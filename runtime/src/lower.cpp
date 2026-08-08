@@ -197,10 +197,23 @@ struct Lowering {
     fail("unsupported sized type " + t.base, t.raw);
   }
 
+  // Data declared `array[N] vector[K]` (or row_vector). The interpreter
+  // stores every 2-D value with the first index fastest, the way it stores
+  // a matrix. The graph wants an array of containers laid out the way
+  // parameters of the same type are: element n contiguous in K. env_slot
+  // repacks these on the way out.
+  std::set<std::string> array_of_container;
+
   void bind_data(const mir::Program& p) {
     for (const auto& [name, type] : p.input_vars) {
       (void)type;
       if (data.has(name)) td.env()[name] = data.at(name);
+    }
+    for (const auto& st : p.prepare_data) {
+      if (st.kind == mir::Stmt::Decl && st.decl_type.base == "SArray" &&
+          st.decl_type.dims.size() == 2 &&
+          (st.decl_type.raw == "SVector" || st.decl_type.raw == "SRowVector"))
+        array_of_container.insert(st.decl_id);
     }
     for (const auto& st : p.prepare_data) td.exec(st);
     for (auto& [name, e] : td.env()) {
@@ -225,13 +238,25 @@ struct Lowering {
     if (en->r.empty()) return -1;
     SlotInfo si;
     si.data_like = true;
-    if (en->dims.size() == 2) {
+    // An array of containers is not a matrix, so it gets no rows/cols: the
+    // kernels that take one read element n from n*K, which is where the
+    // repack below puts it, and which is where a parameter of the same
+    // type already sits.
+    const bool aoc = array_of_container.count(name) > 0 &&
+                     en->dims.size() == 2;
+    if (en->dims.size() == 2 && !aoc) {
       si.rows = en->dims[0];
       si.cols = en->dims[1];
     }
-    const int s = add_slot((int64_t)en->r.size(), false, si);
-    out.fills.emplace_back(s, en->r);
-    slot_values[s] = en->r;
+    std::vector<double> vals = en->r;
+    if (aoc) {
+      const int64_t N = en->dims[0], K = en->dims[1];
+      for (int64_t i = 0; i < N; ++i)
+        for (int64_t k = 0; k < K; ++k) vals[i * K + k] = en->r[k * N + i];
+    }
+    const int s = add_slot((int64_t)vals.size(), false, si);
+    out.fills.emplace_back(s, vals);
+    slot_values[s] = vals;
     scope[name] = s;
     return s;
   }

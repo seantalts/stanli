@@ -749,6 +749,96 @@ int main() {
     }
   }
 
+  // array[N] vector[K] data into a vectorized multivariate density. See
+  // tests/fixtures/mnarr.stan: the data path stores this shape the way it
+  // stores a matrix, and the kernel wants each element contiguous, so the
+  // slot has to be repacked. Wrong is silent, and no corpus model has the
+  // shape.
+  {
+    // Logical y = {{1,2},{3,4},{5,6}}, stored first index fastest, which
+    // is what the JSON reader produces for [[1,2],[3,4],[5,6]].
+    DataMap d;
+    d.set_int("N", 3);
+    d.set_int("K", 2);
+    d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
+    d.set_real_array("Sigma", {2.0, 0.5, 0.5, 1.0}, {2, 2});
+    CompiledModel am = compile_model(slurp("tests/fixtures/mnarr.tmir.sexp"),
+                                     d);
+    Executor aex(std::move(am.graph));
+    am.bind(aex);
+    const double pts[2][2] = {{0.4, -0.7}, {-0.3, 0.9}};
+    for (int c = 0; c < 2; ++c) {
+      aex.params_data()[0] = pts[c][0];
+      aex.params_data()[1] = pts[c][1];
+      double grad[2] = {0, 0};
+      const double lp = aex.gradient(grad);
+
+      using stan::math::var;
+      // y and Sigma are data, mu is a parameter: the same instantiation
+      // the kernel picks, so this is exact rather than merely close.
+      std::vector<Eigen::VectorXd> ys(3, Eigen::VectorXd(2));
+      ys[0] << 1, 2;
+      ys[1] << 3, 4;
+      ys[2] << 5, 6;
+      Eigen::MatrixXd Sd(2, 2);
+      Sd << 2.0, 0.5, 0.5, 1.0;
+      Eigen::Matrix<var, Eigen::Dynamic, 1> mu(2);
+      mu(0) = pts[c][0];
+      mu(1) = pts[c][1];
+      var acc = stan::math::multi_normal_lpdf<true>(ys, mu, Sd);
+      acc.grad();
+
+      check(grad[0] == mu(0).adj() && grad[1] == mu(1).adj(),
+            "mnarr: gradients bitwise against the var path");
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol,
+            "mnarr: lp matches the var path");
+    }
+  }
+
+  // `p ~ dirichlet(a)` over an array of simplexes. See
+  // tests/fixtures/dirvec.stan: the kernel read the whole slot as one
+  // theta, so the vectorized form threw on a length mismatch and only the
+  // explicit loop worked.
+  {
+    // Logical p = {{0.3,0.7},{0.4,0.6},{0.2,0.8}}, first index fastest.
+    DataMap d;
+    d.set_int("N", 3);
+    d.set_int("K", 2);
+    d.set_real_array("p", {0.3, 0.4, 0.2, 0.7, 0.6, 0.8}, {3, 2});
+    CompiledModel dm = compile_model(slurp("tests/fixtures/dirvec.tmir.sexp"),
+                                     d);
+    Executor dex(std::move(dm.graph));
+    dm.bind(dex);
+    const double pts[2][2] = {{0.3, -0.4}, {-0.6, 0.8}};
+    for (int c = 0; c < 2; ++c) {
+      dex.params_data()[0] = pts[c][0];
+      dex.params_data()[1] = pts[c][1];
+      double grad[2] = {0, 0};
+      const double lp = dex.gradient(grad);
+
+      using stan::math::var;
+      var u0 = pts[c][0], u1 = pts[c][1];
+      Eigen::Matrix<var, Eigen::Dynamic, 1> alpha(2);
+      alpha(0) = stan::math::exp(u0);
+      alpha(1) = stan::math::exp(u1);
+      std::vector<Eigen::VectorXd> th(3, Eigen::VectorXd(2));
+      th[0] << 0.3, 0.7;
+      th[1] << 0.4, 0.6;
+      th[2] << 0.2, 0.8;
+      // lower=0 jacobian on both elements of a, then the vectorized lpdf.
+      var acc = u0 + u1;
+      acc += stan::math::dirichlet_lpdf<true>(th, alpha);
+      acc.grad();
+
+      check(grad[0] == u0.adj() && grad[1] == u1.adj(),
+            "dirvec: gradients bitwise against the var path");
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol,
+            "dirvec: lp matches the var path");
+    }
+  }
+
   // Ordinal regression, against an independent var-path reference. Same
   // reason as the truncation case: CI has no CmdStan, and this is the one
   // density whose cutpoint argument is a shared vector rather than a

@@ -49,6 +49,48 @@ double dirichlet_eval(KernelCtx& ctx) {
   Eigen::Map<const Eigen::VectorXd> alpha_d(ctx.in[1].data, ctx.in[1].len);
   var lp;
   const bool a0 = (mask & 1u) != 0, a1 = (mask & 2u) != 0;
+
+  // `p ~ dirichlet(a)` over an array of simplexes. A single dirichlet needs
+  // theta and alpha the same length, so a longer theta is unambiguously the
+  // vectorized form: reps simplexes of K, element n contiguous in K.
+  // stan-math reads both through vector_seq_view, so the only work here is
+  // splitting the slot.
+  const int64_t K = ctx.in[1].len;
+  const int64_t reps = K > 0 ? ctx.in[0].len / K : 1;
+  if (reps > 1) {
+    std::vector<Eigen::Matrix<var, -1, 1>> th(reps,
+                                              Eigen::Matrix<var, -1, 1>(K));
+    std::vector<Eigen::VectorXd> thd(reps, Eigen::VectorXd(K));
+    for (int64_t r = 0; r < reps; ++r)
+      for (int64_t i = 0; i < K; ++i) {
+        th[r](i) = ctx.in[0].data[r * K + i];
+        thd[r](i) = ctx.in[0].data[r * K + i];
+      }
+    var lpv;
+    if (propto) {
+      if (a0 && a1) lpv = stan::math::dirichlet_lpdf<true>(th, alpha);
+      else if (a0) lpv = stan::math::dirichlet_lpdf<true>(th, alpha_d);
+      else if (a1) lpv = stan::math::dirichlet_lpdf<true>(thd, alpha);
+      else lpv = 0.0;
+    } else {
+      if (a0 && a1) lpv = stan::math::dirichlet_lpdf<false>(th, alpha);
+      else if (a0) lpv = stan::math::dirichlet_lpdf<false>(th, alpha_d);
+      else if (a1) lpv = stan::math::dirichlet_lpdf<false>(thd, alpha);
+      else lpv = stan::math::dirichlet_lpdf<false>(thd, alpha_d);
+    }
+    if constexpr (Grad) {
+      var j = lpv * ctx.out_adj;
+      stan::math::grad(j.vi_);
+      if (a0 && ctx.in_adj[0].data)
+        for (int64_t r = 0; r < reps; ++r)
+          for (int64_t i = 0; i < K; ++i)
+            ctx.in_adj[0].data[r * K + i] += th[r](i).adj();
+      if (a1 && ctx.in_adj[1].data)
+        for (int64_t i = 0; i < K; ++i)
+          ctx.in_adj[1].data[i] += alpha(i).adj();
+    }
+    return lpv.val();
+  }
   if (propto) {
     if (a0 && a1) lp = stan::math::dirichlet_lpdf<true>(theta, alpha);
     else if (a0) lp = stan::math::dirichlet_lpdf<true>(theta, alpha_d);

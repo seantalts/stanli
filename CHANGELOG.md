@@ -2,12 +2,50 @@
 
 ## 0.4.1
 
-Truncation only worked on a scalar outcome. 0.4.0 added truncation and
-tested it on `real y`, which is the one shape that compiled. Every
-vectorized form failed at compile time, and `y ~ normal(mu, sigma)
-T[0, 10]` over a vector is the form models are written in.
+Three bugs in features 0.4.0 introduced. Two refused to compile, one was
+silent. All three were found by exercising shapes the posteriordb corpus
+does not contain, and all three are covered by fixtures now.
 
-Two constructs were missing, one per shape stanc3 emits:
+### array[N] vector[K] data reached the multivariate densities permuted
+
+`y ~ multi_normal(mu, Sigma)` with `array[N] vector[K] y` as data returned
+wrong gradients. The model compiled and `lp__` stayed plausible, so
+nothing announced it.
+
+Data is stored with the first index fastest, the way a matrix is stored.
+An array of vectors has to reach the kernel with element `n` contiguous in
+`K`, which is where a parameter of the same type already sits, so the data
+path now repacks on the way into the slot. The same slot indexed one
+element at a time was always right, which is why the shape looked healthy.
+
+Affected: `multi_normal`, `multi_normal_cholesky`, `multi_normal_prec`,
+`multi_student_t` and `multi_student_t_cholesky`, only with an
+`array[N] vector[K]` outcome that is data, and only when the whole array
+is passed. All five now match CmdStan at 0 ULP on every gradient. The same
+outcome as a parameter was correct before and still is.
+
+No posteriordb model has this shape, so the corpus never covered it.
+`tests/fixtures/mnarr.stan` does now, with `N` and `K` deliberately
+different, since a square case hides a transpose.
+
+### Vectorized dirichlet did not compile
+
+`p ~ dirichlet(a)` over an array of simplexes, the shape a hierarchical
+Dirichlet is written in, threw at evaluation time. The kernel took one
+theta vector and read the whole slot as it, so the vectorized form reached
+stan-math as a single simplex of `N*K` and failed the length check against
+alpha. Only the explicit `for (n in 1:N) p[n] ~ dirichlet(a)` worked.
+
+The kernel splits the slot now. A single dirichlet needs theta and alpha
+the same length, so a longer theta is unambiguously the vectorized form.
+Data and parameter outcomes both match CmdStan at 0 ULP.
+
+### Vectorized truncation did not compile
+
+0.4.0 added truncation and tested it on `real y`, which is the one shape
+that compiled. Every vectorized form failed at compile time, and
+`y ~ normal(mu, sigma) T[0, 10]` over a vector is the form models are
+written in. Two constructs were missing, one per shape stanc3 emits:
 
 - A scalar location gives a normalizer of `FnLength(y) * log_diff_exp(...)`.
   `FnLength` is a compiler-internal rather than a stan-library name, so it
