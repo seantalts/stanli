@@ -54,6 +54,7 @@
   .plots canvas { border: 1px solid #8883; border-radius: 6px;
                   max-width: 100%; }
   .times { font-size: .8rem; opacity: .7; margin-top: .5rem; }
+  #note { font-size: .82rem; opacity: .75; margin: -.4rem 0 .6rem; }
   footer {
     margin: 2.5rem 0 1rem; padding: .9rem 1.1rem; font-size: .85rem;
     border: 1px solid #c96a; border-left: 4px solid #c96;
@@ -87,6 +88,8 @@ everything below happens in this tab.
     <option value="es">eight schools</option>
     <option value="reg">linear regression</option>
     <option value="mix">gaussian mixture</option>
+    <option value="lv">lotka-volterra (ODE)</option>
+    <option value="radon">radon hierarchical (391 params)</option>
   </select></label>
   <label>chains <input id="chains" value="4"></label>
   <label>warmup <input id="warmup" value="1000"></label>
@@ -96,6 +99,7 @@ everything below happens in this tab.
   <button id="csv" class="plain" hidden>Download CSV</button>
   <span id="status"></span>
 </div>
+<div id="note"></div>
 <div id="err"></div>
 <div class="plots">
   <canvas id="trace" width="620" height="180" hidden></canvas>
@@ -219,9 +223,43 @@ model {
     },
   },
 };
-function applyPreset(name) {
-  $("code").value = PRESETS[name].code;
-  $("data").value = PRESETS[name].data();
+// posteriordb models ship as files rather than inline, so the page stays
+// readable and the 37 KB of radon data only downloads if it is asked for.
+const CORPUS = {
+  lv: { file: "lotka_volterra", warmup: 500, samples: 500,
+        note: "Hudson Bay lynx and hare, 1900-1920. A predator-prey ODE " +
+              "solved with rk45 inside the model, and the posterior " +
+              "predictive drawn in generated quantities. ODE models are " +
+              "the shape stanli is slowest on: about 0.6x CmdStan per " +
+              "gradient." },
+  radon: { file: "radon_hier", warmup: 500, samples: 500,
+           note: "Radon in 919 Minnesota homes, partially pooled across " +
+                 "85 counties. 391 parameters, and the shape stanli is " +
+                 "fastest on: 5.1x CmdStan per gradient." },
+};
+async function applyPreset(name) {
+  const corpus = CORPUS[name];
+  $("note").textContent = corpus ? corpus.note : "";
+  if (!corpus) {
+    $("code").value = PRESETS[name].code;
+    $("data").value = PRESETS[name].data();
+    return;
+  }
+  // These two take real work per gradient, so ask for fewer draws than
+  // the toy presets rather than looking hung at 1000.
+  $("warmup").value = corpus.warmup;
+  $("samples").value = corpus.samples;
+  $("code").value = $("data").value = "loading...";
+  const get = (ext) => fetch(`./models/${corpus.file}.${ext}`)
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.text(); });
+  try {
+    const [code, data] = await Promise.all([get("stan"), get("json")]);
+    $("code").value = code;
+    $("data").value = data;
+  } catch (e) {
+    $("code").value = $("data").value = "";
+    $("err").textContent = `could not load ${corpus.file}: ${e.message}`;
+  }
 }
 $("preset").onchange = () => applyPreset($("preset").value);
 applyPreset("es");
@@ -420,8 +458,12 @@ function liveTrace(live, nChains, done) {
   if (!(hi > lo)) { lo -= 1; hi += 1; }
   const total = Math.max(...seqs.map((s) => s.length));
   g.clearRect(0, 0, c.width, c.height);
-  const X = (i) => 4 + (c.width - 8) * i / Math.max(total - 1, 1);
-  const Y = (v) => c.height - 22 - (c.height - 36) * (v - lo) / (hi - lo);
+  const { X, Y } = axes(c, g, {
+    title: done ? `${live.names[0]}  ${nChains} chains`
+                : `${live.names[0]}  live, ${seqs.length} of ${nChains} ` +
+                  `chains running`,
+    xlabel: "draw", ylabel: live.names[0],
+    xlo: 0, xhi: Math.max(total - 1, 1), ylo: lo, yhi: hi });
   seqs.forEach((s, si) => {
     g.strokeStyle = CHAIN_COLORS[si % CHAIN_COLORS.length];
     g.globalAlpha = 0.8;
@@ -431,12 +473,51 @@ function liveTrace(live, nChains, done) {
     g.stroke();
   });
   g.globalAlpha = 1;
-  g.fillStyle = getComputedStyle(document.body).color;
-  g.font = "12px system-ui";
-  g.fillText(done ? `${live.names[0]}  ${nChains} chains`
-                  : `${live.names[0]}  live, ${seqs.length} of ${nChains} ` +
-                    `chains running`, 6, 14);
 }
+// ---- plots -----------------------------------------------------------------
+const PAD = { l: 52, r: 10, t: 20, b: 28 };
+
+// Frame, tick labels and axis names. Returns the mappers into the plot
+// area, so a caller works in data units and never in pixels.
+function axes(c, g, o) {
+  const ink = getComputedStyle(document.body).color;
+  const x0 = PAD.l, x1 = c.width - PAD.r, y0 = PAD.t, y1 = c.height - PAD.b;
+  g.strokeStyle = "#8886";
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(x0 - .5, y0); g.lineTo(x0 - .5, y1 + .5); g.lineTo(x1, y1 + .5);
+  g.stroke();
+  g.fillStyle = ink;
+  g.font = "12px system-ui";
+  g.fillText(o.title, 6, 13);
+  g.font = "10px system-ui";
+  const fmt = (v) =>
+      v === 0 ? "0"
+      : Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3 ? v.toExponential(1)
+      : String(Number(v.toPrecision(3)));
+  g.textAlign = "right";
+  for (const [v, y] of [[o.ylo, y1], [(o.ylo + o.yhi) / 2, (y0 + y1) / 2],
+                        [o.yhi, y0]])
+    g.fillText(fmt(v), x0 - 6, y + 3);
+  g.textAlign = "left";
+  g.fillText(fmt(o.xlo), x0, y1 + 14);
+  g.textAlign = "right";
+  g.fillText(fmt(o.xhi), x1, y1 + 14);
+  g.textAlign = "center";
+  g.fillText(o.xlabel, (x0 + x1) / 2, y1 + 14);
+  g.save();
+  g.translate(12, (y0 + y1) / 2);
+  g.rotate(-Math.PI / 2);
+  g.fillText(o.ylabel, 0, 0);
+  g.restore();
+  g.textAlign = "left";
+  const span = (a, b) => (b === a ? 0 : 1 / (b - a));
+  return {
+    X: (v) => x0 + (x1 - x0) * (v - o.xlo) * span(o.xlo, o.xhi),
+    Y: (v) => y1 - (y1 - y0) * (v - o.ylo) * span(o.ylo, o.yhi),
+  };
+}
+
 function tracePlot(name) {
   const c = $("trace"), g = c.getContext("2d");
   c.hidden = false;
@@ -445,8 +526,10 @@ function tracePlot(name) {
   for (const ch of fit.chains)
     for (const x of ch[name]) { if (x < lo) lo = x; if (x > hi) hi = x; }
   if (!(hi > lo)) { lo -= 1; hi += 1; }
-  const X = (i) => 4 + (c.width - 8) * i / (fit.samples - 1);
-  const Y = (v) => c.height - 22 - (c.height - 36) * (v - lo) / (hi - lo);
+  const { X, Y } = axes(c, g, {
+    title: name + "  trace, " + fit.chains.length + " chains",
+    xlabel: "draw", ylabel: name,
+    xlo: 0, xhi: fit.samples - 1, ylo: lo, yhi: hi });
   fit.chains.forEach((ch, ci) => {
     g.strokeStyle = CHAIN_COLORS[ci % CHAIN_COLORS.length];
     g.globalAlpha = 0.8;
@@ -457,9 +540,6 @@ function tracePlot(name) {
     g.stroke();
   });
   g.globalAlpha = 1;
-  g.fillStyle = getComputedStyle(document.body).color;
-  g.font = "12px system-ui";
-  g.fillText(name + "  trace, " + fit.chains.length + " chains", 6, 14);
 }
 function histPlot(name) {
   const xs = allDraws(name);
@@ -473,16 +553,15 @@ function histPlot(name) {
   const c = $("hist"), g = c.getContext("2d");
   c.hidden = false;
   g.clearRect(0, 0, c.width, c.height);
+  const { X, Y } = axes(c, g, {
+    title: name + "  posterior", xlabel: name, ylabel: "draws",
+    xlo: lo, xhi: hi, ylo: 0, yhi: peak });
   g.fillStyle = "#4a7";
-  const w = c.width / nb;
   counts.forEach((k, b) => {
-    const h = (c.height - 22) * k / peak;
-    g.fillRect(b * w + 1, c.height - 20 - h, w - 2, h);
+    const xa = X(lo + (hi - lo) * b / nb);
+    const xb = X(lo + (hi - lo) * (b + 1) / nb);
+    g.fillRect(xa + 1, Y(k), Math.max(xb - xa - 2, 1), Y(0) - Y(k));
   });
-  g.fillStyle = getComputedStyle(document.body).color;
-  g.font = "12px system-ui";
-  g.fillText(name + "  [" + lo.toPrecision(3) + ", " +
-             hi.toPrecision(3) + "]", 6, 14);
 }
 
 // ---- CSV -------------------------------------------------------------------
