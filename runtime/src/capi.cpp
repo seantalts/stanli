@@ -2,10 +2,12 @@
 
 
 #include <stanli/compile.hpp>
+#include <stanli/diagnose.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <limits>
@@ -218,6 +220,179 @@ int stanli_sample_stream(stanli_model* m, uint32_t seed, int warmup,
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
     return 1;
+  }
+}
+
+void stanli_sample_opts_init(stanli_sample_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_sample_opts{};
+  o->seed = 1;
+  o->chains = 4;
+  o->chain_id = 1;
+  o->warmup = 1000;
+  o->samples = 1000;
+  o->thin = 1;
+  o->delta = 0.8;
+  o->max_depth = 10;
+  o->save_warmup = 0;
+  o->init_radius = 2.0;
+  o->inits = nullptr;
+  o->num_threads = 1;
+}
+
+int64_t stanli_n_stored_draws(const stanli_sample_opts* o) {
+  if (o == nullptr) return 0;
+  const int thin = o->thin > 0 ? o->thin : 1;
+  // Ceiling division: transition 0 is always stored, so a run of 5
+  // transitions thinned by 2 keeps 3 rows (0, 2, 4), not 2.
+  const int64_t kept_samples = (o->samples + thin - 1) / thin;
+  const int64_t kept_warmup =
+      o->save_warmup ? (o->warmup + thin - 1) / thin : 0;
+  return kept_samples + kept_warmup;
+}
+
+int stanli_thread_safe(void) { return stanli::thread_safe_build() ? 1 : 0; }
+
+const char* stanli_sampler_column_name(int i) {
+  static const char* kNames[STANLI_N_SAMPLER_COLS] = {
+      "lp__",       "accept_stat__", "stepsize__", "treedepth__",
+      "n_leapfrog__", "divergent__", "energy__"};
+  if (i < 0 || i >= STANLI_N_SAMPLER_COLS) return "";
+  return kNames[i];
+}
+
+int stanli_sample_multi(stanli_model* m, const stanli_sample_opts* opts,
+                        double* draws, double* stats, char* err,
+                        size_t err_len) {
+  try {
+    if (opts == nullptr) {
+      put_err(err, err_len, "null options");
+      return 1;
+    }
+    const int n_chains = opts->chains > 0 ? opts->chains : 1;
+    const int64_t n = m->ex->n_params();
+    const int64_t n_stored = stanli_n_stored_draws(opts);
+
+    stanli::NutsConfig cfg;
+    cfg.seed = opts->seed;
+    cfg.chain_id = opts->chain_id > 0 ? opts->chain_id : 1;
+    cfg.warmup = opts->warmup;
+    cfg.samples = opts->samples;
+    cfg.thin = opts->thin > 0 ? opts->thin : 1;
+    cfg.delta = opts->delta;
+    cfg.max_depth = opts->max_depth > 0 ? opts->max_depth : 10;
+    cfg.save_warmup = opts->save_warmup != 0;
+    cfg.init_radius = opts->init_radius;
+
+    // Chain 0 samples on the model's own executor; the rest get clones,
+    // so a single-chain run allocates no second arena and behaves exactly
+    // as stanli_sample always has.
+    auto clones = stanli::clone_executors(*m->ex, n_chains - 1);
+    std::vector<stanli::Executor*> execs;
+    execs.push_back(m->ex.get());
+    for (auto& c : clones) execs.push_back(c.get());
+
+    std::vector<stanli::ChainResult> res;
+    if (opts->inits == nullptr) {
+      res = stanli::run_nuts_chains(execs, cfg, opts->num_threads);
+    } else {
+      // Per-chain inits mean per-chain configs, which run_nuts_chains
+      // does not take (it varies only the chain id). Run them one at a
+      // time; explicit inits are a debugging and Pathfinder-handoff path,
+      // not the hot one.
+      res.resize((size_t)n_chains);
+      for (int c = 0; c < n_chains; ++c) {
+        stanli::NutsConfig cc = cfg;
+        cc.chain_id = cfg.chain_id + c;
+        cc.init = opts->inits + (int64_t)c * n;
+        try {
+          res[(size_t)c].draws =
+              stanli::run_nuts(*execs[(size_t)c], cc, &res[(size_t)c].stats);
+        } catch (const std::exception& e) {
+          res[(size_t)c].error = e.what();
+        }
+      }
+    }
+
+    int failed = 0;
+    std::string first_error;
+    for (int c = 0; c < n_chains; ++c) {
+      const auto& r = res[(size_t)c];
+      if (!r.error.empty()) {
+        if (failed++ == 0)
+          first_error = "chain " + std::to_string(cfg.chain_id + c) + ": " +
+                        r.error;
+        continue;
+      }
+      // A chain that stored fewer rows than asked would leave the tail of
+      // its block stale; it cannot happen (the loop is a fixed count) but
+      // the buffer is the caller's, so write only what exists.
+      const int64_t rows = std::min<int64_t>((int64_t)r.draws.size(), n_stored);
+      for (int64_t i = 0; i < rows; ++i) {
+        std::memcpy(draws + ((int64_t)c * n_stored + i) * n,
+                    r.draws[(size_t)i].data(), sizeof(double) * (size_t)n);
+        if (stats != nullptr && i < (int64_t)r.stats.rows.size())
+          std::memcpy(stats + ((int64_t)c * n_stored + i) *
+                                  STANLI_N_SAMPLER_COLS,
+                      r.stats.rows[(size_t)i].data(),
+                      sizeof(double) * STANLI_N_SAMPLER_COLS);
+      }
+    }
+    if (failed) put_err(err, err_len, first_error.c_str());
+    return failed;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+int stanli_summary_stats(const double* draws, int64_t n_chains,
+                         int64_t n_draws, int64_t n_cols, double* out) {
+  try {
+    stanli::DrawSet d{draws, n_chains, n_draws, n_cols};
+    const auto s = stanli::summarize(d, {});
+    for (size_t j = 0; j < s.size(); ++j) {
+      double* r = out + (int64_t)j * STANLI_N_SUMMARY_STATS;
+      r[STANLI_STAT_MEAN] = s[j].mean;
+      r[STANLI_STAT_MCSE_MEAN] = s[j].mcse_mean;
+      r[STANLI_STAT_SD] = s[j].sd;
+      r[STANLI_STAT_MCSE_SD] = s[j].mcse_sd;
+      r[STANLI_STAT_Q5] = s[j].q5;
+      r[STANLI_STAT_Q50] = s[j].q50;
+      r[STANLI_STAT_Q95] = s[j].q95;
+      r[STANLI_STAT_ESS_BULK] = s[j].ess_bulk;
+      r[STANLI_STAT_ESS_TAIL] = s[j].ess_tail;
+      r[STANLI_STAT_RHAT] = s[j].rhat;
+    }
+    return 0;
+  } catch (const std::exception&) {
+    return 1;
+  }
+}
+
+int64_t stanli_diagnose_text(const double* draws, int64_t n_chains,
+                             int64_t n_draws, int64_t n_cols,
+                             const char* const* names, const double* stats,
+                             int max_depth, char* out, size_t out_len) {
+  try {
+    stanli::DrawSet d{draws, n_chains, n_draws, n_cols};
+    std::vector<std::string> nm;
+    if (names != nullptr) {
+      nm.reserve((size_t)n_cols);
+      for (int64_t j = 0; j < n_cols; ++j)
+        nm.push_back(names[j] ? names[j] : "");
+    }
+    const auto summary = stanli::summarize(d, nm);
+    const auto fd = stanli::diagnose(d, summary, stats, max_depth);
+    const std::string text = stanli::format_diagnostics(fd);
+    if (out != nullptr && out_len > 0) {
+      const size_t k = std::min(text.size(), out_len - 1);
+      std::memcpy(out, text.data(), k);
+      out[k] = '\0';
+    }
+    return (int64_t)text.size() + 1;
+  } catch (const std::exception&) {
+    return 0;
   }
 }
 

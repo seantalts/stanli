@@ -54,6 +54,126 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 int stanli_sample(stanli_model* m, uint32_t seed, int warmup, int samples,
                   double delta, double* draws, char* err, size_t err_len);
 
+/* ---- multi-chain sampling ------------------------------------------------
+ *
+ * Everything below packs draws CHAIN-MAJOR: draw i of chain c, column j
+ * lives at draws[(c * n_draws + i) * n_cols + j]. That is the layout
+ * numpy reshapes to (chains, draws, cols) for free, and the layout the
+ * diagnostics read. */
+
+typedef struct {
+  uint32_t seed;
+  int chains;      /* number of chains */
+  int chain_id;    /* id of the FIRST chain; chain c uses chain_id + c,
+                    * which is how CmdStan turns one seed into per-chain
+                    * streams. Matching it means a matched seed gives a
+                    * matched stream per chain. */
+  int warmup;
+  int samples;     /* transitions, not stored rows: with thin > 1 a run
+                    * stores samples/thin of them, as CmdStan does */
+  int thin;
+  double delta;    /* target acceptance statistic */
+  int max_depth;
+  int save_warmup; /* store warmup draws ahead of the sampling draws */
+  double init_radius; /* uniform(-r, r) on the unconstrained scale; 0
+                       * starts at the origin (CmdStan's `init=0`) */
+  const double* inits; /* chains * n_unconstrained on the UNCONSTRAINED
+                        * scale, or null for random inits. Unconstrained
+                        * because that is the scale stanli can read: a
+                        * constrained init would need the inverse
+                        * parameter transforms, which do not exist yet. */
+  int num_threads; /* honoured only when stanli_thread_safe(); see there */
+} stanli_sample_opts;
+
+/* Fill with CmdStan's defaults: seed 1, 4 chains from id 1, 1000 warmup,
+ * 1000 samples, thin 1, delta 0.8, max_depth 10, no saved warmup, init
+ * radius 2, random inits, one thread.
+ *
+ * ALWAYS call this before setting fields. A zeroed struct is not the
+ * defaults: it asks for an init radius of 0, which is a different and
+ * perfectly valid request, so the mistake would sample successfully from
+ * the wrong starting point rather than fail. */
+void stanli_sample_opts_init(stanli_sample_opts* o);
+
+/* Stored rows per chain under these options. This is what `draws` and
+ * `stats` must be sized against, and it is not `samples` whenever thin
+ * or save_warmup is set. */
+int64_t stanli_n_stored_draws(const stanli_sample_opts* o);
+
+/* 1 when this build can run chains in real threads. stan-math's autodiff
+ * stack is a plain static unless STAN_THREADS is defined, in which case
+ * it is thread_local; the legacy kernels and tape islands build NESTED
+ * var tapes on it, so without STAN_THREADS two chains in two threads
+ * would quietly corrupt each other. When this is 0, num_threads is
+ * clamped to 1 rather than honoured -- a slow answer instead of a wrong
+ * one. */
+int stanli_thread_safe(void);
+
+/* Run opts->chains chains. draws holds
+ * chains * stanli_n_stored_draws(opts) * n_unconstrained doubles; stats,
+ * when non-null, holds chains * stanli_n_stored_draws(opts) * 7 (the
+ * CmdStan sampler columns, see stanli_sampler_column_name).
+ *
+ * Returns 0 when every chain succeeded. Returns the NUMBER OF FAILED
+ * CHAINS otherwise, with the first failure's message in err: a run where
+ * three of four chains sampled is a partial result the caller may want,
+ * and the failed chains' rows are left untouched. */
+int stanli_sample_multi(stanli_model* m, const stanli_sample_opts* opts,
+                        double* draws, double* stats, char* err,
+                        size_t err_len);
+
+/* The seven sampler columns, in order: lp__, accept_stat__, stepsize__,
+ * treedepth__, n_leapfrog__, divergent__, energy__. */
+#define STANLI_N_SAMPLER_COLS 7
+const char* stanli_sampler_column_name(int i);
+
+/* ---- summaries and convergence diagnostics -------------------------------
+ *
+ * These operate on a caller-supplied draw buffer rather than on the
+ * model, because the draws worth summarizing are usually the CSV columns
+ * (constrained parameters, transformed parameters, generated quantities)
+ * that stanli_wa_row produces, not the unconstrained ones the sampler
+ * returns. */
+
+/* Per-column summary statistics, in this order. */
+enum {
+  STANLI_STAT_MEAN = 0,
+  STANLI_STAT_MCSE_MEAN,
+  STANLI_STAT_SD,
+  STANLI_STAT_MCSE_SD,
+  STANLI_STAT_Q5,
+  STANLI_STAT_Q50,
+  STANLI_STAT_Q95,
+  STANLI_STAT_ESS_BULK,
+  STANLI_STAT_ESS_TAIL,
+  STANLI_STAT_RHAT,
+  STANLI_N_SUMMARY_STATS
+};
+
+/* Writes n_cols * STANLI_N_SUMMARY_STATS doubles into out: for each
+ * column, the statistics above in that order. R-hat is rank-normalized
+ * split-R-hat and ESS is the bulk/tail pair, both from Vehtari et al.
+ * 2021 via stan's own estimators -- the numbers stansummary prints.
+ * A constant column yields NaN for R-hat and ESS, which is the honest
+ * answer rather than a pass. Returns 0 on success. */
+int stanli_summary_stats(const double* draws, int64_t n_chains,
+                         int64_t n_draws, int64_t n_cols, double* out);
+
+/* Convergence diagnostics as prose: divergences, treedepth saturation,
+ * E-BFMI, R-hat, and bulk/tail ESS, each either confirmed or reported
+ * with the number that failed and what to do about it. `stats` is the
+ * sampler columns in the same chain-major packing, STANLI_N_SAMPLER_COLS
+ * wide, or null to run only the R-hat/ESS half. `names`, when non-null,
+ * must hold n_cols entries and is what lets a complaint name the
+ * parameter that failed. Writes at most out_len bytes including the
+ * terminator; returns the number of bytes the full text needs, so a
+ * caller that gets back more than out_len can retry with a bigger
+ * buffer. */
+int64_t stanli_diagnose_text(const double* draws, int64_t n_chains,
+                             int64_t n_draws, int64_t n_cols,
+                             const char* const* names, const double* stats,
+                             int max_depth, char* out, size_t out_len);
+
 /* Constrained view: flattened parameter values for one unconstrained q.
  * n_constrained gives the output length; names are "mu", "theta.1", ... */
 int64_t stanli_n_constrained(const stanli_model* m);

@@ -102,11 +102,35 @@ struct KernelCtx {
   double out2_adj = 0;        // adjoint of the second output
 };
 
+// Payload for OP_REJECT and OP_PRINT: the literal chunks of the message,
+// interleaved with the op's inputs at forward time. Chunk k precedes
+// input k; a trailing chunk with no input after it is just appended.
+struct MessageSpec {
+  std::vector<std::string> chunks;
+};
+
 class Executor {
  public:
   explicit Executor(Graph g);
+  // Copy: the same graph and the same arena CONTENTS, with fresh contexts
+  // bound to this instance's own arenas. The arena is what carries the
+  // data and constant fills, so copying it is what makes the clone a
+  // bound model rather than an empty one -- binding alone zeroes it.
+  //
+  // Multi-chain sampling is what this is for: one executor per chain,
+  // because the arenas are per-evaluation mutable state, and copying an
+  // op list is far cheaper than lowering the model again. Assignment
+  // stays deleted; the contexts hold interior pointers, so a moved-from
+  // or reassigned executor would be a dangling one.
+  Executor(const Executor& src);
+  Executor& operator=(const Executor&) = delete;
 
   int64_t n_params() const { return n_params_; }
+  // The bound graph, so a second executor over the same model can be
+  // built without re-lowering. Multi-chain sampling needs one executor
+  // per chain -- the arenas are mutable per-evaluation state -- and
+  // copying the op list is far cheaper than compiling the model again.
+  const Graph& graph() const { return graph_; }
   // The unconstrained parameter vector: the first n_params() arena entries,
   // in parameter-slot declaration order.
   double* params_data() { return values_.data(); }

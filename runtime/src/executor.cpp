@@ -70,6 +70,7 @@ void register_ode_kernels();
 void register_constrain_kernels();
 void register_eltwise_kernels();
 void register_mixture_kernels();
+void register_message_kernels();
 void register_island_kernel();
 
 static void ensure_registered() {
@@ -80,6 +81,7 @@ static void ensure_registered() {
     register_matrix_kernels();
     register_ode_kernels();
     register_constrain_kernels();
+    register_message_kernels();
     register_eltwise_kernels();
     register_mixture_kernels();
     register_island_kernel();
@@ -91,6 +93,17 @@ static void ensure_registered() {
 Executor::Executor(Graph g) : graph_(std::move(g)) {
   ensure_registered();
   bind_();
+}
+
+Executor::Executor(const Executor& src) : graph_(src.graph_) {
+  ensure_registered();
+  bind_();
+  // bind_ zeroes the arena. The source's arena is where compile_model's
+  // data and constant fills went, and the slot layout is a deterministic
+  // function of the graph, so the two arenas agree element for element.
+  // Copying into the existing buffer rather than assigning the vector
+  // keeps the contexts' interior pointers valid by construction.
+  std::copy(src.values_.begin(), src.values_.end(), values_.begin());
 }
 
 void Executor::bind_() {
