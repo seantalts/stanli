@@ -49,6 +49,7 @@ def _load_lib():
                                      ctypes.POINTER(ctypes.c_double),
                                      ctypes.POINTER(ctypes.c_double)]
     lib.stanli_has_embedded_stanc.restype = ctypes.c_int
+    lib.stanli_exact_lp.restype = ctypes.c_int
     lib.stanli_model_new_from_stan.restype = ctypes.c_void_p
     lib.stanli_model_new_from_stan.argtypes = [ctypes.c_char_p,
                                                ctypes.c_char_p,
@@ -100,6 +101,19 @@ def _data_to_json(data) -> str:
         raise TypeError(f"cannot serialise {type(value).__name__} as Stan data")
 
     return json.dumps(data, default=encode)
+
+
+def exact_lp() -> bool:
+    """True if lp__ reproduces CmdStan's exactly.
+
+    The wheel is built this way and always has been. A STANLI_LITE_LP
+    build -- which is what ships to the browser -- drops stan-math's
+    propto instantiations to halve the library, leaving every gradient
+    and therefore every draw bit-identical and lp__ a per-model constant
+    higher. Worth checking before comparing lp__ across engines; nothing
+    that samples is affected.
+    """
+    return bool(_lib.stanli_exact_lp())
 
 
 class Model:

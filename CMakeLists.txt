@@ -174,13 +174,19 @@ set(STANLI_STANC_EMBED_OBJ "" CACHE FILEPATH
     "stanc_embed.o built by tools/stanc_embed/build.sh; enables in-process stanc")
 set(STANLI_OCAML_STDLIB "" CACHE PATH
     "OCaml stdlib dir (opam switch lib/ocaml) for caml/*.h")
-if(STANLI_STANC_EMBED_OBJ)
-  target_sources(stanli_shared PRIVATE
-    runtime/src/stanc_embed_c.cpp ${STANLI_STANC_EMBED_OBJ})
-  target_include_directories(stanli_shared PRIVATE ${STANLI_OCAML_STDLIB})
-  target_compile_definitions(stanli_shared PRIVATE STANLI_EMBED_STANC)
-  target_link_libraries(stanli_shared PUBLIC dl pthread)
-endif()
+# The embed object is a whole OCaml runtime, so it can only be linked into
+# one artifact at a time -- hence a function rather than adding it to the
+# static library every target shares.
+function(stanli_embed_stanc TGT)
+  if(STANLI_STANC_EMBED_OBJ)
+    target_sources(${TGT} PRIVATE
+      runtime/src/stanc_embed_c.cpp ${STANLI_STANC_EMBED_OBJ})
+    target_include_directories(${TGT} PRIVATE ${STANLI_OCAML_STDLIB})
+    target_compile_definitions(${TGT} PRIVATE STANLI_EMBED_STANC)
+    target_link_libraries(${TGT} PRIVATE dl pthread)
+  endif()
+endfunction()
+stanli_embed_stanc(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
 add_library(stanli STATIC
@@ -222,7 +228,7 @@ if(EMSCRIPTEN)
     "SHELL:-s MAXIMUM_MEMORY=4GB"
     "SHELL:-s STACK_SIZE=8MB"
     "SHELL:-s ENVIRONMENT=web,worker,node"
-    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_malloc,_free"
+    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_malloc,_free"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,stringToNewUTF8,HEAPF64,addFunction,removeFunction"
     "SHELL:-s ALLOW_TABLE_GROWTH=1")
 endif()
@@ -238,8 +244,13 @@ function(stanli_add_test NAME)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
 
+# The native sampler. With the embed object it is one self-contained
+# binary -- .stan in, CmdStan-shaped CSV out, no toolchain and no separate
+# stanc to find -- which is the whole point of an interpreter for a
+# language whose reference implementation compiles C++ per model.
 add_executable(stanli_run tools/stanli_run.cpp tests/tbb_stub.cpp)
 target_link_libraries(stanli_run PRIVATE stanli)
+stanli_embed_stanc(stanli_run)
 add_executable(stanli_check tools/stanli_check.cpp tests/tbb_stub.cpp)
 target_link_libraries(stanli_check PRIVATE stanli)
 add_executable(bench_grad tools/bench_grad.cpp tests/tbb_stub.cpp)
@@ -249,6 +260,20 @@ target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp tests/tbb_stub.cpp)
 target_link_libraries(dump_ops PRIVATE stanli)
+
+# Installable: the native sampler, the parity checker, the shared
+# library the language bindings load, and the headers a C++ caller
+# needs. `cmake --install build-rel --prefix ...` is the whole story;
+# the Python wheel does its own copying (tools/build_wheel.sh).
+include(GNUInstallDirs)
+install(TARGETS stanli_run stanli_check
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS stanli_shared
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(DIRECTORY runtime/include/stanli
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 stanli_add_test(test_smoke)
 stanli_add_test(test_executor)

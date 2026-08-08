@@ -244,7 +244,22 @@ Interpreter vocabulary: add a branch in [`mir_interp.hpp`](../runtime/include/st
 the corpus tells you what is missing:
 `python3 harnesses/wa_coverage.py deps/posteriordb`.
 
-An op takes four steps:
+A density, a distribution function or a scalar math function is one line
+in an X-macro list in [`optable.hpp`](../runtime/include/stanli/optable.hpp)
+-- `STANLI_SCALAR_DENSITY_LIST`, `STANLI_INT_DENSITY_LIST`,
+`STANLI_SCALAR_CDF_LIST`, `STANLI_SCALAR_UNARY_LIST` -- which generates the
+opcode, the name, the kernel, its registration and the lowering entry
+together, so none of them can drift out of step. Then check it:
+`harnesses/fn_sweep.py deps/cmdstan --filter yourfn`, which generates a
+one-function model, compiles it with CmdStan, and reports the worst ULP.
+The bar is 0.
+
+Not everything fits: the recorder computes in doubles and carries no tape,
+so a stan-math function that does arithmetic on the scalar type
+(`von_mises_cdf`, `wiener_lpdf`) fails to compile rather than silently
+losing partials. [`docs/coverage.md`](coverage.md) lists which and why.
+
+Anything else takes four steps:
 
 1. Opcode in [`optable.hpp`](../runtime/include/stanli/optable.hpp), kernel in [`runtime/kernels/`](../runtime/kernels/). For a stan-math
    function without a native port, wrap it with the mechanism in
@@ -263,7 +278,23 @@ cmake --build build-rel -j8 && (cd build-rel && ctest)
 python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 8
 ```
 
-The second line replays all 119 corpus models against recorded CmdStan
+If you touched a density tier, `density_tier`, or anything about propto,
+also check the lite build -- CI does not, because it would mean a second
+full stan-math compile:
+
+```
+cmake -B build-lite -DCMAKE_BUILD_TYPE=Release -DSTANLI_LITE_LP=ON
+cmake --build build-lite --target stanli_check -j8
+python3 tools/verify_lite.py deps/posteriordb
+python3 tools/verify_refs.py deps/posteriordb --check build-lite/stanli_check --no-lp
+```
+
+The first replays both builds and holds gradients to the bit while
+requiring the lp shift to be the same at every evaluation point; the
+second checks the lite build's gradients against CmdStan directly.
+[`docs/lite-lp.md`](lite-lp.md) explains what the flag trades.
+
+The corpus replay above runs all 119 models against recorded CmdStan
 values and is the strongest oracle in the project; it also runs in CI on
 every push, on each of the four wheel platforms it is gated on, and
 [`tools/wasm_check.sh`](../tools/wasm_check.sh) drives the same replay

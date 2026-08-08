@@ -62,7 +62,8 @@ def pair_dev(a, b):
     return (abs(a - b) / scale, ulp_distance(a, b))
 
 
-def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False):
+def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
+                no_lp=False):
     """Returns (model, status, max_rel, max_ulp, n_values, detail)."""
     stan = pdb / "models" / "stan" / f"{model}.stan"
     dz = pdb / "data" / "data" / f"{ref['data']}.json.zip"
@@ -98,6 +99,16 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False):
     gv = [float(x) for x in got[1:]]
     if len(rv) != len(gv):
         return (model, "SHAPE_FAIL", 0.0, 0, 0, f"{len(rv)} vs {len(gv)}")
+    if no_lp:
+        # Element 0 is lp. A STANLI_LITE_LP build computes the full
+        # density where CmdStan's `~` drops constant terms, so its lp sits
+        # a per-model constant above the reference while every gradient is
+        # unchanged -- which is the part sampling depends on. Dropping the
+        # element keeps the corpus oracle usable for that build. Whether
+        # the offset is genuinely CONSTANT is a different question, and
+        # the one that can actually catch a bug; tools/verify_lite.py
+        # answers it by evaluating both builds at several points.
+        rv, gv = rv[1:], gv[1:]
     worst, worst_ulp = 0.0, 0
     for a, b in zip(rv, gv):
         rel, ulp = pair_dev(a, b)
@@ -163,6 +174,9 @@ def main():
                     default=REPO / "build" / "stanli_check")
     ap.add_argument("--max-rel", type=float, default=1e-9)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--no-lp", action="store_true",
+                    help="compare gradients only, not lp: a STANLI_LITE_LP "
+                         "build shifts lp by a constant (docs/lite-lp.md)")
     ap.add_argument("--no-wa", action="store_true",
                     help="replay lp and gradients only (the WASM check "
                          "driver has no write_array entry point yet)")
@@ -188,7 +202,8 @@ def main():
     worst_overall = ("", 0.0, 0)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futs = [pool.submit(check_model, m, refs[m], pdb, args.check, tmp,
-                            args.timeout, args.no_wa) for m in models]
+                            args.timeout, args.no_wa, args.no_lp)
+                for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, status, rel, ulp, n, detail = fut.result()
             if status != "OK":
@@ -207,6 +222,7 @@ def main():
     ok = len(models) - len(failures)
     print(f"\n{ok}/{len(models)} models within {args.max_rel:.0e} of the "
           f"CmdStan references"
+          + (" (gradients only)" if args.no_lp else "")
           + (f"; worst {worst_overall[0]} at {worst_overall[1]:.2e} "
              f"({worst_overall[2]} ulp)" if worst_overall[0] else ""))
     if failures:

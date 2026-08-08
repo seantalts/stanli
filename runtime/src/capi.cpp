@@ -3,6 +3,7 @@
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/nuts.hpp>
+#include <stanli/optable.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <cstring>
@@ -157,6 +158,8 @@ int stanli_has_embedded_stanc(void) {
   return 0;
 #endif
 }
+
+int stanli_exact_lp(void) { return stanli::exact_lp_build() ? 1 : 0; }
 
 void stanli_model_free(stanli_model* m) { delete m; }
 

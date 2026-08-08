@@ -29,8 +29,12 @@ pip install stanli
   <!--gen:corpus_bitwise-->45<!--/gen--> of them bitwise identical, worst
   relative deviation <!--gen:corpus_worst-->2.6e-12<!--/gen-->; per-model
   accuracy in relative terms and ULPs is listed there)
-- Install size: one 19.1 MB shared library, a 6.7 MB wheel. Breakdown
-  in [Binary size](#binary-size) below.
+- Install size: one 21.3 MB shared library, a 7.4 MB wheel. Breakdown
+  in [Binary size](#binary-size) below; the browser build halves the
+  runtime with `STANLI_LITE_LP` ([docs/lite-lp.md](docs/lite-lp.md)).
+- Distribution coverage: [docs/coverage.md](docs/coverage.md) (46 of 72
+  densities, all 72 continuous cdf/lcdf/lccdf, truncation and censoring;
+  every one bitwise against CmdStan, and what is missing says why)
 - How this is possible, for statisticians:
   [docs/how-it-works.md](docs/how-it-works.md)
 - Design doc: `docs/superpowers/specs/2026-08-04-stan-portable-runtime-design.md`
@@ -139,17 +143,17 @@ Stage by stage:
 
 ## Binary size
 
-One self-contained shared library, 19.1 MB installed, 6.7 MB compressed
-in the wheel. Attributing its 18.8 MB of code and data by symbol:
+One self-contained shared library, 21.3 MB installed, 7.4 MB compressed
+in the wheel. Attributing its 21.0 MB of code and data by symbol:
 
 | | | |
 | --- | ---: | ---: |
-| stan-math | 10.15 MB | 54.0% |
-| embedded stanc3 (all OCaml) | 5.73 MB | 30.5% |
-| Boost, nlohmann/json, NUTS, libc++, unattributed | 1.43 MB | 7.6% |
-| stanli itself | 0.76 MB | 4.0% |
-| Eigen (out-of-line) | 0.62 MB | 3.3% |
-| SUNDIALS | 0.10 MB | 0.6% |
+| stan-math | 12.07 MB | 57.5% |
+| embedded stanc3 (all OCaml) | 5.73 MB | 27.3% |
+| Boost, nlohmann/json, NUTS, libc++, unattributed | 1.53 MB | 7.3% |
+| stanli itself | 0.84 MB | 4.0% |
+| Eigen (out-of-line) | 0.68 MB | 3.2% |
+| SUNDIALS | 0.14 MB | 0.7% |
 
 stan-math is the majority of it, and densities are the majority of that.
 A distribution is instantiated once per activity mask -- which arguments
@@ -157,14 +161,24 @@ are autodiff -- twice for propto and again for the elementwise form, so
 4 * 2^N templates per distribution, about 630 KB of object each. That is
 the standing cost of shipping precompiled math: CmdStan instantiates
 only the combination your model uses, and pays for it with a per-model
-compile. The library grew from 13.8 MB when the scalar density
-vocabulary went from 13 distributions to 27; the long tail of them takes
-a smaller form (see STANLI_SCALAR_DENSITY_LIST in optable.hpp), which
-saved 4.4 MB of the 10.5 that adding them cost.
+compile.
 
-The 34 scalar math functions added alongside them cost 0.03 MB between
-them, because an elementwise kernel with a hand-written derivative
-instantiates nothing.
+Each density picks how much of that ladder to instantiate
+(`STANLI_SCALAR_DENSITY_LIST` in optable.hpp). The thirteen distributions
+models lean on take the whole thing; the long tail takes less. The 72
+distribution functions (`cdf`/`lcdf`/`lccdf`, which is what truncation
+runs on) take the least -- one instantiation each -- and that choice was
+measured: giving the common ones the mask dispatch cost 4.8 MB on its
+own, against 2.2 MB for the whole family without it. The 34 scalar math
+functions cost 0.03 MB between them, because an elementwise kernel with a
+hand-written derivative instantiates nothing.
+
+**`-DSTANLI_LITE_LP=ON` halves the runtime.** Dropping the propto family
+entirely takes `libstanli` from 14.8 MB to 7.65 MB stripped, at the cost
+of an `lp__` that sits a per-model constant above CmdStan's -- every
+gradient, and therefore every draw, is bit-identical. It is on by default
+for the browser build and off for the wheel, which keeps the exact `lp__`
+the differential oracle compares against. See [docs/lite-lp.md](docs/lite-lp.md).
 
 The interpreter and NUTS together are about 410 KB. Nearly all of the
 rest is the Stan compiler and the math library, which is the trade the

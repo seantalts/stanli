@@ -4,10 +4,12 @@ EXPORTS
   stanli_model_new
   stanli_model_new_from_stan
   stanli_has_embedded_stanc
+  stanli_exact_lp
   stanli_model_free
   stanli_n_unconstrained
   stanli_grad
   stanli_sample
+  stanli_sample_stream
   stanli_n_constrained
   stanli_constrained_name
   stanli_constrain

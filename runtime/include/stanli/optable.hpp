@@ -53,7 +53,7 @@ namespace stanli {
   X(OP_EIGENVECTORS_SYM)                                                  \
   X(OP_LOG_SUM_EXP)                                                       \
   X(OP_LSE2)                                                              \
-  X(OP_LOG_DIFF_EXP)                                                     \
+  X(OP_LOG_DIFF_EXP)                                                      \
   X(OP_LOG_MIX)                                                           \
   X(OP_SOFTMAX)                                                           \
   X(OP_SUM_VEC)                                                           \

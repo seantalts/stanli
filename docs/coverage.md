@@ -1,0 +1,95 @@
+# Distribution coverage
+
+What stanli lowers, what it does not, and why. Counts are against
+`stanc --dump-stan-math-signatures`, which is what the Stan language
+actually offers rather than what someone typed into a table here; `harnesses/fn_sweep.py` checks each one against CmdStan
+with a generated single-function model.
+
+| family | supported |
+|---|---|
+| densities (`_lpdf`, `_lpmf`) | 46 / 72 |
+| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 72 / 105 |
+| scalar math (all-real signature) | 47 / 129 |
+
+Everything supported matches CmdStan **bitwise** — 0 ULP on every argument
+slot, at three evaluation points. That is the standard here; a density that
+merely agrees to 1e-12 is a bug report, not a feature.
+
+Adding one is a line in an X-macro list in
+`runtime/include/stanli/optable.hpp`, which generates the opcode, the
+kernel, its registration, the lowering table entry and the interpreter
+branch together. See `docs/hacking.md`.
+
+## The gaps, and what each one actually needs
+
+### Ordinal regression — `ordered_logistic`, `ordered_probit`
+
+The largest real-world gap. Their cutpoint argument is a whole vector per
+observation, and stan-math reaches its partials through
+`partials_vec<1>(ops_partials)` — a vector-of-vectors edge. The recorder
+(`runtime/include/stanli/recorder.hpp`) implements scalar and vector edges
+only, so this needs a recorder extension, not a list entry.
+
+### Multivariate — wishart, `multi_student_t`, `multi_normal_prec`, `multi_gp`, `lkj_corr`, `gaussian_dlm_obs`
+
+Matrix arguments, each with its own shape plumbing. `multi_normal`,
+`multi_normal_cholesky`, `lkj_corr_cholesky` and `dirichlet` are already
+in as hand-written kernels; these would follow the same pattern, one at a
+time.
+
+### GLM fast paths — `poisson_log_glm`, `neg_binomial_2_log_glm`, `binomial_logit_glm`, `categorical_logit_glm`, `ordered_logistic_glm`
+
+`bernoulli_logit_glm` is in and shows the shape: a data matrix in a
+row-major slot with its dims in `idata`. These matter for coverage rather
+than speed — brms and rstanarm emit the GLM form directly, so a model
+using one does not merely run slower, it does not run.
+
+### Multinomial family — `multinomial`, `multinomial_logit`, `dirichlet_multinomial`, `beta_binomial`, `hypergeometric`, `discrete_range`
+
+Integer outcomes that are not one int per lane: an array of counts, or two
+int groups. `binomial` already carries two groups
+(`with_int_group` in `densities.cpp`); the rest need their own layouts.
+`hypergeometric` and `discrete_range` have no real arguments at all, so
+they contribute a constant and no gradient.
+
+### Discrete cdfs — 27 of the 33 missing distribution functions
+
+`poisson_lcdf`, `binomial_lccdf` and friends. Same idata plumbing as the
+discrete densities; nothing has needed a truncated count model yet.
+
+### Two that will not work as they stand
+
+- **`von_mises_cdf`** does `res *= 0.0` on the scalar type at a degenerate
+  endpoint. The recorder computes in doubles and carries no tape, so that
+  assignment would change the value and leave the partials describing the
+  old one. `rvar` deliberately has no arithmetic operators, which is why
+  this fails to compile rather than silently producing a wrong gradient.
+- **`skew_double_exponential_{cdf,lcdf,lccdf}`** reach stan-math's
+  `as_array_or_scalar` container check, which asks for
+  `value_type_t<const rvar&>`; the recorder registers `value_type` for
+  `rvar` but not for its const reference. Probably a one-line trait.
+
+### `wiener_lpdf`
+
+The only remaining all-real scalar density, and it fails the same way
+`von_mises_cdf` does: it computes with the scalar type directly
+(`square(y - tau)`, comparisons against doubles) rather than deriving
+partials in doubles. Same fix would be needed — a tape, or a hand-written
+kernel.
+
+## Truncation and censoring
+
+Supported. `y ~ foo(...) T[l, u]` is rewritten by stanc3 into the density
+minus `log_diff_exp` of the bounds' `lcdf`s, and both pieces are in.
+Gradients are bitwise against CmdStan; `lp__` comes out 1 ULP off, because
+the rewrite accumulates its terms in a different order than CmdStan's
+`lp_accum__` does. `tests/fixtures/trunc.stan` guards this in CI, where
+there is no CmdStan for `fn_sweep` to compare against.
+
+## Checking this yourself
+
+```
+harnesses/fn_sweep.py deps/cmdstan            # what we claim, bitwise
+harnesses/fn_sweep.py deps/cmdstan --missing  # and the gap
+harnesses/fn_sweep.py deps/cmdstan --from-stanc   # every scalar signature stanc knows
+```

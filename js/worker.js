@@ -147,6 +147,11 @@ onmessage = async (e) => {
     postMessage({
       done: {
         names, samples,
+        // This build drops stan-math's propto instantiations for size, so
+        // lp__ carries a per-model constant the exact build does not.
+        // Draws are unaffected; surfaced so a caller comparing lp__ across
+        // engines can see it rather than chase it.
+        exactLp: M._stanli_exact_lp() !== 0,
         columns: cols.buffer,
         ms: {
           stanc: tStanc - t0,

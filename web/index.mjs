@@ -115,6 +115,7 @@ export function compile(opts) {
  *   a transferred ArrayBuffer of constrained draws, nCon wide.
  * @returns {Promise<{names: string[], samples: number,
  *                    columns: Object<string, Float64Array>,
+ *                    exactLp: boolean,
  *                    ms: {stanc: number, lower: number, sample: number,
  *                         total: number}}>}
  *   One column per CSV column CmdStan would write: constrained
@@ -134,12 +135,12 @@ export function sample(opts) {
     samples: opts.samples == null ? 1000 : opts.samples,
     delta: opts.delta == null ? 0.8 : opts.delta,
   }, opts).then((done) => {
-    const { names, samples, ms } = done;
+    const { names, samples, ms, exactLp } = done;
     const flat = new Float64Array(done.columns);
     const columns = {};
     names.forEach((name, i) => {
       columns[name] = flat.subarray(i * samples, (i + 1) * samples);
     });
-    return { names, samples, columns, ms };
+    return { names, samples, columns, ms, exactLp };
   });
 }

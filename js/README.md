@@ -42,6 +42,12 @@ from inside this WASM build; see the
 [repository](https://github.com/seantalts/stanli) for the verification
 policy and numbers.
 
+This build is compiled with `STANLI_LITE_LP`, which drops stan-math's
+propto instantiations to halve the runtime. Draws and gradients are
+bit-identical to the exact build; `lp__` sits a per-model constant
+higher, so compare it across chains, not against CmdStan. `fit.exactLp`
+reports which build you have.
+
 Not yet here: variational inference, optimization, multi-chain
 threading. `wasm32` caps memory at 4 GB, which one 79,000-parameter
 corpus model exceeds; everything typical fits.
