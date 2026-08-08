@@ -1,11 +1,9 @@
 #include <stanli/capi.h>
 
-#include <dlfcn.h>
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/nuts.hpp>
-#include <stanli/optable.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <cstring>
@@ -163,49 +161,7 @@ int stanli_has_embedded_stanc(void) {
 
 int stanli_exact_lp(void) { return stanli::exact_lp_build() ? 1 : 0; }
 
-// How a density pack reaches the core's kernel table. It is a C symbol so
-// it can be named in EXPORTED_FUNCTIONS: MAIN_MODULE=2 exports only what
-// is asked for, and the mangled name of register_kernel is not something
-// to hard-code in a build file. The pointers are the three members of
-// Kernel, cast back here.
-void stanli_register_kernel_c(uint16_t opcode, void* fwd, void* bwd,
-                              void* scratch) {
-  stanli::register_kernel(
-      opcode,
-      stanli::Kernel{reinterpret_cast<void (*)(stanli::KernelCtx&)>(fwd),
-                     reinterpret_cast<void (*)(stanli::KernelCtx&)>(bwd),
-                     reinterpret_cast<int64_t (*)(const stanli::Op&,
-                                                  const stanli::Slot*)>(
-                         scratch)});
-}
 
-int stanli_load_pack(const char* path, char* err, size_t err_len) {
-#ifdef STANLI_DENSITY_CORE
-  // dlopen and dlsym stay on this side: the pack calls back into this
-  // module for register_kernel and the recorder's sink, so nothing but a
-  // path has to cross into JavaScript.
-  void* h = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
-  if (h == nullptr) {
-    const char* e = dlerror();
-    put_err(err, err_len, e ? e : "dlopen failed");
-    return 1;
-  }
-  using reg_fn = void (*)();
-  reg_fn reg = reinterpret_cast<reg_fn>(dlsym(h, "stanli_pack_register"));
-  if (reg == nullptr) {
-    put_err(err, err_len, "pack has no stanli_pack_register");
-    return 2;
-  }
-  reg();
-  return 0;
-#else
-  // Every kernel is already in this binary.
-  (void)path;
-  (void)err;
-  (void)err_len;
-  return 0;
-#endif
-}
 
 void stanli_model_free(stanli_model* m) { delete m; }
 

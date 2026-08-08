@@ -211,11 +211,12 @@ and relinking:
 | core runtime | 2.26 MB | 0.69 MB |
 | densities and distribution functions | 3.53 MB | 0.83 MB |
 
-Densities are 55% of the compressed download, which is what
-[docs/density-pack.md](docs/density-pack.md) is about: a core plus an
-on-demand pack, so a model pays for the densities it uses. `densities.cpp`
-is also the one file the browser build compiles at `-Oz` rather than
-`-O3`, worth 8.5 MB of wasm and about 10% on a mixture model.
+Densities are 55% of the compressed download. Loading the uncommon ones
+on demand was built and removed; the measurements and the one emscripten
+limitation that blocks it are in
+[docs/density-pack.md](docs/density-pack.md). `densities.cpp` is also the
+one file the browser build compiles at `-Oz` rather than `-O3`, worth
+8.5 MB of wasm and about 10% on a mixture model.
 
 stanc3 as JavaScript is a separate 2.84 MB, 0.40 MB gzipped, and a page
 that ships precompiled MIR never fetches it.
@@ -225,9 +226,7 @@ The browser build reports the same `lp__` as the wheels.
 shifted `lp__` by a per-model constant; it is off everywhere now, so a
 browser run and a CmdStan run can be compared directly.
 `stanli_exact_lp()` still reports which build is loaded, for anyone who
-turns the flag back on. See [docs/lite-lp.md](docs/lite-lp.md), and
-[docs/density-pack.md](docs/density-pack.md) for the plan to get the
-download back down without giving up `lp__`.
+turns the flag back on. See [docs/lite-lp.md](docs/lite-lp.md).
 
 ## Python
 

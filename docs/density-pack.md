@@ -1,15 +1,13 @@
-# Splitting the browser runtime: core plus an on-demand density pack
+# Splitting the browser runtime: what was tried and why it is not in
 
-Loading uncommon densities lazily in the browser. This is implemented and
-tested, and turned OFF, because the only emscripten mode it currently
-loads under costs more than the split saves. Build it with
-`-DSTANLI_DENSITY_PACK_BUILD=ON`; `tests/test_wasm_pack.cjs` is the
-check.
+Densities are 55% of the compressed browser download and most models use a
+handful, so loading the uncommon ones on demand is an obvious idea. It was
+built, it worked, and it was removed. This records what was measured, so
+that a second attempt starts from the one thing that actually blocks it.
 
-## The problem
-
-`stanli.wasm` ships every density, and a model uses a handful. The browser
-pays for all of them before it can do anything.
+The code is in the history: the commit that added `stanli_load_pack`,
+`stanli_register_kernel_c` and `tests/test_wasm_pack.cjs`, and the one
+that removed them.
 
 ## What the payload is made of
 
@@ -21,15 +19,10 @@ Measured by stubbing every density, cdf and tail kernel and relinking
 | core runtime, plus `multi_normal` and `lkj_corr_cholesky` | 2.26 MB | 0.69 MB |
 | everything, as shipped | 5.79 MB | 1.52 MB |
 
-The density surface is 3.53 MB raw, 0.83 MB gzipped: 55% of the compressed
-download. The core cannot be split.
+The density surface is 3.53 MB raw, 0.83 MB gzipped. The core cannot be
+split.
 
-The core figure is from a build with every density body stubbed, so
-`STANLI_LITE_LP` had nothing to act on and the number holds for either
-setting. The total is the shipped build, which is exact-lp since that flag
-went off by default.
-
-## Why it is off
+## Why it is not in
 
 | | gzip |
 |---|---:|
@@ -37,116 +30,64 @@ went off by default.
 | split, `MAIN_MODULE=1`: core + pack | 1.73 + 0.99 MB |
 | split, `MAIN_MODULE=2`: core + pack | 1.04 + 0.99 MB |
 
-`MAIN_MODULE=2` is the one worth having: a model using only core
-densities downloads 1.04 MB instead of 1.52 MB. It does not work. That
-mode exports only what `EXPORTED_FUNCTIONS` names, and a side module also
-imports `__stack_pointer` and the `__cpp_exception` tag, which are not
-functions and cannot be named there. Loading fails with
+`MAIN_MODULE=2` is the mode worth having: a model using only core
+densities downloads 1.04 MB instead of 1.52 MB. It does not load a side
+module. That mode exports only what `EXPORTED_FUNCTIONS` names, and a side
+module also imports `__stack_pointer` and the `__cpp_exception` tag, which
+are not functions and cannot be named there. The load fails with
 `imported mutable global must be a WebAssembly.Global object`, and adding
 `__stack_pointer` to `EXPORTED_FUNCTIONS` is rejected as an undefined
 exported symbol.
 
 `MAIN_MODULE=1` exports everything a side module might want, which is why
-it works, and it adds 0.69 MB gzipped to the core. Core plus pack is then
-2.72 MB against 1.52 MB unsplit: worse for every model, whether or not it
-needs the pack.
+it works and why it adds 0.69 MB gzipped to the core. Core plus pack is
+then 2.72 MB against 1.52 MB unsplit: worse for every model, whether or
+not it needs the pack.
 
-So the remaining work is entirely on the emscripten side: get a
-`MAIN_MODULE=2` core to hand a side module its stack pointer and exception
-tag. Everything else is done and tested.
+The whole question is therefore on the emscripten side. Everything else
+worked.
 
-## Why dynamic linking is affordable
+## What did work, and is worth reusing
 
-Emscripten's `MAIN_MODULE=2` with `-fPIC`, measured against the same tree:
+**Dynamic linking is free here.** `MAIN_MODULE=2` with `-fPIC`, measured
+against the same tree: 1.05 MB gzipped either way, 449 against 451
+ns/gradient. WebAssembly calls already go indirect through a function
+table, so there is no PLT or GOT penalty of the kind native dynamic
+linking pays. An earlier version of `docs/benchmarks.md` assumed this cost
+would exceed the saving; that was wrong.
 
-| | static | MAIN_MODULE=2 + fPIC |
-|---|---:|---:|
-| `stanli.wasm` gzipped | 1.05 MB | 1.05 MB |
-| fixtures, geomean | 449 ns | 451 ns |
-
-No measurable cost. WebAssembly calls already go indirect through a
-function table, so there is no PLT or GOT penalty of the kind native
-dynamic linking pays. An earlier version of `docs/benchmarks.md` assumed
-this cost would exceed the saving and concluded the split was not worth
-doing. That assumption was wrong.
-
-## The mechanism works
-
-A spike built a `SIDE_MODULE` against these headers, loaded it at runtime
-with `dlopen`, and called a function in it that called back into the main
-module. The call returned the expected value, which means a pack can use
-`register_kernel`, `active_sink()` and libm from the core instead of
+**A side module can call back into the core.** A spike loaded one with
+`dlopen` and called a function in it that called a function in the main
+module. A pack can use the core's `register_kernel` and libm rather than
 carrying its own copies.
 
-Three properties of the existing design make this fit:
+**The design fits the runtime as it stands.** Dispatch is already
+`kernel(opcode).forward`, a function-pointer table, so late registration
+only fills in slots. The lowering already fails with
+`opcode not registered: OP_...`, so the trigger is self-correcting: try to
+compile, fetch the pack on that error, retry once. No list of density
+names has to be mirrored in JavaScript.
 
-1. Dispatch is already `kernel(opcode).forward`, a function-pointer table.
-   Late registration only has to fill in slots.
-2. The lowering already fails with `unsupported function <name>`. The
-   trigger is therefore self-correcting: try to lower, fetch the pack on
-   that error, retry. No table of density names has to be duplicated in
-   JavaScript.
-3. `dlopen` and `dlsym` stay inside C. JavaScript only has to put the pack
-   where the loader can read it, then call one exported entry point.
+## Traps, if this is attempted again
 
-**Requirement found the hard way:** the pack must be compiled with the same
-exception ABI as the core (`-fwasm-exceptions`). Without it the load fails
-with `imported mutable global must be a WebAssembly.Global object` on
-`__stack_pointer`, which reads like a dynamic-linking bug and is not.
+- The pack must be compiled with the same exception ABI as the core
+  (`-fwasm-exceptions`). Without it the load fails on `__stack_pointer`
+  in a way that looks like a dynamic-linking bug and is not.
+- `dlfcn.h` does not exist on mingw. Anything that includes it has to be
+  guarded, or the Windows wheel stops building. That job runs after the
+  merge rather than as a gate, so it fails on `main`.
+- A define that selects which kernels register has to reach both the
+  static library, where `densities.cpp` lives, and the executable, where
+  the loader lives. Setting only the first makes the loader a silent
+  no-op that returns success.
+- The pack sources must leave the static library only when the split is
+  on, not whenever the platform is emscripten, or an unsplit browser build
+  fails to link.
 
-## How it is built
-
-`int stanli_load_pack(const char* path, char* err, size_t err_len)` does
-`dlopen(path, RTLD_NOW | RTLD_GLOBAL)`, `dlsym` for
-`stanli_pack_register`, and calls it. The pack registers one kernel per
-opcode it provides.
-
-The pack cannot call `register_kernel` directly: that is a C++ symbol, and
-`MAIN_MODULE=2` would need it named in a build file by its mangled name.
-The core exports `stanli_register_kernel_c` instead, a C entry taking the
-three `Kernel` members as `void*`, and `densities.cpp` redirects to it
-when built for the pack. The registration blocks read the same in both
-builds.
-
-Two defines, and both are needed for different files:
-`STANLI_DENSITY_CORE` on the static library controls which kernels
-`densities.cpp` registers, and the same define on the executable controls
-whether `stanli_load_pack` in `capi.cpp` actually dlopens. Setting only
-one makes `stanli_load_pack` a silent no-op that returns success.
-
-On the JavaScript side, `stanli_model_new` fails with
-`opcode not registered: OP_...`; the worker fetches `stanli-pack.wasm`,
-writes it to the emscripten filesystem, calls `stanli_load_pack`, and
-retries the compile once. A second failure is a real error.
-
-## What has to be decided
-
-**Where the line goes.** Which densities are core and which are packed.
-The density list only just settled at 71 of 72, which is why this work was
-deferred: re-splitting later means re-verifying both artifacts. A starting
-point is the tier field in `STANLI_SCALAR_DENSITY_LIST` (tier 3 is the
-thirteen distributions models lean on) plus the discrete lpmfs, with the
-cdfs and the multivariate tail in the pack.
-
-**How many packs.** One is simplest. Splitting cdfs from the multivariate
-tail would save a truncation-only model from downloading wisharts, at the
-cost of a second artifact to build, verify and cache.
-
-**Whether the wheel does this too.** Probably not. The wheel is one file
-on disk and its size is not on anyone's critical path; the browser's is.
-
-## Alternative, if dynamic linking turns out to be a problem
+## The alternative that needs no dynamic linking
 
 Two prebuilt whole-module bundles, common densities and everything,
-selected once the compiled model's op set is known. No PIC, no dynamic
-linking, and the worst case is one wasted fetch of the smaller file. This
-was the fallback before PIC was measured. It is strictly worse when
-dynamic linking works, because it cannot add to a running module.
-
-## Verification this will need
-
-The corpus replay already runs through the browser build
-(`tools/wasm_check.sh` with `tools/verify_refs.py`). A split runtime has to
-pass it with the pack loaded, and separately has to fail cleanly with the
-pack absent: a model needing a packed density must report the unsupported
-function, not compute a wrong answer. Both belong in CI.
+selected once the compiled model's op set is known. No PIC, no side
+modules, and the worst case is one wasted fetch of the smaller file. It
+cannot add to a running module, so a model needing one uncommon density
+downloads the whole large bundle, but it has no emscripten blocker.

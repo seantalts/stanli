@@ -39,14 +39,6 @@ int stanli_has_embedded_stanc(void);
  * seed and expect the same bytes, should check this. */
 int stanli_exact_lp(void);
 
-/* Load a density pack and let it register its kernels. Browser builds
- * split the long tail of densities and the distribution functions into a
- * side module, so a model using one compiles only after the pack is
- * loaded; stanli_model_new fails with "opcode not registered: OP_..."
- * until then. Returns 0 on success, nonzero with a message in err.
- * Loading the same pack twice is harmless. Native builds have every
- * kernel already and return 0 without doing anything. */
-int stanli_load_pack(const char* path, char* err, size_t err_len);
 void stanli_model_free(stanli_model* m);
 
 int64_t stanli_n_unconstrained(const stanli_model* m);
