@@ -81,8 +81,8 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
-              && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":3}]'
-              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":3},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"quay.io/pypa/manylinux_2_28_aarch64","opam_arch":"arm64-linux","build_jobs":3}]') }}
+              && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":2}]'
+              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":2},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"quay.io/pypa/manylinux_2_28_aarch64","opam_arch":"arm64-linux","build_jobs":2}]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -117,7 +117,7 @@ jobs:
         if: matrix.container != ''
         run: |
           dnf install -y unzip which diffutils patch rsync
-          dnf install -y epel-release && dnf install -y ccache
+          dnf install -y epel-release && dnf install -y ccache time
           # The manylinux image keeps its interpreters out of PATH; pick one
           # explicitly rather than inheriting AlmaLinux's system python3.
           echo /opt/python/cp312-cp312/bin >> "$GITHUB_PATH"
@@ -202,7 +202,19 @@ jobs:
           cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo '?')
           gb=$(free -g 2>/dev/null | awk '/^Mem/{print $2}')
           echo "runner: $cores cores, ${gb:-?} GB, building -j${{ matrix.build_jobs }}"
-          cmake --build build-rel -j ${{ matrix.build_jobs }}
+          # What the biggest single compile actually costs on THIS
+          # toolchain, because guessing it from another one is what put
+          # exit 137 back in the log. GNU time reports the largest child,
+          # not the sum, which is exactly the number -j has to fit.
+          # Linux only: BSD time on macOS spells the same thing -l.
+          if [ "$(uname -s)" = Linux ] && [ -x /usr/bin/time ]; then
+            /usr/bin/time -v cmake --build build-rel \
+              -j ${{ matrix.build_jobs }} 2>/tmp/build.err ||
+              { cat /tmp/build.err; exit 1; }
+            grep -i "maximum resident" /tmp/build.err
+          else
+            cmake --build build-rel -j ${{ matrix.build_jobs }}
+          fi
           ccache -s
 
       - name: Tests
