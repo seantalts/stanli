@@ -69,17 +69,20 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
     strategy:
       fail-fast: false
-      # A pull request builds one platform. macOS arm64 is the whole merge
-      # gate: it runs the test suite and the corpus oracle, which is what
-      # has ever caught anything, and it is the fastest of the five. The
-      # other three build after the merge, nightly and on tags. A platform
-      # break therefore lands on main and is fixed forward, which is the
-      # same deal Windows already has.
+      # A pull request builds one platform, and it is Linux x86_64. It
+      # runs the test suite and the corpus oracle, which is what has ever
+      # caught anything. It is not the mac: on identical work the arm64
+      # runner took 49.8 min against this container's 30.1 while the
+      # container was pinned to -j1, so it is the slowest machine here,
+      # not the fastest. It only looked quick on docs-only runs, where
+      # the build is a cache hit and the two minutes are fixed overhead.
+      # The other three platforms build after the merge, nightly and on
+      # tags, where a break is fixed forward the way Windows already is.
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
-              && '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4}]'
-              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":1},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"quay.io/pypa/manylinux_2_28_aarch64","opam_arch":"arm64-linux","build_jobs":1}]') }}
+              && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":3}]'
+              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":3},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"quay.io/pypa/manylinux_2_28_aarch64","opam_arch":"arm64-linux","build_jobs":3}]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -190,9 +193,15 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
             -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
-          # Bounded, not bare -j: that means unlimited to make, and a
-          # stan-math translation unit peaks around 2 GB, so the x86_64
-          # container built itself to death (exit 137).
+          # Bounded, not bare -j. The containers ran at -j1 because one
+          # densities.cpp compile peaked at 7.57 GB, so two at once
+          # OOM-killed a 16 GB runner (exit 137). Sharded, the largest
+          # shard is 3.89 GB and -j3 worst-cases at 9.0 GB. Printing what
+          # the runner actually has, so the next person tuning this reads
+          # it off a log instead of guessing.
+          cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo '?')
+          gb=$(free -g 2>/dev/null | awk '/^Mem/{print $2}')
+          echo "runner: $cores cores, ${gb:-?} GB, building -j${{ matrix.build_jobs }}"
           cmake --build build-rel -j ${{ matrix.build_jobs }}
           ccache -s
 
