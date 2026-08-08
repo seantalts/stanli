@@ -316,6 +316,27 @@ No sdist is published. Building from source needs a 30-minute OCaml
 toolchain step, so an sdist would only turn "no wheel for your platform"
 into a confusing build failure.
 
+The npm package `@seantalts/stanli` ships the same way on its own tag
+series. Bump `version` in `js/package.json`, add the `CHANGELOG.md` entry,
+then tag `npm-vX.Y.Z`. The `npm-publish` job asserts the tag agrees with
+`package.json`, takes the `stanli.wasm` the `wasm` job built for that
+commit plus the cached release stancjs, and publishes through npm trusted
+publishing, again with no token anywhere; the `npm` deployment environment
+is restricted to `npm-v*` tags.
+
+```
+git tag -a npm-v0.1.0 -m "stanli npm 0.1.0" && git push origin npm-v0.1.0
+```
+
+Two things about npm differ from PyPI and are worth knowing before the
+next name or the next first release. npm has no pending publisher: a
+trusted publisher attaches only to a package that already exists, so the
+first version of a package goes out by hand with `npm publish` and every
+release after that is a tag. And the package is scoped because npm's
+name-similarity filter rejects the unscoped `stanli` as too close to
+existing packages, which is why `publishConfig.access` is set to public
+(a scoped package would otherwise default to a private publish).
+
 ## Verification policy
 
 Nothing ships on "looks close". Kernel gradients are bitwise-tested

@@ -242,7 +242,7 @@ tagged, so everything below is what changed for anyone upgrading from
   and histogram plots while NUTS runs, split-Rhat and effective sample
   size, and a CSV of the draws.
 
-- An npm package, `stanli`: `compile()` and `sample()` over a worker
+- An npm package, `@seantalts/stanli`: `compile()` and `sample()` over a worker
   pool sized to the hardware, with an `onLive` callback for streaming
   draws and `preload()` to warm the compiler and runtime before the
   first click. Published on `npm-v*` tags through npm trusted

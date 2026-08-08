@@ -488,8 +488,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          # Scoped, so npm pack writes seantalts-stanli-<version>.tgz.
           name: npm-package
-          path: stanli-*.tgz
+          path: "*stanli-*.tgz"
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -8,7 +8,7 @@ server, no C++ toolchain, everything in the tab. Live demo:
 <https://seantalts.github.io/stanli/>.
 
 ```js
-import { sample } from "stanli";
+import { sample } from "@seantalts/stanli";
 
 const fit = await sample({
   code: `

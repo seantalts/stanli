@@ -3,7 +3,7 @@
 // op graph and runs NUTS. Everything happens client side, off the main
 // thread, in workers this module owns.
 //
-//   import { compile, sample } from "stanli";
+//   import { compile, sample } from "@seantalts/stanli";
 //   const { mir } = await compile({ code });
 //   const fits = await Promise.all([1, 2, 3, 4].map((c) =>
 //       sample({ mir, data, seed: c })));
