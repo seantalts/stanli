@@ -85,17 +85,32 @@ jobs:
             deps/ocaml-include
           key: stanc-embed-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('tools/stanc_embed/**') }}
 
+      # The compiled objects from the last run on main. stan-math heavy
+      # translation units dominate the wall clock, and most pushes touch a
+      # handful of files, so a warm ccache turns an hour of compiling into
+      # minutes of cache hits. Keyed on the commit so every run saves a
+      # fresh cache; the prefix restore pulls the newest previous one.
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.plat }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.plat }}-
+
       - name: System packages (manylinux)
         if: matrix.container != ''
         run: |
           dnf install -y unzip which diffutils patch rsync
+          dnf install -y epel-release && dnf install -y ccache
           # The manylinux image keeps its interpreters out of PATH; pick one
           # explicitly rather than inheriting AlmaLinux's system python3.
           echo /opt/python/cp312-cp312/bin >> "$GITHUB_PATH"
 
       - name: System packages (macOS)
         if: matrix.container == ''
-        run: brew list cmake >/dev/null 2>&1 || brew install cmake
+        run: |
+          brew list cmake >/dev/null 2>&1 || brew install cmake
+          brew list ccache >/dev/null 2>&1 || brew install ccache
 
       # Not the runner's system python: Homebrew marks it externally
       # managed, so pip refuses to install the build tooling into it.
@@ -136,13 +151,19 @@ jobs:
 
       - name: Configure and build
         run: |
+          # $PWD, not github.workspace: inside the manylinux containers the
+          # workspace mounts at a different path than the expression gives.
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
             -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
           # Bounded, not bare -j: that means unlimited to make, and a
           # stan-math translation unit peaks around 2 GB, so the x86_64
           # container built itself to death (exit 137).
           cmake --build build-rel -j ${{ matrix.build_jobs }}
+          ccache -s
 
       - name: Tests
         run: ctest --test-dir build-rel --output-on-failure
@@ -242,6 +263,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-ccache
             mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-python-pip
             mingw-w64-ucrt-x86_64-python-setuptools
@@ -249,13 +271,24 @@ jobs:
             unzip
             curl
 
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-win_amd64-${{ github.sha }}
+          restore-keys: ccache-win_amd64-
+
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
 
       - name: Configure, build, test
         run: |
-          cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
+          ccache -s
           (cd build-rel && ctest --output-on-failure)
 
       - name: Build the wheel
@@ -290,12 +323,23 @@ jobs:
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: 6.0.6
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-wasm-${{ github.sha }}
+          restore-keys: ccache-wasm-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
       - name: Build stanli.wasm
         run: |
-          emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release
+          which ccache || sudo apt-get install -y ccache
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-wasm -j4
+          ccache -s
       - name: Sample eight schools under Node
         run: node tests/test_wasm.cjs
       - uses: actions/upload-artifact@v4
