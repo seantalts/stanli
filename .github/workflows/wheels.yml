@@ -11,7 +11,14 @@
 # Windows builds under mingw-w64 (stan-math does not build under MSVC,
 # which is why RStan ships through RTools), exports the C ABI through a
 # .def file, and bundles the release stanc.exe as a subprocess: the
-# embedded compiler waits on opam's native Windows support.
+# embedded compiler waits on opam's native Windows support. That job
+# does not run on pull requests: mingw compiles the density kernels an
+# order of magnitude slower than every other platform (110 minutes for
+# that one translation unit against ~7 for the other 140 targets), so
+# gating merges on it means waiting hours for a signal that has never
+# caught a bug the other five platforms missed. It runs after the merge
+# instead, nightly, and on release tags, where a failure is a bug report
+# rather than a roadblock. Publishing still waits for it.
 name: wheels
 
 on:
@@ -19,6 +26,9 @@ on:
     branches: [main]
     tags: ['v*', 'npm-v*']
   pull_request:
+  schedule:
+    # 08:00 UTC daily, which is overnight in US time zones.
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 permissions:
@@ -246,8 +256,12 @@ jobs:
           name: wheel-${{ matrix.plat }}
           path: dist/*.whl
 
+  # Everything except pull requests: main pushes, the nightly cron, and
+  # release tags (the publish job needs this wheel, so a tag still waits
+  # for it).
   windows:
     name: win_amd64
+    if: github.event_name != 'pull_request'
     runs-on: windows-2022
     defaults:
       run:

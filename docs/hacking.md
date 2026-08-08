@@ -265,7 +265,7 @@ python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --j
 
 The second line replays all 119 corpus models against recorded CmdStan
 values and is the strongest oracle in the project; it also runs in CI on
-every push, on all five wheel platforms, and
+every push, on each of the four wheel platforms it is gated on, and
 [`tools/wasm_check.sh`](../tools/wasm_check.sh) drives the same replay
 through the WASM build under Node. Compiler changes that claim to be pure
 refactors should leave its worst-deviation line untouched. For sampler
@@ -276,9 +276,10 @@ harnesses and the current numbers).
 
 ## Landing a change
 
-`main` is protected: the five wheel platforms and the WASM build must
-pass before anything merges, admins included, so direct pushes are
-rejected. The flow is a branch and an auto-merged PR:
+`main` is protected: the four wheel platforms that build at a reasonable
+speed, plus the WASM build, must pass before anything merges, admins
+included, so direct pushes are rejected. The flow is a branch and an
+auto-merged PR:
 
 ```
 git checkout -b my-change
@@ -290,5 +291,18 @@ gh pr merge --auto --rebase
 The merge happens on its own when CI goes green (rebase-merge keeps the
 history linear). Release tags (`v*`, `npm-v*`) are not gated by this;
 they point at commits that already passed on main.
+
+Windows is the exception. mingw compiles the density kernels an order of
+magnitude slower than any other platform, so that job would set the pace
+for every merge on its own; it runs after the merge, nightly at 08:00
+UTC, and on release tags instead of on pull requests. A red Windows run
+on main is a bug to fix forward, and a tag will not publish until it
+passes. If a change plausibly touches Windows (build files, the C ABI
+surface, anything under `tools/exported_symbols.def`), run the job on the
+branch before merging:
+
+```
+gh workflow run wheels.yml --ref my-change
+```
 
 Release process and CI layout live in [`README.md`](../README.md) under "Releasing".
