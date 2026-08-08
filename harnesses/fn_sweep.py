@@ -103,20 +103,34 @@ def cdf_specs(pool):
     the arguments in that table are already chosen to sit in the support,
     so writing them out again would only create a second place to get them
     wrong. std_normal_cdf and friends take the outcome alone; everything
-    else mirrors its lpdf. Only what stanli claims is emitted -- the point
-    is verifying what we ship, and the 27 discrete cdfs have a different
-    shape entirely.
+    else mirrors its density, lpmf included -- an integer outcome stays a
+    Python int and model_for prints it as one. Only what stanli claims is
+    emitted; the point is verifying what we ship.
     """
+    # A tail function can be degenerate at an argument the density is
+    # perfectly happy with. bernoulli's outcome 1 is the top of its
+    # support, so bernoulli_lccdf(1 | theta) is log(0) BY DEFINITION --
+    # stanli and CmdStan both return -inf with a zero gradient, and agree,
+    # but stanli_check refuses to print a nonfinite lp while ref_driver
+    # prints it, so the comparison reports a disagreement that is not one.
+    # Move off the boundary rather than teach the harness to squint.
+    OUTCOME_FOR_TAIL = {"bernoulli": 0}
     have = claimed()
     out = []
     for name, n, argv in pool:
-        base = name[:-len("_lpdf")] if name.endswith("_lpdf") else None
-        if base is None or any(isinstance(v, int) for v in argv):
+        for suffix in ("_lpdf", "_lpmf"):
+            if name.endswith(suffix):
+                base = name[:-len(suffix)]
+                break
+        else:
             continue
+        args = list(argv)
+        if base in OUTCOME_FOR_TAIL:
+            args[0] = OUTCOME_FOR_TAIL[base]
         for suffix in ("cdf", "lcdf", "lccdf"):
             fn = f"{base}_{suffix}"
             if fn in have:
-                out.append((fn, n, argv))
+                out.append((fn, n, args))
     return out
 
 

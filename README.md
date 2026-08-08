@@ -33,8 +33,8 @@ pip install stanli
   in [Binary size](#binary-size) below; the browser build halves the
   runtime with `STANLI_LITE_LP` ([docs/lite-lp.md](docs/lite-lp.md)).
 - Distribution coverage: [docs/coverage.md](docs/coverage.md) (46 of 72
-  densities, all 72 continuous cdf/lcdf/lccdf, truncation and censoring;
-  every one bitwise against CmdStan, and what is missing says why)
+  densities, 87 of 105 cdf/lcdf/lccdf, truncation and censoring; every one
+  bitwise against CmdStan, and what is missing says why)
 - How this is possible, for statisticians:
   [docs/how-it-works.md](docs/how-it-works.md)
 - Design doc: `docs/superpowers/specs/2026-08-04-stan-portable-runtime-design.md`

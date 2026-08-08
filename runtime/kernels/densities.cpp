@@ -443,6 +443,19 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
 STANLI_SCALAR_CDF_LIST(STANLI_DEFINE_CDF_FWD)
 #undef STANLI_DEFINE_CDF_FWD
 
+// Integer-outcome cdfs. Same as above with the count read from idata,
+// the way the lpmfs read theirs -- a whole vector of outcomes in one
+// call, since the summed form is the only one these have.
+#define STANLI_DEFINE_INT_CDF_FWD(code, fn, nreal, tier)                 \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                    \
+    Eigen::Map<const Eigen::VectorXi> y(                                 \
+        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));              \
+    cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(      \
+        ctx, [&](const auto&... a) { stan::math::fn(y, a...); });        \
+  }
+STANLI_INT_CDF_LIST(STANLI_DEFINE_INT_CDF_FWD)
+#undef STANLI_DEFINE_INT_CDF_FWD
+
 }  // namespace
 
 void register_density_kernels() {
@@ -460,6 +473,7 @@ void register_density_kernels() {
 #define STANLI_REGISTER_CDF(code, fn, n, tier) \
   register_kernel(code, Kernel{fn##_fwd_gen, density_bwd<n>, density_scratch<n>});
   STANLI_SCALAR_CDF_LIST(STANLI_REGISTER_CDF)
+  STANLI_INT_CDF_LIST(STANLI_REGISTER_CDF)
 #undef STANLI_REGISTER_CDF
   // The list is the default. A density whose forward needs more than the
   // shared one registers after it and wins: uniform_lpdf has to decide

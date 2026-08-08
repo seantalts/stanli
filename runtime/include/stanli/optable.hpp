@@ -265,6 +265,31 @@ namespace stanli {
   X(OP_WEIBULL_LCCDF, weibull_lccdf, 3, 0) \
   X(OP_WEIBULL_LCDF, weibull_lcdf, 3, 0)
 
+// The same, for distributions whose outcome is an integer: the count
+// rides in idata exactly as it does for the lpmfs, and the real
+// arguments behave as above. Field 3 is the count of REAL arguments, so
+// the lowering entry is one more than that with one int group.
+//
+// Not every discrete cdf fits: binomial and beta_binomial carry a second
+// int group (the trial count) and discrete_range is integers all the way
+// down, so those nine keep waiting for a layout rather than a list line.
+#define STANLI_INT_CDF_LIST(X)                                            \
+  X(OP_BERNOULLI_CDF, bernoulli_cdf, 1, 0)                                \
+  X(OP_BERNOULLI_LCCDF, bernoulli_lccdf, 1, 0)                            \
+  X(OP_BERNOULLI_LCDF, bernoulli_lcdf, 1, 0)                              \
+  X(OP_BETA_NEG_BINOMIAL_CDF, beta_neg_binomial_cdf, 3, 0)                \
+  X(OP_BETA_NEG_BINOMIAL_LCCDF, beta_neg_binomial_lccdf, 3, 0)            \
+  X(OP_BETA_NEG_BINOMIAL_LCDF, beta_neg_binomial_lcdf, 3, 0)              \
+  X(OP_NEG_BINOMIAL_CDF, neg_binomial_cdf, 2, 0)                          \
+  X(OP_NEG_BINOMIAL_LCCDF, neg_binomial_lccdf, 2, 0)                      \
+  X(OP_NEG_BINOMIAL_LCDF, neg_binomial_lcdf, 2, 0)                        \
+  X(OP_POISSON_CDF, poisson_cdf, 1, 0)                                    \
+  X(OP_POISSON_LCCDF, poisson_lccdf, 1, 0)                                \
+  X(OP_POISSON_LCDF, poisson_lcdf, 1, 0)                                  \
+  X(OP_YULE_SIMON_CDF, yule_simon_cdf, 1, 0)                              \
+  X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1, 0)                          \
+  X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1, 0)
+
 // Not here, and worth saying why: ordered_logistic and ordered_probit.
 // Their cutpoint argument is a whole vector per observation, and
 // stan-math reaches its partials through partials_vec<1>(ops_partials),
@@ -355,6 +380,7 @@ enum Opcode : uint16_t {
   STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_ENUM)
   STANLI_INT_DENSITY_LIST(STANLI_DENSITY_ENUM)
   STANLI_SCALAR_CDF_LIST(STANLI_DENSITY_ENUM)
+  STANLI_INT_CDF_LIST(STANLI_DENSITY_ENUM)
 #undef STANLI_DENSITY_ENUM
 #define STANLI_UNARY_ENUM(code, fn, v, d) code,
   STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_ENUM)

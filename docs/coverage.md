@@ -8,7 +8,7 @@ with a generated single-function model.
 | family | supported |
 |---|---|
 | densities (`_lpdf`, `_lpmf`) | 46 / 72 |
-| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 72 / 105 |
+| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 87 / 105 |
 | scalar math (all-real signature) | 47 / 129 |
 
 Everything supported matches CmdStan **bitwise** — 0 ULP on every argument
@@ -52,10 +52,17 @@ int groups. `binomial` already carries two groups
 `hypergeometric` and `discrete_range` have no real arguments at all, so
 they contribute a constant and no gradient.
 
-### Discrete cdfs — 27 of the 33 missing distribution functions
+### The 18 remaining distribution functions
 
-`poisson_lcdf`, `binomial_lccdf` and friends. Same idata plumbing as the
-discrete densities; nothing has needed a truncated count model yet.
+`binomial` and `beta_binomial` carry a second int group (the trial count)
+and `discrete_range` is integers all the way down, so those nine want a
+layout rather than a list line — `with_int_group` in `densities.cpp` shows
+the shape.
+
+`neg_binomial_2`'s three reparameterize to `neg_binomial` by computing
+`phi / mu` **on the scalar type**, which is the recorder's hard limit
+again (see below). The other six are `von_mises` and
+`skew_double_exponential`, also below.
 
 ### Two that will not work as they stand
 

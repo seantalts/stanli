@@ -6,12 +6,12 @@
   not compile before: stanc3 rewrites a `T[,]` into the density minus
   `log_diff_exp` of the bounds' `lcdf`s, and stanli had neither piece.
   Both land here, along with the whole continuous distribution-function
-  family -- 72 `cdf`/`lcdf`/`lccdf` functions, every one 0 ULP against
-  CmdStan on first run.
+  family -- 87 `cdf`/`lcdf`/`lccdf` functions, continuous and count
+  alike, every one 0 ULP against CmdStan.
 
 - **Count distributions**: `neg_binomial`, `neg_binomial_2_log`,
   `beta_neg_binomial`, `yule_simon`. Coverage is now 46 of Stan's 72
-  densities and 72 of its 105 distribution functions;
+  densities and 87 of its 105 distribution functions;
   [docs/coverage.md](docs/coverage.md) lists what is missing and what each
   gap actually needs.
 
