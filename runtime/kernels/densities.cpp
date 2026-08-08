@@ -17,6 +17,7 @@
 #include <stan/math/prim.hpp>
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace stanli {
 namespace {
@@ -414,6 +415,12 @@ STANLI_SCALAR_DENSITY_LIST(STANLI_DEFINE_DENSITY_FWD)
 // scalar rvar where their vector overload expects a container.
 template <int NArgs, int Tier, typename F>
 void cdf_fwd(KernelCtx& ctx, F&& f) {
+  // Cannot happen today -- reroll.cpp opts densities into the fusion by
+  // opcode and cdfs are in neither list -- but the failure if it ever did
+  // would be silent: out would be len N and only element 0 written. Say
+  // so instead. The branch costs nothing next to an incomplete beta.
+  if (ctx.variant & 0x40u)
+    throw std::runtime_error("cdf: elementwise variant not implemented");
   sink s;
   int64_t off = 0;
   for (int k = 0; k < NArgs; ++k) {
