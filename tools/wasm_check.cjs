@@ -45,7 +45,11 @@ try {
 }
 const data = fs.readFileSync(dataFile, "utf8");
 
-const createStanli = require(path.join(repo, "build-wasm", "stanli.js"));
+// $STANLI_WASM_MODULE points the replay at another build tree, which is
+// how two wasm configurations get compared against the same references.
+const createStanli = require(process.env.STANLI_WASM_MODULE
+    ? path.resolve(process.env.STANLI_WASM_MODULE)
+    : path.join(repo, "build-wasm", "stanli.js"));
 createStanli().then((M) => {
   const mirPtr = M.stringToNewUTF8(mir);
   const dataPtr = M.stringToNewUTF8(data);

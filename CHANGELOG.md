@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The browser build uses SIMD128. Worth 2% on most shapes and 11% on a
+  matrix-heavy model for 0.03 MB gzipped, and every corpus model's
+  gradients come out bitwise identical to the scalar build -- with FP
+  contraction still pinned off, the vectorization Eigen takes is
+  elementwise, which is order-preserving. `tools/bench_wasm.cjs` is the
+  measurement; docs/benchmarks.md has the numbers, and two things it says
+  are not worth doing.
+
 - **Ordinal regression.** `y ~ ordered_logistic(lambda, c)` compiles and
   matches CmdStan bitwise. Its cutpoint argument is a vector shared by
   every observation rather than a per-lane value, which the recorder now

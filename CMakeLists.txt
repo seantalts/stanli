@@ -72,6 +72,18 @@ endif()
 
 if(EMSCRIPTEN)
   target_compile_options(stanmath INTERFACE -fwasm-exceptions)
+  # SIMD128. Measured with tools/bench_wasm.cjs on this machine: geomean
+  # 457 -> 449 ns/gradient over the fixtures, radon_pooled 107.9 -> 105.7
+  # us, nes 29.1 -> 25.9 us (11%), for 0.03 MB gzipped. The reason it is
+  # safe is the interesting part: every corpus model's gradients come out
+  # BITWISE identical to the scalar build (checked through
+  # tools/wasm_check.sh against the CmdStan references, and directly on
+  # radon_pooled and nes at three points each). With -ffp-contract=off
+  # still in force the vectorization Eigen takes here is elementwise, and
+  # elementwise is order-preserving; a vectorized reduction would
+  # reassociate and would have shown up immediately. Baseline support is
+  # Chrome 91, Firefox 89, Safari 16.4.
+  target_compile_options(stanmath INTERFACE -msimd128)
   # The density kernels instantiate every activity mask times every shape
   # times summed/elementwise: 21 MB of object at -O3. The browser build
   # trades their straight-line speed for size.
