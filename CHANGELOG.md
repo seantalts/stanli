@@ -1,126 +1,110 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
-- Sizes re-measured on the current tree, since the density list nearly
-  doubled: the shared library is 22.2 MB installed and 7.8 MB in the wheel
-  (from 21.3 / 7.4), `libstanli` is 15.75 MB stripped exact and 8.43 MB
-  lite (from 14.93 / 7.79), and `stanli.wasm` is 4.10 MB raw / 1.15 MB
-  gzipped (from 3.60 / 1.05). Densities and distribution functions are now
-  12.03 MB of the shipped library, 54.9%.
+Coverage. 0.3.0 shipped 46 of Stan's 72 densities and could not compile a
+truncated model at all. This one has 71, and truncation and censoring
+work.
 
-- **71 of Stan's 72 densities.** The multivariate and multinomial tail
-  lands: the wishart family, `multi_gp`, `multi_student_t`, `lkj_cov`,
-  `multi_normal_prec`, the multinomial family, `ordered_probit`, `wiener`,
-  and the three remaining GLMs. Only `gaussian_dlm_obs` is out, and for a
-  structural reason: it takes seven arguments and an op holds six.
+### Distributions
 
-- Those tail densities are **compact** -- one instantiation of stan-math's
-  template instead of one per activity mask. Their gradients are bitwise
-  against CmdStan and their `lp__` sits a per-model constant higher,
-  measured and characterised in the new
-  [docs/compact-densities.md](docs/compact-densities.md), which also says
-  which densities are exact and how to make a tail one exact if you need
-  it. The trade is the same one `STANLI_LITE_LP` makes globally, applied
-  per density: `lp__` is a diagnostic, the gradient is what the sampler
-  integrates.
+- **71 of 72 densities.** New since 0.3.0: the count distributions
+  (`neg_binomial`, `neg_binomial_2_log`, `beta_neg_binomial`,
+  `yule_simon`, `beta_binomial`), the count GLMs (`poisson_log_glm`,
+  `neg_binomial_2_log_glm`, `binomial_logit_glm`, `categorical_logit_glm`,
+  `ordered_logistic_glm`), ordinal regression (`ordered_logistic`,
+  `ordered_probit`), the multivariate tail (`multi_normal_prec`,
+  `multi_student_t` and its cholesky form, the wishart family, `multi_gp`
+  and its cholesky form, `lkj_corr`, `lkj_cov`), the multinomial family,
+  `hypergeometric`, `discrete_range` and `wiener`.
 
-- `ordered_probit` and `wiener` were written off as unreachable because
-  the recorder cannot do arithmetic on its scalar type. That is true of
-  the recorder and not of `stan::math::var`, so both work on a nested var
-  tape.
+  `gaussian_dlm_obs` is the one that is out, for a structural reason: it
+  takes seven arguments and an op holds six.
 
-- `Graph::add_op` used to write past `Op::in` without a word. A
-  seven-input op corrupted `n_in` and surfaced as a SIGBUS inside a
-  kernel; it throws at the point that knows now.
+- **Truncation and censoring.** `y ~ normal(mu, sigma) T[0, 10]` did not
+  compile before. stanc3 rewrites a `T[,]` into the density minus
+  `log_diff_exp` of the bounds' `lcdf`s, and neither piece existed.
 
-- `multi_normal_prec`, `lkj_corr`, `hypergeometric` and `discrete_range`,
-  taking densities to 54 of 72 -- and none of the four needed a kernel
-  written from scratch. The first two are one template parameter on
-  `multi_normal` and `lkj_corr_cholesky`, whose argument shapes they share.
-  The other two are all-integer, so they are covered by a general rewrite:
-  `y ~ foo(...)` with every argument data contributes exactly zero, because
-  that is what CmdStan's `include_summand` does with it. See the three
-  tiers at the top of docs/coverage.md.
+- **90 of 105 distribution functions**, the `cdf`/`lcdf`/`lccdf` family
+  that truncation runs on, continuous and count alike. Every one is 0 ULP
+  against CmdStan.
 
-- Three more densities, and a propto bug they exposed: `poisson_log_glm`,
-  `neg_binomial_2_log_glm` and `beta_binomial`, all bitwise against
-  CmdStan. GLM ops were the one density shape the lowering gave no variant
-  at all, so their kernels hardcoded `propto=false` and
-  `poisson_log_glm`'s lp landed `sum(log(y!))` away from CmdStan's with the
-  gradients already exact. `bernoulli_logit_glm` had the same hardcoding
-  and got away with it because bernoulli has no constant to drop. 50 of 72
-  densities now.
+- [docs/coverage.md](docs/coverage.md) lists what is still missing and
+  what each gap needs. It also opens with the three ways a density gets
+  added, cheapest first, because reaching for a kernel first is what kept
+  the list short longer than it had to be.
 
-- The browser build uses SIMD128. Worth 2% on most shapes and 11% on a
-  matrix-heavy model for 0.03 MB gzipped, and every corpus model's
-  gradients come out bitwise identical to the scalar build -- with FP
-  contraction still pinned off, the vectorization Eigen takes is
-  elementwise, which is order-preserving. `tools/bench_wasm.cjs` is the
-  measurement; docs/benchmarks.md has the numbers, and two things it says
-  are not worth doing.
+### Two bugs worth naming
 
-- **Ordinal regression.** `y ~ ordered_logistic(lambda, c)` compiles and
-  matches CmdStan bitwise. Its cutpoint argument is a vector shared by
-  every observation rather than a per-lane value, which the recorder now
-  expresses (`VecMask`), and its outcome reaches stan-math as the
-  `std::vector<int>` CmdStan's generated code passes.
+- GLM ops were the one density shape the lowering gave no variant at all,
+  so their kernels hardcoded `propto=false`. `poisson_log_glm`'s `lp__`
+  came out `sum(log(y!))` away from CmdStan's with every gradient already
+  exact. `bernoulli_logit_glm`, which shipped in 0.3.0, had the same
+  hardcoding and got away with it because bernoulli has no constant to
+  drop.
 
-- `rvar` declares `Scalar`. We register `is_fvar<rvar>` and stan-math's
-  fvar `value_type` specialization reads `std::decay_t<T>::Scalar` for
-  anything that trait accepts -- `const rvar&` included -- so claiming the
-  trait without the member left every cv-ref form reaching for something
-  that did not exist. Honouring it brought in `ordered_logistic` and
-  `skew_double_exponential`'s three cdfs at once: 47 of 72 densities and
-  90 of 105 distribution functions.
+- `Graph::add_op` wrote past `Op::in` with no bounds check. A seven-input
+  op corrupted `n_in` and surfaced as a SIGBUS inside a kernel rather than
+  at the point that knew. It throws now.
 
-- `stanli_check` reports a nonfinite lp or gradient as a value instead of
-  refusing. `ref_driver` -- the CmdStan side of every comparison -- always
-  did, and the comparisons are nonfinite-safe, so the asymmetry meant the
-  oracle could never confirm agreement at -inf and reported a genuine
-  disagreement as a run failure. `bernoulli_lccdf(1 | theta)` is log(0) by
-  definition and both engines return -inf with a zero gradient; that is a
-  pass now. `wasm_check.cjs` keeps the same contract.
+### The reported lp__, and the compact tier
 
-- CI runs one workflow per branch. Superseded pull-request runs are
-  cancelled; pushes to main and tag builds are not.
+The multivariate and multinomial tail is built compact: one instantiation
+of stan-math's template instead of one per activity mask. Gradients and
+`write_array` values are bitwise against CmdStan; `lp__` sits a per-model
+constant higher, because stan-math's term-dropping is keyed on argument
+types and a single instantiation cannot reproduce it.
+[docs/compact-densities.md](docs/compact-densities.md) says which
+densities are exact, which are compact, and how to make a compact one
+exact.
 
-- **Truncation and censoring work.** `y ~ normal(mu, sigma) T[0, 10]` did
-  not compile before: stanc3 rewrites a `T[,]` into the density minus
-  `log_diff_exp` of the bounds' `lcdf`s, and stanli had neither piece.
-  Both land here, along with the whole continuous distribution-function
-  family -- 87 `cdf`/`lcdf`/`lccdf` functions, continuous and count
-  alike, every one 0 ULP against CmdStan.
+`STANLI_LITE_LP` applies the same trade globally and is off everywhere,
+browser included. It defaulted on for the browser during development,
+which meant the demo reported an `lp__` that could not be compared against
+CmdStan. Every build reports the same `lp__` now.
 
-- **Count distributions**: `neg_binomial`, `neg_binomial_2_log`,
-  `beta_neg_binomial`, `yule_simon`. Coverage is now 46 of Stan's 72
-  densities and 87 of its 105 distribution functions;
-  [docs/coverage.md](docs/coverage.md) lists what is missing and what each
-  gap actually needs.
+### Browser
 
-- **`-DSTANLI_LITE_LP=ON`** halves the runtime -- 14.9 MB to 7.79 MB
-  stripped -- by dropping stan-math's propto instantiations. Every
-  gradient and every `write_array` value stays bitwise identical across
-  the whole corpus; only `lp__` moves, by a per-model constant. The
-  chain a seed produces does change, because lp is added to the kinetic
-  energy and a shifted lp rounds differently there -- the same class of
-  difference as reseeding, not of different math. On by default for the
-  browser build, off for the wheel -- which takes `stanli.wasm` from 6.2
-  MB to 3.40 MB raw, 1.34 MB to 0.99 MB gzipped, while *gaining*
-  truncation and 76 functions. `stanli_exact_lp()`
-  in C, `stanli.exact_lp()` in Python, `fit.exactLp` in JS report which
-  build you have. See [docs/lite-lp.md](docs/lite-lp.md).
+- SIMD128, worth 2% on most shapes and 11% on a matrix-heavy model for
+  0.03 MB gzipped. Gradients stay bitwise identical to the scalar build.
+- Exact `lp__`, as above. `stanli.wasm` is 5.80 MB raw and 1.52 MB
+  gzipped.
+- `-ffp-contract=fast` produces a byte-identical binary here: baseline
+  WebAssembly has no FMA instruction, so there is nothing to contract.
+- Loading uncommon densities from a side module was built and removed.
+  [docs/density-pack.md](docs/density-pack.md) records the measurements
+  and the one emscripten limitation that blocks it.
 
-- **`stanli_run` is a self-contained native sampler.** Built with the
-  stanc3 embed object it compiles the model in-process: `.stan` and
-  `data.json` in, CmdStan-shaped CSV out, with no toolchain and no
-  separate compiler binary to find. `cmake --install` now places it,
-  `stanli_check`, the shared library and the headers.
+### Build and tools
 
-- `tools/verify_lite.py` verifies the lite build against the exact one
-  (gradients bitwise, lp shift constant across evaluation points), and
-  `tools/verify_refs.py --no-lp` replays the corpus for a build whose
+- The density kernels are nine translation units instead of one. That one
+  file peaked at 7.6 GB of compiler memory and serialized the build.
+- `stanli_run` compiles the model in process when built with the stanc3
+  embed object: one binary, `.stan` and `data.json` in, CmdStan-shaped CSV
+  out, no toolchain and no separate compiler to find. `cmake --install`
+  places it, `stanli_check`, the library and the headers.
+- `stanli_check` reports a nonfinite `lp__` or gradient as a value instead
+  of refusing. `ref_driver` always did, so the asymmetry meant the oracle
+  could never confirm agreement at -inf.
+- `tools/bench_wasm.cjs` measures ns/gradient in the browser build.
+  `tools/verify_lite.py` checks a `STANLI_LITE_LP` build against the exact
+  one. `tools/verify_refs.py --no-lp` replays the corpus for a build whose
   `lp__` is shifted by design.
+- CI runs one workflow per branch, cancelling superseded pull-request runs
+  but never a push to main or a tag build.
+
+### Sizes
+
+| | 0.3.0 | 0.4.0 |
+|---|---:|---:|
+| shared library installed | 21.3 MB | 22.2 MB |
+| wheel | 7.4 MB | 7.8 MB |
+| `libstanli` stripped | 14.93 MB | 15.75 MB |
+| `stanli.wasm` gzipped | 0.99 MB | 1.52 MB |
+
+The library grew with the density list. The browser payload grew mostly
+because `STANLI_LITE_LP` came off, which bought an `lp__` that matches
+CmdStan.
 
 ## 0.3.0
 

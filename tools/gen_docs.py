@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stamp the measured numbers into the docs, so they cannot go stale.
 
-Every headline number in README.md and python/README.md (verified model
+Every headline number in README.md, python/README.md and the demo page
 counts, bitwise counts, worst deviation, benchmark span, the PyPI page's
 benchmark table) is derived from two artifacts:
 
@@ -24,7 +24,10 @@ import sys
 import warnings
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-TARGETS = [REPO / "README.md", REPO / "python" / "README.md"]
+# The demo page carries headline numbers too, and its markers are HTML
+# comments, so the same substitution works there.
+TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
+           REPO / "web" / "index.html"]
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 

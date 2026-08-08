@@ -616,9 +616,35 @@ $("csv").onclick = () => {
 };
 </script>
 <footer>
+<h2>Surprised it was that quick?</h2>
+<p><b>There was no compile step.</b> CmdStan turns your model into C++ and
+builds it, which takes tens of seconds before the first draw. Nothing was
+compiled here. stanli treats a model as data: a graph of operations over
+precompiled stan-math kernels, built in milliseconds and then interpreted.
+<a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
+it works</a> is the short version, for people who know Stan rather than
+compilers.</p>
+<p><b>And it is usually faster per gradient, not just to start.</b> Median
+<!--gen:corpus_median-->2.07x<!--/gen--> CmdStan across
+<!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
+<!--gen:corpus_at_par-->93<!--/gen--> of them at or above it. The radon
+preset above is one of the good cases and the Lotka-Volterra one is not,
+which is the honest range. Every model, win or loss, with the reason:
+<a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.</p>
+<p><b>The numbers are checked against CmdStan itself.</b> Not against a
+tolerance someone picked:
+<!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models are
+replayed against the log density, the full gradient and the generated
+quantities CmdStan actually printed, and
+<!--gen:corpus_bitwise-->45<!--/gen--> agree to the last bit. Worst
+disagreement anywhere is
+<!--gen:corpus_worst-->2.6e-12<!--/gen--> relative. Per-model results:
+<a href="https://github.com/seantalts/stanli/blob/main/docs/corpus-status.md">corpus
+status</a>.</p>
 <p>This page runs the same runtime the PyPI wheels ship, built the same
-way. Gradients, generated quantities and <code>lp__</code> all match
-CmdStan.</p>
+way, so gradients, generated quantities and <code>lp__</code> all match
+CmdStan here too. <code>pip install stanli</code>, or read the
+<a href="https://github.com/seantalts/stanli">source</a>.</p>
 </footer>
 </body>
 </html>
