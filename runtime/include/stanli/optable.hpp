@@ -88,48 +88,83 @@ namespace stanli {
 // Discrete densities are not here: an integer outcome needs idata
 // plumbing that differs per distribution.
 //
-// The last field is whether to instantiate the full activity-mask
-// dispatch. A density instantiates stan-math's template once per mask,
-// twice for propto and again for the elementwise form -- 4 * 2^N, about
-// 630 KB of object each, which is what a precompiled library costs when
-// CmdStan gets to instantiate only the combination your model uses.
+// The last field is the instantiation tier, two independent bits over
+// what CmdStan gets for free by instantiating only the one combination
+// your model uses. A density instantiates stan-math's template once per
+// activity mask, twice for propto, and again for the elementwise form --
+// 4 * 2^N, about 630 KB of object for a 3-argument density.
 //
-// With propto OFF no terms are dropped, so the value is the same for
-// every mask and one all-active binding would do. That is not free: it
-// binds data arguments as recorder scalars, so their partials get
-// computed and thrown away, and on radon_pooled -- a vectorized normal
-// over 919 data points -- it cost 30-40%. The densities models actually
-// use keep the dispatch (1); the long tail takes the smaller code (0),
-// where the same cost lands on a density nobody has profiled anyway.
+//   bit 1 (2): instantiate the propto family. Term-dropping is keyed on
+//              the argument TYPES, so propto only means anything with the
+//              per-mask dispatch; the two always come together. Without
+//              this bit, `y ~ foo(...)` evaluates the full density: same
+//              gradient, lp off by a constant.
+//   bit 0 (1): instantiate the mask dispatch for the full form. Without
+//              it one all-active binding covers every mask -- the value
+//              does not depend on the mask with propto off -- but data
+//              arguments bind as recorder scalars, so their partials are
+//              computed and thrown away. On radon_pooled (a vectorized
+//              normal over 919 data points) that cost 30-40%.
+//
+// So: 3 is the whole ladder, for the densities models lean on; 2 keeps
+// exact propto lp and pays the collapse only on an explicit
+// `target += foo_lpdf(...)`; 1 is fast but constant-shifted lp; 0 is two
+// instantiations, about 40 KB, and is how the long tail gets to exist at
+// all. STANLI_LITE_LP clears bit 1 across the board -- see density_tier.
+#define STANLI_DENSITY_FULL_MASKS 1
+#define STANLI_DENSITY_PROPTO 2
 #define STANLI_SCALAR_DENSITY_LIST(X)                                     \
-  X(OP_NORMAL_LPDF, normal_lpdf, 3, 1)                                      \
-  X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 1)                                      \
-  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 1)                                \
-  X(OP_GAMMA_LPDF, gamma_lpdf, 3, 1)                                        \
-  X(OP_BETA_LPDF, beta_lpdf, 3, 1)                                          \
-  X(OP_LOGNORMAL_LPDF, lognormal_lpdf, 3, 1)                                \
-  X(OP_UNIFORM_LPDF, uniform_lpdf, 3, 1)                                    \
-  X(OP_DOUBLE_EXP_LPDF, double_exponential_lpdf, 3, 1)                      \
-  X(OP_EXPONENTIAL_LPDF, exponential_lpdf, 2, 1)                            \
-  X(OP_INV_GAMMA_LPDF, inv_gamma_lpdf, 3, 1)                                \
-  X(OP_STD_NORMAL_LPDF, std_normal_lpdf, 1, 1)                              \
-  X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 1)                                    \
-  X(OP_LOGISTIC_LPDF, logistic_lpdf, 3, 1)                                  \
-  X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 0)                              \
-  X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 0)                      \
-  X(OP_SCALED_INV_CHI_SQUARE_LPDF, scaled_inv_chi_square_lpdf, 3, 0)        \
-  X(OP_FRECHET_LPDF, frechet_lpdf, 3, 0)                                    \
-  X(OP_GUMBEL_LPDF, gumbel_lpdf, 3, 0)                                      \
-  X(OP_LOGLOGISTIC_LPDF, loglogistic_lpdf, 3, 0)                            \
-  X(OP_PARETO_LPDF, pareto_lpdf, 3, 0)                                      \
-  X(OP_PARETO_TYPE_2_LPDF, pareto_type_2_lpdf, 4, 0)                        \
-  X(OP_RAYLEIGH_LPDF, rayleigh_lpdf, 2, 0)                                  \
-  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 0)                            \
-  X(OP_VON_MISES_LPDF, von_mises_lpdf, 3, 0)                                \
-  X(OP_EXP_MOD_NORMAL_LPDF, exp_mod_normal_lpdf, 4, 0)                      \
-  X(OP_BETA_PROPORTION_LPDF, beta_proportion_lpdf, 3, 0)                    \
-  X(OP_SKEW_DOUBLE_EXPONENTIAL_LPDF, skew_double_exponential_lpdf, 4, 0)
+  X(OP_NORMAL_LPDF, normal_lpdf, 3, 3)                                      \
+  X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3)                                      \
+  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 3)                                \
+  X(OP_GAMMA_LPDF, gamma_lpdf, 3, 3)                                        \
+  X(OP_BETA_LPDF, beta_lpdf, 3, 3)                                          \
+  X(OP_LOGNORMAL_LPDF, lognormal_lpdf, 3, 3)                                \
+  X(OP_UNIFORM_LPDF, uniform_lpdf, 3, 3)                                    \
+  X(OP_DOUBLE_EXP_LPDF, double_exponential_lpdf, 3, 3)                      \
+  X(OP_EXPONENTIAL_LPDF, exponential_lpdf, 2, 3)                            \
+  X(OP_INV_GAMMA_LPDF, inv_gamma_lpdf, 3, 3)                                \
+  X(OP_STD_NORMAL_LPDF, std_normal_lpdf, 1, 3)                              \
+  X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 3)                                    \
+  X(OP_LOGISTIC_LPDF, logistic_lpdf, 3, 3)                                  \
+  X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 2)                              \
+  X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 2)                      \
+  X(OP_SCALED_INV_CHI_SQUARE_LPDF, scaled_inv_chi_square_lpdf, 3, 2)        \
+  X(OP_FRECHET_LPDF, frechet_lpdf, 3, 2)                                    \
+  X(OP_GUMBEL_LPDF, gumbel_lpdf, 3, 2)                                      \
+  X(OP_LOGLOGISTIC_LPDF, loglogistic_lpdf, 3, 2)                            \
+  X(OP_PARETO_LPDF, pareto_lpdf, 3, 2)                                      \
+  X(OP_PARETO_TYPE_2_LPDF, pareto_type_2_lpdf, 4, 2)                        \
+  X(OP_RAYLEIGH_LPDF, rayleigh_lpdf, 2, 2)                                  \
+  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 2)                            \
+  X(OP_VON_MISES_LPDF, von_mises_lpdf, 3, 2)                                \
+  X(OP_EXP_MOD_NORMAL_LPDF, exp_mod_normal_lpdf, 4, 2)                      \
+  X(OP_BETA_PROPORTION_LPDF, beta_proportion_lpdf, 3, 2)                    \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_LPDF, skew_double_exponential_lpdf, 4, 2)
 
+// Discrete densities: an integer outcome that rides in idata instead of
+// on a propagator edge, plus NReal real arguments that behave exactly like
+// an lpdf's. The outcome is argument 0 in every Stan signature, so the
+// lowering entry is NReal + 1 arguments with one int group, and the same
+// tier field applies -- see the note above.
+//
+// The older lpmfs (poisson, bernoulli, binomial, the GLM) predate this
+// list and stay hand-written: binomial carries two int groups and the GLM
+// carries a data matrix, so they are not the same shape. What is here is
+// everything whose outcome is a single int per lane.
+#define STANLI_INT_DENSITY_LIST(X)                                        \
+  X(OP_NEG_BINOMIAL_2_LOG_LPMF, neg_binomial_2_log_lpmf, 2, 3)            \
+  X(OP_NEG_BINOMIAL_LPMF, neg_binomial_lpmf, 2, 2)                        \
+  X(OP_BETA_NEG_BINOMIAL_LPMF, beta_neg_binomial_lpmf, 3, 2)              \
+  X(OP_YULE_SIMON_LPMF, yule_simon_lpmf, 1, 2)
+
+// Not here, and worth saying why: ordered_logistic and ordered_probit.
+// Their cutpoint argument is a whole vector per observation, and
+// stan-math reaches its partials through partials_vec<1>(ops_partials),
+// a vector-of-vectors edge. The recorder implements scalar and vector
+// edges only, so these need a recorder extension rather than a list
+// entry. They are the largest remaining coverage gap (ordinal
+// regression); see docs/coverage.md.
 // Scalar unary math, one line each: opcode, kernel, registration,
 // lowering entry and interpreter branch all come from here. The value and
 // the derivative are the only things that vary, and `x` is the argument.
@@ -178,6 +213,30 @@ namespace stanli {
   X(OP_TRUNC, trunc, std::trunc(x), 0.0)  \
   X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0)
 
+// The tier a density is actually built at. STANLI_LITE_LP drops the
+// propto family from every one of them: about half the library, at the
+// cost of an lp__ that differs from CmdStan's by a per-model constant on
+// every `~` statement. Gradients, and therefore the draws, are untouched
+// -- which is why the browser build takes this and the wheel does not.
+constexpr int density_tier(int listed) {
+#ifdef STANLI_LITE_LP
+  return listed & STANLI_DENSITY_FULL_MASKS;
+#else
+  return listed;
+#endif
+}
+
+// True when this build can reproduce CmdStan's lp__ exactly, rather than
+// up to a constant. Reported by stanli_version() and checked by the
+// verification harnesses, which relax from bitwise to same-constant.
+constexpr bool exact_lp_build() {
+#ifdef STANLI_LITE_LP
+  return false;
+#else
+  return true;
+#endif
+}
+
 enum Opcode : uint16_t {
   OP_NONE_ = 0,
 #define STANLI_OPCODE_ENUM(name) name,
@@ -185,6 +244,7 @@ enum Opcode : uint16_t {
 #undef STANLI_OPCODE_ENUM
 #define STANLI_DENSITY_ENUM(code, fn, n, m) code,
   STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_ENUM)
+  STANLI_INT_DENSITY_LIST(STANLI_DENSITY_ENUM)
 #undef STANLI_DENSITY_ENUM
 #define STANLI_UNARY_ENUM(code, fn, v, d) code,
   STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_ENUM)

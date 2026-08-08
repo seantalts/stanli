@@ -84,6 +84,15 @@ bool is_idata_outcome_density(uint16_t oc) {
     case OP_POISSON_LOG_LPMF:
     case OP_NEG_BINOMIAL_2_LPMF:
       return true;
+    // Everything in STANLI_INT_DENSITY_LIST has exactly this shape by
+    // construction. The ordered densities deliberately do NOT appear:
+    // their cutpoint vector is shared by every lane, so element n of it
+    // is not lane n's, and the elementwise rewrite would be silently
+    // wrong rather than merely unfused.
+#define STANLI_INT_DENSITY_CASE(code, fn, nreal, t) case code:
+      STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_CASE)
+#undef STANLI_INT_DENSITY_CASE
+      return true;
     default:
       return false;
   }

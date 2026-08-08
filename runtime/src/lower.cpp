@@ -860,6 +860,13 @@ struct Lowering {
 #define STANLI_DENSITY_TABLE(code, fn, n, m) {#fn, {code, n, 0}},
         STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_TABLE)
 #undef STANLI_DENSITY_TABLE
+        // Discrete densities: outcome + n real arguments, one int group.
+        // Ordered ones have the same lowering shape -- their cutpoint
+        // vector is an ordinary real slot -- and differ only in that
+        // reroll never fuses them.
+#define STANLI_INT_DENSITY_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 1, 1}},
+        STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TABLE)
+#undef STANLI_INT_DENSITY_TABLE
         {"bernoulli_lpmf", {OP_BERNOULLI_LPMF, 2, 1}},
         {"poisson_lpmf", {OP_POISSON_LPMF, 2, 1}},
         {"neg_binomial_2_lpmf", {OP_NEG_BINOMIAL_2_LPMF, 3, 1}},

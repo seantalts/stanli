@@ -45,6 +45,9 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+# Which build tree to test. --build points it elsewhere; the default
+# is the Release tree the wheel ships from.
+BUILD = "build-rel"
 
 # (stan name, arg count, argument values). The values matter: they have to
 # sit inside the distribution's support, or both engines throw and the
@@ -79,6 +82,18 @@ DENSITIES = [
     ("exp_mod_normal_lpdf", 4, [0.4, 0.2, 1.3, 0.7]),
     ("beta_proportion_lpdf", 3, [0.4, 0.6, 2.0]),
     ("skew_double_exponential_lpdf", 4, [0.4, 0.2, 1.3, 0.6]),
+    # Discrete: an int outcome, written as a Python int so model_for emits
+    # an integer literal and leaves slot 0 unperturbed -- there is no
+    # derivative with respect to a count.
+    ("poisson_lpmf", 2, [3, 1.3]),
+    ("poisson_log_lpmf", 2, [3, 0.4]),
+    ("bernoulli_lpmf", 2, [1, 0.4]),
+    ("bernoulli_logit_lpmf", 2, [1, 0.4]),
+    ("neg_binomial_lpmf", 3, [3, 2.0, 1.3]),
+    ("neg_binomial_2_lpmf", 3, [3, 2.0, 1.3]),
+    ("neg_binomial_2_log_lpmf", 3, [3, 0.4, 1.3]),
+    ("beta_neg_binomial_lpmf", 4, [3, 2.0, 3.0, 1.3]),
+    ("yule_simon_lpmf", 2, [3, 1.3]),
 ]
 
 # Which of the above stanli claims. Anything here that fails is a bug;
@@ -87,13 +102,19 @@ def claimed():
     """Names stanli wires into the log-density path.
 
     Two sources since the densities were generated: the hand-written
-    entries still spelled out in lower.cpp, and STANLI_SCALAR_DENSITY_LIST
-    in optable.hpp, which generates the opcode, the kernel and the table
-    entry from one line each.
+    entries still spelled out in lower.cpp, and the X-macro lists in
+    optable.hpp, which generate the opcode, the kernel and the table entry
+    from one line each.
+
+    The list rows carry trailing fields that have changed over time (the
+    instantiation tier arrived after this was first written), so match the
+    name and the argument count and let the rest be anything. An
+    over-tight pattern here fails silently: every density looks unclaimed,
+    the sweep reports them as free coverage, and nothing is verified.
     """
     have = set(re.findall(r'"([a-z_0-9]+_(?:lpdf|lpmf))"',
                           (REPO / "runtime/src/lower.cpp").read_text()))
-    have |= set(re.findall(r"X\(OP_[A-Z_0-9]+, ([a-z_0-9]+), \d\)",
+    have |= set(re.findall(r"X\(OP_[A-Z_0-9]+, ([a-z_0-9]+), \d+[,)]",
                            (REPO / "runtime/include/stanli/optable.hpp").read_text()))
     return have
 
@@ -114,9 +135,16 @@ model {{
 
 def model_for(name, argv, density=True):
     """Target sums the call once per differentiable slot, so the gradient
-    exercises every partial the function has."""
+    exercises every partial the function has.
+
+    A Python int in argv marks an integer slot: it prints without a
+    decimal point (Stan would reject `3.0` where an int is wanted) and
+    never takes the perturbation, since there is nothing to differentiate.
+    """
     lines = []
     for k in range(len(argv)):
+        if isinstance(argv[k], int):
+            continue
         args = [f"{v}" for v in argv]
         args[k] = f"({args[k]} + p * 0.0625)"
         if density:
@@ -184,7 +212,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
     data = d / "data.json"
     data.write_text(json.dumps({"y_data": 1.0}))
 
-    ours = run([str(REPO / "build-rel/stanli_check"), str(stan), str(data),
+    ours = run([str(REPO / BUILD / "stanli_check"), str(stan), str(data),
                 "--stanc", str(REPO / "deps/stanc3/stanc")])
     if "COMPILE_FAIL" in ours.stdout or "COMPILE_FAIL" in ours.stderr:
         why = (ours.stdout + ours.stderr).strip().splitlines()[-1]
@@ -213,7 +241,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
     worst = 0
     for point in range(3):
         ref = run([str(exe), str(data), str(point)])
-        got = run([str(REPO / "build-rel/stanli_check"), str(stan), str(data),
+        got = run([str(REPO / BUILD / "stanli_check"), str(stan), str(data),
                    "--stanc", str(REPO / "deps/stanc3/stanc"),
                    "--point", str(point)])
         rf = [l for l in ref.stdout.splitlines() if l.startswith("OK")]
@@ -235,7 +263,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
     mir = run([str(REPO / "deps/stanc3/stanc"), "--debug-transformed-mir", str(stan)])
     if mir.returncode == 0:
         sexp.write_text(mir.stdout)
-        bench = run([str(REPO / "build-rel/bench_grad"), str(sexp), str(data), "20000"])
+        bench = run([str(REPO / BUILD / "bench_grad"), str(sexp), str(data), "20000"])
         if bench.returncode == 0 and bench.stdout.split():
             ns = float(bench.stdout.split()[0])
     if not keep:
@@ -244,6 +272,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
 
 
 def main():
+    global BUILD
     ap = argparse.ArgumentParser()
     ap.add_argument("cmdstan", type=pathlib.Path)
     ap.add_argument("--filter", default="")
@@ -251,7 +280,10 @@ def main():
     ap.add_argument("--keep", action="store_true")
     ap.add_argument("--missing", action="store_true")
     ap.add_argument("--from-stanc", action="store_true")
+    ap.add_argument("--build", default=BUILD,
+                    help="build tree holding stanli_check and bench_grad")
     args = ap.parse_args()
+    BUILD = args.build
 
     have = claimed()
     density = not args.from_stanc

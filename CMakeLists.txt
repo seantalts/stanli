@@ -47,6 +47,27 @@ target_compile_definitions(stanmath INTERFACE _REENTRANT BOOST_DISABLE_ASSERTS)
 # between the kernels and the var-path references (measured: 2 ULP on
 # eight-schools d/dmu). Cost is well inside the performance budget.
 target_compile_options(stanmath INTERFACE -ffp-contract=off)
+
+# Half the library is the propto family: stan-math drops a term based on
+# the argument TYPES, so an exact `~` needs the density instantiated once
+# per activity mask on top of the full form. Dropping it leaves a build
+# whose gradients -- and therefore whose draws -- are bit-identical, with
+# an lp__ that sits a per-model constant above CmdStan's. The wheel keeps
+# the exact lp because the differential oracle is the point; the browser
+# build spends the bytes on reach instead. See density_tier in optable.hpp
+# and docs/lite-lp.md.
+if(EMSCRIPTEN)
+  set(_lite_default ON)
+else()
+  set(_lite_default OFF)
+endif()
+option(STANLI_LITE_LP
+  "Drop the propto instantiation family: half the size, lp__ off by a constant"
+  ${_lite_default})
+if(STANLI_LITE_LP)
+  target_compile_definitions(stanmath INTERFACE STANLI_LITE_LP=1)
+endif()
+
 if(EMSCRIPTEN)
   target_compile_options(stanmath INTERFACE -fwasm-exceptions)
   # The density kernels instantiate every activity mask times every shape
