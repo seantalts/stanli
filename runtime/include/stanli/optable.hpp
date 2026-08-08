@@ -114,34 +114,41 @@ namespace stanli {
 // all. STANLI_LITE_LP clears bit 1 across the board -- see density_tier.
 #define STANLI_DENSITY_FULL_MASKS 1
 #define STANLI_DENSITY_PROPTO 2
-#define STANLI_SCALAR_DENSITY_LIST(X)                                     \
-  X(OP_NORMAL_LPDF, normal_lpdf, 3, 3)                                      \
-  X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3)                                      \
-  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 3)                                \
-  X(OP_GAMMA_LPDF, gamma_lpdf, 3, 3)                                        \
-  X(OP_BETA_LPDF, beta_lpdf, 3, 3)                                          \
-  X(OP_LOGNORMAL_LPDF, lognormal_lpdf, 3, 3)                                \
-  X(OP_UNIFORM_LPDF, uniform_lpdf, 3, 3)                                    \
-  X(OP_DOUBLE_EXP_LPDF, double_exponential_lpdf, 3, 3)                      \
-  X(OP_EXPONENTIAL_LPDF, exponential_lpdf, 2, 3)                            \
-  X(OP_INV_GAMMA_LPDF, inv_gamma_lpdf, 3, 3)                                \
-  X(OP_STD_NORMAL_LPDF, std_normal_lpdf, 1, 3)                              \
-  X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 3)                                    \
-  X(OP_LOGISTIC_LPDF, logistic_lpdf, 3, 3)                                  \
-  X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 2)                              \
-  X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 2)                      \
-  X(OP_SCALED_INV_CHI_SQUARE_LPDF, scaled_inv_chi_square_lpdf, 3, 2)        \
-  X(OP_FRECHET_LPDF, frechet_lpdf, 3, 2)                                    \
-  X(OP_GUMBEL_LPDF, gumbel_lpdf, 3, 2)                                      \
-  X(OP_LOGLOGISTIC_LPDF, loglogistic_lpdf, 3, 2)                            \
-  X(OP_PARETO_LPDF, pareto_lpdf, 3, 2)                                      \
-  X(OP_PARETO_TYPE_2_LPDF, pareto_type_2_lpdf, 4, 2)                        \
-  X(OP_RAYLEIGH_LPDF, rayleigh_lpdf, 2, 2)                                  \
-  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 2)                            \
-  X(OP_VON_MISES_LPDF, von_mises_lpdf, 3, 2)                                \
-  X(OP_EXP_MOD_NORMAL_LPDF, exp_mod_normal_lpdf, 4, 2)                      \
-  X(OP_BETA_PROPORTION_LPDF, beta_proportion_lpdf, 3, 2)                    \
+#define STANLI_SCALAR_DENSITY_LIST_COMMON(X) \
+  X(OP_NORMAL_LPDF, normal_lpdf, 3, 3) \
+  X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3) \
+  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 3) \
+  X(OP_GAMMA_LPDF, gamma_lpdf, 3, 3) \
+  X(OP_BETA_LPDF, beta_lpdf, 3, 3) \
+  X(OP_LOGNORMAL_LPDF, lognormal_lpdf, 3, 3) \
+  X(OP_UNIFORM_LPDF, uniform_lpdf, 3, 3) \
+  X(OP_DOUBLE_EXP_LPDF, double_exponential_lpdf, 3, 3) \
+  X(OP_EXPONENTIAL_LPDF, exponential_lpdf, 2, 3) \
+  X(OP_INV_GAMMA_LPDF, inv_gamma_lpdf, 3, 3) \
+  X(OP_STD_NORMAL_LPDF, std_normal_lpdf, 1, 3) \
+  X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 3) \
+  X(OP_LOGISTIC_LPDF, logistic_lpdf, 3, 3)
+
+#define STANLI_SCALAR_DENSITY_LIST_REST(X) \
+  X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 2) \
+  X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 2) \
+  X(OP_SCALED_INV_CHI_SQUARE_LPDF, scaled_inv_chi_square_lpdf, 3, 2) \
+  X(OP_FRECHET_LPDF, frechet_lpdf, 3, 2) \
+  X(OP_GUMBEL_LPDF, gumbel_lpdf, 3, 2) \
+  X(OP_LOGLOGISTIC_LPDF, loglogistic_lpdf, 3, 2) \
+  X(OP_PARETO_LPDF, pareto_lpdf, 3, 2) \
+  X(OP_PARETO_TYPE_2_LPDF, pareto_type_2_lpdf, 4, 2) \
+  X(OP_RAYLEIGH_LPDF, rayleigh_lpdf, 2, 2) \
+  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 2) \
+  X(OP_VON_MISES_LPDF, von_mises_lpdf, 3, 2) \
+  X(OP_EXP_MOD_NORMAL_LPDF, exp_mod_normal_lpdf, 4, 2) \
+  X(OP_BETA_PROPORTION_LPDF, beta_proportion_lpdf, 3, 2) \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_LPDF, skew_double_exponential_lpdf, 4, 2)
+
+#define STANLI_SCALAR_DENSITY_LIST(X) \
+  STANLI_SCALAR_DENSITY_LIST_COMMON(X) \
+  STANLI_SCALAR_DENSITY_LIST_REST(X)
+
 
 // Discrete densities: an integer outcome that rides in idata instead of
 // on a propagator edge, plus NReal real arguments that behave exactly like
@@ -191,7 +198,7 @@ namespace stanli {
 // like that would change the value and leave the partials describing the
 // old one. rvar has no arithmetic operators precisely so this fails to
 // compile instead.
-#define STANLI_SCALAR_CDF_LIST(X) \
+#define STANLI_SCALAR_CDF_LIST_A(X) \
   X(OP_BETA_CDF, beta_cdf, 3, 0) \
   X(OP_BETA_LCCDF, beta_lccdf, 3, 0) \
   X(OP_BETA_LCDF, beta_lcdf, 3, 0) \
@@ -229,7 +236,9 @@ namespace stanli {
   X(OP_INV_GAMMA_LCDF, inv_gamma_lcdf, 3, 0) \
   X(OP_LOGISTIC_CDF, logistic_cdf, 3, 0) \
   X(OP_LOGISTIC_LCCDF, logistic_lccdf, 3, 0) \
-  X(OP_LOGISTIC_LCDF, logistic_lcdf, 3, 0) \
+  X(OP_LOGISTIC_LCDF, logistic_lcdf, 3, 0)
+
+#define STANLI_SCALAR_CDF_LIST_B(X) \
   X(OP_LOGLOGISTIC_CDF, loglogistic_cdf, 3, 0) \
   X(OP_LOGNORMAL_CDF, lognormal_cdf, 3, 0) \
   X(OP_LOGNORMAL_LCCDF, lognormal_lccdf, 3, 0) \
@@ -267,6 +276,11 @@ namespace stanli {
   X(OP_WEIBULL_CDF, weibull_cdf, 3, 0) \
   X(OP_WEIBULL_LCCDF, weibull_lccdf, 3, 0) \
   X(OP_WEIBULL_LCDF, weibull_lcdf, 3, 0)
+
+#define STANLI_SCALAR_CDF_LIST(X) \
+  STANLI_SCALAR_CDF_LIST_A(X) \
+  STANLI_SCALAR_CDF_LIST_B(X)
+
 
 // The same, for distributions whose outcome is an integer: the count
 // rides in idata exactly as it does for the lpmfs, and the real
