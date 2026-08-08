@@ -1,4 +1,6 @@
-// The densities models actually lean on, and the hand-written lpmfs.
+// Half the densities models lean on, plus the hand-written kernels
+// (two int groups, a data matrix, a support test) that predate the
+// lists. The other half is densities_common_b.cpp.
 //
 // One of the density shards: see densities_impl.hpp for why they
 // are split and what they share.
@@ -7,196 +9,8 @@
 namespace stanli {
 namespace dens {
 
-STANLI_SCALAR_DENSITY_LIST_COMMON(STANLI_DEFINE_DENSITY_FWD)
+STANLI_SCALAR_DENSITY_LIST_COMMON_A(STANLI_DEFINE_DENSITY_FWD)
 
-STANLI_LPMF_FWD(poisson_log_fwd, poisson_log_lpmf, 1)
-STANLI_LPMF_FWD(bernoulli_logit_fwd, bernoulli_logit_lpmf, 1)
-STANLI_LPMF_FWD(bernoulli_fwd, bernoulli_lpmf, 1)
-STANLI_LPMF_FWD(poisson_fwd, poisson_lpmf, 1)
-STANLI_LPMF_FWD(neg_binomial_2_fwd, neg_binomial_2_lpmf, 2)
-#undef STANLI_LPMF_FWD
-
-// The same shape, one line per distribution (STANLI_INT_DENSITY_LIST).
-#define STANLI_DEFINE_INT_DENSITY(code, fn, nreal, tier)                       \
-  STANLI_LPMF_FWD_T(fn##_fwd_gen, fn, nreal, tier)
-STANLI_INT_DENSITY_LIST(STANLI_DEFINE_INT_DENSITY)
-#undef STANLI_DEFINE_INT_DENSITY
-#undef STANLI_LPMF_FWD_T
-
-// Binomials carry two int groups; idata = [len_n, n..., len_N, N...].
-// A length of -1 marks a language-level int scalar (stan-math broadcasts
-// scalars; a size-1 vector would be a size error against a longer group).
-template <typename F>
-void with_int_group(const int* p, F&& f) {
-  const int len = static_cast<int>(p[0]);
-  if (len == -1)
-    f(p[1], p + 2);
-  else
-    f(Eigen::Map<const Eigen::VectorXi>(p + 1, len), p + 1 + len);
-}
-// Element n of a group: the scalar for all n, or the vector's n-th entry.
-int int_group_elem(const int* p, int64_t n) {
-  return p[0] == -1 ? p[1] : p[1 + n];
-}
-const int* int_group_next(const int* p) {
-  return p + (p[0] == -1 ? 2 : 1 + p[0]);
-}
-#define STANLI_BINOMIAL_FWD(fname, dist)                                       \
-  void fname(KernelCtx& ctx) {                                                 \
-    if (ctx.variant & 0x40u) {                                                 \
-      const int* g1 = ctx.idata;                                               \
-      const int* g2 = int_group_next(g1);                                      \
-      density_fwd_elt<1, 3>(                                                      \
-          ctx,                                                                 \
-          [&](int64_t n, const auto& theta) {                                  \
-            stan::math::dist<true>(int_group_elem(g1, n),                      \
-                                   int_group_elem(g2, n), theta);              \
-          },                                                                   \
-          [&](int64_t n, const auto& theta) {                                  \
-            stan::math::dist<false>(int_group_elem(g1, n),                     \
-                                    int_group_elem(g2, n), theta);             \
-          });                                                                  \
-      return;                                                                  \
-    }                                                                          \
-    with_int_group(ctx.idata, [&](const auto& n, const int* rest) {            \
-      with_int_group(rest, [&](const auto& N, const int*) {                    \
-        density_fwd_v<1, 3>(                                                      \
-            ctx,                                                               \
-            [&](const auto& theta) { stan::math::dist<true>(n, N, theta); },   \
-            [&](const auto& theta) { stan::math::dist<false>(n, N, theta); }); \
-      });                                                                      \
-    });                                                                        \
-  }
-
-STANLI_BINOMIAL_FWD(binomial_fwd, binomial_lpmf)
-STANLI_BINOMIAL_FWD(binomial_logit_fwd, binomial_logit_lpmf)
-#undef STANLI_BINOMIAL_FWD
-// bernoulli_logit_glm(y | X, alpha, beta): X data matrix (row-major slot),
-
-// idata = [y..., rows, cols]. Edges are (x, alpha, beta); X is arg 0.
-void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
-  const int64_t rows = ctx.idata[ctx.n_idata - 2];
-  const int64_t cols = ctx.idata[ctx.n_idata - 1];
-  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, rows);
-  Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, rows, cols);
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < 3; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
-  if (ctx.in[1].len != 1)
-    throw std::runtime_error("glm: vector alpha unsupported");
-  active_sink() = &s;
-  // beta is a vector regardless of its length; alpha scalar. Honour the
-  // propto bit: bernoulli has no constant to drop, so the two forms agree
-  // here, but hardcoding one is what made poisson_log_glm's lp land
-  // sum(log(y!)) away from CmdStan's.
-  if (ctx.variant & 0x80u) {
-    stan::math::bernoulli_logit_glm_lpmf<true>(
-        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
-  } else {
-    stan::math::bernoulli_logit_glm_lpmf<false>(
-        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
-  }
-  active_sink() = nullptr;
-  ctx.out.data[0] = s.value;
-}
-// Edge order (x, alpha, beta): X data (edge 0 skipped by null adjoint),
-// alpha scalar, beta vector.
-void bernoulli_logit_glm_bwd(KernelCtx& ctx) { density_bwd<3>(ctx); }
-
-
-// The other GLMs brms and rstanarm emit directly. A model that writes one
-// of these does not merely run slower without it, it does not run. Alpha
-// is the intercept: stan-math takes it as a scalar or a per-row vector,
-// and only the scalar form is wired (the vector form needs a second
-// length to plumb, and no corpus model asks for it).
-void poisson_log_glm_fwd(KernelCtx& ctx) {
-  const int64_t rows = ctx.idata[ctx.n_idata - 2];
-  const int64_t cols = ctx.idata[ctx.n_idata - 1];
-  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, rows);
-  Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, rows, cols);
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < 3; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
-  if (ctx.in[1].len != 1)
-    throw std::runtime_error("poisson_log_glm: vector alpha unsupported");
-  active_sink() = &s;
-  // propto drops -lgamma(y+1), which is constant in the parameters but is
-  // 10.45 on a six-observation test -- a constant offset, not noise.
-  if (ctx.variant & 0x80u) {
-    stan::math::poisson_log_glm_lpmf<true>(y, X, rvar(ctx.in[1].data[0]),
-                                           as_rvar(ctx.in[2]));
-  } else {
-    stan::math::poisson_log_glm_lpmf<false>(y, X, rvar(ctx.in[1].data[0]),
-                                            as_rvar(ctx.in[2]));
-  }
-  active_sink() = nullptr;
-  ctx.out.data[0] = s.value;
-}
-
-void poisson_log_glm_bwd(KernelCtx& ctx) { density_bwd<3>(ctx); }
-
-// Same, with the overdispersion argument on the end.
-void neg_binomial_2_log_glm_fwd(KernelCtx& ctx) {
-  const int64_t rows = ctx.idata[ctx.n_idata - 2];
-  const int64_t cols = ctx.idata[ctx.n_idata - 1];
-  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, rows);
-  Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, rows, cols);
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < 4; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
-  if (ctx.in[1].len != 1)
-    throw std::runtime_error(
-        "neg_binomial_2_log_glm: vector alpha unsupported");
-  active_sink() = &s;
-  const bool propto = (ctx.variant & 0x80u) != 0;
-  if (ctx.in[3].len == 1) {
-    const rvar phi(ctx.in[3].data[0]);
-    if (propto) {
-      stan::math::neg_binomial_2_log_glm_lpmf<true>(
-          y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), phi);
-    } else {
-      stan::math::neg_binomial_2_log_glm_lpmf<false>(
-          y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), phi);
-    }
-  } else if (propto) {
-    stan::math::neg_binomial_2_log_glm_lpmf<true>(
-        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), as_rvar(ctx.in[3]));
-  } else {
-    stan::math::neg_binomial_2_log_glm_lpmf<false>(
-        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), as_rvar(ctx.in[3]));
-  }
-  active_sink() = nullptr;
-  ctx.out.data[0] = s.value;
-}
-
-void neg_binomial_2_log_glm_bwd(KernelCtx& ctx) { density_bwd<4>(ctx); }
-
-// beta_binomial(n | N, alpha, beta): two integer groups, then two real
-// arguments that behave like any other density's. with_int_group unpacks
-// the [len, vals...] pairs the lowering wrote, exactly as binomial does.
-void beta_binomial_fwd(KernelCtx& ctx) {
-  with_int_group(ctx.idata, [&](const auto& n, const int* rest) {
-    with_int_group(rest, [&](const auto& N, const int*) {
-      density_fwd_sum<2, density_tier(2), 0>(
-          ctx,
-          [&](const auto&... a) {
-            stan::math::beta_binomial_lpmf<true>(n, N, a...);
-          },
-          [&](const auto&... a) {
-            stan::math::beta_binomial_lpmf<false>(n, N, a...);
-          });
-    });
-  });
-}
 
 void uniform_fwd(KernelCtx& ctx) {
   // stan-math reports out-of-support y with an early `return LOG_ZERO`
@@ -243,8 +57,6 @@ void uniform_fwd(KernelCtx& ctx) {
 // wants a mutable pointer that a Map<const VectorXi> cannot supply. A
 // std::vector is also exactly what CmdStan's generated code passes, so
 // this is the instantiation the references were produced from. The copy
-// is n ints per evaluation, against a density over the same n.
-STANLI_ORDERED_DENSITY_LIST(STANLI_DEFINE_ORDERED_FWD)
 
 }  // namespace dens
 }  // namespace stanli

@@ -86,7 +86,13 @@ if(EMSCRIPTEN)
   # trades their straight-line speed for size.
   set_source_files_properties(
     runtime/kernels/densities_common.cpp
+  runtime/kernels/densities_lpmf.cpp
+  runtime/kernels/densities_glm.cpp
+    runtime/kernels/densities_lpmf.cpp
+    runtime/kernels/densities_glm.cpp
+    runtime/kernels/densities_common_b.cpp
     runtime/kernels/densities_rest.cpp
+    runtime/kernels/densities_rest_b.cpp
     runtime/kernels/densities_cdf_a.cpp
     runtime/kernels/densities_cdf_b.cpp
     PROPERTIES COMPILE_OPTIONS -Oz)
@@ -132,7 +138,11 @@ add_library(stanli_shared SHARED
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
   runtime/kernels/densities_common.cpp
+  runtime/kernels/densities_lpmf.cpp
+  runtime/kernels/densities_glm.cpp
+  runtime/kernels/densities_common_b.cpp
   runtime/kernels/densities_rest.cpp
+  runtime/kernels/densities_rest_b.cpp
   runtime/kernels/densities_cdf_a.cpp
   runtime/kernels/densities_cdf_b.cpp
   runtime/kernels/legacy_fns.cpp
@@ -213,7 +223,11 @@ add_library(stanli STATIC
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
   runtime/kernels/densities_common.cpp
+  runtime/kernels/densities_lpmf.cpp
+  runtime/kernels/densities_glm.cpp
+  runtime/kernels/densities_common_b.cpp
   runtime/kernels/densities_rest.cpp
+  runtime/kernels/densities_rest_b.cpp
   runtime/kernels/densities_cdf_a.cpp
   runtime/kernels/densities_cdf_b.cpp
   runtime/kernels/legacy_fns.cpp

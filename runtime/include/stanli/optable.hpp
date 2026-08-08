@@ -136,13 +136,25 @@ namespace stanli {
 // all. STANLI_LITE_LP clears bit 1 across the board -- see density_tier.
 #define STANLI_DENSITY_FULL_MASKS 1
 #define STANLI_DENSITY_PROPTO 2
-#define STANLI_SCALAR_DENSITY_LIST_COMMON(X) \
+// The sub-lists are the shard boundaries. Each one is a translation unit
+// (densities_*.cpp), because the instantiations are what make this
+// expensive to compile: the tier-3 distributions below expand to 4 * 2^N
+// copies of a stan-math template each, and one file holding all of them
+// peaked at 7.6 GB of compiler memory. Splitting is the only lever, since
+// the instantiations themselves are the product.
+//
+// Balance them by COST, not by count. A tier-3 four-argument density is
+// worth about eight tier-2 two-argument ones, which is why COMMON_A holds
+// six entries and REST_A holds seven.
+#define STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
   X(OP_NORMAL_LPDF, normal_lpdf, 3, 3) \
   X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3) \
-  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 3) \
   X(OP_GAMMA_LPDF, gamma_lpdf, 3, 3) \
   X(OP_BETA_LPDF, beta_lpdf, 3, 3) \
-  X(OP_LOGNORMAL_LPDF, lognormal_lpdf, 3, 3) \
+  X(OP_LOGNORMAL_LPDF, lognormal_lpdf, 3, 3)
+
+#define STANLI_SCALAR_DENSITY_LIST_COMMON_B(X) \
+  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 3) \
   X(OP_UNIFORM_LPDF, uniform_lpdf, 3, 3) \
   X(OP_DOUBLE_EXP_LPDF, double_exponential_lpdf, 3, 3) \
   X(OP_EXPONENTIAL_LPDF, exponential_lpdf, 2, 3) \
@@ -151,7 +163,11 @@ namespace stanli {
   X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 3) \
   X(OP_LOGISTIC_LPDF, logistic_lpdf, 3, 3)
 
-#define STANLI_SCALAR_DENSITY_LIST_REST(X) \
+#define STANLI_SCALAR_DENSITY_LIST_COMMON(X) \
+  STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
+  STANLI_SCALAR_DENSITY_LIST_COMMON_B(X)
+
+#define STANLI_SCALAR_DENSITY_LIST_REST_A(X) \
   X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 2) \
   X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 2) \
   X(OP_SCALED_INV_CHI_SQUARE_LPDF, scaled_inv_chi_square_lpdf, 3, 2) \
@@ -159,13 +175,19 @@ namespace stanli {
   X(OP_GUMBEL_LPDF, gumbel_lpdf, 3, 2) \
   X(OP_LOGLOGISTIC_LPDF, loglogistic_lpdf, 3, 2) \
   X(OP_PARETO_LPDF, pareto_lpdf, 3, 2) \
+  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 2) \
+  X(OP_EXP_MOD_NORMAL_LPDF, exp_mod_normal_lpdf, 4, 2)
+
+#define STANLI_SCALAR_DENSITY_LIST_REST_B(X) \
   X(OP_PARETO_TYPE_2_LPDF, pareto_type_2_lpdf, 4, 2) \
   X(OP_RAYLEIGH_LPDF, rayleigh_lpdf, 2, 2) \
-  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 2) \
   X(OP_VON_MISES_LPDF, von_mises_lpdf, 3, 2) \
-  X(OP_EXP_MOD_NORMAL_LPDF, exp_mod_normal_lpdf, 4, 2) \
   X(OP_BETA_PROPORTION_LPDF, beta_proportion_lpdf, 3, 2) \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_LPDF, skew_double_exponential_lpdf, 4, 2)
+
+#define STANLI_SCALAR_DENSITY_LIST_REST(X) \
+  STANLI_SCALAR_DENSITY_LIST_REST_A(X) \
+  STANLI_SCALAR_DENSITY_LIST_REST_B(X)
 
 #define STANLI_SCALAR_DENSITY_LIST(X) \
   STANLI_SCALAR_DENSITY_LIST_COMMON(X) \

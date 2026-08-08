@@ -147,10 +147,11 @@ onmessage = async (e) => {
     postMessage({
       done: {
         names, samples,
-        // This build drops stan-math's propto instantiations for size, so
-        // lp__ carries a per-model constant the exact build does not.
-        // Draws are unaffected; surfaced so a caller comparing lp__ across
-        // engines can see it rather than chase it.
+        // True unless the runtime was built with STANLI_LITE_LP, which
+        // drops stan-math's propto instantiations and shifts lp__ by a
+        // per-model constant. The shipped browser build does not, so this
+        // is true; it stays in the payload so a caller that compares lp__
+        // across engines can check rather than assume.
         exactLp: M._stanli_exact_lp() !== 0,
         columns: cols.buffer,
         ms: {

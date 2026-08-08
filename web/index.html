@@ -616,22 +616,9 @@ $("csv").onclick = () => {
 };
 </script>
 <footer>
-<h2>This page reports a shifted <code>lp__</code></h2>
-<p>The browser runtime is built with <code>STANLI_LITE_LP</code>, which
-drops stan-math's propto instantiations to halve the download. Those are
-exactly the terms that do not depend on the parameters, so every gradient
-and every generated quantity here is bit-for-bit what CmdStan computes,
-and the posterior you sample from is the same one. What moves is
-<code>lp__</code> itself: it differs from CmdStan's by a per-model constant,
-so do not compare this page's <code>lp__</code> against a CmdStan run, and
-do not use it for anything that reads log densities as absolute numbers
-(Bayes factors, marginal likelihoods, bridge sampling).</p>
-<p>Because the sampler adds <code>lp</code> to the kinetic energy, a
-pinned seed also draws a different chain here than in the wheels. It is
-an equally valid chain from the same posterior, not different math.</p>
-<p>The PyPI wheels ship the exact build and match CmdStan's
-<code>lp__</code>. Details in
-<a href="https://github.com/seantalts/stanli/blob/main/docs/lite-lp.md">docs/lite-lp.md</a>.</p>
+<p>This page runs the same runtime the PyPI wheels ship, built the same
+way. Gradients, generated quantities and <code>lp__</code> all match
+CmdStan.</p>
 </footer>
 </body>
 </html>

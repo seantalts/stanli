@@ -200,41 +200,34 @@ the cost of ~8x slower model compilation.
 ### The browser build
 
 A different binary with different economics: no embedded stanc3, because
-the compiler ships separately as JavaScript, and `STANLI_LITE_LP` on by
-default. `stanli.wasm` is 3.47 MB raw and 1.01 MB gzipped, of which
-3.33 MB is code, attributed the same way:
+the compiler ships separately as JavaScript. `stanli.wasm` is 5.79 MB raw
+and 1.52 MB gzipped.
 
-| | | |
+Where that goes, measured by stubbing every density, cdf and tail kernel
+and relinking:
+
+| | raw | gzip |
 | --- | ---: | ---: |
-| stanli itself | 1.35 MB | 40.5% |
-| densities and distribution functions | 0.95 MB | 28.4% |
-| stan-math, everything else | 0.42 MB | 12.5% |
-| Eigen (out-of-line) | 0.26 MB | 7.7% |
-| libc++, NUTS, runtime, unattributed | 0.21 MB | 6.4% |
-| SUNDIALS | 0.06 MB | 1.7% |
-| nlohmann/json | 0.05 MB | 1.5% |
-| Boost | 0.05 MB | 1.4% |
+| core runtime | 2.26 MB | 0.69 MB |
+| densities and distribution functions | 3.53 MB | 0.83 MB |
 
-The densities are 28% here against 54% in the wheel, and stanli's own
-code leads instead. Two reasons: the propto instantiations are gone, and
-`densities.cpp` is the one file the browser build compiles at `-Oz`
-rather than `-O3`, which was worth 8.5 MB of wasm and costs about 10% on
-a mixture model. What is left of stanli grows as a share because the
-interpreter and the register machine are templates that survive both.
+Densities are 55% of the compressed download, which is what
+[docs/density-pack.md](docs/density-pack.md) is about: a core plus an
+on-demand pack, so a model pays for the densities it uses. `densities.cpp`
+is also the one file the browser build compiles at `-Oz` rather than
+`-O3`, worth 8.5 MB of wasm and about 10% on a mixture model.
 
 stanc3 as JavaScript is a separate 2.84 MB, 0.40 MB gzipped, and a page
-that ships precompiled MIR never fetches it. So the floor for sampling a
-known model in a browser is the 1.01 MB runtime alone.
+that ships precompiled MIR never fetches it.
 
-**The browser `lp__` is not CmdStan's.** `STANLI_LITE_LP` is what makes
-the numbers above, and it drops the propto instantiations, so `~`
-evaluates the full density and `lp__` differs from CmdStan's by a
-per-model constant. Gradients and every `write_array` value stay bitwise
-identical, and the posterior is the same posterior, but do not compare a
-browser `lp__` against a CmdStan run or feed it to anything reading log
-densities as absolute numbers. The wheels ship the exact build.
-`stanli_exact_lp()` reports which one is loaded. Details in
-[docs/lite-lp.md](docs/lite-lp.md).
+The browser build reports the same `lp__` as the wheels.
+`STANLI_LITE_LP` used to default on here, which halved the download and
+shifted `lp__` by a per-model constant; it is off everywhere now, so a
+browser run and a CmdStan run can be compared directly.
+`stanli_exact_lp()` still reports which build is loaded, for anyone who
+turns the flag back on. See [docs/lite-lp.md](docs/lite-lp.md), and
+[docs/density-pack.md](docs/density-pack.md) for the plan to get the
+download back down without giving up `lp__`.
 
 ## Python
 

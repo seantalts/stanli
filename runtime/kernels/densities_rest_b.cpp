@@ -1,5 +1,4 @@
-// Half the long tail of densities. The other half is
-// densities_rest_b.cpp.
+// The other half of the long tail of densities.
 //
 // One of the density shards: see densities_impl.hpp for why they
 // are split and what they share.
@@ -8,7 +7,7 @@
 namespace stanli {
 namespace dens {
 
-STANLI_SCALAR_DENSITY_LIST_REST_A(STANLI_DEFINE_DENSITY_FWD)
+STANLI_SCALAR_DENSITY_LIST_REST_B(STANLI_DEFINE_DENSITY_FWD)
 
 }  // namespace dens
 }  // namespace stanli

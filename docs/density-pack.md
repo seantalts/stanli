@@ -17,13 +17,15 @@ Measured by stubbing every density, cdf and tail kernel and relinking
 | | raw | gzip |
 |---|---:|---:|
 | core runtime, plus `multi_normal` and `lkj_corr_cholesky` | 2.26 MB | 0.69 MB |
-| everything, as shipped | 4.10 MB | 1.15 MB |
+| everything, as shipped | 5.79 MB | 1.52 MB |
 
-The density surface is 1.84 MB raw, 0.46 MB gzipped: 40% of the payload.
-The core cannot be split.
+The density surface is 3.53 MB raw, 0.83 MB gzipped: 55% of the compressed
+download. The core cannot be split.
 
-These numbers are from the `STANLI_LITE_LP` build. That flag is now off by
-default, so both figures grow; re-measure before sizing anything.
+The core figure is from a build with every density body stubbed, so
+`STANLI_LITE_LP` had nothing to act on and the number holds for either
+setting. The total is the shipped build, which is exact-lp since that flag
+went off by default.
 
 ## Why dynamic linking is affordable
 
