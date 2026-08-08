@@ -11,8 +11,12 @@ makes precisely:
   1. gradients are BITWISE identical, and so are write_array values.
      Term-dropping only removes summands that are constant in the active
      arguments, so it never reaches a partial derivative. This is the
-     claim HMC actually depends on -- same gradients, same trajectory,
-     same draws.
+     claim HMC actually depends on. Note what it does NOT say: a pinned
+     seed draws a different chain in the lite build, because the sampler
+     adds lp to the kinetic energy and a shifted lp rounds differently
+     there. Measured on eight schools, that starts at 2e-15 after five
+     warmup iterations and reaches 1e-9 by fifty -- the signature of
+     rounding amplified by a chaotic trajectory, not of different math.
   2. lp__ differs by a CONSTANT. Evaluated at several points in the
      unconstrained space, lp_exact - lp_lite must come out the same every
      time. A difference that moves with the parameters would mean a

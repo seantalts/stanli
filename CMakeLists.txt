@@ -51,8 +51,10 @@ target_compile_options(stanmath INTERFACE -ffp-contract=off)
 # Half the library is the propto family: stan-math drops a term based on
 # the argument TYPES, so an exact `~` needs the density instantiated once
 # per activity mask on top of the full form. Dropping it leaves a build
-# whose gradients -- and therefore whose draws -- are bit-identical, with
-# an lp__ that sits a per-model constant above CmdStan's. The wheel keeps
+# whose gradients are bit-identical, with an lp__ that sits a per-model
+# constant above CmdStan's. A given seed still draws a different chain,
+# because lp enters the Hamiltonian additively and a shifted lp rounds
+# differently -- statistically the same sampler, not the same bytes. The wheel keeps
 # the exact lp because the differential oracle is the point; the browser
 # build spends the bytes on reach instead. See density_tier in optable.hpp
 # and docs/lite-lp.md.

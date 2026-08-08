@@ -18,8 +18,13 @@
 - **`-DSTANLI_LITE_LP=ON`** halves the runtime -- 14.8 MB to 7.65 MB
   stripped -- by dropping stan-math's propto instantiations. Every
   gradient and every `write_array` value stays bitwise identical across
-  the whole corpus; only `lp__` moves, by a per-model constant. On by
-  default for the browser build, off for the wheel. `stanli_exact_lp()`
+  the whole corpus; only `lp__` moves, by a per-model constant. The
+  chain a seed produces does change, because lp is added to the kinetic
+  energy and a shifted lp rounds differently there -- the same class of
+  difference as reseeding, not of different math. On by default for the
+  browser build, off for the wheel -- which takes `stanli.wasm` from 6.2
+  MB to 3.40 MB raw, 1.34 MB to 0.99 MB gzipped, while *gaining*
+  truncation and 76 functions. `stanli_exact_lp()`
   in C, `stanli.exact_lp()` in Python, `fit.exactLp` in JS report which
   build you have. See [docs/lite-lp.md](docs/lite-lp.md).
 

@@ -175,10 +175,12 @@ hand-written derivative instantiates nothing.
 
 **`-DSTANLI_LITE_LP=ON` halves the runtime.** Dropping the propto family
 entirely takes `libstanli` from 14.8 MB to 7.65 MB stripped, at the cost
-of an `lp__` that sits a per-model constant above CmdStan's -- every
-gradient, and therefore every draw, is bit-identical. It is on by default
-for the browser build and off for the wheel, which keeps the exact `lp__`
-the differential oracle compares against. See [docs/lite-lp.md](docs/lite-lp.md).
+of an `lp__` that sits a per-model constant above CmdStan's. Every
+gradient stays bit-identical; a pinned seed draws a different but equally
+valid chain, because the sampler adds `lp` to the kinetic energy and a
+shifted `lp` rounds differently there. On by default for the browser
+build, off for the wheel, which keeps the exact `lp__` the differential
+oracle compares against. See [docs/lite-lp.md](docs/lite-lp.md).
 
 The interpreter and NUTS together are about 410 KB. Nearly all of the
 rest is the Stan compiler and the math library, which is the trade the

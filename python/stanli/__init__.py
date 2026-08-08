@@ -109,9 +109,10 @@ def exact_lp() -> bool:
     The wheel is built this way and always has been. A STANLI_LITE_LP
     build -- which is what ships to the browser -- drops stan-math's
     propto instantiations to halve the library, leaving every gradient
-    and therefore every draw bit-identical and lp__ a per-model constant
-    higher. Worth checking before comparing lp__ across engines; nothing
-    that samples is affected.
+    bitwise identical and lp__ a per-model constant higher. A pinned seed
+    still gives a different chain there: lp is added to the kinetic
+    energy, so shifting it changes the rounding, and NUTS amplifies that
+    into a different (equally valid) trajectory.
     """
     return bool(_lib.stanli_exact_lp())
 

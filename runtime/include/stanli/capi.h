@@ -32,9 +32,11 @@ int stanli_has_embedded_stanc(void);
 /* 1 if this build reproduces CmdStan's lp__ exactly, 0 if lp__ sits a
  * per-model constant above it. A STANLI_LITE_LP build drops stan-math's
  * propto instantiations to halve the library, which leaves every
- * gradient -- and therefore every draw -- untouched and shifts only the
- * reported log density. Callers that display or compare lp__ should say
- * so; nothing that samples needs to care. */
+ * gradient bitwise identical and shifts only the reported log density.
+ * A given seed still draws a different (equally valid) chain, because a
+ * shifted lp rounds differently where the Hamiltonian adds it to the
+ * kinetic energy. Callers that display or compare lp__, or that pin a
+ * seed and expect the same bytes, should check this. */
 int stanli_exact_lp(void);
 void stanli_model_free(stanli_model* m);
 

@@ -323,7 +323,9 @@ namespace stanli {
 // The tier a density is actually built at. STANLI_LITE_LP drops the
 // propto family from every one of them: about half the library, at the
 // cost of an lp__ that differs from CmdStan's by a per-model constant on
-// every `~` statement. Gradients, and therefore the draws, are untouched
+// every `~` statement. Gradients are untouched to the bit; the chain a
+// seed produces is not, because a shifted lp rounds differently inside
+// the Hamiltonian (docs/lite-lp.md)
 // -- which is why the browser build takes this and the wheel does not.
 constexpr int density_tier(int listed) {
 #ifdef STANLI_LITE_LP

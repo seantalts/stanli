@@ -1,7 +1,8 @@
 # The lite build: half the library, lp__ off by a constant
 
 `-DSTANLI_LITE_LP=ON` builds a runtime that is 48% smaller and samples
-identically. It is on by default for emscripten and off everywhere else.
+from the same posterior with bit-identical gradients. It is on by default
+for emscripten and off everywhere else.
 
 ## What it drops
 
@@ -24,7 +25,6 @@ constant above CmdStan's.
 
 Every gradient. The terms propto removes are exactly the ones that are
 constant in the active arguments, so they have no derivative to contribute.
-Same gradients means same trajectories, same acceptance, same draws.
 
 Measured over the whole 119-model posteriordb corpus: every gradient and
 every `write_array` value is **bitwise identical** to the exact build, and
@@ -35,7 +35,33 @@ every `write_array` value is **bitwise identical** to the exact build, and
 | `libstanli` stripped (macOS arm64) | 14.79 MB | 7.65 MB |
 | gradients vs CmdStan | bitwise | bitwise |
 | `lp__` vs CmdStan | bitwise | constant offset |
+| draws for a pinned seed | — | different chain, same posterior |
 | `stanli_exact_lp()` | 1 | 0 |
+
+### The draws are not byte-identical, and that is expected
+
+It is tempting to reason: the constant cancels in every Hamiltonian
+*difference* NUTS looks at — the Metropolis ratio, the multinomial
+weights, the divergence test — so the trajectory must be identical. In
+exact arithmetic that is true. In floating point it is not: the sampler
+forms `H = -lp + kinetic`, and adding a shifted `lp` to the kinetic energy
+**rounds differently**. The difference starts at one ULP and NUTS is
+chaotic, so it grows.
+
+Measured on eight schools, same seed, exact against lite:
+
+| warmup iterations | relative difference in `mu` |
+|---|---|
+| 5 | 2.0e-15 |
+| 20 | 6.3e-13 |
+| 50 | 1.3e-09 |
+
+Both chains start from the identical initial point and take the identical
+number of gradient evaluations; they separate purely by amplification.
+This is the same class of difference as changing the seed — every draw is
+from the same posterior, and no draw is byte-comparable. If you need a run
+that reproduces another run byte for byte, both must be the same build.
+0.2.1 carries the same caveat for a different reason (the RNG change).
 
 ## How the claim is checked
 
@@ -71,10 +97,11 @@ failure and teach everyone to ignore the tool.
 oracle against CmdStan is the project's whole claim to correctness, and it
 needs an `lp__` to compare.
 
-**The browser build is lite.** It is 2 MB over the wire against a runtime
-that has to be downloaded before anything happens, nobody is diffing a
-browser demo's `lp__` against CmdStan, and the draws are the same.
+**The browser build is lite.** The runtime has to be downloaded before
+anything happens, nobody is diffing a browser demo's `lp__` against
+CmdStan, and the posterior is the same one.
 
-Callers can ask: `stanli_exact_lp()` in C, `stanli.exact_lp()` in Python.
-Anything that *displays or compares* `lp__` across engines should check it.
-Anything that samples can ignore it.
+Callers can ask: `stanli_exact_lp()` in C, `stanli.exact_lp()` in Python,
+`fit.exactLp` in JS. Check it if you display or compare `lp__` across
+engines, or if you pin a seed and expect the same bytes back. Anything
+that just wants draws from the posterior can ignore it.
