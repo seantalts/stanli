@@ -174,7 +174,7 @@ functions cost 0.03 MB between them, because an elementwise kernel with a
 hand-written derivative instantiates nothing.
 
 **`-DSTANLI_LITE_LP=ON` halves the runtime.** Dropping the propto family
-entirely takes `libstanli` from 14.8 MB to 7.65 MB stripped, at the cost
+entirely takes `libstanli` from 14.9 MB to 7.79 MB stripped, at the cost
 of an `lp__` that sits a per-model constant above CmdStan's. Every
 gradient stays bit-identical; a pinned seed draws a different but equally
 valid chain, because the sampler adds `lp` to the kinetic energy and a

@@ -15,7 +15,7 @@
   [docs/coverage.md](docs/coverage.md) lists what is missing and what each
   gap actually needs.
 
-- **`-DSTANLI_LITE_LP=ON`** halves the runtime -- 14.8 MB to 7.65 MB
+- **`-DSTANLI_LITE_LP=ON`** halves the runtime -- 14.9 MB to 7.79 MB
   stripped -- by dropping stan-math's propto instantiations. Every
   gradient and every `write_array` value stays bitwise identical across
   the whole corpus; only `lp__` moves, by a per-model constant. The
