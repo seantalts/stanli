@@ -53,6 +53,7 @@ namespace stanli {
   X(OP_EIGENVECTORS_SYM)                                                  \
   X(OP_LOG_SUM_EXP)                                                       \
   X(OP_LSE2)                                                              \
+  X(OP_LOG_DIFF_EXP)                                                     \
   X(OP_LOG_MIX)                                                           \
   X(OP_SOFTMAX)                                                           \
   X(OP_SUM_VEC)                                                           \
@@ -158,6 +159,112 @@ namespace stanli {
   X(OP_BETA_NEG_BINOMIAL_LPMF, beta_neg_binomial_lpmf, 3, 2)              \
   X(OP_YULE_SIMON_LPMF, yule_simon_lpmf, 1, 2)
 
+// Distribution functions: cdf, lcdf, lccdf. Same shape as an lpdf --
+// real arguments, partials through ops_partials -- with one difference:
+// there is no propto form to instantiate, because a cumulative
+// probability has no terms to drop. So the tier field here only ever
+// carries bit 0.
+//
+// Every one of them is at 0, and that is measured rather than assumed.
+// These are not cheap functions the way an lpdf is: they pull in
+// inc_beta, grad_reg_inc_gamma and friends, so an instantiation runs
+// about 30 KB. Giving the thirteen common distributions the mask
+// dispatch (2^N instantiations each) cost 4.8 MB of the library on its
+// own -- more than the whole rest of this list. At 0 the 72 functions
+// together cost 2.2 MB. The price is that data arguments bind as
+// recorder scalars and their partials are computed and dropped, which on
+// a function called once per truncation bound is not where the time
+// goes. Raise one to 1 if a profile ever says otherwise.
+//
+// This is what truncation runs on. `y ~ normal(mu, sigma) T[a, b]` is
+// lowered by stanc3 into the density minus log_diff_exp of the two
+// bounds' lcdfs, so a model with a T[] on it needs the lcdf and
+// log_diff_exp and nothing else. Censoring uses the same pieces.
+//
+// The 27 discrete cdfs (poisson_lcdf and friends) are not here: their
+// outcome is an int, which is the idata plumbing STANLI_INT_DENSITY_LIST
+// handles, and no truncated discrete model has asked for them yet.
+//
+// von_mises is not here either, and for a reason worth keeping: its cdf
+// does `res *= 0.0` on the scalar type at a degenerate endpoint. The
+// recorder computes in doubles and carries no tape, so an assignment
+// like that would change the value and leave the partials describing the
+// old one. rvar has no arithmetic operators precisely so this fails to
+// compile instead.
+#define STANLI_SCALAR_CDF_LIST(X) \
+  X(OP_BETA_CDF, beta_cdf, 3, 0) \
+  X(OP_BETA_LCCDF, beta_lccdf, 3, 0) \
+  X(OP_BETA_LCDF, beta_lcdf, 3, 0) \
+  X(OP_BETA_PROPORTION_LCCDF, beta_proportion_lccdf, 3, 0) \
+  X(OP_BETA_PROPORTION_LCDF, beta_proportion_lcdf, 3, 0) \
+  X(OP_CAUCHY_CDF, cauchy_cdf, 3, 0) \
+  X(OP_CAUCHY_LCCDF, cauchy_lccdf, 3, 0) \
+  X(OP_CAUCHY_LCDF, cauchy_lcdf, 3, 0) \
+  X(OP_CHI_SQUARE_CDF, chi_square_cdf, 2, 0) \
+  X(OP_CHI_SQUARE_LCCDF, chi_square_lccdf, 2, 0) \
+  X(OP_CHI_SQUARE_LCDF, chi_square_lcdf, 2, 0) \
+  X(OP_DOUBLE_EXPONENTIAL_CDF, double_exponential_cdf, 3, 0) \
+  X(OP_DOUBLE_EXPONENTIAL_LCCDF, double_exponential_lccdf, 3, 0) \
+  X(OP_DOUBLE_EXPONENTIAL_LCDF, double_exponential_lcdf, 3, 0) \
+  X(OP_EXP_MOD_NORMAL_CDF, exp_mod_normal_cdf, 4, 0) \
+  X(OP_EXP_MOD_NORMAL_LCCDF, exp_mod_normal_lccdf, 4, 0) \
+  X(OP_EXP_MOD_NORMAL_LCDF, exp_mod_normal_lcdf, 4, 0) \
+  X(OP_EXPONENTIAL_CDF, exponential_cdf, 2, 0) \
+  X(OP_EXPONENTIAL_LCCDF, exponential_lccdf, 2, 0) \
+  X(OP_EXPONENTIAL_LCDF, exponential_lcdf, 2, 0) \
+  X(OP_FRECHET_CDF, frechet_cdf, 3, 0) \
+  X(OP_FRECHET_LCCDF, frechet_lccdf, 3, 0) \
+  X(OP_FRECHET_LCDF, frechet_lcdf, 3, 0) \
+  X(OP_GAMMA_CDF, gamma_cdf, 3, 0) \
+  X(OP_GAMMA_LCCDF, gamma_lccdf, 3, 0) \
+  X(OP_GAMMA_LCDF, gamma_lcdf, 3, 0) \
+  X(OP_GUMBEL_CDF, gumbel_cdf, 3, 0) \
+  X(OP_GUMBEL_LCCDF, gumbel_lccdf, 3, 0) \
+  X(OP_GUMBEL_LCDF, gumbel_lcdf, 3, 0) \
+  X(OP_INV_CHI_SQUARE_CDF, inv_chi_square_cdf, 2, 0) \
+  X(OP_INV_CHI_SQUARE_LCCDF, inv_chi_square_lccdf, 2, 0) \
+  X(OP_INV_CHI_SQUARE_LCDF, inv_chi_square_lcdf, 2, 0) \
+  X(OP_INV_GAMMA_CDF, inv_gamma_cdf, 3, 0) \
+  X(OP_INV_GAMMA_LCCDF, inv_gamma_lccdf, 3, 0) \
+  X(OP_INV_GAMMA_LCDF, inv_gamma_lcdf, 3, 0) \
+  X(OP_LOGISTIC_CDF, logistic_cdf, 3, 0) \
+  X(OP_LOGISTIC_LCCDF, logistic_lccdf, 3, 0) \
+  X(OP_LOGISTIC_LCDF, logistic_lcdf, 3, 0) \
+  X(OP_LOGLOGISTIC_CDF, loglogistic_cdf, 3, 0) \
+  X(OP_LOGNORMAL_CDF, lognormal_cdf, 3, 0) \
+  X(OP_LOGNORMAL_LCCDF, lognormal_lccdf, 3, 0) \
+  X(OP_LOGNORMAL_LCDF, lognormal_lcdf, 3, 0) \
+  X(OP_NORMAL_CDF, normal_cdf, 3, 0) \
+  X(OP_NORMAL_LCCDF, normal_lccdf, 3, 0) \
+  X(OP_NORMAL_LCDF, normal_lcdf, 3, 0) \
+  X(OP_PARETO_CDF, pareto_cdf, 3, 0) \
+  X(OP_PARETO_LCCDF, pareto_lccdf, 3, 0) \
+  X(OP_PARETO_LCDF, pareto_lcdf, 3, 0) \
+  X(OP_PARETO_TYPE_2_CDF, pareto_type_2_cdf, 4, 0) \
+  X(OP_PARETO_TYPE_2_LCCDF, pareto_type_2_lccdf, 4, 0) \
+  X(OP_PARETO_TYPE_2_LCDF, pareto_type_2_lcdf, 4, 0) \
+  X(OP_RAYLEIGH_CDF, rayleigh_cdf, 2, 0) \
+  X(OP_RAYLEIGH_LCCDF, rayleigh_lccdf, 2, 0) \
+  X(OP_RAYLEIGH_LCDF, rayleigh_lcdf, 2, 0) \
+  X(OP_SCALED_INV_CHI_SQUARE_CDF, scaled_inv_chi_square_cdf, 3, 0) \
+  X(OP_SCALED_INV_CHI_SQUARE_LCCDF, scaled_inv_chi_square_lccdf, 3, 0) \
+  X(OP_SCALED_INV_CHI_SQUARE_LCDF, scaled_inv_chi_square_lcdf, 3, 0) \
+  X(OP_SKEW_NORMAL_CDF, skew_normal_cdf, 4, 0) \
+  X(OP_SKEW_NORMAL_LCCDF, skew_normal_lccdf, 4, 0) \
+  X(OP_SKEW_NORMAL_LCDF, skew_normal_lcdf, 4, 0) \
+  X(OP_STD_NORMAL_CDF, std_normal_cdf, 1, 0) \
+  X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1, 0) \
+  X(OP_STD_NORMAL_LCDF, std_normal_lcdf, 1, 0) \
+  X(OP_STUDENT_T_CDF, student_t_cdf, 4, 0) \
+  X(OP_STUDENT_T_LCCDF, student_t_lccdf, 4, 0) \
+  X(OP_STUDENT_T_LCDF, student_t_lcdf, 4, 0) \
+  X(OP_UNIFORM_CDF, uniform_cdf, 3, 0) \
+  X(OP_UNIFORM_LCCDF, uniform_lccdf, 3, 0) \
+  X(OP_UNIFORM_LCDF, uniform_lcdf, 3, 0) \
+  X(OP_WEIBULL_CDF, weibull_cdf, 3, 0) \
+  X(OP_WEIBULL_LCCDF, weibull_lccdf, 3, 0) \
+  X(OP_WEIBULL_LCDF, weibull_lcdf, 3, 0)
+
 // Not here, and worth saying why: ordered_logistic and ordered_probit.
 // Their cutpoint argument is a whole vector per observation, and
 // stan-math reaches its partials through partials_vec<1>(ops_partials),
@@ -245,6 +352,7 @@ enum Opcode : uint16_t {
 #define STANLI_DENSITY_ENUM(code, fn, n, m) code,
   STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_ENUM)
   STANLI_INT_DENSITY_LIST(STANLI_DENSITY_ENUM)
+  STANLI_SCALAR_CDF_LIST(STANLI_DENSITY_ENUM)
 #undef STANLI_DENSITY_ENUM
 #define STANLI_UNARY_ENUM(code, fn, v, d) code,
   STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_ENUM)

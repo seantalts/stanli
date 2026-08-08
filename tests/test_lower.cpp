@@ -653,6 +653,50 @@ int main() {
     check(threw, "propto ~ in a parameter region refused with the fix");
   }
 
+  // Truncation, against an independent var-path reference. CI has no
+  // CmdStan, so harnesses/fn_sweep.py -- which checks all 72 distribution
+  // functions bitwise -- cannot run there; this is what guards the
+  // rewrite and the cdf kernels on every push.
+  {
+    DataMap d;
+    d.set_real("y", 1.75);
+    CompiledModel tm = compile_model(slurp("tests/fixtures/trunc.tmir.sexp"), d);
+    Executor tex(std::move(tm.graph));
+    tm.bind(tex);
+    const double pts[2][2] = {{0.6, -0.3}, {-0.25, 0.4}};
+    for (int c = 0; c < 2; ++c) {
+      tex.params_data()[0] = pts[c][0];
+      tex.params_data()[1] = pts[c][1];
+      double grad[2] = {0, 0};
+      const double lp = tex.gradient(grad);
+
+      using stan::math::var;
+      var u_mu = pts[c][0], u_sig = pts[c][1];
+      var mu = u_mu, sigma = stan::math::exp(u_sig);
+      var acc = u_sig;  // lower=0 jacobian
+      // The propto instantiation CmdStan would pick: y is data, the
+      // parameters are var. Getting this wrong shows up as a constant.
+      acc += stan::math::normal_lpdf<true>(1.75, mu, sigma);
+      acc -= stan::math::log_diff_exp(stan::math::normal_lcdf(10.0, mu, sigma),
+                                      stan::math::normal_lcdf(0.0, mu, sigma));
+      acc += stan::math::normal_lcdf(1.5, mu, sigma);
+      acc += stan::math::normal_lccdf(0.5, mu, sigma);
+      acc += stan::math::gamma_lcdf(1.2, 2.0, sigma);
+      acc.grad();
+
+      // Gradients are held to the bit; lp is not. The truncation rewrite
+      // adds its terms in a different order than this reference does, and
+      // than CmdStan's lp_accum__ does -- measured at 1 ULP against
+      // CmdStan on this model, with every gradient exact. Reassociating a
+      // sum is the one difference allowed to survive here.
+      check(grad[0] == u_mu.adj() && grad[1] == u_sig.adj(),
+            "trunc: gradients bitwise against the var path");
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol,
+            "trunc: lp matches the var path");
+    }
+  }
+
   {
     // Error path: an unsupported function is reported by name, never
     // silently miscompiled. Mutate a known-good fixture's density name.

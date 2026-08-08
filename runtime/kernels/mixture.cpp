@@ -103,6 +103,15 @@ void lse2_fwd(KernelCtx& ctx) {
   });
 }
 
+// log_diff_exp(a, b) = log(exp(a) - exp(b)). Truncation is what wants
+// it: stanc3 lowers `y ~ foo(...) T[l, u]` into the density minus
+// log_diff_exp(foo_lcdf(u|...), foo_lcdf(l|...)).
+void log_diff_exp_fwd(KernelCtx& ctx) {
+  mix_fwd<2>(ctx, [](const auto& a) {
+    return stan::math::log_diff_exp(a[0], a[1]);
+  });
+}
+
 void log_mix_fwd(KernelCtx& ctx) {
   mix_fwd<3>(ctx, [](const auto& a) {
     return stan::math::log_mix(a[0], a[1], a[2]);
@@ -114,6 +123,8 @@ void log_mix_fwd(KernelCtx& ctx) {
 void register_mixture_kernels() {
   register_kernel(OP_LOG_SUM_EXP, Kernel{lse_fwd, lse_bwd, lse_scratch});
   register_kernel(OP_LSE2, Kernel{lse2_fwd, mix_bwd<2>, mix_scratch<2>});
+  register_kernel(OP_LOG_DIFF_EXP,
+                  Kernel{log_diff_exp_fwd, mix_bwd<2>, mix_scratch<2>});
   register_kernel(OP_LOG_MIX,
                   Kernel{log_mix_fwd, mix_bwd<3>, mix_scratch<3>});
 }

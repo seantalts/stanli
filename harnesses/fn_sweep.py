@@ -96,6 +96,30 @@ DENSITIES = [
     ("yule_simon_lpmf", 2, [3, 1.3]),
 ]
 
+def cdf_specs(pool):
+    """cdf/lcdf/lccdf entries derived from the lpdf rows above.
+
+    A distribution function takes the same arguments as its density, and
+    the arguments in that table are already chosen to sit in the support,
+    so writing them out again would only create a second place to get them
+    wrong. std_normal_cdf and friends take the outcome alone; everything
+    else mirrors its lpdf. Only what stanli claims is emitted -- the point
+    is verifying what we ship, and the 27 discrete cdfs have a different
+    shape entirely.
+    """
+    have = claimed()
+    out = []
+    for name, n, argv in pool:
+        base = name[:-len("_lpdf")] if name.endswith("_lpdf") else None
+        if base is None or any(isinstance(v, int) for v in argv):
+            continue
+        for suffix in ("cdf", "lcdf", "lccdf"):
+            fn = f"{base}_{suffix}"
+            if fn in have:
+                out.append((fn, n, argv))
+    return out
+
+
 # Which of the above stanli claims. Anything here that fails is a bug;
 # anything absent that passes is free coverage nobody wired up.
 def claimed():
@@ -288,6 +312,8 @@ def main():
     have = claimed()
     density = not args.from_stanc
     pool = from_stanc(REPO / "deps/stanc3/stanc") if args.from_stanc else DENSITIES
+    if not args.from_stanc:
+        pool = pool + cdf_specs(pool)
     specs = [s for s in pool if args.filter in s[0]]
     if not args.missing and not args.from_stanc:
         specs = [s for s in specs if s[0] in have]

@@ -405,6 +405,37 @@ void uniform_fwd(KernelCtx& ctx) {
 STANLI_SCALAR_DENSITY_LIST(STANLI_DEFINE_DENSITY_FWD)
 #undef STANLI_DEFINE_DENSITY_FWD
 
+// Distribution functions: one form, no propto, and no elementwise
+// variant either. reroll.cpp only ever fuses opcodes it opts in by name,
+// and cdfs are not among them, so variant bit 6 cannot arrive -- writing
+// this separately from density_fwd_v is what keeps the per-lane binding
+// from being instantiated for 75 functions that will never use it. It is
+// not merely wasted code: some cdfs do not survive being handed a bare
+// scalar rvar where their vector overload expects a container.
+template <int NArgs, int Tier, typename F>
+void cdf_fwd(KernelCtx& ctx, F&& f) {
+  sink s;
+  int64_t off = 0;
+  for (int k = 0; k < NArgs; ++k) {
+    s.buf[k] = ctx.scratch + off;
+    off += ctx.in[k].len;
+  }
+  const unsigned mask = ctx.variant == 0 ? (1u << NArgs) - 1
+                                         : (ctx.variant & 0x3fu);
+  active_sink() = &s;
+  full_form<NArgs, Tier>(mask, ctx, f);
+  active_sink() = nullptr;
+  ctx.out.data[0] = s.value;
+}
+
+#define STANLI_DEFINE_CDF_FWD(code, fn, n, tier)                         \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                    \
+    cdf_fwd<n, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(          \
+        ctx, [](const auto&... a) { stan::math::fn(a...); });            \
+  }
+STANLI_SCALAR_CDF_LIST(STANLI_DEFINE_CDF_FWD)
+#undef STANLI_DEFINE_CDF_FWD
+
 }  // namespace
 
 void register_density_kernels() {
@@ -419,6 +450,10 @@ void register_density_kernels() {
                   Kernel{fn##_fwd_gen, density_bwd<nreal>, density_scratch<nreal>});
   STANLI_INT_DENSITY_LIST(STANLI_REGISTER_INT_DENSITY)
 #undef STANLI_REGISTER_INT_DENSITY
+#define STANLI_REGISTER_CDF(code, fn, n, tier) \
+  register_kernel(code, Kernel{fn##_fwd_gen, density_bwd<n>, density_scratch<n>});
+  STANLI_SCALAR_CDF_LIST(STANLI_REGISTER_CDF)
+#undef STANLI_REGISTER_CDF
   // The list is the default. A density whose forward needs more than the
   // shared one registers after it and wins: uniform_lpdf has to decide
   // support itself, because stan-math returns LOG_ZERO out of support
