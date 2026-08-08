@@ -11,7 +11,8 @@ with a generated single-function model.
 | distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 87 / 105 |
 | scalar math (all-real signature) | 47 / 129 |
 
-Everything supported matches CmdStan **bitwise** — 0 ULP on every argument
+Everything supported matches CmdStan **bitwise** -- 0 ULP on every
+argument
 slot, at three evaluation points. That is the standard here; a density that
 merely agrees to 1e-12 is a bug report, not a feature.
 
@@ -22,29 +23,34 @@ branch together. See `docs/hacking.md`.
 
 ## The gaps, and what each one actually needs
 
-### Ordinal regression — `ordered_logistic`, `ordered_probit`
+### Ordinal regression -- `ordered_logistic`, `ordered_probit`
 
 The largest real-world gap. Their cutpoint argument is a whole vector per
 observation, and stan-math reaches its partials through
-`partials_vec<1>(ops_partials)` — a vector-of-vectors edge. The recorder
+`partials_vec<1>(ops_partials)` -- a vector-of-vectors edge. The
+recorder
 (`runtime/include/stanli/recorder.hpp`) implements scalar and vector edges
 only, so this needs a recorder extension, not a list entry.
 
-### Multivariate — wishart, `multi_student_t`, `multi_normal_prec`, `multi_gp`, `lkj_corr`, `gaussian_dlm_obs`
+### Multivariate -- wishart, `multi_student_t`, `multi_normal_prec`,
+`multi_gp`, `lkj_corr`, `gaussian_dlm_obs`
 
 Matrix arguments, each with its own shape plumbing. `multi_normal`,
 `multi_normal_cholesky`, `lkj_corr_cholesky` and `dirichlet` are already
 in as hand-written kernels; these would follow the same pattern, one at a
 time.
 
-### GLM fast paths — `poisson_log_glm`, `neg_binomial_2_log_glm`, `binomial_logit_glm`, `categorical_logit_glm`, `ordered_logistic_glm`
+### GLM fast paths -- `poisson_log_glm`, `neg_binomial_2_log_glm`,
+`binomial_logit_glm`, `categorical_logit_glm`, `ordered_logistic_glm`
 
 `bernoulli_logit_glm` is in and shows the shape: a data matrix in a
 row-major slot with its dims in `idata`. These matter for coverage rather
-than speed — brms and rstanarm emit the GLM form directly, so a model
+than speed -- brms and rstanarm emit the GLM form directly, so a model
 using one does not merely run slower, it does not run.
 
-### Multinomial family — `multinomial`, `multinomial_logit`, `dirichlet_multinomial`, `beta_binomial`, `hypergeometric`, `discrete_range`
+### Multinomial family -- `multinomial`, `multinomial_logit`,
+`dirichlet_multinomial`, `beta_binomial`, `hypergeometric`,
+`discrete_range`
 
 Integer outcomes that are not one int per lane: an array of counts, or two
 int groups. `binomial` already carries two groups
@@ -56,7 +62,8 @@ they contribute a constant and no gradient.
 
 `binomial` and `beta_binomial` carry a second int group (the trial count)
 and `discrete_range` is integers all the way down, so those nine want a
-layout rather than a list line — `with_int_group` in `densities.cpp` shows
+layout rather than a list line -- `with_int_group` in `densities.cpp`
+shows
 the shape.
 
 `neg_binomial_2`'s three reparameterize to `neg_binomial` by computing
@@ -81,7 +88,8 @@ again (see below). The other six are `von_mises` and
 The only remaining all-real scalar density, and it fails the same way
 `von_mises_cdf` does: it computes with the scalar type directly
 (`square(y - tau)`, comparisons against doubles) rather than deriving
-partials in doubles. Same fix would be needed — a tape, or a hand-written
+partials in doubles. Same fix would be needed -- a tape, or a
+hand-written
 kernel.
 
 ## Truncation and censoring

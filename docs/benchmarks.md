@@ -60,8 +60,8 @@ model's *shape*, not its size:
   gap grows with N. This class is regressions, GLMs, and most
   hierarchical models written with vectorized statements.
 - **Scalar loops the passes can vectorize.** The hierarchical indexing
-  idiom — `y[n] ~ normal(mu[county[n]], sigma)` and loops that fill a
-  vector element by element — arrives unrolled and is re-rolled back
+  idiom -- `y[n] ~ normal(mu[county[n]], sigma)` and loops that fill a
+  vector element by element -- arrives unrolled and is re-rolled back
   into the class above (radon family up to 6.1x, `election88_full`
   3.0x, `dogs` 2.8x). What the passes handle is described below.
 - **Everything, on preparation.** Lowering a model is 4-400 ms against
@@ -70,7 +70,7 @@ model's *shape*, not its size:
 
 **Near parity (0.8-1.2x):**
 
-- **Models dominated by one large dense operation** — a Cholesky, a big
+- **Models dominated by one large dense operation** -- a Cholesky, a big
   matrix product, an eigendecomposition (the GP models). Both engines
   spend their time inside the same stan-math kernel on the same
   contiguous doubles; interpreter overhead is noise on top.
@@ -140,8 +140,8 @@ terms fused into one summed vector density). `radon_pooled` collapses
 from 27,670 ops to 8 (0.91x -> 6.18x) and `arK` from 3,164 to 21 (0.40x
 -> 4.83x). Indexed reads rewrite by shape: the whole base in order needs
 no op at all, a contiguous window becomes an `OP_SLICE`, and an arbitrary
-data-driven index — `alpha[county_idx[n]]`, the hierarchical idiom,
-repeats and all — becomes one `OP_GATHER` whose backward scatter-adds.
+data-driven index -- `alpha[county_idx[n]]`, the hierarchical idiom,
+repeats and all -- becomes one `OP_GATHER` whose backward scatter-adds.
 Anything the pass cannot prove safe it leaves alone, per region:
 cross-lane recurrences, outputs escaping their lane, opcodes outside its
 vocabulary. Set `STANLI_NO_REROLL=1` to disable it, `STANLI_NO_INPLACE=1`
@@ -149,15 +149,16 @@ for the update rules below.
 
 **Element writes: `mu[n] = ...` inside a loop.** This is the other half
 of the hierarchical idiom, and it used to be the worst thing in the
-project. Each write lowered to a *functional update* — copy the whole
-vector into a fresh slot, poke one element — so N writes cost O(N^2) time
+project. Each write lowered to a *functional update* -- copy the whole
+vector into a fresh slot, poke one element -- so N writes cost O(N^2)
+time
 and O(N^2) arena. `radon_county_intercept` (N=12,573) spent 90.5 ms per
 gradient inside 2.58 GB of arena, 207x slower than CmdStan.
 
 Three rules compose to remove it (`runtime/src/inplace.cpp`, plus the
 index rules above). A write may mutate its vector directly when it is the
-**last use** of that vector — not merely its only use, since the
-read-back in the same iteration is an earlier use — and when no earlier
+**last use** of that vector -- not merely its only use, since the
+read-back in the same iteration is an earlier use -- and when no earlier
 reader needs the vector's values during the reverse sweep (`log_sum_exp`
 and the other nested-replay backwards rebuild their tape from the input
 buffer, so they must find it intact). The write and its read-back then
@@ -167,9 +168,10 @@ gather rule vectorizes: **77,960 ops become 9**, 90.5 ms becomes 92 us,
 2.58 GB becomes 42 MB. Seven radon-family models and `rats_model` collapse
 the same way.
 
-That worked when the read-back cancelled the write. When it did not —
+That worked when the read-back cancelled the write. When it did not --
 when the loop fills a vector that something *else* reads, which is what
-`y_hat[n] = a[county[n]]` followed by `y ~ normal(y_hat, sigma)` is — the
+`y_hat[n] = a[county[n]]` followed by `y ~ normal(y_hat, sigma)` is --
+the
 writes survived, one op per element, and the re-roll pass refused the
 region because its outputs escaped the lane. **Write-side fusion** takes
 that case: a run of element writes marching contiguously through one
@@ -186,8 +188,8 @@ each. 57 of the 120 corpus models now change under the passes, against 28
 before.
 
 Three follow-ons closed the `dogs` family (0.65x -> 2.8x, 12,751 ops ->
-261). A **strided** run — indices advancing by the matrix's row count,
-`p[j, t]` filled down columns — fuses into `OP_SET_SLICE_STRIDED`, and
+261). A **strided** run -- indices advancing by the matrix's row count,
+`p[j, t]` filled down columns -- fuses into `OP_SET_SLICE_STRIDED`, and
 interleaved runs over one vector chain block by block: each block's store
 output becomes the vector every later reference, read or write, is
 renamed to, so the next block fuses onto it in turn. **Per-lane integer
@@ -213,18 +215,18 @@ elementwise, widens the consuming `log_mix`, and swaps the N per-lane
 target terms for one `OP_SUM_VEC`. `low_dim_gauss_mix` drops from 7,208
 ops to 16 and crosses parity (0.78x -> 1.07x); `normal_mixture` lands at
 13 ops, 1.09x. A density whose inputs are all lane-invariant hoists to
-one scalar op instead of widening — a len-N output over all-scalar
+one scalar op instead of widening -- a len-N output over all-scalar
 inputs is exactly the miscompile shape the corpus A/B caught once
 already (`losscurve_sislob`).
 
 **Tape islands: the irreducible residue.** After every other pass has
 run, whatever scalar residue survives is, by construction, what no
-vectorizer can help — cross-lane recurrences, where step t reads step
+vectorizer can help -- cross-lane recurrences, where step t reads step
 t-1's parameter-dependent result. The island pass
 (`runtime/src/island.cpp`, `STANLI_NO_ISLAND=1` to disable) compiles
 each maximal run of compilable ops into a flat register program executed
 by ONE op: forward runs it on plain doubles; backward replays it under
-stan-math's nested autodiff and harvests the live-ins' adjoints — the
+stan-math's nested autodiff and harvests the live-ins' adjoints -- the
 same var arithmetic CmdStan's generated code runs for the same
 statements, so gradients match by construction. Per-lane data constants
 absorb into the program as immediates; dead copy-then-modify chains
@@ -260,14 +262,14 @@ backwards it replaced. `iohmm_reg` is different for a reason that has
 nothing to do with dispatch: its steps copy a 1,500-element state
 vector each, 1.6M elements of traffic per gradient, and the island's
 registers make those copies disappear. `bones_model` is the same
-mechanism inverted — 36 ops behind a 4,024-register file, rebuilt as
+mechanism inverted -- 36 ops behind a 4,024-register file, rebuilt as
 vars 77 times per gradient.
 
 So the pass estimates both sides before committing: what the ops move
 (an in-place element update moves one element, not a vector) against
 the register file, weighted 4x because it is built twice per call and
-once as vars. The estimate separates the fourteen exactly — `iohmm_reg`
-1.6M against 435k, every other region 4-20x the wrong way — and the
+once as vars. The estimate separates the fourteen exactly -- `iohmm_reg`
+1.6M against 435k, every other region 4-20x the wrong way -- and the
 thirteen it now leaves alone are bitwise identical to the passes-off
 baseline again. `STANLI_ISLAND_ALWAYS=1` skips the estimate, which is
 how to ask why a region was left alone.
@@ -403,7 +405,8 @@ attribute one).
 That harness earns its keep. An earlier version of the in-place rule
 allowed a destructive write whenever it was the last use of its vector,
 which is wrong for any earlier reader that rebuilds its var tape from the
-buffer during the reverse sweep — `log_sum_exp`, `softmax`, every legacy
+buffer during the reverse sweep -- `log_sum_exp`, `softmax`, every
+legacy
 nested-replay backward. Eight HMM/LDA/mixture models were silently wrong
 by up to 1.7e+05 relative **with their op counts unchanged**, so nothing
 structural would have caught it. Only ops whose backward purely routes

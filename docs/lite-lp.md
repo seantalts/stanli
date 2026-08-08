@@ -7,8 +7,9 @@ for emscripten and off everywhere else.
 ## What it drops
 
 A density is not one function. stan-math decides which terms of a log
-density to keep by looking at the argument *types* — `include_summand<propto,
-T_y, T_loc, T_scale>` is a compile-time query — so a `~` statement that
+density to keep by looking at the argument *types* --
+`include_summand<propto,
+T_y, T_loc, T_scale>` is a compile-time query -- so a `~` statement that
 drops `-0.5 * log(2π)` because `sigma` is data is a *different
 instantiation* from one that keeps it. Supporting `~` exactly therefore
 costs one instantiation per activity mask, on top of the full form, twice
@@ -17,7 +18,8 @@ per distribution, about 630 KB of object for a three-argument one.
 
 `STANLI_LITE_LP` clears the propto half of that (`density_tier()` in
 `runtime/include/stanli/optable.hpp`). `y ~ normal(mu, sigma)` then
-evaluates the *full* normal density. That is still a correct log density —
+evaluates the *full* normal density. That is still a correct log density
+--
 it just is not the one CmdStan computes, so `lp__` lands a per-model
 constant above CmdStan's.
 
@@ -35,14 +37,14 @@ every `write_array` value is **bitwise identical** to the exact build, and
 | `libstanli` stripped (macOS arm64) | 14.93 MB | 7.79 MB |
 | gradients vs CmdStan | bitwise | bitwise |
 | `lp__` vs CmdStan | bitwise | constant offset |
-| draws for a pinned seed | — | different chain, same posterior |
+| draws for a pinned seed | -- | different chain, same posterior |
 | `stanli_exact_lp()` | 1 | 0 |
 
 ### The draws are not byte-identical, and that is expected
 
 It is tempting to reason: the constant cancels in every Hamiltonian
-*difference* NUTS looks at — the Metropolis ratio, the multinomial
-weights, the divergence test — so the trajectory must be identical. In
+*difference* NUTS looks at -- the Metropolis ratio, the multinomial
+weights, the divergence test -- so the trajectory must be identical. In
 exact arithmetic that is true. In floating point it is not: the sampler
 forms `H = -lp + kinetic`, and adding a shifted `lp` to the kinetic energy
 **rounds differently**. The difference starts at one ULP and NUTS is
@@ -58,7 +60,8 @@ Measured on eight schools, same seed, exact against lite:
 
 Both chains start from the identical initial point and take the identical
 number of gradient evaluations; they separate purely by amplification.
-This is the same class of difference as changing the seed — every draw is
+This is the same class of difference as changing the seed -- every draw
+is
 from the same posterior, and no draw is byte-comparable. If you need a run
 that reproduces another run byte for byte, both must be the same build.
 0.2.1 carries the same caveat for a different reason (the RNG change).
@@ -76,7 +79,7 @@ cmake --build build-lite --target stanli_check -j8
 python3 tools/verify_lite.py deps/posteriordb
 ```
 
-1. **Gradients bitwise.** Not "close" — the same computation.
+1. **Gradients bitwise.** Not "close" -- the same computation.
 2. **The lp shift is constant.** Evaluated at three points in the
    unconstrained space, `lp_exact - lp_lite` must come out the same every
    time. This is the load-bearing check: a shift that *moved* with the
@@ -87,7 +90,7 @@ python3 tools/verify_lite.py deps/posteriordb
 The gate on the shift is relative to `lp`, not to the shift. Dropping a
 term reassociates the sum after it, so the residue lives on `lp`'s rounding
 scale: `rats_model`'s `lp` is -4.7e6 (one ULP is 9.3e-10) and its shift
-moves by 4.7e-10 — half an ULP of the number it was subtracted from.
+moves by 4.7e-10 -- half an ULP of the number it was subtracted from.
 Normalizing against the shift's own magnitude instead would flag that as a
 failure and teach everyone to ignore the tool.
 
