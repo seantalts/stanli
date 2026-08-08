@@ -170,7 +170,7 @@ Wheels for macOS (arm64 and x86_64) and Linux (x86_64 and aarch64,
 manylinux_2_28). Windows is not built yet; it needs a mingw-w64 toolchain,
 because stan-math does not build under MSVC.
 
-The installed library is 21.3 MB, which is the trade this design makes:
+The installed library is 22.2 MB, which is the trade this design makes:
 ship the compiler and every kernel once, so that nothing is ever built on
 the user's machine. Roughly half of that is the embedded stanc3 and
 somewhat under half is stan-math. The interpreter and NUTS together are

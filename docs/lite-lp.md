@@ -34,7 +34,7 @@ every `write_array` value is **bitwise identical** to the exact build, and
 
 | | exact | lite |
 |---|---|---|
-| `libstanli` stripped (macOS arm64) | 14.93 MB | 7.79 MB |
+| `libstanli` stripped (macOS arm64) | 15.75 MB | 8.43 MB |
 | gradients vs CmdStan | bitwise | bitwise |
 | `lp__` vs CmdStan | bitwise | constant offset |
 | draws for a pinned seed | -- | different chain, same posterior |

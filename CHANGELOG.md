@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Sizes re-measured on the current tree, since the density list nearly
+  doubled: the shared library is 22.2 MB installed and 7.8 MB in the wheel
+  (from 21.3 / 7.4), `libstanli` is 15.75 MB stripped exact and 8.43 MB
+  lite (from 14.93 / 7.79), and `stanli.wasm` is 4.10 MB raw / 1.15 MB
+  gzipped (from 3.60 / 1.05). Densities and distribution functions are now
+  12.03 MB of the shipped library, 54.9%.
+
 - **71 of Stan's 72 densities.** The multivariate and multinomial tail
   lands: the wishart family, `multi_gp`, `multi_student_t`, `lkj_cov`,
   `multi_normal_prec`, the multinomial family, `ordered_probit`, `wiener`,

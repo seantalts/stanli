@@ -30,13 +30,13 @@ parameters, and generated quantities (RNG draws stream from `seed`).
 The heavy work runs in a worker the package owns, so the page never
 blocks; calls queue and run one at a time.
 
-The payload is ~6.5 MB installed (~1.4 MB over the wire with gzip): the WASM
+The payload is ~7 MB installed (~1.6 MB over the wire with gzip): the WASM
 runtime plus the stanc3 compiler. The compiler loads lazily, only when a
 call passes Stan source. `preload()` starts both loads in the background
 -- call it at page idle and the user's first `sample()` begins at full
 speed instead of paying the fetch and parse on their click; an app that ships a fixed model can precompile
 it at build time (`stanc --debug-transformed-mir model.stan`) and pass
-`mir` instead of `code`, and the runtime alone is ~1.0 MB gzipped. 118 of 119 posteriordb corpus models
+`mir` instead of `code`, and the runtime alone is ~1.2 MB gzipped. 118 of 119 posteriordb corpus models
 verify against CmdStan's log density, gradients, and write_array values
 from inside this WASM build; see the
 [repository](https://github.com/seantalts/stanli) for the verification

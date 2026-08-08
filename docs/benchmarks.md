@@ -604,7 +604,8 @@ node tools/bench_wasm.cjs                      # fixtures, ns/gradient
 node tools/bench_wasm.cjs --module build-wasm-simd/stanli.js
 ```
 
-Measured on macOS arm64, emsdk 6.0.6 (the version CI pins):
+The A/B that turned SIMD on, measured on macOS arm64, emsdk 6.0.6 (the
+version CI pins), on the tree as it stood at that commit:
 
 | | scalar | +SIMD128 |
 |---|---:|---:|
@@ -612,6 +613,11 @@ Measured on macOS arm64, emsdk 6.0.6 (the version CI pins):
 | `radon_pooled` (919 obs, vectorized normal) | 107.9 us | **105.7 us** |
 | `nes` (matrix-heavy) | 29.1 us | **25.9 us** |
 | `stanli.wasm` gzipped | 1.02 MB | 1.05 MB |
+
+The absolute numbers have moved since -- the density surface roughly
+doubled -- and today's build is 4.10 MB raw, 1.15 MB gzipped, 478 ns
+geomean. The A/B above is kept as the decision record; rerun it against a
+freshly configured scalar build if the decision is ever revisited.
 
 SIMD128 is on. It is worth 2% on most shapes and 11% on the matrix-heavy
 one for 0.03 MB, and -- the part that made it an easy call -- every corpus
@@ -631,25 +637,41 @@ the relaxed-SIMD proposal and `-mrelaxed-simd`). The `-ffp-contract=off`
 pin that costs something on native costs exactly nothing in the browser,
 and fast-math is not a lever on this target at all.
 
-**Splitting densities into side modules is smaller than it looks.**
-Stubbing every generated density and cdf body and relinking says where the
-payload actually is:
+**Splitting densities into a lazily-loaded pack is viable, and the
+obstacle I expected is not there.** Stubbing every density, cdf and tail
+kernel and relinking says where the payload actually is:
 
 | | raw | gzip |
 |---|---:|---:|
-| core runtime alone | 1.95 MB | **0.62 MB** |
-| + 47 densities | 2.83 MB | 0.85 MB |
-| + 90 cdfs | 3.53 MB | 1.02 MB |
+| core runtime (plus `multi_normal`, `lkj_corr_cholesky`) | 2.26 MB | **0.69 MB** |
+| everything, as shipped | 4.10 MB | **1.15 MB** |
 
-So the whole splittable surface is 0.37 MB gzipped, against a 0.62 MB core
-that cannot be split -- and a model still needs its own densities, so the
-realistic saving is smaller again. Emscripten's `MAIN_MODULE`/`SIDE_MODULE`
-dynamic linking would put PIC codegen on that 0.62 MB core and add a round
-trip after `stanc`. If this is ever wanted, the cheap version is two
-prebuilt whole-module bundles (common densities vs everything) chosen once
-the compiled model's op set is known: no PIC, no dynamic linking, worst
-case one wasted fetch of the smaller file. The larger untouched lever is
-the core itself.
+So the density surface is 1.84 MB raw, **0.46 MB gzipped** -- 40% of the
+payload, against a 0.69 MB core that cannot be split. A model still needs
+its own densities, so the realistic saving is smaller than 0.46 MB, but it
+is no longer marginal: this doc previously said 0.37 MB against a bigger
+core, before the density list went from 47 to 71.
+
+The cost I assumed would eat it does not exist. Emscripten's
+`MAIN_MODULE=2` with `-fPIC` was measured against the same tree: **1.05 MB
+gzipped either way, 451 ns against 449 ns**. On wasm, calls already go
+indirect through a function table, so there is no PLT/GOT penalty of the
+kind native dynamic linking pays.
+
+The mechanism was proven end to end with a spike: a `SIDE_MODULE` built
+against these headers, loaded at runtime, calling **back into the main
+module** -- which is what lets a pack call `register_kernel`,
+`active_sink()` and libm from the core instead of carrying its own copies.
+Dispatch is already `kernel(opcode).forward`, a function-pointer table, so
+late registration only has to fill in slots, and the lowering already
+fails with `unsupported function <name>` -- so the trigger is
+self-correcting: try to lower, fetch the pack on that error, retry, with
+no density-name table duplicated in JavaScript.
+
+One requirement, found the hard way: the pack must be compiled with the
+same exception ABI (`-fwasm-exceptions`) as the core. Mismatched, it fails
+with an opaque `__stack_pointer` mutable-global import error that looks
+like a dynamic-linking bug and is not.
 
 ## Reproducing
 

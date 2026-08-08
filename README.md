@@ -29,7 +29,7 @@ pip install stanli
   <!--gen:corpus_bitwise-->45<!--/gen--> of them bitwise identical, worst
   relative deviation <!--gen:corpus_worst-->2.6e-12<!--/gen-->; per-model
   accuracy in relative terms and ULPs is listed there)
-- Install size: one 21.3 MB shared library, a 7.4 MB wheel. Breakdown
+- Install size: one 22.2 MB shared library, a 7.8 MB wheel. Breakdown
   in [Binary size](#binary-size) below; the browser build halves the
   runtime with `STANLI_LITE_LP` ([docs/lite-lp.md](docs/lite-lp.md)).
 - Distribution coverage: [docs/coverage.md](docs/coverage.md) (71 of 72
@@ -144,17 +144,17 @@ Stage by stage:
 
 ## Binary size
 
-One self-contained shared library, 21.3 MB installed, 7.4 MB compressed
-in the wheel. Attributing its 21.0 MB of code and data by symbol:
+One self-contained shared library, 22.2 MB installed, 7.8 MB compressed
+in the wheel. Attributing its 21.9 MB of code and data by symbol:
 
 | | | |
 | --- | ---: | ---: |
-| densities and distribution functions | 11.43 MB | 54.4% |
-| embedded stanc3 (all OCaml) | 5.73 MB | 27.3% |
-| stan-math, everything else | 0.64 MB | 3.1% |
-| Boost, nlohmann/json, NUTS, libc++, unattributed | 1.53 MB | 7.3% |
-| stanli itself | 0.84 MB | 4.0% |
-| Eigen (out-of-line) | 0.68 MB | 3.2% |
+| densities and distribution functions | 12.03 MB | 54.9% |
+| embedded stanc3 (all OCaml) | 5.73 MB | 26.1% |
+| stan-math, everything else | 0.78 MB | 3.6% |
+| Boost, nlohmann/json, NUTS, libc++, unattributed | 1.61 MB | 7.3% |
+| stanli itself | 0.92 MB | 4.2% |
+| Eigen (out-of-line) | 0.71 MB | 3.3% |
 | SUNDIALS | 0.14 MB | 0.7% |
 
 The densities are the majority, and the split above is measured the same
@@ -179,7 +179,7 @@ functions cost 0.03 MB between them, because an elementwise kernel with a
 hand-written derivative instantiates nothing.
 
 **`-DSTANLI_LITE_LP=ON` halves the runtime.** Dropping the propto family
-entirely takes `libstanli` from 14.9 MB to 7.79 MB stripped, at the cost
+entirely takes `libstanli` from 15.8 MB to 8.4 MB stripped, at the cost
 of an `lp__` that differs from CmdStan's by a per-model constant. Every
 gradient stays bit-identical; a pinned seed draws a different but equally
 valid chain, because the sampler adds `lp` to the kinetic energy and a
