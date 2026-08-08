@@ -236,16 +236,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: deps/posteriordb
-          key: pdb-lite-${{ env.PDB_SHA }}
+          key: pdb-lite-${{ env.PDB_SHA }}-2
       - name: Fetch posteriordb
         if: steps.pdb-cache.outputs.cache-hit != 'true'
         run: |
           git clone --filter=blob:none --sparse \
             https://github.com/stan-dev/posteriordb.git deps/posteriordb
           git -C deps/posteriordb sparse-checkout set \
-            posterior_database/models/stan posterior_database/data/data
+            posterior_database/models/stan posterior_database/data/data \
+            posterior_database/posteriors
           git -C deps/posteriordb fetch -q origin "$PDB_SHA"
           git -C deps/posteriordb checkout -q "$PDB_SHA"
+
+      # Every model the demo page offers has a hand written description,
+      # and nothing else on its card is typed. This is the part of that
+      # contract a runner can check without a browser.
+      - name: Every demo model has a description
+        run: python3 tools/gen_web_models.py --check
 
       # The strongest oracle in the project: every referenced posteriordb
       # model evaluated and compared against CmdStan's recorded lp and full
@@ -443,6 +450,28 @@ jobs:
         with:
           name: wasm
           path: web/
+
+      # The demo page offers every posteriordb model stanli has verified,
+      # so the deploy needs the corpus that tools/gen_web_models.py copies
+      # into web/models/. Same sparse checkout and cache as the build job.
+      - name: Restore posteriordb (models and data only)
+        id: pdb-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/posteriordb
+          key: pdb-lite-${{ env.PDB_SHA }}-2
+      - name: Fetch posteriordb
+        if: steps.pdb-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --filter=blob:none --sparse \
+            https://github.com/stan-dev/posteriordb.git deps/posteriordb
+          git -C deps/posteriordb sparse-checkout set \
+            posterior_database/models/stan posterior_database/data/data \
+            posterior_database/posteriors
+          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          git -C deps/posteriordb checkout -q "$PDB_SHA"
+      - name: Model catalog
+        run: python3 tools/gen_web_models.py
 
       - name: Restore stancjs
         id: stancjs-cache

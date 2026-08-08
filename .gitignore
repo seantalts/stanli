@@ -22,4 +22,8 @@ js/stanli.wasm
 js/stancjs.bc.js
 web/worker.js
 web/stanli.mjs
+# The corpus the demo page offers: 8 MB of posteriordb models and data,
+# written by tools/gen_web_models.py from the pinned checkout. Generated
+# rather than committed, for the same reason the wasm is.
+web/models/
 *.tgz

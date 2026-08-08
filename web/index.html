@@ -57,7 +57,33 @@
   .plots canvas { border: 1px solid #8883; border-radius: 6px;
                   max-width: 100%; }
   .times { font-size: .8rem; opacity: .7; margin-top: .5rem; }
-  #note { font-size: .82rem; opacity: .75; margin: -.4rem 0 .6rem; }
+  #note { font-size: .82rem; opacity: .75; margin: -.4rem 0 .6rem;
+          max-width: 62rem; }
+  #note b { font-weight: 600; }
+  #note .stats { opacity: .8; white-space: nowrap; }
+  /* The model picker: a text input that filters a listbox under it, so
+     120 models stay reachable by typing instead of by scrolling. */
+  .combo { position: relative; }
+  .combo input { width: 15rem; }
+  #modellist {
+    position: absolute; z-index: 5; left: 0; top: calc(100% + 2px);
+    width: 30rem; max-width: 80vw; max-height: 19rem; overflow-y: auto;
+    margin: 0; padding: .2rem 0; list-style: none;
+    border: 1px solid #8886; border-radius: 6px;
+    background: Canvas; color: CanvasText;
+    box-shadow: 0 6px 20px #0003;
+  }
+  #modellist li {
+    display: flex; gap: .6rem; align-items: baseline;
+    padding: .25rem .55rem; cursor: pointer; font-weight: 400;
+  }
+  #modellist li[aria-selected="true"] { background: #4a73; }
+  #modellist li .name { font-family: ui-monospace, monospace;
+                        font-size: .82rem; }
+  #modellist li .meta { margin-left: auto; font-size: .72rem; opacity: .65;
+                        white-space: nowrap; }
+  #modellist li.none { cursor: default; opacity: .6; }
+  #modellist mark { background: #fd05; color: inherit; border-radius: 2px; }
   footer {
     margin: 2.5rem 0 1rem; padding: .9rem 1.1rem; font-size: .85rem;
     border: 1px solid #c96a; border-left: 4px solid #c96;
@@ -87,13 +113,12 @@ everything below happens in this tab.
 
 <div class="bar">
   <button id="run">Run NUTS</button>
-  <label>model <select id="preset">
-    <option value="es">eight schools</option>
-    <option value="reg">linear regression</option>
-    <option value="mix">gaussian mixture</option>
-    <option value="lv">lotka-volterra (ODE)</option>
-    <option value="radon">radon hierarchical (391 params)</option>
-  </select></label>
+  <label class="combo" for="model">model
+    <input id="model" type="text" role="combobox" aria-expanded="false"
+           aria-controls="modellist" aria-autocomplete="list"
+           autocomplete="off" spellcheck="false">
+    <ul id="modellist" role="listbox" hidden></ul>
+  </label>
   <label>chains <input id="chains" value="4"></label>
   <label>warmup <input id="warmup" value="1000"></label>
   <label>samples <input id="samples" value="1000"></label>
@@ -146,6 +171,10 @@ function normalish(u) {  // sum of uniforms: good enough for fake data
 }
 const PRESETS = {
   es: {
+    name: "eight schools (non-centered)",
+    note: "The SAT coaching study from Rubin (1981), typed inline. The " +
+          "non-centered parameterization, and the smallest thing here " +
+          "that is worth sampling.",
     code: `data {
   int<lower=0> J;
   array[J] real y;
@@ -170,6 +199,10 @@ model {
  "sigma": [15, 10, 16, 11, 9, 11, 10, 18]}`,
   },
   reg: {
+    name: "linear regression",
+    note: "Forty points from a fixed pseudorandom stream, so the page is " +
+          "self-contained and the fit is reproducible. Regression with a " +
+          "posterior predictive drawn in generated quantities.",
     code: `data {
   int<lower=0> N;
   vector[N] x;
@@ -200,6 +233,10 @@ generated quantities {
     },
   },
   mix: {
+    name: "gaussian mixture",
+    note: "A hundred and twenty points drawn from two Gaussians. Two " +
+          "components with ordered means so the labels cannot swap, and " +
+          "log_mix per observation.",
     code: `data {
   int<lower=0> N;
   vector[N] y;
@@ -226,46 +263,179 @@ model {
     },
   },
 };
-// posteriordb models ship as files rather than inline, so the page stays
-// readable and the 37 KB of radon data only downloads if it is asked for.
-const CORPUS = {
-  lv: { file: "lotka_volterra", warmup: 500, samples: 500,
-        note: "Hudson Bay lynx and hare, 1900-1920. A predator-prey ODE " +
-              "solved with rk45 inside the model, and the posterior " +
-              "predictive drawn in generated quantities. ODE models are " +
-              "the shape stanli is slowest on: about 0.6x CmdStan per " +
-              "gradient." },
-  radon: { file: "radon_hier", warmup: 500, samples: 500,
-           note: "Radon in 919 Minnesota homes, partially pooled across " +
-                 "85 counties. 391 parameters, and the shape stanli is " +
-                 "fastest on: 5.1x CmdStan per gradient." },
+// ---- the model picker ------------------------------------------------------
+// Every posteriordb model that stanli has verified against CmdStan is on
+// the page. They ship as files rather than inline, and only the chosen
+// one is fetched, so the catalog costs a 60 KB index and the 2 MB of
+// diamonds data downloads only if somebody asks for diamonds.
+// tools/gen_web_models.py writes models/ and models/index.json.
+const CATALOG = Object.keys(PRESETS).map((k) => ({
+  name: PRESETS[k].name, note: PRESETS[k].note,
+  keywords: ["built in", "synthetic"], builtin: k,
+}));
+let catalogReady = fetch("./models/index.json")
+    .then((r) => (r.ok ? r.json() : { models: [] }))
+    .then((idx) => { CATALOG.push(...idx.models); })
+    .catch(() => {});  // the three built-in presets still work offline
+
+// What each row matches on: the name people know, plus posteriordb's
+// keywords and the note, so "ode", "spatial" or "arsenic" all find
+// something even when they appear in no model name.
+//
+// A term has to start a word, not merely appear inside one. Plain
+// substring matching looks fine until you type "ode" and get back every
+// model whose name ends in _model. Underscores count as separators, so
+// "volterra" still finds lotka_volterra.
+const words = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+const rx = (t) => new RegExp("(^| )" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+const haystack = (m) =>
+    words(`${m.name} ${(m.keywords || []).join(" ")} ${m.note || ""}`);
+function search(q) {
+  const terms = words(q).split(" ").filter(Boolean).map((t) => [t, rx(t)]);
+  if (!terms.length) return CATALOG;
+  const hit = CATALOG.filter((m) => {
+    const h = haystack(m);
+    return terms.every(([, r]) => r.test(h));
+  });
+  // A name match is what the typist meant; a note match is a discovery.
+  const rank = (m) => {
+    const n = words(m.name);
+    if (!terms.every(([, r]) => r.test(n))) return 2;
+    return n.startsWith(terms[0][0]) ? 0 : 1;
+  };
+  return hit.sort((a, b) => rank(a) - rank(b) ||
+                            a.name.length - b.name.length);
+}
+
+const esc = (s) => s.replace(/[&<>]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+function highlight(name, q) {
+  const terms = words(q).split(" ").filter(Boolean);
+  // Mark each term where it starts a word, matching what search() did.
+  // One space per separator rather than one per run, so indices into w
+  // are indices into name.
+  const w = name.toLowerCase().replace(/[^a-z0-9]/g, " ");
+  const spans = [];
+  for (const t of terms)
+    for (let at = w.indexOf(t); at >= 0; at = w.indexOf(t, at + 1))
+      if (at === 0 || w[at - 1] === " ") spans.push([at, at + t.length]);
+  spans.sort((a, b) => a[0] - b[0]);
+  let out = "", i = 0;
+  for (const [s, e] of spans) {
+    if (s < i) continue;
+    out += esc(name.slice(i, s)) + "<mark>" + esc(name.slice(s, e)) + "</mark>";
+    i = e;
+  }
+  return out + esc(name.slice(i));
+}
+
+const meta = (m) => [
+  m.params != null ? `${m.params} par${m.params === 1 ? "" : "s"}` : "",
+  m.speedup ? `${m.speedup}x` : "",
+].filter(Boolean).join(" · ");
+
+let shown = [], active = -1, selected = null;
+const list = $("modellist"), box = $("model");
+
+function closeList() {
+  list.hidden = true;
+  box.setAttribute("aria-expanded", "false");
+  box.removeAttribute("aria-activedescendant");
+  active = -1;
+}
+function openList(q) {
+  shown = search(q);
+  list.innerHTML = "";
+  if (!shown.length) {
+    list.innerHTML = '<li class="none">no model matches</li>';
+  } else {
+    shown.forEach((m, i) => {
+      const li = document.createElement("li");
+      li.id = `opt${i}`;
+      li.role = "option";
+      li.innerHTML = `<span class="name">${highlight(m.name, q)}</span>` +
+                     `<span class="meta">${meta(m)}</span>`;
+      // mousedown, not click: the input blurs before a click fires.
+      li.onmousedown = (e) => { e.preventDefault(); choose(m); };
+      list.appendChild(li);
+    });
+  }
+  list.hidden = false;
+  box.setAttribute("aria-expanded", "true");
+  setActive(shown.length ? 0 : -1);
+}
+function setActive(i) {
+  const items = list.querySelectorAll("li[role=option]");
+  items.forEach((li) => li.setAttribute("aria-selected", "false"));
+  active = i;
+  if (i < 0 || !items[i]) return;
+  items[i].setAttribute("aria-selected", "true");
+  items[i].scrollIntoView({ block: "nearest" });
+  box.setAttribute("aria-activedescendant", items[i].id);
+}
+
+box.oninput = () => openList(box.value);
+box.onfocus = () => { box.select(); openList(""); };
+box.onblur = () => { closeList(); box.value = selected ? selected.name : ""; };
+box.onkeydown = (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (list.hidden) return openList(box.value);
+    if (!shown.length) return;
+    setActive((active + (e.key === "ArrowDown" ? 1 : shown.length - 1)) %
+              shown.length);
+  } else if (e.key === "Enter") {
+    if (!list.hidden && shown[active]) { e.preventDefault(); choose(shown[active]); }
+  } else if (e.key === "Escape") {
+    closeList();
+    box.value = selected ? selected.name : "";
+  }
 };
-async function applyPreset(name) {
-  const corpus = CORPUS[name];
-  $("note").textContent = corpus ? corpus.note : "";
-  if (!corpus) {
-    $("code").value = PRESETS[name].code;
-    $("data").value = PRESETS[name].data();
+
+async function choose(m) {
+  selected = m;
+  box.value = m.name;
+  closeList();
+  box.blur();
+  $("err").textContent = "";
+  const stats = [
+    m.params != null ? `${m.params} parameter${m.params === 1 ? "" : "s"}` : "",
+    m.speedup ? `${m.speedup}x CmdStan per gradient` : "",
+  ].filter(Boolean).join(" · ");
+  $("note").innerHTML = `<b>${esc(m.name)}</b>. ${esc(m.note)}` +
+      (stats ? ` <span class="stats">(${esc(stats)})</span>` : "");
+  if (m.builtin) {
+    $("warmup").value = $("samples").value = 1000;
+    $("code").value = PRESETS[m.builtin].code;
+    $("data").value = PRESETS[m.builtin].data();
     return;
   }
-  // These two take real work per gradient, so ask for fewer draws than
-  // the toy presets rather than looking hung at 1000.
-  $("warmup").value = corpus.warmup;
-  $("samples").value = corpus.samples;
+  // Heavier models ask for fewer draws than the toy presets rather than
+  // looking hung; gen_web_models.py picks the count from the reference
+  // sampling time.
+  $("warmup").value = m.warmup;
+  $("samples").value = m.samples;
   $("code").value = $("data").value = "loading...";
-  const get = (ext) => fetch(`./models/${corpus.file}.${ext}`)
-      .then((r) => { if (!r.ok) throw new Error(r.status); return r.text(); });
+  const get = (p) => fetch(p).then((r) => {
+    if (!r.ok) throw new Error(`${p}: ${r.status}`);
+    return r.text();
+  });
   try {
-    const [code, data] = await Promise.all([get("stan"), get("json")]);
+    const [code, data] = await Promise.all([
+      get(`./models/${m.name}.stan`), get(`./models/data/${m.data}.json`)]);
+    if (selected !== m) return;  // a faster click won the race
     $("code").value = code;
     $("data").value = data;
   } catch (e) {
+    if (selected !== m) return;
     $("code").value = $("data").value = "";
-    $("err").textContent = `could not load ${corpus.file}: ${e.message}`;
+    $("err").textContent = `could not load ${m.name}: ${e.message}`;
   }
 }
-$("preset").onchange = () => applyPreset($("preset").value);
-applyPreset("es");
+catalogReady.then(() => {
+  box.placeholder = `search ${CATALOG.length} models`;
+});
+choose(CATALOG[0]);
 
 // ---- run -------------------------------------------------------------------
 // fit = {names, samples, chains: [{name: Float64Array} per chain]}

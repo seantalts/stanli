@@ -23,4 +23,9 @@ chmod +w js/stancjs.bc.js
 # web/ is the demo page, assembled as a consumer of the package.
 cp js/index.mjs web/stanli.mjs
 cp js/worker.js js/stanli.js js/stanli.wasm js/stancjs.bc.js web/
+
+# The model catalog the page searches, written from the posteriordb
+# checkout rather than committed.
+python3 tools/gen_web_models.py
+
 ls -la web/
