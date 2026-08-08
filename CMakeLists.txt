@@ -87,7 +87,11 @@ if(EMSCRIPTEN)
   # The density kernels instantiate every activity mask times every shape
   # times summed/elementwise: 21 MB of object at -O3. The browser build
   # trades their straight-line speed for size.
-  set_source_files_properties(runtime/kernels/densities.cpp
+  set_source_files_properties(
+    runtime/kernels/densities_common.cpp
+    runtime/kernels/densities_rest.cpp
+    runtime/kernels/densities_cdf_a.cpp
+    runtime/kernels/densities_cdf_b.cpp
     PROPERTIES COMPILE_OPTIONS -Oz)
   # stan-math's rev core includes TBB 2020 headers unconditionally, and
   # that TBB predates wasm: its machine layer selects by OS macro and
@@ -130,6 +134,10 @@ add_library(stanli_shared SHARED
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
+  runtime/kernels/densities_common.cpp
+  runtime/kernels/densities_rest.cpp
+  runtime/kernels/densities_cdf_a.cpp
+  runtime/kernels/densities_cdf_b.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
   runtime/kernels/ode.cpp
@@ -207,6 +215,10 @@ add_library(stanli STATIC
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
+  runtime/kernels/densities_common.cpp
+  runtime/kernels/densities_rest.cpp
+  runtime/kernels/densities_cdf_a.cpp
+  runtime/kernels/densities_cdf_b.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
   runtime/kernels/ode.cpp
