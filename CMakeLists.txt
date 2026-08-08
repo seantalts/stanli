@@ -369,4 +369,5 @@ stanli_add_test(test_diagnose)
 stanli_add_test(test_multichain)
 stanli_add_test(test_newtrans)
 stanli_add_test(test_rejectprint)
+stanli_add_test(test_odevariadic)
 endif()  # NOT EMSCRIPTEN

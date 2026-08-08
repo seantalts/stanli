@@ -56,10 +56,54 @@ struct MirRhs {
       run_rhs<T>(spec->prog, T(t), ys.data(), ths.data(), x_r.data(), out);
       return out;
     }
-    std::vector<T> tv{T(t)}, yv(y.begin(), y.end()),
-        thv(theta.begin(), theta.end()), xrv(x_r.begin(), x_r.end());
+    // Rebuild the formal argument list the right-hand side declares.
+    // MirInterp::call binds positionally by declared type, so the real
+    // arguments have to arrive already split out of the packed theta and
+    // x_r -- in the same order compile_rhs_args assigned their register
+    // ranges, which is the order spec->args records.
+    std::vector<std::vector<T>> reals{{T(t)}, std::vector<T>(y.begin(), y.end())};
+    std::vector<std::vector<int>> ints;
+    size_t th_at = 0, xr_at = 0;
+    for (const RhsArg& a : spec->args) {
+      if (a.is_int) {
+        ints.push_back(a.ints);
+      } else if (a.is_param) {
+        reals.emplace_back(theta.begin() + th_at,
+                           theta.begin() + th_at + a.len);
+        th_at += (size_t)a.len;
+      } else {
+        reals.emplace_back(x_r.begin() + xr_at, x_r.begin() + xr_at + a.len);
+        xr_at += (size_t)a.len;
+      }
+    }
     MirInterp<T> ev(*spec->funs(), "ODE function");
-    return ev.call(*spec->rhs(), {tv, yv, thv, xrv}, {x_i});
+    return ev.call(*spec->rhs(), reals, ints);
+  }
+};
+
+// in = {z_init, theta}; data ts / x_r / x_i and tolerances live in the spec.
+// out = N_ts * S, array-major (time outer, state inner), matching Stan's
+// array[N, S] layout.
+// The modern family's functor convention: an Eigen state in and out, and
+// the variadic arguments after the message stream. It forwards to the
+// same MirRhs, which is where the packed theta/x_r/x_i are split back
+// into the right-hand side's declared parameters.
+struct VarRhs {
+  const OdeSpec* spec;
+
+  template <typename T_y, typename T_param>
+  Eigen::Matrix<stan::return_type_t<T_y, T_param>, Eigen::Dynamic, 1>
+  operator()(const double& t,
+             const Eigen::Matrix<T_y, Eigen::Dynamic, 1>& y, std::ostream*,
+             const std::vector<T_param>& theta,
+             const std::vector<double>& x_r,
+             const std::vector<int>& x_i) const {
+    using T = stan::return_type_t<T_y, T_param>;
+    const std::vector<T_y> yv(y.data(), y.data() + y.size());
+    const std::vector<T> dy = MirRhs{spec}(t, yv, theta, x_r, x_i);
+    Eigen::Matrix<T, Eigen::Dynamic, 1> out(dy.size());
+    for (size_t i = 0; i < dy.size(); ++i) out(i) = dy[i];
+    return out;
   }
 };
 
@@ -69,14 +113,53 @@ struct MirRhs {
 template <typename T>
 std::vector<std::vector<T>> solve(const OdeSpec& s, const std::vector<T>& z0,
                                   const std::vector<T>& theta) {
-  MirRhs f{&s};
-  if (s.stiff)
-    return stan::math::integrate_ode_bdf(f, z0, s.t0, s.ts, theta, s.x_r,
-                                         s.x_i, nullptr, s.rtol, s.atol,
-                                         s.max_steps);
-  return stan::math::integrate_ode_rk45(f, z0, s.t0, s.ts, theta, s.x_r,
-                                        s.x_i, nullptr, s.rtol, s.atol,
-                                        s.max_steps);
+  // The deprecated entry points, unchanged: the four corpus ODE models
+  // are verified against exactly this call.
+  if (s.legacy) {
+    MirRhs f{&s};
+    if (s.stiff)
+      return stan::math::integrate_ode_bdf(f, z0, s.t0, s.ts, theta, s.x_r,
+                                           s.x_i, nullptr, s.rtol, s.atol,
+                                           s.max_steps);
+    return stan::math::integrate_ode_rk45(f, z0, s.t0, s.ts, theta, s.x_r,
+                                          s.x_i, nullptr, s.rtol, s.atol,
+                                          s.max_steps);
+  }
+
+  VarRhs f{&s};
+  Eigen::Matrix<T, Eigen::Dynamic, 1> y0((Eigen::Index)z0.size());
+  for (size_t i = 0; i < z0.size(); ++i) y0((Eigen::Index)i) = z0[i];
+  // Dispatch on the solver the model actually named. Mapping adams onto
+  // bdf (or ckrk onto rk45) agrees to tolerance on an easy system and is
+  // still the wrong integrator for the user who picked one for its
+  // stability, so each gets its own call.
+  std::vector<Eigen::Matrix<T, Eigen::Dynamic, 1>> res;
+  switch (s.solver) {
+    case OdeSpec::BDF:
+      res = stan::math::ode_bdf_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
+                                    s.max_steps, nullptr, theta, s.x_r, s.x_i);
+      break;
+    case OdeSpec::ADAMS:
+      res = stan::math::ode_adams_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
+                                      s.max_steps, nullptr, theta, s.x_r,
+                                      s.x_i);
+      break;
+    case OdeSpec::CKRK:
+      res = stan::math::ode_ckrk_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
+                                     s.max_steps, nullptr, theta, s.x_r,
+                                     s.x_i);
+      break;
+    default:
+      res = stan::math::ode_rk45_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
+                                     s.max_steps, nullptr, theta, s.x_r,
+                                     s.x_i);
+      break;
+  }
+  std::vector<std::vector<T>> out;
+  out.reserve(res.size());
+  for (const auto& r : res)
+    out.emplace_back(r.data(), r.data() + r.size());
+  return out;
 }
 
 void ode_fwd(KernelCtx& ctx) {

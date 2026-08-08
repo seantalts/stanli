@@ -1648,8 +1648,137 @@ struct Lowering {
     return std::nullopt;
   }
 
+  // The modern variadic family: ode_rk45 / ode_bdf / ode_adams / ode_ckrk
+  // and their _tol forms.
+  //
+  //   ode_SOLVER(f, y0, t0, ts, ...args)
+  //   ode_SOLVER_tol(f, y0, t0, ts, rtol, atol, max_steps, ...args)
+  //
+  // Everything after the fixed prefix is passed straight through to the
+  // right-hand side, in any number and any type. They reduce to the same
+  // calling convention integrate_ode_* has always used -- autodiff reals
+  // packed in order, data reals packed in order, integers as compile-time
+  // constants -- so the kernel and the register machine are unchanged;
+  // only the packing at this end is new.
+  std::optional<Val> lower_ode_variadic(const mir::Expr& e) {
+    static const std::vector<std::pair<const char*, OdeSpec::Solver>>
+        kSolvers = {{"ode_bdf", OdeSpec::BDF},
+                    {"ode_adams", OdeSpec::ADAMS},
+                    {"ode_rk45", OdeSpec::RK45},
+                    {"ode_ckrk", OdeSpec::CKRK}};
+    std::string base = e.name;
+    bool with_tol = false;
+    if (base.size() > 4 && base.compare(base.size() - 4, 4, "_tol") == 0) {
+      with_tol = true;
+      base = base.substr(0, base.size() - 4);
+    }
+    const auto sit = std::find_if(
+        kSolvers.begin(), kSolvers.end(),
+        [&](const auto& s) { return base == s.first; });
+    if (sit == kSolvers.end()) return std::nullopt;
+
+    const size_t fixed = with_tol ? 7 : 4;
+    if (e.args.size() < fixed) fail(e.name + ": unexpected arity", e.raw);
+    auto spec = std::make_shared<OdeSpec>();
+    if (fun_defs.find(e.args[0].name) == fun_defs.end())
+      fail(e.name + ": unknown right-hand side " + e.args[0].name, e.raw);
+    spec->adopt(fun_defs);
+    spec->rhs_name = e.args[0].name;
+    spec->solver = sit->second;
+    spec->stiff = spec->solver == OdeSpec::BDF ||
+                  spec->solver == OdeSpec::ADAMS;
+    // stan-math's defaults, per solver: the CVODES pair is far tighter
+    // than the Runge-Kutta pair, and using one set for both is how
+    // one_comp_mm's gradients ended up 2.9e-6 off CmdStan once already.
+    if (spec->stiff) {
+      spec->rtol = 1e-10;
+      spec->atol = 1e-10;
+      spec->max_steps = 100000000;
+    }
+    spec->t0 = const_values(e.args[2]).at(0);
+    spec->ts = const_values(e.args[3]);
+    if (with_tol) {
+      spec->rtol = const_values(e.args[4]).at(0);
+      spec->atol = const_values(e.args[5]).at(0);
+      spec->max_steps = (long)const_values(e.args[6]).at(0);
+    }
+
+    // Classify and pack. Data arguments fold into the spec here and never
+    // reach the graph; autodiff ones are concatenated in argument order
+    // into the single theta input the op takes, which is the order
+    // compile_rhs_args assigns their register sub-ranges in.
+    std::vector<RhsArg> rargs;
+    std::vector<Val> param_parts;
+    for (size_t k = fixed; k < e.args.size(); ++k) {
+      const mir::Expr& a = e.args[k];
+      RhsArg ra;
+      const bool is_int = a.type_.find("UInt") != std::string::npos;
+      if (is_int && a.data_only) {
+        ra.is_int = true;
+        ra.ints = const_ints(a);
+      } else if (a.data_only) {
+        // One evaluation, held in a local. Calling const_values(a) twice
+        // and taking begin() from one temporary and end() from the other
+        // is an invalid range, and it does not fail loudly: it appended
+        // hundreds of garbage doubles to x_r and surfaced much later as
+        // "ode parameters and data[927] is nan".
+        const std::vector<double> vals = const_values(a);
+        ra.len = (int)vals.size();
+        spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());
+      } else {
+        if (is_int)
+          fail(e.name + ": integer argument " + std::to_string(k - fixed + 1) +
+                   " is not data",
+               e.raw);
+        const Val v = lower_expr(a);
+        ra.is_param = true;
+        ra.len = (int)info[v.slot].len;
+        param_parts.push_back(v);
+      }
+      rargs.push_back(std::move(ra));
+    }
+
+    Val z0 = lower_expr(e.args[1]);
+    const int64_t S = info[z0.slot].len;
+    const int64_t N = (int64_t)spec->ts.size();
+
+    // One contiguous theta. A model with a single parameter argument --
+    // which is most of them -- gets its slot used directly and pays for
+    // no copy at all; more than one chains through CONCAT2, whose
+    // backward already splits the adjoint back out.
+    Val theta;
+    if (param_parts.empty()) {
+      theta = {const_slot(0.0), {}};  // len 1, unread: n_th is 0
+    } else {
+      theta = param_parts[0];
+      int64_t acc = info[theta.slot].len;
+      for (size_t k = 1; k < param_parts.size(); ++k) {
+        const int64_t add = info[param_parts[k].slot].len;
+        theta = emit(OP_CONCAT2, {theta.slot, param_parts[k].slot}, acc + add);
+        acc += add;
+      }
+    }
+
+    spec->args = rargs;
+    spec->prog = compile_rhs_args(*spec->rhs(), *spec->funs(), (int)S, rargs);
+    // Falling back to the interpreter is correct but ~30x slower, so make
+    // it findable rather than silent.
+    if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ODE"))
+      std::fprintf(stderr,
+                   "stanli: ODE right-hand side %s falls back to the "
+                   "interpreter: %s\n",
+                   spec->rhs_name.c_str(), spec->prog.why.c_str());
+
+    Val v = emit(OP_ODE, {z0.slot, theta.slot}, N * S, {}, {(int)N, (int)S});
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+    decl_dims_pending = {N, S};
+    return v;
+  }
+
   // The integrate_ode_* family.
   std::optional<Val> lower_ode_fn(const mir::Expr& e) {
+    if (auto v = lower_ode_variadic(e)) return v;
     if (e.name.rfind("integrate_ode_", 0) == 0) {
       // integrate_ode_*(f, z_init, t0, ts, theta, x_r, x_i[, rtol, atol,
       // max_steps]). Everything but z_init and theta is data, and is
@@ -1662,6 +1791,8 @@ struct Lowering {
       spec->adopt(fun_defs);
       spec->rhs_name = e.args[0].name;
       spec->stiff = e.name.find("bdf") != std::string::npos;
+      spec->legacy = true;
+      spec->solver = spec->stiff ? OdeSpec::BDF : OdeSpec::RK45;
       // stan-math's own defaults differ per solver: rk45 1e-6/1e-6/1e6,
       // bdf 1e-10/1e-10/1e8. Using one set for both left one_comp_mm's
       // gradients 2.9e-6 off CmdStan.
@@ -1685,6 +1816,12 @@ struct Lowering {
       const int64_t N = (int64_t)spec->ts.size();
       // Compile the right-hand side now that its argument sizes are known.
       // A failure here is not a compile error: the interpreter still runs it.
+      spec->args.resize(3);
+      spec->args[0].is_param = true;
+      spec->args[0].len = (int)info[theta.slot].len;
+      spec->args[1].len = (int)spec->x_r.size();
+      spec->args[2].is_int = true;
+      spec->args[2].ints = spec->x_i;
       spec->prog = compile_rhs(*spec->rhs(), *spec->funs(), (int)S,
                                (int)info[theta.slot].len,
                                (int)spec->x_r.size(), spec->x_i);

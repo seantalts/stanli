@@ -20,7 +20,7 @@ can be picked up cold.
 
 ---
 
-**Status, 2026-08-08:** items 1 and 2 are done and verified (30/30 tests,
+**Status, 2026-08-08:** items 1, 2 and the solver half of 3 are done and verified (30/30 tests,
 20/20 transforms bitwise vs CmdStan, 119/119 corpus models unchanged
 against the stored references). Items 3-7 are as written.
 
@@ -94,7 +94,12 @@ brms-generated models are made of.
 
 ---
 
-## 3. Modern `ode_*` and the other solvers
+## 3. Modern `ode_*` and the other solvers — DONE (solvers), open (other solvers)
+
+The four `ode_*` solvers and their `_tol` forms landed, verified against
+CmdStan by `harnesses/ode_sweep.py`. What is still open from this item is
+the rest of the paragraph below: `algebra_solver`, `solve_newton`,
+`solve_powell`, `integrate_1d`, and the DAE family.
 
 Only the deprecated `integrate_ode_*` family lowers (`lower.cpp:1628`).
 Current models use the variadic `ode_rk45`/`ode_bdf`/`ode_adams`/

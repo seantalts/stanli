@@ -56,6 +56,40 @@ TBB's scheduler-entry hook does it for every worker -- and this build
 stubs TBB out. Raw `std::thread`s segfaulted inside `start_nested()`
 until `run_nuts_chains` did it itself.
 
+### The modern ODE interface
+
+`ode_rk45`, `ode_bdf`, `ode_adams`, `ode_ckrk` and their `_tol` forms.
+Only the deprecated `integrate_ode_*` family lowered before, so a model
+written against the interface Stan has recommended for years did not
+compile.
+
+The two differ in more than spelling: the modern right-hand side takes a
+`vector` state and returns a `vector`, and everything after `ts` is
+passed through in any number and any type, where the old one fixed
+exactly `(theta, x_r, x_i)`. Both now reduce to one calling convention --
+autodiff reals packed in order, data reals packed in order, integers as
+compile-time constants -- so the register machine that made ODE
+right-hand sides 29-39x faster is unchanged and serves both.
+
+Each solver dispatches to its own stan-math entry point. Mapping
+`ode_adams` onto BDF, or `ode_ckrk` onto RK45, agrees to solver tolerance
+on an easy system and is still the wrong integrator for the user who
+chose one for its stability -- and it would have passed a casual test.
+
+The interpreter fallback follows: a right-hand side the compiler cannot
+take still runs, as it always has, because the spec now carries the
+argument list the fallback needs to split the packed arguments back into
+the function's declared parameters. Coverage never shrinks, only speed.
+
+Verified against a CmdStan build of the same model at three points, 11
+interfaces including the deprecated one, worst 1.1e-14 relative
+(`harnesses/ode_sweep.py`). One bug found on the way, and it is the kind
+worth naming: the data-argument packing called `const_values(a)` twice
+and took `begin()` from one temporary and `end()` from the other. That is
+an invalid range and it does not fail loudly -- it appended hundreds of
+garbage doubles and surfaced much later as `ode parameters and
+data[927] is nan`.
+
 ### Parameter transforms, reject and print
 
 - **`offset` / `multiplier`.** The modern non-centering idiom, and what

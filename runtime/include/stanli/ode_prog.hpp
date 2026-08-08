@@ -39,8 +39,32 @@ struct RhsProgram : Program {
   std::string why;  // why not, when !ok
 };
 
-// Compile `f` against the argument sizes an integrate_ode_* call fixes.
-// Never throws: failure comes back as ok == false.
+// One argument of a right-hand side, after (t, y).
+//
+// The deprecated `integrate_ode_*` interface fixes exactly three of these
+// -- theta, x_r, x_i -- and the modern `ode_*` interface takes any number
+// of any type. Both reduce to this list, so there is one calling
+// convention: real arguments are packed in order into the theta region
+// when they carry autodiff and into the x_r region when they are data,
+// and integer arguments bind as compile-time constants. The lowering
+// packs the call site the same way, in the same order, which is what
+// makes the two halves agree.
+struct RhsArg {
+  bool is_int = false;
+  bool is_param = false;   // reals: theta region when true, x_r when false
+  int len = 0;             // reals
+  std::vector<int> ints;   // ints
+};
+
+// Compile `f` against a variadic argument list. Never throws: failure
+// comes back as ok == false with a reason.
+RhsProgram compile_rhs_args(
+    const mir::FunDef& f,
+    const std::map<std::string, const mir::FunDef*>& funs, int n_y,
+    const std::vector<RhsArg>& args);
+
+// The deprecated interface's fixed (t, y, theta, x_r, x_i) convention,
+// expressed in the same terms.
 RhsProgram compile_rhs(const mir::FunDef& f,
                        const std::map<std::string, const mir::FunDef*>& funs,
                        int n_y, int n_theta, int n_x_r,
