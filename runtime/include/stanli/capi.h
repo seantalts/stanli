@@ -174,6 +174,45 @@ int64_t stanli_diagnose_text(const double* draws, int64_t n_chains,
                              const char* const* names, const double* stats,
                              int max_depth, char* out, size_t out_len);
 
+/* ---- optimization --------------------------------------------------------
+ *
+ * L-BFGS, the same one CmdStan's `optimize` runs, over the same gradient
+ * the sampler uses. */
+
+typedef struct {
+  uint32_t seed;
+  int chain_id;
+  int iter;
+  int jacobian;        /* include the change-of-variables Jacobian, making
+                        * this the posterior MODE rather than the penalized
+                        * maximum likelihood. CmdStan defaults it off. */
+  double init_alpha;
+  double tol_obj;
+  double tol_rel_obj;
+  double tol_grad;
+  double tol_rel_grad;
+  double tol_param;
+  int history_size;
+  double init_radius;
+  const double* init;  /* unconstrained, or null for a random start */
+} stanli_optimize_opts;
+
+/* CmdStan's defaults. Call before setting fields, for the same reason
+ * stanli_sample_opts_init exists. */
+void stanli_optimize_opts_init(stanli_optimize_opts* o);
+
+/* Writes the mode to `unconstrained` (n_unconstrained doubles) and, when
+ * `values` is non-null, every CSV column there (stanli_wa_n_columns, or
+ * n_constrained when the model has no generated quantities). *lp receives
+ * the log density at the mode.
+ *
+ * Returns 0 when the optimizer converged, nonzero otherwise with a
+ * message in err -- and in that case the buffers still hold the last
+ * point it reached, which is usually what a user wants to look at. */
+int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
+                    double* unconstrained, double* values, double* lp,
+                    char* err, size_t err_len);
+
 /* Constrained view: flattened parameter values for one unconstrained q.
  * n_constrained gives the output length; names are "mu", "theta.1", ... */
 int64_t stanli_n_constrained(const stanli_model* m);

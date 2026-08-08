@@ -226,6 +226,40 @@ def test_generated_quantities_differ_across_chains():
     assert not (fit.draws("yrep")[0] == fit.draws("yrep")[1]).all()
 
 
+def test_optimize_finds_a_mode_and_feeds_sample():
+    m = _es()
+    r = m.optimize(seed=1)
+    # Every CSV column, the way one draw of sample() comes back.
+    assert "mu" in r and "tau" in r and "theta.1" in r
+    assert r.unconstrained.shape == (m.n_unconstrained,)
+    # The reported lp must be the model's lp at that point, not the
+    # objective the optimizer minimizes -- that sign slip is silent.
+    lp, _ = m.log_prob_grad(r.unconstrained)
+    assert abs(lp - r.lp) < 1e-8, (lp, r.lp)
+    # And no nearby point may beat it, which is what "mode" means.
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        q = r.unconstrained + 0.01 * rng.standard_normal(m.n_unconstrained)
+        assert m.log_prob_grad(q)[0] <= r.lp + 1e-8
+
+    # Starting the sampler from the mode is the point of having it.
+    fit = m.sample(chains=1, seed=2, warmup=200, samples=200,
+                   inits=r.unconstrained)
+    assert fit.n_draws == 200
+
+
+def test_optimize_refuses_the_jacobian_free_form():
+    # CmdStan's default is jacobian=0; stanli cannot express it, and must
+    # say so rather than return the posterior mode under that name.
+    m = _es()
+    try:
+        m.optimize(seed=1, jacobian=False)
+    except NotImplementedError as e:
+        assert "Jacobian" in str(e)
+        return
+    raise AssertionError("expected NotImplementedError for jacobian=False")
+
+
 def test_wrong_size_raises():
     m = stanli.Model(
         stan_code="parameters { real x; } model { x ~ normal(0, 1); }")

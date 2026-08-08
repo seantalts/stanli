@@ -195,6 +195,7 @@ add_library(stanli_shared SHARED
   runtime/src/island.cpp
   runtime/src/nuts.cpp
   runtime/src/diagnose.cpp
+  runtime/src/estimate.cpp
   runtime/src/mir_reader.cpp
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
@@ -282,6 +283,7 @@ add_library(stanli STATIC
   runtime/src/island.cpp
   runtime/src/nuts.cpp
   runtime/src/diagnose.cpp
+  runtime/src/estimate.cpp
   runtime/src/mir_reader.cpp
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
@@ -388,4 +390,5 @@ stanli_add_test(test_multichain)
 stanli_add_test(test_newtrans)
 stanli_add_test(test_rejectprint)
 stanli_add_test(test_odevariadic)
+stanli_add_test(test_estimate)
 endif()  # NOT EMSCRIPTEN

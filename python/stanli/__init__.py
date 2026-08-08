@@ -14,7 +14,8 @@ import sys
 
 import numpy as np
 
-__all__ = ["Model", "Fit", "Summary", "exact_lp", "thread_safe",
+__all__ = ["Model", "Fit", "Summary", "OptimizeResult",
+           "exact_lp", "thread_safe",
            "SAMPLER_COLUMNS", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
@@ -31,6 +32,25 @@ _N_SAMPLER_COLS = len(SAMPLER_COLUMNS)
 _SUMMARY_STATS = ("mean", "mcse_mean", "sd", "mcse_sd", "q5", "q50", "q95",
                   "ess_bulk", "ess_tail", "r_hat")
 _N_SUMMARY_STATS = len(_SUMMARY_STATS)
+
+
+class _OptimizeOpts(ctypes.Structure):
+    """Mirrors stanli_optimize_opts in runtime/include/stanli/capi.h."""
+    _fields_ = [
+        ("seed", ctypes.c_uint32),
+        ("chain_id", ctypes.c_int),
+        ("iter", ctypes.c_int),
+        ("jacobian", ctypes.c_int),
+        ("init_alpha", ctypes.c_double),
+        ("tol_obj", ctypes.c_double),
+        ("tol_rel_obj", ctypes.c_double),
+        ("tol_grad", ctypes.c_double),
+        ("tol_rel_grad", ctypes.c_double),
+        ("tol_param", ctypes.c_double),
+        ("history_size", ctypes.c_int),
+        ("init_radius", ctypes.c_double),
+        ("init", ctypes.POINTER(ctypes.c_double)),
+    ]
 
 
 class _SampleOpts(ctypes.Structure):
@@ -116,6 +136,14 @@ def _load_lib():
                                          ctypes.c_int64, ctypes.c_int64,
                                          ctypes.c_int64,
                                          ctypes.POINTER(ctypes.c_double)]
+    lib.stanli_optimize_opts_init.argtypes = [ctypes.POINTER(_OptimizeOpts)]
+    lib.stanli_optimize.restype = ctypes.c_int
+    lib.stanli_optimize.argtypes = [ctypes.c_void_p,
+                                    ctypes.POINTER(_OptimizeOpts),
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.POINTER(ctypes.c_double),
+                                    ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_diagnose_text.restype = ctypes.c_int64
     lib.stanli_diagnose_text.argtypes = [ctypes.POINTER(ctypes.c_double),
                                          ctypes.c_int64, ctypes.c_int64,
@@ -397,6 +425,16 @@ class Fit:
                 f"{len(self.names)} columns>")
 
 
+class OptimizeResult(dict):
+    """The mode, by column name, plus where it is on the sampler's scale.
+
+    A dict so `result["mu"]` reads the way a draw does, with the
+    unconstrained point and lp attached for handing to `sample(inits=)`.
+    """
+    unconstrained = None
+    lp = None
+
+
 class Model:
     """A compiled (model, data) pair."""
 
@@ -461,6 +499,58 @@ class Model:
             return [_lib.stanli_wa_column_name(self._m, i).decode()
                     for i in range(n_wa)], True
         return list(self.constrained_names), False
+
+    def optimize(self, *, seed=1, iter=2000, jacobian=True, init=None,
+                 init_radius=2.0):
+        """The mode by L-BFGS -- the same optimizer CmdStan's `optimize` runs.
+
+        Returns an OptimizeResult: a {name: float} of every CSV column at
+        the mode, matching one draw of what `sample()` returns, with the
+        unconstrained point and lp attached. `.unconstrained` is what
+        `sample(inits=...)` takes.
+
+        Returns the posterior MODE. CmdStan's `optimize` defaults to
+        `jacobian=0`, the penalized maximum likelihood, which stanli
+        cannot offer: the Jacobian terms are folded into the graph at
+        lowering time. `jacobian=False` raises rather than quietly
+        returning the other quantity -- the two differ for any
+        constrained parameter, which is most models.
+        """
+        if not jacobian:
+            raise NotImplementedError(
+                "stanli folds the Jacobian into the graph at lowering "
+                "time, so the penalized maximum likelihood (CmdStan's "
+                "jacobian=0) is not available; optimize() returns the "
+                "posterior mode")
+        opts = _OptimizeOpts()
+        _lib.stanli_optimize_opts_init(ctypes.byref(opts))
+        opts.seed = seed
+        opts.iter = int(iter)
+        opts.jacobian = 1 if jacobian else 0
+        opts.init_radius = float(init_radius)
+        init_arr = None
+        if init is not None:
+            init_arr = np.ascontiguousarray(init, dtype=np.float64)
+            if init_arr.shape != (self.n_unconstrained,):
+                raise ValueError(
+                    f"init must be ({self.n_unconstrained},) on the "
+                    f"unconstrained scale, got {init_arr.shape}")
+            opts.init = _dptr(init_arr)
+
+        names, _ = self._column_names()
+        q = np.empty(self.n_unconstrained)
+        vals = np.empty(len(names))
+        lp = ctypes.c_double()
+        err = ctypes.create_string_buffer(4096)
+        rc = _lib.stanli_optimize(self._m, ctypes.byref(opts), _dptr(q),
+                                  _dptr(vals), ctypes.byref(lp), err, len(err))
+        del init_arr
+        if rc != 0:
+            raise RuntimeError(f"optimize failed: {err.value.decode()}")
+        out = OptimizeResult({n: vals[i] for i, n in enumerate(names)})
+        out.unconstrained = q
+        out.lp = lp.value
+        return out
 
     def sample(self, *, chains=4, seed=1, warmup=1000, samples=1000,
                delta=0.8, max_depth=10, thin=1, save_warmup=False,

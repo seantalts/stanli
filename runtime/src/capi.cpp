@@ -3,6 +3,7 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/diagnose.hpp>
+#include <stanli/estimate.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/wa_interp.hpp>
@@ -393,6 +394,77 @@ int64_t stanli_diagnose_text(const double* draws, int64_t n_chains,
     return (int64_t)text.size() + 1;
   } catch (const std::exception&) {
     return 0;
+  }
+}
+
+void stanli_optimize_opts_init(stanli_optimize_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_optimize_opts{};
+  const stanli::OptimizeConfig d;
+  o->seed = d.seed;
+  o->chain_id = d.chain_id;
+  o->iter = d.iter;
+  o->jacobian = d.jacobian ? 1 : 0;
+  o->init_alpha = d.init_alpha;
+  o->tol_obj = d.tol_obj;
+  o->tol_rel_obj = d.tol_rel_obj;
+  o->tol_grad = d.tol_grad;
+  o->tol_rel_grad = d.tol_rel_grad;
+  o->tol_param = d.tol_param;
+  o->history_size = d.history_size;
+  o->init_radius = d.init_radius;
+  o->init = nullptr;
+}
+
+int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
+                    double* unconstrained, double* values, double* lp,
+                    char* err, size_t err_len) {
+  try {
+    if (opts == nullptr) {
+      put_err(err, err_len, "null options");
+      return 1;
+    }
+    stanli::OptimizeConfig cfg;
+    cfg.seed = opts->seed;
+    cfg.chain_id = opts->chain_id > 0 ? opts->chain_id : 1;
+    cfg.iter = opts->iter > 0 ? opts->iter : 2000;
+    cfg.jacobian = opts->jacobian != 0;
+    cfg.init_alpha = opts->init_alpha;
+    cfg.tol_obj = opts->tol_obj;
+    cfg.tol_rel_obj = opts->tol_rel_obj;
+    cfg.tol_grad = opts->tol_grad;
+    cfg.tol_rel_grad = opts->tol_rel_grad;
+    cfg.tol_param = opts->tol_param;
+    cfg.history_size = opts->history_size > 0 ? opts->history_size : 5;
+    cfg.init_radius = opts->init_radius;
+    cfg.init = opts->init;
+
+    // The CSV side, so the optimizer can report the mode the way a draw is
+    // reported: whichever write_array path this model has.
+    stanli::WriteArray wa;
+    wa.names = m->wa_n > 0 ? m->wa_names : m->flat_names;
+    wa.row = [m](const double* q, double* out) {
+      if (m->wa_n > 0) {
+        stanli_wa_row(m, q, out);
+      } else {
+        stanli_constrain(m, q, out);
+      }
+    };
+
+    const stanli::OptimizeResult r =
+        stanli::run_optimize(*m->ex, &wa, cfg);
+    for (size_t i = 0; i < r.unconstrained.size(); ++i)
+      unconstrained[i] = r.unconstrained[i];
+    if (values != nullptr)
+      for (size_t i = 0; i < r.values.size(); ++i) values[i] = r.values[i];
+    if (lp != nullptr) *lp = r.lp;
+    if (r.return_code != 0)
+      put_err(err, err_len,
+              r.message.empty() ? "L-BFGS did not converge" : r.message.c_str());
+    return r.return_code;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
   }
 }
 

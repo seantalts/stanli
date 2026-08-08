@@ -29,6 +29,25 @@ fit.draws("mu")         # (chains, draws), for a trace plot
 Model preparation takes milliseconds, so the first draw arrives about 20x
 sooner than a toolchain that compiles C++ per model.
 
+## The mode, and where to start
+
+```python
+r = model.optimize(seed=1)
+r["mu"], r.lp          # every CSV column at the mode, and the lp there
+r.unconstrained        # the point on the sampler's scale
+
+fit = model.sample(inits=r.unconstrained)   # start the chains there
+```
+
+L-BFGS -- stan's own, the one behind CmdStan's `optimize`.
+
+It returns the posterior **mode**. CmdStan's `optimize` defaults to
+`jacobian=0`, the penalized maximum likelihood, and stanli cannot offer
+that: the change-of-variables Jacobian is folded into the graph when the
+model is lowered. `jacobian=False` raises rather than quietly handing
+back the other quantity, since the two differ for any constrained
+parameter.
+
 ## Chains and convergence
 
 Four chains by default, run in parallel, because R-hat needs more than one

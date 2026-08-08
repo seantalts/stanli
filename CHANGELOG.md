@@ -56,6 +56,38 @@ TBB's scheduler-entry hook does it for every worker -- and this build
 stubs TBB out. Raw `std::thread`s segfaulted inside `start_nested()`
 until `run_nuts_chains` did it itself.
 
+### Optimization
+
+`Model.optimize()` runs L-BFGS -- stan's own, the one behind CmdStan's
+`optimize` -- over the same gradient the sampler uses, and returns the
+mode as every CSV column plus the unconstrained point. That point is
+what `sample(inits=...)` takes, which is the reason to have it.
+
+**It returns the posterior MODE, and refuses CmdStan's default.**
+CmdStan's `optimize` defaults to `jacobian=0`, the penalized maximum
+likelihood. stanli folds the change-of-variables Jacobian into the graph
+at lowering time and the model adapter ignores the template flag
+entirely, so `jacobian=False` raises rather than quietly returning the
+other quantity under that name -- they differ for any constrained
+parameter, which is most models. Excluding the Jacobian is possible in
+principle (`lower.cpp` already collects `jac_slots` separately) and is
+what the fix would be.
+
+`ExecutorModel` grew the rest of the stan model concept to get here:
+`log_prob` in its `std::vector` form as well as its Eigen one,
+`constrained_param_names` (which APPENDS -- the services push their own
+columns first), `write_array` in both forms, `get_dims`, and a
+`transform_inits` that throws, because unconstraining a user's starting
+values needs the INVERSE parameter transforms and only the forward ones
+exist.
+
+**Pathfinder is not here.** The adapter is now complete enough that
+stan's service compiles and runs against it, but the draws come back
+empty -- the parameter writer is never called -- and an entry point that
+silently returns nothing is worse than none. Multi-path additionally
+needs real TBB, which this build stubs out, so its `tbb::parallel_for`
+does not link at all.
+
 ### The modern ODE interface
 
 `ode_rk45`, `ode_bdf`, `ode_adams`, `ode_ckrk` and their `_tol` forms.

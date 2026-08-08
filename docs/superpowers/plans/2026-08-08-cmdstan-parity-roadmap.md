@@ -113,7 +113,22 @@ Same shape, same machinery: `algebra_solver`/`solve_newton`/
 
 ---
 
-## 4. Pathfinder, optimize, laplace
+## 4. Pathfinder, optimize, laplace — PARTIAL
+
+**L-BFGS landed** (`Model.optimize()`), verified against a posterior
+whose mode is known in closed form. It returns the posterior MODE and
+refuses CmdStan's `jacobian=0` default rather than returning the wrong
+quantity under that name -- stanli folds the Jacobian into the graph at
+lowering time. `lower.cpp` already collects `jac_slots` separately, so
+making that flag real is the next piece.
+
+**Pathfinder is not landed.** `ExecutorModel` now satisfies enough of
+the model concept that stan's single-path service compiles and runs,
+but its parameter writer is never called and the draws come back empty;
+that is one debugging session, not a design problem. Multi-path is a
+harder blocker: it uses `tbb::parallel_for` and this build stubs TBB
+out, so it does not link. **laplace_sample** and standalone
+**generate_quantities** are untouched.
 
 `deps/stan/src/stan/services/` ships `pathfinder/`, `optimize/`,
 `laplace_sample`, and `diagnose/`. They are drivers over a model's
