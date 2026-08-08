@@ -53,6 +53,15 @@ void register_density_kernels() {
   register_kernel(OP_BERNOULLI_LOGIT_GLM_LPMF,
                   Kernel{bernoulli_logit_glm_fwd, bernoulli_logit_glm_bwd,
                          sum_in_lens});
+  register_kernel(OP_POISSON_LOG_GLM_LPMF,
+                  Kernel{poisson_log_glm_fwd, poisson_log_glm_bwd,
+                         sum_in_lens});
+  register_kernel(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF,
+                  Kernel{neg_binomial_2_log_glm_fwd,
+                         neg_binomial_2_log_glm_bwd, sum_in_lens});
+  register_kernel(OP_BETA_BINOMIAL_LPMF,
+                  Kernel{beta_binomial_fwd, density_bwd<2>,
+                         density_scratch<2>});
 }
 
 }  // namespace stanli

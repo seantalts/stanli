@@ -7,7 +7,7 @@ with a generated single-function model.
 
 | family | supported |
 |---|---|
-| densities (`_lpdf`, `_lpmf`) | 47 / 72 |
+| densities (`_lpdf`, `_lpmf`) | 50 / 72 |
 | distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 90 / 105 |
 | scalar math (all-real signature) | 47 / 129 |
 
@@ -52,21 +52,29 @@ Matrix arguments, each with its own shape plumbing. `multi_normal`,
 in as hand-written kernels; these would follow the same pattern, one at a
 time.
 
-### GLM fast paths -- `poisson_log_glm`, `neg_binomial_2_log_glm`,
-`binomial_logit_glm`, `categorical_logit_glm`, `ordered_logistic_glm`
+### GLM fast paths -- `binomial_logit_glm`, `categorical_logit_glm`, `ordered_logistic_glm`
 
-`bernoulli_logit_glm` is in and shows the shape: a data matrix in a
-row-major slot with its dims in `idata`. These matter for coverage rather
-than speed -- brms and rstanarm emit the GLM form directly, so a model
-using one does not merely run slower, it does not run.
+`bernoulli_logit_glm`, `poisson_log_glm` and `neg_binomial_2_log_glm` are
+in, and show the shape: a data matrix in a row-major slot with its dims in
+`idata`, alpha as a scalar intercept (the per-row vector form is not
+wired). These matter for coverage rather than speed -- brms and rstanarm
+emit the GLM form directly, so a model using one does not merely run
+slower, it does not run.
 
-### Multinomial family -- `multinomial`, `multinomial_logit`,
-`dirichlet_multinomial`, `beta_binomial`, `hypergeometric`,
-`discrete_range`
+They were also the one density shape the lowering gave no variant at all,
+so their kernels hardcoded `propto=false`, and `poisson_log_glm`'s lp came
+out `sum(log(y!))` away from CmdStan's -- 10.45 on a six-row test -- with
+the gradients already exact. They take the same variant as every other
+density now. Setting only the propto bit is not an option: `density_bwd`
+reads a nonzero variant as a literal mask, so `0x80` alone means "no
+argument is active" and every gradient comes back zero.
 
-Integer outcomes that are not one int per lane: an array of counts, or two
-int groups. `binomial` already carries two groups
-(`with_int_group` in `densities.cpp`); the rest need their own layouts.
+### Multinomial family -- `multinomial`, `multinomial_logit`, `dirichlet_multinomial`, `hypergeometric`, `discrete_range`
+
+Integer outcomes that are not one int per lane: an array of counts.
+`beta_binomial` is in, through the two-int-group unpacking `binomial`
+already used (`with_int_group` in `densities.cpp`); the rest need their own
+layouts.
 `hypergeometric` and `discrete_range` have no real arguments at all, so
 they contribute a constant and no gradient.
 

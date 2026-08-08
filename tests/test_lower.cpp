@@ -741,6 +741,52 @@ int main() {
           "ordered_logistic: lp matches the var path");
   }
 
+  // The GLM fast paths. fn_sweep cannot reach these -- it generates
+  // all-scalar models and a GLM needs a data matrix -- so this is the only
+  // check that their propto bit and activity mask arrive.
+  {
+    // Through the JSON reader, so the data-matrix layout convention is
+    // part of what this checks: x[i][j] is row i, column j, and the
+    // reference below fills X the same way.
+    DataMap d = DataMap::from_json(
+        R"({"N": 4, "K": 2,
+            "x": [[0.3, -0.2], [1.1, 0.4], [-0.5, 0.9], [0.2, 0.7]],
+            "y": [2, 5, 1, 3]})");
+    CompiledModel gm =
+        compile_model(slurp("tests/fixtures/glmpois.tmir.sexp"), d);
+    Executor gex(std::move(gm.graph));
+    gm.bind(gex);
+    const double q[4] = {0.15, 0.3, -0.25, -0.4};  // alpha, beta[2], log phi
+    for (int i = 0; i < 4; ++i) gex.params_data()[i] = q[i];
+    double grad[4] = {0, 0, 0, 0};
+    const double lp = gex.gradient(grad);
+
+    using stan::math::var;
+    var alpha = q[0];
+    Eigen::Matrix<var, -1, 1> beta(2);
+    beta(0) = q[1];
+    beta(1) = q[2];
+    var u_phi = q[3], phi = stan::math::exp(u_phi);
+    Eigen::MatrixXd X(4, 2);
+    X << 0.3, -0.2, 1.1, 0.4, -0.5, 0.9, 0.2, 0.7;
+    const std::vector<int> y{2, 5, 1, 3};
+    var acc = u_phi;  // lower=0 jacobian on phi
+    acc += stan::math::normal_lpdf<true>(alpha, 0, 2);
+    acc += stan::math::normal_lpdf<true>(beta, 0, 2);
+    acc += stan::math::exponential_lpdf<true>(phi, 1);
+    acc += stan::math::poisson_log_glm_lpmf<true>(y, X, alpha, beta);
+    acc += stan::math::neg_binomial_2_log_glm_lpmf<true>(y, X, alpha, beta,
+                                                        phi);
+    acc.grad();
+
+    const bool g_ok = grad[0] == alpha.adj() && grad[1] == beta(0).adj() &&
+                      grad[2] == beta(1).adj() && grad[3] == u_phi.adj();
+    check(g_ok, "glm: gradients bitwise against the var path");
+    check(std::abs(lp - acc.val()) <=
+              8 * 2.220446049250313e-16 * std::abs(acc.val()),
+          "glm: lp matches the var path (propto reached the kernel)");
+  }
+
   {
     // Error path: an unsupported function is reported by name, never
     // silently miscompiled. Mutate a known-good fixture's density name.

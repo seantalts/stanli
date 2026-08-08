@@ -21,6 +21,9 @@ namespace stanli {
   X(OP_BINOMIAL_LPMF)                                                     \
   X(OP_BINOMIAL_LOGIT_LPMF)                                               \
   X(OP_BERNOULLI_LOGIT_GLM_LPMF)                                          \
+  X(OP_POISSON_LOG_GLM_LPMF)                                              \
+  X(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF)                                       \
+  X(OP_BETA_BINOMIAL_LPMF)                                                \
   X(OP_LOGIT)                                                             \
   X(OP_MEAN)                                                              \
   X(OP_REP_VEC)                                                           \

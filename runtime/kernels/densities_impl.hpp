@@ -175,27 +175,15 @@ void density_fwd_elt(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
 // families this density actually has. A missing propto family is not a
 // refusal: the full form is a correct log density, just not the one
 // CmdStan's `~` computes, so it lands a constant higher.
-template <int NArgs, int Listed, unsigned VecMask = 0, typename FProp,
+// The summed forward, and the only one most densities have. Partials for
+// argument k land at scratch[sum of lens of args < k]; the mask decides
+// which arguments are autodiff, the tier which instantiation families
+// exist. Whatever the outcome looks like -- a propagator edge, one idata
+// group, two, an integer array -- it is bound by the caller's lambdas, so
+// this is shared by every density shape in these shards.
+template <int NArgs, int Tier, unsigned VecMask, typename FProp,
           typename FFull>
-void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
-  constexpr int Tier = density_tier(Listed);
-  // A density with a vector-only argument has no elementwise form to
-  // instantiate -- the per-lane binding hands every argument over as a
-  // scalar, which is exactly what VecMask exists to forbid. reroll.cpp
-  // never fuses these (they are in neither of its opt-in lists), so the
-  // bit cannot arrive; refuse rather than write one element of N.
-  if constexpr (VecMask != 0) {
-    if (ctx.variant & 0x40u)
-      throw std::runtime_error(
-          "density: elementwise variant on a vector-argument density");
-  } else if (ctx.variant & 0x40u) {
-    // Real-argument densities reuse the same lambdas: scalar bindings
-    // instantiate the same generic templates.
-    density_fwd_elt<NArgs, Tier>(
-        ctx, [&](int64_t, const auto&... a) { fp(a...); },
-        [&](int64_t, const auto&... a) { ff(a...); });
-    return;
-  }
+void density_fwd_sum(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   sink s;
   int64_t off = 0;
   for (int k = 0; k < NArgs; ++k) {
@@ -217,6 +205,30 @@ void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   }
   active_sink() = nullptr;
   ctx.out.data[0] = s.value;
+}
+
+template <int NArgs, int Listed, unsigned VecMask = 0, typename FProp,
+          typename FFull>
+void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
+  constexpr int Tier = density_tier(Listed);
+  // A density with a vector-only argument has no elementwise form to
+  // instantiate -- the per-lane binding hands every argument over as a
+  // scalar, which is exactly what VecMask exists to forbid. reroll.cpp
+  // never fuses these (they are in neither of its opt-in lists), so the
+  // bit cannot arrive; refuse rather than write one element of N.
+  if constexpr (VecMask != 0) {
+    if (ctx.variant & 0x40u)
+      throw std::runtime_error(
+          "density: elementwise variant on a vector-argument density");
+  } else if (ctx.variant & 0x40u) {
+    // Real-argument densities reuse the same lambdas: scalar bindings
+    // instantiate the same generic templates.
+    density_fwd_elt<NArgs, Tier>(
+        ctx, [&](int64_t, const auto&... a) { fp(a...); },
+        [&](int64_t, const auto&... a) { ff(a...); });
+    return;
+  }
+  density_fwd_sum<NArgs, Tier, VecMask>(ctx, fp, ff);
 }
 
 // Partials for argument k live at scratch[sum of lens of args < k]. A scalar
@@ -324,18 +336,9 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
   // so instead. The branch costs nothing next to an incomplete beta.
   if (ctx.variant & 0x40u)
     throw std::runtime_error("cdf: elementwise variant not implemented");
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < NArgs; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
-  const unsigned mask = ctx.variant == 0 ? (1u << NArgs) - 1
-                                         : (ctx.variant & 0x3fu);
-  active_sink() = &s;
-  full_form<NArgs, Tier, 0>(mask, ctx, f);
-  active_sink() = nullptr;
-  ctx.out.data[0] = s.value;
+  // Tier here never carries the propto bit, so the first lambda is never
+  // instantiated; it exists to satisfy the shared signature.
+  density_fwd_sum<NArgs, Tier, 0>(ctx, [](const auto&...) {}, f);
 }
 
 #define STANLI_DEFINE_CDF_FWD(code, fn, n, tier)                         \
@@ -393,6 +396,11 @@ void binomial_fwd(KernelCtx&);
 void binomial_logit_fwd(KernelCtx&);
 void bernoulli_logit_glm_fwd(KernelCtx&);
 void bernoulli_logit_glm_bwd(KernelCtx&);
+void poisson_log_glm_fwd(KernelCtx&);
+void poisson_log_glm_bwd(KernelCtx&);
+void neg_binomial_2_log_glm_fwd(KernelCtx&);
+void neg_binomial_2_log_glm_bwd(KernelCtx&);
+void beta_binomial_fwd(KernelCtx&);
 void uniform_fwd(KernelCtx&);
 
 }  // namespace dens

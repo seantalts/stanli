@@ -94,6 +94,8 @@ DENSITIES = [
     ("neg_binomial_2_log_lpmf", 3, [3, 0.4, 1.3]),
     ("beta_neg_binomial_lpmf", 4, [3, 2.0, 3.0, 1.3]),
     ("yule_simon_lpmf", 2, [3, 1.3]),
+    # Two integer groups: the outcome and the trial count.
+    ("beta_binomial_lpmf", 4, [3, 10, 2.0, 3.0]),
 ]
 
 def cdf_specs(pool):

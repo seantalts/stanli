@@ -882,6 +882,10 @@ struct Lowering {
         {"neg_binomial_2_lpmf", {OP_NEG_BINOMIAL_2_LPMF, 3, 1}},
         {"binomial_lpmf", {OP_BINOMIAL_LPMF, 3, 2}},
         {"binomial_logit_lpmf", {OP_BINOMIAL_LOGIT_LPMF, 3, 2}},
+        {"poisson_log_glm_lpmf", {OP_POISSON_LOG_GLM_LPMF, 4, 1, true}},
+        {"neg_binomial_2_log_glm_lpmf",
+         {OP_NEG_BINOMIAL_2_LOG_GLM_LPMF, 5, 1, true}},
+        {"beta_binomial_lpmf", {OP_BETA_BINOMIAL_LPMF, 4, 2}},
         {"bernoulli_logit_glm_lpmf",
          {OP_BERNOULLI_LOGIT_GLM_LPMF, 4, 1, true}},
         {"dirichlet_lpdf", {OP_DIRICHLET_LPDF, 2, 0}},
@@ -924,7 +928,18 @@ struct Lowering {
         idata.push_back((int)xsi.cols);
       }
       Val dv = emit(d.op, ins, 1, {}, idata);
-      if (!d.glm) g.ops.back().variant = variant;
+      // GLM ops used to be the one density shape that got no variant at
+      // all, so their kernels hardcoded propto=false and poisson_log_glm's
+      // lp landed sum(log(y!)) -- 10.45 on a six-row test -- away from
+      // CmdStan's, with the gradients already exact. They get the same
+      // variant as everything else now. Their forwards bind arguments
+      // explicitly rather than through mask_dispatch, so the mask reaches
+      // only density_bwd, where it says to skip X -- which it already did
+      // by X's null adjoint. Setting only the propto bit is NOT an option:
+      // density_bwd reads a nonzero variant as a literal mask, so 0x80
+      // alone means "no argument is active" and every gradient comes back
+      // zero.
+      g.ops.back().variant = variant;
       return dv;
     }
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Three more densities, and a propto bug they exposed: `poisson_log_glm`,
+  `neg_binomial_2_log_glm` and `beta_binomial`, all bitwise against
+  CmdStan. GLM ops were the one density shape the lowering gave no variant
+  at all, so their kernels hardcoded `propto=false` and
+  `poisson_log_glm`'s lp landed `sum(log(y!))` away from CmdStan's with the
+  gradients already exact. `bernoulli_logit_glm` had the same hardcoding
+  and got away with it because bernoulli has no constant to drop. 50 of 72
+  densities now.
+
 - The browser build uses SIMD128. Worth 2% on most shapes and 11% on a
   matrix-heavy model for 0.03 MB gzipped, and every corpus model's
   gradients come out bitwise identical to the scalar build -- with FP
