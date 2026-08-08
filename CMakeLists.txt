@@ -391,4 +391,5 @@ stanli_add_test(test_newtrans)
 stanli_add_test(test_rejectprint)
 stanli_add_test(test_odevariadic)
 stanli_add_test(test_estimate)
+stanli_add_test(test_brmsmono)
 endif()  # NOT EMSCRIPTEN

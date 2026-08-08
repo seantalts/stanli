@@ -885,6 +885,19 @@ struct Lowering {
       Val v;
       if (try_fold_const(e, &v)) return v;
     }
+    // A shape query in a REAL-valued expression. eval_int already answers
+    // rows/cols/size from the slot or the data map, but only where an
+    // integer was expected; brms's mo() helper writes
+    // `rows(scale) * sum(scale[1:i])`, where the same call sits in the
+    // middle of arithmetic and reached the failure below instead.
+    if ((e.name == "rows" || e.name == "cols" || e.name == "size" ||
+         e.name == "num_elements") &&
+        e.args.size() == 1) {
+      try {
+        return Val{const_slot((double)eval_int(e)), {}};
+      } catch (const CompileError&) {
+      }
+    }
     fail("unsupported function " + e.name);
   }
 

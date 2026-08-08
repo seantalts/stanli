@@ -77,6 +77,38 @@ std::vector<char> mark_constant_ops(const Graph& g) {
           changed = true;
         }
       }
+      // And refuse any slot a surviving READ-MODIFY-WRITE op updates in
+      // place, when a constant op is what produces its initial contents.
+      //
+      // make_inplace_updates refuses a fill-backed base for exactly this
+      // reason -- "mutating one would let state leak from one gradient
+      // evaluation into the next" -- but it decides BEFORE this pass runs,
+      // and folding is what turns an op-written slot into a fill. So the
+      // precondition it checked can stop being true afterwards.
+      //
+      //   vector[N] mu = rep_vector(0, N);
+      //   for (n in 1:N) mu[n] += f(theta, n);
+      //
+      // rep_vector's arguments are constants, so it folds; mu becomes a
+      // bind-time fill; and the in-place element writes then accumulate
+      // across evaluations. The same point evaluated four times gave four
+      // different log densities, and nothing structural showed it --
+      // the corpus rig evaluates one point per process, so only a sampler
+      // (or a second call) can see it.
+      //
+      // out == one of in is the read-modify-write signature; an op that
+      // merely overwrites its output is safe to fold behind, since it
+      // recomputes the whole slot every evaluation.
+      if (op.out >= 0 && last_write[(size_t)op.out] >= 0 &&
+          !no_fold[(size_t)op.out]) {
+        bool reads_own_output = false;
+        for (int k = 0; k < op.n_in; ++k)
+          reads_own_output = reads_own_output || op.in[k] == op.out;
+        if (reads_own_output) {
+          no_fold[(size_t)op.out] = 1;
+          changed = true;
+        }
+      }
     }
     if (!changed || round > 16) return is_const;
   }
