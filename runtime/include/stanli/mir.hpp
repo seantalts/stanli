@@ -29,9 +29,12 @@ struct Expr {
 };
 
 struct Transform {
+  // The names are stanc3's own MIR tags, so a new transform in the
+  // compiler is greppable here.
   enum Kind { Identity, Lower, Upper, LowerUpper, Offset, Multiplier,
               OffsetMultiplier, Simplex, Ordered, PositiveOrdered,
-              CholeskyCorr, Unsupported } kind = Identity;
+              CholeskyCorr, UnitVector, SumToZero, Correlation, Covariance,
+              CholeskyCov, Unsupported } kind = Identity;
   std::vector<Expr> args;
   std::string raw;
 };

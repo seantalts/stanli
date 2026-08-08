@@ -20,13 +20,60 @@ megabytes.
 import stanli
 
 model = stanli.Model(stan_file="eight_schools.stan", data="data.json")
-draws = model.sample(seed=1, warmup=1000, samples=1000)
+fit = model.sample(seed=1, chains=4, warmup=1000, samples=1000)
 
-draws["mu"].mean()      # one numpy array of draws per constrained parameter
+fit["mu"].mean()        # every draw of a column, chains concatenated
+fit.draws("mu")         # (chains, draws), for a trace plot
 ```
 
 Model preparation takes milliseconds, so the first draw arrives about 20x
 sooner than a toolchain that compiles C++ per model.
+
+## Chains and convergence
+
+Four chains by default, run in parallel, because R-hat needs more than one
+and a single-chain run cannot be checked for convergence at all. Eight
+schools does all four in about 70 ms. Threading changes nothing about the
+answer: each chain owns its executor and its RNG stream, so the draws come
+out byte-identical to a sequential run.
+
+```python
+print(fit.summary())
+```
+
+```
+name                Mean       MCSE     StdDev         5%        50%        95%   ESS_bulk   ESS_tail      R_hat
+mu                4.4600     0.0532     3.1705    -0.7414     4.5519     9.5384       3586       2847      1.000
+tau               3.4752     0.0635     3.1612     0.2192     2.6680     9.6313       2160       1874      1.001
+```
+
+R-hat is rank-normalized split-R-hat and ESS is the bulk/tail pair, both
+Vehtari et al. 2021, computed by stan's own estimators -- so the numbers
+agree with `stansummary` rather than approximating it.
+
+```python
+print(fit.diagnose())
+```
+
+```
+No divergent transitions.
+No transitions saturated the maximum treedepth of 10.
+E-BFMI is above 0.3 in every chain.
+R-hat is below 1.01 for every parameter (worst 1.002, theta.6).
+Bulk ESS is at least 100 per chain for every parameter (worst 2160, tau).
+Tail ESS is at least 100 per chain for every parameter (worst 1874, tau).
+No problems detected.
+```
+
+Those are the checks a Bayesian workflow actually turns on, including
+**E-BFMI** -- the one that catches a badly explored heavy tail, which
+R-hat and ESS are both blind to. Each check either confirms or reports the
+number that failed and what to do about it.
+
+The pieces are reachable individually too: `fit.divergences`,
+`fit.max_treedepth_hits`, `fit.stepsize` and `fit.ebfmi()` are per-chain
+arrays, `fit.summary().r_hat` is the whole column, and `fit.to_arviz()`
+hands off an InferenceData with the sampler stats attached.
 
 ## How it works
 

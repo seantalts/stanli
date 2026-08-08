@@ -274,9 +274,179 @@ void pos_ordered_bwd(KernelCtx& ctx) {
   });
 }
 
+// offset_multiplier_constrain(x, mu, sigma, lp):
+//   ret = fma(sigma, x, mu)  -- std::fma, a real fused multiply-add, not
+//   contraction, so -ffp-contract=off does not change it;
+//   lp += multiply_log(size(x), sigma) when sigma is a SCALAR, else
+//   sum(log(sigma)).
+//
+// Written natively rather than replayed because this is the modern
+// non-centering idiom (`vector<offset=mu, multiplier=tau>[J] theta`), so
+// mu and sigma are usually parameters themselves and it sits on the hot
+// path. Each of mu and sigma is length 1 (broadcast) or length n.
+void offset_mult_fwd(KernelCtx& ctx) {
+  const int64_t n = ctx.in[0].len;
+  const double* x = ctx.in[0].data;
+  const double* mu = ctx.in[1].data;
+  const double* sg = ctx.in[2].data;
+  const bool mu_v = ctx.in[1].len > 1, sg_v = ctx.in[2].len > 1;
+  for (int64_t i = 0; i < n; ++i)
+    ctx.out.data[i] = std::fma(sg[sg_v ? i : 0], x[i], mu[mu_v ? i : 0]);
+  if (sg_v) {
+    double s = 0.0;
+    for (int64_t i = 0; i < n; ++i) s += std::log(sg[i]);
+    ctx.out2.data[0] = s;
+  } else {
+    // multiply_log(N, sigma) = N * log(sigma), one call rather than N
+    // additions -- which is what stan-math does, and the difference is
+    // visible in the last bits.
+    ctx.out2.data[0] = (double)n * std::log(sg[0]);
+  }
+}
+void offset_mult_bwd(KernelCtx& ctx) {
+  const int64_t n = ctx.in[0].len;
+  const double* x = ctx.in[0].data;
+  const double* sg = ctx.in[2].data;
+  const double* dout = ctx.out_adj_vec.data;
+  const bool mu_v = ctx.in[1].len > 1, sg_v = ctx.in[2].len > 1;
+  if (ctx.in_adj[0].data)
+    for (int64_t i = 0; i < n; ++i)
+      ctx.in_adj[0].data[i] += dout[i] * sg[sg_v ? i : 0];
+  if (ctx.in_adj[1].data) {
+    if (mu_v)
+      for (int64_t i = 0; i < n; ++i) ctx.in_adj[1].data[i] += dout[i];
+    else
+      ctx.in_adj[1].data[0] += seq_sum(dout, n);
+  }
+  if (ctx.in_adj[2].data) {
+    if (sg_v) {
+      // TWO accumulations, not one sum of two terms. stan-math builds the
+      // lp term (sum(log(sigma))) before the value (fma), so the reverse
+      // sweep contracts fma's contribution into sigma.adj first and the
+      // jacobian's second -- and a += b += c does not round like a += (b + c).
+      for (int64_t i = 0; i < n; ++i) ctx.in_adj[2].data[i] += dout[i] * x[i];
+      for (int64_t i = 0; i < n; ++i)
+        ctx.in_adj[2].data[i] += ctx.out2_adj / sg[i];
+    } else {
+      double s = 0.0;
+      for (int64_t i = 0; i < n; ++i) s += dout[i] * x[i];
+      ctx.in_adj[2].data[0] += s + ctx.out2_adj * (double)n / sg[0];
+    }
+  }
+}
+
+// The remaining structured transforms. unit_vector and sum_to_zero are
+// vector -> vector and go straight through the batched helpers; the three
+// matrix-valued ones flatten column-major to match slot layout, like
+// cholesky_corr above.
+void unit_vector_fwd(KernelCtx& ctx) {
+  structured_fwd(ctx, [](const auto& y, double& lp) {
+    return stan::math::unit_vector_constrain(y, lp);
+  });
+}
+void unit_vector_bwd(KernelCtx& ctx) {
+  structured_bwd(ctx, [](auto& y, stan::math::var& lp) {
+    return stan::math::unit_vector_constrain(y, lp);
+  });
+}
+
+// sum_to_zero_constrain has no lp overload: the transform is
+// volume-preserving, so its log-jacobian is exactly 0 and stan-math does
+// not offer somewhere to add one. out2 stays 0.
+void sum_to_zero_fwd(KernelCtx& ctx) {
+  structured_fwd(ctx, [](const auto& y, double&) {
+    return Eigen::VectorXd(stan::math::sum_to_zero_constrain(y));
+  });
+}
+void sum_to_zero_bwd(KernelCtx& ctx) {
+  structured_bwd(ctx, [](auto& y, stan::math::var&) {
+    return stan::math::sum_to_zero_constrain(y);
+  });
+}
+
+// Vector -> K x K (or M x N), flattened column-major. idata carries the
+// dimensions the size alone cannot recover.
+template <typename F>
+void matrix_constrain_fwd(KernelCtx& ctx, int64_t rows, int64_t cols, F&& f) {
+  Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data, ctx.in[0].len);
+  double lp = 0.0;
+  Eigen::MatrixXd x = f(y, lp);
+  for (int64_t j = 0; j < cols; ++j)
+    for (int64_t i = 0; i < rows; ++i)
+      ctx.out.data[j * rows + i] = x(i, j);
+  ctx.out2.data[0] = lp;
+}
+template <typename F>
+void matrix_constrain_bwd(KernelCtx& ctx, int64_t rows, int64_t cols, F&& f) {
+  if (ctx.in_adj[0].data == nullptr) return;
+  using stan::math::var;
+  stan::math::nested_rev_autodiff nested;
+  Eigen::Matrix<var, -1, 1> y(ctx.in[0].len);
+  for (int64_t i = 0; i < ctx.in[0].len; ++i) y(i) = ctx.in[0].data[i];
+  var lp = 0.0;
+  auto x = f(y, lp);
+  Eigen::Matrix<var, -1, 1> flat(rows * cols);
+  for (int64_t j = 0; j < cols; ++j)
+    for (int64_t i = 0; i < rows; ++i) flat(j * rows + i) = x(i, j);
+  Eigen::Map<const Eigen::VectorXd> seed(ctx.out_adj_vec.data, rows * cols);
+  var j2 = stan::math::dot_product(seed, flat) + ctx.out2_adj * lp;
+  stan::math::grad(j2.vi_);
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    ctx.in_adj[0].data[i] += y(i).adj();
+}
+
+void corr_matrix_fwd(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0];
+  matrix_constrain_fwd(ctx, K, K, [K](const auto& y, auto& lp) {
+    return stan::math::corr_matrix_constrain(y, (Eigen::Index)K, lp);
+  });
+}
+void corr_matrix_bwd(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0];
+  matrix_constrain_bwd(ctx, K, K, [K](auto& y, auto& lp) {
+    return stan::math::corr_matrix_constrain(y, (Eigen::Index)K, lp);
+  });
+}
+void cov_matrix_fwd(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0];
+  matrix_constrain_fwd(ctx, K, K, [K](const auto& y, auto& lp) {
+    return stan::math::cov_matrix_constrain(y, (Eigen::Index)K, lp);
+  });
+}
+void cov_matrix_bwd(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0];
+  matrix_constrain_bwd(ctx, K, K, [K](auto& y, auto& lp) {
+    return stan::math::cov_matrix_constrain(y, (Eigen::Index)K, lp);
+  });
+}
+void chol_cov_fwd(KernelCtx& ctx) {
+  const int64_t M = ctx.idata[0], N = ctx.idata[1];
+  matrix_constrain_fwd(ctx, M, N, [M, N](const auto& y, auto& lp) {
+    return stan::math::cholesky_factor_constrain(y, (int)M, (int)N, lp);
+  });
+}
+void chol_cov_bwd(KernelCtx& ctx) {
+  const int64_t M = ctx.idata[0], N = ctx.idata[1];
+  matrix_constrain_bwd(ctx, M, N, [M, N](auto& y, auto& lp) {
+    return stan::math::cholesky_factor_constrain(y, (int)M, (int)N, lp);
+  });
+}
+
 }  // namespace
 
 void register_constrain_kernels() {
+  register_kernel(OP_CONSTRAIN_OFFSET_MULT,
+                  Kernel{offset_mult_fwd, offset_mult_bwd, nullptr});
+  register_kernel(OP_CONSTRAIN_UNIT_VECTOR,
+                  Kernel{unit_vector_fwd, unit_vector_bwd, nullptr});
+  register_kernel(OP_CONSTRAIN_SUM_TO_ZERO,
+                  Kernel{sum_to_zero_fwd, sum_to_zero_bwd, nullptr});
+  register_kernel(OP_CONSTRAIN_CORR_MATRIX,
+                  Kernel{corr_matrix_fwd, corr_matrix_bwd, nullptr});
+  register_kernel(OP_CONSTRAIN_COV_MATRIX,
+                  Kernel{cov_matrix_fwd, cov_matrix_bwd, nullptr});
+  register_kernel(OP_CONSTRAIN_CHOL_COV,
+                  Kernel{chol_cov_fwd, chol_cov_bwd, nullptr});
   register_kernel(OP_CONSTRAIN_LOWER,
                   Kernel{clower_fwd, clower_bwd, constrain_scratch});
   register_kernel(OP_CONSTRAIN_UPPER,

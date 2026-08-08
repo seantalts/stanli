@@ -91,9 +91,59 @@ surfaced as a SIGBUS inside the kernel. It throws now.)
 and `neg_binomial_2_log_glm` take the intercept as a scalar; stan-math
 also allows a per-row vector. The kernels refuse that form by name.
 
-**`corr_matrix` and `cholesky_factor_cov` parameter transforms.** Not
-densities, but they are why `lkj_corr` and the wisharts have to be
-reached through a transformed parameter rather than declared directly.
+## Parameter transforms
+
+All of them, and every one bitwise against CmdStan:
+
+| transform | unconstrained size |
+|---|---|
+| `lower`, `upper`, `lower, upper` | n |
+| `offset`, `multiplier`, `offset, multiplier` | n |
+| `simplex[K]` | K-1 |
+| `sum_to_zero_vector[K]` | K-1 |
+| `unit_vector[K]` | K |
+| `ordered[K]`, `positive_ordered[K]` | K |
+| `corr_matrix[K]` | K(K-1)/2 |
+| `cov_matrix[K]` | K(K+1)/2 |
+| `cholesky_factor_corr[K]` | K(K-1)/2 |
+| `cholesky_factor_cov[M, N]` | N(N+1)/2 + (M-N)N |
+
+`offset`/`multiplier` is the one that matters most in practice -- it is
+how a modern model writes a non-centered parameterization, and how brms
+generates one -- and its offset and multiplier may themselves be
+parameters, scalar or per-element.
+
+`corr_matrix` and `cholesky_factor_cov` landing here is also what lets
+`lkj_corr` and the wisharts be *declared* rather than reached through a
+transformed parameter.
+
+`harnesses/transform_sweep.py deps/cmdstan` is the oracle: one model per
+transform, compared to a CmdStan build of the same model at three
+deterministic points. It needs a CmdStan checkout, so CI runs
+`tests/test_newtrans.cpp` instead, which checks the unconstrained size by
+hand, the gradient against central finite differences, and each
+transform's defining property (a unit_vector has norm 1, a correlation
+matrix has unit diagonal, a Cholesky factor has a positive one).
+
+## reject and print
+
+Both supported, in both places they can appear. `reject` throws
+`std::domain_error` -- the same exception CmdStan's generated code
+throws, so the sampler counts it as a rejected proposal rather than a
+failed run -- and `print` writes to stdout.
+
+The two placements are different machinery and both are covered
+(`tests/test_rejectprint.cpp`). In `transformed data` the statement runs
+in the MIR interpreter at lowering time, so a taken `reject` fails the
+compile, which is CmdStan failing to construct the model. In the model
+block it lowers to an op and throws during the forward sweep, once per
+evaluation.
+
+What is still missing is a `reject` under a condition on a *parameter*,
+because the condition is what stanli cannot lower yet, not the reject:
+`lower.cpp` refuses boolean operators on parameters. That is the same
+gap as parameter-dependent control flow generally, and the path to it is
+island v2 -- the register program already has the branch instructions.
 
 ## Truncation and censoring
 

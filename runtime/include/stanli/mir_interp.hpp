@@ -32,6 +32,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -373,6 +374,35 @@ class MirInterp {
       case mir::Stmt::Return:
         throw ReturnV{st.has_init ? eval(st.rhs) : Value{}};
       case mir::Stmt::NRFunApp:
+        // Constraint checks are not executed here, but reject() and
+        // print() are: a `reject` in transformed data is how a model
+        // validates its data, and CmdStan fails to construct the model
+        // there rather than sampling from a model whose data is wrong.
+        // Skipping it would mean stanli happily sampled a model CmdStan
+        // refuses to build.
+        if (st.fn_name == "FnReject" || st.fn_name == "FnPrint") {
+          std::string msg;
+          for (const auto& a : st.fn_args) {
+            if (a.kind == mir::Expr::LitStr) {
+              msg += a.lit_s;
+              continue;
+            }
+            const Value v = eval(a);
+            if (v.r.size() == 1) {
+              msg += fmt_num(val(v.r[0]));
+            } else {
+              msg += '[';
+              for (size_t i = 0; i < v.r.size(); ++i) {
+                if (i) msg += ',';
+                msg += fmt_num(val(v.r[i]));
+              }
+              msg += ']';
+            }
+          }
+          if (st.fn_name == "FnReject") throw std::domain_error(msg);
+          std::fprintf(stdout, "%s\n", msg.c_str());
+        }
+        return;
       case mir::Stmt::Skip:
         return;  // constraint checks are not executed here
       default:
@@ -381,6 +411,16 @@ class MirInterp {
   }
 
  private:
+  // How reject()/print() render a number. ostream's default formatting is
+  // what the OP_REJECT kernel uses on the graph side, so the two paths
+  // spell the same value the same way -- and it is also what stan-math's
+  // own reject produces.
+  static std::string fmt_num(double v) {
+    std::ostringstream os;
+    os << v;
+    return os.str();
+  }
+
   // Thrown by a Return statement inside an interpreted function body.
   struct ReturnV {
     Value v;

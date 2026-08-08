@@ -1721,12 +1721,42 @@ struct Lowering {
     int64_t raw_len = con_len;
     if (tr.kind == mir::Transform::Simplex)
       raw_len = n_batch * (inner_con - 1);
+    // sum_to_zero_vector[K]: K constrained from K-1 unconstrained, and
+    // unlike the simplex it is volume-preserving, so there is no jacobian
+    // term at all.
+    if (tr.kind == mir::Transform::SumToZero)
+      raw_len = n_batch * (inner_con - 1);
+    // unit_vector[K] is K from K: the constraint costs no dimension, it
+    // just curves the space (and does carry a jacobian).
     if (tr.kind == mir::Transform::CholeskyCorr) {
       // cholesky_factor_corr[K]: K*K constrained, K*(K-1)/2 unconstrained.
       const int64_t K = inner_con;
       n_batch = 1;
       raw_len = K * (K - 1) / 2;
       con_len = K * K;
+    }
+    // The matrix-valued transforms take their dimensions from the read
+    // dims rather than from the flattened length, which cannot tell
+    // corr_matrix[3] from cov_matrix[2].
+    int64_t chol_M = 0, chol_N = 0;
+    if (tr.kind == mir::Transform::Correlation ||
+        tr.kind == mir::Transform::Covariance) {
+      const int64_t K = inner_con;
+      n_batch = 1;
+      raw_len = tr.kind == mir::Transform::Correlation
+                    ? K * (K - 1) / 2        // k_choose_2
+                    : K + K * (K - 1) / 2;   // K + k_choose_2
+      con_len = K * K;
+    }
+    if (tr.kind == mir::Transform::CholeskyCov) {
+      // cholesky_factor_cov[M, N] reads two dims; [K] is the square case.
+      chol_M = eval_int(s.read_dims[s.read_dims.size() >= 2
+                                        ? s.read_dims.size() - 2
+                                        : s.read_dims.size() - 1]);
+      chol_N = s.read_dims.size() >= 2 ? inner_con : chol_M;
+      n_batch = 1;
+      raw_len = (chol_N * (chol_N + 1)) / 2 + (chol_M - chol_N) * chol_N;
+      con_len = chol_M * chol_N;
     }
     if (s.read_dims.size() > 1) {
       std::vector<int64_t> dims;
@@ -1782,6 +1812,49 @@ struct Lowering {
       case mir::Transform::PositiveOrdered:
         opcode = OP_CONSTRAIN_POS_ORDERED;
         break;
+      // offset / multiplier: the affine transform, and the modern
+      // non-centering idiom. stanc3 emits three tags depending on which
+      // halves were written, so the missing half becomes its identity
+      // (offset 0, multiplier 1) and one kernel serves all three.
+      case mir::Transform::Offset:
+      case mir::Transform::Multiplier:
+      case mir::Transform::OffsetMultiplier: {
+        opcode = OP_CONSTRAIN_OFFSET_MULT;
+        const int zero = const_slot(0.0);
+        const int one = const_slot(1.0);
+        if (tr.kind == mir::Transform::Offset) {
+          ins.push_back(lower_expr(tr.args[0]).slot);
+          ins.push_back(one);
+        } else if (tr.kind == mir::Transform::Multiplier) {
+          ins.push_back(zero);
+          ins.push_back(lower_expr(tr.args[0]).slot);
+        } else {
+          ins.push_back(lower_expr(tr.args[0]).slot);
+          ins.push_back(lower_expr(tr.args[1]).slot);
+        }
+        break;
+      }
+      case mir::Transform::UnitVector:
+        opcode = OP_CONSTRAIN_UNIT_VECTOR;
+        break;
+      case mir::Transform::SumToZero:
+        opcode = OP_CONSTRAIN_SUM_TO_ZERO;
+        break;
+      case mir::Transform::Correlation:
+        opcode = OP_CONSTRAIN_CORR_MATRIX;
+        psi.rows = inner_con;
+        psi.cols = inner_con;
+        break;
+      case mir::Transform::Covariance:
+        opcode = OP_CONSTRAIN_COV_MATRIX;
+        psi.rows = inner_con;
+        psi.cols = inner_con;
+        break;
+      case mir::Transform::CholeskyCov:
+        opcode = OP_CONSTRAIN_CHOL_COV;
+        psi.rows = chol_M;
+        psi.cols = chol_N;
+        break;
       default:
         fail("unsupported parameter transform", tr.raw);
     }
@@ -1790,7 +1863,15 @@ struct Lowering {
     if (opcode == OP_CONSTRAIN_SIMPLEX || opcode == OP_CONSTRAIN_ORDERED ||
         opcode == OP_CONSTRAIN_POS_ORDERED)
       tr_idata = {(int)n_batch, (int)inner_con};
-    if (opcode == OP_CONSTRAIN_CHOL_CORR) tr_idata = {(int)inner_con};
+    if (opcode == OP_CONSTRAIN_UNIT_VECTOR ||
+        opcode == OP_CONSTRAIN_SUM_TO_ZERO)
+      tr_idata = {(int)n_batch, (int)inner_con};
+    if (opcode == OP_CONSTRAIN_CHOL_CORR ||
+        opcode == OP_CONSTRAIN_CORR_MATRIX ||
+        opcode == OP_CONSTRAIN_COV_MATRIX)
+      tr_idata = {(int)inner_con};
+    if (opcode == OP_CONSTRAIN_CHOL_COV)
+      tr_idata = {(int)chol_M, (int)chol_N};
     Val con = emit(opcode, ins, con_len, psi, tr_idata, jac);
     jac_slots.push_back(jac);
     scope[s.decl_id] = con.slot;
@@ -1964,6 +2045,55 @@ struct Lowering {
         // Compiler-internal checks (FnCheck / FnValidateSize): sizes are
         // enforced at data binding; value checks are skipped.
         if (s.fn_name == "FnCheck" || s.fn_name == "FnValidateSize") return;
+        // A vector offset/multiplier makes stanc emit check_matching_dims
+        // as a named call rather than an FnCheck. It is a pure SHAPE
+        // check, and every shape here is static -- a mismatch would have
+        // failed this lowering long before the check ran -- so skipping
+        // it is exact rather than a relaxation. Deliberately not a
+        // `check_*` prefix match: a value check like check_positive_finite
+        // rejects a draw at runtime, and skipping one of those would
+        // silently accept points CmdStan refuses.
+        if (s.fn_name == "check_matching_dims") return;
+        // reject() and print(): the message is a mix of string literals
+        // and expressions, so the literals become the op's chunk list and
+        // the expressions become its inputs. reject throws
+        // std::domain_error at forward time, which is the same exception
+        // from the same place CmdStan's generated code throws it, so the
+        // sampler counts it as a rejected proposal rather than a failure.
+        if (s.fn_name == "FnReject" || s.fn_name == "FnPrint") {
+          auto spec = std::make_shared<MessageSpec>();
+          std::vector<int> ins;
+          std::string pending;
+          for (const auto& a : s.fn_args) {
+            if (a.kind == mir::Expr::LitStr) {
+              pending += a.lit_s;
+              continue;
+            }
+            // Each value input closes the chunk that precedes it. Op::in
+            // holds six, and a message longer than that is a diagnostic
+            // nobody will miss the tail of -- but say so rather than
+            // corrupting the op.
+            if (ins.size() >= 6)
+              fail(std::string(s.fn_name == "FnReject" ? "reject" : "print") +
+                       " with more than 6 printed values",
+                   s.raw);
+            spec->chunks.push_back(pending);
+            pending.clear();
+            ins.push_back(lower_expr(a).slot);
+          }
+          spec->chunks.push_back(pending);  // trailing literal, if any
+          Op op;
+          op.opcode = s.fn_name == "FnReject" ? OP_REJECT : OP_PRINT;
+          op.n_in = (int)ins.size();
+          for (size_t k = 0; k < ins.size(); ++k) op.in[k] = ins[k];
+          // The output is a dead scalar: every op writes somewhere, and
+          // nothing reads this one.
+          op.out = add_slot(1, false);
+          op.udata = spec.get();
+          g.udata_pool.push_back(spec);
+          g.ops.push_back(op);
+          return;
+        }
         if (s.fn_name == "FnWriteParam") {
           // One CSV column, at the point the emission happens: this is what
           // fixes the column order to CmdStan's. Arrays of containers are

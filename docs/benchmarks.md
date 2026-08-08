@@ -381,6 +381,53 @@ between engines (CmdStan took 9,654 post-warmup leapfrogs here), so treat
 the sampling rows as indicative; the controlled comparison is the
 per-gradient table.
 
+## Parallel chains, and what STAN_THREADS costs
+
+Chains run in threads, one executor each. The question worth measuring
+was not the speedup but the tax: stan-math's autodiff stack is a plain
+static unless `STAN_THREADS` is defined, in which case it becomes
+thread-local (`__thread` on gcc/clang), and that indirection lands on
+every var operation. So the model to worry about is not a vectorized one
+-- native kernels never touch the var stack -- but one dominated by the
+nested-tape path.
+
+| model | plain | `STAN_THREADS` |
+| --- | ---: | ---: |
+| 200-step `ordered_logistic` recurrence (72% in a legacy op) | 44,695 ns | 44,370 ns |
+| `es` (eight schools, native kernels) | 221.4 ns | 223.0 ns |
+| `ar1` | 228.9 ns | 224.1 ns |
+| `conj` | 142.2 ns | 141.1 ns |
+
+Best of three each. The tax is noise, in both directions, including on
+the model built specifically to expose it. Against that, eight chains of
+that same model:
+
+| threads | 1 | 2 | 4 | 8 |
+| --- | ---: | ---: | ---: | ---: |
+| 8 chains, wall clock | 2.89 s | 1.59 s | 0.86 s | 0.49 s |
+
+So it is on by default for native builds, and off under Emscripten (wasm
+threads need `-pthread` and a cross-origin-isolated page; the browser
+build runs one chain per worker instead).
+
+**Threading does not change the answer.** Each chain owns its executor --
+its own arena, its own contexts -- and its own RNG stream, so a parallel
+run is byte-identical to a sequential one. Checked as a CSV `cmp` across
+four models (eight schools, the `ordered_logistic` recurrence, `ar1`, and
+`conj` with its generated quantities), 8 chains x 300 draws each, and
+asserted in `tests/test_multichain.cpp` and `tests/test_python.py` in a
+form that holds on a single-threaded build too.
+
+**One trap, worth naming because it is invisible from the outside.**
+stan-math's AD stack pointer is thread-local under `STAN_THREADS` and
+starts **null** in every new thread; each child thread must instantiate a
+`ChainableStack` before touching the AD system, which stan-math's own
+header documents and which CmdStan never has to write because TBB's
+scheduler-entry hook (`ad_tape_observer`) does it for every worker. This
+build stubs TBB out, so raw `std::thread`s dereferenced null inside
+`start_nested()` on the first legacy op. A segfault rather than a wrong
+number, which is the good version of this bug.
+
 ## Numerical parity
 
 Every model in the passing set is differentially verified against

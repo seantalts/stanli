@@ -100,6 +100,14 @@ namespace stanli {
   X(OP_CONSTRAIN_SIMPLEX)                                                 \
   X(OP_CONSTRAIN_ORDERED)                                                 \
   X(OP_CONSTRAIN_POS_ORDERED)                                             \
+  X(OP_CONSTRAIN_OFFSET_MULT)                                             \
+  X(OP_CONSTRAIN_UNIT_VECTOR)                                             \
+  X(OP_CONSTRAIN_SUM_TO_ZERO)                                             \
+  X(OP_CONSTRAIN_CORR_MATRIX)                                             \
+  X(OP_CONSTRAIN_COV_MATRIX)                                              \
+  X(OP_CONSTRAIN_CHOL_COV)                                                \
+  X(OP_REJECT)                                                            \
+  X(OP_PRINT)                                                             \
   X(OP_DIRICHLET_LPDF)
 
 // Scalar densities, one line each: this list generates the opcode, the

@@ -190,6 +190,11 @@ Transform read_transform(const Node& n) {
     else if (n.atom == "Ordered") t.kind = Transform::Ordered;
     else if (n.atom == "PositiveOrdered") t.kind = Transform::PositiveOrdered;
     else if (n.atom == "CholeskyCorr") t.kind = Transform::CholeskyCorr;
+    else if (n.atom == "UnitVector") t.kind = Transform::UnitVector;
+    else if (n.atom == "SumToZero") t.kind = Transform::SumToZero;
+    else if (n.atom == "Correlation") t.kind = Transform::Correlation;
+    else if (n.atom == "Covariance") t.kind = Transform::Covariance;
+    else if (n.atom == "CholeskyCov") t.kind = Transform::CholeskyCov;
     else t.kind = Transform::Unsupported;
     t.raw = n.atom;
     return t;

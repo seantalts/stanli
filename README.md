@@ -240,8 +240,35 @@ pip install stanli                 # or: ./tools/build_wheel.sh
 ```python
 import stanli
 m = stanli.Model(stan_file="model.stan", data={"J": 8, "y": y, "sigma": s})
-draws = m.sample(seed=1, warmup=1000, samples=1000)
-draws["mu"].mean()
+fit = m.sample(seed=1, chains=4, warmup=1000, samples=1000)
+fit["mu"].mean()          # every draw, chains concatenated
+fit.draws("mu")           # (chains, draws), for a trace plot
+print(fit.summary())      # stansummary's table
+print(fit.diagnose())     # the convergence checks, in words
+fit.to_arviz()            # if you have arviz
+```
+
+Four chains by default, run in parallel, because R-hat needs more than
+one and a single-chain run cannot be checked for convergence at all.
+Eight schools takes about 70 ms for all four. Threading changes nothing
+about the answer: each chain owns its executor and its RNG stream, so
+the draws are byte-identical to a sequential run.
+
+`summary()` reports rank-normalized split-R-hat with bulk and tail ESS
+and MCSE -- stan's own estimators, so the numbers agree with
+`stansummary`. `diagnose()` runs the checks a Bayesian workflow actually
+turns on: divergent transitions, max-treedepth saturation, **E-BFMI**,
+R-hat, and bulk/tail ESS, each either confirmed or reported with the
+number that failed and what to do about it.
+
+```
+No divergent transitions.
+No transitions saturated the maximum treedepth of 10.
+E-BFMI is above 0.3 in every chain.
+R-hat is below 1.01 for every parameter (worst 1.002, theta.6).
+Bulk ESS is at least 100 per chain for every parameter (worst 2160, tau).
+Tail ESS is at least 100 per chain for every parameter (worst 1874, tau).
+No problems detected.
 ```
 
 Builds without the embedded stanc3 object fall back to running a bundled
@@ -339,6 +366,16 @@ through eigenvectors of a nearly degenerate covariance (see the note in
 the corpus status).
 
 ## Roadmap
+
+What it would take to displace CmdStan rather than out-run it on a
+corpus, in order, is written up in
+[docs/superpowers/plans/2026-08-08-cmdstan-parity-roadmap.md](docs/superpowers/plans/2026-08-08-cmdstan-parity-roadmap.md):
+multi-chain and diagnostics (done), the missing parameter transforms
+(done), the modern `ode_*` and solver interfaces, Pathfinder and
+optimize, a native adjoint program for the sequential tail
+([design](docs/superpowers/plans/2026-08-08-native-adjoint-program.md)),
+`reduce_sum`, and the R/brms and browser packaging. The engine-level
+items below are the ones that predate it.
 
 1. Fusing adjacent elementwise chains into one pass over the arena --
    the follow-on now that the re-roll pass covers the mixture shape
