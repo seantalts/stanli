@@ -274,4 +274,21 @@ changes use [`tools/sampler_trace.py`](../tools/sampler_trace.py); for generated
 `STANLI_PROFILE=1` before and after ([`docs/benchmarks.md`](benchmarks.md) has the
 harnesses and the current numbers).
 
+## Landing a change
+
+`main` is protected: the five wheel platforms and the WASM build must
+pass before anything merges, admins included, so direct pushes are
+rejected. The flow is a branch and an auto-merged PR:
+
+```
+git checkout -b my-change
+git push -u origin my-change
+gh pr create --fill
+gh pr merge --auto --rebase
+```
+
+The merge happens on its own when CI goes green (rebase-merge keeps the
+history linear). Release tags (`v*`, `npm-v*`) are not gated by this;
+they point at commits that already passed on main.
+
 Release process and CI layout live in [`README.md`](../README.md) under "Releasing".
