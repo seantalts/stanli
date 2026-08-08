@@ -236,9 +236,13 @@ ctest --test-dir build
 
 ## Releasing
 
-`.github/workflows/wheels.yml` builds all four wheels (macOS arm64 and
-x86_64, manylinux_2_28 x86_64 and aarch64) on every push and pull request,
-so the release path is the path that is already exercised continuously.
+`.github/workflows/wheels.yml` builds all five wheels (macOS arm64 and
+x86_64, manylinux_2_28 x86_64 and aarch64, Windows x86_64). The first
+four run on every push and pull request, so the release path is the path
+that is already exercised continuously; Windows runs after the merge and
+nightly, because mingw compiles the density kernels slowly enough to set
+the pace of every merge on its own. A release tag runs all five, and the
+publish job waits for them.
 Each build links the embedded stanc3 object (cached, since it takes half
 an hour to produce), runs the test suite, checks that the platform tag
 matches what the library actually requires, and installs the wheel into a

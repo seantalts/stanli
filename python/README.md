@@ -84,7 +84,8 @@ Full per-model accuracy table:
 Per-gradient latency against CmdStan, same models, same evaluation point,
 both sides `-O3` with FP contraction pinned off:
 
-<!--gen:bench_table_us-->| model | params | stanli | CmdStan | speedup |
+<!--gen:bench_table_us-->
+| model | params | stanli | CmdStan | speedup |
 | --- | ---: | ---: | ---: | ---: |
 | `radon_pooled` | 3 | 52.9 us | 320.9 us | **6.1x** |
 | `arK` | 7 | 2.4 us | 12.5 us | **5.2x** |
@@ -108,7 +109,8 @@ both sides `-O3` with FP contraction pinned off:
 | `hmm_drive_0` | 6 | 173.0 us | 132.8 us | 0.77x |
 | `hmm_example` | 4 | 36.3 us | 27.1 us | 0.75x |
 | `ldaK2` | 7 | 145.9 us | 104.1 us | 0.71x |
-| `iohmm_reg` | 29 | 545.2 us | 320.3 us | 0.59x |<!--/gen-->
+| `iohmm_reg` | 29 | 545.2 us | 320.3 us | 0.59x |
+<!--/gen-->
 
 The wins come from op granularity. CmdStan's var tape allocates, walks, and
 frees one node per scalar operation per leapfrog step; stanli pays a fixed

@@ -1,6 +1,48 @@
 # Changelog
 
-## 0.2.1
+## 0.3.0
+
+- Stan runs in the browser. stanc3 compiled to JavaScript through its
+  own js_of_ocaml target, this runtime compiled to WebAssembly through
+  Emscripten, and nothing on a server: a model is compiled and sampled
+  in the page. 118 of the 120 corpus models replay through the WASM
+  build under Node against the same recorded CmdStan values the native
+  build is checked against, generated-quantities columns included
+  (`nn_rbm1bJ100` is the exception, and it wants more than the 4 GB a
+  wasm32 heap can address). The demo is at
+  [seantalts.github.io/stanli](https://seantalts.github.io/stanli/):
+  presets, chains sampling simultaneously in one worker each, live trace
+  and histogram plots while NUTS runs, split-Rhat and effective sample
+  size, and a CSV of the draws. The payload is 1.34 MB of runtime plus
+  0.43 MB of compiler, gzipped; a page that ships precompiled MIR never
+  loads the compiler at all.
+
+- An npm package, `stanli`, wrapping that: `compile()` and `sample()`
+  over a worker pool sized to the hardware, with an `onLive` callback
+  for streaming draws. Published on `npm-v*` tags through npm trusted
+  publishing.
+
+- A Windows wheel. `win_amd64` joins the four existing platforms, built
+  under mingw-w64 (stan-math does not build under MSVC, which is why
+  RStan ships through RTools), exporting the C ABI through a `.def`
+  file. It bundles the release `stanc.exe` and drives it as a
+  subprocess rather than embedding the compiler, which waits on opam's
+  native Windows support.
+
+- write_array reached the C ABI: `stanli_wa_n_columns`,
+  `stanli_wa_column_name`, `stanli_wa_seed`, `stanli_wa_row`. Every
+  binding gets the columns CmdStan would write, in CmdStan's order,
+  including the models whose generated quantities are interpreted per
+  draw because the graph cannot express them.
+
+- The benchmark table on the PyPI page renders as a table again. The
+  marker that stamps generated numbers into the page shared its line
+  with the table header, and a line opening `<!--` opens a raw HTML
+  block that runs to the `-->`, so PyPI's renderer swallowed the header
+  and printed every row as literal pipes. `tools/gen_docs.py --check`
+  now renders both READMEs with readme_renderer, the library PyPI
+  itself uses, and fails if a table does not come out as one. `twine
+  check` never caught this: the page rendered, it just rendered wrong.
 
 - The sampler draws from CmdStan's generator now. It built
   `boost::ecuyer1988` from the seed while CmdStan builds

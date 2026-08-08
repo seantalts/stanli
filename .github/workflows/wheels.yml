@@ -133,7 +133,13 @@ jobs:
           opam --version
 
       - name: Build tooling
-        run: python3 -m pip install --upgrade pip setuptools wheel
+        # readme_renderer is what PyPI itself renders the long
+        # description with, and tools/gen_docs.py --check uses it to
+        # prove the page's tables still come out as tables.
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install "readme_renderer[md]"
+
 
       - name: Vendored dependencies
         run: ./deps/fetch.sh

@@ -21,6 +21,7 @@ import json
 import pathlib
 import re
 import sys
+import warnings
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TARGETS = [REPO / "README.md", REPO / "python" / "README.md"]
@@ -120,6 +121,44 @@ def compute():
     }
 
 
+def render_problems(path):
+    """Markdown tables that PyPI would not render as tables.
+
+    PyPI renders the long description with readme_renderer, which is
+    stricter than GitHub about one thing that bit this file: a line
+    starting with `<!--` opens a raw HTML block, and everything up to
+    the `-->` is HTML, not markdown. A generated-value marker sitting on
+    the same line as a table header therefore swallowed the header, and
+    the delimiter row plus every data row rendered as literal pipes.
+    twine check does not catch it: the page renders, it just renders
+    wrong. Returns [] when readme_renderer[md] is not installed, so this
+    is a CI check that a local run without it simply skips.
+    """
+    try:
+        import readme_renderer.markdown
+    except ImportError:
+        return []
+    text = path.read_text(encoding="utf-8")
+    # A delimiter row, which is what makes the block above it a table:
+    # every cell is dashes, optionally colon-anchored.
+    delim = re.compile(r"\s*\|(\s*:?-+:?\s*\|)+\s*$")
+    want = sum(1 for line in text.splitlines() if delim.match(line))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        html = readme_renderer.markdown.render(text)
+    if html is None:
+        # readme_renderer is present but its markdown extra is not, so
+        # it renders nothing at all. Not a finding about the docs.
+        return []
+    got = html.count("<table")
+    if got >= want:
+        return []
+    rel = path.relative_to(REPO)
+    return [f"{rel}: {want} markdown table(s), "
+            f"{got} rendered by readme_renderer (PyPI would show "
+            f"literal pipes)"]
+
+
 def main():
     check = "--check" in sys.argv
     stats = compute()
@@ -132,15 +171,29 @@ def main():
             key = m.group(2)
             if key not in stats:
                 raise SystemExit(f"{rel}: unknown marker gen:{key}")
-            if m.group(3) != stats[key]:
-                short = (stats[key][:40] + "...") \
-                    if len(stats[key]) > 40 else stats[key]
-                stale.append(f"{rel}: {key}: {m.group(3)[:40]!r} -> {short!r}")
-            return m.group(1) + stats[key] + m.group(4)
+            value = stats[key]
+            # A multi-line value is a markdown block, and a block cannot
+            # begin on the marker's own line: `<!--` opens a raw HTML
+            # block that runs through the `-->`, so a table header
+            # sharing that line is eaten as HTML and the rows below it
+            # render as literal pipes (see render_problems).
+            block = "\n" in value
+            had = m.group(3).strip("\n") if block else m.group(3)
+            if had != value:
+                short = (value[:40] + "...") if len(value) > 40 else value
+                stale.append(f"{rel}: {key}: {had[:40]!r} -> {short!r}")
+            body = f"\n{value}\n" if block else value
+            return m.group(1) + body + m.group(4)
 
         new = MARK.sub(sub, text)
         if not check and new != text:
             path.write_text(new)
+    broken = [p for path in TARGETS for p in render_problems(path)]
+    if broken:
+        print("the rendered page would be wrong:")
+        for b in broken:
+            print(" ", b)
+        return 1
     if check and stale:
         print("docs disagree with the measured artifacts "
               "(run tools/gen_docs.py):")
