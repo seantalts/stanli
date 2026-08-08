@@ -21,6 +21,17 @@ onmessage = async (e) => {
   const t0 = performance.now();
   const say = (status) => postMessage({ status });
   try {
+    if (req.cmd === "preload") {
+      // Warm the worker before anyone needs it: instantiate the wasm
+      // runtime and, when asked, parse the 2.8 MB compiler. Sent by the
+      // page at idle so the first Run pays neither load.
+      if (req.stanc) ensureStanc();
+      await ready;
+      postMessage({ done: { warmed: true,
+                            stanc: typeof globalThis.stanc === "function",
+                            ms: { preload: performance.now() - t0 } } });
+      return;
+    }
     if (req.cmd === "compile") {
       // Compile once here, sample everywhere: chain workers take the MIR
       // and never load the compiler.

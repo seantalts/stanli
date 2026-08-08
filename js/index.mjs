@@ -70,6 +70,24 @@ function request(msg, opts) {
   });
 }
 
+/** Load the heavy artifacts before they are needed. Resolves when one
+ * worker holds the parsed stanc3 compiler and `chains - 1` more hold the
+ * instantiated wasm runtime, so a later compile() or sample() starts at
+ * full speed instead of paying the fetch+parse on the user's click.
+ * Safe to call more than once; the pool reuses warmed workers.
+ * @param {object} [opts]
+ * @param {number} [opts.chains=2] Workers to warm (first gets stanc3).
+ * @param {function} [opts.onProgress]
+ */
+export function preload(opts) {
+  const o = opts || {};
+  const n = Math.max(1, Math.min(MAX_WORKERS, o.chains || 2));
+  const jobs = [request({ cmd: "preload", stanc: true }, o)];
+  for (let k = 1; k < n; ++k)
+    jobs.push(request({ cmd: "preload", stanc: false }, o));
+  return Promise.all(jobs);
+}
+
 /** Compile Stan source to transformed MIR (one worker loads stanc3).
  * @returns {Promise<{mir: string, ms: {stanc: number}}>} */
 export function compile(opts) {

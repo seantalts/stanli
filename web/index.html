@@ -96,8 +96,27 @@ everything below happens in this tab.
 <div class="times" id="times"></div>
 
 <script type="module">
-import { compile, sample } from "./stanli.mjs";
+import { compile, preload, sample } from "./stanli.mjs";
 const $ = (id) => document.getElementById(id);
+
+// ---- background warm-up ----------------------------------------------------
+// Fetch and parse the heavy artifacts (2.8 MB compiler, wasm runtime)
+// while the user is still reading the page, so the first Run starts at
+// full speed. requestIdleCallback keeps it off the first paint; the
+// promise is awaited nowhere -- if the user beats it to the button, the
+// pool simply hands them the half-warmed worker and the load finishes in
+// line, exactly as it would have without the warm-up.
+const warm = () => preload({ chains: 2 }).then(() => {
+  if (!$("status").textContent) {
+    $("status").textContent = "compiler loaded";
+    setTimeout(() => {
+      if ($("status").textContent === "compiler loaded")
+        $("status").textContent = "";
+    }, 2000);
+  }
+}).catch(() => {});  // a failed warm-up is just a cold first click
+if ("requestIdleCallback" in window) requestIdleCallback(warm);
+else setTimeout(warm, 0);
 
 // ---- presets ---------------------------------------------------------------
 // Synthetic data comes from a fixed linear congruential stream so the
