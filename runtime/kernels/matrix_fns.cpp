@@ -486,6 +486,387 @@ void eigvecs_bwd(KernelCtx& ctx) {
   });
 }
 
+// ---- tail densities: one nested var tape, no hand-written derivative ----
+// Everything below binds EVERY argument as var, calls the unmodified
+// stan-math template, grads, and scatters the adjoints back. Two
+// consequences worth stating.
+//
+// It has no restriction on what the density does with its scalar type.
+// The recorder computes in doubles and carries no tape, so a density that
+// does arithmetic on the scalar (ordered_probit's
+// `c_vec[i].coeff(0) - lambda_vec[i]`, wiener's `res *= 0.0`) cannot go
+// through it at all. stan::math::var has every operator, so those work
+// here. That is why this file, not densities.cpp, is where the tail goes.
+//
+// And it is the compact tier by construction: one instantiation, no
+// activity-mask expansion. A data argument's partials are computed and
+// dropped, which is the right trade for a density nobody has profiled.
+VarM tail_m(const KernelCtx& ctx, int k, int64_t rows, int64_t cols) {
+  VarM M(rows, cols);
+  for (int64_t j = 0; j < cols; ++j)
+    for (int64_t i = 0; i < rows; ++i)
+      M(i, j) = ctx.in[k].data[j * rows + i];
+  return M;
+}
+VarV tail_v(const KernelCtx& ctx, int k, int64_t n) {
+  VarV v(n);
+  for (int64_t i = 0; i < n; ++i) v(i) = ctx.in[k].data[i];
+  return v;
+}
+void tail_scatter_m(KernelCtx& ctx, int k, const VarM& M) {
+  if (!ctx.in_adj[k].data) return;
+  const int64_t rows = M.rows(), cols = M.cols();
+  for (int64_t j = 0; j < cols; ++j)
+    for (int64_t i = 0; i < rows; ++i)
+      ctx.in_adj[k].data[j * rows + i] += M(i, j).adj();
+}
+void tail_scatter_v(KernelCtx& ctx, int k, const VarV& v) {
+  if (!ctx.in_adj[k].data) return;
+  for (int64_t i = 0; i < v.size(); ++i)
+    ctx.in_adj[k].data[i] += v(i).adj();
+}
+void tail_scatter_s(KernelCtx& ctx, int k, const stan::math::var& x) {
+  if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += x.adj();
+}
+
+// ---- wishart family: (matrix W, real nu, matrix S), four of them --------
+enum WishKind { kWishart, kInvWishart, kWishartChol, kInvWishartChol };
+template <bool Grad, WishKind Kind>
+double wish_eval(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0];
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  VarM W = tail_m(ctx, 0, K, K);
+  var nu = ctx.in[1].data[0];
+  VarM S = tail_m(ctx, 2, K, K);
+  var out;
+  if constexpr (Kind == kWishart) {
+    out = propto ? stan::math::wishart_lpdf<true>(W, nu, S)
+                 : stan::math::wishart_lpdf<false>(W, nu, S);
+  } else if constexpr (Kind == kInvWishart) {
+    out = propto ? stan::math::inv_wishart_lpdf<true>(W, nu, S)
+                 : stan::math::inv_wishart_lpdf<false>(W, nu, S);
+  } else if constexpr (Kind == kWishartChol) {
+    out = propto ? stan::math::wishart_cholesky_lpdf<true>(W, nu, S)
+                 : stan::math::wishart_cholesky_lpdf<false>(W, nu, S);
+  } else {
+    out = propto ? stan::math::inv_wishart_cholesky_lpdf<true>(W, nu, S)
+                 : stan::math::inv_wishart_cholesky_lpdf<false>(W, nu, S);
+  }
+  const double v = out.val();
+  if constexpr (Grad) {
+    var j = out * ctx.out_adj;
+    stan::math::grad(j.vi_);
+    tail_scatter_m(ctx, 0, W);
+    tail_scatter_s(ctx, 1, nu);
+    tail_scatter_m(ctx, 2, S);
+  }
+  return v;
+}
+#define STANLI_WISH_KERNEL(name, kind)                                    \
+  void name##_fwd(KernelCtx& ctx) {                                       \
+    ctx.out.data[0] = wish_eval<false, kind>(ctx);                        \
+  }                                                                       \
+  void name##_bwd(KernelCtx& ctx) { wish_eval<true, kind>(ctx); }
+STANLI_WISH_KERNEL(wish, kWishart)
+STANLI_WISH_KERNEL(iwish, kInvWishart)
+STANLI_WISH_KERNEL(wishc, kWishartChol)
+STANLI_WISH_KERNEL(iwishc, kInvWishartChol)
+#undef STANLI_WISH_KERNEL
+
+// ---- multi_gp: (matrix y, matrix Sigma, vector w) -----------------------
+enum GpKind { kMultiGp, kMultiGpChol };
+template <bool Grad, GpKind Kind>
+double mgp_eval(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0], N = ctx.idata[1];
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  VarM y = tail_m(ctx, 0, K, N);
+  VarM S = tail_m(ctx, 1, K, K);
+  VarV w = tail_v(ctx, 2, K);
+  var out;
+  if constexpr (Kind == kMultiGp) {
+    out = propto ? stan::math::multi_gp_lpdf<true>(y, S, w)
+                 : stan::math::multi_gp_lpdf<false>(y, S, w);
+  } else {
+    out = propto ? stan::math::multi_gp_cholesky_lpdf<true>(y, S, w)
+                 : stan::math::multi_gp_cholesky_lpdf<false>(y, S, w);
+  }
+  const double v = out.val();
+  if constexpr (Grad) {
+    var j = out * ctx.out_adj;
+    stan::math::grad(j.vi_);
+    tail_scatter_m(ctx, 0, y);
+    tail_scatter_m(ctx, 1, S);
+    tail_scatter_v(ctx, 2, w);
+  }
+  return v;
+}
+
+// ---- multi_student_t: (vector y, real nu, vector mu, matrix Sigma) ------
+enum MstKind { kMst, kMstChol };
+template <bool Grad, MstKind Kind>
+double mst_eval(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0];
+  const int64_t reps = ctx.n_idata > 1 ? ctx.idata[1] : 1;
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  // y may be one K-vector or an array of reps of them.
+  std::vector<VarV> ys;
+  ys.reserve(reps);
+  for (int64_t r = 0; r < reps; ++r) {
+    VarV yy(K);
+    for (int64_t i = 0; i < K; ++i)
+      yy(i) = ctx.in[0].data[r * K + i];
+    ys.push_back(std::move(yy));
+  }
+  var nu = ctx.in[1].data[0];
+  VarV mu = tail_v(ctx, 2, K);
+  VarM S = tail_m(ctx, 3, K, K);
+  const auto call = [&](auto&& yarg) {
+    if constexpr (Kind == kMst) {
+      return propto ? stan::math::multi_student_t_lpdf<true>(yarg, nu, mu, S)
+                    : stan::math::multi_student_t_lpdf<false>(yarg, nu, mu, S);
+    } else {
+      return propto
+                 ? stan::math::multi_student_t_cholesky_lpdf<true>(yarg, nu, mu, S)
+                 : stan::math::multi_student_t_cholesky_lpdf<false>(yarg, nu, mu, S);
+    }
+  };
+  var out = reps > 1 ? call(ys) : call(ys[0]);
+  const double v = out.val();
+  if constexpr (Grad) {
+    var j = out * ctx.out_adj;
+    stan::math::grad(j.vi_);
+    if (ctx.in_adj[0].data)
+      for (int64_t r = 0; r < reps; ++r)
+        for (int64_t i = 0; i < K; ++i)
+          ctx.in_adj[0].data[r * K + i] += ys[r](i).adj();
+    tail_scatter_s(ctx, 1, nu);
+    tail_scatter_v(ctx, 2, mu);
+    tail_scatter_m(ctx, 3, S);
+  }
+  return v;
+}
+
+// ---- multinomial family: (array[] int ns, vector theta) -----------------
+// The counts ride in idata; theta is the only propagator edge.
+enum MultKind { kMultinomial, kMultinomialLogit, kDirichletMultinomial };
+template <bool Grad, MultKind Kind>
+double mult_eval(KernelCtx& ctx) {
+  const int64_t K = ctx.in[0].len;
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  std::vector<int> ns(ctx.idata, ctx.idata + ctx.n_idata);
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  VarV theta = tail_v(ctx, 0, K);
+  var out;
+  if constexpr (Kind == kMultinomial) {
+    out = propto ? stan::math::multinomial_lpmf<true>(ns, theta)
+                 : stan::math::multinomial_lpmf<false>(ns, theta);
+  } else if constexpr (Kind == kMultinomialLogit) {
+    out = propto ? stan::math::multinomial_logit_lpmf<true>(ns, theta)
+                 : stan::math::multinomial_logit_lpmf<false>(ns, theta);
+  } else {
+    out = propto ? stan::math::dirichlet_multinomial_lpmf<true>(ns, theta)
+                 : stan::math::dirichlet_multinomial_lpmf<false>(ns, theta);
+  }
+  const double v = out.val();
+  if constexpr (Grad) {
+    var j = out * ctx.out_adj;
+    stan::math::grad(j.vi_);
+    tail_scatter_v(ctx, 0, theta);
+  }
+  return v;
+}
+
+// ---- the two the recorder cannot take ----------------------------------
+// ordered_probit does `c_vec[i].coeff(0) - lambda_vec[i]` and wiener
+// `res *= 0.0` on the scalar type. var has those operators; rvar
+// deliberately does not (see recorder.hpp), so they live here.
+// ordered_probit(y | lambda, c): counts in idata, lambda and c real edges.
+template <bool Grad>
+double oprobit_eval(KernelCtx& ctx) {
+  const int64_t N = ctx.n_idata, K = ctx.in[1].len;
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  std::vector<int> y(ctx.idata, ctx.idata + N);
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  VarV lambda = tail_v(ctx, 0, ctx.in[0].len);
+  VarV c = tail_v(ctx, 1, K);
+  var out;
+  if (ctx.in[0].len == 1) {
+    out = propto ? stan::math::ordered_probit_lpmf<true>(y, lambda(0), c)
+                 : stan::math::ordered_probit_lpmf<false>(y, lambda(0), c);
+  } else {
+    out = propto ? stan::math::ordered_probit_lpmf<true>(y, lambda, c)
+                 : stan::math::ordered_probit_lpmf<false>(y, lambda, c);
+  }
+  const double v = out.val();
+  if constexpr (Grad) {
+    var j = out * ctx.out_adj;
+    stan::math::grad(j.vi_);
+    tail_scatter_v(ctx, 0, lambda);
+    tail_scatter_v(ctx, 1, c);
+  }
+  return v;
+}
+
+// wiener(y | alpha, tau, beta, delta): five real arguments, all scalars.
+template <bool Grad>
+double wiener_eval(KernelCtx& ctx) {
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  const int64_t n = ctx.in[0].len;
+  VarV y = tail_v(ctx, 0, n);
+  var alpha = ctx.in[1].data[0], tau = ctx.in[2].data[0];
+  var beta = ctx.in[3].data[0], delta = ctx.in[4].data[0];
+  var out = propto
+                ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
+                : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
+  const double v = out.val();
+  if constexpr (Grad) {
+    var j = out * ctx.out_adj;
+    stan::math::grad(j.vi_);
+    tail_scatter_v(ctx, 0, y);
+    tail_scatter_s(ctx, 1, alpha);
+    tail_scatter_s(ctx, 2, tau);
+    tail_scatter_s(ctx, 3, beta);
+    tail_scatter_s(ctx, 4, delta);
+  }
+  return v;
+}
+
+#define STANLI_TAIL_KERNEL(name, fn, kind)                                \
+  void name##_fwd(KernelCtx& ctx) {                                       \
+    ctx.out.data[0] = fn<false, kind>(ctx);                               \
+  }                                                                       \
+  void name##_bwd(KernelCtx& ctx) { fn<true, kind>(ctx); }
+STANLI_TAIL_KERNEL(mgp, mgp_eval, kMultiGp)
+STANLI_TAIL_KERNEL(mgpc, mgp_eval, kMultiGpChol)
+STANLI_TAIL_KERNEL(mst, mst_eval, kMst)
+STANLI_TAIL_KERNEL(mstc, mst_eval, kMstChol)
+STANLI_TAIL_KERNEL(multn, mult_eval, kMultinomial)
+STANLI_TAIL_KERNEL(multnl, mult_eval, kMultinomialLogit)
+STANLI_TAIL_KERNEL(dirmult, mult_eval, kDirichletMultinomial)
+#undef STANLI_TAIL_KERNEL
+void oprobit_fwd(KernelCtx& ctx) { ctx.out.data[0] = oprobit_eval<false>(ctx); }
+void oprobit_bwd(KernelCtx& ctx) { oprobit_eval<true>(ctx); }
+void wiener_fwd(KernelCtx& ctx) { ctx.out.data[0] = wiener_eval<false>(ctx); }
+void wiener_bwd(KernelCtx& ctx) { wiener_eval<true>(ctx); }
+
+// ---- the last five ------------------------------------------------------
+// lkj_cov(Sigma | mu, sigma, eta): a covariance matrix, two vectors of
+// lognormal hyperparameters for the scales, and the LKJ shape.
+template <bool Grad>
+double lkjcov_eval(KernelCtx& ctx) {
+  const int64_t K = ctx.idata[0];
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  VarM S = tail_m(ctx, 0, K, K);
+  VarV mu = tail_v(ctx, 1, ctx.in[1].len);
+  VarV sig = tail_v(ctx, 2, ctx.in[2].len);
+  var eta = ctx.in[3].data[0];
+  var out = propto ? stan::math::lkj_cov_lpdf<true>(S, mu, sig, eta)
+                   : stan::math::lkj_cov_lpdf<false>(S, mu, sig, eta);
+  const double v = out.val();
+  if constexpr (Grad) {
+    var j = out * ctx.out_adj;
+    stan::math::grad(j.vi_);
+    tail_scatter_m(ctx, 0, S);
+    tail_scatter_v(ctx, 1, mu);
+    tail_scatter_v(ctx, 2, sig);
+    tail_scatter_s(ctx, 3, eta);
+  }
+  return v;
+}
+
+// The three remaining GLMs. Unlike the ones in densities.cpp these carry
+// argument shapes the recorder cannot express (a cutpoint vector, a
+// coefficient matrix, a second int group), so they take the var tape.
+// idata = [outcome..., rows, cols] and, for binomial, the trial counts.
+enum GlmKind { kBinomLogitGlm, kCatLogitGlm, kOrdLogisticGlm };
+template <bool Grad, GlmKind Kind>
+double tglm_eval(KernelCtx& ctx) {
+  const int64_t rows = ctx.idata[ctx.n_idata - 2];
+  const int64_t cols = ctx.idata[ctx.n_idata - 1];
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  VarM X = tail_m(ctx, 0, rows, cols);
+  var out;
+  if constexpr (Kind == kBinomLogitGlm) {
+    // idata = [n..., N..., rows, cols]
+    std::vector<int> nn(ctx.idata, ctx.idata + rows);
+    std::vector<int> NN(ctx.idata + rows, ctx.idata + 2 * rows);
+    var alpha = ctx.in[1].data[0];
+    VarV beta = tail_v(ctx, 2, cols);
+    out = propto ? stan::math::binomial_logit_glm_lpmf<true>(nn, NN, X, alpha, beta)
+                 : stan::math::binomial_logit_glm_lpmf<false>(nn, NN, X, alpha, beta);
+    const double v0 = out.val();
+    if constexpr (Grad) {
+      var j = out * ctx.out_adj;
+      stan::math::grad(j.vi_);
+      tail_scatter_m(ctx, 0, X);
+      tail_scatter_s(ctx, 1, alpha);
+      tail_scatter_v(ctx, 2, beta);
+    }
+    return v0;
+  } else {
+    std::vector<int> y(ctx.idata, ctx.idata + rows);
+    if constexpr (Kind == kCatLogitGlm) {
+      VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
+      VarM beta = tail_m(ctx, 2, cols, ctx.in[2].len / cols);
+      out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y, X, alpha, beta)
+                   : stan::math::categorical_logit_glm_lpmf<false>(y, X, alpha, beta);
+      const double vv = out.val();
+      if constexpr (Grad) {
+        var j = out * ctx.out_adj;
+        stan::math::grad(j.vi_);
+        tail_scatter_m(ctx, 0, X);
+        tail_scatter_v(ctx, 1, alpha);
+        tail_scatter_m(ctx, 2, beta);
+      }
+      return vv;
+    } else {
+      // in = {X, beta, cutpoints}; alpha above is beta for this one.
+      VarV beta = tail_v(ctx, 1, cols);
+      VarV cuts = tail_v(ctx, 2, ctx.in[2].len);
+      out = propto ? stan::math::ordered_logistic_glm_lpmf<true>(y, X, beta, cuts)
+                   : stan::math::ordered_logistic_glm_lpmf<false>(y, X, beta, cuts);
+      const double vv = out.val();
+      if constexpr (Grad) {
+        var j = out * ctx.out_adj;
+        stan::math::grad(j.vi_);
+        tail_scatter_m(ctx, 0, X);
+        tail_scatter_v(ctx, 1, beta);
+        tail_scatter_v(ctx, 2, cuts);
+      }
+      return vv;
+    }
+  }
+}
+
+void lkjcov_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkjcov_eval<false>(ctx); }
+void lkjcov_bwd(KernelCtx& ctx) { lkjcov_eval<true>(ctx); }
+void blglm_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = tglm_eval<false, kBinomLogitGlm>(ctx);
+}
+void blglm_bwd(KernelCtx& ctx) { tglm_eval<true, kBinomLogitGlm>(ctx); }
+void clglm_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = tglm_eval<false, kCatLogitGlm>(ctx);
+}
+void clglm_bwd(KernelCtx& ctx) { tglm_eval<true, kCatLogitGlm>(ctx); }
+void olglm_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = tglm_eval<false, kOrdLogisticGlm>(ctx);
+}
+void olglm_bwd(KernelCtx& ctx) { tglm_eval<true, kOrdLogisticGlm>(ctx); }
+
 int64_t no_scratch(const Op&, const Slot*) { return 0; }
 
 }  // namespace
@@ -493,6 +874,33 @@ int64_t no_scratch(const Op&, const Slot*) { return 0; }
 void register_matrix_kernels() {
   register_kernel(OP_GP_EXP_QUAD_COV,
                   Kernel{gp_cov_fwd, gp_cov_bwd, no_scratch});
+  register_kernel(OP_WISHART_LPDF, Kernel{wish_fwd, wish_bwd, no_scratch});
+  register_kernel(OP_INV_WISHART_LPDF,
+                  Kernel{iwish_fwd, iwish_bwd, no_scratch});
+  register_kernel(OP_WISHART_CHOL_LPDF,
+                  Kernel{wishc_fwd, wishc_bwd, no_scratch});
+  register_kernel(OP_INV_WISHART_CHOL_LPDF,
+                  Kernel{iwishc_fwd, iwishc_bwd, no_scratch});
+  register_kernel(OP_MULTI_GP_LPDF, Kernel{mgp_fwd, mgp_bwd, no_scratch});
+  register_kernel(OP_MULTI_GP_CHOL_LPDF, Kernel{mgpc_fwd, mgpc_bwd, no_scratch});
+  register_kernel(OP_MULTI_STUDENT_T_LPDF, Kernel{mst_fwd, mst_bwd, no_scratch});
+  register_kernel(OP_MULTI_STUDENT_T_CHOL_LPDF,
+                  Kernel{mstc_fwd, mstc_bwd, no_scratch});
+  register_kernel(OP_MULTINOMIAL_LPMF, Kernel{multn_fwd, multn_bwd, no_scratch});
+  register_kernel(OP_MULTINOMIAL_LOGIT_LPMF,
+                  Kernel{multnl_fwd, multnl_bwd, no_scratch});
+  register_kernel(OP_DIRICHLET_MULTINOMIAL_LPMF,
+                  Kernel{dirmult_fwd, dirmult_bwd, no_scratch});
+  register_kernel(OP_ORDERED_PROBIT_LPMF,
+                  Kernel{oprobit_fwd, oprobit_bwd, no_scratch});
+  register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, no_scratch});
+  register_kernel(OP_LKJ_COV_LPDF, Kernel{lkjcov_fwd, lkjcov_bwd, no_scratch});
+  register_kernel(OP_BINOMIAL_LOGIT_GLM_LPMF,
+                  Kernel{blglm_fwd, blglm_bwd, no_scratch});
+  register_kernel(OP_CATEGORICAL_LOGIT_GLM_LPMF,
+                  Kernel{clglm_fwd, clglm_bwd, no_scratch});
+  register_kernel(OP_ORDERED_LOGISTIC_GLM_LPMF,
+                  Kernel{olglm_fwd, olglm_bwd, no_scratch});
   register_kernel(OP_DIAG_MATRIX, Kernel{diag_fwd, diag_bwd, no_scratch});
   register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, no_scratch});
   register_kernel(OP_MULTI_NORMAL_CHOL_LPDF,

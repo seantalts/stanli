@@ -50,6 +50,23 @@ namespace stanli {
   X(OP_CONSTRAIN_CHOL_CORR)                                               \
   X(OP_LKJ_CORR_CHOL_LPDF)                                                \
   X(OP_LKJ_CORR_LPDF)                                                     \
+  X(OP_WISHART_LPDF)                                                      \
+  X(OP_INV_WISHART_LPDF)                                                  \
+  X(OP_WISHART_CHOL_LPDF)                                                 \
+  X(OP_INV_WISHART_CHOL_LPDF)                                             \
+  X(OP_MULTI_GP_LPDF)                                                   \
+  X(OP_MULTI_GP_CHOL_LPDF)                                              \
+  X(OP_MULTI_STUDENT_T_LPDF)                                            \
+  X(OP_MULTI_STUDENT_T_CHOL_LPDF)                                       \
+  X(OP_MULTINOMIAL_LPMF)                                                \
+  X(OP_MULTINOMIAL_LOGIT_LPMF)                                          \
+  X(OP_DIRICHLET_MULTINOMIAL_LPMF)                                      \
+  X(OP_ORDERED_PROBIT_LPMF)                                             \
+  X(OP_WIENER_LPDF)                                                     \
+  X(OP_LKJ_COV_LPDF)                                                    \
+  X(OP_BINOMIAL_LOGIT_GLM_LPMF)                                         \
+  X(OP_CATEGORICAL_LOGIT_GLM_LPMF)                                      \
+  X(OP_ORDERED_LOGISTIC_GLM_LPMF)                                       \
   X(OP_NORMAL_ID_GLM_LPDF)                                                \
   X(OP_TRANSPOSE)                                                         \
   X(OP_ODE)                                                               \

@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 namespace stanli {
@@ -64,6 +65,13 @@ struct Graph {
     op.opcode = opcode;
     op.out = out;
     op.n_in = 0;
+    // Op::in is fixed-size and this used to write past it without a
+    // word: a 7-input op corrupted n_in and whatever followed, and the
+    // failure surfaced as a SIGBUS inside the kernel rather than here.
+    // Six is a real ceiling on the lowering, so say so at the point that
+    // knows.
+    if (ins.size() > sizeof(op.in) / sizeof(op.in[0]))
+      throw std::length_error("op has more inputs than Op::in holds");
     for (int s : ins) op.in[op.n_in++] = s;
     if (!idata.empty()) {
       idata_pool.push_back(std::move(idata));

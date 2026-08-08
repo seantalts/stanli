@@ -1036,6 +1036,168 @@ struct Lowering {
       g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x1u);
       return v;
     }
+    // lkj_cov(Sigma | mu, sigma, eta).
+    if (e.name == "lkj_cov_lpdf" && e.args.size() == 4) {
+      Val S = lower_expr(e.args[0]);
+      Val mu = lower_expr(e.args[1]);
+      Val sig = lower_expr(e.args[2]);
+      Val eta = lower_expr(e.args[3]);
+      if (S.si.rows == 0) fail("lkj_cov needs a matrix", e.raw);
+      Val v = emit(OP_LKJ_COV_LPDF, {S.slot, mu.slot, sig.slot, eta.slot}, 1,
+                   {}, {(int)S.si.rows});
+      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0xfu);
+      return v;
+    }
+
+    // gaussian_dlm_obs takes seven arguments and Op::in holds six, so it
+    // cannot be lowered as one op at all. Raising the limit would add
+    // bytes to every Op and every KernelCtx in every model for the sake
+    // of one dynamic-linear-model density, so this refuses instead and
+    // names the reason. See docs/coverage.md.
+    if (e.name == "gaussian_dlm_obs_lpdf")
+      fail("gaussian_dlm_obs takes 7 arguments and an op holds 6", e.raw);
+
+    // The three GLMs whose argument shapes the recorder cannot express.
+    // idata is the outcome (two groups for binomial) then rows, cols.
+    if (e.name == "binomial_logit_glm_lpmf" && e.args.size() == 5) {
+      std::vector<int> idata = int_arg_values(e.args[0]);
+      std::vector<int> NN = int_arg_values(e.args[1]);
+      Val X = lower_expr(e.args[2]);
+      Val alpha = lower_expr(e.args[3]);
+      Val beta = lower_expr(e.args[4]);
+      if (X.si.rows == 0) fail("binomial_logit_glm needs a matrix", e.raw);
+      // Both int groups are one value per row, so a scalar broadcasts.
+      const int64_t rows = X.si.rows;
+      if ((int64_t)idata.size() == 1) idata.assign(rows, idata[0]);
+      if ((int64_t)NN.size() == 1) NN.assign(rows, NN[0]);
+      idata.insert(idata.end(), NN.begin(), NN.end());
+      idata.push_back((int)rows);
+      idata.push_back((int)X.si.cols);
+      Val v = emit(OP_BINOMIAL_LOGIT_GLM_LPMF,
+                   {X.slot, alpha.slot, beta.slot}, 1, {}, idata);
+      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+      return v;
+    }
+    if ((e.name == "categorical_logit_glm_lpmf" ||
+         e.name == "ordered_logistic_glm_lpmf") &&
+        e.args.size() == 4) {
+      std::vector<int> idata = int_arg_values(e.args[0]);
+      Val X = lower_expr(e.args[1]);
+      Val a2 = lower_expr(e.args[2]);
+      Val a3 = lower_expr(e.args[3]);
+      if (X.si.rows == 0) fail(e.name + " needs a matrix", e.raw);
+      if ((int64_t)idata.size() == 1) idata.assign(X.si.rows, idata[0]);
+      idata.push_back((int)X.si.rows);
+      idata.push_back((int)X.si.cols);
+      // categorical: (y, x, alpha, beta). ordered: (y, x, beta, cuts).
+      // Both pass their two real arguments in order, so the kernel reads
+      // in[1] and in[2] and knows from its Kind what they mean.
+      Val v = emit(e.name == "categorical_logit_glm_lpmf"
+                       ? OP_CATEGORICAL_LOGIT_GLM_LPMF
+                       : OP_ORDERED_LOGISTIC_GLM_LPMF,
+                   {X.slot, a2.slot, a3.slot}, 1, {}, idata);
+      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+      return v;
+    }
+
+    // multi_gp: (matrix y[K x N], matrix Sigma[K x K], vector w[K]).
+    if ((e.name == "multi_gp_lpdf" || e.name == "multi_gp_cholesky_lpdf") &&
+        e.args.size() == 3) {
+      Val y = lower_expr(e.args[0]);
+      Val S = lower_expr(e.args[1]);
+      Val w = lower_expr(e.args[2]);
+      if (y.si.rows == 0 || S.si.rows == 0)
+        fail(e.name + " needs matrix arguments", e.raw);
+      Val v = emit(e.name == "multi_gp_lpdf" ? OP_MULTI_GP_LPDF
+                                             : OP_MULTI_GP_CHOL_LPDF,
+                   {y.slot, S.slot, w.slot}, 1, {},
+                   {(int)y.si.rows, (int)y.si.cols});
+      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+      return v;
+    }
+
+    // multi_student_t: (vector y, real nu, vector mu, matrix Sigma). K from
+    // the matrix; y may be an array of K-vectors, as multi_normal allows.
+    if ((e.name == "multi_student_t_lpdf" ||
+         e.name == "multi_student_t_cholesky_lpdf") &&
+        e.args.size() == 4) {
+      Val y = lower_expr(e.args[0]);
+      Val nu = lower_expr(e.args[1]);
+      Val mu = lower_expr(e.args[2]);
+      Val S = lower_expr(e.args[3]);
+      if (S.si.rows == 0) fail(e.name + " needs a matrix argument", e.raw);
+      const int64_t K = S.si.rows;
+      const int64_t reps = info[y.slot].len / K;
+      Val v = emit(e.name == "multi_student_t_lpdf"
+                       ? OP_MULTI_STUDENT_T_LPDF
+                       : OP_MULTI_STUDENT_T_CHOL_LPDF,
+                   {y.slot, nu.slot, mu.slot, S.slot}, 1, {},
+                   {(int)K, (int)reps});
+      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0xfu);
+      return v;
+    }
+
+    // The multinomial family: (array[] int ns, vector theta). The counts
+    // must be data (they ride in idata); theta is the only edge.
+    {
+      static const std::map<std::string, uint16_t> kMult = {
+          {"multinomial_lpmf", OP_MULTINOMIAL_LPMF},
+          {"multinomial_logit_lpmf", OP_MULTINOMIAL_LOGIT_LPMF},
+          {"dirichlet_multinomial_lpmf", OP_DIRICHLET_MULTINOMIAL_LPMF},
+      };
+      auto mit = kMult.find(e.name);
+      if (mit != kMult.end() && e.args.size() == 2) {
+        std::vector<int> ns = int_arg_values(e.args[0]);
+        Val th = lower_expr(e.args[1]);
+        Val v = emit(mit->second, {th.slot}, 1, {}, ns);
+        g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x1u);
+        return v;
+      }
+    }
+
+    // ordered_probit(y | lambda, c): outcome in idata, lambda and the
+    // cutpoints are real edges.
+    if (e.name == "ordered_probit_lpmf" && e.args.size() == 3) {
+      std::vector<int> y = int_arg_values(e.args[0]);
+      Val lam = lower_expr(e.args[1]);
+      Val c = lower_expr(e.args[2]);
+      Val v = emit(OP_ORDERED_PROBIT_LPMF, {lam.slot, c.slot}, 1, {}, y);
+      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x3u);
+      return v;
+    }
+
+    // wiener(y | alpha, tau, beta, delta): five real arguments.
+    if (e.name == "wiener_lpdf" && e.args.size() == 5) {
+      std::vector<int> ins;
+      for (int i = 0; i < 5; ++i) ins.push_back(lower_expr(e.args[i]).slot);
+      Val v = emit(OP_WIENER_LPDF, ins, 1, {}, {});
+      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x1fu);
+      return v;
+    }
+
+    // The wishart family: (matrix, real, matrix), all four of them. K
+    // comes from the first matrix; the kernels bind every argument as var
+    // (docs/coverage.md, "write the kernel" tier) so no activity mask is
+    // needed, only the propto bit.
+    {
+      static const std::map<std::string, uint16_t> kWish = {
+          {"wishart_lpdf", OP_WISHART_LPDF},
+          {"inv_wishart_lpdf", OP_INV_WISHART_LPDF},
+          {"wishart_cholesky_lpdf", OP_WISHART_CHOL_LPDF},
+          {"inv_wishart_cholesky_lpdf", OP_INV_WISHART_CHOL_LPDF},
+      };
+      auto wit = kWish.find(e.name);
+      if (wit != kWish.end() && e.args.size() == 3) {
+        Val W = lower_expr(e.args[0]);
+        Val nu = lower_expr(e.args[1]);
+        Val S = lower_expr(e.args[2]);
+        if (W.si.rows == 0) fail(e.name + " needs a matrix", e.raw);
+        Val v = emit(wit->second, {W.slot, nu.slot, S.slot}, 1, {},
+                     {(int)W.si.rows});
+        g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+        return v;
+      }
+    }
     if (e.name == "normal_id_glm_lpdf" && e.args.size() == 5) {
       Val y = lower_expr(e.args[0]);
       Val X = lower_expr(e.args[1]);
