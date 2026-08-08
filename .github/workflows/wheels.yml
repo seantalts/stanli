@@ -211,7 +211,16 @@ jobs:
             /usr/bin/time -v cmake --build build-rel \
               -j ${{ matrix.build_jobs }} 2>/tmp/build.err ||
               { cat /tmp/build.err; exit 1; }
-            grep -i "maximum resident" /tmp/build.err
+            # A cache-hit build compiles nothing and reports a peak of
+            # about 170 MB, which is not headroom and must not be read as
+            # any. Qualify the number with the miss count so nobody
+            # raises -j off a run that never ran the compiler.
+            kb=$(awk '/[Mm]aximum resident/ {print $NF}' /tmp/build.err)
+            miss=$(ccache -s | awk '/^ *Misses:/ {print $2; exit}')
+            echo "peak RSS $(( kb / 1024 )) MB on the largest single" \
+                 "compile, over ${miss:-?} ccache misses" \
+                 "$([ "${miss:-0}" -lt 20 ] && echo '(cached build:' \
+                 'this peak is not a memory ceiling)')"
           else
             cmake --build build-rel -j ${{ matrix.build_jobs }}
           fi
