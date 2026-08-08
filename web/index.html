@@ -51,6 +51,9 @@
   tr:hover td { background: #8881; }
   td.bad { color: #c33; font-weight: 600; }
   .plots { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: .4rem; }
+  tr.plotrow td { padding: .3rem 0 .7rem; border-bottom: 1px solid #8883; }
+  tr.plotrow:hover td { background: none; }
+  tr.selected td { background: #4a72; font-weight: 600; }
   .plots canvas { border: 1px solid #8883; border-radius: 6px;
                   max-width: 100%; }
   .times { font-size: .8rem; opacity: .7; margin-top: .5rem; }
@@ -101,10 +104,10 @@ everything below happens in this tab.
 </div>
 <div id="note"></div>
 <div id="err"></div>
-<div class="plots">
+<div id="plotshome"><div class="plots" id="plots">
   <canvas id="trace" width="620" height="180" hidden></canvas>
   <canvas id="hist" width="420" height="180" hidden></canvas>
-</div>
+</div></div>
 <div id="out"></div>
 <div class="times" id="times"></div>
 
@@ -271,6 +274,8 @@ let fit = null;
 $("run").onclick = async () => {
   $("run").disabled = true;
   $("err").textContent = "";
+  // Park the plots before the table they may be sitting in is wiped.
+  $("plotshome").appendChild($("plots"));
   $("out").innerHTML = "";
   $("times").textContent = "";
   $("csv").hidden = true;
@@ -434,7 +439,37 @@ function render(ms, nChains) {
       `sampling per chain (stanc ${ms.stanc.toFixed(0)} ms, once); ` +
       `click a row for trace + histogram`;
   for (const tr of $("out").querySelectorAll("tr[data-n]"))
-    tr.onclick = () => { tracePlot(tr.dataset.n); histPlot(tr.dataset.n); };
+    tr.onclick = () => showPlots(tr);
+}
+
+// The plots follow the selection: one pair, parked above the table while
+// NUTS streams, then moved into a row of its own directly under whichever
+// parameter was clicked. Moving the node keeps the canvases and their
+// contexts alive, so nothing has to be redrawn to relocate them.
+function showPlots(tr) {
+  const plots = $("plots");
+  const prev = $("out").querySelector("tr.plotrow");
+  if (prev && prev.previousElementSibling === tr) {
+    // Clicking the same row again puts them back and clears the highlight.
+    $("plotshome").appendChild(plots);
+    prev.remove();
+    tr.classList.remove("selected");
+    return;
+  }
+  if (prev) {
+    prev.previousElementSibling?.classList.remove("selected");
+    prev.remove();
+  }
+  const row = document.createElement("tr");
+  row.className = "plotrow";
+  const cell = document.createElement("td");
+  cell.colSpan = 8;
+  cell.appendChild(plots);
+  row.appendChild(cell);
+  tr.after(row);
+  tr.classList.add("selected");
+  tracePlot(tr.dataset.n);
+  histPlot(tr.dataset.n);
 }
 
 // ---- plots -----------------------------------------------------------------
