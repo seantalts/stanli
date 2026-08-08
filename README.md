@@ -32,9 +32,10 @@ pip install stanli
 - Install size: one 21.3 MB shared library, a 7.4 MB wheel. Breakdown
   in [Binary size](#binary-size) below; the browser build halves the
   runtime with `STANLI_LITE_LP` ([docs/lite-lp.md](docs/lite-lp.md)).
-- Distribution coverage: [docs/coverage.md](docs/coverage.md) (46 of 72
-  densities, 87 of 105 cdf/lcdf/lccdf, truncation and censoring; every one
-  bitwise against CmdStan, and what is missing says why)
+- Distribution coverage: [docs/coverage.md](docs/coverage.md) (47 of 72
+  densities, 90 of 105 cdf/lcdf/lccdf, truncation, censoring and ordinal
+  regression; every one bitwise against CmdStan, and what is missing says
+  why)
 - How this is possible, for statisticians:
   [docs/how-it-works.md](docs/how-it-works.md)
 - Design doc: `docs/superpowers/specs/2026-08-04-stan-portable-runtime-design.md`

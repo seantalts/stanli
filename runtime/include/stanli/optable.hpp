@@ -254,6 +254,9 @@ namespace stanli {
   X(OP_SKEW_NORMAL_LCDF, skew_normal_lcdf, 4, 0) \
   X(OP_STD_NORMAL_CDF, std_normal_cdf, 1, 0) \
   X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1, 0) \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_CDF, skew_double_exponential_cdf, 4, 0) \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCDF, skew_double_exponential_lcdf, 4, 0) \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCCDF, skew_double_exponential_lccdf, 4, 0) \
   X(OP_STD_NORMAL_LCDF, std_normal_lcdf, 1, 0) \
   X(OP_STUDENT_T_CDF, student_t_cdf, 4, 0) \
   X(OP_STUDENT_T_LCCDF, student_t_lccdf, 4, 0) \
@@ -290,13 +293,20 @@ namespace stanli {
   X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1, 0)                          \
   X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1, 0)
 
-// Not here, and worth saying why: ordered_logistic and ordered_probit.
-// Their cutpoint argument is a whole vector per observation, and
-// stan-math reaches its partials through partials_vec<1>(ops_partials),
-// a vector-of-vectors edge. The recorder implements scalar and vector
-// edges only, so these need a recorder extension rather than a list
-// entry. They are the largest remaining coverage gap (ordinal
-// regression); see docs/coverage.md.
+// Ordinal regression. Two things make these different from the list
+// above, and both are expressed in the kernel rather than here: the
+// cutpoint argument is a whole vector whatever its length (field 4 is
+// the VecMask that says so, since a one-element cutpoint set is a
+// one-element vector and NOT a scalar), and the integer outcome has to
+// reach stan-math as a std::vector<int> -- ordered_logistic asks
+// scalar_seq_view for a mutable data() pointer, which an
+// Eigen::Map<const VectorXi> cannot give it.
+//
+// reroll.cpp must never fuse these: element n of a shared cutpoint
+// vector is not observation n's cutpoints. They are absent from both of
+// its opt-in lists, which is the whole guard.
+#define STANLI_ORDERED_DENSITY_LIST(X)                                    \
+  X(OP_ORDERED_LOGISTIC_LPMF, ordered_logistic_lpmf, 2, 0x2)
 // Scalar unary math, one line each: opcode, kernel, registration,
 // lowering entry and interpreter branch all come from here. The value and
 // the derivative are the only things that vary, and `x` is the argument.
@@ -381,6 +391,7 @@ enum Opcode : uint16_t {
   STANLI_INT_DENSITY_LIST(STANLI_DENSITY_ENUM)
   STANLI_SCALAR_CDF_LIST(STANLI_DENSITY_ENUM)
   STANLI_INT_CDF_LIST(STANLI_DENSITY_ENUM)
+  STANLI_ORDERED_DENSITY_LIST(STANLI_DENSITY_ENUM)
 #undef STANLI_DENSITY_ENUM
 #define STANLI_UNARY_ENUM(code, fn, v, d) code,
   STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_ENUM)

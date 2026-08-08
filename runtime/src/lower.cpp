@@ -875,6 +875,7 @@ struct Lowering {
         // Integer-outcome cdfs: the count is the one int group.
 #define STANLI_INT_CDF_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 1, 1}},
         STANLI_INT_CDF_LIST(STANLI_INT_CDF_TABLE)
+        STANLI_ORDERED_DENSITY_LIST(STANLI_INT_CDF_TABLE)
 #undef STANLI_INT_CDF_TABLE
         {"bernoulli_lpmf", {OP_BERNOULLI_LPMF, 2, 1}},
         {"poisson_lpmf", {OP_POISSON_LPMF, 2, 1}},

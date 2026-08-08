@@ -34,6 +34,20 @@ on:
 permissions:
   contents: read
 
+# One run per branch. Pushing twice to a pull request used to leave both
+# runs alive, competing for the same macOS runners, so the run that
+# actually gates the merge started last and finished last -- four stale
+# runs had to be cancelled by hand on one branch.
+#
+# cancel-in-progress is deliberately conditional. A superseded PR run is
+# worthless, but a push to main is what the nightly-vs-release history is
+# read from, and a tag build is a release: neither may be cancelled by
+# whatever lands next. github.ref distinguishes them, and the group is
+# per-ref so a PR never cancels main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # Must match tools/dev_setup.sh. The embedded compiler cache is keyed on
   # it, so bumping it there and here invalidates the cache exactly once.

@@ -1,5 +1,7 @@
 // stanli_check's contract, driven through the WASM build under Node:
 //   OK <lp> <g0> <g1> ...   / COMPILE_FAIL ... / EVAL_FAIL ...
+// EVAL_FAIL means evaluation threw; a nonfinite lp or gradient is a
+// value and gets printed, exactly as stanli_check and ref_driver do.
 // stanc runs natively (Node spawns the same pinned binary); the model
 // compiles and evaluates inside stanli.wasm. This is what lets
 // tools/verify_refs.py replay the corpus references against the browser
@@ -64,20 +66,20 @@ createStanli().then((M) => {
     console.log("EVAL_FAIL evaluation threw");
     process.exit(1);
   }
+  // Nonfinite values are reported, not refused -- see the note in
+  // tools/stanli_check.cpp. This driver has to keep the same contract as
+  // that one or the WASM replay stops being the same oracle.
   const lp = M.HEAPF64[lpPtr / 8];
-  if (!Number.isFinite(lp)) {
-    console.log("EVAL_FAIL nonfinite lp");
-    process.exit(1);
-  }
+  let nBad = 0;
   const parts = ["OK", fmt(lp)];
   for (let i = 0; i < n; ++i) {
     const g = M.HEAPF64[gradPtr / 8 + i];
-    if (!Number.isFinite(g)) {
-      console.log("EVAL_FAIL nonfinite gradient");
-      process.exit(1);
-    }
+    if (!Number.isFinite(g)) ++nBad;
     parts.push(fmt(g));
   }
+  if (!Number.isFinite(lp) || nBad > 0)
+    console.error("wasm_check: nonfinite lp=" + (Number.isFinite(lp) ? 0 : 1) +
+                  " gradients=" + nBad);
   console.log(parts.join(" "));
   if (waValues) {
     const nWa = Number(M._stanli_wa_n_columns(m));

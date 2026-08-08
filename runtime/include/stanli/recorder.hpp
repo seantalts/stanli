@@ -34,6 +34,15 @@ namespace stanli {
 // literal 0.0) but not convertible to double, so stan::is_constant<rvar>
 // is false without a specialization.
 struct rvar {
+  // We register is_fvar<rvar>, and stan-math's fvar contract includes a
+  // Scalar member: its value_type specialization is written
+  // `typename std::decay_t<T>::Scalar` for anything is_fvar accepts, and
+  // that applies to `const rvar&` as much as to `rvar`. Specializing
+  // value_type for the bare type only, as this header used to, left every
+  // cv-ref form reaching for a member that did not exist -- which is what
+  // kept ordered_logistic and skew_double_exponential's cdfs out. Honour
+  // the trait instead of patching its consumers one at a time.
+  using Scalar = double;
   double val_{0};
   rvar() = default;
   rvar(double v) : val_(v) {}  // NOLINT: implicit on purpose

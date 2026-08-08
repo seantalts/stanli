@@ -7,8 +7,8 @@ with a generated single-function model.
 
 | family | supported |
 |---|---|
-| densities (`_lpdf`, `_lpmf`) | 46 / 72 |
-| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 87 / 105 |
+| densities (`_lpdf`, `_lpmf`) | 47 / 72 |
+| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 90 / 105 |
 | scalar math (all-real signature) | 47 / 129 |
 
 Everything supported matches CmdStan **bitwise** -- 0 ULP on every
@@ -23,14 +23,26 @@ branch together. See `docs/hacking.md`.
 
 ## The gaps, and what each one actually needs
 
-### Ordinal regression -- `ordered_logistic`, `ordered_probit`
+### Ordinal regression -- `ordered_logistic` is in, `ordered_probit` is not
 
-The largest real-world gap. Their cutpoint argument is a whole vector per
-observation, and stan-math reaches its partials through
-`partials_vec<1>(ops_partials)` -- a vector-of-vectors edge. The
-recorder
-(`runtime/include/stanli/recorder.hpp`) implements scalar and vector edges
-only, so this needs a recorder extension, not a list entry.
+`ordered_logistic` works and matches CmdStan bitwise. Getting there needed
+three things, and the first was a wrong diagnosis: the recorder's Eigen
+edge already *has* `partials_vec_`, so the vector-of-vectors partials were
+never the problem. What actually blocked it was that the failing edge was
+the **scalar** one -- `bind_args_m` compiles both shape branches, and a
+cutpoint set bound as a scalar picks stan-math overloads the scalar edge
+cannot serve. `VecMask` (densities.cpp) marks an argument as a vector
+whatever its length, which is correct anyway: a one-element cutpoint set
+is a one-element vector.
+
+The other two: the outcome goes over as a `std::vector<int>`, because
+`ordered_logistic` asks `scalar_seq_view` for a mutable `data()` that an
+`Eigen::Map<const VectorXi>` cannot give (and a `std::vector` is what
+CmdStan's generated code passes, so it is the instantiation the references
+came from); and `rvar` gained a `Scalar` member -- see below.
+
+`ordered_probit` is still out, for the recorder's structural reason:
+`c_vec[i].coeff(0) - lambda_vec[i]` does arithmetic on the scalar type.
 
 ### Multivariate -- wishart, `multi_student_t`, `multi_normal_prec`,
 `multi_gp`, `lkj_corr`, `gaussian_dlm_obs`
@@ -78,10 +90,14 @@ again (see below). The other six are `von_mises` and
   assignment would change the value and leave the partials describing the
   old one. `rvar` deliberately has no arithmetic operators, which is why
   this fails to compile rather than silently producing a wrong gradient.
-- **`skew_double_exponential_{cdf,lcdf,lccdf}`** reach stan-math's
-  `as_array_or_scalar` container check, which asks for
-  `value_type_t<const rvar&>`; the recorder registers `value_type` for
-  `rvar` but not for its const reference. Probably a one-line trait.
+`skew_double_exponential`'s three cdfs used to be listed here for a
+related reason and are now in. The cause was the same missing trait: we
+register `is_fvar<rvar>`, and stan-math's fvar `value_type` specialization
+is written `typename std::decay_t<T>::Scalar` -- which applies to
+`const rvar&` as much as to `rvar`, and asked for a member `rvar` did not
+have. A real `fvar` defines `Scalar`; we claimed the trait without
+honouring that part of its contract. One member declaration, and three
+cdfs plus `ordered_logistic` compiled.
 
 ### `wiener_lpdf`
 

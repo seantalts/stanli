@@ -2,7 +2,9 @@
 // gradient at a deterministic unconstrained point. Machine-readable output:
 //   OK <lp> <g0> <g1> ...        on success
 //   COMPILE_FAIL <first line of error>
-//   EVAL_FAIL <what>
+//   EVAL_FAIL <what>       only when evaluation THREW; a nonfinite lp
+//                          or gradient is printed as a value, matching
+//                          ref_driver.cpp so the two can be compared
 // Used by tools/corpus.py to build the coverage scoreboard, and by the
 // reference harness to compare against CmdStan at the same point.
 #include <stanli/compile.hpp>
@@ -126,15 +128,24 @@ int main(int argc, char** argv) {
       ex.params_data()[i] = eval_point(i, variant);
     std::vector<double> grad(n, 0.0);
     const double lp = ex.gradient(grad.data());
-    if (!std::isfinite(lp)) {
-      std::printf("EVAL_FAIL nonfinite lp\n");
-      return 1;
-    }
+    // A nonfinite value is reported, not refused. ref_driver.cpp -- the
+    // CmdStan side of every comparison -- prints whatever log_prob
+    // returned, and the comparisons are all nonfinite-safe (pair_dev in
+    // verify_refs.py: the same infinity on both sides is agreement, one
+    // side alone is an infinite deviation). Refusing here made the two
+    // drivers asymmetric, so the oracle could never confirm agreement at
+    // -inf and reported a real disagreement as a run failure instead of a
+    // mismatch. bernoulli_lccdf(1 | theta) is log(0) by definition and
+    // both engines return -inf with a zero gradient; that is a pass.
+    //
+    // The diagnostic value of noticing goes to stderr, where it does not
+    // disturb the machine-readable contract on stdout.
+    int n_bad = 0;
     for (double g : grad)
-      if (!std::isfinite(g)) {
-        std::printf("EVAL_FAIL nonfinite gradient\n");
-        return 1;
-      }
+      if (!std::isfinite(g)) ++n_bad;
+    if (!std::isfinite(lp) || n_bad > 0)
+      std::fprintf(stderr, "stanli_check: nonfinite lp=%d gradients=%d\n",
+                   std::isfinite(lp) ? 0 : 1, n_bad);
     std::printf("OK %.17g", lp);
     for (double g : grad) std::printf(" %.17g", g);
     std::printf("\n");

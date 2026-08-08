@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <vector>
 
 namespace stanli {
 namespace {
@@ -26,40 +27,57 @@ namespace {
 // rvar, 0 = plain double) with runtime shape branching inside. Matching the
 // data/parameter instantiation CmdStan's generated code uses is what makes
 // propto term-dropping and evaluation order line up exactly.
-template <int NArgs, unsigned Mask, typename F, typename... Bound>
+// VecMask marks arguments that are a VECTOR whatever their length: a
+// cutpoint set of one element is a one-element vector, not a scalar, and
+// binding it as a scalar does not merely mis-shape the call -- it picks a
+// stan-math overload that reaches for members the recorder's scalar edge
+// does not have, and fails to compile. Ordinary arguments (bit clear)
+// keep the runtime length branch, which is what lets one instantiation
+// serve a broadcast scalar and a full vector.
+template <int NArgs, unsigned Mask, unsigned VecMask, typename F,
+          typename... Bound>
 void bind_args_m(KernelCtx& ctx, F&& f, const Bound&... bound) {
   if constexpr (sizeof...(Bound) == NArgs) {
     f(bound...);
   } else {
     constexpr int i = sizeof...(Bound);
     constexpr bool active = ((Mask >> i) & 1u) != 0;
-    if (ctx.in[i].len == 1) {
+    constexpr bool always_vec = ((VecMask >> i) & 1u) != 0;
+    const auto bind_vector = [&] {
       if constexpr (active) {
-        bind_args_m<NArgs, Mask>(ctx, f, bound..., rvar(ctx.in[i].data[0]));
+        bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound...,
+                                          as_rvar(ctx.in[i]));
       } else {
-        bind_args_m<NArgs, Mask>(ctx, f, bound..., ctx.in[i].data[0]);
-      }
-    } else {
-      if constexpr (active) {
-        bind_args_m<NArgs, Mask>(ctx, f, bound..., as_rvar(ctx.in[i]));
-      } else {
-        bind_args_m<NArgs, Mask>(
+        bind_args_m<NArgs, Mask, VecMask>(
             ctx, f, bound...,
             Eigen::Map<const Eigen::VectorXd>(ctx.in[i].data, ctx.in[i].len));
       }
+    };
+    if constexpr (always_vec) {
+      bind_vector();  // no length test: a one-element set is still a vector
+    } else if (ctx.in[i].len == 1) {
+      if constexpr (active) {
+        bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound...,
+                                          rvar(ctx.in[i].data[0]));
+      } else {
+        bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound...,
+                                          ctx.in[i].data[0]);
+      }
+    } else {
+      bind_vector();
     }
   }
 }
 
 // Runtime mask -> compile-time Mask instantiation.
-template <int NArgs, typename F, unsigned M = 0>
+template <int NArgs, unsigned VecMask, typename F, unsigned M = 0>
 void mask_dispatch(unsigned mask, KernelCtx& ctx, F&& f) {
   if (mask == M) {
-    bind_args_m<NArgs, M>(ctx, f);
+    bind_args_m<NArgs, M, VecMask>(ctx, f);
     return;
   }
   if constexpr (M + 1 < (1u << NArgs)) {
-    mask_dispatch<NArgs, F, M + 1>(mask, ctx, std::forward<F>(f));
+    mask_dispatch<NArgs, VecMask, F, M + 1>(mask, ctx, std::forward<F>(f));
   }
 }
 
@@ -101,12 +119,12 @@ void mask_dispatch_elt(unsigned mask, KernelCtx& ctx, int64_t n, F&& f) {
 // covers them all and 2^NArgs - 1 instantiations stop existing. The
 // partials computed for data arguments are then discarded (density_bwd
 // skips an argument the executor gave no adjoint buffer).
-template <int NArgs, int Tier, typename F>
+template <int NArgs, int Tier, unsigned VecMask, typename F>
 void full_form(unsigned mask, KernelCtx& ctx, F&& ff) {
   if constexpr ((Tier & STANLI_DENSITY_FULL_MASKS) != 0) {
-    mask_dispatch<NArgs>(mask, ctx, ff);
+    mask_dispatch<NArgs, VecMask>(mask, ctx, ff);
   } else {
-    bind_args_m<NArgs, (1u << NArgs) - 1>(ctx, ff);
+    bind_args_m<NArgs, (1u << NArgs) - 1, VecMask>(ctx, ff);
   }
 }
 
@@ -150,10 +168,20 @@ void density_fwd_elt(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
 // families this density actually has. A missing propto family is not a
 // refusal: the full form is a correct log density, just not the one
 // CmdStan's `~` computes, so it lands a constant higher.
-template <int NArgs, int Listed, typename FProp, typename FFull>
+template <int NArgs, int Listed, unsigned VecMask = 0, typename FProp,
+          typename FFull>
 void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   constexpr int Tier = density_tier(Listed);
-  if (ctx.variant & 0x40u) {
+  // A density with a vector-only argument has no elementwise form to
+  // instantiate -- the per-lane binding hands every argument over as a
+  // scalar, which is exactly what VecMask exists to forbid. reroll.cpp
+  // never fuses these (they are in neither of its opt-in lists), so the
+  // bit cannot arrive; refuse rather than write one element of N.
+  if constexpr (VecMask != 0) {
+    if (ctx.variant & 0x40u)
+      throw std::runtime_error(
+          "density: elementwise variant on a vector-argument density");
+  } else if (ctx.variant & 0x40u) {
     // Real-argument densities reuse the same lambdas: scalar bindings
     // instantiate the same generic templates.
     density_fwd_elt<NArgs, Tier>(
@@ -173,12 +201,12 @@ void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   active_sink() = &s;
   if constexpr ((Tier & STANLI_DENSITY_PROPTO) != 0) {
     if (ctx.variant & 0x80u) {
-      mask_dispatch<NArgs>(mask, ctx, fp);
+      mask_dispatch<NArgs, VecMask>(mask, ctx, fp);
     } else {
-      full_form<NArgs, Tier>(mask, ctx, ff);
+      full_form<NArgs, Tier, VecMask>(mask, ctx, ff);
     }
   } else {
-    full_form<NArgs, Tier>(mask, ctx, ff);
+    full_form<NArgs, Tier, VecMask>(mask, ctx, ff);
   }
   active_sink() = nullptr;
   ctx.out.data[0] = s.value;
@@ -430,7 +458,7 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
   const unsigned mask = ctx.variant == 0 ? (1u << NArgs) - 1
                                          : (ctx.variant & 0x3fu);
   active_sink() = &s;
-  full_form<NArgs, Tier>(mask, ctx, f);
+  full_form<NArgs, Tier, 0>(mask, ctx, f);
   active_sink() = nullptr;
   ctx.out.data[0] = s.value;
 }
@@ -456,6 +484,23 @@ STANLI_SCALAR_CDF_LIST(STANLI_DEFINE_CDF_FWD)
 STANLI_INT_CDF_LIST(STANLI_DEFINE_INT_CDF_FWD)
 #undef STANLI_DEFINE_INT_CDF_FWD
 
+// Ordinal regression. The outcome goes over as a std::vector<int>, not
+// the Eigen map the other lpmfs use: ordered_logistic hands its outcome
+// to scalar_seq_view and then asks for data(), whose non-const overload
+// wants a mutable pointer that a Map<const VectorXi> cannot supply. A
+// std::vector is also exactly what CmdStan's generated code passes, so
+// this is the instantiation the references were produced from. The copy
+// is n ints per evaluation, against a density over the same n.
+#define STANLI_DEFINE_ORDERED_FWD(code, fn, nargs, vecmask)              \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                    \
+    const std::vector<int> y(ctx.idata, ctx.idata + ctx.n_idata);        \
+    density_fwd_v<nargs, 2, vecmask>(                                    \
+        ctx, [&](const auto&... a) { stan::math::fn<true>(y, a...); },   \
+        [&](const auto&... a) { stan::math::fn<false>(y, a...); });      \
+  }
+STANLI_ORDERED_DENSITY_LIST(STANLI_DEFINE_ORDERED_FWD)
+#undef STANLI_DEFINE_ORDERED_FWD
+
 }  // namespace
 
 void register_density_kernels() {
@@ -475,6 +520,11 @@ void register_density_kernels() {
   STANLI_SCALAR_CDF_LIST(STANLI_REGISTER_CDF)
   STANLI_INT_CDF_LIST(STANLI_REGISTER_CDF)
 #undef STANLI_REGISTER_CDF
+#define STANLI_REGISTER_ORDERED(code, fn, nargs, vm) \
+  register_kernel(code,                              \
+                  Kernel{fn##_fwd_gen, density_bwd<nargs>, density_scratch<nargs>});
+  STANLI_ORDERED_DENSITY_LIST(STANLI_REGISTER_ORDERED)
+#undef STANLI_REGISTER_ORDERED
   // The list is the default. A density whose forward needs more than the
   // shared one registers after it and wins: uniform_lpdf has to decide
   // support itself, because stan-math returns LOG_ZERO out of support

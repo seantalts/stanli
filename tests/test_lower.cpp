@@ -697,6 +697,50 @@ int main() {
     }
   }
 
+  // Ordinal regression, against an independent var-path reference. Same
+  // reason as the truncation case: CI has no CmdStan, and this is the one
+  // density whose cutpoint argument is a shared vector rather than a
+  // per-lane value, so it is the only check that VecMask and the
+  // vector-of-vectors partials edge stay wired.
+  {
+    DataMap d;
+    d.set_int("N", 4);
+    d.set_int("K", 4);
+    d.set_int_array("y", {1, 3, 2, 4});
+    CompiledModel om = compile_model(slurp("tests/fixtures/ordlog.tmir.sexp"), d);
+    Executor oex(std::move(om.graph));
+    om.bind(oex);
+    // 4 lambdas + 3 unconstrained cutpoints.
+    const double q[7] = {0.3, -0.2, 0.55, -0.4, -0.5, 0.2, 0.1};
+    for (int i = 0; i < 7; ++i) oex.params_data()[i] = q[i];
+    double grad[7] = {0, 0, 0, 0, 0, 0, 0};
+    const double lp = oex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> lambda(4);
+    for (int i = 0; i < 4; ++i) lambda(i) = q[i];
+    // ordered[3] from the unconstrained triple, with its jacobian.
+    Eigen::Matrix<var, -1, 1> c(3);
+    var acc = 0;
+    c(0) = q[4];
+    for (int k = 1; k < 3; ++k) {
+      c(k) = c(k - 1) + stan::math::exp(var(q[4 + k]));
+      acc += q[4 + k];
+    }
+    const std::vector<int> y{1, 3, 2, 4};
+    acc += stan::math::normal_lpdf<true>(lambda, 0, 2);
+    acc += stan::math::ordered_logistic_lpmf<true>(y, lambda, c);
+    acc.grad();
+
+    bool grads_ok = true;
+    for (int i = 0; i < 4; ++i)
+      if (grad[i] != lambda(i).adj()) grads_ok = false;
+    check(grads_ok, "ordered_logistic: lambda gradients bitwise");
+    check(std::abs(lp - acc.val()) <= 8 * 2.220446049250313e-16 *
+                                          std::abs(acc.val()),
+          "ordered_logistic: lp matches the var path");
+  }
+
   {
     // Error path: an unsupported function is reported by name, never
     // silently miscompiled. Mutate a known-good fixture's density name.
