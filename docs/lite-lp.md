@@ -21,7 +21,7 @@ per distribution, about 630 KB of object for a three-argument one.
 evaluates the *full* normal density. That is still a correct log density
 --
 it just is not the one CmdStan computes, so `lp__` lands a per-model
-constant above CmdStan's.
+constant away from CmdStan's.
 
 ## What it does not drop
 
@@ -39,6 +39,34 @@ every `write_array` value is **bitwise identical** to the exact build, and
 | `lp__` vs CmdStan | bitwise | constant offset |
 | draws for a pinned seed | -- | different chain, same posterior |
 | `stanli_exact_lp()` | 1 | 0 |
+
+### Speed, and what propto is worth at runtime
+
+Nothing measurable. The natural worry about `~` evaluating the full
+density is that it is doing arithmetic the propto form skips, so the
+half-size build should be the slower one. It is not, at any size that
+shows up above the noise floor.
+
+Per-gradient, minimum of five runs of 4000 evaluations each, same
+machine, both builds `-O3`:
+
+| model | exact | lite | |
+|---|---:|---:|---|
+| eight schools (10 params) | 278.9 ns | 288.7 ns | lite 3.5% slower |
+| `arK` (7 params) | 2556 ns | 2591 ns | lite 1.4% slower |
+| `radon_pooled` (3 params, 919 obs) | 4430 ns | 4256 ns | lite 3.9% *faster* |
+
+The sign is not even consistent, which is the tell: this is run-to-run
+variance, not a cost. `STANLI_PROFILE=1` says why. The two builds produce
+the same opcodes with the same counts, because the propto choice is
+internal to a kernel and never changes the graph, and in a profiled run
+the unrelated `OP_ADD` and `OP_MUL` moved by the same 9% as
+`OP_NORMAL_LPDF` did, which is machine noise rather than anything to do
+with densities.
+
+So the trade is half the library against a shifted `lp__`, and not
+against throughput. Do not pick the exact build for speed; pick it
+because you want CmdStan's `lp__`.
 
 ### The draws are not byte-identical, and that is expected
 

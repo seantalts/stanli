@@ -41,7 +41,7 @@ tagged, so everything below is what changed for anyone upgrading from
     transformed parameter, and generated quantity, is bitwise
     identical.
   - The posterior is the same posterior. `lp__` lands a per-model
-    constant above CmdStan's.
+    constant away from CmdStan's.
 
   Two consequences. Do not compare a browser `lp__` against a CmdStan
   run, and do not feed it to anything that reads log densities as

@@ -587,7 +587,7 @@ drops stan-math's propto instantiations to halve the download. Those are
 exactly the terms that do not depend on the parameters, so every gradient
 and every generated quantity here is bit-for-bit what CmdStan computes,
 and the posterior you sample from is the same one. What moves is
-<code>lp__</code> itself: it sits a per-model constant above CmdStan's,
+<code>lp__</code> itself: it differs from CmdStan's by a per-model constant,
 so do not compare this page's <code>lp__</code> against a CmdStan run, and
 do not use it for anything that reads log densities as absolute numbers
 (Bayes factors, marginal likelihoods, bridge sampling).</p>

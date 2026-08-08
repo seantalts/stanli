@@ -179,7 +179,7 @@ hand-written derivative instantiates nothing.
 
 **`-DSTANLI_LITE_LP=ON` halves the runtime.** Dropping the propto family
 entirely takes `libstanli` from 14.9 MB to 7.79 MB stripped, at the cost
-of an `lp__` that sits a per-model constant above CmdStan's. Every
+of an `lp__` that differs from CmdStan's by a per-model constant. Every
 gradient stays bit-identical; a pinned seed draws a different but equally
 valid chain, because the sampler adds `lp` to the kinetic energy and a
 shifted `lp` rounds differently there. On by default for the browser
@@ -227,8 +227,8 @@ known model in a browser is the 1.01 MB runtime alone.
 
 **The browser `lp__` is not CmdStan's.** `STANLI_LITE_LP` is what makes
 the numbers above, and it drops the propto instantiations, so `~`
-evaluates the full density and `lp__` lands a per-model constant above
-CmdStan's. Gradients and every `write_array` value stay bitwise
+evaluates the full density and `lp__` differs from CmdStan's by a
+per-model constant. Gradients and every `write_array` value stay bitwise
 identical, and the posterior is the same posterior, but do not compare a
 browser `lp__` against a CmdStan run or feed it to anything reading log
 densities as absolute numbers. The wheels ship the exact build.
