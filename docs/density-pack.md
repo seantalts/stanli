@@ -1,8 +1,10 @@
 # Splitting the browser runtime: core plus an on-demand density pack
 
-Design notes for loading uncommon densities lazily in the browser. Nothing
-here is implemented yet. The measurements and the feasibility spike are
-done, and this records them so the work does not start from guesses.
+Loading uncommon densities lazily in the browser. This is implemented and
+tested, and turned OFF, because the only emscripten mode it currently
+loads under costs more than the split saves. Build it with
+`-DSTANLI_DENSITY_PACK_BUILD=ON`; `tests/test_wasm_pack.cjs` is the
+check.
 
 ## The problem
 
@@ -26,6 +28,32 @@ The core figure is from a build with every density body stubbed, so
 `STANLI_LITE_LP` had nothing to act on and the number holds for either
 setting. The total is the shipped build, which is exact-lp since that flag
 went off by default.
+
+## Why it is off
+
+| | gzip |
+|---|---:|
+| one module, as shipped | 1.52 MB |
+| split, `MAIN_MODULE=1`: core + pack | 1.73 + 0.99 MB |
+| split, `MAIN_MODULE=2`: core + pack | 1.04 + 0.99 MB |
+
+`MAIN_MODULE=2` is the one worth having: a model using only core
+densities downloads 1.04 MB instead of 1.52 MB. It does not work. That
+mode exports only what `EXPORTED_FUNCTIONS` names, and a side module also
+imports `__stack_pointer` and the `__cpp_exception` tag, which are not
+functions and cannot be named there. Loading fails with
+`imported mutable global must be a WebAssembly.Global object`, and adding
+`__stack_pointer` to `EXPORTED_FUNCTIONS` is rejected as an undefined
+exported symbol.
+
+`MAIN_MODULE=1` exports everything a side module might want, which is why
+it works, and it adds 0.69 MB gzipped to the core. Core plus pack is then
+2.72 MB against 1.52 MB unsplit: worse for every model, whether or not it
+needs the pack.
+
+So the remaining work is entirely on the emscripten side: get a
+`MAIN_MODULE=2` core to hand a side module its stack pointer and exception
+tag. Everything else is done and tested.
 
 ## Why dynamic linking is affordable
 
@@ -66,24 +94,30 @@ exception ABI as the core (`-fwasm-exceptions`). Without it the load fails
 with `imported mutable global must be a WebAssembly.Global object` on
 `__stack_pointer`, which reads like a dynamic-linking bug and is not.
 
-## Sketch
+## How it is built
 
-Core exports one entry:
+`int stanli_load_pack(const char* path, char* err, size_t err_len)` does
+`dlopen(path, RTLD_NOW | RTLD_GLOBAL)`, `dlsym` for
+`stanli_pack_register`, and calls it. The pack registers one kernel per
+opcode it provides.
 
-```c
-/* Load a density pack and let it register its kernels. Returns 0 on
-   success. */
-int stanli_load_pack(const char* path);
-```
+The pack cannot call `register_kernel` directly: that is a C++ symbol, and
+`MAIN_MODULE=2` would need it named in a build file by its mangled name.
+The core exports `stanli_register_kernel_c` instead, a C entry taking the
+three `Kernel` members as `void*`, and `densities.cpp` redirects to it
+when built for the pack. The registration blocks read the same in both
+builds.
 
-which does `dlopen(path, RTLD_NOW | RTLD_GLOBAL)`, `dlsym` for
-`stanli_pack_register`, and calls it. The pack's `stanli_pack_register`
-calls `register_kernel` once per opcode it provides.
+Two defines, and both are needed for different files:
+`STANLI_DENSITY_CORE` on the static library controls which kernels
+`densities.cpp` registers, and the same define on the executable controls
+whether `stanli_load_pack` in `capi.cpp` actually dlopens. Setting only
+one makes `stanli_load_pack` a silent no-op that returns success.
 
-On the JavaScript side, `stanli_model_new` fails with the unsupported
-function name; the worker fetches `stanli-pack.wasm`, writes it to the
-emscripten filesystem, calls `stanli_load_pack`, and retries the compile
-once. A second failure is a real error.
+On the JavaScript side, `stanli_model_new` fails with
+`opcode not registered: OP_...`; the worker fetches `stanli-pack.wasm`,
+writes it to the emscripten filesystem, calls `stanli_load_pack`, and
+retries the compile once. A second failure is a real error.
 
 ## What has to be decided
 

@@ -32,6 +32,20 @@ file(GLOB _boost ${DEPS}/math/lib/boost_*)
 file(GLOB _sundials ${DEPS}/math/lib/sundials_*)
 file(GLOB _tbb ${DEPS}/math/lib/tbb_*)
 
+# The long tail of densities and the distribution functions. On
+# emscripten these are a separate side module the page fetches only when a
+# model needs one (docs/density-pack.md); everywhere else they are part of
+# the library like everything else.
+set(STANLI_PACK_SOURCES
+  runtime/kernels/densities_rest.cpp
+  runtime/kernels/densities_rest_b.cpp
+  runtime/kernels/densities_cdf_a.cpp
+  runtime/kernels/densities_cdf_b.cpp)
+
+option(STANLI_DENSITY_PACK_BUILD
+  "Split the browser runtime into a core plus an on-demand density pack"
+  OFF)
+
 # Everything that includes stan-math (or stan) links this interface target.
 add_library(stanmath INTERFACE)
 target_include_directories(stanmath INTERFACE
@@ -81,20 +95,17 @@ if(EMSCRIPTEN)
   # reassociate and would have shown up immediately. Baseline support is
   # Chrome 91, Firefox 89, Safari 16.4.
   target_compile_options(stanmath INTERFACE -msimd128)
+  # MAIN_MODULE needs every object in the core to be PIC.
+  target_compile_options(stanmath INTERFACE -fPIC)
   # The density kernels instantiate every activity mask times every shape
   # times summed/elementwise: 21 MB of object at -O3. The browser build
   # trades their straight-line speed for size.
   set_source_files_properties(
     runtime/kernels/densities_common.cpp
-  runtime/kernels/densities_lpmf.cpp
-  runtime/kernels/densities_glm.cpp
+    runtime/kernels/densities_common_b.cpp
     runtime/kernels/densities_lpmf.cpp
     runtime/kernels/densities_glm.cpp
-    runtime/kernels/densities_common_b.cpp
-    runtime/kernels/densities_rest.cpp
-    runtime/kernels/densities_rest_b.cpp
-    runtime/kernels/densities_cdf_a.cpp
-    runtime/kernels/densities_cdf_b.cpp
+    ${STANLI_PACK_SOURCES}
     PROPERTIES COMPILE_OPTIONS -Oz)
   # stan-math's rev core includes TBB 2020 headers unconditionally, and
   # that TBB predates wasm: its machine layer selects by OS macro and
@@ -133,6 +144,7 @@ set_target_properties(sundials PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(NOT EMSCRIPTEN)
 add_library(stanli_shared SHARED
+  ${STANLI_PACK_SOURCES}
   runtime/src/capi.cpp
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
@@ -141,10 +153,6 @@ add_library(stanli_shared SHARED
   runtime/kernels/densities_lpmf.cpp
   runtime/kernels/densities_glm.cpp
   runtime/kernels/densities_common_b.cpp
-  runtime/kernels/densities_rest.cpp
-  runtime/kernels/densities_rest_b.cpp
-  runtime/kernels/densities_cdf_a.cpp
-  runtime/kernels/densities_cdf_b.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
   runtime/kernels/ode.cpp
@@ -219,6 +227,7 @@ stanli_embed_stanc(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
 add_library(stanli STATIC
+  $<$<NOT:$<BOOL:${STANLI_DENSITY_PACK_BUILD}>>:${STANLI_PACK_SOURCES}>
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
@@ -226,10 +235,6 @@ add_library(stanli STATIC
   runtime/kernels/densities_lpmf.cpp
   runtime/kernels/densities_glm.cpp
   runtime/kernels/densities_common_b.cpp
-  runtime/kernels/densities_rest.cpp
-  runtime/kernels/densities_rest_b.cpp
-  runtime/kernels/densities_cdf_a.cpp
-  runtime/kernels/densities_cdf_b.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
   runtime/kernels/ode.cpp
@@ -256,6 +261,52 @@ target_link_libraries(stanli PUBLIC stanmath sundials)
 if(EMSCRIPTEN)
   add_executable(stanli_wasm runtime/src/capi.cpp tests/tbb_stub.cpp)
   target_link_libraries(stanli_wasm PRIVATE stanli)
+  # MAIN_MODULE=2 exports only what is asked for, and costs nothing
+  # measurable here: wasm calls already go indirect through a function
+  # table, so there is no PLT or GOT penalty (docs/density-pack.md).
+  # The density pack: off, and measured rather than assumed. It works --
+  # tests/test_wasm_pack.cjs loads a side module and gets the right answer
+  # from a density the core does not carry -- but only under
+  # MAIN_MODULE=1, which exports everything a side module might import.
+  # That costs more than the split saves:
+  #
+  #   unsplit                          1.52 MB gzip
+  #   MAIN_MODULE=1 core + pack   1.73 + 0.99 MB gzip
+  #   MAIN_MODULE=2 core + pack   1.04 + 0.99 MB gzip   (would be the win)
+  #
+  # MAIN_MODULE=2 exports only what EXPORTED_FUNCTIONS names, and a side
+  # module also imports __stack_pointer and the __cpp_exception tag, which
+  # are not functions and cannot be named there. Until that is solved the
+  # browser ships one module. See docs/density-pack.md.
+  # (declared above, next to STANLI_LITE_LP)
+  if(STANLI_DENSITY_PACK_BUILD)
+    # Both targets need it, for different files: densities.cpp is in the
+    # static library and decides which kernels register, capi.cpp is in
+    # the executable and decides whether stanli_load_pack dlopens.
+    # Setting it on only one makes load_pack a silent no-op.
+    target_compile_definitions(stanli PRIVATE STANLI_DENSITY_CORE)
+    target_compile_definitions(stanli_wasm PRIVATE STANLI_DENSITY_CORE)
+    target_link_options(stanli_wasm PRIVATE "SHELL:-s MAIN_MODULE=1")
+  endif()
+
+  if(STANLI_DENSITY_PACK_BUILD)
+    # The density pack: same shards, built as a side module that registers
+    # its kernels into the core's table when stanli_load_pack dlopens it.
+    # It must share the core's exception ABI or the load fails on an
+    # imported mutable __stack_pointer.
+    add_executable(stanli_pack ${STANLI_PACK_SOURCES}
+                               runtime/kernels/densities.cpp)
+    target_link_libraries(stanli_pack PRIVATE stanmath)
+    target_include_directories(stanli_pack PRIVATE runtime/include)
+    target_compile_definitions(stanli_pack PRIVATE STANLI_DENSITY_PACK)
+    target_compile_options(stanli_pack PRIVATE -fPIC -Oz)
+    set_target_properties(stanli_pack PROPERTIES OUTPUT_NAME stanli-pack
+                                                 SUFFIX ".wasm")
+    target_link_options(stanli_pack PRIVATE
+      -fwasm-exceptions
+      "SHELL:-s SIDE_MODULE=2"
+      "SHELL:-s EXPORTED_FUNCTIONS=_stanli_pack_register")
+  endif()
   set_target_properties(stanli_wasm PROPERTIES OUTPUT_NAME stanli)
   target_link_options(stanli_wasm PRIVATE
     -fwasm-exceptions
@@ -265,8 +316,8 @@ if(EMSCRIPTEN)
     "SHELL:-s MAXIMUM_MEMORY=4GB"
     "SHELL:-s STACK_SIZE=8MB"
     "SHELL:-s ENVIRONMENT=web,worker,node"
-    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_malloc,_free"
-    "SHELL:-s EXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,stringToNewUTF8,HEAPF64,addFunction,removeFunction"
+    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_stanli_load_pack,_stanli_register_kernel_c,_malloc,_free"
+    "SHELL:-s EXPORTED_RUNTIME_METHODS=cwrap,ccall,UTF8ToString,stringToNewUTF8,HEAPF64,addFunction,removeFunction,FS"
     "SHELL:-s ALLOW_TABLE_GROWTH=1")
 endif()
 

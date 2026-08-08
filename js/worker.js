@@ -16,6 +16,30 @@ function ensureStanc() {
     importScripts("stancjs.bc.js");
 }
 
+// The density pack. The core runtime carries the distributions models
+// lean on; the long tail and the distribution functions are a side module
+// worth about half the compressed download, fetched the first time a
+// model turns out to need one. Compiling reports
+// "opcode not registered: OP_..." until it is loaded, which is the only
+// signal needed: no list of density names has to be mirrored here.
+let packLoaded = false;
+async function ensurePack(M) {
+  if (packLoaded) return true;
+  const res = await fetch("stanli-pack.wasm");
+  if (!res.ok) return false;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  M.FS.writeFile("/stanli-pack.wasm", bytes);
+  const errPtr = M._malloc(8192);
+  const rc = M.ccall("stanli_load_pack", "number",
+                     ["string", "number", "number"],
+                     ["/stanli-pack.wasm", errPtr, 8192]);
+  const msg = rc === 0 ? "" : M.UTF8ToString(errPtr);
+  M._free(errPtr);
+  if (rc !== 0) throw new Error("density pack: " + msg);
+  packLoaded = true;
+  return true;
+}
+
 onmessage = async (e) => {
   const req = e.data;
   const t0 = performance.now();
@@ -59,7 +83,14 @@ onmessage = async (e) => {
     const dataPtr = M.stringToNewUTF8(req.dataJson || "{}");
     const errLen = 8192;
     const errPtr = M._malloc(errLen);
-    const model = M._stanli_model_new(mirPtr, dataPtr, errPtr, errLen);
+    let model = M._stanli_model_new(mirPtr, dataPtr, errPtr, errLen);
+    if (!model && /opcode not registered/.test(M.UTF8ToString(errPtr))) {
+      // A density that lives in the pack. Fetch it and compile once more;
+      // a second failure is a real error.
+      say("fetching the density pack");
+      if (await ensurePack(M))
+        model = M._stanli_model_new(mirPtr, dataPtr, errPtr, errLen);
+    }
     M._free(mirPtr);
     M._free(dataPtr);
     if (!model) throw new Error(M.UTF8ToString(errPtr));
