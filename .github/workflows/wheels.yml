@@ -69,28 +69,17 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
     strategy:
       fail-fast: false
+      # A pull request builds one platform. macOS arm64 is the whole merge
+      # gate: it runs the test suite and the corpus oracle, which is what
+      # has ever caught anything, and it is the fastest of the five. The
+      # other three build after the merge, nightly and on tags. A platform
+      # break therefore lands on main and is fixed forward, which is the
+      # same deal Windows already has.
       matrix:
-        include:
-          - os: macos-15
-            plat: macosx_11_0_arm64
-            macos_target: '11.0'
-            opam_arch: arm64-macos
-            build_jobs: 4
-          - os: macos-15-intel
-            plat: macosx_10_15_x86_64
-            macos_target: '10.15'
-            opam_arch: x86_64-macos
-            build_jobs: 4
-          - os: ubuntu-24.04
-            plat: manylinux_2_28_x86_64
-            container: quay.io/pypa/manylinux_2_28_x86_64
-            opam_arch: x86_64-linux
-            build_jobs: 1
-          - os: ubuntu-24.04-arm
-            plat: manylinux_2_28_aarch64
-            container: quay.io/pypa/manylinux_2_28_aarch64
-            opam_arch: arm64-linux
-            build_jobs: 1
+        include: >-
+          ${{ fromJSON(github.event_name == 'pull_request'
+              && '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4}]'
+              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":1},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"quay.io/pypa/manylinux_2_28_aarch64","opam_arch":"arm64-linux","build_jobs":1}]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -164,6 +153,18 @@ jobs:
           python3 -m pip install --upgrade pip setuptools wheel
           python3 -m pip install "readme_renderer[md]"
 
+
+      # Everything fetch.sh pulls is pinned by SHA or by release asset, so
+      # the whole directory is a pure function of the script.
+      - name: Restore the vendored dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+            deps/stanc3
+          key: deps-${{ matrix.plat }}-${{ hashFiles('deps/fetch.sh') }}
 
       - name: Vendored dependencies
         run: ./deps/fetch.sh
@@ -349,8 +350,14 @@ jobs:
           name: wheel-win_amd64
           path: dist/*.whl
 
+  # Not on pull requests: 265 s, of which 200 is emscripten linking the
+  # module, and ccache cannot touch a link. It is safe to run this after
+  # the merge because the Pages deploy needs it: a broken browser build
+  # fails here and the demo keeps serving its last good version rather
+  # than shipping the breakage.
   wasm:
     name: wasm (browser build)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
