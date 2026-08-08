@@ -32,6 +32,21 @@ file(GLOB _boost ${DEPS}/math/lib/boost_*)
 file(GLOB _sundials ${DEPS}/math/lib/sundials_*)
 file(GLOB _tbb ${DEPS}/math/lib/tbb_*)
 
+# std::thread in nuts.cpp (parallel chains). libstdc++ needs -pthread at
+# LINK time for it, and every consumer of the static library inherits the
+# translation unit whether or not it ever starts a chain -- so this is
+# PUBLIC on the libraries rather than added per executable. macOS hides
+# the requirement (pthreads live in libSystem), which is why this only
+# ever fails on Linux, and only in CI.
+#
+# Not under Emscripten: wasm threads need -pthread plus a
+# cross-origin-isolated page, thread_safe_build() is false there, and
+# emscripten's libc resolves the symbols without the flag.
+if(NOT EMSCRIPTEN)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+endif()
+
 # Everything that includes stan-math (or stan) links this interface target.
 add_library(stanmath INTERFACE)
 target_include_directories(stanmath INTERFACE
@@ -189,7 +204,7 @@ add_library(stanli_shared SHARED
   runtime/src/data.cpp
   tests/tbb_stub.cpp)
 target_include_directories(stanli_shared PUBLIC runtime/include)
-target_link_libraries(stanli_shared PUBLIC stanmath sundials)
+target_link_libraries(stanli_shared PUBLIC stanmath sundials Threads::Threads)
 set_target_properties(stanli_shared PROPERTIES OUTPUT_NAME stanli)
 
 # Export only the C API. Everything else in here (stan-math, Eigen, the
@@ -276,6 +291,9 @@ add_library(stanli STATIC
   runtime/src/data.cpp)
 target_include_directories(stanli PUBLIC runtime/include)
 target_link_libraries(stanli PUBLIC stanmath sundials)
+if(NOT EMSCRIPTEN)
+  target_link_libraries(stanli PUBLIC Threads::Threads)
+endif()
 
 # The browser/WASM build: the same runtime and C ABI over the MIR-text
 # entry point (no embedded stanc; stanc.js supplies the MIR in JS). One
