@@ -54,18 +54,15 @@ target_compile_options(stanmath INTERFACE -ffp-contract=off)
 # whose gradients are bit-identical, with an lp__ that sits a per-model
 # constant above CmdStan's. A given seed still draws a different chain,
 # because lp enters the Hamiltonian additively and a shifted lp rounds
-# differently -- statistically the same sampler, not the same bytes. The wheel keeps
-# the exact lp because the differential oracle is the point; the browser
-# build spends the bytes on reach instead. See density_tier in optable.hpp
-# and docs/lite-lp.md.
-if(EMSCRIPTEN)
-  set(_lite_default ON)
-else()
-  set(_lite_default OFF)
-endif()
+# differently: the same sampler statistically, not the same bytes.
+#
+# Off everywhere, browser included. The browser build used to default it
+# on to save 7 MB of wasm, which meant the demo reported an lp__ nobody
+# could compare against CmdStan. Every build now reports the same lp__.
+# See density_tier in optable.hpp and docs/lite-lp.md.
 option(STANLI_LITE_LP
   "Drop the propto instantiation family: half the size, lp__ off by a constant"
-  ${_lite_default})
+  OFF)
 if(STANLI_LITE_LP)
   target_compile_definitions(stanmath INTERFACE STANLI_LITE_LP=1)
 endif()
