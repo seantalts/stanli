@@ -154,7 +154,7 @@ struct Lowering {
         // Shape queries on slot-bound values (e.g. rows(v) on an inlined
         // UDF's vector argument) answer from the slot's SlotInfo.
         if ((e.name == "rows" || e.name == "cols" || e.name == "size" ||
-             e.name == "num_elements") &&
+             e.name == "num_elements" || e.name == "FnLength") &&
             e.args.size() == 1 && e.args[0].kind == mir::Expr::Var) {
           auto sit = scope.find(e.args[0].name);
           if (sit != scope.end()) {

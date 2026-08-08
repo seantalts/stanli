@@ -235,7 +235,19 @@ Stmt read_stmt(const Node& n) {
     if (const Node* dt = field(p, "decl_type")) {
       const Node& t = (*dt)[1];  // (Sized ST) or (Unsized T)
       s.decl_type = t.head_is("Sized") ? read_sized(t[1]) : SizedType{};
-      if (!t.head_is("Sized")) s.decl_type.raw = dump(t);
+      if (!t.head_is("Sized")) {
+        s.decl_type.raw = dump(t);
+        // stanc3 declares scalar temporaries unsized. A vectorized `T[,]`
+        // whose location is a container loops over the elements and hoists
+        // the scale into one of these. A scalar carries no size
+        // expression, so give it the sized spelling. Unsized containers
+        // still reach the failure in sized_len, which is where their
+        // missing size belongs.
+        if (t.size() > 1 && t[1].is_atom()) {
+          if (t[1].atom == "UReal") s.decl_type.base = "SReal";
+          else if (t[1].atom == "UInt") s.decl_type.base = "SInt";
+        }
+      }
     }
     if (const Node* init = field(p, "initialize")) {
       const Node& iv = (*init)[1];

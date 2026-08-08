@@ -1087,8 +1087,12 @@ class MirInterp {
       a.dims = {(int64_t)std::max(a.r.size(), a.i.size())};
       return a;
     }
+    // FnLength is the compiler-internal stanc3 emits for the observation
+    // count in a vectorized `T[,]` normalizer. Its backend spelling is
+    // stan::math::size, which counts every element, so it answers as
+    // num_elements does rather than as size does.
     if (e.name == "rows" || e.name == "cols" || e.name == "size" ||
-        e.name == "num_elements") {
+        e.name == "num_elements" || e.name == "FnLength") {
       Value a = eval(e.args[0]);
       long v = 0;
       if (e.name == "rows")
@@ -1098,7 +1102,7 @@ class MirInterp {
       else
         v = a.dims.empty() ? (long)std::max(a.r.size(), a.i.size())
                            : (long)a.dims[0];
-      if (e.name == "num_elements")
+      if (e.name == "num_elements" || e.name == "FnLength")
         v = (long)std::max(a.r.size(), a.i.size());
       r.is_int = true;
       r.i = {(int)v};

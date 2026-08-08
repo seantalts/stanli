@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.1
+
+Truncation only worked on a scalar outcome. 0.4.0 added truncation and
+tested it on `real y`, which is the one shape that compiled. Every
+vectorized form failed at compile time, and `y ~ normal(mu, sigma)
+T[0, 10]` over a vector is the form models are written in.
+
+Two constructs were missing, one per shape stanc3 emits:
+
+- A scalar location gives a normalizer of `FnLength(y) * log_diff_exp(...)`.
+  `FnLength` is a compiler-internal rather than a stan-library name, so it
+  reached the lowering as an unknown function kind. It answers as
+  `num_elements` does, matching `stan::math::size`, which is what stanc3's
+  own backend maps it to.
+- A container location with a literal scale makes stanc3 loop over the
+  elements and hoist the scale into a temporary it declares
+  `(Unsized UReal)`. The reader only understood sized declarations, and a
+  scalar carries no size expression.
+
+Both are fixed. Five shapes now match CmdStan at 0 ULP on `lp__` and every
+gradient: vector outcome, array outcome, one-sided `T[a, ]` and `T[ , b]`,
+a vector location, and a truncated `_lpmf`. `tests/fixtures/truncvec.stan`
+covers the two that failed, so CI catches this without CmdStan installed.
+
 ## 0.4.0
 
 Coverage. 0.3.0 shipped 46 of Stan's 72 densities and could not compile a

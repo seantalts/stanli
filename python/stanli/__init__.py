@@ -16,7 +16,7 @@ import numpy as np
 __all__ = ["Model", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 _BIN = pathlib.Path(__file__).parent / "_bin"
 

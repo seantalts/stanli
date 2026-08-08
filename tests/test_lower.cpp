@@ -697,6 +697,58 @@ int main() {
     }
   }
 
+  // Vectorized truncation. The fixture above truncates a scalar, which is
+  // the shape that kept working while both vectorized forms failed to
+  // compile at all: one needs the FnLength compiler-internal, the other a
+  // decl stanc3 leaves unsized. Checked against CmdStan at 0 ULP on lp and
+  // every gradient when this went in; the var path is what CI can run.
+  {
+    const std::vector<double> yv = {0.5, 1.75, 2.25};
+    DataMap d;
+    d.set_int("N", 3);
+    d.set_real_array("y", yv);
+    CompiledModel tm = compile_model(slurp("tests/fixtures/truncvec.tmir.sexp"),
+                                     d);
+    Executor tex(std::move(tm.graph));
+    tm.bind(tex);
+    // Declaration order: mu, theta[3], sigma.
+    const double pts[2][5] = {{0.6, -0.2, 0.35, 0.1, -0.3},
+                              {-0.25, 0.4, -0.15, 0.5, 0.2}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 5; ++i) tex.params_data()[i] = pts[c][i];
+      double grad[5] = {0, 0, 0, 0, 0};
+      const double lp = tex.gradient(grad);
+
+      using stan::math::var;
+      var u_mu = pts[c][0], u_sig = pts[c][4];
+      Eigen::Matrix<var, Eigen::Dynamic, 1> theta(3);
+      for (int i = 0; i < 3; ++i) theta(i) = pts[c][1 + i];
+      var mu = u_mu, sigma = stan::math::exp(u_sig);
+      Eigen::VectorXd y = Eigen::Map<const Eigen::VectorXd>(yv.data(), 3);
+
+      var acc = u_sig;  // lower=0 jacobian
+      // Scalar location: one log_diff_exp scaled by the element count.
+      acc += stan::math::normal_lpdf<true>(y, mu, sigma);
+      acc -= 3.0 * stan::math::log_diff_exp(
+                       stan::math::normal_lcdf(10.0, mu, sigma),
+                       stan::math::normal_lcdf(0.0, mu, sigma));
+      // Container location: one log_diff_exp per element, accumulated.
+      acc += stan::math::normal_lpdf<true>(y, theta, 1.0);
+      for (int i = 0; i < 3; ++i)
+        acc -= stan::math::log_diff_exp(
+            stan::math::normal_lcdf(10.0, theta(i), 1.0),
+            stan::math::normal_lcdf(0.0, theta(i), 1.0));
+      acc.grad();
+
+      bool gok = grad[0] == u_mu.adj() && grad[4] == u_sig.adj();
+      for (int i = 0; i < 3; ++i) gok = gok && grad[1 + i] == theta(i).adj();
+      check(gok, "truncvec: gradients bitwise against the var path");
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol,
+            "truncvec: lp matches the var path");
+    }
+  }
+
   // Ordinal regression, against an independent var-path reference. Same
   // reason as the truncation case: CI has no CmdStan, and this is the one
   // density whose cutpoint argument is a shared vector rather than a
