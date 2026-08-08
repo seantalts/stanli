@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -arch arm64 -mmacosx-version-min=11.0 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/stanli_check.dir/tools/stanli_check.cpp.o CMakeFiles/stanli_check.dir/tests/tbb_stub.cpp.o -o stanli_check  libstanli.a libsundials.a

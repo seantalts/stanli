@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -arch arm64 -mmacosx-version-min=11.0 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/bench_opcost.dir/tools/bench_opcost.cpp.o CMakeFiles/bench_opcost.dir/tests/tbb_stub.cpp.o -o bench_opcost  libstanli.a libsundials.a

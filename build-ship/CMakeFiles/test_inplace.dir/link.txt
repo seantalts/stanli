@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -arch arm64 -mmacosx-version-min=11.0 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/test_inplace.dir/tests/test_inplace.cpp.o CMakeFiles/test_inplace.dir/tests/tbb_stub.cpp.o -o test_inplace  libstanli.a libsundials.a
