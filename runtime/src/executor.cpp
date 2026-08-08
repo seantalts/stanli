@@ -126,8 +126,11 @@ void Executor::bind_() {
   for (auto& op : graph_.ops) {
     const Kernel& k = kernel(op.opcode);
     if (k.forward == nullptr)
-      throw std::runtime_error("opcode not registered: " +
-                               std::to_string(op.opcode));
+      // Name it. A browser build can be missing a kernel because its
+      // density pack has not been loaded yet, and the caller decides what
+      // to do from this string.
+      throw std::runtime_error(std::string("opcode not registered: ") +
+                               opcode_name(op.opcode));
     op.scratch_off = scratch;
     op.scratch_len =
         k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0;
