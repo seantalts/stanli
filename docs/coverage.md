@@ -7,7 +7,7 @@ with a generated single-function model.
 
 | family | supported |
 |---|---|
-| densities (`_lpdf`, `_lpmf`) | 50 / 72 |
+| densities (`_lpdf`, `_lpmf`) | 54 / 72 |
 | distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 90 / 105 |
 | scalar math (all-real signature) | 47 / 129 |
 
@@ -20,6 +20,46 @@ Adding one is a line in an X-macro list in
 `runtime/include/stanli/optable.hpp`, which generates the opcode, the
 kernel, its registration, the lowering table entry and the interpreter
 branch together. See `docs/hacking.md`.
+
+## Three ways in, cheapest first
+
+Not every density needs a kernel, and reaching for one first is how this
+list stayed short longer than it had to.
+
+**1. Rewrite, when the rewrite is exact.** `y ~ foo(...)` with every
+argument data contributes EXACTLY zero: CmdStan's generated code calls
+`foo_lpdf<propto=true>` on all-double arguments, `include_summand` comes
+back false, and the term is dropped before any arithmetic. That is a
+general rule, not an approximation, and it needs no kernel at all -- which
+is the whole of `hypergeometric` and `discrete_range`, whose arguments are
+all integers so every use of them lands here. `target +=` of the same call
+is a compile-time constant through the data interpreter. (The one
+divergence: a model whose data is outside the density's support -- CmdStan
+throws from its checks, stanli contributes 0. Such a model rejects every
+draw either way.)
+
+What does NOT belong here is a rewrite that changes the arithmetic.
+`multi_normal_prec(y | mu, P)` is `multi_normal(y | mu, inverse(P))`
+mathematically, but it costs a K^3 inverse per evaluation and stops
+matching CmdStan bitwise, which is the oracle this project runs on. The
+kernel below was fifteen lines.
+
+**2. Clone, when a signature already exists.** `multi_normal_prec` takes
+the same three arguments in the same shapes as `multi_normal`;
+`lkj_corr` the same two as `lkj_corr_cholesky`. Both were one template
+parameter on an existing kernel. Worth checking for before writing
+anything: the remaining pairs (`wishart`/`inv_wishart`,
+`multi_gp`/`multi_gp_cholesky`, `multi_student_t`/its cholesky form) are
+clones of each other, so the first of each pair pays for two.
+
+**3. Write the kernel.** The var-tape-replay pattern (`multi_normal`,
+`lkj_corr_cholesky`) is correct by construction and needs no hand-written
+derivative: build a nested tape, call stan-math, `grad()` it. What makes
+each of the remaining ones bespoke is only the SHAPE PLUMBING -- how a
+matrix or an array-of-vectors argument reaches the kernel -- not the math.
+A generic matrix-density kernel driven by a small descriptor table would
+turn most of the list below into table rows, and is the obvious next
+structural move.
 
 ## The gaps, and what each one actually needs
 

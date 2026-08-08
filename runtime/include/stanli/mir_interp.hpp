@@ -1178,7 +1178,9 @@ class MirInterp {
         e.name == "binomial_lpmf" || e.name == "poisson_lpmf" ||
         e.name == "poisson_log_lpmf" || e.name == "student_t_lpdf" ||
         e.name == "bernoulli_logit_lpmf" ||
-        e.name == "binomial_logit_lpmf") {
+        e.name == "binomial_logit_lpmf" ||
+        e.name == "hypergeometric_lpmf" ||
+        e.name == "discrete_range_lpmf") {
       std::vector<Value> av;
       for (const auto& a : e.args) av.push_back(eval(a));
       size_t n = 1;
@@ -1219,6 +1221,12 @@ class MirInterp {
           acc += stan::math::poisson_lpmf(ic(0, i), sc(1, i));
         else if (e.name == "poisson_log_lpmf")
           acc += stan::math::poisson_log_lpmf(ic(0, i), sc(1, i));
+        else if (e.name == "hypergeometric_lpmf")
+          acc += stan::math::hypergeometric_lpmf(ic(0, i), ic(1, i),
+                                                 ic(2, i), ic(3, i));
+        else if (e.name == "discrete_range_lpmf")
+          acc += stan::math::discrete_range_lpmf(ic(0, i), ic(1, i),
+                                                 ic(2, i));
         else if (e.name == "student_t_lpdf")
           acc += stan::math::student_t_lpdf(sc(0, i), sc(1, i), sc(2, i),
                                             sc(3, i));

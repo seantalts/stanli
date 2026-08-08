@@ -837,6 +837,25 @@ struct Lowering {
     if (auto v = lower_eltwise_fn(e)) return *v;
     if (auto v = lower_matrix_fn(e)) return *v;
     if (auto v = lower_ode_fn(e)) return *v;
+    // `y ~ foo(...)` with every argument data is EXACTLY zero in CmdStan:
+    // the generated C++ calls foo_lpdf<propto=true> on all-double
+    // arguments, include_summand comes back false, and the whole term is
+    // dropped before any arithmetic happens. So the rewrite is not an
+    // approximation, and it covers densities no kernel exists for --
+    // hypergeometric and discrete_range are all-int, so ALL their uses
+    // land here or in the constant fold below. (categorical_logit already
+    // had this rule privately; this is the general form.) The one
+    // divergence is a model whose data is outside the density's support:
+    // CmdStan's checks throw before the early return, stanli contributes
+    // 0. That model rejects every draw anyway.
+    const bool is_density = e.name.size() > 5 &&
+                            (e.name.compare(e.name.size() - 5, 5, "_lpdf") == 0 ||
+                             e.name.compare(e.name.size() - 5, 5, "_lpmf") == 0);
+    if (is_density && e.fn_propto) {
+      bool all_data = true;
+      for (const auto& a : e.args) all_data = all_data && a.data_only;
+      if (all_data) return Val{const_slot(0.0), {}};
+    }
     {
       Val v;
       if (try_fold_const(e, &v)) return v;
@@ -977,7 +996,8 @@ struct Lowering {
     }
 
     if ((e.name == "multi_normal_cholesky_lpdf" ||
-         e.name == "multi_normal_lpdf") && e.args.size() == 3) {
+         e.name == "multi_normal_lpdf" ||
+         e.name == "multi_normal_prec_lpdf") && e.args.size() == 3) {
       Val y = lower_expr(e.args[0]);
       Val mu = lower_expr(e.args[1]);
       Val m = lower_expr(e.args[2]);
@@ -993,20 +1013,26 @@ struct Lowering {
              e.raw);
       const int64_t K = m.si.rows;
       const int64_t reps = info[y.slot].len / K;
-      Val v = emit(e.name.find("cholesky") != std::string::npos
-                       ? OP_MULTI_NORMAL_CHOL_LPDF
-                       : OP_MULTI_NORMAL_LPDF,
+      const uint16_t mn_op =
+          e.name.find("cholesky") != std::string::npos
+              ? OP_MULTI_NORMAL_CHOL_LPDF
+              : (e.name.find("prec") != std::string::npos
+                     ? OP_MULTI_NORMAL_PREC_LPDF
+                     : OP_MULTI_NORMAL_LPDF);
+      Val v = emit(mn_op,
                    {y.slot, mu.slot, m.slot}, 1, {},
                    {(int)K, (int)reps});
       g.ops.back().variant = variant;
       return v;
     }
-    if (e.name == "lkj_corr_cholesky_lpdf" && e.args.size() == 2) {
+    if ((e.name == "lkj_corr_cholesky_lpdf" || e.name == "lkj_corr_lpdf") &&
+        e.args.size() == 2) {
       Val L = lower_expr(e.args[0]);
       Val eta = lower_expr(e.args[1]);
-      if (L.si.rows == 0) fail("lkj_corr_cholesky needs a matrix", e.raw);
-      Val v = emit(OP_LKJ_CORR_CHOL_LPDF, {L.slot, eta.slot}, 1, {},
-                   {(int)L.si.rows});
+      if (L.si.rows == 0) fail(e.name + " needs a matrix", e.raw);
+      Val v = emit(e.name == "lkj_corr_lpdf" ? OP_LKJ_CORR_LPDF
+                                             : OP_LKJ_CORR_CHOL_LPDF,
+                   {L.slot, eta.slot}, 1, {}, {(int)L.si.rows});
       g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x1u);
       return v;
     }

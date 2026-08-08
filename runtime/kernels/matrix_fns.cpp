@@ -221,7 +221,11 @@ void mnc_fwd(KernelCtx& ctx) { ctx.out.data[0] = mnc_eval<false>(ctx); }
 void mnc_bwd(KernelCtx& ctx) { mnc_eval<true>(ctx); }
 
 // ---- multi_normal_lpdf(y | mu, Sigma) -------------------------------------
-template <bool Grad>
+// multi_normal_prec takes the same three arguments in the same shapes -- a
+// precision matrix instead of a covariance -- so it is the same kernel with
+// one call swapped.
+enum MnKind { kMnCov, kMnPrec };
+template <bool Grad, MnKind Kind = kMnCov>
 double mn_eval(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
   const int64_t m = ctx.n_idata > 1 ? ctx.idata[1] : 1;
@@ -245,8 +249,13 @@ double mn_eval(KernelCtx& ctx) {
   CMapV yd(ctx.in[0].data, n), mud(ctx.in[1].data, n);
   CMapM Sd(ctx.in[2].data, n, n);
   auto call = [&](auto&& a, auto&& b, auto&& c) {
-    return propto ? stan::math::multi_normal_lpdf<true>(a, b, c)
-                  : stan::math::multi_normal_lpdf<false>(a, b, c);
+    if constexpr (Kind == kMnPrec) {
+      return propto ? stan::math::multi_normal_prec_lpdf<true>(a, b, c)
+                    : stan::math::multi_normal_prec_lpdf<false>(a, b, c);
+    } else {
+      return propto ? stan::math::multi_normal_lpdf<true>(a, b, c)
+                    : stan::math::multi_normal_lpdf<false>(a, b, c);
+    }
   };
   var out;
   const bool ay = mask & 1u, am = mask & 2u, aS = mask & 4u;
@@ -304,6 +313,10 @@ double mn_eval(KernelCtx& ctx) {
 }
 void mn_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_eval<false>(ctx); }
 void mn_bwd(KernelCtx& ctx) { mn_eval<true>(ctx); }
+void mnprec_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = mn_eval<false, kMnPrec>(ctx);
+}
+void mnprec_bwd(KernelCtx& ctx) { mn_eval<true, kMnPrec>(ctx); }
 
 // ---- general matrix product: out = A * B ----------------------------------
 // idata = {rows_a, cols_a, cols_b}; either side may carry adjoints.
@@ -326,7 +339,7 @@ void gemm_bwd(KernelCtx& ctx) {
 
 // ---- lkj_corr_cholesky_lpdf(L | eta) --------------------------------------
 // in = {L, eta}; idata = {K}. eta is a data scalar in practice.
-template <bool Grad>
+template <bool Grad, bool Chol = true>
 double lkj_eval(KernelCtx& ctx) {
   const int64_t K = ctx.idata[0];
   const bool propto = (ctx.variant & 0x80u) != 0;
@@ -336,8 +349,14 @@ double lkj_eval(KernelCtx& ctx) {
   for (int64_t j = 0; j < K; ++j)
     for (int64_t i = 0; i < K; ++i) L(i, j) = ctx.in[0].data[j * K + i];
   const double eta = ctx.in[1].data[0];
-  var out = propto ? stan::math::lkj_corr_cholesky_lpdf<true>(L, eta)
-                   : stan::math::lkj_corr_cholesky_lpdf<false>(L, eta);
+  var out;
+  if constexpr (Chol) {
+    out = propto ? stan::math::lkj_corr_cholesky_lpdf<true>(L, eta)
+                 : stan::math::lkj_corr_cholesky_lpdf<false>(L, eta);
+  } else {
+    out = propto ? stan::math::lkj_corr_lpdf<true>(L, eta)
+                 : stan::math::lkj_corr_lpdf<false>(L, eta);
+  }
   const double v = out.val();
   if constexpr (Grad) {
     var j = out * ctx.out_adj;
@@ -351,6 +370,12 @@ double lkj_eval(KernelCtx& ctx) {
 }
 void lkj_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkj_eval<false>(ctx); }
 void lkj_bwd(KernelCtx& ctx) { lkj_eval<true>(ctx); }
+// lkj_corr takes the correlation matrix itself where the cholesky form
+// takes its factor: identical argument shapes, so identical kernel.
+void lkjc_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = lkj_eval<false, false>(ctx);
+}
+void lkjc_bwd(KernelCtx& ctx) { lkj_eval<true, false>(ctx); }
 
 // ---- normal_id_glm_lpdf(y | X, alpha, beta, sigma) ------------------------
 // in = {y, X, alpha, beta, sigma}; idata = {rows, cols}. X is a data matrix.
@@ -473,6 +498,8 @@ void register_matrix_kernels() {
   register_kernel(OP_MULTI_NORMAL_CHOL_LPDF,
                   Kernel{mnc_fwd, mnc_bwd, no_scratch});
   register_kernel(OP_MULTI_NORMAL_LPDF, Kernel{mn_fwd, mn_bwd, no_scratch});
+  register_kernel(OP_MULTI_NORMAL_PREC_LPDF,
+                  Kernel{mnprec_fwd, mnprec_bwd, no_scratch});
   register_kernel(OP_GEMM, Kernel{gemm_fwd, gemm_bwd, no_scratch});
   register_kernel(OP_EIGENVALUES_SYM,
                   Kernel{eigvals_fwd, eigvals_bwd, no_scratch});
@@ -481,6 +508,8 @@ void register_matrix_kernels() {
   register_kernel(OP_TRANSPOSE,
                   Kernel{transpose_fwd, transpose_bwd, no_scratch});
   register_kernel(OP_LKJ_CORR_CHOL_LPDF, Kernel{lkj_fwd, lkj_bwd, no_scratch});
+  register_kernel(OP_LKJ_CORR_LPDF,
+                  Kernel{lkjc_fwd, lkjc_bwd, no_scratch});
   register_kernel(OP_NORMAL_ID_GLM_LPDF,
                   Kernel{nid_glm_fwd, nid_glm_bwd, nid_glm_scratch});
 }

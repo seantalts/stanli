@@ -42,12 +42,14 @@ namespace stanli {
   X(OP_CHOLESKY)                                                          \
   X(OP_MULTI_NORMAL_CHOL_LPDF)                                            \
   X(OP_MULTI_NORMAL_LPDF)                                                 \
+  X(OP_MULTI_NORMAL_PREC_LPDF)                                            \
   X(OP_GEMM)                                                              \
   X(OP_LOG_INV_LOGIT)                                                     \
   X(OP_LOG_SOFTMAX)                                                       \
   X(OP_LOG1M_INV_LOGIT)                                                   \
   X(OP_CONSTRAIN_CHOL_CORR)                                               \
   X(OP_LKJ_CORR_CHOL_LPDF)                                                \
+  X(OP_LKJ_CORR_LPDF)                                                     \
   X(OP_NORMAL_ID_GLM_LPDF)                                                \
   X(OP_TRANSPOSE)                                                         \
   X(OP_ODE)                                                               \

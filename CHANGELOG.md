@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `multi_normal_prec`, `lkj_corr`, `hypergeometric` and `discrete_range`,
+  taking densities to 54 of 72 -- and none of the four needed a kernel
+  written from scratch. The first two are one template parameter on
+  `multi_normal` and `lkj_corr_cholesky`, whose argument shapes they share.
+  The other two are all-integer, so they are covered by a general rewrite:
+  `y ~ foo(...)` with every argument data contributes exactly zero, because
+  that is what CmdStan's `include_summand` does with it. See the three
+  tiers at the top of docs/coverage.md.
+
 - Three more densities, and a propto bug they exposed: `poisson_log_glm`,
   `neg_binomial_2_log_glm` and `beta_binomial`, all bitwise against
   CmdStan. GLM ops were the one density shape the lowering gave no variant
