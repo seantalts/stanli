@@ -15,11 +15,13 @@
 // than taken lets stanli sample happily from a model CmdStan refuses.
 #include <stanli/compile.hpp>
 
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 static int failures = 0;
 static void expect(const std::string& what, bool ok) {
