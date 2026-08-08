@@ -18,10 +18,45 @@ tagged, so everything below is what changed for anyone upgrading from
   different draws than 0.2.0 did. Any seed is as valid as any other, but
   a run pinned to one will not reproduce byte for byte.
 
-- **The browser build reports a shifted `lp__`** (see the lite build
-  below). Gradients and every `write_array` value are bitwise identical;
-  `lp__` sits a per-model constant above CmdStan's. The wheels are
-  unaffected: they ship the exact build.
+- **The browser build reports a shifted `lp__`.** This is the one
+  number in this release that does not match CmdStan, so it is worth
+  being precise about what does and does not move.
+
+  The browser runtime is built with `STANLI_LITE_LP`, which drops
+  stan-math's propto instantiations. A density is not one function:
+  stan-math decides which terms of a log density to keep by looking at
+  the argument types, so `y ~ normal(mu, sigma)` with data `sigma`
+  drops `-0.5 * log(2*pi)` and is a different instantiation from the
+  one that keeps it. Supporting that exactly costs `4 * 2^N` copies of
+  the template per distribution, about 630 KB each, which is half the
+  library.
+
+  Dropping the propto half means `~` evaluates the full density. The
+  terms it stops removing are exactly the ones that are constant in the
+  active arguments, so they have no derivative to contribute:
+
+  - Every gradient is bitwise identical to the exact build, measured
+    across the whole 119-model corpus.
+  - Every `write_array` value, so every constrained parameter,
+    transformed parameter, and generated quantity, is bitwise
+    identical.
+  - The posterior is the same posterior. `lp__` lands a per-model
+    constant above CmdStan's.
+
+  Two consequences. Do not compare a browser `lp__` against a CmdStan
+  run, and do not feed it to anything that reads log densities as
+  absolute numbers: Bayes factors, marginal likelihoods, bridge
+  sampling. And because NUTS adds `lp` to the kinetic energy, a shifted
+  `lp` rounds differently there, so a pinned seed draws a different
+  chain in the browser than in the wheels. It is an equally valid chain
+  from the same posterior, the same class of difference as reseeding.
+
+  **The PyPI wheels are unaffected.** `STANLI_LITE_LP` is on by default
+  only for emscripten; every wheel ships the exact build and matches
+  CmdStan's `lp__`. `stanli_exact_lp()` in C, `stanli.exact_lp()` in
+  Python, and `fit.exactLp` in JS report which build is loaded, and
+  `tools/verify_lite.py` is what checks the claims above. Full write-up
+  in [docs/lite-lp.md](docs/lite-lp.md).
 
 ### Stan in the browser
 

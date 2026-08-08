@@ -54,6 +54,15 @@
   .plots canvas { border: 1px solid #8883; border-radius: 6px;
                   max-width: 100%; }
   .times { font-size: .8rem; opacity: .7; margin-top: .5rem; }
+  footer {
+    margin: 2.5rem 0 1rem; padding: .9rem 1.1rem; font-size: .85rem;
+    border: 1px solid #c96a; border-left: 4px solid #c96;
+    border-radius: 6px; background: #c9630c0a;
+  }
+  footer h2 { font-size: .9rem; margin: 0 0 .4rem; }
+  footer p { margin: .4rem 0 0; }
+  footer code { font-family: ui-monospace, monospace; font-size: .95em; }
+  footer a { color: inherit; }
 </style>
 </head>
 <body>
@@ -492,5 +501,23 @@ $("csv").onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 </script>
+<footer>
+<h2>This page reports a shifted <code>lp__</code></h2>
+<p>The browser runtime is built with <code>STANLI_LITE_LP</code>, which
+drops stan-math's propto instantiations to halve the download. Those are
+exactly the terms that do not depend on the parameters, so every gradient
+and every generated quantity here is bit-for-bit what CmdStan computes,
+and the posterior you sample from is the same one. What moves is
+<code>lp__</code> itself: it sits a per-model constant above CmdStan's,
+so do not compare this page's <code>lp__</code> against a CmdStan run, and
+do not use it for anything that reads log densities as absolute numbers
+(Bayes factors, marginal likelihoods, bridge sampling).</p>
+<p>Because the sampler adds <code>lp</code> to the kinetic energy, a
+pinned seed also draws a different chain here than in the wheels. It is
+an equally valid chain from the same posterior, not different math.</p>
+<p>The PyPI wheels ship the exact build and match CmdStan's
+<code>lp__</code>. Details in
+<a href="https://github.com/seantalts/stanli/blob/main/docs/lite-lp.md">docs/lite-lp.md</a>.</p>
+</footer>
 </body>
 </html>
