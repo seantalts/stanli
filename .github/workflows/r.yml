@@ -64,7 +64,13 @@ jobs:
         include:
           # --as-cran on one row only: it is the strictest and slowest,
           # and running it four times says the same thing four times.
-          - {os: ubuntu-latest,  r: 'release', args: '"--as-cran"'}
+          # That row also gets a LaTeX, because --as-cran builds the PDF
+          # manual and a runner without pdflatex reports the absence as
+          # an Rd problem ("LaTeX errors when creating PDF version"),
+          # which is a WARNING and an ERROR for something the package
+          # did not do. CRAN builds that manual, so the answer is to
+          # have a pdflatex rather than to stop asking.
+          - {os: ubuntu-latest,  r: 'release', args: '"--as-cran"', tex: true}
           - {os: ubuntu-latest,  r: 'devel',   args: '"--no-manual"'}
           - {os: macos-latest,   r: 'release', args: '"--no-manual"'}
           - {os: windows-latest, r: 'release', args: '"--no-manual"'}
@@ -79,6 +85,9 @@ jobs:
           r-version: ${{ matrix.r }}
           http-user-agent: ${{ matrix.r == 'devel' && 'release' || 'default' }}
           use-public-rspm: true
+
+      - uses: r-lib/actions/setup-tinytex@v2
+        if: matrix.tex
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:

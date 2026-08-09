@@ -11,13 +11,53 @@
  * stanli_bridge_load() has succeeded, so every wrapper checks and errors
  * with a message naming the missing piece rather than dereferencing null.
  */
-#include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <R.h>
 #include <Rinternals.h>
+
+/* The four dynamic-loading calls this file makes, on both families.
+ * Windows has no dlfcn.h -- R's own installer spells it LoadLibrary --
+ * and the R side already knew to go looking for stanli.dll, so without
+ * this the package did not compile on the one platform its runtime
+ * filename was written for. */
+#ifdef _WIN32
+#include <windows.h>
+static void *dl_open(const char *path) {
+  return (void *)LoadLibraryA(path);
+}
+static void *dl_sym(void *h, const char *name) {
+  /* Through uintptr_t: GetProcAddress returns a function pointer, and
+   * converting one straight to void* is what -Wcast-function-type
+   * exists to complain about. */
+  return (void *)(uintptr_t)GetProcAddress((HMODULE)h, name);
+}
+static void dl_close(void *h) { FreeLibrary((HMODULE)h); }
+static const char *dl_error(void) {
+  static char buf[512];
+  const DWORD e = GetLastError();
+  const DWORD n = FormatMessageA(
+      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, e,
+      0, buf, (DWORD)sizeof buf - 1, NULL);
+  if (n == 0)
+    snprintf(buf, sizeof buf, "could not load the library (error %lu)",
+             (unsigned long)e);
+  return buf;
+}
+#else
+#include <dlfcn.h>
+static void *dl_open(const char *path) {
+  return dlopen(path, RTLD_NOW | RTLD_LOCAL);
+}
+static void *dl_sym(void *h, const char *name) { return dlsym(h, name); }
+static void dl_close(void *h) { dlclose(h); }
+static const char *dl_error(void) {
+  const char *e = dlerror();
+  return e != NULL ? e : "unknown error";
+}
+#endif
 
 /* Must equal STANLI_ABI_VERSION in runtime/include/stanli/capi.h. The
  * runtime reports its own through stanli_abi_version(), and
@@ -93,20 +133,20 @@ static void (*p_optimize_opts_init)(stanli_optimize_opts *);
 static int (*p_optimize)(void *, const stanli_optimize_opts *, double *,
                          double *, double *, char *, size_t);
 
-#define BIND(fn, var)                                            \
-  do {                                                           \
-    *(void **)(&var) = dlsym(g_lib, fn);                         \
-    if (var == NULL) {                                           \
-      dlclose(g_lib);                                            \
-      g_lib = NULL;                                              \
-      return mkString("missing symbol in stanli library: " fn);   \
-    }                                                            \
+#define BIND(fn, var)                                          \
+  do {                                                         \
+    *(void **)(&var) = dl_sym(g_lib, fn);                      \
+    if (var == NULL) {                                         \
+      dl_close(g_lib);                                         \
+      g_lib = NULL;                                            \
+      return mkString("missing symbol in stanli library: " fn); \
+    }                                                          \
   } while (0)
 
 SEXP stanli_bridge_load(SEXP path) {
   if (g_lib != NULL) return mkString("");
-  g_lib = dlopen(CHAR(STRING_ELT(path, 0)), RTLD_NOW | RTLD_LOCAL);
-  if (g_lib == NULL) return mkString(dlerror());
+  g_lib = dl_open(CHAR(STRING_ELT(path, 0)));
+  if (g_lib == NULL) return mkString(dl_error());
 
   /* Before anything else. The two opts structs above are copies of the
    * runtime's, and this package and the runtime are separately
@@ -114,9 +154,9 @@ SEXP stanli_bridge_load(SEXP path) {
    * field moved, every call would still succeed and read the wrong
    * offsets: a run at the wrong seed and the wrong step size, with no
    * error anywhere. Refuse instead. */
-  *(void **)(&p_abi_version) = dlsym(g_lib, "stanli_abi_version");
+  *(void **)(&p_abi_version) = dl_sym(g_lib, "stanli_abi_version");
   if (p_abi_version == NULL) {
-    dlclose(g_lib);
+    dl_close(g_lib);
     g_lib = NULL;
     return mkString("this stanli runtime predates the versioned ABI and is "
                     "too old for this package. Run "
@@ -129,7 +169,7 @@ SEXP stanli_bridge_load(SEXP path) {
              "was built against %d. Run stanli_install(overwrite = TRUE) to "
              "fetch a matching runtime, or update the package.",
              p_abi_version(), STANLI_R_ABI_VERSION);
-    dlclose(g_lib);
+    dl_close(g_lib);
     g_lib = NULL;
     return mkString(msg);
   }
