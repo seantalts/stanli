@@ -17,12 +17,7 @@ void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
   const int64_t cols = ctx.idata[ctx.n_idata - 1];
   Eigen::Map<const Eigen::VectorXi> y(ctx.idata, rows);
   Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, rows, cols);
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < 3; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
+  sink s = sink_for_args(ctx, 3);
   if (ctx.in[1].len != 1)
     throw std::runtime_error("glm: vector alpha unsupported");
   active_sink() = &s;
@@ -55,12 +50,7 @@ void poisson_log_glm_fwd(KernelCtx& ctx) {
   const int64_t cols = ctx.idata[ctx.n_idata - 1];
   Eigen::Map<const Eigen::VectorXi> y(ctx.idata, rows);
   Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, rows, cols);
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < 3; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
+  sink s = sink_for_args(ctx, 3);
   if (ctx.in[1].len != 1)
     throw std::runtime_error("poisson_log_glm: vector alpha unsupported");
   active_sink() = &s;
@@ -85,12 +75,7 @@ void neg_binomial_2_log_glm_fwd(KernelCtx& ctx) {
   const int64_t cols = ctx.idata[ctx.n_idata - 1];
   Eigen::Map<const Eigen::VectorXi> y(ctx.idata, rows);
   Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, rows, cols);
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < 4; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
+  sink s = sink_for_args(ctx, 4);
   if (ctx.in[1].len != 1)
     throw std::runtime_error(
         "neg_binomial_2_log_glm: vector alpha unsupported");

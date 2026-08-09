@@ -29,6 +29,19 @@
 namespace stanli {
 namespace dens {
 
+// The scratch layout density_bwd<N> reads back: the partials for argument k
+// live at scratch[sum of the lens of the arguments before k]. Writing it out
+// per kernel is how a forward comes to disagree with its own backward
+// silently, so both ends go through this.
+inline sink sink_for_args(KernelCtx& ctx, int nargs) {
+  sink s;
+  int64_t off = 0;
+  for (int k = 0; k < nargs; ++k) {
+    s.buf[k] = ctx.scratch + off;
+    off += ctx.in[k].len;
+  }
+  return s;
+}
 
 // Compile-time recursion over per-arg ACTIVITY (Mask bit: 1 = autodiff
 // rvar, 0 = plain double) with runtime shape branching inside. Matching the
@@ -184,12 +197,7 @@ void density_fwd_elt(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
 template <int NArgs, int Tier, unsigned VecMask, typename FProp,
           typename FFull>
 void density_fwd_sum(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
-  sink s;
-  int64_t off = 0;
-  for (int k = 0; k < NArgs; ++k) {
-    s.buf[k] = ctx.scratch + off;
-    off += ctx.in[k].len;
-  }
+  sink s = sink_for_args(ctx, NArgs);
   const unsigned mask = ctx.variant == 0
                             ? (1u << NArgs) - 1  // default: all active
                             : (ctx.variant & 0x3fu);
