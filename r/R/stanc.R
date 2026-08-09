@@ -55,16 +55,10 @@ mir_from_js <- function(code, name = "stanli_model") {
        if (r.errors) return JSON.stringify({e: String(r.errors)});
        return JSON.stringify({r: r.result});
      })()")
-  parsed <- jsonlite_from_json(out)
+  parsed <- jsonlite::fromJSON(out, simplifyVector = TRUE)
   if (!is.null(parsed$e))
     stop("stanc: ", paste(parsed$e, collapse = "\n"), call. = FALSE)
   parsed$r
-}
-
-# V8 already depends on jsonlite, so this is not a new dependency; going
-# through a string keeps the boundary one type instead of several.
-jsonlite_from_json <- function(x) {
-  jsonlite::fromJSON(x, simplifyVector = TRUE)
 }
 
 # A native stanc, when one is configured or on the PATH.

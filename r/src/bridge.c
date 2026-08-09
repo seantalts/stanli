@@ -305,8 +305,9 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
   return out;
 }
 
-/* opts arrives from R as a named list; unpacking it here keeps the field
- * order in one place (this file) rather than in R as well. */
+/* opts arrives from R as an unnamed positional list, so this order must
+ * match sample_model() in R/stanli.R element for element. A swap of two
+ * same-typed fields samples from the wrong configuration in silence. */
 static void fill_sample_opts(stanli_sample_opts *o, SEXP l) {
   p_sample_opts_init(o);
   o->seed = (uint32_t)asInteger(VECTOR_ELT(l, 0));
