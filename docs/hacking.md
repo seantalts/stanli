@@ -2,13 +2,11 @@
 
 A map for contributors: which file owns what, how a gradient gets
 computed, and the recipes for the most common changes.
-[`docs/how-it-works.md`](how-it-works.md) explains why the design is
-what it is; [`runtime/src/OPTIMIZATIONS.md`](../runtime/src/OPTIMIZATIONS.md)
-explains the graph passes in plain language;
-[`docs/benchmarks.md`](benchmarks.md) has the measurements.
-
-If you read only one section, read "Where the silent wrongness lives".
-It is the shape of every bug this project has shipped.
+ - [`docs/how-it-works.md`](how-it-works.md) explains why the design is
+what it is
+ - [`runtime/src/OPTIMIZATIONS.md`](../runtime/src/OPTIMIZATIONS.md)
+explains the graph passes in plain language
+ - [`docs/benchmarks.md`](benchmarks.md) has the measurements
 
 ## Layout
 
@@ -16,11 +14,11 @@ It is the shape of every bug this project has shipped.
 |---|---|
 | [`runtime/include/stanli/`](../runtime/include/stanli/) | Public headers. [`graph.hpp`](../runtime/include/stanli/graph.hpp) is the IR: `Slot` + `Op` over flat arenas. |
 | [`runtime/src/lower.cpp`](../runtime/src/lower.cpp) | The compiler: transformed MIR in, op graph out. |
-| [`runtime/src/mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Parses stanc3's s-expressions into MIR structs. Unrecognized input fails loudly if reached. |
+| [`runtime/src/mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Parses stanc3's s-expressions into MIR structs. Unrecognized input fails loudly. |
 | [`runtime/src/inplace.cpp`](../runtime/src/inplace.cpp), [`constfold.cpp`](../runtime/src/constfold.cpp), [`reroll.cpp`](../runtime/src/reroll.cpp), [`island.cpp`](../runtime/src/island.cpp) | The graph passes, in pipeline order, each with an off switch (see [OPTIMIZATIONS.md](../runtime/src/OPTIMIZATIONS.md)). |
 | [`runtime/src/executor.cpp`](../runtime/src/executor.cpp) | Runs the op list. `STANLI_PROFILE=1` prints per-opcode accounting. |
 | [`runtime/kernels/`](../runtime/kernels/) | Op implementations: [`densities.cpp`](../runtime/kernels/densities.cpp), [`elementwise.cpp`](../runtime/kernels/elementwise.cpp), [`constrain.cpp`](../runtime/kernels/constrain.cpp), plus [`matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp)/[`legacy_fns.cpp`](../runtime/kernels/legacy_fns.cpp) wrapping stan-math functions without a native port ([`legacy.hpp`](../runtime/include/stanli/legacy.hpp) is the mechanism). |
-| [`runtime/include/stanli/mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) | The one MIR interpreter, templated on the scalar: transformed data at lowering time, uncompiled ODE right-hand sides, interpreted write_array. |
+| [`runtime/include/stanli/mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) | The MIR interpreter, templated on the scalar: transformed data at lowering time, uncompiled ODE right-hand sides, interpreted write_array. |
 | [`runtime/src/wa_interp.cpp`](../runtime/src/wa_interp.cpp) | Per-draw interpreted generated quantities when the write_array graph cannot be built (RNG calls, draw-dependent branches). |
 | [`runtime/include/stanli/program.hpp`](../runtime/include/stanli/program.hpp), [`mir_prog.hpp`](../runtime/include/stanli/mir_prog.hpp) | The register machine and its MIR front end. |
 | [`runtime/src/nuts.cpp`](../runtime/src/nuts.cpp) | The sampler: stan's own `adapt_diag_e_nuts`. Owns CmdStan parity of the RNG stream and initial-point acceptance. |
@@ -31,17 +29,13 @@ It is the shape of every bug this project has shipped.
 | [`harnesses/`](../harnesses/) | Corpus sweeps needing a local posteriordb: [`wa_coverage.py`](../harnesses/wa_coverage.py), [`ab_corpus.py`](../harnesses/ab_corpus.py), benchmarks. |
 | [`tests/`](../tests/) | One `test_*.cpp` per subsystem, plus [`fixtures/`](../tests/fixtures/) with `.stan` sources and pinned MIR (regenerate with [`tools/gen_fixtures.sh`](../tools/gen_fixtures.sh)). |
 
-About 11,500 lines of runtime against 5,800 lines of tests. The biggest
-files: [`lower.cpp`](../runtime/src/lower.cpp) (1,935 lines, the
+About 12k ish lines of runtime against 6k lines of tests. The biggest
+files: [`lower.cpp`](../runtime/src/lower.cpp) (2k lines, the
 compiler, most likely what you are looking for),
-[`mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) (1,284),
-[`reroll.cpp`](../runtime/src/reroll.cpp) (860). The kernels are
+[`mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) (1.5k),
+[`reroll.cpp`](../runtime/src/reroll.cpp) (<1k). The kernels are
 repetitive by design: read one and you can read them all. There are 82
 opcodes ([`optable.hpp`](../runtime/include/stanli/optable.hpp)).
-
-The difficulty in this codebase is almost never writing new code. It is
-not breaking the numerical agreement with CmdStan that everything else
-rests on.
 
 ## Life of a gradient
 
@@ -74,17 +68,15 @@ forward sweep   = log density, each kernel stashing its partials
 reverse sweep   = gradient, each kernel contracting them
 ```
 
-Two things to internalize. **The graph is the autodiff tape**: no tape
+**The graph is the autodiff tape**: no tape
 is built at evaluation time, which is why parameter-dependent control
 flow cannot be ops (it becomes an island) and why a steady-state
-gradient allocates nothing. **Lowering happens once, evaluation happens
-millions of times**: a compile-time cost of 200 ms to save 10 ns per
-gradient is a trade this project takes every time.
+gradient allocates nothing. 
 
 ## The IR
 
 Four types in [`graph.hpp`](../runtime/include/stanli/graph.hpp),
-deliberately dull:
+deliberately simple:
 
 - `Slot`: a value. An arena offset, a length, and whether it is a
   parameter. Parameters come first, in declaration order, so the
@@ -115,11 +107,7 @@ struct Kernel {
 };
 ```
 
-The rules, each learned the hard way:
-
-- **The forward computes partials; the backward only contracts them.**
-  A backward that recomputes the forward pays twice per gradient; that
-  was 90% of `diamonds`, and fixing it was worth 1.8x.
+Some rules:
 - **`in_adj[k].data` may be null.** The input is data; do not touch its
   adjoint.
 - **Accumulate in the order the reference does.** Several kernels sum
@@ -133,7 +121,8 @@ The rules, each learned the hard way:
 
 ## The register machine
 
-Some code cannot be ops. An ODE right-hand side must stay callable
+Some code cannot be lowered into ops within the main fixed size autodiff region.
+An ODE right-hand side must stay callable
 because the integrator picks the times; a region whose control flow
 depends on a parameter must pick its arm at evaluation time. Both
 compile to the same flat instruction list over a register file
@@ -153,22 +142,11 @@ not compile.
 
 [`nuts.cpp`](../runtime/src/nuts.cpp) is 133 lines because Stan's own
 classes do the sampling; the file's real job is matching CmdStan's
-*configuration*, which no pointwise gradient test can see. Three things
-it keeps in step, each of which was wrong at some point: the max tree
-depth (5 in the base class, 10 in CmdStan); the RNG stream
-(`stan::services::util::create_rng(seed, chain)`, drawing the initial
-point in the same order); and which initial points are accepted
-(CmdStan evaluates the log density on doubles *and then* its gradient,
-rejecting on either, and the two can disagree for an ODE model, which
-is why `Executor::forward_value_only()` exists).
+*configuration*, which no pointwise gradient test can see. 
 [`tools/sampler_trace.py`](../tools/sampler_trace.py) is the oracle:
 same model, same seed, compare the sampler columns distributionally.
 
-## Where the silent wrongness lives
-
-Every bug this project has shipped has one shape: the graph changed,
-every test passed, and the numbers were wrong. The classes, with the
-case that taught each:
+## Where the bugs have lived
 
 - **A destructive write in front of a backward that re-reads its
   inputs.** The in-place pass may only write over a value when every
@@ -219,7 +197,7 @@ in an X-macro list in
 kernel, registration and lowering entry together so they cannot drift.
 Then check it: `harnesses/fn_sweep.py deps/cmdstan --filter yourfn`
 generates a one-function model, compiles it with CmdStan, and reports
-the worst ULP. The bar is 0.
+the worst ULP.
 
 Not everything fits: the recorder computes in doubles, so a stan-math
 function that does arithmetic on the scalar type (`von_mises_cdf`,
@@ -276,9 +254,7 @@ performance claims, measure with `STANLI_PROFILE=1` before and after
 
 ## Landing a change
 
-`main` is protected: the four fast wheel platforms plus the WASM build
-must pass before anything merges, admins included. The flow is a branch
-and an auto-merged PR:
+`main` is protected.
 
 ```
 git checkout -b my-change
@@ -290,11 +266,7 @@ gh pr merge --auto --rebase
 The merge happens when CI goes green. Release tags (`v*`, `npm-v*`) are
 not gated by this; they point at commits that already passed on main.
 
-Windows is the exception: mingw compiles the density kernels an order
-of magnitude slower than any other platform, so its job runs after the
-merge, nightly, and on release tags. A red Windows run on main is a bug
-to fix forward, and a tag will not publish until it passes. If a change
-plausibly touches Windows (build files, the C ABI surface,
+If a change plausibly touches Windows (build files, the C ABI surface,
 `tools/exported_symbols.def`), run the job on the branch first:
 
 ```
