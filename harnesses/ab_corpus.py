@@ -10,7 +10,7 @@ Usage: python3 harnesses/ab_corpus.py deps/posteriordb [--filter SUBSTR]
 Default disables every pass at once (re-roll, in-place, constant
 folding, islands), which is the end-to-end check; pass one variable to
 attribute a divergence.
-Run from the worktree root with build-rel/ built.
+Needs build-rel/ built.
 """
 import json
 import os
@@ -20,7 +20,7 @@ import sys
 import tempfile
 import zipfile
 
-REPO = pathlib.Path.cwd()
+REPO = pathlib.Path(__file__).resolve().parent.parent
 CHECK = REPO / "build-rel/stanli_check"
 DUMP = REPO / "build-rel/dump_ops"
 STANC = REPO / "deps/stanc3/stanc"

@@ -11,7 +11,7 @@ useful and a rerun can skip what is already there.
 Usage: python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb OUT.tsv
                                       [--filter SUBSTR] [--timeout SEC]
                                       [--stanli-only]
-Run from the worktree root with build-rel/ built. Expect hours: CmdStan
+Needs build-rel/ built. Expect hours: CmdStan
 builds a binary per model.
 
 --stanli-only re-measures the stanli columns of every EXISTING row in place
@@ -29,7 +29,7 @@ import tempfile
 import time
 import zipfile
 
-REPO = pathlib.Path.cwd()
+REPO = pathlib.Path(__file__).resolve().parent.parent
 BENCH = REPO / "build-rel/bench_grad"
 RUN = REPO / "build-rel/stanli_run"
 STANC = REPO / "deps/stanc3/stanc"

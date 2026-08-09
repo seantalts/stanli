@@ -140,7 +140,7 @@ def run_cmdstan(stan, data, args, cmdstan, tmp):
     return read_csv(out)
 
 
-def compare(model, a, b, args):
+def compare(a, b, args):
     """a = stanli, b = cmdstan. Returns list of failure strings."""
     bad = []
     if rel(a["leapfrogs"], b["leapfrogs"]) > args.tol_leapfrog:
@@ -213,7 +213,7 @@ def main():
             print(f"ERROR {name}: {e}")
             failures += 1
             continue
-        bad = compare(name, s, c, args)
+        bad = compare(s, c, args)
         tag = "DIVERGED" if bad else "MATCH"
         print(f"{tag} {name}: leapfrog {s['leapfrogs']}/{c['leapfrogs']}, "
               f"stepsize {s['stepsize']:.4g}/{c['stepsize']:.4g}, "
