@@ -4,10 +4,10 @@
 -ffp-contract=off, single-threaded. Both engines evaluate the sampling
 gradient (propto + jacobian) at the same deterministic unconstrained
 point. stanli runs `tools/bench_grad.cpp`; CmdStan runs
-`tools/bench_cmdstan_grad.cpp` compiled against the stanc-generated
-header, looping the same fresh-vars + grad + recover_memory cycle
-`stan::model::gradient` performs per leapfrog step. Reproduce the whole
-table with `tools/bench_models.py deps/cmdstan deps/posteriordb`.
+`tools/bench_cmdstan_grad.cpp`, looping the same fresh-vars + grad +
+recover_memory cycle `stan::model::gradient` performs per leapfrog
+step. Reproduce the whole table with
+`tools/bench_models.py deps/cmdstan deps/posteriordb`.
 
 ## Per-gradient latency
 
@@ -40,203 +40,99 @@ this page.
 | `ldaK2` | 7 | 145,916 | 104,059 | 0.71x | 0.165 s |
 | `iohmm_reg` | 29 | 545,184 | 320,335 | 0.59x | 0.441 s |
 
-(The table has changed shape twice: `radon_county`, `election88_full`
-and `dogs` moved up with the write-fusion and constant-folding work, the
-mixtures crossed parity with the elementwise-lp fusion, and `iohmm_reg`
-climbed from 0.21x on the island pass. All three are described below.)
-
 ## Which models are faster, which are slower, and why
 
 Across the full corpus (`docs/corpus-bench.tsv`, 119 models with both
-gradients) the median per-gradient speedup is 2.07x and 93 of 119 models
-are at or above parity. The ratio is almost entirely predicted by the
-model's *shape*, not its size:
+gradients) the median per-gradient speedup is 2.07x and 93 of 119
+models are at or above parity. The ratio is predicted almost entirely
+by the model's *shape*, not its size.
 
 **Faster (most of the corpus, typically 1.5-6x):**
 
-- **Vectorized-statement models.** A `y ~ normal(X * beta, sigma)` or a
-  vectorized GLM over N observations is a handful of ops here; CmdStan
-  builds and walks N var-tape nodes per statement per leapfrog step. The
-  gap grows with N. This class is regressions, GLMs, and most
-  hierarchical models written with vectorized statements.
+- **Vectorized-statement models.** A `y ~ normal(X * beta, sigma)` over
+  N observations is a handful of ops here; CmdStan builds and walks N
+  var-tape nodes per statement per leapfrog step. The gap grows with N.
+  This class is regressions, GLMs, and most hierarchical models.
 - **Scalar loops the passes can vectorize.** The hierarchical indexing
-  idiom -- `y[n] ~ normal(mu[county[n]], sigma)` and loops that fill a
-  vector element by element -- arrives unrolled and is re-rolled back
-  into the class above (radon family up to 6.1x, `election88_full`
-  3.0x, `dogs` 2.8x). What the passes handle is described below.
-- **Everything, on preparation.** Lowering a model is 4-400 ms against
-  a ~7 s CmdStan compile, so short runs and iterative model development
+  idiom (`y[n] ~ normal(mu[county[n]], sigma)` and loops that fill a
+  vector element by element) arrives unrolled and is re-rolled back
+  into the class above: the radon family up to 6.1x, `election88_full`
+  3.0x, `dogs` 2.8x.
+- **Everything, on preparation.** Lowering takes 4-400 ms against a
+  ~7 s CmdStan compile, so short runs and iterative model development
   are dominated by this regardless of gradient speed.
 
-**Near parity (0.8-1.2x):**
-
-- **Models dominated by one large dense operation** -- a Cholesky, a big
-  matrix product, an eigendecomposition (the GP models). Both engines
-  spend their time inside the same stan-math kernel on the same
-  contiguous doubles; interpreter overhead is noise on top.
+**Near parity (0.8-1.2x):** models dominated by one large dense
+operation (a Cholesky, a big matrix product, the GP models). Both
+engines spend their time inside the same stan-math kernel; interpreter
+overhead is noise on top.
 
 **Slower (a shrinking tail, mostly 0.5-0.8x):**
 
-- **Sequential models.** HMM forward recursions, state-space and
-  ARMA/GARCH-style updates: each step reads the previous step's
-  parameter-dependent result, so re-rolling correctly refuses
-  (vectorizing a recurrence would change the math). The island pass
-  (below) compiles such a region into one op, but only helps when the
-  region's ops move real data: `iohmm_reg` copies a 1,500-element state
-  vector per step and went 0.21x to 0.59x, while on the scalar
-  recurrences the compiled form measured slower than the ops and the
-  pass now declines it. What is left for them is per-op dispatch
-  against CmdStan's inlined scalar code, and a native adjoint program
-  is what would change that.
-- **Mixture-shape models with K > 2 components** (`ldaK2`/`ldaK5`):
-  their inner `log_sum_exp` runs over K-vectors built per document, a
-  row-wise reduction the elementwise-lp fusion (below) does not yet
-  express. The binary-mixture case is closed.
-- **ODE models** were the extreme case (0.015x) when the right-hand
-  side was interpreted per call; with it compiled (below) they sit at
-  ~0.6x, the residue being our per-call dispatch against CmdStan's
-  fully inlined right-hand side inside the same CVODES solver.
-- **`Mtbh_model` (0.45x)**, now the slowest model, spends **36%** in
-  `OP_SET_SLICE_STRIDED`: 146 calls moving 106,580 elements, most of it
-  in the backward. The in-place rule below rewrites element writes
-  (`OP_SET_INDEX`) but not slice writes, so a model that fills a matrix
-  column by column still copies the whole matrix per column. Open.
+- **Sequential models.** HMM recursions and state-space/ARMA/GARCH
+  updates read the previous step's parameter-dependent result, so
+  re-rolling correctly refuses (vectorizing a recurrence would change
+  the math). What is left is per-op dispatch against CmdStan's inlined
+  scalar code; a native adjoint program is what would change that.
+- **Mixture models with K > 2 components** (`ldaK2`/`ldaK5`): their
+  inner `log_sum_exp` runs over K-vectors built per document, a
+  row-wise reduction the elementwise-lp fusion does not yet express.
+  The binary-mixture case is closed.
+- **ODE models**, at about 0.6x: our per-call dispatch of the compiled
+  right-hand side against CmdStan's fully inlined one inside the same
+  CVODES solver. (They were 0.015x before the right-hand side compiled;
+  see below.)
+- **`Mtbh_model` (0.45x)**, the slowest model, spends 36% in
+  `OP_SET_SLICE_STRIDED`. The in-place rule rewrites element writes but
+  not slice writes, so a model that fills a matrix column by column
+  still copies the whole matrix per column. Open.
 
-A profile of every sub-parity model (`STANLI_PROFILE=1`, one gradient
-each) is what the last two kernel changes came from, and it says the
-remaining tail is mostly not a graph problem: in seven of those models a
-single precompiled kernel is half to nine-tenths of the gradient.
-`diamonds` was the extreme -- 90.9% in `OP_NORMAL_ID_GLM_LPDF`, whose
-"native" kernel built a var tape in the forward, threw it away, and
-built it again in the backward to call grad(). Differentiating once and
-stashing the partials took it from 0.48x to 0.89x. `prophet` was 82% in
-`OP_MATVEC`, where the accumulation was one serial dependency chain;
-four independent accumulators took it from 0.67x to 1.23x, bitwise
-unchanged. What is left in that class: `Mt_model` (62% in a scalar
-`bernoulli_lpmf`), `gp_regr` (55% in `multi_normal_cholesky_lpdf`, where
-the same partial-stashing measured a wash), `kronecker_gp` (38% in an
-eigendecomposition).
+A profile of every sub-parity model (`STANLI_PROFILE=1`) says the
+remaining tail is mostly not a graph problem: in seven of those models
+a single precompiled kernel is half to nine-tenths of the gradient.
+`diamonds` was the extreme, 90.9% in one GLM kernel that rebuilt a var
+tape in both sweeps; differentiating once and stashing the partials
+took it 0.48x -> 0.89x. `prophet` was 82% in `OP_MATVEC` with one
+serial accumulation chain; four independent accumulators took it 0.67x
+-> 1.23x, bitwise unchanged.
 
-**Where the wins come from: op granularity.** The interpreter's cost is
-per op, not per element: ~17-20 ns for a scalar density op forward +
-backward, measured as ~9.5 ns executor (dispatch + context assembly) plus
-~9 ns recorder/sink inside the kernel, against ~0.9 ns for the actual
+## Where the wins come from
+
+The interpreter's cost is per op, not per element: ~17-20 ns for a
+scalar density op forward + backward, against ~0.9 ns for the actual
 math (`tools/bench_opcost.cpp`). A vectorized statement over N elements
 amortizes that to nothing and runs precompiled stan-math on contiguous
-doubles, while CmdStan pays its var-tape cost per scalar per evaluation:
-one tape node allocated, walked, and freed per leapfrog step, with
-AoS-strided access. Vectorized models therefore win (2-6x, growing with
-N), and models that were stuck as unrolled scalar loops used to lose
-(0.4-0.9x before the re-roll pass).
+doubles, while CmdStan pays its var-tape cost per scalar per
+evaluation. Vectorized models therefore win, and models stuck as
+unrolled scalar loops used to lose (0.4-0.9x) until the graph passes
+closed the gap. The passes themselves are described in
+[runtime/src/OPTIMIZATIONS.md](../runtime/src/OPTIMIZATIONS.md); the
+headline measurements:
 
-**The re-roll pass** (`runtime/src/reroll.cpp`) closes that gap at the
-graph level. Lowering unrolls data-bound loops, so a scalar-loop model
-arrives as N consecutive copies of a small op template; the pass detects
-these periodic regions and rewrites them into the vectorized ops the
-kernels already support (constant vectors materialized from the const
-pool, invariant ops hoisted, elementwise lanes widened, INDEX
-progressions collapsed into their base vector, and N scalar density
-terms fused into one summed vector density). `radon_pooled` collapses
-from 27,670 ops to 8 (0.91x -> 6.18x) and `arK` from 3,164 to 21 (0.40x
--> 4.83x). Indexed reads rewrite by shape: the whole base in order needs
-no op at all, a contiguous window becomes an `OP_SLICE`, and an arbitrary
-data-driven index -- `alpha[county_idx[n]]`, the hierarchical idiom,
-repeats and all -- becomes one `OP_GATHER` whose backward scatter-adds.
-Anything the pass cannot prove safe it leaves alone, per region:
-cross-lane recurrences, outputs escaping their lane, opcodes outside its
-vocabulary. Set `STANLI_NO_REROLL=1` to disable it, `STANLI_NO_INPLACE=1`
-for the update rules below.
+- **Re-rolling** (scalar loops back to vector ops): `radon_pooled`
+  27,670 ops -> 8 (0.91x -> 6.18x), `arK` 3,164 -> 21 (0.40x -> 4.83x).
+- **In-place updates + store-to-load forwarding** (the element-write
+  idiom): `radon_county_intercept` went from 90.5 ms per gradient in
+  2.58 GB of arena (207x slower than CmdStan) to 92 us in 42 MB, 77,960
+  ops -> 9. Seven radon-family models and `rats_model` collapse the
+  same way.
+- **Write-side fusion** (loops that fill a vector something else
+  reads): `radon_county` 25,152 ops -> 10 (0.36x -> 0.98x),
+  `election88_full` 289,165 -> 65 (0.39x -> 2.97x). Strided-run and
+  integer-outcome fusion closed the `dogs` family (0.65x -> 2.8x).
+  57 of the 120 corpus models change under the passes, against 28
+  before write-side fusion.
+- **Elementwise-lp fusion** (the mixture idiom): `low_dim_gauss_mix`
+  7,208 ops -> 16, crossing parity (0.78x -> 1.07x); `normal_mixture`
+  13 ops, 1.09x.
 
-**Element writes: `mu[n] = ...` inside a loop.** This is the other half
-of the hierarchical idiom, and it used to be the worst thing in the
-project. Each write lowered to a *functional update* -- copy the whole
-vector into a fresh slot, poke one element -- so N writes cost O(N^2)
-time
-and O(N^2) arena. `radon_county_intercept` (N=12,573) spent 90.5 ms per
-gradient inside 2.58 GB of arena, 207x slower than CmdStan.
+## Tape islands, measured
 
-Three rules compose to remove it (`runtime/src/inplace.cpp`, plus the
-index rules above). A write may mutate its vector directly when it is the
-**last use** of that vector -- not merely its only use, since the
-read-back in the same iteration is an earlier use -- and when no earlier
-reader needs the vector's values during the reverse sweep (`log_sum_exp`
-and the other nested-replay backwards rebuild their tape from the input
-buffer, so they must find it intact). The write and its read-back then
-cancel outright, and when nothing else reads the vector its writes are
-dead and swept. What is left is plain per-lane arithmetic, which the
-gather rule vectorizes: **77,960 ops become 9**, 90.5 ms becomes 92 us,
-2.58 GB becomes 42 MB. Seven radon-family models and `rats_model` collapse
-the same way.
-
-That worked when the read-back cancelled the write. When it did not --
-when the loop fills a vector that something *else* reads, which is what
-`y_hat[n] = a[county[n]]` followed by `y ~ normal(y_hat, sigma)` is --
-the
-writes survived, one op per element, and the re-roll pass refused the
-region because its outputs escaped the lane. **Write-side fusion** takes
-that case: a run of element writes marching contiguously through one
-vector becomes a single vector store, and no store at all when the run
-covers the vector, since the vectorized values can simply *be* it. Later
-readers are redirected to the fused value. The conditions are what make
-the redirection sound rather than what makes it possible: the vector must
-be the same one every lane, no one else may read it while it is
-half-written, nothing may write it after the run, and it must not be read
-from outside the graph. `radon_county` goes from 25,152 ops to **10**
-(0.36x -> 0.98x of CmdStan) and `election88_full` from 289,165 to **65**
-(0.39x -> 2.97x). Eleven more radon-family variants collapse to 10-22 ops
-each. 57 of the 120 corpus models now change under the passes, against 28
-before.
-
-Three follow-ons closed the `dogs` family (0.65x -> 2.8x, 12,751 ops ->
-261). A **strided** run -- indices advancing by the matrix's row count,
-`p[j, t]` filled down columns -- fuses into `OP_SET_SLICE_STRIDED`, and
-interleaved runs over one vector chain block by block: each block's store
-output becomes the vector every later reference, read or write, is
-renamed to, so the next block fuses onto it in turn. **Per-lane integer
-outcomes** fuse too: an lpmf lane carries its observation as an
-immediate, so the lanes match as a template up to that immediate and the
-fused vector op's outcome array is just their concatenation (the vector
-kernels already take outcomes exactly that way). And the **unary math
-ops** (exp, log, inv_logit, sqrt, ...) joined the widening vocabulary,
-since their kernels were already shape-dispatching on `out.len`.
-
-**Mixture fusion: the elementwise-lp variant.** A mixture model's
-per-observation shape is `log_mix(theta, normal_lpdf(y[n]|...),
-normal_lpdf(y[n]|...))`: the density outputs feed an op instead of the
-target, so the summed-density fusion above cannot apply. Three pieces
-close it. Densities gained a variant bit meaning *elementwise*: the
-fused op's output is a vector holding each lane's own lp, computed by
-the same per-element recorder call the scalar lanes used (bit-identical,
-stan-math computing every value and partial). `log_mix` and the
-two-argument `log_sum_exp` kernels batch over lanes with the usual
-broadcast shape dispatch. And the re-roll pass classifies a density
-whose lane outputs are consumed only inside their own lanes as
-elementwise, widens the consuming `log_mix`, and swaps the N per-lane
-target terms for one `OP_SUM_VEC`. `low_dim_gauss_mix` drops from 7,208
-ops to 16 and crosses parity (0.78x -> 1.07x); `normal_mixture` lands at
-13 ops, 1.09x. A density whose inputs are all lane-invariant hoists to
-one scalar op instead of widening -- a len-N output over all-scalar
-inputs is exactly the miscompile shape the corpus A/B caught once
-already (`losscurve_sislob`).
-
-**Tape islands: the irreducible residue.** After every other pass has
-run, whatever scalar residue survives is, by construction, what no
-vectorizer can help -- cross-lane recurrences, where step t reads step
-t-1's parameter-dependent result. The island pass
-(`runtime/src/island.cpp`, `STANLI_NO_ISLAND=1` to disable) compiles
-each maximal run of compilable ops into a flat register program executed
-by ONE op: forward runs it on plain doubles; backward replays it under
-stan-math's nested autodiff and harvests the live-ins' adjoints -- the
-same var arithmetic CmdStan's generated code runs for the same
-statements, so gradients match by construction. Per-lane data constants
-absorb into the program as immediates; dead copy-then-modify chains
-reuse their base's registers (on `iohmm_reg` that is the difference
-between 1.6M registers and 94k).
-
-The op collapse is dramatic on every model that has such a region, and
-the time follows on exactly one. Measured with `STANLI_NO_ISLAND=1` as
-the baseline, same build, same point, on all fourteen corpus models that
-compile a region:
+The island pass compiles irreducible scalar residue (recurrences) into
+one register-machine op. The op collapse is dramatic on every model
+that has such a region; the time follows on exactly one. Measured with
+`STANLI_NO_ISLAND=1` as the baseline, same build, same point, on all
+fourteen corpus models that compile a region:
 
 | model | islanded | ops off | ns/grad off -> on | |
 | --- | ---: | ---: | ---: | ---: |
@@ -255,57 +151,29 @@ compile a region:
 | `arma11` | | 1,198 | 6,882 -> 10,570 | 0.65x |
 | `bones_model` | 77 islands | 4,955 | 52,774 -> 1,005,148 | 0.05x |
 
-The op count was never the cost. A dispatch is ~5 ns and the scalar
-kernels around it are cheap; a var replay of the same operations costs
-what CmdStan costs for them, which is more than the scratch-partials
-backwards it replaced. `iohmm_reg` is different for a reason that has
-nothing to do with dispatch: its steps copy a 1,500-element state
-vector each, 1.6M elements of traffic per gradient, and the island's
-registers make those copies disappear. `bones_model` is the same
-mechanism inverted -- 36 ops behind a 4,024-register file, rebuilt as
-vars 77 times per gradient.
+The op count was never the cost: a dispatch is ~5 ns and the scalar
+kernels around it are cheap, while a var replay of the same operations
+costs what CmdStan costs for them. `iohmm_reg` wins because its steps
+copy a 1,500-element state vector each (1.6M elements of traffic per
+gradient) and the island's registers make the copies disappear;
+`bones_model` is the same mechanism inverted, a 4,024-register file
+rebuilt as vars 77 times per gradient. The pass now estimates both
+sides before committing; the estimate separates the fourteen exactly,
+and the thirteen it leaves alone are bitwise identical to the
+passes-off baseline. What would move the rest of this class is a native
+adjoint program, generated alongside the forward one instead of
+replayed under nested autodiff.
 
-So the pass estimates both sides before committing: what the ops move
-(an in-place element update moves one element, not a vector) against
-the register file, weighted 4x because it is built twice per call and
-once as vars. The estimate separates the fourteen exactly -- `iohmm_reg`
-1.6M against 435k, every other region 4-20x the wrong way -- and the
-thirteen it now leaves alone are bitwise identical to the passes-off
-baseline again. `STANLI_ISLAND_ALWAYS=1` skips the estimate, which is
-how to ask why a region was left alone.
+## ODE models
 
-What would move the rest of this class is not fewer dispatches but a
-cheaper backward: a native adjoint program, generated alongside the
-forward one instead of replayed under nested autodiff. Beyond the
-estimate, islands also refuse propto densities (their term-dropping
-depends on argument types, which the island's uniform binding cannot
-reproduce), runs under 32 ops, and regions producing target terms.
-
-**Dispatch, measured to its floor.** The executor's sweeps resolve their
-function pointers at bind time and run 4x-unrolled
-(`tools/bench_dispatch.cpp` holds the comparison: a musttail-chained
-alternative measured slower and noisier than the unrolled loop, so it
-was declined). After those, per-op cost is bound by the context loads,
-not the dispatch branch: the remaining lever for op-heavy graphs is
-fewer ops, which is what the passes above are.
-
-**ODE models: the right-hand side was an interpreter.** Every user function
-is inlined at lowering time except one -- an ODE right-hand side has to stay
-callable at runtime, because the integrator picks the times. It was evaluated
-by a tree-walking interpreter over the MIR, at a `std::map` lookup per
-variable reference and a `std::vector` allocation per intermediate: 5.8 us per
-call for lotka_volterra's two-line right-hand side, ~500 calls per gradient,
-**97% of the model's gradient time**. It also solved the system twice per
-gradient, once for the values and again for the derivatives.
-
-Both are gone. The right-hand side compiles once, at lowering time, into a
-flat register machine (`runtime/src/ode_prog.cpp`): names become indices,
-loops over the states unroll, data-only conditions fold, conditions on the
-solve time become branches, and a call is a switch over a contiguous
-instruction array with no allocation. And the forward sweep, which has to
-solve the coupled state-plus-sensitivity system anyway to match CmdStan's
-step control, now keeps the sensitivities instead of throwing them away, so
-the backward is a matrix-vector product.
+Every user function is inlined at lowering time except an ODE
+right-hand side, which the integrator calls at times of its choosing.
+It used to be evaluated by a tree-walking interpreter: 5.8 us per call,
+~500 calls per gradient, 97% of the model's gradient time, and the
+system was solved twice per gradient (values, then derivatives). Both
+are gone: the right-hand side compiles once into a flat register
+machine, and the forward sweep keeps the sensitivities it already
+computes, so the backward is a matrix-vector product.
 
 | model | before | after | speedup | vs CmdStan |
 | --- | ---: | ---: | ---: | ---: |
@@ -314,57 +182,22 @@ the backward is a matrix-vector product.
 | `one_comp_mm_elim_abs` | 18,873,857 ns | 653,181 ns | 28.9x | 0.025x -> 0.74x |
 
 Gradients are unchanged to the bit where they were before, and
-`lotka_volterra` moved from 4 ULP to bitwise identical to CmdStan: reading the
-jacobian out of the same solve that produced the values removes a second,
-independently stepped solve. All four corpus models that call
-`integrate_ode_*` compile their right-hand side. Anything the compiler cannot
-express -- a `return` out of a branch on the solve time, say -- keeps the
-interpreter, so coverage never shrinks; `STANLI_DEBUG_ODE=1` reports when that
-happens, since a silent 30x is worth a line.
+`lotka_volterra` moved from 4 ULP to bitwise identical to CmdStan:
+reading the jacobian out of the same solve that produced the values
+removes a second, independently stepped solve. Anything the compiler
+cannot express keeps the interpreter, so coverage never shrinks;
+`STANLI_DEBUG_ODE=1` reports when that happens.
 
-(`one_comp_mm_elim_abs` has a CmdStan number here for the first time.
-It is the only corpus model calling `integrate_ode_bdf`, which reaches
-CVODES, and the gradient driver linked only TBB -- so the comparison
-failed to build and the row went blank with nothing to say why. The
-harness now links the CVODES archives and names the failure if a driver
-still will not build or run.)
+Preparation scales too: the largest corpus model (`nn_rbm1bJ100`,
+MNIST, 60,000 rows, 79,411 parameters) lowers to a 192,030-op graph in
+20.7 s and evaluates its gradient in 0.43 s. Lowering used to be
+quadratic in data size (the transformed-data interpreter copied an
+indexed expression's whole base per read). Overall, stanli lowers a
+model in 4-200 ms against a 6.2-7.6 s CmdStan compile (warm precompiled
+header, after a multi-minute one-time `make build`); that gap is what
+time-to-first-draw is made of.
 
-Model preparation scales too: the largest model in the corpus
-(`nn_rbm1bJ100`, MNIST, 60,000 rows, 79,411 parameters) lowers to a
-192,030-op graph in 20.7 s and evaluates its gradient in 0.43 s. That
-number used to be unbounded: the transformed-data interpreter evaluated
-an indexed expression by copying its base, so reading `y[n]` in a loop
-copied the whole array each time and lowering was quadratic in the data
-size.
-
-Preparation time is the other axis: stanli lowers a model in 4-200 ms,
-against a 6.2-7.6 s CmdStan compile (with a warm precompiled header, and
-after a multi-minute one-time `make build`). That gap is what
-time-to-first-draw is made of. Re-rolling also cut preparation time on
-loop-heavy models (radon_pooled 0.39 s -> 0.08 s): the executor binds
-and sizes 8 ops instead of 27,670.
-
-## End to end: eight schools, model.stan + data.json -> 1000 warmup + 1000 draws
-
-An earlier revision of these sampling numbers was measured with a
-defective max tree depth of 5 (`stan::mcmc::base_nuts` defaults to 5;
-CmdStan sets 10, and `run_nuts` never called `set_max_depth`), capping
-trajectories at 31 leapfrogs and understating any model that needs deep
-trees. The sampling columns in `docs/corpus-bench.tsv` and the full
-table below have since been re-measured at the correct depth; treat them
-as indicative rather than controlled, since adaptation trajectories
-legitimately differ between engines at matched seeds.
-
-They were also unequal work in a second way: stanli computed no
-transformed parameters and no generated quantities, so on the models with
-a generated quantities block (`diamonds`, `accel_splines`,
-`covid19imperial_v2` among the biggest apparent sampling wins) CmdStan
-was doing per-draw work stanli skipped. That gap is closed for all 119
-compiling models: the write_array graph covers 95, and the 24 the graph
-cannot express (RNG draws, branches on draw-computed values) run through
-a per-draw interpreter (`harnesses/wa_coverage.py` is the sweep). The
-sampling columns for those 24 predate the interpreted fallback, so they
-still understate CmdStan's side there.
+## End to end: eight schools, 1000 warmup + 1000 draws
 
 | engine | stage | time |
 | --- | --- | --- |
@@ -375,21 +208,22 @@ still understate CmdStan's side there.
 | CmdStan | NUTS 1000+1000 (self-reported total) | 0.044 s |
 | CmdStan | build + run wall time | ~4.98 s |
 
-Time-to-first-draw is ~20x faster (0.24 s vs ~4.98 s). Sampling-phase
-times are dominated by gradient cost, and adaptation trajectories differ
-between engines (CmdStan took 9,654 post-warmup leapfrogs here), so treat
-the sampling rows as indicative; the controlled comparison is the
-per-gradient table.
+Time-to-first-draw is ~20x faster (0.24 s vs ~4.98 s). Treat sampling
+times as indicative rather than controlled: adaptation trajectories
+legitimately differ between engines at matched seeds, so they measure
+the whole run, not the gradient. (An earlier revision of the sampling
+numbers was measured with a defective max tree depth of 5; the columns
+in `docs/corpus-bench.tsv` and the table below have been re-measured at
+the correct depth. The sampling columns for the 24 models whose
+generated quantities run through the per-draw interpreter predate that
+fallback, so they still understate CmdStan's side there.)
 
 ## Parallel chains, and what STAN_THREADS costs
 
-Chains run in threads, one executor each. The question worth measuring
-was not the speedup but the tax: stan-math's autodiff stack is a plain
-static unless `STAN_THREADS` is defined, in which case it becomes
-thread-local (`__thread` on gcc/clang), and that indirection lands on
-every var operation. So the model to worry about is not a vectorized one
--- native kernels never touch the var stack -- but one dominated by the
-nested-tape path.
+Chains run in threads, one executor each. The tax worth measuring:
+stan-math's autodiff stack becomes thread-local under `STAN_THREADS`,
+and that indirection lands on every var operation, so the model to
+worry about is one dominated by the nested-tape path.
 
 | model | plain | `STAN_THREADS` |
 | --- | ---: | ---: |
@@ -398,98 +232,65 @@ nested-tape path.
 | `ar1` | 228.9 ns | 224.1 ns |
 | `conj` | 142.2 ns | 141.1 ns |
 
-Best of three each. The tax is noise, in both directions, including on
-the model built specifically to expose it. Against that, eight chains of
-that same model:
+The tax is noise, in both directions, including on the model built to
+expose it. Against that, eight chains of that model:
 
 | threads | 1 | 2 | 4 | 8 |
 | --- | ---: | ---: | ---: | ---: |
 | 8 chains, wall clock | 2.89 s | 1.59 s | 0.86 s | 0.49 s |
 
-So it is on by default for native builds, and off under Emscripten (wasm
-threads need `-pthread` and a cross-origin-isolated page; the browser
-build runs one chain per worker instead).
+So it is on by default for native builds, and off under Emscripten
+(wasm threads need a cross-origin-isolated page; the browser runs one
+chain per worker instead).
 
-**Threading does not change the answer.** Each chain owns its executor --
-its own arena, its own contexts -- and its own RNG stream, so a parallel
-run is byte-identical to a sequential one. Checked as a CSV `cmp` across
-four models (eight schools, the `ordered_logistic` recurrence, `ar1`, and
-`conj` with its generated quantities), 8 chains x 300 draws each, and
-asserted in `tests/test_multichain.cpp` and `tests/test_python.py` in a
-form that holds on a single-threaded build too.
+**Threading does not change the answer.** Each chain owns its executor
+and its RNG stream, so a parallel run is byte-identical to a sequential
+one. Checked as a CSV `cmp` across four models at 8 chains x 300 draws,
+and asserted in `tests/test_multichain.cpp` and `tests/test_python.py`.
 
-**One trap, worth naming because it is invisible from the outside.**
+One trap, worth naming because it is invisible from the outside:
 stan-math's AD stack pointer is thread-local under `STAN_THREADS` and
-starts **null** in every new thread; each child thread must instantiate a
-`ChainableStack` before touching the AD system, which stan-math's own
-header documents and which CmdStan never has to write because TBB's
-scheduler-entry hook (`ad_tape_observer`) does it for every worker. This
-build stubs TBB out, so raw `std::thread`s dereferenced null inside
-`start_nested()` on the first legacy op. A segfault rather than a wrong
-number, which is the good version of this bug.
+starts **null** in every new thread. CmdStan never has to handle this
+because TBB's scheduler hook instantiates a `ChainableStack` per
+worker; this build stubs TBB out, so raw `std::thread`s must do it
+themselves or segfault on the first legacy op.
 
 ## Numerical parity
 
 Every model in the passing set is differentially verified against
 CmdStan's `log_prob_propto_jacobian` and full gradient at the shared
-point: 118/120 verified, 44 of them bitwise identical, worst relative
-deviation 2.6e-12 (`tools/verify_sample.py`, `docs/corpus-status.md`).
-For the 20 models whose generated quantities are deterministic
-(kronecker_gp sits out with its documented eigenvector deviation), the
-same oracle also replays CmdStan's write_array values (every CSV column at the
-same point); recording those caught two interpreter bugs on its first
-run, an uninitialized-value semantic and a transposed batched-simplex
-read, both invisible to structural coverage checks.
+point: 118/120 verified, 45 of them bitwise identical, worst relative
+deviation 2.6e-12 (`tools/verify_sample.py`,
+`docs/corpus-status.md`). For the 20 models whose generated quantities
+are deterministic, the same oracle also replays CmdStan's write_array
+values (every CSV column at the same point); recording those caught two
+interpreter bugs invisible to structural coverage checks.
+
 Transformed models change summation order relative to CmdStan's scalar
-loop, so they verify at tolerance rather than bitwise: across the corpus
-the passes now change 66 models and the worst gradient deviation any of
-them introduces vs the untransformed graph is 6.0e-13 relative --
-`iohmm_reg`, whose entire forward algorithm replays through one island
-(`harnesses/ab_corpus.py` compares every corpus model passes-on vs
-passes-off and flags any divergence; `--disable` one variable to
-attribute one).
-
-That harness earns its keep. An earlier version of the in-place rule
-allowed a destructive write whenever it was the last use of its vector,
-which is wrong for any earlier reader that rebuilds its var tape from the
-buffer during the reverse sweep -- `log_sum_exp`, `softmax`, every
-legacy
-nested-replay backward. Eight HMM/LDA/mixture models were silently wrong
-by up to 1.7e+05 relative **with their op counts unchanged**, so nothing
-structural would have caught it. Only ops whose backward purely routes
-adjoints may now precede a destructive write.
-
-All six were then re-run through the CmdStan rig directly rather than
-resting on that transitive argument, and all six still verify:
-`radon_pooled` 2.1e-14 (140 ulp, against 135 before the pass), `arK`
-9.6e-16 (5 ulp, against 1), `rats_model` 2.4e-16 (2 ulp),
-`soil_incubation` 1.3e-16 (1 ulp), and both `covid19imperial` variants
-8.2e-16 (7 ulp), unchanged.
+loop, so they verify at tolerance rather than bitwise: the passes
+change 66 corpus models, and the worst gradient deviation any of them
+introduces vs the untransformed graph is 6.0e-13 relative
+(`harnesses/ab_corpus.py` compares every model passes-on vs passes-off
+and flags any divergence). That harness caught an in-place rule that
+made eight models silently wrong by up to 1.7e+05 relative with their
+op counts unchanged; the six models most affected by the passes were
+then also re-run through the CmdStan rig directly, and all six verify
+(e.g. `radon_pooled` 2.1e-14, `arK` 9.6e-16, `rats_model` 2.4e-16).
 
 ## Full corpus
 
-Every posteriordb model, sorted by per-gradient speedup. The columns are
-CmdStan's absolute numbers and stanli's ratio against them: the ratio is
-what the table is read for, and stanli's own time is the ratio applied to
-the column beside it. Sampling is 1000 warmup + 1000 draws at matched
-seeds, indicative rather than controlled -- the two samplers take
-different trajectories, so it measures the whole run, not the gradient.
-Where the two columns disagree sharply, the two engines sampled
-different modes. `ldaK2` has two (mean lp about -596 and about -696) and
-the second is five times more expensive to explore -- adapted stepsize
-0.09 against 0.48. Over five seeds through `tools/sampler_trace.py` the
-engines picked the same mode in four and the corpus seed is the fifth,
-where stanli drew the expensive mode and CmdStan the cheap one. That is
-the whole of its 0.25x sampling column against a 0.71x gradient, and it
-is a property of the posterior, not of either sampler. `hmm_gaussian`
-(0.69x per gradient, 0.03x sampling) is the same shape with a sharper
-edge: at that seed CmdStan's run has *every* post-warmup draw divergent,
-so its 18.75 s is a chain that is not sampling at all. Read the sampling
-column as indicative and the gradient column as the measurement. (It is
-also older than the gradient column in one way: it was measured before
-the sampler moved to CmdStan's generator, so the seed that produced each
-row's draws is not the seed that would produce them today.)
-Regenerate with `python3 tools/corpus_table.py docs/corpus-bench.tsv`.
+Every posteriordb model, sorted by per-gradient speedup. The columns
+are CmdStan's absolute numbers and stanli's ratio against them.
+Sampling is 1000 warmup + 1000 draws at matched seeds, indicative
+rather than controlled; where the two columns disagree sharply, the two
+engines sampled different modes. (`ldaK2` has two modes and the corpus
+seed is the one seed of five where the engines split, stanli drawing
+the mode that is five times more expensive to explore; that is the
+whole of its 0.25x sampling column against a 0.71x gradient.
+`hmm_gaussian`'s CmdStan run at that seed has every post-warmup draw
+divergent, so its 18.75 s is a chain that is not sampling at all.) Read
+the gradient column as the measurement. Regenerate with
+`python3 tools/corpus_table.py docs/corpus-bench.tsv`.
 
 | model | params | CmdStan ns/grad | grad speedup | CmdStan sample | sample speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -613,50 +414,32 @@ Regenerate with `python3 tools/corpus_table.py docs/corpus-bench.tsv`.
 
 ### The models the run could not complete
 
-A missing number is not a slow number, so these sort below the table
-rather than inside it.
+A missing number is not a slow number, so these sort below the table.
 
 | model | params | CmdStan ns/grad | grad speedup | what stopped it |
 | --- | ---: | ---: | ---: | --- |
-| `ldaK5` | 7714 | 5,580,314 | 1.10x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
-| `nn_rbm1bJ100` | 79411 | 434,981,254 | 1.07x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
-| `kronecker_gp` | 438 | 217,990 | 0.70x | stanli sampling hit the 900 s cap |
-| `lotka_volterra` | 8 | 41,313 | 0.61x | stanli sampling hit the 900 s cap |
-| `sir` |  | - | - | stanli's gradient probe threw at the benchmark point; no stanli gradient |
+| `ldaK5` | 7714 | 5,580,314 | 1.10x | both engines hit the 900 s sampling cap |
+| `nn_rbm1bJ100` | 79411 | 434,981,254 | 1.07x | both engines hit the 900 s sampling cap |
+| `kronecker_gp` | 438 | 217,990 | 0.70x | stanli sampling hit the 900 s cap (CmdStan takes 451 s) |
+| `lotka_volterra` | 8 | 41,313 | 0.61x | stanli sampling hit the 900 s cap; untraced (CmdStan samples it in 6.2 s, so 0.61x per gradient should fit; `tools/sampler_trace.py` is the tool) |
+| `sir` |  | - | - | the benchmark's fixed evaluation point is invalid: the ODE solution dips to -4.4e-10 and `poisson_lpmf` rejects the negative rate. CmdStan has no gradient number here either; the model samples fine. |
 
-- `ldaK5` and `nn_rbm1bJ100` are the two largest models in the corpus
-  (7,714 and 79,411 parameters; CmdStan itself needs 435 ms per gradient
-  on the second one). Neither engine finishes 2000 iterations inside the
-  cap. Their per-gradient numbers are measured and stand.
-- `kronecker_gp` is 0.70x per gradient and CmdStan takes 451 s, so the
-  same run does not fit in 900 s.
-- `lotka_volterra` is the honest puzzle left: CmdStan samples it in
-  6.2 s and stanli is 0.61x per gradient, so the cap should be nowhere
-  near. The mode explanation above covers `ldaK2` and `hmm_gaussian`;
-  this one has not been traced yet. `tools/sampler_trace.py` is the tool.
-- `sir` throws at the benchmark's fixed evaluation point: the ODE
-  solution dips to -4.4e-10 and `poisson_lpmf` rejects a negative rate.
-  CmdStan has no gradient number here either. The model samples fine
-  (38.7 s in CmdStan), so this is the probe point, not the model.
+`ldaK5` and `nn_rbm1bJ100` are the two largest models in the corpus;
+their per-gradient numbers are measured and stand.
 
 ## The browser build
 
-Different compiler, different libm, and until now no SIMD, so none of the
-numbers above carry over. `tools/bench_wasm.cjs` measures it under Node
-against the same MIR fixtures the tests use (no stanc, no posteriordb
-needed); `--mir`/`--data` point it at a bigger model.
-
-```
-node tools/bench_wasm.cjs                      # fixtures, ns/gradient
-node tools/bench_wasm.cjs --module build-wasm-simd/stanli.js
-```
+Different compiler, different libm, so none of the numbers above carry
+over. `tools/bench_wasm.cjs` measures it under Node against the same
+MIR fixtures the tests use; `--mir`/`--data` point it at a bigger
+model. Measure under Node, never in an automated browser tab: attaching
+chrome.debugger keeps V8 on its baseline tier and costs about 4x.
 
 ### What the browser costs you
 
-Both builds from the same commit, same MIR and same data on each side,
-`bench_grad` against `bench_wasm.cjs`, min of three runs each, macOS
-arm64. This is the number the demo page's footer cites, and the reason it
-tells people to install the wheel for real work.
+Both builds from the same commit, same MIR and data, min of three runs,
+macOS arm64. This is the number the demo page's footer cites, and the
+reason it tells people to install the wheel for real work.
 
 | model | native | wasm | wasm/native |
 |---|---:|---:|---:|
@@ -669,21 +452,16 @@ tells people to install the wheel for real work.
 | `diamonds` | 36.3 us | 52.2 us | 1.44x |
 | geometric mean | | | **1.71x** |
 
-Two things this is *not*. It is not the missing propto terms: the browser
-ships `STANLI_LITE_LP`, which drops the propto instantiations and so
-evaluates the fuller density, and propto is worth nothing measurable
-either way (docs/lite-lp.md). It is not model preparation either: stanc3
-compiled by js_of_ocaml compiles eight schools in 3 ms warm, against 13 ms
-for the native binary including process spawn, so the browser is not
-behind on time to first draw at all. The gap is gradient throughput,
-which is what dominates once sampling starts.
+The gap is gradient throughput, which is what dominates once sampling
+starts. It is not model preparation: stanc3 compiled by js_of_ocaml
+compiles eight schools in 3 ms warm, against 13 ms for the native
+binary including process spawn.
 
-Measure it under Node, never in an automated browser tab: attaching
-chrome.debugger keeps V8 on the Liftoff baseline tier and costs about 4x
-on the same binary.
+### SIMD
 
-The A/B that turned SIMD on, measured on macOS arm64, emsdk 6.0.6 (the
-version CI pins), on the tree as it stood at that commit:
+SIMD128 is on. The A/B that decided it (macOS arm64, emsdk 6.0.6, on
+the tree as it stood then; sizes have grown since as the density
+surface roughly doubled):
 
 | | scalar | +SIMD128 |
 |---|---:|---:|
@@ -692,64 +470,19 @@ version CI pins), on the tree as it stood at that commit:
 | `nes` (matrix-heavy) | 29.1 us | **25.9 us** |
 | `stanli.wasm` gzipped | 1.02 MB | 1.05 MB |
 
-The absolute numbers have moved since -- the density surface roughly
-doubled -- and today's build is 4.10 MB raw, 1.15 MB gzipped, 478 ns
-geomean. The A/B above is kept as the decision record; rerun it against a
-freshly configured scalar build if the decision is ever revisited.
+2% on most shapes and 11% on the matrix-heavy one for 0.03 MB, and
+(the part that made it an easy call) every corpus model's gradients are
+**bitwise identical** to the scalar build. With `-ffp-contract=off` in
+force the vectorization Eigen takes is elementwise, and elementwise is
+order-preserving; a vectorized reduction would have shown up as a
+deviation immediately.
 
-SIMD128 is on. It is worth 2% on most shapes and 11% on the matrix-heavy
-one for 0.03 MB, and -- the part that made it an easy call -- every corpus
-model's gradients come out **bitwise identical** to the scalar build
-(`tools/wasm_check.sh` against the CmdStan references, plus a direct
-comparison on `radon_pooled` and `nes` at three points each). With
-`-ffp-contract=off` still in force the vectorization Eigen takes is
-elementwise, and elementwise is order-preserving. A vectorized reduction
-would reassociate, and would have shown up as a deviation immediately.
-
-### Two things not worth doing, measured
-
-**`-ffp-contract=fast` is a no-op here.** Not "not worth it" -- it produces
-a **byte-identical** `stanli.wasm`. Baseline WebAssembly has no FMA
-instruction, so there is nothing to contract (`f64x2.relaxed_madd` needs
-the relaxed-SIMD proposal and `-mrelaxed-simd`). The `-ffp-contract=off`
-pin that costs something on native costs exactly nothing in the browser,
-and fast-math is not a lever on this target at all.
-
-**Splitting densities into a lazily-loaded pack is viable, and the
-obstacle I expected is not there.** Stubbing every density, cdf and tail
-kernel and relinking says where the payload actually is:
-
-| | raw | gzip |
-|---|---:|---:|
-| core runtime (plus `multi_normal`, `lkj_corr_cholesky`) | 2.26 MB | **0.69 MB** |
-| everything, as shipped | 4.10 MB | **1.15 MB** |
-
-So the density surface is 1.84 MB raw, **0.46 MB gzipped** -- 40% of the
-payload, against a 0.69 MB core that cannot be split. A model still needs
-its own densities, so the realistic saving is smaller than 0.46 MB, but it
-is no longer marginal: this doc previously said 0.37 MB against a bigger
-core, before the density list went from 47 to 71.
-
-The cost I assumed would eat it does not exist. Emscripten's
-`MAIN_MODULE=2` with `-fPIC` was measured against the same tree: **1.05 MB
-gzipped either way, 451 ns against 449 ns**. On wasm, calls already go
-indirect through a function table, so there is no PLT/GOT penalty of the
-kind native dynamic linking pays.
-
-The mechanism was proven end to end with a spike: a `SIDE_MODULE` built
-against these headers, loaded at runtime, calling **back into the main
-module** -- which is what lets a pack call `register_kernel`,
-`active_sink()` and libm from the core instead of carrying its own copies.
-Dispatch is already `kernel(opcode).forward`, a function-pointer table, so
-late registration only has to fill in slots, and the lowering already
-fails with `unsupported function <name>` -- so the trigger is
-self-correcting: try to lower, fetch the pack on that error, retry, with
-no density-name table duplicated in JavaScript.
-
-One requirement, found the hard way: the pack must be compiled with the
-same exception ABI (`-fwasm-exceptions`) as the core. Mismatched, it fails
-with an opaque `__stack_pointer` mutable-global import error that looks
-like a dynamic-linking bug and is not.
+Two related results, measured: `-ffp-contract=fast` produces a
+byte-identical `stanli.wasm`, because baseline WebAssembly has no FMA
+instruction to contract to, so fast-math is not a lever on this target.
+And splitting the densities into a lazily-loaded pack is viable but
+blocked by one emscripten limitation; the measurements and traps are in
+[docs/density-pack.md](density-pack.md).
 
 ## Reproducing
 
@@ -758,5 +491,5 @@ like a dynamic-linking bug and is not.
 cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
 cmake --build build-rel -j
 python3 tools/bench_models.py deps/cmdstan deps/posteriordb
-python3 harnesses/ab_corpus.py deps/posteriordb   # re-roll A/B over the corpus
+python3 harnesses/ab_corpus.py deps/posteriordb   # passes A/B over the corpus
 ```

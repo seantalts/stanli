@@ -12,9 +12,11 @@ C++ toolchain on the machine.
 pip install stanli
 ```
 
-That is the whole install. No compiler, no `make`, no CmdStan checkout, no
-multi-minute first-run build. One wheel, one shared library, under seven
-megabytes.
+That is the whole install. No compiler, no `make`, no CmdStan checkout,
+no multi-minute first-run build. One wheel, one shared library, under
+eight megabytes. Model preparation takes milliseconds, so the first
+draw arrives about 20x sooner than a toolchain that compiles C++ per
+model.
 
 ```python
 import stanli
@@ -26,35 +28,13 @@ fit["mu"].mean()        # every draw of a column, chains concatenated
 fit.draws("mu")         # (chains, draws), for a trace plot
 ```
 
-Model preparation takes milliseconds, so the first draw arrives about 20x
-sooner than a toolchain that compiles C++ per model.
-
-## The mode, and where to start
-
-```python
-r = model.optimize(seed=1)
-r["mu"], r.lp          # every CSV column at the mode, and the lp there
-r.unconstrained        # the point on the sampler's scale
-
-fit = model.sample(inits=r.unconstrained)   # start the chains there
-```
-
-L-BFGS -- stan's own, the one behind CmdStan's `optimize`.
-
-It returns the posterior **mode**. CmdStan's `optimize` defaults to
-`jacobian=0`, the penalized maximum likelihood, and stanli cannot offer
-that: the change-of-variables Jacobian is folded into the graph when the
-model is lowered. `jacobian=False` raises rather than quietly handing
-back the other quantity, since the two differ for any constrained
-parameter.
-
 ## Chains and convergence
 
-Four chains by default, run in parallel, because R-hat needs more than one
-and a single-chain run cannot be checked for convergence at all. Eight
-schools does all four in about 70 ms. Threading changes nothing about the
-answer: each chain owns its executor and its RNG stream, so the draws come
-out byte-identical to a sequential run.
+Four chains by default, run in parallel, because R-hat needs more than
+one and a single-chain run cannot be checked for convergence at all.
+Eight schools does all four in about 70 ms. Threading changes nothing
+about the answer: each chain owns its executor and its RNG stream, so
+the draws come out byte-identical to a sequential run.
 
 ```python
 print(fit.summary())
@@ -66,9 +46,9 @@ mu                4.4600     0.0532     3.1705    -0.7414     4.5519     9.5384 
 tau               3.4752     0.0635     3.1612     0.2192     2.6680     9.6313       2160       1874      1.001
 ```
 
-R-hat is rank-normalized split-R-hat and ESS is the bulk/tail pair, both
-Vehtari et al. 2021, computed by stan's own estimators -- so the numbers
-agree with `stansummary` rather than approximating it.
+R-hat is rank-normalized split-R-hat and ESS is the bulk/tail pair
+(Vehtari et al. 2021), computed by stan's own estimators, so the
+numbers agree with `stansummary` rather than approximating it.
 
 ```python
 print(fit.diagnose())
@@ -85,45 +65,42 @@ No problems detected.
 ```
 
 Those are the checks a Bayesian workflow actually turns on, including
-**E-BFMI** -- the one that catches a badly explored heavy tail, which
-R-hat and ESS are both blind to. Each check either confirms or reports the
-number that failed and what to do about it.
+E-BFMI, the one that catches a badly explored heavy tail, which R-hat
+and ESS are both blind to. The pieces are reachable individually too:
+`fit.divergences`, `fit.max_treedepth_hits`, `fit.stepsize` and
+`fit.ebfmi()` are per-chain arrays, and `fit.to_arviz()` hands off an
+InferenceData with the sampler stats attached.
 
-The pieces are reachable individually too: `fit.divergences`,
-`fit.max_treedepth_hits`, `fit.stepsize` and `fit.ebfmi()` are per-chain
-arrays, `fit.summary().r_hat` is the whole column, and `fit.to_arviz()`
-hands off an InferenceData with the sampler stats attached.
+## The mode, and where to start
+
+```python
+r = model.optimize(seed=1)
+r["mu"], r.lp          # every CSV column at the mode, and the lp there
+r.unconstrained        # the point on the sampler's scale
+
+fit = model.sample(inits=r.unconstrained)   # start the chains there
+```
+
+L-BFGS, stan's own, the one behind CmdStan's `optimize`. It returns the
+posterior **mode**. CmdStan's `optimize` defaults to `jacobian=0`, the
+penalized maximum likelihood, and stanli cannot offer that: the
+change-of-variables Jacobian is folded into the graph when the model is
+lowered. `jacobian=False` raises rather than quietly handing back the
+other quantity.
 
 ## How it works
 
 Every Stan model is a composition of a fixed vocabulary of operations:
-densities, constraint transforms, linear algebra, elementwise math. stanli
-ships those precompiled and turns each model into *data*, a static graph of
-ops over flat preallocated buffers, instead of generating and compiling C++
-per model.
-
-```
-model.stan + data.json
-  |  stanc3, the official OCaml compiler, linked into the library
-  v
-transformed MIR
-  |  lowering: transformed data evaluated eagerly, data-bound loops unrolled,
-  |            then periodic regions re-rolled back into vectorized ops
-  v
-op graph over preallocated value/adjoint arenas
-  |  forward sweep = log density, reverse sweep = gradient
-  v
-NUTS with diagonal-metric adaptation -> draws
-```
-
-The graph doubles as the autodiff tape, so a reverse sweep is a backwards
-loop over an array rather than a walk through a pointer-chasing tape, and
-steady-state gradient evaluation allocates nothing.
+densities, constraint transforms, linear algebra, elementwise math.
+stanli ships those precompiled and turns each model into *data*, a
+static graph of ops over flat preallocated buffers, instead of
+generating and compiling C++ per model. The graph doubles as the
+autodiff tape, so a reverse sweep is a backwards loop over an array,
+and steady-state gradient evaluation allocates nothing.
 
 Two things are not reimplemented, which is what makes the results
-trustworthy: the compiler is the real stanc3, linked in-process, so the
-Stan language behaves as the official toolchain makes it behave; and the
-math is unmodified stan-math, the same code CmdStan runs.
+trustworthy: the compiler is the real stanc3, linked in-process, and
+the math is unmodified stan-math, the same code CmdStan runs.
 
 ## Correctness
 
@@ -136,19 +113,19 @@ component. **<!--gen:corpus_bitwise-->45<!--/gen--> agree bitwise.** The
 worst deviation across the entire corpus is
 **<!--gen:corpus_worst-->2.6e-12<!--/gen--> relative**.
 
-The two exceptions are documented rather than hidden. `sir`'s ODE solution
-dips about 1e-9 below a declared lower bound at the shared evaluation point,
-where CmdStan rejects it too; `kronecker_gp` matches on the log density and
-436 of 438 gradients, differing on the two that flow through eigenvectors of
-a nearly degenerate covariance matrix.
+The two exceptions are documented rather than hidden. `sir`'s ODE
+solution dips about 1e-9 below a declared lower bound at the shared
+evaluation point, where CmdStan rejects it too; `kronecker_gp` matches
+on the log density and 436 of 438 gradients, differing on the two that
+flow through eigenvectors of a nearly degenerate covariance matrix.
 
 Full per-model accuracy table:
 [docs/corpus-status.md](https://github.com/seantalts/stanli/blob/main/docs/corpus-status.md)
 
 ## Performance
 
-Per-gradient latency against CmdStan, same models, same evaluation point,
-both sides `-O3` with FP contraction pinned off:
+Per-gradient latency against CmdStan, same models, same evaluation
+point, both sides `-O3` with FP contraction pinned off:
 
 <!--gen:bench_table_us-->
 | model | params | stanli | CmdStan | speedup |
@@ -178,29 +155,21 @@ both sides `-O3` with FP contraction pinned off:
 | `iohmm_reg` | 29 | 545.2 us | 320.3 us | 0.59x |
 <!--/gen-->
 
-The wins come from op granularity. CmdStan's var tape allocates, walks, and
-frees one node per scalar operation per leapfrog step; stanli pays a fixed
-cost per *op*, and a vectorized statement over N elements amortizes that to
-nothing. Across the whole posteriordb corpus the median is
-<!--gen:corpus_median-->2.07x<!--/gen--> and
+The wins come from op granularity. CmdStan's var tape allocates, walks,
+and frees one node per scalar operation per leapfrog step; stanli pays
+a fixed cost per *op*, and a vectorized statement over N elements
+amortizes that to nothing. Across the whole posteriordb corpus the
+median is <!--gen:corpus_median-->2.07x<!--/gen--> and
 <!--gen:corpus_at_par-->93<!--/gen--> of
 <!--gen:corpus_n_grad-->119<!--/gen--> models are at or above CmdStan.
 
-The losses are honest and understood, and they are all one shape: a
-recurrence. `hmm_*`, `garch11` and `arma11` step through time with each
-step reading the last one's parameter-dependent result, which nothing can
-vectorize, so the work is scalar on both sides and CmdStan's generated C++
-is the faster way to run scalar work. `ldaK2` is a mixture over more than
-two components, which the fusion pass does not yet widen.
-
-ODE models are the other place stanli is still behind. An ODE right-hand
-side is the one user function that cannot be inlined at lowering time,
-since the integrator picks the times; it now compiles into a flat register
-machine instead of being tree-walked, and the forward sweep keeps the
-sensitivities it was already computing instead of solving twice. Together
-that is 29x to 39x faster than the tree-walking interpreter it replaces,
-which puts `lotka_volterra` and `soil_incubation` at 0.58x and 0.63x of
-CmdStan rather than 0.015x.
+The losses are understood, and they are all one shape: a recurrence.
+`hmm_*`, `garch11` and `arma11` step through time with each step
+reading the last one's parameter-dependent result, which nothing can
+vectorize, so the work is scalar on both sides and CmdStan's generated
+C++ runs scalar work faster. ODE models sit around 0.6x for a similar
+reason: the right-hand side runs through a compact register machine
+where CmdStan runs native code.
 
 Method and full table:
 [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
@@ -221,46 +190,47 @@ model.constrained_names             # ['mu', 'tau', 'theta.1', ...]
 
 lp, grad = model.log_prob_grad(q)   # sampling log density and its gradient
 
-draws = model.sample(seed=1, warmup=1000, samples=1000, delta=0.8)
-draws["mu"]                         # ndarray of length `samples`
+fit = model.sample(seed=1, warmup=1000, samples=1000, delta=0.8)
+fit["theta.1"]                      # ndarray, chains concatenated
 ```
 
-`data` accepts a path to a JSON file or a dict of Python scalars, lists, and
-numpy arrays. `sample` returns one array of constrained draws per scalar
-parameter, named the way CmdStan names them, so `theta` declared as
-`vector[8]` arrives as `theta.1` through `theta.8`.
+`data` accepts a path to a JSON file or a dict of Python scalars,
+lists, and numpy arrays. `sample` returns every column CmdStan's CSV
+would carry (constrained parameters, transformed parameters, generated
+quantities, with RNG draws streamed per chain), named the way CmdStan
+names them, so `theta` declared as `vector[8]` arrives as `theta.1`
+through `theta.8`. Sampler columns (`lp__`, `divergent__`, ...) are
+reachable by name too.
 
 ## Platforms
 
 Wheels for macOS (arm64 and x86_64), Linux (x86_64 and aarch64,
 manylinux_2_28) and Windows (x86_64). The Windows wheel is built under
-mingw-w64, because stan-math does not build under MSVC, which is the same
-reason RStan ships through RTools. It bundles `stanc.exe` and runs it as
-a subprocess instead of embedding the compiler, which waits on opam's
-native Windows support; `Model("model.stan", data)` works the same way
-either way.
+mingw-w64, because stan-math does not build under MSVC (the same reason
+RStan ships through RTools), and bundles `stanc.exe` as a subprocess
+instead of embedding the compiler; the API works the same way either
+way.
 
-The installed library is 22.2 MB, which is the trade this design makes:
-ship the compiler and every kernel once, so that nothing is ever built on
-the user's machine. Roughly half of that is the embedded stanc3 and
-somewhat under half is stan-math. The interpreter and NUTS together are
-about 410 KB.
+The installed library is 22.2 MB: over half of it is the density
+kernels, about a quarter the embedded stanc3, and the interpreter and
+NUTS together are about 410 KB. That is the trade this design makes:
+ship the compiler and every kernel once, so nothing is ever built on
+the user's machine.
 
-## Status
+## Limits
 
-Early, and deliberately narrow. The sampler is Stan's own NUTS with
-diagonal-metric adaptation. Known limits, stated plainly:
+Stated plainly:
 
-- `sample()` returns declared parameters only. Transformed parameters and
-  generated quantities are computed by the runtime and written by the
-  command line tool, but are not exposed through the Python API yet, so
-  the non-centered eight schools gives you `mu`, `tau`, and
-  `theta_tilde`, not `theta`.
-- No variational inference, no optimization, no multi-chain threading.
-- No convergence diagnostics. Pair it with ArviZ or similar for now.
+- The sampler is Stan's own NUTS with diagonal-metric adaptation, and
+  `optimize()` is Stan's L-BFGS. No variational inference or Pathfinder
+  yet.
+- `inits` are on the unconstrained scale. Constrained inits would need
+  the inverse parameter transforms, which do not exist here yet.
+- `optimize(jacobian=False)` (CmdStan's default penalized maximum
+  likelihood) raises; see above.
 
-What is here is verified against CmdStan model by model, and every number
-on this page is reproducible from the repository.
+What is here is verified against CmdStan model by model, and every
+number on this page is reproducible from the repository.
 
 - Source, issues, and roadmap:
   [github.com/seantalts/stanli](https://github.com/seantalts/stanli)
