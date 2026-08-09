@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace stanli {
@@ -120,7 +121,32 @@ bool gen_adjoint(IslandProg& p) {
   auto bad_overlap = [](int x, int y, int len) {
     return x != y && x < y + len && y < x + len;
   };
+  // Every register an adjoint rule will READ, checked once here rather than
+  // trusted per rule. The write side is bounded by the loop above; nothing
+  // bounded the operands, and they index the same vectors.
+  auto in_range = [&](int r, int len) { return r >= 0 && r + len <= n0; };
   for (const auto& I : orig) {
+    const int reads = density_arity(I.code) > 0 ? density_arity(I.code)
+                      : I.code == Program::CONST || I.code == Program::CONSTR
+                          ? 0
+                          : 3;
+    if (reads > 0 && !in_range(I.a, 1)) return false;
+    if (reads > 1 && !in_range(I.b, 1)) return false;
+    if (reads > 2 && !in_range(I.c, 1)) return false;
+    switch (I.code) {
+      case Program::MOVR:
+      case Program::LOG_RANGE:
+      case Program::EXP_RANGE:
+      case Program::SOFTMAX:
+      case Program::LSE_RANGE:
+        if (!in_range(I.a, I.len)) return false;
+        break;
+      case Program::DOT:
+        if (!in_range(I.a, I.len) || !in_range(I.b, I.len)) return false;
+        break;
+      default:
+        break;
+    }
     switch (I.code) {
       case Program::MOVR:
       case Program::LOG_RANGE:
@@ -424,21 +450,30 @@ void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
         adj[I.b] += m * std::log(val[I.va]);
         break;
       }
+      // fmax/fmin build no node at all: they return whichever operand won,
+      // so the whole adjoint routes to it. Ties go to b. NaN needs saying
+      // separately -- `a > b` is false when either is NaN, so the plain
+      // comparison would hand fmax(x, NaN) to the NaN, where stan-math
+      // returns x. A local declared and never assigned is NaN
+      // (mir_prog.hpp), so this is reachable and not hypothetical.
       case Program::FMAX:
+      case Program::FMIN: {
         adj[I.dst] = 0.0;
-        // fmax returns one of its operands, ties going to b.
-        if (val[I.va] > val[I.vb])
+        const double x = val[I.va], y = val[I.vb];
+        if (std::isnan(x) && std::isnan(y)) {
+          adj[I.a] = std::numeric_limits<double>::quiet_NaN();
+          adj[I.b] = std::numeric_limits<double>::quiet_NaN();
+        } else if (std::isnan(y)) {
           adj[I.a] += t;
-        else
+        } else if (std::isnan(x)) {
           adj[I.b] += t;
-        break;
-      case Program::FMIN:
-        adj[I.dst] = 0.0;
-        if (val[I.va] < val[I.vb])
+        } else if (I.code == Program::FMAX ? x > y : x < y) {
           adj[I.a] += t;
-        else
+        } else {
           adj[I.b] += t;
+        }
         break;
+      }
       case Program::NEG:
         adj[I.dst] = 0.0;
         adj[I.a] -= t;
@@ -466,8 +501,13 @@ void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
       case Program::FABS:
         adj[I.dst] = 0.0;
         // At exactly zero stan-math returns a fresh node with no operand,
-        // so the derivative is dropped rather than being either sign.
-        if (val[I.va] > 0.0)
+        // so the derivative is dropped rather than being either sign; at
+        // NaN it poisons the operand's adjoint outright, which is what
+        // makes a sampler reject the draw rather than accept a finite
+        // gradient computed from nothing.
+        if (std::isnan(val[I.va]))
+          adj[I.a] = std::numeric_limits<double>::quiet_NaN();
+        else if (val[I.va] > 0.0)
           adj[I.a] += t;
         else if (val[I.va] < 0.0)
           adj[I.a] -= t;
@@ -535,9 +575,16 @@ void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
         const double* oa = adj + I.dst;
         double d = p[0] * oa[0];
         for (int32_t k = 1; k < I.len; ++k) d += p[k] * oa[k];
-        for (int32_t k = 0; k < I.len; ++k)
-          adj[I.a + k] += p[k] * (oa[k] - d);
-        for (int32_t k = 0; k < I.len; ++k) adj[I.dst + k] = 0.0;
+        // Clear each output adjoint as its contribution is consumed, not in
+        // a second pass: an in-place `x = softmax(x)` has dst and a as the
+        // same cells, and a trailing clear would erase what this loop just
+        // accumulated. The two stores are disjoint when the ranges are, so
+        // this is the same arithmetic in that case.
+        for (int32_t k = 0; k < I.len; ++k) {
+          const double o = oa[k];
+          adj[I.dst + k] = 0.0;
+          adj[I.a + k] += p[k] * (o - d);
+        }
         break;
       }
       case Program::LSE2:

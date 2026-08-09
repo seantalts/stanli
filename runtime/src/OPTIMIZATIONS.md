@@ -178,33 +178,56 @@ computes step t from step t-1, and every step depends on parameters.
 Re-rolling correctly refuses these. This pass runs last, so what it
 sees is by construction what nothing else could help. It compiles each
 long stretch of leftover scalar ops into a single instruction list run
-by one op. Forward runs it on plain numbers; backward re-executes it
-under stan-math's autodiff on a scratch tape and reads the derivatives
-out, the same arithmetic CmdStan performs for those statements, so the
-derivatives agree by construction.
+by one op, forward on plain numbers.
 
-Collapsing thousands of ops into one sounds like it must be faster, and
-mostly it is not: measured on all fourteen corpus models with a big
-enough region, it was faster on one, a wash on four, and up to 20x
-slower on nine. The op count was never the cost; scalar ops are about
-as cheap as the arithmetic inside them, and replaying under autodiff
-costs what CmdStan costs, which is more. The one model that wins
-(`iohmm_reg`, 2.6x) copies a 1,500-element state vector per step, and
-the island's register file makes those copies disappear.
+The backward used to re-execute that same list under stan-math's
+autodiff on a scratch tape and read the derivatives out. That gave the
+right answer by construction -- the same arithmetic CmdStan performs for
+those statements -- and it cost what CmdStan costs, which was the whole
+problem. Collapsing thousands of ops into one sounds like it must be
+faster, and with that backward it mostly was not: measured on all
+fourteen corpus models with a big enough region, it was faster on one, a
+wash on four, and up to 20x slower on nine. The op count was never the
+cost; scalar ops are about as cheap as the arithmetic inside them, and
+replaying under autodiff is not.
 
-So the pass estimates both sides before committing (what the ops move,
-against what the register file costs to build, twice per evaluation and
-once as allocating autodiff values) and keeps the compiled form only
-when it is cheaper. The estimate separates the fourteen models exactly.
-`STANLI_ISLAND_ALWAYS=1` skips the estimate, which is how to ask why a
-region was left alone.
+So the backward is *generated* instead (`adjoint.cpp`): the compiler
+reads the instruction list once and writes a second instruction list
+that computes the derivatives directly, in plain numbers, allocating
+nothing. Each rule is the matching stan-math derivative transcribed
+expression for expression, so the two still agree to the last bit on
+almost every region, and `STANLI_NO_NATIVE_ADJ=1` switches back to the
+autodiff replay to check that they do.
+
+That changed the class rather than improving it. On all eighteen corpus
+models with a region big enough to compile, every one is faster
+generated than replayed, and models that were a wash became real wins:
+one HMM collapses 42,926 ops into 11 and went from 0.99x to 1.68x. The
+model whose steps copy a 1,500-element state vector -- memory traffic
+the register file makes free, which is why it was the one winner before
+-- went from 2.5x to 4.9x.
+
+The pass still estimates both sides before committing, because one shape
+is still wrong for it: a region carrying far more state than it
+computes, where the register file costs more to write and read back than
+the ops ever moved. The estimate weighs what the ops move and what they
+pay per dispatch against the register file and the two instruction
+lists, and it now keeps every region that measured clearly above parity.
+`STANLI_ISLAND_ALWAYS=1` skips it, which is how to ask why a region was
+left alone.
 
 The pass also refuses outright: short runs (under 32 ops), regions with
 more than six distinct inputs, densities in the dropped-constants form
-(see the refusal above), and regions producing target entries.
+(see the refusal above), and regions producing target entries. One more
+applies to the generated backward alone: a region with a branch on a
+parameter keeps the autodiff replay, because reversing a branch needs
+the nested if/else shape the flat instruction list has already thrown
+away.
 
-The remaining work for this class is to generate the backward pass
-directly instead of replaying the forward under autodiff.
+What is left for this class is the per-instruction cost itself. Both
+directions read one instruction at a time and decide what to do with it,
+where CmdStan's compiler has inlined the equivalent straight into the
+model's machine code.
 
 ## Compiled ODE right-hand sides (`ode_prog.cpp`, report fallbacks: `STANLI_DEBUG_ODE=1`)
 

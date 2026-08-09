@@ -47,9 +47,14 @@ struct IslandProg : Program {
     int len = 0;
   };
   std::vector<LiveIn> ins;
-  // The generated backward (adjoint.hpp). Empty means the var replay: a
-  // program the generator does not differentiate, or STANLI_NO_NATIVE_ADJ.
+  // The generated backward (adjoint.hpp), empty for a program the generator
+  // does not differentiate.
   AdjProgram adj;
+  // Whether to run it. STANLI_NO_NATIVE_ADJ clears this and nothing else:
+  // the adjoint is still generated and the carve estimate still assumes it,
+  // so the two backwards are compared over the SAME islands running the
+  // SAME forward program, which is the only comparison worth having.
+  bool native_adj = false;
 };
 
 // Generate p.adj, appending checkpoint saves to p's forward code. False

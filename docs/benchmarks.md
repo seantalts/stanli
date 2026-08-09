@@ -72,8 +72,14 @@ overhead is noise on top.
 - **Sequential models.** HMM recursions and state-space/ARMA/GARCH
   updates read the previous step's parameter-dependent result, so
   re-rolling correctly refuses (vectorizing a recurrence would change
-  the math). What is left is per-op dispatch against CmdStan's inlined
-  scalar code; a native adjoint program is what would change that.
+  the math). This is the class the island pass is for, and the class
+  that changed most when its backward stopped being a var replay and
+  became a generated adjoint program: against islands off,
+  `hmm_gaussian` 1.68x, `hmm_drive_0` 1.66x, `hmm_example` 1.64x,
+  `garch11` 1.27x, and `iohmm_reg` 4.88x. Each was at or below parity
+  while the region replayed under `var`. What is left is per-op dispatch
+  against CmdStan's inlined scalar code, one interpreted instruction at a
+  time in each direction.
 - **Mixture models with K > 2 components** (`ldaK2`/`ldaK5`): their
   inner `log_sum_exp` runs over K-vectors built per document, a
   row-wise reduction the elementwise-lp fusion does not yet express.
@@ -129,40 +135,95 @@ headline measurements:
 ## Tape islands, measured
 
 The island pass compiles irreducible scalar residue (recurrences) into
-one register-machine op. The op collapse is dramatic on every model
-that has such a region; the time follows on exactly one. Measured with
-`STANLI_NO_ISLAND=1` as the baseline, same build, same point, on all
-fourteen corpus models that compile a region:
+one register-machine op. For most of this pass's life the op collapse was
+dramatic on every model with such a region and the time followed on
+exactly one, because the backward re-executed the whole program under
+`stan::math::var`: a vari allocated per operation, a virtual `chain()`
+per operation, a nested tape built and torn down per call. That is
+correct by construction and it costs what CmdStan costs, so the island
+bought data movement and nothing else -- `iohmm_reg`, whose steps copy a
+1,500-element state vector, won 2.5x, and the estimate refused nearly
+everything else.
 
-| model | islanded | ops off | ns/grad off -> on | |
-| --- | ---: | ---: | ---: | ---: |
-| `iohmm_reg` | 27 ops | 53,456 | 1,432,673 -> 547,895 | **2.61x** |
-| `hier_2pl` | | 256 | 305,182 -> 306,487 | 1.00x |
-| `hmm_gaussian` | 11 ops | 42,926 | 368,160 -> 365,965 | 1.01x |
-| `multi_occupancy` | | 353 | 69,105 -> 70,981 | 0.97x |
-| `hmm_example` | 13 ops | 3,483 | 33,253 -> 34,385 | 0.97x |
-| `hmm_drive_0` | 24 ops | 19,540 | 167,291 -> 177,449 | 0.94x |
-| `hmm_drive_1` | 25 ops | 19,540 | 177,097 -> 195,421 | 0.91x |
-| `accel_gp` | | 399 | 9,764 -> 10,954 | 0.89x |
-| `accel_splines` | | 399 | 10,739 -> 12,208 | 0.88x |
-| `Mb_model` | | 5,390 | 71,209 -> 94,210 | 0.76x |
-| `losscurve_sislob` | | 230 | 2,379 -> 3,133 | 0.76x |
-| `garch11` | | 1,790 | 10,931 -> 14,575 | 0.75x |
-| `arma11` | | 1,198 | 6,882 -> 10,570 | 0.65x |
-| `bones_model` | 77 islands | 4,955 | 52,774 -> 1,005,148 | 0.05x |
+`gen_adjoint` (`runtime/src/adjoint.cpp`) generates the backward instead:
+reverse-mode source transformation over the ~35 opcodes of `Program`,
+producing a second pass over doubles with no vari, no nested tape and no
+allocation. Measured with `STANLI_NO_ISLAND=1` as the baseline, same
+build, same point, on all eighteen corpus models that compile a region
+(`harnesses/island_ab.py`, min of three runs each):
 
-The op count was never the cost: a dispatch is ~5 ns and the scalar
-kernels around it are cheap, while a var replay of the same operations
-costs what CmdStan costs for them. `iohmm_reg` wins because its steps
-copy a 1,500-element state vector each (1.6M elements of traffic per
-gradient) and the island's registers make the copies disappear;
-`bones_model` is the same mechanism inverted, a 4,024-register file
-rebuilt as vars 77 times per gradient. The pass now estimates both
-sides before committing; the estimate separates the fourteen exactly,
-and the thirteen it leaves alone are bitwise identical to the
-passes-off baseline. What would move the rest of this class is a native
-adjoint program, generated alongside the forward one instead of
-replayed under nested autodiff.
+| model | ops off -> on | ns/grad off | replayed | generated | |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `iohmm_reg` | 53,456 -> 27 | 1,416,007 | 575,482 (2.46x) | 290,286 | **4.88x** |
+| `hmm_gaussian` | 42,926 -> 11 | 360,905 | 364,228 (0.99x) | 215,038 | **1.68x** |
+| `hmm_drive_0` | 19,540 -> 24 | 163,258 | 177,215 (0.92x) | 98,352 | **1.66x** |
+| `hmm_example` | 3,483 -> 13 | 31,977 | 33,568 (0.95x) | 19,457 | **1.64x** |
+| `hmm_drive_1` | 19,540 -> 24 | 168,305 | 192,561 (0.87x) | 108,045 | **1.56x** |
+| `garch11` | 1,797 -> 8 | 11,018 | 15,074 (0.73x) | 8,696 | **1.27x** |
+| `Mb_model` | 7,035 -> 1,647 | 70,124 | 94,297 (0.74x) | 61,384 | **1.14x** |
+| `losscurve_sislob` | 316 -> 88 | 2,285 | 3,152 (0.72x) | 2,132 | **1.07x** |
+| `hier_2pl` | 349 -> 97 | 300,632 | 304,245 (0.99x) | 300,742 | 1.00x |
+| `kronecker_gp` | 254 -> 166 | 300,220 | 310,635 (0.97x) | 300,704 | 1.00x |
+| `multi_occupancy` | 4,006 -> 3,659 | 68,646 | 70,058 (0.98x) | 68,417 | 1.00x |
+| `accel_gp` | 461 -> 64 | 7,085 | 8,032 (0.88x) | 7,141 | 0.99x |
+| `hierarchical_gp` | 165 -> 84 | 30,794 | 35,534 (0.87x) | 31,452 | 0.98x |
+| `accel_splines` | 425 -> 28 | 7,495 | 8,689 (0.86x) | 7,694 | 0.97x |
+| `arma11` | 1,205 -> 9 | 6,452 | 10,621 (0.61x) | 6,672 | 0.97x |
+| `covid19imperial_v3` | 21,526 -> 19,995 | 308,476 | 438,658 (0.70x) | 319,252 | 0.97x |
+| `covid19imperial_v2` | 21,526 -> 19,995 | 307,758 | 440,122 (0.70x) | 319,371 | 0.96x |
+| `bones_model` | 7,528 -> 4,955 | 51,342 | 989,073 (0.05x) | 207,054 | 0.25x |
+
+Every region is faster generated than replayed, and the class changed
+rather than improved: op collapse is now worth roughly what the op counts
+always suggested it should be. `hmm_gaussian` collapses 42,926 ops to 11
+and measured 0.99x replayed against 1.68x generated. The ceiling is
+parity-plus and not more, as predicted before measuring -- CmdStan's
+generated code is inlined compiled C++ and the adjoint program still pays
+interpreted dispatch per instruction -- and `iohmm_reg` beats it only
+because the registers also make its vector copies disappear.
+
+The estimate changed with it. It weighed the register file 4x because the
+file was built as vars, and that term is what refused thirteen of the
+fourteen regions it could compile. A register is a memory cost again
+(written by the forward, read by the backward, plus one zeroing of the
+adjoint file: `kRegWeight = 3`), and what an island buys is now mostly
+the per-op tax the graph pays -- a dispatch, a context load and a
+scratch-partials backward, ~5 ns against ~1 ns for an island instruction,
+which the estimate had no term for at all (`kOpCost = 5`). Without it a
+region like `garch11`, whose 1,797 scalar ops barely move more elements
+than there are ops, read as a wash; it measures 1.27x. Against the table
+it carves all eight regions that clear parity by more than run-to-run
+noise, and refuses `bones_model` -- 36 ops behind a 4,024-register file,
+still exactly the shape islands are wrong for -- and the
+`covid19imperial` pair. The seven left sit between 0.97x and 1.00x, which
+is inside the noise; it carves five of them and leaves two.
+`STANLI_ISLAND_ALWAYS=1` skips the estimate, which is how to ask why a
+region was left alone.
+
+`STANLI_NO_NATIVE_ADJ=1` restores the replay. It changes nothing else --
+the adjoint is still generated, the estimate still assumes it, and the
+forward program is identical -- so the two backwards are compared over
+the same islands, which is what the "replayed" column above is.
+
+Fifteen of the eighteen agree with the replay **bitwise**; each rule is
+the corresponding stan-math rev expression transcribed, grouping
+included. The other three reassociate one sum: a var copy shares a vari,
+so from the copy onward both registers accumulate into one adjoint, and
+`gen_adjoint` shares an adjoint cell to match -- but a cell is shared for
+the whole program where a vari is shared only until the destination is
+next written. Where they differ the arbiter is the op graph the island
+replaced, not the replay, and the generated adjoint is closer to it in
+all three: `Mb_model` reproduces the op graph exactly where the replay
+was 1.07e-14 away, and `iohmm_reg` is 3.46e-13 against the replay's
+6.01e-13.
+
+Beyond the estimate, islands still refuse propto densities (their
+term-dropping depends on argument types, which the island's uniform
+binding cannot reproduce), runs under 32 ops, and regions producing
+target terms. `gen_adjoint` additionally refuses jumps, so the regions
+lowering emits for parameter-dependent control flow keep the replay:
+reversing control flow wants the structured form the flat instruction
+list has already lost.
 
 ## ODE models
 
@@ -268,14 +329,19 @@ interpreter bugs invisible to structural coverage checks.
 
 Transformed models change summation order relative to CmdStan's scalar
 loop, so they verify at tolerance rather than bitwise: the passes
-change 66 corpus models, and the worst gradient deviation any of them
-introduces vs the untransformed graph is 6.0e-13 relative
-(`harnesses/ab_corpus.py` compares every model passes-on vs passes-off
-and flags any divergence). That harness caught an in-place rule that
-made eight models silently wrong by up to 1.7e+05 relative with their
-op counts unchanged; the six models most affected by the passes were
-then also re-run through the CmdStan rig directly, and all six verify
-(e.g. `radon_pooled` 2.1e-14, `arK` 9.6e-16, `rats_model` 2.4e-16).
+change 65 corpus models, and the worst gradient deviation any of them
+introduces vs the untransformed graph is 3.5e-13 relative -- `iohmm_reg`,
+whose entire forward algorithm runs as one island. That was 6.0e-13 while
+the island replayed under `var`: generating the backward moved it closer
+to the graph it replaced rather than further, and `hmm_gaussian`, which
+islands its whole forward algorithm too, now reproduces the untransformed
+graph exactly. (`harnesses/ab_corpus.py` compares every model passes-on
+vs passes-off and flags any divergence.) That harness caught an in-place
+rule that made eight models silently wrong by up to 1.7e+05 relative with
+their op counts unchanged; the six models most affected by the passes
+were then also re-run through the CmdStan rig directly, and all six
+verify (e.g. `radon_pooled` 2.1e-14, `arK` 9.6e-16, `rats_model`
+2.4e-16).
 
 ## Full corpus
 

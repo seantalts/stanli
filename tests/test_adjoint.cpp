@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -116,6 +117,13 @@ static const char* code_name(Program::Code c) {
     case Program::SQRT: return "SQRT";
     case Program::SQUARE: return "SQUARE";
     case Program::TANH: return "TANH";
+    case Program::DOT: return "DOT";
+    case Program::LSE_RANGE: return "LSE_RNG";
+    case Program::LOG_RANGE: return "LOG_RNG";
+    case Program::EXP_RANGE: return "EXP_RNG";
+    case Program::SOFTMAX: return "SOFTMAX";
+    case Program::LSE2: return "LSE2";
+    case Program::LOG_MIX: return "LOG_MIX";
     default: return "OTHER";
   }
 }
@@ -135,9 +143,11 @@ static void dump(const IslandProg& p) {
   }
 }
 
-// How many representable doubles apart two results are.
+// How many representable doubles apart two results are. Two NaNs agree:
+// stan-math poisons an adjoint with NaN deliberately (fabs, fmax) and `==`
+// would call that a disagreement forever.
 static int64_t ulps(double a, double b) {
-  if (a == b) return 0;
+  if (a == b || (std::isnan(a) && std::isnan(b))) return 0;
   int64_t ia, ib;
   std::memcpy(&ia, &a, sizeof ia);
   std::memcpy(&ib, &b, sizeof ib);
@@ -174,8 +184,15 @@ static bool check(const std::string& name, Case c, int64_t tol = 0) {
   std::vector<double> want_v, got_v;
   const std::vector<double> want = replay_adjoints(orig, c.in, c.seed, &want_v);
   const std::vector<double> got = native_adjoints(c.p, c.in, c.seed, &got_v);
+  // Values, to the same tolerance as the adjoints. They are normally
+  // identical, but DOT is deliberately not the same reduction on the two
+  // scalars -- program.hpp runs an Eigen array product for double to match
+  // OP_DOT's kernel and stan-math's dot_product for var -- so the oracle's
+  // own forward can sit an ulp from the one the island actually ran. That
+  // is a property of the replay, not of the generated adjoint: in the
+  // executor the island's output always comes from the double pass.
   for (size_t m = 0; m < want_v.size(); ++m)
-    if (!(want_v[m] == got_v[m])) {
+    if (ulps(want_v[m], got_v[m]) > tol) {
       ++failures;
       passed = false;
       std::printf("FAIL %s: value %zu replay %.17g native %.17g\n",
@@ -440,6 +457,56 @@ static void test_reductions() {
   }
 }
 
+// An instruction whose output range IS its input range. gen_adjoint admits
+// this deliberately -- `x = exp(x)` is ordinary and the elementwise rules
+// read, clear and accumulate one cell at a time, which is safe when the
+// ranges coincide. The reductions have to hold to that too: softmax reads
+// every output adjoint to form its contraction, so clearing them in a
+// second pass would wipe what the first pass just accumulated.
+static void test_in_place_ranges() {
+  const std::vector<double> v{0.3, 0.7, 1.4, 0.2};
+  const Program::Code codes[] = {Program::SOFTMAX, Program::EXP_RANGE,
+                                 Program::LOG_RANGE, Program::MOVR};
+  const char* names[] = {"softmax", "exp_range", "log_range", "movr"};
+  for (size_t k = 0; k < 4; ++k) {
+    Build b(v, 4);
+    b.emit_to(codes[k], 0, 0, 0, 0, 4);  // dst == a: in place
+    check(std::string("in-place ") + names[k],
+          b.done({0, 1, 2, 3}, {1.1, -0.4, 2.0, 0.7}));
+  }
+}
+
+// stan-math's fmax/fmin return one of their operands rather than building a
+// node, and both go to NaN's own branch: `a > b` is false for any NaN, so
+// fmax(x, NaN) returns x and its derivative belongs to x. A local declared
+// and not assigned is NaN (mir_prog.hpp), so this is reachable.
+static void test_nan_operands() {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  {
+    Build b({0.7, nan});
+    const int d = b.emit(Program::FMAX, 0, 1);
+    check("fmax nan second", b.done({d}, {2.5}));
+  }
+  {
+    Build b({0.7, nan});
+    const int d = b.emit(Program::FMIN, 0, 1);
+    check("fmin nan second", b.done({d}, {2.5}));
+  }
+  {
+    Build b({nan, 0.7});
+    const int d = b.emit(Program::FMAX, 0, 1);
+    check("fmax nan first", b.done({d}, {2.5}));
+  }
+  // fabs poisons its operand's adjoint at NaN rather than leaving it alone,
+  // which is what makes a sampler reject the draw instead of accepting a
+  // finite gradient computed from nothing.
+  {
+    Build b({nan});
+    const int d = b.emit(Program::FABS, 0);
+    check("fabs nan", b.done({d}, {1.3}));
+  }
+}
+
 // ---- densities ---------------------------------------------------------
 
 static void test_densities() {
@@ -570,6 +637,74 @@ static void test_fuzz() {
   }
 }
 
+// The same idea over RANGES, which is where the bugs actually were: an
+// in-place softmax cleared the adjoints it had just accumulated, and no
+// scalar program can express that. Ranges, reductions, in-place writes and
+// single-element pokes into a live range, against the replay.
+static void test_fuzz_ranges() {
+  for (int trial = 0; trial < 300; ++trial) {
+    Rng rng{(uint64_t)(trial * 40503u + 7919)};
+    const int W = 2 + rng.pick(4);
+    std::vector<double> ins;
+    for (int k = 0; k < W; ++k) ins.push_back(rng.real());
+    Build b(ins, W);
+    std::vector<int> ranges{0};   // starts of W-wide live ranges
+    std::vector<int> scalars;     // registers holding one value
+    const int n_instr = 3 + rng.pick(8);
+    for (int t = 0; t < n_instr; ++t) {
+      const int src = ranges[(size_t)rng.pick((int)ranges.size())];
+      // Half the range writes go somewhere fresh, half in place.
+      const bool fresh = rng.pick(2) == 0;
+      const int dst = fresh ? b.alloc(W) : src;
+      switch (rng.pick(6)) {
+        case 0: b.emit_to(Program::MOVR, dst, src, 0, 0, W); break;
+        case 1: b.emit_to(Program::EXP_RANGE, dst, src, 0, 0, W); break;
+        case 2: b.emit_to(Program::SOFTMAX, dst, src, 0, 0, W); break;
+        case 3: {
+          // A reduction: its output is a scalar, not a range.
+          const int r = b.alloc();
+          b.emit_to(rng.pick(2) ? Program::LSE_RANGE : Program::DOT, r, src,
+                    ranges[(size_t)rng.pick((int)ranges.size())], 0, W);
+          scalars.push_back(r);
+          continue;
+        }
+        case 4: {
+          // Poke one element of a live range, the SET_INDEX shape.
+          if (scalars.empty()) continue;
+          const int e = scalars[(size_t)rng.pick((int)scalars.size())];
+          b.emit_to(Program::MOV, src + rng.pick(W), e);
+          continue;
+        }
+        default: {
+          // Read one element out and transform it.
+          const int r = b.alloc();
+          b.emit_to(Program::TANH, r, src + rng.pick(W));
+          scalars.push_back(r);
+          continue;
+        }
+      }
+      if (std::find(ranges.begin(), ranges.end(), dst) == ranges.end())
+        ranges.push_back(dst);
+    }
+    std::vector<int> outs;
+    std::vector<double> seeds;
+    const int base = ranges[(size_t)rng.pick((int)ranges.size())];
+    for (int k = 0; k < W; ++k) {
+      outs.push_back(base + k);
+      seeds.push_back(0.9 - 0.23 * k);
+    }
+    for (int r : scalars)
+      if (rng.pick(3) == 0) {
+        outs.push_back(r);
+        seeds.push_back(0.31);
+      }
+    Case c = b.done(outs, seeds);
+    const IslandProg before = c.p;
+    if (!check("fuzz range " + std::to_string(trial), std::move(c), 16))
+      dump(before);
+  }
+}
+
 int main() {
   test_binary_ops();
   test_unary_ops();
@@ -579,11 +714,14 @@ int main() {
   test_copy_then_modify_chain();
   test_accumulate_into_one_register();
   test_ranged();
+  test_in_place_ranges();
+  test_nan_operands();
   test_reductions();
   test_densities();
   test_recurrence();
   test_two_gradients();
   test_fuzz();
+  test_fuzz_ranges();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

@@ -36,10 +36,25 @@ namespace {
 
 constexpr int64_t kMinIslandOps = 32;
 constexpr int kMaxLiveIns = 6;
-// What one register costs against one element of graph traffic. The
-// register file is built per call and built again as vars on the
-// backward, an allocation each, and the reverse sweep walks all of them.
-constexpr int kVarWeight = 4;
+// What one register costs against one element of graph traffic. The file is
+// written by the forward and read by the backward, and the backward's
+// adjoint file is zeroed once per call besides -- so three passes over a
+// register against one element moved.
+//
+// It was 4 while the backward replayed the program under var, where a
+// register meant an allocated vari and a virtual chain() call. That term
+// dominated the estimate and is what refused thirteen of the fourteen
+// regions the carver could compile; the generated adjoint (adjoint.hpp)
+// is what makes it a memory cost again.
+constexpr int kRegWeight = 3;
+// And what one graph op costs against one element. An op that writes a
+// scalar still pays a dispatch, a context load and a scratch-partials
+// backward; measured at ~5 ns against ~1 ns for an island instruction
+// (docs/benchmarks.md). Leaving this out is why regions like `garch11`
+// -- 1,797 scalar ops whose elements moved barely outnumber them -- read
+// as a wash to an estimate that could only see elements, and measured
+// 1.28x once they were compiled.
+constexpr int kOpCost = 5;
 
 bool scalar_ins(const Graph& g, const Op& op) {
   for (int j = 0; j < op.n_in; ++j)
@@ -393,36 +408,47 @@ int carve_islands(Graph& g,
     // Generate the backward before estimating, because generating it is
     // what the estimate is about: it appends the checkpoint saves the
     // adjoint needs, so both the register count and the instruction count
-    // below are the ones the island will actually run.
-    if (compiled && !std::getenv("STANLI_NO_NATIVE_ADJ")) gen_adjoint(cc.prog);
-    // Is the island cheaper than the ops it replaces? Both sides counted
-    // in elements touched per call: the graph's is what its ops write
-    // (an in-place element update writes one element, not a vector), the
-    // island's is its register file, weighted because the file is built
-    // twice per call and once as vars. See kVarWeight.
+    // below are the ones the island will actually run. STANLI_NO_NATIVE_ADJ
+    // does not skip this -- it only stops the kernel USING the result, so
+    // the two backwards can be compared over the same islands.
+    if (compiled) {
+      const bool gen = gen_adjoint(cc.prog);
+      cc.prog.native_adj = gen && !std::getenv("STANLI_NO_NATIVE_ADJ");
+      // A refusal is not an error -- the replay still gives the right
+      // gradient -- but it is worth being able to see, because it is the
+      // difference between a region that is fast and one that merely
+      // works, and nothing else about the model would show it.
+      if (!gen && std::getenv("STANLI_DEBUG_ISLAND"))
+        std::fprintf(stderr,
+                     "island: no adjoint generated for a %zu-op region; "
+                     "it will replay under var\n",
+                     j - i);
+    }
+    // Is the island cheaper than the ops it replaces? The graph's side is
+    // what its ops move (an in-place element update moves one element, not
+    // a vector) plus what they pay per dispatch; the island's is its
+    // register file plus its two instruction streams, forward and adjoint.
     //
-    // This is the whole difference between the one model islands help
-    // and the eleven they do not. `iohmm_reg` copies a 1,500-element
-    // state vector per step -- 1.6M elements against the island's 435k,
-    // and it runs 2.6x faster islanded. Every other region the carver
-    // reaches is scalar arithmetic the in-place pass already made cheap,
-    // where the replay costs 4-20x what the ops did and measured 0.65x
-    // to 1.01x. Refusing them is what makes the pass a win rather than
-    // a wash. (`STANLI_ISLAND_ALWAYS=1` bypasses this, for tests that
-    // exercise the compiler on small graphs and for asking why a region
-    // was left alone.)
+    // `bones_model` is what the estimate is still for: 36 ops behind a
+    // 4,024-register file, which is 3,979 live-outs packed into one op and
+    // measured 0.25x. Everything else the carver reaches now wins, because
+    // the register file stopped being built as vars. (`STANLI_ISLAND_ALWAYS=1`
+    // bypasses this, for tests that exercise the compiler on small graphs
+    // and for asking why a region was left alone.)
     if (compiled && !std::getenv("STANLI_ISLAND_ALWAYS")) {
       int64_t graph_elems = 0;
       for (size_t u = i; u < j; ++u)
         graph_elems += g.ops[u].opcode == OP_SET_INDEX_INPLACE
                            ? 1
                            : g.slots[g.ops[u].out].len;
-      const int64_t island_elems =
-          kVarWeight * (int64_t)cc.prog.n_regs + (int64_t)cc.prog.code.size();
+      const int64_t graph_cost = graph_elems + kOpCost * (int64_t)(j - i);
+      const int64_t island_cost = kRegWeight * (int64_t)cc.prog.n_regs +
+                                  (int64_t)cc.prog.code.size() +
+                                  (int64_t)cc.prog.adj.code.size();
       if (std::getenv("STANLI_DEBUG_ISLAND"))
         std::fprintf(stderr, "island? ops=%zu graph=%lld island=%lld\n", j - i,
-                     (long long)graph_elems, (long long)island_elems);
-      if (graph_elems < island_elems) compiled = false;
+                     (long long)graph_cost, (long long)island_cost);
+      if (graph_cost < island_cost) compiled = false;
     }
     if (compiled) {
       // Live-outs: written in the region and visible after it, in

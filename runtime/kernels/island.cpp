@@ -37,13 +37,13 @@ int64_t island_scratch(const Op& op, const Slot* slots) {
   // The generated backward reads the whole register file, so the forward
   // runs in scratch and leaves it there. n_regs covers the live-ins, which
   // occupy registers of their own. The replay only needs their snapshot.
-  if (!p.adj.empty()) return p.n_regs;
+  if (p.native_adj) return p.n_regs;
   return sum_in_lens(op, slots);
 }
 
 void island_fwd(KernelCtx& ctx) {
   const auto& p = *static_cast<const IslandProg*>(ctx.udata);
-  if (!p.adj.empty()) {
+  if (p.native_adj) {
     for (int k = 0; k < ctx.n_in; ++k)
       for (int64_t i = 0; i < ctx.in[k].len; ++i)
         ctx.scratch[p.ins[(size_t)k].reg + i] = ctx.in[k].data[i];
@@ -86,7 +86,7 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
 
 void island_bwd(KernelCtx& ctx) {
   const auto& p = *static_cast<const IslandProg*>(ctx.udata);
-  if (!p.adj.empty()) {
+  if (p.native_adj) {
     island_bwd_native(p, ctx);
     return;
   }

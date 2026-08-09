@@ -21,6 +21,7 @@ explains the graph passes in plain language
 | [`runtime/include/stanli/mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) | The MIR interpreter, templated on the scalar: transformed data at lowering time, uncompiled ODE right-hand sides, interpreted write_array. |
 | [`runtime/src/wa_interp.cpp`](../runtime/src/wa_interp.cpp) | Per-draw interpreted generated quantities when the write_array graph cannot be built (RNG calls, draw-dependent branches). |
 | [`runtime/include/stanli/program.hpp`](../runtime/include/stanli/program.hpp), [`mir_prog.hpp`](../runtime/include/stanli/mir_prog.hpp) | The register machine and its MIR front end. |
+| [`runtime/src/adjoint.cpp`](../runtime/src/adjoint.cpp) | Differentiates a register program into a second register program, so an island's backward is a double pass and not a replay under `var`. `STANLI_NO_NATIVE_ADJ=1` restores the replay, which is the oracle it is tested against. |
 | [`runtime/src/nuts.cpp`](../runtime/src/nuts.cpp) | The sampler: stan's own `adapt_diag_e_nuts`. Owns CmdStan parity of the RNG stream and initial-point acceptance. |
 | [`runtime/src/capi.cpp`](../runtime/src/capi.cpp), [`capi.h`](../runtime/include/stanli/capi.h) | The C ABI. [`python/stanli/__init__.py`](../python/stanli/__init__.py) is a thin ctypes wrapper over it. |
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The in-process stanc3 (OCaml, `-output-complete-obj`). |

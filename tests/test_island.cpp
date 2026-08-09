@@ -186,10 +186,11 @@ static void test_unsupported_op_splits() {
 
 // A region that carries far more state than it computes: each step drops
 // one scalar into its own wide template, so the register file grows by a
-// whole vector per three instructions. The file is rebuilt every call --
-// as vars on the backward, one nested-arena allocation each -- so the
-// replay costs more than the scalar ops it would replace. bones_model is
-// this shape (36 ops behind 4,024 registers) and the islands cost it 19x.
+// whole vector per three instructions, and the file is written by the
+// forward and read back by the backward every call. This is the one shape
+// the estimate still has to refuse once the backward stops building vars:
+// `bones_model` is it (36 ops behind 4,024 registers) and islands cost it
+// 19x replayed, 4x with a generated adjoint.
 static void test_wide_state_refused() {
   Graph g;
   Fills fills;
@@ -233,15 +234,24 @@ static void test_vector_copies_carved() {
     expect_close("copies v" + std::to_string(i), got[i], want[i]);
 }
 
-// The same recurrence on a two-element state: nothing is copied, the ops
-// are already as cheap as the arithmetic they do, and a var replay of
-// them costs more. This is every HMM in the corpus but `iohmm_reg`.
-static void test_scalar_chain_refused() {
-  HmmGraph h = build_hmm(8);
-  const size_t before = h.g.ops.size();
-  const int carved = carve_islands(h.g, h.fills, h.terms, {});
-  expect("scalar chain none carved", carved == 0);
-  expect("scalar chain ops unchanged", h.g.ops.size() == before);
+// The same recurrence on a two-element state: nothing is copied, so the
+// island buys no data movement at all -- only the per-op tax. The estimate
+// refused this shape while the backward replayed under var, because a var
+// replay of the same arithmetic cost more than the ops did; with a
+// generated adjoint the corpus regions it stands for measure 1.5-1.7x
+// (`hmm_example`, `hmm_gaussian`, both `hmm_drive`s). So it carves now --
+// and the gradient still has to be the one the ops produced.
+static void test_scalar_chain_carved() {
+  HmmGraph ref = build_hmm(8);
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+
+  HmmGraph isl = build_hmm(8);
+  const int carved = carve_islands(isl.g, isl.fills, isl.terms, {});
+  expect("scalar chain carved==1", carved == 1);
+  const std::vector<double> got = run_grad(std::move(isl.g), isl.fills);
+  expect("scalar chain sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("scalar chain v" + std::to_string(i), got[i], want[i]);
 }
 
 static void test_too_many_live_ins() {
@@ -376,7 +386,7 @@ int main() {
   test_unsetenv("STANLI_ISLAND_ALWAYS");
   test_wide_state_refused();
   test_vector_copies_carved();
-  test_scalar_chain_refused();
+  test_scalar_chain_carved();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;
