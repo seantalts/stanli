@@ -190,8 +190,18 @@ only route.
 
 ## 7. R/brms and the wasm density pack
 
-- **CRAN shim** (already roadmap item 2 in the README). All five wheels
-  are built and published by `.github/workflows/wheels.yml`.
+- **CRAN shim** — DONE, as `r/`. Not a shim over the Python package in
+  the end but a package in its own right: an R-level API, a dlopen
+  bridge to the C ABI, and stanc3 as JavaScript through V8, which is how
+  rstan carries a Stan compiler on CRAN and the only form of the
+  compiler CRAN can take. `R CMD check --as-cran` is clean but for the
+  permanent "New submission" NOTE. The runtime is downloaded rather than
+  bundled, so the same `v*` tag that publishes the wheels also attaches
+  five platform runtime tarballs to the release, and the C ABI carries a
+  layout version the bridge refuses to mismatch. **Still to do:** the
+  r-universe registry entry (one file in a separate repo) and the CRAN
+  submission itself, which is a web form and a confirmation email by
+  policy and cannot be automated.
 - **A brms backend** is the bigger play. R is half of Stan's user base,
   and brms-generated code is a natural stress corpus that exercises
   precisely the gaps in item 2 — `offset`/`multiplier`,

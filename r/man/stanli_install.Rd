@@ -4,10 +4,17 @@
 \alias{stanli_install}
 \title{Download the stanli runtime}
 \usage{
-stanli_install(version = "latest", quiet = FALSE, overwrite = FALSE)
+stanli_install(
+  version = stanli_runtime_release,
+  quiet = FALSE,
+  overwrite = FALSE
+)
 }
 \arguments{
-\item{version}{Release tag to fetch, or `"latest"`.}
+\item{version}{Release tag to fetch. Defaults to the release this
+version of the package was built against, which is the pairing its
+ABI check will accept; `"latest"` takes whatever the newest release
+is instead.}
 
 \item{quiet}{Passed to [utils::download.file()].}
 

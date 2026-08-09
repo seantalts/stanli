@@ -13,10 +13,17 @@
  */
 #include <dlfcn.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <R.h>
 #include <Rinternals.h>
+
+/* Must equal STANLI_ABI_VERSION in runtime/include/stanli/capi.h. The
+ * runtime reports its own through stanli_abi_version(), and
+ * stanli_bridge_load() refuses to bind when the two disagree -- see
+ * there for why a mismatch cannot be allowed to proceed. */
+#define STANLI_R_ABI_VERSION 1
 
 /* Mirrors stanli_sample_opts in runtime/include/stanli/capi.h. Field
  * order and types must match exactly; R never sees this struct, but a
@@ -55,6 +62,7 @@ typedef struct {
 static void *g_lib = NULL;
 
 /* Every entry point the R side uses. */
+static int (*p_abi_version)(void);
 static void *(*p_model_new_from_stan)(const char *, const char *, char *,
                                       size_t);
 static void *(*p_model_new)(const char *, const char *, char *, size_t);
@@ -99,6 +107,32 @@ SEXP stanli_bridge_load(SEXP path) {
   if (g_lib != NULL) return mkString("");
   g_lib = dlopen(CHAR(STRING_ELT(path, 0)), RTLD_NOW | RTLD_LOCAL);
   if (g_lib == NULL) return mkString(dlerror());
+
+  /* Before anything else. The two opts structs above are copies of the
+   * runtime's, and this package and the runtime are separately
+   * versioned artifacts -- the library is downloaded, not linked. If a
+   * field moved, every call would still succeed and read the wrong
+   * offsets: a run at the wrong seed and the wrong step size, with no
+   * error anywhere. Refuse instead. */
+  *(void **)(&p_abi_version) = dlsym(g_lib, "stanli_abi_version");
+  if (p_abi_version == NULL) {
+    dlclose(g_lib);
+    g_lib = NULL;
+    return mkString("this stanli runtime predates the versioned ABI and is "
+                    "too old for this package. Run "
+                    "stanli_install(overwrite = TRUE).");
+  }
+  if (p_abi_version() != STANLI_R_ABI_VERSION) {
+    char msg[256];
+    snprintf(msg, sizeof msg,
+             "this stanli runtime speaks ABI version %d, but the R package "
+             "was built against %d. Run stanli_install(overwrite = TRUE) to "
+             "fetch a matching runtime, or update the package.",
+             p_abi_version(), STANLI_R_ABI_VERSION);
+    dlclose(g_lib);
+    g_lib = NULL;
+    return mkString(msg);
+  }
 
   BIND("stanli_model_new_from_stan", p_model_new_from_stan);
   BIND("stanli_model_new", p_model_new);

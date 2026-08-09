@@ -14,6 +14,22 @@ extern "C" {
 
 typedef struct stanli_model stanli_model;
 
+/* The layout version of this ABI. Bump it whenever an existing struct
+ * gains, loses or reorders a field, or an existing function changes
+ * signature. Adding a NEW function does not need a bump: a binding that
+ * does not know about it never looks it up, and one that does gets a
+ * named dlsym failure rather than a misread.
+ *
+ * This exists because the Python wheel ships its library inside the
+ * package while the R package downloads one -- so on R, the binding and
+ * the runtime are separately versioned artifacts and can drift. Reading
+ * an opts struct at the wrong offsets is silent: sampling would succeed
+ * from the wrong seed with the wrong step size. A binding must compare
+ * this against the value it was compiled against before calling
+ * anything, and refuse on a mismatch. */
+#define STANLI_ABI_VERSION 1
+int stanli_abi_version(void);
+
 /* Compile transformed-MIR sexp text (from `stanc --debug-transformed-mir`)
  * against JSON data (CmdStan conventions). Returns null on failure with a
  * message in err. */

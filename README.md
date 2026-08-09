@@ -5,17 +5,30 @@ stan-math kernels. No C++ toolchain, no LLVM, no compilation on the
 user's machine.
 
 [![PyPI](https://img.shields.io/pypi/v/stanli.svg)](https://pypi.org/project/stanli/)
+[![npm](https://img.shields.io/npm/v/@seantalts/stanli.svg)](https://www.npmjs.com/package/@seantalts/stanli)
 [![wheels](https://github.com/seantalts/stanli/actions/workflows/wheels.yml/badge.svg)](https://github.com/seantalts/stanli/actions/workflows/wheels.yml)
+[![R](https://github.com/seantalts/stanli/actions/workflows/r.yml/badge.svg)](https://github.com/seantalts/stanli/actions/workflows/r.yml)
+[![License](https://img.shields.io/pypi/l/stanli.svg)](LICENSE)
 
 **Try it in your browser, no install:**
 [seantalts.github.io/stanli](https://seantalts.github.io/stanli/) --
 Stan source to posterior draws in a few hundred milliseconds, entirely
 client side.
-[![License](https://img.shields.io/pypi/l/stanli.svg)](LICENSE)
 
-```
-pip install stanli
-```
+One runtime, three packages. Each is the same shared library behind a
+different binding, so a model samples to the same draws from any of them.
+
+| | | |
+| --- | --- | --- |
+| **Python** | `pip install stanli` | [python/README.md](python/README.md), [PyPI](https://pypi.org/project/stanli/) |
+| **R** | `install.packages("stanli")` then `stanli_install()` | [r/README.md](r/README.md) |
+| **Browser / Node** | `npm install @seantalts/stanli` | [js/README.md](js/README.md), [npm](https://www.npmjs.com/package/@seantalts/stanli) |
+
+The R package is not on CRAN yet; until it is, install it from
+[r-universe](https://seantalts.r-universe.dev) or from a checkout --
+see [r/README.md](r/README.md). It is the one binding that downloads its
+runtime rather than bundling it, because CRAN will not carry a 16 MB
+binary and could not build one on their farm.
 
 - Performance vs CmdStan: [docs/benchmarks.md](docs/benchmarks.md)
   (median gradient <!--gen:corpus_median-->2.07x<!--/gen--> across
@@ -274,6 +287,48 @@ No problems detected.
 Builds without the embedded stanc3 object fall back to running a bundled
 stanc binary as a subprocess.
 
+## R
+
+The same runtime behind an R binding, with `posterior`-shaped draws.
+Full documentation in [r/README.md](r/README.md).
+
+```r
+library(stanli)
+stanli_install()   # one time: fetches the runtime for this platform
+
+m <- stanli_model(file = "eight_schools.stan", data = list(J = 8L, y = y, sigma = s))
+fit <- sample_model(m, chains = 4, seed = 1)
+
+summary(fit)          # mean, MCSE, sd, quantiles, bulk/tail ESS, R-hat
+stanli_diagnose(fit)  # divergences, treedepth, E-BFMI, R-hat, ESS
+as_draws_array(fit)   # a posterior::draws_array
+```
+
+Two pieces are not in the package, for two different reasons, and both
+are what make it a package CRAN can carry at all.
+
+The **runtime** is downloaded on first use into the user cache
+directory, the way torch fetches libtorch: CRAN builds its own binaries
+from source and would have to compile stan-math, every density kernel
+and an OCaml compiler to produce one. `stanli_install()` is explicit and
+nothing is fetched without it. The release workflow publishes the five
+platform libraries as release assets, and the package pins the release
+it was built against rather than tracking whichever is newest.
+
+The **Stan compiler** is stanc3 compiled to JavaScript and run through
+V8 -- the same approach rstan uses. It is one 2.8 MB file that
+compresses to 0.4 MB in the source tarball, with no toolchain and no
+per-platform binaries. Where the runtime embeds stanc3 (every release
+build but Windows) that path is used instead and V8 never loads.
+`tests/test_stancjs.cjs` checks that the JavaScript compiler emits the
+same MIR as the native binary, byte for byte.
+
+Because the binding and the runtime are separately versioned artifacts,
+the C ABI carries a layout version (`stanli_abi_version()`) and the
+bridge refuses to bind a runtime that disagrees with the one it was
+compiled against. Reading `stanli_sample_opts` at the wrong offsets
+would not fail: it would sample successfully from the wrong seed.
+
 ## Browser (WASM)
 
 The same runtime compiles to WebAssembly and runs full Stan in a browser
@@ -363,6 +418,60 @@ release after that is a tag. And the package is scoped because npm's
 name-similarity filter rejects the unscoped `stanli` as too close to
 existing packages, which is why `publishConfig.access` is set to public
 (a scoped package would otherwise default to a private publish).
+
+### R
+
+The same `v*` tag publishes the R side, in the `runtime-release` job.
+It attaches to the GitHub Release:
+
+- five runtime tarballs, `stanli-runtime-{darwin,linux,windows}-{arm64,x86_64}.tar.gz`,
+  each the same `_bin/` the wheel for that platform ships. This is what
+  `stanli_install()` downloads, so the release **is** the R package's
+  distribution channel for everything except the R code itself.
+- `stanli_X.Y.Z.tar.gz`, the R source package.
+
+The job asserts `stanli_runtime_release` in `r/R/install.R` equals the
+tag being cut. The package pins that release rather than tracking
+`latest` on purpose: a CRAN-requested documentation fix bumps the
+package version without a runtime release, and a floating default would
+quietly pair an old binding with a new library. Bump the pin in the same
+commit as the version.
+
+Bumping `STANLI_ABI_VERSION` in `runtime/include/stanli/capi.h` means
+bumping `STANLI_R_ABI_VERSION` in `r/src/bridge.c` too; `.github/workflows/r.yml`
+fails if they disagree. Bump it whenever a struct in the C ABI gains,
+loses or reorders a field, or a function changes signature -- adding a
+new function does not need one.
+
+Two distribution channels, and neither is fully hands-off in the same
+way PyPI and npm are:
+
+**r-universe** builds from this repository continuously, so every push
+to main becomes an installable binary for Linux, macOS and Windows with
+no tag and no action here. It needs a one-time registry entry: a
+`packages.json` in `seantalts/seantalts.r-universe.dev` with
+`{"package": "stanli", "url": "https://github.com/seantalts/stanli", "subdir": "r"}`.
+Users then install with
+
+```r
+install.packages("stanli", repos = "https://seantalts.r-universe.dev")
+```
+
+**CRAN** cannot be automated, and that is policy rather than a missing
+feature: a submission is a file uploaded to a web form and confirmed
+through a link mailed to the maintainer address, specifically so a
+machine cannot do it. What CI can do it does -- `.github/workflows/r.yml`
+runs `R CMD check --as-cran` on Linux, macOS, Windows and R-devel on
+every change under `r/`, and the release job builds the tarball. Cutting
+a CRAN release is then: bump `Version:` in `r/DESCRIPTION` and the
+runtime pin, tag, download `stanli_X.Y.Z.tar.gz` from the release, and
+upload it at
+[cran.r-project.org/submit.html](https://cran.r-project.org/submit.html).
+
+The sampling tests do not run in `r.yml`, because it has no runtime --
+which is the honest simulation of CRAN's farm. They run in `wheels.yml`,
+against the Linux library that build produced, and that job fails if
+they skip.
 
 ## Verification policy
 

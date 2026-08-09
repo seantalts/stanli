@@ -1,0 +1,96 @@
+# R CMD check for the R package, on the platforms CRAN checks on.
+#
+# Deliberately without a runtime. CRAN's farm will not have one either --
+# the 16 MB library is downloaded on first use, not built from source --
+# so this job answers the question CRAN asks: does the package install,
+# document, and check cleanly on its own? The sampling tests skip here
+# and say so. They run for real in wheels.yml, against the .so that
+# build job just produced, and that job fails if they skip.
+#
+# What does run here is the JavaScript compiler path: stanc3 through V8,
+# which is the piece that makes the package shippable to CRAN at all and
+# the piece with no runtime dependency.
+name: R
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'r/**'
+      - 'runtime/include/stanli/capi.h'
+      - '.github/workflows/r.yml'
+  pull_request:
+    paths:
+      - 'r/**'
+      - 'runtime/include/stanli/capi.h'
+      - '.github/workflows/r.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Two constants that must agree and live in different languages in
+  # different directories. The runtime and the R bridge are separately
+  # versioned artifacts -- one is downloaded, the other comes from CRAN --
+  # so the bridge refuses to bind when the numbers disagree at runtime.
+  # That guard is only as good as the number it compares against, and
+  # bumping capi.h without bridge.c would make it accept a runtime it
+  # should reject.
+  abi:
+    name: the ABI constants agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          rt=$(sed -n 's/^#define STANLI_ABI_VERSION \([0-9]*\).*/\1/p' \
+               runtime/include/stanli/capi.h)
+          r=$(sed -n 's/^#define STANLI_R_ABI_VERSION \([0-9]*\).*/\1/p' \
+              r/src/bridge.c)
+          echo "runtime ${rt:-<none>}, R bridge ${r:-<none>}"
+          [ -n "$rt" ] && [ "$rt" = "$r" ]
+
+  check:
+    name: ${{ matrix.os }} (${{ matrix.r }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --as-cran on one row only: it is the strictest and slowest,
+          # and running it four times says the same thing four times.
+          - {os: ubuntu-latest,  r: 'release', args: '"--as-cran"'}
+          - {os: ubuntu-latest,  r: 'devel',   args: '"--no-manual"'}
+          - {os: macos-latest,   r: 'release', args: '"--no-manual"'}
+          - {os: windows-latest, r: 'release', args: '"--no-manual"'}
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.r }}
+          http-user-agent: ${{ matrix.r == 'devel' && 'release' || 'default' }}
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r
+          extra-packages: any::rcmdcheck
+          needs: check
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          working-directory: r
+          args: ${{ matrix.args }}
+          # One NOTE is expected and permanent until the package is on
+          # CRAN ("New submission"); nothing else may appear.
+          error-on: '"warning"'
+          upload-snapshots: true

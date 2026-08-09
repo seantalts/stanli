@@ -11,11 +11,38 @@
 # explicit, and everything else fails with a message telling the user to
 # run it.
 
+# The release this package was built against. NOT the package version:
+# a CRAN-requested documentation fix bumps the package without cutting a
+# runtime release, and a default of "latest" would silently pair a
+# pinned binding with a runtime that has moved. The release workflow
+# asserts this equals the tag being cut, so bumping one without the
+# other fails there rather than at a user's install.
+stanli_runtime_release <- "v0.5.0"
+
 runtime_filename <- function() {
   switch(Sys.info()[["sysname"]],
          Darwin = "libstanli.dylib",
          Windows = "stanli.dll",
          "libstanli.so")
+}
+
+# The asset name is built from R's own architecture, not the kernel's.
+# The library is dlopen'd into the R process, so it has to match that
+# process: an x86_64 R under Rosetta on an arm64 Mac needs the x86_64
+# dylib. Both names are normalized because the same machine is spelled
+# three ways across platforms -- "x86-64" on Windows, "aarch64" on Linux
+# arm, "arm64" on macOS arm.
+runtime_os <- function() tolower(Sys.info()[["sysname"]])
+
+runtime_arch <- function() {
+  a <- tolower(R.version$arch)
+  if (grepl("^(x86[-_]64|amd64)$", a)) return("x86_64")
+  if (grepl("^(aarch64|arm64)$", a)) return("arm64")
+  a
+}
+
+runtime_asset <- function() {
+  sprintf("stanli-runtime-%s-%s.tar.gz", runtime_os(), runtime_arch())
 }
 
 #' Where the stanli runtime lives
@@ -44,12 +71,15 @@ stanli_available <- function() {
 #' Fetches the prebuilt runtime for this platform into the user cache
 #' directory. This is a one-time step; the library is about 16 MB.
 #'
-#' @param version Release tag to fetch, or `"latest"`.
+#' @param version Release tag to fetch. Defaults to the release this
+#'   version of the package was built against, which is the pairing its
+#'   ABI check will accept; `"latest"` takes whatever the newest release
+#'   is instead.
 #' @param quiet Passed to [utils::download.file()].
 #' @param overwrite Re-download even if the runtime is already present.
 #' @return The path it was installed to, invisibly.
 #' @export
-stanli_install <- function(version = "latest", quiet = FALSE,
+stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
                            overwrite = FALSE) {
   dest_dir <- tools::R_user_dir("stanli", "cache")
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
@@ -58,8 +88,7 @@ stanli_install <- function(version = "latest", quiet = FALSE,
     if (!quiet) message("stanli runtime already at ", dest)
     return(invisible(dest))
   }
-  asset <- sprintf("stanli-runtime-%s-%s.tar.gz",
-                   tolower(Sys.info()[["sysname"]]), Sys.info()[["machine"]])
+  asset <- runtime_asset()
   base <- "https://github.com/seantalts/stanli/releases"
   url <- if (identical(version, "latest")) {
     file.path(base, "latest", "download", asset)
@@ -68,15 +97,22 @@ stanli_install <- function(version = "latest", quiet = FALSE,
   }
   tmp <- tempfile(fileext = ".tar.gz")
   on.exit(unlink(tmp), add = TRUE)
-  ok <- tryCatch({
-    utils::download.file(url, tmp, mode = "wb", quiet = quiet)
-    TRUE
-  }, error = function(e) {
-    stop("could not download the stanli runtime from ", url, ": ",
-         conditionMessage(e),
-         "\nBuild it from source and point STANLI_RUNTIME at the result ",
-         "if this platform has no release asset.", call. = FALSE)
-  })
+  tryCatch(
+    utils::download.file(url, tmp, mode = "wb", quiet = quiet),
+    error = function(e) {
+      stop("could not download the stanli runtime from ", url, ": ",
+           conditionMessage(e),
+           "\nBuild it from source and point STANLI_RUNTIME at the result ",
+           "if this platform has no release asset.", call. = FALSE)
+    })
+  # download.file() reports some failures through a non-zero status
+  # rather than a condition, and a proxy or an error page can arrive as
+  # a small file with status 0. Both would reach untar() as garbage.
+  if (!file.exists(tmp) || file.size(tmp) < 1e6)
+    stop("the download from ", url, " is not a runtime archive (",
+         if (file.exists(tmp)) file.size(tmp) else 0, " bytes). ",
+         "If this platform has no release asset, build from source and ",
+         "point STANLI_RUNTIME at the result.", call. = FALSE)
   utils::untar(tmp, exdir = dest_dir)
   if (!file.exists(dest))
     stop("the downloaded archive did not contain ", runtime_filename(),

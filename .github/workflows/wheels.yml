@@ -81,8 +81,8 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
-              && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":2}]'
-              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":2},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"quay.io/pypa/manylinux_2_28_aarch64","opam_arch":"arm64-linux","build_jobs":2}]') }}
+              && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":2,"runtime":"linux-x86_64"}]'
+              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4,"runtime":"darwin-arm64"},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4,"runtime":"darwin-x86_64"},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"quay.io/pypa/manylinux_2_28_x86_64","opam_arch":"x86_64-linux","build_jobs":2,"runtime":"linux-x86_64"},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"quay.io/pypa/manylinux_2_28_aarch64","opam_arch":"arm64-linux","build_jobs":2,"runtime":"linux-arm64"}]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -314,6 +314,97 @@ jobs:
           name: wheel-${{ matrix.plat }}
           path: dist/*.whl
 
+      # The same _bin/ the wheel ships, packaged on its own for the R
+      # package, which downloads its runtime instead of bundling it (CRAN
+      # will not carry a 16 MB binary, and could not build one from
+      # source on their farm). Whatever build_wheel.sh put there rides
+      # along, so the Windows tarball carries stanc.exe next to the DLL
+      # the way that wheel does. Naming matches runtime_asset() in
+      # r/R/install.R -- os and architecture as R spells them, normalized.
+      - name: Runtime tarball
+        env:
+          # BSD tar otherwise writes an AppleDouble ._ entry beside every
+          # file that carries an extended attribute, and untar() in R
+          # would drop those into the user's cache directory.
+          COPYFILE_DISABLE: '1'
+        run: |
+          mkdir -p runtime-dist
+          tar czf "runtime-dist/stanli-runtime-${{ matrix.runtime }}.tar.gz" \
+            -C python/stanli/_bin .
+          tar tzf "runtime-dist/stanli-runtime-${{ matrix.runtime }}.tar.gz"
+          ls -la runtime-dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.runtime }}
+          path: runtime-dist/*.tar.gz
+
+  # The R package's 23 tests, against a real runtime. They skip without
+  # one, so this is the only place they actually run: everywhere else
+  # (r.yml, CRAN's farm) has the package but no library, and a green
+  # check there says nothing about whether sampling works. Not in the
+  # manylinux container -- that image has no R and installing one into
+  # AlmaLinux costs more than running the .so on a normal runner, which
+  # its glibc 2.28 floor makes safe.
+  r-tests:
+    name: R package against the runtime
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime-linux-x86_64
+          path: runtime
+
+      - name: Unpack the runtime
+        run: |
+          mkdir -p rt
+          tar xzf runtime/*.tar.gz -C rt
+          ls -la rt/
+          echo "STANLI_RUNTIME=$PWD/rt/libstanli.so" >> "$GITHUB_ENV"
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      # V8 is not needed: the Linux runtime embeds stanc3, so model
+      # source goes straight to the library and the JavaScript compiler
+      # never loads. r.yml is where that path is exercised.
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r
+          extra-packages: any::testthat, any::posterior
+          dependencies: '"hard"'
+
+      # Through R CMD check rather than testthat directly, so the tests
+      # run the way CRAN runs them -- against the installed package, in a
+      # clean temporary directory -- instead of against the source tree.
+      - name: Build and check
+        working-directory: r
+        env:
+          _R_CHECK_FORCE_SUGGESTS_: 'false'
+        run: |
+          R CMD build .
+          R CMD check --no-manual --ignore-vignettes stanli_*.tar.gz
+          # A check whose tests all skipped is green and worthless, which
+          # is the exact failure this job exists to prevent. The runtime
+          # is right there, so nothing may skip for want of one.
+          log=stanli.Rcheck/tests/testthat.Rout
+          [ -f "$log" ] || log=stanli.Rcheck/tests/testthat.Rout.fail
+          cat "$log"
+          if grep -q 'no stanli runtime installed' "$log"; then
+            echo "the sampling tests skipped: the runtime was not seen"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r-check-log
+          path: r/stanli.Rcheck/
+
   # Everything except pull requests: main pushes, the nightly cron, and
   # release tags (the publish job needs this wheel, so a tag still waits
   # for it).
@@ -386,6 +477,22 @@ jobs:
         with:
           name: wheel-win_amd64
           path: dist/*.whl
+
+      # As above, for the R package. This _bin/ has stanc.exe in it as
+      # well as the DLL, because the Windows build does not embed the
+      # compiler; find_stanc() in r/R/stanc.R looks beside the runtime
+      # for exactly that, so unpacking the tarball is all it takes.
+      - name: Runtime tarball
+        run: |
+          mkdir -p runtime-dist
+          tar czf runtime-dist/stanli-runtime-windows-x86_64.tar.gz \
+            -C python/stanli/_bin .
+          tar tzf runtime-dist/stanli-runtime-windows-x86_64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-windows-x86_64
+          path: runtime-dist/*.tar.gz
 
   # Not on pull requests: 265 s, of which 200 is emscripten linking the
   # module, and ccache cannot touch a link. It is safe to run this after
@@ -593,6 +700,65 @@ jobs:
         run: |
           ls -la js/
           cd js && npm publish
+
+  # The R package's distribution channel. CRAN carries the R code and the
+  # 40 KB bridge; the 16 MB runtime it dlopens comes from here, which is
+  # the same split torch uses for libtorch, so this job is what makes
+  # stanli_install() resolve to anything at all.
+  #
+  # Tag-gated with the same reasoning as PyPI, and it runs the R source
+  # tarball up as an asset too: r-universe builds from the repository
+  # continuously, but a CRAN submission is a file a human uploads to a
+  # web form, and this is where that file comes from.
+  runtime-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the release and attach assets to it
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: runtime
+          pattern: runtime-*
+          merge-multiple: true
+
+      # The R package pins the release it was built against rather than
+      # tracking "latest", so the two have to be bumped together. Caught
+      # here, that is a failed tag build; missed, it is every user's
+      # stanli_install() downloading a 404 until someone cuts another
+      # release.
+      - name: The R package pins this release
+        run: |
+          pin=$(sed -n 's/^stanli_runtime_release <- "\(.*\)"$/\1/p' \
+                r/R/install.R)
+          echo "tag $GITHUB_REF_NAME, r/R/install.R pins ${pin:-<none>}"
+          [ "$pin" = "$GITHUB_REF_NAME" ]
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - name: The R source tarball
+        run: R CMD build r
+
+      - name: Attach the assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la runtime/
+          # Five platforms, one asset each. A partial upload is worse
+          # than none: releases/latest/download resolves for four
+          # platforms and 404s for the fifth, and nothing says which.
+          n=$(ls runtime/*.tar.gz | wc -l)
+          echo "$n runtime assets"
+          [ "$n" -eq 5 ]
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" \
+              --title "stanli ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" \
+            runtime/*.tar.gz stanli_*.tar.gz --clobber
 
   publish:
     # Tags only. PyPI versions can never be reused, so this must not fire

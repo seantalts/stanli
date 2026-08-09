@@ -1,6 +1,7 @@
 ; PE export list for stanli.dll: the C ABI and nothing else, matching
 ; exported_symbols.txt (Mach-O) and exported_symbols.map (ELF).
 EXPORTS
+  stanli_abi_version
   stanli_model_new
   stanli_model_new_from_stan
   stanli_has_embedded_stanc

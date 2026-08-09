@@ -6,6 +6,10 @@
 #include <stanli/optable.hpp>
 #include <stanli/reroll.hpp>
 
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -691,7 +695,17 @@ int count(const Graph& g, uint16_t oc) {
 // refill. N iterations chain N store regions through that single slot, so
 // eager tail renaming made the pass quadratic in both time and memory
 // (the real model: 32,877 iterations, 52 s and 49 GB to compile, which
-// OOM-killed every CI runner). The pass must stay near-linear in N.
+// OOM-killed every CI runner).
+//
+// Space is linear now and time is not. Measured on this shape, one
+// doubling of n costs 2.0x memory and 3.8x time -- so the fix removed
+// the quadratic term from the allocation and left a quadratic term in
+// the work, about 13x smaller than it was: n=32,000 is 350 MB and 4 s.
+// That is why the guard below is a memory ceiling and a scaling ratio
+// rather than the wall-clock budget it used to be. A budget cannot work
+// here: the gap between the bug and the fix is 13x, CI's slowest runner
+// is 9x slower than its fastest, and the two overlap. The old budget
+// duly failed a commit that touched nothing but an unrelated directory.
 namespace ldashape {
 
 struct Built {
@@ -759,18 +773,59 @@ static void test_lda_shape_gradients() {
     expect_close(("lda v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
-static void test_lda_shape_linear_cost() {
-  const int N = 8000;  // quadratic renaming: seconds and GBs; linear: ~0.1 s
-  ldashape::Built b = ldashape::build(N);
+// Peak resident set for the process in MB, or -1 where the platform does
+// not report one. ru_maxrss is bytes on macOS and kilobytes elsewhere, a
+// difference that would otherwise read as a 1000x regression.
+static double peak_rss_mb() {
+#ifdef _WIN32
+  return -1.0;
+#else
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru) != 0) return -1.0;
+#ifdef __APPLE__
+  return static_cast<double>(ru.ru_maxrss) / (1024.0 * 1024.0);
+#else
+  return static_cast<double>(ru.ru_maxrss) / 1024.0;
+#endif
+#endif
+}
+
+// How long reroll takes on the lda shape at size n, with the region count
+// checked along the way so a pass that got fast by doing less is not
+// mistaken for a pass that got fast.
+static double time_lda_reroll(int n) {
+  ldashape::Built b = ldashape::build(n);
   std::vector<int> tt = b.terms;
   const auto t0 = std::chrono::steady_clock::now();
   RerollStats st = reroll(b.g, b.fills, tt, {});
   const double sec =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
           .count();
-  expect("lda big all regions found", st.regions == N);
-  std::printf("  lda shape N=%d rerolled in %.2f s\n", N, sec);
-  expect("lda reroll near-linear (<2 s)", sec < 2.0);
+  expect("lda big all regions found", st.regions == n);
+  return sec;
+}
+
+static void test_lda_shape_cost() {
+  const double small = time_lda_reroll(4000);
+  const double big = time_lda_reroll(8000);
+  const double rss = peak_rss_mb();
+  std::printf("  lda shape reroll: n=4000 %.2f s, n=8000 %.2f s (%.1fx),"
+              " peak RSS %.0f MB\n",
+              small, big, small > 0.0 ? big / small : 0.0, rss);
+
+  // The memory ceiling is the guard that matters, because memory is what
+  // broke, and unlike a wall-clock number an RSS figure means the same
+  // thing on every machine. This is the whole process's peak, so it
+  // counts every case that ran before this one -- an over-estimate,
+  // which is the safe direction. All of them together reach under
+  // 100 MB; the same shape under the quadratic-space bug would be around
+  // 2.9 GB, so 1 GB separates them with room on both sides.
+  if (rss > 0.0) expect("lda reroll space stays linear", rss < 1024.0);
+
+  // Time is quadratic and this only catches a fall to something worse.
+  // A doubling costs 4x at quadratic and 8x at cubic; 5x sits between
+  // them and does not depend on how fast the machine is.
+  expect("lda reroll time no worse than quadratic", big < 5.0 * small);
 }
 
 static void test_write_fusion() {
@@ -1086,7 +1141,7 @@ int main() {
   test_block_structured();
   test_bail_extra_root();
   test_lda_shape_gradients();
-  test_lda_shape_linear_cost();
+  test_lda_shape_cost();
   test_write_fusion();
   test_write_fusion_bails();
   test_write_fusion_scalar_chain();

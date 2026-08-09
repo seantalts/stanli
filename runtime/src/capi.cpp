@@ -154,6 +154,8 @@ stanli_model* stanli_model_new_from_stan(const char* stan_code,
 #endif
 }
 
+int stanli_abi_version(void) { return STANLI_ABI_VERSION; }
+
 int stanli_has_embedded_stanc(void) {
 #ifdef STANLI_EMBED_STANC
   return 1;

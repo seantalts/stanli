@@ -2,9 +2,35 @@
 
 Compile and sample Stan models without a C++ toolchain.
 
+## Install
+
+Not on CRAN yet. Until it is:
+
+```r
+# r-universe: binaries for Linux, macOS and Windows, rebuilt from main
+install.packages("stanli", repos = "https://seantalts.r-universe.dev")
+
+# or from a checkout
+# R CMD INSTALL r
+```
+
+Then, once per machine:
+
+```r
+stanli_install()
+```
+
+That downloads the ~16 MB runtime for your platform into
+`tools::R_user_dir("stanli", "cache")`. Nothing is fetched without it.
+It takes the release the package was built against rather than whichever
+is newest, so the binding and the library always agree; pass
+`version = "latest"` to override, and set `STANLI_RUNTIME` to use a
+library you built yourself.
+
+## Use
+
 ```r
 library(stanli)
-stanli_install()   # one time: fetches the runtime (~16 MB)
 
 m <- stanli_model(file = "eight_schools.stan", data = list(J = 8L, y = y, sigma = s))
 fit <- sample_model(m, chains = 4, seed = 1)
@@ -39,13 +65,26 @@ source and would have to compile all of that to produce one, so
 directory instead. Nothing is fetched without being asked for. Point
 `STANLI_RUNTIME` at a local build to use one you built yourself.
 
+The consequence is that this package and the library it calls are
+separately versioned artifacts, and can drift. Getting that wrong is not
+a crash: `stanli_sample_opts` is a struct this package declares a copy
+of, so a field added on one side and not the other would be read at the
+wrong offsets and sample happily from the wrong seed at the wrong step
+size. So the C ABI carries a layout version, the runtime reports it
+through `stanli_abi_version()`, and loading refuses on a mismatch with a
+message saying which side to update. The release workflow asserts the
+pinned release equals the tag it is cutting.
+
 **The Stan compiler** is stanc3 compiled to JavaScript and run through
 the V8 package — the same approach rstan uses to ship a Stan compiler on
 CRAN. It is one 2.8 MB file that compresses to about 0.4 MB in the source
 tarball, with no toolchain and no per-platform binaries. When the runtime
-embeds stanc3 (the release builds do) that path is used instead and V8 is
-never loaded; a native `stanc` in `STANLI_STANC` or on the `PATH` also
-wins, because it is faster than either.
+embeds stanc3 -- every release build but Windows, which waits on opam's
+native Windows support -- that path is used instead and V8 is never
+loaded; a native `stanc` in `STANLI_STANC` or beside the runtime also
+wins, because it is faster than either. The Windows runtime tarball
+carries `stanc.exe` next to the DLL for exactly that reason, so V8 is a
+fallback there too rather than a requirement.
 
 `tests/test_stancjs.cjs` in the main repository checks that the
 JavaScript compiler emits the same MIR as the native binary, byte for
