@@ -68,17 +68,19 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
   static thread_local std::vector<double> adj;
   if ((int64_t)adj.size() < p.n_regs) adj.resize((size_t)p.n_regs);
   std::fill(adj.begin(), adj.begin() + p.n_regs, 0.0);
-  // Descending, because two live-out slots can share a register range (the
-  // carver aliases a dead copy-then-modify chain onto its base) and the
-  // replay's seeding sum unwinds in that order.
+  // Through the sharing map, since a live-out register need not own its
+  // adjoint cell. Descending, because two live-out slots can share a
+  // register range (the carver aliases a dead copy-then-modify chain onto
+  // its base) and the replay's seeding sum unwinds in that order.
+  const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
-    adj[(size_t)p.out_regs[m]] += ctx.out_adj_vec.data[m];
+    adj[(size_t)map[(size_t)p.out_regs[m]]] += ctx.out_adj_vec.data[m];
   run_adjoint(p.adj, ctx.scratch, adj.data());
   for (int k = 0; k < ctx.n_in; ++k) {
     if (!ctx.in_adj[k].data) continue;
     const auto& li = p.ins[(size_t)k];
     for (int i = 0; i < li.len; ++i)
-      ctx.in_adj[k].data[i] += adj[(size_t)(li.reg + i)];
+      ctx.in_adj[k].data[i] += adj[(size_t)map[(size_t)(li.reg + i)]];
   }
 }
 

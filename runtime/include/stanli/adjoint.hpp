@@ -50,20 +50,27 @@ struct AdjInstr {
 
 struct AdjProgram {
   std::vector<AdjInstr> code;  // in reverse execution order
-  bool empty() const { return code.empty(); }
+  // Which adjoint cell each forward register accumulates into, normally
+  // itself. A copy the forward never rewrites is the exception: it shares
+  // its source's cell rather than moving a total across at the end, because
+  // that is what the replay does -- a var copy shares a vari, so a read of
+  // the copy lands on the source's adjoint in tape order. Collecting the
+  // copy's contributions separately and transferring them in one lump would
+  // regroup the sum and cost the last few bits.
+  std::vector<int32_t> adj_reg;
+  bool empty() const { return adj_reg.empty(); }
 };
 
 // Accumulate adjoints backwards through `ap`. `val` is the forward register
 // file as the forward pass left it (checkpoints included); `adj` is the
 // adjoint file, zeroed by the caller and seeded at the live-out registers.
 // Reads `val`, writes `adj`, allocates nothing.
+//
+// Seeding and harvesting go through `AdjProgram::adj_reg`: a copy the
+// forward never rewrites shares one adjoint cell with its source, the way
+// the replay's registers share one vari, so a live-out or live-in register
+// may not have an adjoint cell of its own.
 void run_adjoint(const AdjProgram& ap, const double* val, double* adj);
-
-// Generate the adjoint of `fwd`, appending checkpoint saves to `fwd` and
-// growing its register count. Returns false and leaves both untouched when
-// the program contains something the generator does not differentiate, in
-// which case the caller keeps the var replay.
-bool gen_adjoint(Program& fwd, AdjProgram* out);
 
 }  // namespace stanli
 

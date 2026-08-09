@@ -498,9 +498,22 @@ int carve_islands(Graph& g,
         }
         if (std::getenv("STANLI_DEBUG_ISLAND")) {
           const IslandProg& p = *static_cast<const IslandProg*>(is.udata);
-          std::fprintf(
-              stderr, "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu\n",
-              j - i, p.code.size(), p.n_regs, p.ins.size(), p.out_regs.size());
+          std::fprintf(stderr,
+                       "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu "
+                       "adj=%zu\n",
+                       j - i, p.code.size(), p.n_regs, p.ins.size(),
+                       p.out_regs.size(), p.adj.code.size());
+          // Which instructions the region is made of, so a disagreement
+          // with the replay can be attributed to an opcode rather than
+          // guessed at.
+          std::vector<int> hist(64, 0);
+          for (const auto& I : p.code)
+            if ((int)I.code < 64) ++hist[(size_t)I.code];
+          std::fprintf(stderr, "island opcodes:");
+          for (int c = 0; c < 64; ++c)
+            if (hist[(size_t)c])
+              std::fprintf(stderr, " %d:%d", c, hist[(size_t)c]);
+          std::fprintf(stderr, "\n");
         }
         ++carved;
         i = j;

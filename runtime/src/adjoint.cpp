@@ -83,24 +83,35 @@ bool supported(Program::Code c) {
 
 }  // namespace
 
-bool gen_adjoint(Program& fwd, AdjProgram* out) {
+bool gen_adjoint(IslandProg& p) {
+  Program& fwd = p;
   const std::vector<Program::Instr> orig = fwd.code;
   const int n0 = fwd.n_regs;
   for (const auto& I : orig)
     if (!supported(I.code)) return false;
 
-  // Where each register was last written. A value the backward needs
-  // survives in place exactly when no later instruction overwrites it,
-  // which this answers in constant time.
-  std::vector<int> last_write((size_t)n0, -1);
+  // Where each register was first and last written. A value the backward
+  // needs survives in place exactly when no later instruction overwrites it;
+  // a register written exactly once is what the copy aliasing below needs.
+  std::vector<int> first_write((size_t)n0, -1), last_write((size_t)n0, -1);
   for (int i = 0; i < (int)orig.size(); ++i) {
     const int wl = out_len(orig[i]);
     for (int k = 0; k < wl; ++k) {
       const int r = orig[i].dst + k;
       if (r < 0 || r >= n0) return false;
+      if (first_write[(size_t)r] < 0) first_write[(size_t)r] = i;
       last_write[(size_t)r] = i;
     }
   }
+
+  // Live-in registers are harvested by register id, so their adjoint cell
+  // has to stay their own; a copy may not be aliased onto one.
+  std::vector<char> is_live_in((size_t)n0, 0);
+  for (const auto& li : p.ins)
+    for (int k = 0; k < li.len; ++k) {
+      if (li.reg + k >= n0) return false;
+      is_live_in[(size_t)(li.reg + k)] = 1;
+    }
 
   // Two ranges that overlap without coinciding would have the elementwise
   // adjoint loop read a cell it has already zeroed. Coinciding is fine and
@@ -133,10 +144,46 @@ bool gen_adjoint(Program& fwd, AdjProgram* out) {
   ncode.reserve(orig.size());
   AdjProgram ap;
   ap.code.reserve(orig.size());
+  ap.adj_reg.resize((size_t)n0);
+  for (int r = 0; r < n0; ++r) ap.adj_reg[(size_t)r] = r;
   int n_regs = n0;
+
+  // A copy the forward never rewrites shares its source's adjoint cell.
+  // This is the replay's vari sharing, written down: `reg[d] = reg[a]` on
+  // vars copies a POINTER, so every later read of either register lands on
+  // one adjoint in tape order. Giving the copy its own cell and adding the
+  // total back at the copy would be the same derivative grouped
+  // differently, which shows up as a last-bit disagreement on exactly the
+  // models islands were built for (iohmm_reg copies a 1,500-element state
+  // vector per step).
+  auto aliasable = [&](const Program::Instr& I, int i) {
+    if (I.code != Program::MOV && I.code != Program::MOVR) return false;
+    const int len = I.code == Program::MOV ? 1 : I.len;
+    if (len <= 0) return false;
+    if (I.dst < 0 || I.dst + len > n0 || I.a < 0 || I.a + len > n0)
+      return false;
+    for (int k = 0; k < len; ++k) {
+      // Written once, by this instruction: any other writer would clear a
+      // cell that now belongs to the source as well.
+      if (first_write[(size_t)(I.dst + k)] != i) return false;
+      if (last_write[(size_t)(I.dst + k)] != i) return false;
+      // The source must not be rewritten later, or the two registers stop
+      // holding the same value while sharing one adjoint.
+      if (last_write[(size_t)(I.a + k)] > i) return false;
+      if (is_live_in[(size_t)(I.dst + k)]) return false;
+    }
+    return true;
+  };
 
   for (int i = 0; i < (int)orig.size(); ++i) {
     const Program::Instr& I = orig[i];
+    if (aliasable(I, i)) {
+      const int len = I.code == Program::MOV ? 1 : I.len;
+      for (int k = 0; k < len; ++k)
+        ap.adj_reg[(size_t)(I.dst + k)] = ap.adj_reg[(size_t)(I.a + k)];
+      ncode.push_back(I);
+      continue;  // no adjoint instruction: the cells are already shared
+    }
     AdjInstr A;
     A.code = I.code;
     A.dst = I.dst;
@@ -242,13 +289,51 @@ bool gen_adjoint(Program& fwd, AdjProgram* out) {
         break;
     }
 
+    // Adjoint operands go through the sharing map; value operands do not.
+    // A range has to map to a range: aliasing builds contiguous maps from
+    // contiguous copies, so this holds, and refusing is cheaper than
+    // scattering the interpreter's loops.
+    bool ok = true;
+    auto map1 = [&](int32_t r) { return ap.adj_reg[(size_t)r]; };
+    auto mapn = [&](int32_t r, int len) {
+      const int32_t base = ap.adj_reg[(size_t)r];
+      for (int k = 1; k < len; ++k)
+        if (ap.adj_reg[(size_t)(r + k)] != base + k) ok = false;
+      return base;
+    };
+    const int wlen = out_len(I);
+    A.dst = wlen > 1 ? mapn(I.dst, wlen) : map1(I.dst);
+    switch (I.code) {
+      case Program::MOVR:
+      case Program::LOG_RANGE:
+      case Program::EXP_RANGE:
+      case Program::SOFTMAX:
+        A.a = mapn(I.a, I.len);
+        break;
+      case Program::LSE_RANGE:
+        A.a = mapn(I.a, I.len);
+        break;
+      case Program::DOT:
+        A.a = mapn(I.a, I.len);
+        A.b = mapn(I.b, I.len);
+        break;
+      case Program::CONST:
+      case Program::CONSTR:
+        break;  // no operand adjoints
+      default:
+        A.a = map1(I.a);
+        A.b = map1(I.b);
+        A.c = map1(I.c);
+        break;
+    }
+    if (!ok) return false;
     ap.code.push_back(A);
   }
 
   std::reverse(ap.code.begin(), ap.code.end());
   fwd.code = std::move(ncode);
   fwd.n_regs = n_regs;
-  *out = std::move(ap);
+  p.adj = std::move(ap);
   return true;
 }
 
@@ -504,10 +589,6 @@ void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
         break;  // gen_adjoint refuses these; unreachable
     }
   }
-}
-
-bool gen_adjoint(IslandProg& p) {
-  return gen_adjoint(static_cast<Program&>(p), &p.adj);
 }
 
 }  // namespace stanli
