@@ -30,6 +30,7 @@
 #ifndef STANLI_ISLAND_HPP
 #define STANLI_ISLAND_HPP
 
+#include <stanli/adjoint.hpp>
 #include <stanli/program.hpp>
 
 #include <cstdint>
@@ -46,7 +47,14 @@ struct IslandProg : Program {
     int len = 0;
   };
   std::vector<LiveIn> ins;
+  // The generated backward (adjoint.hpp). Empty means the var replay: a
+  // program the generator does not differentiate, or STANLI_NO_NATIVE_ADJ.
+  AdjProgram adj;
 };
+
+// Generate p.adj, appending checkpoint saves to p's forward code. False
+// leaves p untouched and keeps the replay.
+bool gen_adjoint(IslandProg& p);
 
 // Evaluate on T = double (forward) or stan::math::var (backward replay,
 // inside the caller's nested_rev_autodiff). The register file is reused

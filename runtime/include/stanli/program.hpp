@@ -114,11 +114,11 @@ struct Program {
   std::vector<int> out_regs;  // the values the caller reads back
 };
 
-// Run `p` over `reg`, which the caller has seeded and sized. The compilers
-// guarantee every register is written before it is read, so a reused file
-// never leaks a previous call's values.
+// Run `p` over `reg`, which the caller has seeded and sized to at least
+// p.n_regs. The compilers guarantee every register is written before it is
+// read, so a reused file never leaks a previous call's values.
 template <typename T>
-void run_program(const Program& p, std::vector<T>& reg) {
+void run_program(const Program& p, T* reg) {
   using VecT = Eigen::Matrix<T, Eigen::Dynamic, 1>;
   const int64_t n = (int64_t)p.code.size();
   for (int64_t pc = 0; pc < n; ++pc) {
@@ -275,6 +275,11 @@ void run_program(const Program& p, std::vector<T>& reg) {
 #undef STANLI_PROGRAM_DENSITY_CASE
     }
   }
+}
+
+template <typename T>
+inline void run_program(const Program& p, std::vector<T>& reg) {
+  run_program(p, reg.data());
 }
 
 }  // namespace stanli

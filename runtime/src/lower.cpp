@@ -524,6 +524,12 @@ struct Lowering {
     }
     if (prog->out_regs.empty())
       fail("parameter-dependent region produces nothing", s ? s->raw : e->raw);
+    // A region with a runtime branch keeps the var replay -- reversing
+    // control flow needs the structured form the flat program has already
+    // lost -- so this usually declines. It is asked anyway because a region
+    // can reach here branch-free: a `~` refusal or an unknown name is not
+    // the only way to end up compiled.
+    if (!std::getenv("STANLI_NO_NATIVE_ADJ")) gen_adjoint(*prog);
     *prog_out = std::move(prog);
   }
 

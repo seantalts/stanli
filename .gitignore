@@ -32,3 +32,4 @@ r/src/*.so
 r/src/*.dll
 r/*.Rcheck/
 r/*.tar.gz
+.claude/worktrees/

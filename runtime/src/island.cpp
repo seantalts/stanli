@@ -390,6 +390,11 @@ int carve_islands(Graph& g,
       cc.op_index = u;
       compiled = cc.compile(g.ops[u]) && cc.ok;
     }
+    // Generate the backward before estimating, because generating it is
+    // what the estimate is about: it appends the checkpoint saves the
+    // adjoint needs, so both the register count and the instruction count
+    // below are the ones the island will actually run.
+    if (compiled && !std::getenv("STANLI_NO_NATIVE_ADJ")) gen_adjoint(cc.prog);
     // Is the island cheaper than the ops it replaces? Both sides counted
     // in elements touched per call: the graph's is what its ops write
     // (an in-place element update writes one element, not a vector), the

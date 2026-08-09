@@ -193,6 +193,7 @@ add_library(stanli_shared SHARED
   runtime/kernels/message.cpp
   runtime/kernels/island.cpp
   runtime/src/island.cpp
+  runtime/src/adjoint.cpp
   runtime/src/nuts.cpp
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp
@@ -281,6 +282,7 @@ add_library(stanli STATIC
   runtime/kernels/message.cpp
   runtime/kernels/island.cpp
   runtime/src/island.cpp
+  runtime/src/adjoint.cpp
   runtime/src/nuts.cpp
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp
@@ -385,6 +387,7 @@ stanli_add_test(test_constfold)
 stanli_add_test(test_write_array)
 stanli_add_test(test_mixture)
 stanli_add_test(test_island)
+stanli_add_test(test_adjoint)
 stanli_add_test(test_diagnose)
 stanli_add_test(test_multichain)
 stanli_add_test(test_newtrans)
