@@ -92,12 +92,7 @@ Expr read_expr_pattern(const Node& p) {
       e.fn_lib = Expr::Lib::Internal;
       const Node& internal = kind[1];
       e.name = internal.is_atom() ? internal.atom : internal[0].atom;
-      if (!internal.is_atom()) {
-        // Carry FnReadParam's payload nodes as raw for the Decl reader.
-        e.raw = dump(internal, 4000);
-      }
-      // Stash the payload for FnReadParam: transform + dims read by caller
-      // via the original node; simplest is to keep a pointer-free copy here.
+      if (!internal.is_atom()) e.raw = dump(internal);
     } else if (kind.head_is("UserDefined")) {
       e.fn_lib = Expr::Lib::UserDefined;
       e.name = kind[1].atom;
