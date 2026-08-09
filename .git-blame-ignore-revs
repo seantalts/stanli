@@ -1,0 +1,6 @@
+# Bulk reformat commits, hidden from git blame. Configure once with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub applies this file automatically.)
+
+# chore: reformat with clang-format (no semantic changes)
+f03ea98bff32f75f8a2a03b12667f91a025495e2
