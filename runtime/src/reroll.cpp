@@ -198,18 +198,21 @@ RerollStats reroll(Graph& g,
 
   // Consumers of each slot, by original op index. Ops only read slots
   // produced earlier, so indices stay valid as the scan rewrites disjoint
-  // regions left to right.
-  std::unordered_map<int, std::vector<size_t>> uses;
+  // regions left to right. Indexed by slot id: every question below is
+  // asked about a slot taken from an unrewritten g.ops entry, i.e. one
+  // that already existed when the scan started, so the dense form is
+  // enough and no lookup can miss.
+  std::vector<std::vector<size_t>> uses(g.slots.size());
   for (size_t u = 0; u < g.ops.size(); ++u)
     for (int j = 0; j < g.ops[u].n_in; ++j)
-      uses[g.ops[u].in[j]].push_back(u);
+      if (g.ops[u].in[j] >= 0) uses[(size_t)g.ops[u].in[j]].push_back(u);
 
   // Producers of each slot. The write-fusion rewrite below needs to know
   // that nothing else ever writes the vector it is about to take over.
-  std::unordered_map<int, std::vector<size_t>> writers;
+  std::vector<std::vector<size_t>> writers(g.slots.size());
   for (size_t u = 0; u < g.ops.size(); ++u) {
-    if (g.ops[u].out >= 0) writers[g.ops[u].out].push_back(u);
-    if (g.ops[u].out2 >= 0) writers[g.ops[u].out2].push_back(u);
+    if (g.ops[u].out >= 0) writers[(size_t)g.ops[u].out].push_back(u);
+    if (g.ops[u].out2 >= 0) writers[(size_t)g.ops[u].out2].push_back(u);
   }
 
   // Both lists are built by walking u upwards, so each one is sorted, and
@@ -243,10 +246,9 @@ RerollStats reroll(Graph& g,
   };
   // Is any entry of `v` in [lo, hi) not accepted by `ours`? `ours` names
   // the region's own ops, which are allowed to touch the slot.
-  const auto any_in_range_but = [&](const std::vector<size_t>* v, size_t lo,
+  const auto any_in_range_but = [&](const std::vector<size_t>& v, size_t lo,
                                     size_t hi, auto&& ours) {
-    if (v == nullptr) return false;
-    for (auto it = first_at_or_after(*v, lo); it != v->end() && *it < hi;
+    for (auto it = first_at_or_after(v, lo); it != v.end() && *it < hi;
          ++it) {
       ++st.list_steps;
       if (!ours(*it)) return true;
@@ -254,15 +256,8 @@ RerollStats reroll(Graph& g,
     return false;
   };
   // Is any entry of `v` at or after `x`?
-  const auto any_at_or_after = [&](const std::vector<size_t>* v, size_t x) {
-    return v != nullptr && first_at_or_after(*v, x) != v->end();
-  };
-  // The list for a slot, or null when it has none.
-  const auto list_for = [](const std::unordered_map<int,
-                                                    std::vector<size_t>>& m,
-                           int slot) -> const std::vector<size_t>* {
-    const auto it = m.find(slot);
-    return it == m.end() ? nullptr : &it->second;
+  const auto any_at_or_after = [&](const std::vector<size_t>& v, size_t x) {
+    return first_at_or_after(v, x) != v.end();
   };
 
   std::unordered_set<int> term_set(target_terms.begin(), target_terms.end());
@@ -419,18 +414,16 @@ RerollStats reroll(Graph& g,
             if (!is_term && br_term == Luse) br_term = l;
             if (is_term && br_nonterm == Luse) br_nonterm = l;
             if (br_internal == Luse && root_set.count(o) != 0) br_internal = l;
-            if (br_internal == Luse) {
-              auto uit = uses.find(o);
-              if (uit != uses.end())
-                for (size_t u : uit->second) {
-                  const bool inside = u > i + (size_t)l * P + p &&
-                                      u < i + ((size_t)l + 1) * P;
-                  if (!inside) {
-                    br_internal = l;
-                    break;
-                  }
-                }
-            }
+            // A use before the lane's own position would mean an op reading
+            // a slot written after it, which the emission order forbids for
+            // every position whose br_internal is read: the one exception,
+            // an element store's repeatedly written vector, is classified by
+            // the is_element_store arm, which never looks at br_internal.
+            // So "escapes the lane" is exactly "used at or past the lane
+            // end", which is one binary search instead of a whole scan.
+            if (br_internal == Luse &&
+                any_at_or_after(uses[(size_t)o], i + ((size_t)l + 1) * P))
+              br_internal = l;
           }
 
           // Position-level classification.
@@ -518,7 +511,7 @@ RerollStats reroll(Graph& g,
               const Pos& prod = pos[(size_t)ap.ins[1].producer_pos];
               if (prod.index_elision) {
                 const int base = op_at(ap.ins[1].producer_pos, 0).in[0];
-                if (any_at_or_after(list_for(writers, base), region_end))
+                if (any_at_or_after(writers[(size_t)base], region_end))
                   written_after = true;
               }
             }
@@ -529,8 +522,8 @@ RerollStats reroll(Graph& g,
                 return u >= i && u < region_end &&
                        (u - i) % (size_t)P == (size_t)p;
               };
-              const std::vector<size_t>* vec_uses = list_for(uses, vec);
-              const std::vector<size_t>* vec_writers = list_for(writers, vec);
+              const std::vector<size_t>& vec_uses = uses[(size_t)vec];
+              const std::vector<size_t>& vec_writers = writers[(size_t)vec];
               if (any_in_range_but(vec_uses, i, region_end, in_region_write) ||
                   any_in_range_but(vec_writers, i, region_end, in_region_write))
                 clean = false;
@@ -564,8 +557,7 @@ RerollStats reroll(Graph& g,
               ok = false;
               prefix = 0;  // already a vector op; nothing to fuse
             } else if (all_terms) {
-              auto uit = uses.find(t.out);
-              if (uit != uses.end() && !uit->second.empty()) {
+              if (!uses[(size_t)t.out].empty()) {
                 ok = false;
                 prefix = 0;  // a term that is also an op input
               } else if (all_inputs_invariant &&
@@ -612,8 +604,7 @@ RerollStats reroll(Graph& g,
               // Every lane's out is a target term (log_mix under
               // `target +=`): widen the op, SUM_VEC the lanes, and swap
               // the N terms for the sum.
-              auto uit = uses.find(t.out);
-              if (uit != uses.end() && !uit->second.empty()) {
+              if (!uses[(size_t)t.out].empty()) {
                 ok = false;
                 prefix = 0;  // a term that is also an op input
               } else {
