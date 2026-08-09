@@ -52,7 +52,6 @@ struct Lowering {
   CompiledModel out;
   std::map<std::string, int> scope;            // var -> slot
   std::map<std::string, long> int_env;         // data int scalars
-  std::map<std::string, std::string> int_arrays;  // int-array vars (by name)
   std::map<double, int> const_cache;
   std::map<int, std::vector<double>> slot_values;  // constant/data fills
   std::vector<SlotInfo> info;                  // parallel to g.slots
@@ -191,7 +190,7 @@ struct Lowering {
     }
     if (t.base == "SArray") {
       int64_t n = 1;
-      for (const auto& d : t.dims) n *= eval_int(const_cast<mir::Expr&>(d));
+      for (const auto& d : t.dims) n *= eval_int(d);
       return n;
     }
     fail("unsupported sized type " + t.base, t.raw);
@@ -758,7 +757,7 @@ struct Lowering {
       const mir::Expr& a = e.args[i];
       if (a.data_only && a.type_ == "UInt") {
         binds[i].is_int = true;
-        binds[i].iv = eval_int(const_cast<mir::Expr&>(a));
+        binds[i].iv = eval_int(a);
       } else {
         binds[i].v = lower_expr(a);
       }
@@ -952,19 +951,18 @@ struct Lowering {
       const Dens& d = dit->second;
       if ((int)e.args.size() != d.nargs)
         fail(e.name + ": expected " + std::to_string(d.nargs) + " args");
-      auto int_arg = [&](const mir::Expr& oc) { return int_arg_values(oc); };
       std::vector<int> idata;
       if (d.n_int == 1) {
-        idata = int_arg(e.args[0]);
+        idata = int_arg_values(e.args[0]);
       } else if (d.n_int == 2) {
         // Group length -1 marks a language-level scalar (broadcast in
         // stan-math); a length-1 array stays a vector, as CmdStan would
         // instantiate it.
         auto put = [&](const mir::Expr& a) {
-          auto g = int_arg(a);
-          const bool scalar = a.type_ == "UInt" && g.size() == 1;
-          idata.push_back(scalar ? -1 : (int)g.size());
-          idata.insert(idata.end(), g.begin(), g.end());
+          auto vals = int_arg_values(a);
+          const bool scalar = a.type_ == "UInt" && vals.size() == 1;
+          idata.push_back(scalar ? -1 : (int)vals.size());
+          idata.insert(idata.end(), vals.begin(), vals.end());
         };
         put(e.args[0]);
         put(e.args[1]);
