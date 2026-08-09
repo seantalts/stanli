@@ -47,6 +47,42 @@ bool scalar_ins(const Graph& g, const Op& op) {
   return g.slots[op.out].len == 1;
 }
 
+// The scalar unaries the island machine speaks, paired with the
+// instruction each compiles to. File-local on purpose: the MIR front
+// end's unary chain (mir_prog.hpp) is a different set -- it has INV and
+// FABS and lacks LOG1M and TANH -- so there is nothing to share.
+#define STANLI_ISLAND_UNARY_LIST(X)                                        \
+  X(OP_NEG, NEG)                                                           \
+  X(OP_EXPV, EXP)                                                          \
+  X(OP_LOGV, LOG)                                                          \
+  X(OP_SQRT, SQRT)                                                         \
+  X(OP_SQUARE, SQUARE)                                                     \
+  X(OP_INV_LOGIT, INV_LOGIT)                                               \
+  X(OP_LOG1M, LOG1M)                                                       \
+  X(OP_TANHV, TANH)
+
+// Unary opcode -> island instruction, or -1.
+int unary_code(uint16_t oc) {
+  switch (oc) {
+#define X(opc, code) case opc: return Program::code;
+    STANLI_ISLAND_UNARY_LIST(X)
+#undef X
+    default: return -1;
+  }
+}
+
+// Density opcode -> island instruction, or -1. Arity is op.n_in. The
+// twelve entries come from the one list in program.hpp; every code there
+// spells its opcode OP_<code>_LPDF.
+int density_code(uint16_t oc) {
+  switch (oc) {
+#define X(code, name, arity) case OP_##code##_LPDF: return Program::code;
+    STANLI_PROGRAM_DENSITY_LIST(X)
+#undef X
+    default: return -1;
+  }
+}
+
 // Structural vocabulary test. Shape/idata details are re-checked during
 // compilation; anything unexpected there aborts the island (compile
 // returns false) and the run is left alone.
@@ -61,15 +97,6 @@ bool in_vocab(const Graph& g, const Op& op) {
     case OP_LSE2:
     case OP_LOG_MIX:
       return scalar_ins(g, op);
-    case OP_NEG:
-    case OP_EXPV:
-    case OP_LOGV:
-    case OP_SQRT:
-    case OP_SQUARE:
-    case OP_INV_LOGIT:
-    case OP_LOG1M:
-    case OP_TANHV:
-      return g.slots[op.out].len == g.slots[op.in[0]].len;
     case OP_INDEX:
     case OP_SET_INDEX:
     case OP_SET_INDEX_INPLACE:
@@ -82,42 +109,13 @@ bool in_vocab(const Graph& g, const Op& op) {
     case OP_LOG_SUM_EXP:
     case OP_SOFTMAX:
       return op.n_in == 1;
-    case OP_STD_NORMAL_LPDF:
-    case OP_EXPONENTIAL_LPDF:
-    case OP_NORMAL_LPDF:
-    case OP_LOGNORMAL_LPDF:
-    case OP_CAUCHY_LPDF:
-    case OP_GAMMA_LPDF:
-    case OP_INV_GAMMA_LPDF:
-    case OP_BETA_LPDF:
-    case OP_WEIBULL_LPDF:
-    case OP_LOGISTIC_LPDF:
-    case OP_DOUBLE_EXP_LPDF:
-    case OP_UNIFORM_LPDF:
+    default:
+      if (unary_code(op.opcode) >= 0)
+        return g.slots[op.out].len == g.slots[op.in[0]].len;
       // Propto term-dropping depends on argument TYPES; the island binds
       // every argument as T, which only matches the <false> instantiation.
-      return (op.variant & 0x80u) == 0 && scalar_ins(g, op);
-    default:
-      return false;
-  }
-}
-
-// Density opcode -> island instruction, or -1. Arity is op.n_in.
-int density_code(uint16_t oc) {
-  switch (oc) {
-    case OP_STD_NORMAL_LPDF: return Program::STD_NORMAL;
-    case OP_EXPONENTIAL_LPDF: return Program::EXPONENTIAL;
-    case OP_NORMAL_LPDF: return Program::NORMAL;
-    case OP_LOGNORMAL_LPDF: return Program::LOGNORMAL;
-    case OP_CAUCHY_LPDF: return Program::CAUCHY;
-    case OP_GAMMA_LPDF: return Program::GAMMA;
-    case OP_INV_GAMMA_LPDF: return Program::INV_GAMMA;
-    case OP_BETA_LPDF: return Program::BETA;
-    case OP_WEIBULL_LPDF: return Program::WEIBULL;
-    case OP_LOGISTIC_LPDF: return Program::LOGISTIC;
-    case OP_DOUBLE_EXP_LPDF: return Program::DOUBLE_EXP;
-    case OP_UNIFORM_LPDF: return Program::UNIFORM;
-    default: return -1;
+      return density_code(op.opcode) >= 0 && (op.variant & 0x80u) == 0 &&
+             scalar_ins(g, op);
   }
 }
 
@@ -240,25 +238,11 @@ struct Compiler {
           emit(Program::ADD, d, d, read_reg(op.in[j]));
         return ok;
       }
-      case OP_NEG:
-      case OP_EXPV:
-      case OP_LOGV:
-      case OP_SQRT:
-      case OP_SQUARE:
-      case OP_INV_LOGIT:
-      case OP_LOG1M:
-      case OP_TANHV: {
-        Program::Code c;
-        switch (op.opcode) {
-          case OP_NEG: c = Program::NEG; break;
-          case OP_EXPV: c = Program::EXP; break;
-          case OP_LOGV: c = Program::LOG; break;
-          case OP_SQRT: c = Program::SQRT; break;
-          case OP_SQUARE: c = Program::SQUARE; break;
-          case OP_INV_LOGIT: c = Program::INV_LOGIT; break;
-          case OP_LOG1M: c = Program::LOG1M; break;
-          default: c = Program::TANH; break;
-        }
+#define X(opc, code) case opc:
+      STANLI_ISLAND_UNARY_LIST(X)
+#undef X
+      {
+        const Program::Code c = (Program::Code)unary_code(op.opcode);
         const int a = read_reg(op.in[0]);
         const int d = write_reg(op.out);
         if (out_len == 1) {
