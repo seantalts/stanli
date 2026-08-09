@@ -36,6 +36,7 @@
 #include <stanli/inplace.hpp>
 #include <stanli/optable.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <unordered_map>
 #include <unordered_set>

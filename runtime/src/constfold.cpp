@@ -30,7 +30,10 @@
 #include <unordered_set>
 
 namespace stanli {
+namespace {
 
+// True for each op whose inputs are all data, constants, or the outputs of
+// earlier constant ops. Parallel to `g.ops`.
 std::vector<char> mark_constant_ops(const Graph& g) {
   std::vector<char> no_fold(g.slots.size(), 0);
   std::vector<char> is_const(g.ops.size(), 0);
@@ -113,6 +116,8 @@ std::vector<char> mark_constant_ops(const Graph& g) {
     if (!changed || round > 16) return is_const;
   }
 }
+
+}  // namespace
 
 ConstFoldStats const_fold(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,

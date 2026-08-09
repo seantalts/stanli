@@ -189,8 +189,6 @@ RerollStats reroll(Graph& g,
                    std::vector<int>& target_terms,
                    const std::vector<int>& extra_roots) {
   RerollStats st;
-  st.ops_before = static_cast<int64_t>(g.ops.size());
-  st.ops_after = st.ops_before;
   if (std::getenv("STANLI_NO_REROLL")) return st;
 
   // The dedup'd constant pool: slot -> value, for len-1 fills.
@@ -908,7 +906,6 @@ RerollStats reroll(Graph& g,
     }
   }
   g.ops = std::move(result);
-  st.ops_after = static_cast<int64_t>(g.ops.size());
   return st;
 }
 

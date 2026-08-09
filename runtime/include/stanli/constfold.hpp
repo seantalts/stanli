@@ -11,10 +11,6 @@
 
 namespace stanli {
 
-// True for each op whose inputs are all data, constants, or the outputs of
-// earlier constant ops. Parallel to `g.ops`.
-std::vector<char> mark_constant_ops(const Graph& g);
-
 struct ConstFoldStats {
   int ops_removed = 0;
   int slots_folded = 0;  // const outputs some surviving op still reads
