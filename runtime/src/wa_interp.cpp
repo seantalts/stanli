@@ -34,7 +34,7 @@ std::vector<double> WaInterp::eval(
   cur = &in;
   in.env() = base_env_;
   in.run(prog_->generate_quantities);
-  if (!have_cols_) have_cols_ = true;
+  have_cols_ = true;
   return row;
 }
 
