@@ -9,8 +9,8 @@
 namespace stanli {
 namespace dens {
 
-// bernoulli_logit_glm(y | X, alpha, beta): X data matrix (row-major slot),
-
+// bernoulli_logit_glm(y | X, alpha, beta): X is a data matrix, mapped
+// column-major like every other matrix slot.
 // idata = [y..., rows, cols]. Edges are (x, alpha, beta); X is arg 0.
 void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[ctx.n_idata - 2];

@@ -91,7 +91,6 @@ void beta_binomial_fwd(KernelCtx& ctx) {
   });
 }
 
-// is n ints per evaluation, against a density over the same n.
 STANLI_ORDERED_DENSITY_LIST(STANLI_DEFINE_ORDERED_FWD)
 
 }  // namespace dens

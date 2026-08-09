@@ -50,13 +50,5 @@ void uniform_fwd(KernelCtx& ctx) {
   }
 }
 
-
-// Ordinal regression. The outcome goes over as a std::vector<int>, not
-// the Eigen map the other lpmfs use: ordered_logistic hands its outcome
-// to scalar_seq_view and then asks for data(), whose non-const overload
-// wants a mutable pointer that a Map<const VectorXi> cannot supply. A
-// std::vector is also exactly what CmdStan's generated code passes, so
-// this is the instantiation the references were produced from. The copy
-
 }  // namespace dens
 }  // namespace stanli
