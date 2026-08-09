@@ -798,9 +798,18 @@ compilers.</p>
 <!--gen:corpus_median-->2.07x<!--/gen--> CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
 <!--gen:corpus_at_par-->93<!--/gen--> of them at or above it. The radon
-preset above is one of the good cases and the Lotka-Volterra one is not,
-which is the honest range. Every model, win or loss, with the reason:
+models in the picker are among the good cases and the Lotka-Volterra one
+is not, which is the honest range. Every model, win or loss, with the
+reason:
 <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.</p>
+<p><b>This tab is the slow way to run it, though.</b> The same source
+compiled to WebAssembly instead of native costs about 1.5x to 2x per
+gradient: 1.71x geometric mean over seven models, measured under Node so
+the numbers are not a debugger artifact. The figures in the paragraph
+above are native ones, so the margin over CmdStan in here is nearer par
+than 2x. Preparing the model is not what costs you, since stanc compiled
+to JavaScript still finishes in milliseconds. For work rather than a
+look, <code>pip install stanli</code> runs the native build.</p>
 <p><b>The numbers are checked against CmdStan itself.</b> Not against a
 tolerance someone picked:
 <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models are

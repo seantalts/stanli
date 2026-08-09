@@ -651,6 +651,37 @@ node tools/bench_wasm.cjs                      # fixtures, ns/gradient
 node tools/bench_wasm.cjs --module build-wasm-simd/stanli.js
 ```
 
+### What the browser costs you
+
+Both builds from the same commit, same MIR and same data on each side,
+`bench_grad` against `bench_wasm.cjs`, min of three runs each, macOS
+arm64. This is the number the demo page's footer cites, and the reason it
+tells people to install the wheel for real work.
+
+| model | native | wasm | wasm/native |
+|---|---:|---:|---:|
+| `eight_schools_noncentered` | 269 ns | 534 ns | 1.98x |
+| `radon_pooled` | 54.3 us | 106.6 us | 1.96x |
+| `low_dim_gauss_mix` | 93.2 us | 168.4 us | 1.81x |
+| `hmm_example` | 33.8 us | 58.6 us | 1.73x |
+| `arK` | 2.32 us | 3.75 us | 1.62x |
+| `lotka_volterra` | 74.6 us | 110.6 us | 1.48x |
+| `diamonds` | 36.3 us | 52.2 us | 1.44x |
+| geometric mean | | | **1.71x** |
+
+Two things this is *not*. It is not the missing propto terms: the browser
+ships `STANLI_LITE_LP`, which drops the propto instantiations and so
+evaluates the fuller density, and propto is worth nothing measurable
+either way (docs/lite-lp.md). It is not model preparation either: stanc3
+compiled by js_of_ocaml compiles eight schools in 3 ms warm, against 13 ms
+for the native binary including process spawn, so the browser is not
+behind on time to first draw at all. The gap is gradient throughput,
+which is what dominates once sampling starts.
+
+Measure it under Node, never in an automated browser tab: attaching
+chrome.debugger keeps V8 on the Liftoff baseline tier and costs about 4x
+on the same binary.
+
 The A/B that turned SIMD on, measured on macOS arm64, emsdk 6.0.6 (the
 version CI pins), on the tree as it stood at that commit:
 
