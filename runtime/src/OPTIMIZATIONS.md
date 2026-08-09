@@ -212,7 +212,8 @@ is still wrong for it: a region carrying far more state than it
 computes, where the register file costs more to write and read back than
 the ops ever moved. The estimate weighs what the ops move and what they
 pay per dispatch against the register file and the two instruction
-lists, and it now keeps every region that measured clearly above parity.
+lists, and it keeps every region that measured clearly above parity
+while dropping that shape and two more that were slower compiled.
 `STANLI_ISLAND_ALWAYS=1` skips it, which is how to ask why a region was
 left alone.
 

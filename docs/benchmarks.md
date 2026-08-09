@@ -40,6 +40,14 @@ this page.
 | `ldaK2` | 7 | 145,916 | 104,059 | 0.71x | 0.165 s |
 | `iohmm_reg` | 29 | 545,184 | 320,335 | 0.59x | 0.441 s |
 
+**The four sequential models at the bottom of this slice predate the
+generated adjoint** and will move up when this table is next regenerated
+from `docs/corpus-bench.tsv`. Measured against the same CmdStan column:
+`iohmm_reg` 320,335 / 290,286 = 1.10x rather than 0.59x, `hmm_example`
+1.40x rather than 0.75x, `hmm_drive_0` 1.35x rather than 0.77x, and
+`garch11` 1.11x rather than 0.86x -- all four cross parity. The island
+section below has the per-region measurements those come from.
+
 ## Which models are faster, which are slower, and why
 
 Across the full corpus (`docs/corpus-bench.tsv`, 119 models with both
