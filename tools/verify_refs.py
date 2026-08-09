@@ -62,6 +62,21 @@ def pair_dev(a, b):
     return (abs(a - b) / scale, ulp_distance(a, b))
 
 
+def parse_wa(out):
+    """(names_csv, value_strings) from WANAMES/WAVALS lines, or None."""
+    names, vals = None, None
+    for line in out.splitlines():
+        if line.startswith("WANAMES "):
+            names = line[8:]
+        elif line.startswith("WAVALS"):
+            vals = line[6:].split()
+    if names is None or vals is None or names.startswith("FAIL"):
+        return None
+    if vals and vals[0] == "FAIL":
+        return None
+    return (names, vals)
+
+
 def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
                 no_lp=False):
     """Returns (model, status, max_rel, max_ulp, n_values, detail)."""

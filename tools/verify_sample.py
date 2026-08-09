@@ -14,11 +14,14 @@ Usage: tools/verify_sample.py CMDSTAN_DIR PDB_DIR model1 model2 ...
 import gzip
 import json
 import pathlib
-import struct
 import subprocess
 import sys
 import tempfile
 import zipfile
+
+# The deviation arithmetic lives in the replay script, not here, so a
+# change to it cannot land in the recorder without landing in the CI gate.
+from verify_refs import pair_dev, parse_wa
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 REFS_PATH = REPO / "docs" / "corpus-refs.json.gz"
@@ -46,49 +49,6 @@ def write_refs(refs):
     prev.update(refs)
     blob = json.dumps(prev, indent=0, sort_keys=True).encode()
     REFS_PATH.write_bytes(gzip.compress(blob, mtime=0))
-
-
-def ulp_distance(a, b):
-    """Distance in representable doubles; 0 means bitwise identical."""
-    if a == b:
-        return 0
-    ia, ib = (struct.unpack("<q", struct.pack("<d", v))[0] for v in (a, b))
-    key = lambda i: (-(1 << 63)) - i if i < 0 else i
-    return abs(key(ia) - key(ib))
-
-
-def pair_dev(a, b):
-    """(rel, ulp) for one reference/stanli pair, nonfinite-safe.
-
-    Both NaN, or the same infinity, is agreement (0, 0). A nonfinite
-    value on one side only is an infinite relative deviation: the old
-    arithmetic produced NaN here and Python's max() silently kept the
-    running value, which hid dogs_log disagreeing with CmdStan at -inf
-    for months.
-    """
-    if a != a and b != b:
-        return (0.0, 0)
-    if a == b:
-        return (0.0, 0)
-    if not (a - a == 0.0 and b - b == 0.0):
-        return (float("inf"), ulp_distance(a, b) if a == a and b == b else 0)
-    scale = max(abs(a), abs(b), 1.0)
-    return (abs(a - b) / scale, ulp_distance(a, b))
-
-
-def parse_wa(out):
-    """(names_csv, value_strings) from WANAMES/WAVALS lines, or None."""
-    names, vals = None, None
-    for line in out.splitlines():
-        if line.startswith("WANAMES "):
-            names = line[8:]
-        elif line.startswith("WAVALS"):
-            vals = line[6:].split()
-    if names is None or vals is None or names.startswith("FAIL"):
-        return None
-    if vals and vals[0] == "FAIL":
-        return None
-    return (names, vals)
 
 
 def main():
