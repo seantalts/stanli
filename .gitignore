@@ -27,3 +27,8 @@ web/stanli.mjs
 # rather than committed, for the same reason the wasm is.
 web/models/
 *.tgz
+r/src/*.o
+r/src/*.so
+r/src/*.dll
+r/*.Rcheck/
+r/*.tar.gz

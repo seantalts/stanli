@@ -1,0 +1,23 @@
+Package: stanli
+Type: Package
+Title: The Stan Language Interpreter
+Version: 0.5.0
+Authors@R: person("Sean", "Talts", email = "xitrium@gmail.com",
+                  role = c("aut", "cre"))
+Description: Compile and sample Stan models without a C++ toolchain. Stan
+    models are lowered to a graph of operations over precompiled
+    'stan-math' kernels rather than translated to C++ and compiled, so
+    preparing a model takes milliseconds instead of minutes. Provides
+    adaptive Hamiltonian Monte Carlo with the diagnostics a Bayesian
+    workflow needs (rank-normalized split R-hat, bulk and tail effective
+    sample size, E-BFMI), and L-BFGS optimization. The runtime library is
+    downloaded on first use rather than bundled; see stanli_install().
+License: BSD_3_clause + file LICENSE
+URL: https://github.com/seantalts/stanli
+BugReports: https://github.com/seantalts/stanli/issues
+Encoding: UTF-8
+Depends: R (>= 4.0)
+Imports: utils, tools
+Suggests: V8, jsonlite, posterior, testthat (>= 3.0.0)
+NeedsCompilation: yes
+Config/roxygen2/version: 8.1.0
