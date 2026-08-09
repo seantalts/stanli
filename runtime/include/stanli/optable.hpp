@@ -499,6 +499,11 @@ Kernel& kernel(uint16_t opcode);
 // Called by kernel TUs at static-init time.
 void register_kernel(uint16_t opcode, Kernel k);
 
+// The registered kernel for an opcode, or null. Registers the built-in
+// kernels on first use, so it is safe from lowering, which runs before
+// any Executor exists.
+const Kernel* find_kernel(uint16_t opcode);
+
 }  // namespace stanli
 
 #endif

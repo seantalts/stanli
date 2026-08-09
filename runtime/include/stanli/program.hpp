@@ -25,9 +25,13 @@
 #include <stan/math.hpp>
 
 #include <cstdint>
+#include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace stanli {
+
+struct KernelCtx;  // graph.hpp; only CALL's helpers touch it
 
 struct Program {
   enum Code : uint8_t {
@@ -89,6 +93,14 @@ struct Program {
     // value exactly; the extra partials computed for data arguments are
     // discarded when the executor hands the island a null adjoint.
     DENSITY,
+    // Any graph kernel, by opcode: the payload is calls[a]. This is the
+    // union point with the graph executor -- one instruction gives the
+    // register machine the graph's whole vocabulary, and its derivative
+    // is the kernel's own backward rather than a transcribed rule. The
+    // kernels compute on doubles, so only run_program<double> can execute
+    // one; the carver keeps a CALL-bearing island only when the generated
+    // adjoint exists, so the var replay never meets it.
+    CALL,
   };
   struct Instr {
     Code code = CONST;
@@ -96,11 +108,43 @@ struct Program {
     int32_t len = 0;
   };
 
+  // A CALL's payload: which kernel, and which register ranges stand in
+  // for its slots. `scratch` is a range inside the register file, so the
+  // partials the forward stashes are retained for the backward the same
+  // way every value is. `bwd_in`/`bwd_out` are where the VALUES live at
+  // backward time -- the same registers, unless the adjoint generator
+  // had to checkpoint them (some kernel backwards re-read their inputs;
+  // backward_ignores_input_values is a whitelist, not a guarantee).
+  struct Call {
+    uint16_t opcode = 0;
+    uint8_t variant = 0;
+    int8_t n_in = 0;
+    int32_t in[6] = {0, 0, 0, 0, 0, 0};
+    int32_t in_len[6] = {0, 0, 0, 0, 0, 0};
+    int32_t out = 0;
+    int32_t out_len = 0;
+    int32_t scratch = 0;
+    int32_t scratch_len = 0;
+    int32_t bwd_in[6] = {0, 0, 0, 0, 0, 0};
+    int32_t bwd_out = 0;
+    std::vector<int> idata;
+  };
+
   std::vector<Instr> code;
+  std::vector<Call> calls;   // CALL payloads, indexed by Instr::a
   std::vector<double> pool;  // CONSTR data
   int n_regs = 0;
   std::vector<int> out_regs;  // the values the caller reads back
 };
+
+// Assemble the forward context for `call` over the register file `reg`.
+// Backward-only fields are left null; run_adjoint fills its own.
+KernelCtx call_fwd_ctx(const Program::Call& call, double* reg);
+
+// Run one CALL forward. Out of line: KernelCtx lives in graph.hpp and
+// the kernel table in the executor, neither of which this header needs
+// for anything else.
+void run_call(const Program::Call& call, double* reg);
 
 // Run `p` over `reg`, which the caller has seeded and sized to at least
 // p.n_regs. The compilers guarantee every register is written before it is
@@ -250,6 +294,16 @@ void run_program(const Program& p, T* reg) {
       // program_density.cpp holds the switch, so the 27 instantiations
       // are paid in one translation unit instead of in every one that
       // runs a program.
+      case Program::CALL:
+        if constexpr (std::is_same_v<T, double>) {
+          run_call(p.calls[(size_t)I.a], reg);
+        } else {
+          // Kernels are double machinery; a program that reaches here
+          // under var was carved wrong, and saying so beats corrupting
+          // a gradient.
+          throw std::logic_error("CALL instruction in a var replay");
+        }
+        break;
       case Program::DENSITY: {
         const int ar = program_density_arity(I.len);
         if (ar > 3) {

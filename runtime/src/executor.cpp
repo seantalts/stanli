@@ -1,5 +1,6 @@
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/program.hpp>
 #include <stanli/packet.hpp>
 
 #include <algorithm>
@@ -55,6 +56,39 @@ const char* opcode_name(uint16_t opcode) {
 void register_kernel(uint16_t opcode, Kernel k) {
   assert(opcode < OP_COUNT_);
   g_table[opcode] = k;
+}
+
+static void ensure_registered();
+
+const Kernel* find_kernel(uint16_t opcode) {
+  ensure_registered();
+  if (opcode >= OP_COUNT_) return nullptr;
+  const Kernel& k = g_table[opcode];
+  return k.forward ? &k : nullptr;
+}
+
+// CALL support (program.hpp): the register machine invoking a graph
+// kernel. The context is assembled per call from the payload's ranges --
+// every field is a pointer into the register file plus immediates, so
+// this is loads and stores, no allocation.
+KernelCtx call_fwd_ctx(const Program::Call& call, double* reg) {
+  KernelCtx ctx;
+  ctx.n_in = call.n_in;
+  for (int k = 0; k < call.n_in; ++k)
+    ctx.in[k] = Desc{reg + call.in[k], call.in_len[k]};
+  ctx.out = Desc{reg + call.out, call.out_len};
+  ctx.variant = call.variant;
+  ctx.scratch = reg + call.scratch;
+  ctx.idata = call.idata.data();
+  ctx.n_idata = (int64_t)call.idata.size();
+  return ctx;
+}
+
+void run_call(const Program::Call& call, double* reg) {
+  KernelCtx ctx = call_fwd_ctx(call, reg);
+  const Kernel* k = find_kernel(call.opcode);
+  assert(k != nullptr);  // the carver only emits registered opcodes
+  k->forward(ctx);
 }
 
 void register_elementwise_kernels();

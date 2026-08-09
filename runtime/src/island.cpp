@@ -90,6 +90,30 @@ int unary_code(uint16_t oc) {
   }
 }
 
+// Everything else reaches the graph's own kernel through a CALL
+// instruction, so one op the machine has no rule for stops ending a run.
+// Scalar-out only for now: a vector-out op's value to an island is the
+// same kernel the graph already ran, and admitting them means compiling
+// entire vectorized models just for the estimate to refuse them
+// (docs/superpowers/plans/2026-08-09-kernel-call-instruction.md, phase 2).
+// The meta ops carry udata (message text, an ODE spec) or are the island
+// itself; propto stays refused for the same reason as above.
+bool callable(const Graph& g, const Op& op) {
+  switch (op.opcode) {
+    case OP_ISLAND:
+    case OP_ODE:
+    case OP_PRINT:
+    case OP_REJECT:
+      return false;
+    default:
+      break;
+  }
+  if (op.udata != nullptr || op.out2 >= 0) return false;
+  if (op.variant & 0x80u) return false;
+  if (g.slots[op.out].len != 1) return false;
+  return find_kernel(op.opcode) != nullptr;
+}
+
 // Structural vocabulary test. Shape/idata details are re-checked during
 // compilation; anything unexpected there aborts the island (compile
 // returns false) and the run is left alone.
@@ -120,8 +144,9 @@ bool in_vocab(const Graph& g, const Op& op) {
         return g.slots[op.out].len == g.slots[op.in[0]].len;
       // Propto term-dropping depends on argument TYPES; the island binds
       // every argument as T, which only matches the <false> instantiation.
-      return program_density_id_by_opcode(op.opcode) >= 0 &&
-             (op.variant & 0x80u) == 0 && scalar_ins(g, op);
+      if (program_density_id_by_opcode(op.opcode) >= 0)
+        return (op.variant & 0x80u) == 0 && scalar_ins(g, op);
+      return callable(g, op);
   }
 }
 
@@ -137,6 +162,10 @@ struct Compiler {
   std::unordered_map<int, int> reg_of;  // slot -> first register
   std::vector<int> live_in_slots;
   size_t op_index = 0;  // graph index of the op being compiled
+  // Scratch registers CALLs allocated: working memory the graph op also
+  // had, free in the estimate's eyes, so the estimate counts these at
+  // weight 1 rather than kRegWeight.
+  int64_t n_call_scratch = 0;
   bool ok = true;
 
   // A copy-then-modify op (SET_INDEX/SET_SLICE writing a slot distinct
@@ -225,6 +254,41 @@ struct Compiler {
     I.c = cc;
     I.len = len;
     prog.code.push_back(I);
+  }
+
+  // Everything callable() admits: the graph kernel itself, over register
+  // ranges. Scratch is allocated inside the register file so the partials
+  // the forward stashes survive to the backward.
+  bool compile_call(const Op& op) {
+    const Kernel* k = find_kernel(op.opcode);
+    if (k == nullptr || op.n_in > 6) return false;
+    Program::Call call;
+    call.opcode = op.opcode;
+    call.variant = op.variant;
+    call.n_in = (int8_t)op.n_in;
+    for (int j = 0; j < op.n_in; ++j) {
+      call.in[j] = read_reg(op.in[j]);
+      call.in_len[j] = (int)g.slots[op.in[j]].len;
+      call.bwd_in[j] = call.in[j];
+    }
+    call.out = write_reg(op.out);
+    call.out_len = (int)g.slots[op.out].len;
+    // An output aliasing an input would need the in-place value dance the
+    // scalar rules do; no callable op is written that way, so refuse
+    // rather than reason about it.
+    for (int j = 0; j < op.n_in; ++j)
+      if (call.out < call.in[j] + call.in_len[j] &&
+          call.in[j] < call.out + call.out_len)
+        return false;
+    call.bwd_out = call.out;
+    call.scratch_len =
+        k->scratch_size ? (int)k->scratch_size(op, g.slots.data()) : 0;
+    call.scratch = call.scratch_len ? alloc(call.scratch_len) : 0;
+    call.idata.assign(op.idata, op.idata + op.n_idata);
+    n_call_scratch += call.scratch_len;
+    prog.calls.push_back(std::move(call));
+    emit(Program::CALL, 0, (int)prog.calls.size() - 1);
+    return ok;
   }
 
   bool compile(const Op& op) {
@@ -345,7 +409,8 @@ struct Compiler {
       }
       default: {
         const int dc = program_density_id_by_opcode(op.opcode);
-        if (dc < 0 || op.n_in != program_density_arity(dc)) return false;
+        if (dc < 0) return compile_call(op);
+        if (op.n_in != program_density_arity(dc)) return false;
         int argv[kMaxDensityArgs];
         for (int k = 0; k < op.n_in; ++k) argv[k] = read_reg(op.in[k]);
         if (op.n_in > 3) {
@@ -404,7 +469,7 @@ int carve_islands(Graph& g,
     }
 
     // Compile. A failure mid-run keeps the graph untouched for the run.
-    Compiler cc{g, const_slots, last_use, pinned, {}, {}, {}, 0, true};
+    Compiler cc{g, const_slots, last_use, pinned, {}, {}, {}, 0, 0, true};
     bool compiled = true;
     for (size_t u = i; u < j && compiled; ++u) {
       cc.op_index = u;
@@ -419,6 +484,11 @@ int carve_islands(Graph& g,
     if (compiled) {
       const bool gen = gen_adjoint(cc.prog);
       cc.prog.native_adj = gen && !std::getenv("STANLI_NO_NATIVE_ADJ");
+      // The var replay cannot execute a CALL (kernels are double
+      // machinery), so a CALL-bearing island exists only with its
+      // generated adjoint; otherwise the run stays as ops, which is the
+      // same work the CALLs would have done anyway.
+      if (!cc.prog.calls.empty() && !cc.prog.native_adj) compiled = false;
       // A refusal is not an error -- the replay still gives the right
       // gradient -- but it is worth being able to see, because it is the
       // difference between a region that is fast and one that merely
@@ -447,9 +517,21 @@ int carve_islands(Graph& g,
                            ? 1
                            : g.slots[g.ops[u].out].len;
       const int64_t graph_cost = graph_elems + kOpCost * (int64_t)(j - i);
-      const int64_t island_cost = kRegWeight * (int64_t)cc.prog.n_regs +
-                                  (int64_t)cc.prog.code.size() +
-                                  (int64_t)cc.prog.adj.code.size();
+      // A CALL should read as cost-NEUTRAL: it runs the graph's own
+      // kernel with the graph's own per-call overhead (context assembly,
+      // indirect call, twice per gradient), so absorbing one buys
+      // continuity, never speed. Two corrections make that true in the
+      // arithmetic: its scratch counts at weight 1 rather than
+      // kRegWeight (working memory the graph op also had, free in this
+      // accounting), and each CALL pays the same kOpCost the graph side
+      // is charged -- without which a region of nothing but CALLs reads
+      // as a win and measures a loss (dugongs_model, 0.63x, the first
+      // sweep after the vocabulary widened).
+      const int64_t n_calls = (int64_t)cc.prog.calls.size();
+      const int64_t island_cost =
+          kRegWeight * ((int64_t)cc.prog.n_regs - cc.n_call_scratch) +
+          cc.n_call_scratch + (int64_t)cc.prog.code.size() +
+          (int64_t)cc.prog.adj.code.size() + (kOpCost - 1) * 2 * n_calls;
       if (std::getenv("STANLI_DEBUG_ISLAND"))
         std::fprintf(stderr, "island? ops=%zu graph=%lld island=%lld\n", j - i,
                      (long long)graph_cost, (long long)island_cost);

@@ -26,6 +26,7 @@
 
 #include <stanli/adjoint.hpp>
 #include <stanli/island.hpp>
+#include <stanli/optable.hpp>
 #include <stanli/program_density.hpp>
 
 #include <stan/math.hpp>
@@ -83,14 +84,26 @@ bool gen_adjoint(IslandProg& p) {
   // needs survives in place exactly when no later instruction overwrites it;
   // a register written exactly once is what the copy aliasing below needs.
   std::vector<int> first_write((size_t)n0, -1), last_write((size_t)n0, -1);
+  auto mark_write = [&](int i, int r) {
+    if (r < 0 || r >= n0) return false;
+    if (first_write[(size_t)r] < 0) first_write[(size_t)r] = i;
+    last_write[(size_t)r] = i;
+    return true;
+  };
   for (int i = 0; i < (int)orig.size(); ++i) {
-    const int wl = out_len(orig[i]);
-    for (int k = 0; k < wl; ++k) {
-      const int r = orig[i].dst + k;
-      if (r < 0 || r >= n0) return false;
-      if (first_write[(size_t)r] < 0) first_write[(size_t)r] = i;
-      last_write[(size_t)r] = i;
+    if (orig[i].code == Program::CALL) {
+      // A CALL's writes come from its payload: the output range and the
+      // scratch its kernel stashes partials in.
+      const Program::Call& call = fwd.calls[(size_t)orig[i].a];
+      for (int k = 0; k < call.out_len; ++k)
+        if (!mark_write(i, call.out + k)) return false;
+      for (int k = 0; k < call.scratch_len; ++k)
+        if (!mark_write(i, call.scratch + k)) return false;
+      continue;
     }
+    const int wl = out_len(orig[i]);
+    for (int k = 0; k < wl; ++k)
+      if (!mark_write(i, orig[i].dst + k)) return false;
   }
 
   // Registers whose adjoint cell has to stay their own. Two kinds:
@@ -104,10 +117,21 @@ bool gen_adjoint(IslandProg& p) {
       if (li.reg + k >= n0) return false;
       no_alias[(size_t)(li.reg + k)] = 1;
     }
-  for (const auto& I : orig)
+  for (const auto& I : orig) {
     if (I.code == Program::DENSITY && program_density_arity(I.len) > 3)
       for (int k = 0; k < program_density_arity(I.len); ++k)
         if (I.a + k >= 0 && I.a + k < n0) no_alias[(size_t)(I.a + k)] = 1;
+    if (I.code == Program::CALL) {
+      // The kernel's backward accumulates adjoints over whole ranges, so
+      // every CALL range keeps identity adjoint cells.
+      const Program::Call& call = fwd.calls[(size_t)I.a];
+      for (int j = 0; j < call.n_in; ++j)
+        for (int k = 0; k < call.in_len[j]; ++k)
+          no_alias[(size_t)(call.in[j] + k)] = 1;
+      for (int k = 0; k < call.out_len; ++k)
+        no_alias[(size_t)(call.out + k)] = 1;
+    }
+  }
 
   // Two ranges that overlap without coinciding would have the elementwise
   // adjoint loop read a cell it has already zeroed. Coinciding is fine and
@@ -126,6 +150,15 @@ bool gen_adjoint(IslandProg& p) {
     if (I.code == Program::DENSITY && program_density_arity(I.len) > 3 &&
         !in_range(I.a, program_density_arity(I.len)))
       return false;
+    if (I.code == Program::CALL) {
+      const Program::Call& call = fwd.calls[(size_t)I.a];
+      for (int j = 0; j < call.n_in; ++j)
+        if (!in_range(call.in[j], call.in_len[j])) return false;
+      if (!in_range(call.out, call.out_len)) return false;
+      if (call.scratch_len && !in_range(call.scratch, call.scratch_len))
+        return false;
+      continue;
+    }
     const bool ranged_density =
         I.code == Program::DENSITY && program_density_arity(I.len) > 3;
     if (!ranged_density) {
@@ -201,8 +234,42 @@ bool gen_adjoint(IslandProg& p) {
     return true;
   };
 
+  // A range needs a checkpoint when any element is overwritten strictly
+  // after i; the copy is one MOVR and the backward reads it instead.
+  auto save_range = [&](int r, int len, int i) {
+    bool need = false;
+    for (int k = 0; k < len && !need; ++k)
+      need = last_write[(size_t)(r + k)] > i;
+    if (!need) return r;
+    const int ck = n_regs;
+    n_regs += len;
+    Program::Instr S;
+    S.code = len == 1 ? Program::MOV : Program::MOVR;
+    S.dst = ck;
+    S.a = r;
+    S.len = len;
+    ncode.push_back(S);
+    return ck;
+  };
+
   for (int i = 0; i < (int)orig.size(); ++i) {
     const Program::Instr& I = orig[i];
+    if (I.code == Program::CALL) {
+      // The kernel's backward may read its input VALUES, not just its
+      // scratch (backward_ignores_input_values is a whitelist, not a
+      // guarantee), and some read their output values too -- so both are
+      // checkpointed whenever a later instruction overwrites them.
+      Program::Call& call = fwd.calls[(size_t)I.a];
+      for (int j = 0; j < call.n_in; ++j)
+        call.bwd_in[j] = save_range(call.in[j], call.in_len[j], i);
+      ncode.push_back(I);
+      call.bwd_out = save_range(call.out, call.out_len, i);
+      AdjInstr A;
+      A.code = Program::CALL;
+      A.a = I.a;
+      ap.code.push_back(A);
+      continue;
+    }
     if (aliasable(I, i)) {
       const int len = I.code == Program::MOV ? 1 : I.len;
       for (int k = 0; k < len; ++k)
@@ -382,8 +449,37 @@ bool gen_adjoint(IslandProg& p) {
   return true;
 }
 
-void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
+void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
+                 double* adj) {
   for (const AdjInstr& I : ap.code) {
+    if (I.code == Program::CALL) {
+      // The kernel's own backward is the rule: values from the (possibly
+      // checkpointed) forward registers, partials from the scratch the
+      // forward stashed inside the file, adjoints accumulated straight
+      // into the adjoint file at the same ranges the values occupy --
+      // every CALL range is excluded from cell sharing, so range index
+      // and cell index agree. Then the output's cells are cleared, the
+      // same consume-and-clear every other rule performs.
+      const Program::Call& call = fwd.calls[(size_t)I.a];
+      KernelCtx ctx;
+      ctx.n_in = call.n_in;
+      for (int k = 0; k < call.n_in; ++k) {
+        ctx.in[k] =
+            Desc{const_cast<double*>(val) + call.bwd_in[k], call.in_len[k]};
+        ctx.in_adj[k] = Desc{adj + call.in[k], call.in_len[k]};
+      }
+      ctx.out = Desc{const_cast<double*>(val) + call.bwd_out, call.out_len};
+      ctx.out_adj_vec = Desc{adj + call.out, call.out_len};
+      if (call.out_len == 1) ctx.out_adj = adj[call.out];
+      ctx.variant = call.variant;
+      ctx.scratch = const_cast<double*>(val) + call.scratch;
+      ctx.idata = call.idata.data();
+      ctx.n_idata = (int64_t)call.idata.size();
+      const Kernel* k = find_kernel(call.opcode);
+      k->backward(ctx);
+      for (int j = 0; j < call.out_len; ++j) adj[call.out + j] = 0.0;
+      continue;
+    }
     // Every instruction consumes its output's adjoint and clears it: the
     // register is a cell, and whatever it held before this instruction wrote
     // it is a different value with a different adjoint. Reading into `t`

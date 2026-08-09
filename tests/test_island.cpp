@@ -166,16 +166,18 @@ static void test_propto_density_refused() {
 }
 
 static void test_unsupported_op_splits() {
-  // POW mid-region splits the run into halves below the threshold.
+  // A vector-out op mid-region splits the run into halves below the
+  // threshold. It used to be POW, but POW -- and every scalar-out op with
+  // a kernel -- now compiles as a CALL; what still refuses is an output
+  // wider than one register (phase 2 of the kernel-call plan).
   HmmGraph h = build_hmm(5);  // 55 body ops
   Graph& g = h.g;
   const size_t mid = g.ops.size() / 2;
   Op pw;
-  pw.opcode = OP_POW;
-  pw.n_in = 2;
+  pw.opcode = OP_REP_VEC;
+  pw.n_in = 1;
   pw.in[0] = g.ops[mid].in[0];
-  pw.in[1] = g.ops[mid].in[0];
-  pw.out = g.add_slot(1, false);
+  pw.out = g.add_slot(3, false);
   g.ops.insert(g.ops.begin() + (long)mid, pw);
   h.terms.back() = h.g.result_slot;  // unchanged, re-anchor after insert
   const size_t before = g.ops.size();
@@ -252,6 +254,74 @@ static void test_scalar_chain_carved() {
   expect("scalar chain sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close("scalar chain v" + std::to_string(i), got[i], want[i]);
+}
+
+// A recurrence threaded through ops the register machine has no
+// instruction for -- POW, a unary from the generated list, a cdf, an
+// integer-outcome lpmf. Each compiles as a CALL to the graph's own
+// kernel, so one op the machine cannot say stops ending the run, and
+// the derivative is the kernel's own backward. The reference is the
+// same graph uncarved: a CALL runs the identical kernel, so the graph
+// is the arbiter, not the var replay (which cannot execute a CALL and
+// never meets one).
+static void test_kernel_call_ops_carved() {
+  Graph g;
+  Fills fills;
+  const int p0 = g.add_slot(1, true);
+  const int p1 = g.add_slot(1, true);
+  auto cslot = [&](double v) {
+    const int s = g.add_slot(1, false);
+    fills.emplace_back(s, std::vector<double>{v});
+    return s;
+  };
+  int acc = p0;
+  for (int t = 0; t < 12; ++t) {
+    // inv_logit keeps the recurrence in (0, 1): pow of a negative base at
+    // a non-integer exponent is NaN, and tanh below goes negative.
+    const int il = g.add_slot(1, false);
+    g.add_op(OP_INV_LOGIT, {acc}, il);
+    const int pw = g.add_slot(1, false);
+    g.add_op(OP_POW, {il, p1}, pw);  // out of vocabulary until CALL
+    const int sq = g.add_slot(1, false);
+    g.add_op(OP_SQUARE, {pw}, sq);
+    const int lg = g.add_slot(1, false);
+    g.add_op(OP_LGAMMA, {sq}, lg);  // generated-unary list
+    const int sm = g.add_slot(1, false);
+    g.add_op(OP_ADD, {lg, cslot(0.15 * t + 0.4)}, sm);
+    const int cd = g.add_slot(1, false);
+    g.add_op(OP_NORMAL_LCDF, {cslot(0.3), sm, cslot(2.0)}, cd);  // cdf
+    const int pm = g.add_slot(1, false);
+    {
+      Op lp;  // poisson_lpmf(2 | exp-ish rate): int outcome rides in idata
+      lp.opcode = OP_POISSON_LPMF;
+      lp.n_in = 1;
+      lp.in[0] = sq;
+      lp.out = pm;
+      lp.variant = 0x01;  // rate active; propto OFF
+      g.idata_pool.push_back({2});
+      lp.idata = g.idata_pool.back().data();
+      lp.n_idata = 1;
+      g.ops.push_back(lp);
+    }
+    const int nx = g.add_slot(1, false);
+    g.add_op(OP_ADD, {cd, pm}, nx);
+    const int th = g.add_slot(1, false);
+    g.add_op(OP_TANHV, {nx}, th);
+    acc = th;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {acc, p0}, lp);
+  g.result_slot = lp;
+  std::vector<int> terms{lp};
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  const int carved = carve_islands(g, fills, terms, {});
+  expect("callops carved==1", carved == 1);
+  const std::vector<double> got = run_grad(std::move(g), fills);
+  expect("callops sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("callops v" + std::to_string(i), got[i], want[i]);
 }
 
 static void test_too_many_live_ins() {
@@ -382,6 +452,7 @@ int main() {
   test_unsupported_op_splits();
   test_too_many_live_ins();
   test_six_live_ins_ok();
+  test_kernel_call_ops_carved();
 
   test_unsetenv("STANLI_ISLAND_ALWAYS");
   test_wide_state_refused();

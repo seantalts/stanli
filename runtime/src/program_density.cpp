@@ -98,9 +98,9 @@ int program_density_id_by_opcode(uint16_t opcode) {
 template <typename T>
 T program_density(int id, const T* args) {
   switch (id) {
-#define STANLI_PD_CASE(opc, fn, arity, tier)                        \
-  case kId_##fn:                                                    \
-    return call_with<arity>(                                        \
+#define STANLI_PD_CASE(opc, fn, arity, tier) \
+  case kId_##fn:                             \
+    return call_with<arity>(                 \
         [](const auto&... x) { return stan::math::fn<false>(x...); }, args);
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_CASE)
 #undef STANLI_PD_CASE
@@ -119,10 +119,10 @@ void program_density_partials(int id, const double* args, double* partials) {
   for (int k = 0; k < n; ++k) s.buf[k] = &partials[k];
   active_sink() = &s;
   switch (id) {
-#define STANLI_PD_PARTIALS(opc, fn, arity, tier)                       \
-  case kId_##fn:                                                       \
+#define STANLI_PD_PARTIALS(opc, fn, arity, tier)                            \
+  case kId_##fn:                                                            \
     call_rvar<arity>([](const auto&... x) { stan::math::fn<false>(x...); }, \
-                     args);                                            \
+                     args);                                                 \
     break;
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_PARTIALS)
 #undef STANLI_PD_PARTIALS

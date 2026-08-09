@@ -75,7 +75,7 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
   const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += ctx.out_adj_vec.data[m];
-  run_adjoint(p.adj, ctx.scratch, adj.data());
+  run_adjoint(p, p.adj, ctx.scratch, adj.data());
   for (int k = 0; k < ctx.n_in; ++k) {
     if (!ctx.in_adj[k].data) continue;
     const auto& li = p.ins[(size_t)k];

@@ -94,7 +94,7 @@ static std::vector<double> native_adjoints(const IslandProg& p,
   const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += seed[m];
-  run_adjoint(p.adj, val.data(), adj.data());
+  run_adjoint(p, p.adj, val.data(), adj.data());
 
   std::vector<double> got(in.size());
   off = 0;

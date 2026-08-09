@@ -228,7 +228,16 @@ while dropping that shape and two more that were slower compiled.
 `STANLI_ISLAND_ALWAYS=1` skips it, which is how to ask why a region was
 left alone.
 
-The pass also refuses outright: short runs (under 32 ops), regions with
+Vocabulary is no longer a refusal for scalar work. The machine has its
+own instructions for the arithmetic a recurrence is made of, and
+anything else with a single-number result -- a cdf, a discrete density,
+a special function -- compiles as a *call to the graph's own kernel*,
+the exact code the op would have run, partials and derivative included.
+So one op the machine has no instruction for stops ending a run, which
+used to split regions in half; a call buys continuity, never speed, and
+the estimate charges it accordingly. Vector-result ops still end runs.
+
+The pass still refuses outright: short runs (under 32 ops), regions with
 more than six distinct inputs, densities in the dropped-constants form
 (see the refusal above), and regions producing target entries. One more
 applies to the generated backward alone: a region with a branch on a
