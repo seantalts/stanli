@@ -17,8 +17,6 @@
 
 #include <stan/math.hpp>
 
-#include <array>
-
 namespace stanli {
 
 // Replays f on a varmat operand -- `var_value<VectorXd>`, one vari over a
@@ -65,19 +63,6 @@ double legacy_fwd_partials_vec(KernelCtx& ctx, F&& f) {
   const double value = j.val();
   stan::math::grad(j.vi_);
   Eigen::Map<Eigen::VectorXd>(ctx.scratch, ctx.in[0].len) = x.adj();
-  return value;
-}
-
-// The same, for a handful of scalar operands.
-template <int NArgs, typename F>
-double legacy_fwd_partials_scalars(KernelCtx& ctx, F&& f) {
-  stan::math::nested_rev_autodiff nested;
-  std::array<stan::math::var, NArgs> a;
-  for (int k = 0; k < NArgs; ++k) a[k] = ctx.in[k].data[0];
-  stan::math::var j = f(a);
-  const double value = j.val();
-  stan::math::grad(j.vi_);
-  for (int k = 0; k < NArgs; ++k) ctx.scratch[k] = a[k].adj();
   return value;
 }
 
