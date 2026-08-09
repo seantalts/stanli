@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1
+
+A re-release of 0.5.0 for the R distribution channel; no code changes.
+The v0.5.0 GitHub release was published before its runtime assets
+attached, and under immutable releases that freezes it empty; deleting
+it tombstones the tag name forever, so the assets `stanli_install()`
+downloads need a release that can carry them. The release workflow now
+attaches assets to a draft and publishes last, which is the order
+immutable releases require.
+
 ## 0.5.0
 
 Three bindings and a workflow. 0.4.x could sample a model from Python or

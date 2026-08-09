@@ -754,11 +754,17 @@ jobs:
           n=$(ls runtime/*.tar.gz | wc -l)
           echo "$n runtime assets"
           [ "$n" -eq 5 ]
+          # Immutable releases freeze their assets the moment they are
+          # published, so everything must attach while the release is a
+          # draft and publishing is the last step. Publishing first and
+          # uploading after is a 422; worse, deleting the failed release
+          # tombstones the tag name forever (v0.5.0 is such a casualty).
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" \
+            gh release create "$GITHUB_REF_NAME" --draft \
               --title "stanli ${GITHUB_REF_NAME#v}" --generate-notes
           gh release upload "$GITHUB_REF_NAME" \
             runtime/*.tar.gz stanli_*.tar.gz --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
 
   publish:
     # Tags only. PyPI versions can never be reused, so this must not fire
