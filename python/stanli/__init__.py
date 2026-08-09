@@ -23,11 +23,10 @@ __version__ = "0.5.0"
 
 _BIN = pathlib.Path(__file__).parent / "_bin"
 
-# Must match STANLI_N_SAMPLER_COLS and the column order in
-# runtime/include/stanli/capi.h.
-SAMPLER_COLUMNS = ("lp__", "accept_stat__", "stepsize__", "treedepth__",
-                   "n_leapfrog__", "divergent__", "energy__")
-_N_SAMPLER_COLS = len(SAMPLER_COLUMNS)
+# Must match STANLI_N_SAMPLER_COLS in runtime/include/stanli/capi.h; the
+# names themselves come from the ABI (see below), so only the count is
+# mirrored here.
+_N_SAMPLER_COLS = 7
 # Must match the STANLI_STAT_* enum in capi.h.
 _SUMMARY_STATS = ("mean", "mcse_mean", "sd", "mcse_sd", "q5", "q50", "q95",
                   "ess_bulk", "ess_tail", "r_hat")
@@ -91,11 +90,6 @@ def _load_lib():
                                 ctypes.POINTER(ctypes.c_double),
                                 ctypes.POINTER(ctypes.c_double),
                                 ctypes.POINTER(ctypes.c_double)]
-    lib.stanli_sample.restype = ctypes.c_int
-    lib.stanli_sample.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
-                                  ctypes.c_int, ctypes.c_int, ctypes.c_double,
-                                  ctypes.POINTER(ctypes.c_double),
-                                  ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_n_constrained.restype = ctypes.c_int64
     lib.stanli_n_constrained.argtypes = [ctypes.c_void_p]
     lib.stanli_constrained_name.restype = ctypes.c_char_p
@@ -152,10 +146,17 @@ def _load_lib():
                                          ctypes.POINTER(ctypes.c_double),
                                          ctypes.c_int, ctypes.c_char_p,
                                          ctypes.c_size_t]
+    lib.stanli_sampler_column_name.restype = ctypes.c_char_p
+    lib.stanli_sampler_column_name.argtypes = [ctypes.c_int]
     return lib
 
 
 _lib = _load_lib()
+
+# The column names are the ABI's, not ours; the R bridge reads the same
+# accessor.
+SAMPLER_COLUMNS = tuple(_lib.stanli_sampler_column_name(i).decode()
+                        for i in range(_N_SAMPLER_COLS))
 
 
 def _dptr(a):
@@ -526,7 +527,7 @@ class Model:
         _lib.stanli_optimize_opts_init(ctypes.byref(opts))
         opts.seed = seed
         opts.iter = int(iter)
-        opts.jacobian = 1 if jacobian else 0
+        opts.jacobian = 1
         opts.init_radius = float(init_radius)
         init_arr = None
         if init is not None:
