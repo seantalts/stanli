@@ -44,9 +44,7 @@ namespace stanli {
   X(OP_MULTI_NORMAL_LPDF)                                                 \
   X(OP_MULTI_NORMAL_PREC_LPDF)                                            \
   X(OP_GEMM)                                                              \
-  X(OP_LOG_INV_LOGIT)                                                     \
   X(OP_LOG_SOFTMAX)                                                       \
-  X(OP_LOG1M_INV_LOGIT)                                                   \
   X(OP_CONSTRAIN_CHOL_CORR)                                               \
   X(OP_LKJ_CORR_CHOL_LPDF)                                                \
   X(OP_LKJ_CORR_LPDF)                                                     \
@@ -392,6 +390,8 @@ namespace stanli {
   X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -2.0 / (x * x * x))  \
   X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x), -std::exp(x) / (1.0 - std::exp(x)))  \
   X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x), stan::math::inv_logit(x))  \
+  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x), stan::math::inv_logit(-x))  \
+  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x), -stan::math::inv_logit(x))  \
   X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x), std::exp(x - std::exp(x)))  \
   X(OP_SIN, sin, std::sin(x), std::cos(x))  \
   X(OP_COS, cos, std::cos(x), -std::sin(x))  \

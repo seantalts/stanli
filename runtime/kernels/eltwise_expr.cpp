@@ -269,32 +269,6 @@ void cumsum_bwd(KernelCtx& ctx) {
   ctx.in_adj[0].data[0] += radj[0];
 }
 
-// AoS Matrix<var> log_inv_logit routes through apply_scalar_unary: scalar
-// libm per element; adjoint is dout * inv_logit(-x).
-void log_inv_logit_fwd(KernelCtx& ctx) {
-  for (int64_t i = 0; i < ctx.out.len; ++i)
-    ctx.out.data[i] = stan::math::log_inv_logit(ctx.in[0].data[i]);
-}
-void log_inv_logit_bwd(KernelCtx& ctx) {
-  if (!ctx.in_adj[0].data) return;
-  const double* dout = ctx.out.len == 1 ? &ctx.out_adj
-                                        : ctx.out_adj_vec.data;
-  for (int64_t i = 0; i < ctx.out.len; ++i)
-    ctx.in_adj[0].data[i] += dout[i] * stan::math::inv_logit(-ctx.in[0].data[i]);
-}
-
-void log1m_inv_logit_fwd(KernelCtx& ctx) {
-  for (int64_t i = 0; i < ctx.out.len; ++i)
-    ctx.out.data[i] = stan::math::log1m_inv_logit(ctx.in[0].data[i]);
-}
-void log1m_inv_logit_bwd(KernelCtx& ctx) {
-  if (!ctx.in_adj[0].data) return;
-  const double* dout = ctx.out.len == 1 ? &ctx.out_adj
-                                        : ctx.out_adj_vec.data;
-  for (int64_t i = 0; i < ctx.out.len; ++i)
-    ctx.in_adj[0].data[i] -= dout[i] * stan::math::inv_logit(ctx.in[0].data[i]);
-}
-
 void logv_fwd(KernelCtx& ctx) {
   for (int64_t i = 0; i < ctx.out.len; ++i)
     ctx.out.data[i] = std::log(ctx.in[0].data[i]);
@@ -429,10 +403,6 @@ void register_eltwise_kernels() {
   register_kernel(OP_NEG, Kernel{negu_fwd, negu_bwd, nullptr});
   register_kernel(OP_EXPV, Kernel{expv_fwd, expv_bwd, nullptr});
   register_kernel(OP_TANHV, Kernel{tanhv_fwd, tanhv_bwd, nullptr});
-  register_kernel(OP_LOG1M_INV_LOGIT,
-                  Kernel{log1m_inv_logit_fwd, log1m_inv_logit_bwd, nullptr});
-  register_kernel(OP_LOG_INV_LOGIT,
-                  Kernel{log_inv_logit_fwd, log_inv_logit_bwd, nullptr});
   register_kernel(OP_CUMSUM, Kernel{cumsum_fwd, cumsum_bwd, nullptr});
   register_kernel(OP_LOGV, Kernel{logv_fwd, logv_bwd, nullptr});
   register_kernel(OP_INV_LOGIT, Kernel{invlogit_fwd, invlogit_bwd, nullptr});

@@ -1340,8 +1340,6 @@ struct Lowering {
         {"inv_logit", OP_INV_LOGIT}, {"sqrt", OP_SQRT},
         {"square", OP_SQUARE}, {"log1m", OP_LOG1M},  {"softmax", OP_SOFTMAX},
         {"tanh", OP_TANHV},    {"cumulative_sum", OP_CUMSUM},
-        {"log_inv_logit", OP_LOG_INV_LOGIT},
-        {"log1m_inv_logit", OP_LOG1M_INV_LOGIT},
         {"log_softmax", OP_LOG_SOFTMAX},
     };
     auto uit = kUn.find(e.name);
