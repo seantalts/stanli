@@ -2,11 +2,13 @@
 
 ## 0.5.0
 
-Workflow and language reach. 0.4.x could sample a model but not tell you
-whether the run was any good, and a 2026 model written with
-`offset`/`multiplier` would not compile at all. This one runs four
-chains in parallel with the diagnostics to judge them, and lowers every
-parameter transform Stan has.
+Three bindings and a workflow. 0.4.x could sample a model from Python or
+a browser tab but could not tell you whether the run was any good, and a
+2026 model written with `offset`/`multiplier` would not compile at all.
+This one runs four chains in parallel with the diagnostics to judge
+them, lowers every parameter transform Stan has, finds the mode, adds an
+R package, verifies brms-shaped models, and closes with a reviewed
+cleanup of the engine all of it sits on.
 
 ### Multi-chain sampling and diagnostics
 
@@ -148,13 +150,62 @@ data[927] is nan`.
   reverse sweep contracts them in that order. `a += b; a += c` does not
   round like `a += (b + c)`, and that was the whole of a 1-ULP gap.
 
-## 0.4.1
+
+### An R package
+
+The same runtime behind an R binding (#33, #35): `stanli_model()`,
+`sample_model()`, `summary()`, `stanli_diagnose()`, `optimize_model()`,
+and `as_draws_array()` for the posterior ecosystem. Two choices make it
+a package CRAN could carry:
+
+- **The Stan compiler is stanc3 compiled to JavaScript**, run through
+  the V8 package, rstan's approach: one 2.8 MB file, no toolchain, no
+  per-platform binaries. Where the runtime embeds stanc3 that path is
+  used instead and V8 never loads; `tests/test_stancjs.cjs` pins the
+  JavaScript compiler's MIR byte-for-byte against the native binary.
+- **The runtime downloads on first use** with `stanli_install()`, pinned
+  to the release the package was built against. Release tags now attach
+  the five platform runtime tarballs, so the GitHub release is the R
+  package's distribution channel. Because binding and runtime are
+  separately versioned artifacts, the C ABI carries a layout version
+  (`stanli_abi_version()`) and the bridge refuses a runtime that
+  disagrees: reading the options struct at wrong offsets would not
+  crash, it would sample from the wrong seed.
+
+Not on CRAN yet; install from
+[r-universe](https://seantalts.r-universe.dev) or a checkout
+(`r/README.md`).
+
+### brms-shaped models, and a bug only a second evaluation could catch
+
+`harnesses/brms_sweep.py` generates eight brms-shaped models (lprior
+accumulation, correlated random effects, splines, monotonic effects, the
+ordinal and bernoulli GLMs, posterior-predictive generated quantities)
+and verifies each against a CmdStan build; all eight pass, six bitwise
+(#32). Two fixes came out of it:
+
+- **The same point evaluated four times gave four different log
+  densities.** The in-place pass verified that a vector's zero-fill was
+  an op before making `mu[n] +=` writes destructive; constant folding
+  then replaced that op with a bind-time fill, and the writes
+  accumulated into a buffer nothing reset. Folding now refuses to fold
+  away the producer of a slot that a surviving read-modify-write op
+  needs restored each evaluation. Nothing structural could have caught
+  it, and the corpus rig cannot: it evaluates one point per process, so
+  a model that drifts across evaluations verifies perfectly and then
+  samples from the wrong posterior.
+- **`rows()` in a real-valued expression.** brms's `mo()` helper writes
+  `rows(scale) * sum(scale[1:i])` in the middle of arithmetic, and the
+  function was answered only where an integer was expected.
+
+### Three shape fixes, from a 0.4.1 that was never tagged
 
 Three bugs in features 0.4.0 introduced. Two refused to compile, one was
 silent. All three were found by exercising shapes the posteriordb corpus
-does not contain, and all three are covered by fixtures now.
+does not contain, and all three are covered by fixtures now. (These were
+drafted as a 0.4.1 that never shipped; no such version exists on PyPI.)
 
-### array[N] vector[K] data reached the multivariate densities permuted
+#### array[N] vector[K] data reached the multivariate densities permuted
 
 `y ~ multi_normal(mu, Sigma)` with `array[N] vector[K] y` as data returned
 wrong gradients. The model compiled and `lp__` stayed plausible, so
@@ -176,7 +227,7 @@ No posteriordb model has this shape, so the corpus never covered it.
 `tests/fixtures/mnarr.stan` does now, with `N` and `K` deliberately
 different, since a square case hides a transpose.
 
-### Vectorized dirichlet did not compile
+#### Vectorized dirichlet did not compile
 
 `p ~ dirichlet(a)` over an array of simplexes, the shape a hierarchical
 Dirichlet is written in, threw at evaluation time. The kernel took one
@@ -188,7 +239,7 @@ The kernel splits the slot now. A single dirichlet needs theta and alpha
 the same length, so a longer theta is unambiguously the vectorized form.
 Data and parameter outcomes both match CmdStan at 0 ULP.
 
-### Vectorized truncation did not compile
+#### Vectorized truncation did not compile
 
 0.4.0 added truncation and tested it on `real y`, which is the one shape
 that compiled. Every vectorized form failed at compile time, and
@@ -209,6 +260,46 @@ Both are fixed. Five shapes now match CmdStan at 0 ULP on `lp__` and every
 gradient: vector outcome, array outcome, one-sided `T[a, ]` and `T[ , b]`,
 a vector location, and a truncated `_lpmf`. `tests/fixtures/truncvec.stan`
 covers the two that failed, so CI catches this without CmdStan installed.
+
+### The demo page carries the corpus, and npm carries a scope
+
+Every verified posteriordb model (117 of them) is on the
+[demo page](https://seantalts.github.io/stanli/) now, searchable, lazily
+loaded: the page fetches only an index until a model is selected. The
+npm package is `@seantalts/stanli`: npm's name-similarity filter rejects
+the unscoped name, and the scope is what lets the tag flow publish.
+
+### Re-rolling is O(n log n) in time, and the test that keeps it there counts
+
+The re-roll pass was linear in memory but quadratic in time: every
+region answered its range questions by scanning whole per-slot use lists
+(#36). ldaK5 refills one shared 5-slot vector from each of its 33,000
+iterations, so those lists are 33,000 entries long and every region
+walked all of them: 11.3 billion list entries read, against 3.6 million
+for everything else in the pass combined. Binary search asks the same
+questions of the same lists and reads only the entries that can matter.
+
+The regression gate then learned its own lesson: two wall-clock
+formulations of "still linear" failed on shared CI runners while the
+pass was fine. The pass now counts every list entry it reads
+(`RerollStats::list_steps`, probes included), and the test asserts on
+that exact integer's ratio between two sizes: 2.1x for the shipped pass,
+4.0x for the quadratic scan it provably rejects.
+
+### A reviewed simplification of the engine
+
+The docs were rewritten about a third shorter with their stale claims
+fixed (#37), and the runtime went through a staged review (#39): survey
+reviewers proposed 84 simplifications, adversarial verification refuted
+26, and the 57 approved ones landed one commit each, 579 lines removed
+net. Nothing changed behavior by every oracle the project has: the
+corpus replay's worst-deviation line is byte-identical before and after,
+the passes-on/passes-off A/B is byte-identical, and per-gradient
+benchmarks across the touched surfaces are flat. Two findings became new
+tests: the `STANLI_NO_INPLACE`/`STANLI_NO_ISLAND` kill-switches and
+`forward_value_only` had no coverage, and now do. The plan and the
+adjudicated findings are committed under `docs/superpowers/plans/`.
+
 
 ## 0.4.0
 
