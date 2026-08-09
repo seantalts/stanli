@@ -38,7 +38,10 @@ std::vector<char> mark_constant_ops(const Graph& g) {
   std::vector<char> no_fold(g.slots.size(), 0);
   std::vector<char> is_const(g.ops.size(), 0);
 
-  for (int round = 0;; ++round) {
+  // Terminates without a round cap: every `changed` sets a no_fold entry
+  // that was clear, no_fold lives outside the loop and is never cleared,
+  // so the number of rounds is bounded by g.slots.size().
+  for (;;) {
     // A slot carries a parameter's influence if it is a parameter or if some
     // surviving op writes it. Ops are in evaluation order, so one pass does.
     std::vector<char> live(g.slots.size(), 0);
@@ -113,7 +116,7 @@ std::vector<char> mark_constant_ops(const Graph& g) {
         }
       }
     }
-    if (!changed || round > 16) return is_const;
+    if (!changed) return is_const;
   }
 }
 
