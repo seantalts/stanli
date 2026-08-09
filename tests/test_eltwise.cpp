@@ -53,9 +53,6 @@ int main() {
 
   // Binary: all shape combos. Scalars are length-1 slots; the var reference
   // uses the scalar overloads (v(0)) exactly as generated C++ would.
-  auto scalar = [](const std::vector<double>& v) {
-    return std::vector<double>{v[0]};
-  };
 
   // ADD
   check_case("add vv", OP_ADD, N, {A, B}, [](auto& v) {
@@ -141,7 +138,6 @@ int main() {
     return stan::math::dot_product(v[0], v[1]);
   });
 
-  (void)scalar;
   if (failures == 0) std::printf("test_eltwise OK\n");
   return failures == 0 ? 0 : 1;
 }

@@ -962,9 +962,7 @@ static void test_write_fusion_bails() {
       expect_close(("chain v" + std::to_string(i)).c_str(), got[i], want[i]);
   }
   {  // something reads the vector while it is still half-written
-    Built b = build(8, 0);
-    Graph& g = b.g;
-    // Rebuild with a read of y_hat inside every lane.
+    // Built by hand with a read of y_hat inside every lane.
     Graph g2;
     Fills f2;
     const int a = g2.add_slot(5, true), sigma = g2.add_slot(1, true);
@@ -988,7 +986,6 @@ static void test_write_fusion_bails() {
     reroll(g2, f2, tt, {});
     expect("mid-run reader blocks fusion",
            count(g2, OP_SET_INDEX_INPLACE) == 8);
-    (void)g;
   }
 }
 

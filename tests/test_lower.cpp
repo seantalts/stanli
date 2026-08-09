@@ -564,20 +564,17 @@ int main() {
     stan::math::recover_memory();
   }
 
-  // Unsupported construct: cholesky_factor_corr must fail clearly.
-  bool threw = false;
-  try {
-    compile_model(slurp("tests/fixtures/chol.tmir.sexp"), [] {
+  // cholesky_factor_corr[K] lowers to K*(K-1)/2 unconstrained parameters.
+  // The unsupported-transform error path is covered by the
+  // unsupported-function check below.
+  {
+    CompiledModel cm = compile_model(slurp("tests/fixtures/chol.tmir.sexp"), [] {
       DataMap d;
       d.set_int("K", 3);
       return d;
     }());
-  } catch (const CompileError& e) {
-    threw = std::string(e.what()).find("transform") != std::string::npos;
+    check(cm.n_unconstrained == 3, "cholesky_corr unconstrained size is 3");
   }
-  // cholesky_factor_corr is supported now, so this fixture compiles; the
-  // error path is covered by the unsupported-function check below.
-  check(!threw, "cholesky_corr fixture compiles");
   // Control flow on a parameter: an `if` and a ternary whose conditions
   // depend on mu and sigma cannot pick an arm at load time, so lowering
   // compiles each into a necessity island. The gradient must be the one

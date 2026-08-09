@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -14,6 +15,25 @@ static void expect(const char* what, bool ok) {
     ++failures;
     std::printf("FAIL %s\n", what);
   }
+}
+
+// The opcode's calls column, or -1 if the report has no row for it. Rows are
+// "%-22s %10lld %12lld %12lld %5.1f%% %12lld", so calls is the second
+// whitespace-separated field; searching the report for the number anywhere
+// would also match the two unbounded nanosecond columns.
+static long long calls_for(const std::string& rep, const char* opcode) {
+  const std::string name(opcode);
+  for (size_t pos = 0; pos < rep.size();) {
+    const size_t eol = rep.find('\n', pos);
+    const std::string line = rep.substr(pos, eol - pos);
+    pos = eol == std::string::npos ? rep.size() : eol + 1;
+    const size_t a = line.find_first_not_of(' ');
+    if (a == std::string::npos) continue;
+    const size_t b = line.find(' ', a);
+    if (b == std::string::npos || line.compare(a, b - a, name) != 0) continue;
+    return std::strtoll(line.c_str() + b, nullptr, 10);
+  }
+  return -1;
 }
 
 int main() {
@@ -47,7 +67,8 @@ int main() {
   expect("report names EXP", rep.find("EXP") != std::string::npos);
   expect("report names ADD_N", rep.find("ADD_N") != std::string::npos);
   // 11 profiled gradient evaluations, one op instance of each opcode.
-  expect("counts calls", rep.find("11") != std::string::npos);
+  expect("counts EXP calls", calls_for(rep, "OP_EXP") == 11);
+  expect("counts ADD_N calls", calls_for(rep, "OP_ADD_N") == 11);
   expect("report has totals", rep.find("total") != std::string::npos);
 
   // Toggling off stops accumulation but keeps the collected numbers.
