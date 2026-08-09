@@ -794,10 +794,17 @@ static double peak_rss_mb() {
 #endif
 }
 
-// How long reroll takes on the lda shape at size n, with the region count
-// checked along the way so a pass that got fast by doing less is not
-// mistaken for a pass that got fast.
-static double time_lda_reroll(int n) {
+// What reroll costs on the lda shape at size n: the list entries it looks
+// at, which is the term that was quadratic, and the wall clock, which is
+// reported but not asserted on. The region count is checked along the way
+// so a pass that got cheap by doing less is not mistaken for a pass that
+// got cheap.
+struct LdaCost {
+  double sec;
+  int64_t steps;
+};
+
+static LdaCost lda_reroll_cost(int n) {
   ldashape::Built b = ldashape::build(n);
   std::vector<int> tt = b.terms;
   const auto t0 = std::chrono::steady_clock::now();
@@ -806,16 +813,20 @@ static double time_lda_reroll(int n) {
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
           .count();
   expect("lda big all regions found", st.regions == n);
-  return sec;
+  return {sec, st.list_steps};
 }
 
 static void test_lda_shape_cost() {
-  const double small = time_lda_reroll(8000);
-  const double big = time_lda_reroll(16000);
+  const LdaCost small = lda_reroll_cost(8000);
+  const LdaCost big = lda_reroll_cost(16000);
   const double rss = peak_rss_mb();
-  std::printf("  lda shape reroll: n=8000 %.2f s, n=16000 %.2f s (%.1fx),"
+  std::printf("  lda shape reroll: n=8000 %.2f s / %lld steps,"
+              " n=16000 %.2f s / %lld steps (%.1fx steps, %.1fx time),"
               " peak RSS %.0f MB\n",
-              small, big, small > 0.0 ? big / small : 0.0, rss);
+              small.sec, (long long)small.steps, big.sec,
+              (long long)big.steps,
+              small.steps > 0 ? (double)big.steps / (double)small.steps : 0.0,
+              small.sec > 0.0 ? big.sec / small.sec : 0.0, rss);
 
   // The memory ceiling is the guard that matters, because memory is what
   // broke, and unlike a wall-clock number an RSS figure means the same
@@ -826,11 +837,19 @@ static void test_lda_shape_cost() {
   // 12 GB at n=16000, so 1 GB separates them with room on both sides.
   if (rss > 0.0) expect("lda reroll space stays linear", rss < 1024.0);
 
-  // Time is linear with a log factor: a doubling measures about 2.1x
-  // here and 2.0x asymptotically, against 4x for the quadratic scan this
-  // replaced. 3x sits between them, and being a ratio it does not depend
-  // on how fast the machine is.
-  expect("lda reroll time stays near-linear", big < 3.0 * small);
+  // Count the work, do not time it. A doubling of n doubles the entries
+  // this pass reads (2.1x measured) against a quadrupling for the
+  // whole-list scan it replaced (4.0x measured), so 3x separates the two
+  // with room on both sides, and the count is the same integer on every
+  // machine.
+  //
+  // The wall clock is not. Two earlier versions of this check gated on
+  // it, first as an absolute budget and then as a ratio, and between
+  // them they failed three CI runs in one day on the shared macOS
+  // runners, on both arches, while the same binary measured 2.1x on a
+  // quiet laptop. The ratio formulation barely separated the two cases
+  // even there: the quadratic scan timed 3.1x against a 3.0x bound.
+  expect("lda reroll work stays near-linear", big.steps < 3 * small.steps);
 }
 
 static void test_write_fusion() {

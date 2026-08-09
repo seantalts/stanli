@@ -228,16 +228,31 @@ RerollStats reroll(Graph& g,
   // same answers; it just does not read the entries that cannot matter.
   // Entries actually inside a region are still visited, but regions are
   // disjoint, so that total is bounded by the list sizes: O(n log n).
-  const auto first_at_or_after = [](const std::vector<size_t>& v, size_t x) {
-    return std::lower_bound(v.begin(), v.end(), x);
+  //
+  // Every entry read is counted into st.list_steps, probes included, and
+  // that count is what the scaling test asserts on: it is an exact
+  // integer for a given graph, so it says the same thing on a laptop and
+  // on a shared CI runner, which a wall-clock reading does not.
+  const auto first_at_or_after = [&](const std::vector<size_t>& v, size_t x) {
+    size_t lo = 0, hi = v.size();
+    while (lo < hi) {
+      const size_t mid = lo + (hi - lo) / 2;
+      ++st.list_steps;
+      if (v[mid] < x) lo = mid + 1;
+      else hi = mid;
+    }
+    return v.begin() + (ptrdiff_t)lo;
   };
   // Is any entry of `v` in [lo, hi) not accepted by `ours`? `ours` names
   // the region's own ops, which are allowed to touch the slot.
   const auto any_in_range_but = [&](const std::vector<size_t>* v, size_t lo,
                                     size_t hi, auto&& ours) {
     if (v == nullptr) return false;
-    for (auto it = first_at_or_after(*v, lo); it != v->end() && *it < hi; ++it)
+    for (auto it = first_at_or_after(*v, lo); it != v->end() && *it < hi;
+         ++it) {
+      ++st.list_steps;
       if (!ours(*it)) return true;
+    }
     return false;
   };
   // Is any entry of `v` at or after `x`?

@@ -17,6 +17,12 @@ struct RerollStats {
   int regions = 0;
   int64_t ops_before = 0;
   int64_t ops_after = 0;
+  // Entries of the per-slot use and writer lists the pass read. This is
+  // the term that was once quadratic in the op count, and it is what
+  // tests/test_reroll.cpp asserts near-linearity on: an exact integer,
+  // unlike a wall-clock reading, so the same graph gives the same answer
+  // on every machine.
+  int64_t list_steps = 0;
 };
 
 // In place. `fills` gains entries for materialized constant vectors.
