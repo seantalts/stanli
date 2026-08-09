@@ -78,9 +78,7 @@ void gp_cov_fwd(KernelCtx& ctx) {
   MapM(ctx.out.data, N, N) = c;
 }
 void gp_cov_bwd(KernelCtx& ctx) {
-  const int64_t N = ctx.idata[0];
   auto pts = gp_points(ctx);
-  (void)N;
   nary_bwd(ctx, [&](std::vector<VarV>& xs) {
     return stan::math::gp_exp_quad_cov(pts, xs[1](0), xs[2](0));
   });
@@ -379,11 +377,9 @@ void lkjc_bwd(KernelCtx& ctx) { lkj_eval<true, false>(ctx); }
 
 // ---- normal_id_glm_lpdf(y | X, alpha, beta, sigma) ------------------------
 // in = {y, X, alpha, beta, sigma}; idata = {rows, cols}. X is a data matrix.
-template <bool Grad>
 double nid_glm_eval(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
   const bool propto = (ctx.variant & 0x80u) != 0;
-  const unsigned mask = ctx.variant == 0 ? 0x1fu : (ctx.variant & 0x3fu);
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   CMapV yd(ctx.in[0].data, rows);
@@ -392,10 +388,6 @@ double nid_glm_eval(KernelCtx& ctx) {
   for (int64_t i = 0; i < ctx.in[2].len; ++i) alpha(i) = ctx.in[2].data[i];
   for (int64_t i = 0; i < ctx.in[3].len; ++i) beta(i) = ctx.in[3].data[i];
   for (int64_t i = 0; i < ctx.in[4].len; ++i) sigma(i) = ctx.in[4].data[i];
-  auto scalar_or_vec = [](auto& v, int64_t len) {
-    return len == 1 ? v(0) : var(0);  // placeholder, unused when len > 1
-  };
-  (void)scalar_or_vec;
   var out;
   const bool one_a = ctx.in[2].len == 1, one_s = ctx.in[4].len == 1;
   auto call = [&](auto&& a, auto&& s) {
@@ -425,7 +417,7 @@ int64_t nid_glm_scratch(const Op& op, const Slot* slots) {
   return slots[op.in[2]].len + slots[op.in[3]].len + slots[op.in[4]].len;
 }
 
-void nid_glm_fwd(KernelCtx& ctx) { ctx.out.data[0] = nid_glm_eval<false>(ctx); }
+void nid_glm_fwd(KernelCtx& ctx) { ctx.out.data[0] = nid_glm_eval(ctx); }
 
 void nid_glm_bwd(KernelCtx& ctx) {
   const unsigned mask = ctx.variant == 0 ? 0x1fu : (ctx.variant & 0x3fu);
@@ -867,57 +859,55 @@ void olglm_fwd(KernelCtx& ctx) {
 }
 void olglm_bwd(KernelCtx& ctx) { tglm_eval<true, kOrdLogisticGlm>(ctx); }
 
-int64_t no_scratch(const Op&, const Slot*) { return 0; }
-
 }  // namespace
 
 void register_matrix_kernels() {
   register_kernel(OP_GP_EXP_QUAD_COV,
-                  Kernel{gp_cov_fwd, gp_cov_bwd, no_scratch});
-  register_kernel(OP_WISHART_LPDF, Kernel{wish_fwd, wish_bwd, no_scratch});
+                  Kernel{gp_cov_fwd, gp_cov_bwd, nullptr});
+  register_kernel(OP_WISHART_LPDF, Kernel{wish_fwd, wish_bwd, nullptr});
   register_kernel(OP_INV_WISHART_LPDF,
-                  Kernel{iwish_fwd, iwish_bwd, no_scratch});
+                  Kernel{iwish_fwd, iwish_bwd, nullptr});
   register_kernel(OP_WISHART_CHOL_LPDF,
-                  Kernel{wishc_fwd, wishc_bwd, no_scratch});
+                  Kernel{wishc_fwd, wishc_bwd, nullptr});
   register_kernel(OP_INV_WISHART_CHOL_LPDF,
-                  Kernel{iwishc_fwd, iwishc_bwd, no_scratch});
-  register_kernel(OP_MULTI_GP_LPDF, Kernel{mgp_fwd, mgp_bwd, no_scratch});
-  register_kernel(OP_MULTI_GP_CHOL_LPDF, Kernel{mgpc_fwd, mgpc_bwd, no_scratch});
-  register_kernel(OP_MULTI_STUDENT_T_LPDF, Kernel{mst_fwd, mst_bwd, no_scratch});
+                  Kernel{iwishc_fwd, iwishc_bwd, nullptr});
+  register_kernel(OP_MULTI_GP_LPDF, Kernel{mgp_fwd, mgp_bwd, nullptr});
+  register_kernel(OP_MULTI_GP_CHOL_LPDF, Kernel{mgpc_fwd, mgpc_bwd, nullptr});
+  register_kernel(OP_MULTI_STUDENT_T_LPDF, Kernel{mst_fwd, mst_bwd, nullptr});
   register_kernel(OP_MULTI_STUDENT_T_CHOL_LPDF,
-                  Kernel{mstc_fwd, mstc_bwd, no_scratch});
-  register_kernel(OP_MULTINOMIAL_LPMF, Kernel{multn_fwd, multn_bwd, no_scratch});
+                  Kernel{mstc_fwd, mstc_bwd, nullptr});
+  register_kernel(OP_MULTINOMIAL_LPMF, Kernel{multn_fwd, multn_bwd, nullptr});
   register_kernel(OP_MULTINOMIAL_LOGIT_LPMF,
-                  Kernel{multnl_fwd, multnl_bwd, no_scratch});
+                  Kernel{multnl_fwd, multnl_bwd, nullptr});
   register_kernel(OP_DIRICHLET_MULTINOMIAL_LPMF,
-                  Kernel{dirmult_fwd, dirmult_bwd, no_scratch});
+                  Kernel{dirmult_fwd, dirmult_bwd, nullptr});
   register_kernel(OP_ORDERED_PROBIT_LPMF,
-                  Kernel{oprobit_fwd, oprobit_bwd, no_scratch});
-  register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, no_scratch});
-  register_kernel(OP_LKJ_COV_LPDF, Kernel{lkjcov_fwd, lkjcov_bwd, no_scratch});
+                  Kernel{oprobit_fwd, oprobit_bwd, nullptr});
+  register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, nullptr});
+  register_kernel(OP_LKJ_COV_LPDF, Kernel{lkjcov_fwd, lkjcov_bwd, nullptr});
   register_kernel(OP_BINOMIAL_LOGIT_GLM_LPMF,
-                  Kernel{blglm_fwd, blglm_bwd, no_scratch});
+                  Kernel{blglm_fwd, blglm_bwd, nullptr});
   register_kernel(OP_CATEGORICAL_LOGIT_GLM_LPMF,
-                  Kernel{clglm_fwd, clglm_bwd, no_scratch});
+                  Kernel{clglm_fwd, clglm_bwd, nullptr});
   register_kernel(OP_ORDERED_LOGISTIC_GLM_LPMF,
-                  Kernel{olglm_fwd, olglm_bwd, no_scratch});
-  register_kernel(OP_DIAG_MATRIX, Kernel{diag_fwd, diag_bwd, no_scratch});
-  register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, no_scratch});
+                  Kernel{olglm_fwd, olglm_bwd, nullptr});
+  register_kernel(OP_DIAG_MATRIX, Kernel{diag_fwd, diag_bwd, nullptr});
+  register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, nullptr});
   register_kernel(OP_MULTI_NORMAL_CHOL_LPDF,
-                  Kernel{mnc_fwd, mnc_bwd, no_scratch});
-  register_kernel(OP_MULTI_NORMAL_LPDF, Kernel{mn_fwd, mn_bwd, no_scratch});
+                  Kernel{mnc_fwd, mnc_bwd, nullptr});
+  register_kernel(OP_MULTI_NORMAL_LPDF, Kernel{mn_fwd, mn_bwd, nullptr});
   register_kernel(OP_MULTI_NORMAL_PREC_LPDF,
-                  Kernel{mnprec_fwd, mnprec_bwd, no_scratch});
-  register_kernel(OP_GEMM, Kernel{gemm_fwd, gemm_bwd, no_scratch});
+                  Kernel{mnprec_fwd, mnprec_bwd, nullptr});
+  register_kernel(OP_GEMM, Kernel{gemm_fwd, gemm_bwd, nullptr});
   register_kernel(OP_EIGENVALUES_SYM,
-                  Kernel{eigvals_fwd, eigvals_bwd, no_scratch});
+                  Kernel{eigvals_fwd, eigvals_bwd, nullptr});
   register_kernel(OP_EIGENVECTORS_SYM,
-                  Kernel{eigvecs_fwd, eigvecs_bwd, no_scratch});
+                  Kernel{eigvecs_fwd, eigvecs_bwd, nullptr});
   register_kernel(OP_TRANSPOSE,
-                  Kernel{transpose_fwd, transpose_bwd, no_scratch});
-  register_kernel(OP_LKJ_CORR_CHOL_LPDF, Kernel{lkj_fwd, lkj_bwd, no_scratch});
+                  Kernel{transpose_fwd, transpose_bwd, nullptr});
+  register_kernel(OP_LKJ_CORR_CHOL_LPDF, Kernel{lkj_fwd, lkj_bwd, nullptr});
   register_kernel(OP_LKJ_CORR_LPDF,
-                  Kernel{lkjc_fwd, lkjc_bwd, no_scratch});
+                  Kernel{lkjc_fwd, lkjc_bwd, nullptr});
   register_kernel(OP_NORMAL_ID_GLM_LPDF,
                   Kernel{nid_glm_fwd, nid_glm_bwd, nid_glm_scratch});
 }
