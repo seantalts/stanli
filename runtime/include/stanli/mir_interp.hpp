@@ -516,9 +516,12 @@ class MirInterp {
       r.r = {base.r.at(ix - 1)};
       return r;
     }
-    if (e.args.size() == 2 && e.args[1].name == "IndexSingle" &&
-        base.dims.size() == 2) {
-      // Row of a 2-D array (col-major storage).
+    // Row of a 2-D array (col-major storage), spelled either X[i] or
+    // X[i, :].
+    if (base.dims.size() == 2 &&
+        ((e.args.size() == 2 && e.args[1].name == "IndexSingle") ||
+         (e.args.size() == 3 && e.args[1].name == "IndexSingle" &&
+          e.args[2].name == "IndexAll"))) {
       const long i = as_int(e.args[1].args[0]);
       const int64_t R = base.dims[0], C = base.dims[1];
       r.is_int = base.is_int;
@@ -557,19 +560,6 @@ class MirInterp {
       r.r.assign(base.r.begin() + (j - 1) * R, base.r.begin() + j * R);
       if (base.is_int)
         r.i.assign(base.i.begin() + (j - 1) * R, base.i.begin() + j * R);
-      return r;
-    }
-    // Row slice X[i, :] on a matrix / 2-D array.
-    if (e.args.size() == 3 && e.args[1].name == "IndexSingle" &&
-        e.args[2].name == "IndexAll" && base.dims.size() == 2) {
-      const long i = as_int(e.args[1].args[0]);
-      const int64_t R = base.dims[0], C = base.dims[1];
-      r.is_int = base.is_int;
-      r.dims = {C};
-      for (int64_t j = 0; j < C; ++j) {
-        r.r.push_back(base.r.at(j * R + (i - 1)));
-        if (base.is_int) r.i.push_back(base.i.at(j * R + (i - 1)));
-      }
       return r;
     }
     // Leading-Single slice of an N-D entry (k > 2): first index fixed.
@@ -688,6 +678,13 @@ class MirInterp {
       o.r.resize(a.r.size());
       for (size_t i = 0; i < a.r.size(); ++i) o.r[i] = f(a.r[i]);
       return o;
+    };
+    // The comparison operators: compare values, answer 1.0 or 0.0, and
+    // otherwise take bin's broadcasting and int-scalar rules unchanged.
+    auto cmp = [&](auto f) {
+      return bin([f](const T& x, const T& y) {
+        return T(f(val(x), val(y)) ? 1.0 : 0.0);
+      });
     };
     if (e.name == "Plus__") return bin([](const T& x, const T& y) { return x + y; });
     if (e.name == "Minus__") return bin([](const T& x, const T& y) { return x - y; });
@@ -1010,39 +1007,19 @@ class MirInterp {
       return r;
     }
     if (e.name == "Equals__")
-      return bin([](const T& x, const T& y) {
-        return T(stan::math::value_of(x) == stan::math::value_of(y) ? 1.0
-                                                                    : 0.0);
-      });
+      return cmp([](double x, double y) { return x == y; });
     if (e.name == "NEquals__")
-      return bin([](const T& x, const T& y) {
-        return T(stan::math::value_of(x) != stan::math::value_of(y) ? 1.0
-                                                                    : 0.0);
-      });
+      return cmp([](double x, double y) { return x != y; });
     if (e.name == "Greater__")
-      return bin([](const T& x, const T& y) {
-        return T(stan::math::value_of(x) > stan::math::value_of(y) ? 1.0
-                                                                   : 0.0);
-      });
+      return cmp([](double x, double y) { return x > y; });
     if (e.name == "Geq__")
-      return bin([](const T& x, const T& y) {
-        return T(stan::math::value_of(x) >= stan::math::value_of(y) ? 1.0
-                                                                    : 0.0);
-      });
+      return cmp([](double x, double y) { return x >= y; });
     if (e.name == "Less__")
-      return bin([](const T& x, const T& y) {
-        return T(stan::math::value_of(x) < stan::math::value_of(y) ? 1.0
-                                                                   : 0.0);
-      });
+      return cmp([](double x, double y) { return x < y; });
     if (e.name == "Leq__")
-      return bin([](const T& x, const T& y) {
-        return T(stan::math::value_of(x) <= stan::math::value_of(y) ? 1.0
-                                                                    : 0.0);
-      });
+      return cmp([](double x, double y) { return x <= y; });
     if (e.name == "PNot__")
-      return un([](const T& x) {
-        return T(stan::math::value_of(x) == 0.0 ? 1.0 : 0.0);
-      });
+      return un([](const T& x) { return T(val(x) == 0.0 ? 1.0 : 0.0); });
     if (e.name == "max" || e.name == "min") {
       // std::max/min semantics on values, not fmax/fmin: NaN handling and
       // tie selection must not change under the template.
