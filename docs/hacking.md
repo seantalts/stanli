@@ -26,7 +26,7 @@ explains the graph passes in plain language
 | [`runtime/src/capi.cpp`](../runtime/src/capi.cpp), [`capi.h`](../runtime/include/stanli/capi.h) | The C ABI. [`python/stanli/__init__.py`](../python/stanli/__init__.py) is a thin ctypes wrapper over it. |
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The in-process stanc3 (OCaml, `-output-complete-obj`). |
 | [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page, assembled from it by [`tools/build_web.sh`](../tools/build_web.sh) so they cannot drift. |
-| [`tools/`](../tools/) | [`stanli_check`](../tools/stanli_check.cpp) (one deterministic gradient), [`stanli_run`](../tools/stanli_run.cpp) (full CSV run), [`dump_ops`](../tools/dump_ops.cpp) (print a model's op list), [`verify_refs.py`](../tools/verify_refs.py) (corpus replay against recorded CmdStan values; runs in CI), [`verify_sample.py`](../tools/verify_sample.py) (records the references; needs CmdStan), [`sampler_trace.py`](../tools/sampler_trace.py), [`gen_docs.py`](../tools/gen_docs.py), [`wasm_check.sh`](../tools/wasm_check.sh). |
+| [`tools/`](../tools/) | [`stanli_check`](../tools/stanli_check.cpp) (one deterministic gradient), [`stanli_run`](../tools/stanli_run.cpp) (full CSV run), [`dump_ops`](../tools/dump_ops.cpp) (print a model's op list), [`dump_islands`](../tools/dump_islands.cpp) (print every island's forward and adjoint programs at instruction level), [`verify_refs.py`](../tools/verify_refs.py) (corpus replay against recorded CmdStan values; runs in CI), [`verify_sample.py`](../tools/verify_sample.py) (records the references; needs CmdStan), [`sampler_trace.py`](../tools/sampler_trace.py), [`gen_docs.py`](../tools/gen_docs.py), [`wasm_check.sh`](../tools/wasm_check.sh). |
 | [`harnesses/`](../harnesses/) | Corpus sweeps needing a local posteriordb: [`wa_coverage.py`](../harnesses/wa_coverage.py), [`ab_corpus.py`](../harnesses/ab_corpus.py), benchmarks. |
 | [`tests/`](../tests/) | One `test_*.cpp` per subsystem, plus [`fixtures/`](../tests/fixtures/) with `.stan` sources and pinned MIR (regenerate with [`tools/gen_fixtures.sh`](../tools/gen_fixtures.sh)). |
 
@@ -39,6 +39,11 @@ repetitive by design: read one and you can read them all. There are 82
 opcodes ([`optable.hpp`](../runtime/include/stanli/optable.hpp)).
 
 ## Life of a gradient
+
+For one small model traced through every layer below -- tree, graph,
+both island kinds, the checkpoint, the generated backward, the
+estimate -- see [lowering-walkthrough.md](lowering-walkthrough.md).
+
 
 ```
 model.stan + data.json

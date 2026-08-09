@@ -348,6 +348,8 @@ target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp tests/tbb_stub.cpp)
 target_link_libraries(dump_ops PRIVATE stanli)
+add_executable(dump_islands tools/dump_islands.cpp tests/tbb_stub.cpp)
+target_link_libraries(dump_islands PRIVATE stanli)
 
 # Installable: the native sampler, the parity checker, the shared
 # library the language bindings load, and the headers a C++ caller
