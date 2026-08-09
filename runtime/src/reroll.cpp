@@ -214,6 +214,44 @@ RerollStats reroll(Graph& g,
     if (g.ops[u].out2 >= 0) writers[g.ops[u].out2].push_back(u);
   }
 
+  // Both lists are built by walking u upwards, so each one is sorted, and
+  // every question asked of them below is a range question: is anything
+  // in [lo, hi), is anything at or past hi. Answering those by scanning
+  // the whole list is what made this pass quadratic in TIME long after
+  // the lazy renaming below made it linear in space -- ldaK5 refills one
+  // shared gamma vector from every one of its N iterations, so that
+  // slot's lists are N long and every one of the N regions walked all of
+  // both. Measured at N=32,000: 11.3 billion list steps, against 3.6
+  // million for everything else in the pass put together.
+  //
+  // Binary search asks the same questions of the same lists and gets the
+  // same answers; it just does not read the entries that cannot matter.
+  // Entries actually inside a region are still visited, but regions are
+  // disjoint, so that total is bounded by the list sizes: O(n log n).
+  const auto first_at_or_after = [](const std::vector<size_t>& v, size_t x) {
+    return std::lower_bound(v.begin(), v.end(), x);
+  };
+  // Is any entry of `v` in [lo, hi) not accepted by `ours`? `ours` names
+  // the region's own ops, which are allowed to touch the slot.
+  const auto any_in_range_but = [&](const std::vector<size_t>* v, size_t lo,
+                                    size_t hi, auto&& ours) {
+    if (v == nullptr) return false;
+    for (auto it = first_at_or_after(*v, lo); it != v->end() && *it < hi; ++it)
+      if (!ours(*it)) return true;
+    return false;
+  };
+  // Is any entry of `v` at or after `x`?
+  const auto any_at_or_after = [&](const std::vector<size_t>* v, size_t x) {
+    return v != nullptr && first_at_or_after(*v, x) != v->end();
+  };
+  // The list for a slot, or null when it has none.
+  const auto list_for = [](const std::unordered_map<int,
+                                                    std::vector<size_t>>& m,
+                           int slot) -> const std::vector<size_t>* {
+    const auto it = m.find(slot);
+    return it == m.end() ? nullptr : &it->second;
+  };
+
   std::unordered_set<int> term_set(target_terms.begin(), target_terms.end());
 
   // Write-fusion renaming, done lazily. When a store region is fused, every
@@ -467,10 +505,8 @@ RerollStats reroll(Graph& g,
               const Pos& prod = pos[(size_t)ap.ins[1].producer_pos];
               if (prod.index_elision) {
                 const int base = op_at(ap.ins[1].producer_pos, 0).in[0];
-                auto wit = writers.find(base);
-                if (wit != writers.end())
-                  for (size_t u : wit->second)
-                    if (u >= region_end) written_after = true;
+                if (any_at_or_after(list_for(writers, base), region_end))
+                  written_after = true;
               }
             }
             if (clean) {
@@ -480,18 +516,13 @@ RerollStats reroll(Graph& g,
                 return u >= i && u < region_end &&
                        (u - i) % (size_t)P == (size_t)p;
               };
-              auto uit = uses.find(vec);
-              if (uit != uses.end())
-                for (size_t u : uit->second)
-                  if (u >= i && u < region_end && !in_region_write(u))
-                    clean = false;
-              auto wit = writers.find(vec);
-              if (wit != writers.end())
-                for (size_t u : wit->second) {
-                  if (u >= i && u < region_end && !in_region_write(u))
-                    clean = false;
-                  if (u >= region_end) written_after = true;
-                }
+              const std::vector<size_t>* vec_uses = list_for(uses, vec);
+              const std::vector<size_t>* vec_writers = list_for(writers, vec);
+              if (any_in_range_but(vec_uses, i, region_end, in_region_write) ||
+                  any_in_range_but(vec_writers, i, region_end, in_region_write))
+                clean = false;
+              if (any_at_or_after(vec_writers, region_end))
+                written_after = true;
             }
             if (!clean || br_run < Luse) {
               ok = false;

@@ -697,15 +697,19 @@ int count(const Graph& g, uint16_t oc) {
 // (the real model: 32,877 iterations, 52 s and 49 GB to compile, which
 // OOM-killed every CI runner).
 //
-// Space is linear now and time is not. Measured on this shape, one
-// doubling of n costs 2.0x memory and 3.8x time -- so the fix removed
-// the quadratic term from the allocation and left a quadratic term in
-// the work, about 13x smaller than it was: n=32,000 is 350 MB and 4 s.
-// That is why the guard below is a memory ceiling and a scaling ratio
-// rather than the wall-clock budget it used to be. A budget cannot work
-// here: the gap between the bug and the fix is 13x, CI's slowest runner
-// is 9x slower than its fastest, and the two overlap. The old budget
-// duly failed a commit that touched nothing but an unrelated directory.
+// Both are linear now, but they were fixed in two separate goes: the
+// lazy renaming took the quadratic term out of the allocation and left
+// one in the work, which stood for a while because nothing measured it
+// (n=32,000 was 350 MB and 4 s). Binary search over the sorted use and
+// writer lists in reroll.cpp took out the second: 0.2 s at that size.
+//
+// The guards below are a memory ceiling and a scaling ratio rather than
+// the wall-clock budget this test used to carry. A budget cannot work
+// here. The gap between a regression and a fix is around 13x, CI's
+// slowest runner is 9x slower than its fastest, and those two overlap --
+// the old budget duly failed a commit that touched nothing but an
+// unrelated directory. A ratio and an RSS figure mean the same thing on
+// every machine.
 namespace ldashape {
 
 struct Built {
@@ -806,10 +810,10 @@ static double time_lda_reroll(int n) {
 }
 
 static void test_lda_shape_cost() {
-  const double small = time_lda_reroll(4000);
-  const double big = time_lda_reroll(8000);
+  const double small = time_lda_reroll(8000);
+  const double big = time_lda_reroll(16000);
   const double rss = peak_rss_mb();
-  std::printf("  lda shape reroll: n=4000 %.2f s, n=8000 %.2f s (%.1fx),"
+  std::printf("  lda shape reroll: n=8000 %.2f s, n=16000 %.2f s (%.1fx),"
               " peak RSS %.0f MB\n",
               small, big, small > 0.0 ? big / small : 0.0, rss);
 
@@ -818,14 +822,15 @@ static void test_lda_shape_cost() {
   // thing on every machine. This is the whole process's peak, so it
   // counts every case that ran before this one -- an over-estimate,
   // which is the safe direction. All of them together reach under
-  // 100 MB; the same shape under the quadratic-space bug would be around
-  // 2.9 GB, so 1 GB separates them with room on both sides.
+  // 200 MB; the same shape under the quadratic-space bug would be around
+  // 12 GB at n=16000, so 1 GB separates them with room on both sides.
   if (rss > 0.0) expect("lda reroll space stays linear", rss < 1024.0);
 
-  // Time is quadratic and this only catches a fall to something worse.
-  // A doubling costs 4x at quadratic and 8x at cubic; 5x sits between
-  // them and does not depend on how fast the machine is.
-  expect("lda reroll time no worse than quadratic", big < 5.0 * small);
+  // Time is linear with a log factor: a doubling measures about 2.1x
+  // here and 2.0x asymptotically, against 4x for the quadratic scan this
+  // replaced. 3x sits between them, and being a ratio it does not depend
+  // on how fast the machine is.
+  expect("lda reroll time stays near-linear", big < 3.0 * small);
 }
 
 static void test_write_fusion() {
