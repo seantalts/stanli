@@ -42,7 +42,8 @@ struct Transform {
 struct SizedType {
   std::string base;        // SInt SReal SVector SRowVector SMatrix SArray ...
   std::vector<Expr> dims;  // outer-to-inner for SArray chains
-  std::string raw;
+  std::string elem_base;   // for SArray: the innermost element base
+  std::string raw;         // Unsupported diagnostics
 };
 
 struct Stmt {

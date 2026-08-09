@@ -385,7 +385,7 @@ struct ProgramCompiler {
     switch (s.kind) {
       case mir::Stmt::Decl: {
         if (s.decl_type.base == "SInt" ||
-            (s.decl_type.base == "SArray" && s.decl_type.raw == "SInt")) {
+            (s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt")) {
           if (s.has_init) {
             ints[s.decl_id] = {cint(s.init)};
           } else {

@@ -198,7 +198,7 @@ class MirInterp {
       case mir::Stmt::Decl: {
         Value e;
         if (st.decl_type.base == "SInt" ||
-            (st.decl_type.base == "SArray" && st.decl_type.raw == "SInt"))
+            (st.decl_type.base == "SArray" && st.decl_type.elem_base == "SInt"))
           e.is_int = true;
         if (st.has_init && st.init.kind == mir::Expr::FunApp &&
             st.init.fn_lib == mir::Expr::Lib::Internal &&

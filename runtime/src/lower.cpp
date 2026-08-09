@@ -200,7 +200,8 @@ struct Lowering {
     for (const auto& st : p.prepare_data) {
       if (st.kind == mir::Stmt::Decl && st.decl_type.base == "SArray" &&
           st.decl_type.dims.size() == 2 &&
-          (st.decl_type.raw == "SVector" || st.decl_type.raw == "SRowVector"))
+          (st.decl_type.elem_base == "SVector" ||
+           st.decl_type.elem_base == "SRowVector"))
         array_of_container.insert(st.decl_id);
     }
     for (const auto& st : p.prepare_data) td.exec(st);
