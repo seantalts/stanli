@@ -168,7 +168,7 @@ class Executor {
 
  private:
   void bind_();
-  KernelCtx make_ctx_(const Op& op);
+  KernelCtx make_ctx_(const Op& op, const std::vector<char>& written);
 
   struct ProfEntry {
     int64_t calls = 0;       // forward invocations
@@ -200,12 +200,10 @@ class Executor {
   };
   std::vector<BwdStep> bwd_;
   std::vector<double*> out2_adj_ptr_;  // parallel to ops; null when no out2
-  std::vector<char> written_;  // slot carries adjoint (param or op output)
   bool profile_ = false;
   std::vector<ProfEntry> prof_;  // indexed by opcode; empty until enabled
   int64_t n_grad_evals_ = 0;
   int64_t n_params_ = 0;
-  int64_t arena_len_ = 0;
 };
 
 }  // namespace stanli

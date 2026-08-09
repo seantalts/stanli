@@ -18,12 +18,6 @@
 namespace stanli {
 namespace {
 
-int64_t island_scratch(const Op& op, const Slot* slots) {
-  int64_t t = 0;
-  for (int i = 0; i < op.n_in; ++i) t += slots[op.in[i]].len;
-  return t;
-}
-
 void island_fwd(KernelCtx& ctx) {
   const auto& p = *static_cast<const IslandProg*>(ctx.udata);
   const double* in[6];
@@ -70,7 +64,7 @@ void island_bwd(KernelCtx& ctx) {
 }  // namespace
 
 void register_island_kernel() {
-  register_kernel(OP_ISLAND, Kernel{island_fwd, island_bwd, island_scratch});
+  register_kernel(OP_ISLAND, Kernel{island_fwd, island_bwd, sum_in_lens});
 }
 
 }  // namespace stanli

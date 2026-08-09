@@ -171,10 +171,6 @@ namespace stanli {
   X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 3) \
   X(OP_LOGISTIC_LPDF, logistic_lpdf, 3, 3)
 
-#define STANLI_SCALAR_DENSITY_LIST_COMMON(X) \
-  STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
-  STANLI_SCALAR_DENSITY_LIST_COMMON_B(X)
-
 #define STANLI_SCALAR_DENSITY_LIST_REST_A(X) \
   X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 2) \
   X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 2) \
@@ -193,13 +189,11 @@ namespace stanli {
   X(OP_BETA_PROPORTION_LPDF, beta_proportion_lpdf, 3, 2) \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_LPDF, skew_double_exponential_lpdf, 4, 2)
 
-#define STANLI_SCALAR_DENSITY_LIST_REST(X) \
+#define STANLI_SCALAR_DENSITY_LIST(X) \
+  STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
+  STANLI_SCALAR_DENSITY_LIST_COMMON_B(X) \
   STANLI_SCALAR_DENSITY_LIST_REST_A(X) \
   STANLI_SCALAR_DENSITY_LIST_REST_B(X)
-
-#define STANLI_SCALAR_DENSITY_LIST(X) \
-  STANLI_SCALAR_DENSITY_LIST_COMMON(X) \
-  STANLI_SCALAR_DENSITY_LIST_REST(X)
 
 
 // Discrete densities: an integer outcome that rides in idata instead of
@@ -447,20 +441,28 @@ constexpr bool exact_lp_build() {
 #endif
 }
 
+// Every opcode list, in enum order, named once. The enum and the name
+// table both expand this, so a list added to one cannot be forgotten in
+// the other. PLAIN takes (name), DENSITY takes (code, fn, n, m), UNARY
+// takes (code, fn, v, d).
+#define STANLI_ALL_OPCODES(PLAIN, DENSITY, UNARY) \
+  STANLI_OPCODE_LIST(PLAIN)                       \
+  STANLI_SCALAR_DENSITY_LIST(DENSITY)             \
+  STANLI_INT_DENSITY_LIST(DENSITY)                \
+  STANLI_SCALAR_CDF_LIST(DENSITY)                 \
+  STANLI_INT_CDF_LIST(DENSITY)                    \
+  STANLI_ORDERED_DENSITY_LIST(DENSITY)            \
+  STANLI_SCALAR_UNARY_LIST(UNARY)
+
 enum Opcode : uint16_t {
   OP_NONE_ = 0,
 #define STANLI_OPCODE_ENUM(name) name,
-  STANLI_OPCODE_LIST(STANLI_OPCODE_ENUM)
-#undef STANLI_OPCODE_ENUM
 #define STANLI_DENSITY_ENUM(code, fn, n, m) code,
-  STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_ENUM)
-  STANLI_INT_DENSITY_LIST(STANLI_DENSITY_ENUM)
-  STANLI_SCALAR_CDF_LIST(STANLI_DENSITY_ENUM)
-  STANLI_INT_CDF_LIST(STANLI_DENSITY_ENUM)
-  STANLI_ORDERED_DENSITY_LIST(STANLI_DENSITY_ENUM)
-#undef STANLI_DENSITY_ENUM
 #define STANLI_UNARY_ENUM(code, fn, v, d) code,
-  STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_ENUM)
+  STANLI_ALL_OPCODES(STANLI_OPCODE_ENUM, STANLI_DENSITY_ENUM,
+                     STANLI_UNARY_ENUM)
+#undef STANLI_OPCODE_ENUM
+#undef STANLI_DENSITY_ENUM
 #undef STANLI_UNARY_ENUM
   OP_COUNT_
 };
@@ -478,6 +480,14 @@ struct Kernel {
   // Scratch doubles needed, given bound slot shapes. Null means zero.
   int64_t (*scratch_size)(const Op&, const Slot* slots) = nullptr;
 };
+
+// The most common Kernel::scratch_size shape: one scratch double per
+// element of every input.
+inline int64_t sum_in_lens(const Op& op, const Slot* slots) {
+  int64_t t = 0;
+  for (int i = 0; i < op.n_in; ++i) t += slots[op.in[i]].len;
+  return t;
+}
 
 Kernel& kernel(uint16_t opcode);
 // Called by kernel TUs at static-init time.

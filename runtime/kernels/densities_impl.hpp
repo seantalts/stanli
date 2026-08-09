@@ -268,12 +268,6 @@ void density_bwd(KernelCtx& ctx) {
   }
 }
 
-inline int64_t sum_in_lens(const Op& op, const Slot* slots) {
-  int64_t t = 0;
-  for (int i = 0; i < op.n_in; ++i) t += slots[op.in[i]].len;
-  return t;
-}
-
 // Elementwise ops need one partial per argument per element, even for
 // broadcast scalars (each element scales by its own adjoint).
 template <int NArgs>

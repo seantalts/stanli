@@ -41,17 +41,12 @@ const char* opcode_name(uint16_t opcode) {
   static const char* const names[] = {
       "OP_NONE_",
 #define STANLI_OPCODE_NAME(name) #name,
-      STANLI_OPCODE_LIST(STANLI_OPCODE_NAME)
-#undef STANLI_OPCODE_NAME
 #define STANLI_DENSITY_OPCODE_NAME(code, fn, n, m) #code,
-      STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_OPCODE_NAME)
-      STANLI_INT_DENSITY_LIST(STANLI_DENSITY_OPCODE_NAME)
-      STANLI_SCALAR_CDF_LIST(STANLI_DENSITY_OPCODE_NAME)
-      STANLI_INT_CDF_LIST(STANLI_DENSITY_OPCODE_NAME)
-      STANLI_ORDERED_DENSITY_LIST(STANLI_DENSITY_OPCODE_NAME)
-#undef STANLI_DENSITY_OPCODE_NAME
 #define STANLI_UNARY_OPCODE_NAME(code, fn, v, d) #code,
-      STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_OPCODE_NAME)
+      STANLI_ALL_OPCODES(STANLI_OPCODE_NAME, STANLI_DENSITY_OPCODE_NAME,
+                         STANLI_UNARY_OPCODE_NAME)
+#undef STANLI_OPCODE_NAME
+#undef STANLI_DENSITY_OPCODE_NAME
 #undef STANLI_UNARY_OPCODE_NAME
   };
   return opcode < OP_COUNT_ ? names[opcode] : "OP_?";
@@ -123,16 +118,15 @@ void Executor::bind_() {
       off += s.len;
     }
   }
-  arena_len_ = off;
-  values_.assign(arena_len_, 0.0);
-  adjoints_.assign(arena_len_, 0.0);
+  values_.assign(off, 0.0);
+  adjoints_.assign(off, 0.0);
 
   // A slot carries adjoint if it is a parameter or an op writes it. Slots
   // that are neither are data: kernels see a null adjoint Desc and skip them.
-  written_.assign(graph_.slots.size(), 0);
+  std::vector<char> written(graph_.slots.size(), 0);
   for (const auto& op : graph_.ops) {
-    written_[op.out] = 1;
-    if (op.out2 >= 0) written_[op.out2] = 1;
+    written[op.out] = 1;
+    if (op.out2 >= 0) written[op.out2] = 1;
   }
 
   int64_t scratch = 0;
@@ -159,7 +153,7 @@ void Executor::bind_() {
   ctx_.resize(graph_.ops.size());
   out2_adj_ptr_.assign(graph_.ops.size(), nullptr);
   for (size_t i = 0; i < graph_.ops.size(); ++i) {
-    ctx_[i] = make_ctx_(graph_.ops[i]);
+    ctx_[i] = make_ctx_(graph_.ops[i], written);
     const int o2 = graph_.ops[i].out2;
     if (o2 >= 0) out2_adj_ptr_[i] = adjoints_.data() + graph_.slots[o2].offset;
   }
@@ -176,7 +170,7 @@ void Executor::bind_() {
   }
 }
 
-KernelCtx Executor::make_ctx_(const Op& op) {
+KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written) {
   KernelCtx ctx;
   ctx.n_in = op.n_in;
   for (int i = 0; i < op.n_in; ++i) {
@@ -197,7 +191,7 @@ KernelCtx Executor::make_ctx_(const Op& op) {
   for (int i = 0; i < op.n_in; ++i) {
     const int si = op.in[i];
     const Slot& s = graph_.slots[si];
-    const bool active = s.is_param || written_[si];
+    const bool active = s.is_param || written[si];
     ctx.in_adj[i] =
         Desc{active ? adjoints_.data() + s.offset : nullptr, s.len};
   }
@@ -280,17 +274,11 @@ void Executor::run_forward_only() {
 }
 
 double Executor::forward_value_only() {
-  g_values_only = true;
-  try {
-    run_forward_only();
-  } catch (...) {
-    g_values_only = false;
-    throw;
-  }
-  g_values_only = false;
-  const Slot& r = graph_.slots[graph_.result_slot];
-  assert(r.len == 1);
-  return values_[r.offset];
+  struct ValuesOnly {
+    ValuesOnly() { g_values_only = true; }
+    ~ValuesOnly() { g_values_only = false; }
+  } guard;
+  return forward();
 }
 
 double Executor::forward() {
