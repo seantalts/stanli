@@ -1,6 +1,7 @@
 // Re-roll pass: unrolled scalar-loop regions collapse to vector ops with
 // gradients preserved (up to summation order, 1e-12 rel).
 #include "env_helpers.hpp"
+#include "graph_helpers.hpp"
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
@@ -35,31 +36,12 @@ static void expect_close(const char* what, double got, double want) {
 }
 
 using namespace stanli;
-using Fills = std::vector<std::pair<int, std::vector<double>>>;
+using stanli::testutil::Fills;
+using stanli::testutil::reduce_into_result;
 
-// Executes gradient at fixed params; returns {lp, grads...}.
+static double fill_at(int64_t i) { return 0.2 + 0.1 * (i % 3); }
 static std::vector<double> run_grad(Graph g, const Fills& fills) {
-  Executor ex(std::move(g));
-  for (const auto& f : fills) {
-    double* p = ex.value_ptr(f.first);
-    for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
-  }
-  for (int64_t i = 0; i < ex.n_params(); ++i)
-    ex.params_data()[i] = 0.2 + 0.1 * (i % 3);
-  std::vector<double> out(1 + ex.n_params());
-  out[0] = ex.gradient(out.data() + 1);
-  return out;
-}
-
-// Chained ADD_N reduction, as lower.cpp's reduce_terms does.
-static void reduce_terms_into_result(Graph& g, const std::vector<int>& terms) {
-  int acc = terms[0];
-  for (size_t k = 1; k < terms.size(); ++k) {
-    const int s = g.add_slot(1, false);
-    g.add_op(OP_ADD_N, {acc, terms[k]}, s);
-    acc = s;
-  }
-  g.result_slot = acc;
+  return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
 // radon shape: mu = vector intermediate written by an op; per lane
@@ -90,15 +72,7 @@ static void test_radon_shape() {
   }
   // Reference BEFORE the pass (reduce terms via chained ADD_N).
   Graph ref = g;
-  {
-    int acc = terms[0];
-    for (int n = 1; n < L; ++n) {
-      const int s = ref.add_slot(1, false);
-      ref.add_op(OP_ADD_N, {acc, terms[n]}, s);
-      acc = s;
-    }
-    ref.result_slot = acc;
-  }
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -155,15 +129,7 @@ static void test_ark_shape() {
     terms.push_back(lp);
   }
   Graph ref = g;
-  {
-    int acc = terms[0];
-    for (int l = 1; l < L; ++l) {
-      const int s = ref.add_slot(1, false);
-      ref.add_op(OP_ADD_N, {acc, terms[l]}, s);
-      acc = s;
-    }
-    ref.result_slot = acc;
-  }
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -236,15 +202,7 @@ static void test_gauss_mix_shape() {
     terms.push_back(t);
   }
   Graph ref = g;
-  {
-    int acc = terms[0];
-    for (int l = 1; l < L; ++l) {
-      const int s = ref.add_slot(1, false);
-      ref.add_op(OP_ADD_N, {acc, terms[l]}, s);
-      acc = s;
-    }
-    ref.result_slot = acc;
-  }
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -286,7 +244,7 @@ static void test_elt_lpmf_shape() {
     terms.push_back(t);
   }
   Graph ref = g;
-  reduce_terms_into_result(ref, terms);
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -328,7 +286,7 @@ static void test_elt_scalar_density_hoists() {
     terms.push_back(t);
   }
   Graph ref = g;
-  reduce_terms_into_result(ref, terms);
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -436,7 +394,7 @@ static void test_partial_range_slices() {
     terms.push_back(lp);
   }
   Graph ref = g;
-  reduce_terms_into_result(ref, terms);
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -447,7 +405,7 @@ static void test_partial_range_slices() {
   for (const Op& op : g.ops) slices += op.opcode == OP_SLICE;
   expect("window becomes a slice", slices == 1);
   expect("slice ops==3", g.ops.size() == 3);  // REP_VEC + SLICE + NORMAL
-  reduce_terms_into_result(g, tt);
+  reduce_into_result(g, tt);
   const std::vector<double> got = run_grad(std::move(g), f2);
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close(("slice v" + std::to_string(i)).c_str(), got[i], want[i]);
@@ -478,7 +436,7 @@ static void test_data_index_gathers() {
     terms.push_back(lp);
   }
   Graph ref = g;
-  reduce_terms_into_result(ref, terms);
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -489,7 +447,7 @@ static void test_data_index_gathers() {
   for (const Op& op : g.ops) gathers += op.opcode == OP_GATHER;
   expect("index becomes a gather", gathers == 1);
   expect("gather ops==2", g.ops.size() == 2);  // GATHER + vector NORMAL
-  reduce_terms_into_result(g, tt);
+  reduce_into_result(g, tt);
   const std::vector<double> got = run_grad(std::move(g), f2);
   // Repeated indices mean the gather's scatter-add accumulates several
   // lanes into one alpha element: the value that matters most here.
@@ -548,15 +506,7 @@ static void test_first_lane_anomalous() {
     terms.push_back(lp);
   }
   Graph ref = g;
-  {
-    int acc = terms[0];
-    for (int l = 1; l < L; ++l) {
-      const int s = ref.add_slot(1, false);
-      ref.add_op(OP_ADD_N, {acc, terms[l]}, s);
-      acc = s;
-    }
-    ref.result_slot = acc;
-  }
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -566,13 +516,7 @@ static void test_first_lane_anomalous() {
   // MUL + lane-0 NORMAL survive scalar; lanes 1..7 collapse to 1 vec op.
   expect("anomalous ops==3", g.ops.size() == 3);
   expect("anomalous terms==2", tt.size() == 2);
-  int acc = tt[0];
-  for (size_t k = 1; k < tt.size(); ++k) {
-    const int s = g.add_slot(1, false);
-    g.add_op(OP_ADD_N, {acc, tt[(int)k]}, s);
-    acc = s;
-  }
-  g.result_slot = acc;
+  reduce_into_result(g, tt);
   const std::vector<double> got = run_grad(std::move(g), f2);
   expect("anomalous sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
@@ -603,15 +547,7 @@ static void test_block_structured() {
     }
   }
   Graph ref = g;
-  {
-    int acc = terms[0];
-    for (size_t k = 1; k < terms.size(); ++k) {
-      const int s = ref.add_slot(1, false);
-      ref.add_op(OP_ADD_N, {acc, terms[k]}, s);
-      acc = s;
-    }
-    ref.result_slot = acc;
-  }
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   std::vector<int> tt = terms;
@@ -623,13 +559,7 @@ static void test_block_structured() {
   expect("block regions==1", st.regions == 1);
   expect("block ops==2", g.ops.size() == 2);  // GATHER + vector NORMAL
   expect("block terms==1", tt.size() == 1);
-  int acc = tt[0];
-  for (size_t k = 1; k < tt.size(); ++k) {
-    const int s = g.add_slot(1, false);
-    g.add_op(OP_ADD_N, {acc, tt[k]}, s);
-    acc = s;
-  }
-  g.result_slot = acc;
+  reduce_into_result(g, tt);
   const std::vector<double> got = run_grad(std::move(g), f2);
   expect("block sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
@@ -757,7 +687,7 @@ static void test_lda_shape_gradients() {
   const int N = 40;
   ldashape::Built b = ldashape::build(N);
   Graph ref = b.g;
-  reduce_terms_into_result(ref, b.terms);
+  reduce_into_result(ref, b.terms);
   const std::vector<double> want = run_grad(std::move(ref), b.fills);
 
   std::vector<int> tt = b.terms;
@@ -770,7 +700,7 @@ static void test_lda_shape_gradients() {
   expect("lda stores chain", writefuse::count(b.g, OP_SET_SLICE) == N - 1);
   expect("lda no element writes left",
          writefuse::count(b.g, OP_SET_INDEX_INPLACE) == 0);
-  reduce_terms_into_result(b.g, tt);
+  reduce_into_result(b.g, tt);
   const std::vector<double> got = run_grad(std::move(b.g), f2);
   expect("lda sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
@@ -858,7 +788,7 @@ static void test_write_fusion() {
     const int L = 8;
     Built b = build(L, start);
     Graph ref = b.g;
-    reduce_terms_into_result(ref, b.terms);
+    reduce_into_result(ref, b.terms);
     const std::vector<double> want = run_grad(std::move(ref), b.fills);
 
     std::vector<int> tt = b.terms;
@@ -874,7 +804,7 @@ static void test_write_fusion() {
            count(b.g, OP_SET_SLICE) == (start ? 1 : 0));
     expect((tag + " op count").c_str(),
            b.g.ops.size() == (size_t)(start ? 3 : 2));
-    reduce_terms_into_result(b.g, tt);
+    reduce_into_result(b.g, tt);
     const std::vector<double> got = run_grad(std::move(b.g), f2);
     for (size_t i = 0; i < want.size() && i < got.size(); ++i)
       expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
@@ -890,7 +820,7 @@ static void test_write_fusion_bails() {
   {  // a strided run fuses into OP_SET_SLICE_STRIDED, gradients preserved
     Built b = build(8, 0, 2);
     Graph ref = b.g;
-    reduce_terms_into_result(ref, b.terms);
+    reduce_into_result(ref, b.terms);
     const std::vector<double> want = run_grad(std::move(ref), b.fills);
     Fills f2 = b.fills;
     std::vector<int> tt = b.terms;
@@ -898,7 +828,7 @@ static void test_write_fusion_bails() {
     expect("strided writes fused",
            count(b.g, OP_SET_INDEX_INPLACE) == 0 &&
                count(b.g, OP_SET_SLICE_STRIDED) == 1);
-    reduce_terms_into_result(b.g, tt);
+    reduce_into_result(b.g, tt);
     const std::vector<double> got = run_grad(std::move(b.g), f2);
     for (size_t i = 0; i < want.size() && i < got.size(); ++i)
       expect_close(("strided v" + std::to_string(i)).c_str(), got[i],
@@ -946,7 +876,7 @@ static void test_write_fusion_bails() {
     std::vector<int> terms{lp};
 
     Graph ref = g;
-    reduce_terms_into_result(ref, terms);
+    reduce_into_result(ref, terms);
     const std::vector<double> want = run_grad(std::move(ref), fills);
 
     Fills f2 = fills;
@@ -956,7 +886,7 @@ static void test_write_fusion_bails() {
            count(g, OP_SET_SLICE) == 1 && count(g, OP_GATHER) == 1);
     expect("later write chains, not blocks",
            count(g, OP_SET_INDEX_INPLACE) == 1);
-    reduce_terms_into_result(g, tt);
+    reduce_into_result(g, tt);
     const std::vector<double> got = run_grad(std::move(g), f2);
     for (size_t i = 0; i < want.size() && i < got.size(); ++i)
       expect_close(("chain v" + std::to_string(i)).c_str(), got[i], want[i]);
@@ -1022,7 +952,7 @@ static void test_write_fusion_scalar_chain() {
   std::vector<int> terms{lp};
 
   Graph ref = g;
-  reduce_terms_into_result(ref, terms);
+  reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
 
   Fills f2 = fills;
@@ -1032,7 +962,7 @@ static void test_write_fusion_scalar_chain() {
   int repv = 0;
   for (const Op& op : g.ops) repv += op.opcode == OP_REP_VEC;
   expect("scalar value broadcast once", repv == 1);
-  reduce_terms_into_result(g, tt);
+  reduce_into_result(g, tt);
   const std::vector<double> got = run_grad(std::move(g), f2);
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close(("scalar-chain v" + std::to_string(i)).c_str(), got[i],

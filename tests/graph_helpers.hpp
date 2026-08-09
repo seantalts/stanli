@@ -5,10 +5,44 @@
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
+#include <utility>
 #include <vector>
 
 namespace stanli {
 namespace testutil {
+
+// Slot fills for data and constant slots, applied after construction.
+using Fills = std::vector<std::pair<int, std::vector<double>>>;
+
+// Executes gradient at fixed params; returns {lp, grads...}. `fill_at(i)`
+// picks the evaluation point and stays a per-file callable: a before/after
+// pair is only a comparison if both halves run at the same point, and each
+// pass test picks its own.
+template <class FillAt>
+inline std::vector<double> run_grad(Graph g, const Fills& fills,
+                                    FillAt fill_at) {
+  Executor ex(std::move(g));
+  for (const auto& f : fills) {
+    double* p = ex.value_ptr(f.first);
+    for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
+  }
+  for (int64_t i = 0; i < ex.n_params(); ++i)
+    ex.params_data()[i] = fill_at(i);
+  std::vector<double> out(1 + (size_t)ex.n_params());
+  out[0] = ex.gradient(out.data() + 1);
+  return out;
+}
+
+// Chained ADD_N reduction, as lower.cpp's reduce_terms does.
+inline void reduce_into_result(Graph& g, const std::vector<int>& terms) {
+  int acc = terms[0];
+  for (size_t k = 1; k < terms.size(); ++k) {
+    const int s = g.add_slot(1, false);
+    g.add_op(OP_ADD_N, {acc, terms[k]}, s);
+    acc = s;
+  }
+  g.result_slot = acc;
+}
 
 struct RunResult {
   double value;

@@ -2,6 +2,7 @@
 // replaces (values and gradients), and everything the carver cannot prove
 // safe must stay untouched.
 #include "env_helpers.hpp"
+#include "graph_helpers.hpp"
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
@@ -30,19 +31,11 @@ static void expect_close(const std::string& what, double got, double want) {
 }
 
 using namespace stanli;
-using Fills = std::vector<std::pair<int, std::vector<double>>>;
+using stanli::testutil::Fills;
 
+static double fill_at(int64_t i) { return 0.3 + 0.15 * (i % 4); }
 static std::vector<double> run_grad(Graph g, const Fills& fills) {
-  Executor ex(std::move(g));
-  for (const auto& f : fills) {
-    double* p = ex.value_ptr(f.first);
-    for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
-  }
-  for (int64_t i = 0; i < ex.n_params(); ++i)
-    ex.params_data()[i] = 0.3 + 0.15 * (i % 4);
-  std::vector<double> out(1 + ex.n_params());
-  out[0] = ex.gradient(out.data() + 1);
-  return out;
+  return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
 // A mini HMM forward pass: per step, index the previous state pair, take

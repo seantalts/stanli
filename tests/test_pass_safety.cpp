@@ -14,6 +14,7 @@
 //    whole-vector reads, elementwise arithmetic, densities), including
 //    the interleavings no hand-written test would think to write.
 #include "env_helpers.hpp"
+#include "graph_helpers.hpp"
 #include <stanli/graph.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/island.hpp>
@@ -34,7 +35,8 @@ static void expect(const char* what, bool ok) {
 }
 
 using namespace stanli;
-using Fills = std::vector<std::pair<int, std::vector<double>>>;
+using stanli::testutil::Fills;
+using stanli::testutil::reduce_into_result;
 
 // ---- 1. the whitelist ------------------------------------------------------
 
@@ -181,17 +183,11 @@ static void test_whitelist_backwards_ignore_values() {
 
 // ---- 2. randomized graphs --------------------------------------------------
 
+static double fill_at(int64_t i) {
+  return 0.3 + 0.2 * std::sin(0.7 * (double)i);
+}
 static std::vector<double> run_grad(Graph g, const Fills& fills) {
-  Executor ex(std::move(g));
-  for (const auto& f : fills) {
-    double* p = ex.value_ptr(f.first);
-    for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
-  }
-  for (int64_t i = 0; i < ex.n_params(); ++i)
-    ex.params_data()[i] = 0.3 + 0.2 * std::sin(0.7 * (double)i);
-  std::vector<double> out(1 + ex.n_params());
-  out[0] = ex.gradient(out.data() + 1);
-  return out;
+  return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
 // Builds a graph in the shapes lowering produces, with the mix chosen by
@@ -270,16 +266,6 @@ static Graph random_graph(std::mt19937& rng, Fills& fills,
     terms.push_back(lse);
   }
   return g;
-}
-
-static void reduce_into_result(Graph& g, const std::vector<int>& terms) {
-  int acc = terms[0];
-  for (size_t k = 1; k < terms.size(); ++k) {
-    const int s = g.add_slot(1, false);
-    g.add_op(OP_ADD_N, {acc, terms[k]}, s);
-    acc = s;
-  }
-  g.result_slot = acc;
 }
 
 static void test_random_graphs_preserve_gradients() {

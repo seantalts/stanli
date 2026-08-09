@@ -1,6 +1,7 @@
 // In-place functional updates: a chain of OP_SET_INDEX writes into the
 // same vector must collapse onto one buffer (O(N) instead of O(N^2)) with
 // values and gradients unchanged.
+#include "graph_helpers.hpp"
 #include <stanli/graph.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/optable.hpp>
@@ -26,19 +27,12 @@ static void expect_close(const char* what, double got, double want) {
 }
 
 using namespace stanli;
-using Fills = std::vector<std::pair<int, std::vector<double>>>;
+using stanli::testutil::Fills;
+using stanli::testutil::reduce_into_result;
 
+static double fill_at(int64_t i) { return 0.2 + 0.1 * (i % 3); }
 static std::vector<double> run_grad(Graph g, const Fills& fills) {
-  Executor ex(std::move(g));
-  for (const auto& f : fills) {
-    double* p = ex.value_ptr(f.first);
-    for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
-  }
-  for (int64_t i = 0; i < ex.n_params(); ++i)
-    ex.params_data()[i] = 0.2 + 0.1 * (i % 3);
-  std::vector<double> out(1 + ex.n_params());
-  out[0] = ex.gradient(out.data() + 1);
-  return out;
+  return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
 // Two gradient evaluations must agree: an in-place chain that wrongly
@@ -49,8 +43,7 @@ static std::vector<double> run_grad_twice(Graph g, const Fills& fills) {
     double* p = ex.value_ptr(f.first);
     for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
   }
-  for (int64_t i = 0; i < ex.n_params(); ++i)
-    ex.params_data()[i] = 0.2 + 0.1 * (i % 3);
+  for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = fill_at(i);
   std::vector<double> first(1 + ex.n_params()), second(1 + ex.n_params());
   first[0] = ex.gradient(first.data() + 1);
   second[0] = ex.gradient(second.data() + 1);
@@ -94,16 +87,6 @@ static Graph build_chain(int L, Fills& fills, std::vector<int>& terms,
     prev = nxt;
   }
   return g;
-}
-
-static void reduce_into_result(Graph& g, const std::vector<int>& terms) {
-  int acc = terms[0];
-  for (size_t k = 1; k < terms.size(); ++k) {
-    const int s = g.add_slot(1, false);
-    g.add_op(OP_ADD_N, {acc, terms[k]}, s);
-    acc = s;
-  }
-  g.result_slot = acc;
 }
 
 static void test_chain_collapses() {
