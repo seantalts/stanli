@@ -6,8 +6,8 @@
 // a hand-picked twelve of its own, and the MIR interpreter generated from
 // that twelve and then hand-added `student_t_lpdf` back because it did not
 // fit. The subset was not a design -- it was whatever the corpus needed
-// when the register machine was written -- and it was load-bearing in the
-// worst way: a region whose control flow depends on a parameter has to
+// when the register machine was written -- and it carried weight in the
+// worst place: a region whose control flow depends on a parameter has to
 // compile to the register machine or not at all, so a density outside the
 // twelve was a hard compile error for a model the runtime handles
 // everywhere else. `target += chi_square_lpdf(y | nu)` inside an

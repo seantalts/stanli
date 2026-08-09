@@ -117,16 +117,89 @@ losing against CmdStan to beating it six-fold. The statistician did not
 vectorize the model; the runtime did, once, at load time. You can only
 do that to a computation that exists as an inspectable data structure.
 
+## The three machines inside the runtime
+
+Everything above describes the main engine, but the runtime actually
+contains three, and the honest way to see why is one question: **how
+much do you know before the model runs?** The more you decide early,
+the faster you go. The less you assume, the more you can handle. Each
+engine sits at a different point on that line.
+
+**The MIR interpreter decides everything late.** It walks the
+compiler's syntax tree and looks variables up by name, every time.
+That is slow, and that is fine, because its jobs are the ones where
+speed cannot matter or early decisions are impossible: transformed
+data runs once at load; generated quantities can call a random number
+generator and branch on the draw, so there is nothing fixed to
+compile; and it is the safety net for anything the fast paths refuse.
+That last job carries a rule this codebase treats as law: **the
+fallback must always speak more of the language than the fast path**,
+because a refusal has to land somewhere that still works. If the
+fallback were ever narrower, a refusal would become a crash.
+
+**The op graph decides shapes and order early.** That is the engine
+this document is about: the fixed list is the tape, and vector-sized
+ops amortize the dispatch cost. Its two hard walls are structural. A
+fixed list cannot contain a decision, so `if (theta > 0)` -- which
+picks its branch anew every evaluation -- cannot become ops at all.
+And when a loop cannot be vectorized because step t needs step t-1's
+answer, the list holds thousands of one-number ops, each paying the
+per-op overhead that vector ops exist to amortize.
+
+**The register machine also decides placement early.** Regions that
+hit the graph's walls -- a recurrence, a branch on a parameter, an ODE
+right-hand side the solver calls at times of its choosing -- compile
+one level further down, into a flat instruction list over numbered
+cells fixed at load time. No slot lookup, no descriptor: an
+instruction costs about a nanosecond. It may branch, because it runs
+entirely inside one graph op, so from the tape's point of view the
+branch never happened -- the same way a branch inside any kernel is
+invisible. Its gradient is a second instruction list, generated at
+compile time by reading the first one backward and replacing each
+instruction with its derivative rule, running over a parallel array of
+adjoints. Both lists are plain doubles; nothing allocates.
+
+Where the mathematics lives differs by class, deliberately. The scalar
+continuous densities -- the `normal_lpdf` in an HMM's emission, the
+hottest instructions an island has -- go through one shared table that
+binds the arguments to a recording scalar and calls the unmodified
+Stan library, which computes the value and the partial derivatives
+itself. Everything else with a one-number result (a cdf, `pow`, a
+discrete density) is a `CALL`: the register machine invokes the graph
+op's own kernel, the identical code, partials, and backward the graph
+would have run. One instruction, rather than hundreds of ported rules,
+is what keeps the three vocabularies from drifting: the densities are
+special only in being hot enough to deserve a direct path, and narrow
+enough (plain scalar in, one scalar out) that the direct path is a
+single library call. Only the elementary arithmetic -- multiply,
+divide, `exp`, a couple dozen more -- has hand-written derivative
+rules, each transcribed from the Stan library's own reverse-mode
+source and pinned by tests that require bit-for-bit agreement with it.
+
+One mechanism ties the engines' gradients together: scratch. Every
+graph op may declare working space; at model load the executor sums
+the requests and hands each op a fixed slice of one flat arena. An
+op's forward stashes its partial derivatives there and its backward
+reads them, which is why a gradient allocates nothing and why the
+backward never needs to re-run the forward. An island is the same
+idea one level down: its scratch slice holds its whole register file,
+so the values its forward computed are still sitting there when its
+backward runs, and a CALL's kernel scratch is carved out of that same
+file. It is scratch all the way down, allocated once, addressed by
+offsets decided before the first gradient ever runs.
+
 ## Where the compiled model still wins
 
-Sequential models lose: HMM recursions and state-space updates read the
-previous step's parameter-dependent result, which nothing can
-vectorize, so the work is scalar on both sides and CmdStan's compiled
-scalar code is faster (typically 0.6-0.8x). ODE models run at about
-0.6x: the right-hand side must stay callable at solver-chosen times,
-and stanli runs it through a compact register machine where CmdStan
-runs native code. These gaps are engineering, not anything fundamental,
-but today they are real.
+ODE models run at about 0.6x: the right-hand side must stay callable
+at solver-chosen times, and stanli runs it through the register
+machine where CmdStan runs native code. Sequential models used to
+lose the same way, until the islands' backward stopped replaying under
+CmdStan-style autodiff and became a generated program: the HMM family
+now measures 1.4-1.6x against islands off, and `iohmm_reg` 4.7x
+(docs/benchmarks.md has the table). What remains for both classes is
+the per-instruction cost of interpreting at all, which is the
+difference between a nanosecond of dispatch and code the C++ compiler
+inlined into the model binary.
 
 The other cost is size, the deliberate trade at the center of the
 design: the wheel is 7.8 MB because it carries the entire Stan compiler
