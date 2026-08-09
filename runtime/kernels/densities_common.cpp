@@ -34,9 +34,11 @@ void uniform_fwd(KernelCtx& ctx) {
     std::fill(ctx.scratch, ctx.scratch + plen, 0.0);
     return;
   }
-  density_fwd_v<3, 3>(
-      ctx, [](const auto&... a) { stan::math::uniform_lpdf<true>(a...); },
-      [](const auto&... a) { stan::math::uniform_lpdf<false>(a...); });
+  // The list already generates exactly this call in densities_common_b.cpp.
+  // Writing it out again here would instantiate the whole three-argument
+  // family a second time (the lambdas are distinct closure types), so call
+  // the generated one; densities.cpp registers this wrapper over it.
+  uniform_lpdf_fwd_gen(ctx);
   if (any_out && elt) {
     // Elementwise variant: only the offending lanes are LOG_ZERO, and
     // their partials contribute nothing.
