@@ -1,0 +1,5 @@
+# Google C++ style, with one deviation: include order is semantic in
+# this codebase (stan-math must precede Eigen so its plugin macros are
+# seen), so clang-format must not reorder it.
+BasedOnStyle: Google
+SortIncludes: Never
