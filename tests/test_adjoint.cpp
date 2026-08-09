@@ -41,8 +41,8 @@ static void expect(const char* what, bool ok) {
 // designated live-ins (seeded from `in`) and some live-outs (read back).
 struct Case {
   IslandProg p;
-  std::vector<double> in;   // one value per live-in register, packed
-  std::vector<double> seed; // one adjoint per out_reg
+  std::vector<double> in;    // one value per live-in register, packed
+  std::vector<double> seed;  // one adjoint per out_reg
 };
 
 // The oracle: run_island<var> under nested autodiff, exactly as
@@ -82,7 +82,8 @@ static std::vector<double> native_adjoints(const IslandProg& p,
   std::vector<double> val((size_t)p.n_regs, 0.0);
   int64_t off = 0;
   for (const auto& li : p.ins)
-    for (int i = 0; i < li.len; ++i) val[(size_t)(li.reg + i)] = in[(size_t)off++];
+    for (int i = 0; i < li.len; ++i)
+      val[(size_t)(li.reg + i)] = in[(size_t)off++];
   run_program(p, val.data());
   for (size_t m = 0; m < p.out_regs.size(); ++m)
     out_vals->push_back(val[(size_t)p.out_regs[m]]);
@@ -103,28 +104,50 @@ static std::vector<double> native_adjoints(const IslandProg& p,
 
 static const char* code_name(Program::Code c) {
   switch (c) {
-    case Program::CONST: return "CONST";
-    case Program::CONSTR: return "CONSTR";
-    case Program::MOV: return "MOV";
-    case Program::MOVR: return "MOVR";
-    case Program::ADD: return "ADD";
-    case Program::SUB: return "SUB";
-    case Program::MUL: return "MUL";
-    case Program::DIV: return "DIV";
-    case Program::NEG: return "NEG";
-    case Program::EXP: return "EXP";
-    case Program::LOG: return "LOG";
-    case Program::SQRT: return "SQRT";
-    case Program::SQUARE: return "SQUARE";
-    case Program::TANH: return "TANH";
-    case Program::DOT: return "DOT";
-    case Program::LSE_RANGE: return "LSE_RNG";
-    case Program::LOG_RANGE: return "LOG_RNG";
-    case Program::EXP_RANGE: return "EXP_RNG";
-    case Program::SOFTMAX: return "SOFTMAX";
-    case Program::LSE2: return "LSE2";
-    case Program::LOG_MIX: return "LOG_MIX";
-    default: return "OTHER";
+    case Program::CONST:
+      return "CONST";
+    case Program::CONSTR:
+      return "CONSTR";
+    case Program::MOV:
+      return "MOV";
+    case Program::MOVR:
+      return "MOVR";
+    case Program::ADD:
+      return "ADD";
+    case Program::SUB:
+      return "SUB";
+    case Program::MUL:
+      return "MUL";
+    case Program::DIV:
+      return "DIV";
+    case Program::NEG:
+      return "NEG";
+    case Program::EXP:
+      return "EXP";
+    case Program::LOG:
+      return "LOG";
+    case Program::SQRT:
+      return "SQRT";
+    case Program::SQUARE:
+      return "SQUARE";
+    case Program::TANH:
+      return "TANH";
+    case Program::DOT:
+      return "DOT";
+    case Program::LSE_RANGE:
+      return "LSE_RNG";
+    case Program::LOG_RANGE:
+      return "LOG_RNG";
+    case Program::EXP_RANGE:
+      return "EXP_RNG";
+    case Program::SOFTMAX:
+      return "SOFTMAX";
+    case Program::LSE2:
+      return "LSE2";
+    case Program::LOG_MIX:
+      return "LOG_MIX";
+    default:
+      return "OTHER";
   }
 }
 
@@ -205,10 +228,10 @@ static bool check(const std::string& name, Case c, int64_t tol = 0) {
     if (ulps(want[k], got[k]) > tol) {
       ++failures;
       passed = false;
-      std::printf("FAIL %s: adj[%zu] replay %.17g native %.17g (rel %.2e)\n",
-                  name.c_str(), k, want[k], got[k],
-                  std::abs(got[k] - want[k]) /
-                      std::max(std::abs(want[k]), 1e-300));
+      std::printf(
+          "FAIL %s: adj[%zu] replay %.17g native %.17g (rel %.2e)\n",
+          name.c_str(), k, want[k], got[k],
+          std::abs(got[k] - want[k]) / std::max(std::abs(want[k]), 1e-300));
       std::printf("     (%lld ulp, tolerance %lld)\n",
                   (long long)ulps(want[k], got[k]), (long long)tol);
     }
@@ -243,7 +266,8 @@ struct Build {
   }
   int konst(double v) {
     const int r = alloc();
-    p.code.push_back(Program::Instr{Program::CONST, r, (int)p.pool.size(), 0, 0, 1});
+    p.code.push_back(
+        Program::Instr{Program::CONST, r, (int)p.pool.size(), 0, 0, 1});
     p.pool.push_back(v);
     return r;
   }
@@ -278,11 +302,11 @@ static void test_binary_ops() {
 
 static void test_unary_ops() {
   const Program::Code codes[] = {
-      Program::NEG,  Program::EXP,       Program::LOG,   Program::SQRT,
+      Program::NEG,    Program::EXP,       Program::LOG,   Program::SQRT,
       Program::SQUARE, Program::INV_LOGIT, Program::LOG1M, Program::TANH,
-      Program::INV,  Program::FABS};
-  const char* names[] = {"neg",       "exp",   "log",   "sqrt", "square",
-                         "inv_logit", "log1m", "tanh",  "inv",  "fabs"};
+      Program::INV,    Program::FABS};
+  const char* names[] = {"neg",       "exp",   "log",  "sqrt", "square",
+                         "inv_logit", "log1m", "tanh", "inv",  "fabs"};
   for (size_t k = 0; k < sizeof(codes) / sizeof(codes[0]); ++k) {
     Build b({0.37});
     const int d = b.emit(codes[k], 0);
@@ -300,9 +324,9 @@ static void test_unary_ops() {
 // the checkpoint analysis has to notice.
 static void test_overwrite_needs_checkpoint() {
   Build b({1.3, 0.8});
-  const int t = b.emit(Program::MUL, 0, 1);       // t = a*b
-  b.emit_to(Program::MUL, 1, t, 0);               // b = t*a  (overwrites b!)
-  const int u = b.emit(Program::MUL, t, 1);       // u = t*b'
+  const int t = b.emit(Program::MUL, 0, 1);  // t = a*b
+  b.emit_to(Program::MUL, 1, t, 0);          // b = t*a  (overwrites b!)
+  const int u = b.emit(Program::MUL, t, 1);  // u = t*b'
   check("overwrite checkpoint", b.done({u}, {0.9}));
 }
 
@@ -310,7 +334,7 @@ static void test_overwrite_needs_checkpoint() {
 // very instruction that needs it.
 static void test_self_write() {
   Build b({1.3, 0.8});
-  b.emit_to(Program::MUL, 0, 0, 1);   // a = a*b, needs the OLD a
+  b.emit_to(Program::MUL, 0, 0, 1);  // a = a*b, needs the OLD a
   const int u = b.emit(Program::EXP, 0);
   check("self write", b.done({u}, {0.7}));
 }
@@ -328,9 +352,9 @@ static void test_live_copy_both_read() {
   // Three different functions, so the three contributions to the original's
   // adjoint are three different numbers and the grouping is observable. Two
   // equal contributions would make both orders agree by accident.
-  const int r1 = b.emit(Program::EXP, 0);        // reads the original
-  const int r2 = b.emit(Program::SQRT, c);       // reads the copy
-  const int r3 = b.emit(Program::TANH, 0);       // reads the original again
+  const int r1 = b.emit(Program::EXP, 0);   // reads the original
+  const int r2 = b.emit(Program::SQRT, c);  // reads the copy
+  const int r3 = b.emit(Program::TANH, 0);  // reads the original again
   const int s1 = b.emit(Program::ADD, r1, r2);
   const int s2 = b.emit(Program::ADD, s1, r3);
   check("live copy both read", b.done({s2}, {1.0}));
@@ -345,17 +369,17 @@ static void test_copy_then_modify_chain() {
   const int W = 4;
   const int z = b.alloc(W);
   const std::vector<double> zeros((size_t)W, 0.0);
-  b.p.code.push_back(Program::Instr{Program::CONSTR, z,
-                                    (int)b.p.pool.size(), 0, 0, W});
+  b.p.code.push_back(
+      Program::Instr{Program::CONSTR, z, (int)b.p.pool.size(), 0, 0, W});
   for (int k = 0; k < W; ++k) b.p.pool.push_back(0.1 * k);
   int st = z;
   int acc = -1;
   for (int t = 0; t < 5; ++t) {
     const int d = b.alloc(W);
-    b.emit_to(Program::MOVR, d, st, 0, 0, W);           // copy the state
+    b.emit_to(Program::MOVR, d, st, 0, 0, W);  // copy the state
     const int m = b.emit(Program::MUL, st + (t % W), t % 3);
     const int u = b.emit(Program::TANH, m);
-    b.emit_to(Program::MOV, d + (t % W), u);            // overwrite one cell
+    b.emit_to(Program::MOV, d + (t % W), u);  // overwrite one cell
     const int lse = b.emit(Program::LSE_RANGE, d, 0, 0, W);
     acc = acc < 0 ? lse : b.emit(Program::ADD, acc, lse);
     st = d;
@@ -513,12 +537,12 @@ static void test_densities() {
   // One point inside every listed density's support: 0 < y < 1 for beta,
   // y above the lower bound and below the upper for uniform, and positive
   // shape/scale arguments for the rest.
-#define STANLI_TEST_DENSITY(code, fn, arity)                              \
-  {                                                                       \
-    Build b({0.63, 0.4, 1.7});                                            \
-    const int d = b.emit(Program::code, 0, arity > 1 ? 1 : 0,             \
-                         arity > 2 ? 2 : 0);                              \
-    check(std::string("density ") + #fn, b.done({d}, {1.25}));            \
+#define STANLI_TEST_DENSITY(code, fn, arity)                            \
+  {                                                                     \
+    Build b({0.63, 0.4, 1.7});                                          \
+    const int d =                                                       \
+        b.emit(Program::code, 0, arity > 1 ? 1 : 0, arity > 2 ? 2 : 0); \
+    check(std::string("density ") + #fn, b.done({d}, {1.25}));          \
   }
   STANLI_PROGRAM_DENSITY_LIST(STANLI_TEST_DENSITY)
 #undef STANLI_TEST_DENSITY
@@ -608,16 +632,26 @@ static void test_fuzz() {
       switch (form) {
         case 0: {
           const double v = rng.real();
-          b.p.code.push_back(Program::Instr{Program::CONST, d,
-                                            (int)b.p.pool.size(), 0, 0, 1});
+          b.p.code.push_back(
+              Program::Instr{Program::CONST, d, (int)b.p.pool.size(), 0, 0, 1});
           b.p.pool.push_back(v);
           break;
         }
-        case 1: b.emit_to(Program::MOV, d, a); break;
-        case 2: b.emit_to(Program::ADD, d, a, c); break;
-        case 3: b.emit_to(Program::SUB, d, a, c); break;
-        case 4: b.emit_to(Program::MUL, d, a, c); break;
-        default: b.emit_to(Program::TANH, d, a); break;
+        case 1:
+          b.emit_to(Program::MOV, d, a);
+          break;
+        case 2:
+          b.emit_to(Program::ADD, d, a, c);
+          break;
+        case 3:
+          b.emit_to(Program::SUB, d, a, c);
+          break;
+        case 4:
+          b.emit_to(Program::MUL, d, a, c);
+          break;
+        default:
+          b.emit_to(Program::TANH, d, a);
+          break;
       }
       if (std::find(live.begin(), live.end(), d) == live.end())
         live.push_back(d);
@@ -648,8 +682,8 @@ static void test_fuzz_ranges() {
     std::vector<double> ins;
     for (int k = 0; k < W; ++k) ins.push_back(rng.real());
     Build b(ins, W);
-    std::vector<int> ranges{0};   // starts of W-wide live ranges
-    std::vector<int> scalars;     // registers holding one value
+    std::vector<int> ranges{0};  // starts of W-wide live ranges
+    std::vector<int> scalars;    // registers holding one value
     const int n_instr = 3 + rng.pick(8);
     for (int t = 0; t < n_instr; ++t) {
       const int src = ranges[(size_t)rng.pick((int)ranges.size())];
@@ -657,9 +691,15 @@ static void test_fuzz_ranges() {
       const bool fresh = rng.pick(2) == 0;
       const int dst = fresh ? b.alloc(W) : src;
       switch (rng.pick(6)) {
-        case 0: b.emit_to(Program::MOVR, dst, src, 0, 0, W); break;
-        case 1: b.emit_to(Program::EXP_RANGE, dst, src, 0, 0, W); break;
-        case 2: b.emit_to(Program::SOFTMAX, dst, src, 0, 0, W); break;
+        case 0:
+          b.emit_to(Program::MOVR, dst, src, 0, 0, W);
+          break;
+        case 1:
+          b.emit_to(Program::EXP_RANGE, dst, src, 0, 0, W);
+          break;
+        case 2:
+          b.emit_to(Program::SOFTMAX, dst, src, 0, 0, W);
+          break;
         case 3: {
           // A reduction: its output is a scalar, not a range.
           const int r = b.alloc();

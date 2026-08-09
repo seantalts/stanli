@@ -12,7 +12,8 @@
 // thirty-five opcodes:
 //
 //   forward   d = a * b
-//   adjoint   t = adj[d]; adj[d] = 0; adj[a] += val[b] * t; adj[b] += val[a] * t
+//   adjoint   t = adj[d]; adj[d] = 0;
+//             adj[a] += val[b] * t; adj[b] += val[a] * t
 //
 // Every rule mirrors the corresponding stan-math rev implementation
 // expression for expression -- operand grouping included, since the bar is

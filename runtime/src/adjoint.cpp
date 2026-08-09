@@ -229,7 +229,8 @@ bool gen_adjoint(IslandProg& p) {
     // one does.
     auto save_before = [&](int r, int len) {
       bool need = r < I.dst + wl && I.dst < r + len;
-      for (int k = 0; k < len && !need; ++k) need = last_write[(size_t)(r + k)] > i;
+      for (int k = 0; k < len && !need; ++k)
+        need = last_write[(size_t)(r + k)] > i;
       if (!need) return r;
       const int ck = n_regs;
       n_regs += len;
@@ -287,7 +288,8 @@ bool gen_adjoint(IslandProg& p) {
     // later overwrite can lose it.
     auto save_after = [&](int r, int len) {
       bool need = false;
-      for (int k = 0; k < len && !need; ++k) need = last_write[(size_t)(r + k)] > i;
+      for (int k = 0; k < len && !need; ++k)
+        need = last_write[(size_t)(r + k)] > i;
       if (!need) return r;
       const int ck = n_regs;
       n_regs += len;
@@ -624,9 +626,9 @@ void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
         adj[I.a] += t * (one_m_exp * one_d);
         break;
       }
-#define STANLI_ADJ_DENSITY_CASE(code, fn, n)                              \
-  case Program::code:                                                     \
-    density_adj<n>(I, val, adj,                                           \
+#define STANLI_ADJ_DENSITY_CASE(code, fn, n)                               \
+  case Program::code:                                                      \
+    density_adj<n>(I, val, adj,                                            \
                    [](const auto&... a) { stan::math::fn<false>(a...); }); \
     break;
         STANLI_PROGRAM_DENSITY_LIST(STANLI_ADJ_DENSITY_CASE)
