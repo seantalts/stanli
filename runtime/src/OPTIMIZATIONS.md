@@ -210,7 +210,7 @@ expression for expression, so the two still agree to the last bit on
 almost every region, and `STANLI_NO_NATIVE_ADJ=1` switches back to the
 autodiff replay to check that they do.
 
-That changed the class rather than improving it. On all eighteen corpus
+That changed the class rather than improving it. On the corpus
 models with a region big enough to compile, every one is faster
 generated than replayed, and models that were a wash became real wins:
 one HMM collapses 42,926 ops into 11 and went from 0.99x to 1.68x. The

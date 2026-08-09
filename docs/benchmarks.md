@@ -157,29 +157,46 @@ everything else.
 reverse-mode source transformation over the ~35 opcodes of `Program`,
 producing a second pass over doubles with no vari, no nested tape and no
 allocation. Measured with `STANLI_NO_ISLAND=1` as the baseline, same
-build, same point, on all eighteen corpus models that compile a region
-(`harnesses/island_ab.py`, min of three runs each):
+build, same point, on all twenty-one corpus models that compile a
+region (`harnesses/island_ab.py`, min of three runs each -- the sweep
+bypasses the carve estimate so the regions it declines are measured
+too, which is how the table can hold rows the default build refuses):
 
 | model | ops off -> on | ns/grad off | replayed | generated | |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `iohmm_reg` | 53,456 -> 27 | 1,416,007 | 575,482 (2.46x) | 290,286 | **4.88x** |
-| `hmm_gaussian` | 42,926 -> 11 | 360,905 | 364,228 (0.99x) | 215,038 | **1.68x** |
-| `hmm_drive_0` | 19,540 -> 24 | 163,258 | 177,215 (0.92x) | 98,352 | **1.66x** |
-| `hmm_example` | 3,483 -> 13 | 31,977 | 33,568 (0.95x) | 19,457 | **1.64x** |
-| `hmm_drive_1` | 19,540 -> 24 | 168,305 | 192,561 (0.87x) | 108,045 | **1.56x** |
-| `garch11` | 1,797 -> 8 | 11,018 | 15,074 (0.73x) | 8,696 | **1.27x** |
-| `Mb_model` | 7,035 -> 1,647 | 70,124 | 94,297 (0.74x) | 61,384 | **1.14x** |
-| `losscurve_sislob` | 316 -> 88 | 2,285 | 3,152 (0.72x) | 2,132 | **1.07x** |
-| `hier_2pl` | 349 -> 97 | 300,632 | 304,245 (0.99x) | 300,742 | 1.00x |
-| `kronecker_gp` | 254 -> 166 | 300,220 | 310,635 (0.97x) | 300,704 | 1.00x |
-| `multi_occupancy` | 4,006 -> 3,659 | 68,646 | 70,058 (0.98x) | 68,417 | 1.00x |
-| `accel_gp` | 461 -> 64 | 7,085 | 8,032 (0.88x) | 7,141 | 0.99x |
-| `hierarchical_gp` | 165 -> 84 | 30,794 | 35,534 (0.87x) | 31,452 | 0.98x |
-| `accel_splines` | 425 -> 28 | 7,495 | 8,689 (0.86x) | 7,694 | 0.97x |
-| `arma11` | 1,205 -> 9 | 6,452 | 10,621 (0.61x) | 6,672 | 0.97x |
-| `covid19imperial_v3` | 21,526 -> 19,995 | 308,476 | 438,658 (0.70x) | 319,252 | 0.97x |
-| `covid19imperial_v2` | 21,526 -> 19,995 | 307,758 | 440,122 (0.70x) | 319,371 | 0.96x |
-| `bones_model` | 7,528 -> 4,955 | 51,342 | 989,073 (0.05x) | 207,054 | 0.25x |
+| `iohmm_reg` | 53,456 -> 27 | 1,428,776 | 574,888 (2.49x) | 301,629 | **4.74x** |
+| `hmm_gaussian` | 42,926 -> 11 | 365,750 | 398,088 (0.92x) | 228,638 | **1.60x** |
+| `hmm_example` | 3,483 -> 13 | 32,292 | 36,465 (0.89x) | 20,766 | **1.56x** |
+| `hmm_drive_1` | 19,540 -> 24 | 171,084 | 199,678 (0.86x) | 121,344 | **1.41x** |
+| `hmm_drive_0` | 19,540 -> 24 | 162,653 | 195,899 (0.83x) | 117,285 | **1.39x** |
+| `garch11` | 1,797 -> 8 | 10,996 | 14,777 (0.74x) | 8,109 | **1.36x** |
+| `Mb_model` | 7,035 -> 1,646 | 72,289 | 71,934 (1.00x) | 65,250 | **1.11x** |
+| `arma11` | 1,205 -> 9 | 6,774 | 10,526 (0.64x) | 6,544 | 1.04x |
+| `accel_gp` | 461 -> 64 | 7,233 | 8,170 (0.89x) | 7,041 | 1.03x |
+| `losscurve_sislob` | 316 -> 26 | 2,340 | 3,165 (0.74x) | 2,281 | 1.03x |
+| `multi_occupancy` | 4,006 -> 3,659 | 68,098 | 70,760 (0.96x) | 68,097 | 1.00x |
+| `hier_2pl` | 349 -> 97 | 301,507 | 302,117 (1.00x) | 301,792 | 1.00x |
+| `soil_incubation` | 129 -> 32 | 96,445 | 96,704 (1.00x) | 96,903 | 1.00x |
+| `kronecker_gp` | 254 -> 166 | 302,779 | 315,098 (0.96x) | 306,665 | 0.99x |
+| `accel_splines` | 425 -> 28 | 7,745 | 8,963 (0.86x) | 7,882 | 0.98x |
+| `hierarchical_gp` | 165 -> 84 | 30,448 | 35,607 (0.86x) | 31,041 | 0.98x |
+| `covid19imperial_v3` | 21,526 -> 19,995 | 308,879 | 439,340 (0.70x) | 316,736 | 0.98x |
+| `covid19imperial_v2` | 21,526 -> 19,995 | 305,642 | 442,001 (0.69x) | 315,311 | 0.97x |
+| `Survey_model` | 1,427 -> 5 | 61,524 | 62,030 (0.99x) | 65,039 | 0.95x |
+| `dugongs_model` | 120 -> 12 | 768 | 766 (1.00x) | 1,168 | 0.66x |
+| `bones_model` | 7,528 -> 4,955 | 52,335 | 988,998 (0.05x) | 207,721 | 0.25x |
+
+Three of the twenty-one exist because the machine's vocabulary stopped
+being a subset of the graph's: any scalar-out op it has no instruction
+for now compiles as a CALL to the graph's own kernel -- the identical
+code, partials, and backward the op would have run -- so one such op no
+longer ends a run (`POW` used to split regions in half). A CALL buys
+continuity, never speed, and the estimate charges it the graph's own
+per-op tax; without that charge the first sweep carved `dugongs_model`
+at a measured 0.66x and `Survey_model` at 0.95x, and with it both are
+refused on the default path while every previously carved verdict is
+unchanged. `losscurve_sislob` is the payoff shape: its residue drops
+88 -> 26 ops because the cdfs inside it stopped ending the run.
 
 Every region is faster generated than replayed, and the class changed
 rather than improved: op collapse is now worth roughly what the op counts
