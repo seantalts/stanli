@@ -1170,6 +1170,12 @@ class MirInterp {
     // semantics.
     // Scalar unaries from the shared list, so transformed data and
     // generated quantities accept exactly what the log-density path does.
+    // These compute on plain doubles (val()), so any name that must
+    // carry derivatives through the interpreter (inv, log10,
+    // log_inv_logit, log1m_inv_logit, ...) needs its hand-written un()
+    // handler earlier in this chain: that handler wins by position, and
+    // deleting it as a "duplicate" of the entry here silently zeroes the
+    // derivative.
 #define STANLI_INTERP_UNARY(code, ufn, VAL, DERIV)                        \
   if (e.name == #ufn && e.args.size() == 1) {                             \
     const Value a = eval(e.args[0]);                                       \

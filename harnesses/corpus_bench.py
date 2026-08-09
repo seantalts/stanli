@@ -11,8 +11,7 @@ useful and a rerun can skip what is already there.
 Usage: python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb OUT.tsv
                                       [--filter SUBSTR] [--timeout SEC]
                                       [--stanli-only]
-Needs build-rel/ built. Expect hours: CmdStan
-builds a binary per model.
+Needs build-rel/ built. Expect hours: CmdStan builds a binary per model.
 
 --stanli-only re-measures the stanli columns of every EXISTING row in place
 and keeps the CmdStan columns as they are. That is the refresh mode for a

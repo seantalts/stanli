@@ -134,15 +134,11 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
         # The write_array reference: column names must match exactly, and
         # the values (transformed parameters + generated quantities at the
         # same point) share the model's gate.
-        names, vals = None, None
-        for line in lines[1:]:
-            if line.startswith("WANAMES "):
-                names = line[8:]
-            elif line.startswith("WAVALS"):
-                vals = line[6:].split()
-        if names is None or vals is None or names.startswith("FAIL"):
+        wa = parse_wa(proc.stdout)
+        if wa is None:
             return (model, "WA_FAIL", worst, worst_ulp, n,
-                    (names or "no write_array output")[:120])
+                    "no or failed write_array output")
+        names, vals = wa
         if names != ref["wa"]["names"]:
             return (model, "WA_NAMES_FAIL", worst, worst_ulp, n,
                     f"got {names[:60]} want {ref['wa']['names'][:60]}")

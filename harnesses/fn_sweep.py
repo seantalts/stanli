@@ -268,11 +268,13 @@ def sweep_one(spec, cs, tmp, keep, density=True):
         status, _, note = err.partition(": ")
         return name, status, note, None, None
 
-    worst, _, err = compare_points(exe, REPO / BUILD / "stanli_check", stan,
-                                   data, ulps, REPO / "deps/stanc3/stanc",
-                                   run=run)
+    worst, n_cmp, err = compare_points(exe, REPO / BUILD / "stanli_check",
+                                       stan, data, ulps,
+                                       REPO / "deps/stanc3/stanc", run=run)
     if err:
         return name, err[0], err[1], None, None
+    if n_cmp == 0:
+        return name, "no_valid_point", "", None, None
 
     ns = None
     sexp = d / "m.sexp"
