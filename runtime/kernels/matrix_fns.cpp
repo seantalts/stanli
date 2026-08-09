@@ -128,101 +128,46 @@ void chol_bwd(KernelCtx& ctx) {
   });
 }
 
-// ---- multi_normal_cholesky_lpdf(y | mu, L) --------------------------------
-// in = {y, mu, L}; idata = {n}. Propto and per-argument activity follow the
-// density convention: stan-math drops terms by argument type, so inactive
-// arguments must stay double.
-template <bool Grad>
-double mnc_eval(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0];
-  const int64_t m = ctx.n_idata > 1 ? ctx.idata[1] : 1;
-  const bool propto = (ctx.variant & 0x80u) != 0;
-  const unsigned mask = ctx.variant == 0 ? 0x7u : (ctx.variant & 0x3fu);
-  stan::math::nested_rev_autodiff nested;
-  using stan::math::var;
-  // m > 1: y is an array of m K-vectors (stan-math's vectorized form).
-  std::vector<VarV> ys(m, VarV(n));
-  std::vector<VecD> ysd(m, VecD(n));
-  for (int64_t k = 0; k < m; ++k)
-    for (int64_t i = 0; i < n; ++i) {
-      ys[k](i) = ctx.in[0].data[k * n + i];
-      ysd[k](i) = ctx.in[0].data[k * n + i];
-    }
-  VarV y = ys[0], mu(n);
-  VarM L(n, n);
-  for (int64_t i = 0; i < n; ++i) mu(i) = ctx.in[1].data[i];
-  for (int64_t j = 0; j < n; ++j)
-    for (int64_t i = 0; i < n; ++i) L(i, j) = ctx.in[2].data[j * n + i];
-  CMapV yd(ctx.in[0].data, n), mud(ctx.in[1].data, n);
-  CMapM Ld(ctx.in[2].data, n, n);
-
-  // 8 activity combinations x propto; bind each argument var-or-double.
-  auto call = [&](auto&& a, auto&& b, auto&& c) {
-    return propto ? stan::math::multi_normal_cholesky_lpdf<true>(a, b, c)
-                  : stan::math::multi_normal_cholesky_lpdf<false>(a, b, c);
-  };
-  var out;
-  const bool ay = mask & 1u, am = mask & 2u, aL = mask & 4u;
-  if (m > 1) {
-    // Vectorized form: y is an array of m K-vectors and may itself be a
-    // parameter expression (array[S] vector[K] built from parameters), so
-    // it binds var-or-double per the activity mask like the others.
-    var v_out;
-    if (ay)
-      v_out = aL ? (am ? call(ys, mu, L) : call(ys, mud, L))
-                  : (am ? call(ys, mu, Ld) : call(ys, mud, Ld));
-    else
-      v_out = aL ? (am ? call(ysd, mu, L) : call(ysd, mud, L))
-                  : (am ? call(ysd, mu, Ld) : call(ysd, mud, Ld));
-    const double vv = v_out.val();
-    if constexpr (Grad) {
-      var jj = v_out * ctx.out_adj;
-      stan::math::grad(jj.vi_);
-      if (ay && ctx.in_adj[0].data)
-        for (int64_t k = 0; k < m; ++k)
-          for (int64_t i = 0; i < n; ++i)
-            ctx.in_adj[0].data[k * n + i] += ys[k](i).adj();
-      if (am && ctx.in_adj[1].data)
-        for (int64_t i = 0; i < n; ++i) ctx.in_adj[1].data[i] += mu(i).adj();
-      if (aL && ctx.in_adj[2].data)
-        for (int64_t j2 = 0; j2 < n; ++j2)
-          for (int64_t i = 0; i < n; ++i)
-            ctx.in_adj[2].data[j2 * n + i] += L(i, j2).adj();
-    }
-    return vv;
-  }
-  if (ay && am && aL) out = call(y, mu, L);
-  else if (ay && am) out = call(y, mu, Ld);
-  else if (ay && aL) out = call(y, mud, L);
-  else if (am && aL) out = call(yd, mu, L);
-  else if (ay) out = call(y, mud, Ld);
-  else if (am) out = call(yd, mu, Ld);
-  else if (aL) out = call(yd, mud, L);
-  else return call(yd, mud, Ld);
-
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    if (ay && ctx.in_adj[0].data)
-      for (int64_t i = 0; i < n; ++i) ctx.in_adj[0].data[i] += y(i).adj();
-    if (am && ctx.in_adj[1].data)
-      for (int64_t i = 0; i < n; ++i) ctx.in_adj[1].data[i] += mu(i).adj();
-    if (aL && ctx.in_adj[2].data)
-      for (int64_t j2 = 0; j2 < n; ++j2)
-        for (int64_t i = 0; i < n; ++i)
-          ctx.in_adj[2].data[j2 * n + i] += L(i, j2).adj();
-  }
+// Bind a slot as a var matrix or vector, and scatter the adjoints back
+// afterwards. Shared by the multivariate densities below and by the tail
+// densities further down.
+VarM tail_m(const KernelCtx& ctx, int k, int64_t rows, int64_t cols) {
+  VarM M(rows, cols);
+  for (int64_t j = 0; j < cols; ++j)
+    for (int64_t i = 0; i < rows; ++i)
+      M(i, j) = ctx.in[k].data[j * rows + i];
+  return M;
+}
+VarV tail_v(const KernelCtx& ctx, int k, int64_t n) {
+  VarV v(n);
+  for (int64_t i = 0; i < n; ++i) v(i) = ctx.in[k].data[i];
   return v;
 }
-void mnc_fwd(KernelCtx& ctx) { ctx.out.data[0] = mnc_eval<false>(ctx); }
-void mnc_bwd(KernelCtx& ctx) { mnc_eval<true>(ctx); }
+void tail_scatter_m(KernelCtx& ctx, int k, const VarM& M) {
+  if (!ctx.in_adj[k].data) return;
+  const int64_t rows = M.rows(), cols = M.cols();
+  for (int64_t j = 0; j < cols; ++j)
+    for (int64_t i = 0; i < rows; ++i)
+      ctx.in_adj[k].data[j * rows + i] += M(i, j).adj();
+}
+void tail_scatter_v(KernelCtx& ctx, int k, const VarV& v) {
+  if (!ctx.in_adj[k].data) return;
+  for (int64_t i = 0; i < v.size(); ++i)
+    ctx.in_adj[k].data[i] += v(i).adj();
+}
+void tail_scatter_s(KernelCtx& ctx, int k, const stan::math::var& x) {
+  if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += x.adj();
+}
 
 // ---- multi_normal_lpdf(y | mu, Sigma) -------------------------------------
-// multi_normal_prec takes the same three arguments in the same shapes -- a
-// precision matrix instead of a covariance -- so it is the same kernel with
-// one call swapped.
-enum MnKind { kMnCov, kMnPrec };
+// in = {y, mu, Sigma}; idata = {n}. Propto and per-argument activity follow
+// the density convention: stan-math drops terms by argument type, so inactive
+// arguments must stay double.
+//
+// multi_normal_prec and multi_normal_cholesky take the same three arguments in
+// the same shapes -- a precision matrix or a Cholesky factor instead of a
+// covariance -- so they are the same kernel with one call swapped.
+enum MnKind { kMnCov, kMnPrec, kMnChol };
 template <bool Grad, MnKind Kind = kMnCov>
 double mn_eval(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
@@ -246,10 +191,14 @@ double mn_eval(KernelCtx& ctx) {
     for (int64_t i = 0; i < n; ++i) S(i, j) = ctx.in[2].data[j * n + i];
   CMapV yd(ctx.in[0].data, n), mud(ctx.in[1].data, n);
   CMapM Sd(ctx.in[2].data, n, n);
+  // 8 activity combinations x propto; bind each argument var-or-double.
   auto call = [&](auto&& a, auto&& b, auto&& c) {
     if constexpr (Kind == kMnPrec) {
       return propto ? stan::math::multi_normal_prec_lpdf<true>(a, b, c)
                     : stan::math::multi_normal_prec_lpdf<false>(a, b, c);
+    } else if constexpr (Kind == kMnChol) {
+      return propto ? stan::math::multi_normal_cholesky_lpdf<true>(a, b, c)
+                    : stan::math::multi_normal_cholesky_lpdf<false>(a, b, c);
     } else {
       return propto ? stan::math::multi_normal_lpdf<true>(a, b, c)
                     : stan::math::multi_normal_lpdf<false>(a, b, c);
@@ -272,16 +221,13 @@ double mn_eval(KernelCtx& ctx) {
     if constexpr (Grad) {
       var jj = v_out * ctx.out_adj;
       stan::math::grad(jj.vi_);
+      // y stays hand-written here: it is a std::vector<VarV>, not a VarV.
       if (ay && ctx.in_adj[0].data)
         for (int64_t k = 0; k < m; ++k)
           for (int64_t i = 0; i < n; ++i)
             ctx.in_adj[0].data[k * n + i] += ys[k](i).adj();
-      if (am && ctx.in_adj[1].data)
-        for (int64_t i = 0; i < n; ++i) ctx.in_adj[1].data[i] += mu(i).adj();
-      if (aS && ctx.in_adj[2].data)
-        for (int64_t j2 = 0; j2 < n; ++j2)
-          for (int64_t i = 0; i < n; ++i)
-            ctx.in_adj[2].data[j2 * n + i] += S(i, j2).adj();
+      if (am) tail_scatter_v(ctx, 1, mu);
+      if (aS) tail_scatter_m(ctx, 2, S);
     }
     return vv;
   }
@@ -298,14 +244,9 @@ double mn_eval(KernelCtx& ctx) {
   if constexpr (Grad) {
     var j = out * ctx.out_adj;
     stan::math::grad(j.vi_);
-    if (ay && ctx.in_adj[0].data)
-      for (int64_t i = 0; i < n; ++i) ctx.in_adj[0].data[i] += y(i).adj();
-    if (am && ctx.in_adj[1].data)
-      for (int64_t i = 0; i < n; ++i) ctx.in_adj[1].data[i] += mu(i).adj();
-    if (aS && ctx.in_adj[2].data)
-      for (int64_t j2 = 0; j2 < n; ++j2)
-        for (int64_t i = 0; i < n; ++i)
-          ctx.in_adj[2].data[j2 * n + i] += S(i, j2).adj();
+    if (ay) tail_scatter_v(ctx, 0, y);
+    if (am) tail_scatter_v(ctx, 1, mu);
+    if (aS) tail_scatter_m(ctx, 2, S);
   }
   return v;
 }
@@ -315,6 +256,8 @@ void mnprec_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = mn_eval<false, kMnPrec>(ctx);
 }
 void mnprec_bwd(KernelCtx& ctx) { mn_eval<true, kMnPrec>(ctx); }
+void mnc_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_eval<false, kMnChol>(ctx); }
+void mnc_bwd(KernelCtx& ctx) { mn_eval<true, kMnChol>(ctx); }
 
 // ---- general matrix product: out = A * B ----------------------------------
 // idata = {rows_a, cols_a, cols_b}; either side may carry adjoints.
@@ -359,10 +302,7 @@ double lkj_eval(KernelCtx& ctx) {
   if constexpr (Grad) {
     var j = out * ctx.out_adj;
     stan::math::grad(j.vi_);
-    if (ctx.in_adj[0].data)
-      for (int64_t j2 = 0; j2 < K; ++j2)
-        for (int64_t i = 0; i < K; ++i)
-          ctx.in_adj[0].data[j2 * K + i] += L(i, j2).adj();
+    tail_scatter_m(ctx, 0, L);
   }
   return v;
 }
@@ -493,34 +433,6 @@ void eigvecs_bwd(KernelCtx& ctx) {
 // And it is the compact tier by construction: one instantiation, no
 // activity-mask expansion. A data argument's partials are computed and
 // dropped, which is the right trade for a density nobody has profiled.
-VarM tail_m(const KernelCtx& ctx, int k, int64_t rows, int64_t cols) {
-  VarM M(rows, cols);
-  for (int64_t j = 0; j < cols; ++j)
-    for (int64_t i = 0; i < rows; ++i)
-      M(i, j) = ctx.in[k].data[j * rows + i];
-  return M;
-}
-VarV tail_v(const KernelCtx& ctx, int k, int64_t n) {
-  VarV v(n);
-  for (int64_t i = 0; i < n; ++i) v(i) = ctx.in[k].data[i];
-  return v;
-}
-void tail_scatter_m(KernelCtx& ctx, int k, const VarM& M) {
-  if (!ctx.in_adj[k].data) return;
-  const int64_t rows = M.rows(), cols = M.cols();
-  for (int64_t j = 0; j < cols; ++j)
-    for (int64_t i = 0; i < rows; ++i)
-      ctx.in_adj[k].data[j * rows + i] += M(i, j).adj();
-}
-void tail_scatter_v(KernelCtx& ctx, int k, const VarV& v) {
-  if (!ctx.in_adj[k].data) return;
-  for (int64_t i = 0; i < v.size(); ++i)
-    ctx.in_adj[k].data[i] += v(i).adj();
-}
-void tail_scatter_s(KernelCtx& ctx, int k, const stan::math::var& x) {
-  if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += x.adj();
-}
-
 // ---- wishart family: (matrix W, real nu, matrix S), four of them --------
 enum WishKind { kWishart, kInvWishart, kWishartChol, kInvWishartChol };
 template <bool Grad, WishKind Kind>
