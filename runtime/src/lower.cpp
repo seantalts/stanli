@@ -1631,6 +1631,35 @@ struct Lowering {
     return std::nullopt;
   }
 
+  // stan-math's own defaults differ per solver: rk45 1e-6/1e-6/1e6 (the
+  // OdeSpec field initializers), bdf 1e-10/1e-10/1e8. Using one set for
+  // both left one_comp_mm's gradients 2.9e-6 off CmdStan, so both
+  // families stamp them from here.
+  void stamp_ode_defaults(OdeSpec& spec) {
+    if (!spec.stiff) return;
+    spec.rtol = 1e-10;
+    spec.atol = 1e-10;
+    spec.max_steps = 100000000;
+  }
+
+  // The op tail both ODE families share: report an interpreter fallback,
+  // emit OP_ODE and hand the spec to the graph.
+  Val emit_ode(std::shared_ptr<OdeSpec> spec, int z0_slot, int theta_slot,
+               int64_t N, int64_t S) {
+    // Falling back to the interpreter is correct but ~30x slower, so make
+    // it findable rather than silent.
+    if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ODE"))
+      std::fprintf(stderr,
+                   "stanli: ODE right-hand side %s falls back to the "
+                   "interpreter: %s\n",
+                   spec->rhs_name.c_str(), spec->prog.why.c_str());
+    Val v = emit(OP_ODE, {z0_slot, theta_slot}, N * S, {}, {(int)N, (int)S});
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+    decl_dims_pending = {N, S};
+    return v;
+  }
+
   // The modern variadic family: ode_rk45 / ode_bdf / ode_adams / ode_ckrk
   // and their _tol forms.
   //
@@ -1670,14 +1699,7 @@ struct Lowering {
     spec->solver = sit->second;
     spec->stiff = spec->solver == OdeSpec::BDF ||
                   spec->solver == OdeSpec::ADAMS;
-    // stan-math's defaults, per solver: the CVODES pair is far tighter
-    // than the Runge-Kutta pair, and using one set for both is how
-    // one_comp_mm's gradients ended up 2.9e-6 off CmdStan once already.
-    if (spec->stiff) {
-      spec->rtol = 1e-10;
-      spec->atol = 1e-10;
-      spec->max_steps = 100000000;
-    }
+    stamp_ode_defaults(*spec);
     spec->t0 = const_values(e.args[2]).at(0);
     spec->ts = const_values(e.args[3]);
     if (with_tol) {
@@ -1744,19 +1766,7 @@ struct Lowering {
 
     spec->args = rargs;
     spec->prog = compile_rhs_args(*spec->rhs(), *spec->funs(), (int)S, rargs);
-    // Falling back to the interpreter is correct but ~30x slower, so make
-    // it findable rather than silent.
-    if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ODE"))
-      std::fprintf(stderr,
-                   "stanli: ODE right-hand side %s falls back to the "
-                   "interpreter: %s\n",
-                   spec->rhs_name.c_str(), spec->prog.why.c_str());
-
-    Val v = emit(OP_ODE, {z0.slot, theta.slot}, N * S, {}, {(int)N, (int)S});
-    g.ops.back().udata = spec.get();
-    g.udata_pool.push_back(std::move(spec));
-    decl_dims_pending = {N, S};
-    return v;
+    return emit_ode(std::move(spec), z0.slot, theta.slot, N, S);
   }
 
   // The integrate_ode_* family.
@@ -1776,14 +1786,7 @@ struct Lowering {
       spec->stiff = e.name.find("bdf") != std::string::npos;
       spec->legacy = true;
       spec->solver = spec->stiff ? OdeSpec::BDF : OdeSpec::RK45;
-      // stan-math's own defaults differ per solver: rk45 1e-6/1e-6/1e6,
-      // bdf 1e-10/1e-10/1e8. Using one set for both left one_comp_mm's
-      // gradients 2.9e-6 off CmdStan.
-      if (spec->stiff) {
-        spec->rtol = 1e-10;
-        spec->atol = 1e-10;
-        spec->max_steps = 100000000;
-      }
+      stamp_ode_defaults(*spec);
       spec->t0 = const_values(e.args[2]).at(0);
       spec->ts = const_values(e.args[3]);
       spec->x_r = const_values(e.args[5]);
@@ -1808,17 +1811,7 @@ struct Lowering {
       spec->prog = compile_rhs(*spec->rhs(), *spec->funs(), (int)S,
                                (int)g.slots[theta.slot].len,
                                (int)spec->x_r.size(), spec->x_i);
-      // Falling back is correct but ~30x slower, so make it findable.
-      if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ODE"))
-        std::fprintf(stderr,
-                     "stanli: ODE right-hand side %s falls back to the "
-                     "interpreter: %s\n",
-                     spec->rhs_name.c_str(), spec->prog.why.c_str());
-      Val v = emit(OP_ODE, {z0.slot, theta.slot}, N * S, {}, {(int)N, (int)S});
-      g.ops.back().udata = spec.get();
-      g.udata_pool.push_back(std::move(spec));
-      decl_dims_pending = {N, S};
-      return v;
+      return emit_ode(std::move(spec), z0.slot, theta.slot, N, S);
     }
     return std::nullopt;
   }
