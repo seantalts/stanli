@@ -40,23 +40,18 @@ class WaInterp {
 
   // One CSV row: constrained parameter values by name in, every column of
   // the generate_quantities section out.
-  std::vector<double> eval(
-      const std::map<std::string, DataMap::Entry>& params);
+  std::vector<double> eval(const std::map<std::string, DataMap::Entry>& params);
 
   // Valid after the first eval.
-  const std::vector<CompiledModel::ParamView>& columns() const {
-    return cols_;
-  }
+  const std::vector<CompiledModel::ParamView>& columns() const { return cols_; }
 
  private:
   bool read_param(MirInterp<double>& in, const mir::Stmt& s,
                   const std::map<std::string, DataMap::Entry>& params);
   bool write_param(MirInterp<double>& in, const mir::Stmt& s,
                    std::vector<double>& row);
-  bool rng_fun(MirInterp<double>& in, const mir::Expr& e,
-               DataMap::Entry* out);
-  bool ode_fun(MirInterp<double>& in, const mir::Expr& e,
-               DataMap::Entry* out);
+  bool rng_fun(MirInterp<double>& in, const mir::Expr& e, DataMap::Entry* out);
+  bool ode_fun(MirInterp<double>& in, const mir::Expr& e, DataMap::Entry* out);
 
   std::shared_ptr<const mir::Program> prog_;
   std::map<std::string, const mir::FunDef*> funs_;

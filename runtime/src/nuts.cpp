@@ -19,8 +19,7 @@
 
 namespace stanli {
 
-std::vector<std::vector<double>> run_nuts(Executor& ex,
-                                          const NutsConfig& cfg,
+std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
                                           SamplerStats* stats,
                                           const DrawObserver& observe) {
   // CmdStan's generator, seeded CmdStan's way: same engine (mixmax in this
@@ -40,7 +39,7 @@ std::vector<std::vector<double>> run_nuts(Executor& ex,
   const int64_t n = ex.n_params();
   Eigen::VectorXd q(n);
   boost::random::uniform_real_distribution<double> init_dist(-cfg.init_radius,
-                                                            cfg.init_radius);
+                                                             cfg.init_radius);
 
   // CmdStan draws uniform(-2, 2) on the unconstrained scale and REJECTS the
   // draw unless both the log density and its whole gradient are finite,
@@ -97,13 +96,13 @@ std::vector<std::vector<double>> run_nuts(Executor& ex,
               ? std::string("initialization failed: the supplied "
                             "unconstrained init has no finite log density "
                             "and gradient")
-              : cfg.init_radius == 0.0
-                    ? std::string("initialization failed: the origin has no "
-                                  "finite log density and gradient (init "
-                                  "radius is 0)")
-                    : "initialization failed: no draw in " +
-                          std::to_string(kMaxInitAttempts) +
-                          " attempts had finite log density and gradient");
+          : cfg.init_radius == 0.0
+              ? std::string("initialization failed: the origin has no "
+                            "finite log density and gradient (init "
+                            "radius is 0)")
+              : "initialization failed: no draw in " +
+                    std::to_string(kMaxInitAttempts) +
+                    " attempts had finite log density and gradient");
   }
   if (std::getenv("STANLI_DEBUG_INIT")) {
     std::fprintf(stderr, "init");
@@ -126,7 +125,8 @@ std::vector<std::vector<double>> run_nuts(Executor& ex,
   const int thin = cfg.thin > 0 ? cfg.thin : 1;
   std::vector<std::vector<double>> draws;
   draws.reserve((size_t)((cfg.save_warmup ? cfg.warmup : 0) + cfg.samples) /
-                (size_t)thin + 1);
+                    (size_t)thin +
+                1);
   if (stats) stats->rows.clear();
 
   Eigen::VectorXd qd(n);
@@ -144,12 +144,10 @@ std::vector<std::vector<double>> run_nuts(Executor& ex,
         // divergent__, energy__ in that order (stan::mcmc::base_nuts).
         sp.clear();
         sampler.get_sampler_params(sp);
-        stats->rows.push_back({s.log_prob(), s.accept_stat(),
-                               sp.size() > 0 ? sp[0] : 0.0,
-                               sp.size() > 1 ? sp[1] : 0.0,
-                               sp.size() > 2 ? sp[2] : 0.0,
-                               sp.size() > 3 ? sp[3] : 0.0,
-                               sp.size() > 4 ? sp[4] : 0.0});
+        stats->rows.push_back(
+            {s.log_prob(), s.accept_stat(), sp.size() > 0 ? sp[0] : 0.0,
+             sp.size() > 1 ? sp[1] : 0.0, sp.size() > 2 ? sp[2] : 0.0,
+             sp.size() > 3 ? sp[3] : 0.0, sp.size() > 4 ? sp[4] : 0.0});
       }
     }
     if (observe) observe(i, warmup, qd.data());

@@ -94,12 +94,12 @@ struct KernelCtx {
   const int* idata = nullptr;
   int64_t n_idata = 0;
   const void* udata = nullptr;
-  Desc out2{nullptr, 0};      // second output value (scalar), if any
+  Desc out2{nullptr, 0};  // second output value (scalar), if any
   // Backward only. Data inputs get {nullptr, len}: kernels skip them.
   Desc in_adj[6];
-  double out_adj = 0;         // scalar-output ops
+  double out_adj = 0;            // scalar-output ops
   Desc out_adj_vec{nullptr, 0};  // vector-output ops
-  double out2_adj = 0;        // adjoint of the second output
+  double out2_adj = 0;           // adjoint of the second output
 };
 
 // Payload for OP_REJECT and OP_PRINT: the literal chunks of the message,
@@ -134,8 +134,12 @@ class Executor {
   // The unconstrained parameter vector: the first n_params() arena entries,
   // in parameter-slot declaration order.
   double* params_data() { return values_.data(); }
-  double* param_ptr(int slot) { return values_.data() + graph_.slots[slot].offset; }
-  double* value_ptr(int slot) { return values_.data() + graph_.slots[slot].offset; }
+  double* param_ptr(int slot) {
+    return values_.data() + graph_.slots[slot].offset;
+  }
+  double* value_ptr(int slot) {
+    return values_.data() + graph_.slots[slot].offset;
+  }
 
   // Forward through all ops; returns value of result_slot (must be scalar).
   double forward();
@@ -171,10 +175,10 @@ class Executor {
   KernelCtx make_ctx_(const Op& op, const std::vector<char>& written);
 
   struct ProfEntry {
-    int64_t calls = 0;       // forward invocations
+    int64_t calls = 0;  // forward invocations
     int64_t fwd_ns = 0;
     int64_t bwd_ns = 0;
-    int64_t elems = 0;       // output elements per forward call, summed
+    int64_t elems = 0;  // output elements per forward call, summed
   };
 
   Graph graph_;

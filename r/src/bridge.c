@@ -25,22 +25,20 @@
  * filename was written for. */
 #ifdef _WIN32
 #include <windows.h>
-static void *dl_open(const char *path) {
-  return (void *)LoadLibraryA(path);
-}
-static void *dl_sym(void *h, const char *name) {
+static void* dl_open(const char* path) { return (void*)LoadLibraryA(path); }
+static void* dl_sym(void* h, const char* name) {
   /* Through uintptr_t: GetProcAddress returns a function pointer, and
    * converting one straight to void* is what -Wcast-function-type
    * exists to complain about. */
-  return (void *)(uintptr_t)GetProcAddress((HMODULE)h, name);
+  return (void*)(uintptr_t)GetProcAddress((HMODULE)h, name);
 }
-static void dl_close(void *h) { FreeLibrary((HMODULE)h); }
-static const char *dl_error(void) {
+static void dl_close(void* h) { FreeLibrary((HMODULE)h); }
+static const char* dl_error(void) {
   static char buf[512];
   const DWORD e = GetLastError();
-  const DWORD n = FormatMessageA(
-      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, e,
-      0, buf, (DWORD)sizeof buf - 1, NULL);
+  const DWORD n =
+      FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                     NULL, e, 0, buf, (DWORD)sizeof buf - 1, NULL);
   if (n == 0)
     snprintf(buf, sizeof buf, "could not load the library (error %lu)",
              (unsigned long)e);
@@ -48,13 +46,13 @@ static const char *dl_error(void) {
 }
 #else
 #include <dlfcn.h>
-static void *dl_open(const char *path) {
+static void* dl_open(const char* path) {
   return dlopen(path, RTLD_NOW | RTLD_LOCAL);
 }
-static void *dl_sym(void *h, const char *name) { return dlsym(h, name); }
-static void dl_close(void *h) { dlclose(h); }
-static const char *dl_error(void) {
-  const char *e = dlerror();
+static void* dl_sym(void* h, const char* name) { return dlsym(h, name); }
+static void dl_close(void* h) { dlclose(h); }
+static const char* dl_error(void) {
+  const char* e = dlerror();
   return e != NULL ? e : "unknown error";
 }
 #endif
@@ -79,7 +77,7 @@ typedef struct {
   int max_depth;
   int save_warmup;
   double init_radius;
-  const double *inits;
+  const double* inits;
   int num_threads;
 } stanli_sample_opts;
 
@@ -96,51 +94,50 @@ typedef struct {
   double tol_param;
   int history_size;
   double init_radius;
-  const double *init;
+  const double* init;
 } stanli_optimize_opts;
 
-static void *g_lib = NULL;
+static void* g_lib = NULL;
 
 /* Every entry point the R side uses. */
 static int (*p_abi_version)(void);
-static void *(*p_model_new_from_stan)(const char *, const char *, char *,
-                                      size_t);
-static void *(*p_model_new)(const char *, const char *, char *, size_t);
-static void (*p_model_free)(void *);
+static void* (*p_model_new_from_stan)(const char*, const char*, char*, size_t);
+static void* (*p_model_new)(const char*, const char*, char*, size_t);
+static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
 static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
-static int64_t (*p_n_unconstrained)(const void *);
-static int (*p_grad)(void *, const double *, double *, double *);
-static int64_t (*p_n_constrained)(const void *);
-static const char *(*p_constrained_name)(const void *, int64_t);
-static int (*p_constrain)(void *, const double *, double *);
-static void (*p_sample_opts_init)(stanli_sample_opts *);
-static int64_t (*p_n_stored_draws)(const stanli_sample_opts *);
-static int (*p_sample_multi)(void *, const stanli_sample_opts *, double *,
-                             double *, char *, size_t);
-static const char *(*p_sampler_column_name)(int);
-static int (*p_summary_stats)(const double *, int64_t, int64_t, int64_t,
-                              double *);
-static int64_t (*p_diagnose_text)(const double *, int64_t, int64_t, int64_t,
-                                  const char *const *, const double *, int,
-                                  char *, size_t);
-static int64_t (*p_wa_n_columns)(const void *);
-static const char *(*p_wa_column_name)(const void *, int64_t);
-static void (*p_wa_seed)(void *, uint32_t);
-static int (*p_wa_row)(void *, const double *, double *);
-static void (*p_optimize_opts_init)(stanli_optimize_opts *);
-static int (*p_optimize)(void *, const stanli_optimize_opts *, double *,
-                         double *, double *, char *, size_t);
+static int64_t (*p_n_unconstrained)(const void*);
+static int (*p_grad)(void*, const double*, double*, double*);
+static int64_t (*p_n_constrained)(const void*);
+static const char* (*p_constrained_name)(const void*, int64_t);
+static int (*p_constrain)(void*, const double*, double*);
+static void (*p_sample_opts_init)(stanli_sample_opts*);
+static int64_t (*p_n_stored_draws)(const stanli_sample_opts*);
+static int (*p_sample_multi)(void*, const stanli_sample_opts*, double*, double*,
+                             char*, size_t);
+static const char* (*p_sampler_column_name)(int);
+static int (*p_summary_stats)(const double*, int64_t, int64_t, int64_t,
+                              double*);
+static int64_t (*p_diagnose_text)(const double*, int64_t, int64_t, int64_t,
+                                  const char* const*, const double*, int, char*,
+                                  size_t);
+static int64_t (*p_wa_n_columns)(const void*);
+static const char* (*p_wa_column_name)(const void*, int64_t);
+static void (*p_wa_seed)(void*, uint32_t);
+static int (*p_wa_row)(void*, const double*, double*);
+static void (*p_optimize_opts_init)(stanli_optimize_opts*);
+static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
+                         double*, char*, size_t);
 
-#define BIND(fn, var)                                          \
-  do {                                                         \
-    *(void **)(&var) = dl_sym(g_lib, fn);                      \
-    if (var == NULL) {                                         \
-      dl_close(g_lib);                                         \
-      g_lib = NULL;                                            \
+#define BIND(fn, var)                                           \
+  do {                                                          \
+    *(void**)(&var) = dl_sym(g_lib, fn);                        \
+    if (var == NULL) {                                          \
+      dl_close(g_lib);                                          \
+      g_lib = NULL;                                             \
       return mkString("missing symbol in stanli library: " fn); \
-    }                                                          \
+    }                                                           \
   } while (0)
 
 SEXP stanli_bridge_load(SEXP path) {
@@ -154,13 +151,14 @@ SEXP stanli_bridge_load(SEXP path) {
    * field moved, every call would still succeed and read the wrong
    * offsets: a run at the wrong seed and the wrong step size, with no
    * error anywhere. Refuse instead. */
-  *(void **)(&p_abi_version) = dl_sym(g_lib, "stanli_abi_version");
+  *(void**)(&p_abi_version) = dl_sym(g_lib, "stanli_abi_version");
   if (p_abi_version == NULL) {
     dl_close(g_lib);
     g_lib = NULL;
-    return mkString("this stanli runtime predates the versioned ABI and is "
-                    "too old for this package. Run "
-                    "stanli_install(overwrite = TRUE).");
+    return mkString(
+        "this stanli runtime predates the versioned ABI and is "
+        "too old for this package. Run "
+        "stanli_install(overwrite = TRUE).");
   }
   if (p_abi_version() != STANLI_R_ABI_VERSION) {
     char msg[256];
@@ -204,23 +202,24 @@ SEXP stanli_bridge_loaded(void) { return ScalarLogical(g_lib != NULL); }
 
 static void require_loaded(void) {
   if (g_lib == NULL)
-    error("the stanli runtime is not loaded; call stanli_install() once, "
-          "then restart or call stanli:::load_runtime()");
+    error(
+        "the stanli runtime is not loaded; call stanli_install() once, "
+        "then restart or call stanli:::load_runtime()");
 }
 
 /* The model handle is an external pointer with a finalizer, so a model
  * that goes out of scope in R frees its arenas rather than leaking them
  * until the session ends. */
 static void model_finalizer(SEXP ext) {
-  void *m = R_ExternalPtrAddr(ext);
+  void* m = R_ExternalPtrAddr(ext);
   if (m != NULL && p_model_free != NULL) {
     p_model_free(m);
     R_ClearExternalPtr(ext);
   }
 }
 
-static void *model_ptr(SEXP ext) {
-  void *m = R_ExternalPtrAddr(ext);
+static void* model_ptr(SEXP ext) {
+  void* m = R_ExternalPtrAddr(ext);
   if (m == NULL) error("stanli model handle is no longer valid");
   return m;
 }
@@ -229,7 +228,7 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir) {
   require_loaded();
   char err[8192];
   err[0] = '\0';
-  void *m;
+  void* m;
   if (asLogical(is_mir))
     m = p_model_new(CHAR(STRING_ELT(code, 0)), CHAR(STRING_ELT(data_json, 0)),
                     err, sizeof err);
@@ -263,7 +262,7 @@ SEXP stanli_r_n_unconstrained(SEXP m) {
 
 SEXP stanli_r_column_names(SEXP m) {
   require_loaded();
-  void *mm = model_ptr(m);
+  void* mm = model_ptr(m);
   /* write_array columns when the model has generated quantities, the
    * constrained parameters otherwise -- the same rule the Python
    * wrapper follows, so both report the same CSV. */
@@ -272,7 +271,7 @@ SEXP stanli_r_column_names(SEXP m) {
   if (!wa) n = p_n_constrained(mm);
   SEXP out = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
   for (int64_t i = 0; i < n; ++i) {
-    const char *s = wa ? p_wa_column_name(mm, i) : p_constrained_name(mm, i);
+    const char* s = wa ? p_wa_column_name(mm, i) : p_constrained_name(mm, i);
     SET_STRING_ELT(out, (R_xlen_t)i, mkChar(s ? s : ""));
   }
   UNPROTECT(1);
@@ -281,7 +280,7 @@ SEXP stanli_r_column_names(SEXP m) {
 
 SEXP stanli_r_grad(SEXP m, SEXP q) {
   require_loaded();
-  void *mm = model_ptr(m);
+  void* mm = model_ptr(m);
   const int64_t n = p_n_unconstrained(mm);
   if (XLENGTH(q) != n)
     error("q has %lld elements, model has %lld unconstrained parameters",
@@ -291,8 +290,9 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
   const int rc = p_grad(mm, REAL(q), &lp, REAL(grad));
   if (rc != 0) {
     UNPROTECT(1);
-    error("log density evaluation failed at this point (domain error in a "
-          "distribution or function)");
+    error(
+        "log density evaluation failed at this point (domain error in a "
+        "distribution or function)");
   }
   SEXP out = PROTECT(allocVector(VECSXP, 2));
   SET_VECTOR_ELT(out, 0, ScalarReal(lp));
@@ -308,7 +308,7 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
 /* opts arrives from R as an unnamed positional list, so this order must
  * match sample_model() in R/stanli.R element for element. A swap of two
  * same-typed fields samples from the wrong configuration in silence. */
-static void fill_sample_opts(stanli_sample_opts *o, SEXP l) {
+static void fill_sample_opts(stanli_sample_opts* o, SEXP l) {
   p_sample_opts_init(o);
   o->seed = (uint32_t)asInteger(VECTOR_ELT(l, 0));
   o->chains = asInteger(VECTOR_ELT(l, 1));
@@ -324,7 +324,7 @@ static void fill_sample_opts(stanli_sample_opts *o, SEXP l) {
 
 SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits) {
   require_loaded();
-  void *mm = model_ptr(m);
+  void* mm = model_ptr(m);
   stanli_sample_opts o;
   fill_sample_opts(&o, optlist);
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
@@ -352,13 +352,13 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits) {
   const int wa = ncol > 0;
   if (!wa) ncol = p_n_constrained(mm);
   SEXP vals = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * ncol)));
-  double *vp = REAL(vals);
-  double *rp = REAL(raw);
-  double *row = (double *)R_alloc((size_t)ncol, sizeof(double));
+  double* vp = REAL(vals);
+  double* rp = REAL(raw);
+  double* row = (double*)R_alloc((size_t)ncol, sizeof(double));
   for (int64_t c = 0; c < nchain; ++c) {
     if (wa) p_wa_seed(mm, (uint32_t)(o.seed + c));
     for (int64_t i = 0; i < rows; ++i) {
-      const double *q = rp + (c * rows + i) * n;
+      const double* q = rp + (c * rows + i) * n;
       const int rc = wa ? p_wa_row(mm, q, row) : p_constrain(mm, q, row);
       if (rc != 0) {
         UNPROTECT(3);
@@ -415,13 +415,12 @@ SEXP stanli_r_diagnose(SEXP draws, SEXP dims, SEXP names, SEXP stats,
   const int64_t nchain = INTEGER(dims)[0];
   const int64_t ndraw = INTEGER(dims)[1];
   const int64_t ncol = INTEGER(dims)[2];
-  const char **nm =
-      (const char **)R_alloc((size_t)ncol, sizeof(const char *));
+  const char** nm = (const char**)R_alloc((size_t)ncol, sizeof(const char*));
   for (int64_t i = 0; i < ncol; ++i) nm[i] = CHAR(STRING_ELT(names, i));
-  const int64_t need = p_diagnose_text(REAL(draws), nchain, ndraw, ncol, nm,
-                                       REAL(stats), asInteger(max_depth), NULL,
-                                       0);
-  char *buf = (char *)R_alloc((size_t)(need > 0 ? need : 1), 1);
+  const int64_t need =
+      p_diagnose_text(REAL(draws), nchain, ndraw, ncol, nm, REAL(stats),
+                      asInteger(max_depth), NULL, 0);
+  char* buf = (char*)R_alloc((size_t)(need > 0 ? need : 1), 1);
   p_diagnose_text(REAL(draws), nchain, ndraw, ncol, nm, REAL(stats),
                   asInteger(max_depth), buf, (size_t)(need > 0 ? need : 1));
   return mkString(buf);
@@ -429,7 +428,7 @@ SEXP stanli_r_diagnose(SEXP draws, SEXP dims, SEXP names, SEXP stats,
 
 SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
   require_loaded();
-  void *mm = model_ptr(m);
+  void* mm = model_ptr(m);
   stanli_optimize_opts o;
   p_optimize_opts_init(&o);
   o.seed = (uint32_t)asInteger(VECTOR_ELT(optlist, 0));

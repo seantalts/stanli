@@ -15,8 +15,8 @@ static void expect_in(const std::string& what, double got, double lo,
                       double hi) {
   if (!(got >= lo && got <= hi)) {
     ++failures;
-    std::printf("FAIL %-14s got %.6g want in [%g, %g]\n", what.c_str(), got,
-                lo, hi);
+    std::printf("FAIL %-14s got %.6g want in [%g, %g]\n", what.c_str(), got, lo,
+                hi);
   }
 }
 static std::string slurp(const std::string& path) {

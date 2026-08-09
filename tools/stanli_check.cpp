@@ -38,8 +38,8 @@ static double eval_point(int64_t i, int variant) {
 
 static std::string run_stanc(const std::string& stanc,
                              const std::string& model) {
-  const std::string cmd = stanc + " --debug-transformed-mir '" + model +
-                          "' 2>/dev/null";
+  const std::string cmd =
+      stanc + " --debug-transformed-mir '" + model + "' 2>/dev/null";
   std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd.c_str(), "r"), pclose);
   if (!pipe) throw std::runtime_error("cannot run stanc");
   std::string out;
@@ -63,10 +63,14 @@ int main(int argc, char** argv) {
   bool wa_values = false;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
-    if (a == "--columns") columns_only = true;
-    else if (a == "--wa-values") wa_values = true;
-    else if (a == "--stanc" && i + 1 < argc) stanc = argv[++i];
-    else if (a == "--point" && i + 1 < argc) variant = std::atoi(argv[++i]);
+    if (a == "--columns")
+      columns_only = true;
+    else if (a == "--wa-values")
+      wa_values = true;
+    else if (a == "--stanc" && i + 1 < argc)
+      stanc = argv[++i];
+    else if (a == "--point" && i + 1 < argc)
+      variant = std::atoi(argv[++i]);
   }
   if (const char* env = std::getenv("STANC")) stanc = env;
 
@@ -98,9 +102,9 @@ int main(int argc, char** argv) {
   // comparison against CmdStan's (harnesses/wa_header_check.py).
   if (columns_only) {
     if (!cm.write_array || cm.write_array->columns.empty()) {
-      std::printf("NO_COLUMNS %s\n",
-                  cm.write_array ? cm.write_array->truncated.c_str()
-                                 : "no generate_quantities section");
+      std::printf("NO_COLUMNS %s\n", cm.write_array
+                                         ? cm.write_array->truncated.c_str()
+                                         : "no generate_quantities section");
       return 1;
     }
     std::string h;
@@ -111,8 +115,7 @@ int main(int argc, char** argv) {
     }
     std::printf("%s\n", h.c_str());
     if (!cm.write_array->truncated.empty())
-      std::fprintf(stderr, "TRUNCATED %s\n",
-                   cm.write_array->truncated.c_str());
+      std::fprintf(stderr, "TRUNCATED %s\n", cm.write_array->truncated.c_str());
     return 0;
   }
 
@@ -183,8 +186,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
                      "WA %zu vars %lld values %lld nonfinite complete "
                      "(interpreted: %s)\n",
-                     wi.columns().size(), (long long)row.size(),
-                     (long long)bad, cm.write_array->truncated.c_str());
+                     wi.columns().size(), (long long)row.size(), (long long)bad,
+                     cm.write_array->truncated.c_str());
         if (wa_values) {
           std::string joined;
           for (const auto& nm :
@@ -198,8 +201,7 @@ int main(int argc, char** argv) {
         }
       } catch (const std::exception& we) {
         std::fprintf(stderr, "WA empty interp: %s\n", we.what());
-        if (wa_values)
-          std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", we.what());
+        if (wa_values) std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", we.what());
       }
     } else if (cm.write_array->columns.empty()) {
       std::fprintf(stderr, "WA empty %s\n", cm.write_array->truncated.c_str());
@@ -236,9 +238,8 @@ int main(int argc, char** argv) {
         std::printf("\n");
       }
     }
-    if (wa_values &&
-        (!cm.write_array ||
-         (!cm.write_array->interp && cm.write_array->columns.empty())))
+    if (wa_values && (!cm.write_array || (!cm.write_array->interp &&
+                                          cm.write_array->columns.empty())))
       std::printf("WANAMES FAIL no write_array\nWAVALS FAIL\n");
   } catch (const std::exception& e) {
     std::printf("EVAL_FAIL %s\n", e.what());

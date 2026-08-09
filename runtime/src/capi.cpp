@@ -1,6 +1,5 @@
 #include <stanli/capi.h>
 
-
 #include <stanli/compile.hpp>
 #include <stanli/diagnose.hpp>
 #include <stanli/estimate.hpp>
@@ -27,7 +26,7 @@ void put_err(char* err, size_t err_len, const char* what) {
 }  // namespace
 
 struct stanli_model {
-  stanli::CompiledModel cm;   // graph moved out into ex
+  stanli::CompiledModel cm;  // graph moved out into ex
   std::unique_ptr<stanli::Executor> ex;
   std::vector<std::string> flat_names;  // constrained, flattened
   int64_t n_con = 0;
@@ -67,10 +66,13 @@ std::vector<double> interp_wa_row(stanli_model& m, const double* q) {
 // support at one point and fine at the next.
 double probe_point(int64_t i, int variant) {
   switch (variant) {
-    case 1: return 0.02 * static_cast<double>((i % 5) - 2);
-    case 2: return 0.0;
-    default: return 0.1 + 0.05 * static_cast<double>(i % 7) -
-                    0.15 * static_cast<double>(i % 3);
+    case 1:
+      return 0.02 * static_cast<double>((i % 5) - 2);
+    case 2:
+      return 0.0;
+    default:
+      return 0.1 + 0.05 * static_cast<double>(i % 7) -
+             0.15 * static_cast<double>(i % 3);
   }
 }
 
@@ -106,8 +108,8 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
           try {
             const auto row = interp_wa_row(*m, q.data());
             m->wa_n = (int64_t)row.size();
-            m->wa_names = stanli::CompiledModel::csv_names(
-                m->wa_interp->columns());
+            m->wa_names =
+                stanli::CompiledModel::csv_names(m->wa_interp->columns());
             found = true;
           } catch (const std::exception&) {
           }
@@ -166,8 +168,6 @@ int stanli_has_embedded_stanc(void) {
 
 int stanli_exact_lp(void) { return stanli::exact_lp_build() ? 1 : 0; }
 
-
-
 void stanli_model_free(stanli_model* m) { delete m; }
 
 int64_t stanli_n_unconstrained(const stanli_model* m) {
@@ -192,8 +192,8 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
 
 int stanli_sample(stanli_model* m, uint32_t seed, int warmup, int samples,
                   double delta, double* draws, char* err, size_t err_len) {
-  return stanli_sample_stream(m, seed, warmup, samples, delta, draws,
-                              nullptr, nullptr, err, err_len);
+  return stanli_sample_stream(m, seed, warmup, samples, delta, draws, nullptr,
+                              nullptr, err, err_len);
 }
 
 int stanli_sample_stream(stanli_model* m, uint32_t seed, int warmup,
@@ -258,8 +258,8 @@ int stanli_thread_safe(void) { return stanli::thread_safe_build() ? 1 : 0; }
 
 const char* stanli_sampler_column_name(int i) {
   static const char* kNames[STANLI_N_SAMPLER_COLS] = {
-      "lp__",       "accept_stat__", "stepsize__", "treedepth__",
-      "n_leapfrog__", "divergent__", "energy__"};
+      "lp__",         "accept_stat__", "stepsize__", "treedepth__",
+      "n_leapfrog__", "divergent__",   "energy__"};
   if (i < 0 || i >= STANLI_N_SAMPLER_COLS) return "";
   return kNames[i];
 }
@@ -323,8 +323,8 @@ int stanli_sample_multi(stanli_model* m, const stanli_sample_opts* opts,
       const auto& r = res[(size_t)c];
       if (!r.error.empty()) {
         if (failed++ == 0)
-          first_error = "chain " + std::to_string(cfg.chain_id + c) + ": " +
-                        r.error;
+          first_error =
+              "chain " + std::to_string(cfg.chain_id + c) + ": " + r.error;
         continue;
       }
       // A chain that stored fewer rows than asked would leave the tail of
@@ -335,10 +335,10 @@ int stanli_sample_multi(stanli_model* m, const stanli_sample_opts* opts,
         std::memcpy(draws + ((int64_t)c * n_stored + i) * n,
                     r.draws[(size_t)i].data(), sizeof(double) * (size_t)n);
         if (stats != nullptr && i < (int64_t)r.stats.rows.size())
-          std::memcpy(stats + ((int64_t)c * n_stored + i) *
-                                  STANLI_N_SAMPLER_COLS,
-                      r.stats.rows[(size_t)i].data(),
-                      sizeof(double) * STANLI_N_SAMPLER_COLS);
+          std::memcpy(
+              stats + ((int64_t)c * n_stored + i) * STANLI_N_SAMPLER_COLS,
+              r.stats.rows[(size_t)i].data(),
+              sizeof(double) * STANLI_N_SAMPLER_COLS);
       }
     }
     if (failed) put_err(err, err_len, first_error.c_str());
@@ -349,8 +349,8 @@ int stanli_sample_multi(stanli_model* m, const stanli_sample_opts* opts,
   }
 }
 
-int stanli_summary_stats(const double* draws, int64_t n_chains,
-                         int64_t n_draws, int64_t n_cols, double* out) {
+int stanli_summary_stats(const double* draws, int64_t n_chains, int64_t n_draws,
+                         int64_t n_cols, double* out) {
   try {
     stanli::DrawSet d{draws, n_chains, n_draws, n_cols};
     const auto s = stanli::summarize(d, {});
@@ -453,16 +453,16 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
       }
     };
 
-    const stanli::OptimizeResult r =
-        stanli::run_optimize(*m->ex, &wa, cfg);
+    const stanli::OptimizeResult r = stanli::run_optimize(*m->ex, &wa, cfg);
     for (size_t i = 0; i < r.unconstrained.size(); ++i)
       unconstrained[i] = r.unconstrained[i];
     if (values != nullptr)
       for (size_t i = 0; i < r.values.size(); ++i) values[i] = r.values[i];
     if (lp != nullptr) *lp = r.lp;
     if (r.return_code != 0)
-      put_err(err, err_len,
-              r.message.empty() ? "L-BFGS did not converge" : r.message.c_str());
+      put_err(
+          err, err_len,
+          r.message.empty() ? "L-BFGS did not converge" : r.message.c_str());
     return r.return_code;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());

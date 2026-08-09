@@ -25,7 +25,10 @@
 
 static int failures = 0;
 static void expect(const char* what, bool ok) {
-  if (!ok) { ++failures; std::printf("FAIL %s\n", what); }
+  if (!ok) {
+    ++failures;
+    std::printf("FAIL %s\n", what);
+  }
 }
 static void expect_close(const char* what, double got, double want) {
   const double rel = std::abs(got - want) / std::max(std::abs(want), 1e-300);

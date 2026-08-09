@@ -51,8 +51,8 @@ struct MirRhs {
       // y and theta arrive as T_y / T_param, which are T or double; the
       // register file is T, so promote through a small staging buffer only
       // when they differ.
-      std::vector<T> out, ys(y.begin(), y.end()), ths(theta.begin(),
-                                                      theta.end());
+      std::vector<T> out, ys(y.begin(), y.end()),
+          ths(theta.begin(), theta.end());
       run_rhs<T>(spec->prog, T(t), ys.data(), ths.data(), x_r.data(), out);
       return out;
     }
@@ -61,7 +61,8 @@ struct MirRhs {
     // arguments have to arrive already split out of the packed theta and
     // x_r -- in the same order compile_rhs_args assigned their register
     // ranges, which is the order spec->args records.
-    std::vector<std::vector<T>> reals{{T(t)}, std::vector<T>(y.begin(), y.end())};
+    std::vector<std::vector<T>> reals{{T(t)},
+                                      std::vector<T>(y.begin(), y.end())};
     std::vector<std::vector<int>> ints;
     size_t th_at = 0, xr_at = 0;
     for (const RhsArg& a : spec->args) {
@@ -93,9 +94,8 @@ struct VarRhs {
 
   template <typename T_y, typename T_param>
   Eigen::Matrix<stan::return_type_t<T_y, T_param>, Eigen::Dynamic, 1>
-  operator()(const double& t,
-             const Eigen::Matrix<T_y, Eigen::Dynamic, 1>& y, std::ostream*,
-             const std::vector<T_param>& theta,
+  operator()(const double& t, const Eigen::Matrix<T_y, Eigen::Dynamic, 1>& y,
+             std::ostream*, const std::vector<T_param>& theta,
              const std::vector<double>& x_r,
              const std::vector<int>& x_i) const {
     using T = stan::return_type_t<T_y, T_param>;
@@ -140,25 +140,22 @@ std::vector<std::vector<T>> solve(const OdeSpec& s, const std::vector<T>& z0,
                                     s.max_steps, nullptr, theta, s.x_r, s.x_i);
       break;
     case OdeSpec::ADAMS:
-      res = stan::math::ode_adams_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
-                                      s.max_steps, nullptr, theta, s.x_r,
-                                      s.x_i);
+      res =
+          stan::math::ode_adams_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
+                                    s.max_steps, nullptr, theta, s.x_r, s.x_i);
       break;
     case OdeSpec::CKRK:
       res = stan::math::ode_ckrk_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
-                                     s.max_steps, nullptr, theta, s.x_r,
-                                     s.x_i);
+                                     s.max_steps, nullptr, theta, s.x_r, s.x_i);
       break;
     default:
       res = stan::math::ode_rk45_tol(f, y0, s.t0, s.ts, s.rtol, s.atol,
-                                     s.max_steps, nullptr, theta, s.x_r,
-                                     s.x_i);
+                                     s.max_steps, nullptr, theta, s.x_r, s.x_i);
       break;
   }
   std::vector<std::vector<T>> out;
   out.reserve(res.size());
-  for (const auto& r : res)
-    out.emplace_back(r.data(), r.data() + r.size());
+  for (const auto& r : res) out.emplace_back(r.data(), r.data() + r.size());
   return out;
 }
 

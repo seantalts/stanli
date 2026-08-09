@@ -23,15 +23,17 @@
 
 static int failures = 0;
 static void expect(const char* what, bool ok) {
-  if (!ok) { ++failures; std::printf("FAIL %s\n", what); }
+  if (!ok) {
+    ++failures;
+    std::printf("FAIL %s\n", what);
+  }
 }
 static void expect_close(const char* what, double got, double want) {
-  const double rel =
-      std::abs(got - want) / std::max(std::abs(want), 1e-300);
+  const double rel = std::abs(got - want) / std::max(std::abs(want), 1e-300);
   if (!(rel < 1e-12)) {
     ++failures;
-    std::printf("FAIL %-24s got %.17g want %.17g rel %.2e\n", what, got,
-                want, rel);
+    std::printf("FAIL %-24s got %.17g want %.17g rel %.2e\n", what, got, want,
+                rel);
   }
 }
 
@@ -57,7 +59,10 @@ static void test_radon_shape() {
   g.add_op(OP_REP_VEC, {alpha}, base);  // makes base a written slot
   std::vector<int> yconst(L);
   for (int n = 0; n < L; ++n) {
-    if (n == 5) { yconst[n] = yconst[1]; continue; }  // dedup'd pool
+    if (n == 5) {
+      yconst[n] = yconst[1];
+      continue;
+    }  // dedup'd pool
     yconst[n] = g.add_slot(1, false);
     fills.emplace_back(yconst[n], std::vector<double>{0.25 * n - 1.0});
   }
@@ -430,8 +435,8 @@ static void test_data_index_gathers() {
     const int a = g.add_slot(1, false);
     g.add_op(OP_INDEX, {alpha}, a, {idx[l]});
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.3 * l - 1.0), a, sigma},
-                            lp);
+    const int id =
+        g.add_op(OP_NORMAL_LPDF, {cslot(0.3 * l - 1.0), a, sigma}, lp);
     g.ops[id].variant = 0x06;
     terms.push_back(lp);
   }
@@ -591,8 +596,8 @@ Built build(int L, int start, int stride = 1) {
   // stride 1: exactly the window, so the start==0 case covers the vector
   // and exercises the no-store elision. Otherwise: big enough for the comb.
   const int64_t last = start + (int64_t)(L - 1) * stride;
-  const int64_t vlen = stride == 1 ? start + (int64_t)L
-                                   : std::max((int64_t)start, last) + 1;
+  const int64_t vlen =
+      stride == 1 ? start + (int64_t)L : std::max((int64_t)start, last) + 1;
   b.y_hat = g.add_slot(vlen, false);
   b.fills.emplace_back(b.y_hat, std::vector<double>((size_t)vlen, 0.0));
   const int ydata = g.add_slot(vlen, false);
@@ -602,8 +607,7 @@ Built build(int L, int start, int stride = 1) {
   for (int l = 0; l < L; ++l) {
     const int v = g.add_slot(1, false);
     g.add_op(OP_INDEX, {b.a}, v, {l % J});
-    g.add_op(OP_SET_INDEX_INPLACE, {b.y_hat, v}, b.y_hat,
-             {start + l * stride});
+    g.add_op(OP_SET_INDEX_INPLACE, {b.y_hat, v}, b.y_hat, {start + l * stride});
   }
   const int lp = g.add_slot(1, false);
   const int id = g.add_op(OP_NORMAL_LPDF, {ydata, b.y_hat, b.sigma}, lp);
@@ -750,13 +754,13 @@ static void test_lda_shape_cost() {
   const LdaCost small = lda_reroll_cost(8000);
   const LdaCost big = lda_reroll_cost(16000);
   const double rss = peak_rss_mb();
-  std::printf("  lda shape reroll: n=8000 %.2f s / %lld steps,"
-              " n=16000 %.2f s / %lld steps (%.1fx steps, %.1fx time),"
-              " peak RSS %.0f MB\n",
-              small.sec, (long long)small.steps, big.sec,
-              (long long)big.steps,
-              small.steps > 0 ? (double)big.steps / (double)small.steps : 0.0,
-              small.sec > 0.0 ? big.sec / small.sec : 0.0, rss);
+  std::printf(
+      "  lda shape reroll: n=8000 %.2f s / %lld steps,"
+      " n=16000 %.2f s / %lld steps (%.1fx steps, %.1fx time),"
+      " peak RSS %.0f MB\n",
+      small.sec, (long long)small.steps, big.sec, (long long)big.steps,
+      small.steps > 0 ? (double)big.steps / (double)small.steps : 0.0,
+      small.sec > 0.0 ? big.sec / small.sec : 0.0, rss);
 
   // The memory ceiling is the guard that matters, because memory is what
   // broke, and unlike a wall-clock number an RSS figure means the same
@@ -825,14 +829,12 @@ static void test_write_fusion_bails() {
     Fills f2 = b.fills;
     std::vector<int> tt = b.terms;
     reroll(b.g, f2, tt, {});
-    expect("strided writes fused",
-           count(b.g, OP_SET_INDEX_INPLACE) == 0 &&
-               count(b.g, OP_SET_SLICE_STRIDED) == 1);
+    expect("strided writes fused", count(b.g, OP_SET_INDEX_INPLACE) == 0 &&
+                                       count(b.g, OP_SET_SLICE_STRIDED) == 1);
     reduce_into_result(b.g, tt);
     const std::vector<double> got = run_grad(std::move(b.g), f2);
     for (size_t i = 0; i < want.size() && i < got.size(); ++i)
-      expect_close(("strided v" + std::to_string(i)).c_str(), got[i],
-                   want[i]);
+      expect_close(("strided v" + std::to_string(i)).c_str(), got[i], want[i]);
   }
   {  // indices marching backwards: no positive stride, no fusion
     Built b = build(8, 14, -2);
@@ -1016,13 +1018,11 @@ static void test_e2e_fixtures() {
     const std::vector<double> want = e2e_grad(c.sexp, c.json, &ops_unrolled);
     test_unsetenv("STANLI_NO_REROLL");
     const std::vector<double> got = e2e_grad(c.sexp, c.json, &ops_rerolled);
-    expect((std::string(c.name) + " sizes").c_str(),
-           got.size() == want.size());
+    expect((std::string(c.name) + " sizes").c_str(), got.size() == want.size());
     for (size_t i = 0; i < want.size() && i < got.size(); ++i)
       expect_close((std::string(c.name) + " v" + std::to_string(i)).c_str(),
                    got[i], want[i]);
-    std::printf("%s: %zu ops -> %zu ops\n", c.name, ops_unrolled,
-                ops_rerolled);
+    std::printf("%s: %zu ops -> %zu ops\n", c.name, ops_unrolled, ops_rerolled);
     expect((std::string(c.name) + " shrinks 4x").c_str(),
            ops_rerolled < ops_unrolled / 4);
   }
@@ -1097,7 +1097,10 @@ int main() {
   test_write_fusion_bails();
   test_write_fusion_scalar_chain();
   test_e2e_fixtures();
-  if (failures) { std::printf("%d failures\n", failures); return 1; }
+  if (failures) {
+    std::printf("%d failures\n", failures);
+    return 1;
+  }
   std::printf("test_reroll OK\n");
   return 0;
 }

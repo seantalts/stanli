@@ -64,8 +64,8 @@ static std::string embedded_stanc(const std::string& model) {
 
 static std::string run_stanc(const std::string& stanc,
                              const std::string& model) {
-  const std::string cmd = stanc + " --debug-transformed-mir '" + model +
-                          "' 2>/dev/null";
+  const std::string cmd =
+      stanc + " --debug-transformed-mir '" + model + "' 2>/dev/null";
   std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd.c_str(), "r"), pclose);
   if (!pipe) throw std::runtime_error("cannot run stanc: " + cmd);
   std::string out;
@@ -105,21 +105,43 @@ int main(int argc, char** argv) {
   bool threads_asked = false;
   for (int i = 3; i < argc; ++i) {
     const std::string k = argv[i];
-    if (k == "--sampler-stats") { want_stats = true; continue; }
-    if (k == "--summary") { want_summary = true; continue; }
-    if (k == "--save-warmup") { cfg.save_warmup = true; continue; }
+    if (k == "--sampler-stats") {
+      want_stats = true;
+      continue;
+    }
+    if (k == "--summary") {
+      want_summary = true;
+      continue;
+    }
+    if (k == "--save-warmup") {
+      cfg.save_warmup = true;
+      continue;
+    }
     if (i + 1 >= argc) break;
     const std::string v = argv[++i];
-    if (k == "--seed") cfg.seed = (uint32_t)std::stoul(v);
-    else if (k == "--warmup") cfg.warmup = std::stoi(v);
-    else if (k == "--samples") cfg.samples = std::stoi(v);
-    else if (k == "--delta") cfg.delta = std::stod(v);
-    else if (k == "--max-depth") cfg.max_depth = std::stoi(v);
-    else if (k == "--chains") n_chains = std::stoi(v);
-    else if (k == "--num-threads") { n_threads = std::stoi(v); threads_asked = true; }
-    else if (k == "--thin") cfg.thin = std::stoi(v);
-    else if (k == "--init-radius") cfg.init_radius = std::stod(v);
-    else if (k == "--stanc") { stanc = v; stanc_explicit = true; }
+    if (k == "--seed")
+      cfg.seed = (uint32_t)std::stoul(v);
+    else if (k == "--warmup")
+      cfg.warmup = std::stoi(v);
+    else if (k == "--samples")
+      cfg.samples = std::stoi(v);
+    else if (k == "--delta")
+      cfg.delta = std::stod(v);
+    else if (k == "--max-depth")
+      cfg.max_depth = std::stoi(v);
+    else if (k == "--chains")
+      n_chains = std::stoi(v);
+    else if (k == "--num-threads") {
+      n_threads = std::stoi(v);
+      threads_asked = true;
+    } else if (k == "--thin")
+      cfg.thin = std::stoi(v);
+    else if (k == "--init-radius")
+      cfg.init_radius = std::stod(v);
+    else if (k == "--stanc") {
+      stanc = v;
+      stanc_explicit = true;
+    }
   }
   if (n_chains < 1) n_chains = 1;
   if (n_threads <= 0) n_threads = n_chains;
@@ -189,9 +211,9 @@ int main(int argc, char** argv) {
     // column instead (slower, but generated quantities run once per stored
     // draw). Without either we still report the constrained parameters the
     // log_prob graph already computes.
-    stanli::WaInterp* wi =
-        cm.write_array && cm.write_array->interp ? cm.write_array->interp.get()
-                                                 : nullptr;
+    stanli::WaInterp* wi = cm.write_array && cm.write_array->interp
+                               ? cm.write_array->interp.get()
+                               : nullptr;
     const bool have_wa =
         !wi && cm.write_array && !cm.write_array->columns.empty();
     if (cm.write_array && !cm.write_array->truncated.empty())
@@ -200,8 +222,8 @@ int main(int argc, char** argv) {
                    cm.write_array->truncated.c_str());
     std::unique_ptr<stanli::Executor> wex;
     if (have_wa) {
-      wex = std::make_unique<stanli::Executor>(
-          std::move(cm.write_array->graph));
+      wex =
+          std::make_unique<stanli::Executor>(std::move(cm.write_array->graph));
       cm.write_array->bind(*wex);
     }
 
@@ -262,8 +284,9 @@ int main(int argc, char** argv) {
 
     std::string hdr;
     if (want_stats)
-      hdr = "lp__,accept_stat__,stepsize__,treedepth__,n_leapfrog__,"
-            "divergent__,energy__";
+      hdr =
+          "lp__,accept_stat__,stepsize__,treedepth__,n_leapfrog__,"
+          "divergent__,energy__";
     for (const auto& n : stanli::CompiledModel::csv_names(cols)) {
       if (!hdr.empty()) hdr += ',';
       hdr += n;
@@ -275,8 +298,7 @@ int main(int argc, char** argv) {
     // full draw matrix is hundreds of megabytes, and streaming is why the
     // default path can print them at all.
     std::vector<double> summary_draws;
-    if (want_summary)
-      summary_draws.reserve(draws.size() * col_names.size());
+    if (want_summary) summary_draws.reserve(draws.size() * col_names.size());
 
     std::vector<double> row;
     for (size_t d = 0; d < draws.size(); ++d) {
@@ -319,8 +341,8 @@ int main(int argc, char** argv) {
       flat_stats.reserve(stats.rows.size() * stanli::N_SAMPLER_COLS);
       for (const auto& r : stats.rows)
         flat_stats.insert(flat_stats.end(), r.begin(), r.end());
-      const auto fd = stanli::diagnose(ds, sm, flat_stats.data(),
-                                       cfg.max_depth);
+      const auto fd =
+          stanli::diagnose(ds, sm, flat_stats.data(), cfg.max_depth);
       std::fprintf(stderr, "%s", stanli::format_diagnostics(fd).c_str());
     }
     // Gradient evaluations = leapfrog steps + init probes. Reported so a

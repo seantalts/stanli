@@ -58,8 +58,7 @@ int main() {
   if (n != 6) return 1;
 
   std::vector<double> q((size_t)n);
-  for (int64_t i = 0; i < n; ++i)
-    q[(size_t)i] = -0.3 + 0.11 * (double)i;
+  for (int64_t i = 0; i < n; ++i) q[(size_t)i] = -0.3 + 0.11 * (double)i;
 
   std::vector<double> grad((size_t)n);
   for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
@@ -78,17 +77,17 @@ int main() {
   {
     // Taken at a shifted point, so a solve that silently wrote nothing
     // cannot pass on the previous sweep's leftovers in the arena.
-    for (int64_t k = 0; k < n; ++k)
-      ex.params_data()[k] = q[(size_t)k] + 0.05;
+    for (int64_t k = 0; k < n; ++k) ex.params_data()[k] = q[(size_t)k] + 0.05;
     const double lp_vo = ex.forward_value_only();
     const double lp_full = ex.forward();
     const double dev =
         std::fabs(lp_vo - lp_full) / std::max(1.0, std::fabs(lp_full));
     if (!(dev < 1e-5)) {
       ++failures;
-      std::printf("FAIL value-only lp differs from the coupled solve by "
-                  "%.3g relative\n",
-                  dev);
+      std::printf(
+          "FAIL value-only lp differs from the coupled solve by "
+          "%.3g relative\n",
+          dev);
     }
 
     for (int64_t k = 0; k < n; ++k) ex.params_data()[k] = q[(size_t)k];
@@ -162,8 +161,8 @@ int main() {
     expect(std::string(other) + " has the same shape", o.size() == rk45.size());
     double w = 0;
     for (size_t k = 0; k < o.size() && k < rk45.size(); ++k)
-      w = std::max(w, std::fabs(o[k] - rk45[k]) /
-                          std::max(1e-8, std::fabs(rk45[k])));
+      w = std::max(
+          w, std::fabs(o[k] - rk45[k]) / std::max(1e-8, std::fabs(rk45[k])));
     // Four adaptive solvers on the same well-conditioned system agree to
     // their tolerances; a dead dispatch branch or an unapplied tolerance
     // does not.

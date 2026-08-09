@@ -129,7 +129,8 @@ int main() {
     DataMap d;
     d.set_int("N", 3);
     d.set_real_array("y", {1.0, 2.0, 3.0});
-    CompiledModel lm = compile_model(slurp("tests/fixtures/loopy.tmir.sexp"), d);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/loopy.tmir.sexp"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.4;
@@ -154,7 +155,8 @@ int main() {
     DataMap d;
     d.set_int("M", 3);
     d.set_int_array("s", {2, 0, 1});
-    CompiledModel lm = compile_model(slurp("tests/fixtures/staticif.tmir.sexp"), d);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/staticif.tmir.sexp"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.3;
@@ -183,9 +185,10 @@ int main() {
   // Row of a 2-D int data array as a density outcome: y[i] reaches the
   // kernel as a T-length int array (Mb/Mt/irt_2pl pattern).
   {
-    DataMap d = DataMap::from_json(
-        R"({"M": 2, "T": 3, "y": [[1, 0, 1], [0, 0, 1]]})");
-    CompiledModel lm = compile_model(slurp("tests/fixtures/introw.tmir.sexp"), d);
+    DataMap d =
+        DataMap::from_json(R"({"M": 2, "T": 3, "y": [[1, 0, 1], [0, 0, 1]]})");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/introw.tmir.sexp"), d);
     check(lm.n_unconstrained == 3, "introw 3 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -197,8 +200,7 @@ int main() {
     Eigen::Matrix<var, -1, 1> pu(3);
     for (int i = 0; i < 3; ++i) pu(i) = 0.2 * (i + 1) - 0.3;
     var lj = 0.0;
-    Eigen::Matrix<var, -1, 1> pc =
-        stan::math::lub_constrain(pu, 0.0, 1.0, lj);
+    Eigen::Matrix<var, -1, 1> pc = stan::math::lub_constrain(pu, 0.0, 1.0, lj);
     const std::vector<std::vector<int>> yv = {{1, 0, 1}, {0, 0, 1}};
     var acc = 0.0;
     for (int i = 0; i < 2; ++i)
@@ -217,7 +219,8 @@ int main() {
     DataMap d;
     d.set_int("N", 2);
     d.set_real_array("y", {1.3, -0.7});
-    CompiledModel lm = compile_model(slurp("tests/fixtures/dfold.tmir.sexp"), d);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/dfold.tmir.sexp"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.25;
@@ -228,8 +231,8 @@ int main() {
     using stan::math::var;
     const double yv[2] = {1.3, -0.7};
     const double m = (yv[0] + yv[1]) / 2.0;
-    const double s = std::sqrt(((yv[0] - m) * (yv[0] - m) +
-                                (yv[1] - m) * (yv[1] - m)) / 1.0);
+    const double s = std::sqrt(
+        ((yv[0] - m) * (yv[0] - m) + (yv[1] - m) * (yv[1] - m)) / 1.0);
     Eigen::Matrix<var, -1, 1> muu(2);
     muu << 0.25, -0.6;
     var lj = 0.0;
@@ -293,7 +296,8 @@ int main() {
     DataMap d;
     d.set_int("N", 4);
     d.set_real_array("y", {2.0, 1.5, -1.0, 3.0});
-    CompiledModel lm = compile_model(slurp("tests/fixtures/tdext.tmir.sexp"), d);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/tdext.tmir.sexp"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.3;
@@ -324,7 +328,8 @@ int main() {
     DataMap d;
     d.set_real("a", 1.25);
     d.set_real("b", -0.5);
-    CompiledModel lm = compile_model(slurp("tests/fixtures/tdvocab.tmir.sexp"), d);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/tdvocab.tmir.sexp"), d);
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.3;
@@ -337,9 +342,9 @@ int main() {
     // not. The compiled path falls back to the interpreter, so the
     // interpreter's vocabulary has to cover the compiler's.
     const double dens = stan::math::inv_gamma_lpdf(1.5, 2, 3) +
-                     stan::math::weibull_lpdf(1.5, 2, 3) +
-                     stan::math::logistic_lpdf(0.25, 0, 1) +
-                     stan::math::double_exponential_lpdf(0.25, 0, 1);
+                        stan::math::weibull_lpdf(1.5, 2, 3) +
+                        stan::math::logistic_lpdf(0.25, 0, 1) +
+                        stan::math::double_exponential_lpdf(0.25, 0, 1);
     using stan::math::var;
     var mu = 0.3;
     var acc = stan::math::normal_lpdf<false>(mu, m + dens, 1.0);
@@ -355,7 +360,8 @@ int main() {
     DataMap d;
     d.set_int("N", 3);
     d.set_real_array("y", {1.1, -0.4, 2.2});
-    CompiledModel lm = compile_model(slurp("tests/fixtures/udflp.tmir.sexp"), d);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/udflp.tmir.sexp"), d);
     check(lm.n_unconstrained == 4, "udflp 4 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -394,7 +400,7 @@ int main() {
     check(lm.n_unconstrained == 9, "idx 9 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
-    const double q[9] = {0.5, -0.7, 1.2,           // v
+    const double q[9] = {0.5, -0.7, 1.2,                   // v
                          0.1, -0.3, 0.6, 0.9, -1.1, 0.2};  // M col-major
     for (int i = 0; i < 9; ++i) lex.params_data()[i] = q[i];
     double grad[9];
@@ -411,9 +417,9 @@ int main() {
     Eigen::Matrix<var, -1, 1> w(2);
     w << v(1), v(2);
     Eigen::Matrix<var, -1, 1> row1(3), col3(2), lcol2(2), v12(2);
-    row1 << M(0), M(2), M(4);      // row 1 of 2x3 col-major: stride 2
-    col3 << M(4), M(5);            // column 3: offset 4
-    lcol2 = w;                     // L[:,2] = w
+    row1 << M(0), M(2), M(4);  // row 1 of 2x3 col-major: stride 2
+    col3 << M(4), M(5);        // column 3: offset 4
+    lcol2 = w;                 // L[:,2] = w
     v12 << v(0), v(1);
     var t1 = stan::math::normal_lpdf<false>(g, 0.0, 1.0);
     var t2 = stan::math::normal_lpdf<false>(v12, 0.0, 2.0);
@@ -447,8 +453,7 @@ int main() {
     Eigen::Matrix<var, -1, 1> q(2);
     q << 0.3, -0.8;
     var lj = 0.0;
-    Eigen::Matrix<var, -1, 1> theta =
-        stan::math::simplex_constrain(q, lj);
+    Eigen::Matrix<var, -1, 1> theta = stan::math::simplex_constrain(q, lj);
     var t1 = stan::math::categorical_lpmf<false>(2, theta);
     const std::vector<int> ys = {3, 1, 3};
     var t2 = stan::math::categorical_lpmf<false>(ys, theta);
@@ -501,7 +506,8 @@ int main() {
   {
     DataMap d;
     d.set_int("C", 2);
-    CompiledModel lm = compile_model(slurp("tests/fixtures/aprow.tmir.sexp"), d);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/aprow.tmir.sexp"), d);
     check(lm.n_unconstrained == 8, "aprow 8 unconstrained");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
@@ -514,7 +520,7 @@ int main() {
     // A is 2xC col-major (q0..q3), B is 1xC (q4,q5), r is C (q6,q7).
     Eigen::Matrix<var, -1, 1> p(8);
     for (int i = 0; i < 8; ++i) p(i) = q[i];
-    auto A = [&](int i, int j) { return p(j * 2 + i); };     // 2 rows
+    auto A = [&](int i, int j) { return p(j * 2 + i); };  // 2 rows
     auto B = [&](int j) { return p(4 + j); };
     auto r = [&](int j) { return p(6 + j); };
     Eigen::Matrix<var, -1, 1> S(6), T(6);
@@ -568,11 +574,12 @@ int main() {
   // The unsupported-transform error path is covered by the
   // unsupported-function check below.
   {
-    CompiledModel cm = compile_model(slurp("tests/fixtures/chol.tmir.sexp"), [] {
-      DataMap d;
-      d.set_int("K", 3);
-      return d;
-    }());
+    CompiledModel cm =
+        compile_model(slurp("tests/fixtures/chol.tmir.sexp"), [] {
+          DataMap d;
+          d.set_int("K", 3);
+          return d;
+        }());
     check(cm.n_unconstrained == 3, "cholesky_corr unconstrained size is 3");
   }
   // Control flow on a parameter: an `if` and a ternary whose conditions
@@ -657,7 +664,8 @@ int main() {
   {
     DataMap d;
     d.set_real("y", 1.75);
-    CompiledModel tm = compile_model(slurp("tests/fixtures/trunc.tmir.sexp"), d);
+    CompiledModel tm =
+        compile_model(slurp("tests/fixtures/trunc.tmir.sexp"), d);
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     const double pts[2][2] = {{0.6, -0.3}, {-0.25, 0.4}};
@@ -689,8 +697,7 @@ int main() {
       check(grad[0] == u_mu.adj() && grad[1] == u_sig.adj(),
             "trunc: gradients bitwise against the var path");
       const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
-      check(std::abs(lp - acc.val()) <= tol,
-            "trunc: lp matches the var path");
+      check(std::abs(lp - acc.val()) <= tol, "trunc: lp matches the var path");
     }
   }
 
@@ -704,8 +711,8 @@ int main() {
     DataMap d;
     d.set_int("N", 3);
     d.set_real_array("y", yv);
-    CompiledModel tm = compile_model(slurp("tests/fixtures/truncvec.tmir.sexp"),
-                                     d);
+    CompiledModel tm =
+        compile_model(slurp("tests/fixtures/truncvec.tmir.sexp"), d);
     Executor tex(std::move(tm.graph));
     tm.bind(tex);
     // Declaration order: mu, theta[3], sigma.
@@ -726,9 +733,9 @@ int main() {
       var acc = u_sig;  // lower=0 jacobian
       // Scalar location: one log_diff_exp scaled by the element count.
       acc += stan::math::normal_lpdf<true>(y, mu, sigma);
-      acc -= 3.0 * stan::math::log_diff_exp(
-                       stan::math::normal_lcdf(10.0, mu, sigma),
-                       stan::math::normal_lcdf(0.0, mu, sigma));
+      acc -= 3.0 *
+             stan::math::log_diff_exp(stan::math::normal_lcdf(10.0, mu, sigma),
+                                      stan::math::normal_lcdf(0.0, mu, sigma));
       // Container location: one log_diff_exp per element, accumulated.
       acc += stan::math::normal_lpdf<true>(y, theta, 1.0);
       for (int i = 0; i < 3; ++i)
@@ -759,8 +766,8 @@ int main() {
     d.set_int("K", 2);
     d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
     d.set_real_array("Sigma", {2.0, 0.5, 0.5, 1.0}, {2, 2});
-    CompiledModel am = compile_model(slurp("tests/fixtures/mnarr.tmir.sexp"),
-                                     d);
+    CompiledModel am =
+        compile_model(slurp("tests/fixtures/mnarr.tmir.sexp"), d);
     Executor aex(std::move(am.graph));
     am.bind(aex);
     const double pts[2][2] = {{0.4, -0.7}, {-0.3, 0.9}};
@@ -788,8 +795,7 @@ int main() {
       check(grad[0] == mu(0).adj() && grad[1] == mu(1).adj(),
             "mnarr: gradients bitwise against the var path");
       const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
-      check(std::abs(lp - acc.val()) <= tol,
-            "mnarr: lp matches the var path");
+      check(std::abs(lp - acc.val()) <= tol, "mnarr: lp matches the var path");
     }
   }
 
@@ -803,8 +809,8 @@ int main() {
     d.set_int("N", 3);
     d.set_int("K", 2);
     d.set_real_array("p", {0.3, 0.4, 0.2, 0.7, 0.6, 0.8}, {3, 2});
-    CompiledModel dm = compile_model(slurp("tests/fixtures/dirvec.tmir.sexp"),
-                                     d);
+    CompiledModel dm =
+        compile_model(slurp("tests/fixtures/dirvec.tmir.sexp"), d);
     Executor dex(std::move(dm.graph));
     dm.bind(dex);
     const double pts[2][2] = {{0.3, -0.4}, {-0.6, 0.8}};
@@ -831,8 +837,7 @@ int main() {
       check(grad[0] == u0.adj() && grad[1] == u1.adj(),
             "dirvec: gradients bitwise against the var path");
       const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
-      check(std::abs(lp - acc.val()) <= tol,
-            "dirvec: lp matches the var path");
+      check(std::abs(lp - acc.val()) <= tol, "dirvec: lp matches the var path");
     }
   }
 
@@ -853,8 +858,8 @@ int main() {
     d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
     d.set_real_array("p", {0.3, 0.4, 0.2, 0.7, 0.6, 0.8}, {3, 2});
     d.set_real_array("Sigma", {2.0, 0.5, 0.5, 1.0}, {2, 2});
-    CompiledModel sm = compile_model(slurp("tests/fixtures/shapes.tmir.sexp"),
-                                     d);
+    CompiledModel sm =
+        compile_model(slurp("tests/fixtures/shapes.tmir.sexp"), d);
     Executor sex(std::move(sm.graph));
     sm.bind(sex);
     // Declaration order: mu, theta[3], sigma, m[2], a[2].
@@ -894,9 +899,9 @@ int main() {
       // order the model writes them.
       var acc = u_sig + au0 + au1;
       acc += stan::math::normal_lpdf<true>(t, mu, sigma);
-      acc -= 3.0 * stan::math::log_diff_exp(
-                       stan::math::normal_lcdf(10.0, mu, sigma),
-                       stan::math::normal_lcdf(0.0, mu, sigma));
+      acc -= 3.0 *
+             stan::math::log_diff_exp(stan::math::normal_lcdf(10.0, mu, sigma),
+                                      stan::math::normal_lcdf(0.0, mu, sigma));
       acc += stan::math::normal_lpdf<true>(t, theta, 1.0);
       for (int i = 0; i < 3; ++i)
         acc -= stan::math::log_diff_exp(
@@ -918,8 +923,7 @@ int main() {
       for (int i = 0; i < 9; ++i)
         expect_ulp("shapes g" + std::to_string(i), grad[i], want[i]);
       const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
-      check(std::abs(lp - acc.val()) <= tol,
-            "shapes: lp matches the var path");
+      check(std::abs(lp - acc.val()) <= tol, "shapes: lp matches the var path");
     }
   }
 
@@ -933,7 +937,8 @@ int main() {
     d.set_int("N", 4);
     d.set_int("K", 4);
     d.set_int_array("y", {1, 3, 2, 4});
-    CompiledModel om = compile_model(slurp("tests/fixtures/ordlog.tmir.sexp"), d);
+    CompiledModel om =
+        compile_model(slurp("tests/fixtures/ordlog.tmir.sexp"), d);
     Executor oex(std::move(om.graph));
     om.bind(oex);
     // 4 lambdas + 3 unconstrained cutpoints.
@@ -962,8 +967,8 @@ int main() {
     for (int i = 0; i < 4; ++i)
       if (grad[i] != lambda(i).adj()) grads_ok = false;
     check(grads_ok, "ordered_logistic: lambda gradients bitwise");
-    check(std::abs(lp - acc.val()) <= 8 * 2.220446049250313e-16 *
-                                          std::abs(acc.val()),
+    check(std::abs(lp - acc.val()) <=
+              8 * 2.220446049250313e-16 * std::abs(acc.val()),
           "ordered_logistic: lp matches the var path");
   }
 
@@ -1001,8 +1006,8 @@ int main() {
     acc += stan::math::normal_lpdf<true>(beta, 0, 2);
     acc += stan::math::exponential_lpdf<true>(phi, 1);
     acc += stan::math::poisson_log_glm_lpmf<true>(y, X, alpha, beta);
-    acc += stan::math::neg_binomial_2_log_glm_lpmf<true>(y, X, alpha, beta,
-                                                        phi);
+    acc +=
+        stan::math::neg_binomial_2_log_glm_lpmf<true>(y, X, alpha, beta, phi);
     acc.grad();
 
     const bool g_ok = grad[0] == alpha.adj() && grad[1] == beta(0).adj() &&

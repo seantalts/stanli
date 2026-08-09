@@ -52,8 +52,7 @@ static DataMap::Entry entry_from_json(const std::string& name, const json& v) {
           e.is_int = true;
           e.i.resize(R * C);
           for (int64_t i = 0; i < R; ++i)
-            for (int64_t j = 0; j < C; ++j)
-              e.i[j * R + i] = v[i][j].get<int>();
+            for (int64_t j = 0; j < C; ++j) e.i[j * R + i] = v[i][j].get<int>();
         }
         return e;
       }
@@ -70,11 +69,10 @@ static DataMap::Entry entry_from_json(const std::string& name, const json& v) {
         bool all_int = true;
         std::vector<int64_t> ix(D.size(), 0);
         std::function<void(const json&, size_t)> walk = [&](const json& node,
-                                                           size_t depth) {
+                                                            size_t depth) {
           if (depth == D.size()) {
             int64_t flatpos = 0;
-            for (size_t d = 0; d < D.size(); ++d)
-              flatpos += ix[d] * stride[d];
+            for (size_t d = 0; d < D.size(); ++d) flatpos += ix[d] * stride[d];
             e.r[flatpos] = node.get<double>();
             if (!node.is_number_integer()) all_int = false;
             return;

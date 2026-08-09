@@ -38,13 +38,14 @@ std::vector<double> WaInterp::eval(
   return row;
 }
 
-bool WaInterp::read_param(
-    MirInterp<double>& in, const mir::Stmt& s,
-    const std::map<std::string, DataMap::Entry>& params) {
+bool WaInterp::read_param(MirInterp<double>& in, const mir::Stmt& s,
+                          const std::map<std::string, DataMap::Entry>& params) {
   auto it = params.find(s.decl_id);
   if (it == params.end())
-    throw CompileError("stanli write_array: no constrained value supplied "
-                       "for parameter " + s.decl_id);
+    throw CompileError(
+        "stanli write_array: no constrained value supplied "
+        "for parameter " +
+        s.decl_id);
   DataMap::Entry e = it->second;
   if (!s.read_dims.empty()) {
     std::vector<int64_t> dims;
@@ -211,8 +212,7 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
     for (int64_t i = 0; i < K; ++i) m[i] = mu.r[(size_t)i];
     Eigen::MatrixXd sig(K, K);
     for (int64_t j = 0; j < K; ++j)
-      for (int64_t i = 0; i < K; ++i)
-        sig(i, j) = S.r.at((size_t)(j * K + i));
+      for (int64_t i = 0; i < K; ++i) sig(i, j) = S.r.at((size_t)(j * K + i));
     const Eigen::VectorXd draw =
         base == "multi_normal"
             ? stan::math::multi_normal_rng(m, sig, rng_)

@@ -31,7 +31,9 @@ int main() {
   double gy_copy[8]{}, gmu_copy = 0, gsig_copy = 0;
   {
     stanli::sink s;
-    s.buf[0] = gy_copy; s.buf[1] = &gmu_copy; s.buf[2] = &gsig_copy;
+    s.buf[0] = gy_copy;
+    s.buf[1] = &gmu_copy;
+    s.buf[2] = &gsig_copy;
     stanli::active_sink() = &s;
     Eigen::Matrix<rvar, -1, 1> ry(N);
     for (int i = 0; i < N; ++i) ry(i) = rvar(ys[i]);
@@ -44,7 +46,9 @@ int main() {
   double gy_map[8]{}, gmu_map = 0, gsig_map = 0;
   {
     stanli::sink s;
-    s.buf[0] = gy_map; s.buf[1] = &gmu_map; s.buf[2] = &gsig_map;
+    s.buf[0] = gy_map;
+    s.buf[1] = &gmu_map;
+    s.buf[2] = &gsig_map;
     stanli::active_sink() = &s;
     auto ry = stanli::as_rvar(stanli::Desc{ys.data(), N});
     stan::math::normal_lpdf<false>(ry, rvar(0.25), rvar(1.4));
@@ -71,7 +75,9 @@ int main() {
   double ga = 0, gb = 0;
   {
     stanli::sink s;
-    s.buf[0] = nullptr; s.buf[1] = &ga; s.buf[2] = &gb;
+    s.buf[0] = nullptr;
+    s.buf[1] = &ga;
+    s.buf[2] = &gb;
     stanli::active_sink() = &s;
     stan::math::gamma_lpdf<false>(ymap, rvar(2.5), rvar(1.3));
     stanli::active_sink() = nullptr;

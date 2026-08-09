@@ -97,9 +97,10 @@ bool thread_safe_build();
 // n_threads <= 1 runs sequentially. Larger values are honoured only on a
 // thread_safe_build(); elsewhere they are clamped to 1, because the
 // alternative is a wrong answer rather than a slow one.
-std::vector<ChainResult> run_nuts_chains(
-    const std::vector<Executor*>& execs, const NutsConfig& cfg,
-    int n_threads = 1, const DrawObserver& observe = {});
+std::vector<ChainResult> run_nuts_chains(const std::vector<Executor*>& execs,
+                                         const NutsConfig& cfg,
+                                         int n_threads = 1,
+                                         const DrawObserver& observe = {});
 
 // Build `n` executors over the same compiled graph, copying it out of an
 // already-bound one. The caller keeps ownership; `src` is not modified.

@@ -192,8 +192,7 @@ KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written) {
     const int si = op.in[i];
     const Slot& s = graph_.slots[si];
     const bool active = s.is_param || written[si];
-    ctx.in_adj[i] =
-        Desc{active ? adjoints_.data() + s.offset : nullptr, s.len};
+    ctx.in_adj[i] = Desc{active ? adjoints_.data() + s.offset : nullptr, s.len};
   }
   if (so.len == 1) ctx.out_adj = adjoints_[so.offset];
   ctx.out_adj_vec = Desc{adjoints_.data() + so.offset, so.len};
@@ -220,8 +219,8 @@ std::string Executor::profile_report() const {
   });
   char line[160];
   std::string out;
-  std::snprintf(line, sizeof line, "%-22s %10s %12s %12s %6s %12s\n",
-                "opcode", "calls", "fwd ns", "bwd ns", "%", "elems");
+  std::snprintf(line, sizeof line, "%-22s %10s %12s %12s %6s %12s\n", "opcode",
+                "calls", "fwd ns", "bwd ns", "%", "elems");
   out += line;
   for (uint16_t op : order) {
     const ProfEntry& e = prof_[op];
@@ -251,8 +250,8 @@ void Executor::run_forward_only() {
       const auto t1 = std::chrono::steady_clock::now();
       ProfEntry& e = prof_[op];
       ++e.calls;
-      e.fwd_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      t1 - t0).count();
+      e.fwd_ns +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
       e.elems += ctx_[i].out.len;
     }
     return;
@@ -304,7 +303,8 @@ double Executor::gradient(double* grad_out) {
       k.backward(ctx);
       prof_[graph_.ops[pi].opcode].bwd_ns +=
           std::chrono::duration_cast<std::chrono::nanoseconds>(
-              std::chrono::steady_clock::now() - t0).count();
+              std::chrono::steady_clock::now() - t0)
+              .count();
     }
     std::memcpy(grad_out, adjoints_.data(), sizeof(double) * n_params_);
     return v;

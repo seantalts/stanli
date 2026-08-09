@@ -25,8 +25,8 @@ static void expect_close(const std::string& what, double got, double want) {
   const double rel = std::abs(got - want) / std::max(std::abs(want), 1e-300);
   if (!(rel < 1e-12)) {
     ++failures;
-    std::printf("FAIL %-24s got %.17g want %.17g rel %.2e\n", what.c_str(),
-                got, want, rel);
+    std::printf("FAIL %-24s got %.17g want %.17g rel %.2e\n", what.c_str(), got,
+                want, rel);
   }
 }
 
@@ -57,10 +57,10 @@ struct HmmGraph {
 static HmmGraph build_hmm(int T, int W = 2) {
   HmmGraph h;
   Graph& g = h.g;
-  const int gp0 = g.add_slot(W, true);   // initial log-state
+  const int gp0 = g.add_slot(W, true);  // initial log-state
   const int mu = g.add_slot(2, true);
   const int sigma = g.add_slot(1, true);
-  const int z2 = g.add_slot(W, false);   // fill-backed template (absorbed)
+  const int z2 = g.add_slot(W, false);  // fill-backed template (absorbed)
   h.fills.emplace_back(z2, std::vector<double>((size_t)W, 0.0));
   auto cslot = [&](double v) {
     const int s = g.add_slot(1, false);
@@ -109,7 +109,7 @@ static HmmGraph build_hmm(int T, int W = 2) {
 }
 
 static void test_hmm_parity() {
-  HmmGraph ref = build_hmm(8);   // 8*11 = 88 body ops, above threshold
+  HmmGraph ref = build_hmm(8);  // 8*11 = 88 body ops, above threshold
   const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
 
   HmmGraph isl = build_hmm(8);
@@ -144,8 +144,7 @@ static void test_env_disable() {
   test_unsetenv("STANLI_NO_ISLAND");
 
   // The same graph with the switch off: the run carves.
-  expect("enabled: one island",
-         carve_islands(h.g, h.fills, h.terms, {}) == 1);
+  expect("enabled: one island", carve_islands(h.g, h.fills, h.terms, {}) == 1);
 }
 
 static void test_short_run_untouched() {
@@ -313,10 +312,10 @@ static void test_six_live_ins_ok() {
 static void test_live_in_and_out_slot() {
   Graph g;
   Fills fills;
-  const int seedp = g.add_slot(1, true);   // feeds the producer
+  const int seedp = g.add_slot(1, true);  // feeds the producer
   const int a = g.add_slot(1, true);
   const int vec = g.add_slot(10, false);
-  g.add_op(OP_REP_VEC, {seedp}, vec);      // the producer, before the region
+  g.add_op(OP_REP_VEC, {seedp}, vec);  // the producer, before the region
   auto cslot = [&](double v) {
     const int s = g.add_slot(1, false);
     fills.emplace_back(s, std::vector<double>{v});

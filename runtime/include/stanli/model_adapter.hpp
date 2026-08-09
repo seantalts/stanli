@@ -78,9 +78,8 @@ class ExecutorModel {
   template <bool propto, bool jacobian, typename T>
   T log_prob(std::vector<T>& params_r, std::vector<int>& /*params_i*/,
              std::ostream* msgs) const {
-    Eigen::Matrix<T, -1, 1> q =
-        Eigen::Map<Eigen::Matrix<T, -1, 1>>(params_r.data(),
-                                            (Eigen::Index)params_r.size());
+    Eigen::Matrix<T, -1, 1> q = Eigen::Map<Eigen::Matrix<T, -1, 1>>(
+        params_r.data(), (Eigen::Index)params_r.size());
     return log_prob<propto, jacobian, T>(q, msgs);
   }
 
@@ -114,9 +113,8 @@ class ExecutorModel {
 
   template <typename RNG>
   void write_array(RNG& /*rng*/, std::vector<double>& params_r,
-                   std::vector<int>& /*params_i*/,
-                   std::vector<double>& values, bool /*include_tp*/ = true,
-                   bool /*include_gq*/ = true,
+                   std::vector<int>& /*params_i*/, std::vector<double>& values,
+                   bool /*include_tp*/ = true, bool /*include_gq*/ = true,
                    std::ostream* /*msgs*/ = nullptr) const {
     if (wa_ == nullptr) {
       values.assign(params_r.begin(), params_r.end());
@@ -143,8 +141,7 @@ class ExecutorModel {
   // Every unconstrained parameter is a scalar as far as a random init is
   // concerned, so each gets an empty dimension list.
   void get_dims(std::vector<std::vector<size_t>>& dims,
-                bool /*include_tp*/ = true,
-                bool /*include_gq*/ = true) const {
+                bool /*include_tp*/ = true, bool /*include_gq*/ = true) const {
     dims.assign((size_t)ex_->n_params(), std::vector<size_t>{});
   }
 

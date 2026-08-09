@@ -188,8 +188,7 @@ void pow_fwd(KernelCtx& ctx) {
 void pow_bwd(KernelCtx& ctx) {
   const double a = ctx.in[0].data[0], b = ctx.in[1].data[0];
   const double v = ctx.out.data[0];
-  if (ctx.in_adj[0].data)
-    ctx.in_adj[0].data[0] += ctx.out_adj * b * v / a;
+  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj * b * v / a;
   if (ctx.in_adj[1].data)
     ctx.in_adj[1].data[0] += ctx.out_adj * std::log(a) * v;
 }
@@ -236,8 +235,7 @@ void tanhv_fwd(KernelCtx& ctx) {
 }
 void tanhv_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
-  const double* dout = ctx.out.len == 1 ? &ctx.out_adj
-                                        : ctx.out_adj_vec.data;
+  const double* dout = ctx.out.len == 1 ? &ctx.out_adj : ctx.out_adj_vec.data;
   for (int64_t i = 0; i < ctx.out.len; ++i) {
     const double c = std::cosh(ctx.in[0].data[i]);
     ctx.in_adj[0].data[i] += dout[i] / (c * c);
@@ -344,9 +342,7 @@ void logitv_bwd(KernelCtx& ctx) {
   }
 }
 
-void mean_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = in_a(ctx, 0).mean();
-}
+void mean_fwd(KernelCtx& ctx) { ctx.out.data[0] = in_a(ctx, 0).mean(); }
 void mean_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   const double d = ctx.out_adj / static_cast<double>(ctx.in[0].len);
@@ -355,8 +351,7 @@ void mean_bwd(KernelCtx& ctx) {
 
 // rep_vector(x, n): out[i] = x; scalar adjoint accumulates ascending.
 void repv_fwd(KernelCtx& ctx) {
-  for (int64_t i = 0; i < ctx.out.len; ++i)
-    ctx.out.data[i] = ctx.in[0].data[0];
+  for (int64_t i = 0; i < ctx.out.len; ++i) ctx.out.data[i] = ctx.in[0].data[0];
 }
 void repv_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
@@ -364,25 +359,24 @@ void repv_bwd(KernelCtx& ctx) {
     ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[i];
 }
 
-
 // Generated from STANLI_SCALAR_UNARY_LIST (optable.hpp): the value in the
 // forward, the derivative contracted in the backward. Shape-preserving and
 // elementwise, so a re-rolled vector arrives here as one op.
-#define STANLI_DEFINE_UNARY(code, name, VAL, DERIV)                        \
-  void name##_ufwd(KernelCtx& ctx) {                                       \
-    for (int64_t i = 0; i < ctx.out.len; ++i) {                            \
-      const double x = ctx.in[0].data[i];                                  \
-      ctx.out.data[i] = (VAL);                                             \
-    }                                                                      \
-  }                                                                        \
-  void name##_ubwd(KernelCtx& ctx) {                                       \
-    if (!ctx.in_adj[0].data) return;                                       \
-    const double* dout =                                                   \
-        ctx.out.len == 1 ? &ctx.out_adj : ctx.out_adj_vec.data;            \
-    for (int64_t i = 0; i < ctx.out.len; ++i) {                            \
-      const double x = ctx.in[0].data[i];                                  \
-      ctx.in_adj[0].data[i] += dout[i] * (DERIV);                          \
-    }                                                                      \
+#define STANLI_DEFINE_UNARY(code, name, VAL, DERIV)             \
+  void name##_ufwd(KernelCtx& ctx) {                            \
+    for (int64_t i = 0; i < ctx.out.len; ++i) {                 \
+      const double x = ctx.in[0].data[i];                       \
+      ctx.out.data[i] = (VAL);                                  \
+    }                                                           \
+  }                                                             \
+  void name##_ubwd(KernelCtx& ctx) {                            \
+    if (!ctx.in_adj[0].data) return;                            \
+    const double* dout =                                        \
+        ctx.out.len == 1 ? &ctx.out_adj : ctx.out_adj_vec.data; \
+    for (int64_t i = 0; i < ctx.out.len; ++i) {                 \
+      const double x = ctx.in[0].data[i];                       \
+      ctx.in_adj[0].data[i] += dout[i] * (DERIV);               \
+    }                                                           \
   }
 STANLI_SCALAR_UNARY_LIST(STANLI_DEFINE_UNARY)
 #undef STANLI_DEFINE_UNARY

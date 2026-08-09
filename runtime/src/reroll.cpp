@@ -84,11 +84,11 @@ bool is_idata_outcome_density(uint16_t oc) {
     case OP_POISSON_LOG_LPMF:
     case OP_NEG_BINOMIAL_2_LPMF:
       return true;
-    // Everything in STANLI_INT_DENSITY_LIST has exactly this shape by
-    // construction. The ordered densities deliberately do NOT appear:
-    // their cutpoint vector is shared by every lane, so element n of it
-    // is not lane n's, and the elementwise rewrite would be silently
-    // wrong rather than merely unfused.
+      // Everything in STANLI_INT_DENSITY_LIST has exactly this shape by
+      // construction. The ordered densities deliberately do NOT appear:
+      // their cutpoint vector is shared by every lane, so element n of it
+      // is not lane n's, and the elementwise rewrite would be silently
+      // wrong rather than merely unfused.
 #define STANLI_INT_DENSITY_CASE(code, fn, nreal, t) case code:
       STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_CASE)
 #undef STANLI_INT_DENSITY_CASE
@@ -132,27 +132,27 @@ enum class InKind { kInvariant, kConstLanes, kLaneLocal, kBad };
 
 struct PosIn {
   InKind kind = InKind::kBad;
-  int producer_pos = -1;         // LANE_LOCAL: template position of producer
-  std::vector<double> values;    // CONST_LANES: one value per lane
+  int producer_pos = -1;       // LANE_LOCAL: template position of producer
+  std::vector<double> values;  // CONST_LANES: one value per lane
 };
 
 struct Pos {
   std::vector<PosIn> ins;
-  bool index_elision = false;  // OP_INDEX, idata==lane, base len==lanes
-  bool hoist = false;          // all inputs + idata invariant: emit once
-  bool term_density = false;   // density, every lane's out a target term
-  bool elt_density = false;    // density, every lane's out consumed only
-                               //   inside its own lane -> variant bit 6,
-                               //   out[n] = lane n's lp
-  bool term_widen = false;     // widenable, every lane's out a target term
-                               //   -> widen + OP_SUM_VEC, swap the terms
-  int slice_start = -1;        // OP_INDEX over a contiguous window
-  std::vector<int> gather_idx; // OP_INDEX with a data-driven index
-  int store_vec = -1;          // element write filling a window of this
-  int store_start = 0;         //   vector, starting here,
-  int store_stride = 1;        //   advancing by this much per lane
+  bool index_elision = false;   // OP_INDEX, idata==lane, base len==lanes
+  bool hoist = false;           // all inputs + idata invariant: emit once
+  bool term_density = false;    // density, every lane's out a target term
+  bool elt_density = false;     // density, every lane's out consumed only
+                                //   inside its own lane -> variant bit 6,
+                                //   out[n] = lane n's lp
+  bool term_widen = false;      // widenable, every lane's out a target term
+                                //   -> widen + OP_SUM_VEC, swap the terms
+  int slice_start = -1;         // OP_INDEX over a contiguous window
+  std::vector<int> gather_idx;  // OP_INDEX with a data-driven index
+  int store_vec = -1;           // element write filling a window of this
+  int store_start = 0;          //   vector, starting here,
+  int store_stride = 1;         //   advancing by this much per lane
   bool store_written_after = false;  // someone writes the vector later
-  std::vector<int> outcome_idata;  // lpmf: per-lane integer outcomes
+  std::vector<int> outcome_idata;    // lpmf: per-lane integer outcomes
 };
 
 bool is_element_store(const Op& op) {
@@ -239,8 +239,10 @@ RerollStats reroll(Graph& g,
     while (lo < hi) {
       const size_t mid = lo + (hi - lo) / 2;
       ++st.list_steps;
-      if (v[mid] < x) lo = mid + 1;
-      else hi = mid;
+      if (v[mid] < x)
+        lo = mid + 1;
+      else
+        hi = mid;
     }
     return v.begin() + (ptrdiff_t)lo;
   };
@@ -248,8 +250,7 @@ RerollStats reroll(Graph& g,
   // the region's own ops, which are allowed to touch the slot.
   const auto any_in_range_but = [&](const std::vector<size_t>& v, size_t lo,
                                     size_t hi, auto&& ours) {
-    for (auto it = first_at_or_after(v, lo); it != v.end() && *it < hi;
-         ++it) {
+    for (auto it = first_at_or_after(v, lo); it != v.end() && *it < hi; ++it) {
       ++st.list_steps;
       if (!ours(*it)) return true;
     }
@@ -299,8 +300,7 @@ RerollStats reroll(Graph& g,
   size_t i = 0;
   while (i < g.ops.size()) {
     bool rewrote = false;
-    for (int P = 1; P <= kMaxPeriod && i + 2 * (size_t)P <= g.ops.size();
-         ++P) {
+    for (int P = 1; P <= kMaxPeriod && i + 2 * (size_t)P <= g.ops.size(); ++P) {
       if (i < retry_at[(size_t)P]) continue;
       // Cheap pre-check before any lane counting: a profitable region must
       // contain an allowlisted density (term or elementwise), a per-lane
@@ -311,8 +311,7 @@ RerollStats reroll(Graph& g,
       for (int p = 0; p < P && !candidate; ++p) {
         const Op& t = g.ops[i + p];
         candidate = is_density(t.opcode) ||
-                    is_idata_outcome_density(t.opcode) ||
-                    is_element_store(t) ||
+                    is_idata_outcome_density(t.opcode) || is_element_store(t) ||
                     (is_widenable(t.opcode) && term_set.count(t.out) != 0);
       }
       if (!candidate) continue;
@@ -336,8 +335,8 @@ RerollStats reroll(Graph& g,
       std::vector<Pos> pos;
       int64_t Luse = L;
       bool classified = false;
-      for (int attempt = 0;
-           attempt < kMaxClassifyAttempts && Luse >= kMinLanes; ++attempt) {
+      for (int attempt = 0; attempt < kMaxClassifyAttempts && Luse >= kMinLanes;
+           ++attempt) {
         int64_t prefix = Luse;
         pos.assign((size_t)P, Pos{});
         std::unordered_map<int, int> lane0_producer;
@@ -398,16 +397,15 @@ RerollStats reroll(Graph& g,
               continue;
             }
             ok = false;
-            prefix =
-                std::min(prefix, std::max({br_inv, br_local, br_const}));
+            prefix = std::min(prefix, std::max({br_inv, br_local, br_const}));
           }
 
           // Output discipline prefixes. A lane's out may be consumed only
           // by later ops of its own lane instance; density outs may
           // instead be target terms (with no op consumers at all).
-          int64_t br_term = Luse;     // lanes whose out IS a term
-          int64_t br_nonterm = Luse;  // lanes whose out is NOT a term
-          int64_t br_internal = Luse; // lanes whose out does not escape
+          int64_t br_term = Luse;      // lanes whose out IS a term
+          int64_t br_nonterm = Luse;   // lanes whose out is NOT a term
+          int64_t br_internal = Luse;  // lanes whose out does not escape
           for (int64_t l = 0; l < Luse; ++l) {
             const int o = op_at(p, l).out;
             const bool is_term = term_set.count(o) != 0;
@@ -629,8 +627,8 @@ RerollStats reroll(Graph& g,
           classified = true;
           break;
         }
-        if (ok) prefix = 0;  // classifiable but useless
-        if (prefix >= Luse) prefix = Luse - 1;    // guarantee progress
+        if (ok) prefix = 0;                     // classifiable but useless
+        if (prefix >= Luse) prefix = Luse - 1;  // guarantee progress
         Luse = prefix;
       }
 

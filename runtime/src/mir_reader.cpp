@@ -180,27 +180,44 @@ SizedType read_sized(const Node& n) {
 Transform read_transform(const Node& n) {
   Transform t;
   if (n.is_atom()) {
-    if (n.atom == "Identity") t.kind = Transform::Identity;
-    else if (n.atom == "Simplex") t.kind = Transform::Simplex;
-    else if (n.atom == "Ordered") t.kind = Transform::Ordered;
-    else if (n.atom == "PositiveOrdered") t.kind = Transform::PositiveOrdered;
-    else if (n.atom == "CholeskyCorr") t.kind = Transform::CholeskyCorr;
-    else if (n.atom == "UnitVector") t.kind = Transform::UnitVector;
-    else if (n.atom == "SumToZero") t.kind = Transform::SumToZero;
-    else if (n.atom == "Correlation") t.kind = Transform::Correlation;
-    else if (n.atom == "Covariance") t.kind = Transform::Covariance;
-    else if (n.atom == "CholeskyCov") t.kind = Transform::CholeskyCov;
-    else t.kind = Transform::Unsupported;
+    if (n.atom == "Identity")
+      t.kind = Transform::Identity;
+    else if (n.atom == "Simplex")
+      t.kind = Transform::Simplex;
+    else if (n.atom == "Ordered")
+      t.kind = Transform::Ordered;
+    else if (n.atom == "PositiveOrdered")
+      t.kind = Transform::PositiveOrdered;
+    else if (n.atom == "CholeskyCorr")
+      t.kind = Transform::CholeskyCorr;
+    else if (n.atom == "UnitVector")
+      t.kind = Transform::UnitVector;
+    else if (n.atom == "SumToZero")
+      t.kind = Transform::SumToZero;
+    else if (n.atom == "Correlation")
+      t.kind = Transform::Correlation;
+    else if (n.atom == "Covariance")
+      t.kind = Transform::Covariance;
+    else if (n.atom == "CholeskyCov")
+      t.kind = Transform::CholeskyCov;
+    else
+      t.kind = Transform::Unsupported;
     t.raw = n.atom;
     return t;
   }
   const std::string& k = n[0].atom;
-  if (k == "Lower") t.kind = Transform::Lower;
-  else if (k == "Upper") t.kind = Transform::Upper;
-  else if (k == "LowerUpper") t.kind = Transform::LowerUpper;
-  else if (k == "Offset") t.kind = Transform::Offset;
-  else if (k == "Multiplier") t.kind = Transform::Multiplier;
-  else if (k == "OffsetMultiplier") t.kind = Transform::OffsetMultiplier;
+  if (k == "Lower")
+    t.kind = Transform::Lower;
+  else if (k == "Upper")
+    t.kind = Transform::Upper;
+  else if (k == "LowerUpper")
+    t.kind = Transform::LowerUpper;
+  else if (k == "Offset")
+    t.kind = Transform::Offset;
+  else if (k == "Multiplier")
+    t.kind = Transform::Multiplier;
+  else if (k == "OffsetMultiplier")
+    t.kind = Transform::OffsetMultiplier;
   else {
     t.kind = Transform::Unsupported;
     t.raw = dump(n);
@@ -224,8 +241,10 @@ Stmt read_stmt(const Node& n) {
   }
   const Node& p = (*pat)[1];
   if (p.is_atom()) {
-    if (p.atom == "Skip") s.kind = Stmt::Skip;
-    else s.raw = p.atom;
+    if (p.atom == "Skip")
+      s.kind = Stmt::Skip;
+    else
+      s.raw = p.atom;
     return s;
   }
   const std::string& head = p[0].atom;
@@ -244,8 +263,10 @@ Stmt read_stmt(const Node& n) {
         // still reach the failure in sized_len, which is where their
         // missing size belongs.
         if (t.size() > 1 && t[1].is_atom()) {
-          if (t[1].atom == "UReal") s.decl_type.base = "SReal";
-          else if (t[1].atom == "UInt") s.decl_type.base = "SInt";
+          if (t[1].atom == "UReal")
+            s.decl_type.base = "SReal";
+          else if (t[1].atom == "UInt")
+            s.decl_type.base = "SInt";
         }
       }
     }

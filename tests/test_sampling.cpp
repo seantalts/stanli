@@ -29,8 +29,7 @@ namespace {
 
 int failures = 0;
 
-void expect_near(const std::string& what, double got, double want,
-                 double tol) {
+void expect_near(const std::string& what, double got, double want, double tol) {
   if (!(std::fabs(got - want) <= tol)) {
     ++failures;
     std::printf("FAIL %-26s got %.9g want %.9g +/- %.3g\n", what.c_str(), got,
@@ -111,7 +110,8 @@ void test_conjugate() {
   double ss = 0;
   for (double v : y) ss += (v - ybar) * (v - ybar);
 
-  CompiledModel cm = compile_model(slurp("tests/fixtures/conj.tmir.sexp"), data);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/conj.tmir.sexp"), data);
   if (!cm.write_array) {
     std::printf("FAIL conj: no write_array graph was compiled\n");
     ++failures;
@@ -177,8 +177,7 @@ void test_conjugate() {
       if (std::isnan(v)) ++nan_count;
     const double mu_c = r[c_mu_c], sigma = r[c_sigma];
     auto rel = [&](double got, double want) {
-      const double d = std::fabs(got - want) /
-                       std::max(1.0, std::fabs(want));
+      const double d = std::fabs(got - want) / std::max(1.0, std::fabs(want));
       if (d > worst_det) worst_det = d;
     };
     rel(r[c_prec], 1.0 / (sigma * sigma));  // transformed parameter

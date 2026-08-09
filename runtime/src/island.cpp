@@ -51,23 +51,26 @@ bool scalar_ins(const Graph& g, const Op& op) {
 // instruction each compiles to. File-local on purpose: the MIR front
 // end's unary chain (mir_prog.hpp) is a different set -- it has INV and
 // FABS and lacks LOG1M and TANH -- so there is nothing to share.
-#define STANLI_ISLAND_UNARY_LIST(X)                                        \
-  X(OP_NEG, NEG)                                                           \
-  X(OP_EXPV, EXP)                                                          \
-  X(OP_LOGV, LOG)                                                          \
-  X(OP_SQRT, SQRT)                                                         \
-  X(OP_SQUARE, SQUARE)                                                     \
-  X(OP_INV_LOGIT, INV_LOGIT)                                               \
-  X(OP_LOG1M, LOG1M)                                                       \
+#define STANLI_ISLAND_UNARY_LIST(X) \
+  X(OP_NEG, NEG)                    \
+  X(OP_EXPV, EXP)                   \
+  X(OP_LOGV, LOG)                   \
+  X(OP_SQRT, SQRT)                  \
+  X(OP_SQUARE, SQUARE)              \
+  X(OP_INV_LOGIT, INV_LOGIT)        \
+  X(OP_LOG1M, LOG1M)                \
   X(OP_TANHV, TANH)
 
 // Unary opcode -> island instruction, or -1.
 int unary_code(uint16_t oc) {
   switch (oc) {
-#define X(opc, code) case opc: return Program::code;
+#define X(opc, code) \
+  case opc:          \
+    return Program::code;
     STANLI_ISLAND_UNARY_LIST(X)
 #undef X
-    default: return -1;
+    default:
+      return -1;
   }
 }
 
@@ -76,10 +79,13 @@ int unary_code(uint16_t oc) {
 // spells its opcode OP_<code>_LPDF.
 int density_code(uint16_t oc) {
   switch (oc) {
-#define X(code, name, arity) case OP_##code##_LPDF: return Program::code;
+#define X(code, name, arity) \
+  case OP_##code##_LPDF:     \
+    return Program::code;
     STANLI_PROGRAM_DENSITY_LIST(X)
 #undef X
-    default: return -1;
+    default:
+      return -1;
   }
 }
 
@@ -104,8 +110,7 @@ bool in_vocab(const Graph& g, const Op& op) {
     case OP_SET_SLICE:
       return op.n_idata == 1;
     case OP_DOT:
-      return op.n_in == 2 &&
-             g.slots[op.in[0]].len == g.slots[op.in[1]].len;
+      return op.n_in == 2 && g.slots[op.in[0]].len == g.slots[op.in[1]].len;
     case OP_LOG_SUM_EXP:
     case OP_SOFTMAX:
       return op.n_in == 1;
@@ -221,8 +226,7 @@ struct Compiler {
                           OP_DIV == OP_ADD + 3,
                       "binary code order");
         const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
-        const auto c = (Program::Code)(Program::ADD +
-                                          (op.opcode - OP_ADD));
+        const auto c = (Program::Code)(Program::ADD + (op.opcode - OP_ADD));
         emit(c, write_reg(op.out), a, b);
         return ok;
       }
@@ -239,23 +243,23 @@ struct Compiler {
         return ok;
       }
 #define X(opc, code) case opc:
-      STANLI_ISLAND_UNARY_LIST(X)
+        STANLI_ISLAND_UNARY_LIST(X)
 #undef X
-      {
-        const Program::Code c = (Program::Code)unary_code(op.opcode);
-        const int a = read_reg(op.in[0]);
-        const int d = write_reg(op.out);
-        if (out_len == 1) {
-          emit(c, d, a);
-        } else if (c == Program::LOG) {
-          emit(Program::LOG_RANGE, d, a, 0, 0, (int)out_len);
-        } else if (c == Program::EXP) {
-          emit(Program::EXP_RANGE, d, a, 0, 0, (int)out_len);
-        } else {
-          return false;  // vector unary outside the range vocabulary
+        {
+          const Program::Code c = (Program::Code)unary_code(op.opcode);
+          const int a = read_reg(op.in[0]);
+          const int d = write_reg(op.out);
+          if (out_len == 1) {
+            emit(c, d, a);
+          } else if (c == Program::LOG) {
+            emit(Program::LOG_RANGE, d, a, 0, 0, (int)out_len);
+          } else if (c == Program::EXP) {
+            emit(Program::EXP_RANGE, d, a, 0, 0, (int)out_len);
+          } else {
+            return false;  // vector unary outside the range vocabulary
+          }
+          return ok;
         }
-        return ok;
-      }
       case OP_INDEX: {
         const int idx = op.idata[0];
         if (idx < 0 || idx >= g.slots[op.in[0]].len) return false;
@@ -265,11 +269,9 @@ struct Compiler {
       }
       case OP_SLICE: {
         const int start = op.idata[0];
-        if (start < 0 || start + out_len > g.slots[op.in[0]].len)
-          return false;
+        if (start < 0 || start + out_len > g.slots[op.in[0]].len) return false;
         const int a = read_reg(op.in[0]);
-        emit(Program::MOVR, write_reg(op.out), a + start, 0, 0,
-             (int)out_len);
+        emit(Program::MOVR, write_reg(op.out), a + start, 0, 0, (int)out_len);
         return ok;
       }
       case OP_SET_INDEX:
@@ -288,8 +290,7 @@ struct Compiler {
       case OP_SET_SLICE: {
         const int start = op.idata[0];
         const int64_t vlen = g.slots[op.in[1]].len;
-        if (op.n_in != 2 || start < 0 || start + vlen > out_len)
-          return false;
+        if (op.n_in != 2 || start < 0 || start + vlen > out_len) return false;
         const int base = read_reg(op.in[0]);
         const int val = read_reg(op.in[1]);
         if (base_dead_here(op.in[0])) reg_of[op.out] = base;
@@ -411,8 +412,8 @@ int carve_islands(Graph& g,
         graph_elems += g.ops[u].opcode == OP_SET_INDEX_INPLACE
                            ? 1
                            : g.slots[g.ops[u].out].len;
-      const int64_t island_elems = kVarWeight * (int64_t)cc.prog.n_regs +
-                                   (int64_t)cc.prog.code.size();
+      const int64_t island_elems =
+          kVarWeight * (int64_t)cc.prog.n_regs + (int64_t)cc.prog.code.size();
       if (std::getenv("STANLI_DEBUG_ISLAND"))
         std::fprintf(stderr, "island? ops=%zu graph=%lld island=%lld\n", j - i,
                      (long long)graph_elems, (long long)island_elems);
@@ -492,10 +493,9 @@ int carve_islands(Graph& g,
         }
         if (std::getenv("STANLI_DEBUG_ISLAND")) {
           const IslandProg& p = *static_cast<const IslandProg*>(is.udata);
-          std::fprintf(stderr,
-                       "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu\n",
-                       j - i, p.code.size(), p.n_regs, p.ins.size(),
-                       p.out_regs.size());
+          std::fprintf(
+              stderr, "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu\n",
+              j - i, p.code.size(), p.n_regs, p.ins.size(), p.out_regs.size());
         }
         ++carved;
         i = j;

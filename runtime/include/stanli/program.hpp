@@ -40,45 +40,64 @@ struct Program {
   // double and var passes. The discrete densities are deliberately not
   // here; they need an integer outcome the register file has nowhere to
   // put, and the interpreter carries them alone.
-#define STANLI_PROGRAM_DENSITY_LIST(X)                                     \
-  X(STD_NORMAL, std_normal_lpdf, 1)                                        \
-  X(EXPONENTIAL, exponential_lpdf, 2)                                      \
-  X(NORMAL, normal_lpdf, 3)                                                \
-  X(LOGNORMAL, lognormal_lpdf, 3)                                          \
-  X(CAUCHY, cauchy_lpdf, 3)                                                \
-  X(GAMMA, gamma_lpdf, 3)                                                  \
-  X(INV_GAMMA, inv_gamma_lpdf, 3)                                          \
-  X(BETA, beta_lpdf, 3)                                                    \
-  X(WEIBULL, weibull_lpdf, 3)                                              \
-  X(LOGISTIC, logistic_lpdf, 3)                                            \
-  X(DOUBLE_EXP, double_exponential_lpdf, 3)                                \
+#define STANLI_PROGRAM_DENSITY_LIST(X)      \
+  X(STD_NORMAL, std_normal_lpdf, 1)         \
+  X(EXPONENTIAL, exponential_lpdf, 2)       \
+  X(NORMAL, normal_lpdf, 3)                 \
+  X(LOGNORMAL, lognormal_lpdf, 3)           \
+  X(CAUCHY, cauchy_lpdf, 3)                 \
+  X(GAMMA, gamma_lpdf, 3)                   \
+  X(INV_GAMMA, inv_gamma_lpdf, 3)           \
+  X(BETA, beta_lpdf, 3)                     \
+  X(WEIBULL, weibull_lpdf, 3)               \
+  X(LOGISTIC, logistic_lpdf, 3)             \
+  X(DOUBLE_EXP, double_exponential_lpdf, 3) \
   X(UNIFORM, uniform_lpdf, 3)
 
   enum Code : uint8_t {
-    CONST,     // dst = pool[a]
-    CONSTR,    // dst[0..len) = pool[a + i]
-    MOV,       // dst = r[a]
-    MOVR,      // dst[0..len) = r[a + i]
-    ADD, SUB, MUL, DIV,              // dst = r[a] op r[b]
-    POW, FMAX, FMIN,
-    NEG, EXP, LOG, SQRT, SQUARE,     // dst = op(r[a])
-    INV, FABS, INV_LOGIT, LOG1M, TANH,
+    CONST,   // dst = pool[a]
+    CONSTR,  // dst[0..len) = pool[a + i]
+    MOV,     // dst = r[a]
+    MOVR,    // dst[0..len) = r[a + i]
+    ADD,
+    SUB,
+    MUL,
+    DIV,  // dst = r[a] op r[b]
+    POW,
+    FMAX,
+    FMIN,
+    NEG,
+    EXP,
+    LOG,
+    SQRT,
+    SQUARE,  // dst = op(r[a])
+    INV,
+    FABS,
+    INV_LOGIT,
+    LOG1M,
+    TANH,
     // Comparisons produce a plain 0/1 with no derivative, matching how
     // generated C++ evaluates them on values.
-    GT, GE, LT, LE, EQ, NE,
-    JZ,        // jump to `dst` when r[a] is zero
-    JMP,       // jump to `dst`
-    LOG_RANGE, EXP_RANGE,            // dst[i] = op(r[a+i]), i < len
-    DOT,       // dst = sum_i r[a+i] * r[b+i]      (Eigen redux, as OP_DOT)
-    LSE_RANGE, // dst = log_sum_exp(r[a..a+len))
-    SOFTMAX,   // dst[0..len) = softmax(r[a..a+len))
-    LSE2,      // dst = log_sum_exp(r[a], r[b])
-    LOG_MIX,   // dst = log_mix(r[a], r[b], r[c])
-    // Densities, propto-OFF only (the island carver refuses propto). With
-    // no term-dropping the value does not depend on which arguments are
-    // autodiff, so binding all of them as T reproduces the scalar op's
-    // value exactly; the extra partials computed for data arguments are
-    // discarded when the executor hands the island a null adjoint.
+    GT,
+    GE,
+    LT,
+    LE,
+    EQ,
+    NE,
+    JZ,   // jump to `dst` when r[a] is zero
+    JMP,  // jump to `dst`
+    LOG_RANGE,
+    EXP_RANGE,  // dst[i] = op(r[a+i]), i < len
+    DOT,        // dst = sum_i r[a+i] * r[b+i]      (Eigen redux, as OP_DOT)
+    LSE_RANGE,  // dst = log_sum_exp(r[a..a+len))
+    SOFTMAX,    // dst[0..len) = softmax(r[a..a+len))
+    LSE2,       // dst = log_sum_exp(r[a], r[b])
+    LOG_MIX,    // dst = log_mix(r[a], r[b], r[c])
+  // Densities, propto-OFF only (the island carver refuses propto). With
+  // no term-dropping the value does not depend on which arguments are
+  // autodiff, so binding all of them as T reproduces the scalar op's
+  // value exactly; the extra partials computed for data arguments are
+  // discarded when the executor hands the island a null adjoint.
 #define STANLI_PROGRAM_DENSITY_ENUM(code, name, arity) code,
     STANLI_PROGRAM_DENSITY_LIST(STANLI_PROGRAM_DENSITY_ENUM)
 #undef STANLI_PROGRAM_DENSITY_ENUM
@@ -114,33 +133,71 @@ void run_program(const Program& p, std::vector<T>& reg) {
       // Scalar constants get their own opcode: a right-hand side is mostly
       // scalars, and going through the ranged form cost the ODE models 3-4%
       // for the loop setup the compiler cannot see is one iteration.
-      case Program::CONST: d() = T(p.pool[(size_t)I.a]); break;
+      case Program::CONST:
+        d() = T(p.pool[(size_t)I.a]);
+        break;
       case Program::CONSTR:
         for (int32_t i = 0; i < I.len; ++i)
           reg[(size_t)(I.dst + i)] = T(p.pool[(size_t)(I.a + i)]);
         break;
-      case Program::MOV: d() = ra(); break;
+      case Program::MOV:
+        d() = ra();
+        break;
       case Program::MOVR:
         for (int32_t i = 0; i < I.len; ++i)
           reg[(size_t)(I.dst + i)] = reg[(size_t)(I.a + i)];
         break;
-      case Program::ADD: d() = ra() + rb(); break;
-      case Program::SUB: d() = ra() - rb(); break;
-      case Program::MUL: d() = ra() * rb(); break;
-      case Program::DIV: d() = ra() / rb(); break;
-      case Program::POW: d() = stan::math::pow(ra(), rb()); break;
-      case Program::FMAX: d() = stan::math::fmax(ra(), rb()); break;
-      case Program::FMIN: d() = stan::math::fmin(ra(), rb()); break;
-      case Program::NEG: d() = -ra(); break;
-      case Program::EXP: d() = stan::math::exp(ra()); break;
-      case Program::LOG: d() = stan::math::log(ra()); break;
-      case Program::SQRT: d() = stan::math::sqrt(ra()); break;
-      case Program::SQUARE: d() = stan::math::square(ra()); break;
-      case Program::INV: d() = stan::math::inv(ra()); break;
-      case Program::FABS: d() = stan::math::fabs(ra()); break;
-      case Program::INV_LOGIT: d() = stan::math::inv_logit(ra()); break;
-      case Program::LOG1M: d() = stan::math::log1m(ra()); break;
-      case Program::TANH: d() = stan::math::tanh(ra()); break;
+      case Program::ADD:
+        d() = ra() + rb();
+        break;
+      case Program::SUB:
+        d() = ra() - rb();
+        break;
+      case Program::MUL:
+        d() = ra() * rb();
+        break;
+      case Program::DIV:
+        d() = ra() / rb();
+        break;
+      case Program::POW:
+        d() = stan::math::pow(ra(), rb());
+        break;
+      case Program::FMAX:
+        d() = stan::math::fmax(ra(), rb());
+        break;
+      case Program::FMIN:
+        d() = stan::math::fmin(ra(), rb());
+        break;
+      case Program::NEG:
+        d() = -ra();
+        break;
+      case Program::EXP:
+        d() = stan::math::exp(ra());
+        break;
+      case Program::LOG:
+        d() = stan::math::log(ra());
+        break;
+      case Program::SQRT:
+        d() = stan::math::sqrt(ra());
+        break;
+      case Program::SQUARE:
+        d() = stan::math::square(ra());
+        break;
+      case Program::INV:
+        d() = stan::math::inv(ra());
+        break;
+      case Program::FABS:
+        d() = stan::math::fabs(ra());
+        break;
+      case Program::INV_LOGIT:
+        d() = stan::math::inv_logit(ra());
+        break;
+      case Program::LOG1M:
+        d() = stan::math::log1m(ra());
+        break;
+      case Program::TANH:
+        d() = stan::math::tanh(ra());
+        break;
       case Program::GT:
         d() = T(stan::math::value_of(ra()) > stan::math::value_of(rb()));
         break;
@@ -162,7 +219,9 @@ void run_program(const Program& p, std::vector<T>& reg) {
       case Program::JZ:
         if (stan::math::value_of(ra()) == 0.0) pc = I.dst - 1;
         break;
-      case Program::JMP: pc = I.dst - 1; break;
+      case Program::JMP:
+        pc = I.dst - 1;
+        break;
       case Program::LOG_RANGE:
         for (int32_t i = 0; i < I.len; ++i)
           reg[(size_t)(I.dst + i)] = stan::math::log(reg[(size_t)(I.a + i)]);
@@ -193,24 +252,26 @@ void run_program(const Program& p, std::vector<T>& reg) {
         for (int32_t i = 0; i < I.len; ++i) reg[(size_t)(I.dst + i)] = s(i);
         break;
       }
-      case Program::LSE2: d() = stan::math::log_sum_exp(ra(), rb()); break;
+      case Program::LSE2:
+        d() = stan::math::log_sum_exp(ra(), rb());
+        break;
       case Program::LOG_MIX:
         d() = stan::math::log_mix(ra(), rb(), reg[(size_t)I.c]);
         break;
-      // Generated from the same list as the enum and the two front ends,
-      // so a density cannot exist as an instruction with no case to run
-      // it. It used to be possible, and the failure was a silently
-      // unwritten register rather than an error.
-#define STANLI_PROGRAM_DENSITY_CASE(code, fn, n)                     \
-  case Program::code:                                                \
-    if constexpr (n == 1)                                            \
-      d() = stan::math::fn<false>(ra());                             \
-    else if constexpr (n == 2)                                       \
-      d() = stan::math::fn<false>(ra(), rb());                       \
-    else                                                             \
-      d() = stan::math::fn<false>(ra(), rb(), reg[(size_t)I.c]);     \
+        // Generated from the same list as the enum and the two front ends,
+        // so a density cannot exist as an instruction with no case to run
+        // it. It used to be possible, and the failure was a silently
+        // unwritten register rather than an error.
+#define STANLI_PROGRAM_DENSITY_CASE(code, fn, n)                 \
+  case Program::code:                                            \
+    if constexpr (n == 1)                                        \
+      d() = stan::math::fn<false>(ra());                         \
+    else if constexpr (n == 2)                                   \
+      d() = stan::math::fn<false>(ra(), rb());                   \
+    else                                                         \
+      d() = stan::math::fn<false>(ra(), rb(), reg[(size_t)I.c]); \
     break;
-      STANLI_PROGRAM_DENSITY_LIST(STANLI_PROGRAM_DENSITY_CASE)
+        STANLI_PROGRAM_DENSITY_LIST(STANLI_PROGRAM_DENSITY_CASE)
 #undef STANLI_PROGRAM_DENSITY_CASE
     }
   }

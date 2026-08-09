@@ -31,10 +31,9 @@ struct ConstFoldStats {
 // there is one implementation of what an op means. If that evaluation throws
 // -- a density rejecting its own data, say -- the graph is left untouched.
 // STANLI_NO_CONSTFOLD=1 disables the pass.
-ConstFoldStats const_fold(Graph& g,
-                          std::vector<std::pair<int, std::vector<double>>>& fills,
-                          const std::vector<int>& roots,
-                          std::vector<int>* folded = nullptr);
+ConstFoldStats const_fold(
+    Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
+    const std::vector<int>& roots, std::vector<int>* folded = nullptr);
 
 }  // namespace stanli
 

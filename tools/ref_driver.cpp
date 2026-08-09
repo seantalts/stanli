@@ -19,8 +19,7 @@
 
 // Provided by the generated model translation unit.
 stan::model::model_base& new_model(stan::io::var_context& data_context,
-                                   unsigned int seed,
-                                   std::ostream* msg_stream);
+                                   unsigned int seed, std::ostream* msg_stream);
 
 // Same points as tools/stanli_check.cpp; see the note there on why more
 // than one exists.
@@ -75,8 +74,7 @@ int main(int argc, char** argv) {
     }
     std::printf("WANAMES %s\n", joined.c_str());
     std::printf("WAVALS");
-    for (int64_t i = 0; i < vars.size(); ++i)
-      std::printf(" %.17g", vars(i));
+    for (int64_t i = 0; i < vars.size(); ++i) std::printf(" %.17g", vars(i));
     std::printf("\n");
   } catch (const std::exception& e) {
     std::printf("WANAMES FAIL %s\n", e.what());

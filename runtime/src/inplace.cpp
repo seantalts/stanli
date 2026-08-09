@@ -139,7 +139,11 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
   if (g.result_slot >= 0) root_set.insert(g.result_slot);
 
   // Most recent write to each vector, as (op index, element, value slot).
-  struct Store { size_t op; int elem; int value; };
+  struct Store {
+    size_t op;
+    int elem;
+    int value;
+  };
   std::unordered_map<int, Store> last_store;
   std::unordered_map<int, int> rename;  // load output -> stored value slot
   const auto resolve = [&](int s) {

@@ -4,7 +4,8 @@
 #if defined(__APPLE__)
 extern "C" void stanli_observe_stub(void*, bool) {}
 asm(".globl __ZN3tbb8internal26task_scheduler_observer_v37observeEb\n"
-    "__ZN3tbb8internal26task_scheduler_observer_v37observeEb = _stanli_observe_stub\n");
+    "__ZN3tbb8internal26task_scheduler_observer_v37observeEb = "
+    "_stanli_observe_stub\n");
 #else
 namespace tbb {
 namespace internal {

@@ -125,8 +125,8 @@ void clu_fwd(KernelCtx& ctx) {
     // .val() expression: e/(1+e) with an inf guard, no sign branch.
     if (packet_math()) {
       MapA(il, n) = CMapA(x, n).exp();
-      MapA(il, n) = (MapA(il, n).isInf()).select(1.0,
-                                                 MapA(il, n) / (1.0 + MapA(il, n)));
+      MapA(il, n) =
+          (MapA(il, n).isInf()).select(1.0, MapA(il, n) / (1.0 + MapA(il, n)));
     } else {
       for (int64_t i = 0; i < n; ++i) {
         const double e = std::exp(x[i]);
@@ -203,8 +203,8 @@ void structured_bwd(KernelCtx& ctx, RevF&& f) {
       y(i) = ctx.in[0].data[b * inner_raw + i];
     var lp = 0.0;
     auto x = f(y, lp);
-    Eigen::Map<const Eigen::VectorXd> seed(
-        ctx.out_adj_vec.data + b * inner_con, inner_con);
+    Eigen::Map<const Eigen::VectorXd> seed(ctx.out_adj_vec.data + b * inner_con,
+                                           inner_con);
     var j = stan::math::dot_product(seed, x) + ctx.out2_adj * lp;
     stan::math::grad(j.vi_);
     for (int64_t i = 0; i < inner_raw; ++i)
@@ -372,8 +372,7 @@ void matrix_constrain_fwd(KernelCtx& ctx, int64_t rows, int64_t cols, F&& f) {
   double lp = 0.0;
   Eigen::MatrixXd x = f(y, lp);
   for (int64_t j = 0; j < cols; ++j)
-    for (int64_t i = 0; i < rows; ++i)
-      ctx.out.data[j * rows + i] = x(i, j);
+    for (int64_t i = 0; i < rows; ++i) ctx.out.data[j * rows + i] = x(i, j);
   ctx.out2.data[0] = lp;
 }
 template <typename F>
@@ -451,8 +450,7 @@ void register_constrain_kernels() {
                   Kernel{clower_fwd, clower_bwd, constrain_scratch});
   register_kernel(OP_CONSTRAIN_UPPER,
                   Kernel{cupper_fwd, cupper_bwd, constrain_scratch});
-  register_kernel(OP_CONSTRAIN_LU,
-                  Kernel{clu_fwd, clu_bwd, constrain_scratch});
+  register_kernel(OP_CONSTRAIN_LU, Kernel{clu_fwd, clu_bwd, constrain_scratch});
   register_kernel(OP_CONSTRAIN_CHOL_CORR,
                   Kernel{chol_corr_fwd, chol_corr_bwd, nullptr});
   register_kernel(OP_CONSTRAIN_SIMPLEX,

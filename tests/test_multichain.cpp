@@ -31,8 +31,8 @@ static void expect_in(const std::string& what, double got, double lo,
                       double hi) {
   if (!(got >= lo && got <= hi)) {
     ++failures;
-    std::printf("FAIL %-34s got %.6g want in [%g, %g]\n", what.c_str(), got,
-                lo, hi);
+    std::printf("FAIL %-34s got %.6g want in [%g, %g]\n", what.c_str(), got, lo,
+                hi);
   }
 }
 
@@ -77,7 +77,8 @@ int main() {
     // Bitwise: the clone runs the same ops over the same doubles in the
     // same order, so anything short of equality is a real difference.
     bool same = lp1 == lp2;
-    for (int64_t i = 0; i < n; ++i) same = same && g1[(size_t)i] == g2[(size_t)i];
+    for (int64_t i = 0; i < n; ++i)
+      same = same && g1[(size_t)i] == g2[(size_t)i];
     expect("clone gradient is bitwise identical", same);
 
     // And the two arenas are independent: evaluating one must not move
@@ -212,7 +213,7 @@ int main() {
     const double init[3] = {0.5, -0.25, 1.5};
     NutsConfig cfg;
     cfg.seed = 5;
-    cfg.warmup = 0;   // no adaptation, so the first draw stays near the init
+    cfg.warmup = 0;  // no adaptation, so the first draw stays near the init
     cfg.samples = 1;
     cfg.init = init;
     auto d = run_nuts(ex, cfg);
@@ -262,7 +263,8 @@ int main() {
     for (int c = 0; c < C; ++c)
       for (int i = 0; i < N; ++i) {
         for (int j = 0; j < D; ++j)
-          draws[(size_t)((c * N + i) * D + j)] = res[(size_t)c].draws[(size_t)i][(size_t)j];
+          draws[(size_t)((c * N + i) * D + j)] =
+              res[(size_t)c].draws[(size_t)i][(size_t)j];
         for (int k = 0; k < N_SAMPLER_COLS; ++k)
           stats[(size_t)((c * N + i) * N_SAMPLER_COLS + k)] =
               res[(size_t)c].stats.rows[(size_t)i][(size_t)k];

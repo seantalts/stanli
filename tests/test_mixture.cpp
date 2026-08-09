@@ -63,7 +63,7 @@ static void check_ref(const std::string& tag, uint16_t opcode, int64_t out_len,
 // a threaded vector; then SUM_VEC. Fused: one op with a len-N out, SUM_VEC.
 struct GraphRun {
   double value;
-  std::vector<double> out;   // the len-N intermediate
+  std::vector<double> out;  // the len-N intermediate
   std::vector<double> grad;
 };
 

@@ -30,8 +30,8 @@ static void expect_near(const std::string& what, double got, double want,
                         double tol) {
   if (!(std::fabs(got - want) <= tol)) {
     ++failures;
-    std::printf("FAIL %-30s got %.10g want %.10g (tol %g)\n", what.c_str(),
-                got, want, tol);
+    std::printf("FAIL %-30s got %.10g want %.10g (tol %g)\n", what.c_str(), got,
+                want, tol);
   }
 }
 

@@ -14,9 +14,8 @@
 namespace stanli {
 
 RhsProgram compile_rhs_args(
-    const mir::FunDef& f,
-    const std::map<std::string, const mir::FunDef*>& funs, int n_y,
-    const std::vector<RhsArg>& args) {
+    const mir::FunDef& f, const std::map<std::string, const mir::FunDef*>& funs,
+    int n_y, const std::vector<RhsArg>& args) {
   RhsProgram p;
   if (f.arg_names.size() != args.size() + 2) {
     p.why = "right-hand side takes " + std::to_string(f.arg_names.size()) +

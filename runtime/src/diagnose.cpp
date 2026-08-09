@@ -75,10 +75,9 @@ std::vector<ParamSummary> summarize(const DrawSet& d,
 
     s.mean = flat.mean();
     // Sample sd (n-1), matching stansummary.
-    s.sd = n_total > 1
-               ? std::sqrt((flat.array() - s.mean).square().sum() /
-                           (double)(n_total - 1))
-               : 0.0;
+    s.sd = n_total > 1 ? std::sqrt((flat.array() - s.mean).square().sum() /
+                                   (double)(n_total - 1))
+                       : 0.0;
     s.q5 = stan::math::quantile(flat, 0.05);
     s.q50 = stan::math::quantile(flat, 0.50);
     s.q95 = stan::math::quantile(flat, 0.95);
@@ -270,7 +269,8 @@ std::string format_diagnostics(const FitDiagnostics& d) {
                     d.max_rhat, d.max_rhat_param.c_str(), kRhatThreshold);
       line(buf);
     } else {
-      std::snprintf(buf, sizeof buf, "R-hat is below %.2f for every "
+      std::snprintf(buf, sizeof buf,
+                    "R-hat is below %.2f for every "
                     "parameter (worst %.3f, %s).",
                     kRhatThreshold, d.max_rhat, d.max_rhat_param.c_str());
       line(buf);
@@ -321,9 +321,9 @@ std::string format_diagnostics(const FitDiagnostics& d) {
   if (problems == 0)
     line("No problems detected.");
   else
-    line(problems == 1 ? "1 diagnostic check failed."
-                       : std::to_string(problems) +
-                             " diagnostic checks failed.");
+    line(problems == 1
+             ? "1 diagnostic check failed."
+             : std::to_string(problems) + " diagnostic checks failed.");
   return out;
 }
 

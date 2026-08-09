@@ -153,8 +153,7 @@ class MirInterp {
           r.r = {T((double)iv)};
           return r;
         }
-        fail("unknown variable " + e.name + " (type " + e.type_ + ")",
-             e.raw);
+        fail("unknown variable " + e.name + " (type " + e.type_ + ")", e.raw);
       }
       case mir::Expr::TernaryIf: {
         const bool c = val(eval(e.args[0]).r.at(0)) != 0.0;
@@ -225,9 +224,8 @@ class MirInterp {
           // means best_logp[1, k], and its Viterbi only matches CmdStan's
           // because the never-written element loses every comparison.
           if (e.is_int) e.i = {0};
-          e.r = {e.is_int
-                     ? T(0.0)
-                     : T(std::numeric_limits<double>::quiet_NaN())};
+          e.r = {e.is_int ? T(0.0)
+                          : T(std::numeric_limits<double>::quiet_NaN())};
         } else if (!st.decl_type.base.empty()) {
           // Bare sized decl: allocate so element writes work; real elements
           // are NaN until written (see the scalar case above).
@@ -238,9 +236,8 @@ class MirInterp {
             dims.push_back(v);
             n *= v;
           }
-          e.r.assign(n, e.is_int
-                            ? T(0.0)
-                            : T(std::numeric_limits<double>::quiet_NaN()));
+          e.r.assign(n, e.is_int ? T(0.0)
+                                 : T(std::numeric_limits<double>::quiet_NaN()));
           if (e.is_int) e.i.assign(n, 0);
           e.dims = std::move(dims);
         }
@@ -278,20 +275,18 @@ class MirInterp {
             // Row write into a matrix (A[i] = row_vector), col-major strided.
             const int64_t R = en->dims[0], C = en->dims[1];
             if ((int64_t)v.r.size() != C) fail("row write size mismatch");
-            for (int64_t j = 0; j < C; ++j)
-              en->r.at(j * R + (ix - 1)) = v.r[j];
+            for (int64_t j = 0; j < C; ++j) en->r.at(j * R + (ix - 1)) = v.r[j];
             return;
           }
           if ((size_t)ix > en->r.size())
-            en->r.resize(
-                ix, en->is_int
-                        ? T(0.0)
-                        : T(std::numeric_limits<double>::quiet_NaN()));
+            en->r.resize(ix, en->is_int
+                                 ? T(0.0)
+                                 : T(std::numeric_limits<double>::quiet_NaN()));
           en->r[ix - 1] = v.r.at(0);
           if (en->is_int) {
             if ((size_t)ix > en->i.size()) en->i.resize(ix, 0);
-            en->i[ix - 1] = v.is_int && !v.i.empty() ? v.i[0]
-                                                     : (int)val(v.r.at(0));
+            en->i[ix - 1] =
+                v.is_int && !v.i.empty() ? v.i[0] : (int)val(v.r.at(0));
           }
           return;
         }
@@ -318,8 +313,7 @@ class MirInterp {
             st.lhs_idx[1].name == "IndexSingle" && en->dims.size() == 2) {
           const long j = as_int(st.lhs_idx[1].args[0]);
           const int64_t R = en->dims[0];
-          for (int64_t i = 0; i < R; ++i)
-            en->r.at((j - 1) * R + i) = v.r.at(i);
+          for (int64_t i = 0; i < R; ++i) en->r.at((j - 1) * R + i) = v.r.at(i);
           return;
         }
         // Column-segment write X[a:b, j] = vector.
@@ -479,8 +473,7 @@ class MirInterp {
     auto it = funs_.find(e.name);
     if (it == funs_.end()) fail("unknown function " + e.name, e.raw);
     const mir::FunDef& f = *it->second;
-    if (e.args.size() != f.arg_names.size())
-      fail(e.name + " arity mismatch");
+    if (e.args.size() != f.arg_names.size()) fail(e.name + " arity mismatch");
     if (udf_depth_ > 64) fail("UDF recursion too deep");
     // Function bodies see their arguments and nothing else.
     MirInterp sub(funs_, where_, hooks_);
@@ -637,8 +630,8 @@ class MirInterp {
       return r;
     }
     {
-      std::string what = "unsupported index: dims=" +
-                         std::to_string(base.dims.size());
+      std::string what =
+          "unsupported index: dims=" + std::to_string(base.dims.size());
       for (size_t k = 1; k < e.args.size(); ++k)
         what += " [" + e.args[k].name + "]";
       fail(what, e.raw);
@@ -655,15 +648,13 @@ class MirInterp {
       Value a = eval(e.args[0]), b = eval(e.args[1]);
       Value o;
       if (a.r.size() != b.r.size() && a.r.size() != 1 && b.r.size() != 1)
-        fail(e.name + ": incompatible lengths " +
-                 std::to_string(a.r.size()) + " vs " +
-                 std::to_string(b.r.size()),
+        fail(e.name + ": incompatible lengths " + std::to_string(a.r.size()) +
+                 " vs " + std::to_string(b.r.size()),
              e.raw);
       const size_t n = std::max(a.r.size(), b.r.size());
       o.r.resize(n);
       for (size_t i = 0; i < n; ++i)
-        o.r[i] = f(a.r[a.r.size() == 1 ? 0 : i],
-                   b.r[b.r.size() == 1 ? 0 : i]);
+        o.r[i] = f(a.r[a.r.size() == 1 ? 0 : i], b.r[b.r.size() == 1 ? 0 : i]);
       o.dims = a.r.size() >= b.r.size() ? a.dims : b.dims;
       if (a.is_int && b.is_int && a.i.size() == 1 && b.i.size() == 1) {
         o.is_int = true;
@@ -686,8 +677,10 @@ class MirInterp {
         return T(f(val(x), val(y)) ? 1.0 : 0.0);
       });
     };
-    if (e.name == "Plus__") return bin([](const T& x, const T& y) { return x + y; });
-    if (e.name == "Minus__") return bin([](const T& x, const T& y) { return x - y; });
+    if (e.name == "Plus__")
+      return bin([](const T& x, const T& y) { return x + y; });
+    if (e.name == "Minus__")
+      return bin([](const T& x, const T& y) { return x - y; });
     if (e.name == "Times__") {
       // Times on shaped operands is linear algebra, not elementwise; only
       // a scalar operand (either side) scales elementwise.
@@ -698,8 +691,7 @@ class MirInterp {
         const int64_t Ca = a_mat ? a.dims[1] : (int64_t)a.r.size();
         const int64_t Rb = b_mat ? b.dims[0] : (int64_t)b.r.size();
         const int64_t Cb = b_mat ? b.dims[1] : 1;
-        if (Ca != Rb)
-          fail("Times__: inner dimension mismatch", e.raw);
+        if (Ca != Rb) fail("Times__: inner dimension mismatch", e.raw);
         // Col-major storage on both sides.
         r.r.assign((size_t)(Ra * Cb), T(0.0));
         for (int64_t j = 0; j < Cb; ++j)
@@ -762,15 +754,18 @@ class MirInterp {
       return bin([](const T& x, const T& y) { return stan::math::fmin(x, y); });
     if (e.name == "PMinus__") return un([](const T& x) { return -x; });
     if (e.name == "PPlus__") return un([](const T& x) { return x; });
-    if (e.name == "exp") return un([](const T& x) { return stan::math::exp(x); });
-    if (e.name == "log") return un([](const T& x) { return stan::math::log(x); });
+    if (e.name == "exp")
+      return un([](const T& x) { return stan::math::exp(x); });
+    if (e.name == "log")
+      return un([](const T& x) { return stan::math::log(x); });
     if (e.name == "log10")
       return un([](const T& x) { return stan::math::log10(x); });
     if (e.name == "sqrt")
       return un([](const T& x) { return stan::math::sqrt(x); });
     if (e.name == "square")
       return un([](const T& x) { return stan::math::square(x); });
-    if (e.name == "inv") return un([](const T& x) { return stan::math::inv(x); });
+    if (e.name == "inv")
+      return un([](const T& x) { return stan::math::inv(x); });
     if (e.name == "inv_logit")
       return un([](const T& x) { return stan::math::inv_logit(x); });
     if (e.name == "logit")
@@ -786,8 +781,8 @@ class MirInterp {
     if (e.name == "cumulative_sum") {
       Value a = eval(e.args[0]);
       Value o;
-      o.dims = a.dims.empty() ? std::vector<int64_t>{(int64_t)a.r.size()}
-                              : a.dims;
+      o.dims =
+          a.dims.empty() ? std::vector<int64_t>{(int64_t)a.r.size()} : a.dims;
       T s = T(0.0);
       for (const T& x : a.r) {
         s += x;
@@ -817,8 +812,7 @@ class MirInterp {
       Value x = eval(e.args[0]);
       const T alpha = eval(e.args[1]).r.at(0);
       const T rho = eval(e.args[2]).r.at(0);
-      const int64_t N = x.dims.size() == 2 ? x.dims[0]
-                                           : (int64_t)x.r.size();
+      const int64_t N = x.dims.size() == 2 ? x.dims[0] : (int64_t)x.r.size();
       const int64_t D = x.dims.size() == 2 ? x.dims[1] : 1;
       const T a2 = alpha * alpha;
       const T inv2r2 = T(1.0) / (T(2.0) * rho * rho);
@@ -829,8 +823,8 @@ class MirInterp {
         for (int64_t i = 0; i < N; ++i) {
           T sq = T(0.0);
           for (int64_t d = 0; d < D; ++d) {
-            const T diff = x.r.at((size_t)(i + N * d)) -
-                           x.r.at((size_t)(j + N * d));
+            const T diff =
+                x.r.at((size_t)(i + N * d)) - x.r.at((size_t)(j + N * d));
             sq += diff * diff;
           }
           o.r[(size_t)(j * N + i)] = a2 * stan::math::exp(-sq * inv2r2);
@@ -920,8 +914,7 @@ class MirInterp {
     if ((e.name == "dot_product" || e.name == "dot_self")) {
       Value a = eval(e.args[0]);
       Value b = e.name == "dot_self" ? a : eval(e.args[1]);
-      if (a.r.size() != b.r.size())
-        fail("dot_product: length mismatch", e.raw);
+      if (a.r.size() != b.r.size()) fail("dot_product: length mismatch", e.raw);
       T s = T(0.0);
       for (size_t i = 0; i < a.r.size(); ++i) s += a.r[i] * b.r[i];
       r.r = {s};
@@ -976,8 +969,8 @@ class MirInterp {
       Value a = eval(e.args[0]);
       const T m = lse(a.r);
       Value o;
-      o.dims = a.dims.empty() ? std::vector<int64_t>{(int64_t)a.r.size()}
-                              : a.dims;
+      o.dims =
+          a.dims.empty() ? std::vector<int64_t>{(int64_t)a.r.size()} : a.dims;
       for (const T& x : a.r)
         o.r.push_back(e.name == "softmax" ? stan::math::exp(x - m) : x - m);
       return o;
@@ -987,8 +980,7 @@ class MirInterp {
       const bool pre = e.name.find("_pre_") != std::string::npos;
       Value v = eval(e.args[pre ? 0 : 1]);
       Value m = eval(e.args[pre ? 1 : 0]);
-      if (m.dims.size() != 2)
-        fail(e.name + ": needs a matrix argument", e.raw);
+      if (m.dims.size() != 2) fail(e.name + ": needs a matrix argument", e.raw);
       const int64_t R = m.dims[0], C = m.dims[1];
       Value o;
       o.dims = {R, C};
@@ -1062,8 +1054,10 @@ class MirInterp {
           continue;
         }
         o.r.push_back(v2.r.at(0));
-        if (v2.is_int && !v2.i.empty()) o.i.push_back(v2.i[0]);
-        else o.is_int = false;
+        if (v2.is_int && !v2.i.empty())
+          o.i.push_back(v2.i[0]);
+        else
+          o.is_int = false;
       }
       if (!o.is_int) o.i.clear();
       if (rows_mode) {
@@ -1176,16 +1170,16 @@ class MirInterp {
     // handler earlier in this chain: that handler wins by position, and
     // deleting it as a "duplicate" of the entry here silently zeroes the
     // derivative.
-#define STANLI_INTERP_UNARY(code, ufn, VAL, DERIV)                        \
-  if (e.name == #ufn && e.args.size() == 1) {                             \
-    const Value a = eval(e.args[0]);                                       \
-    r.r.resize(a.r.size());                                                \
-    for (size_t i = 0; i < a.r.size(); ++i) {                              \
-      const double x = val(a.r[i]);                                        \
-      r.r[i] = T(VAL);                                                     \
-    }                                                                      \
-    r.dims = a.dims;                                                       \
-    return r;                                                              \
+#define STANLI_INTERP_UNARY(code, ufn, VAL, DERIV) \
+  if (e.name == #ufn && e.args.size() == 1) {      \
+    const Value a = eval(e.args[0]);               \
+    r.r.resize(a.r.size());                        \
+    for (size_t i = 0; i < a.r.size(); ++i) {      \
+      const double x = val(a.r[i]);                \
+      r.r[i] = T(VAL);                             \
+    }                                              \
+    r.dims = a.dims;                               \
+    return r;                                      \
   }
     STANLI_SCALAR_UNARY_LIST(STANLI_INTERP_UNARY)
 #undef STANLI_INTERP_UNARY
@@ -1204,10 +1198,8 @@ class MirInterp {
     if (shared_density || e.name == "bernoulli_lpmf" ||
         e.name == "binomial_lpmf" || e.name == "poisson_lpmf" ||
         e.name == "poisson_log_lpmf" || e.name == "student_t_lpdf" ||
-        e.name == "bernoulli_logit_lpmf" ||
-        e.name == "binomial_logit_lpmf" ||
-        e.name == "hypergeometric_lpmf" ||
-        e.name == "discrete_range_lpmf") {
+        e.name == "bernoulli_logit_lpmf" || e.name == "binomial_logit_lpmf" ||
+        e.name == "hypergeometric_lpmf" || e.name == "discrete_range_lpmf") {
       std::vector<Value> av;
       for (const auto& a : e.args) av.push_back(eval(a));
       size_t n = 1;
@@ -1223,15 +1215,15 @@ class MirInterp {
       };
       T acc = T(0.0);
       for (size_t i = 0; i < n; ++i) {
-#define STANLI_INTERP_DENSITY_EVAL(code, fn, n)                        \
-  if (e.name == #fn) {                                                   \
-    if constexpr (n == 1)                                                \
-      acc += stan::math::fn(sc(0, i));                                   \
-    else if constexpr (n == 2)                                           \
-      acc += stan::math::fn(sc(0, i), sc(1, i));                         \
-    else                                                                 \
-      acc += stan::math::fn(sc(0, i), sc(1, i), sc(2, i));               \
-    continue;                                                            \
+#define STANLI_INTERP_DENSITY_EVAL(code, fn, n)            \
+  if (e.name == #fn) {                                     \
+    if constexpr (n == 1)                                  \
+      acc += stan::math::fn(sc(0, i));                     \
+    else if constexpr (n == 2)                             \
+      acc += stan::math::fn(sc(0, i), sc(1, i));           \
+    else                                                   \
+      acc += stan::math::fn(sc(0, i), sc(1, i), sc(2, i)); \
+    continue;                                              \
   }
         STANLI_PROGRAM_DENSITY_LIST(STANLI_INTERP_DENSITY_EVAL)
 #undef STANLI_INTERP_DENSITY_EVAL
@@ -1242,18 +1234,16 @@ class MirInterp {
         else if (e.name == "binomial_lpmf")
           acc += stan::math::binomial_lpmf(ic(0, i), ic(1, i), sc(2, i));
         else if (e.name == "binomial_logit_lpmf")
-          acc += stan::math::binomial_logit_lpmf(ic(0, i), ic(1, i),
-                                                 sc(2, i));
+          acc += stan::math::binomial_logit_lpmf(ic(0, i), ic(1, i), sc(2, i));
         else if (e.name == "poisson_lpmf")
           acc += stan::math::poisson_lpmf(ic(0, i), sc(1, i));
         else if (e.name == "poisson_log_lpmf")
           acc += stan::math::poisson_log_lpmf(ic(0, i), sc(1, i));
         else if (e.name == "hypergeometric_lpmf")
-          acc += stan::math::hypergeometric_lpmf(ic(0, i), ic(1, i),
-                                                 ic(2, i), ic(3, i));
+          acc += stan::math::hypergeometric_lpmf(ic(0, i), ic(1, i), ic(2, i),
+                                                 ic(3, i));
         else if (e.name == "discrete_range_lpmf")
-          acc += stan::math::discrete_range_lpmf(ic(0, i), ic(1, i),
-                                                 ic(2, i));
+          acc += stan::math::discrete_range_lpmf(ic(0, i), ic(1, i), ic(2, i));
         else if (e.name == "student_t_lpdf")
           acc += stan::math::student_t_lpdf(sc(0, i), sc(1, i), sc(2, i),
                                             sc(3, i));
@@ -1306,8 +1296,7 @@ class MirInterp {
         r.r.insert(r.r.end(), b.r.begin(), b.r.end());
         return r;
       }
-      if (a.dims.size() == 2 && b.dims.size() == 2 &&
-          a.dims[1] == b.dims[1]) {
+      if (a.dims.size() == 2 && b.dims.size() == 2 && a.dims[1] == b.dims[1]) {
         // Matrices: stack rows, col-major storage interleaves columns.
         const int64_t Ra = a.dims[0], Rb = b.dims[0], C = a.dims[1];
         r.dims = {Ra + Rb, C};

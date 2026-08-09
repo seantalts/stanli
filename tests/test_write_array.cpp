@@ -112,8 +112,8 @@ void test_wanames_pipeline() {
       const double got = gq[(i - 1) * 2 + (j - 1)];
       if (got != want) {
         ++failures;
-        std::printf("FAIL wanames gq.%d.%d: got %.17g want %.17g\n", i, j,
-                    got, want);
+        std::printf("FAIL wanames gq.%d.%d: got %.17g want %.17g\n", i, j, got,
+                    want);
       }
     }
 }
@@ -139,8 +139,7 @@ void test_interpreted_gq() {
   params["sigma"] = sig;
   wi.seed(42);
   const std::vector<double> r1 = wi.eval(params);
-  expect_eq("gqrng header", joined(wi.columns()),
-            "sigma,yrep,crep,branchy,p");
+  expect_eq("gqrng header", joined(wi.columns()), "sigma,yrep,crep,branchy,p");
   if (r1.size() != 5) {
     ++failures;
     std::printf("FAIL gqrng: row size %zu\n", r1.size());

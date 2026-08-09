@@ -54,7 +54,7 @@ struct OptimizeResult {
   std::vector<double> unconstrained;  // the mode, on the sampler's scale
   std::vector<double> values;         // every CSV column at that point
   std::vector<std::string> names;
-  int return_code = 0;                // 0 = converged
+  int return_code = 0;  // 0 = converged
   std::string message;
 };
 

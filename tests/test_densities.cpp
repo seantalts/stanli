@@ -30,8 +30,8 @@ static void expect_close(const std::string& what, double got, double want) {
   const double tol = 1e-13 * (std::abs(want) > 1 ? std::abs(want) : 1.0);
   if (std::abs(got - want) > tol) {
     ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g (tol %g)\n", what.c_str(),
-                got, want, tol);
+    std::printf("FAIL %-32s got %.17g want %.17g (tol %g)\n", what.c_str(), got,
+                want, tol);
   }
 }
 
@@ -179,8 +179,7 @@ int main() {
     expect_eq("uniform oos value", r.value,
               -std::numeric_limits<double>::infinity());
     expect_eq("uniform oos dy", r.grad[0], 0.0);
-    auto r2 = testutil::run_one_op(OP_UNIFORM_LPDF,
-                                   {{-0.5}, {-100.0}, {0.0}},
+    auto r2 = testutil::run_one_op(OP_UNIFORM_LPDF, {{-0.5}, {-100.0}, {0.0}},
                                    {true, false, false});
     var vy = -0.5;
     var lp = stan::math::uniform_lpdf<false>(vy, -100.0, 0.0);
@@ -253,8 +252,7 @@ int main() {
 
   // ---- student_t_lpdf(y_data, nu_ps, mu_ps, sigma_ps) --------------------
   {
-    auto r = testutil::run_one_op(OP_STUDENT_T_LPDF,
-                                  {ys, {4.0}, {0.25}, {1.4}},
+    auto r = testutil::run_one_op(OP_STUDENT_T_LPDF, {ys, {4.0}, {0.25}, {1.4}},
                                   {false, true, true, true});
     Eigen::Map<Eigen::VectorXd> ymap(ys.data(), N);
     var vnu = 4.0, vmu = 0.25, vsig = 1.4;
@@ -373,10 +371,9 @@ int main() {
 
     // binomial: int groups; y vector, trials a language-level scalar (-1).
     std::vector<int> fused_b{N, 3, 0, 7, 1, 2, -1, 20};
-    check_elt("elt binomial", OP_BINOMIAL_LPMF, 0x01, N, {unit}, {true},
-              fused_b, [&](int64_t i) {
-                return std::vector<int>{-1, counts[i], -1, 20};
-              });
+    check_elt(
+        "elt binomial", OP_BINOMIAL_LPMF, 0x01, N, {unit}, {true}, fused_b,
+        [&](int64_t i) { return std::vector<int>{-1, counts[i], -1, 20}; });
   }
 
   if (failures == 0) std::printf("test_densities OK\n");

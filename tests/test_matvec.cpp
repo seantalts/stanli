@@ -20,8 +20,8 @@ int main() {
   using stan::math::var;
   const int R = 5, C = 3;
   // Column-major X (Stan/Eigen convention), same logical matrix as before.
-  double X[R * C] = {0.5,  2.0,  -0.4, 0.2,  1.3,  -1.2, -0.7, 0.9,
-                     0.8,  -0.1, 0.3,  1.1,  -1.5, -0.6, 0.7};
+  double X[R * C] = {0.5, 2.0,  -0.4, 0.2, 1.3,  -1.2, -0.7, 0.9,
+                     0.8, -0.1, 0.3,  1.1, -1.5, -0.6, 0.7};
   double yv[R] = {0.4, -1.0, 2.1, 0.3, -0.8};
   double betav[C] = {0.25, -0.5, 1.0};
 

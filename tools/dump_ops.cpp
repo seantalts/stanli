@@ -40,9 +40,8 @@ static void summarize(const stanli::Graph& g) {
       per_op_scalar[op.opcode] += s;
     }
   }
-  std::printf("SUMMARY ops=%zu scalar_out=%lld vector_out=%lld\n",
-              g.ops.size(), (long long)scalar,
-              (long long)(g.ops.size() - scalar));
+  std::printf("SUMMARY ops=%zu scalar_out=%lld vector_out=%lld\n", g.ops.size(),
+              (long long)scalar, (long long)(g.ops.size() - scalar));
   // Opcodes by scalar-output count: the re-roll pass's remaining targets.
   std::vector<std::pair<int64_t, uint16_t>> rank;
   for (uint16_t oc = 0; oc < stanli::OP_COUNT_; ++oc)

@@ -20,9 +20,9 @@ namespace testmodels {
 //      + normal(mu | 0, 5) + cauchy(tau | 0, 5) + log_tau   (jacobian)
 struct EightSchools {
   Graph graph;
-  int mu, log_tau, theta_tilde;   // parameter slots
-  int y, sigma;                   // data slots
-  int zero, one, five;            // constant slots
+  int mu, log_tau, theta_tilde;  // parameter slots
+  int y, sigma;                  // data slots
+  int zero, one, five;           // constant slots
   static constexpr int J = 8;
   static constexpr double kY[J] = {28, 8, -3, 7, -1, 1, 18, 12};
   static constexpr double kSigma[J] = {15, 10, 16, 11, 9, 11, 10, 18};
@@ -77,7 +77,7 @@ struct LogisticGlm {
   Graph graph;
   int alpha, beta;
   int X;
-  int zero, p25, five, one;       // constant slots
+  int zero, p25, five, one;  // constant slots
   static constexpr int N = 20, K = 3;
   // Deterministic fixed data, column-major (Stan/Eigen convention).
   static const double kX[N * K];
@@ -85,12 +85,12 @@ struct LogisticGlm {
 };
 
 inline const double LogisticGlm::kX[LogisticGlm::N * LogisticGlm::K] = {
-    0.17, -1.30, 0.55,  1.02,  -0.21, -0.88, 0.34,  0.91,  -1.44, 0.62,
-    -0.53, 1.21, -0.09, 0.75,  -0.66, 1.35,  -1.02, 0.28,  0.44,  -0.37,
-    0.83, -1.19, 0.06,  0.97,  -0.74, 0.51,  1.28,  -0.42, -0.15, 0.68,
-    -0.95, 0.23, 1.07,  -0.58, 0.39,  -1.26, 0.71,  0.12,  -0.81, 1.14,
-    -0.33, 0.86, 0.49,  -1.08, 0.25,  0.93,  -0.61, 0.18,  1.31,  -0.47,
-    0.04, 0.78, -1.15,  0.36,  0.59,  -0.92, 1.24,  -0.28, 0.65,  -0.11};
+    0.17,  -1.30, 0.55,  1.02,  -0.21, -0.88, 0.34,  0.91,  -1.44, 0.62,
+    -0.53, 1.21,  -0.09, 0.75,  -0.66, 1.35,  -1.02, 0.28,  0.44,  -0.37,
+    0.83,  -1.19, 0.06,  0.97,  -0.74, 0.51,  1.28,  -0.42, -0.15, 0.68,
+    -0.95, 0.23,  1.07,  -0.58, 0.39,  -1.26, 0.71,  0.12,  -0.81, 1.14,
+    -0.33, 0.86,  0.49,  -1.08, 0.25,  0.93,  -0.61, 0.18,  1.31,  -0.47,
+    0.04,  0.78,  -1.15, 0.36,  0.59,  -0.92, 1.24,  -0.28, 0.65,  -0.11};
 inline const int LogisticGlm::kYint[LogisticGlm::N] = {
     1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0};
 
@@ -111,8 +111,7 @@ inline LogisticGlm logistic_glm() {
   const int lp3 = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
 
-  g.add_op(OP_MATVEC, {m.X, m.beta}, eta0,
-           {LogisticGlm::N, LogisticGlm::K});
+  g.add_op(OP_MATVEC, {m.X, m.beta}, eta0, {LogisticGlm::N, LogisticGlm::K});
   g.add_op(OP_BCAST_FMA, {m.alpha, one, eta0}, eta);
   g.add_op(OP_BERNOULLI_LOGIT_LPMF, {eta}, lp1,
            std::vector<int>(LogisticGlm::kYint,

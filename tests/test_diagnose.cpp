@@ -26,8 +26,8 @@ static void expect_near(const std::string& what, double got, double want,
                         double tol) {
   if (!(std::fabs(got - want) <= tol)) {
     ++failures;
-    std::printf("FAIL %-30s got %.10g want %.10g (tol %g)\n", what.c_str(),
-                got, want, tol);
+    std::printf("FAIL %-30s got %.10g want %.10g (tol %g)\n", what.c_str(), got,
+                want, tol);
   }
 }
 
@@ -35,8 +35,8 @@ static void expect_in(const std::string& what, double got, double lo,
                       double hi) {
   if (!(got >= lo && got <= hi)) {
     ++failures;
-    std::printf("FAIL %-30s got %.6g want in [%g, %g]\n", what.c_str(), got,
-                lo, hi);
+    std::printf("FAIL %-30s got %.6g want in [%g, %g]\n", what.c_str(), got, lo,
+                hi);
   }
 }
 
@@ -174,8 +174,8 @@ int main() {
     DrawSet ds{d.data(), C, N, P};
     auto fd = diagnose(ds, summarize(ds, {"x"}), st.data(), 10);
     expect("divergences counted", fd.n_divergent == 3);
-    expect("divergences attributed", fd.divergent_by_chain[0] == 3 &&
-                                         fd.divergent_by_chain[1] == 0);
+    expect("divergences attributed",
+           fd.divergent_by_chain[0] == 3 && fd.divergent_by_chain[1] == 0);
     expect("treedepth counted", fd.n_max_treedepth == 2);
     expect_near("stepsize chain 0", fd.stepsize_by_chain[0], 0.25, 1e-12);
     expect_near("stepsize chain 1", fd.stepsize_by_chain[1], 0.35, 1e-12);

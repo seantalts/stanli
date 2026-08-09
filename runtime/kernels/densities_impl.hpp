@@ -65,8 +65,7 @@ void bind_args_m(KernelCtx& ctx, F&& f, const Bound&... bound) {
     constexpr bool always_vec = ((VecMask >> i) & 1u) != 0;
     const auto bind_vector = [&] {
       if constexpr (active) {
-        bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound...,
-                                          as_rvar(ctx.in[i]));
+        bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound..., as_rvar(ctx.in[i]));
       } else {
         bind_args_m<NArgs, Mask, VecMask>(
             ctx, f, bound...,
@@ -80,8 +79,7 @@ void bind_args_m(KernelCtx& ctx, F&& f, const Bound&... bound) {
         bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound...,
                                           rvar(ctx.in[i].data[0]));
       } else {
-        bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound...,
-                                          ctx.in[i].data[0]);
+        bind_args_m<NArgs, Mask, VecMask>(ctx, f, bound..., ctx.in[i].data[0]);
       }
     } else {
       bind_vector();
@@ -194,8 +192,7 @@ void density_fwd_elt(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
 // exist. Whatever the outcome looks like -- a propagator edge, one idata
 // group, two, an integer array -- it is bound by the caller's lambdas, so
 // this is shared by every density shape in these shards.
-template <int NArgs, int Tier, unsigned VecMask, typename FProp,
-          typename FFull>
+template <int NArgs, int Tier, unsigned VecMask, typename FProp, typename FFull>
 void density_fwd_sum(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   sink s = sink_for_args(ctx, NArgs);
   const unsigned mask = ctx.variant == 0
@@ -247,8 +244,8 @@ void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
 // fused op replaces (bit-identical accumulation).
 template <int NArgs>
 void density_bwd(KernelCtx& ctx) {
-  const unsigned mask = ctx.variant == 0 ? (1u << NArgs) - 1
-                                         : (ctx.variant & 0x3fu);
+  const unsigned mask =
+      ctx.variant == 0 ? (1u << NArgs) - 1 : (ctx.variant & 0x3fu);
   if (ctx.variant & 0x40u) {
     const int64_t N = ctx.out.len;
     for (int k = 0; k < NArgs; ++k) {
@@ -256,8 +253,7 @@ void density_bwd(KernelCtx& ctx) {
       const double* col = ctx.scratch + static_cast<int64_t>(k) * N;
       if (ctx.in_adj[k].len == 1 && N > 1) {
         double acc = 0;
-        for (int64_t n = N; n-- > 0;)
-          acc += ctx.out_adj_vec.data[n] * col[n];
+        for (int64_t n = N; n-- > 0;) acc += ctx.out_adj_vec.data[n] * col[n];
         ctx.in_adj[k].data[0] += acc;
       } else {
         for (int64_t n = 0; n < N; ++n)
@@ -284,31 +280,29 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
   return sum_in_lens(op, slots);
 }
 
-
-
 // ---- lpmfs: integer outcome from idata, not a propagator edge --------------
 // The elementwise variant hands each recorder call outcome element n; the
 // summed path keeps the whole-vector call. STANLI_LPMF_FWD expands both.
-#define STANLI_LPMF_FWD_T(fname, dist, NARGS, TIER)                            \
-  void fname(KernelCtx& ctx) {                                                 \
-    if (ctx.variant & 0x40u) {                                                 \
-      density_fwd_elt<NARGS, density_tier(TIER)>(                              \
-          ctx,                                                                 \
-          [&](int64_t n, const auto&... a) {                                   \
-            stan::math::dist<true>(ctx.idata[n], a...);                        \
-          },                                                                   \
-          [&](int64_t n, const auto&... a) {                                   \
-            stan::math::dist<false>(ctx.idata[n], a...);                       \
-          });                                                                  \
-      return;                                                                  \
-    }                                                                          \
-    Eigen::Map<const Eigen::VectorXi> y(                                       \
-        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));                    \
-    density_fwd_v<NARGS, TIER>(                                                \
-        ctx, [&](const auto&... a) { stan::math::dist<true>(y, a...); },       \
-        [&](const auto&... a) { stan::math::dist<false>(y, a...); });          \
+#define STANLI_LPMF_FWD_T(fname, dist, NARGS, TIER)                      \
+  void fname(KernelCtx& ctx) {                                           \
+    if (ctx.variant & 0x40u) {                                           \
+      density_fwd_elt<NARGS, density_tier(TIER)>(                        \
+          ctx,                                                           \
+          [&](int64_t n, const auto&... a) {                             \
+            stan::math::dist<true>(ctx.idata[n], a...);                  \
+          },                                                             \
+          [&](int64_t n, const auto&... a) {                             \
+            stan::math::dist<false>(ctx.idata[n], a...);                 \
+          });                                                            \
+      return;                                                            \
+    }                                                                    \
+    Eigen::Map<const Eigen::VectorXi> y(                                 \
+        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));              \
+    density_fwd_v<NARGS, TIER>(                                          \
+        ctx, [&](const auto&... a) { stan::math::dist<true>(y, a...); }, \
+        [&](const auto&... a) { stan::math::dist<false>(y, a...); });    \
   }
-#define STANLI_LPMF_FWD(fname, dist, NARGS)                                    \
+#define STANLI_LPMF_FWD(fname, dist, NARGS) \
   STANLI_LPMF_FWD_T(fname, dist, NARGS, 3)
 
 // One line per density in STANLI_SCALAR_DENSITY_LIST (optable.hpp) makes
@@ -316,11 +310,11 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
 // share -- propto and per-argument activity from the variant byte,
 // elementwise output, the partials stashed for density_bwd to contract --
 // lives in density_fwd_v.
-#define STANLI_DEFINE_DENSITY_FWD(code, fn, n, tier)                             \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                      \
-    density_fwd_v<n, tier>(                                                      \
-        ctx, [](const auto&... a) { stan::math::fn<true>(a...); },         \
-        [](const auto&... a) { stan::math::fn<false>(a...); });            \
+#define STANLI_DEFINE_DENSITY_FWD(code, fn, n, tier)               \
+  void fn##_fwd_gen(KernelCtx& ctx) {                              \
+    density_fwd_v<n, tier>(                                        \
+        ctx, [](const auto&... a) { stan::math::fn<true>(a...); }, \
+        [](const auto&... a) { stan::math::fn<false>(a...); });    \
   }
 
 // Distribution functions: one form, no propto, and no elementwise
@@ -343,24 +337,22 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
   density_fwd_sum<NArgs, Tier, 0>(ctx, [](const auto&...) {}, f);
 }
 
-#define STANLI_DEFINE_CDF_FWD(code, fn, n, tier)                         \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                    \
-    cdf_fwd<n, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(          \
-        ctx, [](const auto&... a) { stan::math::fn(a...); });            \
+#define STANLI_DEFINE_CDF_FWD(code, fn, n, tier)                \
+  void fn##_fwd_gen(KernelCtx& ctx) {                           \
+    cdf_fwd<n, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>( \
+        ctx, [](const auto&... a) { stan::math::fn(a...); });   \
   }
-
 
 // Integer-outcome cdfs. Same as above with the count read from idata,
 // the way the lpmfs read theirs -- a whole vector of outcomes in one
 // call, since the summed form is the only one these have.
-#define STANLI_DEFINE_INT_CDF_FWD(code, fn, nreal, tier)                 \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                    \
-    Eigen::Map<const Eigen::VectorXi> y(                                 \
-        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));              \
-    cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(      \
-        ctx, [&](const auto&... a) { stan::math::fn(y, a...); });        \
+#define STANLI_DEFINE_INT_CDF_FWD(code, fn, nreal, tier)            \
+  void fn##_fwd_gen(KernelCtx& ctx) {                               \
+    Eigen::Map<const Eigen::VectorXi> y(                            \
+        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));         \
+    cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>( \
+        ctx, [&](const auto&... a) { stan::math::fn(y, a...); });   \
   }
-
 
 // Ordinal regression. The outcome goes over as a std::vector<int>, not
 // the Eigen map the other lpmfs use: ordered_logistic hands its outcome
@@ -369,12 +361,12 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
 // std::vector is also exactly what CmdStan's generated code passes, so
 // this is the instantiation the references were produced from. The copy
 // is n ints per evaluation, against a density over the same n.
-#define STANLI_DEFINE_ORDERED_FWD(code, fn, nargs, vecmask)              \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                    \
-    const std::vector<int> y(ctx.idata, ctx.idata + ctx.n_idata);        \
-    density_fwd_v<nargs, 2, vecmask>(                                    \
-        ctx, [&](const auto&... a) { stan::math::fn<true>(y, a...); },   \
-        [&](const auto&... a) { stan::math::fn<false>(y, a...); });      \
+#define STANLI_DEFINE_ORDERED_FWD(code, fn, nargs, vecmask)            \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                  \
+    const std::vector<int> y(ctx.idata, ctx.idata + ctx.n_idata);      \
+    density_fwd_v<nargs, 2, vecmask>(                                  \
+        ctx, [&](const auto&... a) { stan::math::fn<true>(y, a...); }, \
+        [&](const auto&... a) { stan::math::fn<false>(y, a...); });    \
   }
 
 // Declarations of everything the shards define, so registration in

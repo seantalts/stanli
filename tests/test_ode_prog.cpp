@@ -42,8 +42,7 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
            int n_y, int n_th, const std::vector<double>& x_r,
            const std::vector<int>& x_i, bool want_ok) {
   using namespace stanli;
-  RhsProgram p =
-      compile_rhs(f, funs, n_y, n_th, (int)x_r.size(), x_i);
+  RhsProgram p = compile_rhs(f, funs, n_y, n_th, (int)x_r.size(), x_i);
   if (p.ok != want_ok) {
     ++failures;
     std::printf("FAIL %s: compile ok=%d, wanted %d (%s)\n", name.c_str(),

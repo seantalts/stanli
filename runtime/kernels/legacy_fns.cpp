@@ -13,9 +13,7 @@ void softmax_fwd(KernelCtx& ctx) {
   out = stan::math::softmax(x);
 }
 void softmax_bwd(KernelCtx& ctx) {
-  legacy_bwd_vec_in(ctx, [](const auto& x) {
-    return stan::math::softmax(x);
-  });
+  legacy_bwd_vec_in(ctx, [](const auto& x) { return stan::math::softmax(x); });
 }
 
 // Multivariate density via nested replay: dirichlet_lpdf(theta | alpha).
@@ -58,15 +56,23 @@ double dirichlet_eval(KernelCtx& ctx) {
       }
     var lpv;
     if (propto) {
-      if (a0 && a1) lpv = stan::math::dirichlet_lpdf<true>(th, alpha);
-      else if (a0) lpv = stan::math::dirichlet_lpdf<true>(th, alpha_d);
-      else if (a1) lpv = stan::math::dirichlet_lpdf<true>(thd, alpha);
-      else lpv = 0.0;
+      if (a0 && a1)
+        lpv = stan::math::dirichlet_lpdf<true>(th, alpha);
+      else if (a0)
+        lpv = stan::math::dirichlet_lpdf<true>(th, alpha_d);
+      else if (a1)
+        lpv = stan::math::dirichlet_lpdf<true>(thd, alpha);
+      else
+        lpv = 0.0;
     } else {
-      if (a0 && a1) lpv = stan::math::dirichlet_lpdf<false>(th, alpha);
-      else if (a0) lpv = stan::math::dirichlet_lpdf<false>(th, alpha_d);
-      else if (a1) lpv = stan::math::dirichlet_lpdf<false>(thd, alpha);
-      else lpv = stan::math::dirichlet_lpdf<false>(thd, alpha_d);
+      if (a0 && a1)
+        lpv = stan::math::dirichlet_lpdf<false>(th, alpha);
+      else if (a0)
+        lpv = stan::math::dirichlet_lpdf<false>(th, alpha_d);
+      else if (a1)
+        lpv = stan::math::dirichlet_lpdf<false>(thd, alpha);
+      else
+        lpv = stan::math::dirichlet_lpdf<false>(thd, alpha_d);
     }
     if constexpr (Grad) {
       var j = lpv * ctx.out_adj;
@@ -76,21 +82,28 @@ double dirichlet_eval(KernelCtx& ctx) {
           for (int64_t i = 0; i < K; ++i)
             ctx.in_adj[0].data[r * K + i] += th[r](i).adj();
       if (a1 && ctx.in_adj[1].data)
-        for (int64_t i = 0; i < K; ++i)
-          ctx.in_adj[1].data[i] += alpha(i).adj();
+        for (int64_t i = 0; i < K; ++i) ctx.in_adj[1].data[i] += alpha(i).adj();
     }
     return lpv.val();
   }
   if (propto) {
-    if (a0 && a1) lp = stan::math::dirichlet_lpdf<true>(theta, alpha);
-    else if (a0) lp = stan::math::dirichlet_lpdf<true>(theta, alpha_d);
-    else if (a1) lp = stan::math::dirichlet_lpdf<true>(theta_d, alpha);
-    else lp = 0.0;
+    if (a0 && a1)
+      lp = stan::math::dirichlet_lpdf<true>(theta, alpha);
+    else if (a0)
+      lp = stan::math::dirichlet_lpdf<true>(theta, alpha_d);
+    else if (a1)
+      lp = stan::math::dirichlet_lpdf<true>(theta_d, alpha);
+    else
+      lp = 0.0;
   } else {
-    if (a0 && a1) lp = stan::math::dirichlet_lpdf<false>(theta, alpha);
-    else if (a0) lp = stan::math::dirichlet_lpdf<false>(theta, alpha_d);
-    else if (a1) lp = stan::math::dirichlet_lpdf<false>(theta_d, alpha);
-    else lp = stan::math::dirichlet_lpdf<false>(theta_d, alpha_d);
+    if (a0 && a1)
+      lp = stan::math::dirichlet_lpdf<false>(theta, alpha);
+    else if (a0)
+      lp = stan::math::dirichlet_lpdf<false>(theta, alpha_d);
+    else if (a1)
+      lp = stan::math::dirichlet_lpdf<false>(theta_d, alpha);
+    else
+      lp = stan::math::dirichlet_lpdf<false>(theta_d, alpha_d);
   }
   if constexpr (Grad) {
     var j = lp * ctx.out_adj;
@@ -115,9 +128,8 @@ void log_softmax_fwd(KernelCtx& ctx) {
   out = stan::math::log_softmax(x);
 }
 void log_softmax_bwd(KernelCtx& ctx) {
-  legacy_bwd_vec_in(ctx, [](const auto& x) {
-    return stan::math::log_softmax(x);
-  });
+  legacy_bwd_vec_in(ctx,
+                    [](const auto& x) { return stan::math::log_softmax(x); });
 }
 
 }  // namespace

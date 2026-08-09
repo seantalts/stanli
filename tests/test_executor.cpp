@@ -53,8 +53,7 @@ int main() {
   // ... and again with a value-only sweep in between.
   ex.forward_value_only();
   double grad2[2] = {0, 0};
-  expect_eq("grad after value-only", ex.gradient(grad2),
-            std::exp(0.3) + -1.1);
+  expect_eq("grad after value-only", ex.gradient(grad2), std::exp(0.3) + -1.1);
   expect_eq("d/da after value-only", grad2[0], grad[0]);
   expect_eq("d/db after value-only", grad2[1], grad[1]);
 
@@ -70,7 +69,9 @@ int main() {
   *ex2.param_ptr(s_a) = 0.5;
   *ex2.param_ptr(s_b) = 2.0;
   double* x = ex2.value_ptr(s_x);
-  x[0] = 1.0; x[1] = -2.0; x[2] = 0.25;
+  x[0] = 1.0;
+  x[1] = -2.0;
+  x[2] = 0.25;
   ex2.run_forward_only();
   const double* o = ex2.value_ptr(s_o);
   expect_eq("fma[0]", o[0], 0.5 + 2.0 * 1.0);

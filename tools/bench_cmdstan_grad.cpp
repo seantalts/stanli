@@ -14,8 +14,7 @@
 #include <vector>
 
 stan::model::model_base& new_model(stan::io::var_context& data_context,
-                                   unsigned int seed,
-                                   std::ostream* msg_stream);
+                                   unsigned int seed, std::ostream* msg_stream);
 
 int main(int argc, char** argv) {
   if (argc < 3) {

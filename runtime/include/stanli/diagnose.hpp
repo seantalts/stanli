@@ -71,8 +71,8 @@ struct FitDiagnostics {
   std::vector<int64_t> divergent_by_chain;
   std::vector<int64_t> max_treedepth_by_chain;
   std::vector<double> ebfmi_by_chain;
-  std::vector<double> stepsize_by_chain;      // adapted, final
-  std::vector<double> accept_stat_by_chain;   // mean over post-warmup
+  std::vector<double> stepsize_by_chain;     // adapted, final
+  std::vector<double> accept_stat_by_chain;  // mean over post-warmup
 
   int64_t n_divergent = 0;
   int64_t n_max_treedepth = 0;

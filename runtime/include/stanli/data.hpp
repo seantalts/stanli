@@ -43,9 +43,8 @@ class DataMap {
   void set_real_array(const std::string& name, std::vector<double> v,
                       std::vector<int64_t> dims = {}) {
     Entry e;
-    e.dims = dims.empty()
-                 ? std::vector<int64_t>{static_cast<int64_t>(v.size())}
-                 : std::move(dims);
+    e.dims = dims.empty() ? std::vector<int64_t>{static_cast<int64_t>(v.size())}
+                          : std::move(dims);
     e.r = std::move(v);
     m_[name] = std::move(e);
   }

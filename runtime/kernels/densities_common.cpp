@@ -11,7 +11,6 @@ namespace dens {
 
 STANLI_SCALAR_DENSITY_LIST_COMMON_A(STANLI_DEFINE_DENSITY_FWD)
 
-
 void uniform_fwd(KernelCtx& ctx) {
   // stan-math reports out-of-support y with an early `return LOG_ZERO`
   // that never reaches the partials sink, so the recorder would leave the

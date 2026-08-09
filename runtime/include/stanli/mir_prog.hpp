@@ -69,7 +69,8 @@ struct ProgramCompiler {
   [[noreturn]] void bail(const std::string& why) { throw Bail{why}; }
 
   int alloc(int n) {
-    if (p.n_regs + n > kMaxRegs) bail("right-hand side needs too many registers");
+    if (p.n_regs + n > kMaxRegs)
+      bail("right-hand side needs too many registers");
     const int r = p.n_regs;
     p.n_regs += n;
     return r;
@@ -122,7 +123,8 @@ struct ProgramCompiler {
         auto it = ints.find(e.args[0].name);
         if (it == ints.end()) bail("integer array " + e.args[0].name);
         const long ix = cint(e.args[1].args[0]);
-        if (ix < 1 || (size_t)ix > it->second.size()) bail("integer index range");
+        if (ix < 1 || (size_t)ix > it->second.size())
+          bail("integer index range");
         return it->second[(size_t)ix - 1];
       }
       case mir::Expr::FunApp:
@@ -133,8 +135,7 @@ struct ProgramCompiler {
           if (e.name == "IntDivide__" || e.name == "Divide__")
             return cint(e.args[0]) / cint(e.args[1]);
         }
-        if (e.args.size() == 1 && e.name == "PMinus__")
-          return -cint(e.args[0]);
+        if (e.args.size() == 1 && e.name == "PMinus__") return -cint(e.args[0]);
         bail("integer function " + e.name);
       default:
         bail("integer expression");
@@ -197,8 +198,8 @@ struct ProgramCompiler {
         const int z = konst(0.0), ta = alloc(1), tb = alloc(1), r = alloc(1);
         emit(Program::NE, ta, a.reg, z);
         emit(Program::NE, tb, b.reg, z);
-        emit(e.kind == mir::Expr::EOr ? Program::FMAX : Program::FMIN, r,
-             ta, tb);
+        emit(e.kind == mir::Expr::EOr ? Program::FMAX : Program::FMIN, r, ta,
+             tb);
         return {r, 1};
       }
       case mir::Expr::FunApp:
@@ -217,14 +218,12 @@ struct ProgramCompiler {
     const int jz = emit(Program::JZ, 0, cv.reg);
     const Range av = expr(a);
     const int dst = alloc(av.len);
-    for (int k = 0; k < av.len; ++k)
-      emit(Program::MOV, dst + k, av.reg + k);
+    for (int k = 0; k < av.len; ++k) emit(Program::MOV, dst + k, av.reg + k);
     const int jmp = emit(Program::JMP, 0);
     p.code[(size_t)jz].dst = (int)p.code.size();
     const Range bv = expr(b);
     if (bv.len != av.len) bail("conditional arms of different widths");
-    for (int k = 0; k < bv.len; ++k)
-      emit(Program::MOV, dst + k, bv.reg + k);
+    for (int k = 0; k < bv.len; ++k) emit(Program::MOV, dst + k, bv.reg + k);
     p.code[(size_t)jmp].dst = (int)p.code.size();
     return {dst, av.len};
   }
@@ -288,9 +287,12 @@ struct ProgramCompiler {
         // rather than approximate. (Measured, before this check: lp off
         // by exactly log(2*pi)/2 on a normal.)
         if (e.fn_propto)
-          bail("`~` inside a parameter-dependent region (write it as "
-               "`target += " + e.name + "(...)`, which keeps every "
-               "constant and is what the region can reproduce)");
+          bail(
+              "`~` inside a parameter-dependent region (write it as "
+              "`target += " +
+              e.name +
+              "(...)`, which keeps every "
+              "constant and is what the region can reproduce)");
         if ((int)e.args.size() != arity)
           bail(e.name + " takes " + std::to_string(arity) + " arguments here");
         Range av[3];
@@ -313,20 +315,34 @@ struct ProgramCompiler {
       if ((a.len != 1 && a.len != n) || (b.len != 1 && b.len != n))
         bail("binary " + e.name + " on mismatched widths");
       Program::Code c;
-      if (e.name == "Plus__") c = Program::ADD;
-      else if (e.name == "Minus__") c = Program::SUB;
-      else if (e.name == "Times__" || e.name == "EltTimes__") c = Program::MUL;
-      else if (e.name == "Divide__" || e.name == "EltDivide__") c = Program::DIV;
-      else if (e.name == "Pow__" || e.name == "pow") c = Program::POW;
-      else if (e.name == "fmax") c = Program::FMAX;
-      else if (e.name == "fmin") c = Program::FMIN;
-      else if (e.name == "Greater__") c = Program::GT;
-      else if (e.name == "Geq__") c = Program::GE;
-      else if (e.name == "Less__") c = Program::LT;
-      else if (e.name == "Leq__") c = Program::LE;
-      else if (e.name == "Equals__") c = Program::EQ;
-      else if (e.name == "NEquals__") c = Program::NE;
-      else bail("function " + e.name);
+      if (e.name == "Plus__")
+        c = Program::ADD;
+      else if (e.name == "Minus__")
+        c = Program::SUB;
+      else if (e.name == "Times__" || e.name == "EltTimes__")
+        c = Program::MUL;
+      else if (e.name == "Divide__" || e.name == "EltDivide__")
+        c = Program::DIV;
+      else if (e.name == "Pow__" || e.name == "pow")
+        c = Program::POW;
+      else if (e.name == "fmax")
+        c = Program::FMAX;
+      else if (e.name == "fmin")
+        c = Program::FMIN;
+      else if (e.name == "Greater__")
+        c = Program::GT;
+      else if (e.name == "Geq__")
+        c = Program::GE;
+      else if (e.name == "Less__")
+        c = Program::LT;
+      else if (e.name == "Leq__")
+        c = Program::LE;
+      else if (e.name == "Equals__")
+        c = Program::EQ;
+      else if (e.name == "NEquals__")
+        c = Program::NE;
+      else
+        bail("function " + e.name);
       const int r = alloc(n);
       for (int i = 0; i < n; ++i)
         emit(c, r + i, a.reg + (a.len == 1 ? 0 : i),
@@ -342,16 +358,26 @@ struct ProgramCompiler {
         return {r, 1};
       }
       Program::Code c;
-      if (e.name == "PMinus__") c = Program::NEG;
-      else if (e.name == "PPlus__") c = Program::MOV;
-      else if (e.name == "exp") c = Program::EXP;
-      else if (e.name == "log") c = Program::LOG;
-      else if (e.name == "sqrt") c = Program::SQRT;
-      else if (e.name == "square") c = Program::SQUARE;
-      else if (e.name == "inv") c = Program::INV;
-      else if (e.name == "fabs" || e.name == "abs") c = Program::FABS;
-      else if (e.name == "inv_logit") c = Program::INV_LOGIT;
-      else bail("function " + e.name);
+      if (e.name == "PMinus__")
+        c = Program::NEG;
+      else if (e.name == "PPlus__")
+        c = Program::MOV;
+      else if (e.name == "exp")
+        c = Program::EXP;
+      else if (e.name == "log")
+        c = Program::LOG;
+      else if (e.name == "sqrt")
+        c = Program::SQRT;
+      else if (e.name == "square")
+        c = Program::SQUARE;
+      else if (e.name == "inv")
+        c = Program::INV;
+      else if (e.name == "fabs" || e.name == "abs")
+        c = Program::FABS;
+      else if (e.name == "inv_logit")
+        c = Program::INV_LOGIT;
+      else
+        bail("function " + e.name);
       const int r = alloc(a.len);
       for (int i = 0; i < a.len; ++i) emit(c, r + i, a.reg + i);
       return {r, a.len};
@@ -483,8 +509,7 @@ struct ProgramCompiler {
         // The region's own running total. The caller decides what it is
         // (the ODE side never sees one; lowering makes it a target term),
         // so all this does is accumulate.
-        if (target_reg < 0)
-          bail("target += is not available in this region");
+        if (target_reg < 0) bail("target += is not available in this region");
         const Range v = expr(s.target);
         if (v.len != 1) bail("target += of a container");
         emit(Program::ADD, target_reg, target_reg, v.reg);
@@ -528,7 +553,6 @@ struct ProgramCompiler {
     return out;
   }
 };
-
 
 }  // namespace stanli
 

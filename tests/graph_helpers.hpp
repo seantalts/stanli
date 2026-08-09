@@ -26,8 +26,7 @@ inline std::vector<double> run_grad(Graph g, const Fills& fills,
     double* p = ex.value_ptr(f.first);
     for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
   }
-  for (int64_t i = 0; i < ex.n_params(); ++i)
-    ex.params_data()[i] = fill_at(i);
+  for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = fill_at(i);
   std::vector<double> out(1 + (size_t)ex.n_params());
   out[0] = ex.gradient(out.data() + 1);
   return out;

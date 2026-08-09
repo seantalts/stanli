@@ -8,104 +8,104 @@ namespace stanli {
 
 // One list, two uses: the enum and the name table are generated from it,
 // so a new op cannot be added to one and forgotten in the other.
-#define STANLI_OPCODE_LIST(X)                                             \
-  X(OP_EXP)                                                               \
-  X(OP_ADD_N)                                                             \
-  X(OP_BCAST_FMA)                                                         \
-  X(OP_MATVEC)                                                            \
-  X(OP_POISSON_LOG_LPMF)                                                  \
-  X(OP_BERNOULLI_LOGIT_LPMF)                                              \
-  X(OP_BERNOULLI_LPMF)                                                    \
-  X(OP_POISSON_LPMF)                                                      \
-  X(OP_NEG_BINOMIAL_2_LPMF)                                               \
-  X(OP_BINOMIAL_LPMF)                                                     \
-  X(OP_BINOMIAL_LOGIT_LPMF)                                               \
-  X(OP_BERNOULLI_LOGIT_GLM_LPMF)                                          \
-  X(OP_POISSON_LOG_GLM_LPMF)                                              \
-  X(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF)                                       \
-  X(OP_BETA_BINOMIAL_LPMF)                                                \
-  X(OP_LOGIT)                                                             \
-  X(OP_MEAN)                                                              \
-  X(OP_REP_VEC)                                                           \
-  X(OP_INDEX)                                                             \
-  X(OP_SET_INDEX)                                                         \
-  X(OP_SET_INDEX_INPLACE)                                                 \
-  X(OP_SLICE)                                                             \
-  X(OP_SET_SLICE)                                                         \
-  X(OP_SET_SLICE_STRIDED)                                                 \
-  X(OP_SLICE_STRIDED)                                                     \
-  X(OP_GATHER)                                                            \
-  X(OP_CONCAT2)                                                           \
-  X(OP_REP_MAT)                                                           \
-  X(OP_GP_EXP_QUAD_COV)                                                   \
-  X(OP_DIAG_MATRIX)                                                       \
-  X(OP_CHOLESKY)                                                          \
-  X(OP_MULTI_NORMAL_CHOL_LPDF)                                            \
-  X(OP_MULTI_NORMAL_LPDF)                                                 \
-  X(OP_MULTI_NORMAL_PREC_LPDF)                                            \
-  X(OP_GEMM)                                                              \
-  X(OP_LOG_SOFTMAX)                                                       \
-  X(OP_CONSTRAIN_CHOL_CORR)                                               \
-  X(OP_LKJ_CORR_CHOL_LPDF)                                                \
-  X(OP_LKJ_CORR_LPDF)                                                     \
-  X(OP_WISHART_LPDF)                                                      \
-  X(OP_INV_WISHART_LPDF)                                                  \
-  X(OP_WISHART_CHOL_LPDF)                                                 \
-  X(OP_INV_WISHART_CHOL_LPDF)                                             \
-  X(OP_MULTI_GP_LPDF)                                                   \
-  X(OP_MULTI_GP_CHOL_LPDF)                                              \
-  X(OP_MULTI_STUDENT_T_LPDF)                                            \
-  X(OP_MULTI_STUDENT_T_CHOL_LPDF)                                       \
-  X(OP_MULTINOMIAL_LPMF)                                                \
-  X(OP_MULTINOMIAL_LOGIT_LPMF)                                          \
-  X(OP_DIRICHLET_MULTINOMIAL_LPMF)                                      \
-  X(OP_ORDERED_PROBIT_LPMF)                                             \
-  X(OP_WIENER_LPDF)                                                     \
-  X(OP_LKJ_COV_LPDF)                                                    \
-  X(OP_BINOMIAL_LOGIT_GLM_LPMF)                                         \
-  X(OP_CATEGORICAL_LOGIT_GLM_LPMF)                                      \
-  X(OP_ORDERED_LOGISTIC_GLM_LPMF)                                       \
-  X(OP_NORMAL_ID_GLM_LPDF)                                                \
-  X(OP_TRANSPOSE)                                                         \
-  X(OP_ODE)                                                               \
-  X(OP_ISLAND)                                                            \
-  X(OP_EIGENVALUES_SYM)                                                   \
-  X(OP_EIGENVECTORS_SYM)                                                  \
-  X(OP_LOG_SUM_EXP)                                                       \
-  X(OP_LSE2)                                                              \
-  X(OP_LOG_DIFF_EXP)                                                      \
-  X(OP_LOG_MIX)                                                           \
-  X(OP_SOFTMAX)                                                           \
-  X(OP_SUM_VEC)                                                           \
-  X(OP_ADD)                                                               \
-  X(OP_SUB)                                                               \
-  X(OP_MUL)                                                               \
-  X(OP_DIV)                                                               \
-  X(OP_POW)                                                               \
-  X(OP_DOT)                                                               \
-  X(OP_NEG)                                                               \
-  X(OP_EXPV)                                                              \
-  X(OP_LOGV)                                                              \
-  X(OP_INV_LOGIT)                                                         \
-  X(OP_SQRT)                                                              \
-  X(OP_SQUARE)                                                            \
-  X(OP_LOG1M)                                                             \
-  X(OP_TANHV)                                                             \
-  X(OP_CUMSUM)                                                            \
-  X(OP_CONSTRAIN_LOWER)                                                   \
-  X(OP_CONSTRAIN_UPPER)                                                   \
-  X(OP_CONSTRAIN_LU)                                                      \
-  X(OP_CONSTRAIN_SIMPLEX)                                                 \
-  X(OP_CONSTRAIN_ORDERED)                                                 \
-  X(OP_CONSTRAIN_POS_ORDERED)                                             \
-  X(OP_CONSTRAIN_OFFSET_MULT)                                             \
-  X(OP_CONSTRAIN_UNIT_VECTOR)                                             \
-  X(OP_CONSTRAIN_SUM_TO_ZERO)                                             \
-  X(OP_CONSTRAIN_CORR_MATRIX)                                             \
-  X(OP_CONSTRAIN_COV_MATRIX)                                              \
-  X(OP_CONSTRAIN_CHOL_COV)                                                \
-  X(OP_REJECT)                                                            \
-  X(OP_PRINT)                                                             \
+#define STANLI_OPCODE_LIST(X)       \
+  X(OP_EXP)                         \
+  X(OP_ADD_N)                       \
+  X(OP_BCAST_FMA)                   \
+  X(OP_MATVEC)                      \
+  X(OP_POISSON_LOG_LPMF)            \
+  X(OP_BERNOULLI_LOGIT_LPMF)        \
+  X(OP_BERNOULLI_LPMF)              \
+  X(OP_POISSON_LPMF)                \
+  X(OP_NEG_BINOMIAL_2_LPMF)         \
+  X(OP_BINOMIAL_LPMF)               \
+  X(OP_BINOMIAL_LOGIT_LPMF)         \
+  X(OP_BERNOULLI_LOGIT_GLM_LPMF)    \
+  X(OP_POISSON_LOG_GLM_LPMF)        \
+  X(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF) \
+  X(OP_BETA_BINOMIAL_LPMF)          \
+  X(OP_LOGIT)                       \
+  X(OP_MEAN)                        \
+  X(OP_REP_VEC)                     \
+  X(OP_INDEX)                       \
+  X(OP_SET_INDEX)                   \
+  X(OP_SET_INDEX_INPLACE)           \
+  X(OP_SLICE)                       \
+  X(OP_SET_SLICE)                   \
+  X(OP_SET_SLICE_STRIDED)           \
+  X(OP_SLICE_STRIDED)               \
+  X(OP_GATHER)                      \
+  X(OP_CONCAT2)                     \
+  X(OP_REP_MAT)                     \
+  X(OP_GP_EXP_QUAD_COV)             \
+  X(OP_DIAG_MATRIX)                 \
+  X(OP_CHOLESKY)                    \
+  X(OP_MULTI_NORMAL_CHOL_LPDF)      \
+  X(OP_MULTI_NORMAL_LPDF)           \
+  X(OP_MULTI_NORMAL_PREC_LPDF)      \
+  X(OP_GEMM)                        \
+  X(OP_LOG_SOFTMAX)                 \
+  X(OP_CONSTRAIN_CHOL_CORR)         \
+  X(OP_LKJ_CORR_CHOL_LPDF)          \
+  X(OP_LKJ_CORR_LPDF)               \
+  X(OP_WISHART_LPDF)                \
+  X(OP_INV_WISHART_LPDF)            \
+  X(OP_WISHART_CHOL_LPDF)           \
+  X(OP_INV_WISHART_CHOL_LPDF)       \
+  X(OP_MULTI_GP_LPDF)               \
+  X(OP_MULTI_GP_CHOL_LPDF)          \
+  X(OP_MULTI_STUDENT_T_LPDF)        \
+  X(OP_MULTI_STUDENT_T_CHOL_LPDF)   \
+  X(OP_MULTINOMIAL_LPMF)            \
+  X(OP_MULTINOMIAL_LOGIT_LPMF)      \
+  X(OP_DIRICHLET_MULTINOMIAL_LPMF)  \
+  X(OP_ORDERED_PROBIT_LPMF)         \
+  X(OP_WIENER_LPDF)                 \
+  X(OP_LKJ_COV_LPDF)                \
+  X(OP_BINOMIAL_LOGIT_GLM_LPMF)     \
+  X(OP_CATEGORICAL_LOGIT_GLM_LPMF)  \
+  X(OP_ORDERED_LOGISTIC_GLM_LPMF)   \
+  X(OP_NORMAL_ID_GLM_LPDF)          \
+  X(OP_TRANSPOSE)                   \
+  X(OP_ODE)                         \
+  X(OP_ISLAND)                      \
+  X(OP_EIGENVALUES_SYM)             \
+  X(OP_EIGENVECTORS_SYM)            \
+  X(OP_LOG_SUM_EXP)                 \
+  X(OP_LSE2)                        \
+  X(OP_LOG_DIFF_EXP)                \
+  X(OP_LOG_MIX)                     \
+  X(OP_SOFTMAX)                     \
+  X(OP_SUM_VEC)                     \
+  X(OP_ADD)                         \
+  X(OP_SUB)                         \
+  X(OP_MUL)                         \
+  X(OP_DIV)                         \
+  X(OP_POW)                         \
+  X(OP_DOT)                         \
+  X(OP_NEG)                         \
+  X(OP_EXPV)                        \
+  X(OP_LOGV)                        \
+  X(OP_INV_LOGIT)                   \
+  X(OP_SQRT)                        \
+  X(OP_SQUARE)                      \
+  X(OP_LOG1M)                       \
+  X(OP_TANHV)                       \
+  X(OP_CUMSUM)                      \
+  X(OP_CONSTRAIN_LOWER)             \
+  X(OP_CONSTRAIN_UPPER)             \
+  X(OP_CONSTRAIN_LU)                \
+  X(OP_CONSTRAIN_SIMPLEX)           \
+  X(OP_CONSTRAIN_ORDERED)           \
+  X(OP_CONSTRAIN_POS_ORDERED)       \
+  X(OP_CONSTRAIN_OFFSET_MULT)       \
+  X(OP_CONSTRAIN_UNIT_VECTOR)       \
+  X(OP_CONSTRAIN_SUM_TO_ZERO)       \
+  X(OP_CONSTRAIN_CORR_MATRIX)       \
+  X(OP_CONSTRAIN_COV_MATRIX)        \
+  X(OP_CONSTRAIN_CHOL_COV)          \
+  X(OP_REJECT)                      \
+  X(OP_PRINT)                       \
   X(OP_DIRICHLET_LPDF)
 
 // Scalar densities, one line each: this list generates the opcode, the
@@ -153,46 +153,45 @@ namespace stanli {
 // worth about eight tier-2 two-argument ones, which is why COMMON_A holds
 // six entries and REST_A holds seven.
 #define STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
-  X(OP_NORMAL_LPDF, normal_lpdf, 3, 3) \
-  X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3) \
-  X(OP_GAMMA_LPDF, gamma_lpdf, 3, 3) \
-  X(OP_BETA_LPDF, beta_lpdf, 3, 3) \
+  X(OP_NORMAL_LPDF, normal_lpdf, 3, 3)         \
+  X(OP_CAUCHY_LPDF, cauchy_lpdf, 3, 3)         \
+  X(OP_GAMMA_LPDF, gamma_lpdf, 3, 3)           \
+  X(OP_BETA_LPDF, beta_lpdf, 3, 3)             \
   X(OP_LOGNORMAL_LPDF, lognormal_lpdf, 3, 3)
 
-#define STANLI_SCALAR_DENSITY_LIST_COMMON_B(X) \
-  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 3) \
-  X(OP_UNIFORM_LPDF, uniform_lpdf, 3, 3) \
+#define STANLI_SCALAR_DENSITY_LIST_COMMON_B(X)         \
+  X(OP_STUDENT_T_LPDF, student_t_lpdf, 4, 3)           \
+  X(OP_UNIFORM_LPDF, uniform_lpdf, 3, 3)               \
   X(OP_DOUBLE_EXP_LPDF, double_exponential_lpdf, 3, 3) \
-  X(OP_EXPONENTIAL_LPDF, exponential_lpdf, 2, 3) \
-  X(OP_INV_GAMMA_LPDF, inv_gamma_lpdf, 3, 3) \
-  X(OP_STD_NORMAL_LPDF, std_normal_lpdf, 1, 3) \
-  X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 3) \
+  X(OP_EXPONENTIAL_LPDF, exponential_lpdf, 2, 3)       \
+  X(OP_INV_GAMMA_LPDF, inv_gamma_lpdf, 3, 3)           \
+  X(OP_STD_NORMAL_LPDF, std_normal_lpdf, 1, 3)         \
+  X(OP_WEIBULL_LPDF, weibull_lpdf, 3, 3)               \
   X(OP_LOGISTIC_LPDF, logistic_lpdf, 3, 3)
 
-#define STANLI_SCALAR_DENSITY_LIST_REST_A(X) \
-  X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 2) \
-  X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 2) \
+#define STANLI_SCALAR_DENSITY_LIST_REST_A(X)                         \
+  X(OP_CHI_SQUARE_LPDF, chi_square_lpdf, 2, 2)                       \
+  X(OP_INV_CHI_SQUARE_LPDF, inv_chi_square_lpdf, 2, 2)               \
   X(OP_SCALED_INV_CHI_SQUARE_LPDF, scaled_inv_chi_square_lpdf, 3, 2) \
-  X(OP_FRECHET_LPDF, frechet_lpdf, 3, 2) \
-  X(OP_GUMBEL_LPDF, gumbel_lpdf, 3, 2) \
-  X(OP_LOGLOGISTIC_LPDF, loglogistic_lpdf, 3, 2) \
-  X(OP_PARETO_LPDF, pareto_lpdf, 3, 2) \
-  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 2) \
+  X(OP_FRECHET_LPDF, frechet_lpdf, 3, 2)                             \
+  X(OP_GUMBEL_LPDF, gumbel_lpdf, 3, 2)                               \
+  X(OP_LOGLOGISTIC_LPDF, loglogistic_lpdf, 3, 2)                     \
+  X(OP_PARETO_LPDF, pareto_lpdf, 3, 2)                               \
+  X(OP_SKEW_NORMAL_LPDF, skew_normal_lpdf, 4, 2)                     \
   X(OP_EXP_MOD_NORMAL_LPDF, exp_mod_normal_lpdf, 4, 2)
 
-#define STANLI_SCALAR_DENSITY_LIST_REST_B(X) \
-  X(OP_PARETO_TYPE_2_LPDF, pareto_type_2_lpdf, 4, 2) \
-  X(OP_RAYLEIGH_LPDF, rayleigh_lpdf, 2, 2) \
-  X(OP_VON_MISES_LPDF, von_mises_lpdf, 3, 2) \
+#define STANLI_SCALAR_DENSITY_LIST_REST_B(X)             \
+  X(OP_PARETO_TYPE_2_LPDF, pareto_type_2_lpdf, 4, 2)     \
+  X(OP_RAYLEIGH_LPDF, rayleigh_lpdf, 2, 2)               \
+  X(OP_VON_MISES_LPDF, von_mises_lpdf, 3, 2)             \
   X(OP_BETA_PROPORTION_LPDF, beta_proportion_lpdf, 3, 2) \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_LPDF, skew_double_exponential_lpdf, 4, 2)
 
-#define STANLI_SCALAR_DENSITY_LIST(X) \
+#define STANLI_SCALAR_DENSITY_LIST(X)    \
   STANLI_SCALAR_DENSITY_LIST_COMMON_A(X) \
   STANLI_SCALAR_DENSITY_LIST_COMMON_B(X) \
-  STANLI_SCALAR_DENSITY_LIST_REST_A(X) \
+  STANLI_SCALAR_DENSITY_LIST_REST_A(X)   \
   STANLI_SCALAR_DENSITY_LIST_REST_B(X)
-
 
 // Discrete densities: an integer outcome that rides in idata instead of
 // on a propagator edge, plus NReal real arguments that behave exactly like
@@ -204,10 +203,10 @@ namespace stanli {
 // list and stay hand-written: binomial carries two int groups and the GLM
 // carries a data matrix, so they are not the same shape. What is here is
 // everything whose outcome is a single int per lane.
-#define STANLI_INT_DENSITY_LIST(X)                                        \
-  X(OP_NEG_BINOMIAL_2_LOG_LPMF, neg_binomial_2_log_lpmf, 2, 3)            \
-  X(OP_NEG_BINOMIAL_LPMF, neg_binomial_lpmf, 2, 2)                        \
-  X(OP_BETA_NEG_BINOMIAL_LPMF, beta_neg_binomial_lpmf, 3, 2)              \
+#define STANLI_INT_DENSITY_LIST(X)                             \
+  X(OP_NEG_BINOMIAL_2_LOG_LPMF, neg_binomial_2_log_lpmf, 2, 3) \
+  X(OP_NEG_BINOMIAL_LPMF, neg_binomial_lpmf, 2, 2)             \
+  X(OP_BETA_NEG_BINOMIAL_LPMF, beta_neg_binomial_lpmf, 3, 2)   \
   X(OP_YULE_SIMON_LPMF, yule_simon_lpmf, 1, 2)
 
 // Distribution functions: cdf, lcdf, lccdf. Same shape as an lpdf --
@@ -242,89 +241,88 @@ namespace stanli {
 // like that would change the value and leave the partials describing the
 // old one. rvar has no arithmetic operators precisely so this fails to
 // compile instead.
-#define STANLI_SCALAR_CDF_LIST_A(X) \
-  X(OP_BETA_CDF, beta_cdf, 3, 0) \
-  X(OP_BETA_LCCDF, beta_lccdf, 3, 0) \
-  X(OP_BETA_LCDF, beta_lcdf, 3, 0) \
-  X(OP_BETA_PROPORTION_LCCDF, beta_proportion_lccdf, 3, 0) \
-  X(OP_BETA_PROPORTION_LCDF, beta_proportion_lcdf, 3, 0) \
-  X(OP_CAUCHY_CDF, cauchy_cdf, 3, 0) \
-  X(OP_CAUCHY_LCCDF, cauchy_lccdf, 3, 0) \
-  X(OP_CAUCHY_LCDF, cauchy_lcdf, 3, 0) \
-  X(OP_CHI_SQUARE_CDF, chi_square_cdf, 2, 0) \
-  X(OP_CHI_SQUARE_LCCDF, chi_square_lccdf, 2, 0) \
-  X(OP_CHI_SQUARE_LCDF, chi_square_lcdf, 2, 0) \
-  X(OP_DOUBLE_EXPONENTIAL_CDF, double_exponential_cdf, 3, 0) \
+#define STANLI_SCALAR_CDF_LIST_A(X)                              \
+  X(OP_BETA_CDF, beta_cdf, 3, 0)                                 \
+  X(OP_BETA_LCCDF, beta_lccdf, 3, 0)                             \
+  X(OP_BETA_LCDF, beta_lcdf, 3, 0)                               \
+  X(OP_BETA_PROPORTION_LCCDF, beta_proportion_lccdf, 3, 0)       \
+  X(OP_BETA_PROPORTION_LCDF, beta_proportion_lcdf, 3, 0)         \
+  X(OP_CAUCHY_CDF, cauchy_cdf, 3, 0)                             \
+  X(OP_CAUCHY_LCCDF, cauchy_lccdf, 3, 0)                         \
+  X(OP_CAUCHY_LCDF, cauchy_lcdf, 3, 0)                           \
+  X(OP_CHI_SQUARE_CDF, chi_square_cdf, 2, 0)                     \
+  X(OP_CHI_SQUARE_LCCDF, chi_square_lccdf, 2, 0)                 \
+  X(OP_CHI_SQUARE_LCDF, chi_square_lcdf, 2, 0)                   \
+  X(OP_DOUBLE_EXPONENTIAL_CDF, double_exponential_cdf, 3, 0)     \
   X(OP_DOUBLE_EXPONENTIAL_LCCDF, double_exponential_lccdf, 3, 0) \
-  X(OP_DOUBLE_EXPONENTIAL_LCDF, double_exponential_lcdf, 3, 0) \
-  X(OP_EXP_MOD_NORMAL_CDF, exp_mod_normal_cdf, 4, 0) \
-  X(OP_EXP_MOD_NORMAL_LCCDF, exp_mod_normal_lccdf, 4, 0) \
-  X(OP_EXP_MOD_NORMAL_LCDF, exp_mod_normal_lcdf, 4, 0) \
-  X(OP_EXPONENTIAL_CDF, exponential_cdf, 2, 0) \
-  X(OP_EXPONENTIAL_LCCDF, exponential_lccdf, 2, 0) \
-  X(OP_EXPONENTIAL_LCDF, exponential_lcdf, 2, 0) \
-  X(OP_FRECHET_CDF, frechet_cdf, 3, 0) \
-  X(OP_FRECHET_LCCDF, frechet_lccdf, 3, 0) \
-  X(OP_FRECHET_LCDF, frechet_lcdf, 3, 0) \
-  X(OP_GAMMA_CDF, gamma_cdf, 3, 0) \
-  X(OP_GAMMA_LCCDF, gamma_lccdf, 3, 0) \
-  X(OP_GAMMA_LCDF, gamma_lcdf, 3, 0) \
-  X(OP_GUMBEL_CDF, gumbel_cdf, 3, 0) \
-  X(OP_GUMBEL_LCCDF, gumbel_lccdf, 3, 0) \
-  X(OP_GUMBEL_LCDF, gumbel_lcdf, 3, 0) \
-  X(OP_INV_CHI_SQUARE_CDF, inv_chi_square_cdf, 2, 0) \
-  X(OP_INV_CHI_SQUARE_LCCDF, inv_chi_square_lccdf, 2, 0) \
-  X(OP_INV_CHI_SQUARE_LCDF, inv_chi_square_lcdf, 2, 0) \
-  X(OP_INV_GAMMA_CDF, inv_gamma_cdf, 3, 0) \
-  X(OP_INV_GAMMA_LCCDF, inv_gamma_lccdf, 3, 0) \
-  X(OP_INV_GAMMA_LCDF, inv_gamma_lcdf, 3, 0) \
-  X(OP_LOGISTIC_CDF, logistic_cdf, 3, 0) \
-  X(OP_LOGISTIC_LCCDF, logistic_lccdf, 3, 0) \
+  X(OP_DOUBLE_EXPONENTIAL_LCDF, double_exponential_lcdf, 3, 0)   \
+  X(OP_EXP_MOD_NORMAL_CDF, exp_mod_normal_cdf, 4, 0)             \
+  X(OP_EXP_MOD_NORMAL_LCCDF, exp_mod_normal_lccdf, 4, 0)         \
+  X(OP_EXP_MOD_NORMAL_LCDF, exp_mod_normal_lcdf, 4, 0)           \
+  X(OP_EXPONENTIAL_CDF, exponential_cdf, 2, 0)                   \
+  X(OP_EXPONENTIAL_LCCDF, exponential_lccdf, 2, 0)               \
+  X(OP_EXPONENTIAL_LCDF, exponential_lcdf, 2, 0)                 \
+  X(OP_FRECHET_CDF, frechet_cdf, 3, 0)                           \
+  X(OP_FRECHET_LCCDF, frechet_lccdf, 3, 0)                       \
+  X(OP_FRECHET_LCDF, frechet_lcdf, 3, 0)                         \
+  X(OP_GAMMA_CDF, gamma_cdf, 3, 0)                               \
+  X(OP_GAMMA_LCCDF, gamma_lccdf, 3, 0)                           \
+  X(OP_GAMMA_LCDF, gamma_lcdf, 3, 0)                             \
+  X(OP_GUMBEL_CDF, gumbel_cdf, 3, 0)                             \
+  X(OP_GUMBEL_LCCDF, gumbel_lccdf, 3, 0)                         \
+  X(OP_GUMBEL_LCDF, gumbel_lcdf, 3, 0)                           \
+  X(OP_INV_CHI_SQUARE_CDF, inv_chi_square_cdf, 2, 0)             \
+  X(OP_INV_CHI_SQUARE_LCCDF, inv_chi_square_lccdf, 2, 0)         \
+  X(OP_INV_CHI_SQUARE_LCDF, inv_chi_square_lcdf, 2, 0)           \
+  X(OP_INV_GAMMA_CDF, inv_gamma_cdf, 3, 0)                       \
+  X(OP_INV_GAMMA_LCCDF, inv_gamma_lccdf, 3, 0)                   \
+  X(OP_INV_GAMMA_LCDF, inv_gamma_lcdf, 3, 0)                     \
+  X(OP_LOGISTIC_CDF, logistic_cdf, 3, 0)                         \
+  X(OP_LOGISTIC_LCCDF, logistic_lccdf, 3, 0)                     \
   X(OP_LOGISTIC_LCDF, logistic_lcdf, 3, 0)
 
-#define STANLI_SCALAR_CDF_LIST_B(X) \
-  X(OP_LOGLOGISTIC_CDF, loglogistic_cdf, 3, 0) \
-  X(OP_LOGNORMAL_CDF, lognormal_cdf, 3, 0) \
-  X(OP_LOGNORMAL_LCCDF, lognormal_lccdf, 3, 0) \
-  X(OP_LOGNORMAL_LCDF, lognormal_lcdf, 3, 0) \
-  X(OP_NORMAL_CDF, normal_cdf, 3, 0) \
-  X(OP_NORMAL_LCCDF, normal_lccdf, 3, 0) \
-  X(OP_NORMAL_LCDF, normal_lcdf, 3, 0) \
-  X(OP_PARETO_CDF, pareto_cdf, 3, 0) \
-  X(OP_PARETO_LCCDF, pareto_lccdf, 3, 0) \
-  X(OP_PARETO_LCDF, pareto_lcdf, 3, 0) \
-  X(OP_PARETO_TYPE_2_CDF, pareto_type_2_cdf, 4, 0) \
-  X(OP_PARETO_TYPE_2_LCCDF, pareto_type_2_lccdf, 4, 0) \
-  X(OP_PARETO_TYPE_2_LCDF, pareto_type_2_lcdf, 4, 0) \
-  X(OP_RAYLEIGH_CDF, rayleigh_cdf, 2, 0) \
-  X(OP_RAYLEIGH_LCCDF, rayleigh_lccdf, 2, 0) \
-  X(OP_RAYLEIGH_LCDF, rayleigh_lcdf, 2, 0) \
-  X(OP_SCALED_INV_CHI_SQUARE_CDF, scaled_inv_chi_square_cdf, 3, 0) \
-  X(OP_SCALED_INV_CHI_SQUARE_LCCDF, scaled_inv_chi_square_lccdf, 3, 0) \
-  X(OP_SCALED_INV_CHI_SQUARE_LCDF, scaled_inv_chi_square_lcdf, 3, 0) \
-  X(OP_SKEW_NORMAL_CDF, skew_normal_cdf, 4, 0) \
-  X(OP_SKEW_NORMAL_LCCDF, skew_normal_lccdf, 4, 0) \
-  X(OP_SKEW_NORMAL_LCDF, skew_normal_lcdf, 4, 0) \
-  X(OP_STD_NORMAL_CDF, std_normal_cdf, 1, 0) \
-  X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1, 0) \
-  X(OP_SKEW_DOUBLE_EXPONENTIAL_CDF, skew_double_exponential_cdf, 4, 0) \
-  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCDF, skew_double_exponential_lcdf, 4, 0) \
+#define STANLI_SCALAR_CDF_LIST_B(X)                                        \
+  X(OP_LOGLOGISTIC_CDF, loglogistic_cdf, 3, 0)                             \
+  X(OP_LOGNORMAL_CDF, lognormal_cdf, 3, 0)                                 \
+  X(OP_LOGNORMAL_LCCDF, lognormal_lccdf, 3, 0)                             \
+  X(OP_LOGNORMAL_LCDF, lognormal_lcdf, 3, 0)                               \
+  X(OP_NORMAL_CDF, normal_cdf, 3, 0)                                       \
+  X(OP_NORMAL_LCCDF, normal_lccdf, 3, 0)                                   \
+  X(OP_NORMAL_LCDF, normal_lcdf, 3, 0)                                     \
+  X(OP_PARETO_CDF, pareto_cdf, 3, 0)                                       \
+  X(OP_PARETO_LCCDF, pareto_lccdf, 3, 0)                                   \
+  X(OP_PARETO_LCDF, pareto_lcdf, 3, 0)                                     \
+  X(OP_PARETO_TYPE_2_CDF, pareto_type_2_cdf, 4, 0)                         \
+  X(OP_PARETO_TYPE_2_LCCDF, pareto_type_2_lccdf, 4, 0)                     \
+  X(OP_PARETO_TYPE_2_LCDF, pareto_type_2_lcdf, 4, 0)                       \
+  X(OP_RAYLEIGH_CDF, rayleigh_cdf, 2, 0)                                   \
+  X(OP_RAYLEIGH_LCCDF, rayleigh_lccdf, 2, 0)                               \
+  X(OP_RAYLEIGH_LCDF, rayleigh_lcdf, 2, 0)                                 \
+  X(OP_SCALED_INV_CHI_SQUARE_CDF, scaled_inv_chi_square_cdf, 3, 0)         \
+  X(OP_SCALED_INV_CHI_SQUARE_LCCDF, scaled_inv_chi_square_lccdf, 3, 0)     \
+  X(OP_SCALED_INV_CHI_SQUARE_LCDF, scaled_inv_chi_square_lcdf, 3, 0)       \
+  X(OP_SKEW_NORMAL_CDF, skew_normal_cdf, 4, 0)                             \
+  X(OP_SKEW_NORMAL_LCCDF, skew_normal_lccdf, 4, 0)                         \
+  X(OP_SKEW_NORMAL_LCDF, skew_normal_lcdf, 4, 0)                           \
+  X(OP_STD_NORMAL_CDF, std_normal_cdf, 1, 0)                               \
+  X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1, 0)                           \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_CDF, skew_double_exponential_cdf, 4, 0)     \
+  X(OP_SKEW_DOUBLE_EXPONENTIAL_LCDF, skew_double_exponential_lcdf, 4, 0)   \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_LCCDF, skew_double_exponential_lccdf, 4, 0) \
-  X(OP_STD_NORMAL_LCDF, std_normal_lcdf, 1, 0) \
-  X(OP_STUDENT_T_CDF, student_t_cdf, 4, 0) \
-  X(OP_STUDENT_T_LCCDF, student_t_lccdf, 4, 0) \
-  X(OP_STUDENT_T_LCDF, student_t_lcdf, 4, 0) \
-  X(OP_UNIFORM_CDF, uniform_cdf, 3, 0) \
-  X(OP_UNIFORM_LCCDF, uniform_lccdf, 3, 0) \
-  X(OP_UNIFORM_LCDF, uniform_lcdf, 3, 0) \
-  X(OP_WEIBULL_CDF, weibull_cdf, 3, 0) \
-  X(OP_WEIBULL_LCCDF, weibull_lccdf, 3, 0) \
+  X(OP_STD_NORMAL_LCDF, std_normal_lcdf, 1, 0)                             \
+  X(OP_STUDENT_T_CDF, student_t_cdf, 4, 0)                                 \
+  X(OP_STUDENT_T_LCCDF, student_t_lccdf, 4, 0)                             \
+  X(OP_STUDENT_T_LCDF, student_t_lcdf, 4, 0)                               \
+  X(OP_UNIFORM_CDF, uniform_cdf, 3, 0)                                     \
+  X(OP_UNIFORM_LCCDF, uniform_lccdf, 3, 0)                                 \
+  X(OP_UNIFORM_LCDF, uniform_lcdf, 3, 0)                                   \
+  X(OP_WEIBULL_CDF, weibull_cdf, 3, 0)                                     \
+  X(OP_WEIBULL_LCCDF, weibull_lccdf, 3, 0)                                 \
   X(OP_WEIBULL_LCDF, weibull_lcdf, 3, 0)
 
 #define STANLI_SCALAR_CDF_LIST(X) \
-  STANLI_SCALAR_CDF_LIST_A(X) \
+  STANLI_SCALAR_CDF_LIST_A(X)     \
   STANLI_SCALAR_CDF_LIST_B(X)
-
 
 // The same, for distributions whose outcome is an integer: the count
 // rides in idata exactly as it does for the lpmfs, and the real
@@ -334,21 +332,21 @@ namespace stanli {
 // Not every discrete cdf fits: binomial and beta_binomial carry a second
 // int group (the trial count) and discrete_range is integers all the way
 // down, so those nine keep waiting for a layout rather than a list line.
-#define STANLI_INT_CDF_LIST(X)                                            \
-  X(OP_BERNOULLI_CDF, bernoulli_cdf, 1, 0)                                \
-  X(OP_BERNOULLI_LCCDF, bernoulli_lccdf, 1, 0)                            \
-  X(OP_BERNOULLI_LCDF, bernoulli_lcdf, 1, 0)                              \
-  X(OP_BETA_NEG_BINOMIAL_CDF, beta_neg_binomial_cdf, 3, 0)                \
-  X(OP_BETA_NEG_BINOMIAL_LCCDF, beta_neg_binomial_lccdf, 3, 0)            \
-  X(OP_BETA_NEG_BINOMIAL_LCDF, beta_neg_binomial_lcdf, 3, 0)              \
-  X(OP_NEG_BINOMIAL_CDF, neg_binomial_cdf, 2, 0)                          \
-  X(OP_NEG_BINOMIAL_LCCDF, neg_binomial_lccdf, 2, 0)                      \
-  X(OP_NEG_BINOMIAL_LCDF, neg_binomial_lcdf, 2, 0)                        \
-  X(OP_POISSON_CDF, poisson_cdf, 1, 0)                                    \
-  X(OP_POISSON_LCCDF, poisson_lccdf, 1, 0)                                \
-  X(OP_POISSON_LCDF, poisson_lcdf, 1, 0)                                  \
-  X(OP_YULE_SIMON_CDF, yule_simon_cdf, 1, 0)                              \
-  X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1, 0)                          \
+#define STANLI_INT_CDF_LIST(X)                                 \
+  X(OP_BERNOULLI_CDF, bernoulli_cdf, 1, 0)                     \
+  X(OP_BERNOULLI_LCCDF, bernoulli_lccdf, 1, 0)                 \
+  X(OP_BERNOULLI_LCDF, bernoulli_lcdf, 1, 0)                   \
+  X(OP_BETA_NEG_BINOMIAL_CDF, beta_neg_binomial_cdf, 3, 0)     \
+  X(OP_BETA_NEG_BINOMIAL_LCCDF, beta_neg_binomial_lccdf, 3, 0) \
+  X(OP_BETA_NEG_BINOMIAL_LCDF, beta_neg_binomial_lcdf, 3, 0)   \
+  X(OP_NEG_BINOMIAL_CDF, neg_binomial_cdf, 2, 0)               \
+  X(OP_NEG_BINOMIAL_LCCDF, neg_binomial_lccdf, 2, 0)           \
+  X(OP_NEG_BINOMIAL_LCDF, neg_binomial_lcdf, 2, 0)             \
+  X(OP_POISSON_CDF, poisson_cdf, 1, 0)                         \
+  X(OP_POISSON_LCCDF, poisson_lccdf, 1, 0)                     \
+  X(OP_POISSON_LCDF, poisson_lcdf, 1, 0)                       \
+  X(OP_YULE_SIMON_CDF, yule_simon_cdf, 1, 0)                   \
+  X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1, 0)               \
   X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1, 0)
 
 // Ordinal regression. Two things make these different from the list
@@ -363,7 +361,7 @@ namespace stanli {
 // reroll.cpp must never fuse these: element n of a shared cutpoint
 // vector is not observation n's cutpoints. They are absent from both of
 // its opt-in lists, which is the whole guard.
-#define STANLI_ORDERED_DENSITY_LIST(X)                                    \
+#define STANLI_ORDERED_DENSITY_LIST(X) \
   X(OP_ORDERED_LOGISTIC_LPMF, ordered_logistic_lpmf, 2, 0x2)
 // Scalar unary math, one line each: opcode, kernel, registration,
 // lowering entry and interpreter branch all come from here. The value and
@@ -376,43 +374,52 @@ namespace stanli {
 // written out rather than obtained by instantiating an autodiff template.
 // fn_sweep.py checks every one against CmdStan, which is what makes
 // hand-written derivatives safe to write at this rate.
-#define STANLI_SCALAR_UNARY_LIST(X)                                       \
-  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), stan::math::digamma(x))  \
-  X(OP_DIGAMMA, digamma, stan::math::digamma(x), stan::math::trigamma(x))  \
-  X(OP_LOG1P, log1p, stan::math::log1p(x), 1.0 / (1.0 + x))  \
-  X(OP_EXPM1, expm1, stan::math::expm1(x), std::exp(x))  \
-  X(OP_PHI, Phi, stan::math::Phi(x), stan::math::INV_SQRT_TWO_PI * std::exp(-0.5 * x * x))  \
-  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x), 1.0 / (stan::math::INV_SQRT_TWO_PI * std::exp(-0.5 * stan::math::inv_Phi(x) * stan::math::inv_Phi(x))))  \
-  X(OP_ERF, erf, std::erf(x), stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x))  \
-  X(OP_ERFC, erfc, std::erfc(x), -stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x))  \
-  X(OP_INV, inv, 1.0 / x, -1.0 / (x * x))  \
-  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x), -0.5 / (x * std::sqrt(x)))  \
-  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -2.0 / (x * x * x))  \
-  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x), -std::exp(x) / (1.0 - std::exp(x)))  \
-  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x), stan::math::inv_logit(x))  \
-  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x), stan::math::inv_logit(-x))  \
-  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x), -stan::math::inv_logit(x))  \
-  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x), std::exp(x - std::exp(x)))  \
-  X(OP_SIN, sin, std::sin(x), std::cos(x))  \
-  X(OP_COS, cos, std::cos(x), -std::sin(x))  \
-  X(OP_TAN, tan, std::tan(x), 1.0 / (std::cos(x) * std::cos(x)))  \
-  X(OP_ASIN, asin, std::asin(x), 1.0 / std::sqrt(1.0 - x * x))  \
-  X(OP_ACOS, acos, std::acos(x), -1.0 / std::sqrt(1.0 - x * x))  \
-  X(OP_ATAN, atan, std::atan(x), 1.0 / (1.0 + x * x))  \
-  X(OP_SINH, sinh, std::sinh(x), std::cosh(x))  \
-  X(OP_COSH, cosh, std::cosh(x), std::sinh(x))  \
-  X(OP_ASINH, asinh, std::asinh(x), 1.0 / std::sqrt(x * x + 1.0))  \
-  X(OP_ACOSH, acosh, std::acosh(x), 1.0 / std::sqrt(x * x - 1.0))  \
-  X(OP_ATANH, atanh, std::atanh(x), 1.0 / (1.0 - x * x))  \
-  X(OP_CBRT, cbrt, std::cbrt(x), 1.0 / (3.0 * std::cbrt(x) * std::cbrt(x)))  \
-  X(OP_EXP2, exp2, std::exp2(x), stan::math::LOG_TWO * std::exp2(x))  \
-  X(OP_LOG2, log2, stan::math::log2(x), 1.0 / (x * stan::math::LOG_TWO))  \
-  X(OP_LOG10, log10, std::log10(x), 1.0 / (x * stan::math::LOG_TEN))  \
-  X(OP_ABS, abs, std::fabs(x), x < 0 ? -1.0 : 1.0)  \
-  X(OP_FLOOR, floor, std::floor(x), 0.0)  \
-  X(OP_CEIL, ceil, std::ceil(x), 0.0)  \
-  X(OP_ROUND, round, std::round(x), 0.0)  \
-  X(OP_TRUNC, trunc, std::trunc(x), 0.0)  \
+#define STANLI_SCALAR_UNARY_LIST(X)                                            \
+  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), stan::math::digamma(x))          \
+  X(OP_DIGAMMA, digamma, stan::math::digamma(x), stan::math::trigamma(x))      \
+  X(OP_LOG1P, log1p, stan::math::log1p(x), 1.0 / (1.0 + x))                    \
+  X(OP_EXPM1, expm1, stan::math::expm1(x), std::exp(x))                        \
+  X(OP_PHI, Phi, stan::math::Phi(x),                                           \
+    stan::math::INV_SQRT_TWO_PI* std::exp(-0.5 * x * x))                       \
+  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x),                               \
+    1.0 / (stan::math::INV_SQRT_TWO_PI *                                       \
+           std::exp(-0.5 * stan::math::inv_Phi(x) * stan::math::inv_Phi(x))))  \
+  X(OP_ERF, erf, std::erf(x), stan::math::TWO_OVER_SQRT_PI* std::exp(-x* x))   \
+  X(OP_ERFC, erfc, std::erfc(x),                                               \
+    -stan::math::TWO_OVER_SQRT_PI* std::exp(-x* x))                            \
+  X(OP_INV, inv, 1.0 / x, -1.0 / (x * x))                                      \
+  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x), -0.5 / (x * std::sqrt(x))) \
+  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -2.0 / (x * x * x))              \
+  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x),                         \
+    -std::exp(x) / (1.0 - std::exp(x)))                                        \
+  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x),                         \
+    stan::math::inv_logit(x))                                                  \
+  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x),             \
+    stan::math::inv_logit(-x))                                                 \
+  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x),       \
+    -stan::math::inv_logit(x))                                                 \
+  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x),                   \
+    std::exp(x - std::exp(x)))                                                 \
+  X(OP_SIN, sin, std::sin(x), std::cos(x))                                     \
+  X(OP_COS, cos, std::cos(x), -std::sin(x))                                    \
+  X(OP_TAN, tan, std::tan(x), 1.0 / (std::cos(x) * std::cos(x)))               \
+  X(OP_ASIN, asin, std::asin(x), 1.0 / std::sqrt(1.0 - x * x))                 \
+  X(OP_ACOS, acos, std::acos(x), -1.0 / std::sqrt(1.0 - x * x))                \
+  X(OP_ATAN, atan, std::atan(x), 1.0 / (1.0 + x * x))                          \
+  X(OP_SINH, sinh, std::sinh(x), std::cosh(x))                                 \
+  X(OP_COSH, cosh, std::cosh(x), std::sinh(x))                                 \
+  X(OP_ASINH, asinh, std::asinh(x), 1.0 / std::sqrt(x * x + 1.0))              \
+  X(OP_ACOSH, acosh, std::acosh(x), 1.0 / std::sqrt(x * x - 1.0))              \
+  X(OP_ATANH, atanh, std::atanh(x), 1.0 / (1.0 - x * x))                       \
+  X(OP_CBRT, cbrt, std::cbrt(x), 1.0 / (3.0 * std::cbrt(x) * std::cbrt(x)))    \
+  X(OP_EXP2, exp2, std::exp2(x), stan::math::LOG_TWO* std::exp2(x))            \
+  X(OP_LOG2, log2, stan::math::log2(x), 1.0 / (x * stan::math::LOG_TWO))       \
+  X(OP_LOG10, log10, std::log10(x), 1.0 / (x * stan::math::LOG_TEN))           \
+  X(OP_ABS, abs, std::fabs(x), x < 0 ? -1.0 : 1.0)                             \
+  X(OP_FLOOR, floor, std::floor(x), 0.0)                                       \
+  X(OP_CEIL, ceil, std::ceil(x), 0.0)                                          \
+  X(OP_ROUND, round, std::round(x), 0.0)                                       \
+  X(OP_TRUNC, trunc, std::trunc(x), 0.0)                                       \
   X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0)
 
 // The tier a density is actually built at. STANLI_LITE_LP drops the
@@ -459,12 +466,11 @@ enum Opcode : uint16_t {
 #define STANLI_OPCODE_ENUM(name) name,
 #define STANLI_DENSITY_ENUM(code, fn, n, m) code,
 #define STANLI_UNARY_ENUM(code, fn, v, d) code,
-  STANLI_ALL_OPCODES(STANLI_OPCODE_ENUM, STANLI_DENSITY_ENUM,
-                     STANLI_UNARY_ENUM)
+  STANLI_ALL_OPCODES(STANLI_OPCODE_ENUM, STANLI_DENSITY_ENUM, STANLI_UNARY_ENUM)
 #undef STANLI_OPCODE_ENUM
 #undef STANLI_DENSITY_ENUM
 #undef STANLI_UNARY_ENUM
-  OP_COUNT_
+      OP_COUNT_
 };
 
 // "OP_NORMAL_LPDF" for a known opcode, "OP_?" otherwise. Diagnostics and

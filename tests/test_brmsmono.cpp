@@ -87,8 +87,7 @@ int main() {
   // it evaluates one point per process.
   for (int64_t k = 0; k < n; ++k) ex.params_data()[k] = q[(size_t)k];
   const double again = ex.forward();
-  expect("evaluating the same point twice gives the same lp",
-         again == lp);
+  expect("evaluating the same point twice gives the same lp", again == lp);
   if (!(worst < 1e-5)) {
     ++failures;
     std::printf("FAIL finite differences: worst %.3g at parameter %d\n", worst,
@@ -97,8 +96,7 @@ int main() {
 
   // bsp_1 is the monotonic slope; if the mo() term were folded to zero
   // (the shape a wrong `rows` could take) its gradient would vanish.
-  expect("the monotonic term reaches the target",
-         std::fabs(grad[2]) > 1e-8);
+  expect("the monotonic term reaches the target", std::fabs(grad[2]) > 1e-8);
 
   if (failures == 0) std::printf("test_brmsmono: all checks passed\n");
   return failures == 0 ? 0 : 1;

@@ -26,11 +26,11 @@ void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
   // here, but hardcoding one is what made poisson_log_glm's lp land
   // sum(log(y!)) away from CmdStan's.
   if (ctx.variant & 0x80u) {
-    stan::math::bernoulli_logit_glm_lpmf<true>(
-        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
+    stan::math::bernoulli_logit_glm_lpmf<true>(y, X, rvar(ctx.in[1].data[0]),
+                                               as_rvar(ctx.in[2]));
   } else {
-    stan::math::bernoulli_logit_glm_lpmf<false>(
-        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
+    stan::math::bernoulli_logit_glm_lpmf<false>(y, X, rvar(ctx.in[1].data[0]),
+                                                as_rvar(ctx.in[2]));
   }
   active_sink() = nullptr;
   ctx.out.data[0] = s.value;
@@ -38,7 +38,6 @@ void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
 // Edge order (x, alpha, beta): X data (edge 0 skipped by null adjoint),
 // alpha scalar, beta vector.
 void bernoulli_logit_glm_bwd(KernelCtx& ctx) { density_bwd<3>(ctx); }
-
 
 // The other GLMs brms and rstanarm emit directly. A model that writes one
 // of these does not merely run slower without it, it does not run. Alpha

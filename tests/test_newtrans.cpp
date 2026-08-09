@@ -37,8 +37,8 @@ static void expect_near(const std::string& what, double got, double want,
                         double tol) {
   if (!(std::fabs(got - want) <= tol)) {
     ++failures;
-    std::printf("FAIL %-28s got %.12g want %.12g (tol %g)\n", what.c_str(),
-                got, want, tol);
+    std::printf("FAIL %-28s got %.12g want %.12g (tol %g)\n", what.c_str(), got,
+                want, tol);
   }
 }
 static std::string slurp(const std::string& path) {
@@ -110,7 +110,8 @@ int main() {
   for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
   ex.run_forward_only();
 
-  const auto view = [&](const std::string& name) -> const CompiledModel::ParamView* {
+  const auto view =
+      [&](const std::string& name) -> const CompiledModel::ParamView* {
     for (const auto& v : cm.views)
       if (v.name == name) return &v;
     return nullptr;
@@ -143,8 +144,8 @@ int main() {
   if (vals("R", R)) {
     expect("corr_matrix is 3x3", R.size() == 9);
     for (int k = 0; k < 3; ++k)
-      expect_near("corr diag " + std::to_string(k), R[(size_t)(k * 3 + k)],
-                  1.0, 1e-12);
+      expect_near("corr diag " + std::to_string(k), R[(size_t)(k * 3 + k)], 1.0,
+                  1e-12);
     // Symmetric, and every off-diagonal a valid correlation.
     for (int i = 0; i < 3; ++i)
       for (int j = 0; j < 3; ++j) {
@@ -188,8 +189,7 @@ int main() {
   // m = 0.3 and s = 1.7, the constrained value is exactly s*x + m.
   if (vals("a", a)) {
     const double x = q[0];  // `a` is the first declared parameter
-    expect_near("offset/multiplier scalar", a[0], std::fma(1.7, x, 0.3),
-                1e-13);
+    expect_near("offset/multiplier scalar", a[0], std::fma(1.7, x, 0.3), 1e-13);
   }
   if (vals("b", b)) {
     expect("offset/multiplier vector has 3 elements", b.size() == 3);
@@ -204,11 +204,10 @@ int main() {
     // e's raw slice starts after a(1) b(3) c(1) d(1) mu_p(3) sg_p(3).
     const int e0 = 1 + 3 + 1 + 1 + 3 + 3;
     for (int i = 0; i < 3; ++i)
-      expect_near("elementwise offset/multiplier " + std::to_string(i),
-                  e[(size_t)i],
-                  std::fma(sg_p[(size_t)i], q[(size_t)(e0 + i)],
-                           mu_p[(size_t)i]),
-                  1e-12);
+      expect_near(
+          "elementwise offset/multiplier " + std::to_string(i), e[(size_t)i],
+          std::fma(sg_p[(size_t)i], q[(size_t)(e0 + i)], mu_p[(size_t)i]),
+          1e-12);
   }
 
   if (failures == 0) std::printf("test_newtrans: all checks passed\n");

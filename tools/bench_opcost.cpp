@@ -70,8 +70,8 @@ static Graph make_graph(bool density, int* n_ops) {
 }
 
 static void fill_inputs(Executor& ex) {
-  ex.params_data()[0] = 0.3;   // mu
-  ex.params_data()[1] = 1.2;   // sigma
+  ex.params_data()[0] = 0.3;  // mu
+  ex.params_data()[1] = 1.2;  // sigma
   // data slots follow the params in the arena; y_i deterministic
   for (int i = 0; i < N; ++i)
     ex.params_data()[2 + 2 * i] = 0.1 * ((i % 17) - 8);
@@ -134,8 +134,8 @@ int main() {
     for (int i = 0; i < N; ++i) {
       const double y = 0.1 * ((i % 17) - 8);
       const double z = (y - muv) / sigv;
-      const double lp = -0.5 * z * z - std::log(sigv)
-                        - 0.918938533204672742;  // -0.5*log(2*pi)
+      const double lp = -0.5 * z * z - std::log(sigv) -
+                        0.918938533204672742;  // -0.5*log(2*pi)
       const double dmu = z / sigv;
       const double dsig = (z * z - 1.0) / sigv;
       sink += lp + dmu + dsig;
@@ -144,8 +144,10 @@ int main() {
 
   std::printf("graph ops: density=%d trivial=%d (N=%d density/add ops)\n",
               ops_d, ops_t, N);
-  std::printf("A exec grad density : %8.1f ns total, %6.2f ns/op, %6.2f ns/density-op\n",
-              a_ns, a_ns / ops_d, a_ns / N);
+  std::printf(
+      "A exec grad density : %8.1f ns total, %6.2f ns/op, %6.2f "
+      "ns/density-op\n",
+      a_ns, a_ns / ops_d, a_ns / N);
   std::printf("B exec fwd density  : %8.1f ns total, %6.2f ns/op\n", b_ns,
               b_ns / ops_d);
   std::printf("E exec grad trivial : %8.1f ns total, %6.2f ns/op\n", e_ns,

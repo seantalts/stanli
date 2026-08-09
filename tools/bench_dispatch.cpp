@@ -91,14 +91,26 @@ int main() {
   std::vector<Step> steps((size_t)N + 1);
   std::vector<int> kind((size_t)N);
   for (int i = 0; i < N; ++i) {
-    ctx[(size_t)i] = Ctx{&vals[(size_t)i], &vals[(size_t)i + 1],
-                         &vals[(size_t)i + 2], 1};
+    ctx[(size_t)i] =
+        Ctx{&vals[(size_t)i], &vals[(size_t)i + 1], &vals[(size_t)i + 2], 1};
     kind[(size_t)i] = i % 4;
     switch (kind[(size_t)i]) {
-      case 0: fns[(size_t)i] = add_fwd; steps[(size_t)i].fn = t_add; break;
-      case 1: fns[(size_t)i] = mul_fwd; steps[(size_t)i].fn = t_mul; break;
-      case 2: fns[(size_t)i] = sub_fwd; steps[(size_t)i].fn = t_sub; break;
-      default: fns[(size_t)i] = neg_fwd; steps[(size_t)i].fn = t_neg; break;
+      case 0:
+        fns[(size_t)i] = add_fwd;
+        steps[(size_t)i].fn = t_add;
+        break;
+      case 1:
+        fns[(size_t)i] = mul_fwd;
+        steps[(size_t)i].fn = t_mul;
+        break;
+      case 2:
+        fns[(size_t)i] = sub_fwd;
+        steps[(size_t)i].fn = t_sub;
+        break;
+      default:
+        fns[(size_t)i] = neg_fwd;
+        steps[(size_t)i].fn = t_neg;
+        break;
     }
   }
   ctx[(size_t)N] = ctx[0];
@@ -107,9 +119,8 @@ int main() {
   const double loop_ns = time_ns(REPS, [&] {
     for (int i = 0; i < N; ++i) fns[(size_t)i](ctx[(size_t)i]);
   });
-  const double tail_ns = time_ns(REPS, [&] {
-    steps[0].fn(steps.data(), ctx.data());
-  });
+  const double tail_ns =
+      time_ns(REPS, [&] { steps[0].fn(steps.data(), ctx.data()); });
   // UNROLL4: today's loop, four separate call sites -- no kernel changes.
   const double unroll_ns = time_ns(REPS, [&] {
     int i = 0;
@@ -125,10 +136,18 @@ int main() {
     for (int i = 0; i < N; ++i) {
       Ctx& c = ctx[(size_t)i];
       switch (kind[(size_t)i]) {
-        case 0: c.out[0] = c.a[0] + c.b[0]; break;
-        case 1: c.out[0] = c.a[0] * c.b[0]; break;
-        case 2: c.out[0] = c.a[0] - c.b[0]; break;
-        default: c.out[0] = -c.a[0]; break;
+        case 0:
+          c.out[0] = c.a[0] + c.b[0];
+          break;
+        case 1:
+          c.out[0] = c.a[0] * c.b[0];
+          break;
+        case 2:
+          c.out[0] = c.a[0] - c.b[0];
+          break;
+        default:
+          c.out[0] = -c.a[0];
+          break;
       }
     }
   });

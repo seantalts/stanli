@@ -11,7 +11,8 @@ namespace {
 // OP_EXP: scalar out = exp(in). Partial is the output itself; no scratch.
 void exp_fwd(KernelCtx& ctx) { ctx.out.data[0] = std::exp(ctx.in[0].data[0]); }
 void exp_bwd(KernelCtx& ctx) {
-  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj * ctx.out.data[0];
+  if (ctx.in_adj[0].data)
+    ctx.in_adj[0].data[0] += ctx.out_adj * ctx.out.data[0];
 }
 
 // OP_ADD_N: scalar out = sum of scalar inputs.
@@ -321,14 +322,12 @@ void register_elementwise_kernels() {
   register_kernel(OP_SUM_VEC, Kernel{sum_vec_fwd, sum_vec_bwd, nullptr});
   register_kernel(OP_INDEX, Kernel{index_fwd, index_bwd, nullptr});
   register_kernel(OP_SET_INDEX, Kernel{set_index_fwd, set_index_bwd, nullptr});
-  register_kernel(OP_SET_INDEX_INPLACE,
-                  Kernel{set_index_inplace_fwd, set_index_inplace_bwd,
-                         nullptr});
+  register_kernel(OP_SET_INDEX_INPLACE, Kernel{set_index_inplace_fwd,
+                                               set_index_inplace_bwd, nullptr});
   register_kernel(OP_SLICE, Kernel{slice_fwd, slice_bwd, nullptr});
   register_kernel(OP_SET_SLICE, Kernel{set_slice_fwd, set_slice_bwd, nullptr});
-  register_kernel(OP_SET_SLICE_STRIDED,
-                  Kernel{set_slice_strided_fwd, set_slice_strided_bwd,
-                         nullptr});
+  register_kernel(OP_SET_SLICE_STRIDED, Kernel{set_slice_strided_fwd,
+                                               set_slice_strided_bwd, nullptr});
   register_kernel(OP_SLICE_STRIDED,
                   Kernel{slice_strided_fwd, slice_strided_bwd, nullptr});
   register_kernel(OP_GATHER, Kernel{gather_fwd, gather_bwd, nullptr});

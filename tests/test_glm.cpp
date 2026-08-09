@@ -53,9 +53,8 @@ int main() {
   testmodels::fill_logistic_glm_data(m, ex);
   const int NP = 4;
 
-  const double qs[3][NP] = {{0.2, 0.5, -0.8, 1.1},
-                            {-1.0, 0.0, 0.3, -0.2},
-                            {2.2, -1.5, 0.9, 0.4}};
+  const double qs[3][NP] = {
+      {0.2, 0.5, -0.8, 1.1}, {-1.0, 0.0, 0.3, -0.2}, {2.2, -1.5, 0.9, 0.4}};
 
   for (int c = 0; c < 3; ++c) {
     ex.param_ptr(m.alpha)[0] = qs[c][0];

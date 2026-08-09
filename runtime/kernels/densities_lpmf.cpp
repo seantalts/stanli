@@ -17,7 +17,7 @@ STANLI_LPMF_FWD(neg_binomial_2_fwd, neg_binomial_2_lpmf, 2)
 #undef STANLI_LPMF_FWD
 
 // The same shape, one line per distribution (STANLI_INT_DENSITY_LIST).
-#define STANLI_DEFINE_INT_DENSITY(code, fn, nreal, tier)                       \
+#define STANLI_DEFINE_INT_DENSITY(code, fn, nreal, tier) \
   STANLI_LPMF_FWD_T(fn##_fwd_gen, fn, nreal, tier)
 STANLI_INT_DENSITY_LIST(STANLI_DEFINE_INT_DENSITY)
 #undef STANLI_DEFINE_INT_DENSITY
@@ -46,7 +46,7 @@ const int* int_group_next(const int* p) {
     if (ctx.variant & 0x40u) {                                                 \
       const int* g1 = ctx.idata;                                               \
       const int* g2 = int_group_next(g1);                                      \
-      density_fwd_elt<1, 3>(                                                      \
+      density_fwd_elt<1, 3>(                                                   \
           ctx,                                                                 \
           [&](int64_t n, const auto& theta) {                                  \
             stan::math::dist<true>(int_group_elem(g1, n),                      \
@@ -60,7 +60,7 @@ const int* int_group_next(const int* p) {
     }                                                                          \
     with_int_group(ctx.idata, [&](const auto& n, const int* rest) {            \
       with_int_group(rest, [&](const auto& N, const int*) {                    \
-        density_fwd_v<1, 3>(                                                      \
+        density_fwd_v<1, 3>(                                                   \
             ctx,                                                               \
             [&](const auto& theta) { stan::math::dist<true>(n, N, theta); },   \
             [&](const auto& theta) { stan::math::dist<false>(n, N, theta); }); \
@@ -71,7 +71,6 @@ const int* int_group_next(const int* p) {
 STANLI_BINOMIAL_FWD(binomial_fwd, binomial_lpmf)
 STANLI_BINOMIAL_FWD(binomial_logit_fwd, binomial_logit_lpmf)
 #undef STANLI_BINOMIAL_FWD
-
 
 // beta_binomial(n | N, alpha, beta): two integer groups, then two real
 // arguments that behave like any other density's. with_int_group unpacks

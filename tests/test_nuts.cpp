@@ -13,8 +13,8 @@ static void expect_in(const std::string& what, double got, double lo,
                       double hi) {
   if (!(got >= lo && got <= hi)) {
     ++failures;
-    std::printf("FAIL %-18s got %.6g want in [%g, %g]\n", what.c_str(), got,
-                lo, hi);
+    std::printf("FAIL %-18s got %.6g want in [%g, %g]\n", what.c_str(), got, lo,
+                hi);
   }
 }
 
@@ -150,8 +150,8 @@ int main() {
     try {
       run_nuts(ex, cfg);
     } catch (const std::exception& e) {
-      threw_init = std::string(e.what()).find("initialization") !=
-                   std::string::npos;
+      threw_init =
+          std::string(e.what()).find("initialization") != std::string::npos;
     }
     if (!threw_init) {
       ++failures;
@@ -194,9 +194,10 @@ int main() {
                       std::isfinite(energy) && energy >= -lp_;
       if (!ok) {
         ++failures;
-        std::printf("FAIL stats row: lp %g accept %g step %g depth %g "
-                    "nleap %g div %g energy %g\n",
-                    lp_, accept, step, depth, nleap, div, energy);
+        std::printf(
+            "FAIL stats row: lp %g accept %g step %g depth %g "
+            "nleap %g div %g energy %g\n",
+            lp_, accept, step, depth, nleap, div, energy);
         break;
       }
       leapfrogs += (int64_t)nleap;

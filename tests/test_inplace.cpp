@@ -15,15 +15,17 @@
 
 static int failures = 0;
 static void expect(const char* what, bool ok) {
-  if (!ok) { ++failures; std::printf("FAIL %s\n", what); }
+  if (!ok) {
+    ++failures;
+    std::printf("FAIL %s\n", what);
+  }
 }
 static void expect_close(const char* what, double got, double want) {
-  const double rel =
-      std::abs(got - want) / std::max(std::abs(want), 1e-300);
+  const double rel = std::abs(got - want) / std::max(std::abs(want), 1e-300);
   if (!(rel < 1e-12)) {
     ++failures;
-    std::printf("FAIL %-26s got %.17g want %.17g rel %.2e\n", what, got,
-                want, rel);
+    std::printf("FAIL %-26s got %.17g want %.17g rel %.2e\n", what, got, want,
+                rel);
   }
 }
 
@@ -49,8 +51,7 @@ static std::vector<double> run_grad_twice(Graph g, const Fills& fills) {
   first[0] = ex.gradient(first.data() + 1);
   second[0] = ex.gradient(second.data() + 1);
   for (size_t i = 0; i < first.size(); ++i)
-    expect_close(("repeat v" + std::to_string(i)).c_str(), second[i],
-                 first[i]);
+    expect_close(("repeat v" + std::to_string(i)).c_str(), second[i], first[i]);
   return second;
 }
 
@@ -251,8 +252,8 @@ static void test_store_to_load_forwarding() {
   // L read-backs plus the L writes they made redundant.
   expect("forwarded and swept 2L ops", removed == 2 * L);
   for (const Op& op : g.ops) {
-    expect("no writes left", op.opcode != OP_SET_INDEX &&
-                                 op.opcode != OP_SET_INDEX_INPLACE);
+    expect("no writes left",
+           op.opcode != OP_SET_INDEX && op.opcode != OP_SET_INDEX_INPLACE);
     expect("no reads left", op.opcode != OP_INDEX);
   }
   reduce_into_result(g, terms);
@@ -382,8 +383,7 @@ static void test_env_disable() {
   expect("disabled: no stores forwarded", forward_stores_to_loads(g, {}) == 0);
   expect("disabled: graph untouched", g.ops.size() == before);
   for (const Op& op : g.ops)
-    expect("disabled: no destructive write",
-           op.opcode != OP_SET_INDEX_INPLACE);
+    expect("disabled: no destructive write", op.opcode != OP_SET_INDEX_INPLACE);
   test_unsetenv("STANLI_NO_INPLACE");
 
   // The same graph with the switch off: both passes do their work.
@@ -401,7 +401,10 @@ int main() {
   test_bail_later_reader();
   test_bail_root();
   test_dead_slots_freed();
-  if (failures) { std::printf("%d failures\n", failures); return 1; }
+  if (failures) {
+    std::printf("%d failures\n", failures);
+    return 1;
+  }
   std::printf("test_inplace OK\n");
   return 0;
 }

@@ -14,8 +14,19 @@ namespace stanli {
 namespace mir {
 
 struct Expr {
-  enum Kind { Var, LitInt, LitReal, LitStr, FunApp, Promotion, Indexed,
-              TernaryIf, EOr, EAnd, Unsupported } kind = Unsupported;
+  enum Kind {
+    Var,
+    LitInt,
+    LitReal,
+    LitStr,
+    FunApp,
+    Promotion,
+    Indexed,
+    TernaryIf,
+    EOr,
+    EAnd,
+    Unsupported
+  } kind = Unsupported;
   std::string name;  // Var name or FunApp function name
   enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
   bool fn_propto = false;  // (FnLpdf true) / (FnLpmf true)
@@ -31,10 +42,25 @@ struct Expr {
 struct Transform {
   // The names are stanc3's own MIR tags, so a new transform in the
   // compiler is greppable here.
-  enum Kind { Identity, Lower, Upper, LowerUpper, Offset, Multiplier,
-              OffsetMultiplier, Simplex, Ordered, PositiveOrdered,
-              CholeskyCorr, UnitVector, SumToZero, Correlation, Covariance,
-              CholeskyCov, Unsupported } kind = Identity;
+  enum Kind {
+    Identity,
+    Lower,
+    Upper,
+    LowerUpper,
+    Offset,
+    Multiplier,
+    OffsetMultiplier,
+    Simplex,
+    Ordered,
+    PositiveOrdered,
+    CholeskyCorr,
+    UnitVector,
+    SumToZero,
+    Correlation,
+    Covariance,
+    CholeskyCov,
+    Unsupported
+  } kind = Identity;
   std::vector<Expr> args;
   std::string raw;
 };
@@ -47,8 +73,20 @@ struct SizedType {
 };
 
 struct Stmt {
-  enum Kind { Decl, Assignment, TargetPE, Block, SList, For, IfElse, While,
-              NRFunApp, Return, Skip, Unsupported } kind = Unsupported;
+  enum Kind {
+    Decl,
+    Assignment,
+    TargetPE,
+    Block,
+    SList,
+    For,
+    IfElse,
+    While,
+    NRFunApp,
+    Return,
+    Skip,
+    Unsupported
+  } kind = Unsupported;
   // Decl
   std::string decl_id;
   SizedType decl_type;

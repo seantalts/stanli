@@ -73,8 +73,8 @@ std::vector<VecD> gp_points(const KernelCtx& ctx) {
 void gp_cov_fwd(KernelCtx& ctx) {
   const int64_t N = ctx.idata[0];
   auto pts = gp_points(ctx);
-  MatD c = stan::math::gp_exp_quad_cov(pts, ctx.in[1].data[0],
-                                       ctx.in[2].data[0]);
+  MatD c =
+      stan::math::gp_exp_quad_cov(pts, ctx.in[1].data[0], ctx.in[2].data[0]);
   MapM(ctx.out.data, N, N) = c;
 }
 void gp_cov_bwd(KernelCtx& ctx) {
@@ -123,9 +123,8 @@ void chol_fwd(KernelCtx& ctx) {
 }
 void chol_bwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
-  matvar_bwd(ctx, n, [](const auto& a) {
-    return stan::math::cholesky_decompose(a);
-  });
+  matvar_bwd(ctx, n,
+             [](const auto& a) { return stan::math::cholesky_decompose(a); });
 }
 
 // Bind a slot as a var matrix or vector, and scatter the adjoints back
@@ -134,8 +133,7 @@ void chol_bwd(KernelCtx& ctx) {
 VarM tail_m(const KernelCtx& ctx, int k, int64_t rows, int64_t cols) {
   VarM M(rows, cols);
   for (int64_t j = 0; j < cols; ++j)
-    for (int64_t i = 0; i < rows; ++i)
-      M(i, j) = ctx.in[k].data[j * rows + i];
+    for (int64_t i = 0; i < rows; ++i) M(i, j) = ctx.in[k].data[j * rows + i];
   return M;
 }
 VarV tail_v(const KernelCtx& ctx, int k, int64_t n) {
@@ -152,8 +150,7 @@ void tail_scatter_m(KernelCtx& ctx, int k, const VarM& M) {
 }
 void tail_scatter_v(KernelCtx& ctx, int k, const VarV& v) {
   if (!ctx.in_adj[k].data) return;
-  for (int64_t i = 0; i < v.size(); ++i)
-    ctx.in_adj[k].data[i] += v(i).adj();
+  for (int64_t i = 0; i < v.size(); ++i) ctx.in_adj[k].data[i] += v(i).adj();
 }
 void tail_scatter_s(KernelCtx& ctx, int k, const stan::math::var& x) {
   if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += x.adj();
@@ -213,10 +210,10 @@ double mn_eval(KernelCtx& ctx) {
     var v_out;
     if (ay)
       v_out = aS ? (am ? call(ys, mu, S) : call(ys, mud, S))
-                  : (am ? call(ys, mu, Sd) : call(ys, mud, Sd));
+                 : (am ? call(ys, mu, Sd) : call(ys, mud, Sd));
     else
       v_out = aS ? (am ? call(ysd, mu, S) : call(ysd, mud, S))
-                  : (am ? call(ysd, mu, Sd) : call(ysd, mud, Sd));
+                 : (am ? call(ysd, mu, Sd) : call(ysd, mud, Sd));
     const double vv = v_out.val();
     if constexpr (Grad) {
       var jj = v_out * ctx.out_adj;
@@ -231,14 +228,22 @@ double mn_eval(KernelCtx& ctx) {
     }
     return vv;
   }
-  if (ay && am && aS) out = call(y, mu, S);
-  else if (ay && am) out = call(y, mu, Sd);
-  else if (ay && aS) out = call(y, mud, S);
-  else if (am && aS) out = call(yd, mu, S);
-  else if (ay) out = call(y, mud, Sd);
-  else if (am) out = call(yd, mu, Sd);
-  else if (aS) out = call(yd, mud, S);
-  else return call(yd, mud, Sd);
+  if (ay && am && aS)
+    out = call(y, mu, S);
+  else if (ay && am)
+    out = call(y, mu, Sd);
+  else if (ay && aS)
+    out = call(y, mud, S);
+  else if (am && aS)
+    out = call(yd, mu, S);
+  else if (ay)
+    out = call(y, mud, Sd);
+  else if (am)
+    out = call(yd, mu, Sd);
+  else if (aS)
+    out = call(yd, mud, S);
+  else
+    return call(yd, mud, Sd);
 
   const double v = out.val();
   if constexpr (Grad) {
@@ -310,9 +315,7 @@ void lkj_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkj_eval<false>(ctx); }
 void lkj_bwd(KernelCtx& ctx) { lkj_eval<true>(ctx); }
 // lkj_corr takes the correlation matrix itself where the cholesky form
 // takes its factor: identical argument shapes, so identical kernel.
-void lkjc_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = lkj_eval<false, false>(ctx);
-}
+void lkjc_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkj_eval<false, false>(ctx); }
 void lkjc_bwd(KernelCtx& ctx) { lkj_eval<true, false>(ctx); }
 
 // ---- normal_id_glm_lpdf(y | X, alpha, beta, sigma) ------------------------
@@ -334,10 +337,14 @@ double nid_glm_eval(KernelCtx& ctx) {
     return propto ? stan::math::normal_id_glm_lpdf<true>(yd, X, a, beta, s)
                   : stan::math::normal_id_glm_lpdf<false>(yd, X, a, beta, s);
   };
-  if (one_a && one_s) out = call(alpha(0), sigma(0));
-  else if (one_a) out = call(alpha(0), sigma);
-  else if (one_s) out = call(alpha, sigma(0));
-  else out = call(alpha, sigma);
+  if (one_a && one_s)
+    out = call(alpha(0), sigma(0));
+  else if (one_a)
+    out = call(alpha(0), sigma);
+  else if (one_s)
+    out = call(alpha, sigma(0));
+  else
+    out = call(alpha, sigma);
   const double v = out.val();
   // One tape per gradient, not two. The forward differentiates it once
   // with a seed of 1 and keeps the partials; the backward is then the
@@ -468,10 +475,10 @@ double wish_eval(KernelCtx& ctx) {
   }
   return v;
 }
-#define STANLI_WISH_KERNEL(name, kind)                                    \
-  void name##_fwd(KernelCtx& ctx) {                                       \
-    ctx.out.data[0] = wish_eval<false, kind>(ctx);                        \
-  }                                                                       \
+#define STANLI_WISH_KERNEL(name, kind)             \
+  void name##_fwd(KernelCtx& ctx) {                \
+    ctx.out.data[0] = wish_eval<false, kind>(ctx); \
+  }                                                \
   void name##_bwd(KernelCtx& ctx) { wish_eval<true, kind>(ctx); }
 STANLI_WISH_KERNEL(wish, kWishart)
 STANLI_WISH_KERNEL(iwish, kInvWishart)
@@ -523,8 +530,7 @@ double mst_eval(KernelCtx& ctx) {
   ys.reserve(reps);
   for (int64_t r = 0; r < reps; ++r) {
     VarV yy(K);
-    for (int64_t i = 0; i < K; ++i)
-      yy(i) = ctx.in[0].data[r * K + i];
+    for (int64_t i = 0; i < K; ++i) yy(i) = ctx.in[0].data[r * K + i];
     ys.push_back(std::move(yy));
   }
   var nu = ctx.in[1].data[0];
@@ -535,9 +541,10 @@ double mst_eval(KernelCtx& ctx) {
       return propto ? stan::math::multi_student_t_lpdf<true>(yarg, nu, mu, S)
                     : stan::math::multi_student_t_lpdf<false>(yarg, nu, mu, S);
     } else {
-      return propto
-                 ? stan::math::multi_student_t_cholesky_lpdf<true>(yarg, nu, mu, S)
-                 : stan::math::multi_student_t_cholesky_lpdf<false>(yarg, nu, mu, S);
+      return propto ? stan::math::multi_student_t_cholesky_lpdf<true>(yarg, nu,
+                                                                      mu, S)
+                    : stan::math::multi_student_t_cholesky_lpdf<false>(yarg, nu,
+                                                                       mu, S);
     }
   };
   var out = reps > 1 ? call(ys) : call(ys[0]);
@@ -629,9 +636,8 @@ double wiener_eval(KernelCtx& ctx) {
   VarV y = tail_v(ctx, 0, n);
   var alpha = ctx.in[1].data[0], tau = ctx.in[2].data[0];
   var beta = ctx.in[3].data[0], delta = ctx.in[4].data[0];
-  var out = propto
-                ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
-                : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
+  var out = propto ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
+                   : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
   const double v = out.val();
   if constexpr (Grad) {
     var j = out * ctx.out_adj;
@@ -645,10 +651,8 @@ double wiener_eval(KernelCtx& ctx) {
   return v;
 }
 
-#define STANLI_TAIL_KERNEL(name, fn, kind)                                \
-  void name##_fwd(KernelCtx& ctx) {                                       \
-    ctx.out.data[0] = fn<false, kind>(ctx);                               \
-  }                                                                       \
+#define STANLI_TAIL_KERNEL(name, fn, kind)                                    \
+  void name##_fwd(KernelCtx& ctx) { ctx.out.data[0] = fn<false, kind>(ctx); } \
   void name##_bwd(KernelCtx& ctx) { fn<true, kind>(ctx); }
 STANLI_TAIL_KERNEL(mgp, mgp_eval, kMultiGp)
 STANLI_TAIL_KERNEL(mgpc, mgp_eval, kMultiGpChol)
@@ -710,8 +714,10 @@ double tglm_eval(KernelCtx& ctx) {
     std::vector<int> NN(ctx.idata + rows, ctx.idata + 2 * rows);
     var alpha = ctx.in[1].data[0];
     VarV beta = tail_v(ctx, 2, cols);
-    out = propto ? stan::math::binomial_logit_glm_lpmf<true>(nn, NN, X, alpha, beta)
-                 : stan::math::binomial_logit_glm_lpmf<false>(nn, NN, X, alpha, beta);
+    out = propto ? stan::math::binomial_logit_glm_lpmf<true>(nn, NN, X, alpha,
+                                                             beta)
+                 : stan::math::binomial_logit_glm_lpmf<false>(nn, NN, X, alpha,
+                                                              beta);
     const double v0 = out.val();
     if constexpr (Grad) {
       var j = out * ctx.out_adj;
@@ -726,8 +732,10 @@ double tglm_eval(KernelCtx& ctx) {
     if constexpr (Kind == kCatLogitGlm) {
       VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
       VarM beta = tail_m(ctx, 2, cols, ctx.in[2].len / cols);
-      out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y, X, alpha, beta)
-                   : stan::math::categorical_logit_glm_lpmf<false>(y, X, alpha, beta);
+      out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y, X, alpha,
+                                                                  beta)
+                   : stan::math::categorical_logit_glm_lpmf<false>(y, X, alpha,
+                                                                   beta);
       const double vv = out.val();
       if constexpr (Grad) {
         var j = out * ctx.out_adj;
@@ -741,8 +749,10 @@ double tglm_eval(KernelCtx& ctx) {
       // in = {X, beta, cutpoints}; alpha above is beta for this one.
       VarV beta = tail_v(ctx, 1, cols);
       VarV cuts = tail_v(ctx, 2, ctx.in[2].len);
-      out = propto ? stan::math::ordered_logistic_glm_lpmf<true>(y, X, beta, cuts)
-                   : stan::math::ordered_logistic_glm_lpmf<false>(y, X, beta, cuts);
+      out =
+          propto
+              ? stan::math::ordered_logistic_glm_lpmf<true>(y, X, beta, cuts)
+              : stan::math::ordered_logistic_glm_lpmf<false>(y, X, beta, cuts);
       const double vv = out.val();
       if constexpr (Grad) {
         var j = out * ctx.out_adj;
@@ -774,13 +784,10 @@ void olglm_bwd(KernelCtx& ctx) { tglm_eval<true, kOrdLogisticGlm>(ctx); }
 }  // namespace
 
 void register_matrix_kernels() {
-  register_kernel(OP_GP_EXP_QUAD_COV,
-                  Kernel{gp_cov_fwd, gp_cov_bwd, nullptr});
+  register_kernel(OP_GP_EXP_QUAD_COV, Kernel{gp_cov_fwd, gp_cov_bwd, nullptr});
   register_kernel(OP_WISHART_LPDF, Kernel{wish_fwd, wish_bwd, nullptr});
-  register_kernel(OP_INV_WISHART_LPDF,
-                  Kernel{iwish_fwd, iwish_bwd, nullptr});
-  register_kernel(OP_WISHART_CHOL_LPDF,
-                  Kernel{wishc_fwd, wishc_bwd, nullptr});
+  register_kernel(OP_INV_WISHART_LPDF, Kernel{iwish_fwd, iwish_bwd, nullptr});
+  register_kernel(OP_WISHART_CHOL_LPDF, Kernel{wishc_fwd, wishc_bwd, nullptr});
   register_kernel(OP_INV_WISHART_CHOL_LPDF,
                   Kernel{iwishc_fwd, iwishc_bwd, nullptr});
   register_kernel(OP_MULTI_GP_LPDF, Kernel{mgp_fwd, mgp_bwd, nullptr});
@@ -805,8 +812,7 @@ void register_matrix_kernels() {
                   Kernel{olglm_fwd, olglm_bwd, nullptr});
   register_kernel(OP_DIAG_MATRIX, Kernel{diag_fwd, diag_bwd, nullptr});
   register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, nullptr});
-  register_kernel(OP_MULTI_NORMAL_CHOL_LPDF,
-                  Kernel{mnc_fwd, mnc_bwd, nullptr});
+  register_kernel(OP_MULTI_NORMAL_CHOL_LPDF, Kernel{mnc_fwd, mnc_bwd, nullptr});
   register_kernel(OP_MULTI_NORMAL_LPDF, Kernel{mn_fwd, mn_bwd, nullptr});
   register_kernel(OP_MULTI_NORMAL_PREC_LPDF,
                   Kernel{mnprec_fwd, mnprec_bwd, nullptr});
@@ -815,11 +821,9 @@ void register_matrix_kernels() {
                   Kernel{eigvals_fwd, eigvals_bwd, nullptr});
   register_kernel(OP_EIGENVECTORS_SYM,
                   Kernel{eigvecs_fwd, eigvecs_bwd, nullptr});
-  register_kernel(OP_TRANSPOSE,
-                  Kernel{transpose_fwd, transpose_bwd, nullptr});
+  register_kernel(OP_TRANSPOSE, Kernel{transpose_fwd, transpose_bwd, nullptr});
   register_kernel(OP_LKJ_CORR_CHOL_LPDF, Kernel{lkj_fwd, lkj_bwd, nullptr});
-  register_kernel(OP_LKJ_CORR_LPDF,
-                  Kernel{lkjc_fwd, lkjc_bwd, nullptr});
+  register_kernel(OP_LKJ_CORR_LPDF, Kernel{lkjc_fwd, lkjc_bwd, nullptr});
   register_kernel(OP_NORMAL_ID_GLM_LPDF,
                   Kernel{nid_glm_fwd, nid_glm_bwd, nid_glm_scratch});
 }

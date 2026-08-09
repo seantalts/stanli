@@ -79,26 +79,26 @@ int stanli_sample(stanli_model* m, uint32_t seed, int warmup, int samples,
 
 typedef struct {
   uint32_t seed;
-  int chains;      /* number of chains */
-  int chain_id;    /* id of the FIRST chain; chain c uses chain_id + c,
-                    * which is how CmdStan turns one seed into per-chain
-                    * streams. Matching it means a matched seed gives a
-                    * matched stream per chain. */
+  int chains;   /* number of chains */
+  int chain_id; /* id of the FIRST chain; chain c uses chain_id + c,
+                 * which is how CmdStan turns one seed into per-chain
+                 * streams. Matching it means a matched seed gives a
+                 * matched stream per chain. */
   int warmup;
-  int samples;     /* transitions, not stored rows: with thin > 1 a run
-                    * stores samples/thin of them, as CmdStan does */
+  int samples; /* transitions, not stored rows: with thin > 1 a run
+                * stores samples/thin of them, as CmdStan does */
   int thin;
-  double delta;    /* target acceptance statistic */
+  double delta; /* target acceptance statistic */
   int max_depth;
-  int save_warmup; /* store warmup draws ahead of the sampling draws */
-  double init_radius; /* uniform(-r, r) on the unconstrained scale; 0
-                       * starts at the origin (CmdStan's `init=0`) */
+  int save_warmup;     /* store warmup draws ahead of the sampling draws */
+  double init_radius;  /* uniform(-r, r) on the unconstrained scale; 0
+                        * starts at the origin (CmdStan's `init=0`) */
   const double* inits; /* chains * n_unconstrained on the UNCONSTRAINED
                         * scale, or null for random inits. Unconstrained
                         * because that is the scale stanli can read: a
                         * constrained init would need the inverse
                         * parameter transforms, which do not exist yet. */
-  int num_threads; /* honoured only when stanli_thread_safe(); see there */
+  int num_threads;     /* honoured only when stanli_thread_safe(); see there */
 } stanli_sample_opts;
 
 /* Fill with CmdStan's defaults: seed 1, 4 chains from id 1, 1000 warmup,
@@ -172,8 +172,8 @@ enum {
  * 2021 via stan's own estimators -- the numbers stansummary prints.
  * A constant column yields NaN for R-hat and ESS, which is the honest
  * answer rather than a pass. Returns 0 on success. */
-int stanli_summary_stats(const double* draws, int64_t n_chains,
-                         int64_t n_draws, int64_t n_cols, double* out);
+int stanli_summary_stats(const double* draws, int64_t n_chains, int64_t n_draws,
+                         int64_t n_cols, double* out);
 
 /* Convergence diagnostics as prose: divergences, treedepth saturation,
  * E-BFMI, R-hat, and bulk/tail ESS, each either confirmed or reported
@@ -199,9 +199,9 @@ typedef struct {
   uint32_t seed;
   int chain_id;
   int iter;
-  int jacobian;        /* include the change-of-variables Jacobian, making
-                        * this the posterior MODE rather than the penalized
-                        * maximum likelihood. CmdStan defaults it off. */
+  int jacobian; /* include the change-of-variables Jacobian, making
+                 * this the posterior MODE rather than the penalized
+                 * maximum likelihood. CmdStan defaults it off. */
   double init_alpha;
   double tol_obj;
   double tol_rel_obj;
@@ -210,7 +210,7 @@ typedef struct {
   double tol_param;
   int history_size;
   double init_radius;
-  const double* init;  /* unconstrained, or null for a random start */
+  const double* init; /* unconstrained, or null for a random start */
 } stanli_optimize_opts;
 
 /* CmdStan's defaults. Call before setting fields, for the same reason
@@ -242,8 +242,8 @@ int stanli_constrain(stanli_model* m, const double* q, double* out);
 typedef void (*stanli_draw_cb)(int32_t i, int32_t warmup, void* user);
 int stanli_sample_stream(stanli_model* m, uint32_t seed, int warmup,
                          int samples, double delta, double* draws,
-                         stanli_draw_cb cb, void* user,
-                         char* err, size_t err_len);
+                         stanli_draw_cb cb, void* user, char* err,
+                         size_t err_len);
 
 /* write_array: every CSV column CmdStan would emit for one draw --
  * constrained parameters, transformed parameters, generated quantities,

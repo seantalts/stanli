@@ -31,7 +31,10 @@
 
 static int failures = 0;
 static void expect(const char* what, bool ok) {
-  if (!ok) { ++failures; std::printf("FAIL %s\n", what); }
+  if (!ok) {
+    ++failures;
+    std::printf("FAIL %s\n", what);
+  }
 }
 
 using namespace stanli;
@@ -226,8 +229,8 @@ static Graph random_graph(std::mt19937& rng, Fills& fills,
         const int rd = g.add_slot(1, false);
         g.add_op(OP_INDEX, {vec}, rd, {k});
         const int lp = g.add_slot(1, false);
-        const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.1 * s), rd, sigma},
-                                lp);
+        const int id =
+            g.add_op(OP_NORMAL_LPDF, {cslot(0.1 * s), rd, sigma}, lp);
         g.ops[id].variant = 0x06;
         terms.push_back(lp);
         break;
@@ -242,8 +245,8 @@ static Graph random_graph(std::mt19937& rng, Fills& fills,
         const int rd = g.add_slot(1, false);
         g.add_op(OP_INDEX, {vecp}, rd, {k});
         const int lp = g.add_slot(1, false);
-        const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.3 - 0.05 * s), rd,
-                                                 sigma}, lp);
+        const int id =
+            g.add_op(OP_NORMAL_LPDF, {cslot(0.3 - 0.05 * s), rd, sigma}, lp);
         g.ops[id].variant = 0x06;
         terms.push_back(lp);
         break;
@@ -252,8 +255,7 @@ static Graph random_graph(std::mt19937& rng, Fills& fills,
         const int a = g.add_slot(1, false);
         g.add_op(OP_ADD, {mu, cslot(0.4 * ((s % 3) + 1))}, a);
         const int lp = g.add_slot(1, false);
-        const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.2 * s), a, sigma},
-                                lp);
+        const int id = g.add_op(OP_NORMAL_LPDF, {cslot(0.2 * s), a, sigma}, lp);
         g.ops[id].variant = 0x06;
         terms.push_back(lp);
         break;
@@ -304,7 +306,10 @@ static void test_random_graphs_preserve_gradients() {
       if (!std::isfinite(got[i]) || !std::isfinite(want[i])) continue;
       const double rel =
           std::abs(got[i] - want[i]) / std::max(std::abs(want[i]), 1e-300);
-      if (rel > worst) { worst = rel; worst_at = trial; }
+      if (rel > worst) {
+        worst = rel;
+        worst_at = trial;
+      }
     }
   }
   if (worst >= 1e-12) {
@@ -320,7 +325,10 @@ int main() {
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);  // see the fuzz loop
   test_whitelist_backwards_ignore_values();
   test_random_graphs_preserve_gradients();
-  if (failures) { std::printf("%d failures\n", failures); return 1; }
+  if (failures) {
+    std::printf("%d failures\n", failures);
+    return 1;
+  }
   std::printf("test_pass_safety OK\n");
   return 0;
 }
