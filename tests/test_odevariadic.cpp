@@ -66,6 +66,41 @@ int main() {
   const double lp = ex.gradient(grad.data());
   expect("lp is finite", std::isfinite(lp));
 
+  // ---- the value-only forward ------------------------------------------
+  // ode_fwd is the only kernel that skips work under forward_value_only:
+  // it solves the states without the coupled sensitivity system, leaving
+  // ctx.scratch -- the jacobian ode_bwd reads -- unwritten. nuts.cpp and
+  // estimate.cpp run exactly this sequence on every ODE model, so a
+  // gradient taken after a value-only sweep must be the one taken before
+  // it. The value itself agrees only to solver tolerance: the two solves
+  // see different error estimates, which is deliberate and is what makes
+  // the value path CmdStan's log_prob<double>.
+  {
+    // Taken at a shifted point, so a solve that silently wrote nothing
+    // cannot pass on the previous sweep's leftovers in the arena.
+    for (int64_t k = 0; k < n; ++k)
+      ex.params_data()[k] = q[(size_t)k] + 0.05;
+    const double lp_vo = ex.forward_value_only();
+    const double lp_full = ex.forward();
+    const double dev =
+        std::fabs(lp_vo - lp_full) / std::max(1.0, std::fabs(lp_full));
+    if (!(dev < 1e-5)) {
+      ++failures;
+      std::printf("FAIL value-only lp differs from the coupled solve by "
+                  "%.3g relative\n",
+                  dev);
+    }
+
+    for (int64_t k = 0; k < n; ++k) ex.params_data()[k] = q[(size_t)k];
+    std::vector<double> grad2((size_t)n);
+    const double lp2 = ex.gradient(grad2.data());
+    expect("lp after a value-only sweep is bitwise the one before", lp2 == lp);
+    for (int64_t i = 0; i < n; ++i)
+      expect("gradient " + std::to_string(i) +
+                 " after a value-only sweep is bitwise the one before",
+             grad2[(size_t)i] == grad[(size_t)i]);
+  }
+
   // ---- finite differences ----------------------------------------------
   // Every parameter must have a nonzero gradient: each one enters the
   // right-hand side, so a zero here means the argument never reached it.
