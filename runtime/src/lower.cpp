@@ -132,16 +132,6 @@ struct Lowering {
         if (e.name == "Plus__") return eval_int(e.args[0]) + eval_int(e.args[1]);
         if (e.name == "Minus__") return eval_int(e.args[0]) - eval_int(e.args[1]);
         if (e.name == "Times__") return eval_int(e.args[0]) * eval_int(e.args[1]);
-        if (e.name == "dims" && e.args.size() == 1 &&
-            e.args[0].kind == mir::Expr::Var) {
-          auto sit = scope.find(e.args[0].name);
-          if (sit != scope.end()) {
-            const SlotInfo& si = info[sit->second];
-            // Only reachable through an index, which eval_int resolves on
-            // the returned sequence; expose rows for matrices, len else.
-            return si.rows > 0 ? si.rows : si.len;
-          }
-        }
         // Anything data-only the td interpreter can evaluate (sum of an
         // int array in a size expression, etc.).
         if (e.data_only) {
