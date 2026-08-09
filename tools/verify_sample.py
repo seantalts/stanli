@@ -19,6 +19,7 @@ import sys
 import tempfile
 import zipfile
 
+from cmdstan_ref import compile_cmd
 # The deviation arithmetic lives in the replay script, not here, so a
 # change to it cannot land in the recorder without landing in the CI gate.
 from verify_refs import pair_dev, parse_wa
@@ -55,14 +56,6 @@ def main():
     cs = pathlib.Path(sys.argv[1])
     pdb = pathlib.Path(sys.argv[2]) / "posterior_database"
     models = sys.argv[3:]
-    math = cs / "stan" / "lib" / "stan_math"
-    lib = lambda pat: next((math / "lib").glob(pat))
-    inc = [
-        cs / "stan" / "src", math,
-        next((cs / "stan" / "lib").glob("rapidjson_*")),
-        lib("eigen_*"), lib("boost_*"),
-        lib("sundials_*") / "include", lib("tbb_*") / "include",
-    ]
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_verify_"))
 
     datas = {}
@@ -84,22 +77,8 @@ def main():
         subprocess.run([str(REPO / "deps/stanc3/stanc"), str(stan),
                         f"--o={hpp}"], check=True)
         exe = tmp / f"{model}_ref"
-        tbb = math / "lib" / "tbb"
-        # -ffp-contract=off matches CmdStan's own build (stan-math's
-        # makefiles set it); without it the reference binary forms FMAs and
-        # drifts a few ULP from what CmdStan actually computes.
         # ODE models pull in CVODES; CmdStan ships it prebuilt.
-        sun = lib("sundials_*") / "lib"
-        cmd = ["clang++", "-std=c++17", "-O1", "-ffp-contract=off",
-               "-D_REENTRANT",
-               "-DBOOST_DISABLE_ASSERTS", "-include", str(hpp),
-               str(REPO / "tools/ref_driver.cpp"),
-               f"-L{tbb}", "-ltbb", f"-Wl,-rpath,{tbb}",
-               f"-L{sun}", "-lsundials_cvodes", "-lsundials_idas",
-               "-lsundials_kinsol", "-lsundials_nvecserial",
-               "-o", str(exe)]
-        for i in inc:
-            cmd.insert(3, f"-I{i}")
+        cmd = compile_cmd(cs, hpp, REPO / "tools/ref_driver.cpp", exe)
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             print(f"BUILD_FAIL {model}: {r.stderr.splitlines()[-1][:120]}")

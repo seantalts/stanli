@@ -45,6 +45,9 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from cmdstan_ref import build_reference, compare_points  # noqa: E402
+
 # Which build tree to test. --build points it elsewhere; the default
 # is the Release tree the wheel ships from.
 BUILD = "build-rel"
@@ -258,45 +261,18 @@ def sweep_one(spec, cs, tmp, keep, density=True):
         why = (ours.stdout + ours.stderr).strip().splitlines()[-1]
         return name, "unsupported", why[:60], None, None
 
-    math = cs / "stan" / "lib" / "stan_math"
-    hpp = d / f"{name}.hpp"
-    if not run([str(REPO / "deps/stanc3/stanc"), str(stan), f"--o={hpp}"]).returncode == 0:
-        return name, "stanc_fail", "", None, None
-    exe = d / "ref"
-    inc = [cs / "stan" / "src", math,
-           next((cs / "stan" / "lib").glob("rapidjson_*")),
-           next((math / "lib").glob("eigen_*")),
-           next((math / "lib").glob("boost_*")),
-           next((math / "lib").glob("sundials_*")) / "include",
-           next((math / "lib").glob("tbb_*")) / "include"]
-    tbb = math / "lib" / "tbb"
-    build = run(["clang++", "-std=c++17", "-O1", "-ffp-contract=off",
-                 "-D_REENTRANT", "-DBOOST_DISABLE_ASSERTS"]
-                + [f"-I{i}" for i in inc]
-                + ["-include", str(hpp), str(REPO / "tools/ref_driver.cpp"),
-                   f"-L{tbb}", "-ltbb", f"-Wl,-rpath,{tbb}", "-o", str(exe)])
-    if build.returncode != 0:
-        return name, "ref_build_fail", build.stderr.strip()[-60:], None, None
+    exe, err = build_reference(cs, d, stan, REPO / "tools/ref_driver.cpp",
+                               REPO / "deps/stanc3/stanc", name=name,
+                               sundials=False, run=run, trim=60)
+    if exe is None:
+        status, _, note = err.partition(": ")
+        return name, status, note, None, None
 
-    worst = 0
-    for point in range(3):
-        ref = run([str(exe), str(data), str(point)])
-        got = run([str(REPO / BUILD / "stanli_check"), str(stan), str(data),
-                   "--stanc", str(REPO / "deps/stanc3/stanc"),
-                   "--point", str(point)])
-        rf = [l for l in ref.stdout.splitlines() if l.startswith("OK")]
-        gf = [l for l in got.stdout.splitlines() if l.startswith("OK")]
-        if not rf or not gf:
-            # Both rejecting the point is fine (outside the support at that
-            # perturbation); one rejecting is not.
-            if bool(rf) != bool(gf):
-                return name, "one_side_threw", f"point {point}", None, None
-            continue
-        a = [float(x) for x in rf[0].split()[1:]]
-        b = [float(x) for x in gf[0].split()[1:]]
-        if len(a) != len(b):
-            return name, "shape_mismatch", "", None, None
-        worst = max([worst] + [ulps(x, y) for x, y in zip(a, b)])
+    worst, _, err = compare_points(exe, REPO / BUILD / "stanli_check", stan,
+                                   data, ulps, REPO / "deps/stanc3/stanc",
+                                   run=run)
+    if err:
+        return name, err[0], err[1], None, None
 
     ns = None
     sexp = d / "m.sexp"

@@ -28,6 +28,9 @@ import sys
 
 REPO = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 CMDSTAN = pathlib.Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else None
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent
+                       / "tools"))
+from cmdstan_ref import build_reference, compare_points  # noqa: E402
 # A temp dir, NOT the harness directory: these models generate a .stan,
 # a .hpp, and a compiled reference binary each, and writing them beside
 # the source is how they end up in a commit.
@@ -328,62 +331,18 @@ def reldiff(a, b):
     return d / scale
 
 
-def build_ref(cs, d, stan, name):
-    math = cs / "stan" / "lib" / "stan_math"
-    hpp = d / f"{name}.hpp"
-    r = subprocess.run(
-        [str(REPO / "deps/stanc3/stanc"), str(stan), f"--o={hpp}"],
-        capture_output=True, text=True)
-    if r.returncode != 0:
-        return None, "stanc_fail"
-    inc = [cs / "stan" / "src", math,
-           next((cs / "stan" / "lib").glob("rapidjson_*")),
-           next((math / "lib").glob("eigen_*")),
-           next((math / "lib").glob("boost_*")),
-           next((math / "lib").glob("sundials_*")) / "include",
-           next((math / "lib").glob("tbb_*")) / "include"]
-    tbb = math / "lib" / "tbb"
-    exe = d / "ref"
-    b = subprocess.run(
-        ["clang++", "-std=c++17", "-O1", "-ffp-contract=off", "-D_REENTRANT",
-         "-DBOOST_DISABLE_ASSERTS"] + [f"-I{i}" for i in inc]
-        + ["-include", str(hpp), str(REPO / "tools/ref_driver.cpp"),
-           f"-L{tbb}", "-ltbb", f"-Wl,-rpath,{tbb}", "-o", str(exe)],
-        capture_output=True, text=True)
-    if b.returncode != 0:
-        return None, "ref_build_fail: " + b.stderr.strip()[-90:]
-    return exe, None
-
-
 def verify_one(cs, d, name, check, stanc):
     """lp and every gradient component, at three deterministic points."""
     stan, data = d / "m.stan", d / "d.json"
-    exe, err = build_ref(cs, d, stan, name)
+    exe, err = build_reference(cs, d, stan, REPO / "tools/ref_driver.cpp",
+                               stanc, name=name, sundials=False)
     if exe is None:
         return err
-    worst, n_cmp = 0.0, 0
-    for point in range(3):
-        ref = subprocess.run([str(exe), str(data), str(point)],
-                             capture_output=True, text=True)
-        got = subprocess.run(
-            [str(check), str(stan), str(data), "--stanc", str(stanc),
-             "--point", str(point)], capture_output=True, text=True)
-        rf = [l for l in ref.stdout.splitlines() if l.startswith("OK")]
-        gf = [l for l in got.stdout.splitlines() if l.startswith("OK")]
-        # CmdStan spells an invalid point as a row of nan; stanli_check
-        # prints no OK line at all. Both mean "not a point".
-        if rf and all(x != x for x in (float(v) for v in rf[0].split()[1:])):
-            rf = []
-        if not rf or not gf:
-            if bool(rf) != bool(gf):
-                return f"one side threw at point {point}"
-            continue
-        a = [float(x) for x in rf[0].split()[1:]]
-        b = [float(x) for x in gf[0].split()[1:]]
-        if len(a) != len(b):
-            return f"shape mismatch: cmdstan {len(a)}, stanli {len(b)}"
-        n_cmp += len(a)
-        worst = max([worst] + [reldiff(x, y) for x, y in zip(a, b)])
+    worst, n_cmp, err = compare_points(exe, check, stan, data, reldiff, stanc)
+    if err:
+        kind, detail = err
+        return (f"one side threw at {detail}" if kind == "one_side_threw"
+                else f"shape mismatch: {detail}")
     if n_cmp == 0:
         return "no valid point"
     if worst > MAX_REL:

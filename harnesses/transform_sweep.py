@@ -29,6 +29,8 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from cmdstan_ref import build_reference, compare_points  # noqa: E402
 
 # name -> (parameters block, target expression). The target has to touch
 # every element of the constrained value, or a transform could be wrong in
@@ -95,30 +97,6 @@ def ulps(a, b):
     return abs(ia - ib)
 
 
-def build_reference(cs, d, stan, name):
-    """CmdStan's own generated model, compiled against ref_driver."""
-    math = cs / "stan" / "lib" / "stan_math"
-    hpp = d / f"{name}.hpp"
-    if run([REPO / "deps/stanc3/stanc", stan, f"--o={hpp}"]).returncode != 0:
-        return None, "stanc_fail"
-    inc = [cs / "stan" / "src", math,
-           next((cs / "stan" / "lib").glob("rapidjson_*")),
-           next((math / "lib").glob("eigen_*")),
-           next((math / "lib").glob("boost_*")),
-           next((math / "lib").glob("sundials_*")) / "include",
-           next((math / "lib").glob("tbb_*")) / "include"]
-    tbb = math / "lib" / "tbb"
-    exe = d / "ref"
-    b = run(["clang++", "-std=c++17", "-O1", "-ffp-contract=off",
-             "-D_REENTRANT", "-DBOOST_DISABLE_ASSERTS"]
-            + [f"-I{i}" for i in inc]
-            + ["-include", hpp, REPO / "tools/ref_driver.cpp",
-               f"-L{tbb}", "-ltbb", f"-Wl,-rpath,{tbb}", "-o", exe])
-    if b.returncode != 0:
-        return None, "ref_build_fail: " + b.stderr.strip()[-90:]
-    return exe, None
-
-
 def sweep_one(case, cs, tmp, build):
     name, params, target = case
     d = tmp / name
@@ -134,41 +112,18 @@ def sweep_one(case, cs, tmp, build):
         why = (ours.stdout + ours.stderr).strip().splitlines()[-1]
         return name, "unsupported", why[:70]
 
-    exe, err = build_reference(cs, d, stan, name)
+    exe, err = build_reference(cs, d, stan, REPO / "tools/ref_driver.cpp",
+                               REPO / "deps/stanc3/stanc", name=name,
+                               sundials=False, run=run)
     if exe is None:
         return name, "ref_fail", err
 
-    worst, n_cmp = 0, 0
-    for point in range(3):
-        ref = run([exe, data, point])
-        got = run([check, stan, data, "--stanc",
-                   REPO / "deps/stanc3/stanc", "--point", point])
-        rf = [l for l in ref.stdout.splitlines() if l.startswith("OK")]
-        gf = [l for l in got.stdout.splitlines() if l.startswith("OK")]
-        # The two engines spell "this point is invalid" differently, and
-        # reading that as disagreement would be wrong. stanli_check
-        # reports EVAL_FAIL and prints no OK line; CmdStan's log_prob
-        # returns a row of nan and only throws later, out of write_array.
-        # A unit_vector at the origin is exactly this: both say norm 0 is
-        # not a point, in different words. So an all-nan reference row
-        # counts as a rejection.
-        if rf and all(x != x for x in
-                      (float(v) for v in rf[0].split()[1:])):
-            rf = []
-        if not rf or not gf:
-            # Both rejecting is agreement (the point is outside the
-            # support); one rejecting is a real disagreement.
-            if bool(rf) != bool(gf):
-                return name, "one_side_threw", f"point {point}"
-            continue
-        a = [float(x) for x in rf[0].split()[1:]]
-        b = [float(x) for x in gf[0].split()[1:]]
-        if len(a) != len(b):
-            # This is the unconstrained-size check: a wrong free-parameter
-            # count for corr_matrix vs cov_matrix lands exactly here.
-            return name, "shape_mismatch", f"cmdstan {len(a)}, stanli {len(b)}"
-        n_cmp += len(a)
-        worst = max([worst] + [ulps(x, y) for x, y in zip(a, b)])
+    # shape_mismatch here is the unconstrained-size check: a wrong
+    # free-parameter count for corr_matrix vs cov_matrix lands exactly there.
+    worst, n_cmp, err = compare_points(exe, check, stan, data, ulps,
+                                       REPO / "deps/stanc3/stanc", run=run)
+    if err:
+        return (name,) + err
     if n_cmp == 0:
         return name, "no_valid_point", ""
     return name, "ok", f"{n_cmp} values, {worst} ulp"

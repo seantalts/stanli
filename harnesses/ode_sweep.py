@@ -26,6 +26,8 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from cmdstan_ref import build_reference, compare_points  # noqa: E402
 
 # The gate, as a RELATIVE difference rather than in ULPs. An ODE solve is
 # iterative, so bitwise is not a bar an integrator can be held to the way
@@ -158,37 +160,6 @@ def reldiff(a, b):
     return d / scale
 
 
-def build_reference(cs, d, stan, name):
-    math = cs / "stan" / "lib" / "stan_math"
-    hpp = d / f"{name}.hpp"
-    if run([REPO / "deps/stanc3/stanc", stan, f"--o={hpp}"]).returncode != 0:
-        return None, "stanc_fail"
-    inc = [cs / "stan" / "src", math,
-           next((cs / "stan" / "lib").glob("rapidjson_*")),
-           next((math / "lib").glob("eigen_*")),
-           next((math / "lib").glob("boost_*")),
-           next((math / "lib").glob("sundials_*")) / "include",
-           next((math / "lib").glob("tbb_*")) / "include"]
-    tbb = math / "lib" / "tbb"
-    sun = next((math / "lib").glob("sundials_*")) / "lib"
-    exe = d / "ref"
-    # CVODES for the bdf/adams solvers: the rk45 drivers link without it,
-    # so leaving it out made those two fail to BUILD and look like a
-    # coverage gap rather than a missing -l.
-    libs = []
-    for a in sorted(sun.glob("*.a")):
-        libs.append(str(a))
-    b = run(["clang++", "-std=c++17", "-O1", "-ffp-contract=off",
-             "-D_REENTRANT", "-DBOOST_DISABLE_ASSERTS"]
-            + [f"-I{i}" for i in inc]
-            + ["-include", hpp, REPO / "tools/ref_driver.cpp"]
-            + libs
-            + [f"-L{tbb}", "-ltbb", f"-Wl,-rpath,{tbb}", "-o", exe])
-    if b.returncode != 0:
-        return None, "ref_build_fail: " + b.stderr.strip()[-100:]
-    return exe, None
-
-
 def sweep_one(case, cs, tmp, build, legacy=False):
     name, extra, call = case
     d = tmp / name
@@ -206,29 +177,16 @@ def sweep_one(case, cs, tmp, build, legacy=False):
         why = (ours.stdout + ours.stderr).strip().splitlines()[-1]
         return name, "unsupported", why[:80]
 
-    exe, err = build_reference(cs, d, stan, name)
+    exe, err = build_reference(cs, d, stan, REPO / "tools/ref_driver.cpp",
+                               REPO / "deps/stanc3/stanc", name=name,
+                               run=run, trim=100)
     if exe is None:
         return name, "ref_fail", err
 
-    worst, n_cmp = 0, 0
-    for point in range(3):
-        ref = run([exe, data, point])
-        got = run([check, stan, data, "--stanc",
-                   REPO / "deps/stanc3/stanc", "--point", point])
-        rf = [l for l in ref.stdout.splitlines() if l.startswith("OK")]
-        gf = [l for l in got.stdout.splitlines() if l.startswith("OK")]
-        if rf and all(x != x for x in (float(v) for v in rf[0].split()[1:])):
-            rf = []
-        if not rf or not gf:
-            if bool(rf) != bool(gf):
-                return name, "one_side_threw", f"point {point}"
-            continue
-        a = [float(x) for x in rf[0].split()[1:]]
-        b = [float(x) for x in gf[0].split()[1:]]
-        if len(a) != len(b):
-            return name, "shape_mismatch", f"cmdstan {len(a)}, stanli {len(b)}"
-        n_cmp += len(a)
-        worst = max([worst] + [reldiff(x, y) for x, y in zip(a, b)])
+    worst, n_cmp, err = compare_points(exe, check, stan, data, reldiff,
+                                       REPO / "deps/stanc3/stanc", run=run)
+    if err:
+        return (name,) + err
     if n_cmp == 0:
         return name, "no_valid_point", ""
     # An ODE solve is iterative, so bitwise is not the bar an integrator

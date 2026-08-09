@@ -30,6 +30,9 @@ import time
 import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from cmdstan_ref import compile_cmd  # noqa: E402
+
 BENCH = REPO / "build-rel/bench_grad"
 RUN = REPO / "build-rel/stanli_run"
 STANC = REPO / "deps/stanc3/stanc"
@@ -173,28 +176,10 @@ def main():
             hpp = work / f"{model}.hpp"
             if run([str(STANC), str(work / f"{model}.stan"), f"--o={hpp}"],
                    timeout) and hpp.exists():
-                math = cs / "stan" / "lib" / "stan_math"
-                inc = [cs / "stan" / "src", math,
-                       next((cs / "stan" / "lib").glob("rapidjson_*")),
-                       next((math / "lib").glob("eigen_*")),
-                       next((math / "lib").glob("boost_*")),
-                       next((math / "lib").glob("sundials_*")) / "include",
-                       next((math / "lib").glob("tbb_*")) / "include"]
-                tbb = math / "lib" / "tbb"
-                # rk45 is header-only Boost odeint, but bdf/adams reach
-                # CVODES: without these the link fails on one model and
-                # the row loses its CmdStan number with nothing to say why.
-                sun = next((math / "lib").glob("sundials_*")) / "lib"
                 gexe = work / "gradbench"
-                cmd = (["clang++", "-std=c++17", "-O3", "-ffp-contract=off",
-                        "-D_REENTRANT", "-DBOOST_DISABLE_ASSERTS"] +
-                       [f"-I{i}" for i in inc] +
-                       ["-include", str(hpp),
-                        str(REPO / "tools/bench_cmdstan_grad.cpp"),
-                        f"-L{tbb}", "-ltbb", f"-Wl,-rpath,{tbb}"] +
-                       [str(sun / f"libsundials_{n}.a")
-                        for n in ("cvodes", "idas", "kinsol", "nvecserial")] +
-                       ["-o", str(gexe)])
+                cmd = compile_cmd(cs, hpp,
+                                  REPO / "tools/bench_cmdstan_grad.cpp",
+                                  gexe, opt="-O3")
                 if not run(cmd, timeout):
                     notes.append("cmdstan_grad_build_fail")
                 else:
