@@ -7,16 +7,6 @@
 namespace stanli {
 namespace {
 
-void lse_fwd(KernelCtx& ctx) {
-  Eigen::Map<const Eigen::VectorXd> x(ctx.in[0].data, ctx.in[0].len);
-  ctx.out.data[0] = stan::math::log_sum_exp(x);
-}
-void lse_bwd(KernelCtx& ctx) {
-  legacy_bwd_vec_in(ctx, [](const auto& x) {
-    return stan::math::log_sum_exp(x);
-  });
-}
-
 void softmax_fwd(KernelCtx& ctx) {
   Eigen::Map<const Eigen::VectorXd> x(ctx.in[0].data, ctx.in[0].len);
   Eigen::Map<Eigen::VectorXd> out(ctx.out.data, ctx.out.len);
@@ -119,39 +109,6 @@ void dirichlet_fwd(KernelCtx& ctx) {
 }
 void dirichlet_bwd(KernelCtx& ctx) { dirichlet_eval<true>(ctx); }
 
-// Binary scalar log_sum_exp via nested replay.
-void lse2_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] =
-      stan::math::log_sum_exp(ctx.in[0].data[0], ctx.in[1].data[0]);
-}
-void lse2_bwd(KernelCtx& ctx) {
-  stan::math::nested_rev_autodiff nested;
-  using stan::math::var;
-  var a = ctx.in[0].data[0], b = ctx.in[1].data[0];
-  var j = stan::math::log_sum_exp(a, b) * ctx.out_adj;
-  stan::math::grad(j.vi_);
-  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += a.adj();
-  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += b.adj();
-}
-
-// log_mix(theta, a, b), all scalars, via nested replay.
-void log_mix_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = stan::math::log_mix(
-      ctx.in[0].data[0], ctx.in[1].data[0], ctx.in[2].data[0]);
-}
-void log_mix_bwd(KernelCtx& ctx) {
-  stan::math::nested_rev_autodiff nested;
-  using stan::math::var;
-  var t = ctx.in[0].data[0], a = ctx.in[1].data[0], b = ctx.in[2].data[0];
-  var j = stan::math::log_mix(t, a, b) * ctx.out_adj;
-  stan::math::grad(j.vi_);
-  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += t.adj();
-  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += a.adj();
-  if (ctx.in_adj[2].data) ctx.in_adj[2].data[0] += b.adj();
-}
-
-}  // namespace
-
 void log_softmax_fwd(KernelCtx& ctx) {
   Eigen::Map<const Eigen::VectorXd> x(ctx.in[0].data, ctx.in[0].len);
   Eigen::Map<Eigen::VectorXd> out(ctx.out.data, ctx.out.len);
@@ -162,6 +119,8 @@ void log_softmax_bwd(KernelCtx& ctx) {
     return stan::math::log_softmax(x);
   });
 }
+
+}  // namespace
 
 void register_legacy_kernels() {
   register_kernel(OP_LOG_SOFTMAX,
