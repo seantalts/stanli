@@ -51,16 +51,14 @@ std::vector<double> initial_point(Executor& ex, uint32_t seed, int chain_id,
       "and gradient");
 }
 
-// The optimizer is templated on whether the change-of-variables Jacobian
-// is included, so both forms have to be instantiated. Everything else is
-// identical, which is why this is a template rather than two functions.
-template <bool Jacobian>
+// run_optimize refuses the Jacobian-free form before it gets here, so only
+// the Jacobian form is ever instantiated.
 int run_lbfgs(ExecutorModel& model, std::vector<double>& cont,
               const OptimizeConfig& cfg, double* lp_out, std::string* msg) {
   using Optimizer =
       stan::optimization::BFGSLineSearch<ExecutorModel,
                                          stan::optimization::LBFGSUpdate<>,
-                                         double, Eigen::Dynamic, Jacobian>;
+                                         double, Eigen::Dynamic, true>;
   std::vector<int> disc;
   std::stringstream ss;
   Optimizer opt(model, cont, disc, &ss);
@@ -111,10 +109,7 @@ OptimizeResult run_optimize(Executor& ex, const WriteArray* wa,
   std::vector<double> cont =
       initial_point(ex, cfg.seed, cfg.chain_id, cfg.init_radius, cfg.init);
 
-  out.return_code = cfg.jacobian
-                        ? run_lbfgs<true>(model, cont, cfg, &out.lp, &out.message)
-                        : run_lbfgs<false>(model, cont, cfg, &out.lp,
-                                           &out.message);
+  out.return_code = run_lbfgs(model, cont, cfg, &out.lp, &out.message);
   out.unconstrained = cont;
   if (wa != nullptr) {
     out.names = wa->names;
