@@ -1,6 +1,7 @@
 // In-place functional updates: a chain of OP_SET_INDEX writes into the
 // same vector must collapse onto one buffer (O(N) instead of O(N^2)) with
 // values and gradients unchanged.
+#include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/graph.hpp>
 #include <stanli/inplace.hpp>
@@ -363,8 +364,36 @@ static void test_dead_slots_freed() {
   expect("dead slots freed (arena linear)", after < (int64_t)(8 * N + 64));
 }
 
+// STANLI_NO_INPLACE switches both entry points off; inplace.cpp reads the
+// variable once per pass. harnesses/ab_corpus.py builds its whole A side out
+// of this and the three sibling switches, so a rename here would leave that
+// oracle comparing the optimized graph against itself, green, with no ctest
+// to catch it.
+static void test_env_disable() {
+  const int L = 8;
+  Fills fills;
+  std::vector<int> terms;
+  int n_vec = 0;
+  Graph g = build_chain(L, fills, terms, &n_vec);
+  const size_t before = g.ops.size();
+
+  test_setenv("STANLI_NO_INPLACE", "1", 1);
+  expect("disabled: no writes made in place", make_inplace_updates(g, {}) == 0);
+  expect("disabled: no stores forwarded", forward_stores_to_loads(g, {}) == 0);
+  expect("disabled: graph untouched", g.ops.size() == before);
+  for (const Op& op : g.ops)
+    expect("disabled: no destructive write",
+           op.opcode != OP_SET_INDEX_INPLACE);
+  test_unsetenv("STANLI_NO_INPLACE");
+
+  // The same graph with the switch off: both passes do their work.
+  expect("enabled: writes made in place", make_inplace_updates(g, {}) == L - 1);
+  expect("enabled: stores forwarded", forward_stores_to_loads(g, {}) == 2 * L);
+}
+
 int main() {
   test_chain_collapses();
+  test_env_disable();
   test_native_lse_allows_destructive();
   test_store_to_load_forwarding();
   test_keeps_live_writes();

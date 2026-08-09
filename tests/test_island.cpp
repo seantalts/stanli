@@ -129,6 +129,25 @@ static void test_hmm_parity() {
     expect_close("hmm v" + std::to_string(i), got[i], want[i]);
 }
 
+// STANLI_NO_ISLAND switches the carver off entirely. harnesses/ab_corpus.py
+// builds its whole A side out of this and the three sibling switches, so a
+// rename here would leave that oracle comparing the optimized graph against
+// itself, green, with no ctest to catch it.
+static void test_env_disable() {
+  HmmGraph h = build_hmm(8);
+  const size_t before = h.g.ops.size();
+
+  test_setenv("STANLI_NO_ISLAND", "1", 1);
+  expect("disabled: nothing carved",
+         carve_islands(h.g, h.fills, h.terms, {}) == 0);
+  expect("disabled: graph untouched", h.g.ops.size() == before);
+  test_unsetenv("STANLI_NO_ISLAND");
+
+  // The same graph with the switch off: the run carves.
+  expect("enabled: one island",
+         carve_islands(h.g, h.fills, h.terms, {}) == 1);
+}
+
 static void test_short_run_untouched() {
   HmmGraph h = build_hmm(2);  // 22 body ops, under threshold
   const size_t before = h.g.ops.size();
@@ -347,6 +366,7 @@ int main() {
   // policy, tested separately below, and these are about correctness.
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
   test_hmm_parity();
+  test_env_disable();
   test_live_in_and_out_slot();
   test_short_run_untouched();
   test_propto_density_refused();
