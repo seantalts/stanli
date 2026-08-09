@@ -1,0 +1,14 @@
+name: lint
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The same binary that produced the tree's formatting: output
+      # drifts across clang-format major versions.
+      - run: pip install clang-format==22.1.8
+      - run: ./tools/format.sh --check

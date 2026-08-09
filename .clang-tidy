@@ -1,0 +1,10 @@
+# Config ships ahead of its CI job: run-clang-tidy joins lint.yml in the
+# PR that addresses what it finds, so this file changes no gate here.
+Checks: >
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  performance-*,
+  misc-unused-using-decls,
+  modernize-use-nullptr,
+  modernize-use-override
+HeaderFilterRegex: '(runtime|tools|tests)/'
