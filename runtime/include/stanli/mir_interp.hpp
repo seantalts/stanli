@@ -1190,16 +1190,12 @@ class MirInterp {
     // narrower fallback turns a slow path into an error. The discrete
     // ones are the interpreter's alone: the register file has nowhere to
     // put an integer outcome.
-    bool shared_density = false;
-#define STANLI_INTERP_DENSITY_NAME(code, fn, n) \
-  if (e.name == #fn) shared_density = true;
-    STANLI_PROGRAM_DENSITY_LIST(STANLI_INTERP_DENSITY_NAME)
-#undef STANLI_INTERP_DENSITY_NAME
-    if (shared_density || e.name == "bernoulli_lpmf" ||
+    const int shared_id = program_density_id_by_name(e.name);
+    if (shared_id >= 0 || e.name == "bernoulli_lpmf" ||
         e.name == "binomial_lpmf" || e.name == "poisson_lpmf" ||
-        e.name == "poisson_log_lpmf" || e.name == "student_t_lpdf" ||
-        e.name == "bernoulli_logit_lpmf" || e.name == "binomial_logit_lpmf" ||
-        e.name == "hypergeometric_lpmf" || e.name == "discrete_range_lpmf") {
+        e.name == "poisson_log_lpmf" || e.name == "bernoulli_logit_lpmf" ||
+        e.name == "binomial_logit_lpmf" || e.name == "hypergeometric_lpmf" ||
+        e.name == "discrete_range_lpmf") {
       std::vector<Value> av;
       for (const auto& a : e.args) av.push_back(eval(a));
       size_t n = 1;
@@ -1215,18 +1211,17 @@ class MirInterp {
       };
       T acc = T(0.0);
       for (size_t i = 0; i < n; ++i) {
-#define STANLI_INTERP_DENSITY_EVAL(code, fn, n)            \
-  if (e.name == #fn) {                                     \
-    if constexpr (n == 1)                                  \
-      acc += stan::math::fn(sc(0, i));                     \
-    else if constexpr (n == 2)                             \
-      acc += stan::math::fn(sc(0, i), sc(1, i));           \
-    else                                                   \
-      acc += stan::math::fn(sc(0, i), sc(1, i), sc(2, i)); \
-    continue;                                              \
-  }
-        STANLI_PROGRAM_DENSITY_LIST(STANLI_INTERP_DENSITY_EVAL)
-#undef STANLI_INTERP_DENSITY_EVAL
+        // The continuous ones go through the shared dispatch, so this
+        // cannot be narrower than what the register machine accepts and
+        // costs one instantiation of 27 densities rather than one per
+        // translation unit that interprets MIR.
+        if (shared_id >= 0) {
+          T argbuf[kMaxDensityArgs];
+          const int arity = program_density_arity(shared_id);
+          for (int k = 0; k < arity; ++k) argbuf[k] = sc((size_t)k, i);
+          acc += program_density<T>(shared_id, argbuf);
+          continue;
+        }
         if (e.name == "bernoulli_lpmf")
           acc += stan::math::bernoulli_lpmf(ic(0, i), sc(1, i));
         else if (e.name == "bernoulli_logit_lpmf")

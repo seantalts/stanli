@@ -194,6 +194,7 @@ add_library(stanli_shared SHARED
   runtime/kernels/island.cpp
   runtime/src/island.cpp
   runtime/src/adjoint.cpp
+  runtime/src/program_density.cpp
   runtime/src/nuts.cpp
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp
@@ -283,6 +284,7 @@ add_library(stanli STATIC
   runtime/kernels/island.cpp
   runtime/src/island.cpp
   runtime/src/adjoint.cpp
+  runtime/src/program_density.cpp
   runtime/src/nuts.cpp
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp

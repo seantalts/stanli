@@ -657,6 +657,47 @@ int main() {
     check(threw, "propto ~ in a parameter region refused with the fix");
   }
 
+  // Densities the register machine did not used to speak, inside
+  // parameter-dependent branches. The region has to compile to the
+  // register machine or not at all, so a density missing from its
+  // vocabulary was a compile error for a model the runtime otherwise
+  // handles everywhere -- `student_t_lpdf` most sharply, because four
+  // arguments did not fit an instruction with three operand fields.
+  {
+    DataMap d;
+    d.set_real("y", 1.75);
+    CompiledModel dm =
+        compile_model(slurp("tests/fixtures/paramcond_density.tmir.sexp"), d);
+    Executor dex(std::move(dm.graph));
+    dm.bind(dex);
+    // Both arms, so every density is evaluated and differentiated.
+    const double pts[2][2] = {{0.35, 0.6}, {-0.2, -0.45}};
+    for (int c = 0; c < 2; ++c) {
+      dex.params_data()[0] = pts[c][0];
+      dex.params_data()[1] = pts[c][1];
+      double grad[2] = {0, 0};
+      const double lp = dex.gradient(grad);
+
+      using stan::math::var;
+      var u_nu = pts[c][0], u_mu = pts[c][1];
+      var nu = stan::math::exp(u_nu), mu = u_mu;
+      var acc = u_nu;  // lower=0 jacobian
+      if (stan::math::value_of(mu) > 0) {
+        acc += stan::math::chi_square_lpdf<false>(1.75, nu);
+        acc += stan::math::student_t_lpdf<false>(1.75, nu, mu, 1.0);
+      } else {
+        acc += stan::math::gumbel_lpdf<false>(1.75, mu, 1.0);
+        acc += stan::math::rayleigh_lpdf<false>(1.75, nu);
+      }
+      acc.grad();
+      const std::string tag = "paramcond_density" + std::to_string(c);
+      expect_eq(tag + " dnu", grad[0], u_nu.adj());
+      expect_eq(tag + " dmu", grad[1], u_mu.adj());
+      expect_ulp(tag + " lp", lp, acc.val());
+      stan::math::recover_memory();
+    }
+  }
+
   // Truncation, against an independent var-path reference. CI has no
   // CmdStan, so harnesses/fn_sweep.py -- which checks all 72 distribution
   // functions bitwise -- cannot run there; this is what guards the

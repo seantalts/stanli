@@ -269,15 +269,8 @@ struct ProgramCompiler {
     // has; a `~` statement's dropped-constant form depends on which
     // arguments are autodiff and is not expressible here.
     {
-      Program::Code dc = Program::CONST;
-      int arity = 0;
-#define STANLI_PROG_DENSITY_NAME(code, fn, n) \
-  if (e.name == #fn) {                        \
-    dc = Program::code;                       \
-    arity = n;                                \
-  }
-      STANLI_PROGRAM_DENSITY_LIST(STANLI_PROG_DENSITY_NAME)
-#undef STANLI_PROG_DENSITY_NAME
+      const int dc = program_density_id_by_name(e.name);
+      const int arity = program_density_arity(dc);
       if (arity) {
         // A `~` statement lowers to the same call with propto set, and
         // which constants it drops depends on which arguments are
@@ -295,17 +288,26 @@ struct ProgramCompiler {
               "constant and is what the region can reproduce)");
         if ((int)e.args.size() != arity)
           bail(e.name + " takes " + std::to_string(arity) + " arguments here");
-        Range av[3];
+        int argv[kMaxDensityArgs];
         for (int k = 0; k < arity; ++k) {
-          av[k] = expr(e.args[(size_t)k]);
+          const Range a = expr(e.args[(size_t)k]);
           // One lp per call: a vectorized density inside a branch would
           // have to sum over its arguments, which this does not do.
-          if (av[k].len != 1) bail(e.name + " on a container");
+          if (a.len != 1) bail(e.name + " on a container");
+          argv[k] = a.reg;
+        }
+        // Three arguments or fewer ride in the instruction; a fourth
+        // needs the contiguous form, so copy them into a block.
+        int a0 = argv[0], a1 = arity > 1 ? argv[1] : 0;
+        int a2 = arity > 2 ? argv[2] : 0;
+        if (arity > 3) {
+          a0 = alloc(arity);
+          for (int k = 0; k < arity; ++k) emit(Program::MOV, a0 + k, argv[k]);
+          a1 = 0;
+          a2 = 0;
         }
         const int r = alloc(1);
-        p.code.push_back(Program::Instr{dc, r, av[0].reg,
-                                        arity > 1 ? av[1].reg : 0,
-                                        arity > 2 ? av[2].reg : 0, 0});
+        p.code.push_back(Program::Instr{Program::DENSITY, r, a0, a1, a2, dc});
         return {r, 1};
       }
     }

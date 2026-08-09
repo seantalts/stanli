@@ -171,6 +171,17 @@ value the same way. Getting it wrong would leave the gradient perfect
 and the log density off by a constant, so it is refused rather than
 approximated.
 
+Because the region has to translate or the model does not compile at
+all, anything the instruction list cannot say is a hard error rather
+than a slow path -- which is why its density vocabulary is the runtime's
+whole list and not a subset of it. It used to be twelve hand-picked
+ones, and `target += chi_square_lpdf(y | nu)` inside an `if` on a
+parameter did not compile while the identical line outside the `if`
+did. One list now
+([`program_density.hpp`](../include/stanli/program_density.hpp)), shared
+with the MIR interpreter and with the generated derivatives, so a
+density added to the runtime arrives in all three at once.
+
 ## Tape islands (`island.cpp`, disable: `STANLI_NO_ISLAND=1`)
 
 Some code cannot be vectorized by anyone: an HMM's forward recursion

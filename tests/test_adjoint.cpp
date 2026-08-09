@@ -12,6 +12,7 @@
 // long comment on `check` says why, and why closing it would cost the
 // contiguous register ranges the reductions depend on.
 #include <stanli/adjoint.hpp>
+#include <stanli/program_density.hpp>
 #include <stanli/island.hpp>
 #include <stanli/program.hpp>
 
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <limits>
 #include <cstdio>
 #include <string>
@@ -282,6 +284,23 @@ struct Build {
                int len = 0) {
     p.code.push_back(Program::Instr{c, d, a, b, cc, len});
   }
+  // A DENSITY laid out the way island.cpp and mir_prog.hpp lay one out:
+  // three arguments or fewer ride in the instruction, a fourth goes in a
+  // contiguous block.
+  int emit_density(int id, std::vector<int> argv) {
+    const int n = (int)argv.size();
+    int a0 = argv[0], a1 = n > 1 ? argv[1] : 0, a2 = n > 2 ? argv[2] : 0;
+    if (n > 3) {
+      a0 = alloc(n);
+      for (int k = 0; k < n; ++k)
+        emit_to(Program::MOV, a0 + k, argv[(size_t)k]);
+      a1 = 0;
+      a2 = 0;
+    }
+    const int d = alloc();
+    p.code.push_back(Program::Instr{Program::DENSITY, d, a0, a1, a2, id});
+    return d;
+  }
   Case done(std::vector<int> outs, std::vector<double> seeds) {
     p.out_regs = std::move(outs);
     seed = std::move(seeds);
@@ -534,18 +553,54 @@ static void test_nan_operands() {
 // ---- densities ---------------------------------------------------------
 
 static void test_densities() {
-  // One point inside every listed density's support: 0 < y < 1 for beta,
-  // y above the lower bound and below the upper for uniform, and positive
-  // shape/scale arguments for the rest.
-#define STANLI_TEST_DENSITY(code, fn, arity)                            \
-  {                                                                     \
-    Build b({0.63, 0.4, 1.7});                                          \
-    const int d =                                                       \
-        b.emit(Program::code, 0, arity > 1 ? 1 : 0, arity > 2 ? 2 : 0); \
-    check(std::string("density ") + #fn, b.done({d}, {1.25}));          \
+  // EVERY density the register machine speaks, discovered from the shared
+  // table rather than listed here, so one added to the runtime is covered
+  // the day it arrives instead of the day someone remembers this file.
+  //
+  // Each has its own support, so rather than curate a point per density
+  // the loop tries a few tuples and keeps the first the density accepts
+  // (a finite value). A density that accepts none of them is a failure,
+  // not a skip -- silently testing nothing is the thing to avoid.
+  static const double kPoints[][kMaxDensityArgs] = {
+      {0.63, 0.4, 1.7, 0.5}, {0.63, 1.4, 2.2, 0.25}, {2.5, 3.0, 1.0, 0.75},
+      {0.35, 2.0, 0.8, 0.5}, {1.25, 0.7, 1.3, 0.9},  {0.5, 4.0, 0.25, 0.5},
+      {0.63, 1.4, 2.2, 1.1}, {2.5, 3.0, 1.0, 2.0},
+  };
+  const int n_points = (int)(sizeof(kPoints) / sizeof(kPoints[0]));
+  for (int id = 0; id < program_density_count(); ++id) {
+    const int arity = program_density_arity(id);
+    const std::string name = program_density_name(id);
+    bool tested = false;
+    for (int pt = 0; pt < n_points && !tested; ++pt) {
+      std::vector<double> args(kPoints[pt], kPoints[pt] + arity);
+      // stan-math signals an argument outside a density's domain by
+      // throwing, not by returning a nonfinite value, so both count as
+      // "try the next point".
+      bool usable = true;
+      try {
+        double probe[kMaxDensityArgs] = {0, 0, 0, 0};
+        const double v = program_density<double>(id, args.data());
+        program_density_partials(id, args.data(), probe);
+        usable = std::isfinite(v);
+        for (int k = 0; k < arity; ++k)
+          if (!std::isfinite(probe[k])) usable = false;
+      } catch (const std::exception&) {
+        usable = false;
+      }
+      if (!usable) continue;
+      Build b(args);
+      std::vector<int> argv;
+      for (int k = 0; k < arity; ++k) argv.push_back(k);
+      const int d = b.emit_density(id, argv);
+      check("density " + name, b.done({d}, {1.25}));
+      tested = true;
+    }
+    if (!tested) {
+      ++failures;
+      std::printf("FAIL density %s: no probe point inside its support\n",
+                  name.c_str());
+    }
   }
-  STANLI_PROGRAM_DENSITY_LIST(STANLI_TEST_DENSITY)
-#undef STANLI_TEST_DENSITY
 }
 
 // ---- a composite region ------------------------------------------------
@@ -554,11 +609,12 @@ static void test_densities() {
 // reading the previous state, adding a density term, and writing the state
 // back in place.
 static void test_recurrence() {
+  const int kNormal = program_density_id_by_name("normal_lpdf");
   Build b({0.35, -0.2, 0.9});  // state, mu, sigma
   int st = 0;
   for (int t = 0; t < 6; ++t) {
     const int y = b.konst(0.3 * t - 0.5);
-    const int e = b.emit(Program::NORMAL, y, 1, 2);
+    const int e = b.emit_density(kNormal, {y, 1, 2});
     const int s = b.emit(Program::ADD, st, e);
     const int u = b.emit(Program::TANH, s);
     b.emit_to(Program::MOV, 0, u);  // state overwritten in place

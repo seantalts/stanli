@@ -23,6 +23,7 @@
 
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/program_density.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -89,21 +90,6 @@ int unary_code(uint16_t oc) {
   }
 }
 
-// Density opcode -> island instruction, or -1. Arity is op.n_in. The
-// twelve entries come from the one list in program.hpp; every code there
-// spells its opcode OP_<code>_LPDF.
-int density_code(uint16_t oc) {
-  switch (oc) {
-#define X(code, name, arity) \
-  case OP_##code##_LPDF:     \
-    return Program::code;
-    STANLI_PROGRAM_DENSITY_LIST(X)
-#undef X
-    default:
-      return -1;
-  }
-}
-
 // Structural vocabulary test. Shape/idata details are re-checked during
 // compilation; anything unexpected there aborts the island (compile
 // returns false) and the run is left alone.
@@ -134,8 +120,8 @@ bool in_vocab(const Graph& g, const Op& op) {
         return g.slots[op.out].len == g.slots[op.in[0]].len;
       // Propto term-dropping depends on argument TYPES; the island binds
       // every argument as T, which only matches the <false> instantiation.
-      return density_code(op.opcode) >= 0 && (op.variant & 0x80u) == 0 &&
-             scalar_ins(g, op);
+      return program_density_id_by_opcode(op.opcode) >= 0 &&
+             (op.variant & 0x80u) == 0 && scalar_ins(g, op);
   }
 }
 
@@ -213,6 +199,20 @@ struct Compiler {
     const int r = alloc((int)g.slots[slot].len);
     reg_of.emplace(slot, r);
     return r;
+  }
+
+  // The four-argument densities read their arguments as one contiguous
+  // run (program.hpp), so scattered ones are copied into a fresh block --
+  // skipped when they already sit in a row. Densities with three or fewer
+  // arguments never come here: theirs ride in the instruction.
+  int gather(const int* argv, int n) {
+    bool contiguous = true;
+    for (int k = 1; k < n; ++k)
+      if (argv[k] != argv[0] + k) contiguous = false;
+    if (contiguous) return argv[0];
+    const int base = alloc(n);
+    for (int k = 0; k < n; ++k) emit(Program::MOV, base + k, argv[k]);
+    return base;
   }
 
   void emit(Program::Code c, int dst, int a, int b = 0, int cc = 0,
@@ -344,12 +344,17 @@ struct Compiler {
         return ok;
       }
       default: {
-        const int dc = density_code(op.opcode);
-        if (dc < 0 || op.n_in < 1 || op.n_in > 3) return false;
-        const int a = read_reg(op.in[0]);
-        const int b = op.n_in > 1 ? read_reg(op.in[1]) : 0;
-        const int c = op.n_in > 2 ? read_reg(op.in[2]) : 0;
-        emit((Program::Code)dc, write_reg(op.out), a, b, c);
+        const int dc = program_density_id_by_opcode(op.opcode);
+        if (dc < 0 || op.n_in != program_density_arity(dc)) return false;
+        int argv[kMaxDensityArgs];
+        for (int k = 0; k < op.n_in; ++k) argv[k] = read_reg(op.in[k]);
+        if (op.n_in > 3) {
+          emit(Program::DENSITY, write_reg(op.out), gather(argv, op.n_in), 0, 0,
+               dc);
+        } else {
+          emit(Program::DENSITY, write_reg(op.out), argv[0],
+               op.n_in > 1 ? argv[1] : 0, op.n_in > 2 ? argv[2] : 0, dc);
+        }
         return ok;
       }
     }

@@ -26,6 +26,7 @@
 
 #include <stanli/adjoint.hpp>
 #include <stanli/island.hpp>
+#include <stanli/program_density.hpp>
 
 #include <stan/math.hpp>
 
@@ -36,19 +37,6 @@
 
 namespace stanli {
 namespace {
-
-// Density instruction -> argument count, from the one list (program.hpp).
-int density_arity(Program::Code c) {
-  switch (c) {
-#define STANLI_ADJ_DENSITY_ARITY(code, fn, n) \
-  case Program::code:                         \
-    return n;
-    STANLI_PROGRAM_DENSITY_LIST(STANLI_ADJ_DENSITY_ARITY)
-#undef STANLI_ADJ_DENSITY_ARITY
-    default:
-      return 0;
-  }
-}
 
 // How many registers an instruction writes, starting at dst.
 int out_len(const Program::Instr& I) {
@@ -105,14 +93,21 @@ bool gen_adjoint(IslandProg& p) {
     }
   }
 
-  // Live-in registers are harvested by register id, so their adjoint cell
-  // has to stay their own; a copy may not be aliased onto one.
-  std::vector<char> is_live_in((size_t)n0, 0);
+  // Registers whose adjoint cell has to stay their own. Two kinds:
+  // live-ins, which are harvested by register id; and a density's
+  // argument run, whose adjoints the backward walks as a range -- let a
+  // copy alias one element of that run onto some unrelated cell and the
+  // range stops being a range.
+  std::vector<char> no_alias((size_t)n0, 0);
   for (const auto& li : p.ins)
     for (int k = 0; k < li.len; ++k) {
       if (li.reg + k >= n0) return false;
-      is_live_in[(size_t)(li.reg + k)] = 1;
+      no_alias[(size_t)(li.reg + k)] = 1;
     }
+  for (const auto& I : orig)
+    if (I.code == Program::DENSITY && program_density_arity(I.len) > 3)
+      for (int k = 0; k < program_density_arity(I.len); ++k)
+        if (I.a + k >= 0 && I.a + k < n0) no_alias[(size_t)(I.a + k)] = 1;
 
   // Two ranges that overlap without coinciding would have the elementwise
   // adjoint loop read a cell it has already zeroed. Coinciding is fine and
@@ -126,13 +121,18 @@ bool gen_adjoint(IslandProg& p) {
   // bounded the operands, and they index the same vectors.
   auto in_range = [&](int r, int len) { return r >= 0 && r + len <= n0; };
   for (const auto& I : orig) {
-    const int reads = density_arity(I.code) > 0 ? density_arity(I.code)
-                      : I.code == Program::CONST || I.code == Program::CONSTR
-                          ? 0
-                          : 3;
-    if (reads > 0 && !in_range(I.a, 1)) return false;
-    if (reads > 1 && !in_range(I.b, 1)) return false;
-    if (reads > 2 && !in_range(I.c, 1)) return false;
+    const int reads =
+        I.code == Program::CONST || I.code == Program::CONSTR ? 0 : 3;
+    if (I.code == Program::DENSITY && program_density_arity(I.len) > 3 &&
+        !in_range(I.a, program_density_arity(I.len)))
+      return false;
+    const bool ranged_density =
+        I.code == Program::DENSITY && program_density_arity(I.len) > 3;
+    if (!ranged_density) {
+      if (reads > 0 && !in_range(I.a, 1)) return false;
+      if (reads > 1 && !in_range(I.b, 1)) return false;
+      if (reads > 2 && !in_range(I.c, 1)) return false;
+    }
     switch (I.code) {
       case Program::MOVR:
       case Program::LOG_RANGE:
@@ -196,7 +196,7 @@ bool gen_adjoint(IslandProg& p) {
       // The source must not be rewritten later, or the two registers stop
       // holding the same value while sharing one adjoint.
       if (last_write[(size_t)(I.a + k)] > i) return false;
-      if (is_live_in[(size_t)(I.dst + k)]) return false;
+      if (no_alias[(size_t)(I.dst + k)]) return false;
     }
     return true;
   };
@@ -273,13 +273,19 @@ bool gen_adjoint(IslandProg& p) {
         A.va = save_before(I.a, I.len);
         A.vb = save_before(I.b, I.len);
         break;
-      default: {
-        const int n = density_arity(I.code);
-        if (n > 0) A.va = save_before(I.a, 1);
-        if (n > 1) A.vb = save_before(I.b, 1);
-        if (n > 2) A.vc = save_before(I.c, 1);
+      case Program::DENSITY: {
+        const int ar = program_density_arity(I.len);
+        if (ar > 3) {
+          A.va = save_before(I.a, ar);
+        } else {
+          A.va = save_before(I.a, 1);
+          if (ar > 1) A.vb = save_before(I.b, 1);
+          if (ar > 2) A.vc = save_before(I.c, 1);
+        }
         break;
       }
+      default:
+        break;
     }
 
     ncode.push_back(I);
@@ -345,6 +351,17 @@ bool gen_adjoint(IslandProg& p) {
         A.a = mapn(I.a, I.len);
         A.b = mapn(I.b, I.len);
         break;
+      case Program::DENSITY: {
+        const int ar = program_density_arity(I.len);
+        if (ar > 3) {
+          A.a = mapn(I.a, ar);
+        } else {
+          A.a = map1(I.a);
+          A.b = map1(I.b);
+          A.c = map1(I.c);
+        }
+        break;
+      }
       case Program::CONST:
       case Program::CONSTR:
         break;  // no operand adjoints
@@ -364,38 +381,6 @@ bool gen_adjoint(IslandProg& p) {
   p.adj = std::move(ap);
   return true;
 }
-
-namespace {
-
-// A density's partials, from stan-math, in doubles. The arguments bind as
-// rvar exactly as the scalar density kernels bind them, so the partials are
-// the same numbers the var replay's precomputed edges carry.
-template <int N, typename F>
-void density_adj(const AdjInstr& I, const double* val, double* adj, F&& f) {
-  const double t = adj[I.dst];
-  adj[I.dst] = 0.0;
-  double part[3] = {0, 0, 0};
-  sink s;
-  for (int k = 0; k < N; ++k) s.buf[k] = &part[k];
-  active_sink() = &s;
-  if constexpr (N == 1) {
-    f(rvar(val[I.va]));
-  } else if constexpr (N == 2) {
-    f(rvar(val[I.va]), rvar(val[I.vb]));
-  } else {
-    f(rvar(val[I.va]), rvar(val[I.vb]), rvar(val[I.vc]));
-  }
-  active_sink() = nullptr;
-  // Descending operand order: stan-math's propagator pushes one tape entry
-  // per operand in argument order, so the reverse sweep runs them backwards.
-  // It only shows when two arguments share a register, and then it is the
-  // difference between matching the replay and nearly matching it.
-  if constexpr (N > 2) adj[I.c] += t * part[2];
-  if constexpr (N > 1) adj[I.b] += t * part[1];
-  adj[I.a] += t * part[0];
-}
-
-}  // namespace
 
 void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
   for (const AdjInstr& I : ap.code) {
@@ -626,13 +611,29 @@ void run_adjoint(const AdjProgram& ap, const double* val, double* adj) {
         adj[I.a] += t * (one_m_exp * one_d);
         break;
       }
-#define STANLI_ADJ_DENSITY_CASE(code, fn, n)                               \
-  case Program::code:                                                      \
-    density_adj<n>(I, val, adj,                                            \
-                   [](const auto&... a) { stan::math::fn<false>(a...); }); \
-    break;
-        STANLI_PROGRAM_DENSITY_LIST(STANLI_ADJ_DENSITY_CASE)
-#undef STANLI_ADJ_DENSITY_CASE
+      case Program::DENSITY: {
+        // stan-math computes the partials in doubles through the recorder
+        // (program_density.cpp); this only scales and accumulates them.
+        // Descending, because the propagator pushes one tape entry per
+        // operand in argument order and the reverse sweep runs them
+        // backwards -- which shows only when two arguments share a
+        // register, and then it is the difference between matching the
+        // replay and nearly matching it.
+        adj[I.dst] = 0.0;
+        const int ar = program_density_arity(I.len);
+        double part[kMaxDensityArgs] = {0, 0, 0, 0};
+        if (ar > 3) {
+          program_density_partials(I.len, val + I.va, part);
+          for (int k = ar; k-- > 0;) adj[I.a + k] += t * part[k];
+          break;
+        }
+        const double args[3] = {val[I.va], val[I.vb], val[I.vc]};
+        program_density_partials(I.len, args, part);
+        if (ar > 2) adj[I.c] += t * part[2];
+        if (ar > 1) adj[I.b] += t * part[1];
+        adj[I.a] += t * part[0];
+        break;
+      }
       case Program::JZ:
       case Program::JMP:
         break;  // gen_adjoint refuses these; unreachable
