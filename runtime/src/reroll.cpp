@@ -570,11 +570,6 @@ RerollStats reroll(Graph& g,
               } else {
                 ap.term_density = true;
                 any_term_density = true;
-                if (is_idata_outcome_density(t.opcode)) {
-                  ap.outcome_idata.reserve((size_t)Luse);
-                  for (int64_t l = 0; l < Luse; ++l)
-                    ap.outcome_idata.push_back(op_at(p, l).idata[0]);
-                }
               }
             } else if (all_inputs_invariant &&
                        !is_idata_outcome_density(t.opcode)) {
@@ -585,11 +580,6 @@ RerollStats reroll(Graph& g,
             } else {
               ap.elt_density = true;
               any_elt_density = true;
-              if (is_idata_outcome_density(t.opcode)) {
-                ap.outcome_idata.reserve((size_t)Luse);
-                for (int64_t l = 0; l < Luse; ++l)
-                  ap.outcome_idata.push_back(op_at(p, l).idata[0]);
-              }
             }
           } else if (all_inputs_invariant) {
             const int64_t io_ok = std::min(br_internal, br_nonterm);
@@ -622,6 +612,15 @@ RerollStats reroll(Graph& g,
           } else {
             ok = false;
             prefix = 0;  // opcode outside the vocabulary: no prefix helps
+          }
+          // The fused lpmf's outcome vector is the lanes' immediates. Only
+          // the two fusing density dispositions need it; the hoist arm
+          // above excludes idata-outcome densities.
+          if ((ap.term_density || ap.elt_density) &&
+              is_idata_outcome_density(t.opcode)) {
+            ap.outcome_idata.reserve((size_t)Luse);
+            for (int64_t l = 0; l < Luse; ++l)
+              ap.outcome_idata.push_back(op_at(p, l).idata[0]);
           }
           lane0_producer[t.out] = p;
         }
@@ -790,6 +789,31 @@ RerollStats reroll(Graph& g,
           for (int s : dead) term_set.erase(s);
           term_set.insert(new_term);
         };
+        // The fused lpmf's outcome vector is the lanes' immediates.
+        const auto attach_idata = [&](Op& o, std::vector<int> outcome) {
+          if (outcome.empty()) return;
+          g.idata_pool.push_back(std::move(outcome));
+          o.idata = g.idata_pool.back().data();
+          o.n_idata = (int64_t)g.idata_pool.back().size();
+        };
+        // Every lane computes the same scalar: emit it once and multiply by
+        // L. Both callers are all-scalar term dispositions, whose positions
+        // have no op consumers at all (the classifier refuses otherwise), so
+        // pos_out here is bookkeeping nobody reads. Returns the new term.
+        const auto scalar_times_lanes = [&](const Op& scalar) {
+          result.push_back(scalar);  // scalar op, out = t.out
+          Op mul;
+          mul.opcode = OP_MUL;
+          mul.n_in = 2;
+          mul.in[0] = scalar.out;
+          const int lc = g.add_slot(1, false);
+          fills.emplace_back(lc, std::vector<double>{(double)Luse});
+          mul.in[1] = lc;
+          mul.out = g.add_slot(1, false);
+          result.push_back(mul);
+          pos_out[(size_t)p] = scalar.out;
+          return mul.out;
+        };
         if (ap.elt_density) {
           // One density op with variant bit 6: out[n] is lane n's lp, read
           // by the lanes' (widened) consumers. An all-scalar real-arg
@@ -797,11 +821,7 @@ RerollStats reroll(Graph& g,
           // per-lane outcome exists here and the out is genuinely len-N.
           op.variant = (uint8_t)(op.variant | 0x40u);
           op.out = g.add_slot(Luse, false);
-          if (!ap.outcome_idata.empty()) {
-            g.idata_pool.push_back(std::move(ap.outcome_idata));
-            op.idata = g.idata_pool.back().data();
-            op.n_idata = (int64_t)g.idata_pool.back().size();
-          }
+          attach_idata(op, std::move(ap.outcome_idata));
           pos_out[(size_t)p] = op.out;
           result.push_back(op);
           continue;
@@ -810,18 +830,7 @@ RerollStats reroll(Graph& g,
           int term_slot;
           if (all_scalar) {
             // Every lane's term is the same scalar: one op, times L.
-            result.push_back(op);  // scalar op, out = t.out
-            Op mul;
-            mul.opcode = OP_MUL;
-            mul.n_in = 2;
-            mul.in[0] = op.out;
-            const int lc = g.add_slot(1, false);
-            fills.emplace_back(lc, std::vector<double>{(double)Luse});
-            mul.in[1] = lc;
-            mul.out = g.add_slot(1, false);
-            result.push_back(mul);
-            term_slot = mul.out;
-            pos_out[(size_t)p] = op.out;
+            term_slot = scalar_times_lanes(op);
           } else {
             op.out = g.add_slot(Luse, false);
             result.push_back(op);
@@ -855,25 +864,11 @@ RerollStats reroll(Graph& g,
             // all came from hoisted producers): the target owes L copies of
             // it, and L times one lane is that, exactly -- the density
             // backward sees out_adj = L and scales its partials to match.
-            result.push_back(op);  // scalar density, out = t.out
-            Op mul;
-            mul.opcode = OP_MUL;
-            mul.n_in = 2;
-            mul.in[0] = op.out;
-            const int lc = g.add_slot(1, false);
-            fills.emplace_back(lc, std::vector<double>{(double)Luse});
-            mul.in[1] = lc;
-            mul.out = g.add_slot(1, false);
-            op = mul;  // the term-swap below installs mul.out as the term
-          } else {
-            op.out = g.add_slot(1, false);
+            swap_terms(scalar_times_lanes(op));
+            continue;
           }
-          if (!ap.outcome_idata.empty()) {
-            // The fused lpmf's outcome vector is the lanes' immediates.
-            g.idata_pool.push_back(std::move(ap.outcome_idata));
-            op.idata = g.idata_pool.back().data();
-            op.n_idata = (int64_t)g.idata_pool.back().size();
-          }
+          op.out = g.add_slot(1, false);
+          attach_idata(op, std::move(ap.outcome_idata));
           swap_terms(op.out);
         } else {
           op.out = g.add_slot(Luse, false);
