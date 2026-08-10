@@ -142,17 +142,17 @@ point, both sides `-O3` with FP contraction pinned off:
 | `kidscore_momiq` | 3 | 1.9 us | 4.9 us | **2.6x** |
 | `lsat_model` | 1006 | 45.5 us | 91.2 us | **2.0x** |
 | `state_space_stochastic_level_stochastic_seasonal` | 389 | 17.2 us | 26.3 us | **1.5x** |
+| `hmm_example` | 4 | 21.1 us | 27.1 us | **1.3x** |
+| `garch11` | 4 | 8.2 us | 9.7 us | **1.2x** |
+| `hmm_drive_0` | 6 | 117.6 us | 132.8 us | **1.1x** |
 | `normal_mixture` | 3 | 79.0 us | 88.2 us | **1.1x** |
 | `low_dim_gauss_mix` | 5 | 88.9 us | 98.3 us | **1.1x** |
 | `wells_dist100ars_model` | 3 | 17.4 us | 19.0 us | **1.1x** |
+| `iohmm_reg` | 29 | 301.4 us | 320.3 us | **1.1x** |
 | `radon_county` | 389 | 83.2 us | 82.1 us | **1.0x** |
-| `arma11` | 4 | 6.7 us | 6.2 us | 0.93x |
+| `arma11` | 4 | 6.7 us | 6.2 us | 0.92x |
 | `diamonds` | 26 | 35.4 us | 31.5 us | 0.89x |
-| `garch11` | 4 | 11.2 us | 9.7 us | 0.86x |
-| `hmm_drive_0` | 6 | 173.0 us | 132.8 us | 0.77x |
-| `hmm_example` | 4 | 36.3 us | 27.1 us | 0.75x |
 | `ldaK2` | 7 | 145.9 us | 104.1 us | 0.71x |
-| `iohmm_reg` | 29 | 545.2 us | 320.3 us | 0.59x |
 <!--/gen-->
 
 The wins come from op granularity. CmdStan's var tape allocates, walks,
@@ -160,16 +160,18 @@ and frees one node per scalar operation per leapfrog step; stanli pays
 a fixed cost per *op*, and a vectorized statement over N elements
 amortizes that to nothing. Across the whole posteriordb corpus the
 median is <!--gen:corpus_median-->2.07x<!--/gen--> and
-<!--gen:corpus_at_par-->93<!--/gen--> of
+<!--gen:corpus_at_par-->100<!--/gen--> of
 <!--gen:corpus_n_grad-->119<!--/gen--> models are at or above CmdStan.
 
-The losses are understood, and they are all one shape: a recurrence.
-`hmm_*`, `garch11` and `arma11` step through time with each step
-reading the last one's parameter-dependent result, which nothing can
-vectorize, so the work is scalar on both sides and CmdStan's generated
-C++ runs scalar work faster. ODE models sit around 0.6x for a similar
-reason: the right-hand side runs through a compact register machine
-where CmdStan runs native code.
+The former worst class -- recurrences -- crossed parity when the
+runtime started compiling them: `hmm_*`, `garch11` and `iohmm_reg`
+step through time with each step reading the last one's
+parameter-dependent result, which nothing can vectorize, so each model
+now compiles its recurrence into a register program with a generated
+derivative program alongside. The remaining losses are mixtures with
+more than two components (a reduction shape the fusion pass does not
+yet express) and ODE models at around 0.6x, whose right-hand side runs
+through the register machine where CmdStan runs native code.
 
 Method and full table:
 [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)

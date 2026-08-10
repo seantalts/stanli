@@ -33,7 +33,7 @@ could not build one on their farm.
 - Performance vs CmdStan: [docs/benchmarks.md](docs/benchmarks.md).
   Median gradient <!--gen:corpus_median-->2.07x<!--/gen--> across
   <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models,
-  <!--gen:corpus_at_par-->93<!--/gen--> of them at or above CmdStan;
+  <!--gen:corpus_at_par-->100<!--/gen--> of them at or above CmdStan;
   <!--gen:bench_span-->1.0x-6.1x<!--/gen--> on vectorized shapes;
   time-to-first-draw about 20x faster.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
@@ -48,7 +48,7 @@ could not build one on their farm.
   [Binary size](#binary-size).
 - How this is possible, for statisticians:
   [docs/how-it-works.md](docs/how-it-works.md)
-- Tutorial, one small model traced through every layer:
+- Tutorial, three small models traced through every layer:
   [docs/lowering-walkthrough.md](docs/lowering-walkthrough.md)
 - Contributor map: [docs/hacking.md](docs/hacking.md)
 - Design doc: `docs/superpowers/specs/2026-08-04-stan-portable-runtime-design.md`
@@ -355,8 +355,8 @@ written up in
 [docs/superpowers/plans/2026-08-08-cmdstan-parity-roadmap.md](docs/superpowers/plans/2026-08-08-cmdstan-parity-roadmap.md):
 multi-chain and diagnostics (done), the missing parameter transforms
 (done), the modern `ode_*` and solver interfaces, Pathfinder and
-optimize, a native adjoint program for the sequential tail
-([design](docs/superpowers/plans/2026-08-08-native-adjoint-program.md)),
+optimize, a native adjoint program for the sequential tail (done;
+[design](docs/superpowers/plans/2026-08-08-native-adjoint-program.md)),
 `reduce_sum`, and the R/brms and browser packaging.
 
 Engine-level items that predate it:

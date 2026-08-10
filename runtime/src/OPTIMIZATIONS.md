@@ -213,10 +213,10 @@ autodiff replay to check that they do.
 That changed the class rather than improving it. On the corpus
 models with a region big enough to compile, every one is faster
 generated than replayed, and models that were a wash became real wins:
-one HMM collapses 42,926 ops into 11 and went from 0.99x to 1.68x. The
+one HMM collapses 42,926 ops into 11 and went from 0.92x to 1.60x. The
 model whose steps copy a 1,500-element state vector -- memory traffic
 the register file makes free, which is why it was the one winner before
--- went from 2.5x to 4.9x.
+-- went from 2.5x to 4.7x.
 
 The pass still estimates both sides before committing, because one shape
 is still wrong for it: a region carrying far more state than it

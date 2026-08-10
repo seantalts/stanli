@@ -1,9 +1,12 @@
 # Benchmarks vs CmdStan
 
 2026-08-06, Apple M-series (macOS arm64), clang, both sides -O3 and
--ffp-contract=off, single-threaded. Both engines evaluate the sampling
-gradient (propto + jacobian) at the same deterministic unconstrained
-point. stanli runs `tools/bench_grad.cpp`; CmdStan runs
+-ffp-contract=off, single-threaded. The stanli columns of the 13
+models that compile an island on the default path were re-measured
+2026-08-09, after islands started generating their backward pass; the
+CmdStan columns are unaffected by that change and carry over. Both
+engines evaluate the sampling gradient (propto + jacobian) at the same
+deterministic unconstrained point. stanli runs `tools/bench_grad.cpp`; CmdStan runs
 `tools/bench_cmdstan_grad.cpp`, looping the same fresh-vars + grad +
 recover_memory cycle `stan::model::gradient` performs per leapfrog
 step. Reproduce the whole table with
@@ -28,30 +31,27 @@ this page.
 | `kidscore_momiq` | 3 | 1,889 | 4,861 | 2.57x | 0.008 s |
 | `lsat_model` | 1006 | 45,543 | 91,173 | 2.00x | 0.055 s |
 | `state_space_stochastic_level_stochastic_seasonal` | 389 | 17,196 | 26,320 | 1.53x | 0.023 s |
+| `hmm_example` | 4 | 21,132 | 27,145 | 1.28x | 0.028 s |
+| `garch11` | 4 | 8,157 | 9,664 | 1.18x | 0.014 s |
+| `hmm_drive_0` | 6 | 117,566 | 132,850 | 1.13x | 0.139 s |
 | `normal_mixture` | 3 | 78,960 | 88,239 | 1.12x | 0.091 s |
 | `low_dim_gauss_mix` | 5 | 88,949 | 98,315 | 1.11x | 0.099 s |
 | `wells_dist100ars_model` | 3 | 17,431 | 18,997 | 1.09x | 0.025 s |
+| `iohmm_reg` | 29 | 301,447 | 320,335 | 1.06x | 0.432 s |
 | `radon_county` | 389 | 83,236 | 82,076 | 0.99x | 0.105 s |
-| `arma11` | 4 | 6,650 | 6,158 | 0.93x | 0.012 s |
+| `arma11` | 4 | 6,717 | 6,158 | 0.92x | 0.012 s |
 | `diamonds` | 26 | 35,358 | 31,497 | 0.89x | 0.110 s |
-| `garch11` | 4 | 11,184 | 9,664 | 0.86x | 0.016 s |
-| `hmm_drive_0` | 6 | 172,957 | 132,850 | 0.77x | 0.189 s |
-| `hmm_example` | 4 | 36,275 | 27,145 | 0.75x | 0.046 s |
 | `ldaK2` | 7 | 145,916 | 104,059 | 0.71x | 0.165 s |
-| `iohmm_reg` | 29 | 545,184 | 320,335 | 0.59x | 0.441 s |
 
-**The four sequential models at the bottom of this slice predate the
-generated adjoint** and will move up when this table is next regenerated
-from `docs/corpus-bench.tsv`. Measured against the same CmdStan column:
-`iohmm_reg` 320,335 / 290,286 = 1.10x rather than 0.59x, `hmm_example`
-1.40x rather than 0.75x, `hmm_drive_0` 1.35x rather than 0.77x, and
-`garch11` 1.11x rather than 0.86x -- all four cross parity. The island
-section below has the per-region measurements those come from.
+The sequential models (`hmm_*`, `garch11`, `iohmm_reg`) sat at
+0.59-0.86x in this slice until islands started generating their
+backward pass; all now cross parity. The island section below has the
+per-region measurements behind that move.
 
 ## Which models are faster, which are slower, and why
 
 Across the full corpus (`docs/corpus-bench.tsv`, 119 models with both
-gradients) the median per-gradient speedup is 2.07x and 93 of 119
+gradients) the median per-gradient speedup is 2.07x and 100 of 119
 models are at or above parity. The ratio is predicted almost entirely
 by the model's *shape*, not its size.
 
@@ -70,24 +70,26 @@ by the model's *shape*, not its size.
   ~7 s CmdStan compile, so short runs and iterative model development
   are dominated by this regardless of gradient speed.
 
-**Near parity (0.8-1.2x):** models dominated by one large dense
-operation (a Cholesky, a big matrix product, the GP models). Both
-engines spend their time inside the same stan-math kernel; interpreter
-overhead is noise on top.
+**Near parity (0.9-1.3x), two shapes:**
 
-**Slower (a shrinking tail, mostly 0.5-0.8x):**
-
+- **Models dominated by one large dense operation** (a Cholesky, a
+  big matrix product, the GP models). Both engines spend their time
+  inside the same stan-math kernel; interpreter overhead is noise on
+  top.
 - **Sequential models.** HMM recursions and state-space/ARMA/GARCH
   updates read the previous step's parameter-dependent result, so
   re-rolling correctly refuses (vectorizing a recurrence would change
-  the math). This is the class the island pass is for, and the class
-  that changed most when its backward stopped being a var replay and
-  became a generated adjoint program: against islands off,
-  `hmm_gaussian` 1.68x, `hmm_drive_0` 1.66x, `hmm_example` 1.64x,
-  `garch11` 1.27x, and `iohmm_reg` 4.88x. Each was at or below parity
-  while the region replayed under `var`. What is left is per-op dispatch
-  against CmdStan's inlined scalar code, one interpreted instruction at a
-  time in each direction.
+  the math). This is the class the island pass is for, and it sat at
+  0.6-0.9x until the island backward stopped being a var replay and
+  became a generated adjoint program: `hmm_example` is now 1.28x,
+  `garch11` 1.18x, `hmm_gaussian` 1.15x, `hmm_drive_0` 1.13x,
+  `iohmm_reg` 1.06x against CmdStan. What keeps them at parity-plus
+  rather than higher is per-op dispatch against CmdStan's inlined
+  scalar code, one interpreted instruction at a time in each
+  direction (the island section below has the per-region numbers).
+
+**Slower (a shrinking tail, mostly 0.5-0.9x):**
+
 - **Mixture models with K > 2 components** (`ldaK2`/`ldaK5`): their
   inner `log_sum_exp` runs over K-vectors built per document, a
   row-wise reduction the elementwise-lp fusion does not yet express.
@@ -201,7 +203,7 @@ unchanged. `losscurve_sislob` is the payoff shape: its residue drops
 Every region is faster generated than replayed, and the class changed
 rather than improved: op collapse is now worth roughly what the op counts
 always suggested it should be. `hmm_gaussian` collapses 42,926 ops to 11
-and measured 0.99x replayed against 1.68x generated. The ceiling is
+and measured 0.92x replayed against 1.60x generated. The ceiling is
 parity-plus and not more, as predicted before measuring -- CmdStan's
 generated code is inlined compiled C++ and the adjoint program still pays
 interpreted dispatch per instruction -- and `iohmm_reg` beats it only
@@ -379,9 +381,12 @@ seed is the one seed of five where the engines split, stanli drawing
 the mode that is five times more expensive to explore; that is the
 whole of its 0.25x sampling column against a 0.71x gradient.
 `hmm_gaussian`'s CmdStan run at that seed has every post-warmup draw
-divergent, so its 18.75 s is a chain that is not sampling at all.) Read
-the gradient column as the measurement. Regenerate with
-`python3 tools/corpus_table.py docs/corpus-bench.tsv`.
+divergent, so its 18.75 s is a chain that is not sampling at all.
+The island models' sampling columns also moved in both directions when
+their rows were re-measured: carving changes the gradient in its last
+bits, which is enough to send NUTS down a different trajectory at the
+same seed.) Read the gradient column as the measurement. Regenerate
+with `python3 tools/corpus_table.py docs/corpus-bench.tsv`.
 
 | model | params | CmdStan ns/grad | grad speedup | CmdStan sample | sample speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -448,25 +453,33 @@ the gradient column as the measurement. Regenerate with
 | `lsat_model` | 1006 | 91,173 | 2.00x | 4.66 s | 1.59x |
 | `irt_2pl` | 144 | 37,468 | 1.86x | 2.17 s | 1.89x |
 | `grsm_latent_reg_irt` | 408 | 762,133 | 1.68x | 66.92 s | 2.23x |
+| `losscurve_sislob` | 15 | 3,450 | 1.64x | 0.31 s | 0.61x |
 | `gpcm_latent_reg_irt` | 530 | 1,337,651 | 1.63x | 161.93 s | 2.68x |
 | `wells_dist` | 2 | 39,202 | 1.62x | 1.44 s | 2.25x |
 | `state_space_stochastic_level_stochastic_seasonal` | 389 | 26,320 | 1.53x | 39.76 s | 1.18x |
 | `2pl_latent_reg_irt` | 531 | 134,556 | 1.51x | 7.94 s | 1.17x |
 | `normal_mixture_k` | 14 | 357,439 | 1.42x | 101.61 s | 1.66x |
-| `losscurve_sislob` | 15 | 3,450 | 1.41x | 0.31 s | 2.38x |
+| `accel_splines` | 82 | 10,584 | 1.40x | 19.74 s | 1.18x |
+| `accel_gp` | 66 | 9,532 | 1.39x | 16.99 s | 1.80x |
 | `hierarchical_gp` | 933 | 47,565 | 1.35x | 17.20 s | 1.07x |
-| `hier_2pl` | 669 | 397,603 | 1.30x | 26.82 s | 1.36x |
+| `hier_2pl` | 669 | 397,603 | 1.31x | 26.82 s | 1.43x |
 | `eight_schools_centered` | 10 | 314 | 1.29x | 0.19 s | 3.80x |
 | `M0_model` | 2 | 15,595 | 1.29x | 0.37 s | 2.64x |
+| `hmm_example` | 4 | 27,145 | 1.28x | 1.00 s | 0.61x |
 | `nes_logit_model` | 2 | 7,653 | 1.23x | 0.38 s | 2.53x |
 | `prophet` | 62 | 69,789 | 1.23x | 117.68 s | 1.20x |
+| `hmm_drive_1` | 6 | 147,829 | 1.22x | 6.94 s | 0.67x |
+| `garch11` | 4 | 9,664 | 1.18x | 0.43 s | 1.87x |
+| `hmm_gaussian` | 14 | 263,917 | 1.15x | 18.75 s | 0.05x |
 | `nn_rbm1bJ10` | 7951 | 185,731 | 1.14x | 456.82 s | 0.97x |
+| `hmm_drive_0` | 6 | 132,850 | 1.13x | 3.65 s | 0.46x |
 | `normal_mixture` | 3 | 88,239 | 1.12x | 1.13 s | 1.53x |
 | `low_dim_gauss_mix_collapse` | 5 | 95,373 | 1.11x | 4.45 s | 1.22x |
 | `low_dim_gauss_mix` | 5 | 98,315 | 1.11x | 1.98 s | 1.41x |
 | `wells_dist100ars_model` | 3 | 18,997 | 1.09x | 0.62 s | 1.55x |
 | `wells_dae_c_model` | 5 | 19,308 | 1.07x | 0.59 s | 1.59x |
 | `wells_dist100_model` | 2 | 17,195 | 1.07x | 0.47 s | 1.81x |
+| `iohmm_reg` | 29 | 320,335 | 1.06x | 181.23 s | 1.20x |
 | `wells_interaction_model` | 4 | 20,402 | 1.06x | 0.94 s | 1.27x |
 | `wells_daae_c_model` | 6 | 20,885 | 1.06x | 0.63 s | 1.29x |
 | `wells_dae_model` | 4 | 20,356 | 1.06x | 0.76 s | 1.43x |
@@ -474,34 +487,26 @@ the gradient column as the measurement. Regenerate with
 | `gp_pois_regr` | 13 | 3,935 | 1.06x | 1.47 s | 1.20x |
 | `wells_interaction_c_model` | 4 | 20,272 | 1.06x | 0.49 s | 1.81x |
 | `Survey_model` | 1 | 61,578 | 1.03x | 1.14 s | 1.31x |
-| `accel_splines` | 82 | 10,584 | 1.03x | 19.74 s | 0.86x |
 | `dogs_hierarchical` | 2 | 34,053 | 1.03x | 0.68 s | 1.58x |
 | `radon_county` | 389 | 82,076 | 0.99x | 4.49 s | 0.97x |
 | `bones_model` | 13 | 51,501 | 0.98x | 1.31 s | 1.11x |
-| `accel_gp` | 66 | 9,532 | 0.97x | 16.99 s | 1.01x |
 | `Mth_model` | 394 | 93,922 | 0.97x | 5.43 s | 1.19x |
-| `arma11` | 4 | 6,158 | 0.93x | 0.26 s | 2.17x |
+| `arma11` | 4 | 6,158 | 0.92x | 0.26 s | 2.36x |
 | `dogs_nonhierarchical` | 65 | 40,588 | 0.91x | 2.86 s | 1.08x |
 | `diamonds` | 26 | 31,497 | 0.89x | 48.55 s | 0.83x |
-| `garch11` | 4 | 9,664 | 0.86x | 0.43 s | 1.34x |
+| `multi_occupancy` | 106 | 58,996 | 0.86x | 7.34 s | 0.90x |
 | `Mh_model` | 388 | 38,956 | 0.85x | 2.66 s | 0.88x |
-| `multi_occupancy` | 106 | 58,996 | 0.85x | 7.34 s | 0.97x |
 | `gp_regr` | 3 | 4,698 | 0.83x | 0.23 s | 2.56x |
-| `hmm_drive_1` | 6 | 147,829 | 0.82x | 6.94 s | 0.98x |
-| `hmm_drive_0` | 6 | 132,850 | 0.77x | 3.65 s | 1.33x |
+| `Mb_model` | 3 | 49,570 | 0.79x | 1.15 s | 0.41x |
 | `covid19imperial_v2` | 51 | 345,937 | 0.76x | 176.00 s | 0.79x |
 | `covid19imperial_v3` | 51 | 342,943 | 0.76x | 175.70 s | 0.79x |
-| `hmm_example` | 4 | 27,145 | 0.75x | 1.00 s | 1.05x |
 | `one_comp_mm_elim_abs` | 4 | 470,681 | 0.74x | 11.23 s | 0.98x |
 | `Mt_model` | 4 | 19,984 | 0.74x | 0.48 s | 1.33x |
 | `ldaK2` | 7 | 104,059 | 0.71x | 3.19 s | 0.25x |
-| `Mb_model` | 3 | 49,570 | 0.70x | 1.15 s | 0.86x |
-| `hmm_gaussian` | 14 | 263,917 | 0.69x | 18.75 s | 0.03x |
 | `soil_incubation` | 6 | 60,871 | 0.66x | 12.84 s | 0.56x |
-| `iohmm_reg` | 29 | 320,335 | 0.59x | 181.23 s | 0.72x |
 | `Mtbh_model` | 154 | 42,791 | 0.45x | 2.38 s | 0.62x |
 
-120 models; 119 with both gradients; median per-gradient speedup 2.07x; 93/119 at or above CmdStan.
+120 models; 119 with both gradients; median per-gradient speedup 2.07x; 100/119 at or above CmdStan.
 
 ### The models the run could not complete
 
