@@ -48,6 +48,8 @@ could not build one on their farm.
   [Binary size](#binary-size).
 - How this is possible, for statisticians:
   [docs/how-it-works.md](docs/how-it-works.md)
+- Tutorial, one small model traced through every layer:
+  [docs/lowering-walkthrough.md](docs/lowering-walkthrough.md)
 - Contributor map: [docs/hacking.md](docs/hacking.md)
 - Design doc: `docs/superpowers/specs/2026-08-04-stan-portable-runtime-design.md`
 

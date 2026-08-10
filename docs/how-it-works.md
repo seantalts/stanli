@@ -188,6 +188,11 @@ backward runs, and a CALL's kernel scratch is carved out of that same
 file. It is scratch all the way down, allocated once, addressed by
 offsets decided before the first gradient ever runs.
 
+All of this is concrete in
+[lowering-walkthrough.md](lowering-walkthrough.md): a tutorial that
+takes one ten-line model and shows the real output of every layer,
+from the compiler's tree to the generated backward.
+
 ## Where the compiled model still wins
 
 ODE models run at about 0.6x: the right-hand side must stay callable
