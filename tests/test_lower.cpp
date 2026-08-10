@@ -8,6 +8,7 @@
 #include <stanli/packet.hpp>
 
 #include <stan/math.hpp>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -435,6 +436,89 @@ int main() {
     for (int i = 0; i < 6; ++i)
       expect_eq("idx gM" + std::to_string(i), grad[3 + i], M(i).adj());
     stan::math::recover_memory();
+  }
+
+  // A logical view belongs to the name binding, not to the flat parameter
+  // slot it aliases. M, r, v, and q are simultaneously live here and all
+  // share storage with different matrix/vector labels.
+  {
+    try {
+      DataMap d;
+      d.set_real_array("A", {1.0, 3.0, 2.0, 4.0}, {2, 2});
+      d.set_real_array("y", {0.5, -0.25}, {2});
+      CompiledModel lm =
+          compile_model(slurp("tests/fixtures/viewalias.tmir.sexp"), d);
+      check(lm.n_unconstrained == 6, "viewalias 6 unconstrained");
+      Executor lex(std::move(lm.graph));
+      lm.bind(lex);
+      const double points[2][6] = {
+          {0.25, -0.5, 0.75, -1.0, 1.25, -1.5},
+          {-0.25, 0.5, -0.75, 1.0, -1.25, 1.5}};
+      for (int c = 0; c < 2; ++c) {
+        const double* q = points[c];
+        for (int i = 0; i < 6; ++i) lex.params_data()[i] = q[i];
+        double grad[6] = {0, 0, 0, 0, 0, 0};
+        const double lp = lex.gradient(grad);
+
+        // M is 2x3 column-major. Its first row is q[0], q[2] + q[5],
+        // q[4] after the indexed update, while the still-live flat v alias
+        // remains q. D pins provenance after a parameter element write.
+        // E pins both parameter-dependent whole-assignment arms while
+        // retaining its matrix shape. B is updated from a data-only
+        // reduction and must remain eligible as normal_id_glm's data matrix.
+        // All inputs are binary fractions, so this independent closed form
+        // and its full gradient are exact.
+        const double aq0 = std::abs(q[0]);
+        const double r0 = 0.5 - (q[0] + 3.0 * q[1]);
+        const double r1 = -0.25 - (3.0 * q[0] + 4.0 * q[1]);
+        const double want_lp =
+            q[0] * q[0] + (q[2] + q[5]) * q[1] + q[4] * q[2] +
+            2.0 * (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] +
+                   q[3] * q[3] + q[4] * q[4] + q[5] * q[5]) +
+            4.0 * q[0] + 4.0 * q[1] + q[0] * q[1] +
+            aq0 * (4.0 * q[0] + 6.0 * q[1]) - 0.5 * r0 * r0 -
+            0.5 * r1 * r1;
+        const double e_g0 = q[0] > 0 ? 8.0 * q[0] + 6.0 * q[1]
+                                      : -8.0 * q[0] - 6.0 * q[1];
+        const double want_grad[6] = {
+            6.0 * q[0] + 4.0 + q[1] + e_g0 + r0 + 3.0 * r1,
+            4.0 * q[1] + q[2] + q[5] + 4.0 + q[0] + 6.0 * aq0 +
+                3.0 * r0 + 4.0 * r1,
+            4.0 * q[2] + q[1] + q[4], 4.0 * q[3],
+            4.0 * q[4] + q[2], 4.0 * q[5] + q[1]};
+        const std::string tag = "viewalias" + std::to_string(c);
+        expect_eq(tag + " lp", lp, want_lp);
+        for (int i = 0; i < 6; ++i)
+          expect_eq(tag + " g" + std::to_string(i), grad[i], want_grad[i]);
+      }
+
+      // The same logical matrix alias must survive the separately lowered
+      // write_array graph used for transformed-parameter CSV columns.
+      check(lm.write_array && lm.write_array->truncated.empty(),
+            "viewalias write_array compiled");
+      if (lm.write_array && lm.write_array->truncated.empty()) {
+        Executor wex(std::move(lm.write_array->graph));
+        lm.write_array->bind(wex);
+        for (int i = 0; i < 6; ++i) wex.params_data()[i] = points[0][i];
+        wex.run_forward_only();
+        bool found_w = false;
+        for (const auto& col : lm.write_array->columns) {
+          if (col.name != "W") continue;
+          found_w = true;
+          check(col.naming == CompiledModel::ParamView::Naming::Matrix &&
+                    col.rows == 2,
+                "viewalias write_array matrix metadata");
+          const double* w = wex.value_ptr(col.slot);
+          for (int i = 0; i < 6; ++i)
+            expect_eq("viewalias write W" + std::to_string(i), w[i],
+                      points[0][i]);
+        }
+        check(found_w, "viewalias write_array has W");
+      }
+    } catch (const std::exception& e) {
+      ++failures;
+      std::printf("FAIL viewalias compile: %s\n", e.what());
+    }
   }
 
   // categorical_lpmf, scalar and array outcomes, on a simplex parameter.

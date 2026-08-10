@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <optional>
@@ -26,7 +27,7 @@ namespace {
 
 struct SlotInfo {
   int64_t rows = 0, cols = 0;  // set for matrices
-  bool data_like = false;      // no adjoint (data or constant)
+  bool param_free = false;     // independent of every model parameter
 };
 
 // Where an index path lands in a flat buffer. `stride` is 1 unless the path
@@ -71,6 +72,11 @@ Addr flat_addr(const std::vector<int64_t>& D, bool mat,
 }
 
 struct Lowering {
+  struct Val {
+    int slot;
+    SlotInfo si;
+  };
+
   const DataMap& data;
   // The MIR interpreter instance for everything DataOnly: prepare_data,
   // data-only conditions, size expressions. Its environment doubles as the
@@ -89,11 +95,10 @@ struct Lowering {
                }}};
   Graph g;
   CompiledModel out;
-  std::map<std::string, int> scope;     // var -> slot
+  std::map<std::string, Val> scope;     // var -> value and logical view
   std::map<std::string, long> int_env;  // data int scalars
   std::map<double, int> const_cache;
   std::map<int, std::vector<double>> slot_values;  // constant/data fills
-  std::vector<SlotInfo> info;                      // parallel to g.slots
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
   std::map<std::string, const mir::FunDef*> fun_defs;
@@ -118,11 +123,7 @@ struct Lowering {
 
   explicit Lowering(const DataMap& d) : data(d) {}
 
-  int add_slot(int64_t len, bool is_param, SlotInfo si = {}) {
-    const int s = g.add_slot(len, is_param);
-    info.push_back(si);
-    return s;
-  }
+  int add_slot(int64_t len, bool is_param) { return g.add_slot(len, is_param); }
 
   [[noreturn]] void fail(const std::string& msg, const std::string& raw = "") {
     throw CompileError("stanli compile: " + msg +
@@ -132,14 +133,14 @@ struct Lowering {
   int const_slot(double v) {
     auto it = const_cache.find(v);
     if (it != const_cache.end()) return it->second;
-    SlotInfo si;
-    si.data_like = true;
-    const int s = add_slot(1, false, si);
+    const int s = add_slot(1, false);
     out.fills.emplace_back(s, std::vector<double>{v});
     const_cache[v] = s;
     slot_values[s] = {v};
     return s;
   }
+
+  Val constant(double v) { return {const_slot(v), SlotInfo{0, 0, true}}; }
 
   long eval_int(const mir::Expr& e) {
     switch (e.kind) {
@@ -197,8 +198,8 @@ struct Lowering {
             e.args.size() == 1 && e.args[0].kind == mir::Expr::Var) {
           auto sit = scope.find(e.args[0].name);
           if (sit != scope.end()) {
-            const SlotInfo& si = info[sit->second];
-            const int64_t len = g.slots[sit->second].len;
+            const SlotInfo& si = sit->second.si;
+            const int64_t len = g.slots[sit->second.slot].len;
             if (e.name == "rows") return si.rows > 0 ? si.rows : len;
             if (e.name == "cols") return si.rows > 0 ? si.cols : 1;
             return len;
@@ -273,13 +274,13 @@ struct Lowering {
     // slot when passed around.
     if (!en) return -1;
     if (en->r.empty() && !en->dims.empty() && en->dims[0] == 0) {
-      const int s = add_slot(0, false, SlotInfo{0, 0, true});
-      scope[name] = s;
+      const int s = add_slot(0, false);
+      scope[name] = Val{s, SlotInfo{0, 0, true}};
       return s;
     }
     if (en->r.empty()) return -1;
     SlotInfo si;
-    si.data_like = true;
+    si.param_free = true;
     // An array of containers is not a matrix, so it gets no rows/cols: the
     // kernels that take one read element n from n*K, which is where the
     // repack below puts it, and which is where a parameter of the same
@@ -309,19 +310,14 @@ struct Lowering {
         vals[(size_t)flat_addr(D, elem_dims == 2, ix).off] = en->r[src];
       }
     }
-    const int s = add_slot((int64_t)vals.size(), false, si);
+    const int s = add_slot((int64_t)vals.size(), false);
     out.fills.emplace_back(s, vals);
     slot_values[s] = vals;
-    scope[name] = s;
+    scope[name] = Val{s, si};
     return s;
   }
 
   // ---- expressions ----------------------------------------------------------
-  struct Val {
-    int slot;
-    SlotInfo si;
-  };
-
   Val lower_expr(const mir::Expr& e) {
     switch (e.kind) {
       case mir::Expr::Var: {
@@ -329,12 +325,12 @@ struct Lowering {
         if (it == scope.end()) {
           auto ii = int_env.find(e.name);
           if (ii != int_env.end())
-            return {const_slot(static_cast<double>(ii->second)), {}};
+            return constant(static_cast<double>(ii->second));
           const int s = env_slot(e.name);
-          if (s >= 0) return {s, info[s]};
+          if (s >= 0) return scope.at(e.name);
           fail("unknown variable " + e.name);
         }
-        return {it->second, info[it->second]};
+        return it->second;
       }
       case mir::Expr::Indexed: {
         // All-Single indices with compile-time values -> element read.
@@ -353,7 +349,8 @@ struct Lowering {
         if (e.args.size() == 2 && e.args[1].name == "IndexBetween") {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
-          return emit(OP_SLICE, {base.slot}, hi - lo + 1, {}, {(int)(lo - 1)});
+          return emit_value(OP_SLICE, {base}, hi - lo + 1, {},
+                            {(int)(lo - 1)});
         }
         // Gather by a data int array: v[idx].
         if (e.args.size() == 2 && e.args[1].name == "IndexMulti") {
@@ -363,21 +360,22 @@ struct Lowering {
           std::vector<int> idata;
           idata.reserve(iv.i.size());
           for (int x : iv.i) idata.push_back(x - 1);
-          return emit(OP_GATHER, {base.slot}, (int64_t)idata.size(), {}, idata);
+          return emit_value(OP_GATHER, {base}, (int64_t)idata.size(), {},
+                            idata);
         }
         // Matrix row/column slices (col-major storage; rows>0 marks a
         // matrix slot).
         if (e.args.size() == 3 && base.si.rows > 0 &&
             e.args[1].name == "IndexSingle" && e.args[2].name == "IndexAll") {
           const int64_t i = eval_int(e.args[1].args[0]) - 1;
-          return emit(OP_SLICE_STRIDED, {base.slot}, base.si.cols, {},
-                      {(int)i, (int)base.si.rows});
+          return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, {},
+                            {(int)i, (int)base.si.rows});
         }
         if (e.args.size() == 3 && base.si.rows > 0 &&
             e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
           const int64_t j = eval_int(e.args[2].args[0]) - 1;
-          return emit(OP_SLICE, {base.slot}, base.si.rows, {},
-                      {(int)(j * base.si.rows)});
+          return emit_value(OP_SLICE, {base}, base.si.rows, {},
+                            {(int)(j * base.si.rows)});
         }
         // Column of an array-major 2-D value (array[N, S] real): elements
         // sit S apart, so this is a strided slice, not a contiguous one.
@@ -386,7 +384,8 @@ struct Lowering {
             e.args[2].name == "IndexSingle") {
           const int64_t k = eval_int(e.args[2].args[0]) - 1;
           const int64_t N = (*bdims)[0], S = (*bdims)[1];
-          return emit(OP_SLICE_STRIDED, {base.slot}, N, {}, {(int)k, (int)S});
+          return emit_value(OP_SLICE_STRIDED, {base}, N, {},
+                            {(int)k, (int)S});
         }
         // Row-range column read M[a:b, j] (contiguous within the column).
         if (e.args.size() == 3 && base.si.rows > 0 &&
@@ -395,8 +394,8 @@ struct Lowering {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
           const int64_t j = eval_int(e.args[2].args[0]) - 1;
-          return emit(OP_SLICE, {base.slot}, hi - lo + 1, {},
-                      {(int)(j * base.si.rows + lo - 1)});
+          return emit_value(OP_SLICE, {base}, hi - lo + 1, {},
+                            {(int)(j * base.si.rows + lo - 1)});
         }
         // Params/locals with recorded dims, laid out by flat_addr above.
         // Matrix slots (rows>0) are col-major and never take this path.
@@ -411,10 +410,10 @@ struct Lowering {
             ix.push_back(eval_int(e.args[1 + d].args[0]) - 1);
           const Addr a = flat_addr(D, mat, ix);
           if (a.stride != 1)
-            return emit(OP_SLICE_STRIDED, {base.slot}, a.len, {},
-                        {(int)a.off, (int)a.stride});
+            return emit_value(OP_SLICE_STRIDED, {base}, a.len, {},
+                              {(int)a.off, (int)a.stride});
           if (a.len == 1)
-            return emit(OP_INDEX, {base.slot}, 1, {}, {(int)a.off});
+            return emit_value(OP_INDEX, {base}, 1, {}, {(int)a.off});
           // One whole matrix out of the array keeps its shape, so a later
           // index on it can take the column-major paths above.
           SlotInfo si;
@@ -422,14 +421,14 @@ struct Lowering {
             si.rows = D[n_idx];
             si.cols = D[n_idx + 1];
           }
-          return emit(OP_SLICE, {base.slot}, a.len, si, {(int)a.off});
+          return emit_value(OP_SLICE, {base}, a.len, si, {(int)a.off});
         }
         // Row of a column-major data matrix / 2-D array: strided slice.
         if (all_single && e.args.size() == 2 && base.si.rows > 0 &&
             e.type_ != "UReal" && e.type_ != "UInt") {
           const int64_t t = eval_int(e.args[1].args[0]) - 1;
-          return emit(OP_SLICE_STRIDED, {base.slot}, base.si.cols, {},
-                      {(int)t, (int)base.si.rows});
+          return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, {},
+                            {(int)t, (int)base.si.rows});
         }
         // Data-only slicing with no native path (e.g. one matrix out of a
         // data array of matrices) evaluates at compile time.
@@ -453,12 +452,12 @@ struct Lowering {
           desc += " type=" + e.type_;
           fail(desc, e.raw);
         }
-        return emit(OP_INDEX, {base.slot}, 1, {}, {(int)flat});
+        return emit_value(OP_INDEX, {base}, 1, {}, {(int)flat});
       }
       case mir::Expr::LitInt:
-        return {const_slot(static_cast<double>(e.lit_i)), {}};
+        return constant(static_cast<double>(e.lit_i));
       case mir::Expr::LitReal:
-        return {const_slot(e.lit), {}};
+        return constant(e.lit);
       case mir::Expr::FunApp:
         return lower_funapp(e);
       case mir::Expr::TernaryIf: {
@@ -536,7 +535,7 @@ struct Lowering {
     for (const auto& [name, v] : int_env) c.ints[name] = {v};
     c.bind_extern = [&](const std::string& name, Range* r) {
       auto sc = scope.find(name);
-      const int slot = sc != scope.end() ? sc->second : env_slot(name);
+      const int slot = sc != scope.end() ? sc->second.slot : env_slot(name);
       if (slot < 0) return false;
       const int64_t len = g.slots[slot].len;
       if (len <= 0) return false;
@@ -633,8 +632,8 @@ struct Lowering {
     int64_t off = 0;
     for (size_t k = 0; k < out_lens.size(); ++k) {
       const int len = out_lens[k];
-      const Val v =
-          emit(len == 1 ? OP_INDEX : OP_SLICE, {is.out}, len, {}, {(int)off});
+      const Val v = emit_raw(len == 1 ? OP_INDEX : OP_SLICE, {is.out}, len,
+                             {}, {(int)off});
       out_slots->push_back(v.slot);
       off += len;
     }
@@ -650,7 +649,7 @@ struct Lowering {
     for (const std::string& name : reg.out_names) {
       auto it = scope.find(name);
       if (it != scope.end()) {
-        out_lens.push_back((int)g.slots[it->second].len);
+        out_lens.push_back((int)g.slots[it->second.slot].len);
         continue;
       }
       auto dl = decl_lens.find(name);
@@ -664,8 +663,25 @@ struct Lowering {
     std::vector<int> out_slots;
     emit_island(prog, reg, out_lens, &out_slots);
     // Later statements read the island's results, not the old values.
-    for (size_t k = 0; k < reg.out_names.size(); ++k)
-      scope[reg.out_names[k]] = out_slots[k];
+    for (size_t k = 0; k < reg.out_names.size(); ++k) {
+      const std::string& name = reg.out_names[k];
+      SlotInfo si;
+      auto old = scope.find(name);
+      if (old != scope.end()) {
+        si = old->second.si;
+      } else {
+        auto dl = decl_lens.find(name);
+        if (dl != decl_lens.end()) {
+          si.rows = dl->second.rows;
+          si.cols = dl->second.cols;
+        }
+      }
+      // The island is parameter-dependent regardless of the old binding's
+      // provenance; treating its live-out as data would select kernels that
+      // deliberately omit adjoints for that input.
+      si.param_free = false;
+      scope[name] = Val{out_slots[k], si};
+    }
     if (reg.has_target) target_terms.push_back(out_slots.back());
   }
 
@@ -677,25 +693,50 @@ struct Lowering {
     lower_island(nullptr, &e, &reg, &value, &prog);
     std::vector<int> out_slots;
     emit_island(prog, reg, {value.len}, &out_slots);
-    return {out_slots[0], info[out_slots[0]]};
+    return {out_slots[0], {}};
   }
 
-  Val emit(uint16_t opcode, std::vector<int> ins, int64_t out_len,
-           SlotInfo out_si = {}, std::vector<int> idata = {}, int out2 = -1) {
-    const int o = add_slot(out_len, false, out_si);
-    Op op;
-    op.opcode = opcode;
+  Val finish_emit(Op op, int64_t out_len, SlotInfo out_si,
+                  std::vector<int> idata) {
+    const int o = add_slot(out_len, false);
     op.out = o;
-    op.out2 = out2;
-    op.n_in = 0;
-    for (int s : ins) op.in[op.n_in++] = s;
     if (!idata.empty()) {
       g.idata_pool.push_back(std::move(idata));
       op.idata = g.idata_pool.back().data();
       op.n_idata = (int64_t)g.idata_pool.back().size();
     }
     g.ops.push_back(op);
-    return {o, info[o]};
+    return {o, out_si};
+  }
+
+  // Low-level emission for dynamic slot lists and graph scaffolding whose
+  // output dependency is explicit at the call site.
+  Val emit_raw(uint16_t opcode, std::vector<int> ins, int64_t out_len,
+               SlotInfo out_si, std::vector<int> idata = {}, int out2 = -1) {
+    Op op;
+    op.opcode = opcode;
+    op.out2 = out2;
+    op.n_in = 0;
+    for (int s : ins) op.in[op.n_in++] = s;
+    return finish_emit(op, out_len, out_si, std::move(idata));
+  }
+
+  // The expression seam: a pure result is parameter-free exactly when all of
+  // its inputs are. initializer_list avoids a temporary input-list allocation
+  // and makes forgetting dependency propagation impossible.
+  Val emit_value(uint16_t opcode, std::initializer_list<Val> ins,
+                 int64_t out_len, SlotInfo out_si = {},
+                 std::vector<int> idata = {}, int out2 = -1) {
+    Op op;
+    op.opcode = opcode;
+    op.out2 = out2;
+    op.n_in = 0;
+    out_si.param_free = true;
+    for (const Val& in : ins) {
+      op.in[op.n_in++] = in.slot;
+      out_si.param_free = out_si.param_free && in.si.param_free;
+    }
+    return finish_emit(op, out_len, out_si, std::move(idata));
   }
 
   // Fallback for expressions with no native lowering: a data-only subtree
@@ -712,14 +753,15 @@ struct Lowering {
       return std::nullopt;
     }
     if (en.r.empty()) return std::nullopt;
-    if (en.r.size() == 1) return Val{const_slot(en.r[0]), {}};
+    if (en.r.size() == 1)
+      return constant(en.r[0]);
     SlotInfo si;
-    si.data_like = true;
+    si.param_free = true;
     if (en.dims.size() == 2) {
       si.rows = en.dims[0];
       si.cols = en.dims[1];
     }
-    const int s = add_slot((int64_t)en.r.size(), false, si);
+    const int s = add_slot((int64_t)en.r.size(), false);
     out.fills.emplace_back(s, en.r);
     slot_values[s] = en.r;
     return Val{s, si};
@@ -759,9 +801,9 @@ struct Lowering {
       fail("elementwise op on matrices of different shapes");
     si.rows = src.rows;
     si.cols = src.cols;
-    // An op over data-only inputs is itself data (no adjoint), which is
-    // what lets a transformed data matrix still drive OP_MATVEC.
-    si.data_like = info[a.slot].data_like && info[b.slot].data_like;
+    // A pure op is parameter-free when both inputs are; this lets a
+    // transformed data matrix still drive OP_MATVEC.
+    si.param_free = a.si.param_free && b.si.param_free;
     return si;
   }
 
@@ -872,7 +914,7 @@ struct Lowering {
         int_env[name] = binds[i].iv;
         scope.erase(name);
       } else {
-        scope[name] = binds[i].v.slot;
+        scope[name] = binds[i].v;
         int_env.erase(name);
       }
     }
@@ -917,7 +959,7 @@ struct Lowering {
       Val acc = parts[0];
       for (size_t i = 1; i < parts.size(); ++i) {
         const int64_t len = g.slots[acc.slot].len + g.slots[parts[i].slot].len;
-        acc = emit(OP_CONCAT2, {acc.slot, parts[i].slot}, len);
+        acc = emit_value(OP_CONCAT2, {acc, parts[i]}, len);
       }
       return acc;
     }
@@ -949,7 +991,8 @@ struct Lowering {
     if (is_density && propto(e)) {
       bool all_data = true;
       for (const auto& a : e.args) all_data = all_data && a.data_only;
-      if (all_data) return Val{const_slot(0.0), {}};
+      if (all_data)
+        return constant(0.0);
     }
     if (auto v = fold_const(e)) return *v;
     // A shape query in a REAL-valued expression. eval_int already answers
@@ -961,7 +1004,7 @@ struct Lowering {
          e.name == "num_elements") &&
         e.args.size() == 1) {
       try {
-        return Val{const_slot((double)eval_int(e)), {}};
+        return constant((double)eval_int(e));
       } catch (const CompileError&) {
       }
     }
@@ -1041,21 +1084,26 @@ struct Lowering {
         put(e.args[1]);
       }
       std::vector<int> ins;
+      SlotInfo first_real_si;
+      SlotInfo result_si{0, 0, true};
       uint8_t variant = 0;
       for (size_t i = d.n_int; i < e.args.size(); ++i) {
-        ins.push_back(lower_expr(e.args[i]).slot);
+        const Val arg = lower_expr(e.args[i]);
+        if (i == d.n_int) first_real_si = arg.si;
+        ins.push_back(arg.slot);
+        result_si.param_free = result_si.param_free && arg.si.param_free;
         if (!e.args[i].data_only) variant |= (uint8_t)(1u << (i - d.n_int));
       }
       if (propto(e)) variant |= 0x80u;
       if (d.glm) {
         // X must be a data matrix; append its dims to idata.
-        const SlotInfo& xsi = info[ins[0]];
-        if (xsi.rows == 0 || !xsi.data_like)
+        const SlotInfo& xsi = first_real_si;
+        if (xsi.rows == 0 || !xsi.param_free)
           fail(e.name + ": X must be a data matrix");
         idata.push_back((int)xsi.rows);
         idata.push_back((int)xsi.cols);
       }
-      Val dv = emit(d.op, ins, 1, {}, idata);
+      Val dv = emit_raw(d.op, ins, 1, result_si, idata);
       // GLM ops used to be the one density shape that got no variant at
       // all, so their kernels hardcoded propto=false and poisson_log_glm's
       // lp landed sum(log(y!)) -- 10.45 on a six-row test -- away from
@@ -1074,34 +1122,36 @@ struct Lowering {
     if (e.name == "categorical_logit_lpmf" && e.args.size() == 2) {
       // stan-math evaluates log_softmax(beta) then picks the outcomes,
       // which is exactly this composition.
-      if (propto(e) && e.args[1].data_only) return Val{const_slot(0.0), {}};
+      if (propto(e) && e.args[1].data_only)
+        return constant(0.0);
       Val b = lower_expr(e.args[1]);
-      Val ls = emit(OP_LOG_SOFTMAX, {b.slot}, g.slots[b.slot].len);
+      Val ls = emit_value(OP_LOG_SOFTMAX, {b}, g.slots[b.slot].len);
       auto ns = int_arg_values(e.args[0]);
       if (e.args[0].type_ == "UInt" && ns.size() == 1)
-        return emit(OP_INDEX, {ls.slot}, 1, {}, {ns[0] - 1});
+        return emit_value(OP_INDEX, {ls}, 1, {}, {ns[0] - 1});
       std::vector<int> idata;
       for (int n : ns) idata.push_back(n - 1);
-      Val ga = emit(OP_GATHER, {ls.slot}, (int64_t)idata.size(), {}, idata);
-      return emit(OP_SUM_VEC, {ga.slot}, 1);
+      Val ga = emit_value(OP_GATHER, {ls}, (int64_t)idata.size(), {}, idata);
+      return emit_value(OP_SUM_VEC, {ga}, 1);
     }
     if (e.name == "categorical_lpmf" && e.args.size() == 2) {
       // stan-math computes log(theta[n-1]) on the scalar type directly (no
       // ops_partials), so this decomposes exactly onto existing ops. For an
       // array outcome the reference logs the whole simplex once and gathers,
       // which also fixes the adjoint association for repeated categories.
-      if (propto(e) && e.args[1].data_only) return Val{const_slot(0.0), {}};
+      if (propto(e) && e.args[1].data_only)
+        return constant(0.0);
       Val th = lower_expr(e.args[1]);
       auto ns = int_arg_values(e.args[0]);
       if (e.args[0].type_ == "UInt" && ns.size() == 1) {
-        Val el = emit(OP_INDEX, {th.slot}, 1, {}, {ns[0] - 1});
-        return emit(OP_LOGV, {el.slot}, 1);
+        Val el = emit_value(OP_INDEX, {th}, 1, {}, {ns[0] - 1});
+        return emit_value(OP_LOGV, {el}, 1);
       }
-      Val lg = emit(OP_LOGV, {th.slot}, g.slots[th.slot].len);
+      Val lg = emit_value(OP_LOGV, {th}, g.slots[th.slot].len);
       std::vector<int> idata;
       for (int n : ns) idata.push_back(n - 1);
-      Val ga = emit(OP_GATHER, {lg.slot}, (int64_t)idata.size(), {}, idata);
-      return emit(OP_SUM_VEC, {ga.slot}, 1);
+      Val ga = emit_value(OP_GATHER, {lg}, (int64_t)idata.size(), {}, idata);
+      return emit_value(OP_SUM_VEC, {ga}, 1);
     }
 
     if ((e.name == "multi_normal_cholesky_lpdf" ||
@@ -1127,8 +1177,7 @@ struct Lowering {
                                  : (e.name.find("prec") != std::string::npos
                                         ? OP_MULTI_NORMAL_PREC_LPDF
                                         : OP_MULTI_NORMAL_LPDF);
-      Val v =
-          emit(mn_op, {y.slot, mu.slot, m.slot}, 1, {}, {(int)K, (int)reps});
+      Val v = emit_value(mn_op, {y, mu, m}, 1, {}, {(int)K, (int)reps});
       g.ops.back().variant = variant;
       return v;
     }
@@ -1137,9 +1186,9 @@ struct Lowering {
       Val L = lower_expr(e.args[0]);
       Val eta = lower_expr(e.args[1]);
       if (L.si.rows == 0) fail(e.name + " needs a matrix", e.raw);
-      Val v = emit(
+      Val v = emit_value(
           e.name == "lkj_corr_lpdf" ? OP_LKJ_CORR_LPDF : OP_LKJ_CORR_CHOL_LPDF,
-          {L.slot, eta.slot}, 1, {}, {(int)L.si.rows});
+          {L, eta}, 1, {}, {(int)L.si.rows});
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1u);
       return v;
     }
@@ -1150,8 +1199,8 @@ struct Lowering {
       Val sig = lower_expr(e.args[2]);
       Val eta = lower_expr(e.args[3]);
       if (S.si.rows == 0) fail("lkj_cov needs a matrix", e.raw);
-      Val v = emit(OP_LKJ_COV_LPDF, {S.slot, mu.slot, sig.slot, eta.slot}, 1,
-                   {}, {(int)S.si.rows});
+      Val v = emit_value(OP_LKJ_COV_LPDF, {S, mu, sig, eta}, 1, {},
+                         {(int)S.si.rows});
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0xfu);
       return v;
     }
@@ -1180,8 +1229,8 @@ struct Lowering {
       idata.insert(idata.end(), NN.begin(), NN.end());
       idata.push_back((int)rows);
       idata.push_back((int)X.si.cols);
-      Val v = emit(OP_BINOMIAL_LOGIT_GLM_LPMF, {X.slot, alpha.slot, beta.slot},
-                   1, {}, idata);
+      Val v =
+          emit_value(OP_BINOMIAL_LOGIT_GLM_LPMF, {X, alpha, beta}, 1, {}, idata);
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
     }
@@ -1199,10 +1248,10 @@ struct Lowering {
       // categorical: (y, x, alpha, beta). ordered: (y, x, beta, cuts).
       // Both pass their two real arguments in order, so the kernel reads
       // in[1] and in[2] and knows from its Kind what they mean.
-      Val v = emit(e.name == "categorical_logit_glm_lpmf"
+      Val v = emit_value(e.name == "categorical_logit_glm_lpmf"
                        ? OP_CATEGORICAL_LOGIT_GLM_LPMF
                        : OP_ORDERED_LOGISTIC_GLM_LPMF,
-                   {X.slot, a2.slot, a3.slot}, 1, {}, idata);
+                         {X, a2, a3}, 1, {}, idata);
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
     }
@@ -1215,9 +1264,9 @@ struct Lowering {
       Val w = lower_expr(e.args[2]);
       if (y.si.rows == 0 || S.si.rows == 0)
         fail(e.name + " needs matrix arguments", e.raw);
-      Val v = emit(
+      Val v = emit_value(
           e.name == "multi_gp_lpdf" ? OP_MULTI_GP_LPDF : OP_MULTI_GP_CHOL_LPDF,
-          {y.slot, S.slot, w.slot}, 1, {}, {(int)y.si.rows, (int)y.si.cols});
+          {y, S, w}, 1, {}, {(int)y.si.rows, (int)y.si.cols});
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
     }
@@ -1234,10 +1283,10 @@ struct Lowering {
       if (S.si.rows == 0) fail(e.name + " needs a matrix argument", e.raw);
       const int64_t K = S.si.rows;
       const int64_t reps = g.slots[y.slot].len / K;
-      Val v =
-          emit(e.name == "multi_student_t_lpdf" ? OP_MULTI_STUDENT_T_LPDF
-                                                : OP_MULTI_STUDENT_T_CHOL_LPDF,
-               {y.slot, nu.slot, mu.slot, S.slot}, 1, {}, {(int)K, (int)reps});
+      Val v = emit_value(
+          e.name == "multi_student_t_lpdf" ? OP_MULTI_STUDENT_T_LPDF
+                                           : OP_MULTI_STUDENT_T_CHOL_LPDF,
+          {y, nu, mu, S}, 1, {}, {(int)K, (int)reps});
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0xfu);
       return v;
     }
@@ -1254,7 +1303,7 @@ struct Lowering {
       if (mit != kMult.end() && e.args.size() == 2) {
         std::vector<int> ns = int_arg_values(e.args[0]);
         Val th = lower_expr(e.args[1]);
-        Val v = emit(mit->second, {th.slot}, 1, {}, ns);
+        Val v = emit_value(mit->second, {th}, 1, {}, ns);
         g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1u);
         return v;
       }
@@ -1266,7 +1315,7 @@ struct Lowering {
       std::vector<int> y = int_arg_values(e.args[0]);
       Val lam = lower_expr(e.args[1]);
       Val c = lower_expr(e.args[2]);
-      Val v = emit(OP_ORDERED_PROBIT_LPMF, {lam.slot, c.slot}, 1, {}, y);
+      Val v = emit_value(OP_ORDERED_PROBIT_LPMF, {lam, c}, 1, {}, y);
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x3u);
       return v;
     }
@@ -1274,8 +1323,13 @@ struct Lowering {
     // wiener(y | alpha, tau, beta, delta): five real arguments.
     if (e.name == "wiener_lpdf" && e.args.size() == 5) {
       std::vector<int> ins;
-      for (int i = 0; i < 5; ++i) ins.push_back(lower_expr(e.args[i]).slot);
-      Val v = emit(OP_WIENER_LPDF, ins, 1, {}, {});
+      SlotInfo result_si{0, 0, true};
+      for (int i = 0; i < 5; ++i) {
+        const Val arg = lower_expr(e.args[i]);
+        ins.push_back(arg.slot);
+        result_si.param_free = result_si.param_free && arg.si.param_free;
+      }
+      Val v = emit_raw(OP_WIENER_LPDF, ins, 1, result_si, {});
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1fu);
       return v;
     }
@@ -1297,8 +1351,8 @@ struct Lowering {
         Val nu = lower_expr(e.args[1]);
         Val S = lower_expr(e.args[2]);
         if (W.si.rows == 0) fail(e.name + " needs a matrix", e.raw);
-        Val v = emit(wit->second, {W.slot, nu.slot, S.slot}, 1, {},
-                     {(int)W.si.rows});
+        Val v = emit_value(wit->second, {W, nu, S}, 1, {},
+                           {(int)W.si.rows});
         g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
         return v;
       }
@@ -1306,7 +1360,7 @@ struct Lowering {
     if (e.name == "normal_id_glm_lpdf" && e.args.size() == 5) {
       Val y = lower_expr(e.args[0]);
       Val X = lower_expr(e.args[1]);
-      if (X.si.rows == 0 || !info[X.slot].data_like)
+      if (X.si.rows == 0 || !X.si.param_free)
         fail("normal_id_glm: X must be a data matrix", e.raw);
       Val alpha = lower_expr(e.args[2]);
       Val beta = lower_expr(e.args[3]);
@@ -1315,9 +1369,8 @@ struct Lowering {
       for (int i = 0; i < 5; ++i)
         if (!e.args[i].data_only) variant |= (uint8_t)(1u << i);
       if (propto(e)) variant |= 0x80u;
-      Val v = emit(OP_NORMAL_ID_GLM_LPDF,
-                   {y.slot, X.slot, alpha.slot, beta.slot, sigma.slot}, 1, {},
-                   {(int)X.si.rows, (int)X.si.cols});
+      Val v = emit_value(OP_NORMAL_ID_GLM_LPDF, {y, X, alpha, beta, sigma}, 1,
+                         {}, {(int)X.si.rows, (int)X.si.cols});
       g.ops.back().variant = variant;
       return v;
     }
@@ -1340,17 +1393,17 @@ struct Lowering {
       if (g.slots[a.slot].len == 1 || g.slots[b.slot].len == 1) {
         const Val& shaped = g.slots[a.slot].len == 1 ? b : a;
         SlotInfo si = shaped.si;
-        si.data_like = info[a.slot].data_like && info[b.slot].data_like;
-        return emit(OP_MUL, {a.slot, b.slot},
-                    std::max(g.slots[a.slot].len, g.slots[b.slot].len), si);
+        si.param_free = a.si.param_free && b.si.param_free;
+        return emit_value(
+            OP_MUL, {a, b},
+            std::max(g.slots[a.slot].len, g.slots[b.slot].len), si);
       }
       if (a.si.rows > 0) {
-        if (info[a.slot].data_like && b.si.rows == 0) {
+        if (a.si.param_free && b.si.rows == 0) {
           // Data matrix * vector keeps the tuned MATVEC kernel (its
           // accumulation order is matched to the var path).
-          SlotInfo si;
-          return emit(OP_MATVEC, {a.slot, b.slot}, a.si.rows, si,
-                      {(int)a.si.rows, (int)a.si.cols});
+          return emit_value(OP_MATVEC, {a, b}, a.si.rows, {},
+                            {(int)a.si.rows, (int)a.si.cols});
         }
         // General product; a vector operand is one column.
         const int64_t cb = b.si.rows > 0 ? b.si.cols : 1;
@@ -1365,8 +1418,8 @@ struct Lowering {
         si.rows = a.si.rows;
         si.cols = cb;
         if (cb == 1) si.rows = 0, si.cols = 0;  // result is a vector
-        Val v = emit(OP_GEMM, {a.slot, b.slot}, a.si.rows * cb, si,
-                     {(int)a.si.rows, (int)a.si.cols, (int)cb});
+        Val v = emit_value(OP_GEMM, {a, b}, a.si.rows * cb, si,
+                           {(int)a.si.rows, (int)a.si.cols, (int)cb});
         return v;
       }
       // vector * row_vector with a matrix result is an outer product.
@@ -1375,15 +1428,15 @@ struct Lowering {
         SlotInfo si;
         si.rows = nr;
         si.cols = nc;
-        return emit(OP_GEMM, {a.slot, b.slot}, nr * nc, si,
-                    {(int)nr, 1, (int)nc});
+        return emit_value(OP_GEMM, {a, b}, nr * nc, si,
+                          {(int)nr, 1, (int)nc});
       }
       // row_vector * vector with scalar result type is an inner product.
       if ((e.type_ == "UReal" || e.type_ == "UInt") &&
           g.slots[a.slot].len > 1 && g.slots[b.slot].len > 1)
-        return emit(OP_DOT, {a.slot, b.slot}, 1);
+        return emit_value(OP_DOT, {a, b}, 1);
       const int64_t len = std::max(g.slots[a.slot].len, g.slots[b.slot].len);
-      return emit(OP_MUL, {a.slot, b.slot}, len);
+      return emit_value(OP_MUL, {a, b}, len);
     }
     auto bit = kBin.find(e.name);
     if (bit != kBin.end()) {
@@ -1395,7 +1448,7 @@ struct Lowering {
       // Elementwise results keep the matrix shape of whichever operand
       // has one; losing it would make a later Times__ miss the matvec.
       SlotInfo si = shape_of(a, b);
-      return emit(bit->second, {a.slot, b.slot}, std::max(la, lb), si);
+      return emit_value(bit->second, {a, b}, std::max(la, lb), si);
     }
 
     // Elementwise unaries + reductions.
@@ -1427,52 +1480,53 @@ struct Lowering {
         si.rows = a.si.rows;
         si.cols = a.si.cols;
       }
-      si.data_like = info[a.slot].data_like;
-      return emit(uit->second, {a.slot}, g.slots[a.slot].len, si);
+      si.param_free = a.si.param_free;
+      return emit_value(uit->second, {a}, g.slots[a.slot].len, si);
     }
     if (e.name == "PPlus__") return lower_expr(e.args[0]);
     if (e.name == "logit") {
       Val a = lower_expr(e.args[0]);
-      return emit(OP_LOGIT, {a.slot}, g.slots[a.slot].len);
+      return emit_value(OP_LOGIT, {a}, g.slots[a.slot].len);
     }
     if (e.name == "mean") {
       Val a = lower_expr(e.args[0]);
-      return emit(OP_MEAN, {a.slot}, 1);
+      return emit_value(OP_MEAN, {a}, 1);
     }
     if (e.name == "rep_vector") {
       Val a = lower_expr(e.args[0]);
       const long n = eval_int(e.args[1]);
-      return emit(OP_REP_VEC, {a.slot}, n);
+      return emit_value(OP_REP_VEC, {a}, n);
     }
     if (e.name == "log_sum_exp" || e.name == "sum") {
       if (e.name == "log_sum_exp" && e.args.size() == 2) {
         Val a = lower_expr(e.args[0]);
         Val b = lower_expr(e.args[1]);
-        return emit(OP_LSE2, {a.slot, b.slot}, 1);
+        return emit_value(OP_LSE2, {a, b}, 1);
       }
       Val a = lower_expr(e.args[0]);
-      return emit(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a.slot}, 1);
+      return emit_value(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a},
+                        1);
     }
     if (e.name == "log_diff_exp" && e.args.size() == 2) {
       Val a = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);
-      return emit(OP_LOG_DIFF_EXP, {a.slot, b.slot}, 1);
+      return emit_value(OP_LOG_DIFF_EXP, {a, b}, 1);
     }
     if (e.name == "log_mix" && e.args.size() == 3) {
       Val a = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);
       Val c = lower_expr(e.args[2]);
-      return emit(OP_LOG_MIX, {a.slot, b.slot, c.slot}, 1);
+      return emit_value(OP_LOG_MIX, {a, b, c}, 1);
     }
     if (e.name == "dot_product") {
       Val a = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);
-      return emit(OP_DOT, {a.slot, b.slot}, 1);
+      return emit_value(OP_DOT, {a, b}, 1);
     }
 
     if (e.name == "dot_self") {
       Val a = lower_expr(e.args[0]);
-      return emit(OP_DOT, {a.slot, a.slot}, 1);
+      return emit_value(OP_DOT, {a, a}, 1);
     }
     return std::nullopt;
   }
@@ -1488,9 +1542,9 @@ struct Lowering {
       SlotInfo si;
       si.rows = a.si.cols;
       si.cols = a.si.rows;
-      si.data_like = info[a.slot].data_like;
-      return emit(OP_TRANSPOSE, {a.slot}, g.slots[a.slot].len, si,
-                  {(int)a.si.rows, (int)a.si.cols});
+      si.param_free = a.si.param_free;
+      return emit_value(OP_TRANSPOSE, {a}, g.slots[a.slot].len, si,
+                        {(int)a.si.rows, (int)a.si.cols});
     }
     if ((e.name == "diag_pre_multiply" || e.name == "diag_post_multiply") &&
         e.args.size() == 2) {
@@ -1503,14 +1557,14 @@ struct Lowering {
       SlotInfo dsi;
       dsi.rows = n;
       dsi.cols = n;
-      dsi.data_like = info[v.slot].data_like;
-      Val d = emit(OP_DIAG_MATRIX, {v.slot}, n * n, dsi);
+      dsi.param_free = v.si.param_free;
+      Val d = emit_value(OP_DIAG_MATRIX, {v}, n * n, dsi);
       Val a = pre ? d : m, b = pre ? m : d;
       SlotInfo si;
       si.rows = a.si.rows;
       si.cols = b.si.cols;
-      return emit(OP_GEMM, {a.slot, b.slot}, si.rows * si.cols, si,
-                  {(int)a.si.rows, (int)a.si.cols, (int)b.si.cols});
+      return emit_value(OP_GEMM, {a, b}, si.rows * si.cols, si,
+                        {(int)a.si.rows, (int)a.si.cols, (int)b.si.cols});
     }
     if (e.name == "multiply_lower_tri_self_transpose" && e.args.size() == 1) {
       Val L = lower_expr(e.args[0]);
@@ -1518,13 +1572,13 @@ struct Lowering {
       SlotInfo tsi;
       tsi.rows = L.si.cols;
       tsi.cols = L.si.rows;
-      Val Lt = emit(OP_TRANSPOSE, {L.slot}, g.slots[L.slot].len, tsi,
-                    {(int)L.si.rows, (int)L.si.cols});
+      Val Lt = emit_value(OP_TRANSPOSE, {L}, g.slots[L.slot].len, tsi,
+                          {(int)L.si.rows, (int)L.si.cols});
       SlotInfo si;
       si.rows = L.si.rows;
       si.cols = L.si.rows;
-      return emit(OP_GEMM, {L.slot, Lt.slot}, si.rows * si.cols, si,
-                  {(int)L.si.rows, (int)L.si.cols, (int)L.si.rows});
+      return emit_value(OP_GEMM, {L, Lt}, si.rows * si.cols, si,
+                        {(int)L.si.rows, (int)L.si.cols, (int)L.si.rows});
     }
     if (e.name == "to_matrix" && (e.args.size() == 1 || e.args.size() == 3)) {
       // Col-major storage makes reshaping a relabelling. One argument on an
@@ -1532,7 +1586,7 @@ struct Lowering {
       // from it, which is the transpose of our array-major flat order.
       Val a = lower_expr(e.args[0]);
       SlotInfo si;
-      si.data_like = info[a.slot].data_like;
+      si.param_free = a.si.param_free;
       if (e.args.size() == 3) {
         si.rows = eval_int(e.args[1]);
         si.cols = eval_int(e.args[2]);
@@ -1549,8 +1603,8 @@ struct Lowering {
       // logical shape: transpose the storage.
       si.rows = dims[0];
       si.cols = dims[1];
-      return emit(OP_TRANSPOSE, {a.slot}, g.slots[a.slot].len, si,
-                  {(int)dims[1], (int)dims[0]});
+      return emit_value(OP_TRANSPOSE, {a}, g.slots[a.slot].len, si,
+                        {(int)dims[1], (int)dims[0]});
     }
     if ((e.name == "to_vector" || e.name == "to_row_vector") &&
         e.args.size() == 1) {
@@ -1568,7 +1622,8 @@ struct Lowering {
         const long R = eval_int(e.args[1]), C = eval_int(e.args[2]);
         si.rows = R;
         si.cols = C;
-        return emit(OP_REP_MAT, {x.slot}, R * C, si, {(int)R, (int)C, 0});
+        return emit_value(OP_REP_MAT, {x}, R * C, si,
+                          {(int)R, (int)C, 0});
       }
       if (e.args.size() == 2) {
         Val v = lower_expr(e.args[0]);
@@ -1578,8 +1633,8 @@ struct Lowering {
         const long C = rowvec ? g.slots[v.slot].len : n;
         si.rows = R;
         si.cols = C;
-        return emit(OP_REP_MAT, {v.slot}, R * C, si,
-                    {(int)R, (int)C, rowvec ? 2 : 1});
+        return emit_value(OP_REP_MAT, {v}, R * C, si,
+                          {(int)R, (int)C, rowvec ? 2 : 1});
       }
       fail("rep_matrix arity", e.raw);
     }
@@ -1587,7 +1642,7 @@ struct Lowering {
       Val x = lower_expr(e.args[0]);
       Val alpha = lower_expr(e.args[1]);
       Val rho = lower_expr(e.args[2]);
-      if (!info[x.slot].data_like)
+      if (!x.si.param_free)
         fail("gp_exp_quad_cov: parameter inputs unsupported", e.raw);
       // x is array[N] real (D == 1) or array[N] vector[D], stored
       // array-major, so D falls out of the declared dims.
@@ -1603,8 +1658,8 @@ struct Lowering {
       SlotInfo si;
       si.rows = N;
       si.cols = N;
-      return emit(OP_GP_EXP_QUAD_COV, {x.slot, alpha.slot, rho.slot}, N * N, si,
-                  {(int)N, (int)D});
+      return emit_value(OP_GP_EXP_QUAD_COV, {x, alpha, rho}, N * N, si,
+                        {(int)N, (int)D});
     }
     if (e.name == "diag_matrix" && e.args.size() == 1) {
       Val v = lower_expr(e.args[0]);
@@ -1612,15 +1667,15 @@ struct Lowering {
       SlotInfo si;
       si.rows = n;
       si.cols = n;
-      return emit(OP_DIAG_MATRIX, {v.slot}, n * n, si);
+      return emit_value(OP_DIAG_MATRIX, {v}, n * n, si);
     }
     if (e.name == "cholesky_decompose" && e.args.size() == 1) {
       Val a = lower_expr(e.args[0]);
       if (a.si.rows == 0) fail("cholesky_decompose needs a matrix", e.raw);
       SlotInfo si = a.si;
-      si.data_like = info[a.slot].data_like;
-      return emit(OP_CHOLESKY, {a.slot}, g.slots[a.slot].len, si,
-                  {(int)a.si.rows});
+      si.param_free = a.si.param_free;
+      return emit_value(OP_CHOLESKY, {a}, g.slots[a.slot].len, si,
+                        {(int)a.si.rows});
     }
 
     if ((e.name == "eigenvalues_sym" || e.name == "eigenvectors_sym") &&
@@ -1629,11 +1684,11 @@ struct Lowering {
       if (a.si.rows == 0) fail(e.name + ": needs a matrix", e.raw);
       const int64_t n = a.si.rows;
       if (e.name == "eigenvalues_sym")
-        return emit(OP_EIGENVALUES_SYM, {a.slot}, n, {}, {(int)n});
+        return emit_value(OP_EIGENVALUES_SYM, {a}, n, {}, {(int)n});
       SlotInfo si;
       si.rows = n;
       si.cols = n;
-      return emit(OP_EIGENVECTORS_SYM, {a.slot}, n * n, si, {(int)n});
+      return emit_value(OP_EIGENVECTORS_SYM, {a}, n * n, si, {(int)n});
     }
     if (e.name == "quad_form_diag" && e.args.size() == 2) {
       // quad_form_diag(M, v) = diag(v) * M * diag(v).
@@ -1644,15 +1699,15 @@ struct Lowering {
       SlotInfo dsi;
       dsi.rows = n;
       dsi.cols = n;
-      dsi.data_like = info[v.slot].data_like;
-      Val d = emit(OP_DIAG_MATRIX, {v.slot}, n * n, dsi);
+      dsi.param_free = v.si.param_free;
+      Val d = emit_value(OP_DIAG_MATRIX, {v}, n * n, dsi);
       SlotInfo si;
       si.rows = n;
       si.cols = n;
-      Val left =
-          emit(OP_GEMM, {d.slot, m.slot}, n * n, si, {(int)n, (int)n, (int)n});
-      return emit(OP_GEMM, {left.slot, d.slot}, n * n, si,
-                  {(int)n, (int)n, (int)n});
+      Val left = emit_value(OP_GEMM, {d, m}, n * n, si,
+                            {(int)n, (int)n, (int)n});
+      return emit_value(OP_GEMM, {left, d}, n * n, si,
+                        {(int)n, (int)n, (int)n});
     }
 
     if ((e.name == "append_row" || e.name == "append_col") &&
@@ -1678,7 +1733,7 @@ struct Lowering {
         const int64_t cb = b.si.rows > 0 ? b.si.cols : lb;
         if (ca != cb) fail("append_row column mismatch", e.raw);
         SlotInfo csi;
-        Val cat = emit(OP_CONCAT2, {a.slot, b.slot}, la + lb, csi);
+        Val cat = emit_value(OP_CONCAT2, {a, b}, la + lb, csi);
         std::vector<int> idx;
         idx.reserve(la + lb);
         for (int64_t j = 0; j < ca; ++j) {
@@ -1688,15 +1743,15 @@ struct Lowering {
         }
         si.rows = ra + rb;
         si.cols = ca;
-        return emit(OP_GATHER, {cat.slot}, la + lb, si, idx);
+        return emit_value(OP_GATHER, {cat}, la + lb, si, idx);
       }
-      return emit(OP_CONCAT2, {a.slot, b.slot}, la + lb, si);
+      return emit_value(OP_CONCAT2, {a, b}, la + lb, si);
     }
     if (e.name == "segment" && e.args.size() == 3) {
       Val a = lower_expr(e.args[0]);
       const long from = eval_int(e.args[1]);
       const long cnt = eval_int(e.args[2]);
-      return emit(OP_SLICE, {a.slot}, cnt, {}, {(int)(from - 1)});
+      return emit_value(OP_SLICE, {a}, cnt, {}, {(int)(from - 1)});
     }
     if (e.name == "sub_col" && e.args.size() == 4) {
       // sub_col(M, i, j, n) = M[i .. i+n-1, j]: contiguous in col-major.
@@ -1705,28 +1760,28 @@ struct Lowering {
       const long i = eval_int(e.args[1]);
       const long j = eval_int(e.args[2]);
       const long n = eval_int(e.args[3]);
-      return emit(OP_SLICE, {a.slot}, n, {},
-                  {(int)((j - 1) * a.si.rows + i - 1)});
+      return emit_value(OP_SLICE, {a}, n, {},
+                        {(int)((j - 1) * a.si.rows + i - 1)});
     }
     if (e.name == "col" && e.args.size() == 2) {
       Val a = lower_expr(e.args[0]);
       if (a.si.rows == 0) fail("col on a slot without matrix shape");
       const long j = eval_int(e.args[1]);
-      return emit(OP_SLICE, {a.slot}, a.si.rows, {},
-                  {(int)((j - 1) * a.si.rows)});
+      return emit_value(OP_SLICE, {a}, a.si.rows, {},
+                        {(int)((j - 1) * a.si.rows)});
     }
     if (e.name == "row" && e.args.size() == 2) {
       Val a = lower_expr(e.args[0]);
       if (a.si.rows == 0) fail("row on a slot without matrix shape");
       const long i = eval_int(e.args[1]);
-      return emit(OP_SLICE_STRIDED, {a.slot}, a.si.cols, {},
-                  {(int)(i - 1), (int)a.si.rows});
+      return emit_value(OP_SLICE_STRIDED, {a}, a.si.cols, {},
+                        {(int)(i - 1), (int)a.si.rows});
     }
     if ((e.name == "head" || e.name == "tail") && e.args.size() == 2) {
       Val a = lower_expr(e.args[0]);
       const long n = eval_int(e.args[1]);
       const long off = e.name == "head" ? 0 : g.slots[a.slot].len - n;
-      return emit(OP_SLICE, {a.slot}, n, {}, {(int)off});
+      return emit_value(OP_SLICE, {a}, n, {}, {(int)off});
     }
     return std::nullopt;
   }
@@ -1744,7 +1799,7 @@ struct Lowering {
 
   // The op tail both ODE families share: report an interpreter fallback,
   // emit OP_ODE and hand the spec to the graph.
-  Val emit_ode(std::shared_ptr<OdeSpec> spec, int z0_slot, int theta_slot,
+  Val emit_ode(std::shared_ptr<OdeSpec> spec, const Val& z0, const Val& theta,
                int64_t N, int64_t S) {
     // Falling back to the interpreter is correct but ~30x slower, so make
     // it findable rather than silent.
@@ -1753,7 +1808,7 @@ struct Lowering {
                    "stanli: ODE right-hand side %s falls back to the "
                    "interpreter: %s\n",
                    spec->rhs_name.c_str(), spec->prog.why.c_str());
-    Val v = emit(OP_ODE, {z0_slot, theta_slot}, N * S, {}, {(int)N, (int)S});
+    Val v = emit_value(OP_ODE, {z0, theta}, N * S, {}, {(int)N, (int)S});
     g.ops.back().udata = spec.get();
     g.udata_pool.push_back(std::move(spec));
     decl_dims_pending = {N, S};
@@ -1853,20 +1908,21 @@ struct Lowering {
     // backward already splits the adjoint back out.
     Val theta;
     if (param_parts.empty()) {
-      theta = {const_slot(0.0), {}};  // len 1, unread: n_th is 0
+      theta = constant(0.0);
+      // len 1, unread: n_th is 0
     } else {
       theta = param_parts[0];
       int64_t acc = g.slots[theta.slot].len;
       for (size_t k = 1; k < param_parts.size(); ++k) {
         const int64_t add = g.slots[param_parts[k].slot].len;
-        theta = emit(OP_CONCAT2, {theta.slot, param_parts[k].slot}, acc + add);
+        theta = emit_value(OP_CONCAT2, {theta, param_parts[k]}, acc + add);
         acc += add;
       }
     }
 
     spec->args = rargs;
     spec->prog = compile_rhs_args(*spec->rhs(), *spec->funs(), (int)S, rargs);
-    return emit_ode(std::move(spec), z0.slot, theta.slot, N, S);
+    return emit_ode(std::move(spec), z0, theta, N, S);
   }
 
   // The integrate_ode_* family.
@@ -1911,7 +1967,7 @@ struct Lowering {
       spec->prog = compile_rhs(*spec->rhs(), *spec->funs(), (int)S,
                                (int)g.slots[theta.slot].len,
                                (int)spec->x_r.size(), spec->x_i);
-      return emit_ode(std::move(spec), z0.slot, theta.slot, N, S);
+      return emit_ode(std::move(spec), z0, theta, N, S);
     }
     return std::nullopt;
   }
@@ -2027,7 +2083,7 @@ struct Lowering {
       psi.rows = eval_int(s.read_dims[0]);
       psi.cols = eval_int(s.read_dims[1]);
     }
-    const int raw = add_slot(raw_len, /*is_param=*/true, psi);
+    const int raw = add_slot(raw_len, /*is_param=*/true);
     out.param_names.push_back(s.decl_id);
     {
       // The unconstrained layout the caller needs to slice a draw: how
@@ -2043,7 +2099,7 @@ struct Lowering {
     out.n_unconstrained += raw_len;
 
     if (tr.kind == mir::Transform::Identity) {
-      scope[s.decl_id] = raw;
+      scope[s.decl_id] = Val{raw, psi};
       // In write_array mode the column order is dictated by the FnWriteParam
       // statements, which come later and cover transformed parameters and
       // generated quantities too; declaration order would be wrong.
@@ -2142,9 +2198,9 @@ struct Lowering {
     if (opcode == OP_CONSTRAIN_CHOL_COV) tr_idata = {(int)chol_M, (int)chol_N};
     if (opcode == OP_CONSTRAIN_SUM_TO_ZERO_MAT)
       tr_idata = {(int)n_batch, (int)stz_rows, (int)stz_cols};
-    Val con = emit(opcode, ins, con_len, psi, tr_idata, jac);
+    Val con = emit_raw(opcode, ins, con_len, psi, tr_idata, jac);
     jac_slots.push_back(jac);
-    scope[s.decl_id] = con.slot;
+    scope[s.decl_id] = con;
     if (!in_write_array)
       out.views.push_back(parameter_view(s, con.slot, con_len));
   }
@@ -2177,7 +2233,7 @@ struct Lowering {
           if (s.has_init) int_env[s.decl_id] = eval_int(s.init);
         } else if (s.has_init) {
           decl_dims_pending.clear();
-          scope[s.decl_id] = lower_expr(s.init).slot;
+          scope[s.decl_id] = lower_expr(s.init);
           if (!decl_dims_pending.empty()) {
             decl_dims[s.decl_id] = decl_dims_pending;
             DeclShape sh;
@@ -2212,63 +2268,68 @@ struct Lowering {
         }
         if (!s.lhs_idx.empty()) {
           // Element write under unrolled control flow: functional update.
-          int prev;
+          Val prev_v{-1, {}};
           auto it = scope.find(s.lhs);
           if (it != scope.end()) {
-            prev = it->second;
+            prev_v = it->second;
           } else {
             auto dl = decl_lens.find(s.lhs);
             if (dl == decl_lens.end())
               fail("indexed assignment to undeclared " + s.lhs);
             SlotInfo si;
-            si.data_like = true;
+            si.param_free = true;
             si.rows = dl->second.rows;
             si.cols = dl->second.cols;
-            prev = add_slot(dl->second.len, false, si);
-            out.fills.emplace_back(prev,
+            prev_v = Val{add_slot(dl->second.len, false), si};
+            out.fills.emplace_back(prev_v.slot,
                                    std::vector<double>(dl->second.len, 0.0));
           }
+          const int prev = prev_v.slot;
           bool all_single = true;
           for (const auto& ix : s.lhs_idx)
             if (ix.name != "IndexSingle") all_single = false;
           auto dd = decl_dims.find(s.lhs);
-          const int rhs = lower_expr(s.rhs).slot;
+          const Val rhs_v = lower_expr(s.rhs);
+          const int rhs = rhs_v.slot;
+          SlotInfo out_si = prev_v.si;
           // Between write w[a:b] = rhs (contiguous on 1-D values).
           if (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexBetween") {
             const int64_t lo = eval_int(s.lhs_idx[0].args[0]);
             const int64_t hi = eval_int(s.lhs_idx[0].args[1]);
             if (g.slots[rhs].len != hi - lo + 1)
               fail("range assignment size mismatch for " + s.lhs);
-            Val nv = emit(OP_SET_SLICE, {prev, rhs}, g.slots[prev].len,
-                          info[prev], {(int)(lo - 1)});
-            scope[s.lhs] = nv.slot;
+            Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
+                                g.slots[prev].len, out_si, {(int)(lo - 1)});
+            scope[s.lhs] = nv;
             return;
           }
           // Column write M[:, j] = rhs (contiguous in col-major storage).
           if (s.lhs_idx.size() == 2 && s.lhs_idx[0].name == "IndexAll" &&
-              s.lhs_idx[1].name == "IndexSingle" && info[prev].rows > 0) {
+              s.lhs_idx[1].name == "IndexSingle" && prev_v.si.rows > 0) {
             const int64_t j = eval_int(s.lhs_idx[1].args[0]) - 1;
-            Val nv = emit(OP_SET_SLICE, {prev, rhs}, g.slots[prev].len,
-                          info[prev], {(int)(j * info[prev].rows)});
-            scope[s.lhs] = nv.slot;
+            Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
+                                g.slots[prev].len, out_si,
+                                {(int)(j * prev_v.si.rows)});
+            scope[s.lhs] = nv;
             return;
           }
           // Row-range column write M[a:b, j] = rhs (contiguous within the
           // column).
           if (s.lhs_idx.size() == 2 && s.lhs_idx[0].name == "IndexBetween" &&
-              s.lhs_idx[1].name == "IndexSingle" && info[prev].rows > 0) {
+              s.lhs_idx[1].name == "IndexSingle" && prev_v.si.rows > 0) {
             const int64_t lo = eval_int(s.lhs_idx[0].args[0]);
             const int64_t hi = eval_int(s.lhs_idx[0].args[1]);
             const int64_t j = eval_int(s.lhs_idx[1].args[0]) - 1;
             if (g.slots[rhs].len != hi - lo + 1)
               fail("range assignment size mismatch for " + s.lhs);
-            Val nv = emit(OP_SET_SLICE, {prev, rhs}, g.slots[prev].len,
-                          info[prev], {(int)(j * info[prev].rows + lo - 1)});
-            scope[s.lhs] = nv.slot;
+            Val nv = emit_value(
+                OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len, out_si,
+                {(int)(j * prev_v.si.rows + lo - 1)});
+            scope[s.lhs] = nv;
             return;
           }
           if (all_single && dd != decl_dims.end() &&
-              s.lhs_idx.size() <= dd->second.size() && info[prev].rows == 0) {
+              s.lhs_idx.size() <= dd->second.size() && prev_v.si.rows == 0) {
             // The mirror of the read path, through the same flat_addr.
             const auto& D = dd->second;
             const bool mat = matrix_elem.count(s.lhs) > 0 && D.size() >= 2;
@@ -2280,22 +2341,24 @@ struct Lowering {
               fail("indexed assignment size mismatch for " + s.lhs);
             Val nv =
                 a.stride != 1
-                    ? emit(OP_SET_SLICE_STRIDED, {prev, rhs}, g.slots[prev].len,
-                           info[prev], {(int)a.off, (int)a.stride})
+                    ? emit_value(OP_SET_SLICE_STRIDED, {prev_v, rhs_v},
+                                 g.slots[prev].len, out_si,
+                                 {(int)a.off, (int)a.stride})
                     : (a.len == 1
-                           ? emit(OP_SET_INDEX, {prev, rhs}, g.slots[prev].len,
-                                  info[prev], {(int)a.off})
-                           : emit(OP_SET_SLICE, {prev, rhs}, g.slots[prev].len,
-                                  info[prev], {(int)a.off}));
-            scope[s.lhs] = nv.slot;
+                           ? emit_value(OP_SET_INDEX, {prev_v, rhs_v},
+                                        g.slots[prev].len, out_si, {(int)a.off})
+                           : emit_value(OP_SET_SLICE, {prev_v, rhs_v},
+                                        g.slots[prev].len, out_si,
+                                        {(int)a.off}));
+            scope[s.lhs] = nv;
             return;
           }
           int64_t flat = 0;
           if (all_single && s.lhs_idx.size() == 1) {
             flat = eval_int(s.lhs_idx[0].args[0]) - 1;
           } else if (all_single && s.lhs_idx.size() == 2 &&
-                     info[prev].rows > 0) {
-            flat = (eval_int(s.lhs_idx[1].args[0]) - 1) * info[prev].rows +
+                     prev_v.si.rows > 0) {
+            flat = (eval_int(s.lhs_idx[1].args[0]) - 1) * prev_v.si.rows +
                    (eval_int(s.lhs_idx[0].args[0]) - 1);
           } else {
             std::string desc = "unsupported indexed assignment: lhs=" + s.lhs;
@@ -2303,12 +2366,12 @@ struct Lowering {
               desc += " [" + (ix.name.empty() ? "?" : ix.name) + "]";
             fail(desc, s.raw);
           }
-          Val nv = emit(OP_SET_INDEX, {prev, rhs}, g.slots[prev].len,
-                        info[prev], {(int)flat});
-          scope[s.lhs] = nv.slot;
+          Val nv = emit_value(OP_SET_INDEX, {prev_v, rhs_v},
+                              g.slots[prev].len, out_si, {(int)flat});
+          scope[s.lhs] = nv;
           return;
         }
-        scope[s.lhs] = lower_expr(s.rhs).slot;
+        scope[s.lhs] = lower_expr(s.rhs);
         return;
       }
       case mir::Stmt::TargetPE:
@@ -2406,7 +2469,7 @@ struct Lowering {
           if (t == "UReal" || t == "UInt" || t == "UComplex") {
             pv.naming = Naming::Scalar;
           } else if (t == "UMatrix") {
-            pv.rows = info[v.slot].rows;
+            pv.rows = v.si.rows;
             if (pv.rows <= 0)
               fail("FnWriteParam of a matrix with unknown shape: " + name,
                    s.raw);
@@ -2474,7 +2537,7 @@ struct Lowering {
           continue;
         }
         std::vector<int> chunk(terms.begin() + i, terms.begin() + i + n);
-        next.push_back(emit(OP_ADD_N, chunk, 1).slot);
+        next.push_back(emit_raw(OP_ADD_N, chunk, 1, {}).slot);
       }
       terms = std::move(next);
     }
@@ -2506,7 +2569,6 @@ struct Lowering {
     make_inplace_updates(g, roots);
     forward_stores_to_loads(g, roots);
     reroll(g, out.fills, target_terms, roots);
-    info.resize(g.slots.size());
     // Nothing reads a result here, but forward() asserts a scalar result
     // slot, so point it at one.
     g.result_slot = const_slot(0.0);
@@ -2543,17 +2605,12 @@ struct Lowering {
     forward_stores_to_loads(g, update_roots);
     // After the update chains collapse, so a data-only chain is one slot
     // rather than N; before reroll, so the lanes it sees have data operands.
-    info.resize(g.slots.size());
-    std::vector<int> folded;
-    const_fold(g, out.fills, update_roots, &folded);
-    for (int s : folded) info[s].data_like = true;
+    const_fold(g, out.fills, update_roots);
     reroll(g, out.fills, target_terms, roots);  // off under STANLI_NO_REROLL
     // LAST, after every other pass has had first crack: compile whatever
     // scalar residue survives (recurrences the re-roll can never widen)
     // into island ops. Off under STANLI_NO_ISLAND.
     carve_islands(g, out.fills, target_terms, roots);
-    info.resize(g.slots.size());  // keep SlotInfo parallel: emit() in
-                                  // reduce_terms reads info[o] by slot id
     std::vector<int> all = target_terms;
     all.insert(all.end(), jac_slots.begin(), jac_slots.end());
     g.result_slot = reduce_terms(all);
