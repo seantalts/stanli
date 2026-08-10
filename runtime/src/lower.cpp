@@ -29,6 +29,47 @@ struct SlotInfo {
   bool data_like = false;      // no adjoint (data or constant)
 };
 
+// Where an index path lands in a flat buffer. `stride` is 1 unless the path
+// stops on a matrix row, which is not contiguous in column-major storage.
+struct Addr {
+  int64_t off = 0, len = 1, stride = 1;
+};
+
+// The one place that knows how a declared value is laid out.
+//
+// Dims are outer-to-inner, `mat` says the last two are a matrix's rows and
+// columns. Array dims are array-major (outer slowest, each element
+// contiguous); a matrix element is column-major inside. Those two rules
+// disagree about the last two indices, which is exactly the mistake that
+// transposed every array of matrices in the CSV while leaving the log
+// density right, so the read path, the write path and the data repack all
+// come here rather than each walking the strides themselves.
+Addr flat_addr(const std::vector<int64_t>& D, bool mat,
+               const std::vector<int64_t>& ix) {
+  const size_t n_arr = D.size() - (mat ? 2 : 0);
+  const int64_t rows = mat ? D[n_arr] : 0;
+  const int64_t elem = mat ? rows * D[n_arr + 1] : 1;
+  Addr a;
+  int64_t stride = elem;
+  for (size_t d = n_arr; d-- > 0;) {
+    if (d < ix.size()) a.off += ix[d] * stride;
+    stride *= D[d];
+  }
+  if (ix.size() <= n_arr) {  // whole elements, contiguous
+    a.len = elem;
+    for (size_t d = ix.size(); d < n_arr; ++d) a.len *= D[d];
+    return a;
+  }
+  if (ix.size() == n_arr + 1) {  // one row of an element
+    a.off += ix[n_arr];
+    a.len = D[n_arr + 1];
+    a.stride = rows;
+    return a;
+  }
+  a.off += ix[n_arr + 1] * rows + ix[n_arr];  // one cell
+  return a;
+}
+
 struct Lowering {
   const DataMap& data;
   // The MIR interpreter instance for everything DataOnly: prepare_data,
@@ -191,7 +232,9 @@ struct Lowering {
   // a matrix. The graph wants an array of containers laid out the way
   // parameters of the same type are: element n contiguous in K. env_slot
   // repacks these on the way out.
-  std::set<std::string> array_of_container;
+  // name -> how many trailing dims belong to the element: 1 for a vector or
+  // row_vector, 2 for a matrix. The rest are array dims.
+  std::map<std::string, int> array_of_container;
 
   void bind_data(const mir::Program& p) {
     for (const auto& [name, type] : p.input_vars) {
@@ -199,11 +242,12 @@ struct Lowering {
       if (data.has(name)) td.env()[name] = data.at(name);
     }
     for (const auto& st : p.prepare_data) {
-      if (st.kind == mir::Stmt::Decl && st.decl_type.base == "SArray" &&
-          st.decl_type.dims.size() == 2 &&
-          (st.decl_type.elem_base == "SVector" ||
-           st.decl_type.elem_base == "SRowVector"))
-        array_of_container.insert(st.decl_id);
+      if (st.kind != mir::Stmt::Decl || st.decl_type.base != "SArray") continue;
+      if (st.decl_type.elem_base == "SVector" ||
+          st.decl_type.elem_base == "SRowVector")
+        array_of_container[st.decl_id] = 1;
+      else if (st.decl_type.elem_base == "SMatrix")
+        array_of_container[st.decl_id] = 2;
     }
     for (const auto& st : p.prepare_data) td.exec(st);
     for (auto& [name, e] : td.env()) {
@@ -231,16 +275,30 @@ struct Lowering {
     // kernels that take one read element n from n*K, which is where the
     // repack below puts it, and which is where a parameter of the same
     // type already sits.
-    const bool aoc = array_of_container.count(name) > 0 && en->dims.size() == 2;
+    const auto ae = array_of_container.find(name);
+    const size_t elem_dims =
+        ae == array_of_container.end() ? 0 : (size_t)ae->second;
+    const bool aoc = elem_dims > 0 && en->dims.size() > elem_dims;
     if (en->dims.size() == 2 && !aoc) {
       si.rows = en->dims[0];
       si.cols = en->dims[1];
     }
     std::vector<double> vals = en->r;
     if (aoc) {
-      const int64_t N = en->dims[0], K = en->dims[1];
-      for (int64_t i = 0; i < N; ++i)
-        for (int64_t k = 0; k < K; ++k) vals[i * K + k] = en->r[k * N + i];
+      // DataMap holds every N-D value with the FIRST index fastest, the way
+      // stanc's own data reader flattens JSON. A slot holds what flat_addr
+      // describes, which is where a parameter of the same type already
+      // sits, so every value moves once on the way in.
+      const std::vector<int64_t>& D = en->dims;
+      std::vector<int64_t> ix(D.size(), 0);
+      for (size_t src = 0; src < en->r.size(); ++src) {
+        int64_t t = (int64_t)src;
+        for (size_t d = 0; d < D.size(); ++d) {
+          ix[d] = t % D[d];
+          t /= D[d];
+        }
+        vals[(size_t)flat_addr(D, elem_dims == 2, ix).off] = en->r[src];
+      }
     }
     const int s = add_slot((int64_t)vals.size(), false, si);
     out.fills.emplace_back(s, vals);
@@ -331,22 +389,31 @@ struct Lowering {
           return emit(OP_SLICE, {base.slot}, hi - lo + 1, {},
                       {(int)(j * base.si.rows + lo - 1)});
         }
-        // Params/locals with recorded dims use array-major layout (outer
-        // index slowest, inner contiguous), matching stanc's read order.
+        // Params/locals with recorded dims, laid out by flat_addr above.
         // Matrix slots (rows>0) are col-major and never take this path.
         if (all_single && bdims && n_idx <= bdims->size() &&
             base.si.rows == 0) {
           const auto& D = *bdims;
-          int64_t inner = 1;
-          for (size_t d = n_idx; d < D.size(); ++d) inner *= D[d];
-          int64_t off = 0;
-          for (size_t d = 0; d < n_idx; ++d) {
-            int64_t stride = inner;
-            for (size_t d2 = d + 1; d2 < n_idx; ++d2) stride *= D[d2];
-            off += (eval_int(e.args[1 + d].args[0]) - 1) * stride;
+          const bool mat = e.args[0].kind == mir::Expr::Var &&
+                           matrix_elem.count(e.args[0].name) > 0 &&
+                           D.size() >= 2;
+          std::vector<int64_t> ix;
+          for (size_t d = 0; d < n_idx; ++d)
+            ix.push_back(eval_int(e.args[1 + d].args[0]) - 1);
+          const Addr a = flat_addr(D, mat, ix);
+          if (a.stride != 1)
+            return emit(OP_SLICE_STRIDED, {base.slot}, a.len, {},
+                        {(int)a.off, (int)a.stride});
+          if (a.len == 1)
+            return emit(OP_INDEX, {base.slot}, 1, {}, {(int)a.off});
+          // One whole matrix out of the array keeps its shape, so a later
+          // index on it can take the column-major paths above.
+          SlotInfo si;
+          if (mat && n_idx == D.size() - 2) {
+            si.rows = D[n_idx];
+            si.cols = D[n_idx + 1];
           }
-          if (inner == 1) return emit(OP_INDEX, {base.slot}, 1, {}, {(int)off});
-          return emit(OP_SLICE, {base.slot}, inner, {}, {(int)off});
+          return emit(OP_SLICE, {base.slot}, a.len, si, {(int)a.off});
         }
         // Row of a column-major data matrix / 2-D array: strided slice.
         if (all_single && e.args.size() == 2 && base.si.rows > 0 &&
@@ -1897,6 +1964,8 @@ struct Lowering {
       std::vector<int64_t> dims;
       for (const auto& d : s.read_dims) dims.push_back(eval_int(d));
       decl_dims[s.decl_id] = dims;
+      if (s.decl_type.base == "SArray" && s.decl_type.elem_base == "SMatrix")
+        matrix_elem.insert(s.decl_id);
     }
     SlotInfo psi;
     if (s.decl_type.base == "SMatrix" && s.read_dims.size() == 2) {
@@ -2012,6 +2081,11 @@ struct Lowering {
   }
 
   std::map<std::string, std::vector<int64_t>> decl_dims;
+  // Names in decl_dims whose element is a matrix, so the last two dims are
+  // its rows and columns and are stored column-major inside an otherwise
+  // array-major value. Everything else in decl_dims is array-major
+  // throughout.
+  std::set<std::string> matrix_elem;
 
   struct DeclShape {
     int64_t len = 0, rows = 0, cols = 0;
@@ -2053,6 +2127,13 @@ struct Lowering {
             sh.dims = {sh.rows, sh.cols};
           decl_lens[s.decl_id] = sh;
           decl_dims[s.decl_id] = sh.dims;
+          // Same two-layouts-in-one as a parameter of this type: the array
+          // dims are array-major and the element stays column-major.
+          if (s.decl_type.base == "SArray" &&
+              s.decl_type.elem_base == "SMatrix")
+            matrix_elem.insert(s.decl_id);
+          else
+            matrix_elem.erase(s.decl_id);
         }
         return;
       case mir::Stmt::Assignment: {
@@ -2119,24 +2200,24 @@ struct Lowering {
           }
           if (all_single && dd != decl_dims.end() &&
               s.lhs_idx.size() <= dd->second.size() && info[prev].rows == 0) {
-            // Array-major offset; sub-array writes become SET_SLICE.
+            // The mirror of the read path, through the same flat_addr.
             const auto& D = dd->second;
-            const size_t n_idx = s.lhs_idx.size();
-            int64_t inner = 1;
-            for (size_t d = n_idx; d < D.size(); ++d) inner *= D[d];
-            int64_t off = 0;
-            for (size_t d = 0; d < n_idx; ++d) {
-              int64_t stride = inner;
-              for (size_t d2 = d + 1; d2 < n_idx; ++d2) stride *= D[d2];
-              off += (eval_int(s.lhs_idx[d].args[0]) - 1) * stride;
-            }
-            if (inner != g.slots[rhs].len && inner != 1)
+            const bool mat = matrix_elem.count(s.lhs) > 0 && D.size() >= 2;
+            std::vector<int64_t> ix;
+            for (const auto& k : s.lhs_idx)
+              ix.push_back(eval_int(k.args[0]) - 1);
+            const Addr a = flat_addr(D, mat, ix);
+            if (a.len != g.slots[rhs].len && a.len != 1)
               fail("indexed assignment size mismatch for " + s.lhs);
-            Val nv = inner == 1
-                         ? emit(OP_SET_INDEX, {prev, rhs}, g.slots[prev].len,
-                                info[prev], {(int)off})
-                         : emit(OP_SET_SLICE, {prev, rhs}, g.slots[prev].len,
-                                info[prev], {(int)off});
+            Val nv =
+                a.stride != 1
+                    ? emit(OP_SET_SLICE_STRIDED, {prev, rhs}, g.slots[prev].len,
+                           info[prev], {(int)a.off, (int)a.stride})
+                    : (a.len == 1
+                           ? emit(OP_SET_INDEX, {prev, rhs}, g.slots[prev].len,
+                                  info[prev], {(int)a.off})
+                           : emit(OP_SET_SLICE, {prev, rhs}, g.slots[prev].len,
+                                  info[prev], {(int)a.off}));
             scope[s.lhs] = nv.slot;
             return;
           }
@@ -2407,6 +2488,11 @@ CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
     Lowering wa(data);
     wa.td.env() = lo.td.env();
     wa.int_env = lo.int_env_data;
+    // Which data variables are arrays of containers, and so need repacking
+    // out of the interpreter's layout, is decided by bind_data, which this
+    // lowering skips. Without it every such value reaches the CSV in the
+    // wrong order.
+    wa.array_of_container = lo.array_of_container;
     CompiledModel::WriteArray w = wa.run_write_array(*prog);
     if (w.n_unconstrained != cm.n_unconstrained) {
       // The two graphs read the same draw; if they disagree on its length the

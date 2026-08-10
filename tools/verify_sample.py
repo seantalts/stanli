@@ -174,15 +174,17 @@ def main():
         if model in datas:  # the posteriordb dataset; the language models
             refs[model]["data"] = datas[model]  # carry their own data file
 
-        # write_array reference: recorded only when the generated
-        # quantities are deterministic (no _rng), so the values are a
-        # property of the draw and not of anyone's RNG stream.
+        # write_array reference: recorded whenever the row is deterministic
+        # (no _rng anywhere), so the values are a property of the draw and
+        # not of anyone's RNG stream. A generated quantities block is not
+        # required -- the parameter columns are the row too, and the order
+        # they come out in is exactly what a transposed array of matrices
+        # got wrong while every gradient stayed right.
         wa_note = ""
         src = stan.read_text()
-        gq = src[src.find("generated quantities"):]
         wa = parse_wa(ref_out)
         got_wa = parse_wa(got_out)
-        if "generated quantities" in src and "_rng" not in gq and wa:
+        if "_rng" not in src and wa:
             if not got_wa:
                 wa_note = "; WA not recorded (stanli produced none)"
             elif wa[0] != got_wa[0]:

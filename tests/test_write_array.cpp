@@ -172,11 +172,66 @@ void test_interpreted_gq() {
   }
 }
 
+// An array of matrices carries two layouts at once: the array index is
+// outermost with each element contiguous, and within an element the storage
+// is column-major. Reading m[k, i, j] with one row-major stride computation
+// over all three dimensions transposes every element while leaving the
+// column names right, which is invisible in the log density (nothing
+// indexes a whole matrix by scalar) and wrong in every draw.
+void test_array_of_matrix_columns() {
+  using namespace stanli;
+  DataMap data = DataMap::from_json_file("tests/fixtures/amatwa.json");
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/amatwa.tmir.sexp"), data);
+  if (!cm.write_array || cm.write_array->columns.empty()) {
+    ++failures;
+    std::printf("FAIL amatwa: no write_array\n");
+    return;
+  }
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  // Distinct values, so any misplaced element names itself.
+  for (int64_t k = 0; k < wex.n_params(); ++k) wex.params_data()[k] = (double)k;
+  wex.run_forward_only();
+
+  std::map<std::string, double> row;
+  const auto names = CompiledModel::csv_names(cm.write_array->columns);
+  int64_t at = 0;
+  for (const auto& c : cm.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    for (int64_t k = 0; k < c.len; ++k, ++at) row[names[(size_t)at]] = p[k];
+  }
+  auto expect_val = [&](const std::string& col, double want) {
+    auto it = row.find(col);
+    if (it == row.end()) {
+      ++failures;
+      std::printf("FAIL amatwa: no column %s\n", col.c_str());
+    } else if (it->second != want) {
+      ++failures;
+      std::printf("FAIL amatwa %s: got %.17g want %.17g\n", col.c_str(),
+                  it->second, want);
+    }
+  };
+  for (int k = 1; k <= 2; ++k)
+    for (int i = 1; i <= 2; ++i)
+      for (int j = 1; j <= 3; ++j) {
+        const std::string ix = "." + std::to_string(k) + "." +
+                               std::to_string(i) + "." + std::to_string(j);
+        // element (i, j) of matrix k sits at 6*(k-1) + 2*(j-1) + (i-1)
+        expect_val("m" + ix, (double)(6 * (k - 1) + 2 * (j - 1) + (i - 1)));
+        // the generated quantity says which cell it thinks it is
+        expect_val("g" + ix, (double)(100 * k + 10 * i + j));
+        // and so does the data it copied
+        expect_val("gd" + ix, (double)(100 * k + 10 * i + j));
+      }
+}
+
 }  // namespace
 
 int main() {
   test_naming_rules();
   test_wanames_pipeline();
+  test_array_of_matrix_columns();
   test_interpreted_gq();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
