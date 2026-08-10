@@ -26,8 +26,10 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace stanli {
@@ -37,6 +39,15 @@ namespace stanli {
 struct Range {
   int reg = 0;
   int len = 0;
+};
+
+// One UDF argument in source order. Compile-time integers live outside the
+// register file; every other value is a Range. Keeping the tag beside the
+// value prevents the old real/int partition from reordering mixed calls.
+struct InlineArg {
+  Range real;
+  std::vector<long> ints;
+  bool is_const_int = false;
 };
 
 struct Bail {
@@ -176,6 +187,13 @@ struct ProgramCompiler {
         bail("unknown variable " + e.name);
       }
       case mir::Expr::Indexed: {
+        // A single index into a matrix selects a row in Stan. Range carries
+        // only a flat width, so treating that index as one scalar silently
+        // changes the expression. Refuse until ProgValue carries shape; the
+        // MIR interpreter is the complete path for this operation.
+        if (e.args.size() == 2 && e.args[1].name == "IndexSingle" &&
+            e.args[0].type_ == "UMatrix")
+          bail("matrix row indexing is unsupported by the register program");
         const Range b = expr(e.args[0]);
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
         if (e.args.size() != 2 || e.args[1].name != "IndexSingle")
@@ -191,15 +209,30 @@ struct ProgramCompiler {
       }
       case mir::Expr::EOr:
       case mir::Expr::EAnd: {
-        // No short-circuit: Stan expressions are total, and the branchless
-        // form keeps this out of the instruction stream's way.
-        const Range a = expr(e.args[0]), b = expr(e.args[1]);
-        if (a.len != 1 || b.len != 1) bail("logical operator on a container");
-        const int z = konst(0.0), ta = alloc(1), tb = alloc(1), r = alloc(1);
+        const Range a = expr(e.args[0]);
+        if (a.len != 1) bail("logical operator on a container");
+        const int z = konst(0.0), ta = alloc(1), r = alloc(1);
         emit(Program::NE, ta, a.reg, z);
+        emit(Program::MOV, r, ta);
+
+        // The result starts as the normalized left operand. AND is already
+        // final when that value is false; OR is final when it is true. Only
+        // the other case enters the right operand, preserving Stan's
+        // short-circuit evaluation and any domain errors or effects there.
+        int done = -1;
+        if (e.kind == mir::Expr::EOr) {
+          const int rhs = emit(Program::JZ, 0, ta);
+          done = emit(Program::JMP, 0);
+          p.code[(size_t)rhs].dst = (int)p.code.size();
+        } else {
+          done = emit(Program::JZ, 0, ta);
+        }
+        const Range b = expr(e.args[1]);
+        if (b.len != 1) bail("logical operator on a container");
+        const int tb = alloc(1);
         emit(Program::NE, tb, b.reg, z);
-        emit(e.kind == mir::Expr::EOr ? Program::FMAX : Program::FMIN, r, ta,
-             tb);
+        emit(Program::MOV, r, tb);
+        p.code[(size_t)done].dst = (int)p.code.size();
         return {r, 1};
       }
       case mir::Expr::FunApp:
@@ -232,16 +265,20 @@ struct ProgramCompiler {
     if (e.fn_lib == mir::Expr::Lib::UserDefined) {
       auto it = funs.find(e.name);
       if (it == funs.end()) bail("unknown function " + e.name);
-      std::vector<Range> args;
-      std::vector<std::vector<long>> iargs;
+      std::vector<InlineArg> args;
+      args.reserve(e.args.size());
       for (const auto& a : e.args) {
+        InlineArg arg;
         long v;
-        if (a.type_ == "UInt" && try_cint(a, &v))
-          iargs.push_back({v});
-        else
-          args.push_back(expr(a));
+        if (a.type_ == "UInt" && try_cint(a, &v)) {
+          arg.is_const_int = true;
+          arg.ints = {v};
+        } else {
+          arg.real = expr(a);
+        }
+        args.push_back(std::move(arg));
       }
-      return inline_call(*it->second, args, iargs);
+      return inline_call(*it->second, args);
     }
     if (e.fn_lib == mir::Expr::Lib::Internal) {
       if (e.name == "FnMakeArray" || e.name == "FnMakeRowVec") {
@@ -398,10 +435,12 @@ struct ProgramCompiler {
     return n;
   }
 
-  // Declare (or redeclare) a real variable of `len` registers, filled.
-  // Stan initializes a local to NaN; the ODE side has always zeroed and
-  // its bodies assign before reading, so `fill` keeps both honest.
-  Range declare(const std::string& name, int len, double fill = 0.0) {
+  // Declare (or redeclare) a real variable of `len` registers. Stan's
+  // uninitialized real value is NaN; callers may provide another fill only
+  // when the surrounding lowering has an explicit initialized-value policy.
+  Range declare(
+      const std::string& name, int len,
+      double fill = std::numeric_limits<double>::quiet_NaN()) {
     const Range r{alloc(len), len};
     const std::vector<double> init((size_t)len, fill);
     emit_const(r.reg, init.data(), len);
@@ -525,22 +564,21 @@ struct ProgramCompiler {
     }
   }
 
-  Range inline_call(const mir::FunDef& f, const std::vector<Range>& args,
-                    const std::vector<std::vector<long>>& iargs) {
+  Range inline_call(const mir::FunDef& f,
+                    const std::vector<InlineArg>& args) {
     if (++inline_depth > 32) bail("function inlining too deep");
+    if (args.size() != f.arg_names.size()) bail("function argument mismatch");
     // Callee scope: save the caller's bindings, install the parameters, and
     // restore afterwards. Registers are never reused, so nothing aliases.
     auto saved_reals = reals;
     auto saved_ints = ints;
     reals.clear();
     ints.clear();
-    size_t ai = 0, ii = 0;
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
-      const bool is_int = f.arg_types[k].find("UInt") != std::string::npos;
-      if (is_int && ii < iargs.size())
-        ints[f.arg_names[k]] = iargs[ii++];
-      else if (ai < args.size())
-        reals[f.arg_names[k]] = args[ai++];
+      if (args[k].is_const_int)
+        ints[f.arg_names[k]] = args[k].ints;
+      else
+        reals[f.arg_names[k]] = args[k].real;
     }
     Range out{0, 0};
     try {
