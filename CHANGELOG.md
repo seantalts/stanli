@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.6.0
+
+Islands stopped paying CmdStan's price for their gradients, the corpus
+grew a second half that covers the language rather than the posteriors,
+and that second half immediately found three bugs.
+
+### An island generates its backward instead of replaying it
+
+A recurrence is irreducible scalar residue: the re-rolling pass cannot
+vectorize it, so the island pass compiles the region into one
+register-machine op. For most of that pass's life the op collapse was
+dramatic and the time followed on exactly one model, because the
+backward re-executed the whole program under `stan::math::var` -- a vari
+per operation, a virtual `chain()` per operation, a nested tape built and
+torn down per call. Correct by construction, and it costs what CmdStan
+costs.
+
+- **`gen_adjoint` (`runtime/src/adjoint.cpp`)** differentiates the
+  forward program into a second register program: reverse-mode source
+  transformation over the ~35 opcodes of `Program`, running on doubles
+  with no vari, no nested tape and no allocation. Each rule is the
+  corresponding stan-math rev expression transcribed with the same
+  grouping, because the bar is bitwise agreement with the replay rather
+  than a correct derivative. `STANLI_NO_NATIVE_ADJ=1` restores the
+  replay, which is the oracle it is tested against.
+- **Measured** against `STANLI_NO_ISLAND=1` on all twenty-one corpus
+  models that compile a region: `iohmm_reg` **4.74x**, `hmm_gaussian`
+  1.60x, `hmm_example` 1.56x, `hmm_drive_1` 1.41x, `hmm_drive_0` 1.39x,
+  `garch11` 1.36x. The recurrence slice used to sit at 0.6-0.9x against
+  CmdStan and now crosses parity.
+- **The register machine speaks the graph's whole vocabulary.** It had
+  50 opcodes against the graph's 294, and one op outside that set ended a
+  region (`POW` used to split them in half). A `CALL` instruction now
+  runs the graph's own kernel over a register range -- the identical
+  code, partials and backward -- so an unknown op costs continuity
+  rather than the region. The carve estimate charges it the graph's
+  per-op tax, so no previously carved verdict changed.
+
+### A language corpus beside the posteriordb one
+
+posteriordb is 119 real posteriors, and real posteriors use a small part
+of Stan. Nothing in it declares `offset`/`multiplier`, a
+`cholesky_factor_cov`, a `sum_to_zero_matrix`, a user `_lupdf`, or an
+integer modulus.
+
+- **Ten models lifted from stanc3's own test suite**
+  (`tests/stanc3/`), where they exist to be compiled and never run.
+  `stanc --debug-generate-data` writes their data, which is what makes
+  them usable at all: this lowering evaluates transformed data eagerly,
+  so a model without data cannot be lowered. They replay through the
+  same CI step as the corpus, which now covers 129 models.
+- **write_array references are recorded for every model whose row is
+  deterministic**, not only for models with a generated quantities
+  block. The parameter columns are the row too, and their order is
+  exactly what one of the bugs below got wrong.
+- **Every reference re-recorded**, each model at a point inside its own
+  support: a point where the density is zero compares -inf against -inf
+  and exercises nothing.
+
+### Three bugs it found, all fixed
+
+- **An array of matrices reached the CSV transposed.** An
+  `array[N] matrix[R, C]` is array-major outside and column-major
+  inside, and one row-major stride walk over all three dims transposes
+  every element while leaving the column names right. `log_prob` never
+  notices, so this was invisible to every gradient check; the reported
+  draw was wrong. The offset arithmetic now lives in one function that
+  the read path, the write path and the data repack share.
+- **A user density called normalized stayed unnormalized.** `f_lpdf`
+  whose body calls `normal_lupdf` must drop the normalizing constant
+  only when the caller wrote `f_lupdf`. The MIR reader was not reading
+  the propto flag off a user call at all, so `lp__`, and any transformed
+  parameter or generated quantity computed that way, was off by the
+  constant. Gradients were unaffected, which is how it survived.
+- **`sum_to_zero_matrix` had the wrong number of free parameters**, and
+  now works. Its read dims are indistinguishable from
+  `array[N] sum_to_zero_vector[M]`, and it had been lowered as that:
+  `N*(M-1)` unconstrained where Stan has `(N-1)*(M-1)`, since the matrix
+  transform centers both axes. It is its own kernel now, bitwise against
+  CmdStan on 147 gradients and 630 written values.
+
+### Documentation
+
+- [`docs/hacking.md`](docs/hacking.md) rewritten for readers who know
+  Stan and have never worked on a compiler, and
+  [`docs/lowering-walkthrough.md`](docs/lowering-walkthrough.md) traces
+  three small models -- the vectorized path, a parameter branch, and a
+  recurrence with its generated backward -- through every layer.
+- A README per runtime directory explaining the header/translation-unit
+  split, and `clang-format` gated in CI.
+
 ## 0.5.1
 
 A re-release of 0.5.0 for the R distribution channel; no code changes.
