@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>stanli: Stan Language Interpreter in the browser</title>
+<title>stanli: Stan Language Interpreter, browser edition</title>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -96,10 +96,11 @@
 </style>
 </head>
 <body>
-<h1>stanli: The Stan Language Interpreter - full Stan in the browser</h1>
-<p class="sub">stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm
-lowers it to an op graph and runs NUTS. No server, no C++ toolchain;
-everything below happens in this tab.
+<h1>stanli: The Stan Language Interpreter</h1>
+<p class="sub">No server, no C++ toolchain;
+everything below happens in this tab, runs in the browser, samples on your machine. 
+stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph and runs NUTS. 
+<p class="sub">And it's often FASTER?? </p>
 <a href="https://github.com/seantalts/stanli">github.com/seantalts/stanli</a>
 &middot; <a href="https://www.npmjs.com/package/@seantalts/stanli">npm</a>
 &middot; <a href="https://pypi.org/project/stanli/">PyPI</a></p>
@@ -787,13 +788,12 @@ $("csv").onclick = () => {
 </script>
 <footer>
 <h2>Surprised it was that quick?</h2>
-<p><b>There was no compile step.</b> Other Stan interfaces all lower your model to C++ and then use a system C++ compiler to build it,
+<p><b>Look ma, no compiles!</b> Other Stan interfaces all lower your model to C++ and then use a system C++ compiler to build it,
 which takes a minimum of 6 seconds for the smallest models even after the precompiled headers have been built.
 Stanli has its own lowering and optimization passes that run in tens of milliseconds and then just interprets that high level result rather than using a compiler.
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
-it works</a> is the short version, for people who know Stan rather than
-compilers.</p>
-<p><b>And it is usually faster per gradient, not just to start.</b> Median
+it works</a></p>
+<p><b>Not just faster to start up, but usually faster gradients and sampling??</b> Median
 <!--gen:corpus_median-->2.07x<!--/gen--> CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
 <!--gen:corpus_at_par-->100<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
@@ -801,13 +801,12 @@ compilers.</p>
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
 </p>
-<p><b>This tab is the slow way to run it, though.</b> The same source
+<p><b>This tab is the slow way to run Stanli, though.</b> The same source
 compiled to WebAssembly instead of native costs about 1.5x to 2x per
-gradient: 1.71x geometric mean over seven models. The figures in the paragraph
+gradient. The figures in the paragraph
 above are native ones, so the margin over CmdStan in here is nearer par
-than 2x. For work rather than a
-look, <code>pip install stanli</code> runs the native build.</p>
-<p><b>Numerically accurate and very consistent with CmdStan</b> 
+than 2x. For heavy work, <code>pip install stanli</code> to run the native build.</p>
+<p><b>Numerically accurate and consistent with CmdStan</b> 
 <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models are
 replayed against the log density, the full gradient and the generated
 quantities CmdStan actually printed, and
