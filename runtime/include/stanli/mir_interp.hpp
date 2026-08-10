@@ -396,8 +396,21 @@ class MirInterp {
           }
           if (st.fn_name == "FnReject") throw std::domain_error(msg);
           emit_message(msg);
+          return;
         }
-        return;
+        // These exact validation statements predate the no-silent-statement
+        // contract and remain a narrow compatibility debt. The current MIR
+        // does not retain enough FnCheck metadata to execute all of them,
+        // and existing data/model loading relies on the documented valid-
+        // data assumption. `check_greater_or_equal` is only a static shape
+        // check in the existing newtrans input; the function name is not
+        // generally pure. New names must never silently join this list.
+        if (st.fn_name == "FnCheck" || st.fn_name == "FnValidateSize" ||
+            st.fn_name == "FnValidateSizePositive" ||
+            st.fn_name == "check_matching_dims" ||
+            st.fn_name == "check_greater_or_equal")
+          return;
+        fail("unsupported statement function " + st.fn_name, st.raw);
       case mir::Stmt::Skip:
         return;  // constraint checks are not executed here
       default:

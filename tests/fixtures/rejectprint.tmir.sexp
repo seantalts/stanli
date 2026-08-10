@@ -96,6 +96,38 @@
       (((pattern
          (IfElse
           ((pattern
+            (FunApp (StanLib Equals__ FnPlain AoS)
+             (((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+              ((pattern (Lit Int 8))
+               (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+           (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+          ((pattern
+            (Block
+             (((pattern
+                (NRFunApp (CompilerInternal FnPrint)
+                 (((pattern (Lit Str "before scalar="))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+                  ((pattern (Var x))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable)))))))
+               (meta <opaque>))
+              ((pattern
+                (NRFunApp (CompilerInternal FnReject)
+                 (((pattern (Lit Str "stop scalar="))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+                  ((pattern (Var x))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable)))))))
+               (meta <opaque>))
+              ((pattern
+                (NRFunApp (CompilerInternal FnPrint)
+                 (((pattern (Lit Str "unreachable after reject"))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))))
+               (meta <opaque>)))))
+           (meta <opaque>))
+          ()))
+        (meta <opaque>))
+       ((pattern
+         (IfElse
+          ((pattern
             (FunApp (StanLib Greater__ FnPlain AoS)
              (((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
               ((pattern (Lit Int 100))
@@ -203,6 +235,38 @@
    ((pattern
      (Block
       (((pattern
+         (IfElse
+          ((pattern
+            (FunApp (StanLib Equals__ FnPlain AoS)
+             (((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+              ((pattern (Lit Int 8))
+               (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+           (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+          ((pattern
+            (Block
+             (((pattern
+                (NRFunApp (CompilerInternal FnPrint)
+                 (((pattern (Lit Str "before scalar="))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+                  ((pattern (Var x))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable)))))))
+               (meta <opaque>))
+              ((pattern
+                (NRFunApp (CompilerInternal FnReject)
+                 (((pattern (Lit Str "stop scalar="))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+                  ((pattern (Var x))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable)))))))
+               (meta <opaque>))
+              ((pattern
+                (NRFunApp (CompilerInternal FnPrint)
+                 (((pattern (Lit Str "unreachable after reject"))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))))
+               (meta <opaque>)))))
+           (meta <opaque>))
+          ()))
+        (meta <opaque>))
+       ((pattern
          (IfElse
           ((pattern
             (FunApp (StanLib Greater__ FnPlain AoS)

@@ -138,6 +138,37 @@ int main() {
     ex.gradient(g.data());
   }
 
+  // ---- reject preserves prior output and prevents later effects -------
+  {
+    DataMap d = data_for(8, 2.5);
+    CompiledModel cm = compile_model(mir, d);
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = 0.1;
+    std::vector<double> g((size_t)ex.n_params());
+    bool threw = false;
+    std::string msg;
+    std::vector<std::string> lines;
+
+    set_message_sink([&lines](const char* text, size_t len) {
+      lines.emplace_back(text, len);
+    });
+    try {
+      ex.gradient(g.data());
+    } catch (const std::domain_error& e) {
+      threw = true;
+      msg = e.what();
+    }
+    set_message_sink(nullptr);
+    expect("ordered graph reject throws domain_error", threw);
+    expect("graph reject renders its scalar message exactly: " + msg,
+           msg == "stop scalar=0.1");
+    expect("only one effect precedes graph reject", lines.size() == 1);
+    if (lines.size() == 1)
+      expect("effect before graph reject: " + lines[0],
+             lines[0] == "before scalar=0.1");
+  }
+
   if (failures == 0) std::printf("test_rejectprint: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

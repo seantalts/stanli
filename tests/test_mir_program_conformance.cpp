@@ -1,9 +1,11 @@
 // The MIR interpreter is the semantic fallback for a compiled register
 // program.  A fast path may refuse an expression, but when it accepts one it
 // must preserve the same Stan value, control flow, and errors.  These cases
-// construct the smallest MIR that distinguishes four such rules and check
-// each path independently against the stated language result before comparing
-// the paths with each other.
+// construct small MIR cases for those rules and check each path independently
+// against the stated language result before comparing the paths with each
+// other.
+#include "stdout_capture.hpp"
+
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/ode_prog.hpp>
@@ -29,6 +31,7 @@ using stanli::mir::Expr;
 using stanli::mir::FunDef;
 using stanli::mir::SizedType;
 using stanli::mir::Stmt;
+using stanli_test::StdoutCapture;
 
 int failures = 0;
 
@@ -45,6 +48,15 @@ Expr lit_real(double value) {
   Expr e;
   e.kind = Expr::LitReal;
   e.lit = value;
+  e.type_ = "UReal";
+  e.data_only = true;
+  return e;
+}
+
+Expr lit_string(std::string value) {
+  Expr e;
+  e.kind = Expr::LitStr;
+  e.lit_s = std::move(value);
   e.type_ = "UReal";
   e.data_only = true;
   return e;
@@ -112,6 +124,14 @@ Stmt return_value(Expr value) {
   return s;
 }
 
+Stmt nr_fun_app(std::string name, std::vector<Expr> args) {
+  Stmt s;
+  s.kind = Stmt::NRFunApp;
+  s.fn_name = std::move(name);
+  s.fn_args = std::move(args);
+  return s;
+}
+
 FunDef rhs_function(std::string name, std::vector<Stmt> body) {
   FunDef f;
   f.name = std::move(name);
@@ -132,11 +152,13 @@ struct Observation {
   std::vector<double> value;
   std::vector<uint64_t> bits;
   std::string detail;
+  std::string stdout_text;
 };
 
 struct ProgramObservation {
   Observation compile;
   Observation outcome;
+  bool refused_program_is_empty = false;
 };
 
 uint64_t raw_bits(double value) {
@@ -146,11 +168,13 @@ uint64_t raw_bits(double value) {
   return bits;
 }
 
-Observation observed_values(std::vector<double> values) {
+Observation observed_values(std::vector<double> values,
+                            std::string stdout_text = {}) {
   Observation out;
   out.bits.reserve(values.size());
   for (double value : values) out.bits.push_back(raw_bits(value));
   out.value = std::move(values);
+  out.stdout_text = std::move(stdout_text);
   return out;
 }
 
@@ -168,6 +192,21 @@ const char* kind_name(OutcomeKind kind) {
       return "other exception";
   }
   return "unknown";
+}
+
+std::string escaped(std::string text) {
+  std::string out;
+  for (char c : text) {
+    if (c == '\n')
+      out += "\\n";
+    else if (c == '\r')
+      out += "\\r";
+    else if (c == '\t')
+      out += "\\t";
+    else
+      out += c;
+  }
+  return out;
 }
 
 std::string describe(const Observation& o) {
@@ -190,7 +229,25 @@ std::string describe(const Observation& o) {
   } else if (!o.detail.empty()) {
     out += ": " + o.detail;
   }
+  if (!o.stdout_text.empty())
+    out += "; stdout=\"" + escaped(o.stdout_text) + "\"";
   return out;
+}
+
+template <typename F>
+Observation observe_execution(F&& run) {
+  StdoutCapture captured;
+  try {
+    Observation out = observed_values(run());
+    out.stdout_text = captured.finish();
+    return out;
+  } catch (const std::domain_error& e) {
+    return {Stage::Execute, OutcomeKind::DomainError, {}, {},
+            e.what(),       captured.finish()};
+  } catch (const std::exception& e) {
+    return {Stage::Execute, OutcomeKind::OtherError, {}, {},
+            e.what(),       captured.finish()};
+  }
 }
 
 Observation observe_interpreter(
@@ -200,15 +257,10 @@ Observation observe_interpreter(
   const std::vector<double> theta{0.75};
   const std::vector<double> x_r{1.25};
   const std::vector<int> x_i{2};
-  try {
+  return observe_execution([&] {
     MirInterp<double> interp(functions, "semantic conformance");
-    std::vector<double> value = interp.call(entry, {{t}, y, theta, x_r}, {x_i});
-    return observed_values(std::move(value));
-  } catch (const std::domain_error& e) {
-    return {Stage::Execute, OutcomeKind::DomainError, {}, {}, e.what()};
-  } catch (const std::exception& e) {
-    return {Stage::Execute, OutcomeKind::OtherError, {}, {}, e.what()};
-  }
+    return interp.call(entry, {{t}, y, theta, x_r}, {x_i});
+  });
 }
 
 ProgramObservation observe_program(
@@ -225,42 +277,41 @@ ProgramObservation observe_program(
   } catch (const std::domain_error& e) {
     Observation error{
         Stage::Compile, OutcomeKind::DomainError, {}, {}, e.what()};
-    return {error, error};
+    return {error, error, false};
   } catch (const std::exception& e) {
     Observation error{
         Stage::Compile, OutcomeKind::OtherError, {}, {}, e.what()};
-    return {error, error};
+    return {error, error, false};
   }
 
   if (!p.ok) {
     Observation refusal{
         Stage::Compile, OutcomeKind::Refused, {}, {}, std::move(p.why)};
-    return {std::move(refusal), observe_interpreter(entry, functions, t)};
+    const bool empty = p.code.empty() && p.out_regs.empty();
+    return {std::move(refusal), observe_interpreter(entry, functions, t),
+            empty};
   }
 
   Observation accepted{Stage::Compile, OutcomeKind::Accepted, {}, {}, {}};
-  try {
-    std::vector<double> value;
-    run_rhs<double>(p, t, y.data(), theta.data(), x_r.data(), value);
-    return {std::move(accepted), observed_values(std::move(value))};
-  } catch (const std::domain_error& e) {
-    return {std::move(accepted),
-            {Stage::Execute, OutcomeKind::DomainError, {}, {}, e.what()}};
-  } catch (const std::exception& e) {
-    return {std::move(accepted),
-            {Stage::Execute, OutcomeKind::OtherError, {}, {}, e.what()}};
-  }
+  return {std::move(accepted), observe_execution([&] {
+            std::vector<double> value;
+            run_rhs<double>(p, t, y.data(), theta.data(), x_r.data(), value);
+            return value;
+          }),
+          false};
 }
 
 bool same_observation(const Observation& a, const Observation& b) {
-  if (a.stage != b.stage || a.kind != b.kind) return false;
+  if (a.stage != b.stage || a.kind != b.kind || a.stdout_text != b.stdout_text)
+    return false;
   if (a.kind != OutcomeKind::Value) return a.detail == b.detail;
   return a.bits == b.bits;
 }
 
 bool satisfies_semantics(const Observation& got, const Observation& want) {
   if (got.stage != want.stage || got.kind != want.kind ||
-      got.value.size() != want.value.size())
+      got.value.size() != want.value.size() ||
+      got.stdout_text != want.stdout_text)
     return false;
   // The language oracle may specify only an error category. Route parity
   // below remains stricter and requires the two paths' full messages to
@@ -288,7 +339,8 @@ void expect_observation(const std::string& case_name, const char* path,
 
 void run_observation_case(const std::string& name, const char* semantics,
                           std::vector<FunDef> functions, double t,
-                          Observation want) {
+                          Observation want,
+                          const char* required_refusal = nullptr) {
   std::map<std::string, const FunDef*> table;
   for (const FunDef& f : functions) table[f.name] = &f;
   const FunDef& entry = functions.front();
@@ -299,6 +351,15 @@ void run_observation_case(const std::string& name, const char* semantics,
   if (program.compile.kind == OutcomeKind::Refused)
     std::printf("NOTE %-24s Program %s; exercised MirInterp fallback\n",
                 name.c_str(), describe(program.compile).c_str());
+  if (required_refusal &&
+      (program.compile.kind != OutcomeKind::Refused ||
+       program.compile.detail.find(required_refusal) == std::string::npos ||
+       !program.refused_program_is_empty)) {
+    ++failures;
+    std::printf(
+        "FAIL %-24s expected a cleared Program refusal naming %s; got %s\n",
+        name.c_str(), required_refusal, describe(program.compile).c_str());
+  }
   expect_observation(name, "Program", program.outcome, want);
   expect_observation(name, "MirInterp", interpreter, want);
   if (!same_observation(program.outcome, interpreter)) {
@@ -311,15 +372,37 @@ void run_observation_case(const std::string& name, const char* semantics,
 
 void run_case(const std::string& name, const char* semantics,
               std::vector<FunDef> functions, double t,
-              std::vector<double> expected) {
-  run_observation_case(name, semantics, std::move(functions), t,
-                       observed_values(std::move(expected)));
+              std::vector<double> expected, std::string expected_stdout = {},
+              const char* required_refusal = nullptr) {
+  run_observation_case(
+      name, semantics, std::move(functions), t,
+      observed_values(std::move(expected), std::move(expected_stdout)),
+      required_refusal);
 }
 
 void run_domain_error_case(const std::string& name, const char* semantics,
-                           std::vector<FunDef> functions, double t) {
+                           std::vector<FunDef> functions, double t,
+                           std::string detail = {},
+                           std::string expected_stdout = {},
+                           const char* required_refusal = nullptr) {
   run_observation_case(name, semantics, std::move(functions), t,
-                       {Stage::Execute, OutcomeKind::DomainError, {}, {}, {}});
+                       {Stage::Execute,
+                        OutcomeKind::DomainError,
+                        {},
+                        {},
+                        std::move(detail),
+                        std::move(expected_stdout)},
+                       required_refusal);
+}
+
+void run_other_error_case(const std::string& name, const char* semantics,
+                          std::vector<FunDef> functions, double t,
+                          std::string detail = {},
+                          const char* required_refusal = nullptr) {
+  run_observation_case(
+      name, semantics, std::move(functions), t,
+      {Stage::Execute, OutcomeKind::OtherError, {}, {}, std::move(detail), {}},
+      required_refusal);
 }
 
 void test_short_circuit_or() {
@@ -459,6 +542,87 @@ void test_mixed_integer_udf_arguments() {
            {std::move(entry), std::move(score)}, 1.0, {13.0});
 }
 
+void test_nested_print_effect() {
+  // print is an ordered language effect even when it lives in an inlined
+  // user-defined function. Its arguments are evaluated and rendered once.
+  FunDef echo;
+  echo.name = "echo";
+  echo.arg_names = {"x"};
+  echo.arg_types = {"UReal"};
+  echo.body = {
+      nr_fun_app("FnPrint", {lit_string("nested print x="), var("x", "UReal")}),
+      return_value(var("x", "UReal"))};
+
+  Expr call = fun("echo", {var("t", "UReal")}, "UReal", Expr::Lib::UserDefined);
+  FunDef entry = rhs_function("nested_print_rhs",
+                              {return_value(make_array({std::move(call)}))});
+  run_case("nested print effect",
+           "print in a UDF emits exactly once before returning",
+           {std::move(entry), std::move(echo)}, 1.0, {1.0},
+           "nested print x=1\n", "FnPrint");
+}
+
+void test_print_then_reject_effects() {
+  // Earlier effects remain observable when reject terminates evaluation;
+  // reject is specifically a domain_error carrying every rendered chunk.
+  FunDef entry = rhs_function(
+      "print_then_reject_rhs",
+      {nr_fun_app("FnPrint",
+                  {lit_string("before reject t="), var("t", "UReal")}),
+       nr_fun_app("FnReject", {lit_string("bad rhs t="), var("t", "UReal")}),
+       nr_fun_app("FnPrint", {lit_string("unreachable after reject")}),
+       return_value(make_array({lit_real(0)}))});
+  run_domain_error_case(
+      "print then reject effects",
+      "print occurs first; reject throws domain_error with its full message",
+      {std::move(entry)}, 1.0, "bad rhs t=1", "before reject t=1\n", "FnPrint");
+}
+
+FunDef runtime_effect_rhs() {
+  Stmt effects;
+  effects.kind = Stmt::Block;
+  effects.body = {nr_fun_app("FnPrint", {lit_string("negative branch t="),
+                                         var("t", "UReal")}),
+                  nr_fun_app("FnReject", {lit_string("negative t rejected: "),
+                                          var("t", "UReal")})};
+
+  Stmt guarded;
+  guarded.kind = Stmt::IfElse;
+  guarded.cond = fun("Less__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.body.push_back(std::move(effects));
+
+  return rhs_function(
+      "runtime_effect_rhs",
+      {std::move(guarded), return_value(make_array({var("t", "UReal")}))});
+}
+
+void test_runtime_guarded_effects() {
+  // The same runtime branch supplies both truth-table halves. An untaken
+  // effect is absent; a taken effect executes in source order.
+  const FunDef entry = runtime_effect_rhs();
+  run_case("untaken runtime effects",
+           "a false branch emits nothing and evaluation continues", {entry},
+           1.0, {1.0}, {}, "FnPrint");
+  run_domain_error_case(
+      "taken runtime effects",
+      "a true branch prints once, then reject terminates evaluation", {entry},
+      -1.0, "negative t rejected: -1", "negative branch t=-1\n", "FnPrint");
+}
+
+void test_unknown_nrfunapp_fails_loud() {
+  // Erasing an unrecognized non-returning call invents semantics. Until its
+  // effect is implemented, both routes must fail loudly rather than return.
+  FunDef entry = rhs_function("unknown_effect_rhs",
+                              {nr_fun_app("FnUnmodeledEffect", {lit_real(1)}),
+                               return_value(make_array({lit_real(0)}))});
+  run_other_error_case("unknown NRFunApp",
+                       "an unmodeled statement is never a silent no-op",
+                       {std::move(entry)}, 1.0,
+                       "stanli semantic conformance: unsupported statement "
+                       "function FnUnmodeledEffect",
+                       "FnUnmodeledEffect");
+}
+
 }  // namespace
 
 int main() {
@@ -469,6 +633,10 @@ int main() {
   test_uninitialized_real();
   test_matrix_row_indexing();
   test_mixed_integer_udf_arguments();
+  test_nested_print_effect();
+  test_print_then_reject_effects();
+  test_runtime_guarded_effects();
+  test_unknown_nrfunapp_fails_loud();
   if (failures == 0)
     std::printf("test_mir_program_conformance: all cases passed\n");
   else

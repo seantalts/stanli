@@ -9,6 +9,11 @@ transformed data {
 }
 parameters { real x; vector[2] v; }
 model {
+  if (N == 8) {
+    print("before scalar=", x);
+    reject("stop scalar=", x);
+    print("unreachable after reject");
+  }
   if (N > 100) reject("N too large: ", N, " limit ", lim);
   print("drawing at x = ", x, " v = ", v);
   x ~ normal(0, 1);

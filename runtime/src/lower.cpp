@@ -527,6 +527,12 @@ struct Lowering {
                     Range* expr_out, std::shared_ptr<IslandProg>* prog_out) {
     auto prog = std::make_shared<IslandProg>();
     ProgramCompiler c{*prog, fun_defs};
+    // Necessity islands have no structured-MIR fallback yet. Keep their
+    // existing effect bug explicit at this sole call site; every other
+    // ProgramCompiler caller refuses NRFunApp by default instead of erasing
+    // it. The policy remains a correctness blocker until the island can
+    // execute effects exactly once outside its var replay.
+    c.nrfunapp_policy = NRFunAppPolicy::LegacyIgnoreNecessityIsland;
     for (const auto& [name, v] : int_env) c.ints[name] = {v};
     c.bind_extern = [&](const std::string& name, Range* r) {
       auto sc = scope.find(name);
