@@ -787,31 +787,27 @@ $("csv").onclick = () => {
 </script>
 <footer>
 <h2>Surprised it was that quick?</h2>
-<p><b>There was no compile step.</b> CmdStan turns your model into C++ and
-builds it, which takes tens of seconds before the first draw. Nothing was
-compiled here. stanli treats a model as data: a graph of operations over
-precompiled stan-math kernels, built in milliseconds and then interpreted.
+<p><b>There was no compile step.</b> Other Stan interfaces all lower your model to C++ and then use a system C++ compiler to build it,
+which takes a minimum of 6 seconds for the smallest models even after the precompiled headers have been built.
+Stanli has its own lowering and optimization passes that run in tens of milliseconds and then just interprets that high level result rather than using a compiler.
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
 it works</a> is the short version, for people who know Stan rather than
 compilers.</p>
 <p><b>And it is usually faster per gradient, not just to start.</b> Median
 <!--gen:corpus_median-->2.07x<!--/gen--> CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
-<!--gen:corpus_at_par-->100<!--/gen--> of them at or above it. The radon
-models in the picker are among the good cases and the Lotka-Volterra one
-is not, which is the honest range. Every model, win or loss, with the
-reason:
-<a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.</p>
+<!--gen:corpus_at_par-->100<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
+<a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>. 
+The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
+The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
+</p>
 <p><b>This tab is the slow way to run it, though.</b> The same source
 compiled to WebAssembly instead of native costs about 1.5x to 2x per
-gradient: 1.71x geometric mean over seven models, measured under Node so
-the numbers are not a debugger artifact. The figures in the paragraph
+gradient: 1.71x geometric mean over seven models. The figures in the paragraph
 above are native ones, so the margin over CmdStan in here is nearer par
-than 2x. Preparing the model is not what costs you, since stanc compiled
-to JavaScript still finishes in milliseconds. For work rather than a
+than 2x. For work rather than a
 look, <code>pip install stanli</code> runs the native build.</p>
-<p><b>The numbers are checked against CmdStan itself.</b> Not against a
-tolerance someone picked:
+<p><b>Numerically accurate and very consistent with CmdStan</b> 
 <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models are
 replayed against the log density, the full gradient and the generated
 quantities CmdStan actually printed, and
@@ -820,6 +816,7 @@ disagreement anywhere is
 <!--gen:corpus_worst-->2.6e-12<!--/gen--> relative. Per-model results:
 <a href="https://github.com/seantalts/stanli/blob/main/docs/corpus-status.md">corpus
 status</a>.</p>
+<p><b>Interested in learning more, or even contributing?</b> Check out <a href="https://github.com/seantalts/stanli/blob/main/docs/hacking.md">hacking.md</a> :) </p>
 </footer>
 </body>
 </html>
