@@ -95,29 +95,16 @@ bool WaInterp::read_param(MirInterp<double>& in, const mir::Stmt& s,
         "for parameter " +
         s.decl_id);
   DataMap::Entry e = it->second;
-  if (!s.read_dims.empty()) {
+  if (!s.decl_type.dims.empty()) {
     std::vector<int64_t> dims;
-    for (const auto& d : s.read_dims) dims.push_back(in.as_int(d));
-    // cholesky_factor_corr[K] reads dims (K) but stores the K x K factor.
-    if (s.read_transform->kind == mir::Transform::CholeskyCorr &&
-        dims.size() == 1)
-      dims = {dims[0], dims[0]};
-    if (s.decl_type.base == "SArray" && dims.size() == 2) {
-      // Batched containers (array[K] simplex[K]) sit batch-major in the
-      // constrained view; the interpreter indexes col-major (first index
-      // fastest). Transpose the storage so A[i, j] means what it says.
-      // Caught by the write_array reference for hmm_gaussian: every A
-      // off-diagonal came back transposed.
-      const int64_t B = dims[0], L = dims[1];
-      std::vector<double> t((size_t)(B * L));
-      for (int64_t b = 0; b < B; ++b)
-        for (int64_t l = 0; l < L; ++l)
-          t[(size_t)(b + B * l)] = e.r.at((size_t)(b * L + l));
-      e.r = std::move(t);
-    } else if (s.decl_type.base == "SArray" && dims.size() > 2) {
-      throw CompileError("stanli write_array: parameter " + s.decl_id +
-                         " has more than two read dims (unsupported)");
+    int64_t len = 1;
+    for (const auto& d : s.decl_type.dims) {
+      dims.push_back(in.as_int(d));
+      len *= dims.back();
     }
+    if (len != (int64_t)std::max(e.r.size(), e.i.size()))
+      throw CompileError("stanli write_array: constrained shape mismatch for " +
+                         s.decl_id);
     e.dims = std::move(dims);
   }
   in.env()[s.decl_id] = std::move(e);

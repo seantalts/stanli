@@ -461,4 +461,11 @@ stanli_add_test(test_rejectprint)
 stanli_add_test(test_odevariadic)
 stanli_add_test(test_estimate)
 stanli_add_test(test_brmsmono)
+
+# The C ABI lives only in the shared library. Test it through that shipped
+# boundary rather than compiling capi.cpp into the C++ unit-test library.
+add_executable(test_capi tests/test_capi.cpp)
+target_link_libraries(test_capi PRIVATE stanli_shared)
+add_test(NAME test_capi COMMAND test_capi
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()  # NOT EMSCRIPTEN

@@ -56,7 +56,7 @@ std::vector<double> interp_wa_row(stanli_model& m, const double* q,
   stanli::Executor& ex = *m.ex;
   std::memcpy(ex.params_data(), q, sizeof(double) * ex.n_params());
   ex.run_forward_only();
-  return m.wa_interp->eval(stanli::wa_param_env(ex, m.cm.views), rng);
+  return m.wa_interp->eval(m.cm.constrained_env(ex), rng);
 }
 
 }  // namespace
@@ -71,12 +71,8 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
     m->cm = stanli::compile_model(tmir_sexp, data);
     m->ex = std::make_unique<stanli::Executor>(std::move(m->cm.graph));
     m->cm.bind(*m->ex);
-    for (const auto& v : m->cm.views) {
-      m->n_con += v.len;
-      for (int64_t i = 0; i < v.len; ++i)
-        m->flat_names.push_back(
-            v.len == 1 ? v.name : v.name + "." + std::to_string(i + 1));
-    }
+    for (const auto& v : m->cm.views) m->n_con += v.len;
+    m->flat_names = stanli::CompiledModel::csv_names(m->cm.views);
     if (m->cm.write_array) {
       auto& wa = *m->cm.write_array;
       if (wa.interp) {
@@ -570,7 +566,7 @@ int stanli_constrain(stanli_model* m, const double* q, double* out) {
   int64_t k = 0;
   for (const auto& v : m->cm.views) {
     const double* p = m->ex->value_ptr(v.slot);
-    for (int64_t i = 0; i < v.len; ++i) out[k++] = p[i];
+    for (int64_t i = 0; i < v.len; ++i) out[k++] = p[v.storage_index(i)];
   }
   return 0;
 }

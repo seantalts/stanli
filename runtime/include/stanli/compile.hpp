@@ -12,6 +12,7 @@
 #include <stanli/mir.hpp>
 
 #include <optional>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -44,9 +45,58 @@ struct CompiledModel {
     int64_t len;
     Naming naming = Naming::Auto;  // Auto: bare at length 1, indexed above
     int64_t rows = 0;              // Matrix only
+    // A declaration-level view carries its full logical shape. Stan writes
+    // the first logical index fastest, while the arena keeps arrays
+    // outer-major and an innermost matrix column-major. Write-array views are
+    // already peeled to one emitted value and leave this empty.
+    std::vector<int64_t> dims;
+    bool matrix_storage = false;  // the final two dims form a matrix
+    // Empty means identity. Nonidentity permutations are prepared once while
+    // compiling the concrete model, so serialization performs one indexed
+    // copy per value with no per-draw division or allocation.
+    std::vector<int64_t> storage_order;
+
+    void set_serial_layout(std::vector<int64_t> logical_dims,
+                           bool innermost_matrix) {
+      dims = std::move(logical_dims);
+      matrix_storage = innermost_matrix;
+      storage_order.resize((size_t)len);
+      bool identity = true;
+      for (int64_t serial = 0; serial < len; ++serial) {
+        int64_t q = serial;
+        const size_t outer = matrix_storage ? dims.size() - 2 : dims.size();
+        int64_t stride = matrix_storage
+                             ? len / (dims[outer] * dims[outer + 1])
+                             : len;
+        int64_t at = 0;
+        for (size_t d = 0; d < outer; ++d) {
+          stride /= dims[d];
+          at += (q % dims[d]) * stride;
+          q /= dims[d];
+        }
+        if (matrix_storage) at = at * dims[outer] * dims[outer + 1] + q;
+        storage_order[(size_t)serial] = at;
+        identity &= at == serial;
+      }
+      if (identity) storage_order.clear();
+    }
+
+    int64_t storage_index(int64_t serial) const {
+      return storage_order.empty() ? serial : storage_order[(size_t)serial];
+    }
 
     void append_names(std::vector<std::string>& out) const {
-      if (naming == Naming::Matrix && rows > 0) {
+      if (!dims.empty()) {
+        for (int64_t f = 0; f < len; ++f) {
+          std::string column = name;
+          int64_t q = f;
+          for (int64_t d : dims) {
+            column += "." + std::to_string(q % d + 1);
+            q /= d;
+          }
+          out.push_back(std::move(column));
+        }
+      } else if (naming == Naming::Matrix && rows > 0) {
         for (int64_t f = 0; f < len; ++f)
           out.push_back(name + "." + std::to_string(f % rows + 1) + "." +
                         std::to_string(f / rows + 1));
@@ -67,6 +117,25 @@ struct CompiledModel {
     return out;
   }
   std::vector<ParamView> views;
+
+  // Materialize constrained declarations in the MIR interpreter's logical
+  // first-index-fast layout. Hosts must use this boundary instead of handing
+  // arena storage directly to WaInterp: arrays use different physical order
+  // on the two sides.
+  std::map<std::string, DataMap::Entry> constrained_env(Executor& ex) const {
+    std::map<std::string, DataMap::Entry> env;
+    for (const auto& view : views) {
+      DataMap::Entry value;
+      value.dims = view.dims;
+      value.r.resize((size_t)view.len);
+      const double* stored = ex.value_ptr(view.slot);
+      for (int64_t i = 0; i < view.len; ++i)
+        value.r[(size_t)i] = stored[view.storage_index(i)];
+      env.emplace(view.name, std::move(value));
+    }
+    return env;
+  }
+
   int64_t n_unconstrained = 0;
   // Each declared parameter, in declaration order: what it is called, how
   // many UNCONSTRAINED values it contributes, its declared dimensions, and

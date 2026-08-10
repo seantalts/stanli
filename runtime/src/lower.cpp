@@ -1917,6 +1917,34 @@ struct Lowering {
   }
 
   // ---- statements -----------------------------------------------------------
+  CompiledModel::ParamView parameter_view(const mir::Stmt& s, int slot,
+                                          int64_t len) {
+    using Naming = CompiledModel::ParamView::Naming;
+    CompiledModel::ParamView view{s.decl_id, slot, len};
+    if (s.decl_type.base == "SReal" || s.decl_type.base == "SInt" ||
+        s.decl_type.base == "SComplex") {
+      view.naming = Naming::Scalar;
+      return view;
+    }
+    view.naming = Naming::Container;
+    std::vector<int64_t> dims;
+    for (const auto& dim : s.decl_type.dims) dims.push_back(eval_int(dim));
+    int64_t declared_len = 1;
+    for (int64_t dim : dims) declared_len *= dim;
+    if (declared_len != len)
+      fail("constrained shape does not match its flattened length", s.raw);
+    const bool matrix_storage =
+        s.decl_type.base == "SMatrix" ||
+        (s.decl_type.base == "SArray" &&
+         s.decl_type.elem_base == "SMatrix");
+    view.set_serial_layout(std::move(dims), matrix_storage);
+    if (matrix_storage) {
+      view.naming = Naming::Matrix;
+      view.rows = view.dims.at(view.dims.size() - 2);
+    }
+    return view;
+  }
+
   void lower_read_param(const mir::Stmt& s) {
     // Declared (constrained) size from the read dims; the unconstrained raw
     // size depends on the transform (simplex uses K-1).
@@ -2019,7 +2047,8 @@ struct Lowering {
       // In write_array mode the column order is dictated by the FnWriteParam
       // statements, which come later and cover transformed parameters and
       // generated quantities too; declaration order would be wrong.
-      if (!in_write_array) out.views.push_back({s.decl_id, raw, raw_len});
+      if (!in_write_array)
+        out.views.push_back(parameter_view(s, raw, raw_len));
       return;
     }
     uint16_t opcode = 0;
@@ -2116,7 +2145,8 @@ struct Lowering {
     Val con = emit(opcode, ins, con_len, psi, tr_idata, jac);
     jac_slots.push_back(jac);
     scope[s.decl_id] = con.slot;
-    if (!in_write_array) out.views.push_back({s.decl_id, con.slot, con_len});
+    if (!in_write_array)
+      out.views.push_back(parameter_view(s, con.slot, con_len));
   }
 
   std::map<std::string, std::vector<int64_t>> decl_dims;

@@ -232,18 +232,7 @@ int main(int argc, char** argv) {
     const auto constrained_by_name = [&](const std::vector<double>& q) {
       for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i];
       ex.run_forward_only();
-      std::map<std::string, stanli::DataMap::Entry> ps;
-      for (const auto& v : cm.views) {
-        stanli::DataMap::Entry en;
-        const double* p = ex.value_ptr(v.slot);
-        en.r.assign(p, p + v.len);
-        if (v.rows > 0)
-          en.dims = {v.rows, v.len / v.rows};
-        else if (v.len > 1)
-          en.dims = {v.len};
-        ps[v.name] = std::move(en);
-      }
-      return ps;
+      return cm.constrained_env(ex);
     };
     std::vector<std::vector<double>> irows;
     stanli::WaRng wa_rng(cfg.seed);

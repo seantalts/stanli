@@ -168,18 +168,8 @@ int main(int argc, char** argv) {
       try {
         stanli::WaInterp& wi = *cm.write_array->interp;
         stanli::WaRng rng(1234);
-        std::map<std::string, stanli::DataMap::Entry> params;
-        for (const auto& v : cm.views) {
-          stanli::DataMap::Entry en;
-          const double* p = ex.value_ptr(v.slot);
-          en.r.assign(p, p + v.len);
-          if (v.rows > 0)
-            en.dims = {v.rows, v.len / v.rows};
-          else if (v.len > 1)
-            en.dims = {v.len};
-          params[v.name] = std::move(en);
-        }
-        const std::vector<double> row = wi.eval(params, rng);
+        const std::vector<double> row =
+            wi.eval(cm.constrained_env(ex), rng);
         int64_t bad = 0;
         for (double x : row)
           if (!std::isfinite(x)) ++bad;

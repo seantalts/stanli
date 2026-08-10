@@ -11,6 +11,8 @@
 //   * the whole pipeline on tests/fixtures/wanames.stan, whose expected
 //     header was taken verbatim from a CmdStan run of the same model.
 #include <stanli/compile.hpp>
+#include <stanli/mir.hpp>
+#include <stanli/sexp.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <cmath>
@@ -70,6 +72,35 @@ void test_naming_rules() {
   // The matrix: the bug was emitting M.1 .. M.6.
   expect_eq("matrix[2,3] col-major", joined({PV{"M", 0, 6, N::Matrix, 2}}),
             "M.1.1,M.2.1,M.1.2,M.2.2,M.1.3,M.2.3");
+  PV array_vector{"V", 0, 4, N::Container, 0};
+  array_vector.set_serial_layout({2, 2}, false);
+  expect_eq("array[2] vector[2] first index fastest",
+            joined({array_vector}), "V.1.1,V.2.1,V.1.2,V.2.2");
+  const std::vector<int64_t> vector_storage{0, 2, 1, 3};
+  for (int64_t i = 0; i < array_vector.len; ++i)
+    if (array_vector.storage_index(i) != vector_storage[(size_t)i]) {
+      ++failures;
+      std::printf("FAIL array-vector storage index %lld: got %lld want %lld\n",
+                  static_cast<long long>(i),
+                  static_cast<long long>(array_vector.storage_index(i)),
+                  static_cast<long long>(vector_storage[(size_t)i]));
+    }
+  PV array_matrix{"A", 0, 12, N::Matrix, 2};
+  array_matrix.set_serial_layout({2, 2, 3}, true);
+  expect_eq("array[2] matrix[2,3] first index fastest",
+            joined({array_matrix}),
+            "A.1.1.1,A.2.1.1,A.1.2.1,A.2.2.1,A.1.1.2,A.2.1.2,"
+            "A.1.2.2,A.2.2.2,A.1.1.3,A.2.1.3,A.1.2.3,A.2.2.3");
+  const std::vector<int64_t> matrix_storage{0, 6, 1, 7, 2, 8,
+                                             3, 9, 4, 10, 5, 11};
+  for (int64_t i = 0; i < array_matrix.len; ++i)
+    if (array_matrix.storage_index(i) != matrix_storage[(size_t)i]) {
+      ++failures;
+      std::printf("FAIL array-matrix storage index %lld: got %lld want %lld\n",
+                  static_cast<long long>(i),
+                  static_cast<long long>(array_matrix.storage_index(i)),
+                  static_cast<long long>(matrix_storage[(size_t)i]));
+    }
   // Auto (the log_prob views): bare at length one, indexed above.
   expect_eq("auto scalar", joined({PV{"a", 0, 1, N::Auto, 0}}), "a");
   expect_eq("auto vector", joined({PV{"a", 0, 2, N::Auto, 0}}), "a.1,a.2");
@@ -128,6 +159,51 @@ void test_wanames_pipeline() {
                     want);
       }
     }
+}
+
+// Run the same write-array MIR directly through the broad interpreter. The
+// graph and interpreter intentionally store values differently; what they
+// must share is the logical column schema and the observable row.
+void test_wanames_interpreter_schema() {
+  using namespace stanli;
+  auto prog = std::make_shared<mir::Program>(
+      mir::read_program(sexp::parse(slurp("tests/fixtures/wanames.tmir.sexp"))));
+
+  std::map<std::string, DataMap::Entry> base;
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  WaInterp wi(prog, std::move(base));
+
+  std::map<std::string, DataMap::Entry> params;
+  params["s"].r = {0.375};
+  params["v"].r = {5.0};
+  params["v"].dims = {1};
+  params["M"].r = {11.0, 12.0, 13.0, 14.0, 15.0, 16.0};
+  params["M"].dims = {2, 3};
+
+  const std::vector<double> row = wi.eval(params);
+  expect_eq("wanames interpreted header", joined(wi.columns()),
+            "s,v.1,M.1.1,M.2.1,M.1.2,M.2.2,M.1.3,M.2.3,"
+            "gq.1.1,gq.2.1,gq.1.2,gq.2.2");
+  const std::vector<double> want{0.375, 5.0, 11.0, 12.0, 13.0, 14.0,
+                                 15.0, 16.0, 11.375, 21.375, 12.375, 22.375};
+  if (row != want) {
+    ++failures;
+    std::printf("FAIL wanames interpreted row\n");
+    const size_t n = std::max(row.size(), want.size());
+    for (size_t i = 0; i < n; ++i) {
+      const double got = i < row.size() ? row[i] : NAN;
+      const double expected = i < want.size() ? want[i] : NAN;
+      if (got != expected)
+        std::printf("  [%zu] got %.17g want %.17g\n", i, got, expected);
+    }
+  }
 }
 
 // Generated quantities the graph cannot express (RNG draws, a
@@ -205,6 +281,12 @@ void test_array_of_matrix_columns() {
     std::printf("FAIL amatwa: no write_array\n");
     return;
   }
+  Executor pex(std::move(cm.graph));
+  cm.bind(pex);
+  for (int64_t k = 0; k < pex.n_params(); ++k)
+    pex.params_data()[k] = (double)k;
+  pex.run_forward_only();
+
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
   // Distinct values, so any misplaced element names itself.
@@ -241,6 +323,43 @@ void test_array_of_matrix_columns() {
         // and so does the data it copied
         expect_val("gd" + ix, (double)(100 * k + 10 * i + j));
       }
+
+  // The fallback interpreter has a different physical layout. Feed it
+  // through CompiledModel's one arena-to-logical boundary and require the
+  // exact same named row, including the rank-three parameter that the old
+  // boundary rejected outright.
+  auto prog = std::make_shared<mir::Program>(mir::read_program(
+      sexp::parse(slurp("tests/fixtures/amatwa.tmir.sexp"))));
+  std::map<std::string, DataMap::Entry> base;
+  base["d"] = data.at("d");
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  WaInterp interpreted(prog, std::move(base));
+  const std::vector<double> interpreted_values =
+      interpreted.eval(cm.constrained_env(pex));
+  const std::vector<std::string> interpreted_names =
+      CompiledModel::csv_names(interpreted.columns());
+  std::map<std::string, double> interpreted_row;
+  for (size_t i = 0; i < interpreted_values.size(); ++i)
+    interpreted_row[interpreted_names.at(i)] = interpreted_values[i];
+  if (interpreted_row != row) {
+    ++failures;
+    std::printf("FAIL amatwa: interpreted and compiled rows differ\n");
+    for (const auto& [name, value] : row) {
+      auto it = interpreted_row.find(name);
+      if (it == interpreted_row.end())
+        std::printf("  missing interpreted column %s\n", name.c_str());
+      else if (it->second != value)
+        std::printf("  %s got %.17g want %.17g\n", name.c_str(), it->second,
+                    value);
+    }
+  }
 }
 
 // The RNG state belongs to the CALLER, not to the model. One WaInterp
@@ -297,6 +416,7 @@ void test_caller_owned_rng() {
 int main() {
   test_naming_rules();
   test_wanames_pipeline();
+  test_wanames_interpreter_schema();
   test_array_of_matrix_columns();
   test_interpreted_gq();
   test_caller_owned_rng();
