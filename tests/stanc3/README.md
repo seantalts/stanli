@@ -22,6 +22,7 @@ looks in posteriordb, so nothing about the CI step changed.
 | `lupdf-inlining` | `compiler-optimizations/` | user `_lpdf`/`_lpmf` functions whose bodies call `_lupdf`/`_lupmf` |
 | `multidim_var_param_ar45_mat23` | `parser-generator/` | `array[4,5] matrix<lower,upper>[2,3]`: 120 bounded parameters four levels deep |
 | `operators` | `code-gen/expressions/` | integer `%`, unary `+`/`-`, comparison to a real, `rv / A` and `A \ v` |
+| `sum_to_zero` | `code-gen/` | `sum_to_zero_vector[10]` and `sum_to_zero_matrix[4,5]`, plain and in `array[2,3]`, in every block |
 | `reductions_allowed` | `compiler-optimizations/mem_patterns/` | parameter-dependent conditionals selecting whole matrices; matrix-valued UDFs |
 | `tern_op_contains_var` | (top level) | a ternary choosing between two parameters inside a loop, under `binomial` |
 | `validate_set_double_offset_multiplier_good` | (top level) | `offset`/`multiplier` on reals, vectors, row vectors and arrays of matrices |
@@ -63,14 +64,16 @@ that reach something the corpus does not: `tools/corpus.py` and the
 `FAIL` reasons from a sweep of the upstream directory are the fastest way
 to see what is left.
 
-Two candidates did not make it and are worth knowing about:
+One candidate did not make it and is worth knowing about:
+`declarations.stan`, which declares every type in every block, is
+unrunnable by CmdStan at any data. Its transformed data block declares
+constrained variables and never assigns them, so they are NaN when
+CmdStan validates them and it throws. stanli accepts it, which is its
+own small divergence: constraints on transformed data go unchecked.
 
-- `declarations.stan`, which declares every type in every block, is
-  unrunnable by CmdStan at any data. Its transformed data block declares
-  constrained variables and never assigns them, so they are NaN when
-  CmdStan validates them and it throws. stanli accepts it, which is its
-  own small divergence: constraints on transformed data go unchecked.
-- `code-gen/sum_to_zero.stan` is blocked on `sum_to_zero_matrix`, below.
+`sum_to_zero.stan` needed one edit for the same reason, noted at the top
+of the file: two of its transformed data declarations are assigned from
+the data block rather than left uninitialized.
 
 ## What these found
 
@@ -81,19 +84,21 @@ run:
    read dims, `[N, M]`, look exactly like `array[N] sum_to_zero_vector[M]`,
    and it was lowered as that: `N*(M-1)` unconstrained where Stan has
    `(N-1)*(M-1)`, because the matrix transform centers both axes. The
-   result was a finite gradient of the wrong model. It is now refused at
-   compile time (`tests/test_newtrans.cpp` pins the message), and
-   `code-gen/sum_to_zero.stan` joins the table above when the transform
-   lands.
-2. **A user `_lpdf` called normalized stays unnormalized.** `f_lpdf`
+   result was a finite gradient of the wrong model. Fixed: the transform
+   is its own kernel now, `tests/test_newtrans.cpp` checks the free size
+   and that both axes really do sum to zero, and `sum_to_zero` is in the
+   table above at 147 gradients and 630 write_array values, all bitwise.
+2. **A user `_lpdf` called normalized stayed unnormalized.** `f_lpdf`
    whose body calls `normal_lupdf` must drop the normalizing constant
    only when the caller wrote `f_lupdf`; stanli drops it either way. In
    the model block that is invisible in the gradient, but `lp__` is wrong
    by the constant, and a `transformed parameters` or `generated
    quantities` value computed that way is wrong by it too. Repro:
-   `target += f_lpdf(mu | 1.0)` gives -0.405 where CmdStan gives
-   -1.3239385332046729.
-3. **`write_array` transposes an array of matrices.** For
+   `target += f_lpdf(mu | 1.0)` gave -0.405 where CmdStan gives
+   -1.3239385332046729. Fixed: the MIR reader was not reading the propto
+   flag off a user call at all, and the lowering now threads the caller's
+   value the way CmdStan's `propto__` template argument does.
+3. **`write_array` transposed an array of matrices.** For
    `array[2] matrix[2,3] m`, the columns are named
    `m.1.1.1, m.2.1.1, m.1.2.1, ...` on both sides but stanli fills each
    matrix row-major where CmdStan fills it column-major. `log_prob` and

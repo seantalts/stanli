@@ -1927,19 +1927,21 @@ struct Lowering {
     // term at all.
     //
     // sum_to_zero_matrix[N, M] is a different transform that the read dims
-    // cannot tell apart from array[N] sum_to_zero_vector[M]: both rows and
-    // columns sum to zero, so it is (N-1)*(M-1) free, not N*(M-1). The
-    // declared type is what separates them, and running the vector
-    // transform per row would be silently wrong -- a sampler over the
-    // wrong number of parameters, all finite. Refuse it instead.
+    // cannot tell apart from array[N] sum_to_zero_vector[M]: it centers
+    // both axes, so it is (N-1)*(M-1) free, not N*(M-1), and the declared
+    // type is the only thing that separates them.
+    int64_t stz_rows = 0, stz_cols = 0;
     if (tr.kind == mir::Transform::SumToZero) {
       if (s.decl_type.base == "SMatrix" ||
-          (s.decl_type.base == "SArray" && s.decl_type.elem_base == "SMatrix"))
-        fail(
-            "unsupported parameter transform: sum_to_zero_matrix "
-            "(both axes are centered, so the free size is (N-1)*(M-1))",
-            tr.raw);
-      raw_len = n_batch * (inner_con - 1);
+          (s.decl_type.base == "SArray" &&
+           s.decl_type.elem_base == "SMatrix")) {
+        stz_rows = eval_int(s.read_dims[s.read_dims.size() - 2]);
+        stz_cols = inner_con;
+        n_batch = con_len / (stz_rows * stz_cols);
+        raw_len = n_batch * (stz_rows - 1) * (stz_cols - 1);
+      } else {
+        raw_len = n_batch * (inner_con - 1);
+      }
     }
     // unit_vector[K] is K from K: the constraint costs no dimension, it
     // just curves the space (and does carry a jacobian).
@@ -2055,7 +2057,8 @@ struct Lowering {
         opcode = OP_CONSTRAIN_UNIT_VECTOR;
         break;
       case mir::Transform::SumToZero:
-        opcode = OP_CONSTRAIN_SUM_TO_ZERO;
+        opcode =
+            stz_rows ? OP_CONSTRAIN_SUM_TO_ZERO_MAT : OP_CONSTRAIN_SUM_TO_ZERO;
         break;
       case mir::Transform::Correlation:
         opcode = OP_CONSTRAIN_CORR_MATRIX;
@@ -2087,6 +2090,8 @@ struct Lowering {
         opcode == OP_CONSTRAIN_CORR_MATRIX || opcode == OP_CONSTRAIN_COV_MATRIX)
       tr_idata = {(int)inner_con};
     if (opcode == OP_CONSTRAIN_CHOL_COV) tr_idata = {(int)chol_M, (int)chol_N};
+    if (opcode == OP_CONSTRAIN_SUM_TO_ZERO_MAT)
+      tr_idata = {(int)n_batch, (int)stz_rows, (int)stz_cols};
     Val con = emit(opcode, ins, con_len, psi, tr_idata, jac);
     jac_slots.push_back(jac);
     scope[s.decl_id] = con.slot;

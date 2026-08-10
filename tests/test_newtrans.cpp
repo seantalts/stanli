@@ -210,22 +210,60 @@ int main() {
           1e-12);
   }
 
-  // sum_to_zero_matrix is the one member of this family that is refused
-  // rather than lowered. Its read dims, [N, M], are the same shape as
-  // array[N] sum_to_zero_vector[M], and lowering it as that gave a model
-  // with N*(M-1) free parameters where Stan has (N-1)*(M-1) -- finite,
-  // plausible, and the wrong posterior. CmdStan's own count is what found
-  // it (tests/stanc3/README.md); this pins the refusal.
+  // sum_to_zero_matrix[N, M] centers BOTH axes, which the read dims cannot
+  // say: they look exactly like array[N] sum_to_zero_vector[M], and
+  // lowering it as that gave a model with N*(M-1) free parameters where
+  // Stan has (N-1)*(M-1) -- finite, plausible, and the wrong posterior.
+  // The free size is the check a gradient cannot make, so it comes first.
   {
     DataMap none;
-    bool threw = false;
-    try {
-      compile_model(slurp("tests/fixtures/stzmat.tmir.sexp"), none);
-    } catch (const CompileError& e) {
-      threw =
-          std::string(e.what()).find("sum_to_zero_matrix") != std::string::npos;
+    CompiledModel sm =
+        compile_model(slurp("tests/fixtures/stzmat.tmir.sexp"), none);
+    Executor sx(std::move(sm.graph));
+    sm.bind(sx);
+    expect("sum_to_zero_matrix[4,5] is (4-1)*(5-1) free, got " +
+               std::to_string(sx.n_params()),
+           sx.n_params() == 12);
+    if (sx.n_params() == 12) {
+      for (int64_t i = 0; i < 12; ++i)
+        sx.params_data()[i] = 0.2 + 0.11 * std::sin(1.3 * (double)i);
+      sx.run_forward_only();
+      const double* p = nullptr;
+      for (const auto& v : sm.views)
+        if (v.name == "m") p = sx.value_ptr(v.slot);
+      if (p == nullptr) {
+        ++failures;
+        std::printf("FAIL no view for m\n");
+      } else {
+        // Column-major 4 x 5, and the defining property is both ways.
+        for (int j = 0; j < 5; ++j) {
+          double s = 0;
+          for (int i = 0; i < 4; ++i) s += p[j * 4 + i];
+          expect_near("stz matrix column " + std::to_string(j), s, 0.0, 1e-13);
+        }
+        for (int i = 0; i < 4; ++i) {
+          double s = 0;
+          for (int j = 0; j < 5; ++j) s += p[j * 4 + i];
+          expect_near("stz matrix row " + std::to_string(i), s, 0.0, 1e-13);
+        }
+      }
+      // And the backward against central differences of lp.
+      std::vector<double> g(12);
+      const double lp0 = sx.gradient(g.data());
+      expect("stz matrix lp is finite", std::isfinite(lp0));
+      double worst_stz = 0;
+      for (int64_t i = 0; i < 12; ++i) {
+        const double x = sx.params_data()[i];
+        sx.params_data()[i] = x + 1e-6;
+        const double up = sx.forward();
+        sx.params_data()[i] = x - 1e-6;
+        const double dn = sx.forward();
+        sx.params_data()[i] = x;
+        worst_stz = std::max(worst_stz, std::fabs((up - dn) / 2e-6 - g[i]) /
+                                            std::max(1.0, std::fabs(g[i])));
+      }
+      expect("stz matrix gradient vs finite differences", worst_stz < 1e-5);
     }
-    expect("sum_to_zero_matrix refused by name", threw);
   }
 
   if (failures == 0) std::printf("test_newtrans: all checks passed\n");

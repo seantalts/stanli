@@ -811,6 +811,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "sum_to_zero": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 148,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "surgical_model": {
   "max_rel": 0.0,
   "max_ulp": 0,

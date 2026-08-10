@@ -364,6 +364,49 @@ void sum_to_zero_bwd(KernelCtx& ctx) {
   });
 }
 
+// sum_to_zero_matrix[N, M] is the two-axis form: (N-1)*(M-1) unconstrained
+// in, N x M out with every row AND every column summing to zero. Not the
+// vector transform applied per row, and not the same free size. Also
+// volume-preserving, so out2 stays 0. idata = {n_batch, rows, cols}, and
+// each element is flattened column-major like the other matrix transforms.
+void sum_to_zero_mat_fwd(KernelCtx& ctx) {
+  const int64_t nb = ctx.idata[0], R = ctx.idata[1], C = ctx.idata[2];
+  const int64_t raw = (R - 1) * (C - 1), con = R * C;
+  for (int64_t b = 0; b < nb; ++b) {
+    Eigen::MatrixXd y(R - 1, C - 1);
+    for (int64_t j = 0; j < C - 1; ++j)
+      for (int64_t i = 0; i < R - 1; ++i)
+        y(i, j) = ctx.in[0].data[b * raw + j * (R - 1) + i];
+    const Eigen::MatrixXd x = stan::math::sum_to_zero_constrain(y);
+    for (int64_t j = 0; j < C; ++j)
+      for (int64_t i = 0; i < R; ++i)
+        ctx.out.data[b * con + j * R + i] = x(i, j);
+  }
+  ctx.out2.data[0] = 0.0;
+}
+void sum_to_zero_mat_bwd(KernelCtx& ctx) {
+  if (ctx.in_adj[0].data == nullptr) return;
+  const int64_t nb = ctx.idata[0], R = ctx.idata[1], C = ctx.idata[2];
+  const int64_t raw = (R - 1) * (C - 1), con = R * C;
+  using stan::math::var;
+  for (int64_t b = 0; b < nb; ++b) {
+    stan::math::nested_rev_autodiff nested;
+    Eigen::Matrix<var, -1, -1> y(R - 1, C - 1);
+    for (int64_t j = 0; j < C - 1; ++j)
+      for (int64_t i = 0; i < R - 1; ++i)
+        y(i, j) = ctx.in[0].data[b * raw + j * (R - 1) + i];
+    auto x = stan::math::sum_to_zero_constrain(y);
+    var seeded = 0.0;
+    for (int64_t j = 0; j < C; ++j)
+      for (int64_t i = 0; i < R; ++i)
+        seeded += ctx.out_adj_vec.data[b * con + j * R + i] * x(i, j);
+    stan::math::grad(seeded.vi_);
+    for (int64_t j = 0; j < C - 1; ++j)
+      for (int64_t i = 0; i < R - 1; ++i)
+        ctx.in_adj[0].data[b * raw + j * (R - 1) + i] += y(i, j).adj();
+  }
+}
+
 // Vector -> K x K (or M x N), flattened column-major. idata carries the
 // dimensions the size alone cannot recover.
 template <typename F>
@@ -440,6 +483,8 @@ void register_constrain_kernels() {
                   Kernel{unit_vector_fwd, unit_vector_bwd, nullptr});
   register_kernel(OP_CONSTRAIN_SUM_TO_ZERO,
                   Kernel{sum_to_zero_fwd, sum_to_zero_bwd, nullptr});
+  register_kernel(OP_CONSTRAIN_SUM_TO_ZERO_MAT,
+                  Kernel{sum_to_zero_mat_fwd, sum_to_zero_mat_bwd, nullptr});
   register_kernel(OP_CONSTRAIN_CORR_MATRIX,
                   Kernel{corr_matrix_fwd, corr_matrix_bwd, nullptr});
   register_kernel(OP_CONSTRAIN_COV_MATRIX,

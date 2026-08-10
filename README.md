@@ -42,7 +42,7 @@ could not build one on their farm.
   <!--gen:corpus_bitwise-->44<!--/gen--> of them bitwise identical,
   worst relative deviation <!--gen:corpus_worst-->2.6e-12<!--/gen-->.
 - Language coverage: [tests/stanc3/README.md](tests/stanc3/README.md).
-  <!--gen:lang_verified-->9/9<!--/gen--> models lifted from stanc3's own
+  <!--gen:lang_verified-->10/10<!--/gen--> models lifted from stanc3's own
   test suite, for the type and language constructs no real posterior
   happens to use, verified the same way.
 - Distribution coverage: [docs/coverage.md](docs/coverage.md). 71 of 72
