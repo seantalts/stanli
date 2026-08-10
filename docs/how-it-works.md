@@ -190,7 +190,8 @@ offsets decided before the first gradient ever runs.
 
 All of this is concrete in
 [lowering-walkthrough.md](lowering-walkthrough.md): a tutorial that
-takes one ten-line model and shows the real output of every layer,
+takes three ten-line models -- the normal vectorized path, a branch on
+a parameter, a recurrence -- and shows the real output of every layer,
 from the compiler's tree to the generated backward.
 
 ## Where the compiled model still wins

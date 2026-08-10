@@ -20,8 +20,8 @@ explains the graph passes in plain language
 | [`runtime/kernels/`](../runtime/kernels/) | Op implementations: [`densities.cpp`](../runtime/kernels/densities.cpp), [`elementwise.cpp`](../runtime/kernels/elementwise.cpp), [`constrain.cpp`](../runtime/kernels/constrain.cpp), plus [`matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp)/[`legacy_fns.cpp`](../runtime/kernels/legacy_fns.cpp) wrapping stan-math functions without a native port ([`legacy.hpp`](../runtime/include/stanli/legacy.hpp) is the mechanism). |
 | [`runtime/include/stanli/mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) | The MIR interpreter, templated on the scalar: transformed data at lowering time, uncompiled ODE right-hand sides, interpreted write_array. |
 | [`runtime/src/wa_interp.cpp`](../runtime/src/wa_interp.cpp) | Per-draw interpreted generated quantities when the write_array graph cannot be built (RNG calls, draw-dependent branches). |
-| [`runtime/include/stanli/program.hpp`](../runtime/include/stanli/program.hpp), [`mir_prog.hpp`](../runtime/include/stanli/mir_prog.hpp) | The register machine and its MIR front end. |
-| [`runtime/src/adjoint.cpp`](../runtime/src/adjoint.cpp) | Differentiates a register program into a second register program, so an island's backward is a double pass and not a replay under `var`. `STANLI_NO_NATIVE_ADJ=1` restores the replay, which is the oracle it is tested against. |
+| [`runtime/include/stanli/program.hpp`](../runtime/include/stanli/program.hpp), [`mir_prog.hpp`](../runtime/include/stanli/mir_prog.hpp) | The register machine and its MIR front end. Its `DENSITY` instruction speaks the 27 scalar continuous densities through [`program_density.hpp`](../runtime/include/stanli/program_density.hpp), one table shared with the MIR interpreter; its `CALL` instruction runs a graph kernel over a register range. |
+| [`runtime/src/adjoint.cpp`](../runtime/src/adjoint.cpp) | `gen_adjoint`: differentiates a register program into a second register program, so an island's backward is a double pass and not a replay under `var`. Owns the checkpoint analysis (save a register before a later write destroys a value a derivative rule needs) and the adjoint-cell map. `STANLI_NO_NATIVE_ADJ=1` restores the replay, which is the oracle it is tested against ([`test_adjoint.cpp`](../tests/test_adjoint.cpp)). |
 | [`runtime/src/nuts.cpp`](../runtime/src/nuts.cpp) | The sampler: stan's own `adapt_diag_e_nuts`. Owns CmdStan parity of the RNG stream and initial-point acceptance. |
 | [`runtime/src/capi.cpp`](../runtime/src/capi.cpp), [`capi.h`](../runtime/include/stanli/capi.h) | The C ABI. [`python/stanli/__init__.py`](../python/stanli/__init__.py) is a thin ctypes wrapper over it. |
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The in-process stanc3 (OCaml, `-output-complete-obj`). |
@@ -40,9 +40,10 @@ opcodes ([`optable.hpp`](../runtime/include/stanli/optable.hpp)).
 
 ## Life of a gradient
 
-For one small model traced through every layer below -- tree, graph,
-both island kinds, the checkpoint, the generated backward, the
-estimate -- see [lowering-walkthrough.md](lowering-walkthrough.md).
+For three small models traced through every layer below -- the normal
+vectorized path, a parameter branch, and a recurrence with its
+generated backward -- see
+[lowering-walkthrough.md](lowering-walkthrough.md).
 
 
 ```
