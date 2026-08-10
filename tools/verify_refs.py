@@ -40,6 +40,23 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 LANG = REPO / "tests" / "stanc3"
 
 
+def default_check_bin():
+    """The stanli_check to use when the caller names none.
+
+    Every build recipe in the project configures build-rel; build/ is the
+    older debug tree that only some checkouts keep. Prefer whichever
+    exists, so the corpus tools run without a flag either way. Shared by
+    every tool that shells out to stanli_check, because a default that
+    disagrees between the recorder and the replay is a way to record
+    references from one binary and gate on another.
+    """
+    for name in ("build-rel", "build"):
+        p = REPO / name / "stanli_check"
+        if p.exists():
+            return p
+    return REPO / "build-rel" / "stanli_check"
+
+
 def model_files(model, ref, pdb, tmp):
     """(stan, data) for a reference entry, from whichever corpus has it.
 
@@ -203,7 +220,7 @@ def main():
     ap.add_argument("pdb", type=pathlib.Path)
     ap.add_argument("models", nargs="*")
     ap.add_argument("--check", type=pathlib.Path,
-                    default=REPO / "build" / "stanli_check")
+                    default=default_check_bin())
     ap.add_argument("--max-rel", type=float, default=1e-9)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--no-lp", action="store_true",

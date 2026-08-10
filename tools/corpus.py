@@ -17,7 +17,10 @@ import tempfile
 import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-CHECK = REPO / "build" / "stanli_check"
+sys.path.insert(0, str(REPO / "tools"))
+from verify_refs import default_check_bin  # noqa: E402
+
+CHECK = default_check_bin()
 
 # Verification results written by tools/verify_sample.py. A model counts as
 # passing only if it appears here as VERIFIED; compiling and returning a
@@ -104,6 +107,12 @@ def main():
             reasons[key] += 1
 
     ver = load_verification()
+    # tests/stanc3 models go through the same oracle but are a separate
+    # corpus: language constructs no real posterior happens to use. This
+    # doc reports the posteriordb sweep, so drop them before anything is
+    # counted or tabulated (tools/gen_docs.py splits them the same way).
+    ver = {m: v for m, v in ver.items()
+           if not (REPO / "tests" / "stanc3" / f"{m}.stan").exists()}
     ok = sorted(m for m, (s, _) in results.items() if s == "OK")
     verified = [m for m in ok
                 if ver.get(m, {}).get("status") == "VERIFIED"]
@@ -138,7 +147,7 @@ def main():
     if refs_path.exists():
         refs = json.loads(gzip.decompress(refs_path.read_bytes()))
         wa_refs = {m: len(v["wa"]["values"])
-                   for m, v in refs.items() if "wa" in v}
+                   for m, v in refs.items() if "wa" in v and m in ver}
     if wa_refs:
         md += ["", "## write_array references", "",
                "For models whose generated quantities are deterministic "
