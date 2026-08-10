@@ -7,8 +7,8 @@
   "status": "VERIFIED"
  },
  "GLMM1_model": {
-  "max_rel": 6.0541819272325976e-15,
-  "max_ulp": 43,
+  "max_rel": 1.4642672568190556e-14,
+  "max_ulp": 104,
   "n_values": 238,
   "point": 0,
   "status": "VERIFIED"
@@ -35,8 +35,8 @@
   "status": "VERIFIED"
  },
  "M0_model": {
-  "max_rel": 6.945942619199284e-15,
-  "max_ulp": 61,
+  "max_rel": 1.0887830646465315e-14,
+  "max_ulp": 62,
   "n_values": 3,
   "point": 0,
   "status": "VERIFIED"
@@ -64,7 +64,7 @@
  },
  "Mtbh_model": {
   "max_rel": 1.2171903248037838e-15,
-  "max_ulp": 10,
+  "max_ulp": 23,
   "n_values": 155,
   "point": 0,
   "status": "VERIFIED"
@@ -203,8 +203,8 @@
   "status": "VERIFIED"
  },
  "dogs": {
-  "max_rel": 1.4431924746105812e-15,
-  "max_ulp": 11,
+  "max_rel": 4.605114374019914e-15,
+  "max_ulp": 26,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -259,15 +259,15 @@
   "status": "VERIFIED"
  },
  "election88_full": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
+  "max_rel": 9.800746681323284e-15,
+  "max_ulp": 81,
   "n_values": 91,
   "point": 0,
   "status": "VERIFIED"
  },
  "garch11": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
+  "max_rel": 7.11691192956733e-16,
+  "max_ulp": 4,
   "n_values": 5,
   "point": 0,
   "status": "VERIFIED"
@@ -308,8 +308,8 @@
   "status": "VERIFIED"
  },
  "hierarchical_gp": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
+  "max_rel": 6.974072107791946e-16,
+  "max_ulp": 88,
   "n_values": 934,
   "point": 0,
   "status": "VERIFIED"
@@ -343,8 +343,8 @@
   "status": "VERIFIED"
  },
  "iohmm_reg": {
-  "max_rel": 2.3092638912203256e-14,
-  "max_ulp": 2768,
+  "max_rel": 2.220446049250313e-14,
+  "max_ulp": 292,
   "n_values": 30,
   "point": 0,
   "status": "VERIFIED"
@@ -525,15 +525,15 @@
   "status": "VERIFIED"
  },
  "losscurve_sislob": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
+  "max_rel": 1.5850478288274995e-16,
+  "max_ulp": 1,
   "n_values": 16,
   "point": 0,
   "status": "VERIFIED"
  },
  "lotka_volterra": {
-  "max_rel": 4.595354240455513e-16,
-  "max_ulp": 4,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 9,
   "point": 0,
   "status": "VERIFIED"
@@ -546,8 +546,8 @@
   "status": "VERIFIED"
  },
  "low_dim_gauss_mix_collapse": {
-  "max_rel": 1.0544259136946482e-15,
-  "max_ulp": 8,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
@@ -616,8 +616,8 @@
   "status": "VERIFIED"
  },
  "normal_mixture": {
-  "max_rel": 5.626212130074487e-16,
-  "max_ulp": 4,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -630,7 +630,7 @@
   "status": "VERIFIED"
  },
  "one_comp_mm_elim_abs": {
-  "max_rel": 6.8833827526759706e-15,
+  "max_rel": 6.772360450213455e-15,
   "max_ulp": 256,
   "n_values": 5,
   "point": 0,
@@ -645,7 +645,7 @@
  },
  "pilots": {
   "max_rel": 1.440544395073718e-16,
-  "max_ulp": 1,
+  "max_ulp": 2,
   "n_values": 19,
   "point": 0,
   "status": "VERIFIED"
@@ -658,43 +658,43 @@
   "status": "VERIFIED"
  },
  "radon_county": {
-  "max_rel": 1.1102230246251565e-16,
-  "max_ulp": 272,
+  "max_rel": 2.7755575615628914e-17,
+  "max_ulp": 368,
   "n_values": 390,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_county_intercept": {
-  "max_rel": 6.26954916969231e-15,
-  "max_ulp": 38,
+  "max_rel": 1.8252508265227394e-14,
+  "max_ulp": 136,
   "n_values": 389,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_hierarchical_intercept_centered": {
-  "max_rel": 1.8042579412649363e-15,
-  "max_ulp": 11,
+  "max_rel": 8.477578192919925e-14,
+  "max_ulp": 404,
   "n_values": 392,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_hierarchical_intercept_noncentered": {
-  "max_rel": 1.17186676503871e-14,
-  "max_ulp": 70,
+  "max_rel": 1.5712884263303047e-14,
+  "max_ulp": 96,
   "n_values": 392,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_partially_pooled_centered": {
-  "max_rel": 6.873772368783629e-15,
-  "max_ulp": 42,
+  "max_rel": 3.423971065528358e-14,
+  "max_ulp": 229,
   "n_values": 390,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_partially_pooled_noncentered": {
-  "max_rel": 2.1820118364402026e-15,
-  "max_ulp": 14,
+  "max_rel": 1.6102594283907918e-14,
+  "max_ulp": 75,
   "n_values": 390,
   "point": 0,
   "status": "VERIFIED"
@@ -707,43 +707,43 @@
   "status": "VERIFIED"
  },
  "radon_variable_intercept_centered": {
-  "max_rel": 1.1608063086485264e-14,
-  "max_ulp": 75,
+  "max_rel": 1.699347310329039e-14,
+  "max_ulp": 105,
   "n_values": 391,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_variable_intercept_noncentered": {
-  "max_rel": 1.2345892532327205e-14,
-  "max_ulp": 73,
+  "max_rel": 2.160189344347951e-14,
+  "max_ulp": 288,
   "n_values": 391,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_variable_intercept_slope_centered": {
-  "max_rel": 1.107000230484942e-14,
-  "max_ulp": 68,
+  "max_rel": 2.79199729791753e-14,
+  "max_ulp": 201,
   "n_values": 778,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_variable_intercept_slope_noncentered": {
-  "max_rel": 2.400225957419574e-15,
-  "max_ulp": 14,
+  "max_rel": 2.590245859587703e-15,
+  "max_ulp": 24,
   "n_values": 778,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_variable_slope_centered": {
-  "max_rel": 1.4518512875731515e-14,
-  "max_ulp": 92,
+  "max_rel": 2.956894794245121e-14,
+  "max_ulp": 168,
   "n_values": 391,
   "point": 0,
   "status": "VERIFIED"
  },
  "radon_variable_slope_noncentered": {
-  "max_rel": 1.1234915944923256e-14,
-  "max_ulp": 74,
+  "max_rel": 1.5024701057543596e-14,
+  "max_ulp": 144,
   "n_values": 391,
   "point": 0,
   "status": "VERIFIED"

@@ -39,7 +39,7 @@ could not build one on their farm.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models
   verified against CmdStan's log density and full gradient,
-  <!--gen:corpus_bitwise-->45<!--/gen--> of them bitwise identical,
+  <!--gen:corpus_bitwise-->44<!--/gen--> of them bitwise identical,
   worst relative deviation <!--gen:corpus_worst-->2.6e-12<!--/gen-->.
 - Language coverage: [tests/stanc3/README.md](tests/stanc3/README.md).
   <!--gen:lang_verified-->9/9<!--/gen--> models lifted from stanc3's own
