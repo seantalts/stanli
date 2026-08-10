@@ -148,7 +148,9 @@ static void print_instr(const Program& p, size_t i, const Program::Instr& I) {
     }
     default:
       std::printf(" r%d <- r%d", I.dst, I.a);
-      if (I.code >= Program::ADD && I.code <= Program::FMIN)
+      if ((I.code >= Program::ADD && I.code <= Program::FMIN) ||
+          (I.code >= Program::GT && I.code <= Program::NE) ||
+          I.code == Program::LSE2)
         std::printf(", r%d", I.b);
       if (I.len) std::printf(" (len %d)", I.len);
   }
