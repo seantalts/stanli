@@ -13,6 +13,7 @@ Usage: tools/verify_sample.py CMDSTAN_DIR PDB_DIR model1 model2 ...
 """
 import gzip
 import json
+import math
 import pathlib
 import subprocess
 import sys
@@ -21,10 +22,26 @@ import tempfile
 from cmdstan_ref import compile_cmd
 # The deviation arithmetic lives in the replay script, not here, so a
 # change to it cannot land in the recorder without landing in the CI gate.
-from verify_refs import model_files, pair_dev, parse_wa
+from verify_refs import default_check_bin, model_files, pair_dev, parse_wa
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 REFS_PATH = REPO / "docs" / "corpus-refs.json.gz"
+
+
+def inside_support(fields):
+    """Is this `OK lp grad...` line from a point the model is defined at?
+
+    A point outside a declared support prints a finite gradient next to an
+    lp of -inf, and both engines agree on it, so the walk below would
+    happily record it: -inf against -inf deviates by nothing and the
+    density is never exercised. Prefer a point that puts the model inside
+    its support (dogs_log's priors are uniform, and only its third point
+    is in range).
+    """
+    try:
+        return math.isfinite(float(fields[1]))
+    except (IndexError, ValueError):
+        return False
 
 
 def write_results(results):
@@ -84,13 +101,14 @@ def main():
         # point list until one works on both sides.
         ref, got, point = [], [], 0
         ref_out, got_out = "", ""
+        zero_density = None
         for point in range(3):
             ref_out = subprocess.run([str(exe), str(dj), str(point)],
                                      capture_output=True, text=True).stdout
             ref = (ref_out.splitlines() or [""])[0].split()
             try:
                 got_out = subprocess.run(
-                    [str(REPO / "build/stanli_check"), str(stan), str(dj),
+                    [str(default_check_bin()), str(stan), str(dj),
                      "--point", str(point), "--wa-values"],
                     capture_output=True, text=True,
                     cwd=REPO, timeout=300).stdout
@@ -100,7 +118,16 @@ def main():
                 got = []
                 break
             if ref and ref[0] == "OK" and got and got[0] == "OK":
-                break
+                if inside_support(ref) and inside_support(got):
+                    break
+                if zero_density is None:
+                    zero_density = (ref, got, point, ref_out, got_out)
+        else:
+            # No point put the model inside its support. Recording the
+            # zero-density one is still better than recording nothing: it
+            # keeps the model in the corpus and the gradients are compared.
+            if zero_density is not None:
+                ref, got, point, ref_out, got_out = zero_density
 
         ref_ok = bool(ref) and ref[0] == "OK"
         got_ok = bool(got) and got[0] == "OK"
