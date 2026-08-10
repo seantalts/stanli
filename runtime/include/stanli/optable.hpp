@@ -4,6 +4,8 @@
 
 #include <stanli/graph.hpp>
 
+#include <limits>
+
 namespace stanli {
 
 // One list, two uses: the enum and the name table are generated from it,
@@ -364,64 +366,106 @@ namespace stanli {
 // its opt-in lists, which is the whole guard.
 #define STANLI_ORDERED_DENSITY_LIST(X) \
   X(OP_ORDERED_LOGISTIC_LPMF, ordered_logistic_lpmf, 2, 0x2)
-// Scalar unary math, one line each: opcode, kernel, registration,
-// lowering entry and interpreter branch all come from here. The value and
-// the derivative are the only things that vary, and `x` is the argument.
+// A unary may either always chain, chain only away from zero (abs), or be
+// disconnected.  Disconnected is not the same as multiplying by a zero
+// derivative: an infinite upstream adjoint must not turn 0 into NaN.
+enum class UnaryTopology { Chained, Nonzero, Disconnected };
+
+constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
+  switch (topology) {
+    case UnaryTopology::Chained:
+      return true;
+    case UnaryTopology::Nonzero:
+      return x != 0.0;
+    case UnaryTopology::Disconnected:
+      return false;
+  }
+  return false;
+}
+
+// Scalar unary math, one line each: opcode, kernel, registration, lowering
+// entry and interpreter branch all come from here. `x` is the argument, `y`
+// the already-computed output and `seed` the upstream adjoint. Keeping the
+// ordered delta expression here matters: algebraically equal derivative-times-
+// seed formulas can round differently. The final field owns topology.
 //
 // These are cheap in a way densities are not. A density instantiates
 // stan-math's template once per activity mask, twice for propto and again
 // for the elementwise form -- 4 * 2^N per distribution, about 630 KB of
-// object each. An entry here costs about 5 KB, because the derivative is
+// object each. An entry here costs about 5 KB, because the pullback delta is
 // written out rather than obtained by instantiating an autodiff template.
 // fn_sweep.py checks every one against CmdStan, which is what makes
 // hand-written derivatives safe to write at this rate.
-#define STANLI_SCALAR_UNARY_LIST(X)                                            \
-  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), stan::math::digamma(x))          \
-  X(OP_DIGAMMA, digamma, stan::math::digamma(x), stan::math::trigamma(x))      \
-  X(OP_LOG1P, log1p, stan::math::log1p(x), 1.0 / (1.0 + x))                    \
-  X(OP_EXPM1, expm1, stan::math::expm1(x), std::exp(x))                        \
-  X(OP_PHI, Phi, stan::math::Phi(x),                                           \
-    stan::math::INV_SQRT_TWO_PI* std::exp(-0.5 * x * x))                       \
-  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x),                               \
-    1.0 / (stan::math::INV_SQRT_TWO_PI *                                       \
-           std::exp(-0.5 * stan::math::inv_Phi(x) * stan::math::inv_Phi(x))))  \
-  X(OP_ERF, erf, std::erf(x), stan::math::TWO_OVER_SQRT_PI* std::exp(-x* x))   \
-  X(OP_ERFC, erfc, std::erfc(x),                                               \
-    -stan::math::TWO_OVER_SQRT_PI* std::exp(-x* x))                            \
-  X(OP_INV, inv, 1.0 / x, -1.0 / (x * x))                                      \
-  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x), -0.5 / (x * std::sqrt(x))) \
-  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -2.0 / (x * x * x))              \
-  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x),                         \
-    -std::exp(x) / (1.0 - std::exp(x)))                                        \
-  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x),                         \
-    stan::math::inv_logit(x))                                                  \
-  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x),             \
-    stan::math::inv_logit(-x))                                                 \
-  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x),       \
-    -stan::math::inv_logit(x))                                                 \
-  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x),                   \
-    std::exp(x - std::exp(x)))                                                 \
-  X(OP_SIN, sin, std::sin(x), std::cos(x))                                     \
-  X(OP_COS, cos, std::cos(x), -std::sin(x))                                    \
-  X(OP_TAN, tan, std::tan(x), 1.0 / (std::cos(x) * std::cos(x)))               \
-  X(OP_ASIN, asin, std::asin(x), 1.0 / std::sqrt(1.0 - x * x))                 \
-  X(OP_ACOS, acos, std::acos(x), -1.0 / std::sqrt(1.0 - x * x))                \
-  X(OP_ATAN, atan, std::atan(x), 1.0 / (1.0 + x * x))                          \
-  X(OP_SINH, sinh, std::sinh(x), std::cosh(x))                                 \
-  X(OP_COSH, cosh, std::cosh(x), std::sinh(x))                                 \
-  X(OP_ASINH, asinh, std::asinh(x), 1.0 / std::sqrt(x * x + 1.0))              \
-  X(OP_ACOSH, acosh, std::acosh(x), 1.0 / std::sqrt(x * x - 1.0))              \
-  X(OP_ATANH, atanh, std::atanh(x), 1.0 / (1.0 - x * x))                       \
-  X(OP_CBRT, cbrt, std::cbrt(x), 1.0 / (3.0 * std::cbrt(x) * std::cbrt(x)))    \
-  X(OP_EXP2, exp2, std::exp2(x), stan::math::LOG_TWO* std::exp2(x))            \
-  X(OP_LOG2, log2, stan::math::log2(x), 1.0 / (x * stan::math::LOG_TWO))       \
-  X(OP_LOG10, log10, std::log10(x), 1.0 / (x * stan::math::LOG_TEN))           \
-  X(OP_ABS, abs, std::fabs(x), x < 0 ? -1.0 : 1.0)                             \
-  X(OP_FLOOR, floor, std::floor(x), 0.0)                                       \
-  X(OP_CEIL, ceil, std::ceil(x), 0.0)                                          \
-  X(OP_ROUND, round, std::round(x), 0.0)                                       \
-  X(OP_TRUNC, trunc, std::trunc(x), 0.0)                                       \
-  X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0)
+#define STANLI_SCALAR_UNARY_LIST(X)                                          \
+  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), seed* stan::math::digamma(x),  \
+    UnaryTopology::Chained)                                                  \
+  X(OP_DIGAMMA, digamma, stan::math::digamma(x),                             \
+    seed* stan::math::trigamma(x), UnaryTopology::Chained)                   \
+  X(OP_LOG1P, log1p, stan::math::log1p(x), seed / (1.0 + x),                 \
+    UnaryTopology::Chained)                                                  \
+  X(OP_EXPM1, expm1, stan::math::expm1(x), seed*(y + 1.0),                   \
+    UnaryTopology::Chained)                                                  \
+  X(OP_PHI, Phi, stan::math::Phi(x),                                         \
+    (seed * stan::math::INV_SQRT_TWO_PI) * std::exp(-0.5 * x * x),           \
+    UnaryTopology::Chained)                                                  \
+  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x),                             \
+    seed* std::exp(-stan::math::std_normal_lpdf(y)), UnaryTopology::Chained) \
+  X(OP_ERF, erf, std::erf(x),                                                \
+    seed*(stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x)),                  \
+    UnaryTopology::Chained)                                                  \
+  X(OP_ERFC, erfc, std::erfc(x),                                             \
+    -(seed * (stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x))),             \
+    UnaryTopology::Chained)                                                  \
+  X(OP_INV, inv, 1.0 / x, -(seed / (x * x)), UnaryTopology::Chained)         \
+  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x),                          \
+    -((0.5 * seed) / (x * std::sqrt(x))), UnaryTopology::Chained)            \
+  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -((2.0 * seed) / (x * x * x)), \
+    UnaryTopology::Chained)                                                  \
+  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x),                       \
+    -(seed / std::expm1(-x)), UnaryTopology::Chained)                        \
+  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x),                       \
+    seed* stan::math::inv_logit(x), UnaryTopology::Chained)                  \
+  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x),           \
+    seed* stan::math::inv_logit(-x), UnaryTopology::Chained)                 \
+  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x),     \
+    seed * -stan::math::inv_logit(x), UnaryTopology::Chained)                \
+  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x),                 \
+    seed* std::exp(x - std::exp(x)), UnaryTopology::Chained)                 \
+  X(OP_SIN, sin, std::sin(x), seed* std::cos(x), UnaryTopology::Chained)     \
+  X(OP_COS, cos, std::cos(x), -(seed * std::sin(x)), UnaryTopology::Chained) \
+  X(OP_TAN, tan, std::tan(x), seed * (1.0 + y * y), UnaryTopology::Chained)  \
+  X(OP_ASIN, asin, std::asin(x), seed / std::sqrt(1.0 - (x * x)),            \
+    UnaryTopology::Chained)                                                  \
+  X(OP_ACOS, acos, std::acos(x), -(seed / std::sqrt(1.0 - (x * x))),         \
+    UnaryTopology::Chained)                                                  \
+  X(OP_ATAN, atan, std::atan(x), seed / (1.0 + (x * x)),                     \
+    UnaryTopology::Chained)                                                  \
+  X(OP_SINH, sinh, std::sinh(x), seed* std::cosh(x), UnaryTopology::Chained) \
+  X(OP_COSH, cosh, std::cosh(x), seed* std::sinh(x), UnaryTopology::Chained) \
+  X(OP_ASINH, asinh, std::asinh(x), seed / std::sqrt(x * x + 1.0),           \
+    UnaryTopology::Chained)                                                  \
+  X(OP_ACOSH, acosh, stan::math::acosh(x), seed / std::sqrt(x * x - 1.0),    \
+    UnaryTopology::Chained)                                                  \
+  X(OP_ATANH, atanh, stan::math::atanh(x), seed / (1.0 - x * x),             \
+    UnaryTopology::Chained)                                                  \
+  X(OP_CBRT, cbrt, std::cbrt(x), seed / ((3.0 * y) * y),                     \
+    UnaryTopology::Chained)                                                  \
+  X(OP_EXP2, exp2, std::exp2(x), (seed * y) * stan::math::LOG_TWO,           \
+    UnaryTopology::Chained)                                                  \
+  X(OP_LOG2, log2, stan::math::log2(x), seed / (stan::math::LOG_TWO * x),    \
+    UnaryTopology::Chained)                                                  \
+  X(OP_LOG10, log10, std::log10(x), seed / (stan::math::LOG_TEN * x),        \
+    UnaryTopology::Chained)                                                  \
+  X(OP_ABS, abs, std::fabs(x),                                               \
+    x < 0.0   ? -seed                                                        \
+    : x > 0.0 ? seed                                                         \
+              : std::numeric_limits<double>::quiet_NaN(),                    \
+    UnaryTopology::Nonzero)                                                  \
+  X(OP_FLOOR, floor, std::floor(x), 0.0, UnaryTopology::Disconnected)        \
+  X(OP_CEIL, ceil, std::ceil(x), 0.0, UnaryTopology::Disconnected)           \
+  X(OP_ROUND, round, std::round(x), 0.0, UnaryTopology::Disconnected)        \
+  X(OP_TRUNC, trunc, std::trunc(x), 0.0, UnaryTopology::Disconnected)        \
+  X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0, UnaryTopology::Disconnected)
 
 // The tier a density is actually built at. STANLI_LITE_LP drops the
 // propto family from every one of them: about half the library, at the
@@ -452,7 +496,7 @@ constexpr bool exact_lp_build() {
 // Every opcode list, in enum order, named once. The enum and the name
 // table both expand this, so a list added to one cannot be forgotten in
 // the other. PLAIN takes (name), DENSITY takes (code, fn, n, m), UNARY
-// takes (code, fn, v, d).
+// takes (code, fn, value, delta, topology).
 #define STANLI_ALL_OPCODES(PLAIN, DENSITY, UNARY) \
   STANLI_OPCODE_LIST(PLAIN)                       \
   STANLI_SCALAR_DENSITY_LIST(DENSITY)             \
@@ -466,7 +510,7 @@ enum Opcode : uint16_t {
   OP_NONE_ = 0,
 #define STANLI_OPCODE_ENUM(name) name,
 #define STANLI_DENSITY_ENUM(code, fn, n, m) code,
-#define STANLI_UNARY_ENUM(code, fn, v, d) code,
+#define STANLI_UNARY_ENUM(code, fn, value, delta, topology) code,
   STANLI_ALL_OPCODES(STANLI_OPCODE_ENUM, STANLI_DENSITY_ENUM, STANLI_UNARY_ENUM)
 #undef STANLI_OPCODE_ENUM
 #undef STANLI_DENSITY_ENUM

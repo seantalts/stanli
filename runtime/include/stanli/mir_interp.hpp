@@ -35,6 +35,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -772,22 +773,14 @@ class MirInterp {
       return un([](const T& x) { return stan::math::exp(x); });
     if (e.name == "log")
       return un([](const T& x) { return stan::math::log(x); });
-    if (e.name == "log10")
-      return un([](const T& x) { return stan::math::log10(x); });
     if (e.name == "sqrt")
       return un([](const T& x) { return stan::math::sqrt(x); });
     if (e.name == "square")
       return un([](const T& x) { return stan::math::square(x); });
-    if (e.name == "inv")
-      return un([](const T& x) { return stan::math::inv(x); });
     if (e.name == "inv_logit")
       return un([](const T& x) { return stan::math::inv_logit(x); });
     if (e.name == "logit")
       return un([](const T& x) { return stan::math::logit(x); });
-    if (e.name == "log_inv_logit")
-      return un([](const T& x) { return stan::math::log_inv_logit(x); });
-    if (e.name == "log1m_inv_logit")
-      return un([](const T& x) { return stan::math::log1m_inv_logit(x); });
     if (e.name == "log1m")
       return un([](const T& x) { return stan::math::log1m(x); });
     if (e.name == "tanh")
@@ -845,7 +838,7 @@ class MirInterp {
         }
       return o;
     }
-    if (e.name == "fabs" || e.name == "abs")
+    if (e.name == "fabs")
       return un([](const T& x) { return stan::math::fabs(x); });
     if (e.name == "mean") {
       Value a = eval(e.args[0]);
@@ -1178,22 +1171,27 @@ class MirInterp {
     // semantics.
     // Scalar unaries from the shared list, so transformed data and
     // generated quantities accept exactly what the log-density path does.
-    // These compute on plain doubles (val()), so any name that must
-    // carry derivatives through the interpreter (inv, log10,
-    // log_inv_logit, log1m_inv_logit, ...) needs its hand-written un()
-    // handler earlier in this chain: that handler wins by position, and
-    // deleting it as a "duplicate" of the entry here silently zeroes the
-    // derivative.
-#define STANLI_INTERP_UNARY(code, ufn, VAL, DERIV) \
-  if (e.name == #ufn && e.args.size() == 1) {      \
-    const Value a = eval(e.args[0]);               \
-    r.r.resize(a.r.size());                        \
-    for (size_t i = 0; i < a.r.size(); ++i) {      \
-      const double x = val(a.r[i]);                \
-      r.r[i] = T(VAL);                             \
-    }                                              \
-    r.dims = a.dims;                               \
-    return r;                                      \
+    // Evaluate the table's value formula on doubles on every route. An ODE
+    // fallback instantiates this on var; one arena callback node applies the
+    // same ordered pullback without selecting a second implementation. Keep
+    // `x`, `y`, and the callback's `seed` visible to that shared expression.
+#define STANLI_INTERP_UNARY(code, ufn, VAL, DELTA, TOPOLOGY)              \
+  if (e.name == #ufn && e.args.size() == 1) {                             \
+    return un([](const T& arg) {                                          \
+      const double x = val(arg);                                          \
+      const double y = VAL;                                               \
+      if constexpr (std::is_same_v<T, double>) {                          \
+        return y;                                                         \
+      } else {                                                            \
+        if (!unary_has_pullback(TOPOLOGY, x)) return T(y);                \
+        return stan::math::make_callback_var(y, [arg](auto& vi) mutable { \
+          const double x = stan::math::value_of(arg);                     \
+          const double y = vi.val();                                      \
+          const double seed = vi.adj();                                   \
+          arg.adj() += (DELTA);                                           \
+        });                                                               \
+      }                                                                   \
+    });                                                                   \
   }
     STANLI_SCALAR_UNARY_LIST(STANLI_INTERP_UNARY)
 #undef STANLI_INTERP_UNARY

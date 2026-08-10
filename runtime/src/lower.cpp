@@ -1402,7 +1402,7 @@ struct Lowering {
     static const std::map<std::string, uint16_t> kUn = {
 // Generated from STANLI_SCALAR_UNARY_LIST (optable.hpp), which also made
 // the opcode and the kernel.
-#define STANLI_UNARY_TABLE(code, name, v, d) {#name, code},
+#define STANLI_UNARY_TABLE(code, name, value, delta, topology) {#name, code},
         STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_TABLE)
 #undef STANLI_UNARY_TABLE
             {"PMinus__", OP_NEG},

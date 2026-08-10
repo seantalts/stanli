@@ -43,7 +43,7 @@ const char* opcode_name(uint16_t opcode) {
       "OP_NONE_",
 #define STANLI_OPCODE_NAME(name) #name,
 #define STANLI_DENSITY_OPCODE_NAME(code, fn, n, m) #code,
-#define STANLI_UNARY_OPCODE_NAME(code, fn, v, d) #code,
+#define STANLI_UNARY_OPCODE_NAME(code, fn, value, delta, topology) #code,
       STANLI_ALL_OPCODES(STANLI_OPCODE_NAME, STANLI_DENSITY_OPCODE_NAME,
                          STANLI_UNARY_OPCODE_NAME)
 #undef STANLI_OPCODE_NAME
