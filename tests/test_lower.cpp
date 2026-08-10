@@ -657,6 +657,44 @@ int main() {
     check(threw, "propto ~ in a parameter region refused with the fix");
   }
 
+  // propto through a user-defined density. CmdStan compiles one as a
+  // template on propto__ and hands the CALLER's value to the body, so a
+  // body written with `_lupdf` normalizes when it was reached through
+  // `_lpdf`. Reading the body's own flag made every user density
+  // unnormalized: the gradient is unchanged, lp__ is wrong by the
+  // constant, and so is any transformed parameter computed that way.
+  //
+  // Four terms, four rules, and the whole lp in closed form.
+  {
+    DataMap d;
+    CompiledModel cm =
+        compile_model(slurp("tests/fixtures/proptoudf.tmir.sexp"), d);
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    const double mu = 0.375;
+    ex.params_data()[0] = mu;
+    std::vector<double> grad(1);
+    const double lp = ex.gradient(grad.data());
+    const double kLog2Pi = std::log(2.0 * std::acos(-1.0));
+    const double want =
+        // target += f_lpdf(mu | 1.0)   normalized
+        (-0.5 * kLog2Pi - 0.5 * (mu - 1.0) * (mu - 1.0))
+        // target += g_lpdf(mu | )      normalized through a second UDF
+        + (-0.5 * kLog2Pi - 0.5 * (mu - 0.5) * (mu - 0.5))
+        // target += f_lupdf(mu | 2.0)  unnormalized, as asked
+        + (-0.5 * (mu - 2.0) * (mu - 2.0))
+        // mu ~ f(3.0)                  unnormalized by definition
+        + (-0.5 * (mu - 3.0) * (mu - 3.0));
+    check(std::fabs(lp - want) < 1e-12, "user density propto: lp " +
+                                            std::to_string(lp) + " want " +
+                                            std::to_string(want));
+    // The gradient is the same either way, which is why lp had to be the
+    // test: d/dmu of the four quadratics.
+    const double want_g = -(mu - 1.0) - (mu - 0.5) - (mu - 2.0) - (mu - 3.0);
+    check(std::fabs(grad[0] - want_g) < 1e-12,
+          "user density propto: gradient " + std::to_string(grad[0]));
+  }
+
   // Densities the register machine did not used to speak, inside
   // parameter-dependent branches. The region has to compile to the
   // register machine or not at all, so a density missing from its

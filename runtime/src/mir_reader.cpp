@@ -81,13 +81,21 @@ Expr read_expr_pattern(const Node& p) {
   } else if (p.head_is("FunApp")) {
     e.kind = Expr::FunApp;
     const Node& kind = p[1];
-    if (kind.head_is("StanLib")) {
-      e.fn_lib = Expr::Lib::StanLib;
-      e.name = kind[1].atom;
+    // (StanLib normal_lpdf (FnLpdf true) AoS) and
+    // (UserDefined f_lpdf (FnLpdf true)) spell the propto flag the same
+    // way, and it means the same thing on both: `_lupdf` was written. On a
+    // user function it is the value of CmdStan's propto__ template
+    // argument, which the body inherits.
+    auto read_propto = [&](const Node& kind) {
       const Node& suffix = kind[2];
       if (!suffix.is_atom() &&
           (suffix.head_is("FnLpdf") || suffix.head_is("FnLpmf")))
         e.fn_propto = suffix[1].atom == "true";
+    };
+    if (kind.head_is("StanLib")) {
+      e.fn_lib = Expr::Lib::StanLib;
+      e.name = kind[1].atom;
+      read_propto(kind);
     } else if (kind.head_is("CompilerInternal")) {
       e.fn_lib = Expr::Lib::Internal;
       const Node& internal = kind[1];
@@ -96,6 +104,7 @@ Expr read_expr_pattern(const Node& p) {
     } else if (kind.head_is("UserDefined")) {
       e.fn_lib = Expr::Lib::UserDefined;
       e.name = kind[1].atom;
+      read_propto(kind);
     } else {
       e.kind = Expr::Unsupported;
       e.raw = dump(p);

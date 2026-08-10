@@ -106,6 +106,11 @@ struct Lowering {
   // Lowering generate_quantities rather than log_prob: parameters are columns
   // to emit, not values to differentiate.
   bool in_write_array = false;
+  // CmdStan's propto__ template parameter, threaded by lower_call_udf: a
+  // density inside an inlined user function is unnormalized only if the
+  // call that reached it was.
+  bool propto_ctx = true;
+  bool propto(const mir::Expr& e) const { return e.fn_propto && propto_ctx; }
 
   explicit Lowering(const DataMap& d) : data(d) {}
 
@@ -863,12 +868,20 @@ struct Lowering {
     }
     Val ret{-1, {}};
     bool returned = false;
+    // CmdStan compiles a user density as a template on propto__ and passes
+    // the CALLER's value down, so a body written with `_lupdf` normalizes
+    // when it was reached through `_lpdf`. Reading the body's own flag
+    // instead drops the constant either way: the gradient never notices and
+    // lp__ is wrong by it. This is that template parameter.
+    const bool propto_saved = propto_ctx;
+    propto_ctx = propto_ctx && e.fn_propto;
     try {
       for (const auto& st : f.body) lower_stmt(st);
     } catch (LpReturn& r) {
       ret = r.v;
       returned = true;
     }
+    propto_ctx = propto_saved;
     scope = std::move(sc_saved);
     int_env = std::move(ie_saved);
     decl_dims = std::move(dd_saved);
@@ -923,7 +936,7 @@ struct Lowering {
         e.name.size() > 5 &&
         (e.name.compare(e.name.size() - 5, 5, "_lpdf") == 0 ||
          e.name.compare(e.name.size() - 5, 5, "_lpmf") == 0);
-    if (is_density && e.fn_propto) {
+    if (is_density && propto(e)) {
       bool all_data = true;
       for (const auto& a : e.args) all_data = all_data && a.data_only;
       if (all_data) return Val{const_slot(0.0), {}};
@@ -1023,7 +1036,7 @@ struct Lowering {
         ins.push_back(lower_expr(e.args[i]).slot);
         if (!e.args[i].data_only) variant |= (uint8_t)(1u << (i - d.n_int));
       }
-      if (e.fn_propto) variant |= 0x80u;
+      if (propto(e)) variant |= 0x80u;
       if (d.glm) {
         // X must be a data matrix; append its dims to idata.
         const SlotInfo& xsi = info[ins[0]];
@@ -1051,7 +1064,7 @@ struct Lowering {
     if (e.name == "categorical_logit_lpmf" && e.args.size() == 2) {
       // stan-math evaluates log_softmax(beta) then picks the outcomes,
       // which is exactly this composition.
-      if (e.fn_propto && e.args[1].data_only) return Val{const_slot(0.0), {}};
+      if (propto(e) && e.args[1].data_only) return Val{const_slot(0.0), {}};
       Val b = lower_expr(e.args[1]);
       Val ls = emit(OP_LOG_SOFTMAX, {b.slot}, g.slots[b.slot].len);
       auto ns = int_arg_values(e.args[0]);
@@ -1067,7 +1080,7 @@ struct Lowering {
       // ops_partials), so this decomposes exactly onto existing ops. For an
       // array outcome the reference logs the whole simplex once and gathers,
       // which also fixes the adjoint association for repeated categories.
-      if (e.fn_propto && e.args[1].data_only) return Val{const_slot(0.0), {}};
+      if (propto(e) && e.args[1].data_only) return Val{const_slot(0.0), {}};
       Val th = lower_expr(e.args[1]);
       auto ns = int_arg_values(e.args[0]);
       if (e.args[0].type_ == "UInt" && ns.size() == 1) {
@@ -1090,7 +1103,7 @@ struct Lowering {
       uint8_t variant = 0;
       for (int i = 0; i < 3; ++i)
         if (!e.args[i].data_only) variant |= (uint8_t)(1u << i);
-      if (e.fn_propto) variant |= 0x80u;
+      if (propto(e)) variant |= 0x80u;
       // K comes from the matrix argument; y may be one K-vector or an
       // array of m of them (stan-math's vectorized signature).
       if (m.si.rows == 0)
@@ -1117,7 +1130,7 @@ struct Lowering {
       Val v = emit(
           e.name == "lkj_corr_lpdf" ? OP_LKJ_CORR_LPDF : OP_LKJ_CORR_CHOL_LPDF,
           {L.slot, eta.slot}, 1, {}, {(int)L.si.rows});
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x1u);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1u);
       return v;
     }
     // lkj_cov(Sigma | mu, sigma, eta).
@@ -1129,7 +1142,7 @@ struct Lowering {
       if (S.si.rows == 0) fail("lkj_cov needs a matrix", e.raw);
       Val v = emit(OP_LKJ_COV_LPDF, {S.slot, mu.slot, sig.slot, eta.slot}, 1,
                    {}, {(int)S.si.rows});
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0xfu);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0xfu);
       return v;
     }
 
@@ -1159,7 +1172,7 @@ struct Lowering {
       idata.push_back((int)X.si.cols);
       Val v = emit(OP_BINOMIAL_LOGIT_GLM_LPMF, {X.slot, alpha.slot, beta.slot},
                    1, {}, idata);
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
     }
     if ((e.name == "categorical_logit_glm_lpmf" ||
@@ -1180,7 +1193,7 @@ struct Lowering {
                        ? OP_CATEGORICAL_LOGIT_GLM_LPMF
                        : OP_ORDERED_LOGISTIC_GLM_LPMF,
                    {X.slot, a2.slot, a3.slot}, 1, {}, idata);
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
     }
 
@@ -1195,7 +1208,7 @@ struct Lowering {
       Val v = emit(
           e.name == "multi_gp_lpdf" ? OP_MULTI_GP_LPDF : OP_MULTI_GP_CHOL_LPDF,
           {y.slot, S.slot, w.slot}, 1, {}, {(int)y.si.rows, (int)y.si.cols});
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
     }
 
@@ -1215,7 +1228,7 @@ struct Lowering {
           emit(e.name == "multi_student_t_lpdf" ? OP_MULTI_STUDENT_T_LPDF
                                                 : OP_MULTI_STUDENT_T_CHOL_LPDF,
                {y.slot, nu.slot, mu.slot, S.slot}, 1, {}, {(int)K, (int)reps});
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0xfu);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0xfu);
       return v;
     }
 
@@ -1232,7 +1245,7 @@ struct Lowering {
         std::vector<int> ns = int_arg_values(e.args[0]);
         Val th = lower_expr(e.args[1]);
         Val v = emit(mit->second, {th.slot}, 1, {}, ns);
-        g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x1u);
+        g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1u);
         return v;
       }
     }
@@ -1244,7 +1257,7 @@ struct Lowering {
       Val lam = lower_expr(e.args[1]);
       Val c = lower_expr(e.args[2]);
       Val v = emit(OP_ORDERED_PROBIT_LPMF, {lam.slot, c.slot}, 1, {}, y);
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x3u);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x3u);
       return v;
     }
 
@@ -1253,7 +1266,7 @@ struct Lowering {
       std::vector<int> ins;
       for (int i = 0; i < 5; ++i) ins.push_back(lower_expr(e.args[i]).slot);
       Val v = emit(OP_WIENER_LPDF, ins, 1, {}, {});
-      g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x1fu);
+      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1fu);
       return v;
     }
 
@@ -1276,7 +1289,7 @@ struct Lowering {
         if (W.si.rows == 0) fail(e.name + " needs a matrix", e.raw);
         Val v = emit(wit->second, {W.slot, nu.slot, S.slot}, 1, {},
                      {(int)W.si.rows});
-        g.ops.back().variant = (uint8_t)((e.fn_propto ? 0x80u : 0u) | 0x7u);
+        g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
         return v;
       }
     }
@@ -1291,7 +1304,7 @@ struct Lowering {
       uint8_t variant = 0;
       for (int i = 0; i < 5; ++i)
         if (!e.args[i].data_only) variant |= (uint8_t)(1u << i);
-      if (e.fn_propto) variant |= 0x80u;
+      if (propto(e)) variant |= 0x80u;
       Val v = emit(OP_NORMAL_ID_GLM_LPDF,
                    {y.slot, X.slot, alpha.slot, beta.slot, sigma.slot}, 1, {},
                    {(int)X.si.rows, (int)X.si.cols});
