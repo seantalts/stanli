@@ -294,12 +294,18 @@ into a confusing build failure.
 The npm package `@seantalts/stanli` ships the same way on its own tag
 series: bump `version` in `js/package.json`, add the changelog entry,
 tag `npm-vX.Y.Z`. The `npm-publish` job asserts the tag matches
-`package.json` and publishes through npm trusted publishing. Two npm
-quirks worth knowing: a trusted publisher attaches only to a package
+`package.json` and publishes through npm trusted publishing. Three npm
+quirks worth knowing. A trusted publisher attaches only to a package
 that already exists, so a package's first version goes out by hand with
-`npm publish`; and the package is scoped because npm's name-similarity
-filter rejects unscoped `stanli`, which is why `publishConfig.access` is
-set to public.
+`npm publish`, and the publisher itself is configured on npmjs.com
+(Settings -> Trusted publisher: GitHub Actions, `seantalts` / `stanli` /
+`wheels.yml` / environment `npm`). The package is scoped because npm's
+name-similarity filter rejects unscoped `stanli`, which is why
+`publishConfig.access` is set to public. And the job passes
+`actions/setup-node` no `registry-url`: given one it writes an `.npmrc`
+carrying a placeholder auth token, npm sees credentials and never
+attempts the OIDC exchange, and the registry answers a write it cannot
+authorize with 404 rather than 401.
 
 ### R
 

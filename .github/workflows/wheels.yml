@@ -691,10 +691,21 @@ jobs:
           echo "tag $tag, package.json $pkg"
           [ "$tag" = "$pkg" ]
 
+      # Deliberately no registry-url: setup-node writes an .npmrc with a
+      # placeholder _authToken when it is given one, npm sees credentials
+      # and never attempts the OIDC exchange, and the registry answers a
+      # write it cannot authorize with 404 rather than 401. That is what
+      # npm-v0.5.1 died of. Trusted publishing wants no token at all.
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing landed in npm 11.5.1; whatever Node ships is
+      # not a promise about that.
+      - name: npm new enough to exchange the OIDC token
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - name: Publish
         run: |
