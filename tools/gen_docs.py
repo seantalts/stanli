@@ -85,10 +85,18 @@ def us(ns):
 
 def compute():
     ver = json.loads((REPO / "docs" / "verification.json").read_text())
+    # The same record holds two corpora, and the sentences about them say
+    # different things: posteriordb is real posteriors, tests/stanc3 is
+    # language constructs no posterior happens to use. Split them here so
+    # the posteriordb numbers stay posteriordb numbers.
+    lang = {k: v for k, v in ver.items()
+            if (REPO / "tests" / "stanc3" / f"{k}.stan").exists()}
+    ver = {k: v for k, v in ver.items() if k not in lang}
     verified = {k: v for k, v in ver.items() if v["status"] == "VERIFIED"}
     bitwise = sum(1 for v in verified.values() if v["max_ulp"] == 0)
     worst = max(v["max_rel"] for v in verified.values())
     n_total = len(ver)
+    lang_verified = sum(1 for v in lang.values() if v["status"] == "VERIFIED")
 
     c_n, c_med, c_par = corpus_stats()
     rows = bench_rows()
@@ -114,6 +122,8 @@ def compute():
         "corpus_verified_n": str(len(verified)),
         "corpus_bitwise": str(bitwise),
         "corpus_worst": f"{worst:.1e}".replace("e-0", "e-"),
+        "lang_verified": f"{lang_verified}/{len(lang)}",
+        "lang_n": str(len(lang)),
         "bench_span": span,
         "bench_wins": f"{len(wins)} of the {len(rows)}",
         "bench_losses": loss_text,

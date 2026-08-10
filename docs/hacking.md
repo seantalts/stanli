@@ -234,8 +234,10 @@ cmake --build build-rel -j8 && (cd build-rel && ctest)
 python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 8
 ```
 
-The corpus replay runs all 119 models against recorded CmdStan values
-and is the strongest oracle in the project. It also runs in CI on every
+The corpus replay runs all 128 models against recorded CmdStan values
+and is the strongest oracle in the project: 119 posteriordb posteriors
+plus the language models in [`tests/stanc3/`](../tests/stanc3/README.md),
+which reach the type and language constructs no real posterior uses. It also runs in CI on every
 push, and [`tools/wasm_check.sh`](../tools/wasm_check.sh) drives the
 same replay through the WASM build. Compiler changes that claim to be
 pure refactors should leave its worst-deviation line untouched.

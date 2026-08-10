@@ -1845,8 +1845,22 @@ struct Lowering {
     // sum_to_zero_vector[K]: K constrained from K-1 unconstrained, and
     // unlike the simplex it is volume-preserving, so there is no jacobian
     // term at all.
-    if (tr.kind == mir::Transform::SumToZero)
+    //
+    // sum_to_zero_matrix[N, M] is a different transform that the read dims
+    // cannot tell apart from array[N] sum_to_zero_vector[M]: both rows and
+    // columns sum to zero, so it is (N-1)*(M-1) free, not N*(M-1). The
+    // declared type is what separates them, and running the vector
+    // transform per row would be silently wrong -- a sampler over the
+    // wrong number of parameters, all finite. Refuse it instead.
+    if (tr.kind == mir::Transform::SumToZero) {
+      if (s.decl_type.base == "SMatrix" ||
+          (s.decl_type.base == "SArray" && s.decl_type.elem_base == "SMatrix"))
+        fail(
+            "unsupported parameter transform: sum_to_zero_matrix "
+            "(both axes are centered, so the free size is (N-1)*(M-1))",
+            tr.raw);
       raw_len = n_batch * (inner_con - 1);
+    }
     // unit_vector[K] is K from K: the constraint costs no dimension, it
     // just curves the space (and does carry a jacobian).
     if (tr.kind == mir::Transform::CholeskyCorr) {

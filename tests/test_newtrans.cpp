@@ -210,6 +210,24 @@ int main() {
           1e-12);
   }
 
+  // sum_to_zero_matrix is the one member of this family that is refused
+  // rather than lowered. Its read dims, [N, M], are the same shape as
+  // array[N] sum_to_zero_vector[M], and lowering it as that gave a model
+  // with N*(M-1) free parameters where Stan has (N-1)*(M-1) -- finite,
+  // plausible, and the wrong posterior. CmdStan's own count is what found
+  // it (tests/stanc3/README.md); this pins the refusal.
+  {
+    DataMap none;
+    bool threw = false;
+    try {
+      compile_model(slurp("tests/fixtures/stzmat.tmir.sexp"), none);
+    } catch (const CompileError& e) {
+      threw =
+          std::string(e.what()).find("sum_to_zero_matrix") != std::string::npos;
+    }
+    expect("sum_to_zero_matrix refused by name", threw);
+  }
+
   if (failures == 0) std::printf("test_newtrans: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

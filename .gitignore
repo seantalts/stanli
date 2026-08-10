@@ -13,6 +13,7 @@ python/stanli/LICENSE
 python/stanli/THIRD_PARTY_LICENSES.md
 .cache/
 tests/fixtures/*.hpp
+tests/stanc3/*.hpp
 build-wasm/
 web/stanli.js
 web/stanli.wasm

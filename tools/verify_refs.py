@@ -33,6 +33,31 @@ import tempfile
 import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+# Models from stanc3's own test suite, with data generated for them; see
+# tests/stanc3/README.md. They cover language and type constructs no real
+# posterior happens to use, so they live beside the corpus rather than in
+# it, and a reference is keyed on the file name either way.
+LANG = REPO / "tests" / "stanc3"
+
+
+def model_files(model, ref, pdb, tmp):
+    """(stan, data) for a reference entry, from whichever corpus has it.
+
+    posteriordb data is a zip per dataset and several models share one, so
+    it is unpacked into tmp; the language models carry their data next to
+    them and need no unpacking.
+    """
+    local = LANG / f"{model}.stan"
+    if local.exists():
+        return local, LANG / f"{model}.json"
+    stan = pdb / "models" / "stan" / f"{model}.stan"
+    dz = pdb / "data" / "data" / f"{ref['data']}.json.zip"
+    if not stan.exists() or not dz.exists():
+        return stan, dz
+    dj = tmp / f"{model}_data.json"
+    with zipfile.ZipFile(dz) as z:
+        dj.write_bytes(z.read(z.namelist()[0]))
+    return stan, dj
 
 
 def ulp_distance(a, b):
@@ -80,13 +105,9 @@ def parse_wa(out):
 def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
                 no_lp=False):
     """Returns (model, status, max_rel, max_ulp, n_values, detail)."""
-    stan = pdb / "models" / "stan" / f"{model}.stan"
-    dz = pdb / "data" / "data" / f"{ref['data']}.json.zip"
-    if not stan.exists() or not dz.exists():
+    stan, dj = model_files(model, ref, pdb, tmp)
+    if not stan.exists() or not dj.exists():
         return (model, "MISSING_INPUT", 0.0, 0, 0, str(stan))
-    dj = tmp / f"{model}_data.json"
-    with zipfile.ZipFile(dz) as z:
-        dj.write_bytes(z.read(z.namelist()[0]))
     cmd = [str(check_bin), str(stan), str(dj), "--point", str(ref["point"])]
     if "wa" in ref and not no_wa:
         cmd.append("--wa-values")

@@ -41,6 +41,10 @@ could not build one on their farm.
   verified against CmdStan's log density and full gradient,
   <!--gen:corpus_bitwise-->45<!--/gen--> of them bitwise identical,
   worst relative deviation <!--gen:corpus_worst-->2.6e-12<!--/gen-->.
+- Language coverage: [tests/stanc3/README.md](tests/stanc3/README.md).
+  <!--gen:lang_verified-->9/9<!--/gen--> models lifted from stanc3's own
+  test suite, for the type and language constructs no real posterior
+  happens to use, verified the same way.
 - Distribution coverage: [docs/coverage.md](docs/coverage.md). 71 of 72
   densities, 90 of 105 cdf/lcdf/lccdf, truncation, censoring, ordinal
   regression and the count GLMs, each bitwise against CmdStan.

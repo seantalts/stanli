@@ -29,3 +29,8 @@ Notes on the two that carry conditions beyond attribution:
   exactly this case ("you may link this library into an executable and
   distribute that executable under terms of your choice"), so no relinking
   obligation attaches to the stanli binary.
+
+Not in the binary, but in the repository: `tests/stanc3/` holds Stan
+models copied unchanged from stanc3's test suite (BSD 3-Clause, the same
+license as this repository), used as test inputs. Provenance per file is
+in `tests/stanc3/README.md`.

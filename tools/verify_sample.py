@@ -17,12 +17,11 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-import zipfile
 
 from cmdstan_ref import compile_cmd
 # The deviation arithmetic lives in the replay script, not here, so a
 # change to it cannot land in the recorder without landing in the CI gate.
-from verify_refs import pair_dev, parse_wa
+from verify_refs import model_files, pair_dev, parse_wa
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 REFS_PATH = REPO / "docs" / "corpus-refs.json.gz"
@@ -67,11 +66,7 @@ def main():
     results = {}
     refs = {}
     for model in models:
-        stan = pdb / "models" / "stan" / f"{model}.stan"
-        dz = pdb / "data" / "data" / f"{datas[model]}.json.zip"
-        dj = tmp / f"{model}_data.json"
-        with zipfile.ZipFile(dz) as z:
-            dj.write_bytes(z.read(z.namelist()[0]))
+        stan, dj = model_files(model, {"data": datas.get(model)}, pdb, tmp)
 
         hpp = tmp / f"{model}.hpp"
         subprocess.run([str(REPO / "deps/stanc3/stanc"), str(stan),
@@ -147,9 +142,10 @@ def main():
         # without CmdStan. `status` and `max_rel` ride along so a model
         # that is documented as not matching (kronecker_gp) is gated
         # against its recorded deviation rather than the clean threshold.
-        refs[model] = {"point": point, "data": datas[model],
-                       "values": ref[1:], "status": status,
+        refs[model] = {"point": point, "values": ref[1:], "status": status,
                        "max_rel": worst}
+        if model in datas:  # the posteriordb dataset; the language models
+            refs[model]["data"] = datas[model]  # carry their own data file
 
         # write_array reference: recorded only when the generated
         # quantities are deterministic (no _rng), so the values are a
