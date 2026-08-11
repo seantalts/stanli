@@ -31,8 +31,7 @@ void check(bool ok, const std::string& what) {
 void eq(const std::string& what, double got, double want) {
   if (got != want) {
     ++failures;
-    std::printf("FAIL %-42s got %.17g want %.17g\n", what.c_str(), got,
-                want);
+    std::printf("FAIL %-42s got %.17g want %.17g\n", what.c_str(), got, want);
   }
 }
 
@@ -98,9 +97,9 @@ void test_scalar_array_column() {
 }
 
 void test_slice_refusal() {
-  expect_compile_refusal(
-      "tests/fixtures/viewa_mixed_slice_refuse.tmir.sexp", {},
-      "unsupported index expression", "mixed range/gather slice");
+  expect_compile_refusal("tests/fixtures/viewa_mixed_slice_refuse.tmir.sexp",
+                         {}, "unsupported index expression",
+                         "mixed range/gather slice");
 }
 
 void test_contextual_zero_shapes() {
@@ -119,9 +118,9 @@ void test_zero_product_mismatch() {
   // behavioral form of the invariant that an Array never carries shape 0.
   stanli::DataMap data;
   data.set_real_array("empty", {}, {0, 0});
-  expect_compile_refusal(
-      "tests/fixtures/viewa_zero_product_mismatch.tmir.sexp", data,
-      "logical view mismatch", "array[0] vector[0] -> array[2] vector[0]");
+  expect_compile_refusal("tests/fixtures/viewa_zero_product_mismatch.tmir.sexp",
+                         data, "logical view mismatch",
+                         "array[0] vector[0] -> array[2] vector[0]");
 }
 
 void test_explicit_zero_vectors() {
@@ -168,8 +167,8 @@ void test_empty_data_array_matrix() {
 
 void test_register_array_boundary() {
   using namespace stanli;
-  mir::Program mir = mir::read_program(sexp::parse(
-      slurp("tests/fixtures/viewa_program_arrays.tmir.sexp")));
+  mir::Program mir = mir::read_program(
+      sexp::parse(slurp("tests/fixtures/viewa_program_arrays.tmir.sexp")));
   std::map<std::string, const mir::FunDef*> funs;
   for (const auto& f : mir.fun_defs) funs[f.name] = &f;
 
@@ -183,8 +182,8 @@ void test_register_array_boundary() {
   };
 
   RhsProgram flat = compile("rhs_flat");
-  check(flat.ok, "register accepts depth-1 scalar real/int arrays: " +
-                     flat.why);
+  check(flat.ok,
+        "register accepts depth-1 scalar real/int arrays: " + flat.why);
   if (flat.ok) {
     const double y[1] = {3.0};
     const double theta[4] = {4.0, 5.0, 6.0, 7.0};
@@ -195,8 +194,8 @@ void test_register_array_boundary() {
     if (out.size() == 1) eq("register scalar-array value", out[0], 15.5);
   }
 
-  for (const std::string& name : {"rhs_depth2", "rhs_depth2_int",
-                                  "rhs_vectors", "rhs_matrices"}) {
+  for (const std::string& name :
+       {"rhs_depth2", "rhs_depth2_int", "rhs_vectors", "rhs_matrices"}) {
     RhsProgram refused = compile(name);
     check(!refused.ok, "register refuses " + name);
     check(!refused.why.empty(), "register explains refusal for " + name);

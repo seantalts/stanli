@@ -134,7 +134,7 @@
                                     (Indexed
                                      ((pattern (Var A))
                                       (meta
-                                       ((type_ (UArray (UArray UReal))) 
+                                       ((type_ (UArray (UArray UReal)))
                                         (loc <opaque>) (adlevel DataOnly))))
                                      ((Single
                                        ((pattern (Lit Int 1))
@@ -162,7 +162,7 @@
                                     (Indexed
                                      ((pattern (Var A))
                                       (meta
-                                       ((type_ (UArray (UArray UReal))) 
+                                       ((type_ (UArray (UArray UReal)))
                                         (loc <opaque>) (adlevel DataOnly))))
                                      ((Single
                                        ((pattern (Lit Int 1))
@@ -307,7 +307,7 @@
                                     (Indexed
                                      ((pattern (Var A))
                                       (meta
-                                       ((type_ (UArray (UArray UReal))) 
+                                       ((type_ (UArray (UArray UReal)))
                                         (loc <opaque>) (adlevel DataOnly))))
                                      ((Single
                                        ((pattern (Lit Int 1))
@@ -335,7 +335,7 @@
                                     (Indexed
                                      ((pattern (Var A))
                                       (meta
-                                       ((type_ (UArray (UArray UReal))) 
+                                       ((type_ (UArray (UArray UReal)))
                                         (loc <opaque>) (adlevel DataOnly))))
                                      ((Single
                                        ((pattern (Lit Int 1))

@@ -235,7 +235,7 @@ class bs_model {
       stanli::WaRng scratch(1);
       // Safe to share one WaInterp between threads: its column discovery
       // ran at construction, and eval keeps its per-draw state local.
-      return wa_interp->eval(stanli::wa_param_env(*lease, cm.views),
+      return wa_interp->eval(cm.constrained_env(*lease),
                              rng == nullptr ? scratch : *rng);
     }
     stanli::ExecutorPool& p = wa_pool ? *wa_pool : *pool;
@@ -245,7 +245,7 @@ class bs_model {
     lease->run_forward_only();
     for (const auto& c : cols) {
       const double* v = lease->value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(v[i]);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(v[c.storage_index(i)]);
     }
     return row;
   }
@@ -348,8 +348,7 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
             std::memcpy(lease->params_data(), q.data(),
                         sizeof(double) * q.size());
             lease->run_forward_only();
-            (void)m->wa_interp->eval(stanli::wa_param_env(*lease, m->cm.views),
-                                     probe);
+            (void)m->wa_interp->eval(m->cm.constrained_env(*lease), probe);
             found = true;
           } catch (const std::exception&) {
           }

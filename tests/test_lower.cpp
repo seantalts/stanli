@@ -451,9 +451,8 @@ int main() {
       check(lm.n_unconstrained == 6, "viewalias 6 unconstrained");
       Executor lex(std::move(lm.graph));
       lm.bind(lex);
-      const double points[2][6] = {
-          {0.25, -0.5, 0.75, -1.0, 1.25, -1.5},
-          {-0.25, 0.5, -0.75, 1.0, -1.25, 1.5}};
+      const double points[2][6] = {{0.25, -0.5, 0.75, -1.0, 1.25, -1.5},
+                                   {-0.25, 0.5, -0.75, 1.0, -1.25, 1.5}};
       for (int c = 0; c < 2; ++c) {
         const double* q = points[c];
         for (int i = 0; i < 6; ++i) lex.params_data()[i] = q[i];
@@ -473,19 +472,20 @@ int main() {
         const double r1 = -0.25 - (3.0 * q[0] + 4.0 * q[1]);
         const double want_lp =
             q[0] * q[0] + (q[2] + q[5]) * q[1] + q[4] * q[2] +
-            2.0 * (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] +
-                   q[3] * q[3] + q[4] * q[4] + q[5] * q[5]) +
+            2.0 * (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3] +
+                   q[4] * q[4] + q[5] * q[5]) +
             4.0 * q[0] + 4.0 * q[1] + q[0] * q[1] +
-            aq0 * (4.0 * q[0] + 6.0 * q[1]) - 0.5 * r0 * r0 -
-            0.5 * r1 * r1;
-        const double e_g0 = q[0] > 0 ? 8.0 * q[0] + 6.0 * q[1]
-                                      : -8.0 * q[0] - 6.0 * q[1];
+            aq0 * (4.0 * q[0] + 6.0 * q[1]) - 0.5 * r0 * r0 - 0.5 * r1 * r1;
+        const double e_g0 =
+            q[0] > 0 ? 8.0 * q[0] + 6.0 * q[1] : -8.0 * q[0] - 6.0 * q[1];
         const double want_grad[6] = {
             6.0 * q[0] + 4.0 + q[1] + e_g0 + r0 + 3.0 * r1,
-            4.0 * q[1] + q[2] + q[5] + 4.0 + q[0] + 6.0 * aq0 +
-                3.0 * r0 + 4.0 * r1,
-            4.0 * q[2] + q[1] + q[4], 4.0 * q[3],
-            4.0 * q[4] + q[2], 4.0 * q[5] + q[1]};
+            4.0 * q[1] + q[2] + q[5] + 4.0 + q[0] + 6.0 * aq0 + 3.0 * r0 +
+                4.0 * r1,
+            4.0 * q[2] + q[1] + q[4],
+            4.0 * q[3],
+            4.0 * q[4] + q[2],
+            4.0 * q[5] + q[1]};
         const std::string tag = "viewalias" + std::to_string(c);
         expect_eq(tag + " lp", lp, want_lp);
         for (int i = 0; i < 6; ++i)

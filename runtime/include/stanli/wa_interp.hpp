@@ -56,11 +56,6 @@ class WaRng {
 // one variant and fine at the next, so callers walk all three.
 double wa_probe_point(int64_t i, int variant);
 
-// The constrained parameter values WaInterp::eval reads, taken out of an
-// executor that has just run its forward pass over `views`.
-std::map<std::string, DataMap::Entry> wa_param_env(
-    Executor& ex, const std::vector<CompiledModel::ParamView>& views);
-
 class WaInterp {
  public:
   WaInterp(std::shared_ptr<const mir::Program> prog,

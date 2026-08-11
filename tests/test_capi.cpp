@@ -53,8 +53,7 @@ void expect_names(const char* fixture, const std::string& data,
   }
   for (int64_t i = 0; i < n && i < static_cast<int64_t>(expected.size()); ++i) {
     const char* name = stanli_constrained_name(model, i);
-    expect_eq((std::string(fixture) + " constrained name " +
-               std::to_string(i))
+    expect_eq((std::string(fixture) + " constrained name " + std::to_string(i))
                   .c_str(),
               name == nullptr ? "<null>" : name, expected[(size_t)i]);
   }
@@ -79,18 +78,24 @@ void expect_names(const char* fixture, const std::string& data,
 }  // namespace
 
 int main() {
-  expect_names("tests/fixtures/wanames.tmir.sexp", "{}", {
-      "s",     "v.1",   "M.1.1", "M.2.1",
-      "M.1.2", "M.2.2", "M.1.3", "M.2.3",
-  });
+  expect_names("tests/fixtures/wanames.tmir.sexp", "{}",
+               {
+                   "s",
+                   "v.1",
+                   "M.1.1",
+                   "M.2.1",
+                   "M.1.2",
+                   "M.2.2",
+                   "M.1.3",
+                   "M.2.3",
+               });
 
   // Arrays are outer-major, while each matrix element is column-major.
   // This is the shape a flat "name.1 ... name.N" policy cannot represent.
   expect_names(
       "tests/fixtures/amatwa.tmir.sexp", slurp("tests/fixtures/amatwa.json"),
-      {"m.1.1.1", "m.2.1.1", "m.1.2.1", "m.2.2.1", "m.1.1.2",
-       "m.2.1.2", "m.1.2.2", "m.2.2.2", "m.1.1.3", "m.2.1.3",
-       "m.1.2.3", "m.2.2.3"},
+      {"m.1.1.1", "m.2.1.1", "m.1.2.1", "m.2.2.1", "m.1.1.2", "m.2.1.2",
+       "m.1.2.2", "m.2.2.2", "m.1.1.3", "m.2.1.3", "m.1.2.3", "m.2.2.3"},
       {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
       {0, 6, 1, 7, 2, 8, 3, 9, 4, 10, 5, 11});
 

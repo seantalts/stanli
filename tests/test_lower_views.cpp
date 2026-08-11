@@ -24,8 +24,7 @@ std::string slurp(const std::string& path) {
 void expect_eq(const std::string& what, double got, double want) {
   if (got != want) {
     ++failures;
-    std::printf("FAIL %-28s got %.17g want %.17g\n", what.c_str(), got,
-                want);
+    std::printf("FAIL %-28s got %.17g want %.17g\n", what.c_str(), got, want);
   }
 }
 
@@ -40,8 +39,8 @@ void test_zero_row_matrix() {
   using namespace stanli;
   try {
     DataMap data;
-    CompiledModel model = compile_model(
-        slurp("tests/fixtures/view_zero_matrix.tmir.sexp"), data);
+    CompiledModel model =
+        compile_model(slurp("tests/fixtures/view_zero_matrix.tmir.sexp"), data);
     Executor ex(std::move(model.graph));
     model.bind(ex);
     ex.params_data()[0] = 0.125;
@@ -83,8 +82,8 @@ void test_zero_extent_parameter_alignment() {
   using namespace stanli;
   try {
     DataMap data;
-    CompiledModel model = compile_model(
-        slurp("tests/fixtures/view_zero_params.tmir.sexp"), data);
+    CompiledModel model =
+        compile_model(slurp("tests/fixtures/view_zero_params.tmir.sexp"), data);
     // The three empty matrices occupy no unconstrained slots.  In
     // declaration order the physical parameter vector is q, b[1], b[2],
     // tail, even though zero-sized logical views surround those values.
@@ -112,8 +111,8 @@ void test_row_vector_ternary() {
   using namespace stanli;
   try {
     DataMap data;
-    CompiledModel model = compile_model(
-        slurp("tests/fixtures/view_row_ternary.tmir.sexp"), data);
+    CompiledModel model =
+        compile_model(slurp("tests/fixtures/view_row_ternary.tmir.sexp"), data);
     int islands = 0;
     for (const Op& op : model.graph.ops)
       if (op.opcode == OP_ISLAND) ++islands;
@@ -152,17 +151,15 @@ void test_matrix_ternaries_preserve_view() {
 
     Executor ex(std::move(model.graph));
     model.bind(ex);
-    const double params[2][6] = {
-        {0.25, -0.5, 0.75, -1.0, 1.25, -1.5},
-        {-0.25, -0.5, 0.75, -1.0, 1.25, -1.5}};
+    const double params[2][6] = {{0.25, -0.5, 0.75, -1.0, 1.25, -1.5},
+                                 {-0.25, -0.5, 0.75, -1.0, 1.25, -1.5}};
     const double want_lp[2] = {-8.0, 11.0};
     const double coeff[6] = {6, 5, 7, 7, 9, 11};
     for (int arm = 0; arm < 2; ++arm) {
       for (int i = 0; i < 6; ++i) ex.params_data()[i] = params[arm][i];
       double grad[6] = {0, 0, 0, 0, 0, 0};
       const double lp = ex.gradient(grad);
-      expect_eq("matrix ternary lp " + std::to_string(arm), lp,
-                want_lp[arm]);
+      expect_eq("matrix ternary lp " + std::to_string(arm), lp, want_lp[arm]);
       const double sign = arm == 0 ? 1.0 : -1.0;
       for (int i = 0; i < 6; ++i)
         expect_eq("matrix ternary grad " + std::to_string(arm) + ":" +
@@ -184,10 +181,10 @@ void test_matrix_ternary_view_mismatch_refuses() {
         slurp("tests/fixtures/view_matrix_ternary_mismatch.tmir.sexp"), data);
   } catch (const std::exception& e) {
     refused = true;
-    check(std::string(e.what()).find(
-              "conditional arms of different logical views") !=
-              std::string::npos,
-          "matrix ternary mismatch reports logical-view refusal");
+    check(
+        std::string(e.what()).find(
+            "conditional arms of different logical views") != std::string::npos,
+        "matrix ternary mismatch reports logical-view refusal");
   }
   check(refused,
         "equal-width 2x3/3x2 matrix ternary refuses instead of guessing");
@@ -197,19 +194,20 @@ void test_udf_name_shadowing() {
   using namespace stanli;
   try {
     DataMap data;
-    CompiledModel model = compile_model(
-        slurp("tests/fixtures/view_udf_shadow.tmir.sexp"), data);
+    CompiledModel model =
+        compile_model(slurp("tests/fixtures/view_udf_shadow.tmir.sexp"), data);
     Executor ex(std::move(model.graph));
     model.bind(ex);
     const double q[4] = {0.25, -0.5, 0.75, -1.0};
     for (int i = 0; i < 4; ++i) ex.params_data()[i] = q[i];
     double grad[4] = {0, 0, 0, 0};
     const double lp = ex.gradient(grad);
-    const double want_grad[4] = {1, 1, 0, 0};
-    expect_eq("UDF shadow lp", lp, -0.25);
+    // CmdStan reads array[2,2] with the first index fastest, so z[1,2] is
+    // q[2]. A leaked matrix view from the callee would instead select q[1].
+    const double want_grad[4] = {1, 0, 1, 0};
+    expect_eq("UDF shadow lp", lp, 1.0);
     for (int i = 0; i < 4; ++i)
-      expect_eq("UDF shadow grad " + std::to_string(i), grad[i],
-                want_grad[i]);
+      expect_eq("UDF shadow grad " + std::to_string(i), grad[i], want_grad[i]);
   } catch (const std::exception& e) {
     ++failures;
     std::printf("FAIL UDF shadow compile: %s\n", e.what());
@@ -232,8 +230,7 @@ void test_nested_udf_int_real_frames() {
       ex.params_data()[0] = q[i];
       double grad[1] = {0};
       const double lp = ex.gradient(grad);
-      expect_eq("nested UDF frame lp " + std::to_string(i), lp,
-                want_lp[i]);
+      expect_eq("nested UDF frame lp " + std::to_string(i), lp, want_lp[i]);
       expect_eq("nested UDF frame grad " + std::to_string(i), grad[0], 4.0);
     }
   } catch (const std::exception& e) {
@@ -324,10 +321,10 @@ void test_island_flat_container_refuses() {
         slurp("tests/fixtures/view_island_flat_array.tmir.sexp"), data);
   } catch (const std::exception& e) {
     refused = true;
-    check(std::string(e.what()).find(
-              "conditional arms of different logical views") !=
-              std::string::npos,
-          "flat-container island refusal names logical views");
+    check(
+        std::string(e.what()).find(
+            "conditional arms of different logical views") != std::string::npos,
+        "flat-container island refusal names logical views");
   }
   check(refused, "flat container ternary in register island refuses");
 }
@@ -377,8 +374,8 @@ void test_append_row_vectors_make_matrix() {
   using namespace stanli;
   try {
     DataMap data;
-    CompiledModel model = compile_model(
-        slurp("tests/fixtures/view_append_rows.tmir.sexp"), data);
+    CompiledModel model =
+        compile_model(slurp("tests/fixtures/view_append_rows.tmir.sexp"), data);
     Executor ex(std::move(model.graph));
     model.bind(ex);
     const double q[4] = {1, 2, 3, 4};
@@ -408,8 +405,8 @@ void test_island_udf_return_frame() {
     for (int i = 0; i < 2; ++i) {
       ex.params_data()[0] = q[i];
       double grad[1] = {0};
-      expect_eq("island UDF return lp " + std::to_string(i),
-                ex.gradient(grad), 0.5);
+      expect_eq("island UDF return lp " + std::to_string(i), ex.gradient(grad),
+                0.5);
       expect_eq("island UDF return grad " + std::to_string(i), grad[0],
                 grad_want[i]);
     }

@@ -207,7 +207,7 @@
                                                          (StanLib Plus__ FnPlain AoS)
                                                          (((pattern (Var q))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel AutoDiffable))))
                                                           ((pattern
@@ -236,11 +236,11 @@
                                                                   (loc <opaque>)
                                                                   (adlevel DataOnly))))))))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel AutoDiffable)))))))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel AutoDiffable))))
                                                       ((pattern
@@ -255,7 +255,7 @@
                                                                 (adlevel DataOnly))))
                                                              UReal DataOnly))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel DataOnly))))
                                                           ((pattern
@@ -284,11 +284,11 @@
                                                                   (loc <opaque>)
                                                                   (adlevel DataOnly))))))))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel AutoDiffable)))))))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel AutoDiffable)))))))
                                                    (meta
@@ -300,12 +300,12 @@
                                                         (Promotion
                                                          ((pattern (Lit Int 100))
                                                           (meta
-                                                           ((type_ UInt) 
+                                                           ((type_ UInt)
                                                             (loc <opaque>)
                                                             (adlevel DataOnly))))
                                                          UReal DataOnly))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel DataOnly))))
                                                       ((pattern
@@ -318,23 +318,23 @@
                                                          ((Single
                                                            ((pattern (Lit Int 1))
                                                             (meta
-                                                             ((type_ UInt) 
+                                                             ((type_ UInt)
                                                               (loc <opaque>)
                                                               (adlevel DataOnly)))))
                                                           (Single
                                                            ((pattern (Lit Int 1))
                                                             (meta
-                                                             ((type_ UInt) 
+                                                             ((type_ UInt)
                                                               (loc <opaque>)
                                                               (adlevel DataOnly)))))
                                                           (Single
                                                            ((pattern (Lit Int 2))
                                                             (meta
-                                                             ((type_ UInt) 
+                                                             ((type_ UInt)
                                                               (loc <opaque>)
                                                               (adlevel DataOnly))))))))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel AutoDiffable)))))))
                                                    (meta
@@ -349,7 +349,7 @@
                                                     (Promotion
                                                      ((pattern (Lit Int 1000))
                                                       (meta
-                                                       ((type_ UInt) 
+                                                       ((type_ UInt)
                                                         (loc <opaque>)
                                                         (adlevel DataOnly))))
                                                      UReal DataOnly))
@@ -366,19 +366,19 @@
                                                      ((Single
                                                        ((pattern (Lit Int 1))
                                                         (meta
-                                                         ((type_ UInt) 
+                                                         ((type_ UInt)
                                                           (loc <opaque>)
                                                           (adlevel DataOnly)))))
                                                       (Single
                                                        ((pattern (Lit Int 2))
                                                         (meta
-                                                         ((type_ UInt) 
+                                                         ((type_ UInt)
                                                           (loc <opaque>)
                                                           (adlevel DataOnly)))))
                                                       (Single
                                                        ((pattern (Lit Int 2))
                                                         (meta
-                                                         ((type_ UInt) 
+                                                         ((type_ UInt)
                                                           (loc <opaque>)
                                                           (adlevel DataOnly))))))))
                                                    (meta
@@ -449,7 +449,7 @@
                                             (Indexed
                                              ((pattern (Var B))
                                               (meta
-                                               ((type_ (UArray UMatrix)) 
+                                               ((type_ (UArray UMatrix))
                                                 (loc <opaque>) (adlevel AutoDiffable))))
                                              ((Single
                                                ((pattern (Lit Int 1))
@@ -489,7 +489,7 @@
                                         (Indexed
                                          ((pattern (Var B))
                                           (meta
-                                           ((type_ (UArray UMatrix)) 
+                                           ((type_ (UArray UMatrix))
                                             (loc <opaque>) (adlevel AutoDiffable))))
                                          ((Single
                                            ((pattern (Lit Int 2))
@@ -712,7 +712,7 @@
                                                          (StanLib Plus__ FnPlain AoS)
                                                          (((pattern (Var q))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel AutoDiffable))))
                                                           ((pattern
@@ -741,11 +741,11 @@
                                                                   (loc <opaque>)
                                                                   (adlevel DataOnly))))))))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel AutoDiffable)))))))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel AutoDiffable))))
                                                       ((pattern
@@ -760,7 +760,7 @@
                                                                 (adlevel DataOnly))))
                                                              UReal DataOnly))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel DataOnly))))
                                                           ((pattern
@@ -789,11 +789,11 @@
                                                                   (loc <opaque>)
                                                                   (adlevel DataOnly))))))))
                                                            (meta
-                                                            ((type_ UReal) 
+                                                            ((type_ UReal)
                                                              (loc <opaque>)
                                                              (adlevel AutoDiffable)))))))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel AutoDiffable)))))))
                                                    (meta
@@ -805,12 +805,12 @@
                                                         (Promotion
                                                          ((pattern (Lit Int 100))
                                                           (meta
-                                                           ((type_ UInt) 
+                                                           ((type_ UInt)
                                                             (loc <opaque>)
                                                             (adlevel DataOnly))))
                                                          UReal DataOnly))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel DataOnly))))
                                                       ((pattern
@@ -823,23 +823,23 @@
                                                          ((Single
                                                            ((pattern (Lit Int 1))
                                                             (meta
-                                                             ((type_ UInt) 
+                                                             ((type_ UInt)
                                                               (loc <opaque>)
                                                               (adlevel DataOnly)))))
                                                           (Single
                                                            ((pattern (Lit Int 1))
                                                             (meta
-                                                             ((type_ UInt) 
+                                                             ((type_ UInt)
                                                               (loc <opaque>)
                                                               (adlevel DataOnly)))))
                                                           (Single
                                                            ((pattern (Lit Int 2))
                                                             (meta
-                                                             ((type_ UInt) 
+                                                             ((type_ UInt)
                                                               (loc <opaque>)
                                                               (adlevel DataOnly))))))))
                                                        (meta
-                                                        ((type_ UReal) 
+                                                        ((type_ UReal)
                                                          (loc <opaque>)
                                                          (adlevel AutoDiffable)))))))
                                                    (meta
@@ -854,7 +854,7 @@
                                                     (Promotion
                                                      ((pattern (Lit Int 1000))
                                                       (meta
-                                                       ((type_ UInt) 
+                                                       ((type_ UInt)
                                                         (loc <opaque>)
                                                         (adlevel DataOnly))))
                                                      UReal DataOnly))
@@ -871,19 +871,19 @@
                                                      ((Single
                                                        ((pattern (Lit Int 1))
                                                         (meta
-                                                         ((type_ UInt) 
+                                                         ((type_ UInt)
                                                           (loc <opaque>)
                                                           (adlevel DataOnly)))))
                                                       (Single
                                                        ((pattern (Lit Int 2))
                                                         (meta
-                                                         ((type_ UInt) 
+                                                         ((type_ UInt)
                                                           (loc <opaque>)
                                                           (adlevel DataOnly)))))
                                                       (Single
                                                        ((pattern (Lit Int 2))
                                                         (meta
-                                                         ((type_ UInt) 
+                                                         ((type_ UInt)
                                                           (loc <opaque>)
                                                           (adlevel DataOnly))))))))
                                                    (meta
@@ -954,7 +954,7 @@
                                             (Indexed
                                              ((pattern (Var B))
                                               (meta
-                                               ((type_ (UArray UMatrix)) 
+                                               ((type_ (UArray UMatrix))
                                                 (loc <opaque>) (adlevel AutoDiffable))))
                                              ((Single
                                                ((pattern (Lit Int 1))
@@ -994,7 +994,7 @@
                                         (Indexed
                                          ((pattern (Var B))
                                           (meta
-                                           ((type_ (UArray UMatrix)) 
+                                           ((type_ (UArray UMatrix))
                                             (loc <opaque>) (adlevel AutoDiffable))))
                                          ((Single
                                            ((pattern (Lit Int 2))

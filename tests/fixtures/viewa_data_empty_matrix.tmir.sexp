@@ -48,7 +48,7 @@
                                                   ((type_ (UArray UMatrix))
                                                    (loc <opaque>) (adlevel AutoDiffable)))))))
                                              (meta
-                                              ((type_ (UArray UInt)) 
+                                              ((type_ (UArray UInt))
                                                (loc <opaque>) (adlevel DataOnly))))
                                             ((Single
                                               ((pattern (Lit Int 1))
@@ -78,7 +78,7 @@
                                           (FunApp (StanLib dims FnPlain AoS)
                                            (((pattern (Var x))
                                              (meta
-                                              ((type_ (UArray UMatrix)) 
+                                              ((type_ (UArray UMatrix))
                                                (loc <opaque>) (adlevel AutoDiffable)))))))
                                          (meta
                                           ((type_ (UArray UInt)) (loc <opaque>)

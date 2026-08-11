@@ -28,7 +28,7 @@
                                        (FunApp (StanLib size FnPlain AoS)
                                         (((pattern (Var x))
                                           (meta
-                                           ((type_ (UArray UVector)) 
+                                           ((type_ (UArray UVector))
                                             (loc <opaque>) (adlevel AutoDiffable)))))))
                                       (meta
                                        ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
@@ -129,7 +129,7 @@
                                        (FunApp (StanLib size FnPlain AoS)
                                         (((pattern (Var x))
                                           (meta
-                                           ((type_ (UArray URowVector)) 
+                                           ((type_ (UArray URowVector))
                                             (loc <opaque>) (adlevel AutoDiffable)))))))
                                       (meta
                                        ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
@@ -233,7 +233,7 @@
                                            (FunApp (StanLib size FnPlain AoS)
                                             (((pattern (Var x))
                                               (meta
-                                               ((type_ (UArray UMatrix)) 
+                                               ((type_ (UArray UMatrix))
                                                 (loc <opaque>) (adlevel AutoDiffable)))))))
                                           (meta
                                            ((type_ UInt) (loc <opaque>)
@@ -256,7 +256,7 @@
                                        (FunApp (StanLib num_elements FnPlain AoS)
                                         (((pattern (Var x))
                                           (meta
-                                           ((type_ (UArray UMatrix)) 
+                                           ((type_ (UArray UMatrix))
                                             (loc <opaque>) (adlevel AutoDiffable)))))))
                                       (meta
                                        ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
@@ -384,7 +384,7 @@
                                    (FunApp (StanLib num_elements FnPlain AoS)
                                     (((pattern (Var x))
                                       (meta
-                                       ((type_ (UArray (UArray UReal))) 
+                                       ((type_ (UArray (UArray UReal)))
                                         (loc <opaque>) (adlevel AutoDiffable)))))))
                                   (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
                               (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
@@ -403,7 +403,7 @@
                                   (FunApp (StanLib dims FnPlain AoS)
                                    (((pattern (Var x))
                                      (meta
-                                      ((type_ (UArray (UArray UReal))) 
+                                      ((type_ (UArray (UArray UReal)))
                                        (loc <opaque>) (adlevel AutoDiffable)))))))
                                  (meta
                                   ((type_ (UArray UInt)) (loc <opaque>)

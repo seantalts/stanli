@@ -168,8 +168,7 @@ int main(int argc, char** argv) {
       try {
         stanli::WaInterp& wi = *cm.write_array->interp;
         stanli::WaRng rng(1234);
-        const std::vector<double> row =
-            wi.eval(cm.constrained_env(ex), rng);
+        const std::vector<double> row = wi.eval(cm.constrained_env(ex), rng);
         int64_t bad = 0;
         for (double x : row)
           if (!std::isfinite(x)) ++bad;

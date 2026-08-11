@@ -40,8 +40,7 @@ void run_case(const char* what, F&& f) {
 void eq(const std::string& what, double got, double want) {
   if (got != want) {
     ++failures;
-    std::printf("FAIL %-34s got %.17g want %.17g\n", what.c_str(), got,
-                want);
+    std::printf("FAIL %-34s got %.17g want %.17g\n", what.c_str(), got, want);
   }
 }
 
@@ -233,8 +232,7 @@ void test_zero_row_ternary() {
 
 void test_udf_array_matrix_order() {
   stanli::DataMap data;
-  data.set_real_array("A", {1, 7, 4, 10, 2, 8, 5, 11, 3, 9, 6, 12},
-                      {2, 2, 3});
+  data.set_real_array("A", {1, 7, 4, 10, 2, 8, 5, 11, 3, 9, 6, 12}, {2, 2, 3});
   auto model = stanli::compile_model(
       slurp("tests/fixtures/viewc_udf_array_matrix.tmir.sexp"), data);
   stanli::Executor ex(std::move(model.graph));
@@ -252,13 +250,14 @@ void test_udf_array_matrix_order() {
   model.write_array->bind(wx);
   wx.params_data()[0] = 0.25;
   wx.run_forward_only();
-  const auto names = stanli::CompiledModel::csv_names(model.write_array->columns);
+  const auto names =
+      stanli::CompiledModel::csv_names(model.write_array->columns);
   const std::vector<std::string> want_names = {
       "q",       "C.1.1.1", "C.2.1.1", "C.1.2.1", "C.2.2.1",
       "C.1.1.2", "C.2.1.2", "C.1.2.2", "C.2.2.2", "C.1.1.3",
       "C.2.1.3", "C.1.2.3", "C.2.2.3"};
-  const std::vector<double> want_values = {
-      0.25, 1, 7, 4, 10, 2, 8, 5, 11, 3, 9, 6, 12};
+  const std::vector<double> want_values = {0.25, 1,  7, 4, 10, 2, 8,
+                                           5,    11, 3, 9, 6,  12};
   check(names == want_names, "write_array names have exact order");
   std::vector<double> values;
   for (const auto& c : model.write_array->columns) {

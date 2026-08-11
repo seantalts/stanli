@@ -160,7 +160,7 @@
                                                    (FunApp (StanLib rows FnPlain AoS)
                                                     (((pattern (Var P03))
                                                       (meta
-                                                       ((type_ UMatrix) 
+                                                       ((type_ UMatrix)
                                                         (loc <opaque>)
                                                         (adlevel AutoDiffable)))))))
                                                   (meta
@@ -170,7 +170,7 @@
                                                    (FunApp (StanLib Times__ FnPlain AoS)
                                                     (((pattern (Lit Int 10))
                                                       (meta
-                                                       ((type_ UInt) 
+                                                       ((type_ UInt)
                                                         (loc <opaque>)
                                                         (adlevel DataOnly))))
                                                      ((pattern
@@ -181,7 +181,7 @@
                                                             (loc <opaque>)
                                                             (adlevel AutoDiffable)))))))
                                                       (meta
-                                                       ((type_ UInt) 
+                                                       ((type_ UInt)
                                                         (loc <opaque>)
                                                         (adlevel DataOnly)))))))
                                                   (meta
@@ -200,7 +200,7 @@
                                                    (FunApp (StanLib rows FnPlain AoS)
                                                     (((pattern (Var P30))
                                                       (meta
-                                                       ((type_ UMatrix) 
+                                                       ((type_ UMatrix)
                                                         (loc <opaque>)
                                                         (adlevel AutoDiffable)))))))
                                                   (meta
@@ -457,7 +457,7 @@
                                                    (FunApp (StanLib rows FnPlain AoS)
                                                     (((pattern (Var P03))
                                                       (meta
-                                                       ((type_ UMatrix) 
+                                                       ((type_ UMatrix)
                                                         (loc <opaque>)
                                                         (adlevel AutoDiffable)))))))
                                                   (meta
@@ -467,7 +467,7 @@
                                                    (FunApp (StanLib Times__ FnPlain AoS)
                                                     (((pattern (Lit Int 10))
                                                       (meta
-                                                       ((type_ UInt) 
+                                                       ((type_ UInt)
                                                         (loc <opaque>)
                                                         (adlevel DataOnly))))
                                                      ((pattern
@@ -478,7 +478,7 @@
                                                             (loc <opaque>)
                                                             (adlevel AutoDiffable)))))))
                                                       (meta
-                                                       ((type_ UInt) 
+                                                       ((type_ UInt)
                                                         (loc <opaque>)
                                                         (adlevel DataOnly)))))))
                                                   (meta
@@ -497,7 +497,7 @@
                                                    (FunApp (StanLib rows FnPlain AoS)
                                                     (((pattern (Var P30))
                                                       (meta
-                                                       ((type_ UMatrix) 
+                                                       ((type_ UMatrix)
                                                         (loc <opaque>)
                                                         (adlevel AutoDiffable)))))))
                                                   (meta

@@ -65,9 +65,8 @@ struct CompiledModel {
       for (int64_t serial = 0; serial < len; ++serial) {
         int64_t q = serial;
         const size_t outer = matrix_storage ? dims.size() - 2 : dims.size();
-        int64_t stride = matrix_storage
-                             ? len / (dims[outer] * dims[outer + 1])
-                             : len;
+        int64_t stride =
+            matrix_storage ? len / (dims[outer] * dims[outer + 1]) : len;
         int64_t at = 0;
         for (size_t d = 0; d < outer; ++d) {
           stride /= dims[d];

@@ -208,7 +208,9 @@ struct ProgramCompiler {
   Range declared(Range r, const mir::SizedType& type) {
     if (type.base == "SArray") {
       if (type.elem_base != "SReal" || type.dims.size() != 1)
-        bail("only one-dimensional scalar-array declarations are supported by the register program");
+        bail(
+            "only one-dimensional scalar-array declarations are supported by "
+            "the register program");
       r.kind = ViewKind::Array;
       return r;
     }
@@ -260,8 +262,8 @@ struct ProgramCompiler {
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
         if (e.args.size() != 2 || e.args[1].name != "IndexSingle")
           bail("index form");
-        const bool scalar_result = e.type_ == "UReal" || e.type_ == "UInt" ||
-                                   e.type_ == "UComplex";
+        const bool scalar_result =
+            e.type_ == "UReal" || e.type_ == "UInt" || e.type_ == "UComplex";
         if (!scalar_result)
           bail("container element indexing requires a logical layout");
         if (b.kind != ViewKind::Array && b.kind != ViewKind::Vector &&
@@ -365,7 +367,9 @@ struct ProgramCompiler {
         if (e.name == "FnMakeArray") {
           for (const Range& q : parts)
             if (!is_scalar(q))
-              bail("only flat scalar arrays are supported by the register program");
+              bail(
+                  "only flat scalar arrays are supported by the register "
+                  "program");
         }
         const int r = alloc(total);
         int at = 0;
@@ -373,8 +377,8 @@ struct ProgramCompiler {
           for (int k = 0; k < q.len; ++k)
             emit(Program::MOV, r + at++, q.reg + k);
         Range out{r, total};
-        out.kind = e.name == "FnMakeRowVec" ? ViewKind::RowVector
-                                             : ViewKind::Array;
+        out.kind =
+            e.name == "FnMakeRowVec" ? ViewKind::RowVector : ViewKind::Array;
         return out;
       }
       bail("internal function " + e.name);
@@ -475,8 +479,7 @@ struct ProgramCompiler {
         bail("function " + e.name);
       const int r = alloc(n);
       for (int i = 0; i < n; ++i)
-        emit(c, r + i, a.reg + (a_scalar ? 0 : i),
-             b.reg + (b_scalar ? 0 : i));
+        emit(c, r + i, a.reg + (a_scalar ? 0 : i), b.reg + (b_scalar ? 0 : i));
       Range out{r, n};
       if (a_scalar && !b_scalar)
         out = b;
@@ -541,9 +544,8 @@ struct ProgramCompiler {
   // Declare (or redeclare) a real variable of `len` registers. Stan's
   // uninitialized real value is NaN; callers may provide another fill only
   // when the surrounding lowering has an explicit initialized-value policy.
-  Range declare(
-      const std::string& name, int len, Range view = {},
-      double fill = std::numeric_limits<double>::quiet_NaN()) {
+  Range declare(const std::string& name, int len, Range view = {},
+                double fill = std::numeric_limits<double>::quiet_NaN()) {
     Range r = view;
     r.reg = alloc(len);
     r.len = len;
@@ -685,8 +687,7 @@ struct ProgramCompiler {
     }
   }
 
-  Range inline_call(const mir::FunDef& f,
-                    const std::vector<InlineArg>& args) {
+  Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args) {
     if (args.size() != f.arg_names.size()) bail("function argument mismatch");
     if (++inline_depth > 32) {
       --inline_depth;

@@ -32,7 +32,7 @@ struct SlotInfo {
   int64_t rows = 0, cols = 0;  // set for matrices
   bool param_free = false;     // independent of every model parameter
   ViewKind kind = ViewKind::Flat;
-  ShapeId shape = 0;           // nonzero exactly for Array values
+  ShapeId shape = 0;  // nonzero exactly for Array values
 };
 static_assert(sizeof(SlotInfo) == 24);
 
@@ -128,8 +128,7 @@ Addr flat_addr(const std::vector<int64_t>& D, bool mat,
 }
 
 std::vector<double> graph_order(const DataMap::Entry& en,
-                                bool standalone_matrix,
-                                bool innermost_matrix) {
+                                bool standalone_matrix, bool innermost_matrix) {
   std::vector<double> vals = en.r;
   if (standalone_matrix || en.dims.size() <= 1) return vals;
   std::vector<int64_t> ix(en.dims.size(), 0);
@@ -207,9 +206,8 @@ struct Lowering {
   bool propto_ctx = true;
   bool propto(const mir::Expr& e) const { return e.fn_propto && propto_ctx; }
 
-  explicit Lowering(const DataMap& d,
-                    std::shared_ptr<ShapeInterner> pool =
-                        std::make_shared<ShapeInterner>())
+  explicit Lowering(const DataMap& d, std::shared_ptr<ShapeInterner> pool =
+                                          std::make_shared<ShapeInterner>())
       : data(d), shape_pool(std::move(pool)) {}
 
   void observe(const Val& v, DataMap::Entry en) {
@@ -473,8 +471,8 @@ struct Lowering {
     return shape_pool->at(si.shape);
   }
 
-  SlotInfo indexed_view(const SlotInfo& base, size_t n_single,
-                        int64_t out_len, const std::string& out_type) {
+  SlotInfo indexed_view(const SlotInfo& base, size_t n_single, int64_t out_len,
+                        const std::string& out_type) {
     SlotInfo si = view_of(out_type);
     si.param_free = base.param_free;
     if (!is_array(base)) return si;
@@ -541,8 +539,7 @@ struct Lowering {
     fail(what + ": array values do not have one rows/cols view");
   }
 
-  std::vector<int64_t> logical_shape(const Val& v,
-                                     const std::string& what) {
+  std::vector<int64_t> logical_shape(const Val& v, const std::string& what) {
     const int64_t len = g.slots[v.slot].len;
     validate_view(v.si, len, what);
     if (is_array(v.si)) return array_shape(v.si).dims;
@@ -558,8 +555,7 @@ struct Lowering {
     std::vector<double> vals(dims.begin(), dims.end());
     const int slot = add_slot((int64_t)vals.size(), false);
     out.fills.emplace_back(slot, vals);
-    Val v{slot,
-          array_view({(int64_t)dims.size()}, ViewKind::Flat, true)};
+    Val v{slot, array_view({(int64_t)dims.size()}, ViewKind::Flat, true)};
     DataMap::Entry en;
     en.is_int = true;
     en.r = std::move(vals);
@@ -581,13 +577,11 @@ struct Lowering {
     fail("result type does not match logical rows/cols");
   }
 
-  void validate_view(const SlotInfo& si, int64_t len,
-                     const std::string& what) {
+  void validate_view(const SlotInfo& si, int64_t len, const std::string& what) {
     if (is_array(si) != (si.shape != 0))
       fail(what + ": array kind and shape id disagree");
     if (si.kind == ViewKind::Flat) {
-      if (len != 1)
-        fail(what + ": flat logical value is not a scalar");
+      if (len != 1) fail(what + ": flat logical value is not a scalar");
       return;
     }
     if (is_matrix(si)) {
@@ -668,8 +662,7 @@ struct Lowering {
         is_array(si) && array_shape(si).leaf == ViewKind::Matrix;
     // DataMap is first-index-fast. Graph arrays are outer-major, with only
     // an innermost matrix kept column-major, so normalize at materialization.
-    std::vector<double> vals =
-        graph_order(*en, is_matrix(si), nested_matrix);
+    std::vector<double> vals = graph_order(*en, is_matrix(si), nested_matrix);
     validate_view(si, (int64_t)vals.size(), "data value " + name);
     const int s = add_slot((int64_t)vals.size(), false);
     out.fills.emplace_back(s, vals);
@@ -717,8 +710,7 @@ struct Lowering {
               fail("matrix row range out of bounds", e.raw);
             for (int64_t i = lo; i <= hi; ++i) rows.push_back((int)i - 1);
           } else {
-            DataMap::Entry iv =
-                eval_pure(e.args[1].args[0], "a gather index");
+            DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
             if (!iv.is_int) fail("matrix row gather needs int data", e.raw);
             for (int i : iv.i) {
               if (i < 1 || i > base.si.rows)
@@ -747,8 +739,7 @@ struct Lowering {
             fail("array outer range out of bounds", e.raw);
           std::vector<int64_t> out_dims = sh.dims;
           out_dims[0] = hi - lo + 1;
-          const std::vector<int64_t> suffix(sh.dims.begin() + 1,
-                                            sh.dims.end());
+          const std::vector<int64_t> suffix(sh.dims.begin() + 1, sh.dims.end());
           const int64_t width = checked_product(suffix, "array element");
           const int64_t len = checked_product(out_dims, "array range");
           return emit_value(OP_SLICE, {base}, len,
@@ -770,8 +761,7 @@ struct Lowering {
           const ArrayShape& sh = array_shape(base.si);
           if (sh.leaf != ViewKind::Flat || sh.dims.size() != 1)
             fail("unsupported index expression", e.raw);
-          DataMap::Entry iv =
-              eval_pure(e.args[1].args[0], "a gather index");
+          DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
           if (!iv.is_int) fail("gather index must be int data", e.raw);
           std::vector<int> idata;
           idata.reserve(iv.i.size());
@@ -786,16 +776,14 @@ struct Lowering {
         }
         // Gather by a data int array: v[idx].
         if (e.args.size() == 2 && e.args[1].name == "IndexMulti") {
-          DataMap::Entry iv =
-              eval_pure(e.args[1].args[0], "a gather index");
+          DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
           if (!iv.is_int || iv.i.empty())
             fail("gather index must be int data", e.raw);
           std::vector<int> idata;
           idata.reserve(iv.i.size());
           for (int x : iv.i) idata.push_back(x - 1);
           return emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
-                            view_of(e.type_),
-                            idata);
+                            view_of(e.type_), idata);
         }
         // Matrix row/column slices use the explicit logical view; physical
         // storage remains column-major even when either extent is zero.
@@ -803,8 +791,7 @@ struct Lowering {
             e.args[1].name == "IndexSingle" && e.args[2].name == "IndexAll") {
           const int64_t i = eval_int(e.args[1].args[0]) - 1;
           return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
-                            view_of(e.type_),
-                            {(int)i, (int)base.si.rows});
+                            view_of(e.type_), {(int)i, (int)base.si.rows});
         }
         if (e.args.size() == 3 && is_matrix(base.si) &&
             e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
@@ -815,15 +802,13 @@ struct Lowering {
         // Column of a canonical graph-order 2-D array (array[N, S] real):
         // each outer element is contiguous, so successive rows sit S apart.
         if (e.args.size() == 3 && is_array(base.si) && bdims &&
-            array_shape(base.si).leaf == ViewKind::Flat &&
-            bdims->size() == 2 && e.args[1].name == "IndexAll" &&
-            e.args[2].name == "IndexSingle") {
+            array_shape(base.si).leaf == ViewKind::Flat && bdims->size() == 2 &&
+            e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
           const int64_t k = eval_int(e.args[2].args[0]) - 1;
           const int64_t N = (*bdims)[0], S = (*bdims)[1];
           if (k < 0 || k >= S) fail("array column out of bounds", e.raw);
           return emit_value(OP_SLICE_STRIDED, {base}, N,
-                            array_view({N}, ViewKind::Flat),
-                            {(int)k, (int)S});
+                            array_view({N}, ViewKind::Flat), {(int)k, (int)S});
         }
         // Row-range column read M[a:b, j] (contiguous within the column).
         if (e.args.size() == 3 && is_matrix(base.si) &&
@@ -863,8 +848,7 @@ struct Lowering {
             e.type_ != "UReal" && e.type_ != "UInt") {
           const int64_t t = eval_int(e.args[1].args[0]) - 1;
           return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
-                            view_of(e.type_),
-                            {(int)t, (int)base.si.rows});
+                            view_of(e.type_), {(int)t, (int)base.si.rows});
         }
         // Data-only slicing with no native path (e.g. one matrix out of a
         // data array of matrices) evaluates at compile time.
@@ -1084,8 +1068,8 @@ struct Lowering {
     int64_t off = 0;
     for (size_t k = 0; k < out_lens.size(); ++k) {
       const int len = out_lens[k];
-      const Val v = emit_raw(len == 1 ? OP_INDEX : OP_SLICE, {is.out}, len,
-                             {}, {(int)off});
+      const Val v = emit_raw(len == 1 ? OP_INDEX : OP_SLICE, {is.out}, len, {},
+                             {(int)off});
       out_slots->push_back(v.slot);
       off += len;
     }
@@ -1434,8 +1418,7 @@ struct Lowering {
           int_env[name] = binds[i].iv;
         } else {
           scope[name] = binds[i].v;
-          decls[name] =
-              DeclView{g.slots[binds[i].v.slot].len, binds[i].v.si};
+          decls[name] = DeclView{g.slots[binds[i].v.slot].len, binds[i].v.si};
         }
       }
       // CmdStan passes the CALLER's propto__ value into a user density.
@@ -1571,8 +1554,7 @@ struct Lowering {
     if (is_density && propto(e)) {
       bool all_data = true;
       for (const auto& a : e.args) all_data = all_data && a.data_only;
-      if (all_data)
-        return constant(0.0);
+      if (all_data) return constant(0.0);
     }
     // A shape query in a REAL-valued expression. eval_int already answers
     // rows/cols/size from the slot or the data map, but only where an
@@ -1702,8 +1684,7 @@ struct Lowering {
     if (e.name == "categorical_logit_lpmf" && e.args.size() == 2) {
       // stan-math evaluates log_softmax(beta) then picks the outcomes,
       // which is exactly this composition.
-      if (propto(e) && e.args[1].data_only)
-        return constant(0.0);
+      if (propto(e) && e.args[1].data_only) return constant(0.0);
       Val b = lower_expr(e.args[1]);
       Val ls = emit_value(OP_LOG_SOFTMAX, {b}, g.slots[b.slot].len);
       auto ns = int_arg_values(e.args[0]);
@@ -1719,8 +1700,7 @@ struct Lowering {
       // ops_partials), so this decomposes exactly onto existing ops. For an
       // array outcome the reference logs the whole simplex once and gathers,
       // which also fixes the adjoint association for repeated categories.
-      if (propto(e) && e.args[1].data_only)
-        return constant(0.0);
+      if (propto(e) && e.args[1].data_only) return constant(0.0);
       Val th = lower_expr(e.args[1]);
       auto ns = int_arg_values(e.args[0]);
       if (e.args[0].type_ == "UInt" && ns.size() == 1) {
@@ -1809,8 +1789,8 @@ struct Lowering {
       idata.insert(idata.end(), NN.begin(), NN.end());
       idata.push_back((int)rows);
       idata.push_back((int)X.si.cols);
-      Val v =
-          emit_value(OP_BINOMIAL_LOGIT_GLM_LPMF, {X, alpha, beta}, 1, {}, idata);
+      Val v = emit_value(OP_BINOMIAL_LOGIT_GLM_LPMF, {X, alpha, beta}, 1, {},
+                         idata);
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
     }
@@ -1829,8 +1809,8 @@ struct Lowering {
       // Both pass their two real arguments in order, so the kernel reads
       // in[1] and in[2] and knows from its Kind what they mean.
       Val v = emit_value(e.name == "categorical_logit_glm_lpmf"
-                       ? OP_CATEGORICAL_LOGIT_GLM_LPMF
-                       : OP_ORDERED_LOGISTIC_GLM_LPMF,
+                             ? OP_CATEGORICAL_LOGIT_GLM_LPMF
+                             : OP_ORDERED_LOGISTIC_GLM_LPMF,
                          {X, a2, a3}, 1, {}, idata);
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
       return v;
@@ -1863,10 +1843,10 @@ struct Lowering {
       if (!is_matrix(S.si)) fail(e.name + " needs a matrix argument", e.raw);
       const int64_t K = S.si.rows;
       const int64_t reps = g.slots[y.slot].len / K;
-      Val v = emit_value(
-          e.name == "multi_student_t_lpdf" ? OP_MULTI_STUDENT_T_LPDF
-                                           : OP_MULTI_STUDENT_T_CHOL_LPDF,
-          {y, nu, mu, S}, 1, {}, {(int)K, (int)reps});
+      Val v = emit_value(e.name == "multi_student_t_lpdf"
+                             ? OP_MULTI_STUDENT_T_LPDF
+                             : OP_MULTI_STUDENT_T_CHOL_LPDF,
+                         {y, nu, mu, S}, 1, {}, {(int)K, (int)reps});
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0xfu);
       return v;
     }
@@ -1931,8 +1911,7 @@ struct Lowering {
         Val nu = lower_expr(e.args[1]);
         Val S = lower_expr(e.args[2]);
         if (!is_matrix(W.si)) fail(e.name + " needs a matrix", e.raw);
-        Val v = emit_value(wit->second, {W, nu, S}, 1, {},
-                           {(int)W.si.rows});
+        Val v = emit_value(wit->second, {W, nu, S}, 1, {}, {(int)W.si.rows});
         g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
         return v;
       }
@@ -1976,8 +1955,7 @@ struct Lowering {
         const Val& shaped = a_scalar ? b : a;
         SlotInfo si = shaped.si;
         si.param_free = a.si.param_free && b.si.param_free;
-        const int64_t n = a_scalar ? g.slots[b.slot].len
-                                   : g.slots[a.slot].len;
+        const int64_t n = a_scalar ? g.slots[b.slot].len : g.slots[a.slot].len;
         return emit_value(OP_MUL, {a, b}, n, si);
       }
       if (is_matrix(a.si)) {
@@ -1986,8 +1964,7 @@ struct Lowering {
           // accumulation order is matched to the var path).
           if (g.slots[b.slot].len != a.si.cols)
             fail("Times__: inner dimension mismatch", e.raw);
-          return emit_value(OP_MATVEC, {a, b}, a.si.rows,
-                            view_of("UVector"),
+          return emit_value(OP_MATVEC, {a, b}, a.si.rows, view_of("UVector"),
                             {(int)a.si.rows, (int)a.si.cols});
         }
         // General product; a vector operand is one column.
@@ -1999,8 +1976,7 @@ struct Lowering {
                    " times " + std::to_string(rb) + "x" + std::to_string(cb) +
                    ")",
                e.raw);
-        SlotInfo si = cb == 1 ? view_of("UVector")
-                              : matrix_view(a.si.rows, cb);
+        SlotInfo si = cb == 1 ? view_of("UVector") : matrix_view(a.si.rows, cb);
         Val v = emit_value(OP_GEMM, {a, b}, a.si.rows * cb, si,
                            {(int)a.si.rows, (int)a.si.cols, (int)cb});
         return v;
@@ -2009,8 +1985,7 @@ struct Lowering {
       if (is_vector(a.si) && is_row_vector(b.si) && e.type_ == "UMatrix") {
         const int64_t nr = g.slots[a.slot].len, nc = g.slots[b.slot].len;
         SlotInfo si = matrix_view(nr, nc);
-        return emit_value(OP_GEMM, {a, b}, nr * nc, si,
-                          {(int)nr, 1, (int)nc});
+        return emit_value(OP_GEMM, {a, b}, nr * nc, si, {(int)nr, 1, (int)nc});
       }
       if (is_row_vector(a.si) && is_matrix(b.si)) {
         const int64_t k = g.slots[a.slot].len;
@@ -2101,8 +2076,7 @@ struct Lowering {
         return emit_value(OP_LSE2, {a, b}, 1);
       }
       Val a = lower_expr(e.args[0]);
-      return emit_value(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a},
-                        1);
+      return emit_value(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a}, 1);
     }
     if (e.name == "log_diff_exp" && e.args.size() == 2) {
       Val a = lower_expr(e.args[0]);
@@ -2210,8 +2184,7 @@ struct Lowering {
         Val x = lower_expr(e.args[0]);  // scalar fill
         const long R = eval_int(e.args[1]), C = eval_int(e.args[2]);
         si = matrix_view(R, C);
-        return emit_value(OP_REP_MAT, {x}, R * C, si,
-                          {(int)R, (int)C, 0});
+        return emit_value(OP_REP_MAT, {x}, R * C, si, {(int)R, (int)C, 0});
       }
       if (e.args.size() == 2) {
         Val v = lower_expr(e.args[0]);
@@ -2280,8 +2253,8 @@ struct Lowering {
       SlotInfo dsi = matrix_view(n, n, v.si.param_free);
       Val d = emit_value(OP_DIAG_MATRIX, {v}, n * n, dsi);
       SlotInfo si = matrix_view(n, n);
-      Val left = emit_value(OP_GEMM, {d, m}, n * n, si,
-                            {(int)n, (int)n, (int)n});
+      Val left =
+          emit_value(OP_GEMM, {d, m}, n * n, si, {(int)n, (int)n, (int)n});
       return emit_value(OP_GEMM, {left, d}, n * n, si,
                         {(int)n, (int)n, (int)n});
     }
@@ -2382,8 +2355,7 @@ struct Lowering {
                    "stanli: ODE right-hand side %s falls back to the "
                    "interpreter: %s\n",
                    spec->rhs_name.c_str(), spec->prog.why.c_str());
-    Val v = emit_value(OP_ODE, {z0, theta}, N * S, result_si,
-                       {(int)N, (int)S});
+    Val v = emit_value(OP_ODE, {z0, theta}, N * S, result_si, {(int)N, (int)S});
     g.ops.back().udata = spec.get();
     g.udata_pool.push_back(std::move(spec));
     return v;
@@ -2392,9 +2364,8 @@ struct Lowering {
   SlotInfo ode_result_view(const mir::Expr& e, int64_t N, int64_t S) {
     if (e.unsized.depth == 1 && e.unsized.leaf == mir::UnsizedLeaf::Vector)
       return array_view({N, S}, ViewKind::Vector);
-    if (e.unsized.depth == 2 &&
-        (e.unsized.leaf == mir::UnsizedLeaf::Real ||
-         e.unsized.leaf == mir::UnsizedLeaf::Int))
+    if (e.unsized.depth == 2 && (e.unsized.leaf == mir::UnsizedLeaf::Real ||
+                                 e.unsized.leaf == mir::UnsizedLeaf::Int))
       return array_view({N, S}, ViewKind::Flat);
     fail("ODE result has unsupported logical type", e.raw);
   }
@@ -2506,8 +2477,7 @@ struct Lowering {
 
     spec->args = rargs;
     spec->prog = compile_rhs_args(*spec->rhs(), *spec->funs(), (int)S, rargs);
-    return emit_ode(std::move(spec), z0, theta, N, S,
-                    ode_result_view(e, N, S));
+    return emit_ode(std::move(spec), z0, theta, N, S, ode_result_view(e, N, S));
   }
 
   // The integrate_ode_* family.
@@ -2577,8 +2547,7 @@ struct Lowering {
       fail("constrained shape does not match its flattened length", s.raw);
     const bool matrix_storage =
         s.decl_type.base == "SMatrix" ||
-        (s.decl_type.base == "SArray" &&
-         s.decl_type.elem_base == "SMatrix");
+        (s.decl_type.base == "SArray" && s.decl_type.elem_base == "SMatrix");
     view.set_serial_layout(std::move(dims), matrix_storage);
     if (matrix_storage) {
       view.naming = Naming::Matrix;
@@ -2681,11 +2650,10 @@ struct Lowering {
 
     if (tr.kind == mir::Transform::Identity) {
       Val value{raw, psi};
-      CompiledModel::ParamView serial_view =
-          parameter_view(s, raw, raw_len);
-      const bool nested_scalar =
-          is_array(psi) && array_shape(psi).leaf == ViewKind::Flat &&
-          array_shape(psi).dims.size() > 1;
+      CompiledModel::ParamView serial_view = parameter_view(s, raw, raw_len);
+      const bool nested_scalar = is_array(psi) &&
+                                 array_shape(psi).leaf == ViewKind::Flat &&
+                                 array_shape(psi).dims.size() > 1;
       if (nested_scalar && !serial_view.storage_order.empty()) {
         // FnReadParam exposes a nested scalar array first-index-fast. Arrays
         // of Eigen containers already arrive outer-major with their leaf's
@@ -2697,8 +2665,8 @@ struct Lowering {
         for (int64_t serial = 0; serial < raw_len; ++serial)
           gather[(size_t)serial_view.storage_index(serial)] = (int)serial;
         Val serial{raw, {}};  // physical boundary, not a logical graph value
-        value = emit_value(OP_GATHER, {serial}, con_len, psi,
-                           std::move(gather));
+        value =
+            emit_value(OP_GATHER, {serial}, con_len, psi, std::move(gather));
       }
       scope[s.decl_id] = value;
       // In write_array mode the column order is dictated by the FnWriteParam
@@ -2875,9 +2843,8 @@ struct Lowering {
           SlotInfo out_si = prev_v.si;
           // Whole matrix row write M[i] = row_vector: one value per column,
           // strided by the physical row count.
-          if (s.lhs_idx.size() == 1 &&
-              s.lhs_idx[0].name == "IndexSingle" && is_matrix(prev_v.si) &&
-              is_row_vector(rhs_v.si)) {
+          if (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexSingle" &&
+              is_matrix(prev_v.si) && is_row_vector(rhs_v.si)) {
             const int64_t i = eval_int(s.lhs_idx[0].args[0]) - 1;
             if (i < 0 || i >= prev_v.si.rows)
               fail("row assignment index out of bounds for " + s.lhs);
@@ -2910,9 +2877,9 @@ struct Lowering {
               fail("column assignment index out of bounds for " + s.lhs);
             if (g.slots[rhs].len != prev_v.si.rows)
               fail("column assignment size mismatch for " + s.lhs);
-            Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
-                                g.slots[prev].len, out_si,
-                                {(int)(j * prev_v.si.rows)});
+            Val nv =
+                emit_value(OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len,
+                           out_si, {(int)(j * prev_v.si.rows)});
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -2926,9 +2893,9 @@ struct Lowering {
             const int64_t j = eval_int(s.lhs_idx[1].args[0]) - 1;
             if (g.slots[rhs].len != hi - lo + 1)
               fail("range assignment size mismatch for " + s.lhs);
-            Val nv = emit_value(
-                OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len, out_si,
-                {(int)(j * prev_v.si.rows + lo - 1)});
+            Val nv =
+                emit_value(OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len,
+                           out_si, {(int)(j * prev_v.si.rows + lo - 1)});
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -2972,8 +2939,8 @@ struct Lowering {
               desc += " [" + (ix.name.empty() ? "?" : ix.name) + "]";
             fail(desc, s.raw);
           }
-          Val nv = emit_value(OP_SET_INDEX, {prev_v, rhs_v},
-                              g.slots[prev].len, out_si, {(int)flat});
+          Val nv = emit_value(OP_SET_INDEX, {prev_v, rhs_v}, g.slots[prev].len,
+                              out_si, {(int)flat});
           scope[s.lhs] = nv;
           td.env().erase(s.lhs);
           return;

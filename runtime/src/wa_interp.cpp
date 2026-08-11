@@ -21,22 +21,6 @@ double wa_probe_point(int64_t i, int variant) {
   }
 }
 
-std::map<std::string, DataMap::Entry> wa_param_env(
-    Executor& ex, const std::vector<CompiledModel::ParamView>& views) {
-  std::map<std::string, DataMap::Entry> params;
-  for (const auto& v : views) {
-    DataMap::Entry en;
-    const double* p = ex.value_ptr(v.slot);
-    en.r.assign(p, p + v.len);
-    if (v.rows > 0)
-      en.dims = {v.rows, v.len / v.rows};
-    else if (v.len > 1)
-      en.dims = {v.len};
-    params[v.name] = std::move(en);
-  }
-  return params;
-}
-
 WaInterp::WaInterp(std::shared_ptr<const mir::Program> prog,
                    std::map<std::string, DataMap::Entry> base_env)
     : prog_(std::move(prog)), base_env_(std::move(base_env)) {

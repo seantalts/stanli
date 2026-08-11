@@ -74,8 +74,8 @@ void test_naming_rules() {
             "M.1.1,M.2.1,M.1.2,M.2.2,M.1.3,M.2.3");
   PV array_vector{"V", 0, 4, N::Container, 0};
   array_vector.set_serial_layout({2, 2}, false);
-  expect_eq("array[2] vector[2] first index fastest",
-            joined({array_vector}), "V.1.1,V.2.1,V.1.2,V.2.2");
+  expect_eq("array[2] vector[2] first index fastest", joined({array_vector}),
+            "V.1.1,V.2.1,V.1.2,V.2.2");
   const std::vector<int64_t> vector_storage{0, 2, 1, 3};
   for (int64_t i = 0; i < array_vector.len; ++i)
     if (array_vector.storage_index(i) != vector_storage[(size_t)i]) {
@@ -87,12 +87,11 @@ void test_naming_rules() {
     }
   PV array_matrix{"A", 0, 12, N::Matrix, 2};
   array_matrix.set_serial_layout({2, 2, 3}, true);
-  expect_eq("array[2] matrix[2,3] first index fastest",
-            joined({array_matrix}),
+  expect_eq("array[2] matrix[2,3] first index fastest", joined({array_matrix}),
             "A.1.1.1,A.2.1.1,A.1.2.1,A.2.2.1,A.1.1.2,A.2.1.2,"
             "A.1.2.2,A.2.2.2,A.1.1.3,A.2.1.3,A.1.2.3,A.2.2.3");
-  const std::vector<int64_t> matrix_storage{0, 6, 1, 7, 2, 8,
-                                             3, 9, 4, 10, 5, 11};
+  const std::vector<int64_t> matrix_storage{0, 6, 1, 7,  2, 8,
+                                            3, 9, 4, 10, 5, 11};
   for (int64_t i = 0; i < array_matrix.len; ++i)
     if (array_matrix.storage_index(i) != matrix_storage[(size_t)i]) {
       ++failures;
@@ -166,8 +165,8 @@ void test_wanames_pipeline() {
 // must share is the logical column schema and the observable row.
 void test_wanames_interpreter_schema() {
   using namespace stanli;
-  auto prog = std::make_shared<mir::Program>(
-      mir::read_program(sexp::parse(slurp("tests/fixtures/wanames.tmir.sexp"))));
+  auto prog = std::make_shared<mir::Program>(mir::read_program(
+      sexp::parse(slurp("tests/fixtures/wanames.tmir.sexp"))));
 
   std::map<std::string, DataMap::Entry> base;
   for (const char* flag :
@@ -187,12 +186,13 @@ void test_wanames_interpreter_schema() {
   params["M"].r = {11.0, 12.0, 13.0, 14.0, 15.0, 16.0};
   params["M"].dims = {2, 3};
 
-  const std::vector<double> row = wi.eval(params);
+  WaRng rng(1234);
+  const std::vector<double> row = wi.eval(params, rng);
   expect_eq("wanames interpreted header", joined(wi.columns()),
             "s,v.1,M.1.1,M.2.1,M.1.2,M.2.2,M.1.3,M.2.3,"
             "gq.1.1,gq.2.1,gq.1.2,gq.2.2");
-  const std::vector<double> want{0.375, 5.0, 11.0, 12.0, 13.0, 14.0,
-                                 15.0, 16.0, 11.375, 21.375, 12.375, 22.375};
+  const std::vector<double> want{0.375, 5.0,  11.0,   12.0,   13.0,   14.0,
+                                 15.0,  16.0, 11.375, 21.375, 12.375, 22.375};
   if (row != want) {
     ++failures;
     std::printf("FAIL wanames interpreted row\n");
@@ -283,8 +283,7 @@ void test_array_of_matrix_columns() {
   }
   Executor pex(std::move(cm.graph));
   cm.bind(pex);
-  for (int64_t k = 0; k < pex.n_params(); ++k)
-    pex.params_data()[k] = (double)k;
+  for (int64_t k = 0; k < pex.n_params(); ++k) pex.params_data()[k] = (double)k;
   pex.run_forward_only();
 
   Executor wex(std::move(cm.write_array->graph));
@@ -328,8 +327,8 @@ void test_array_of_matrix_columns() {
   // through CompiledModel's one arena-to-logical boundary and require the
   // exact same named row, including the rank-three parameter that the old
   // boundary rejected outright.
-  auto prog = std::make_shared<mir::Program>(mir::read_program(
-      sexp::parse(slurp("tests/fixtures/amatwa.tmir.sexp"))));
+  auto prog = std::make_shared<mir::Program>(
+      mir::read_program(sexp::parse(slurp("tests/fixtures/amatwa.tmir.sexp"))));
   std::map<std::string, DataMap::Entry> base;
   base["d"] = data.at("d");
   for (const char* flag :
@@ -341,8 +340,9 @@ void test_array_of_matrix_columns() {
     base[flag] = one;
   }
   WaInterp interpreted(prog, std::move(base));
+  WaRng rng(1234);
   const std::vector<double> interpreted_values =
-      interpreted.eval(cm.constrained_env(pex));
+      interpreted.eval(cm.constrained_env(pex), rng);
   const std::vector<std::string> interpreted_names =
       CompiledModel::csv_names(interpreted.columns());
   std::map<std::string, double> interpreted_row;

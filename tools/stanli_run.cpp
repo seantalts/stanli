@@ -300,7 +300,8 @@ int main(int argc, char** argv) {
         out.run_forward_only();
         for (const auto& v : cols) {
           const double* p = out.value_ptr(v.slot);
-          row.insert(row.end(), p, p + v.len);
+          for (int64_t i = 0; i < v.len; ++i)
+            row.push_back(p[v.storage_index(i)]);
         }
       }
       bool first = true;

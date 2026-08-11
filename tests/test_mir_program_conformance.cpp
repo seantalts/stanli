@@ -139,8 +139,10 @@ FunDef rhs_function(std::string name, std::vector<Stmt> body) {
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
   f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
                  "(UArray UInt)"};
-  f.arg_views = {{0, UnsizedLeaf::Real},   {0, UnsizedLeaf::Vector},
-                 {0, UnsizedLeaf::Vector}, {1, UnsizedLeaf::Real},
+  f.arg_views = {{0, UnsizedLeaf::Real},
+                 {0, UnsizedLeaf::Vector},
+                 {0, UnsizedLeaf::Vector},
+                 {1, UnsizedLeaf::Real},
                  {1, UnsizedLeaf::Int}};
   f.body = std::move(body);
   return f;
