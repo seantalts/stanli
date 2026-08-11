@@ -261,6 +261,16 @@ int stanli_sample_stream(stanli_model* m, uint32_t seed, int warmup,
                          stanli_draw_cb cb, void* user, char* err,
                          size_t err_len);
 
+/* WALNUTS (within-orbit adaptive step-length NUTS, arXiv:2506.18746),
+ * same streaming contract as stanli_sample_stream. `max_error` is the
+ * sampler's tunable in place of NUTS's `delta`: the largest drift in
+ * the joint log density allowed across one macro step before the step
+ * is halved within the trajectory; pass 0 for the default (0.5). */
+int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
+                                 int samples, double max_error, double* draws,
+                                 stanli_draw_cb cb, void* user, char* err,
+                                 size_t err_len);
+
 /* write_array: every CSV column CmdStan would emit for one draw --
  * constrained parameters, transformed parameters, generated quantities,
  * in CmdStan's column order. n_columns is 0 when the model has no

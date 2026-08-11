@@ -15,10 +15,13 @@ distributes those components too.
 | [Boost](https://www.boost.org) | math special functions and utilities used by stan-math | Boost Software License 1.0 |
 | [SUNDIALS / CVODES](https://computing.llnl.gov/projects/sundials) | ODE integration for `integrate_ode_rk45` and `integrate_ode_bdf` | BSD 3-Clause |
 | [nlohmann/json](https://github.com/nlohmann/json) | reading CmdStan-format JSON data | MIT |
+| [walnutpie](https://github.com/flatironinstitute/walnuts) | WALNUTS sampler and its warmup adaptation | MIT |
 
 Full license texts ship with the vendored sources fetched by
 `deps/fetch.sh`; see `deps/math/LICENSE.md`, `deps/stan/LICENSE.md`, and
-the license files under `deps/math/lib/`.
+the license files under `deps/math/lib/`. walnutpie is vendored directly
+in this repository, headers and license together, at
+`runtime/third_party/walnutpie/`.
 
 Notes on the two that carry conditions beyond attribution:
 

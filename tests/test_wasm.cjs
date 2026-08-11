@@ -72,7 +72,20 @@ createStanli().then((M) => {
   const mu = muSum / samples;
   if (!(mu > 3.0 && mu < 6.0)) fail("mu " + mu + " outside (3, 6)");
 
+  // WALNUTS through the same streaming C entry the worker uses: same
+  // posterior, so the same window on mean(mu).
+  const rcW = M._stanli_sample_walnuts_stream(model, 1, warmup, samples, 0,
+                                              drawsPtr, 0, 0, errPtr, errLen);
+  if (rcW !== 0) fail("walnuts: " + M.UTF8ToString(errPtr));
+  let muSumW = 0;
+  for (let s = 0; s < samples; ++s) {
+    M._stanli_constrain(model, drawsPtr + 8 * s * n, rowPtr);
+    muSumW += M.HEAPF64[rowPtr / 8 + muIdx];
+  }
+  const muW = muSumW / samples;
+  if (!(muW > 3.0 && muW < 6.0)) fail("walnuts mu " + muW + " outside (3, 6)");
+
   M._stanli_model_free(model);
   console.log("test_wasm OK  lp(0) = " + lp.toFixed(6) + "  mean(mu) = " +
-              mu.toFixed(3));
+              mu.toFixed(3) + "  walnuts mean(mu) = " + muW.toFixed(3));
 }).catch((e) => fail(String(e && e.stack || e)));

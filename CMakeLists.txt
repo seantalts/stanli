@@ -22,6 +22,14 @@ project(stanli C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# The one exception: walnuts.cpp wraps the vendored walnutpie headers,
+# which are written against C++20 concepts. It includes no stan-math --
+# just the executor interface and Eigen -- so the newer standard stays
+# contained to that translation unit.
+set_source_files_properties(runtime/src/walnuts.cpp PROPERTIES
+  COMPILE_OPTIONS "-std=c++20"
+  INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/runtime/third_party)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
@@ -217,6 +225,7 @@ add_library(stanli_shared SHARED
   runtime/src/adjoint.cpp
   runtime/src/program_density.cpp
   runtime/src/nuts.cpp
+  runtime/src/walnuts.cpp
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp
   runtime/src/mir_reader.cpp
@@ -313,6 +322,7 @@ add_library(stanli STATIC
   runtime/src/adjoint.cpp
   runtime/src/program_density.cpp
   runtime/src/nuts.cpp
+  runtime/src/walnuts.cpp
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp
   runtime/src/mir_reader.cpp
@@ -363,7 +373,7 @@ if(EMSCRIPTEN)
     "SHELL:-s MAXIMUM_MEMORY=4GB"
     "SHELL:-s STACK_SIZE=8MB"
     "SHELL:-s ENVIRONMENT=web,worker,node"
-    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_malloc,_free"
+    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_stanli_sample_walnuts_stream,_malloc,_free"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,stringToNewUTF8,HEAPF64,addFunction,removeFunction"
     "SHELL:-s ALLOW_TABLE_GROWTH=1")
 endif()
@@ -421,6 +431,7 @@ stanli_add_test(test_legacy)
 stanli_add_test(test_eight_schools)
 stanli_add_test(test_glm)
 stanli_add_test(test_nuts)
+stanli_add_test(test_walnuts)
 stanli_add_test(test_sexp)
 stanli_add_test(test_mir)
 stanli_add_test(test_transforms)

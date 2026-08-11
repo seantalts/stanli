@@ -21,6 +21,7 @@ EXPORTS
   stanli_grad
   stanli_sample
   stanli_sample_stream
+  stanli_sample_walnuts_stream
   stanli_n_constrained
   stanli_constrained_name
   stanli_constrain

@@ -5,6 +5,7 @@
 #include <stanli/estimate.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/nuts.hpp>
+#include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <algorithm>
@@ -236,6 +237,34 @@ int stanli_sample_stream(stanli_model* m, uint32_t seed, int warmup,
       };
     }
     auto out = stanli::run_nuts(*m->ex, cfg, nullptr, observe);
+    for (size_t s = 0; s < out.size(); ++s)
+      std::memcpy(draws + s * n, out[s].data(), sizeof(double) * n);
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
+                                 int samples, double max_error, double* draws,
+                                 stanli_draw_cb cb, void* user, char* err,
+                                 size_t err_len) {
+  try {
+    stanli::WalnutsConfig cfg;
+    cfg.seed = seed;
+    cfg.warmup = warmup;
+    cfg.samples = samples;
+    if (max_error > 0) cfg.max_error = max_error;
+    const int64_t n = m->ex->n_params();
+    stanli::DrawObserver observe;
+    if (cb) {
+      observe = [&](int64_t i, bool wu, const double* q) {
+        if (!wu) std::memcpy(draws + i * n, q, sizeof(double) * n);
+        cb((int32_t)i, wu ? 1 : 0, user);
+      };
+    }
+    auto out = stanli::run_walnuts(*m->ex, cfg, nullptr, observe);
     for (size_t s = 0; s < out.size(); ++s)
       std::memcpy(draws + s * n, out[s].data(), sizeof(double) * n);
     return 0;
