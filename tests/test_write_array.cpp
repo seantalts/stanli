@@ -137,8 +137,8 @@ void test_interpreted_gq() {
   DataMap::Entry sig;
   sig.r = {1.7};
   params["sigma"] = sig;
-  wi.seed(42);
-  const std::vector<double> r1 = wi.eval(params);
+  WaRng rng(42);
+  const std::vector<double> r1 = wi.eval(params, rng);
   expect_eq("gqrng header", joined(wi.columns()), "sigma,yrep,crep,branchy,p");
   if (r1.size() != 5) {
     ++failures;
@@ -159,13 +159,13 @@ void test_interpreted_gq() {
     ++failures;
     std::printf("FAIL gqrng crep: %.17g not an int in [0,5]\n", crep);
   }
-  wi.seed(42);
-  const std::vector<double> r2 = wi.eval(params);
+  rng.seed(42);
+  const std::vector<double> r2 = wi.eval(params, rng);
   if (r1 != r2) {
     ++failures;
     std::printf("FAIL gqrng: same seed, different row\n");
   }
-  const std::vector<double> r3 = wi.eval(params);
+  const std::vector<double> r3 = wi.eval(params, rng);
   if (r3[1] == r1[1]) {
     ++failures;
     std::printf("FAIL gqrng: RNG stream did not advance across draws\n");
@@ -226,6 +226,55 @@ void test_array_of_matrix_columns() {
       }
 }
 
+// The RNG state belongs to the CALLER, not to the model. One WaInterp
+// serves any number of independent streams, which is what lets concurrent
+// chains draw generated quantities through one shared model without
+// sharing a stream -- the thing a model-owned member cannot express.
+void test_caller_owned_rng() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 5);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/gqrng.tmir.sexp"), data);
+  if (!cm.write_array || !cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL caller-owned rng: no interpreted write_array\n");
+    return;
+  }
+  WaInterp& wi = *cm.write_array->interp;
+  std::map<std::string, DataMap::Entry> params;
+  DataMap::Entry sig;
+  sig.r = {1.7};
+  params["sigma"] = sig;
+
+  // Two states, same seed, interleaved through ONE interpreter: each
+  // advances on its own, so the two sequences agree draw for draw.
+  WaRng a(42), b(42);
+  const std::vector<double> a1 = wi.eval(params, a);
+  const std::vector<double> b1 = wi.eval(params, b);
+  if (a1 != b1) {
+    ++failures;
+    std::printf("FAIL caller-owned rng: same seed, different first draw\n");
+  }
+  const std::vector<double> a2 = wi.eval(params, a);
+  const std::vector<double> b2 = wi.eval(params, b);
+  if (a2 != b2) {
+    ++failures;
+    std::printf("FAIL caller-owned rng: streams diverged on the second draw\n");
+  }
+  if (a2[1] == a1[1]) {
+    ++failures;
+    std::printf("FAIL caller-owned rng: stream did not advance\n");
+  }
+  // A distinct seed is a distinct stream.
+  WaRng c(43);
+  const std::vector<double> c1 = wi.eval(params, c);
+  if (c1[1] == a1[1]) {
+    ++failures;
+    std::printf("FAIL caller-owned rng: seed 43 matched seed 42\n");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -233,6 +282,7 @@ int main() {
   test_wanames_pipeline();
   test_array_of_matrix_columns();
   test_interpreted_gq();
+  test_caller_owned_rng();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
 }

@@ -246,8 +246,8 @@ int main(int argc, char** argv) {
       return ps;
     };
     std::vector<std::vector<double>> irows;
+    stanli::WaRng wa_rng(cfg.seed);
     if (wi) {
-      wi->seed(cfg.seed);
       irows.reserve(draws.size());
       // A draw whose generated quantities cannot be evaluated is written
       // as NaNs and the run continues, which is what CmdStan does
@@ -259,7 +259,7 @@ int main(int argc, char** argv) {
       std::string first_bad;
       for (const auto& q : draws) {
         try {
-          irows.push_back(wi->eval(constrained_by_name(q)));
+          irows.push_back(wi->eval(constrained_by_name(q), wa_rng));
         } catch (const std::domain_error& e) {
           if (n_bad++ == 0) first_bad = e.what();
           irows.emplace_back();  // widened to nan below, once cols is known

@@ -16,7 +16,7 @@ WaInterp::WaInterp(std::shared_ptr<const mir::Program> prog,
 }
 
 std::vector<double> WaInterp::eval(
-    const std::map<std::string, DataMap::Entry>& params) {
+    const std::map<std::string, DataMap::Entry>& params, WaRng& rng) {
   std::vector<double> row;
   MirInterp<double>* cur = nullptr;
   MirHooks h;
@@ -27,8 +27,8 @@ std::vector<double> WaInterp::eval(
       return write_param(*cur, s, row);
     return false;
   };
-  h.fun = [this, &cur](const mir::Expr& e, DataMap::Entry* out) {
-    return rng_fun(*cur, e, out) || ode_fun(*cur, e, out);
+  h.fun = [this, &cur, &rng](const mir::Expr& e, DataMap::Entry* out) {
+    return rng_fun(*cur, e, out, rng) || ode_fun(*cur, e, out);
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
   cur = &in;
@@ -190,7 +190,8 @@ bool WaInterp::ode_fun(MirInterp<double>& in, const mir::Expr& e,
 }
 
 bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
-                       DataMap::Entry* out) {
+                       DataMap::Entry* out, WaRng& rng) {
+  boost::ecuyer1988& g = rng.gen();
   const std::string& f = e.name;
   if (f.size() < 5 || f.compare(f.size() - 4, 4, "_rng") != 0) return false;
   const std::string base = f.substr(0, f.size() - 4);
@@ -215,8 +216,8 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
       for (int64_t i = 0; i < K; ++i) sig(i, j) = S.r.at((size_t)(j * K + i));
     const Eigen::VectorXd draw =
         base == "multi_normal"
-            ? stan::math::multi_normal_rng(m, sig, rng_)
-            : stan::math::multi_normal_cholesky_rng(m, sig, rng_);
+            ? stan::math::multi_normal_rng(m, sig, g)
+            : stan::math::multi_normal_cholesky_rng(m, sig, g);
     out->dims = {K};
     for (int64_t i = 0; i < K; ++i) out->r.push_back(draw[i]);
     return true;
@@ -227,8 +228,8 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
     Eigen::VectorXd th((int64_t)av.at(0).r.size());
     for (size_t i = 0; i < av[0].r.size(); ++i) th[(int64_t)i] = av[0].r[i];
     const int k = base == "categorical"
-                      ? stan::math::categorical_rng(th, rng_)
-                      : stan::math::categorical_logit_rng(th, rng_);
+                      ? stan::math::categorical_rng(th, g)
+                      : stan::math::categorical_logit_rng(th, g);
     out->is_int = true;
     out->i = {k};
     out->r = {(double)k};
@@ -245,53 +246,53 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
     int vi = 0;
     bool iv = false;
     if (base == "normal") {
-      v = stan::math::normal_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::normal_rng(sc(0, i), sc(1, i), g);
     } else if (base == "std_normal") {
-      v = stan::math::std_normal_rng(rng_);
+      v = stan::math::std_normal_rng(g);
     } else if (base == "lognormal") {
-      v = stan::math::lognormal_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::lognormal_rng(sc(0, i), sc(1, i), g);
     } else if (base == "uniform") {
-      v = stan::math::uniform_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::uniform_rng(sc(0, i), sc(1, i), g);
     } else if (base == "gamma") {
-      v = stan::math::gamma_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::gamma_rng(sc(0, i), sc(1, i), g);
     } else if (base == "inv_gamma") {
-      v = stan::math::inv_gamma_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::inv_gamma_rng(sc(0, i), sc(1, i), g);
     } else if (base == "beta") {
-      v = stan::math::beta_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::beta_rng(sc(0, i), sc(1, i), g);
     } else if (base == "exponential") {
-      v = stan::math::exponential_rng(sc(0, i), rng_);
+      v = stan::math::exponential_rng(sc(0, i), g);
     } else if (base == "chi_square") {
-      v = stan::math::chi_square_rng(sc(0, i), rng_);
+      v = stan::math::chi_square_rng(sc(0, i), g);
     } else if (base == "cauchy") {
-      v = stan::math::cauchy_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::cauchy_rng(sc(0, i), sc(1, i), g);
     } else if (base == "double_exponential") {
-      v = stan::math::double_exponential_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::double_exponential_rng(sc(0, i), sc(1, i), g);
     } else if (base == "logistic") {
-      v = stan::math::logistic_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::logistic_rng(sc(0, i), sc(1, i), g);
     } else if (base == "student_t") {
-      v = stan::math::student_t_rng(sc(0, i), sc(1, i), sc(2, i), rng_);
+      v = stan::math::student_t_rng(sc(0, i), sc(1, i), sc(2, i), g);
     } else if (base == "weibull") {
-      v = stan::math::weibull_rng(sc(0, i), sc(1, i), rng_);
+      v = stan::math::weibull_rng(sc(0, i), sc(1, i), g);
     } else if (base == "bernoulli") {
-      vi = stan::math::bernoulli_rng(sc(0, i), rng_);
+      vi = stan::math::bernoulli_rng(sc(0, i), g);
       iv = true;
     } else if (base == "bernoulli_logit") {
-      vi = stan::math::bernoulli_logit_rng(sc(0, i), rng_);
+      vi = stan::math::bernoulli_logit_rng(sc(0, i), g);
       iv = true;
     } else if (base == "binomial") {
-      vi = stan::math::binomial_rng((int)sc(0, i), sc(1, i), rng_);
+      vi = stan::math::binomial_rng((int)sc(0, i), sc(1, i), g);
       iv = true;
     } else if (base == "poisson") {
-      vi = stan::math::poisson_rng(sc(0, i), rng_);
+      vi = stan::math::poisson_rng(sc(0, i), g);
       iv = true;
     } else if (base == "poisson_log") {
-      vi = stan::math::poisson_log_rng(sc(0, i), rng_);
+      vi = stan::math::poisson_log_rng(sc(0, i), g);
       iv = true;
     } else if (base == "neg_binomial_2") {
-      vi = stan::math::neg_binomial_2_rng(sc(0, i), sc(1, i), rng_);
+      vi = stan::math::neg_binomial_2_rng(sc(0, i), sc(1, i), g);
       iv = true;
     } else if (base == "neg_binomial_2_log") {
-      vi = stan::math::neg_binomial_2_log_rng(sc(0, i), sc(1, i), rng_);
+      vi = stan::math::neg_binomial_2_log_rng(sc(0, i), sc(1, i), g);
       iv = true;
     } else {
       return false;

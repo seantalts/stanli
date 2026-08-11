@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
       // machine-readable contract is already written.
       try {
         stanli::WaInterp& wi = *cm.write_array->interp;
-        wi.seed(1234);
+        stanli::WaRng rng(1234);
         std::map<std::string, stanli::DataMap::Entry> params;
         for (const auto& v : cm.views) {
           stanli::DataMap::Entry en;
@@ -179,7 +179,7 @@ int main(int argc, char** argv) {
             en.dims = {v.len};
           params[v.name] = std::move(en);
         }
-        const std::vector<double> row = wi.eval(params);
+        const std::vector<double> row = wi.eval(params, rng);
         int64_t bad = 0;
         for (double x : row)
           if (!std::isfinite(x)) ++bad;

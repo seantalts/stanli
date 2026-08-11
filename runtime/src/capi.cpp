@@ -37,13 +37,20 @@ struct stanli_model {
   std::shared_ptr<stanli::WaInterp> wa_interp;
   std::vector<std::string> wa_names;  // CSV order, flattened
   int64_t wa_n = 0;
+  // The stream stanli_wa_seed sets and stanli_wa_row draws from. This ABI
+  // names one stream per model, so the model holds it; callers wanting a
+  // stream per thread use WaInterp::eval directly with their own WaRng.
+  // Seeded rather than default-constructed so a caller who never calls
+  // stanli_wa_seed still gets the same rows every run.
+  stanli::WaRng wa_rng{1};
 };
 
 namespace {
 
 // One interpreted write_array row: the main executor's forward pass
 // supplies the constrained parameter values by name.
-std::vector<double> interp_wa_row(stanli_model& m, const double* q) {
+std::vector<double> interp_wa_row(stanli_model& m, const double* q,
+                                  stanli::WaRng& rng) {
   stanli::Executor& ex = *m.ex;
   std::memcpy(ex.params_data(), q, sizeof(double) * ex.n_params());
   ex.run_forward_only();
@@ -58,7 +65,7 @@ std::vector<double> interp_wa_row(stanli_model& m, const double* q) {
       en.dims = {v.len};
     params[v.name] = std::move(en);
   }
-  return m.wa_interp->eval(params);
+  return m.wa_interp->eval(params, rng);
 }
 
 // Same deterministic probe points as stanli_check: column discovery for
@@ -106,7 +113,11 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
           for (size_t i = 0; i < q.size(); ++i)
             q[i] = probe_point((int64_t)i, variant);
           try {
-            const auto row = interp_wa_row(*m, q.data());
+            // A scratch stream: discovery is the runtime probing the
+            // model, not a draw the caller asked for, so it must not
+            // advance the stream stanli_wa_seed names.
+            stanli::WaRng probe_rng(1);
+            const auto row = interp_wa_row(*m, q.data(), probe_rng);
             m->wa_n = (int64_t)row.size();
             m->wa_names =
                 stanli::CompiledModel::csv_names(m->wa_interp->columns());
@@ -484,14 +495,12 @@ const char* stanli_wa_column_name(const stanli_model* m, int64_t i) {
   return m->wa_names[(size_t)i].c_str();
 }
 
-void stanli_wa_seed(stanli_model* m, uint32_t seed) {
-  if (m->wa_interp) m->wa_interp->seed(seed);
-}
+void stanli_wa_seed(stanli_model* m, uint32_t seed) { m->wa_rng.seed(seed); }
 
 int stanli_wa_row(stanli_model* m, const double* q, double* out) {
   try {
     if (m->wa_interp) {
-      const auto row = interp_wa_row(*m, q);
+      const auto row = interp_wa_row(*m, q, m->wa_rng);
       if ((int64_t)row.size() != m->wa_n) return 1;
       std::memcpy(out, row.data(), sizeof(double) * (size_t)m->wa_n);
       return 0;
