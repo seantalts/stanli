@@ -635,10 +635,19 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  # npm, tag-gated like PyPI: npm-v* tags publish js/ through npm
-  # trusted publishing (OIDC, no token in secrets). The tag must agree
+  # npm, tag-gated like PyPI: npm-v* tags publish js/. The tag must agree
   # with js/package.json, and the artifacts are the same ones the wasm
   # job and the stancjs cache produced for this exact commit.
+  #
+  # Publishing needs ONE of these set up once, by hand, by someone signed
+  # in to the npm account -- neither can be done from this repository:
+  #   - a trusted publisher on npmjs.com for @seantalts/stanli (GitHub
+  #     Actions, repo seantalts/stanli, workflow wheels.yml, environment
+  #     npm), which is the tokenless path and attaches provenance; or
+  #   - a granular access token with publish rights on that package,
+  #     stored as the NPM_TOKEN repository secret.
+  # Until one exists every npm-v* tag fails here with a 404 on PUT, which
+  # is what the registry returns for "not allowed", not "not there".
   npm-publish:
     if: startsWith(github.ref, 'refs/tags/npm-v')
     needs: wasm
@@ -694,12 +703,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
 
+      # Trusted publishing exchanges the Actions OIDC token for a
+      # short-lived registry credential, and npm only learned how in
+      # 11.5.1. Whatever npm ships with the runner's Node is not a
+      # version this job should depend on.
+      - name: An npm that can do trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      # Two ways to authenticate, and the registry accepts exactly one of
+      # them per repository, so pick by what is configured rather than
+      # assuming. With NPM_TOKEN set this is an ordinary token publish.
+      # Without it, .npmrc must carry NO auth line at all: setup-node's
+      # registry-url writes a placeholder token, npm sends that instead of
+      # authenticating, and the registry answers 404 on a package that
+      # plainly exists -- which is what every npm-v* tag has done so far.
       - name: Publish
         run: |
           ls -la js/
-          cd js && npm publish
+          cd js
+          if [ -n "$NPM_TOKEN" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          else
+            echo "no NPM_TOKEN; publishing via trusted publishing (OIDC)"
+          fi
+          npm publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # The R package's distribution channel. CRAN carries the R code and the
   # 40 KB bridge; the 16 MB runtime it dlopens comes from here, which is
