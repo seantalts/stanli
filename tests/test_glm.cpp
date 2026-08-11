@@ -3,16 +3,80 @@
 #include "models.hpp"
 
 #include <stan/math.hpp>
+#include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
 static int failures = 0;
 static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
+  if (got != want && !(std::isnan(got) && std::isnan(want))) {
     ++failures;
     std::printf("FAIL %-16s got %.17g want %.17g\n", what.c_str(), got, want);
   }
+}
+
+// The three direct GLM kernels do not pass through the generated scalar
+// density wrappers. Empty outcomes return zero before Stan Math builds a
+// propagator, so each must still preserve the returned value and disconnected
+// topology through its own recorder call.
+static void check_empty_glm(uint16_t opcode, const std::string& name) {
+  using namespace stanli;
+  using stan::math::var;
+  constexpr int K = 2;
+
+  Graph g;
+  const int X_slot = g.add_slot(0, false);
+  const int alpha_slot = g.add_slot(1, true);
+  const int beta_slot = g.add_slot(K, true);
+  const bool has_phi = opcode == OP_NEG_BINOMIAL_2_LOG_GLM_LPMF;
+  const int phi_slot = has_phi ? g.add_slot(1, true) : -1;
+  const int infinity_slot = g.add_slot(1, false);
+  const int lp_slot = g.add_slot(1, false);
+  const int scaled_slot = g.add_slot(1, false);
+  if (has_phi) {
+    g.add_op(opcode, {X_slot, alpha_slot, beta_slot, phi_slot}, lp_slot,
+             {0, K});
+  } else {
+    g.add_op(opcode, {X_slot, alpha_slot, beta_slot}, lp_slot, {0, K});
+  }
+  g.add_op(OP_MUL, {lp_slot, infinity_slot}, scaled_slot);
+  g.result_slot = scaled_slot;
+
+  Executor ex(std::move(g));
+  ex.value_ptr(infinity_slot)[0] = std::numeric_limits<double>::infinity();
+  ex.params_data()[0] = 0.4;
+  ex.params_data()[1] = -0.3;
+  ex.params_data()[2] = 0.8;
+  if (has_phi) ex.params_data()[3] = 1.7;
+  std::vector<double> grad(has_phi ? 4 : 3, 0.0);
+  const double value = ex.gradient(grad.data());
+
+  const std::vector<int> y;
+  const Eigen::Matrix<double, -1, -1> X(0, K);
+  var alpha = 0.4;
+  Eigen::Matrix<var, -1, 1> beta(K);
+  beta << -0.3, 0.8;
+  var phi = 1.7;
+  var lp_ref;
+  if (opcode == OP_BERNOULLI_LOGIT_GLM_LPMF) {
+    lp_ref = stan::math::bernoulli_logit_glm_lpmf<false>(y, X, alpha, beta);
+  } else if (opcode == OP_POISSON_LOG_GLM_LPMF) {
+    lp_ref = stan::math::poisson_log_glm_lpmf<false>(y, X, alpha, beta);
+  } else {
+    lp_ref =
+        stan::math::neg_binomial_2_log_glm_lpmf<false>(y, X, alpha, beta, phi);
+  }
+  var value_ref = lp_ref * std::numeric_limits<double>::infinity();
+  value_ref.grad();
+  expect_eq(name + " empty value", value, value_ref.val());
+  expect_eq(name + " empty alpha", grad[0], alpha.adj());
+  for (int k = 0; k < K; ++k)
+    expect_eq(name + " empty beta" + std::to_string(k), grad[1 + k],
+              beta(k).adj());
+  if (has_phi) expect_eq(name + " empty phi", grad[3], phi.adj());
+  stan::math::recover_memory();
 }
 
 static void reference(const double* q, double* lp_out, double* grad_out) {
@@ -69,6 +133,10 @@ int main() {
     for (int i = 0; i < NP; ++i)
       expect_eq(tag + " g" + std::to_string(i), grad[i], grad_ref[i]);
   }
+
+  check_empty_glm(OP_BERNOULLI_LOGIT_GLM_LPMF, "bernoulli_logit_glm");
+  check_empty_glm(OP_POISSON_LOG_GLM_LPMF, "poisson_log_glm");
+  check_empty_glm(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF, "neg_binomial_2_log_glm");
 
   if (failures == 0) std::printf("test_glm OK\n");
   return failures == 0 ? 0 : 1;

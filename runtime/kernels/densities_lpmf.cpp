@@ -41,31 +41,35 @@ int int_group_elem(const int* p, int64_t n) {
 const int* int_group_next(const int* p) {
   return p + (p[0] == -1 ? 2 : 1 + p[0]);
 }
-#define STANLI_BINOMIAL_FWD(fname, dist)                                       \
-  void fname(KernelCtx& ctx) {                                                 \
-    if (ctx.variant & 0x40u) {                                                 \
-      const int* g1 = ctx.idata;                                               \
-      const int* g2 = int_group_next(g1);                                      \
-      density_fwd_elt<1, 3>(                                                   \
-          ctx,                                                                 \
-          [&](int64_t n, const auto& theta) {                                  \
-            stan::math::dist<true>(int_group_elem(g1, n),                      \
-                                   int_group_elem(g2, n), theta);              \
-          },                                                                   \
-          [&](int64_t n, const auto& theta) {                                  \
-            stan::math::dist<false>(int_group_elem(g1, n),                     \
-                                    int_group_elem(g2, n), theta);             \
-          });                                                                  \
-      return;                                                                  \
-    }                                                                          \
-    with_int_group(ctx.idata, [&](const auto& n, const int* rest) {            \
-      with_int_group(rest, [&](const auto& N, const int*) {                    \
-        density_fwd_v<1, 3>(                                                   \
-            ctx,                                                               \
-            [&](const auto& theta) { stan::math::dist<true>(n, N, theta); },   \
-            [&](const auto& theta) { stan::math::dist<false>(n, N, theta); }); \
-      });                                                                      \
-    });                                                                        \
+#define STANLI_BINOMIAL_FWD(fname, dist)                                  \
+  void fname(KernelCtx& ctx) {                                            \
+    if (ctx.variant & 0x40u) {                                            \
+      const int* g1 = ctx.idata;                                          \
+      const int* g2 = int_group_next(g1);                                 \
+      density_fwd_elt<1, 3>(                                              \
+          ctx,                                                            \
+          [&](int64_t n, const auto& theta) {                             \
+            return stan::math::dist<true>(int_group_elem(g1, n),          \
+                                          int_group_elem(g2, n), theta);  \
+          },                                                              \
+          [&](int64_t n, const auto& theta) {                             \
+            return stan::math::dist<false>(int_group_elem(g1, n),         \
+                                           int_group_elem(g2, n), theta); \
+          });                                                             \
+      return;                                                             \
+    }                                                                     \
+    with_int_group(ctx.idata, [&](const auto& n, const int* rest) {       \
+      with_int_group(rest, [&](const auto& N, const int*) {               \
+        density_fwd_v<1, 3>(                                              \
+            ctx,                                                          \
+            [&](const auto& theta) {                                      \
+              return stan::math::dist<true>(n, N, theta);                 \
+            },                                                            \
+            [&](const auto& theta) {                                      \
+              return stan::math::dist<false>(n, N, theta);                \
+            });                                                           \
+      });                                                                 \
+    });                                                                   \
   }
 
 STANLI_BINOMIAL_FWD(binomial_fwd, binomial_lpmf)
@@ -81,10 +85,10 @@ void beta_binomial_fwd(KernelCtx& ctx) {
       density_fwd_sum<2, density_tier(2), 0>(
           ctx,
           [&](const auto&... a) {
-            stan::math::beta_binomial_lpmf<true>(n, N, a...);
+            return stan::math::beta_binomial_lpmf<true>(n, N, a...);
           },
           [&](const auto&... a) {
-            stan::math::beta_binomial_lpmf<false>(n, N, a...);
+            return stan::math::beta_binomial_lpmf<false>(n, N, a...);
           });
     });
   });

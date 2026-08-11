@@ -20,19 +20,18 @@ void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
   sink s = sink_for_args(ctx, 3);
   if (ctx.in[1].len != 1)
     throw std::runtime_error("glm: vector alpha unsupported");
-  active_sink() = &s;
+  sink_scope active(s);
   // beta is a vector regardless of its length; alpha scalar. Honour the
   // propto bit: bernoulli has no constant to drop, so the two forms agree
   // here, but hardcoding one is what made poisson_log_glm's lp land
   // sum(log(y!)) away from CmdStan's.
-  if (ctx.variant & 0x80u) {
-    stan::math::bernoulli_logit_glm_lpmf<true>(y, X, rvar(ctx.in[1].data[0]),
-                                               as_rvar(ctx.in[2]));
-  } else {
-    stan::math::bernoulli_logit_glm_lpmf<false>(y, X, rvar(ctx.in[1].data[0]),
-                                                as_rvar(ctx.in[2]));
-  }
-  active_sink() = nullptr;
+  record_probability_call([&] {
+    if (ctx.variant & 0x80u)
+      return stan::math::bernoulli_logit_glm_lpmf<true>(
+          y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
+    return stan::math::bernoulli_logit_glm_lpmf<false>(
+        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
+  });
   ctx.out.data[0] = s.value;
 }
 // Edge order (x, alpha, beta): X data (edge 0 skipped by null adjoint),
@@ -52,17 +51,16 @@ void poisson_log_glm_fwd(KernelCtx& ctx) {
   sink s = sink_for_args(ctx, 3);
   if (ctx.in[1].len != 1)
     throw std::runtime_error("poisson_log_glm: vector alpha unsupported");
-  active_sink() = &s;
+  sink_scope active(s);
   // propto drops -lgamma(y+1), which is constant in the parameters but is
   // 10.45 on a six-observation test -- a constant offset, not noise.
-  if (ctx.variant & 0x80u) {
-    stan::math::poisson_log_glm_lpmf<true>(y, X, rvar(ctx.in[1].data[0]),
-                                           as_rvar(ctx.in[2]));
-  } else {
-    stan::math::poisson_log_glm_lpmf<false>(y, X, rvar(ctx.in[1].data[0]),
-                                            as_rvar(ctx.in[2]));
-  }
-  active_sink() = nullptr;
+  record_probability_call([&] {
+    if (ctx.variant & 0x80u)
+      return stan::math::poisson_log_glm_lpmf<true>(
+          y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
+    return stan::math::poisson_log_glm_lpmf<false>(
+        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]));
+  });
   ctx.out.data[0] = s.value;
 }
 
@@ -78,25 +76,24 @@ void neg_binomial_2_log_glm_fwd(KernelCtx& ctx) {
   if (ctx.in[1].len != 1)
     throw std::runtime_error(
         "neg_binomial_2_log_glm: vector alpha unsupported");
-  active_sink() = &s;
+  sink_scope active(s);
   const bool propto = (ctx.variant & 0x80u) != 0;
-  if (ctx.in[3].len == 1) {
-    const rvar phi(ctx.in[3].data[0]);
-    if (propto) {
-      stan::math::neg_binomial_2_log_glm_lpmf<true>(
-          y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), phi);
-    } else {
-      stan::math::neg_binomial_2_log_glm_lpmf<false>(
+  record_probability_call([&] {
+    if (ctx.in[3].len == 1) {
+      const rvar phi(ctx.in[3].data[0]);
+      if (propto)
+        return stan::math::neg_binomial_2_log_glm_lpmf<true>(
+            y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), phi);
+      return stan::math::neg_binomial_2_log_glm_lpmf<false>(
           y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), phi);
     }
-  } else if (propto) {
-    stan::math::neg_binomial_2_log_glm_lpmf<true>(
+    if (propto)
+      return stan::math::neg_binomial_2_log_glm_lpmf<true>(
+          y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]),
+          as_rvar(ctx.in[3]));
+    return stan::math::neg_binomial_2_log_glm_lpmf<false>(
         y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), as_rvar(ctx.in[3]));
-  } else {
-    stan::math::neg_binomial_2_log_glm_lpmf<false>(
-        y, X, rvar(ctx.in[1].data[0]), as_rvar(ctx.in[2]), as_rvar(ctx.in[3]));
-  }
-  active_sink() = nullptr;
+  });
   ctx.out.data[0] = s.value;
 }
 

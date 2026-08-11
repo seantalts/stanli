@@ -58,16 +58,16 @@ auto call_with(F&& f, const T* a) {
 
 // The same, promoting doubles to the recording scalar on the way in.
 template <int Arity, typename F>
-void call_rvar(F&& f, const double* a) {
+auto call_rvar(F&& f, const double* a) {
   static_assert(Arity >= 1 && Arity <= 4, "density arity out of range");
   if constexpr (Arity == 1) {
-    f(rvar(a[0]));
+    return f(rvar(a[0]));
   } else if constexpr (Arity == 2) {
-    f(rvar(a[0]), rvar(a[1]));
+    return f(rvar(a[0]), rvar(a[1]));
   } else if constexpr (Arity == 3) {
-    f(rvar(a[0]), rvar(a[1]), rvar(a[2]));
+    return f(rvar(a[0]), rvar(a[1]), rvar(a[2]));
   } else {
-    f(rvar(a[0]), rvar(a[1]), rvar(a[2]), rvar(a[3]));
+    return f(rvar(a[0]), rvar(a[1]), rvar(a[2]), rvar(a[3]));
   }
 }
 
@@ -113,23 +113,28 @@ template double program_density<double>(int, const double*);
 template stan::math::var program_density<stan::math::var>(
     int, const stan::math::var*);
 
-void program_density_partials(int id, const double* args, double* partials) {
+bool program_density_partials(int id, const double* args, double* partials) {
   const int n = program_density_arity(id);
   sink s;
-  for (int k = 0; k < n; ++k) s.buf[k] = &partials[k];
-  active_sink() = &s;
+  for (int k = 0; k < n; ++k) {
+    s.buf[k] = &partials[k];
+    s.len[k] = 1;
+  }
+  sink_scope active(s);
   switch (id) {
-#define STANLI_PD_PARTIALS(opc, fn, arity, tier)                            \
-  case kId_##fn:                                                            \
-    call_rvar<arity>([](const auto&... x) { stan::math::fn<false>(x...); }, \
-                     args);                                                 \
+#define STANLI_PD_PARTIALS(opc, fn, arity, tier)                               \
+  case kId_##fn:                                                               \
+    record_probability_call([&] {                                              \
+      return call_rvar<arity>(                                                 \
+          [](const auto&... x) { return stan::math::fn<false>(x...); }, args); \
+    });                                                                        \
     break;
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_PARTIALS)
 #undef STANLI_PD_PARTIALS
     default:
       break;
   }
-  active_sink() = nullptr;
+  return s.deposited;
 }
 
 }  // namespace stanli

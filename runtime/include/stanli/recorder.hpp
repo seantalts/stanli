@@ -24,9 +24,12 @@
 #include <stan/math/prim/functor/partials_propagator.hpp>
 #include <stan/math/prim/functor/broadcast_array.hpp>
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <ostream>
 #include <type_traits>
+#include <utility>
 
 namespace stanli {
 
@@ -69,18 +72,61 @@ inline Eigen::Map<const Eigen::Matrix<rvar, -1, 1>> as_rvar(const Desc& d) {
 }
 
 // Where build() deposits partials: one buffer per propagator edge, in
-// operand order. A null buf skips that edge's copy-out (its length is still
-// reported). The executor points these at per-op scratch.
+// operand order. A null buf skips that edge's copy-out. len is the configured
+// buffer width; it lets a probability function that returns before build()
+// explicitly record a zero pullback. The executor points these at per-op
+// scratch.
 struct sink {
   static constexpr int kMaxEdges = 8;
   double* buf[kMaxEdges]{};
-  int len[kMaxEdges]{};
+  int64_t len[kMaxEdges]{};
   double value{0};
+  bool deposited{false};
+  // Optional forward-to-reverse topology bit: 1 when build() created edges,
+  // 0 when the probability function returned a disconnected scalar.
+  double* connected{nullptr};
 };
 
 inline sink*& active_sink() {
   static thread_local sink* s = nullptr;
   return s;
+}
+
+// Recorder calls can throw on invalid domains. Restore the preceding
+// thread-local sink on every exit so nested or subsequent calls never see a
+// pointer to a dead stack object.
+class sink_scope {
+ public:
+  explicit sink_scope(sink& current) : previous_(active_sink()) {
+    active_sink() = &current;
+  }
+  ~sink_scope() { active_sink() = previous_; }
+  sink_scope(const sink_scope&) = delete;
+  sink_scope& operator=(const sink_scope&) = delete;
+
+ private:
+  sink* previous_;
+};
+
+inline double recorded_value(double value) { return value; }
+inline double recorded_value(const rvar& value) { return value.val(); }
+
+// Some Stan Math probability functions return a constant (typically
+// LOG_ZERO or zero for an empty input) before constructing their partials
+// propagator. Capture the function's return as well as build(): when build()
+// did not deposit, the return is the value and every partial is zero.
+template <typename F>
+inline void record_probability_call(F&& f) {
+  sink* s = active_sink();
+  if (s != nullptr) s->deposited = false;
+  const auto result = std::forward<F>(f)();
+  if (s == nullptr) return;
+  if (s->connected != nullptr) *s->connected = s->deposited ? 1.0 : 0.0;
+  if (s->deposited) return;
+  s->value = recorded_value(result);
+  for (int k = 0; k < sink::kMaxEdges; ++k)
+    if (s->buf[k] != nullptr)
+      std::fill_n(s->buf[k], static_cast<std::size_t>(s->len[k]), 0.0);
 }
 
 }  // namespace stanli
@@ -202,6 +248,7 @@ class partials_propagator<stanli::rvar, void, Ops...> {
   stanli::rvar build(double value) {
     stanli::sink* s = stanli::active_sink();
     if (s != nullptr) {
+      s->deposited = true;
       s->value = value;
       emit_all(s, std::index_sequence_for<Ops...>{});
     }
@@ -213,10 +260,7 @@ class partials_propagator<stanli::rvar, void, Ops...> {
   void emit_one(stanli::sink* s) {
     using E = std::tuple_element_t<I, decltype(edges_)>;
     if constexpr (rt_has_emit<E>::value) {
-      s->len[I] = std::get<I>(edges_).size();
       if (s->buf[I] != nullptr) std::get<I>(edges_).emit(s->buf[I]);
-    } else {
-      s->len[I] = 0;  // data operand: no partials
     }
   }
 

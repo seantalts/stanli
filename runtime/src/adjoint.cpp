@@ -719,12 +719,12 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         const int ar = program_density_arity(I.len);
         double part[kMaxDensityArgs] = {0, 0, 0, 0};
         if (ar > 3) {
-          program_density_partials(I.len, val + I.va, part);
-          for (int k = ar; k-- > 0;) adj[I.a + k] += t * part[k];
+          if (program_density_partials(I.len, val + I.va, part))
+            for (int k = ar; k-- > 0;) adj[I.a + k] += t * part[k];
           break;
         }
         const double args[3] = {val[I.va], val[I.vb], val[I.vc]};
-        program_density_partials(I.len, args, part);
+        if (!program_density_partials(I.len, args, part)) break;
         if (ar > 2) adj[I.c] += t * part[2];
         if (ar > 1) adj[I.b] += t * part[1];
         adj[I.a] += t * part[0];

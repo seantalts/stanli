@@ -13,6 +13,7 @@
 // contiguous register ranges the reductions depend on.
 #include <stanli/adjoint.hpp>
 #include <stanli/program_density.hpp>
+#include <stanli/recorder.hpp>
 #include <stanli/island.hpp>
 #include <stanli/program.hpp>
 
@@ -603,6 +604,51 @@ static void test_densities() {
   }
 }
 
+// Stan Math can return a constant support value before constructing its
+// partials propagator. The register-program API promises to fill every
+// partial, so it must write zeros rather than leave the caller's old values.
+static void test_density_early_return_partials() {
+  const int id = program_density_id_by_name("inv_gamma_lpdf");
+  expect("inv_gamma density id", id >= 0);
+  const double args[3] = {-1.0, 2.0, 3.0};
+  expect("inv_gamma early value", program_density<double>(id, args) ==
+                                      -std::numeric_limits<double>::infinity());
+  double partials[3] = {4.0, 5.0, 6.0};
+  expect("inv_gamma early disconnected",
+         !program_density_partials(id, args, partials));
+  for (double partial : partials)
+    expect("inv_gamma early partial", partial == 0.0);
+
+  // The var replay has no edge from an early-return literal to its inputs.
+  // An infinite upstream adjoint must therefore be skipped, not multiplied
+  // by a stored zero partial.
+  Build b({-1.0, 2.0, 3.0});
+  const int density = b.emit_density(id, {0, 1, 2});
+  const int squared = b.emit(Program::SQUARE, density);
+  check("inv_gamma disconnected", b.done({squared}, {1.0}));
+
+  // A built zero partial stays connected. Native reverse must retain the
+  // same indeterminate inf * 0 adjoint as the var replay.
+  Build connected({1.0, 2.0, 3.0});
+  const int connected_density = connected.emit_density(id, {0, 1, 2});
+  const int infinity = connected.konst(std::numeric_limits<double>::infinity());
+  const int scaled = connected.emit(Program::MUL, connected_density, infinity);
+  check("inv_gamma connected zero partial", connected.done({scaled}, {1.0}));
+
+  // Restoring the thread-local sink on exceptions is part of making the
+  // shared recorder compositional: one rejected evaluation must not leave a
+  // dangling pointer for the next density call.
+  const double bad_domain[3] = {1.0, -2.0, 3.0};
+  bool threw = false;
+  try {
+    program_density_partials(id, bad_domain, partials);
+  } catch (const std::domain_error&) {
+    threw = true;
+  }
+  expect("inv_gamma invalid alpha throws", threw);
+  expect("density exception restores sink", active_sink() == nullptr);
+}
+
 // ---- a composite region ------------------------------------------------
 
 // The shape the carver actually sees: an unrolled recurrence, each step
@@ -814,6 +860,7 @@ int main() {
   test_nan_operands();
   test_reductions();
   test_densities();
+  test_density_early_return_partials();
   test_recurrence();
   test_two_gradients();
   test_fuzz();

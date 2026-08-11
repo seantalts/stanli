@@ -63,7 +63,10 @@ extern template stan::math::var program_density<stan::math::var>(
 // in doubles through the recorder scalar (recorder.hpp), with no tape.
 // `partials` receives one double per argument. Nothing here differentiates
 // a density by hand.
-void program_density_partials(int id, const double* args, double* partials);
+// Returns whether Stan Math built a dependency edge. A constant early return
+// fills zero partials and returns false so reverse mode can skip, rather than
+// form an indeterminate infinite-adjoint-times-zero product.
+bool program_density_partials(int id, const double* args, double* partials);
 
 }  // namespace stanli
 

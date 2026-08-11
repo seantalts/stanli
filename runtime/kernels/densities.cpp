@@ -19,14 +19,8 @@ void register_density_kernels() {
       code, Kernel{fn##_fwd_gen, density_bwd<nreal>, density_scratch<nreal>});
   STANLI_INT_DENSITY_LIST(STANLI_REGISTER_INT_DENSITY)
 #undef STANLI_REGISTER_INT_DENSITY
-  // The list is the default. A density whose forward needs more than the
-  // shared one registers after it and wins: uniform_lpdf has to decide
-  // support itself, because stan-math returns LOG_ZERO out of support
-  // through an early return that never reaches the partials sink, and the
-  // recorder would leave the value at 0 (CmdStan -inf, stanli finite --
-  // caught by the dogs_log reference).
-  register_kernel(OP_UNIFORM_LPDF,
-                  Kernel{uniform_fwd, density_bwd<3>, density_scratch<3>});
+  // The list is the default. A density whose forward needs a genuinely
+  // different argument shape registers after it and wins.
   register_kernel(OP_POISSON_LOG_LPMF,
                   Kernel{poisson_log_fwd, density_bwd<1>, density_scratch<1>});
   register_kernel(
@@ -44,15 +38,15 @@ void register_density_kernels() {
   register_kernel(
       OP_BINOMIAL_LOGIT_LPMF,
       Kernel{binomial_logit_fwd, density_bwd<1>, density_scratch<1>});
-  register_kernel(
-      OP_BERNOULLI_LOGIT_GLM_LPMF,
-      Kernel{bernoulli_logit_glm_fwd, bernoulli_logit_glm_bwd, sum_in_lens});
+  register_kernel(OP_BERNOULLI_LOGIT_GLM_LPMF,
+                  Kernel{bernoulli_logit_glm_fwd, bernoulli_logit_glm_bwd,
+                         density_scratch<3>});
   register_kernel(
       OP_POISSON_LOG_GLM_LPMF,
-      Kernel{poisson_log_glm_fwd, poisson_log_glm_bwd, sum_in_lens});
+      Kernel{poisson_log_glm_fwd, poisson_log_glm_bwd, density_scratch<3>});
   register_kernel(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF,
                   Kernel{neg_binomial_2_log_glm_fwd, neg_binomial_2_log_glm_bwd,
-                         sum_in_lens});
+                         density_scratch<4>});
   register_kernel(
       OP_BETA_BINOMIAL_LPMF,
       Kernel{beta_binomial_fwd, density_bwd<2>, density_scratch<2>});

@@ -21,6 +21,12 @@ static void expect_eq(const std::string& what, double got, double want) {
     std::printf("FAIL %-32s got %.17g want %.17g\n", what.c_str(), got, want);
   }
 }
+static void expect_nan(const std::string& what, double got, double want) {
+  if (!std::isnan(got) || !std::isnan(want)) {
+    ++failures;
+    std::printf("FAIL %-32s got %.17g want %.17g\n", what.c_str(), got, want);
+  }
+}
 // For comparisons across different instantiation activity. Kernels bind every
 // argument as rvar; a reference with data (double) arguments makes stan-math
 // take different to_ref_if caching paths, which reassociates shared
@@ -171,8 +177,8 @@ int main() {
 
   // ---- uniform_lpdf out of support: -inf, no partials --------------------
   // stan-math reports out-of-support y through an early return that never
-  // reaches the partials sink, so the kernel checks support itself. Found
-  // by the dogs_log reference: CmdStan said -inf, stanli said finite.
+  // reaches the partials sink. This was the first instance caught by the
+  // dogs_log reference: CmdStan said -inf while stanli said finite.
   {
     auto r = testutil::run_one_op(OP_UNIFORM_LPDF, {{0.1}, {-100.0}, {0.0}},
                                   {true, false, false});
@@ -187,6 +193,192 @@ int main() {
     expect_eq("uniform in value", r2.value, lp.val());
     expect_eq("uniform in dy", r2.grad[0], vy.adj());
     stan::math::recover_memory();
+  }
+
+  // ---- inv_gamma_lpdf early return: -inf, no partials ------------------
+  // Stan Math returns LOG_ZERO before building its partials propagator when
+  // any y is nonpositive. The returned value and zero pullback are both part
+  // of the contract: a recorder cannot infer them from a build() call that
+  // never happens.
+  {
+    Graph g;
+    const int y = g.add_slot(1, true);
+    const int alpha = g.add_slot(1, false);
+    const int beta = g.add_slot(1, false);
+    const int lp_slot = g.add_slot(1, false);
+    g.add_op(OP_INV_GAMMA_LPDF, {y, alpha, beta}, lp_slot);
+    g.result_slot = lp_slot;
+    Executor ex(std::move(g));
+    ex.value_ptr(alpha)[0] = 2.0;
+    ex.value_ptr(beta)[0] = 3.0;
+
+    // Seed the density scratch with a real derivative, then cross support.
+    // The second call must not reuse either the value or that derivative.
+    ex.params_data()[0] = 1.5;
+    double grad = 0;
+    const double valid = ex.gradient(&grad);
+    var vy = 1.5;
+    var valid_ref = stan::math::inv_gamma_lpdf<false>(vy, 2.0, 3.0);
+    valid_ref.grad();
+    expect_eq("inv_gamma valid value", valid, valid_ref.val());
+    expect_eq("inv_gamma valid dy", grad, vy.adj());
+    stan::math::recover_memory();
+
+    ex.params_data()[0] = -1.0;
+    grad = std::numeric_limits<double>::quiet_NaN();
+    const double invalid = ex.gradient(&grad);
+    var bad_y = -1.0;
+    var invalid_ref = stan::math::inv_gamma_lpdf<false>(bad_y, 2.0, 3.0);
+    invalid_ref.grad();
+    expect_eq("inv_gamma oos value", invalid, invalid_ref.val());
+    expect_eq("inv_gamma oos dy", grad, bad_y.adj());
+    stan::math::recover_memory();
+  }
+
+  // A vector call returns one LOG_ZERO for the whole density. This is the
+  // non-rerolled shape lowering emits for a vectorized sampling statement.
+  {
+    const std::vector<double> yv{1.5, -1.0, 2.25};
+    auto r = testutil::run_one_op(OP_INV_GAMMA_LPDF, {yv, {2.0}, {3.0}},
+                                  {true, false, false});
+    Eigen::Matrix<var, -1, 1> y_ref(3);
+    for (int i = 0; i < 3; ++i) y_ref(i) = yv[(size_t)i];
+    var lp_ref = stan::math::inv_gamma_lpdf<false>(y_ref, 2.0, 3.0);
+    lp_ref.grad();
+    expect_eq("inv_gamma vector value", r.value, lp_ref.val());
+    for (int i = 0; i < 3; ++i)
+      expect_eq("inv_gamma vector dy" + std::to_string(i), r.grad[(size_t)i],
+                y_ref(i).adj());
+    stan::math::recover_memory();
+  }
+
+  // A literal early return is disconnected, not merely an edge whose local
+  // derivative happens to be zero. Squaring -inf sends an infinite adjoint
+  // toward the density; Stan leaves y untouched rather than forming inf * 0.
+  {
+    Graph g;
+    const int y = g.add_slot(1, true);
+    const int alpha = g.add_slot(1, false);
+    const int beta = g.add_slot(1, false);
+    const int lp_slot = g.add_slot(1, false);
+    const int squared = g.add_slot(1, false);
+    g.add_op(OP_INV_GAMMA_LPDF, {y, alpha, beta}, lp_slot);
+    g.add_op(OP_SQUARE, {lp_slot}, squared);
+    g.result_slot = squared;
+    Executor ex(std::move(g));
+    ex.value_ptr(alpha)[0] = 2.0;
+    ex.value_ptr(beta)[0] = 3.0;
+    ex.params_data()[0] = -1.0;
+    double grad = std::numeric_limits<double>::quiet_NaN();
+    const double value = ex.gradient(&grad);
+
+    var y_ref = -1.0;
+    var lp_ref = stan::math::inv_gamma_lpdf<false>(y_ref, 2.0, 3.0);
+    var value_ref = stan::math::square(lp_ref);
+    value_ref.grad();
+    expect_eq("inv_gamma disconnected value", value, value_ref.val());
+    expect_eq("inv_gamma disconnected dy", grad, y_ref.adj());
+    stan::math::recover_memory();
+  }
+
+  // Conversely, a normal build remains connected even when its local
+  // derivative happens to be zero. At y=beta/(alpha+1), inv_gamma's d/dy is
+  // exactly zero; an infinite upstream adjoint therefore produces NaN on
+  // both Stan's edge and the Graph edge. The connectivity flag must not
+  // suppress that multiplication.
+  {
+    Graph g;
+    const int y = g.add_slot(1, true);
+    const int alpha = g.add_slot(1, false);
+    const int beta = g.add_slot(1, false);
+    const int infinity = g.add_slot(1, false);
+    const int lp_slot = g.add_slot(1, false);
+    const int scaled = g.add_slot(1, false);
+    g.add_op(OP_INV_GAMMA_LPDF, {y, alpha, beta}, lp_slot);
+    g.add_op(OP_MUL, {lp_slot, infinity}, scaled);
+    g.result_slot = scaled;
+    Executor ex(std::move(g));
+    ex.value_ptr(alpha)[0] = 2.0;
+    ex.value_ptr(beta)[0] = 3.0;
+    ex.value_ptr(infinity)[0] = std::numeric_limits<double>::infinity();
+    ex.params_data()[0] = 1.0;
+    double grad = 0;
+    const double value = ex.gradient(&grad);
+
+    var y_ref = 1.0;
+    var lp_ref = stan::math::inv_gamma_lpdf<false>(y_ref, 2.0, 3.0);
+    var value_ref = lp_ref * std::numeric_limits<double>::infinity();
+    value_ref.grad();
+    expect_eq("inv_gamma connected value", value, value_ref.val());
+    expect_nan("inv_gamma connected dy", grad, y_ref.adj());
+    stan::math::recover_memory();
+  }
+
+  // The fused elementwise kernel reuses one sink across lanes. An invalid
+  // lane between valid lanes must record LOG_ZERO and zero only its own
+  // partial, without inheriting the preceding lane's value.
+  {
+    const std::vector<double> yv{1.5, -1.0, 2.25};
+    const EltRun r =
+        run_elt_fused(OP_INV_GAMMA_LPDF, 0x01, 3, {yv, {2.0}, {3.0}},
+                      {true, false, false}, {});
+    double total = 0;
+    for (int i = 0; i < 3; ++i) {
+      var y_ref = yv[(size_t)i];
+      var lp_ref = stan::math::inv_gamma_lpdf<false>(y_ref, 2.0, 3.0);
+      lp_ref.grad();
+      total += lp_ref.val();
+      expect_eq("inv_gamma elt value" + std::to_string(i), r.out[(size_t)i],
+                lp_ref.val());
+      expect_eq("inv_gamma elt dy" + std::to_string(i), r.grad[(size_t)i],
+                y_ref.adj());
+      stan::math::recover_memory();
+    }
+    expect_eq("inv_gamma elt sum", r.value, total);
+  }
+
+  // Connectivity is per lane in the fused form: only the invalid lane is
+  // disconnected when downstream arithmetic sends it an infinite adjoint.
+  {
+    const std::vector<double> yv{1.5, -1.0, 2.25};
+    Graph g;
+    const int y = g.add_slot(3, true);
+    const int alpha = g.add_slot(1, false);
+    const int beta = g.add_slot(1, false);
+    const int lp = g.add_slot(3, false);
+    const int squared = g.add_slot(3, false);
+    const int total = g.add_slot(1, false);
+    Op density;
+    density.opcode = OP_INV_GAMMA_LPDF;
+    density.variant = 0x41;
+    density.out = lp;
+    density.in[0] = y;
+    density.in[1] = alpha;
+    density.in[2] = beta;
+    density.n_in = 3;
+    g.ops.push_back(density);
+    g.add_op(OP_SQUARE, {lp}, squared);
+    g.add_op(OP_SUM_VEC, {squared}, total);
+    g.result_slot = total;
+    Executor ex(std::move(g));
+    ex.value_ptr(alpha)[0] = 2.0;
+    ex.value_ptr(beta)[0] = 3.0;
+    for (int i = 0; i < 3; ++i) ex.params_data()[i] = yv[(size_t)i];
+    double grad[3] = {0, 0, 0};
+    const double value = ex.gradient(grad);
+
+    double value_ref = 0;
+    for (int i = 0; i < 3; ++i) {
+      var y_ref = yv[(size_t)i];
+      var lp_ref = stan::math::inv_gamma_lpdf<false>(y_ref, 2.0, 3.0);
+      var squared_ref = stan::math::square(lp_ref);
+      squared_ref.grad();
+      value_ref += squared_ref.val();
+      expect_eq("inv_gamma elt disconnected dy" + std::to_string(i), grad[i],
+                y_ref.adj());
+      stan::math::recover_memory();
+    }
+    expect_eq("inv_gamma elt disconnected value", value, value_ref);
   }
 
   // ---- normal_lpdf(y_pv, mu_ps, sigma_ps): all three parameters ----------
