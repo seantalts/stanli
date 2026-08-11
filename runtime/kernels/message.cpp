@@ -4,7 +4,8 @@
 // `reject` has real semantics. It throws std::domain_error, which the
 // sampler treats as a rejected proposal exactly as CmdStan's generated
 // code does -- the same exception type, from the same place in the
-// evaluation. `print` has none; it writes to stdout and returns.
+// evaluation. `print` has none; it hands the line to the message sink
+// (stdout unless the host installed something else) and returns.
 //
 // Neither has a backward. `reject` never reaches one (the forward threw)
 // and `print` contributes nothing to the target, so the executor's
@@ -15,9 +16,9 @@
 // because that is the only time the values exist. CmdStan formats a
 // vector as `[1,2,3]` and a scalar bare, and so does this.
 #include <stanli/graph.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 
-#include <cstdio>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -60,14 +61,7 @@ void reject_fwd(KernelCtx& ctx) {
   throw std::domain_error(render(ctx));
 }
 
-void print_fwd(KernelCtx& ctx) {
-  const std::string s = render(ctx);
-  // stdout, unbuffered enough to interleave correctly with a CSV on the
-  // same stream -- which is exactly why CmdStan users are told to send
-  // draws to a file when they print.
-  std::fwrite(s.data(), 1, s.size(), stdout);
-  std::fputc('\n', stdout);
-}
+void print_fwd(KernelCtx& ctx) { emit_message(render(ctx)); }
 
 }  // namespace
 

@@ -14,6 +14,7 @@
 // The failure that matters is silence: a reject that is skipped rather
 // than taken lets stanli sample happily from a model CmdStan refuses.
 #include <stanli/compile.hpp>
+#include <stanli/message_sink.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -100,6 +101,41 @@ int main() {
     expect("with every chunk and value: " + msg,
            msg.find("N too large: 200") != std::string::npos &&
                msg.find("limit 2.5") != std::string::npos);
+  }
+
+  // ---- print goes wherever the host says --------------------------------
+  // Both print paths are exercised: the transformed-data one runs in the
+  // MIR interpreter at compile time, the model-block one in the OP_PRINT
+  // kernel at evaluation time. They were two separate writes to stdout,
+  // which a host embedding the runtime cannot redirect or interleave with
+  // its own output.
+  {
+    std::vector<std::string> lines;
+    set_message_sink([&lines](const char* text, size_t len) {
+      lines.emplace_back(text, len);
+    });
+    DataMap d = data_for(7, 2.5);
+    CompiledModel cm = compile_model(mir, d);
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = 0.25;
+    std::vector<double> g((size_t)ex.n_params());
+    ex.gradient(g.data());
+    set_message_sink(nullptr);
+
+    expect("the sink saw both prints, got " + std::to_string(lines.size()),
+           lines.size() == 2);
+    if (lines.size() == 2) {
+      expect("transformed-data print: " + lines[0],
+             lines[0] == "compiled with N = 7");
+      // The container prints in brackets and the scalar bare, CmdStan's
+      // formatting, and the sink is handed the line without a newline.
+      expect("model-block print: " + lines[1],
+             lines[1] == "drawing at x = 0.25 v = [0.25,0.25]");
+    }
+    // Restoring the default must actually restore it: a later evaluation
+    // writes to stdout again rather than to a dangling sink.
+    ex.gradient(g.data());
   }
 
   if (failures == 0) std::printf("test_rejectprint: all checks passed\n");

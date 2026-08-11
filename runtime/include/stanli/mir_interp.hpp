@@ -22,6 +22,7 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/data.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/optable.hpp>  // STANLI_SCALAR_UNARY_LIST
 #include <stanli/program.hpp>
@@ -394,7 +395,7 @@ class MirInterp {
             }
           }
           if (st.fn_name == "FnReject") throw std::domain_error(msg);
-          std::fprintf(stdout, "%s\n", msg.c_str());
+          emit_message(msg);
         }
         return;
       case mir::Stmt::Skip:

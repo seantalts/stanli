@@ -10,6 +10,7 @@ transformed data {
 parameters { real x; vector[2] v; }
 model {
   if (N > 100) reject("N too large: ", N, " limit ", lim);
+  print("drawing at x = ", x, " v = ", v);
   x ~ normal(0, 1);
   v ~ normal(0, 1);
 }

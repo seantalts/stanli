@@ -201,6 +201,7 @@ add_library(stanli_shared SHARED
   runtime/src/mir_reader.cpp
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
+  runtime/src/message_sink.cpp
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
@@ -291,6 +292,7 @@ add_library(stanli STATIC
   runtime/src/mir_reader.cpp
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
+  runtime/src/message_sink.cpp
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp

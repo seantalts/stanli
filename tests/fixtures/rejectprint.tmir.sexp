@@ -118,6 +118,17 @@
           ()))
         (meta <opaque>))
        ((pattern
+         (NRFunApp (CompilerInternal FnPrint)
+          (((pattern (Lit Str "drawing at x = "))
+            (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+           ((pattern (Var x))
+            (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))
+           ((pattern (Lit Str " v = "))
+            (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+           ((pattern (Var v))
+            (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable)))))))
+        (meta <opaque>))
+       ((pattern
          (TargetPE
           ((pattern
             (FunApp (StanLib normal_lpdf (FnLpdf true) AoS)
@@ -214,6 +225,17 @@
                (meta <opaque>)))))
            (meta <opaque>))
           ()))
+        (meta <opaque>))
+       ((pattern
+         (NRFunApp (CompilerInternal FnPrint)
+          (((pattern (Lit Str "drawing at x = "))
+            (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+           ((pattern (Var x))
+            (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))
+           ((pattern (Lit Str " v = "))
+            (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
+           ((pattern (Var v))
+            (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable)))))))
         (meta <opaque>))
        ((pattern
          (TargetPE
