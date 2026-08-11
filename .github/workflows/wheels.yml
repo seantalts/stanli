@@ -308,6 +308,10 @@ jobs:
           python3 -m venv /tmp/wheeltest
           /tmp/wheeltest/bin/pip install dist/*.whl
           /tmp/wheeltest/bin/python tests/test_python.py
+          # The BridgeStan pair, dlopened the way a sampler loads it. Only
+          # a real load exercises the runtime finding its own sidecar, so
+          # this cannot move into the linked C++ suite.
+          /tmp/wheeltest/bin/python tests/test_bridgestan_pair.py
 
       - uses: actions/upload-artifact@v4
         with:
