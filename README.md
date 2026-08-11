@@ -276,12 +276,15 @@ publish job waits for them. Each build links the cached embedded stanc3
 object, runs the test suite, checks the platform tag, and samples eight
 schools from the installed wheel in a clean venv.
 
-To cut a release: bump `__version__` in `python/stanli/__init__.py` (the
-one place it lives), add a `CHANGELOG.md` entry, then tag. The publish
-job fires only on `refs/tags/v*`, asserts the tag matches the packaged
-version, and uploads through PyPI trusted publishing; no API token
-exists anywhere in the repo. The `pypi` deployment environment is
-restricted to `v*` tags as a second lock.
+To cut a release: bump the version in `python/stanli/__init__.py`,
+`js/package.json`, `r/DESCRIPTION`, and `r/R/install.R` (they move in
+lockstep), add a `CHANGELOG.md` entry, then tag. One `v*` tag publishes
+every channel: PyPI, npm, and the GitHub runtime release the R package
+installs from. The publish jobs assert the tag matches each manifest,
+so a forgotten bump fails the release rather than shipping channels
+that disagree. Uploads go through PyPI and npm trusted publishing; no
+API token exists anywhere in the repo. The `pypi` and `npm` deployment
+environments are restricted to release tags as a second lock.
 
 ```
 git tag -a v0.1.0 -m "stanli 0.1.0" && git push origin v0.1.0
@@ -291,11 +294,10 @@ No sdist is published: building from source needs a 30-minute OCaml
 toolchain step, so an sdist would only turn "no wheel for your platform"
 into a confusing build failure.
 
-The npm package `@seantalts/stanli` ships the same way on its own tag
-series: bump `version` in `js/package.json`, add the changelog entry,
-tag `npm-vX.Y.Z`. The `npm-publish` job asserts the tag matches
-`package.json` and publishes through npm trusted publishing. Three npm
-quirks worth knowing. A trusted publisher attaches only to a package
+The npm package `@seantalts/stanli` rides the same `v*` tag. An
+`npm-vX.Y.Z` tag still works as an npm-only republish hatch for when
+npm alone fails on a release that already went out everywhere else.
+Three npm quirks worth knowing. A trusted publisher attaches only to a package
 that already exists, so a package's first version goes out by hand with
 `npm publish`, and the publisher itself is configured on npmjs.com
 (Settings -> Trusted publisher: GitHub Actions, `seantalts` / `stanli` /

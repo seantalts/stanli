@@ -663,12 +663,18 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  # npm, tag-gated like PyPI: npm-v* tags publish js/ through npm
-  # trusted publishing (OIDC, no token in secrets). The tag must agree
-  # with js/package.json, and the artifacts are the same ones the wasm
-  # job and the stancjs cache produced for this exact commit.
+  # npm, tag-gated like PyPI. A release tag v* publishes every channel
+  # at once (PyPI, the runtime release, npm); versions move in lockstep,
+  # and both publish jobs assert their manifest agrees with the tag.
+  # npm-v* remains as an npm-only republish hatch for when npm alone
+  # fails on a release that already went out everywhere else. Publishing
+  # goes through npm trusted publishing (OIDC, no token in secrets), and
+  # the artifacts are the same ones the wasm job and the stancjs cache
+  # produced for this exact commit.
   npm-publish:
-    if: startsWith(github.ref, 'refs/tags/npm-v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      startsWith(github.ref, 'refs/tags/npm-v')
     needs: wasm
     runs-on: ubuntu-latest
     environment: npm
@@ -714,7 +720,8 @@ jobs:
 
       - name: Tag matches the packaged version
         run: |
-          tag="${GITHUB_REF_NAME#npm-v}"
+          tag="${GITHUB_REF_NAME#npm-}"
+          tag="${tag#v}"
           pkg=$(python3 -c "import json; print(json.load(open('js/package.json'))['version'])")
           echo "tag $tag, package.json $pkg"
           [ "$tag" = "$pkg" ]
@@ -834,7 +841,9 @@ jobs:
           ls -la dist/
 
       # stanli/__init__.py holds the version; the tag has to agree with it,
-      # or a mistyped tag silently publishes the wrong number.
+      # or a mistyped tag silently publishes the wrong number. The npm
+      # package rides the same tag now, so js/package.json has to agree
+      # too, or the release goes out with the channels disagreeing.
       - name: Tag matches the packaged version
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -844,8 +853,10 @@ jobs:
           print(re.search(r'^__version__ = "([^"]+)"', src, re.M).group(1))
           PY
           )
-          echo "tag $tag, package $pkg"
+          npmpkg=$(python3 -c "import json; print(json.load(open('js/package.json'))['version'])")
+          echo "tag $tag, package $pkg, package.json $npmpkg"
           [ "$tag" = "$pkg" ]
+          [ "$tag" = "$npmpkg" ]
           ls dist/ | grep -q "stanli-$pkg-py3-none-" ||
             { echo "no wheel named for version $pkg"; exit 1; }
 
