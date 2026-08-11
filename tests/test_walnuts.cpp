@@ -110,6 +110,54 @@ int main() {
     expect_in("new seed differs", differ ? 1 : 0, 1, 1);
   }
 
+  // ---- NaN density regions must not poison step-size adaptation ----------
+  // The target is normal_lpdf(x | 0, 1) + log(-x), and the log(-x) term
+  // reaches lp through raw vector kernels: for x > 0 it is a NaN, not an
+  // exception, exactly like posteriordb's dogs_log (where this was
+  // found). Trajectories cross x = 0 constantly, and a NaN log density
+  // fed walnutpie's exp(-|logp diff|) acceptance statistic straight into
+  // the Adam step-size estimate, where one NaN is permanent; these seeds
+  // died at the end of warmup with "macro_time must be in (0, inf)". The
+  // wrapper now reports non-finite points as -inf with a zero gradient,
+  // walnutpie's own convention for a throwing density.
+  {
+    for (uint32_t seed = 1; seed <= 5; ++seed) {
+      Graph g;
+      const int x = g.add_slot(1, true);
+      const int nx = g.add_slot(1, false);
+      g.add_op(OP_NEG, {x}, nx);
+      const int lx = g.add_slot(1, false);
+      g.add_op(OP_LOGV, {nx}, lx);
+      const int zero = g.add_slot(1, false);
+      const int one = g.add_slot(1, false);
+      const int nlp = g.add_slot(1, false);
+      g.add_op(OP_NORMAL_LPDF, {x, zero, one}, nlp);
+      const int lp = g.add_slot(1, false);
+      g.add_op(OP_ADD, {nlp, lx}, lp);
+      g.result_slot = lp;
+      Executor ex(std::move(g));
+      ex.value_ptr(zero)[0] = 0.0;
+      ex.value_ptr(one)[0] = 1.0;
+
+      WalnutsConfig cfg;
+      cfg.seed = seed;
+      cfg.warmup = 300;
+      cfg.samples = 200;
+      bool threw = false;
+      int bad = 0;
+      try {
+        auto draws = run_walnuts(ex, cfg);
+        for (const auto& q : draws)
+          if (!(q[0] < 0.0)) ++bad;  // outside support, or NaN
+      } catch (const std::exception&) {
+        threw = true;
+      }
+      const std::string tag = "nan-region seed " + std::to_string(seed);
+      expect_in(tag + " threw", threw ? 1 : 0, 0, 0);
+      expect_in(tag + " bad draws", bad, 0, 0);
+    }
+  }
+
   // ---- observer: sees every stored draw, phases in order -----------------
   {
     Graph g;

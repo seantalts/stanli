@@ -15,6 +15,15 @@ local error demands it, which is what makes funnel-like geometry
 tractable without cranking `delta`; its tunable is `max_error`, the
 largest drift in the joint log density allowed across one macro step.
 
+A NaN log density no longer kills WALNUTS warmup. stanli's kernels
+report out-of-support points as NaN rather than throwing (log of a
+negative is just a NaN), and walnutpie's acceptance statistic fed that
+NaN straight into its Adam step-size estimate, where one NaN is
+permanent; models whose trajectories cross out of support, dogs_log
+among them, died at the end of warmup with "macro_time must be in
+(0, inf)". The gradient wrapper now reports non-finite densities the
+way walnutpie's own exception path does: -inf, zero gradient.
+
 The browser page grew a sampler picker with a comparison mode: NUTS
 and WALNUTS run at once on the same model, data, and seed, NUTS's
 column on the left and WALNUTS's on the right, each with live traces,
@@ -22,7 +31,13 @@ a histogram, per-chain timing with min ESS and ESS per second, and the
 full summary table. Clicking a parameter row in either table selects
 it in both, redrawing the traces on a shared y range and the
 histograms on a shared x range, so the eye compares mixing and the
-posterior rather than axis choices.
+posterior rather than axis choices. The live traces share their y
+range the same way while the chains run, the two samplers' chains
+launch interleaved so a small worker pool cannot serialize them, and
+the up and down arrow keys step the selected parameter. Live repaints
+track the plotted range incrementally and draw at most two points per
+pixel column; both rescans used to pin the page on runs of a few
+hundred thousand draws.
 
 Groundwork for letting external samplers drive stanli models, plus two
 fixes that stand on their own.

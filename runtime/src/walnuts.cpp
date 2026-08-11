@@ -32,6 +32,22 @@ struct ExecLogpGrad {
     for (int64_t i = 0; i < n; ++i) ex->params_data()[i] = x(i);
     grad.resize(n);
     logp = ex->gradient(grad.data());
+    // walnutpie assumes the density throws or is finite: its acceptance
+    // statistic is exp(-|logp - logp_next|), and a NaN there -- which
+    // stanli's kernels produce freely, log of a negative is a NaN and
+    // not an exception -- poisons the Adam step-size estimate for good,
+    // surfacing as "macro_time must be in (0, inf)" at the end of
+    // warmup. Out-of-support points therefore report exactly what
+    // walnutpie's own exception path reports: -inf, zero gradient. A
+    // non-finite gradient at a finite logp gets the same treatment,
+    // because one more leapfrog step through it turns the position and
+    // then the momentum into NaN anyway.
+    bool ok = std::isfinite(logp);
+    for (int64_t i = 0; ok && i < n; ++i) ok = std::isfinite(grad(i));
+    if (!ok) {
+      logp = -std::numeric_limits<double>::infinity();
+      grad.setZero();
+    }
   }
 };
 
