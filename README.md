@@ -21,12 +21,12 @@ different binding, so a model samples to the same draws from any of them.
 | | | |
 | --- | --- | --- |
 | **Python** | `pip install stanli` | [python/README.md](python/README.md), [PyPI](https://pypi.org/project/stanli/) |
-| **R** | `install.packages("stanli")` then `stanli_install()` | [r/README.md](r/README.md) |
+| **R** | `remotes::install_github("seantalts/stanli", subdir = "r")` then `stanli_install()` | [r/README.md](r/README.md) |
 | **Browser / Node** | `npm install @seantalts/stanli` | [js/README.md](js/README.md), [npm](https://www.npmjs.com/package/@seantalts/stanli) |
 
-The R package is not on CRAN yet; until it is, install it from
-[r-universe](https://seantalts.r-universe.dev) or from a checkout (see
-[r/README.md](r/README.md)). It downloads its runtime on first use
+The R package is not on CRAN yet; until it is, install it from this
+repository with `remotes::install_github()` or from a checkout (see
+[R](#r) below). It downloads its runtime on first use
 rather than bundling it, because CRAN will not carry a 16 MB binary and
 could not build one on their farm.
 
@@ -210,6 +210,24 @@ subprocess.
 The same runtime behind an R binding, with `posterior`-shaped draws.
 Full documentation in [r/README.md](r/README.md).
 
+Not on CRAN yet, so install from this repository. The package lives in
+the `r/` subdirectory:
+
+```r
+# install.packages("remotes")
+remotes::install_github("seantalts/stanli", subdir = "r")
+
+# or, from a checkout of this repository
+# R CMD INSTALL r
+```
+
+That builds a 40 KB C bridge, so it wants the compiler R already
+expects for source packages (Xcode command line tools on macOS,
+`r-base-dev` on Debian and Ubuntu, Rtools on Windows). Nothing else is
+compiled: the sampler arrives prebuilt through `stanli_install()`
+below, which downloads the runtime for your platform from this
+repository's releases into `tools::R_user_dir("stanli", "cache")`.
+
 ```r
 library(stanli)
 stanli_install()   # one time: fetches the runtime for this platform
@@ -326,9 +344,13 @@ changes signature; adding a function does not need one.
 
 Two R distribution channels:
 
-- **r-universe** builds from this repository continuously; every push to
-  main becomes an installable binary with no tag. It needs a one-time
-  registry entry in `seantalts/seantalts.r-universe.dev`.
+- **GitHub**, which is what users install from today:
+  `remotes::install_github("seantalts/stanli", subdir = "r")` builds the
+  bridge from any commit, and `stanli_install()` then pulls the runtime
+  from the release the package pins. **r-universe** would serve prebuilt
+  binaries from main with no tag, but it is not wired up:
+  `seantalts.r-universe.dev` answers 404 until the one-time registry
+  entry exists in `seantalts/seantalts.r-universe.dev`.
 - **CRAN** cannot be automated by policy: a submission is a web-form
   upload confirmed by email. `r.yml` runs `R CMD check --as-cran` on
   every change under `r/`; a CRAN release is then bump `Version:` in

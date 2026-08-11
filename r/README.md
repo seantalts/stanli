@@ -4,15 +4,21 @@ Compile and sample Stan models without a C++ toolchain.
 
 ## Install
 
-Not on CRAN yet. Until it is:
+Not on CRAN yet. Until it is, install from GitHub; the package lives in
+the `r/` subdirectory of the repository:
 
 ```r
-# r-universe: binaries for Linux, macOS and Windows, rebuilt from main
-install.packages("stanli", repos = "https://seantalts.r-universe.dev")
+# install.packages("remotes")
+remotes::install_github("seantalts/stanli", subdir = "r")
 
 # or from a checkout
 # R CMD INSTALL r
 ```
+
+This builds the 40 KB C bridge from source, so it wants the toolchain R
+already expects for source packages: Xcode command line tools on macOS,
+`r-base-dev` on Debian and Ubuntu, Rtools on Windows. The sampler
+itself is not compiled here -- it arrives prebuilt below.
 
 Then, once per machine:
 

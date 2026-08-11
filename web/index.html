@@ -112,8 +112,9 @@
 <h1>stanli: The Stan Language Interpreter</h1>
 <p class="sub">No server, no C++ toolchain;
 everything below happens in this tab, runs in the browser, samples on your machine.
-stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph and runs NUTS
-or <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a> &mdash; or both at once, side by side.
+stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph and runs
+Stan-dard Dynamic HMC or <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a>
+&mdash; or both at once, side by side.
 <p class="sub">And it's often FASTER?? </p>
 <a href="https://github.com/seantalts/stanli">github.com/seantalts/stanli</a>
 &middot; <a href="https://www.npmjs.com/package/@seantalts/stanli">npm</a>
@@ -127,11 +128,11 @@ or <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a> &mdash; or both at onc
 </div>
 
 <div class="bar">
-  <button id="run">Run NUTS</button>
+  <button id="run">Run</button>
   <label>sampler <select id="sampler">
-    <option value="nuts">NUTS</option>
+    <option value="nuts">Stan-dard Dynamic HMC</option>
     <option value="walnuts">WALNUTS</option>
-    <option value="both">NUTS vs WALNUTS</option>
+    <option value="both">both, side by side</option>
   </select></label>
   <label class="combo" for="model">model
     <input id="model" type="text" role="combobox" aria-expanded="false"
@@ -459,12 +460,14 @@ catalogReady.then(() => {
 choose(CATALOG[0]);
 
 // ---- sampler selection -----------------------------------------------------
-const SAMPLER_LABEL = { nuts: "NUTS", walnuts: "WALNUTS" };
+// "Stan-dard Dynamic HMC" is what CmdStan runs by default: the NUTS
+// variant Stan has shipped for years. Spelled out rather than "NUTS"
+// because the choice sits beside WALNUTS, and an acronym next to an
+// acronym says nothing about which one is the familiar option.
+const SAMPLER_LABEL = { nuts: "Stan-dard Dynamic HMC", walnuts: "WALNUTS" };
 function samplerMode() { return $("sampler").value; }
 $("sampler").onchange = () => {
   const m = samplerMode();
-  $("run").textContent =
-      m === "both" ? "Run both" : `Run ${SAMPLER_LABEL[m]}`;
   // delta tunes NUTS's adaptation target; max err tunes how much the
   // joint log density may drift across one WALNUTS macro step. Each is
   // shown only when its sampler is in play.
