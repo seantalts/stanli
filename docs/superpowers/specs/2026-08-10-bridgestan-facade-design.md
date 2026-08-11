@@ -100,9 +100,9 @@ and its thread-affinity assumption stay confined to the main library
 the Python package loaded. The pair already pins the exact runtime
 binary, so serialized TMIR adds no version coupling beyond what the
 clone created; the manifest's runtime build id makes a mismatched
-pair fail loudly instead of misbehaving. Exposing TMIR text to the
-helper needs a small `stanli_*` C API addition (compile source to
-MIR text without building a model).
+pair fail loudly instead of misbehaving. The C API entries the helper
+needs, `stanli_stan_to_mir` and `stanli_build_id`, landed with the
+prerequisite refactors.
 
 The cache directory is content-addressed: the pair's stem is a hash
 of (runtime build id, TMIR). Two different programs sharing a model
@@ -162,13 +162,15 @@ that `stanli_wa_row(model, ...)` consumes. Wrapping that as-is under
 a shared `bs_model` would make concurrent `bs_param_constrain` calls
 race on one GQ stream.
 
-Refactor first, then wrap: the write_array core (graph executor and
-WaInterp both) takes an RNG state parameter per evaluation. The
-existing `stanli_wa_seed`/`stanli_wa_row` C API keeps its contract as
-a thin wrapper holding one model-owned state; `bs_param_constrain`
-passes the state inside the caller's `bs_rng` handle. This refactor
-is a standalone commit with its own tests before any facade code
-consumes it.
+Refactor first, then wrap: `WaInterp::eval` takes a `WaRng` the caller
+owns. (The graph write_array path needs no change: it has no RNG at
+all, because an `_rng` call is exactly what truncates graph lowering
+and hands the section to the interpreter.) The existing
+`stanli_wa_seed`/`stanli_wa_row` C API keeps its contract as a thin
+wrapper holding one model-owned state; `bs_param_constrain` passes the
+state inside the caller's `bs_rng` handle. This refactor is a
+standalone commit with its own tests before any facade code consumes
+it.
 
 ### Semantics on stanli
 
@@ -206,14 +208,14 @@ consumes it.
   Non-NULL JSON requires constrained-to-unconstrained conversion
   (inverse transforms) and returns -1 with an error saying exactly
   that; `jacobian == false` is the density-flag limitation above.
-- `bs_set_print_callback`: real plumbing, not a stub. The runtime
-  gains a message sink abstraction; `OP_PRINT` (which today writes
-  straight to stdout from `runtime/kernels/message.cpp`) and reject
-  messages route through it. Default sink is stdout; the facade
-  installs the client's callback and serializes invocations with a
-  mutex, per the reference contract. Ordinary stanli use keeps the
-  stdout default through the same sink, so there is one printing
-  path.
+- `bs_set_print_callback`: real plumbing, not a stub. The runtime's
+  message sink (landed with the prerequisite refactors) already routes
+  both print paths -- the `OP_PRINT` kernel and the MIR interpreter --
+  through one serialized emit with a stdout default, so the facade
+  only has to install the client's callback. Reject messages are not
+  print output: they travel as the `std::domain_error` the sampler
+  reads as a rejected proposal, and reach the client as the error
+  message on a -1 return.
 - Exceptions anywhere (lowering failure, rejected point) become -1
   with a message; a rejected point in the gradient is an error return
   the samplers already treat as a rejection, mirroring
@@ -336,9 +338,10 @@ RED-GREEN throughout.
 ## Phasing
 
 1. Prerequisite refactors, each standalone with tests: caller-owned
-   RNG through the write_array core; message sink for print/reject;
-   lowering metadata (tp/gq section boundaries, unconstrained
-   declaration layout); TMIR-text C API entry.
+   write_array RNG; message sink for print; `stanli_stan_to_mir` and
+   `stanli_build_id`; lowering metadata (tp/gq section boundaries,
+   unconstrained declaration layout). Each one is a fix on its own
+   terms, independent of the facade.
 2. Facade core: bridgestan_abi TU, ExecutorPool, construction path
    with seed, C++ unit tests.
 3. Python helper (content-addressed pair) + dlopen integration +
