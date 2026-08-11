@@ -17,6 +17,7 @@
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/executor_pool.hpp>
+#include <stanli/nuts.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <cmath>
@@ -159,6 +160,11 @@ void test_density_matches_executor() {
     fail("bs_model_info does not carry the build id: " + info);
   if (info.find("2.9.0") == std::string::npos)
     fail("bs_model_info does not name the BridgeStan ABI version: " + info);
+  // Clients grep for BridgeStan's make-args spelling, not a bare word:
+  // walnutpie refuses any model whose info lacks "STAN_THREADS=true".
+  if (stanli::thread_safe_build() &&
+      info.find("STAN_THREADS=true") == std::string::npos)
+    fail("bs_model_info does not carry STAN_THREADS=true: " + info);
 
   bs_model_destruct(m);
 }

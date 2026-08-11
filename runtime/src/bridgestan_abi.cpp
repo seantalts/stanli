@@ -397,7 +397,10 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
               "; model \"" +
               m->name + "\"; " + std::to_string(m->cm.n_unconstrained) +
               " unconstrained parameters; -ffp-contract=off" +
-              (stanli::thread_safe_build() ? "; STAN_THREADS" : "") +
+              // BridgeStan's info reports the make invocation, so clients
+              // (walnutpie among them) grep for the make-args spelling
+              // "STAN_THREADS=true" and refuse to run multi-chain without it.
+              (stanli::thread_safe_build() ? "; STAN_THREADS=true" : "") +
               (stanli::exact_lp_build()
                    ? "; lp__ matches CmdStan exactly"
                    : "; lp__ offset from CmdStan by a per-model constant");
