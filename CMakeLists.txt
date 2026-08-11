@@ -222,6 +222,7 @@ add_library(stanli_shared SHARED
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
   runtime/src/message_sink.cpp
+  runtime/src/executor_pool.cpp
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
@@ -315,6 +316,7 @@ add_library(stanli STATIC
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
   runtime/src/message_sink.cpp
+  runtime/src/executor_pool.cpp
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
@@ -416,6 +418,7 @@ stanli_add_test(test_sampling)
 stanli_add_test(test_ode_prog)
 stanli_add_test(test_constfold)
 stanli_add_test(test_write_array)
+stanli_add_test(test_pool)
 stanli_add_test(test_mixture)
 stanli_add_test(test_island)
 stanli_add_test(test_adjoint)
