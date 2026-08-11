@@ -128,10 +128,9 @@ int main() {
     cfg.warmup = 50;
     cfg.samples = 60;
     int n_warm = 0, n_samp = 0;
-    auto draws = run_walnuts(ex, cfg, nullptr,
-                             [&](int64_t, bool warm, const double*) {
-                               (warm ? n_warm : n_samp)++;
-                             });
+    auto draws = run_walnuts(
+        ex, cfg, nullptr,
+        [&](int64_t, bool warm, const double*) { (warm ? n_warm : n_samp)++; });
     expect_in("observer warmup", n_warm, 50, 50);
     expect_in("observer samples", n_samp, 60, 60);
     expect_in("draws", (double)draws.size(), 60, 60);

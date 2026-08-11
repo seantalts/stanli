@@ -135,8 +135,8 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
   CollectHandler handler{&draws, stats, &observe};
   ExecLogpGrad logp_grad{&ex};
 
-  const walnutpie::InitChainConfig init_cfg(
-      cfg.init_step_size, q, Eigen::VectorXd::Ones(n));
+  const walnutpie::InitChainConfig init_cfg(cfg.init_step_size, q,
+                                            Eigen::VectorXd::Ones(n));
   const walnutpie::WarmupConfig warmup_cfg =
       walnutpie::WarmupConfigBuilder{}
           .min_max_iter((size_t)cfg.warmup, (size_t)cfg.warmup)
