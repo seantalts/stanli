@@ -318,9 +318,8 @@ void run_case(const std::string& name, const char* semantics,
 
 void run_domain_error_case(const std::string& name, const char* semantics,
                            std::vector<FunDef> functions, double t) {
-  run_observation_case(
-      name, semantics, std::move(functions), t,
-      {Stage::Execute, OutcomeKind::DomainError, {}, {}, {}});
+  run_observation_case(name, semantics, std::move(functions), t,
+                       {Stage::Execute, OutcomeKind::DomainError, {}, {}, {}});
 }
 
 void test_short_circuit_or() {
@@ -377,9 +376,9 @@ void test_short_circuit_or_requires_rhs() {
   disjunction.type_ = "UInt";
   disjunction.args = {std::move(runtime_left), std::move(invalid_rhs)};
 
-  FunDef entry = rhs_function(
-      "short_circuit_or_required_rhs",
-      {return_value(make_array({std::move(disjunction)}))});
+  FunDef entry =
+      rhs_function("short_circuit_or_required_rhs",
+                   {return_value(make_array({std::move(disjunction)}))});
   run_domain_error_case(
       "short-circuit OR takes RHS",
       "false || rhs evaluates rhs and propagates its domain error",
@@ -400,9 +399,9 @@ void test_short_circuit_and_requires_rhs() {
   conjunction.type_ = "UInt";
   conjunction.args = {std::move(runtime_left), std::move(invalid_rhs)};
 
-  FunDef entry = rhs_function(
-      "short_circuit_and_required_rhs",
-      {return_value(make_array({std::move(conjunction)}))});
+  FunDef entry =
+      rhs_function("short_circuit_and_required_rhs",
+                   {return_value(make_array({std::move(conjunction)}))});
   run_domain_error_case(
       "short-circuit AND takes RHS",
       "true && rhs evaluates rhs and propagates its domain error",

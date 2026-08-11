@@ -438,9 +438,8 @@ struct ProgramCompiler {
   // Declare (or redeclare) a real variable of `len` registers. Stan's
   // uninitialized real value is NaN; callers may provide another fill only
   // when the surrounding lowering has an explicit initialized-value policy.
-  Range declare(
-      const std::string& name, int len,
-      double fill = std::numeric_limits<double>::quiet_NaN()) {
+  Range declare(const std::string& name, int len,
+                double fill = std::numeric_limits<double>::quiet_NaN()) {
     const Range r{alloc(len), len};
     const std::vector<double> init((size_t)len, fill);
     emit_const(r.reg, init.data(), len);
@@ -564,8 +563,7 @@ struct ProgramCompiler {
     }
   }
 
-  Range inline_call(const mir::FunDef& f,
-                    const std::vector<InlineArg>& args) {
+  Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args) {
     if (++inline_depth > 32) bail("function inlining too deep");
     if (args.size() != f.arg_names.size()) bail("function argument mismatch");
     // Callee scope: save the caller's bindings, install the parameters, and
