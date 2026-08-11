@@ -46,6 +46,21 @@ class WaRng {
   boost::ecuyer1988 gen_;
 };
 
+// The columns only exist after one evaluation, so every driver that wants
+// them at construction time has to probe. These two are that probe, shared
+// so the C ABI and the BridgeStan facade discover the SAME columns: a
+// driver with its own probe schedule would find a model in support where
+// the other found it out of support, and quietly serve a shorter row.
+
+// Probe point i under variant 0, 1 or 2. A model can be out of support at
+// one variant and fine at the next, so callers walk all three.
+double wa_probe_point(int64_t i, int variant);
+
+// The constrained parameter values WaInterp::eval reads, taken out of an
+// executor that has just run its forward pass over `views`.
+std::map<std::string, DataMap::Entry> wa_param_env(
+    Executor& ex, const std::vector<CompiledModel::ParamView>& views);
+
 class WaInterp {
  public:
   WaInterp(std::shared_ptr<const mir::Program> prog,

@@ -55,33 +55,7 @@ std::vector<double> interp_wa_row(stanli_model& m, const double* q,
   stanli::Executor& ex = *m.ex;
   std::memcpy(ex.params_data(), q, sizeof(double) * ex.n_params());
   ex.run_forward_only();
-  std::map<std::string, stanli::DataMap::Entry> params;
-  for (const auto& v : m.cm.views) {
-    stanli::DataMap::Entry en;
-    const double* p = ex.value_ptr(v.slot);
-    en.r.assign(p, p + v.len);
-    if (v.rows > 0)
-      en.dims = {v.rows, v.len / v.rows};
-    else if (v.len > 1)
-      en.dims = {v.len};
-    params[v.name] = std::move(en);
-  }
-  return m.wa_interp->eval(params, rng);
-}
-
-// Same deterministic probe points as stanli_check: column discovery for
-// the interpreted path needs one evaluation, and a model can be out of
-// support at one point and fine at the next.
-double probe_point(int64_t i, int variant) {
-  switch (variant) {
-    case 1:
-      return 0.02 * static_cast<double>((i % 5) - 2);
-    case 2:
-      return 0.0;
-    default:
-      return 0.1 + 0.05 * static_cast<double>(i % 7) -
-             0.15 * static_cast<double>(i % 3);
-  }
+  return m.wa_interp->eval(stanli::wa_param_env(ex, m.cm.views), rng);
 }
 
 }  // namespace
@@ -112,7 +86,7 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
         bool found = false;
         for (int variant = 0; variant < 3 && !found; ++variant) {
           for (size_t i = 0; i < q.size(); ++i)
-            q[i] = probe_point((int64_t)i, variant);
+            q[i] = stanli::wa_probe_point((int64_t)i, variant);
           try {
             // A scratch stream: discovery is the runtime probing the
             // model, not a draw the caller asked for, so it must not

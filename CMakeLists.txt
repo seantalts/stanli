@@ -192,6 +192,7 @@ endif()
 if(NOT EMSCRIPTEN)
 add_library(stanli_shared SHARED
   runtime/src/capi.cpp
+  runtime/src/bridgestan_abi.cpp
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
@@ -231,7 +232,9 @@ add_library(stanli_shared SHARED
 target_include_directories(stanli_shared PUBLIC runtime/include)
 target_compile_definitions(stanli_shared
                            PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
-target_link_libraries(stanli_shared PUBLIC stanmath sundials Threads::Threads)
+# ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr to find its own path.
+target_link_libraries(stanli_shared
+                      PUBLIC stanmath sundials Threads::Threads ${CMAKE_DL_LIBS})
 set_target_properties(stanli_shared PROPERTIES OUTPUT_NAME stanli)
 
 # Export only the C API. Everything else in here (stan-math, Eigen, the
@@ -323,9 +326,18 @@ add_library(stanli STATIC
   runtime/src/data.cpp)
 target_include_directories(stanli PUBLIC runtime/include)
 target_compile_definitions(stanli PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
+# The BridgeStan facade is native-only: it finds its own sidecar manifest
+# with dladdr, and a browser has neither dlopen nor a second process to
+# load the pair. Nothing under wasm references a bs_ symbol, so this only
+# saves compiling it.
+if(NOT EMSCRIPTEN)
+  target_sources(stanli PRIVATE runtime/src/bridgestan_abi.cpp)
+endif()
 target_link_libraries(stanli PUBLIC stanmath sundials)
 if(NOT EMSCRIPTEN)
-  target_link_libraries(stanli PUBLIC Threads::Threads)
+  # ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr. Not under
+  # Emscripten, whose libc already carries it.
+  target_link_libraries(stanli PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 endif()
 
 # The browser/WASM build: the same runtime and C ABI over the MIR-text
@@ -419,6 +431,7 @@ stanli_add_test(test_ode_prog)
 stanli_add_test(test_constfold)
 stanli_add_test(test_write_array)
 stanli_add_test(test_pool)
+stanli_add_test(test_bridgestan)
 stanli_add_test(test_mixture)
 stanli_add_test(test_island)
 stanli_add_test(test_adjoint)

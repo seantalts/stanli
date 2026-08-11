@@ -1,5 +1,12 @@
 ; PE export list for stanli.dll: the C ABI and nothing else, matching
-; exported_symbols.txt (Mach-O) and exported_symbols.map (ELF).
+; exported_symbols.txt (Mach-O) and exported_symbols.map (ELF), which say
+; the same thing as stanli_* and bs_* wildcards.
+;
+; The bs_* half is the BridgeStan C ABI (runtime/third_party/bridgestan.h).
+; Every symbol it declares is listed even though bs_model_construct refuses
+; on Windows: clients bind the whole set at load time, so a missing one
+; fails before any call can explain itself. The three version numbers are
+; data exports, hence the DATA keyword.
 EXPORTS
   stanli_abi_version
   stanli_model_new
@@ -30,3 +37,26 @@ EXPORTS
   stanli_diagnose_text
   stanli_optimize_opts_init
   stanli_optimize
+  bs_major_version DATA
+  bs_minor_version DATA
+  bs_patch_version DATA
+  bs_model_construct
+  bs_model_destruct
+  bs_free_error_msg
+  bs_name
+  bs_model_info
+  bs_param_names
+  bs_param_unc_names
+  bs_param_num
+  bs_param_unc_num
+  bs_param_constrain
+  bs_param_unconstrain
+  bs_param_unconstrain_json
+  bs_param_initialize
+  bs_log_density
+  bs_log_density_gradient
+  bs_log_density_hessian
+  bs_log_density_hessian_vector_product
+  bs_rng_construct
+  bs_rng_destruct
+  bs_set_print_callback

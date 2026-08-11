@@ -1,0 +1,641 @@
+// The BridgeStan C ABI over stanli.
+//
+// Linked directly rather than dlopen'd: the sidecar/dladdr half of
+// bs_model_construct needs a real shared library on disk and belongs to the
+// integration test, so everything here goes through bs_model_from_mir and
+// the manifest reader is tested as the small function it is.
+//
+// Two properties are worth more than the rest. First, the numbers: a
+// density, a gradient and a constrained row through the facade must be
+// BITWISE what the same model computes through compile_model + Executor,
+// because a facade that quietly recomputes is a facade that quietly
+// disagrees. Second, the refusals: every call stanli cannot honor must
+// return exactly -1 with a message, never a plausible number for flags it
+// did not implement.
+#include "../runtime/third_party/bridgestan.h"
+
+#include <stanli/bridgestan_internal.hpp>
+#include <stanli/compile.hpp>
+#include <stanli/executor_pool.hpp>
+#include <stanli/wa_interp.hpp>
+
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+
+int failures = 0;
+
+void fail(const std::string& what) {
+  ++failures;
+  std::printf("FAIL %s\n", what.c_str());
+}
+
+void expect_eq_str(const std::string& what, const std::string& got,
+                   const std::string& want) {
+  if (got != want) {
+    ++failures;
+    std::printf("FAIL %s\n  got  %s\n  want %s\n", what.c_str(), got.c_str(),
+                want.c_str());
+  }
+}
+
+void expect_eq_int(const std::string& what, long long got, long long want) {
+  if (got != want) {
+    ++failures;
+    std::printf("FAIL %s: got %lld want %lld\n", what.c_str(), got, want);
+  }
+}
+
+void expect_bitwise(const std::string& what, double got, double want) {
+  if (!(got == want)) {
+    ++failures;
+    std::printf("FAIL %s: got %.17g want %.17g\n", what.c_str(), got, want);
+  }
+}
+
+std::string slurp(const std::string& path) {
+  std::ifstream f(path);
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+
+// Every unsupported entry has the same contract: exactly -1, a non-null
+// message, and the message frees cleanly. `mentions` pins WHICH refusal it
+// was, so a call that failed for an unrelated reason cannot pass for a
+// call that refused on purpose.
+void expect_refused(const std::string& what, int rc, char* err,
+                    const std::string& mentions) {
+  if (rc != -1) {
+    ++failures;
+    std::printf("FAIL %s: return code %d, want exactly -1\n", what.c_str(), rc);
+  }
+  if (err == nullptr) {
+    ++failures;
+    std::printf("FAIL %s: no error message\n", what.c_str());
+  } else if (err[0] == '\0') {
+    ++failures;
+    std::printf("FAIL %s: empty error message\n", what.c_str());
+  } else if (std::string(err).find(mentions) == std::string::npos) {
+    ++failures;
+    std::printf("FAIL %s: message does not mention \"%s\"\n  got %s\n",
+                what.c_str(), mentions.c_str(), err);
+  }
+  bs_free_error_msg(err);
+}
+
+// A point that depends on the index, so a mixed-up parameter shows up as a
+// wrong number rather than as the same number everywhere.
+double point(int64_t i) { return 0.3 - 0.17 * (double)(i % 5); }
+
+// ---------------------------------------------------------------------------
+
+// conj: two parameters, one transformed parameter, three generated
+// quantities, and a write_array the graph can express end to end.
+void test_density_matches_executor() {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+
+  // The reference: the same model the ordinary way.
+  DataMap data = DataMap::from_json_file("tests/fixtures/conj.json");
+  CompiledModel cm = compile_model(mir, data);
+  Executor ex(std::move(cm.graph));
+  cm.bind(ex);
+  const int64_t n = ex.n_params();
+
+  // The facade, given the data as a PATH (one of the four `data` forms).
+  char* err = nullptr;
+  bs_model* m =
+      bs_model_from_mir(mir.c_str(), "tests/fixtures/conj.json", 1234, &err);
+  if (m == nullptr) {
+    fail(std::string("conj construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_int("conj bs_param_unc_num", bs_param_unc_num(m), n);
+
+  std::vector<double> q((size_t)n);
+  for (int64_t i = 0; i < n; ++i) q[(size_t)i] = point(i);
+
+  for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
+  const double want_lp = ex.forward();
+  std::vector<double> want_g((size_t)n);
+  const double want_lp_g = ex.gradient(want_g.data());
+
+  double lp = 0;
+  expect_eq_int("bs_log_density rc",
+                bs_log_density(m, true, true, q.data(), &lp, &err), 0);
+  expect_bitwise("bs_log_density value", lp, want_lp);
+
+  double val = 0;
+  std::vector<double> g((size_t)n, 0.0);
+  expect_eq_int(
+      "bs_log_density_gradient rc",
+      bs_log_density_gradient(m, true, true, q.data(), &val, g.data(), &err),
+      0);
+  expect_bitwise("bs_log_density_gradient value", val, want_lp_g);
+  for (int64_t i = 0; i < n; ++i)
+    expect_bitwise("bs_log_density_gradient grad[" + std::to_string(i) + "]",
+                   g[(size_t)i], want_g[(size_t)i]);
+
+  // Model identity: the name defaults, the info string names the runtime
+  // and the ABI it implements.
+  expect_eq_str("bs_name default", bs_name(m), "stanli_model");
+  const std::string info = bs_model_info(m);
+  if (info.find(stanli::bs_build_id()) == std::string::npos)
+    fail("bs_model_info does not carry the build id: " + info);
+  if (info.find("2.9.0") == std::string::npos)
+    fail("bs_model_info does not name the BridgeStan ABI version: " + info);
+
+  bs_model_destruct(m);
+}
+
+// All four flag combinations, against the column layout the fixture
+// declares: mu_c, sigma | prec | mu, sd_from_prec, resid.1..resid.50.
+void test_param_num_and_names() {
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m =
+      bs_model_from_mir(mir.c_str(), "tests/fixtures/conj.json", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("conj construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+
+  std::string resid;
+  for (int i = 1; i <= 50; ++i) resid += ",resid." + std::to_string(i);
+
+  expect_eq_int("param_num(F,F)", bs_param_num(m, false, false), 2);
+  expect_eq_int("param_num(T,F)", bs_param_num(m, true, false), 3);
+  expect_eq_int("param_num(F,T)", bs_param_num(m, false, true), 54);
+  expect_eq_int("param_num(T,T)", bs_param_num(m, true, true), 55);
+
+  expect_eq_str("param_names(F,F)", bs_param_names(m, false, false),
+                "mu_c,sigma");
+  expect_eq_str("param_names(T,F)", bs_param_names(m, true, false),
+                "mu_c,sigma,prec");
+  // The interesting one: parameters plus generated quantities, with the
+  // transformed parameter cut out of the middle.
+  expect_eq_str("param_names(F,T)", bs_param_names(m, false, true),
+                "mu_c,sigma,mu,sd_from_prec" + resid);
+  expect_eq_str("param_names(T,T)", bs_param_names(m, true, true),
+                "mu_c,sigma,prec,mu,sd_from_prec" + resid);
+
+  // The strings belong to the model, so the same call twice is the same
+  // pointer rather than a leak per call.
+  if (bs_param_names(m, true, true) != bs_param_names(m, true, true))
+    fail("bs_param_names is not cached on the model");
+
+  bs_model_destruct(m);
+}
+
+void test_unc_names() {
+  char* err = nullptr;
+
+  // Eight schools: a scalar, a bounded scalar, and a vector. The
+  // unconstrained count matches the declared shape throughout.
+  const std::string es = slurp("tests/fixtures/es.tmir.sexp");
+  bs_model* m = bs_model_from_mir(es.c_str(),
+                                  "tests/fixtures/eight_schools.json", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("es construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+  } else {
+    std::string want = "mu,tau";
+    for (int i = 1; i <= 8; ++i) want += ",theta_tilde." + std::to_string(i);
+    expect_eq_str("es bs_param_unc_names", bs_param_unc_names(m), want);
+    expect_eq_int("es bs_param_unc_num", bs_param_unc_num(m), 10);
+    bs_model_destruct(m);
+  }
+
+  // A simplex[3] is THREE constrained values and TWO unconstrained ones,
+  // so the declared dims cannot index the unconstrained vector; the names
+  // fall back to flat 1..len.
+  const std::string simp = slurp("tests/fixtures/simp.tmir.sexp");
+  bs_model* s = bs_model_from_mir(simp.c_str(), "{\"K\": 3}", 1, &err);
+  if (s == nullptr) {
+    fail(std::string("simp construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_int("simp bs_param_unc_num", bs_param_unc_num(s), 2);
+  expect_eq_str("simp bs_param_unc_names", bs_param_unc_names(s),
+                "theta.1,theta.2");
+  expect_eq_int("simp bs_param_num(F,F)", bs_param_num(s, false, false), 3);
+  expect_eq_str("simp bs_param_names(F,F)", bs_param_names(s, false, false),
+                "theta.1,theta.2,theta.3");
+  bs_model_destruct(s);
+}
+
+// The graph write_array path, checked against the same graph run directly.
+void test_constrain_graph() {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  DataMap data = DataMap::from_json_file("tests/fixtures/conj.json");
+  CompiledModel cm = compile_model(mir, data);
+  if (!cm.write_array || cm.write_array->columns.empty()) {
+    fail("conj: no graph write_array");
+    return;
+  }
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  const int64_t n = wex.n_params();
+  std::vector<double> q((size_t)n);
+  for (int64_t i = 0; i < n; ++i) q[(size_t)i] = point(i);
+  for (int64_t i = 0; i < n; ++i) wex.params_data()[i] = q[(size_t)i];
+  wex.run_forward_only();
+  std::vector<double> want;
+  for (const auto& c : cm.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    for (int64_t i = 0; i < c.len; ++i) want.push_back(p[i]);
+  }
+
+  char* err = nullptr;
+  bs_model* m =
+      bs_model_from_mir(mir.c_str(), "tests/fixtures/conj.json", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("conj construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+
+  // Each flag combination is a slice of the same row, so the expectation
+  // is built from the reference row rather than restated.
+  struct Case {
+    bool tp, gq;
+    std::vector<size_t> idx;
+  };
+  std::vector<size_t> params = {0, 1}, tp = {2}, gq;
+  for (size_t i = 3; i < want.size(); ++i) gq.push_back(i);
+  auto cat = [](std::vector<size_t> a, const std::vector<size_t>& b) {
+    a.insert(a.end(), b.begin(), b.end());
+    return a;
+  };
+  const std::vector<Case> cases = {{false, false, params},
+                                   {true, false, cat(params, tp)},
+                                   {false, true, cat(params, gq)},
+                                   {true, true, cat(cat(params, tp), gq)}};
+  for (const auto& c : cases) {
+    const std::string tag = std::string("conj constrain(") +
+                            (c.tp ? "T" : "F") + "," + (c.gq ? "T" : "F") + ")";
+    expect_eq_int(tag + " param_num", bs_param_num(m, c.tp, c.gq),
+                  (long long)c.idx.size());
+    std::vector<double> got(c.idx.size(), 0.0);
+    // rng may be null whenever generated quantities are not asked for.
+    expect_eq_int(
+        tag + " rc",
+        bs_param_constrain(m, c.tp, c.gq, q.data(), got.data(), nullptr, &err),
+        c.gq ? -1 : 0);
+    if (c.gq) {
+      // No RNG handle and generated quantities requested: a refusal, not a
+      // guess. Re-run with one.
+      bs_free_error_msg(err);
+      err = nullptr;
+      bs_rng* rng = bs_rng_construct(7, &err);
+      if (rng == nullptr) {
+        fail("bs_rng_construct returned null");
+        continue;
+      }
+      expect_eq_int(
+          tag + " rc (with rng)",
+          bs_param_constrain(m, c.tp, c.gq, q.data(), got.data(), rng, &err),
+          0);
+      bs_rng_destruct(rng);
+    }
+    for (size_t k = 0; k < c.idx.size(); ++k)
+      expect_bitwise(tag + "[" + std::to_string(k) + "]", got[k],
+                     want[c.idx[k]]);
+  }
+
+  // And one value pinned outright, so a reference row that was wrong in
+  // the same way twice would still be caught: sigma is exp of its
+  // unconstrained value.
+  std::vector<double> two(2, 0.0);
+  bs_param_constrain(m, false, false, q.data(), two.data(), nullptr, &err);
+  expect_bitwise("conj sigma = exp(q1)", two[1], std::exp(q[1]));
+
+  bs_model_destruct(m);
+}
+
+// The interpreted write_array path: RNG draws, an int-valued RNG and a
+// draw-dependent branch, with the stream owned by the caller's bs_rng.
+void test_constrain_interp() {
+  const std::string mir = slurp("tests/fixtures/gqrng.tmir.sexp");
+  char* err = nullptr;
+  // Data as a JSON LITERAL (another of the four `data` forms).
+  bs_model* m = bs_model_from_mir(mir.c_str(), "{\"N\": 5}", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("gqrng construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_int("gqrng param_num(F,F)", bs_param_num(m, false, false), 1);
+  expect_eq_int("gqrng param_num(T,T)", bs_param_num(m, true, true), 5);
+  expect_eq_str("gqrng param_names(T,T)", bs_param_names(m, true, true),
+                "sigma,yrep,crep,branchy,p");
+
+  const double q[1] = {0.53};  // sigma = exp(0.53) > 1, so branchy is 1
+  bs_rng* a = bs_rng_construct(42, &err);
+  bs_rng* b = bs_rng_construct(42, &err);
+  if (a == nullptr || b == nullptr) {
+    fail("bs_rng_construct returned null");
+    return;
+  }
+  std::vector<double> ra(5, 0.0), rb(5, 0.0);
+  expect_eq_int("gqrng constrain rc",
+                bs_param_constrain(m, true, true, q, ra.data(), a, &err), 0);
+  expect_eq_int("gqrng constrain rc (b)",
+                bs_param_constrain(m, true, true, q, rb.data(), b, &err), 0);
+  expect_bitwise("gqrng sigma", ra[0], std::exp(0.53));
+  expect_bitwise("gqrng branchy", ra[3], 1.0);
+  expect_bitwise("gqrng prod", ra[4], 6.0);
+  if (ra[2] != std::floor(ra[2]) || ra[2] < 0.0 || ra[2] > 5.0)
+    fail("gqrng crep is not an integer draw in [0, 5]");
+  if (ra != rb) fail("two bs_rng handles at seed 42 drew different rows");
+
+  // Independent advance: each handle carries its own stream, so the
+  // second draw agrees between them and differs from the first.
+  std::vector<double> ra2(5, 0.0), rb2(5, 0.0);
+  bs_param_constrain(m, true, true, q, ra2.data(), a, &err);
+  bs_param_constrain(m, true, true, q, rb2.data(), b, &err);
+  if (ra2 != rb2) fail("bs_rng streams diverged on the second draw");
+  if (ra2[1] == ra[1]) fail("the bs_rng stream did not advance");
+
+  // The header allows a null rng whenever generated quantities are not
+  // asked for -- including on a model whose write_array is the interpreter
+  // and therefore always runs the RNG-bearing section.
+  std::vector<double> only_params(1, 0.0);
+  expect_eq_int(
+      "gqrng constrain(F,F) with no rng",
+      bs_param_constrain(m, false, false, q, only_params.data(), nullptr, &err),
+      0);
+  expect_bitwise("gqrng constrain(F,F) sigma", only_params[0], std::exp(0.53));
+
+  bs_rng_destruct(a);
+  bs_rng_destruct(b);
+  bs_model_destruct(m);
+}
+
+void test_unsupported() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m = bs_model_from_mir(mir.c_str(),
+                                  "tests/fixtures/eight_schools.json", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("es construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  const int64_t n = bs_param_unc_num(m);
+  std::vector<double> q((size_t)n, 0.1), out((size_t)n * (size_t)n, 0.0),
+      grad((size_t)n, 0.0), vec((size_t)n, 1.0);
+  double val = 0;
+
+  err = nullptr;
+  expect_refused("bs_log_density_hessian",
+                 bs_log_density_hessian(m, true, true, q.data(), &val,
+                                        grad.data(), out.data(), &err),
+                 err, "first derivatives only");
+  err = nullptr;
+  expect_refused(
+      "bs_log_density_hessian_vector_product",
+      bs_log_density_hessian_vector_product(m, true, true, q.data(), vec.data(),
+                                            &val, grad.data(), &err),
+      err, "first derivatives only");
+  err = nullptr;
+  expect_refused("bs_param_unconstrain",
+                 bs_param_unconstrain(m, q.data(), out.data(), &err), err,
+                 "forward constraint transforms only");
+  err = nullptr;
+  expect_refused("bs_param_unconstrain_json",
+                 bs_param_unconstrain_json(m, "{\"mu\": 0}", out.data(), &err),
+                 err, "forward constraint transforms only");
+
+  // Density flags: only (propto=true, jacobian=true) is the quantity a
+  // stanli graph computes, so the other three refuse rather than serve a
+  // different number.
+  const std::string flags = "propto=true, jacobian=true";
+  err = nullptr;
+  expect_refused("bs_log_density propto=false",
+                 bs_log_density(m, false, true, q.data(), &val, &err), err,
+                 flags);
+  err = nullptr;
+  expect_refused("bs_log_density jacobian=false",
+                 bs_log_density(m, true, false, q.data(), &val, &err), err,
+                 flags);
+  err = nullptr;
+  expect_refused("bs_log_density_gradient propto=false",
+                 bs_log_density_gradient(m, false, true, q.data(), &val,
+                                         grad.data(), &err),
+                 err, flags);
+  err = nullptr;
+  expect_refused("bs_log_density_gradient jacobian=false",
+                 bs_log_density_gradient(m, true, false, q.data(), &val,
+                                         grad.data(), &err),
+                 err, flags);
+
+  err = nullptr;
+  bs_rng* rng = bs_rng_construct(1, &err);
+  err = nullptr;
+  expect_refused("bs_param_initialize with json",
+                 bs_param_initialize(m, "{\"mu\": 0}", rng, 2.0, 100, true,
+                                     q.data(), &err),
+                 err, "inverse constraint transforms");
+  err = nullptr;
+  expect_refused(
+      "bs_param_initialize jacobian=false",
+      bs_param_initialize(m, nullptr, rng, 2.0, 100, false, q.data(), &err),
+      err, flags);
+  bs_rng_destruct(rng);
+  bs_model_destruct(m);
+}
+
+void test_initialize() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m = bs_model_from_mir(mir.c_str(),
+                                  "tests/fixtures/eight_schools.json", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("es construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  const int64_t n = bs_param_unc_num(m);
+  bs_rng* rng = bs_rng_construct(99, &err);
+  std::vector<double> q((size_t)n, 0.0);
+  expect_eq_int(
+      "bs_param_initialize rc",
+      bs_param_initialize(m, nullptr, rng, 2.0, 100, true, q.data(), &err), 0);
+  for (int64_t i = 0; i < n; ++i)
+    if (!(q[(size_t)i] >= -2.0 && q[(size_t)i] < 2.0))
+      fail("bs_param_initialize left q[" + std::to_string(i) +
+           "] outside [-2, 2): " + std::to_string(q[(size_t)i]));
+  double lp = 0;
+  expect_eq_int("initialized point evaluates",
+                bs_log_density(m, true, true, q.data(), &lp, &err), 0);
+  if (!std::isfinite(lp))
+    fail("bs_param_initialize returned a point with non-finite log density");
+
+  // Genuine exhaustion, not a contrived one: at a radius this wide every
+  // draw puts mu at a magnitude whose normal(0, 5) term is -inf and tau at
+  // exp(huge) = inf, so no attempt can produce a finite log density.
+  std::vector<double> qq((size_t)n, 0.0);
+  err = nullptr;
+  expect_refused(
+      "bs_param_initialize exhausts",
+      bs_param_initialize(m, nullptr, rng, 1e300, 5, true, qq.data(), &err),
+      err, "initialization failed to find a point");
+
+  bs_rng_destruct(rng);
+  bs_model_destruct(m);
+}
+
+// ---------------------------------------------------------------------------
+
+std::string g_printed;
+void collect_print(const char* data, size_t size) {
+  g_printed.append(data, size);
+}
+
+void test_print_callback() {
+  char* err = nullptr;
+  expect_eq_int("bs_set_print_callback rc",
+                bs_set_print_callback(&collect_print, &err), 0);
+
+  // rejectprint prints from transformed data (at construction, through the
+  // MIR interpreter) and from the model block (at evaluation, through the
+  // OP_PRINT kernel). Both have to arrive.
+  const std::string mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+  g_printed.clear();
+  bs_model* m =
+      bs_model_from_mir(mir.c_str(), "{\"N\": 3, \"lim\": 1.0}", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("rejectprint construct: ") + (err ? err : "(none)"));
+    bs_free_error_msg(err);
+    bs_set_print_callback(nullptr, &err);
+    return;
+  }
+  if (g_printed.find("compiled with N = 3") == std::string::npos)
+    fail("transformed-data print did not reach the callback: [" + g_printed +
+         "]");
+
+  g_printed.clear();
+  std::vector<double> q((size_t)bs_param_unc_num(m), 0.25);
+  double lp = 0;
+  bs_log_density(m, true, true, q.data(), &lp, &err);
+  if (g_printed.find("drawing at x = ") == std::string::npos)
+    fail("model-block print did not reach the callback: [" + g_printed + "]");
+  // Reference BridgeStan hands the callback the bytes Stan wrote to the
+  // stream, and Stan's print() ends its line; a client concatenating
+  // chunks has to get the same text.
+  if (g_printed.empty() || g_printed.back() != '\n')
+    fail("print callback text is not newline-terminated: [" + g_printed + "]");
+
+  // Null restores the default, so nothing further reaches the callback.
+  expect_eq_int("bs_set_print_callback(null) rc",
+                bs_set_print_callback(nullptr, &err), 0);
+  g_printed.clear();
+  bs_log_density(m, true, true, q.data(), &lp, &err);
+  if (!g_printed.empty())
+    fail("the callback still received output after being cleared: [" +
+         g_printed + "]");
+
+  bs_model_destruct(m);
+}
+
+// The sidecar half of bs_model_construct that does not need a dlopen: the
+// manifest is read and its build id checked before anything is compiled.
+void test_manifest() {
+  const std::string id = stanli::bs_build_id();
+  stanli::BsManifest man;
+  std::string err;
+
+  const std::string good = "{\"build_id\": \"" + id +
+                           "\", \"name\": \"mymodel\", \"mir\": \"(prog)\"}";
+  if (!stanli::bs_read_manifest(good, &man, &err)) {
+    fail("a matching manifest was rejected: " + err);
+  } else {
+    expect_eq_str("manifest name", man.name, "mymodel");
+    expect_eq_str("manifest mir", man.mir, "(prog)");
+  }
+
+  const std::string stale =
+      "{\"build_id\": \"abi1-deadbeef-Linux-x86_64\", \"name\": \"m\", "
+      "\"mir\": \"(prog)\"}";
+  err.clear();
+  if (stanli::bs_read_manifest(stale, &man, &err)) {
+    fail("a manifest from another build was accepted");
+  } else {
+    if (err.find("abi1-deadbeef-Linux-x86_64") == std::string::npos ||
+        err.find(id) == std::string::npos)
+      fail("the build-id mismatch message names neither id: " + err);
+  }
+
+  err.clear();
+  if (stanli::bs_read_manifest("not json at all", &man, &err))
+    fail("a malformed manifest was accepted");
+  else if (err.empty())
+    fail("a malformed manifest was rejected without a message");
+
+  err.clear();
+  if (stanli::bs_read_manifest("{\"build_id\": \"" + id + "\"}", &man, &err))
+    fail("a manifest with no mir was accepted");
+  else if (err.empty())
+    fail("a manifest with no mir was rejected without a message");
+}
+
+void test_construct_errors() {
+  char* err = nullptr;
+  // A model that cannot be compiled fails as a null return with a message,
+  // never as an escaping exception.
+  bs_model* m = bs_model_from_mir("(not a program)", nullptr, 1, &err);
+  if (m != nullptr) {
+    fail("bs_model_from_mir accepted nonsense MIR");
+    bs_model_destruct(m);
+  } else if (err == nullptr) {
+    fail("bs_model_from_mir failed without a message");
+  }
+  bs_free_error_msg(err);
+
+  // Data that is neither a path nor parseable JSON is the same story.
+  err = nullptr;
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  m = bs_model_from_mir(mir.c_str(), "{not json", 1, &err);
+  if (m != nullptr) {
+    fail("bs_model_from_mir accepted malformed data JSON");
+    bs_model_destruct(m);
+  } else if (err == nullptr) {
+    fail("malformed data JSON failed without a message");
+  }
+  bs_free_error_msg(err);
+
+  // The version globals name the ABI this file implements.
+  expect_eq_int("bs_major_version", bs_major_version, 2);
+  expect_eq_int("bs_minor_version", bs_minor_version, 9);
+  expect_eq_int("bs_patch_version", bs_patch_version, 0);
+}
+
+}  // namespace
+
+int main() {
+  test_density_matches_executor();
+  test_param_num_and_names();
+  test_unc_names();
+  test_constrain_graph();
+  test_constrain_interp();
+  test_unsupported();
+  test_initialize();
+  test_print_callback();
+  test_manifest();
+  test_construct_errors();
+  if (failures == 0) std::printf("test_bridgestan OK\n");
+  return failures == 0 ? 0 : 1;
+}
