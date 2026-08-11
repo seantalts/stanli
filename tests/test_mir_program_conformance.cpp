@@ -31,6 +31,7 @@ using stanli::mir::Expr;
 using stanli::mir::FunDef;
 using stanli::mir::SizedType;
 using stanli::mir::Stmt;
+using stanli::mir::UnsizedLeaf;
 using stanli_test::StdoutCapture;
 
 int failures = 0;
@@ -138,6 +139,9 @@ FunDef rhs_function(std::string name, std::vector<Stmt> body) {
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
   f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
                  "(UArray UInt)"};
+  f.arg_views = {{0, UnsizedLeaf::Real},   {0, UnsizedLeaf::Vector},
+                 {0, UnsizedLeaf::Vector}, {1, UnsizedLeaf::Real},
+                 {1, UnsizedLeaf::Int}};
   f.body = std::move(body);
   return f;
 }
@@ -526,6 +530,7 @@ void test_mixed_integer_udf_arguments() {
   score.name = "score";
   score.arg_names = {"a", "b"};
   score.arg_types = {"UInt", "UInt"};
+  score.arg_views = {{0, UnsizedLeaf::Int}, {0, UnsizedLeaf::Int}};
   score.body = {
       return_value(fun("Plus__",
                        {fun("Times__", {var("a", "UInt"), lit_int(10)}, "UInt"),
@@ -549,6 +554,7 @@ void test_nested_print_effect() {
   echo.name = "echo";
   echo.arg_names = {"x"};
   echo.arg_types = {"UReal"};
+  echo.arg_views = {{0, UnsizedLeaf::Real}};
   echo.body = {
       nr_fun_app("FnPrint", {lit_string("nested print x="), var("x", "UReal")}),
       return_value(var("x", "UReal"))};

@@ -26,6 +26,8 @@
 
 namespace {
 
+using stanli::mir::UnsizedLeaf;
+
 using stanli::compile_rhs;
 using stanli::MirInterp;
 using stanli::RhsProgram;
@@ -97,6 +99,9 @@ FunDef rhs(std::string name, Expr value) {
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
   f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
                  "(UArray UInt)"};
+  f.arg_views = {{0, UnsizedLeaf::Real},   {0, UnsizedLeaf::Vector},
+                  {0, UnsizedLeaf::Vector}, {1, UnsizedLeaf::Real},
+                  {1, UnsizedLeaf::Int}};
   f.body = {returning(
       call("FnMakeArray", {std::move(value)}, "UVector", Expr::Lib::Internal))};
   return f;

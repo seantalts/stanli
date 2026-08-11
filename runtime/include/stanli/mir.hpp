@@ -6,12 +6,28 @@
 
 #include <stanli/sexp.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace stanli {
 namespace mir {
+
+enum class UnsizedLeaf : uint8_t {
+  Unknown,
+  Int,
+  Real,
+  Complex,
+  Vector,
+  RowVector,
+  Matrix
+};
+
+struct UnsizedView {
+  uint8_t depth = 0;
+  UnsizedLeaf leaf = UnsizedLeaf::Unknown;
+};
 
 struct Expr {
   enum Kind {
@@ -35,6 +51,7 @@ struct Expr {
   std::string lit_s;
   std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx
   std::string type_;       // UInt UReal UVector URowVector UMatrix ...
+  UnsizedView unsized;     // structural (UArray ...), without text parsing
   bool data_only = false;  // adlevel DataOnly
   std::string raw;         // Unsupported diagnostics
 };
@@ -144,6 +161,7 @@ struct FunDef {
   std::string name;
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_types;  // unsized: UReal UVector UMatrix ...
+  std::vector<UnsizedView> arg_views;
   std::vector<Stmt> body;
 };
 

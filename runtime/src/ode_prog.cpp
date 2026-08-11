@@ -13,6 +13,30 @@
 
 namespace stanli {
 
+namespace {
+
+bool supported_rhs_view(const mir::UnsizedView& view) {
+  if (view.depth > 1) return false;
+  if (view.depth == 1)
+    return view.leaf == mir::UnsizedLeaf::Real ||
+           view.leaf == mir::UnsizedLeaf::Int;
+  return view.leaf == mir::UnsizedLeaf::Real ||
+         view.leaf == mir::UnsizedLeaf::Int ||
+         view.leaf == mir::UnsizedLeaf::Vector ||
+         view.leaf == mir::UnsizedLeaf::RowVector;
+}
+
+void stamp_rhs_view(Range* range, const mir::UnsizedView& view) {
+  if (view.depth == 1)
+    range->kind = ViewKind::Array;
+  else if (view.leaf == mir::UnsizedLeaf::Vector)
+    range->kind = ViewKind::Vector;
+  else if (view.leaf == mir::UnsizedLeaf::RowVector)
+    range->kind = ViewKind::RowVector;
+}
+
+}  // namespace
+
 RhsProgram compile_rhs_args(
     const mir::FunDef& f, const std::map<std::string, const mir::FunDef*>& funs,
     int n_y, const std::vector<RhsArg>& args) {
@@ -22,6 +46,17 @@ RhsProgram compile_rhs_args(
             " arguments, the call passes " + std::to_string(args.size() + 2) +
             " (t, y, and " + std::to_string(args.size()) + " more)";
     return p;
+  }
+  if (f.arg_views.size() != f.arg_names.size()) {
+    p.why = "right-hand side has incomplete unsized argument metadata";
+    return p;
+  }
+  for (size_t i = 0; i < f.arg_views.size(); ++i) {
+    if (!supported_rhs_view(f.arg_views[i])) {
+      p.why = "right-hand side argument " + std::to_string(i + 1) +
+              " has an unsupported logical view";
+      return p;
+    }
   }
   ProgramCompiler c{p, funs};
   try {
@@ -42,7 +77,9 @@ RhsProgram compile_rhs_args(
     p.n_th = n_th;
     p.n_xr = n_xr;
     c.reals[f.arg_names[0]] = Range{p.t_reg, 1};
-    c.reals[f.arg_names[1]] = Range{p.y0, n_y};
+    Range y{p.y0, n_y};
+    stamp_rhs_view(&y, f.arg_views[1]);
+    c.reals[f.arg_names[1]] = y;
     int th_at = 0, xr_at = 0;
     for (size_t k = 0; k < args.size(); ++k) {
       const RhsArg& a = args[k];
@@ -50,10 +87,14 @@ RhsProgram compile_rhs_args(
       if (a.is_int) {
         c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
       } else if (a.is_param) {
-        c.reals[name] = Range{p.th0 + th_at, a.len};
+        Range r{p.th0 + th_at, a.len};
+        stamp_rhs_view(&r, f.arg_views[k + 2]);
+        c.reals[name] = r;
         th_at += a.len;
       } else {
-        c.reals[name] = Range{p.xr0 + xr_at, a.len};
+        Range r{p.xr0 + xr_at, a.len};
+        stamp_rhs_view(&r, f.arg_views[k + 2]);
+        c.reals[name] = r;
         xr_at += a.len;
       }
     }

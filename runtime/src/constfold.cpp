@@ -50,7 +50,10 @@ std::vector<char> mark_constant_ops(const Graph& g) {
 
     for (size_t i = 0; i < g.ops.size(); ++i) {
       const Op& op = g.ops[i];
-      bool c = op.n_in > 0;
+      // Effects are graph semantics, even when all their values are data.
+      // Executing them in this compile-time pass would erase them from every
+      // subsequent evaluation (and print/reject while compiling instead).
+      bool c = op.n_in > 0 && op.opcode != OP_PRINT && op.opcode != OP_REJECT;
       for (int k = 0; k < op.n_in; ++k)
         if (op.in[k] >= 0 && live[(size_t)op.in[k]]) c = false;
       if (c && op.out >= 0 && no_fold[(size_t)op.out]) c = false;

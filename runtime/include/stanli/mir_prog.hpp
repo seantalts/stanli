@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <map>
@@ -34,11 +35,16 @@
 
 namespace stanli {
 
+enum class ViewKind : uint8_t { Flat, Vector, RowVector, Matrix, Array };
+
 // A value is a contiguous run of registers: scalars are runs of one, arrays
 // and vectors are runs of their length.
 struct Range {
   int reg = 0;
   int len = 0;
+  int64_t rows = 0;
+  int64_t cols = 0;
+  ViewKind kind = ViewKind::Flat;
 };
 
 // One UDF argument in source order. Compile-time integers live outside the
@@ -113,6 +119,7 @@ struct ProgramCompiler {
 
   // dst[0..n) = the given values, as one instruction.
   void emit_const(int dst, const double* v, int n) {
+    if (n == 0) return;
     p.code.push_back(Program::Instr{n == 1 ? Program::CONST : Program::CONSTR,
                                     dst, pool_at(v, n), 0, 0, n});
   }
@@ -170,6 +177,53 @@ struct ProgramCompiler {
     }
   }
 
+  static bool same_view(const Range& a, const Range& b) {
+    if (a.kind != b.kind) return false;
+    if (a.kind == ViewKind::Flat) return a.len == 1 && b.len == 1;
+    if (a.kind == ViewKind::Vector || a.kind == ViewKind::RowVector)
+      return a.len == b.len;
+    if (a.kind == ViewKind::Array) return a.len == b.len;
+    return a.rows == b.rows && a.cols == b.cols;
+  }
+
+  static bool is_scalar(const Range& r) {
+    return r.kind == ViewKind::Flat && r.len == 1;
+  }
+
+  Range typed(Range r, const std::string& type) {
+    if (type == "UVector") {
+      r.kind = ViewKind::Vector;
+      r.rows = r.cols = 0;
+    } else if (type == "URowVector") {
+      r.kind = ViewKind::RowVector;
+      r.rows = r.cols = 0;
+    } else if (type == "UMatrix" && r.kind != ViewKind::Matrix) {
+      bail("matrix expression has unknown logical extents");
+    } else if (type == "UArray") {
+      bail("array expressions are unsupported by the register program");
+    }
+    return r;
+  }
+
+  Range declared(Range r, const mir::SizedType& type) {
+    if (type.base == "SArray") {
+      if (type.elem_base != "SReal" || type.dims.size() != 1)
+        bail("only one-dimensional scalar-array declarations are supported by the register program");
+      r.kind = ViewKind::Array;
+      return r;
+    }
+    if (type.base == "SVector")
+      r.kind = ViewKind::Vector;
+    else if (type.base == "SRowVector")
+      r.kind = ViewKind::RowVector;
+    else if (type.base == "SMatrix") {
+      r.kind = ViewKind::Matrix;
+      r.rows = cint(type.dims[0]);
+      r.cols = cint(type.dims[1]);
+    }
+    return r;
+  }
+
   // ---- expressions ---------------------------------------------------------
   Range expr(const mir::Expr& e) {
     switch (e.kind) {
@@ -206,6 +260,13 @@ struct ProgramCompiler {
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
         if (e.args.size() != 2 || e.args[1].name != "IndexSingle")
           bail("index form");
+        const bool scalar_result = e.type_ == "UReal" || e.type_ == "UInt" ||
+                                   e.type_ == "UComplex";
+        if (!scalar_result)
+          bail("container element indexing requires a logical layout");
+        if (b.kind != ViewKind::Array && b.kind != ViewKind::Vector &&
+            b.kind != ViewKind::RowVector && b.kind != ViewKind::Flat)
+          bail("indexing this logical view is unsupported");
         const long ix = cint(e.args[1].args[0]);
         if (ix < 1 || ix > b.len) bail("index out of the declared range");
         return {b.reg + (int)ix - 1, 1};
@@ -218,7 +279,7 @@ struct ProgramCompiler {
       case mir::Expr::EOr:
       case mir::Expr::EAnd: {
         const Range a = expr(e.args[0]);
-        if (a.len != 1) bail("logical operator on a container");
+        if (!is_scalar(a)) bail("logical operator on a container");
         const int z = konst(0.0), ta = alloc(1), r = alloc(1);
         emit(Program::NE, ta, a.reg, z);
         emit(Program::MOV, r, ta);
@@ -236,7 +297,7 @@ struct ProgramCompiler {
           done = emit(Program::JZ, 0, ta);
         }
         const Range b = expr(e.args[1]);
-        if (b.len != 1) bail("logical operator on a container");
+        if (!is_scalar(b)) bail("logical operator on a container");
         const int tb = alloc(1);
         emit(Program::NE, tb, b.reg, z);
         emit(Program::MOV, r, tb);
@@ -254,7 +315,7 @@ struct ProgramCompiler {
   Range branchy_select(const mir::Expr& c, const mir::Expr& a,
                        const mir::Expr& b) {
     const Range cv = expr(c);
-    if (cv.len != 1) bail("conditional on a container");
+    if (!is_scalar(cv)) bail("conditional on a container");
     // Compile the arms first to learn the width, then re-emit into place.
     const int jz = emit(Program::JZ, 0, cv.reg);
     const Range av = expr(a);
@@ -264,9 +325,14 @@ struct ProgramCompiler {
     p.code[(size_t)jz].dst = (int)p.code.size();
     const Range bv = expr(b);
     if (bv.len != av.len) bail("conditional arms of different widths");
+    if (av.kind == ViewKind::Array || bv.kind == ViewKind::Array)
+      bail("conditional arms of different logical views");
+    if (!same_view(av, bv)) bail("conditional arms of different logical views");
     for (int k = 0; k < bv.len; ++k) emit(Program::MOV, dst + k, bv.reg + k);
     p.code[(size_t)jmp].dst = (int)p.code.size();
-    return {dst, av.len};
+    Range out = av;
+    out.reg = dst;
+    return out;
   }
 
   Range fun(const mir::Expr& e) {
@@ -296,12 +362,20 @@ struct ProgramCompiler {
           parts.push_back(expr(a));
           total += parts.back().len;
         }
+        if (e.name == "FnMakeArray") {
+          for (const Range& q : parts)
+            if (!is_scalar(q))
+              bail("only flat scalar arrays are supported by the register program");
+        }
         const int r = alloc(total);
         int at = 0;
         for (const Range& q : parts)
           for (int k = 0; k < q.len; ++k)
             emit(Program::MOV, r + at++, q.reg + k);
-        return {r, total};
+        Range out{r, total};
+        out.kind = e.name == "FnMakeRowVec" ? ViewKind::RowVector
+                                             : ViewKind::Array;
+        return out;
       }
       bail("internal function " + e.name);
     }
@@ -338,7 +412,7 @@ struct ProgramCompiler {
           const Range a = expr(e.args[(size_t)k]);
           // One lp per call: a vectorized density inside a branch would
           // have to sum over its arguments, which this does not do.
-          if (a.len != 1) bail(e.name + " on a container");
+          if (!is_scalar(a)) bail(e.name + " on a container");
           argv[k] = a.reg;
         }
         // Three arguments or fewer ride in the instruction; a fourth
@@ -358,9 +432,18 @@ struct ProgramCompiler {
     }
     if (e.args.size() == 2) {
       const Range a = expr(e.args[0]), b = expr(e.args[1]);
-      const int n = std::max(a.len, b.len);
-      if ((a.len != 1 && a.len != n) || (b.len != 1 && b.len != n))
-        bail("binary " + e.name + " on mismatched widths");
+      const bool a_scalar = is_scalar(a);
+      const bool b_scalar = is_scalar(b);
+      if (a.kind == ViewKind::Array || b.kind == ViewKind::Array)
+        bail("array arithmetic is unsupported by the register program");
+      if (!a_scalar && !b_scalar && !same_view(a, b))
+        bail("binary " + e.name + " on different logical views");
+      if (e.name == "Times__" && !a_scalar && !b_scalar) {
+        if (a.kind == ViewKind::Matrix || b.kind == ViewKind::Matrix)
+          bail("matrix multiplication is unsupported by the register program");
+        bail("container multiplication is unsupported by the register program");
+      }
+      const int n = a_scalar ? b.len : (b_scalar ? a.len : a.len);
       Program::Code c;
       if (e.name == "Plus__")
         c = Program::ADD;
@@ -392,13 +475,23 @@ struct ProgramCompiler {
         bail("function " + e.name);
       const int r = alloc(n);
       for (int i = 0; i < n; ++i)
-        emit(c, r + i, a.reg + (a.len == 1 ? 0 : i),
-             b.reg + (b.len == 1 ? 0 : i));
-      return {r, n};
+        emit(c, r + i, a.reg + (a_scalar ? 0 : i),
+             b.reg + (b_scalar ? 0 : i));
+      Range out{r, n};
+      if (a_scalar && !b_scalar)
+        out = b;
+      else if (b_scalar && !a_scalar)
+        out = a;
+      else if (same_view(a, b))
+        out = a;
+      out.reg = r;
+      out.len = n;
+      return typed(out, e.type_);
     }
     if (e.args.size() == 1) {
       const Range a = expr(e.args[0]);
       if (e.name == "sum") {
+        if (a.len == 0) return {konst(0.0), 1};
         const int r = alloc(1);
         emit(Program::MOV, r, a.reg);
         for (int i = 1; i < a.len; ++i) emit(Program::ADD, r, r, a.reg + i);
@@ -427,7 +520,9 @@ struct ProgramCompiler {
         bail("function " + e.name);
       const int r = alloc(a.len);
       for (int i = 0; i < a.len; ++i) emit(c, r + i, a.reg + i);
-      return {r, a.len};
+      Range out = a;
+      out.reg = r;
+      return typed(out, e.type_);
     }
     bail("function " + e.name);
   }
@@ -446,9 +541,12 @@ struct ProgramCompiler {
   // Declare (or redeclare) a real variable of `len` registers. Stan's
   // uninitialized real value is NaN; callers may provide another fill only
   // when the surrounding lowering has an explicit initialized-value policy.
-  Range declare(const std::string& name, int len,
-                double fill = std::numeric_limits<double>::quiet_NaN()) {
-    const Range r{alloc(len), len};
+  Range declare(
+      const std::string& name, int len, Range view = {},
+      double fill = std::numeric_limits<double>::quiet_NaN()) {
+    Range r = view;
+    r.reg = alloc(len);
+    r.len = len;
     const std::vector<double> init((size_t)len, fill);
     emit_const(r.reg, init.data(), len);
     reals[name] = r;
@@ -470,11 +568,21 @@ struct ProgramCompiler {
         }
         if (s.has_init) {
           const Range v = expr(s.init);
-          const Range d = declare(s.decl_id, v.len);
-          for (int k = 0; k < v.len; ++k)
+          const int want = (int)sized_len(s.decl_type);
+          if (v.len != want)
+            bail("declaration width mismatch for " + s.decl_id);
+          Range expected;
+          expected.len = want;
+          expected = declared(expected, s.decl_type);
+          if (!same_view(v, expected))
+            bail("declaration logical view mismatch for " + s.decl_id);
+          const Range d = declare(s.decl_id, want, expected);
+          for (int k = 0; k < want; ++k)
             emit(Program::MOV, d.reg + k, v.reg + k);
         } else {
-          declare(s.decl_id, (int)sized_len(s.decl_type));
+          Range view;
+          declare(s.decl_id, (int)sized_len(s.decl_type),
+                  declared(view, s.decl_type));
         }
         return;
       }
@@ -500,6 +608,8 @@ struct ProgramCompiler {
         const Range v = expr(s.rhs);
         if (s.lhs_idx.empty()) {
           if (v.len != dst.len) bail("assignment width mismatch for " + s.lhs);
+          if (!same_view(v, dst))
+            bail("assignment logical view mismatch for " + s.lhs);
           for (int k = 0; k < v.len; ++k)
             emit(Program::MOV, dst.reg + k, v.reg + k);
           return;
@@ -508,7 +618,7 @@ struct ProgramCompiler {
           bail("assignment index form for " + s.lhs);
         const long ix = cint(s.lhs_idx[0].args[0]);
         if (ix < 1 || ix > dst.len) bail("assignment index range for " + s.lhs);
-        if (v.len != 1) bail("element assignment from a container");
+        if (!is_scalar(v)) bail("element assignment from a container");
         emit(Program::MOV, dst.reg + (int)ix - 1, v.reg);
         return;
       }
@@ -534,7 +644,7 @@ struct ProgramCompiler {
           return;
         }
         const Range cv = expr(s.cond);
-        if (cv.len != 1) bail("branch on a container");
+        if (!is_scalar(cv)) bail("branch on a container");
         ++branch_depth;
         const int jz = emit(Program::JZ, 0, cv.reg);
         if (!s.body.empty()) stmt(s.body[0]);
@@ -559,7 +669,7 @@ struct ProgramCompiler {
         // so all this does is accumulate.
         if (target_reg < 0) bail("target += is not available in this region");
         const Range v = expr(s.target);
-        if (v.len != 1) bail("target += of a container");
+        if (!is_scalar(v)) bail("target += of a container");
         emit(Program::ADD, target_reg, target_reg, v.reg);
         return;
       }
@@ -575,15 +685,21 @@ struct ProgramCompiler {
     }
   }
 
-  Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args) {
-    if (++inline_depth > 32) bail("function inlining too deep");
+  Range inline_call(const mir::FunDef& f,
+                    const std::vector<InlineArg>& args) {
     if (args.size() != f.arg_names.size()) bail("function argument mismatch");
+    if (++inline_depth > 32) {
+      --inline_depth;
+      bail("function inlining too deep");
+    }
     // Callee scope: save the caller's bindings, install the parameters, and
     // restore afterwards. Registers are never reused, so nothing aliases.
     auto saved_reals = reals;
     auto saved_ints = ints;
+    const int saved_branch_depth = branch_depth;
     reals.clear();
     ints.clear();
+    branch_depth = 0;
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
       if (args[k].is_const_int)
         ints[f.arg_names[k]] = args[k].ints;
@@ -596,9 +712,16 @@ struct ProgramCompiler {
       bail("function " + f.name + " returned no value");
     } catch (Returned& r) {
       out = r.r;
+    } catch (...) {
+      reals = std::move(saved_reals);
+      ints = std::move(saved_ints);
+      branch_depth = saved_branch_depth;
+      --inline_depth;
+      throw;
     }
     reals = std::move(saved_reals);
     ints = std::move(saved_ints);
+    branch_depth = saved_branch_depth;
     --inline_depth;
     return out;
   }

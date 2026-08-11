@@ -1,5 +1,6 @@
 #include <stanli/mir.hpp>
 
+#include <limits>
 #include <stdexcept>
 
 namespace stanli {
@@ -29,6 +30,29 @@ const Node* field(const Node& n, const char* key) {
   for (size_t i = 0; i < n.size(); ++i)
     if (n[i].head_is(key)) return &n[i];
   return nullptr;
+}
+
+UnsizedLeaf unsized_leaf(const std::string& atom) {
+  if (atom == "UInt") return UnsizedLeaf::Int;
+  if (atom == "UReal") return UnsizedLeaf::Real;
+  if (atom == "UComplex") return UnsizedLeaf::Complex;
+  if (atom == "UVector") return UnsizedLeaf::Vector;
+  if (atom == "URowVector") return UnsizedLeaf::RowVector;
+  if (atom == "UMatrix") return UnsizedLeaf::Matrix;
+  return UnsizedLeaf::Unknown;
+}
+
+UnsizedView read_unsized(const Node& n) {
+  UnsizedView out;
+  const Node* leaf = &n;
+  while (!leaf->is_atom() && leaf->head_is("UArray") && leaf->size() == 2) {
+    if (out.depth == std::numeric_limits<uint8_t>::max())
+      throw std::runtime_error("mir: unsized array nesting is too deep");
+    ++out.depth;
+    leaf = &(*leaf)[1];
+  }
+  if (leaf->is_atom()) out.leaf = unsized_leaf(leaf->atom);
+  return out;
 }
 
 Expr read_expr(const Node& n);
@@ -153,7 +177,16 @@ Expr read_expr(const Node& n) {
   if (const Node* meta = field(n, "meta")) {
     const Node& m = (*meta)[1];
     if (!m.is_atom()) {
-      if (const Node* t = field(m, "type_")) e.type_ = (*t)[1].atom;
+      if (const Node* t = field(m, "type_")) {
+        const Node& type = (*t)[1];
+        e.unsized = read_unsized(type);
+        if (e.unsized.leaf != UnsizedLeaf::Unknown) {
+          e.type_ = e.unsized.depth ? "UArray" : type.atom;
+        } else {
+          e.type_.clear();
+          e.raw = dump(type);
+        }
+      }
       if (const Node* a = field(m, "adlevel"))
         e.data_only = (*a)[1].is_atom() && (*a)[1].atom == "DataOnly";
     }
@@ -395,6 +428,7 @@ Program read_program(const sexp::Node& root) {
         for (size_t a = 0; a < args.size(); ++a) {
           // (AutoDiffable name type) or (DataOnly name type)
           f.arg_names.push_back(args[a][1].atom);
+          f.arg_views.push_back(read_unsized(args[a][2]));
           f.arg_types.push_back(args[a][2].is_atom() ? args[a][2].atom
                                                      : dump(args[a][2], 40));
         }
