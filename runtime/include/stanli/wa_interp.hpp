@@ -58,6 +58,10 @@ class WaInterp {
 
   // Valid after the first eval.
   const std::vector<CompiledModel::ParamView>& columns() const { return cols_; }
+  // Where the CSV's three sections meet, in `columns` indices: the same
+  // contract as CompiledModel::WriteArray's fields of these names.
+  size_t n_tp_start() const { return n_tp_start_; }
+  size_t n_gq_start() const { return n_gq_start_; }
 
  private:
   bool read_param(MirInterp<double>& in, const mir::Stmt& s,
@@ -72,6 +76,9 @@ class WaInterp {
   std::map<std::string, const mir::FunDef*> funs_;
   std::map<std::string, DataMap::Entry> base_env_;
   std::vector<CompiledModel::ParamView> cols_;
+  size_t n_tp_start_ = 0;
+  size_t n_gq_start_ = 0;
+  bool saw_tp_ = false, saw_gq_ = false;
   bool have_cols_ = false;
 };
 

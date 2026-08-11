@@ -1097,6 +1097,98 @@ int main() {
           "glm: lp matches the var path (propto reached the kernel)");
   }
 
+  // Where the CSV's three sections meet. stanc marks the boundaries with
+  // early-return guards on emit_transformed_parameters__ /
+  // emit_generated_quantities__; lowering pins both flags on, so the
+  // recorded indices are the only thing left that says which column is a
+  // constrained parameter and which a generated quantity.
+  {
+    // conj's header, verified against CmdStan in tests/test_sampling.cpp,
+    // is mu_c,sigma,prec,mu,sd_from_prec,resid.<i>: two constrained
+    // parameters, one transformed parameter, three generated quantities.
+    DataMap d = DataMap::from_json_file("tests/fixtures/conj.json");
+    CompiledModel wm = compile_model(slurp("tests/fixtures/conj.tmir.sexp"), d);
+    check(wm.write_array.has_value(), "conj: write_array compiled");
+    if (wm.write_array) {
+      expect_eq("conj columns", (double)wm.write_array->columns.size(), 6);
+      expect_eq("conj n_tp_start", (double)wm.write_array->n_tp_start, 2);
+      expect_eq("conj n_gq_start", (double)wm.write_array->n_gq_start, 3);
+    }
+  }
+  {
+    // Parameters only: every column is a constrained parameter, so both
+    // boundaries sit at the end.
+    DataMap d;
+    d.set_int("K", 3);
+    CompiledModel wm = compile_model(slurp("tests/fixtures/simp.tmir.sexp"), d);
+    check(wm.write_array.has_value(), "simp: write_array compiled");
+    if (wm.write_array) {
+      expect_eq("simp columns", (double)wm.write_array->columns.size(), 1);
+      expect_eq("simp n_tp_start", (double)wm.write_array->n_tp_start, 1);
+      expect_eq("simp n_gq_start", (double)wm.write_array->n_gq_start, 1);
+    }
+
+    // The unconstrained layout: simplex[3] is 2 free values behind 3
+    // declared ones, so length and dims disagree and both are recorded.
+    check(wm.unc_params.size() == 1, "simp: one unconstrained parameter");
+    if (wm.unc_params.size() == 1) {
+      const auto& u = wm.unc_params[0];
+      check(u.name == "theta", "simp unc name");
+      expect_eq("simp unc len", (double)u.len, 2);
+      check(u.dims == std::vector<int64_t>{3}, "simp unc dims");
+      check(u.transform == mir::Transform::Simplex, "simp unc transform");
+    }
+  }
+  {
+    // One of every transform: the unconstrained lengths are what the
+    // reader has to slice the draw with, and only the declared dims tell
+    // corr_matrix[3] from cov_matrix[3].
+    DataMap d = DataMap::from_json_file("tests/fixtures/newtrans.json");
+    CompiledModel nm =
+        compile_model(slurp("tests/fixtures/newtrans.tmir.sexp"), d);
+    check(nm.unc_params.size() == nm.param_names.size(),
+          "newtrans: one unc_param per declared parameter");
+    int64_t total = 0;
+    bool names_ok = nm.unc_params.size() == nm.param_names.size();
+    for (size_t i = 0; i < nm.unc_params.size(); ++i) {
+      total += nm.unc_params[i].len;
+      if (i < nm.param_names.size() &&
+          nm.unc_params[i].name != nm.param_names[i])
+        names_ok = false;
+    }
+    check(names_ok, "newtrans: unc_params agree with param_names");
+    expect_eq("newtrans unc total", (double)total, (double)nm.n_unconstrained);
+    struct Want {
+      const char* name;
+      int64_t len;
+      std::vector<int64_t> dims;
+      mir::Transform::Kind kind;
+    };
+    const std::vector<Want> want{
+        {"a", 1, {}, mir::Transform::OffsetMultiplier},
+        {"b", 3, {3}, mir::Transform::OffsetMultiplier},
+        {"c", 1, {}, mir::Transform::Offset},
+        {"d", 1, {}, mir::Transform::Multiplier},
+        {"mu_p", 3, {3}, mir::Transform::Identity},
+        {"sg_p", 3, {3}, mir::Transform::Lower},
+        {"e", 3, {3}, mir::Transform::OffsetMultiplier},
+        {"u", 3, {3}, mir::Transform::UnitVector},
+        {"z", 3, {4}, mir::Transform::SumToZero},
+        {"R", 3, {3}, mir::Transform::Correlation},
+        {"S", 6, {3}, mir::Transform::Covariance},
+        {"Lc", 6, {3, 3}, mir::Transform::CholeskyCov},
+        {"Lr", 9, {4, 3}, mir::Transform::CholeskyCov}};
+    check(nm.unc_params.size() == want.size(), "newtrans: 13 parameters");
+    for (size_t i = 0; i < want.size() && i < nm.unc_params.size(); ++i) {
+      const auto& u = nm.unc_params[i];
+      const std::string tag = std::string("newtrans ") + want[i].name;
+      check(u.name == want[i].name, tag + " name");
+      expect_eq(tag + " len", (double)u.len, (double)want[i].len);
+      check(u.dims == want[i].dims, tag + " dims");
+      check(u.transform == want[i].kind, tag + " transform");
+    }
+  }
+
   {
     // Error path: an unsupported function is reported by name, never
     // silently miscompiled. Mutate a known-good fixture's density name.

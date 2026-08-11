@@ -114,6 +114,32 @@ struct Stmt {
   std::string raw;
 };
 
+// stanc3 separates write_array's three CSV sections with early-return
+// guards rather than nested blocks:
+//   if (!(emit_transformed_parameters__ || emit_generated_quantities__))
+//     return;                                 <- transformed parameters start
+//   if (!emit_generated_quantities__) return; <- generated quantities start
+// Both flags are pinned on, so the guards emit nothing; the column count
+// as one is reached is the only record of where a section begins.
+enum class EmitGuard { None, TransformedParams, GeneratedQuantities };
+
+inline EmitGuard emit_guard(const Stmt& s) {
+  if (s.kind != Stmt::IfElse) return EmitGuard::None;
+  const Expr& c = s.cond;
+  if (c.kind != Expr::FunApp || c.name != "PNot__" || c.args.size() != 1)
+    return EmitGuard::None;
+  const Expr& a = c.args[0];
+  if (a.kind == Expr::Var && a.name == "emit_generated_quantities__")
+    return EmitGuard::GeneratedQuantities;
+  if (a.kind == Expr::EOr && a.args.size() == 2 &&
+      a.args[0].kind == Expr::Var &&
+      a.args[0].name == "emit_transformed_parameters__" &&
+      a.args[1].kind == Expr::Var &&
+      a.args[1].name == "emit_generated_quantities__")
+    return EmitGuard::TransformedParams;
+  return EmitGuard::None;
+}
+
 struct FunDef {
   std::string name;
   std::vector<std::string> arg_names;

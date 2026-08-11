@@ -9,6 +9,7 @@
 
 #include <stanli/data.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/mir.hpp>
 
 #include <optional>
 #include <stdexcept>
@@ -67,6 +68,19 @@ struct CompiledModel {
   }
   std::vector<ParamView> views;
   int64_t n_unconstrained = 0;
+  // Each declared parameter, in declaration order: what it is called, how
+  // many UNCONSTRAINED values it contributes, its declared dimensions, and
+  // which constraint transform produced it. The unconstrained vector is
+  // these lengths concatenated in this order.
+  struct UncParam {
+    std::string name;
+    int64_t len = 0;  // unconstrained values
+    // The dimensions as declared, which are not always the constrained
+    // shape: cholesky_factor_corr[K] declares K and holds K x K.
+    std::vector<int64_t> dims;
+    mir::Transform::Kind transform = mir::Transform::Identity;
+  };
+  std::vector<UncParam> unc_params;
   // Slot fills for data + constants, applied after Executor construction.
   std::vector<std::pair<int, std::vector<double>>> fills;
 
@@ -86,6 +100,11 @@ struct CompiledModel {
   struct WriteArray {
     Graph graph;
     std::vector<ParamView> columns;  // CSV order
+    // Index into `columns` where each section starts. Everything before
+    // n_tp_start is a constrained parameter, [n_tp_start, n_gq_start) is a
+    // transformed parameter, the rest is a generated quantity.
+    size_t n_tp_start = 0;
+    size_t n_gq_start = 0;
     std::vector<std::pair<int, std::vector<double>>> fills;
     int64_t n_unconstrained = 0;  // must agree with the log_prob graph's
     // Non-empty when lowering stopped early (an RNG in generated quantities,

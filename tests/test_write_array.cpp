@@ -34,6 +34,13 @@ void expect_eq(const std::string& what, const std::string& got,
   }
 }
 
+void expect_idx(const std::string& what, size_t got, size_t want) {
+  if (got != want) {
+    ++failures;
+    std::printf("FAIL %s: got %zu want %zu\n", what.c_str(), got, want);
+  }
+}
+
 std::string slurp(const std::string& path) {
   std::ifstream f(path);
   std::ostringstream ss;
@@ -86,6 +93,11 @@ void test_wanames_pipeline() {
             joined(cm.write_array->columns),
             "s,v.1,M.1.1,M.2.1,M.1.2,M.2.2,M.1.3,M.2.3,"
             "gq.1.1,gq.2.1,gq.1.2,gq.2.2");
+
+  // Generated quantities but no transformed parameters: the two section
+  // boundaries coincide, right after the three constrained parameters.
+  expect_idx("wanames n_tp_start", cm.write_array->n_tp_start, 3);
+  expect_idx("wanames n_gq_start", cm.write_array->n_gq_start, 3);
 
   // And the write_array graph computes the right VALUES, not just names:
   // gq[i][j] = s + 10*i + j is exact arithmetic on the draw.
@@ -140,6 +152,11 @@ void test_interpreted_gq() {
   WaRng rng(42);
   const std::vector<double> r1 = wi.eval(params, rng);
   expect_eq("gqrng header", joined(wi.columns()), "sigma,yrep,crep,branchy,p");
+  // The interpreter discovers the same section boundaries the graph
+  // lowering records: one constrained parameter, no transformed
+  // parameters, the rest generated quantities.
+  expect_idx("gqrng interp n_tp_start", wi.n_tp_start(), 1);
+  expect_idx("gqrng interp n_gq_start", wi.n_gq_start(), 1);
   if (r1.size() != 5) {
     ++failures;
     std::printf("FAIL gqrng: row size %zu\n", r1.size());

@@ -106,6 +106,10 @@ struct Lowering {
   // Lowering generate_quantities rather than log_prob: parameters are columns
   // to emit, not values to differentiate.
   bool in_write_array = false;
+  // Where the emission guards fell, as counts of columns emitted before
+  // each. Unset until the guard is reached (a section can be missing from
+  // the MIR entirely), which run_write_array then reads as "at the end".
+  std::optional<size_t> n_tp_start, n_gq_start;
   // CmdStan's propto__ template parameter, threaded by lower_call_udf: a
   // density inside an inlined user function is unnormalized only if the
   // call that reached it was.
@@ -1991,6 +1995,17 @@ struct Lowering {
     }
     const int raw = add_slot(raw_len, /*is_param=*/true, psi);
     out.param_names.push_back(s.decl_id);
+    {
+      // The unconstrained layout the caller needs to slice a draw: how
+      // long this parameter's piece is, and what it means. raw_len and
+      // con_len part company for every structured transform.
+      CompiledModel::UncParam u;
+      u.name = s.decl_id;
+      u.len = raw_len;
+      for (const auto& d : s.read_dims) u.dims.push_back(eval_int(d));
+      u.transform = tr.kind;
+      out.unc_params.push_back(std::move(u));
+    }
     out.n_unconstrained += raw_len;
 
     if (tr.kind == mir::Transform::Identity) {
@@ -2377,6 +2392,21 @@ struct Lowering {
         return;
       }
       case mir::Stmt::IfElse: {
+        // The guards are data-only and fold away below (both flags are
+        // pinned on), so this is the only chance to note that a CSV
+        // section ended here.
+        if (in_write_array) {
+          switch (mir::emit_guard(s)) {
+            case mir::EmitGuard::TransformedParams:
+              if (!n_tp_start) n_tp_start = out.views.size();
+              break;
+            case mir::EmitGuard::GeneratedQuantities:
+              if (!n_gq_start) n_gq_start = out.views.size();
+              break;
+            case mir::EmitGuard::None:
+              break;
+          }
+        }
         if (!s.cond.data_only) {  // an island, not a compile error
           lower_param_ifelse(s);
           return;
@@ -2446,6 +2476,13 @@ struct Lowering {
     g.result_slot = const_slot(0.0);
     wa.n_unconstrained = out.n_unconstrained;
     wa.graph = std::move(g);
+    // A section stanc did not emit a guard for (or one lowering stopped
+    // short of) has no columns of its own: it starts where the CSV ends.
+    // The transformed-parameter boundary falls back to the generated
+    // quantities one rather than to the end, so a missing first guard
+    // cannot order the two backwards and hand a reader a negative count.
+    wa.n_gq_start = n_gq_start.value_or(out.views.size());
+    wa.n_tp_start = n_tp_start.value_or(wa.n_gq_start);
     wa.columns = std::move(out.views);
     wa.fills = std::move(out.fills);
     return wa;
@@ -2521,6 +2558,7 @@ CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
                     std::to_string(cm.n_unconstrained) +
                     (w.truncated.empty() ? "" : "; " + w.truncated);
       w.columns.clear();
+      w.n_tp_start = w.n_gq_start = 0;
     }
     if (!w.truncated.empty()) {
       // The graph could not express the whole section; hand the model the

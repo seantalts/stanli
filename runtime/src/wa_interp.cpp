@@ -25,6 +25,18 @@ std::vector<double> WaInterp::eval(
       return read_param(*cur, s, params);
     if (s.kind == mir::Stmt::NRFunApp && s.fn_name == "FnWriteParam")
       return write_param(*cur, s, row);
+    // The section guards: note the boundary and let the interpreter run
+    // the statement, whose condition is false (both flags are on).
+    if (!have_cols_) {
+      const mir::EmitGuard eg = mir::emit_guard(s);
+      if (eg == mir::EmitGuard::TransformedParams) {
+        n_tp_start_ = cols_.size();
+        saw_tp_ = true;
+      } else if (eg == mir::EmitGuard::GeneratedQuantities) {
+        n_gq_start_ = cols_.size();
+        saw_gq_ = true;
+      }
+    }
     return false;
   };
   h.fun = [this, &cur, &rng](const mir::Expr& e, DataMap::Entry* out) {
@@ -34,6 +46,14 @@ std::vector<double> WaInterp::eval(
   cur = &in;
   in.env() = base_env_;
   in.run(prog_->generate_quantities);
+  if (!have_cols_) {
+    // A section with no guard of its own contributes no columns, so it
+    // starts where the CSV ends -- except that a missing first guard
+    // falls back to the second boundary, so the two cannot come out
+    // ordered backwards.
+    if (!saw_gq_) n_gq_start_ = cols_.size();
+    if (!saw_tp_) n_tp_start_ = n_gq_start_;
+  }
   have_cols_ = true;
   return row;
 }
