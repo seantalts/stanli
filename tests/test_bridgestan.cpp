@@ -71,24 +71,30 @@ std::string slurp(const std::string& path) {
 // message, and the message frees cleanly. `mentions` pins WHICH refusal it
 // was, so a call that failed for an unrelated reason cannot pass for a
 // call that refused on purpose.
-void expect_refused(const std::string& what, int rc, char* err,
+// `err` is a POINTER to the caller's variable, not its value: C++ leaves
+// the order of argument evaluation unspecified, so passing `err` next to
+// the call that sets it read the old null on gcc and the new message on
+// clang. Reading it in the body is sequenced after every argument.
+void expect_refused(const std::string& what, int rc, char** err,
                     const std::string& mentions) {
   if (rc != -1) {
     ++failures;
     std::printf("FAIL %s: return code %d, want exactly -1\n", what.c_str(), rc);
   }
-  if (err == nullptr) {
+  char* msg = *err;
+  *err = nullptr;
+  if (msg == nullptr) {
     ++failures;
     std::printf("FAIL %s: no error message\n", what.c_str());
-  } else if (err[0] == '\0') {
+  } else if (msg[0] == '\0') {
     ++failures;
     std::printf("FAIL %s: empty error message\n", what.c_str());
-  } else if (std::string(err).find(mentions) == std::string::npos) {
+  } else if (std::string(msg).find(mentions) == std::string::npos) {
     ++failures;
     std::printf("FAIL %s: message does not mention \"%s\"\n  got %s\n",
-                what.c_str(), mentions.c_str(), err);
+                what.c_str(), mentions.c_str(), msg);
   }
-  bs_free_error_msg(err);
+  bs_free_error_msg(msg);
 }
 
 // A point that depends on the index, so a mixed-up parameter shows up as a
@@ -403,21 +409,21 @@ void test_unsupported() {
   expect_refused("bs_log_density_hessian",
                  bs_log_density_hessian(m, true, true, q.data(), &val,
                                         grad.data(), out.data(), &err),
-                 err, "first derivatives only");
+                 &err, "first derivatives only");
   err = nullptr;
   expect_refused(
       "bs_log_density_hessian_vector_product",
       bs_log_density_hessian_vector_product(m, true, true, q.data(), vec.data(),
                                             &val, grad.data(), &err),
-      err, "first derivatives only");
+      &err, "first derivatives only");
   err = nullptr;
   expect_refused("bs_param_unconstrain",
-                 bs_param_unconstrain(m, q.data(), out.data(), &err), err,
+                 bs_param_unconstrain(m, q.data(), out.data(), &err), &err,
                  "forward constraint transforms only");
   err = nullptr;
   expect_refused("bs_param_unconstrain_json",
                  bs_param_unconstrain_json(m, "{\"mu\": 0}", out.data(), &err),
-                 err, "forward constraint transforms only");
+                 &err, "forward constraint transforms only");
 
   // Density flags: only (propto=true, jacobian=true) is the quantity a
   // stanli graph computes, so the other three refuse rather than serve a
@@ -425,22 +431,22 @@ void test_unsupported() {
   const std::string flags = "propto=true, jacobian=true";
   err = nullptr;
   expect_refused("bs_log_density propto=false",
-                 bs_log_density(m, false, true, q.data(), &val, &err), err,
+                 bs_log_density(m, false, true, q.data(), &val, &err), &err,
                  flags);
   err = nullptr;
   expect_refused("bs_log_density jacobian=false",
-                 bs_log_density(m, true, false, q.data(), &val, &err), err,
+                 bs_log_density(m, true, false, q.data(), &val, &err), &err,
                  flags);
   err = nullptr;
   expect_refused("bs_log_density_gradient propto=false",
                  bs_log_density_gradient(m, false, true, q.data(), &val,
                                          grad.data(), &err),
-                 err, flags);
+                 &err, flags);
   err = nullptr;
   expect_refused("bs_log_density_gradient jacobian=false",
                  bs_log_density_gradient(m, true, false, q.data(), &val,
                                          grad.data(), &err),
-                 err, flags);
+                 &err, flags);
 
   err = nullptr;
   bs_rng* rng = bs_rng_construct(1, &err);
@@ -448,12 +454,12 @@ void test_unsupported() {
   expect_refused("bs_param_initialize with json",
                  bs_param_initialize(m, "{\"mu\": 0}", rng, 2.0, 100, true,
                                      q.data(), &err),
-                 err, "inverse constraint transforms");
+                 &err, "inverse constraint transforms");
   err = nullptr;
   expect_refused(
       "bs_param_initialize jacobian=false",
       bs_param_initialize(m, nullptr, rng, 2.0, 100, false, q.data(), &err),
-      err, flags);
+      &err, flags);
   bs_rng_destruct(rng);
   bs_model_destruct(m);
 }
@@ -492,7 +498,7 @@ void test_initialize() {
   expect_refused(
       "bs_param_initialize exhausts",
       bs_param_initialize(m, nullptr, rng, 1e300, 5, true, qq.data(), &err),
-      err, "initialization failed to find a point");
+      &err, "initialization failed to find a point");
 
   bs_rng_destruct(rng);
   bs_model_destruct(m);
