@@ -332,6 +332,12 @@ target_compile_definitions(stanli PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 # saves compiling it.
 if(NOT EMSCRIPTEN)
   target_sources(stanli PRIVATE runtime/src/bridgestan_abi.cpp)
+  # PUBLIC, so anything linking the runtime sees the same decoration the
+  # definitions were compiled with. Without it the reference header's
+  # BS_PUBLIC is __declspec(dllimport) on Windows, and a test linking the
+  # static library asks for __imp_bs_* from a DLL that does not exist.
+  # Ignored everywhere else: BS_PUBLIC is a visibility attribute there.
+  target_compile_definitions(stanli PUBLIC BRIDGESTAN_EXPORT=1)
 endif()
 target_link_libraries(stanli PUBLIC stanmath sundials)
 if(NOT EMSCRIPTEN)

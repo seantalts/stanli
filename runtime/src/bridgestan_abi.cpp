@@ -26,7 +26,13 @@
 // executor from an ExecutorPool for the length of the call. The RNG is the
 // caller's, in a bs_rng handle, so two chains drawing generated quantities
 // through one model do not share a stream.
+// BS_PUBLIC is __declspec(dllimport) on Windows unless this is defined,
+// which would make these definitions, and any reference to them, look for
+// a DLL that does not exist. The build sets it for everything that links
+// the runtime; this keeps the file correct when compiled on its own.
+#ifndef BRIDGESTAN_EXPORT
 #define BRIDGESTAN_EXPORT 1
+#endif
 #include "../third_party/bridgestan.h"
 
 #include <stanli/bridgestan_internal.hpp>
