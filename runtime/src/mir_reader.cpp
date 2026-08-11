@@ -385,11 +385,21 @@ Stmt read_stmt(const Node& n) {
     if (kind.head_is("CompilerInternal")) {
       const Node& internal = kind[1];
       s.fn_name = internal.is_atom() ? internal.atom : internal[0].atom;
-      // FnWriteParam names its column in the payload, not in the (empty)
-      // argument list: (FnWriteParam (unconstrain_opt ()) (var <expr>)).
-      if (!internal.is_atom())
+      if (!internal.is_atom()) {
+        // FnCheck's payload distinguishes lower from upper and names the
+        // value. Its ordinary operands contain the value and bound but not
+        // that relation.
+        if (s.fn_name == "FnCheck") {
+          if (const Node* t = field(internal, "trans"))
+            s.check_transform = read_transform((*t)[1]);
+          if (const Node* name = field(internal, "var_name"))
+            s.check_var_name = (*name)[1].atom;
+        }
+        // FnWriteParam names its column in the payload, not in the (empty)
+        // argument list; FnCheck likewise carries its checked value here.
         if (const Node* v = field(internal, "var"))
           s.fn_args.push_back(read_expr((*v)[1]));
+      }
     } else if (kind.head_is("StanLib")) {
       s.fn_name = kind[1].atom;
     } else {

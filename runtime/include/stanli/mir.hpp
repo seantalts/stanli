@@ -82,6 +82,23 @@ struct Transform {
   std::string raw;
 };
 
+inline bool is_structured_check(Transform::Kind kind) {
+  switch (kind) {
+    case Transform::Simplex:
+    case Transform::Ordered:
+    case Transform::PositiveOrdered:
+    case Transform::CholeskyCorr:
+    case Transform::UnitVector:
+    case Transform::SumToZero:
+    case Transform::Correlation:
+    case Transform::Covariance:
+    case Transform::CholeskyCov:
+      return true;
+    default:
+      return false;
+  }
+}
+
 struct SizedType {
   std::string base;        // SInt SReal SVector SRowVector SMatrix SArray ...
   std::vector<Expr> dims;  // outer-to-inner for SArray chains
@@ -120,6 +137,11 @@ struct Stmt {
   // NRFunApp
   std::string fn_name;
   std::vector<Expr> fn_args;
+  // FnCheck: the relation lives in the CompilerInternal payload rather than
+  // the ordinary argument list. The first fn_arg is the value and the rest
+  // are its bounds.
+  std::optional<Transform> check_transform;
+  std::string check_var_name;
   // For
   std::string loopvar;
   Expr lower, upper;

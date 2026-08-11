@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -168,6 +169,53 @@ void expect_structured_arrays(int B) {
   stanli_model_free(model);
 }
 
+void expect_invalid_data_rejected() {
+  const std::string mir = slurp("tests/fixtures/newtrans.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model =
+      stanli_model_new(mir.c_str(), R"({"m":0.3,"s":-1})", err, sizeof err);
+  if (model != nullptr) {
+    ++failures;
+    std::printf("FAIL C API accepted data below its declared bound\n");
+    stanli_model_free(model);
+  } else if (std::string(err).find("s") == std::string::npos) {
+    ++failures;
+    std::printf("FAIL C API data-bound error did not name s: %s\n", err);
+  }
+}
+
+void expect_runtime_bound_rejected() {
+  const std::string mir = slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model = stanli_model_new(
+      mir.c_str(),
+      R"({"d":0,"raw":0,"N":1,"M":1,"lo":[-10],"R":1,"C":1,"BR":1,"BC":1,"matrix_lo":[[-10]]})",
+      err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL C API bound-check model construction: %s\n", err);
+    return;
+  }
+
+  double q = -1.0;
+  double lp = 0.0;
+  double grad = 0.0;
+  if (stanli_grad(model, &q, &lp, &grad) != 1 ||
+      lp != -std::numeric_limits<double>::infinity()) {
+    ++failures;
+    std::printf("FAIL C API gradient accepted transformed value below bound\n");
+  }
+
+  const int64_t ncol = stanli_wa_n_columns(model);
+  std::vector<double> row((size_t)ncol);
+  if (ncol <= 0 || stanli_wa_row(model, &q, row.data()) == 0) {
+    ++failures;
+    std::printf(
+        "FAIL C API write_array accepted transformed value below bound\n");
+  }
+  stanli_model_free(model);
+}
+
 }  // namespace
 
 int main() {
@@ -200,6 +248,8 @@ int main() {
                {1, 2, 3, 4, 5, 6}, {1, 4, 2, 5, 3, 6});
 
   for (int B = 0; B <= 2; ++B) expect_structured_arrays(B);
+  expect_invalid_data_rejected();
+  expect_runtime_bound_rejected();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;

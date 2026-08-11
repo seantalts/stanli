@@ -3008,18 +3008,71 @@ struct Lowering {
       case mir::Stmt::Skip:
         return;
       case mir::Stmt::NRFunApp:
-        // Compiler-internal checks (FnCheck / FnValidateSize): sizes are
-        // enforced at data binding; value checks are skipped.
-        if (s.fn_name == "FnCheck" || s.fn_name == "FnValidateSize") return;
-        // A vector offset/multiplier makes stanc emit check_matching_dims
-        // as a named call rather than an FnCheck. It is a pure SHAPE
-        // check, and every shape here is static -- a mismatch would have
-        // failed this lowering long before the check ran -- so skipping
-        // it is exact rather than a relaxation. Deliberately not a
-        // `check_*` prefix match: a value check like check_positive_finite
-        // rejects a draw at runtime, and skipping one of those would
-        // silently accept points CmdStan refuses.
-        if (s.fn_name == "check_matching_dims") return;
+        if (s.fn_name == "FnCheck") {
+          // prepare_data checks already ran in bind_data. Any check reaching
+          // this lowering belongs to log_prob/write_array and must retain its
+          // per-evaluation position, even when its value is parameter-free.
+          if (!s.check_transform) fail("malformed FnCheck", s.raw);
+          // Structural value validation is a separate, explicitly closed
+          // compatibility seam; lower/upper checks below are never erased.
+          if (mir::is_structured_check(s.check_transform->kind)) return;
+          if (s.check_transform->args.size() != 1 || s.fn_args.size() != 2)
+            fail("malformed FnCheck", s.raw);
+          const uint16_t opcode =
+              s.check_transform->kind == mir::Transform::Lower ? OP_CHECK_LOWER
+              : s.check_transform->kind == mir::Transform::Upper
+                  ? OP_CHECK_UPPER
+                  : 0;
+          if (opcode == 0) fail("unsupported FnCheck transform", s.raw);
+
+          const Val value = lower_expr(s.fn_args[0]);
+          const Val bound = lower_expr(s.fn_args[1]);
+          const int64_t value_len = g.slots[value.slot].len;
+          const int64_t bound_len = g.slots[bound.slot].len;
+          validate_view(value.si, value_len, "FnCheck value");
+          validate_view(bound.si, bound_len, "FnCheck bound");
+          const bool bound_is_scalar = is_scalar(bound);
+          const bool shapes_match =
+              is_scalar(value)
+                  ? bound_is_scalar
+                  : (bound_is_scalar ||
+                     same_view(value.si, value_len, bound.si, bound_len));
+
+          auto spec = std::make_shared<BoundCheckSpec>();
+          spec->name =
+              s.check_var_name.empty() ? s.fn_args[0].name : s.check_var_name;
+          spec->bound_is_scalar = bound_is_scalar;
+          spec->shapes_match = shapes_match;
+          (void)emit_value(opcode, {value, bound}, 1);
+          g.ops.back().udata = spec.get();
+          g.udata_pool.push_back(std::move(spec));
+          return;
+        }
+        // Size validation remains a separate compatibility seam.
+        if (s.fn_name == "FnValidateSize") return;
+        if (s.fn_name == "check_matching_dims") {
+          if (s.fn_args.size() != 5 || s.fn_args[0].kind != mir::Expr::LitStr ||
+              s.fn_args[1].kind != mir::Expr::LitStr ||
+              s.fn_args[3].kind != mir::Expr::LitStr)
+            fail("malformed check_matching_dims", s.raw);
+          const Val value = lower_expr(s.fn_args[2]);
+          const Val bound = lower_expr(s.fn_args[4]);
+          const int64_t value_len = g.slots[value.slot].len;
+          const int64_t bound_len = g.slots[bound.slot].len;
+          validate_view(value.si, value_len, "check_matching_dims value");
+          validate_view(bound.si, bound_len, "check_matching_dims bound");
+          auto spec = std::make_shared<BoundCheckSpec>();
+          spec->name = s.fn_args[1].lit_s;
+          spec->shapes_match =
+              same_view(value.si, value_len, bound.si, bound_len);
+          (void)emit_value(OP_CHECK_MATCHING_DIMS, {value, bound}, 1);
+          g.ops.back().udata = spec.get();
+          g.udata_pool.push_back(std::move(spec));
+          return;
+        }
+        // Deliberately not a `check_*` prefix match: a value check like
+        // check_positive_finite rejects a draw at runtime, and skipping one
+        // would silently accept points CmdStan refuses.
         // reject() and print(): the message is a mix of string literals
         // and expressions, so the literals become the op's chunk list and
         // the expressions become its inputs. reject throws

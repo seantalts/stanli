@@ -51,6 +51,25 @@ static std::string slurp(const std::string& path) {
   return ss.str();
 }
 
+static stanli::DataMap bound_check_data(double raw = 0.0, int N = 1, int M = 1,
+                                        int R = 1, int C = 1, int BR = 1,
+                                        int BC = 1) {
+  stanli::DataMap d;
+  d.set_real("d", 0.0);
+  d.set_real("raw", raw);
+  d.set_int("N", N);
+  d.set_int("M", M);
+  d.set_real_array("lo", std::vector<double>((size_t)M, -10.0));
+  d.set_int("R", R);
+  d.set_int("C", C);
+  d.set_int("BR", BR);
+  d.set_int("BC", BC);
+  d.set_real_array("matrix_lo",
+                   std::vector<double>((size_t)BR * (size_t)BC, -10.0),
+                   {BR, BC});
+  return d;
+}
+
 static const double kY[8] = {28, 8, -3, 7, -1, 1, 18, 12};
 static const double kSigma[8] = {15, 10, 16, 11, 9, 11, 10, 18};
 
@@ -1271,6 +1290,144 @@ int main() {
       check(u.dims == want[i].dims, tag + " dims");
       check(u.transform == want[i].kind, tag + " transform");
     }
+  }
+
+  // stanc's generated constructor executes data constraints before it
+  // constructs the model. These are construction errors, not bad draws that
+  // may survive until a density or transform happens to notice them.
+  {
+    const std::string mir = slurp("tests/fixtures/newtrans.tmir.sexp");
+    auto rejected_s = [&](double s) {
+      DataMap d;
+      d.set_real("m", 0.3);
+      d.set_real("s", s);
+      try {
+        (void)compile_model(mir, d);
+      } catch (const std::domain_error& e) {
+        return std::string(e.what()).find("s") != std::string::npos;
+      }
+      return false;
+    };
+    check(rejected_s(-1.0), "data lower bound rejects before construction");
+    check(rejected_s(std::numeric_limits<double>::quiet_NaN()),
+          "data lower bound rejects NaN");
+
+    DataMap at_bound;
+    at_bound.set_real("m", 0.3);
+    at_bound.set_real("s", 0.5);
+    bool accepted = true;
+    try {
+      (void)compile_model(mir, at_bound);
+    } catch (const std::exception&) {
+      accepted = false;
+    }
+    check(accepted, "data lower bound is inclusive");
+  }
+  {
+    // An upper check over an array must inspect every element. The fourth
+    // value is outside 1:K; flattening or checking only the first lane accepts
+    // data generated Stan rejects in its constructor.
+    DataMap d;
+    d.set_int("K", 3);
+    d.set_int("y", 2);
+    d.set_int_array("ys", {1, 2, 4});
+    bool rejected = false;
+    try {
+      (void)compile_model(slurp("tests/fixtures/cat.tmir.sexp"), d);
+    } catch (const std::domain_error& e) {
+      rejected = std::string(e.what()).find("ys") != std::string::npos;
+    }
+    check(rejected, "container data upper bound rejects a later element");
+  }
+
+  {
+    // Generated Stan checks constrained transformed parameters while it
+    // evaluates a draw, not while it constructs the model. The data check
+    // above and this runtime check share FnCheck in MIR but must retain their
+    // distinct execution phases.
+    DataMap d = bound_check_data();
+    CompiledModel checked =
+        compile_model(slurp("tests/fixtures/data_and_tp_checks.tmir.sexp"), d);
+    Executor cex(std::move(checked.graph));
+    checked.bind(cex);
+    cex.params_data()[0] = -1.0;
+    double grad = 0.0;
+    bool rejected = false;
+    try {
+      (void)cex.gradient(&grad);
+    } catch (const std::domain_error& e) {
+      rejected = std::string(e.what()).find("z") != std::string::npos;
+    }
+    check(rejected, "transformed-parameter bound rejects the draw");
+
+    cex.params_data()[0] = 0.0;
+    bool accepted = true;
+    double lp = 0.0;
+    try {
+      lp = cex.gradient(&grad);
+    } catch (const std::exception&) {
+      accepted = false;
+    }
+    check(accepted && lp == 0.0 && grad == 3.0,
+          "transformed-parameter bound is inclusive");
+  }
+  {
+    // Parameter-free does not mean construction-time: a transformed
+    // parameter derived only from unconstrained data is still checked at the
+    // generated log_prob/write_array statement where it was declared.
+    DataMap d = bound_check_data(-1.0);
+    bool constructed = true;
+    bool rejected = false;
+    try {
+      CompiledModel checked = compile_model(
+          slurp("tests/fixtures/data_and_tp_checks.tmir.sexp"), d);
+      Executor cex(std::move(checked.graph));
+      checked.bind(cex);
+      cex.params_data()[0] = 0.0;
+      double grad = 0.0;
+      try {
+        (void)cex.gradient(&grad);
+      } catch (const std::domain_error& e) {
+        rejected = std::string(e.what()).find("from_data") != std::string::npos;
+      }
+    } catch (const std::exception&) {
+      constructed = false;
+    }
+    check(constructed && rejected,
+          "data-derived transformed bound rejects only at evaluation");
+  }
+  {
+    // Runtime-sized container bounds fail in the generated statement, not
+    // while the graph is being compiled. Equal flat widths are likewise not
+    // enough to make matrix orientations compatible.
+    auto rejects_at_evaluation = [&](DataMap d, double x,
+                                     const std::string& name) {
+      bool constructed = true;
+      bool rejected = false;
+      try {
+        CompiledModel checked = compile_model(
+            slurp("tests/fixtures/data_and_tp_checks.tmir.sexp"), d);
+        Executor cex(std::move(checked.graph));
+        checked.bind(cex);
+        cex.params_data()[0] = x;
+        double grad = 0.0;
+        try {
+          (void)cex.gradient(&grad);
+        } catch (const std::invalid_argument& e) {
+          rejected = std::string(e.what()).find(name) != std::string::npos;
+        }
+      } catch (const std::exception&) {
+        constructed = false;
+      }
+      return constructed && rejected;
+    };
+    check(rejects_at_evaluation(bound_check_data(0.0, 1, 2), 0.0, "bounded"),
+          "vector-bound shape mismatch is a runtime error");
+    check(rejects_at_evaluation(bound_check_data(0.0, 1, 2), -1.0, "bounded"),
+          "dimension check precedes later scalar bound checks");
+    check(rejects_at_evaluation(bound_check_data(0.0, 1, 1, 1, 2, 2, 1), 0.0,
+                                "bounded_matrix"),
+          "equal-width matrix-bound mismatch is a runtime error");
   }
 
   {

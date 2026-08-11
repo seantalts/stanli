@@ -1,5 +1,5 @@
-// reject() and print(): the two statements whose whole purpose is a side
-// effect, so they are ops rather than anything the graph optimizes.
+// Runtime checks, reject(), and print(): statements whose whole purpose is a
+// side effect, so they are ops rather than anything the graph optimizes.
 //
 // `reject` has real semantics. It throws std::domain_error, which the
 // sampler treats as a rejected proposal exactly as CmdStan's generated
@@ -18,6 +18,9 @@
 #include <stanli/graph.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
+
+#include <stan/math/prim/err/check_greater_or_equal.hpp>
+#include <stan/math/prim/err/check_less_or_equal.hpp>
 
 #include <sstream>
 #include <stdexcept>
@@ -63,9 +66,50 @@ void reject_fwd(KernelCtx& ctx) {
 
 void print_fwd(KernelCtx& ctx) { emit_message(render(ctx)); }
 
+void check_matching_dims_fwd(KernelCtx& ctx) {
+  if (ctx.n_in != 2 || ctx.out.len != 1 || ctx.udata == nullptr)
+    throw std::logic_error("malformed dimension-check op");
+  const auto* spec = static_cast<const BoundCheckSpec*>(ctx.udata);
+  if (!spec->shapes_match)
+    throw std::invalid_argument(
+        "stanli MIR check: constraint shapes do not match for " + spec->name);
+  ctx.out.data[0] = 0.0;
+}
+
+template <bool Lower>
+void check_fwd(KernelCtx& ctx) {
+  if (ctx.n_in != 2 || ctx.out.len != 1 || ctx.udata == nullptr)
+    throw std::logic_error("malformed bound-check op");
+  const Desc& value = ctx.in[0];
+  const Desc& bound = ctx.in[1];
+  const auto* spec = static_cast<const BoundCheckSpec*>(ctx.udata);
+  if (!spec->shapes_match)
+    throw std::invalid_argument(
+        "stanli MIR check: constraint shapes do not "
+        "match for " +
+        spec->name);
+  if ((spec->bound_is_scalar && bound.len != 1) ||
+      (!spec->bound_is_scalar && bound.len != value.len))
+    throw std::logic_error("bound-check shape metadata is inconsistent");
+  for (int64_t i = 0; i < value.len; ++i) {
+    const double b = bound.data[spec->bound_is_scalar ? 0 : i];
+    if constexpr (Lower)
+      stan::math::check_greater_or_equal("stanli MIR check", spec->name.c_str(),
+                                         value.data[i], b);
+    else
+      stan::math::check_less_or_equal("stanli MIR check", spec->name.c_str(),
+                                      value.data[i], b);
+  }
+  ctx.out.data[0] = 0.0;
+}
+
 }  // namespace
 
 void register_message_kernels() {
+  register_kernel(OP_CHECK_MATCHING_DIMS,
+                  Kernel{check_matching_dims_fwd, nullptr, nullptr});
+  register_kernel(OP_CHECK_LOWER, Kernel{check_fwd<true>, nullptr, nullptr});
+  register_kernel(OP_CHECK_UPPER, Kernel{check_fwd<false>, nullptr, nullptr});
   register_kernel(OP_REJECT, Kernel{reject_fwd, nullptr, nullptr});
   register_kernel(OP_PRINT, Kernel{print_fwd, nullptr, nullptr});
 }

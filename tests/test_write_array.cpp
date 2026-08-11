@@ -20,6 +20,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,41 @@ std::string slurp(const std::string& path) {
   std::ostringstream ss;
   ss << f.rdbuf();
   return ss.str();
+}
+
+stanli::DataMap bound_check_data(int N = 1, int M = 1, int R = 1, int C = 1,
+                                 int BR = 1, int BC = 1) {
+  stanli::DataMap d;
+  d.set_real("d", 0.0);
+  d.set_real("raw", 0.0);
+  d.set_int("N", N);
+  d.set_int("M", M);
+  d.set_real_array("lo", std::vector<double>((size_t)M, -10.0));
+  d.set_int("R", R);
+  d.set_int("C", C);
+  d.set_int("BR", BR);
+  d.set_int("BC", BC);
+  d.set_real_array("matrix_lo",
+                   std::vector<double>((size_t)BR * (size_t)BC, -10.0),
+                   {BR, BC});
+  return d;
+}
+
+std::map<std::string, stanli::DataMap::Entry> bound_check_env(
+    const stanli::DataMap& data) {
+  std::map<std::string, stanli::DataMap::Entry> env;
+  for (const char* name :
+       {"d", "raw", "N", "M", "lo", "R", "C", "BR", "BC", "matrix_lo"})
+    env[name] = data.at(name);
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    stanli::DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    env[flag] = one;
+  }
+  return env;
 }
 
 std::string joined(const std::vector<stanli::CompiledModel::ParamView>& cols) {
@@ -411,6 +447,100 @@ void test_caller_owned_rng() {
   }
 }
 
+void test_transformed_parameter_checks() {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
+  DataMap data = bound_check_data();
+  CompiledModel cm = compile_model(mir, data);
+  if (!cm.write_array || cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL bound-check fixture has no compiled write_array\n");
+    return;
+  }
+
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  wex.params_data()[0] = -1.0;
+  bool graph_rejected = false;
+  try {
+    wex.run_forward_only();
+  } catch (const std::domain_error& e) {
+    graph_rejected = std::string(e.what()).find("z") != std::string::npos;
+  }
+  if (!graph_rejected) {
+    ++failures;
+    std::printf("FAIL compiled write_array did not enforce z lower bound\n");
+  }
+
+  auto prog =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(mir)));
+  WaInterp interpreted(prog, bound_check_env(data));
+  std::map<std::string, DataMap::Entry> params;
+  params["x"].r = {-1.0};
+  WaRng rng(1234);
+  bool interp_rejected = false;
+  try {
+    (void)interpreted.eval(params, rng);
+  } catch (const std::domain_error& e) {
+    interp_rejected = std::string(e.what()).find("z") != std::string::npos;
+  }
+  if (!interp_rejected) {
+    ++failures;
+    std::printf("FAIL interpreted write_array did not enforce z lower bound\n");
+  }
+
+  auto compiled_shape_rejects = [&](DataMap mismatch, double x,
+                                    const std::string& name) {
+    try {
+      CompiledModel bad = compile_model(mir, mismatch);
+      if (!bad.write_array || bad.write_array->interp) return false;
+      Executor ex(std::move(bad.write_array->graph));
+      bad.write_array->bind(ex);
+      ex.params_data()[0] = x;
+      try {
+        ex.run_forward_only();
+      } catch (const std::invalid_argument& e) {
+        return std::string(e.what()).find(name) != std::string::npos;
+      }
+    } catch (const std::exception&) {
+    }
+    return false;
+  };
+  auto interpreted_shape_rejects = [&](DataMap mismatch, double x,
+                                       const std::string& name) {
+    try {
+      WaInterp wi(prog, bound_check_env(mismatch));
+      std::map<std::string, DataMap::Entry> p;
+      p["x"].r = {x};
+      WaRng local_rng(1234);
+      try {
+        (void)wi.eval(p, local_rng);
+      } catch (const std::invalid_argument& e) {
+        return std::string(e.what()).find(name) != std::string::npos;
+      }
+    } catch (const std::exception&) {
+    }
+    return false;
+  };
+  const DataMap vector_mismatch = bound_check_data(1, 2);
+  const DataMap matrix_mismatch = bound_check_data(1, 1, 1, 2, 2, 1);
+  if (!compiled_shape_rejects(vector_mismatch, 0.0, "bounded") ||
+      !interpreted_shape_rejects(vector_mismatch, 0.0, "bounded")) {
+    ++failures;
+    std::printf("FAIL write_array vector-bound mismatch phase\n");
+  }
+  if (!compiled_shape_rejects(vector_mismatch, -1.0, "bounded") ||
+      !interpreted_shape_rejects(vector_mismatch, -1.0, "bounded")) {
+    ++failures;
+    std::printf("FAIL write_array dimension-check ordering\n");
+  }
+  if (!compiled_shape_rejects(matrix_mismatch, 0.0, "bounded_matrix") ||
+      !interpreted_shape_rejects(matrix_mismatch, 0.0, "bounded_matrix")) {
+    ++failures;
+    std::printf("FAIL write_array matrix-bound mismatch phase\n");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -420,6 +550,7 @@ int main() {
   test_array_of_matrix_columns();
   test_interpreted_gq();
   test_caller_owned_rng();
+  test_transformed_parameter_checks();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
 }

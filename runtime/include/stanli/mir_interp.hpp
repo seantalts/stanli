@@ -399,16 +399,20 @@ class MirInterp {
           emit_message(msg);
           return;
         }
-        // These exact validation statements predate the no-silent-statement
-        // contract and remain a narrow compatibility debt. The current MIR
-        // does not retain enough FnCheck metadata to execute all of them,
-        // and existing data/model loading relies on the documented valid-
-        // data assumption. `check_greater_or_equal` is only a static shape
-        // check in the existing newtrans input; the function name is not
-        // generally pure. New names must never silently join this list.
-        if (st.fn_name == "FnCheck" || st.fn_name == "FnValidateSize" ||
+        if (st.fn_name == "FnCheck") {
+          exec_check(st);
+          return;
+        }
+        if (st.fn_name == "check_matching_dims") {
+          exec_matching_dims(st);
+          return;
+        }
+        // These size-validation statements remain a narrow compatibility
+        // debt. `check_greater_or_equal` is only a static shape check in the
+        // existing newtrans input; the function name is not generally pure.
+        // New names must never silently join this list.
+        if (st.fn_name == "FnValidateSize" ||
             st.fn_name == "FnValidateSizePositive" ||
-            st.fn_name == "check_matching_dims" ||
             st.fn_name == "check_greater_or_equal")
           return;
         fail("unsupported statement function " + st.fn_name, st.raw);
@@ -448,6 +452,102 @@ class MirInterp {
   }
 
   static double val(const T& x) { return stan::math::value_of(x); }
+
+  static bool check_scalar_type(const mir::Expr& e) {
+    return e.unsized.depth == 0 && (e.unsized.leaf == mir::UnsizedLeaf::Int ||
+                                    e.unsized.leaf == mir::UnsizedLeaf::Real);
+  }
+
+  static bool check_container_type(const mir::Expr& e) {
+    if (e.unsized.leaf == mir::UnsizedLeaf::Unknown ||
+        e.unsized.leaf == mir::UnsizedLeaf::Complex)
+      return false;
+    return e.unsized.depth != 0 || e.unsized.leaf == mir::UnsizedLeaf::Vector ||
+           e.unsized.leaf == mir::UnsizedLeaf::RowVector ||
+           e.unsized.leaf == mir::UnsizedLeaf::Matrix;
+  }
+
+  std::vector<int64_t> check_dims(const mir::Expr& e, const Value& v) const {
+    // FnReadData is a sequential flat buffer, so its assignment erases a
+    // declaration's dimensions in env_. The source DataMap still owns the
+    // complete logical shape. Computed transformed-data values keep theirs.
+    if (e.kind == mir::Expr::Var)
+      if (const DataMap::Entry* d = data_lookup(e.name)) return d->dims;
+    return v.dims;
+  }
+
+  [[noreturn]] void check_shape_fail(const std::string& name) const {
+    throw std::invalid_argument("stanli " + where_ +
+                                ": constraint shapes do not match for " + name);
+  }
+
+  void exec_matching_dims(const mir::Stmt& st) {
+    if (st.fn_args.size() != 5 || st.fn_args[0].kind != mir::Expr::LitStr ||
+        st.fn_args[1].kind != mir::Expr::LitStr ||
+        st.fn_args[3].kind != mir::Expr::LitStr)
+      fail("malformed check_matching_dims", st.raw);
+    const Value a = eval(st.fn_args[2]);
+    const Value b = eval(st.fn_args[4]);
+    const bool a_scalar = check_scalar_type(st.fn_args[2]);
+    const bool b_scalar = check_scalar_type(st.fn_args[4]);
+    const bool a_container = check_container_type(st.fn_args[2]);
+    const bool b_container = check_container_type(st.fn_args[4]);
+    if ((!a_scalar && !a_container) || (!b_scalar && !b_container))
+      fail("unsupported check_matching_dims operand type", st.raw);
+    const bool shapes_match =
+        (a_scalar && b_scalar) ||
+        (a_container && b_container &&
+         st.fn_args[2].unsized.depth == st.fn_args[4].unsized.depth &&
+         st.fn_args[2].unsized.leaf == st.fn_args[4].unsized.leaf &&
+         check_dims(st.fn_args[2], a) == check_dims(st.fn_args[4], b) &&
+         a.r.size() == b.r.size());
+    if (!shapes_match) check_shape_fail(st.fn_args[1].lit_s);
+  }
+
+  // Execute stanc's generated declaration check once, at the statement's
+  // original position. Stan Math spells these as negated comparisons so a
+  // NaN in either operand rejects rather than slipping through.
+  void exec_check(const mir::Stmt& st) {
+    if (!st.check_transform) fail("malformed FnCheck", st.raw);
+    const auto kind = st.check_transform->kind;
+    // Structural value validation has distinct matrix/vector tolerances and
+    // stays an explicit follow-up seam; this list is closed so a new check
+    // kind cannot silently become a no-op.
+    if (mir::is_structured_check(kind)) return;
+    if (kind != mir::Transform::Lower && kind != mir::Transform::Upper)
+      fail("unsupported FnCheck transform", st.raw);
+    if (st.check_transform->args.size() != 1 || st.fn_args.size() != 2)
+      fail("malformed FnCheck", st.raw);
+
+    const Value y = eval(st.fn_args[0]);
+    const Value bound = eval(st.fn_args[1]);
+    const std::string& name =
+        st.check_var_name.empty() ? st.fn_args[0].name : st.check_var_name;
+    const bool y_scalar = check_scalar_type(st.fn_args[0]);
+    const bool y_container = check_container_type(st.fn_args[0]);
+    const bool b_scalar = check_scalar_type(st.fn_args[1]);
+    const bool b_container = check_container_type(st.fn_args[1]);
+    if ((!y_scalar && !y_container) || (!b_scalar && !b_container))
+      fail("unsupported FnCheck operand type", st.raw);
+    if (y_scalar && (y.r.size() != 1 || !b_scalar)) check_shape_fail(name);
+    if (b_scalar && bound.r.size() != 1) check_shape_fail(name);
+    if (y_container && b_container) {
+      if (st.fn_args[0].unsized.depth != st.fn_args[1].unsized.depth ||
+          st.fn_args[0].unsized.leaf != st.fn_args[1].unsized.leaf ||
+          check_dims(st.fn_args[0], y) != check_dims(st.fn_args[1], bound) ||
+          y.r.size() != bound.r.size())
+        check_shape_fail(name);
+    }
+    for (size_t i = 0; i < y.r.size(); ++i) {
+      const double b = val(bound.r[b_scalar ? 0 : i]);
+      if (kind == mir::Transform::Lower)
+        stan::math::check_greater_or_equal("stanli MIR check", name.c_str(),
+                                           val(y.r[i]), b);
+      else
+        stan::math::check_less_or_equal("stanli MIR check", name.c_str(),
+                                        val(y.r[i]), b);
+    }
+  }
 
   // max-shifted log-sum-exp over a buffer; -inf on an empty or all
   // -inf input rather than NaN.

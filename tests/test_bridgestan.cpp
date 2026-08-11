@@ -752,6 +752,51 @@ void test_construct_errors() {
   }
   bs_free_error_msg(err);
 
+  // Generated Stan rejects a declared data constraint in its constructor.
+  // BridgeStan construction must do the same, before executor or write-array
+  // probing can observe the invalid value.
+  err = nullptr;
+  const std::string constrained_mir =
+      slurp("tests/fixtures/newtrans.tmir.sexp");
+  m = bs_model_from_mir(constrained_mir.c_str(), R"({"m":0.3,"s":-1})", 1,
+                        &err);
+  if (m != nullptr) {
+    fail("bs_model_from_mir accepted data below its declared bound");
+    bs_model_destruct(m);
+  } else if (err == nullptr ||
+             std::string(err).find("s") == std::string::npos) {
+    fail(std::string("data-bound construction error did not name s: ") +
+         (err != nullptr ? err : "(no message)"));
+  }
+  bs_free_error_msg(err);
+
+  // A constrained transformed parameter is checked per draw on both the
+  // density and write_array surfaces. Construction itself still succeeds.
+  err = nullptr;
+  const std::string runtime_mir =
+      slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
+  m = bs_model_from_mir(
+      runtime_mir.c_str(),
+      R"({"d":0,"raw":0,"N":1,"M":1,"lo":[-10],"R":1,"C":1,"BR":1,"BC":1,"matrix_lo":[[-10]]})",
+      1, &err);
+  if (m == nullptr) {
+    fail(std::string("runtime-bound model construction: ") +
+         (err != nullptr ? err : "(no message)"));
+    bs_free_error_msg(err);
+  } else {
+    const double q = -1.0;
+    double lp = 0.0;
+    err = nullptr;
+    const int density_rc = bs_log_density(m, true, true, &q, &lp, &err);
+    expect_refused("runtime-bound density", density_rc, &err, "z");
+
+    std::vector<double> row((size_t)bs_param_num(m, true, false));
+    const int constrain_rc =
+        bs_param_constrain(m, true, false, &q, row.data(), nullptr, &err);
+    expect_refused("runtime-bound write_array", constrain_rc, &err, "z");
+    bs_model_destruct(m);
+  }
+
   // The version globals name the ABI this file implements.
   expect_eq_int("bs_major_version", bs_major_version, 2);
   expect_eq_int("bs_minor_version", bs_minor_version, 9);

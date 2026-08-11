@@ -39,7 +39,7 @@ struct Op {
   const int* idata = nullptr;  // integer immediates (outcome counts, dims)
   int64_t n_idata = 0;
   // Opaque per-op payload for kernels that need compile-time structure the
-  // integer immediates cannot carry (today: the ODE right-hand side).
+  // integer immediates cannot carry (ODEs, messages, declaration checks).
   const void* udata = nullptr;
   int64_t scratch_off = 0;  // into the scratch arena (filled at bind)
   int64_t scratch_len = 0;
@@ -49,8 +49,8 @@ struct Graph {
   std::vector<Slot> slots;
   std::vector<Op> ops;
   std::vector<std::vector<int>> idata_pool;  // owns per-op integer arrays
-  // Owns per-op opaque payloads (ODE specs); pointers into this outlive
-  // lowering because the graph is moved, never copied element-wise.
+  // Owns per-op opaque payloads; pointers into this outlive lowering because
+  // the graph is moved, never copied element-wise.
   std::vector<std::shared_ptr<void>> udata_pool;
   int result_slot = -1;
 
@@ -107,6 +107,13 @@ struct KernelCtx {
 // input k; a trailing chunk with no input after it is just appended.
 struct MessageSpec {
   std::vector<std::string> chunks;
+};
+
+// Payload for generated runtime bound and dimension checks.
+struct BoundCheckSpec {
+  std::string name;
+  bool bound_is_scalar = false;
+  bool shapes_match = false;
 };
 
 class Executor {

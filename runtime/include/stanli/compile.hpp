@@ -2,8 +2,9 @@
 // against a concrete dataset. Scope: straight-line log_prob; unsupported
 // constructs raise CompileError naming the construct.
 //
-// Deliberate simplification: FnCheck data validations are skipped (sizes
-// are still enforced when binding data slots); the data is assumed valid.
+// Generated lower/upper checks keep their source phase: prepare_data checks
+// run at construction, while log_prob/write_array checks stay ordered graph
+// effects. Structural value checks remain an explicit compatibility seam.
 #ifndef STANLI_COMPILE_HPP
 #define STANLI_COMPILE_HPP
 
