@@ -202,7 +202,7 @@ void test_udf_name_shadowing() {
     for (int i = 0; i < 4; ++i) ex.params_data()[i] = q[i];
     double grad[4] = {0, 0, 0, 0};
     const double lp = ex.gradient(grad);
-    // CmdStan reads array[2,2] with the first index fastest, so z[1,2] is
+    // Generated Stan reads nested scalar arrays outer-first, so z[2,1] is
     // q[2]. A leaked matrix view from the callee would instead select q[1].
     const double want_grad[4] = {1, 0, 1, 0};
     expect_eq("UDF shadow lp", lp, 1.0);

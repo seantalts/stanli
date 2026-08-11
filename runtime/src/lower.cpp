@@ -2651,23 +2651,6 @@ struct Lowering {
     if (tr.kind == mir::Transform::Identity) {
       Val value{raw, psi};
       CompiledModel::ParamView serial_view = parameter_view(s, raw, raw_len);
-      const bool nested_scalar = is_array(psi) &&
-                                 array_shape(psi).leaf == ViewKind::Flat &&
-                                 array_shape(psi).dims.size() > 1;
-      if (nested_scalar && !serial_view.storage_order.empty()) {
-        // FnReadParam exposes a nested scalar array first-index-fast. Arrays
-        // of Eigen containers already arrive outer-major with their leaf's
-        // native storage, as the constrained-layout/amatwa contract pins.
-        // Invert the established serialization map only at this scalar-array
-        // boundary; the raw slot remains the sampler input and still owns
-        // unconstrained accounting.
-        std::vector<int> gather((size_t)raw_len);
-        for (int64_t serial = 0; serial < raw_len; ++serial)
-          gather[(size_t)serial_view.storage_index(serial)] = (int)serial;
-        Val serial{raw, {}};  // physical boundary, not a logical graph value
-        value =
-            emit_value(OP_GATHER, {serial}, con_len, psi, std::move(gather));
-      }
       scope[s.decl_id] = value;
       // In write_array mode the column order is dictated by the FnWriteParam
       // statements, which come later and cover transformed parameters and

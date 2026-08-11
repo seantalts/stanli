@@ -79,10 +79,10 @@
               (meta
                ((type_ (UArray (UArray UReal))) (loc <opaque>) (adlevel AutoDiffable))))
              ((Single
-               ((pattern (Lit Int 1))
+               ((pattern (Lit Int 2))
                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
               (Single
-               ((pattern (Lit Int 2))
+               ((pattern (Lit Int 1))
                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
            (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))))
         (meta <opaque>)))))
@@ -140,10 +140,10 @@
               (meta
                ((type_ (UArray (UArray UReal))) (loc <opaque>) (adlevel AutoDiffable))))
              ((Single
-               ((pattern (Lit Int 1))
+               ((pattern (Lit Int 2))
                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
               (Single
-               ((pattern (Lit Int 2))
+               ((pattern (Lit Int 1))
                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
            (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))))
         (meta <opaque>)))))

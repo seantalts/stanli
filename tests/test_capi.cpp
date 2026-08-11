@@ -99,6 +99,13 @@ int main() {
       {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
       {0, 6, 1, 7, 2, 8, 3, 9, 4, 10, 5, 11});
 
+  // Generated Stan reads nested scalar arrays outer-first from q, while
+  // constrained output is first-index-fast. The two orders are deliberately
+  // different for this non-square declaration.
+  expect_names("tests/fixtures/viewa_scalar_column.tmir.sexp", "{}",
+               {"a.1.1", "a.2.1", "a.1.2", "a.2.2", "a.1.3", "a.2.3"},
+               {1, 2, 3, 4, 5, 6}, {1, 4, 2, 5, 3, 6});
+
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;
 }

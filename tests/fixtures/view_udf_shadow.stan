@@ -9,5 +9,5 @@ parameters {
 }
 model {
   target += passthrough(z[1, 1]);
-  target += z[1, 2];
+  target += z[2, 1];
 }

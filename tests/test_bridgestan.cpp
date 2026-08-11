@@ -249,6 +249,48 @@ void test_unc_names() {
   bs_model_destruct(s);
 }
 
+// Generated Stan deserializes array[2,3] real outer-first from q. Its CSV
+// surface is a separate contract: the first logical index is written fastest.
+// Literal expectations keep this test independent of stanli's Executor and
+// ParamView implementations.
+void test_nested_scalar_array_order() {
+  const std::string mir = slurp("tests/fixtures/viewa_scalar_column.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m = bs_model_from_mir(mir.c_str(), "{}", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("nested scalar array construct: ") +
+         (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+
+  expect_eq_int("nested scalar bs_param_unc_num", bs_param_unc_num(m), 6);
+  expect_eq_str("nested scalar bs_param_names", bs_param_names(m, false, false),
+                "a.1.1,a.2.1,a.1.2,a.2.2,a.1.3,a.2.3");
+
+  const double q[6] = {1, 2, 3, 4, 5, 6};
+  const double want_grad[6] = {0, 10, 0, 0, 1, 0};
+  double lp = 0;
+  double grad[6] = {};
+  expect_eq_int("nested scalar gradient rc",
+                bs_log_density_gradient(m, true, true, q, &lp, grad, &err), 0);
+  expect_bitwise("nested scalar lp", lp, 225);
+  for (int i = 0; i < 6; ++i)
+    expect_bitwise("nested scalar grad[" + std::to_string(i) + "]", grad[i],
+                   want_grad[i]);
+
+  double constrained[6] = {};
+  const double want_constrained[6] = {1, 4, 2, 5, 3, 6};
+  expect_eq_int(
+      "nested scalar constrain rc",
+      bs_param_constrain(m, false, false, q, constrained, nullptr, &err), 0);
+  for (int i = 0; i < 6; ++i)
+    expect_bitwise("nested scalar constrained[" + std::to_string(i) + "]",
+                   constrained[i], want_constrained[i]);
+
+  bs_model_destruct(m);
+}
+
 // The graph write_array path, checked against the same graph run directly.
 void test_constrain_graph() {
   using namespace stanli;
@@ -722,6 +764,7 @@ int main() {
   test_density_matches_executor();
   test_param_num_and_names();
   test_unc_names();
+  test_nested_scalar_array_order();
   test_constrain_graph();
   test_constrain_interp();
   test_unsupported();

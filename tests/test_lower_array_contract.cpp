@@ -92,7 +92,7 @@ void test_outer_gather() {
 
 void test_scalar_array_column() {
   check_gradient("tests/fixtures/viewa_scalar_column.tmir.sexp", {},
-                 {1, 2, 3, 4, 5, 6}, 234, {0, 0, 10, 1, 0, 0},
+                 {1, 2, 3, 4, 5, 6}, 225, {0, 10, 0, 0, 1, 0},
                  "array[2,3] column a[:,2]");
 }
 
