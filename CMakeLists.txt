@@ -464,6 +464,7 @@ stanli_add_test(test_rejectprint)
 stanli_add_test(test_odevariadic)
 stanli_add_test(test_estimate)
 stanli_add_test(test_brmsmono)
+stanli_add_test(test_structured_arrays)
 
 # The C ABI lives only in the shared library. Test it through that shipped
 # boundary rather than compiling capi.cpp into the C++ unit-test library.

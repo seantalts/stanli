@@ -370,6 +370,13 @@ struct Lowering {
     return n;
   }
 
+  int checked_immediate(int64_t value, const std::string& what) {
+    if (value < std::numeric_limits<int>::min() ||
+        value > std::numeric_limits<int>::max())
+      fail(what + ": dimension exceeds the graph immediate range");
+    return static_cast<int>(value);
+  }
+
   static ViewKind leaf_kind(const std::string& base) {
     if (base == "SVector" || base == "UVector") return ViewKind::Vector;
     if (base == "SRowVector" || base == "URowVector")
@@ -2557,76 +2564,114 @@ struct Lowering {
   }
 
   void lower_read_param(const mir::Stmt& s) {
-    // Declared (constrained) size from the read dims; the unconstrained raw
-    // size depends on the transform (simplex uses K-1).
-    int64_t con_len = 1;
-    for (const auto& d : s.read_dims) con_len *= eval_int(d);
     const mir::Transform& tr = *s.read_transform;
-    // Batched structured transforms: the last read dim is the per-element
-    // size; outer dims multiply into a batch count.
-    int64_t inner_con = con_len, n_batch = 1;
-    if (!s.read_dims.empty()) {
-      inner_con = eval_int(s.read_dims.back());
-      for (size_t i = 0; i + 1 < s.read_dims.size(); ++i)
-        n_batch *= eval_int(s.read_dims[i]);
-    }
-    int64_t raw_len = con_len;
-    if (tr.kind == mir::Transform::Simplex) raw_len = n_batch * (inner_con - 1);
-    // sum_to_zero_vector[K]: K constrained from K-1 unconstrained, and
-    // unlike the simplex it is volume-preserving, so there is no jacobian
-    // term at all.
-    //
-    // sum_to_zero_matrix[N, M] is a different transform that the read dims
-    // cannot tell apart from array[N] sum_to_zero_vector[M]: it centers
-    // both axes, so it is (N-1)*(M-1) free, not N*(M-1), and the declared
-    // type is the only thing that separates them.
-    int64_t stz_rows = 0, stz_cols = 0;
-    if (tr.kind == mir::Transform::SumToZero) {
-      if (s.decl_type.base == "SMatrix" ||
-          (s.decl_type.base == "SArray" &&
-           s.decl_type.elem_base == "SMatrix")) {
-        stz_rows = eval_int(s.read_dims[s.read_dims.size() - 2]);
-        stz_cols = inner_con;
-        n_batch = 1;
-        for (size_t i = 0; i + 2 < s.read_dims.size(); ++i)
-          n_batch *= eval_int(s.read_dims[i]);
-        raw_len = n_batch * (stz_rows - 1) * (stz_cols - 1);
-      } else {
-        raw_len = n_batch * (inner_con - 1);
-      }
-    }
-    // unit_vector[K] is K from K: the constraint costs no dimension, it
-    // just curves the space (and does carry a jacobian).
-    if (tr.kind == mir::Transform::CholeskyCorr) {
-      // cholesky_factor_corr[K]: K*K constrained, K*(K-1)/2 unconstrained.
-      const int64_t K = inner_con;
-      n_batch = 1;
-      raw_len = K * (K - 1) / 2;
-      con_len = K * K;
-    }
-    // The matrix-valued transforms take their dimensions from the read
-    // dims rather than from the flattened length, which cannot tell
-    // corr_matrix[3] from cov_matrix[2].
-    int64_t chol_M = 0, chol_N = 0;
-    if (tr.kind == mir::Transform::Correlation ||
+    const std::vector<int64_t> declared_dims = sized_dims(s.decl_type);
+    const ViewKind leaf = s.decl_type.base == "SArray"
+                              ? leaf_kind(s.decl_type.elem_base)
+                              : leaf_kind(s.decl_type.base);
+    const size_t leaf_dims = static_cast<size_t>(leaf_rank(leaf));
+    if (declared_dims.size() < leaf_dims)
+      fail("parameter declaration has incomplete leaf dimensions", s.raw);
+    const std::vector<int64_t> outer_dims(declared_dims.begin(),
+                                          declared_dims.end() - leaf_dims);
+    const int64_t n_batch = checked_product(outer_dims, "parameter batch");
+
+    // Unstructured transforms use FnReadParam's declared raw shape. A
+    // structured leaf replaces only its innermost dimensions below; the
+    // outer array geometry remains declaration-owned and orthogonal.
+    std::vector<int64_t> raw_dims;
+    for (const auto& d : s.read_dims) raw_dims.push_back(eval_int(d));
+    std::vector<int64_t> expected_read_dims = declared_dims;
+    if (tr.kind == mir::Transform::CholeskyCorr ||
+        tr.kind == mir::Transform::Correlation ||
         tr.kind == mir::Transform::Covariance) {
-      const int64_t K = inner_con;
-      n_batch = 1;
-      raw_len = tr.kind == mir::Transform::Correlation
-                    ? K * (K - 1) / 2       // k_choose_2
-                    : K + K * (K - 1) / 2;  // K + k_choose_2
-      con_len = K * K;
+      if (leaf != ViewKind::Matrix || expected_read_dims.size() < 2)
+        fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      expected_read_dims.pop_back();
     }
-    if (tr.kind == mir::Transform::CholeskyCov) {
-      // cholesky_factor_cov[M, N] reads two dims; [K] is the square case.
-      chol_M = eval_int(
-          s.read_dims[s.read_dims.size() >= 2 ? s.read_dims.size() - 2
-                                              : s.read_dims.size() - 1]);
-      chol_N = s.read_dims.size() >= 2 ? inner_con : chol_M;
-      n_batch = 1;
-      raw_len = (chol_N * (chol_N + 1)) / 2 + (chol_M - chol_N) * chol_N;
-      con_len = chol_M * chol_N;
+    if (raw_dims != expected_read_dims)
+      fail("parameter read dimensions do not match its declaration", s.raw);
+    int64_t con_len = checked_product(raw_dims, "parameter read shape");
+    int64_t raw_len = con_len;
+    int64_t inner_raw = 0, inner_con = 0;
+    int64_t matrix_rows = 0, matrix_cols = 0;
+
+    auto vector_leaf = [&](int64_t free_size) {
+      if (leaf != ViewKind::Vector || declared_dims.empty())
+        fail("vector parameter transform has a non-vector declaration", s.raw);
+      inner_raw = free_size;
+      inner_con = declared_dims.back();
+      raw_dims = outer_dims;
+      raw_dims.push_back(inner_raw);
+      raw_len = checked_product({n_batch, inner_raw}, "parameter raw shape");
+      con_len =
+          checked_product({n_batch, inner_con}, "parameter constrained shape");
+    };
+    auto flat_matrix_leaf = [&](int64_t free_size) {
+      if (leaf != ViewKind::Matrix || declared_dims.size() < 2)
+        fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      matrix_rows = declared_dims[declared_dims.size() - 2];
+      matrix_cols = declared_dims.back();
+      inner_raw = free_size;
+      inner_con =
+          checked_product({matrix_rows, matrix_cols}, "parameter matrix leaf");
+      raw_dims = outer_dims;
+      raw_dims.push_back(inner_raw);
+      raw_len = checked_product({n_batch, inner_raw}, "parameter raw shape");
+      con_len =
+          checked_product({n_batch, inner_con}, "parameter constrained shape");
+    };
+
+    if (tr.kind == mir::Transform::Simplex ||
+        tr.kind == mir::Transform::SumToZero) {
+      if (leaf == ViewKind::Vector) {
+        vector_leaf(declared_dims.back() - 1);
+      } else if (tr.kind == mir::Transform::SumToZero &&
+                 leaf == ViewKind::Matrix) {
+        matrix_rows = declared_dims[declared_dims.size() - 2];
+        matrix_cols = declared_dims.back();
+        inner_raw = checked_product({matrix_rows - 1, matrix_cols - 1},
+                                    "sum-to-zero matrix raw shape");
+        inner_con = checked_product({matrix_rows, matrix_cols},
+                                    "sum-to-zero matrix leaf");
+        raw_dims = outer_dims;
+        raw_dims.push_back(matrix_rows - 1);
+        raw_dims.push_back(matrix_cols - 1);
+        raw_len = checked_product({n_batch, inner_raw}, "parameter raw shape");
+        con_len = checked_product({n_batch, inner_con},
+                                  "parameter constrained shape");
+      } else {
+        fail("sum-to-zero or simplex transform has an invalid declaration",
+             s.raw);
+      }
+    } else if (tr.kind == mir::Transform::Ordered ||
+               tr.kind == mir::Transform::PositiveOrdered ||
+               tr.kind == mir::Transform::UnitVector) {
+      if (leaf != ViewKind::Vector || declared_dims.empty())
+        fail("vector parameter transform has a non-vector declaration", s.raw);
+      vector_leaf(declared_dims.back());
+    } else if (tr.kind == mir::Transform::CholeskyCorr ||
+               tr.kind == mir::Transform::Correlation ||
+               tr.kind == mir::Transform::Covariance) {
+      if (leaf != ViewKind::Matrix || declared_dims.size() < 2)
+        fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      const int64_t K = declared_dims.back();
+      if (declared_dims[declared_dims.size() - 2] != K)
+        fail("square matrix transform has a rectangular declaration", s.raw);
+      const int64_t free_size = tr.kind == mir::Transform::Covariance
+                                    ? K * (K + 1) / 2
+                                    : K * (K - 1) / 2;
+      flat_matrix_leaf(free_size);
+    } else if (tr.kind == mir::Transform::CholeskyCov) {
+      if (leaf != ViewKind::Matrix || declared_dims.size() < 2)
+        fail("matrix parameter transform has a non-matrix declaration", s.raw);
+      const int64_t M = declared_dims[declared_dims.size() - 2];
+      const int64_t N = declared_dims.back();
+      if (M < N)
+        fail("cholesky-factor-cov rows are smaller than columns", s.raw);
+      flat_matrix_leaf(N * (N + 1) / 2 + (M - N) * N);
     }
+
     SlotInfo psi = view_of(s.decl_type);
     const int64_t declared_len = sized_len(s.decl_type);
     if (declared_len != con_len)
@@ -2642,7 +2687,7 @@ struct Lowering {
       CompiledModel::UncParam u;
       u.name = s.decl_id;
       u.len = raw_len;
-      for (const auto& d : s.read_dims) u.dims.push_back(eval_int(d));
+      u.dims = raw_dims;
       u.transform = tr.kind;
       out.unc_params.push_back(std::move(u));
     }
@@ -2679,7 +2724,6 @@ struct Lowering {
         break;
       case mir::Transform::CholeskyCorr:
         opcode = OP_CONSTRAIN_CHOL_CORR;
-        psi = matrix_view(inner_con, inner_con);
         break;
       case mir::Transform::Simplex:
         opcode = OP_CONSTRAIN_SIMPLEX;
@@ -2716,20 +2760,17 @@ struct Lowering {
         opcode = OP_CONSTRAIN_UNIT_VECTOR;
         break;
       case mir::Transform::SumToZero:
-        opcode =
-            stz_rows ? OP_CONSTRAIN_SUM_TO_ZERO_MAT : OP_CONSTRAIN_SUM_TO_ZERO;
+        opcode = leaf == ViewKind::Matrix ? OP_CONSTRAIN_SUM_TO_ZERO_MAT
+                                          : OP_CONSTRAIN_SUM_TO_ZERO;
         break;
       case mir::Transform::Correlation:
         opcode = OP_CONSTRAIN_CORR_MATRIX;
-        psi = matrix_view(inner_con, inner_con);
         break;
       case mir::Transform::Covariance:
         opcode = OP_CONSTRAIN_COV_MATRIX;
-        psi = matrix_view(inner_con, inner_con);
         break;
       case mir::Transform::CholeskyCov:
         opcode = OP_CONSTRAIN_CHOL_COV;
-        psi = matrix_view(chol_M, chol_N);
         break;
       default:
         fail("unsupported parameter transform", tr.raw);
@@ -2737,17 +2778,25 @@ struct Lowering {
     const int jac = add_slot(1, false);
     std::vector<int> tr_idata;
     if (opcode == OP_CONSTRAIN_SIMPLEX || opcode == OP_CONSTRAIN_ORDERED ||
-        opcode == OP_CONSTRAIN_POS_ORDERED)
-      tr_idata = {(int)n_batch, (int)inner_con};
-    if (opcode == OP_CONSTRAIN_UNIT_VECTOR ||
+        opcode == OP_CONSTRAIN_POS_ORDERED ||
+        opcode == OP_CONSTRAIN_UNIT_VECTOR ||
         opcode == OP_CONSTRAIN_SUM_TO_ZERO)
-      tr_idata = {(int)n_batch, (int)inner_con};
+      tr_idata = {checked_immediate(n_batch, "structured parameter batch"),
+                  checked_immediate(inner_raw, "structured raw leaf"),
+                  checked_immediate(inner_con, "structured constrained leaf")};
     if (opcode == OP_CONSTRAIN_CHOL_CORR ||
-        opcode == OP_CONSTRAIN_CORR_MATRIX || opcode == OP_CONSTRAIN_COV_MATRIX)
-      tr_idata = {(int)inner_con};
-    if (opcode == OP_CONSTRAIN_CHOL_COV) tr_idata = {(int)chol_M, (int)chol_N};
-    if (opcode == OP_CONSTRAIN_SUM_TO_ZERO_MAT)
-      tr_idata = {(int)n_batch, (int)stz_rows, (int)stz_cols};
+        opcode == OP_CONSTRAIN_CORR_MATRIX ||
+        opcode == OP_CONSTRAIN_COV_MATRIX || opcode == OP_CONSTRAIN_CHOL_COV)
+      tr_idata = {checked_immediate(n_batch, "structured parameter batch"),
+                  checked_immediate(inner_raw, "structured raw leaf"),
+                  checked_immediate(matrix_rows, "structured matrix rows"),
+                  checked_immediate(matrix_cols, "structured matrix columns")};
+    if (opcode == OP_CONSTRAIN_SUM_TO_ZERO_MAT) {
+      tr_idata = {checked_immediate(n_batch, "structured parameter batch"),
+                  checked_immediate(inner_raw, "structured raw leaf"),
+                  checked_immediate(matrix_rows, "structured matrix rows"),
+                  checked_immediate(matrix_cols, "structured matrix columns")};
+    }
     Val con = emit_raw(opcode, ins, con_len, psi, tr_idata, jac);
     jac_slots.push_back(jac);
     scope[s.decl_id] = con;

@@ -137,14 +137,15 @@ struct CompiledModel {
 
   int64_t n_unconstrained = 0;
   // Each declared parameter, in declaration order: what it is called, how
-  // many UNCONSTRAINED values it contributes, its declared dimensions, and
-  // which constraint transform produced it. The unconstrained vector is
-  // these lengths concatenated in this order.
+  // many UNCONSTRAINED values it contributes, its logical free dimensions,
+  // and which constraint transform produced it. The unconstrained vector is
+  // these lengths concatenated in declaration order.
   struct UncParam {
     std::string name;
     int64_t len = 0;  // unconstrained values
-    // The dimensions as declared, which are not always the constrained
-    // shape: cholesky_factor_corr[K] declares K and holds K x K.
+    // Exact public naming shape of the free values. Structured matrix leaves
+    // are flat here; sum-to-zero matrices retain their two free dimensions.
+    // Outer array dimensions are always preserved.
     std::vector<int64_t> dims;
     mir::Transform::Kind transform = mir::Transform::Identity;
   };

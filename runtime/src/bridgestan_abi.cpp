@@ -105,18 +105,9 @@ stanli::DataMap load_data(const char* data) {
 
 // The names of one declared parameter's UNCONSTRAINED values.
 //
-// These are not the constrained CSV names: a simplex[3] is three
-// constrained values and two unconstrained ones, and a
-// cholesky_factor_corr[K] is K*K against K*(K-1)/2. So the declared dims
-// index the unconstrained vector only when they multiply out to its
-// length; where they do not, the fallback is flat 1..len under the
-// parameter's own name.
-//
-// The exact index shape reference BridgeStan uses for structured
-// transforms is pinned later by the differential conformance test against
-// a real BridgeStan build. This is the best the current metadata supports:
-// lowering records the declared dims and the unconstrained length, not the
-// unconstrained SHAPE, and inventing one would be a guess.
+// These are not the constrained CSV names: lowering records the exact free
+// logical shape, including outer array extents, so a simplex leaf contributes
+// K-1 indices and a structured matrix leaf contributes its flat raw width.
 void append_unc_names(const stanli::CompiledModel::UncParam& p,
                       std::vector<std::string>& out) {
   int64_t prod = 1;

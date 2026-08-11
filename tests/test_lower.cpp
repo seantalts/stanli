@@ -1212,14 +1212,14 @@ int main() {
       expect_eq("simp n_gq_start", (double)wm.write_array->n_gq_start, 1);
     }
 
-    // The unconstrained layout: simplex[3] is 2 free values behind 3
-    // declared ones, so length and dims disagree and both are recorded.
+    // The unconstrained layout: simplex[3] is two free values behind three
+    // constrained ones, and its metadata carries that exact naming shape.
     check(wm.unc_params.size() == 1, "simp: one unconstrained parameter");
     if (wm.unc_params.size() == 1) {
       const auto& u = wm.unc_params[0];
       check(u.name == "theta", "simp unc name");
       expect_eq("simp unc len", (double)u.len, 2);
-      check(u.dims == std::vector<int64_t>{3}, "simp unc dims");
+      check(u.dims == std::vector<int64_t>{2}, "simp unc dims");
       check(u.transform == mir::Transform::Simplex, "simp unc transform");
     }
   }
@@ -1257,11 +1257,11 @@ int main() {
         {"sg_p", 3, {3}, mir::Transform::Lower},
         {"e", 3, {3}, mir::Transform::OffsetMultiplier},
         {"u", 3, {3}, mir::Transform::UnitVector},
-        {"z", 3, {4}, mir::Transform::SumToZero},
+        {"z", 3, {3}, mir::Transform::SumToZero},
         {"R", 3, {3}, mir::Transform::Correlation},
-        {"S", 6, {3}, mir::Transform::Covariance},
-        {"Lc", 6, {3, 3}, mir::Transform::CholeskyCov},
-        {"Lr", 9, {4, 3}, mir::Transform::CholeskyCov}};
+        {"S", 6, {6}, mir::Transform::Covariance},
+        {"Lc", 6, {6}, mir::Transform::CholeskyCov},
+        {"Lr", 9, {9}, mir::Transform::CholeskyCov}};
     check(nm.unc_params.size() == want.size(), "newtrans: 13 parameters");
     for (size_t i = 0; i < want.size() && i < nm.unc_params.size(); ++i) {
       const auto& u = nm.unc_params[i];

@@ -172,13 +172,13 @@ int64_t constrain_scratch(const Op& op, const Slot* slots) {
 // the prim double implementation; backward replays the actual REV constrain
 // on a nested tape with output + jacobian adjoints seeded via the dot trick.
 // Correct by construction against CmdStan's own code path.
-// Batched for array-of-simplex etc.: idata = {n_batch, inner_con}; each
-// batch element constrains independently, jacobians summed.
+// Batched for array-of-simplex etc.: idata contains the outer batch count,
+// one leaf's raw width, and one leaf's constrained width. Keeping those
+// independent also makes an empty outer batch a plain zero-iteration loop.
 template <typename FwdF>
 void structured_fwd(KernelCtx& ctx, FwdF&& f) {
-  const int64_t nb = ctx.n_idata >= 2 ? ctx.idata[0] : 1;
-  const int64_t inner_con = ctx.n_idata >= 2 ? ctx.idata[1] : ctx.out.len;
-  const int64_t inner_raw = ctx.in[0].len / nb;
+  const int64_t nb = ctx.idata[0], inner_raw = ctx.idata[1];
+  const int64_t inner_con = ctx.idata[2];
   double lp = 0.0;
   for (int64_t b = 0; b < nb; ++b) {
     Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data + b * inner_raw,
@@ -192,9 +192,8 @@ void structured_fwd(KernelCtx& ctx, FwdF&& f) {
 template <typename RevF>
 void structured_bwd(KernelCtx& ctx, RevF&& f) {
   if (ctx.in_adj[0].data == nullptr) return;
-  const int64_t nb = ctx.n_idata >= 2 ? ctx.idata[0] : 1;
-  const int64_t inner_con = ctx.n_idata >= 2 ? ctx.idata[1] : ctx.out.len;
-  const int64_t inner_raw = ctx.in[0].len / nb;
+  const int64_t nb = ctx.idata[0], inner_raw = ctx.idata[1];
+  const int64_t inner_con = ctx.idata[2];
   using stan::math::var;
   for (int64_t b = 0; b < nb; ++b) {
     stan::math::nested_rev_autodiff nested;
@@ -210,37 +209,6 @@ void structured_bwd(KernelCtx& ctx, RevF&& f) {
     for (int64_t i = 0; i < inner_raw; ++i)
       ctx.in_adj[0].data[b * inner_raw + i] += y(i).adj();
   }
-}
-
-// cholesky_corr_constrain(y, K) returns a K x K lower-triangular factor;
-// idata = {K}. Same nested-replay backward as the vector transforms, with
-// the output flattened column-major to match slot layout.
-void chol_corr_fwd(KernelCtx& ctx) {
-  const int64_t K = ctx.idata[0];
-  Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data, ctx.in[0].len);
-  double lp = 0.0;
-  Eigen::MatrixXd x = stan::math::cholesky_corr_constrain(y, (int)K, lp);
-  for (int64_t j = 0; j < K; ++j)
-    for (int64_t i = 0; i < K; ++i) ctx.out.data[j * K + i] = x(i, j);
-  ctx.out2.data[0] = lp;
-}
-void chol_corr_bwd(KernelCtx& ctx) {
-  if (ctx.in_adj[0].data == nullptr) return;
-  const int64_t K = ctx.idata[0];
-  using stan::math::var;
-  stan::math::nested_rev_autodiff nested;
-  Eigen::Matrix<var, -1, 1> y(ctx.in[0].len);
-  for (int64_t i = 0; i < ctx.in[0].len; ++i) y(i) = ctx.in[0].data[i];
-  var lp = 0.0;
-  auto x = stan::math::cholesky_corr_constrain(y, (int)K, lp);
-  Eigen::Matrix<var, -1, 1> flat(K * K);
-  for (int64_t j = 0; j < K; ++j)
-    for (int64_t i = 0; i < K; ++i) flat(j * K + i) = x(i, j);
-  Eigen::Map<const Eigen::VectorXd> seed(ctx.out_adj_vec.data, K * K);
-  var j2 = stan::math::dot_product(seed, flat) + ctx.out2_adj * lp;
-  stan::math::grad(j2.vi_);
-  for (int64_t i = 0; i < ctx.in[0].len; ++i)
-    ctx.in_adj[0].data[i] += y(i).adj();
 }
 
 void simplex_fwd(KernelCtx& ctx) {
@@ -367,11 +335,12 @@ void sum_to_zero_bwd(KernelCtx& ctx) {
 // sum_to_zero_matrix[N, M] is the two-axis form: (N-1)*(M-1) unconstrained
 // in, N x M out with every row AND every column summing to zero. Not the
 // vector transform applied per row, and not the same free size. Also
-// volume-preserving, so out2 stays 0. idata = {n_batch, rows, cols}, and
-// each element is flattened column-major like the other matrix transforms.
+// volume-preserving, so out2 stays 0. idata contains batch, raw width, rows,
+// and columns; each element is flattened column-major like the other matrix
+// transforms.
 void sum_to_zero_mat_fwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], R = ctx.idata[1], C = ctx.idata[2];
-  const int64_t raw = (R - 1) * (C - 1), con = R * C;
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t R = ctx.idata[2], C = ctx.idata[3], con = R * C;
   for (int64_t b = 0; b < nb; ++b) {
     Eigen::MatrixXd y(R - 1, C - 1);
     for (int64_t j = 0; j < C - 1; ++j)
@@ -385,9 +354,9 @@ void sum_to_zero_mat_fwd(KernelCtx& ctx) {
   ctx.out2.data[0] = 0.0;
 }
 void sum_to_zero_mat_bwd(KernelCtx& ctx) {
-  if (ctx.in_adj[0].data == nullptr) return;
-  const int64_t nb = ctx.idata[0], R = ctx.idata[1], C = ctx.idata[2];
-  const int64_t raw = (R - 1) * (C - 1), con = R * C;
+  if (ctx.in_adj[0].data == nullptr || ctx.idata[1] == 0) return;
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t R = ctx.idata[2], C = ctx.idata[3], con = R * C;
   using stan::math::var;
   for (int64_t b = 0; b < nb; ++b) {
     stan::math::nested_rev_autodiff nested;
@@ -407,69 +376,99 @@ void sum_to_zero_mat_bwd(KernelCtx& ctx) {
   }
 }
 
-// Vector -> K x K (or M x N), flattened column-major. idata carries the
-// dimensions the size alone cannot recover.
+// Batched vector -> K x K (or M x N), flattened column-major within each
+// outer element. The raw width is explicit rather than inferred by division.
 template <typename F>
-void matrix_constrain_fwd(KernelCtx& ctx, int64_t rows, int64_t cols, F&& f) {
-  Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data, ctx.in[0].len);
+void matrix_constrain_fwd(KernelCtx& ctx, int64_t nb, int64_t raw, int64_t rows,
+                          int64_t cols, F&& f) {
   double lp = 0.0;
-  Eigen::MatrixXd x = f(y, lp);
-  for (int64_t j = 0; j < cols; ++j)
-    for (int64_t i = 0; i < rows; ++i) ctx.out.data[j * rows + i] = x(i, j);
+  const int64_t con = rows * cols;
+  for (int64_t b = 0; b < nb; ++b) {
+    Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data + b * raw, raw);
+    Eigen::MatrixXd x = f(y, lp);
+    for (int64_t j = 0; j < cols; ++j)
+      for (int64_t i = 0; i < rows; ++i)
+        ctx.out.data[b * con + j * rows + i] = x(i, j);
+  }
   ctx.out2.data[0] = lp;
 }
 template <typename F>
-void matrix_constrain_bwd(KernelCtx& ctx, int64_t rows, int64_t cols, F&& f) {
+void matrix_constrain_bwd(KernelCtx& ctx, int64_t nb, int64_t raw, int64_t rows,
+                          int64_t cols, F&& f) {
   if (ctx.in_adj[0].data == nullptr) return;
   using stan::math::var;
-  stan::math::nested_rev_autodiff nested;
-  Eigen::Matrix<var, -1, 1> y(ctx.in[0].len);
-  for (int64_t i = 0; i < ctx.in[0].len; ++i) y(i) = ctx.in[0].data[i];
-  var lp = 0.0;
-  auto x = f(y, lp);
-  Eigen::Matrix<var, -1, 1> flat(rows * cols);
-  for (int64_t j = 0; j < cols; ++j)
-    for (int64_t i = 0; i < rows; ++i) flat(j * rows + i) = x(i, j);
-  Eigen::Map<const Eigen::VectorXd> seed(ctx.out_adj_vec.data, rows * cols);
-  var j2 = stan::math::dot_product(seed, flat) + ctx.out2_adj * lp;
-  stan::math::grad(j2.vi_);
-  for (int64_t i = 0; i < ctx.in[0].len; ++i)
-    ctx.in_adj[0].data[i] += y(i).adj();
+  const int64_t con = rows * cols;
+  for (int64_t b = 0; b < nb; ++b) {
+    stan::math::nested_rev_autodiff nested;
+    Eigen::Matrix<var, -1, 1> y(raw);
+    for (int64_t i = 0; i < raw; ++i) y(i) = ctx.in[0].data[b * raw + i];
+    var lp = 0.0;
+    auto x = f(y, lp);
+    Eigen::Matrix<var, -1, 1> flat(con);
+    for (int64_t j = 0; j < cols; ++j)
+      for (int64_t i = 0; i < rows; ++i) flat(j * rows + i) = x(i, j);
+    Eigen::Map<const Eigen::VectorXd> seed(ctx.out_adj_vec.data + b * con, con);
+    var j2 = stan::math::dot_product(seed, flat) + ctx.out2_adj * lp;
+    stan::math::grad(j2.vi_);
+    for (int64_t i = 0; i < raw; ++i)
+      ctx.in_adj[0].data[b * raw + i] += y(i).adj();
+  }
+}
+
+void chol_corr_fwd(KernelCtx& ctx) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t K = ctx.idata[2];
+  matrix_constrain_fwd(ctx, nb, raw, K, K, [K](const auto& y, auto& lp) {
+    return stan::math::cholesky_corr_constrain(y, (int)K, lp);
+  });
+}
+void chol_corr_bwd(KernelCtx& ctx) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t K = ctx.idata[2];
+  matrix_constrain_bwd(ctx, nb, raw, K, K, [K](auto& y, auto& lp) {
+    return stan::math::cholesky_corr_constrain(y, (int)K, lp);
+  });
 }
 
 void corr_matrix_fwd(KernelCtx& ctx) {
-  const int64_t K = ctx.idata[0];
-  matrix_constrain_fwd(ctx, K, K, [K](const auto& y, auto& lp) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t K = ctx.idata[2];
+  matrix_constrain_fwd(ctx, nb, raw, K, K, [K](const auto& y, auto& lp) {
     return stan::math::corr_matrix_constrain(y, (Eigen::Index)K, lp);
   });
 }
 void corr_matrix_bwd(KernelCtx& ctx) {
-  const int64_t K = ctx.idata[0];
-  matrix_constrain_bwd(ctx, K, K, [K](auto& y, auto& lp) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t K = ctx.idata[2];
+  matrix_constrain_bwd(ctx, nb, raw, K, K, [K](auto& y, auto& lp) {
     return stan::math::corr_matrix_constrain(y, (Eigen::Index)K, lp);
   });
 }
 void cov_matrix_fwd(KernelCtx& ctx) {
-  const int64_t K = ctx.idata[0];
-  matrix_constrain_fwd(ctx, K, K, [K](const auto& y, auto& lp) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t K = ctx.idata[2];
+  matrix_constrain_fwd(ctx, nb, raw, K, K, [K](const auto& y, auto& lp) {
     return stan::math::cov_matrix_constrain(y, (Eigen::Index)K, lp);
   });
 }
 void cov_matrix_bwd(KernelCtx& ctx) {
-  const int64_t K = ctx.idata[0];
-  matrix_constrain_bwd(ctx, K, K, [K](auto& y, auto& lp) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t K = ctx.idata[2];
+  matrix_constrain_bwd(ctx, nb, raw, K, K, [K](auto& y, auto& lp) {
     return stan::math::cov_matrix_constrain(y, (Eigen::Index)K, lp);
   });
 }
 void chol_cov_fwd(KernelCtx& ctx) {
-  const int64_t M = ctx.idata[0], N = ctx.idata[1];
-  matrix_constrain_fwd(ctx, M, N, [M, N](const auto& y, auto& lp) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t M = ctx.idata[2], N = ctx.idata[3];
+  matrix_constrain_fwd(ctx, nb, raw, M, N, [M, N](const auto& y, auto& lp) {
     return stan::math::cholesky_factor_constrain(y, (int)M, (int)N, lp);
   });
 }
 void chol_cov_bwd(KernelCtx& ctx) {
-  const int64_t M = ctx.idata[0], N = ctx.idata[1];
-  matrix_constrain_bwd(ctx, M, N, [M, N](auto& y, auto& lp) {
+  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+  const int64_t M = ctx.idata[2], N = ctx.idata[3];
+  matrix_constrain_bwd(ctx, nb, raw, M, N, [M, N](auto& y, auto& lp) {
     return stan::math::cholesky_factor_constrain(y, (int)M, (int)N, lp);
   });
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every parameter transform, bitwise against CmdStan.
+"""Every parameter transform, within two ULP of CmdStan.
 
 The constraint transforms are the one part of the lowering with no
 density-level oracle behind it: `fn_sweep.py` generates a model per
@@ -59,21 +59,47 @@ CASES = [
     ("sum_to_zero", "sum_to_zero_vector[5] a;", "sum(a) + a[2] * 3"),
     ("sum_to_zero_array",
      "array[2] sum_to_zero_vector[4] a;", "sum(a[1]) + sum(a[2]) * 2"),
+    ("sum_to_zero_matrix", "sum_to_zero_matrix[2, 3] a;",
+     "sum(a) + a[1, 2] * 3"),
+    ("sum_to_zero_matrix_array",
+     "array[2] sum_to_zero_matrix[2, 3] a;",
+     "sum(a[1]) + sum(a[2]) * 2 + a[2, 1, 2] * 3"),
+    ("sum_to_zero_matrix_row_zero_array",
+     "array[2] sum_to_zero_matrix[1, 3] a;",
+     "sum(a[1]) + sum(a[2]) * 2"),
+    ("sum_to_zero_matrix_col_zero_array",
+     "array[2] sum_to_zero_matrix[3, 1] a;",
+     "sum(a[1]) + sum(a[2]) * 2"),
     ("corr_matrix", "corr_matrix[3] a;", "sum(a) + a[1, 2] * 3"),
+    ("corr_matrix_array", "array[2] corr_matrix[3] a;",
+     "sum(a[1]) + sum(a[2]) * 2 + a[2, 1, 2] * 3"),
     ("cov_matrix", "cov_matrix[3] a;", "sum(a) + a[2, 3] * 3"),
+    ("cov_matrix_array", "array[2] cov_matrix[3] a;",
+     "sum(a[1]) + sum(a[2]) * 2 + a[2, 2, 3] * 3"),
     ("cholesky_corr", "cholesky_factor_corr[3] a;", "sum(a) + a[3, 1] * 3"),
+    ("cholesky_corr_array", "array[2] cholesky_factor_corr[3] a;",
+     "sum(a[1]) + sum(a[2]) * 2 + a[2, 3, 1] * 3"),
     ("cholesky_cov_square", "cholesky_factor_cov[3] a;",
      "sum(a) + a[2, 1] * 3"),
+    ("cholesky_cov_square_array", "array[2] cholesky_factor_cov[3] a;",
+     "sum(a[1]) + sum(a[2]) * 2 + a[2, 2, 1] * 3"),
     ("cholesky_cov_rect", "cholesky_factor_cov[4, 3] a;",
      "sum(a) + a[4, 2] * 3"),
+    ("cholesky_cov_rect_array",
+     "array[2] cholesky_factor_cov[4, 3] a;",
+     "sum(a[1]) + sum(a[2]) * 2 + a[2, 4, 2] * 3"),
     # The transforms that already worked, swept alongside so a regression
     # in the shared plumbing shows up here too.
     ("simplex", "simplex[4] a;", "sum(a) + a[1] * 3"),
+    ("simplex_array", "array[2] simplex[4] a;",
+     "sum(a[1]) + sum(a[2]) * 2 + a[2, 1] * 3"),
     ("ordered", "ordered[4] a;", "sum(a) + a[1] * 3"),
     ("positive_ordered", "positive_ordered[4] a;", "sum(a) + a[1] * 3"),
     ("lower", "real<lower=0> a;", "a"),
     ("lower_upper", "real<lower=0, upper=1> a;", "a"),
 ]
+
+MAX_ULP = 2
 
 
 def model_for(params, target):
@@ -126,6 +152,8 @@ def sweep_one(case, cs, tmp, build):
         return (name,) + err
     if n_cmp == 0:
         return name, "no_valid_point", ""
+    if worst > MAX_ULP:
+        return name, "numeric_mismatch", f"{n_cmp} values, {worst} ulp"
     return name, "ok", f"{n_cmp} values, {worst} ulp"
 
 
@@ -148,7 +176,8 @@ def main():
             bad += 1
         flag = "ok  " if status == "ok" else "FAIL"
         print(f"{flag} {name:24s} {status:16s} {note}")
-    print(f"\n{len(cases) - bad}/{len(cases)} transforms bitwise vs CmdStan")
+    print(f"\n{len(cases) - bad}/{len(cases)} transforms within "
+          f"{MAX_ULP} ULP of CmdStan")
     if args.keep:
         print(f"artifacts in {tmp}")
     return 1 if bad else 0
