@@ -169,6 +169,42 @@ int main() {
              lines[0] == "before scalar=0.1");
   }
 
+  // ---- parameter-dependent effects fail loud ---------------------------
+  // Generated Stan executes the taken print/reject once while evaluating
+  // the model. Necessity islands replay their register program for reverse
+  // mode, so they cannot preserve that contract yet. Refusal is the honest
+  // boundary: silently dropping either effect changes observable behavior,
+  // and dropping reject changes the posterior support.
+  {
+    const std::string effect_mir =
+        slurp("tests/fixtures/necessity_effects.tmir.sexp");
+    for (int mode = 1; mode <= 2; ++mode) {
+      std::vector<std::string> lines;
+      set_message_sink([&lines](const char* text, size_t len) {
+        lines.emplace_back(text, len);
+      });
+      bool threw = false;
+      std::string msg;
+      try {
+        DataMap d;
+        d.set_int("mode", mode);
+        (void)compile_model(effect_mir, d);
+      } catch (const CompileError& e) {
+        threw = true;
+        msg = e.what();
+      }
+      set_message_sink(nullptr);
+
+      const std::string effect = mode == 1 ? "FnPrint" : "FnReject";
+      const std::string tag = "necessity " + effect;
+      expect(tag + " refuses compilation", threw);
+      expect(tag + " names the unsupported effect: " + msg,
+             msg.find("parameter-dependent region") != std::string::npos &&
+                 msg.find(effect) != std::string::npos);
+      expect(tag + " is not executed while refusing", lines.empty());
+    }
+  }
+
   if (failures == 0) std::printf("test_rejectprint: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

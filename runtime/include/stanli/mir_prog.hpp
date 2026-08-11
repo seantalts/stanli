@@ -60,13 +60,6 @@ struct Bail {
   std::string why;
 };
 
-// Non-returning calls carry effects that a numeric register program cannot
-// erase. ODE compilation has a real MIR-interpreter fallback and therefore
-// refuses them. Parameter-dependent necessity islands do not yet have that
-// fallback; their legacy behavior stays named and isolated rather than being
-// mistaken for a generally safe policy.
-enum class NRFunAppPolicy { Refuse, LegacyIgnoreNecessityIsland };
-
 struct ProgramCompiler {
   Program& p;
   const std::map<std::string, const mir::FunDef*>& funs;
@@ -74,7 +67,6 @@ struct ProgramCompiler {
   std::map<std::string, std::vector<long>> ints;
   int branch_depth = 0;  // inside a branch on a runtime value
   int inline_depth = 0;
-  NRFunAppPolicy nrfunapp_policy = NRFunAppPolicy::Refuse;
   // A name that is neither a local nor a compile-time integer. The ODE
   // caller leaves this empty (its arguments are all bound up front);
   // lowering installs a hook that allocates registers for the graph slot
@@ -676,10 +668,8 @@ struct ProgramCompiler {
         return;
       }
       case mir::Stmt::NRFunApp:
-        if (nrfunapp_policy == NRFunAppPolicy::Refuse)
-          bail("statement function " + s.fn_name +
-               " requires the MIR interpreter");
-        return;
+        bail("statement function " + s.fn_name +
+             " requires the MIR interpreter");
       case mir::Stmt::Skip:
         return;
       default:
