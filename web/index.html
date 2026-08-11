@@ -61,6 +61,19 @@
           max-width: 62rem; }
   #note b { font-weight: 600; }
   #note .stats { opacity: .8; white-space: nowrap; }
+  /* The side-by-side sampler comparison: NUTS's column left, WALNUTS's
+     right, each with its own trace, histogram, timing line, and summary
+     table. Clicking a parameter row in either table selects it in both. */
+  .cmp { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-top: .6rem; }
+  .cmp .col { flex: 1 1 440px; min-width: 0; }
+  .cmp h3 { font-size: .95rem; margin: 0 0 .3rem;
+            font-family: ui-monospace, monospace; }
+  .cmp canvas { border: 1px solid #8883; border-radius: 6px;
+                max-width: 100%; display: block; margin-bottom: .5rem; }
+  .cmp table { width: 100%; }
+  /* A wide summary table scrolls inside its own column instead of
+     overlapping its neighbor. */
+  .cmp .ctable { overflow-x: auto; }
   /* The model picker: a text input that filters a listbox under it, so
      120 models stay reachable by typing instead of by scrolling. */
   .combo { position: relative; }
@@ -98,8 +111,9 @@
 <body>
 <h1>stanli: The Stan Language Interpreter</h1>
 <p class="sub">No server, no C++ toolchain;
-everything below happens in this tab, runs in the browser, samples on your machine. 
-stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph and runs NUTS. 
+everything below happens in this tab, runs in the browser, samples on your machine.
+stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph and runs NUTS
+or <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a> &mdash; or both at once, side by side.
 <p class="sub">And it's often FASTER?? </p>
 <a href="https://github.com/seantalts/stanli">github.com/seantalts/stanli</a>
 &middot; <a href="https://www.npmjs.com/package/@seantalts/stanli">npm</a>
@@ -114,6 +128,11 @@ stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph 
 
 <div class="bar">
   <button id="run">Run NUTS</button>
+  <label>sampler <select id="sampler">
+    <option value="nuts">NUTS</option>
+    <option value="walnuts">WALNUTS</option>
+    <option value="both">NUTS vs WALNUTS</option>
+  </select></label>
   <label class="combo" for="model">model
     <input id="model" type="text" role="combobox" aria-expanded="false"
            aria-controls="modellist" aria-autocomplete="list"
@@ -124,7 +143,8 @@ stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph 
   <label>warmup <input id="warmup" value="1000"></label>
   <label>samples <input id="samples" value="1000"></label>
   <label>seed <input id="seed" value="1"></label>
-  <label>delta <input id="delta" value="0.8"></label>
+  <label id="deltalab">delta <input id="delta" value="0.8"></label>
+  <label id="maxerrlab" hidden>max err <input id="maxerr" value="0.5"></label>
   <button id="csv" class="plain" hidden>Download CSV</button>
   <span id="status"></span>
 </div>
@@ -438,9 +458,73 @@ catalogReady.then(() => {
 });
 choose(CATALOG[0]);
 
+// ---- sampler selection -----------------------------------------------------
+const SAMPLER_LABEL = { nuts: "NUTS", walnuts: "WALNUTS" };
+function samplerMode() { return $("sampler").value; }
+$("sampler").onchange = () => {
+  const m = samplerMode();
+  $("run").textContent =
+      m === "both" ? "Run both" : `Run ${SAMPLER_LABEL[m]}`;
+  // delta tunes NUTS's adaptation target; max err tunes how much the
+  // joint log density may drift across one WALNUTS macro step. Each is
+  // shown only when its sampler is in play.
+  $("deltalab").hidden = m === "walnuts";
+  $("maxerrlab").hidden = m === "nuts";
+};
+
 // ---- run -------------------------------------------------------------------
 // fit = {names, samples, chains: [{name: Float64Array} per chain]}
+// Single-sampler runs keep one fit; a comparison run keeps one per
+// sampler so both stay inspectable (and downloadable) side by side.
 let fit = null;
+let cmpFits = null;  // { nuts: fit, walnuts: fit } after a "both" run
+
+// Run nChains chains of one sampler from already-compiled MIR, streaming
+// live draws into `onLive(chain, msg)`. Returns {fit, ms}.
+async function runChains(sampler, opts, nChains, seed, onLive) {
+  const results = await Promise.all(
+      Array.from({ length: nChains }, (_, c) => sample({
+        ...opts, code: undefined, seed: seed + c, sampler,
+        onLive: onLive ? (m) => onLive(c, m) : undefined,
+      })));
+  const ms = { lower: 0, sample: 0 };
+  for (const r of results)
+    for (const k of ["lower", "sample"]) ms[k] += r.ms[k];
+  return {
+    fit: { names: results[0].names, samples: results[0].samples,
+           chains: results.map((r) => r.columns) },
+    ms,
+  };
+}
+
+function newLive(nChains) {
+  return { names: null,
+           chains: Array.from({ length: nChains }, () => []),
+           warm: new Array(nChains).fill(0),
+           drawn: new Array(nChains).fill(0) };
+}
+function liveHandler(live, canvas, label, nChains, progress) {
+  let lastDraw = 0;
+  return (c, m) => {
+    if (m.liveMeta) { live.names = m.liveMeta.names; return; }
+    const lv = m.live;
+    if (lv.phase === "warmup") {
+      live.warm[c] = lv.i;
+      progress();
+      return;
+    }
+    live.drawn[c] = lv.i;
+    const chunk = new Float64Array(lv.rows);
+    for (let k = 0; k < chunk.length / lv.nCon; ++k)
+      live.chains[c].push(chunk.subarray(k * lv.nCon, (k + 1) * lv.nCon));
+    progress();
+    const now = performance.now();
+    if (now - lastDraw > 60) {
+      lastDraw = now;
+      liveTrace(canvas, live, nChains, false, label);
+    }
+  };
+}
 
 $("run").onclick = async () => {
   $("run").disabled = true;
@@ -452,6 +536,9 @@ $("run").onclick = async () => {
   $("csv").hidden = true;
   $("trace").hidden = true;
   $("hist").hidden = true;
+  fit = null;
+  cmpFits = null;
+  const mode = samplerMode();
   const nChains = Math.max(1, parseInt($("chains").value, 10) || 4);
   const seed = parseInt($("seed").value, 10) || 1;
   const opts = {
@@ -460,59 +547,20 @@ $("run").onclick = async () => {
     warmup: parseInt($("warmup").value, 10) || 1000,
     samples: parseInt($("samples").value, 10) || 1000,
     delta: parseFloat($("delta").value) || 0.8,
+    maxError: parseFloat($("maxerr").value) || 0,
   };
   try {
-    // Compile once; every chain then runs from the same MIR, in its own
-    // worker, all simultaneously.
+    // Compile once; every chain of every sampler then runs from the same
+    // MIR, in its own worker, all simultaneously.
     $("status").textContent = "compiling (stanc3)";
     const tWall = performance.now();
     const compiled = await compile({ code: opts.code });
-    const live = { names: null,
-                   chains: Array.from({ length: nChains }, () => []),
-                   warm: new Array(nChains).fill(0),
-                   drawn: new Array(nChains).fill(0) };
-    let lastDraw = 0;
-    const progress = () => {
-      const w = live.warm.reduce((a, b) => a + b, 0);
-      const d = live.drawn.reduce((a, b) => a + b, 0);
-      $("status").textContent = d
-          ? `sampling: ${d}/${nChains * opts.samples} draws across ` +
-            `${nChains} chains`
-          : `warmup: ${w}/${nChains * opts.warmup} across ${nChains} chains`;
-    };
-    const results = await Promise.all(
-        Array.from({ length: nChains }, (_, c) => sample({
-          ...opts, code: undefined, mir: compiled.mir, seed: seed + c,
-          onLive: (m) => {
-            if (m.liveMeta) { live.names = m.liveMeta.names; return; }
-            const lv = m.live;
-            if (lv.phase === "warmup") {
-              live.warm[c] = lv.i;
-              progress();
-              return;
-            }
-            live.drawn[c] = lv.i;
-            const chunk = new Float64Array(lv.rows);
-            for (let k = 0; k < chunk.length / lv.nCon; ++k)
-              live.chains[c].push(
-                  chunk.subarray(k * lv.nCon, (k + 1) * lv.nCon));
-            progress();
-            const now = performance.now();
-            if (now - lastDraw > 60) {
-              lastDraw = now;
-              liveTrace(live, nChains);
-            }
-          },
-        })));
-    liveTrace(live, nChains, true);
-    const chains = results;
-    const ms = { stanc: compiled.ms.stanc, lower: 0, sample: 0,
-                 wall: performance.now() - tWall };
-    for (const r of results)
-      for (const k of ["lower", "sample"]) ms[k] += r.ms[k];
-    fit = { names: chains[0].names, samples: chains[0].samples,
-            chains: chains.map((r) => r.columns) };
-    render(ms, nChains);
+    const runOpts = { ...opts, mir: compiled.mir };
+    if (mode === "both") {
+      await runCompare(runOpts, nChains, seed, compiled, tWall);
+    } else {
+      await runSingle(mode, runOpts, nChains, seed, compiled, tWall);
+    }
     $("csv").hidden = false;
   } catch (e) {
     $("err").textContent = String(e.message || e);
@@ -521,11 +569,134 @@ $("run").onclick = async () => {
   $("status").textContent = "";
 };
 
+async function runSingle(mode, opts, nChains, seed, compiled, tWall) {
+  const label = SAMPLER_LABEL[mode];
+  const live = newLive(nChains);
+  const progress = () => {
+    const w = live.warm.reduce((a, b) => a + b, 0);
+    const d = live.drawn.reduce((a, b) => a + b, 0);
+    $("status").textContent = d
+        ? `${label} sampling: ${d}/${nChains * opts.samples} draws across ` +
+          `${nChains} chains`
+        : `${label} warmup: ${w}/${nChains * opts.warmup} across ` +
+          `${nChains} chains`;
+  };
+  const r = await runChains(
+      mode, opts, nChains, seed,
+      liveHandler(live, $("trace"), label, nChains, progress));
+  liveTrace($("trace"), live, nChains, true, label);
+  fit = r.fit;
+  const ms = { stanc: compiled.ms.stanc, ...r.ms,
+               wall: performance.now() - tWall };
+  render(ms, nChains, label);
+}
+
+// ---- the comparison --------------------------------------------------------
+// One column per sampler, NUTS on the left, WALNUTS on the right: live
+// trace while the chains run, then a histogram, the timing line, and the
+// full summary table. The same parameter is selected in both columns --
+// clicking a row in either table redraws both traces on a SHARED y range
+// and both histograms on a shared x range, so the eye compares mixing
+// and the posterior rather than axis choices.
+function cmpCol(which) {
+  const col = document.createElement("div");
+  col.className = "col";
+  col.id = `col-${which}`;
+  col.innerHTML =
+      `<h3>${SAMPLER_LABEL[which]}</h3>` +
+      `<canvas class="ctrace" width="540" height="170"></canvas>` +
+      `<canvas class="chist" width="540" height="140" hidden></canvas>` +
+      `<div class="times"></div><div class="ctable"></div>`;
+  return col;
+}
+
+async function runCompare(opts, nChains, seed, compiled, tWall) {
+  const wrap = document.createElement("div");
+  wrap.className = "cmp";
+  const cols = { nuts: cmpCol("nuts"), walnuts: cmpCol("walnuts") };
+  wrap.append(cols.nuts, cols.walnuts);
+  $("out").appendChild(wrap);
+
+  const lives = { nuts: newLive(nChains), walnuts: newLive(nChains) };
+  const progress = () => {
+    const part = (w) => {
+      const l = lives[w];
+      const d = l.drawn.reduce((a, b) => a + b, 0);
+      const wu = l.warm.reduce((a, b) => a + b, 0);
+      return `${SAMPLER_LABEL[w]} ` +
+             (d ? `${d}/${nChains * opts.samples} draws`
+                : `warmup ${wu}/${nChains * opts.warmup}`);
+    };
+    $("status").textContent = part("nuts") + " · " + part("walnuts");
+  };
+  // Both samplers launch together: 2 x nChains workers, the pool
+  // queueing whatever exceeds the hardware.
+  const [rn, rw] = await Promise.all(["nuts", "walnuts"].map((w) =>
+      runChains(w, opts, nChains, seed,
+                liveHandler(lives[w], cols[w].querySelector(".ctrace"),
+                            SAMPLER_LABEL[w], nChains, progress))));
+  cmpFits = { nuts: rn.fit, walnuts: rw.fit };
+  const wall = performance.now() - tWall;
+
+  for (const [w, r] of [["nuts", rn], ["walnuts", rw]]) {
+    const perChain = r.ms.sample / nChains;
+    let minEss = Infinity;
+    for (const n of r.fit.names)
+      minEss = Math.min(minEss, rhatEss(r.fit, n).ess);
+    const essRate = minEss / (perChain / 1000);
+    cols[w].querySelector(".times").textContent =
+        `${perChain < 1000 ? perChain.toFixed(0) + " ms"
+                           : (perChain / 1000).toFixed(1) + " s"} ` +
+        `sampling per chain · min ESS ${minEss.toFixed(0)} ` +
+        `(${essRate.toFixed(0)}/s)`;
+  }
+  $("times").textContent =
+      `${nChains} chains each, all in parallel: ` +
+      `${(wall / 1000).toFixed(1)} s wall ` +
+      `(stanc ${compiled.ms.stanc.toFixed(0)} ms, once); ` +
+      `click a row to compare that parameter`;
+
+  for (const w of ["nuts", "walnuts"]) {
+    const f = cmpFits[w];
+    const div = cols[w].querySelector(".ctable");
+    div.innerHTML = summaryTable(f);
+    for (const tr of div.querySelectorAll("tr[data-n]"))
+      tr.onclick = () => cmpSelect(tr.dataset.n);
+  }
+  cmpSelect(cmpFits.nuts.names[0]);
+}
+
+function cmpSelect(name) {
+  // The shared scales: y across both samplers' draws of this parameter,
+  // x likewise for the histograms.
+  let lo = Infinity, hi = -Infinity;
+  for (const w of ["nuts", "walnuts"])
+    for (const ch of cmpFits[w].chains)
+      for (const x of ch[name] || []) {
+        if (x < lo) lo = x;
+        if (x > hi) hi = x;
+      }
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  for (const w of ["nuts", "walnuts"]) {
+    const col = $(`col-${w}`);
+    const f = cmpFits[w];
+    if (!(name in f.chains[0])) continue;
+    drawTrace(col.querySelector(".ctrace"), f, name,
+              `${name}  ${SAMPLER_LABEL[w]}, ${f.chains.length} chains`,
+              lo, hi);
+    const h = col.querySelector(".chist");
+    h.hidden = false;
+    drawHist(h, f, name, lo, hi);
+    for (const tr of col.querySelectorAll("tr[data-n]"))
+      tr.classList.toggle("selected", tr.dataset.n === name);
+  }
+}
+
 // ---- summaries -------------------------------------------------------------
-function allDraws(name) {
-  const parts = fit.chains.map((c) => c[name]);
-  const out = new Float64Array(parts.length * fit.samples);
-  parts.forEach((p, i) => out.set(p, i * fit.samples));
+function allDraws(f, name) {
+  const parts = f.chains.map((c) => c[name]);
+  const out = new Float64Array(parts.length * f.samples);
+  parts.forEach((p, i) => out.set(p, i * f.samples));
   return out;
 }
 function meanOf(xs) { let s = 0; for (const x of xs) s += x; return s / xs.length; }
@@ -536,17 +707,17 @@ function varOf(xs, m) {
 
 // Split-chain R-hat and a Geyer-style bulk ESS over the split chains:
 // the standard diagnostics, on plain (not rank-normalized) draws.
-function splitChains(name) {
-  const half = Math.floor(fit.samples / 2);
+function splitChains(f, name) {
+  const half = Math.floor(f.samples / 2);
   const seqs = [];
-  for (const c of fit.chains) {
+  for (const c of f.chains) {
     const xs = c[name];
-    seqs.push(xs.subarray(0, half), xs.subarray(fit.samples - half));
+    seqs.push(xs.subarray(0, half), xs.subarray(f.samples - half));
   }
   return seqs;
 }
-function rhatEss(name) {
-  const seqs = splitChains(name);
+function rhatEss(f, name) {
+  const seqs = splitChains(f, name);
   const m = seqs.length, n = seqs[0].length;
   const means = seqs.map(meanOf);
   const vars = seqs.map((s, i) => varOf(s, means[i]));
@@ -577,47 +748,51 @@ function rhatEss(name) {
   const ess = (m * n) / (1 + 2 * sumRho);
   return { rhat, ess: Math.min(ess, m * n) };
 }
-function colStats(name) {
-  const xs = allDraws(name);
+function colStats(f, name) {
+  const xs = allDraws(f, name);
   const sorted = Float64Array.from(xs).sort();
   const mean = meanOf(xs);
   const q = (p) => sorted[Math.min(xs.length - 1, Math.floor(p * xs.length))];
   return { mean, sd: Math.sqrt(varOf(xs, mean)),
-           q5: q(0.05), q50: q(0.5), q95: q(0.95), ...rhatEss(name) };
+           q5: q(0.05), q50: q(0.5), q95: q(0.95), ...rhatEss(f, name) };
 }
 
-function render(ms, nChains) {
-  const f = (x) => (Math.abs(x) >= 1000 ? x.toFixed(0) : x.toPrecision(4));
+function summaryTable(f) {
+  const fmt = (x) => (Math.abs(x) >= 1000 ? x.toFixed(0) : x.toPrecision(4));
   let html = "<table><tr><th>parameter</th><th>mean</th><th>sd</th>" +
              "<th>5%</th><th>50%</th><th>95%</th><th>R&#770;</th>" +
              "<th>ESS</th></tr>";
-  fit.names.forEach((n) => {
-    const st = colStats(n);
+  f.names.forEach((n) => {
+    const st = colStats(f, n);
     const badR = st.rhat > 1.01 ? ' class="bad"' : "";
-    html += `<tr data-n="${n}"><td>${n}</td><td>${f(st.mean)}</td>` +
-            `<td>${f(st.sd)}</td><td>${f(st.q5)}</td>` +
-            `<td>${f(st.q50)}</td><td>${f(st.q95)}</td>` +
+    html += `<tr data-n="${n}"><td>${n}</td><td>${fmt(st.mean)}</td>` +
+            `<td>${fmt(st.sd)}</td><td>${fmt(st.q5)}</td>` +
+            `<td>${fmt(st.q50)}</td><td>${fmt(st.q95)}</td>` +
             `<td${badR}>${st.rhat.toFixed(3)}</td>` +
             `<td>${st.ess.toFixed(0)}</td></tr>`;
   });
-  $("out").innerHTML = html + "</table>";
+  return html + "</table>";
+}
+
+function render(ms, nChains, label) {
+  $("out").innerHTML = summaryTable(fit);
   const perChain = ms.sample / nChains;
   $("times").textContent =
-      `${nChains} chain${nChains > 1 ? "s" : ""} in parallel: ` +
+      `${nChains} ${label} chain${nChains > 1 ? "s" : ""} in parallel: ` +
       `${(ms.wall / 1000).toFixed(1)} s wall, ` +
       `${perChain < 1000 ? perChain.toFixed(0) + " ms"
                          : (perChain / 1000).toFixed(1) + " s"} ` +
       `sampling per chain (stanc ${ms.stanc.toFixed(0)} ms, once); ` +
       `click a row for trace + histogram`;
   for (const tr of $("out").querySelectorAll("tr[data-n]"))
-    tr.onclick = () => showPlots(tr);
+    tr.onclick = () => showPlots(tr, label);
 }
 
 // The plots follow the selection: one pair, parked above the table while
-// NUTS streams, then moved into a row of its own directly under whichever
-// parameter was clicked. Moving the node keeps the canvases and their
-// contexts alive, so nothing has to be redrawn to relocate them.
-function showPlots(tr) {
+// the sampler streams, then moved into a row of its own directly under
+// whichever parameter was clicked. Moving the node keeps the canvases and
+// their contexts alive, so nothing has to be redrawn to relocate them.
+function showPlots(tr, label) {
   const plots = $("plots");
   const prev = $("out").querySelector("tr.plotrow");
   if (prev && prev.previousElementSibling === tr) {
@@ -639,48 +814,14 @@ function showPlots(tr) {
   row.appendChild(cell);
   tr.after(row);
   tr.classList.add("selected");
-  tracePlot(tr.dataset.n);
-  histPlot(tr.dataset.n);
+  const name = tr.dataset.n;
+  drawTrace($("trace"), fit, name,
+            `${name}  trace, ${fit.chains.length} chains`);
+  drawHist($("hist"), fit, name);
 }
 
 // ---- plots -----------------------------------------------------------------
 const CHAIN_COLORS = ["#4a7", "#47a", "#a47", "#a74", "#7a4", "#74a"];
-
-// The live view while NUTS runs: every chain's trace of the first
-// parameter, each growing as its worker streams draws in.
-function liveTrace(live, nChains, done) {
-  if (!live.names || !live.names.length) return;
-  const c = $("trace"), g = c.getContext("2d");
-  c.hidden = false;
-  const seqs = live.chains.filter((s) => s.length > 1);
-  if (!seqs.length) return;
-  let lo = Infinity, hi = -Infinity;
-  for (const s of seqs)
-    for (const row of s) {
-      const v = row[0];
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
-  if (!(hi > lo)) { lo -= 1; hi += 1; }
-  const total = Math.max(...seqs.map((s) => s.length));
-  g.clearRect(0, 0, c.width, c.height);
-  const { X, Y } = axes(c, g, {
-    title: done ? `${live.names[0]}  ${nChains} chains`
-                : `${live.names[0]}  live, ${seqs.length} of ${nChains} ` +
-                  `chains running`,
-    xlabel: "draw", ylabel: live.names[0],
-    xlo: 0, xhi: Math.max(total - 1, 1), ylo: lo, yhi: hi });
-  seqs.forEach((s, si) => {
-    g.strokeStyle = CHAIN_COLORS[si % CHAIN_COLORS.length];
-    g.globalAlpha = 0.8;
-    g.beginPath();
-    for (let i = 0; i < s.length; ++i)
-      i ? g.lineTo(X(i), Y(s[i][0])) : g.moveTo(X(i), Y(s[i][0]));
-    g.stroke();
-  });
-  g.globalAlpha = 1;
-}
-// ---- plots -----------------------------------------------------------------
 const PAD = { l: 52, r: 10, t: 20, b: 28 };
 
 // Frame, tick labels and axis names. Returns the mappers into the plot
@@ -724,19 +865,58 @@ function axes(c, g, o) {
   };
 }
 
-function tracePlot(name) {
-  const c = $("trace"), g = c.getContext("2d");
+// The live view while a sampler runs: every chain's trace of the first
+// parameter, each growing as its worker streams draws in.
+function liveTrace(c, live, nChains, done, label) {
+  if (!live.names || !live.names.length) return;
+  const g = c.getContext("2d");
+  c.hidden = false;
+  const seqs = live.chains.filter((s) => s.length > 1);
+  if (!seqs.length) return;
+  let lo = Infinity, hi = -Infinity;
+  for (const s of seqs)
+    for (const row of s) {
+      const v = row[0];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  const total = Math.max(...seqs.map((s) => s.length));
+  g.clearRect(0, 0, c.width, c.height);
+  const { X, Y } = axes(c, g, {
+    title: done ? `${live.names[0]}  ${label}, ${nChains} chains`
+                : `${live.names[0]}  ${label} live, ${seqs.length} of ` +
+                  `${nChains} chains running`,
+    xlabel: "draw", ylabel: live.names[0],
+    xlo: 0, xhi: Math.max(total - 1, 1), ylo: lo, yhi: hi });
+  seqs.forEach((s, si) => {
+    g.strokeStyle = CHAIN_COLORS[si % CHAIN_COLORS.length];
+    g.globalAlpha = 0.8;
+    g.beginPath();
+    for (let i = 0; i < s.length; ++i)
+      i ? g.lineTo(X(i), Y(s[i][0])) : g.moveTo(X(i), Y(s[i][0]));
+    g.stroke();
+  });
+  g.globalAlpha = 1;
+}
+
+// Finished-run trace. ylo/yhi, when given, pin the y range so paired
+// plots share a scale; otherwise the range fits this fit's own draws.
+function drawTrace(c, f, name, title, ylo, yhi) {
+  const g = c.getContext("2d");
   c.hidden = false;
   g.clearRect(0, 0, c.width, c.height);
-  let lo = Infinity, hi = -Infinity;
-  for (const ch of fit.chains)
-    for (const x of ch[name]) { if (x < lo) lo = x; if (x > hi) hi = x; }
-  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  let lo = ylo, hi = yhi;
+  if (lo == null || hi == null) {
+    lo = Infinity; hi = -Infinity;
+    for (const ch of f.chains)
+      for (const x of ch[name]) { if (x < lo) lo = x; if (x > hi) hi = x; }
+    if (!(hi > lo)) { lo -= 1; hi += 1; }
+  }
   const { X, Y } = axes(c, g, {
-    title: name + "  trace, " + fit.chains.length + " chains",
-    xlabel: "draw", ylabel: name,
-    xlo: 0, xhi: fit.samples - 1, ylo: lo, yhi: hi });
-  fit.chains.forEach((ch, ci) => {
+    title, xlabel: "draw", ylabel: name,
+    xlo: 0, xhi: f.samples - 1, ylo: lo, yhi: hi });
+  f.chains.forEach((ch, ci) => {
     g.strokeStyle = CHAIN_COLORS[ci % CHAIN_COLORS.length];
     g.globalAlpha = 0.8;
     g.beginPath();
@@ -747,16 +927,19 @@ function tracePlot(name) {
   });
   g.globalAlpha = 1;
 }
-function histPlot(name) {
-  const xs = allDraws(name);
-  let lo = Infinity, hi = -Infinity;
-  for (const x of xs) { if (x < lo) lo = x; if (x > hi) hi = x; }
-  if (!(hi > lo)) { lo -= 1; hi += 1; }
+function drawHist(c, f, name, xlo, xhi) {
+  const xs = allDraws(f, name);
+  let lo = xlo, hi = xhi;
+  if (lo == null || hi == null) {
+    lo = Infinity; hi = -Infinity;
+    for (const x of xs) { if (x < lo) lo = x; if (x > hi) hi = x; }
+    if (!(hi > lo)) { lo -= 1; hi += 1; }
+  }
   const nb = 40, counts = new Array(nb).fill(0);
   for (const x of xs)
-    ++counts[Math.min(nb - 1, ((x - lo) / (hi - lo) * nb) | 0)];
+    ++counts[Math.min(nb - 1, Math.max(0, ((x - lo) / (hi - lo) * nb) | 0))];
   const peak = Math.max(...counts);
-  const c = $("hist"), g = c.getContext("2d");
+  const g = c.getContext("2d");
   c.hidden = false;
   g.clearRect(0, 0, c.width, c.height);
   const { X, Y } = axes(c, g, {
@@ -772,12 +955,21 @@ function histPlot(name) {
 
 // ---- CSV -------------------------------------------------------------------
 $("csv").onclick = () => {
-  const lines = ["chain," + fit.names.join(",")];
-  fit.chains.forEach((ch, ci) => {
-    for (let s = 0; s < fit.samples; ++s)
-      lines.push((ci + 1) + "," +
-                 fit.names.map((n) => ch[n][s]).join(","));
-  });
+  const lines = [];
+  const emit = (label, f) => {
+    for (let ci = 0; ci < f.chains.length; ++ci)
+      for (let s = 0; s < f.samples; ++s)
+        lines.push((label ? label + "," : "") + (ci + 1) + "," +
+                   f.names.map((n) => f.chains[ci][n][s]).join(","));
+  };
+  if (cmpFits) {
+    lines.push("sampler,chain," + cmpFits.nuts.names.join(","));
+    emit("nuts", cmpFits.nuts);
+    emit("walnuts", cmpFits.walnuts);
+  } else {
+    lines.push("chain," + fit.names.join(","));
+    emit("", fit);
+  }
   const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -797,7 +989,7 @@ it works</a></p>
 <!--gen:corpus_median-->2.07x<!--/gen--> CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
 <!--gen:corpus_at_par-->100<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
-<a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>. 
+<a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
 </p>
@@ -806,7 +998,7 @@ compiled to WebAssembly instead of native costs about 1.5x to 2x per
 gradient. The figures in the paragraph
 above are native ones, so the margin over CmdStan in here is nearer par
 than 2x. For heavy work, <code>pip install stanli</code> to run the native build.</p>
-<p><b>Numerically accurate and consistent with CmdStan</b> 
+<p><b>Numerically accurate and consistent with CmdStan</b>
 <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models are
 replayed against the log density, the full gradient and the generated
 quantities CmdStan actually printed, and

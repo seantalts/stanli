@@ -107,7 +107,12 @@ export function compile(opts) {
  * @param {number} [opts.seed=1]       Chain seed (sampler and GQ RNG).
  * @param {number} [opts.warmup=1000]
  * @param {number} [opts.samples=1000]
- * @param {number} [opts.delta=0.8]    Adaptation target acceptance.
+ * @param {number} [opts.delta=0.8]    Adaptation target acceptance (NUTS).
+ * @param {string} [opts.sampler="nuts"]  "nuts" or "walnuts" (within-orbit
+ *   adaptive step-length NUTS, arXiv:2506.18746).
+ * @param {number} [opts.maxError]     WALNUTS only: largest drift in the
+ *   joint log density allowed across one macro step before the step is
+ *   halved within the trajectory. Omit for the runtime default (0.5).
  * @param {function(string)} [opts.onProgress]  Stage announcements.
  * @param {function(Object)} [opts.onLive]  Streaming draws while NUTS
  *   runs: {liveMeta: {names, warmup, samples}} once per call, then
@@ -134,6 +139,8 @@ export function sample(opts) {
     warmup: opts.warmup == null ? 1000 : opts.warmup,
     samples: opts.samples == null ? 1000 : opts.samples,
     delta: opts.delta == null ? 0.8 : opts.delta,
+    sampler: opts.sampler === "walnuts" ? "walnuts" : "nuts",
+    maxError: opts.maxError == null ? 0 : opts.maxError,
   }, opts).then((done) => {
     const { names, samples, ms, exactLp } = done;
     const flat = new Float64Array(done.columns);

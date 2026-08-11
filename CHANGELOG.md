@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### WALNUTS, next to NUTS
+
+The WALNUTS sampler (within-orbit adaptive step-length NUTS,
+arXiv:2506.18746) is now built in, via the vendored walnutpie headers
+(`runtime/third_party/walnutpie/`, MIT). `run_walnuts` mirrors
+`run_nuts` over the same executor gradient, `stanli_sample_walnuts_stream`
+mirrors `stanli_sample_stream` on the C ABI, and the npm package's
+`sample()` takes `sampler: "walnuts"`. Where NUTS picks one step size
+per chain, WALNUTS halves the step within a trajectory wherever the
+local error demands it, which is what makes funnel-like geometry
+tractable without cranking `delta`; its tunable is `max_error`, the
+largest drift in the joint log density allowed across one macro step.
+
+The browser page grew a sampler picker with a comparison mode: NUTS
+and WALNUTS run at once on the same model, data, and seed, NUTS's
+column on the left and WALNUTS's on the right, each with live traces,
+a histogram, per-chain timing with min ESS and ESS per second, and the
+full summary table. Clicking a parameter row in either table selects
+it in both, redrawing the traces on a shared y range and the
+histograms on a shared x range, so the eye compares mixing and the
+posterior rather than axis choices.
+
 Groundwork for letting external samplers drive stanli models, plus two
 fixes that stand on their own.
 

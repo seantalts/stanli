@@ -1,8 +1,8 @@
 // The sampling worker: stanc3 (js_of_ocaml) compiles the model to MIR,
-// stanli.wasm lowers it and runs NUTS. Everything heavy lives here so the
-// page never blocks. Protocol: {cmd: "run", code, dataJson, seed, warmup,
-// samples, delta} in; {status} progress messages and one {done} or
-// {error} out.
+// stanli.wasm lowers it and runs NUTS or WALNUTS. Everything heavy lives
+// here so the page never blocks. Protocol: {cmd: "run", code, dataJson,
+// seed, warmup, samples, delta, sampler, maxError} in; {status} progress
+// messages and one {done} or {error} out.
 "use strict";
 importScripts("stanli.js");
 
@@ -69,7 +69,9 @@ onmessage = async (e) => {
     const n = Number(M._stanli_n_unconstrained(model));
     const samples = req.samples | 0;
     const warmup = req.warmup | 0;
-    say("NUTS: " + warmup + " warmup + " + samples + " draws");
+    const walnuts = req.sampler === "walnuts";
+    say((walnuts ? "WALNUTS: " : "NUTS: ") + warmup + " warmup + " +
+        samples + " draws");
     const drawsPtr = M._malloc(8 * samples * n);
 
     // Stream: every draw lands in the buffer before its callback, so the
@@ -106,9 +108,16 @@ onmessage = async (e) => {
       }
     }, "viii");
     }
-    const rc = M._stanli_sample_stream(model, req.seed >>> 0, warmup,
-                                       samples, +req.delta, drawsPtr,
-                                       cbPtr, 0, errPtr, errLen);
+    // Same streaming contract either way; WALNUTS's tunable is the max
+    // Hamiltonian error per macro step rather than NUTS's target
+    // acceptance rate, and 0 asks the runtime for its default.
+    const rc = walnuts
+        ? M._stanli_sample_walnuts_stream(model, req.seed >>> 0, warmup,
+                                          samples, +req.maxError || 0,
+                                          drawsPtr, cbPtr, 0, errPtr, errLen)
+        : M._stanli_sample_stream(model, req.seed >>> 0, warmup,
+                                  samples, +req.delta, drawsPtr,
+                                  cbPtr, 0, errPtr, errLen);
     if (cbPtr) M.removeFunction(cbPtr);
     if (liveRowPtr) M._free(liveRowPtr);
     if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
