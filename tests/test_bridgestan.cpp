@@ -611,10 +611,11 @@ void test_manifest() {
 // bs_model_construct path is exercised in-process here.
 void test_embedded_manifest() {
   const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
-  nlohmann::json root = nlohmann::json::parse(slurp("tests/fixtures/conj.json"));
+  nlohmann::json root =
+      nlohmann::json::parse(slurp("tests/fixtures/conj.json"));
   root["__stanli"] = {{"build_id", stanli::bs_build_id()},
-                     {"mir", mir},
-                     {"name", "conj_embedded"}};
+                      {"mir", mir},
+                      {"name", "conj_embedded"}};
   const std::string data = root.dump();
 
   char* err = nullptr;
@@ -642,10 +643,9 @@ void test_embedded_manifest() {
   for (int i = 0; i < n; ++i) q[(size_t)i] = 0.1 * (double)(i + 1);
   double lp = 0, want_lp = 0;
   std::vector<double> g((size_t)n), want_g((size_t)n);
-  expect_eq_int("embedded gradient rc",
-                bs_log_density_gradient(m, true, true, q.data(), &lp, g.data(),
-                                        &err),
-                0);
+  expect_eq_int(
+      "embedded gradient rc",
+      bs_log_density_gradient(m, true, true, q.data(), &lp, g.data(), &err), 0);
   expect_eq_int("reference gradient rc",
                 bs_log_density_gradient(w, true, true, q.data(), &want_lp,
                                         want_g.data(), &err),

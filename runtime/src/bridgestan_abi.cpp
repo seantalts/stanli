@@ -484,8 +484,8 @@ bs_model* bs_model_construct(const char* data, unsigned int seed,
       }
     }
   } catch (const std::exception& e) {
-    set_error(error_msg, std::string("embedded __stanli manifest: ") +
-                             e.what());
+    set_error(error_msg,
+              std::string("embedded __stanli manifest: ") + e.what());
     return nullptr;
   } catch (...) {
     set_error(error_msg, "unknown error reading the embedded manifest");
