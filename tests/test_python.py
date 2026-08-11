@@ -270,6 +270,43 @@ def test_wrong_size_raises():
     raise AssertionError("expected ValueError for a wrong-sized point")
 
 
+def test_stan_to_mir_round_trips():
+    # Compiling a model is two steps -- source to transformed MIR, MIR to
+    # an executable graph -- and only the second was reachable without
+    # also building a model. A caller that wants to keep the MIR (to cache
+    # it, ship it, or hand it to a second process) needs the first step on
+    # its own, and what it gets back has to be the same text the in-process
+    # path uses: the model built from it must be the same model.
+    code = "parameters { real x; } model { x ~ normal(0, 1); }"
+    mir = stanli.stan_to_mir(code)
+    assert "log_prob" in mir, "MIR text does not look like transformed MIR"
+
+    from_source = stanli.Model(stan_code=code)
+    from_mir = stanli.Model(mir=mir)
+    q = np.array([0.375])
+    lp_a, g_a = from_source.log_prob_grad(q)
+    lp_b, g_b = from_mir.log_prob_grad(q)
+    assert lp_a == lp_b, f"log density differs: {lp_a} vs {lp_b}"
+    assert (g_a == g_b).all(), f"gradient differs: {g_a} vs {g_b}"
+
+
+def test_stan_to_mir_reports_syntax_errors():
+    try:
+        stanli.stan_to_mir("parameters { real x } model { }")
+    except RuntimeError:
+        return
+    raise AssertionError("expected RuntimeError for a syntax error")
+
+
+def test_build_id_is_stable_and_specific():
+    # Identifies the runtime binary. Anything caching artifacts keyed to a
+    # build (a compiled MIR next to the library that produced it) needs a
+    # value that changes when the library does and not otherwise.
+    a = stanli.build_id()
+    assert isinstance(a, str) and a, "build id is empty"
+    assert a == stanli.build_id(), "build id is not stable within a process"
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

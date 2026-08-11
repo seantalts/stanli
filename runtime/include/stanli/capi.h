@@ -45,6 +45,22 @@ stanli_model* stanli_model_new_from_stan(const char* stan_code,
 /* 1 if this build embeds stanc3, else 0. */
 int stanli_has_embedded_stanc(void);
 
+/* Compile Stan source to transformed-MIR text WITHOUT building a model,
+ * for a caller that wants to keep the MIR: cache it, ship it, or hand it
+ * to stanli_model_new later or elsewhere. Returns null on failure with a
+ * message in err; on success the caller owns the string and frees it with
+ * stanli_string_free. Needs a build that embeds stanc3. */
+char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len);
+
+/* Frees a string this library returned ownership of. */
+void stanli_string_free(char* p);
+
+/* Identifies this runtime binary: source revision plus the build choices
+ * that change what that source produces. Callers caching artifacts beside
+ * a particular library (a compiled MIR, a manifest) key them on this and
+ * refuse a mismatch. Static storage; do not free. */
+const char* stanli_build_id(void);
+
 /* 1 if this build reproduces CmdStan's lp__ exactly, 0 if lp__ sits a
  * per-model constant above it. A STANLI_LITE_LP build drops stan-math's
  * propto instantiations to halve the library, which leaves every

@@ -169,6 +169,26 @@ target_compile_options(sundials PRIVATE -w
   -include ${_sundials}/include/stan_sundials_printf_override.hpp)
 set_target_properties(sundials PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# Identifies this runtime binary, for callers that cache artifacts next to
+# the library that produced them (the BridgeStan lib pair keys its manifest
+# on it). The git sha names the source; the flavour bits name the build
+# choices that change what the same source produces. Uncommitted edits do
+# not move it -- it identifies a build of the project, not a working tree.
+execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short=12 HEAD
+                OUTPUT_VARIABLE STANLI_GIT_SHA
+                OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT STANLI_GIT_SHA)
+  set(STANLI_GIT_SHA "nogit")
+endif()
+set(STANLI_BUILD_ID
+  "abi1-${STANLI_GIT_SHA}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+if(STANLI_LITE_LP)
+  string(APPEND STANLI_BUILD_ID "-litelp")
+endif()
+if(STANLI_THREADS)
+  string(APPEND STANLI_BUILD_ID "-threads")
+endif()
+
 if(NOT EMSCRIPTEN)
 add_library(stanli_shared SHARED
   runtime/src/capi.cpp
@@ -208,6 +228,8 @@ add_library(stanli_shared SHARED
   runtime/src/data.cpp
   tests/tbb_stub.cpp)
 target_include_directories(stanli_shared PUBLIC runtime/include)
+target_compile_definitions(stanli_shared
+                           PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 target_link_libraries(stanli_shared PUBLIC stanmath sundials Threads::Threads)
 set_target_properties(stanli_shared PROPERTIES OUTPUT_NAME stanli)
 
@@ -298,6 +320,7 @@ add_library(stanli STATIC
   runtime/src/constfold.cpp
   runtime/src/data.cpp)
 target_include_directories(stanli PUBLIC runtime/include)
+target_compile_definitions(stanli PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 target_link_libraries(stanli PUBLIC stanmath sundials)
 if(NOT EMSCRIPTEN)
   target_link_libraries(stanli PUBLIC Threads::Threads)
@@ -308,6 +331,8 @@ endif()
 # .js + .wasm pair, MODULARIZE'd so web pages and Node both load it.
 if(EMSCRIPTEN)
   add_executable(stanli_wasm runtime/src/capi.cpp tests/tbb_stub.cpp)
+  target_compile_definitions(stanli_wasm
+                             PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
   target_link_libraries(stanli_wasm PRIVATE stanli)
   set_target_properties(stanli_wasm PROPERTIES OUTPUT_NAME stanli)
   target_link_options(stanli_wasm PRIVATE

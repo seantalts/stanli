@@ -8,6 +8,7 @@
 #include <stanli/wa_interp.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <limits>
@@ -166,6 +167,39 @@ stanli_model* stanli_model_new_from_stan(const char* stan_code,
   return nullptr;
 #endif
 }
+
+char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len) {
+#ifdef STANLI_EMBED_STANC
+  char* res = stanli_stanc_tmir(stan_code);
+  if (std::strncmp(res, "OK", 2) != 0) {
+    put_err(err, err_len, res + (std::strncmp(res, "ERR", 3) == 0 ? 3 : 0));
+    stanli_stanc_free(res);
+    return nullptr;
+  }
+  // Hand back the MIR alone, on its own allocation: the caller frees this
+  // with stanli_string_free and never sees the "OK" the OCaml side
+  // prefixes its result with.
+  const size_t n = std::strlen(res + 2);
+  char* out = (char*)std::malloc(n + 1);
+  if (out != nullptr) std::memcpy(out, res + 2, n + 1);
+  stanli_stanc_free(res);
+  if (out == nullptr) put_err(err, err_len, "out of memory");
+  return out;
+#else
+  (void)stan_code;
+  put_err(err, err_len, "this build does not embed stanc3");
+  return nullptr;
+#endif
+}
+
+void stanli_string_free(char* p) { std::free(p); }
+
+#ifndef STANLI_BUILD_ID
+// A build that did not go through this project's CMake still answers,
+// so a caller never has to special-case a missing id.
+#define STANLI_BUILD_ID "unknown"
+#endif
+const char* stanli_build_id(void) { return STANLI_BUILD_ID; }
 
 int stanli_abi_version(void) { return STANLI_ABI_VERSION; }
 

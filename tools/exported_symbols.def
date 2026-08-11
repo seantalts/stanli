@@ -5,6 +5,9 @@ EXPORTS
   stanli_model_new
   stanli_model_new_from_stan
   stanli_has_embedded_stanc
+  stanli_stan_to_mir
+  stanli_string_free
+  stanli_build_id
   stanli_exact_lp
   stanli_model_free
   stanli_n_unconstrained

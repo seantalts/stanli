@@ -105,6 +105,15 @@ def _load_lib():
                                                ctypes.c_char_p,
                                                ctypes.c_char_p,
                                                ctypes.c_size_t]
+    # c_void_p, not c_char_p: ctypes converts a c_char_p result to bytes
+    # and drops the pointer, which would leak the string stanli handed us
+    # ownership of.
+    lib.stanli_stan_to_mir.restype = ctypes.c_void_p
+    lib.stanli_stan_to_mir.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+                                       ctypes.c_size_t]
+    lib.stanli_string_free.argtypes = [ctypes.c_void_p]
+    lib.stanli_build_id.restype = ctypes.c_char_p
+    lib.stanli_build_id.argtypes = []
     lib.stanli_wa_n_columns.restype = ctypes.c_int64
     lib.stanli_wa_n_columns.argtypes = [ctypes.c_void_p]
     lib.stanli_wa_column_name.restype = ctypes.c_char_p
@@ -171,6 +180,38 @@ def _stanc_mir(model_path: pathlib.Path) -> str:
     if r.returncode != 0 or not r.stdout:
         raise RuntimeError(f"stanc failed:\n{r.stderr}")
     return r.stdout
+
+
+def stan_to_mir(stan_code: str) -> str:
+    """Stan source to transformed-MIR text, without building a model.
+
+    The first half of compiling a model, on its own. Useful when the MIR
+    is what you want to keep -- to cache it, ship it, or hand it to
+    ``Model(mir=...)`` in another process. Falls back to the bundled stanc
+    binary on a build without the embedded compiler.
+    """
+    if not _lib.stanli_has_embedded_stanc():
+        import tempfile
+        tmp = pathlib.Path(tempfile.mkdtemp()) / "model.stan"
+        tmp.write_text(stan_code)
+        return _stanc_mir(tmp)
+    err = ctypes.create_string_buffer(8192)
+    p = _lib.stanli_stan_to_mir(stan_code.encode(), err, len(err))
+    if not p:
+        raise RuntimeError(err.value.decode())
+    try:
+        return ctypes.cast(p, ctypes.c_char_p).value.decode()
+    finally:
+        _lib.stanli_string_free(p)
+
+
+def build_id() -> str:
+    """Identifies the runtime binary this package loaded.
+
+    Source revision plus the build choices that change what that source
+    produces. Key cached artifacts on it and refuse a mismatch.
+    """
+    return _lib.stanli_build_id().decode()
 
 
 def _data_to_json(data) -> str:
@@ -439,14 +480,23 @@ class OptimizeResult(dict):
 class Model:
     """A compiled (model, data) pair."""
 
-    def __init__(self, stan_file=None, data=None, stan_code=None):
+    def __init__(self, stan_file=None, data=None, stan_code=None, mir=None):
+        data_json = _data_to_json(data)
+        err = ctypes.create_string_buffer(8192)
+
+        if mir is not None:
+            # Already-compiled transformed MIR, from stan_to_mir or from
+            # `stanc --debug-transformed-mir`. Skips the compiler
+            # entirely, which is what a cached or shipped model wants.
+            self._m = _lib.stanli_model_new(mir.encode(), data_json.encode(),
+                                            err, len(err))
+            self._finish_init(err)
+            return
         if stan_code is None:
             if stan_file is None:
-                raise ValueError("provide stan_file or stan_code")
+                raise ValueError("provide stan_file, stan_code, or mir")
             stan_code = pathlib.Path(stan_file).read_text()
-        data_json = _data_to_json(data)
 
-        err = ctypes.create_string_buffer(8192)
         if _lib.stanli_has_embedded_stanc():
             # Fully in-process: embedded stanc3 compiles the model.
             self._m = _lib.stanli_model_new_from_stan(
@@ -456,9 +506,11 @@ class Model:
             import tempfile
             tmp = pathlib.Path(tempfile.mkdtemp()) / "model.stan"
             tmp.write_text(stan_code)
-            mir = _stanc_mir(tmp)
-            self._m = _lib.stanli_model_new(mir.encode(), data_json.encode(),
-                                            err, len(err))
+            self._m = _lib.stanli_model_new(_stanc_mir(tmp).encode(),
+                                            data_json.encode(), err, len(err))
+        self._finish_init(err)
+
+    def _finish_init(self, err):
         if not self._m:
             raise RuntimeError(err.value.decode())
         self.n_unconstrained = _lib.stanli_n_unconstrained(self._m)
