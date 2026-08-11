@@ -77,13 +77,12 @@ void expect_near(const std::string& what, double got, double want) {
   const double tol = 2e-12 * std::max(1.0, std::fabs(want));
   if (!(std::fabs(got - want) <= tol)) {
     ++failures;
-    std::printf("FAIL %s: got %.17g want %.17g (tol %.3g)\n", what.c_str(),
-                got, want, tol);
+    std::printf("FAIL %s: got %.17g want %.17g (tol %.3g)\n", what.c_str(), got,
+                want, tol);
   }
 }
 
-void expect_names(const std::string& what,
-                  const std::vector<std::string>& got,
+void expect_names(const std::string& what, const std::vector<std::string>& got,
                   const std::vector<std::string>& want) {
   if (got == want) return;
   ++failures;
@@ -93,7 +92,8 @@ void expect_names(const std::string& what,
   for (size_t i = 0; i < n; ++i) {
     const std::string g = i < got.size() ? got[i] : "<missing>";
     const std::string w = i < want.size() ? want[i] : "<missing>";
-    if (g != w) std::printf("  [%zu] got %s want %s\n", i, g.c_str(), w.c_str());
+    if (g != w)
+      std::printf("  [%zu] got %s want %s\n", i, g.c_str(), w.c_str());
   }
 }
 
@@ -158,8 +158,8 @@ void test_graph_and_write_array(int B, const std::string& mir) {
                 materialize(wex, cm.write_array->columns),
                 oracle::write_values(B));
 
-  auto prog = std::make_shared<mir::Program>(
-      mir::read_program(sexp::parse(mir)));
+  auto prog =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(mir)));
   std::map<std::string, DataMap::Entry> base;
   DataMap::Entry b;
   b.is_int = true;
@@ -180,8 +180,7 @@ void test_graph_and_write_array(int B, const std::string& mir) {
   expect_names(tag + " interpreted write_array",
                CompiledModel::csv_names(interpreted.columns()),
                oracle::write_names(B));
-  expect_values(tag + " interpreted write_array", row,
-                oracle::write_values(B));
+  expect_values(tag + " interpreted write_array", row, oracle::write_values(B));
 }
 
 void test_bridgestan(int B, const std::string& mir) {
@@ -198,7 +197,8 @@ void test_bridgestan(int B, const std::string& mir) {
   expect_count(tag + " unconstrained count", bs_param_unc_num(model),
                oracle::n_unc(B));
   const char* unc = bs_param_unc_names(model);
-  if (unc == nullptr || std::string(unc) != join(oracle::unconstrained_names(B)))
+  if (unc == nullptr ||
+      std::string(unc) != join(oracle::unconstrained_names(B)))
     fail(tag + " unconstrained names");
   expect_count(tag + " constrained count", bs_param_num(model, false, false),
                oracle::n_con(B));
@@ -242,7 +242,8 @@ void test_bridgestan(int B, const std::string& mir) {
     fail(tag + " RNG construction");
   } else {
     std::vector<double> row(oracle::write_values(B).size());
-    rc = bs_param_constrain(model, false, true, q.data(), row.data(), rng, &err);
+    rc =
+        bs_param_constrain(model, false, true, q.data(), row.data(), rng, &err);
     if (rc != 0) {
       fail(tag + " write row: " + (err ? std::string(err) : "no message"));
       bs_free_error_msg(err);
@@ -307,8 +308,7 @@ void test_malformed_vector_transform() {
 }  // namespace
 
 int main() {
-  const std::string mir =
-      slurp("tests/fixtures/structured_arrays.tmir.sexp");
+  const std::string mir = slurp("tests/fixtures/structured_arrays.tmir.sexp");
   for (int B = 0; B <= 2; ++B) {
     try {
       test_graph_and_write_array(B, mir);
