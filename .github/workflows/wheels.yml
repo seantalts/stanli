@@ -313,6 +313,31 @@ jobs:
           # this cannot move into the linked C++ suite.
           /tmp/wheeltest/bin/python tests/test_bridgestan_pair.py
 
+      # The one check that a second implementation makes and stanli's own
+      # tests cannot: the facade and its tests come from the same head, so
+      # they can agree on a wrong reading of what a bs_ call means.
+      # Reference BridgeStan compiles the same models with a C++
+      # toolchain -- which this runner has and stanli's users never do --
+      # and both libraries answer through the same client.
+      #
+      # Linux only. It costs a stan-math compile per model, and the bugs
+      # it looks for are in stanli's semantics, which do not vary by
+      # platform; the numeric agreement that does vary is already covered
+      # per-platform by the corpus oracle.
+      - name: Conformance against reference BridgeStan
+        if: matrix.plat == 'manylinux_2_28_x86_64'
+        run: |
+          /tmp/wheeltest/bin/pip install bridgestan
+          for m in es simp newtrans conj; do
+            case $m in
+              es) data=tests/fixtures/eight_schools.json ;;
+              simp) data='{"K": 3}' ;;
+              *) data=tests/fixtures/$m.json ;;
+            esac
+            /tmp/wheeltest/bin/python tools/bs_conformance.py \
+              tests/fixtures/$m.stan --data "$data"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.plat }}

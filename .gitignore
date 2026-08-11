@@ -34,3 +34,10 @@ r/src/*.dll
 r/*.Rcheck/
 r/*.tar.gz
 .claude/worktrees/
+
+# Python bytecode, and the model libraries reference BridgeStan
+# compiles next to a .stan file when the conformance harness runs.
+__pycache__/
+*.pyc
+tests/fixtures/*_model.so
+tests/fixtures/*.hpp

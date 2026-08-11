@@ -19,7 +19,7 @@ import numpy as np
 
 __all__ = ["Model", "Fit", "Summary", "OptimizeResult",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
-           "bridgestan_manifest_path",
+           "bridgestan_lib", "bridgestan_manifest_path",
            "SAMPLER_COLUMNS", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
@@ -253,6 +253,60 @@ def _clone_file(src: pathlib.Path, dst: pathlib.Path) -> None:
     worth adding only if the disk ever shows up as a problem.
     """
     shutil.copyfile(src, dst)
+
+
+def bridgestan_lib(stan_file=None, stan_code=None, mir=None, name=None,
+                   dir=None) -> pathlib.Path:
+    """Write a Stan program as a BridgeStan model library, and return it.
+
+    BridgeStan's clients -- walnutpie, nutpie, the bridgestan packages --
+    load a shared library per model and call ``bs_*`` on it. stanli has
+    one library for every model, so a model library here is a PAIR: a
+    copy of the runtime, and a sidecar manifest beside it holding this
+    program's compiled MIR. The runtime finds the sidecar by asking where
+    its own code was loaded from, which is what makes one universal
+    binary answer as a particular model.
+
+    No data: a pair is a compiled PROGRAM, and ``bs_model_construct``
+    takes the data, so one pair serves every dataset for that program.
+
+    The pair is named by the hash of (runtime build, MIR), so the same
+    program against the same runtime is one pair however often you ask, a
+    different program is a different pair, and an upgraded runtime never
+    serves a stale one. `dir` defaults to a per-user cache directory.
+    """
+    if mir is None:
+        if stan_code is None:
+            if stan_file is None:
+                raise ValueError("provide stan_file, stan_code, or mir")
+            stan_code = pathlib.Path(stan_file).read_text()
+        mir = stan_to_mir(stan_code)
+    if name is None:
+        name = pathlib.Path(stan_file).stem if stan_file else "stanli_model"
+
+    stem = "stanli_" + hashlib.sha256(
+        (build_id() + "\0" + mir).encode()).hexdigest()[:16]
+    target = pathlib.Path(dir) if dir is not None else _pair_cache_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    lib = target / (stem + _lib_suffix())
+    manifest = bridgestan_manifest_path(lib)
+
+    if not (lib.exists() and manifest.exists()):
+        # Written to temporary names and moved into place, so a reader
+        # never sees half a pair: another process (or another thread of
+        # this one) asking for the same program either finds a complete
+        # pair or writes its own.
+        tmp_manifest = manifest.with_suffix(".json.tmp%d" % os.getpid())
+        tmp_manifest.write_text(json.dumps({
+            "build_id": build_id(), "name": name, "mir": mir,
+        }))
+        tmp_lib = lib.with_name(lib.name + ".tmp%d" % os.getpid())
+        _clone_file(_runtime_lib_path(), tmp_lib)
+        # The manifest first: the library is what a client opens, so it
+        # must not appear before the thing it will look for.
+        os.replace(tmp_manifest, manifest)
+        os.replace(tmp_lib, lib)
+    return lib
 
 
 def bridgestan_manifest_path(lib_path) -> pathlib.Path:
@@ -589,52 +643,16 @@ class Model:
         ]
 
     def bridgestan_lib(self, dir=None) -> pathlib.Path:
-        """Write this model as a BridgeStan model library, and return it.
+        """This model's program as a BridgeStan library pair.
 
-        BridgeStan's clients -- walnutpie, nutpie, the bridgestan
-        packages -- load a shared library per model and call ``bs_*`` on
-        it. stanli has one library for every model, so a model library
-        here is a PAIR: a copy of the runtime, and a sidecar manifest
-        beside it holding this model's compiled MIR. The runtime finds
-        the sidecar by asking where its own code was loaded from, which
-        is what makes one universal binary answer as a particular model.
-
-        The pair is named by the hash of (runtime build, MIR), so the
-        same model against the same runtime is one pair however often you
-        ask, a different model is a different pair, and an upgraded
-        runtime never serves a stale one. `dir` defaults to a per-user
-        cache directory.
-
-        Note that the data belongs to the caller, not to the pair:
-        ``bs_model_construct`` takes it, so one pair serves every dataset
-        for that program.
+        The module-level `stanli.bridgestan_lib` is the same thing
+        without needing a model: a pair holds a compiled program and
+        `bs_model_construct` supplies the data, so one pair serves every
+        dataset. This is the convenience for when a Model is what you
+        already have.
         """
-        mir = self._model_mir()
-        stem = "stanli_" + hashlib.sha256(
-            (build_id() + "\0" + mir).encode()).hexdigest()[:16]
-        target = pathlib.Path(dir) if dir is not None else _pair_cache_dir()
-        target.mkdir(parents=True, exist_ok=True)
-        lib = target / (stem + _lib_suffix())
-        manifest = bridgestan_manifest_path(lib)
-
-        if not (lib.exists() and manifest.exists()):
-            # Written to temporary names and moved into place, so a
-            # reader never sees half a pair: another process (or another
-            # thread of this one) asking for the same model either finds
-            # a complete pair or writes its own.
-            tmp_manifest = manifest.with_suffix(".json.tmp%d" % os.getpid())
-            tmp_manifest.write_text(json.dumps({
-                "build_id": build_id(),
-                "name": self._name,
-                "mir": mir,
-            }))
-            tmp_lib = lib.with_name(lib.name + ".tmp%d" % os.getpid())
-            _clone_file(_runtime_lib_path(), tmp_lib)
-            # The manifest first: the library is what a client opens, so
-            # it must not appear before the thing it will look for.
-            os.replace(tmp_manifest, manifest)
-            os.replace(tmp_lib, lib)
-        return lib
+        return bridgestan_lib(mir=self._model_mir(), name=self._name,
+                              dir=dir)
 
     def _model_mir(self) -> str:
         """This model's transformed MIR, compiled once and remembered."""
