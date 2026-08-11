@@ -2,11 +2,10 @@
 //
 // BridgeStan's premise is "a Stan model as a differentiable shared
 // library". Reference BridgeStan gets there by compiling the model into
-// the library; stanli ships one universal library and delivers the model
-// as a manifest, either embedded in the data argument under "__stanli" or
-// in a sidecar file next to a per-model clone of the library (see
-// bs_model_construct), so the same clients work with no C++ toolchain on
-// the user's machine.
+// the library; stanli ships one universal library and the model arrives
+// at construct time, as a manifest embedded in the data argument under
+// "__stanli" (see bs_model_construct), so the same clients work with no
+// C++ toolchain on the user's machine.
 //
 // The compatibility stance is narrow on purpose: every call either behaves
 // exactly as the reference header documents, or returns -1 with a message
@@ -60,10 +59,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#ifndef _WIN32
-#include <dlfcn.h>
-#endif
 
 // Identifies this runtime binary. Read from the compile definition rather
 // than through stanli_build_id(), because capi.cpp is not part of the
@@ -416,15 +411,6 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
   }
 }
 
-#ifndef _WIN32
-// What dladdr resolves to this library's path. STATIC on purpose: an
-// exported bs_ symbol can be interposed by another BridgeStan library
-// already loaded in the process, and dladdr would then name that library's
-// file instead of this one's -- so the model would be read from someone
-// else's manifest.
-static void bs_dladdr_anchor() {}
-#endif
-
 extern "C" {
 
 const int bs_major_version = 2;
@@ -433,21 +419,16 @@ const int bs_patch_version = 0;
 
 bs_model* bs_model_construct(const char* data, unsigned int seed,
                              char** error_msg) {
-  // Two transports for the same manifest, tried in this order:
+  // The model arrives inside the data argument: the JSON carries the
+  // manifest under the reserved key "__stanli" (never a data variable:
+  // Stan identifiers begin with a letter). The key is validated,
+  // stripped, and the rest is the model's data. No filesystem, no
+  // dladdr, so one library serves every model, on every platform.
   //
-  //   1. EMBEDDED: the data JSON carries the manifest itself under the
-  //      reserved key "__stanli" (never a data variable: Stan identifiers
-  //      begin with a letter). The key is validated, stripped, and the
-  //      rest is the model's data. No filesystem, no dladdr, so this one
-  //      also works on Windows and in a linked test.
-  //   2. SIDECAR: the manifest sits in a file next to this library, found
-  //      through dladdr. This is what lets clients that only take a
-  //      library path (stan_cli, the R and Julia packages) stay unaware
-  //      of stanli entirely.
-  //
-  // A payload that mentions the key and gets it wrong fails HERE, naming
-  // the embedded manifest -- sliding into the sidecar lookup would bury a
-  // typo under "no sidecar found".
+  // This replaced the lib pair -- a per-model copy of the runtime with a
+  // sidecar manifest found through dladdr -- which cost ~29 MB per model
+  // and could not work on Windows. A caller that still hands us plain
+  // data gets an error saying where the model should have been.
   try {
     if (data != nullptr && data[0] != '\0') {
       // Same resolution rule as load_data: a path ending in ".json" means
@@ -463,9 +444,6 @@ bs_model* bs_model_construct(const char* data, unsigned int seed,
         ss << f.rdbuf();
         text = ss.str();
       }
-      // The substring scan keys the parse: data without the marker takes
-      // the sidecar path untouched, even when it is not valid JSON (that
-      // error belongs to load_data, which says so with more context).
       if (text.find("\"__stanli\"") != std::string::npos) {
         const nlohmann::json root = nlohmann::json::parse(text);
         if (root.is_object() && root.contains("__stanli")) {
@@ -491,59 +469,12 @@ bs_model* bs_model_construct(const char* data, unsigned int seed,
     set_error(error_msg, "unknown error reading the embedded manifest");
     return nullptr;
   }
-
-#ifdef _WIN32
-  (void)seed;
   set_error(error_msg,
-            "bs_model_construct without an embedded \"__stanli\" manifest "
-            "is not supported on this platform: finding the sidecar "
-            "manifest next to this library needs dladdr");
+            "the data argument carries no \"__stanli\" manifest: this "
+            "runtime takes the model embedded in the data JSON "
+            "(stanli.bridgestan_model() builds it), not a per-model "
+            "library");
   return nullptr;
-#else
-  try {
-    Dl_info info;
-    if (dladdr(reinterpret_cast<const void*>(&bs_dladdr_anchor), &info) == 0 ||
-        info.dli_fname == nullptr || info.dli_fname[0] == '\0') {
-      set_error(error_msg,
-                "could not locate this library's own path: dladdr failed");
-      return nullptr;
-    }
-    // <libstem>.stanli.json next to the library: /a/b/libmodel.dylib pairs
-    // with /a/b/libmodel.stanli.json.
-    const std::string lib = info.dli_fname;
-    const size_t slash = lib.find_last_of('/');
-    const size_t dot = lib.find_last_of('.');
-    const bool has_ext =
-        dot != std::string::npos && (slash == std::string::npos || dot > slash);
-    const std::string path =
-        (has_ext ? lib.substr(0, dot) : lib) + ".stanli.json";
-
-    std::ifstream f(path);
-    if (!f) {
-      set_error(error_msg,
-                "no stanli sidecar manifest at " + path +
-                    ": this library was loaded directly rather than as a "
-                    "model pair written by Model.bridgestan_lib()");
-      return nullptr;
-    }
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    stanli::BsManifest man;
-    std::string err;
-    if (!stanli::bs_read_manifest(ss.str(), &man, &err)) {
-      set_error(error_msg, path + ": " + err);
-      return nullptr;
-    }
-    return bs_model_from_mir(man.mir.c_str(), data, seed, error_msg,
-                             man.name.c_str());
-  } catch (const std::exception& e) {
-    set_error(error_msg, e.what());
-    return nullptr;
-  } catch (...) {
-    set_error(error_msg, "unknown error constructing the model");
-    return nullptr;
-  }
-#endif
 }
 
 void bs_model_destruct(bs_model* m) { delete m; }

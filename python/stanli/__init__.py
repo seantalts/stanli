@@ -6,12 +6,10 @@ op graph in-process, and samples with NUTS. No C++ toolchain, no model
 compilation on this machine.
 """
 import ctypes
-import hashlib
 import json
 import math
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 
@@ -19,11 +17,11 @@ import numpy as np
 
 __all__ = ["Model", "Fit", "Summary", "OptimizeResult",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
-           "bridgestan_lib", "bridgestan_manifest_path",
+           "bridgestan_model",
            "SAMPLER_COLUMNS", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 _BIN = pathlib.Path(__file__).parent / "_bin"
 
@@ -218,43 +216,6 @@ def _runtime_lib_path() -> pathlib.Path:
                    else "stanli.dll")
 
 
-def _pair_cache_dir() -> pathlib.Path:
-    """Where pairs go when the caller does not say.
-
-    Under the platform's cache location rather than the package
-    directory, which may be read-only (a system install, a wheel in a
-    zip) and is not the caller's to grow.
-    """
-    if sys.platform == "darwin":
-        base = pathlib.Path.home() / "Library" / "Caches"
-    elif sys.platform == "win32":
-        base = pathlib.Path(os.environ.get("LOCALAPPDATA",
-                                           pathlib.Path.home()))
-    else:
-        base = pathlib.Path(os.environ.get("XDG_CACHE_HOME",
-                                           pathlib.Path.home() / ".cache"))
-    return base / "stanli" / "bridgestan"
-
-
-def _clone_file(src: pathlib.Path, dst: pathlib.Path) -> None:
-    """Copy the runtime into the pair.
-
-    A real copy, not a hard link. A link would be free, but the loader
-    identifies a library by its inode: linking makes the pair the SAME
-    library as the one this process already has open, so dlopen hands
-    back the image that is loaded and the runtime, asking where it came
-    from, reads the original path and never finds the sidecar. Measured
-    as exactly that failure before this was a copy.
-
-    So the pair costs one copy of the runtime, once per (model, runtime)
-    because the name is content-addressed. A copy-on-write clone would
-    make it nearly free on APFS and on Linux filesystems with reflinks;
-    it needs a platform-specific syscall Python does not expose, and is
-    worth adding only if the disk ever shows up as a problem.
-    """
-    shutil.copyfile(src, dst)
-
-
 def _resolve_program(stan_file, stan_code, mir, name):
     """(mir, name) from whichever form the caller has, compiling if needed."""
     if mir is None:
@@ -272,18 +233,13 @@ def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
                      name=None, **kw):
     """A ``bridgestan.StanModel`` for this program, with nothing written.
 
-    Where ``bridgestan_lib`` writes a pair (a full copy of the runtime
-    plus a sidecar manifest), this writes no files at all: the manifest
-    rides inside the data argument under the reserved key ``"__stanli"``
-    (never a data variable; Stan identifiers begin with a letter), and
-    ``bs_model_construct`` reads it out before binding the rest as the
-    model's data. Every model then shares the one runtime library already
-    inside this package.
-
-    The trade is that someone must do this splice, so it only serves
-    callers that construct the model here; a sampler that takes only a
-    library path still wants the pair. Path-form ``data`` is read and
-    inlined for the same reason.
+    The model travels inside the data argument: the manifest rides under
+    the reserved key ``"__stanli"`` (never a data variable; Stan
+    identifiers begin with a letter), and ``bs_model_construct`` reads it
+    out before binding the rest as the model's data. Every model shares
+    the one runtime library already inside this package, so nothing is
+    copied and nothing touches disk. Path-form ``data`` is read and
+    inlined to make room for the splice.
 
     ``bridgestan`` is imported lazily and is not a stanli dependency.
     Extra keyword arguments pass through to ``bridgestan.StanModel``.
@@ -301,67 +257,6 @@ def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
     kw.setdefault("warn", False)
     return bridgestan.StanModel(_runtime_lib_path(), json.dumps(payload),
                                 **kw)
-
-
-def bridgestan_lib(stan_file=None, stan_code=None, mir=None, name=None,
-                   dir=None) -> pathlib.Path:
-    """Write a Stan program as a BridgeStan model library, and return it.
-
-    BridgeStan's clients -- walnutpie, nutpie, the bridgestan packages --
-    load a shared library per model and call ``bs_*`` on it. stanli has
-    one library for every model, so a model library here is a PAIR: a
-    copy of the runtime, and a sidecar manifest beside it holding this
-    program's compiled MIR. The runtime finds the sidecar by asking where
-    its own code was loaded from, which is what makes one universal
-    binary answer as a particular model.
-
-    No data: a pair is a compiled PROGRAM, and ``bs_model_construct``
-    takes the data, so one pair serves every dataset for that program.
-
-    A pair costs a full copy of the runtime. When the caller constructs
-    the model from Python anyway, ``bridgestan_model`` skips the copy by
-    embedding the manifest in the data argument instead.
-
-    The pair is named by the hash of (runtime build, MIR), so the same
-    program against the same runtime is one pair however often you ask, a
-    different program is a different pair, and an upgraded runtime never
-    serves a stale one. `dir` defaults to a per-user cache directory.
-    """
-    mir, name = _resolve_program(stan_file, stan_code, mir, name)
-
-    stem = "stanli_" + hashlib.sha256(
-        (build_id() + "\0" + mir).encode()).hexdigest()[:16]
-    target = pathlib.Path(dir) if dir is not None else _pair_cache_dir()
-    target.mkdir(parents=True, exist_ok=True)
-    lib = target / (stem + _lib_suffix())
-    manifest = bridgestan_manifest_path(lib)
-
-    if not (lib.exists() and manifest.exists()):
-        # Written to temporary names and moved into place, so a reader
-        # never sees half a pair: another process (or another thread of
-        # this one) asking for the same program either finds a complete
-        # pair or writes its own.
-        tmp_manifest = manifest.with_suffix(".json.tmp%d" % os.getpid())
-        tmp_manifest.write_text(json.dumps({
-            "build_id": build_id(), "name": name, "mir": mir,
-        }))
-        tmp_lib = lib.with_name(lib.name + ".tmp%d" % os.getpid())
-        _clone_file(_runtime_lib_path(), tmp_lib)
-        # The manifest first: the library is what a client opens, so it
-        # must not appear before the thing it will look for.
-        os.replace(tmp_manifest, manifest)
-        os.replace(tmp_lib, lib)
-    return lib
-
-
-def bridgestan_manifest_path(lib_path) -> pathlib.Path:
-    """The sidecar that goes with a BridgeStan lib pair.
-
-    The C++ side derives the same name from the library it finds itself
-    loaded from, so this is the one definition of the rule on this side.
-    """
-    p = pathlib.Path(lib_path)
-    return p.with_name(p.stem + ".stanli.json")
 
 
 def build_id() -> str:
@@ -642,13 +537,6 @@ class Model:
     def __init__(self, stan_file=None, data=None, stan_code=None, mir=None):
         data_json = _data_to_json(data)
         err = ctypes.create_string_buffer(8192)
-        # Kept for bridgestan_lib, which needs the MIR and a name. The
-        # source is kept rather than the MIR because compiling is
-        # milliseconds and most models never ask for a library.
-        self._mir = mir
-        self._stan_code = stan_code
-        self._name = (pathlib.Path(stan_file).stem if stan_file is not None
-                      else "stanli_model")
 
         if mir is not None:
             # Already-compiled transformed MIR, from stan_to_mir or from
@@ -662,7 +550,6 @@ class Model:
             if stan_file is None:
                 raise ValueError("provide stan_file, stan_code, or mir")
             stan_code = pathlib.Path(stan_file).read_text()
-            self._stan_code = stan_code
 
         if _lib.stanli_has_embedded_stanc():
             # Fully in-process: embedded stanc3 compiles the model.
@@ -686,29 +573,6 @@ class Model:
             _lib.stanli_constrained_name(self._m, i).decode()
             for i in range(n_con)
         ]
-
-    def bridgestan_lib(self, dir=None) -> pathlib.Path:
-        """This model's program as a BridgeStan library pair.
-
-        The module-level `stanli.bridgestan_lib` is the same thing
-        without needing a model: a pair holds a compiled program and
-        `bs_model_construct` supplies the data, so one pair serves every
-        dataset. This is the convenience for when a Model is what you
-        already have.
-        """
-        return bridgestan_lib(mir=self._model_mir(), name=self._name,
-                              dir=dir)
-
-    def _model_mir(self) -> str:
-        """This model's transformed MIR, compiled once and remembered."""
-        if self._mir is None:
-            if self._stan_code is None:
-                raise RuntimeError(
-                    "this model was built from MIR that was not kept; "
-                    "construct it with stan_code= or mir= to write a "
-                    "BridgeStan library")
-            self._mir = stan_to_mir(self._stan_code)
-        return self._mir
 
     def __del__(self):
         if getattr(self, "_m", None):

@@ -6,7 +6,7 @@ cannot catch the case that matters most here -- the facade and its tests
 sharing a wrong idea of what a BridgeStan call means -- because both sides
 of that comparison come from the same head. The only thing that can is a
 second implementation, so this drives the REFERENCE BridgeStan and the
-stanli pair through the same client and compares what they say.
+stanli runtime through the same client and compares what they say.
 
 It needs a C++ toolchain, because compiling the reference model is the
 whole point. CI has one; stanli's users never do, which is the reason
@@ -30,8 +30,8 @@ import numpy as np
 # justified: it is the list of things stanli does not promise.
 EXPECTED_DIFFERENCES = {
     "model_info": "free text; stanli names its own build, not Stan's",
-    "name": "stanli takes the name from the manifest the pair was "
-            "written with, BridgeStan from the compiled model class",
+    "name": "stanli takes the name from the embedded manifest, "
+            "BridgeStan from the compiled model class",
 }
 
 
@@ -70,16 +70,13 @@ class Reference:
 
 
 class Stanli:
-    """The stanli pair, through the same client, so the client is not a
-    variable in the comparison."""
+    """The stanli runtime, through the same client, so the client is not
+    a variable in the comparison."""
 
     def __init__(self, stan_file, data):
-        import bridgestan
         import stanli
-        lib = stanli.bridgestan_lib(stan_file=stan_file)
-        self.model = bridgestan.StanModel(str(lib), model_data=data,
-                                          capture_stan_prints=False,
-                                          warn=False)
+        self.model = stanli.bridgestan_model(stan_file=stan_file, data=data,
+                                             capture_stan_prints=False)
 
     unc_num = Reference.unc_num
     num = Reference.num

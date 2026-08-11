@@ -1,9 +1,9 @@
 // The BridgeStan C ABI over stanli.
 //
-// Linked directly rather than dlopen'd: the sidecar/dladdr half of
-// bs_model_construct needs a real shared library on disk and belongs to the
-// integration test, so everything here goes through bs_model_from_mir and
-// the manifest reader is tested as the small function it is.
+// Linked directly rather than dlopen'd: the manifest arrives embedded in
+// the data argument, so the whole of bs_model_construct is plain argument
+// passing and tests in-process. bs_model_from_mir is the seam beneath it,
+// and the manifest reader is tested as the small function it is.
 //
 // Two properties are worth more than the rest. First, the numbers: a
 // density, a gradient and a constrained row through the facade must be
@@ -565,8 +565,8 @@ void test_print_callback() {
   bs_model_destruct(m);
 }
 
-// The sidecar half of bs_model_construct that does not need a dlopen: the
-// manifest is read and its build id checked before anything is compiled.
+// The manifest reader on its own: the manifest is read and its build id
+// checked before anything is compiled.
 void test_manifest() {
   const std::string id = stanli::bs_build_id();
   stanli::BsManifest man;
@@ -606,9 +606,9 @@ void test_manifest() {
     fail("a manifest with no mir was rejected without a message");
 }
 
-// The embedded-manifest transport: the data JSON carries the model under
-// "__stanli". Unlike the sidecar this needs no dlopen, so the full
-// bs_model_construct path is exercised in-process here.
+// The manifest transport: the data JSON carries the model under
+// "__stanli", so the full bs_model_construct path is exercised
+// in-process here.
 void test_embedded_manifest() {
   const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
   nlohmann::json root =
@@ -628,7 +628,7 @@ void test_embedded_manifest() {
   }
   expect_eq_str("embedded name reaches bs_name", bs_name(m), "conj_embedded");
 
-  // The same model through the seam the pair path uses; the key must have
+  // The same model through the bs_model_from_mir seam; the key must have
   // been stripped, so the two see identical data and agree bitwise.
   bs_model* w =
       bs_model_from_mir(mir.c_str(), "tests/fixtures/conj.json", 1234, &err);
@@ -657,8 +657,8 @@ void test_embedded_manifest() {
   bs_model_destruct(w);
   bs_model_destruct(m);
 
-  // A wrong build id is the sidecar's staleness error, not a fallback:
-  // the MIR dialect moves with the runtime that lowers it.
+  // A wrong build id is a loud staleness error: the MIR dialect moves
+  // with the runtime that lowers it.
   root["__stanli"]["build_id"] = "abi1-deadbeef-Linux-x86_64";
   err = nullptr;
   m = bs_model_construct(root.dump().c_str(), 1234, &err);
@@ -672,8 +672,8 @@ void test_embedded_manifest() {
   }
   bs_free_error_msg(err);
 
-  // Mentioning the key and getting it wrong is loud, never a silent slide
-  // into the sidecar lookup's "no manifest found".
+  // Mentioning the key and getting it wrong is loud, never a silent
+  // slide into the plain-data "no manifest" refusal.
   err = nullptr;
   m = bs_model_construct("{\"__stanli\": 7}", 1234, &err);
   if (m != nullptr) {

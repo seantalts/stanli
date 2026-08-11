@@ -1,21 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
-### BridgeStan models without the copy
+### stanli models behind the BridgeStan ABI
 
-The BridgeStan manifest can now ride inside the data argument under the
-reserved key `__stanli`; `bs_model_construct` validates it, strips it,
-and binds the rest as the model's data. One runtime library then serves
-every model, with nothing written to disk, where the lib pair costs a
-full ~29 MB copy of the runtime per model. The pair transport is
-unchanged and remains the answer for clients that take only a library
-path. `stanli.bridgestan_model(...)` is the Python sugar: it compiles
-the model, splices the manifest, and returns a `bridgestan.StanModel`
-bound to the runtime library itself. Because the embedded path needs no
-`dladdr`, it also lifts `bs_model_construct`'s Windows refusal for
-callers that use it. Design notes:
-`docs/superpowers/specs/2026-08-11-embedded-mir-data.md`.
+The runtime library now implements the BridgeStan C ABI, so samplers
+that drive BridgeStan models -- walnutpie, nutpie, anything using the
+`bridgestan` packages -- can drive a stanli model, with no C++
+toolchain anywhere. The model travels inside the data argument:
+`stanli.bridgestan_model(stan_file=..., data=...)` compiles the model,
+splices its manifest under the reserved key `__stanli` (never a data
+variable; Stan identifiers begin with a letter), and returns a
+`bridgestan.StanModel` bound to the runtime library itself.
+`bs_model_construct` validates the manifest, strips the key, and binds
+the rest as the model's data. One library serves every model, nothing
+is copied, and nothing touches disk.
+
+Every call either behaves exactly as the BridgeStan header documents
+or refuses with a message; a differential conformance harness
+(`tools/bs_conformance.py`) checks the facade against a real
+BridgeStan build in CI. An earlier design that wrote a per-model copy
+of the runtime next to a manifest file was built and then removed
+before ever reaching a release; the embedded form replaced it because
+it needs no ~29 MB copy per model, no `dladdr` (so it works on Windows
+and under a plain link), and no cache directory. The one thing the
+copy could do that this cannot: serve a client that accepts only a
+library path and will not let the caller touch the data argument.
+Design notes: `docs/superpowers/specs/2026-08-10-bridgestan-facade-design.md`
+and `docs/superpowers/specs/2026-08-11-embedded-mir-data.md`.
 
 ### WALNUTS, next to NUTS
 

@@ -1,11 +1,9 @@
 """The embedded-manifest transport, exercised the way a sampler uses it.
 
-Where the pair test dlopens a per-model copy of the runtime and lets
-bs_model_construct find its sidecar, this test dlopens the ONE runtime
-library directly and hands the model in through the data argument under
-"__stanli". Two different models through the same library handle is the
-property that matters: with the pair transport that aliasing is exactly
-what breaks, and with this one it is the point.
+This test dlopens the ONE runtime library directly and hands each model
+in through the data argument under "__stanli". Two different models
+through the same library handle is the property that matters: model
+identity lives in the construct call, not the file dlopen opened.
 
 Run against an installed wheel (CI does) or a local build:
 
