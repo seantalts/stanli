@@ -255,6 +255,54 @@ def _clone_file(src: pathlib.Path, dst: pathlib.Path) -> None:
     shutil.copyfile(src, dst)
 
 
+def _resolve_program(stan_file, stan_code, mir, name):
+    """(mir, name) from whichever form the caller has, compiling if needed."""
+    if mir is None:
+        if stan_code is None:
+            if stan_file is None:
+                raise ValueError("provide stan_file, stan_code, or mir")
+            stan_code = pathlib.Path(stan_file).read_text()
+        mir = stan_to_mir(stan_code)
+    if name is None:
+        name = pathlib.Path(stan_file).stem if stan_file else "stanli_model"
+    return mir, name
+
+
+def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
+                     name=None, **kw):
+    """A ``bridgestan.StanModel`` for this program, with nothing written.
+
+    Where ``bridgestan_lib`` writes a pair (a full copy of the runtime
+    plus a sidecar manifest), this writes no files at all: the manifest
+    rides inside the data argument under the reserved key ``"__stanli"``
+    (never a data variable; Stan identifiers begin with a letter), and
+    ``bs_model_construct`` reads it out before binding the rest as the
+    model's data. Every model then shares the one runtime library already
+    inside this package.
+
+    The trade is that someone must do this splice, so it only serves
+    callers that construct the model here; a sampler that takes only a
+    library path still wants the pair. Path-form ``data`` is read and
+    inlined for the same reason.
+
+    ``bridgestan`` is imported lazily and is not a stanli dependency.
+    Extra keyword arguments pass through to ``bridgestan.StanModel``.
+    """
+    import bridgestan
+
+    mir, name = _resolve_program(stan_file, stan_code, mir, name)
+    payload = json.loads(_data_to_json(data))
+    if not isinstance(payload, dict):
+        raise ValueError("data must be a JSON object")
+    payload["__stanli"] = {"build_id": build_id(), "mir": mir, "name": name}
+    # bridgestan warns that the library is "already loaded" -- it is, by
+    # stanli's own import, and sharing it is this function's design, so
+    # the warning is off unless the caller asks for it.
+    kw.setdefault("warn", False)
+    return bridgestan.StanModel(_runtime_lib_path(), json.dumps(payload),
+                                **kw)
+
+
 def bridgestan_lib(stan_file=None, stan_code=None, mir=None, name=None,
                    dir=None) -> pathlib.Path:
     """Write a Stan program as a BridgeStan model library, and return it.
@@ -270,19 +318,16 @@ def bridgestan_lib(stan_file=None, stan_code=None, mir=None, name=None,
     No data: a pair is a compiled PROGRAM, and ``bs_model_construct``
     takes the data, so one pair serves every dataset for that program.
 
+    A pair costs a full copy of the runtime. When the caller constructs
+    the model from Python anyway, ``bridgestan_model`` skips the copy by
+    embedding the manifest in the data argument instead.
+
     The pair is named by the hash of (runtime build, MIR), so the same
     program against the same runtime is one pair however often you ask, a
     different program is a different pair, and an upgraded runtime never
     serves a stale one. `dir` defaults to a per-user cache directory.
     """
-    if mir is None:
-        if stan_code is None:
-            if stan_file is None:
-                raise ValueError("provide stan_file, stan_code, or mir")
-            stan_code = pathlib.Path(stan_file).read_text()
-        mir = stan_to_mir(stan_code)
-    if name is None:
-        name = pathlib.Path(stan_file).stem if stan_file else "stanli_model"
+    mir, name = _resolve_program(stan_file, stan_code, mir, name)
 
     stem = "stanli_" + hashlib.sha256(
         (build_id() + "\0" + mir).encode()).hexdigest()[:16]

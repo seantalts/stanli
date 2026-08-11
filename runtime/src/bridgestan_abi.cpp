@@ -2,9 +2,11 @@
 //
 // BridgeStan's premise is "a Stan model as a differentiable shared
 // library". Reference BridgeStan gets there by compiling the model into
-// the library; stanli ships one universal library and puts the model in a
-// sidecar manifest next to a clone of it, so the same clients work with no
-// C++ toolchain on the user's machine.
+// the library; stanli ships one universal library and delivers the model
+// as a manifest, either embedded in the data argument under "__stanli" or
+// in a sidecar file next to a per-model clone of the library (see
+// bs_model_construct), so the same clients work with no C++ toolchain on
+// the user's machine.
 //
 // The compatibility stance is narrow on purpose: every call either behaves
 // exactly as the reference header documents, or returns -1 with a message
@@ -431,12 +433,71 @@ const int bs_patch_version = 0;
 
 bs_model* bs_model_construct(const char* data, unsigned int seed,
                              char** error_msg) {
+  // Two transports for the same manifest, tried in this order:
+  //
+  //   1. EMBEDDED: the data JSON carries the manifest itself under the
+  //      reserved key "__stanli" (never a data variable: Stan identifiers
+  //      begin with a letter). The key is validated, stripped, and the
+  //      rest is the model's data. No filesystem, no dladdr, so this one
+  //      also works on Windows and in a linked test.
+  //   2. SIDECAR: the manifest sits in a file next to this library, found
+  //      through dladdr. This is what lets clients that only take a
+  //      library path (stan_cli, the R and Julia packages) stay unaware
+  //      of stanli entirely.
+  //
+  // A payload that mentions the key and gets it wrong fails HERE, naming
+  // the embedded manifest -- sliding into the sidecar lookup would bury a
+  // typo under "no sidecar found".
+  try {
+    if (data != nullptr && data[0] != '\0') {
+      // Same resolution rule as load_data: a path ending in ".json" means
+      // the file's contents, anything else is the JSON itself.
+      std::string text(data);
+      if (text.size() >= 5 && text.compare(text.size() - 5, 5, ".json") == 0) {
+        std::ifstream f(text);
+        if (!f) {
+          set_error(error_msg, "could not read data file " + text);
+          return nullptr;
+        }
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        text = ss.str();
+      }
+      // The substring scan keys the parse: data without the marker takes
+      // the sidecar path untouched, even when it is not valid JSON (that
+      // error belongs to load_data, which says so with more context).
+      if (text.find("\"__stanli\"") != std::string::npos) {
+        const nlohmann::json root = nlohmann::json::parse(text);
+        if (root.is_object() && root.contains("__stanli")) {
+          stanli::BsManifest man;
+          std::string err;
+          if (!stanli::bs_read_manifest(root["__stanli"].dump(), &man, &err)) {
+            set_error(error_msg, "embedded __stanli manifest: " + err);
+            return nullptr;
+          }
+          nlohmann::json rest = root;
+          rest.erase("__stanli");
+          const std::string rest_text = rest.dump();
+          return bs_model_from_mir(man.mir.c_str(), rest_text.c_str(), seed,
+                                   error_msg, man.name.c_str());
+        }
+      }
+    }
+  } catch (const std::exception& e) {
+    set_error(error_msg, std::string("embedded __stanli manifest: ") +
+                             e.what());
+    return nullptr;
+  } catch (...) {
+    set_error(error_msg, "unknown error reading the embedded manifest");
+    return nullptr;
+  }
+
 #ifdef _WIN32
-  (void)data;
   (void)seed;
   set_error(error_msg,
-            "bs_model_construct is not supported on this platform: finding "
-            "the sidecar manifest next to this library needs dladdr");
+            "bs_model_construct without an embedded \"__stanli\" manifest "
+            "is not supported on this platform: finding the sidecar "
+            "manifest next to this library needs dladdr");
   return nullptr;
 #else
   try {

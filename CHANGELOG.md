@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### BridgeStan models without the copy
+
+The BridgeStan manifest can now ride inside the data argument under the
+reserved key `__stanli`; `bs_model_construct` validates it, strips it,
+and binds the rest as the model's data. One runtime library then serves
+every model, with nothing written to disk, where the lib pair costs a
+full ~29 MB copy of the runtime per model. The pair transport is
+unchanged and remains the answer for clients that take only a library
+path. `stanli.bridgestan_model(...)` is the Python sugar: it compiles
+the model, splices the manifest, and returns a `bridgestan.StanModel`
+bound to the runtime library itself. Because the embedded path needs no
+`dladdr`, it also lifts `bs_model_construct`'s Windows refusal for
+callers that use it. Design notes:
+`docs/superpowers/specs/2026-08-11-embedded-mir-data.md`.
+
 ### WALNUTS, next to NUTS
 
 The WALNUTS sampler (within-orbit adaptive step-length NUTS,

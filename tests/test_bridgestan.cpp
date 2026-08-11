@@ -14,6 +14,8 @@
 // did not implement.
 #include "../runtime/third_party/bridgestan.h"
 
+#include "../runtime/third_party/nlohmann_json.hpp"
+
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/executor_pool.hpp>
@@ -604,6 +606,85 @@ void test_manifest() {
     fail("a manifest with no mir was rejected without a message");
 }
 
+// The embedded-manifest transport: the data JSON carries the model under
+// "__stanli". Unlike the sidecar this needs no dlopen, so the full
+// bs_model_construct path is exercised in-process here.
+void test_embedded_manifest() {
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  nlohmann::json root = nlohmann::json::parse(slurp("tests/fixtures/conj.json"));
+  root["__stanli"] = {{"build_id", stanli::bs_build_id()},
+                     {"mir", mir},
+                     {"name", "conj_embedded"}};
+  const std::string data = root.dump();
+
+  char* err = nullptr;
+  bs_model* m = bs_model_construct(data.c_str(), 1234, &err);
+  if (m == nullptr) {
+    fail(std::string("bs_model_construct rejected an embedded manifest: ") +
+         (err != nullptr ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_str("embedded name reaches bs_name", bs_name(m), "conj_embedded");
+
+  // The same model through the seam the pair path uses; the key must have
+  // been stripped, so the two see identical data and agree bitwise.
+  bs_model* w =
+      bs_model_from_mir(mir.c_str(), "tests/fixtures/conj.json", 1234, &err);
+  if (w == nullptr) {
+    fail("bs_model_from_mir failed on the reference construction");
+    bs_model_destruct(m);
+    return;
+  }
+  const int n = bs_param_unc_num(m);
+  expect_eq_int("embedded param count", n, bs_param_unc_num(w));
+  std::vector<double> q((size_t)n);
+  for (int i = 0; i < n; ++i) q[(size_t)i] = 0.1 * (double)(i + 1);
+  double lp = 0, want_lp = 0;
+  std::vector<double> g((size_t)n), want_g((size_t)n);
+  expect_eq_int("embedded gradient rc",
+                bs_log_density_gradient(m, true, true, q.data(), &lp, g.data(),
+                                        &err),
+                0);
+  expect_eq_int("reference gradient rc",
+                bs_log_density_gradient(w, true, true, q.data(), &want_lp,
+                                        want_g.data(), &err),
+                0);
+  expect_bitwise("embedded lp", lp, want_lp);
+  for (int i = 0; i < n; ++i)
+    expect_bitwise("embedded grad[" + std::to_string(i) + "]", g[(size_t)i],
+                   want_g[(size_t)i]);
+  bs_model_destruct(w);
+  bs_model_destruct(m);
+
+  // A wrong build id is the sidecar's staleness error, not a fallback:
+  // the MIR dialect moves with the runtime that lowers it.
+  root["__stanli"]["build_id"] = "abi1-deadbeef-Linux-x86_64";
+  err = nullptr;
+  m = bs_model_construct(root.dump().c_str(), 1234, &err);
+  if (m != nullptr) {
+    fail("an embedded manifest from another build was accepted");
+    bs_model_destruct(m);
+  } else if (err == nullptr ||
+             std::string(err).find("abi1-deadbeef") == std::string::npos) {
+    fail(std::string("the embedded staleness message names no build id: ") +
+         (err != nullptr ? err : "(no message)"));
+  }
+  bs_free_error_msg(err);
+
+  // Mentioning the key and getting it wrong is loud, never a silent slide
+  // into the sidecar lookup's "no manifest found".
+  err = nullptr;
+  m = bs_model_construct("{\"__stanli\": 7}", 1234, &err);
+  if (m != nullptr) {
+    fail("a non-object __stanli was accepted");
+    bs_model_destruct(m);
+  } else if (err == nullptr) {
+    fail("a non-object __stanli failed without a message");
+  }
+  bs_free_error_msg(err);
+}
+
 void test_construct_errors() {
   char* err = nullptr;
   // A model that cannot be compiled fails as a null return with a message,
@@ -647,6 +728,7 @@ int main() {
   test_initialize();
   test_print_callback();
   test_manifest();
+  test_embedded_manifest();
   test_construct_errors();
   if (failures == 0) std::printf("test_bridgestan OK\n");
   return failures == 0 ? 0 : 1;
