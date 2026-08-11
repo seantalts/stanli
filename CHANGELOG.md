@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+Groundwork for letting external samplers drive stanli models, plus two
+fixes that stand on their own.
+
+### The generated-quantities RNG belongs to the caller
+
+`WaInterp` owned its random stream and `stanli_wa_seed` reached
+through the model to reseed it, so everything drawing from one model
+shared one stream. `WaInterp::eval` now takes a stream the caller
+owns. The C ABI is unchanged: `stanli_wa_seed` and `stanli_wa_row`
+still name one stream per model, so Python, R and the browser see no
+difference.
+
+Two fixes fall out. Column discovery at model construction drew from
+the caller's stream and now uses a scratch one, and the model's stream
+starts from a fixed seed, so `optimize` -- which asks for a row
+without ever seeding -- reports the same generated quantities every
+run instead of whatever discovery happened to leave behind.
+
+### print() goes where the host says
+
+A model's `print()` was written straight to stdout from two places,
+so a program embedding the runtime could not redirect it, interleave
+it with its own output, or drop it. Both paths now go through one
+sink. The default writes the same line to stdout, and
+`stanli::set_message_sink` replaces it; installing and emitting are
+serialized, so concurrent chains cannot interleave halves of two
+lines.
+
+### Two C API entries
+
+`stanli_stan_to_mir` compiles Stan source to transformed-MIR text
+without building a model, so a caller can compile once and keep the
+result: cache it, ship it, hand it to another process. Python takes
+it back through `Model(mir=...)`, and `stanli.stan_to_mir` wraps it.
+
+`stanli_build_id` names the runtime binary, source revision plus the
+build choices that change what that source produces, so anything
+cached beside a particular library can refuse a mismatch instead of
+silently reading an artifact a different build wrote.
+
 ## 0.6.0
 
 Islands stopped paying CmdStan's price for their gradients, the corpus
