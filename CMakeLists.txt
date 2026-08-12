@@ -237,6 +237,7 @@ add_library(stanli_shared SHARED
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
   runtime/src/data.cpp
+  runtime/src/data_var_context.cpp
   tests/tbb_stub.cpp)
 target_include_directories(stanli_shared PUBLIC runtime/include)
 target_compile_definitions(stanli_shared
@@ -333,7 +334,8 @@ add_library(stanli STATIC
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
-  runtime/src/data.cpp)
+  runtime/src/data.cpp
+  runtime/src/data_var_context.cpp)
 target_include_directories(stanli PUBLIC runtime/include)
 target_compile_definitions(stanli PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 # The BridgeStan facade is native-only: it finds its own sidecar manifest
