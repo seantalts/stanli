@@ -1541,26 +1541,6 @@ struct Lowering {
     if (auto v = lower_eltwise_fn(e)) return *v;
     if (auto v = lower_matrix_fn(e)) return *v;
     if (auto v = lower_ode_fn(e)) return *v;
-    // `y ~ foo(...)` with every argument data is EXACTLY zero in CmdStan:
-    // the generated C++ calls foo_lpdf<propto=true> on all-double
-    // arguments, include_summand comes back false, and the whole term is
-    // dropped before any arithmetic happens. So the rewrite is not an
-    // approximation, and it covers densities no kernel exists for --
-    // hypergeometric and discrete_range are all-int, so ALL their uses
-    // land here or in the constant fold below. (categorical_logit already
-    // had this rule privately; this is the general form.) The one
-    // divergence is a model whose data is outside the density's support:
-    // CmdStan's checks throw before the early return, stanli contributes
-    // 0. That model rejects every draw anyway.
-    const bool is_density =
-        e.name.size() > 5 &&
-        (e.name.compare(e.name.size() - 5, 5, "_lpdf") == 0 ||
-         e.name.compare(e.name.size() - 5, 5, "_lpmf") == 0);
-    if (is_density && propto(e)) {
-      bool all_data = true;
-      for (const auto& a : e.args) all_data = all_data && a.data_only;
-      if (all_data) return constant(0.0);
-    }
     // A shape query in a REAL-valued expression. eval_int already answers
     // rows/cols/size from the slot or the data map, but only where an
     // integer was expected; brms's mo() helper writes

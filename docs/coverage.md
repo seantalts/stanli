@@ -7,7 +7,7 @@ against CmdStan with a generated single-function model.
 
 | family | supported |
 |---|---|
-| densities (`_lpdf`, `_lpmf`) | 71 / 72 |
+| densities (`_lpdf`, `_lpmf`) | 69 / 72 |
 | distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 90 / 105 |
 | scalar math (all-real signature) | 47 / 129 |
 
@@ -28,15 +28,13 @@ Adding a function is one line in an X-macro list in
 
 Not every density needs a kernel.
 
-**1. Rewrite, when the rewrite is exact.** `y ~ foo(...)` with every
-argument data contributes exactly zero: CmdStan calls
-`foo_lpdf<propto=true>` on all-double arguments and drops the term
-before any arithmetic. That rule needs no kernel and is the whole of
-`hypergeometric` and `discrete_range`, whose arguments are all
-integers. (One divergence: on data outside the density's support,
-CmdStan throws from its checks and stanli contributes 0. Such a model
-rejects every draw either way.) A rewrite that changes arithmetic does
-not belong here: `multi_normal_prec(y | mu, P)` equals
+**1. Rewrite, when the rewrite is exact.** A rewrite must preserve checks as
+well as the returned value. In particular, CmdStan checks an all-data
+`foo_lpdf<propto=true>` call before dropping its constant term. Stanli
+therefore refuses the propto forms of `hypergeometric` and
+`discrete_range` until it can execute their support checks; their normalized,
+all-data function calls can still constant-fold exactly. A rewrite that
+changes arithmetic does not belong here: `multi_normal_prec(y | mu, P)` equals
 `multi_normal(y | mu, inverse(P))` mathematically, but the inverse
 costs K^3 per evaluation and stops matching CmdStan bitwise. The kernel
 was fifteen lines.
@@ -63,10 +61,15 @@ contract.
 
 ## What is left
 
-**`gaussian_dlm_obs`**, the only unsupported density, for a structural
-reason: it takes seven arguments and `Op::in` holds six. Raising the
-limit would grow every `Op` and `KernelCtx` in every model for one
-density, so the lowering refuses and says why.
+**`hypergeometric` and `discrete_range` propto forms.** Their values are
+constant zero, but Stan Math performs support checks first. Until Stanli has
+an exact checked implementation, lowering refuses rather than silently
+accepting invalid data.
+
+**`gaussian_dlm_obs`.** It is unsupported for a structural reason: it takes
+seven arguments and `Op::in` holds six. Raising the limit would grow every
+`Op` and `KernelCtx` in every model for one density, so the lowering refuses
+and says why.
 
 **Vector `alpha` in the GLMs.** `bernoulli_logit_glm`,
 `poisson_log_glm` and `neg_binomial_2_log_glm` take the intercept as a

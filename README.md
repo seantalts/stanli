@@ -45,7 +45,7 @@ could not build one on their farm.
   <!--gen:lang_verified-->10/10<!--/gen--> models lifted from stanc3's own
   test suite, for the type and language constructs no real posterior
   happens to use, verified the same way.
-- Distribution coverage: [docs/coverage.md](docs/coverage.md). 71 of 72
+- Distribution coverage: [docs/coverage.md](docs/coverage.md). 69 of 72
   densities, 90 of 105 cdf/lcdf/lccdf, truncation, censoring, ordinal
   regression and the count GLMs, each bitwise against CmdStan.
 - Install size: one 22.2 MB shared library, a 7.8 MB wheel. Breakdown in

@@ -1431,6 +1431,66 @@ int main() {
   }
 
   {
+    // Stan Math's hypergeometric implementation performs support checks
+    // before dropping an all-data propto term. Without a native density
+    // implementation, accepting the model as a constant zero would therefore
+    // be exact only for valid data and silently accept invalid data. The
+    // honest boundary is to refuse both.
+    const std::string hypergeometric_mir = R"(
+((functions_block ())
+ (input_vars
+  ((n <opaque> SInt) (N <opaque> SInt) (a <opaque> SInt)
+   (b <opaque> SInt)))
+ (prepare_data ())
+ (log_prob
+  (((pattern
+     (TargetPE
+      ((pattern
+        (FunApp (StanLib hypergeometric_lpmf (FnLpmf true) AoS)
+         (((pattern (Var n))
+           (meta ((type_ UInt) (adlevel DataOnly))))
+          ((pattern (Var N))
+           (meta ((type_ UInt) (adlevel DataOnly))))
+          ((pattern (Var a))
+           (meta ((type_ UInt) (adlevel DataOnly))))
+          ((pattern (Var b))
+           (meta ((type_ UInt) (adlevel DataOnly)))))))
+       (meta ((type_ UReal) (adlevel DataOnly))))))
+    (meta <opaque>)))))
+)";
+
+    check(stan::math::hypergeometric_lpmf<true>(1, 2, 3, 4) == 0.0,
+          "all-data propto oracle drops a valid density");
+    bool oracle_rejected = false;
+    try {
+      (void)stan::math::hypergeometric_lpmf<true>(4, 4, 3, 3);
+    } catch (const std::domain_error&) {
+      oracle_rejected = true;
+    }
+    check(oracle_rejected,
+          "all-data propto oracle still checks invalid support");
+
+    auto lowering_refuses = [&](int n, int N, int a, int b) {
+      DataMap d;
+      d.set_int("n", n);
+      d.set_int("N", N);
+      d.set_int("a", a);
+      d.set_int("b", b);
+      try {
+        (void)compile_model(hypergeometric_mir, d);
+      } catch (const CompileError& e) {
+        return std::string(e.what()).find("hypergeometric_lpmf") !=
+               std::string::npos;
+      }
+      return false;
+    };
+    check(lowering_refuses(1, 2, 3, 4),
+          "unsupported valid all-data propto density is refused");
+    check(lowering_refuses(4, 4, 3, 3),
+          "unsupported invalid all-data propto density is refused");
+  }
+
+  {
     // Error path: an unsupported function is reported by name, never
     // silently miscompiled. Mutate a known-good fixture's density name.
     std::string txt = slurp("tests/fixtures/es.tmir.sexp");
