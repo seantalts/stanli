@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0
+
+### A DataMap from a Stan var_context
+
+`DataMap::from_var_context` builds the runtime's data map straight from
+a `stan::io::var_context`, for bindings that already map their host
+arrays onto `stan::io` and would otherwise have to serialize to JSON
+and parse it back out. Reals and integers come from the context's two
+separate name lists, and since a var_context already stores
+multidimensional values flat and column-major -- the layout an entry
+wants -- nothing is reordered on the way in.
+
+Each construction path is its own translation unit, `data.cpp` for the
+JSON pair and `data_var_context.cpp` for this one, so a build can take
+either without the other; the header declares `stan::io::var_context`
+rather than including it, which keeps the stan headers off the include
+path of callers that never build a map this way. Requested by
+@andrjohns for `stanr` (#81), and built on the branch attached to that
+issue.
+
 ## 0.6.1
 
 ### stanli models behind the BridgeStan ABI
