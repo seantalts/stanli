@@ -163,11 +163,17 @@ jobs:
         id: deps-cache
         uses: actions/cache@v4
         with:
+          # stanc_embed.o is excluded: it belongs to the stanc-embed cache
+          # above, and a copy riding in here restores over a fresh object
+          # (and once satisfied dev_setup's presence check with a STALE
+          # one, shipping a wheel whose embedded compiler lagged the
+          # shim). The -embed1 suffix retires the poisoned entries.
           path: |
             deps/math
             deps/stan
             deps/stanc3
-          key: deps-${{ matrix.plat }}-${{ hashFiles('deps/fetch.sh') }}
+            !deps/stanc3/stanc_embed.o
+          key: deps-${{ matrix.plat }}-embed1-${{ hashFiles('deps/fetch.sh') }}
 
       - name: Vendored dependencies
         run: ./deps/fetch.sh
@@ -175,6 +181,9 @@ jobs:
       - name: Build the embedded stanc3 object
         if: steps.stanc-cache.outputs.cache-hit != 'true'
         run: |
+          # The stanc-embed cache missed, so any object on disk came from
+          # another cache and is stale by definition.
+          rm -f deps/stanc3/stanc_embed.o
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build
           mkdir -p deps/ocaml-include
