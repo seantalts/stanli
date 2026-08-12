@@ -601,6 +601,19 @@ struct ProgramCompiler {
         const Range dst = it->second;
         const Range v = expr(s.rhs);
         if (s.lhs_idx.empty()) {
+          if (dst.len == 0 && v.len != 0) {
+            // The zero-length declaration is stanc3's --O1 inliner
+            // leaving a return variable unsized (`vector[0]`) for the
+            // assignment to size; adopt the assigned shape. The inliner
+            // assigns it exactly once, right where the call was, so no
+            // two branch arms can disagree about the size.
+            Range nd = v;
+            nd.reg = alloc(v.len);
+            for (int k = 0; k < v.len; ++k)
+              emit(Program::MOV, nd.reg + k, v.reg + k);
+            it->second = nd;
+            return;
+          }
           if (v.len != dst.len) bail("assignment width mismatch for " + s.lhs);
           if (!same_view(v, dst))
             bail("assignment logical view mismatch for " + s.lhs);

@@ -192,6 +192,37 @@ Expr read_expr(const Node& n) {
         e.data_only = (*a)[1].is_atom() && (*a)[1].atom == "DataOnly";
     }
   }
+  // stanc3's partial evaluator (--O1) rewrites `c + a*b` into fma(a,b,c),
+  // whose fused rounding CmdStan's default (unoptimized) build never
+  // performs. The corpus references are that default build, so read it
+  // back as the mul+add it came from: bitwise what CmdStan computes, and
+  // no dedicated kernel needed. The optimizer's fma is elementwise over
+  // containers (prophet gets fma(vector, vector, vector)), hence
+  // EltTimes__, which is a plain product on scalars.
+  if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::StanLib &&
+      e.name == "fma" && e.args.size() == 3) {
+    Expr mul;
+    mul.kind = Expr::FunApp;
+    mul.fn_lib = Expr::Lib::StanLib;
+    mul.name = "EltTimes__";
+    const bool a_scalar = e.args[0].unsized.depth == 0 &&
+                          (e.args[0].unsized.leaf == UnsizedLeaf::Real ||
+                           e.args[0].unsized.leaf == UnsizedLeaf::Int);
+    const Expr& shaped = a_scalar ? e.args[1] : e.args[0];
+    mul.type_ = shaped.type_.empty() ? "UReal" : shaped.type_;
+    mul.unsized = shaped.unsized;
+    mul.data_only = e.args[0].data_only && e.args[1].data_only;
+    mul.args = {e.args[0], e.args[1]};
+    Expr add;
+    add.kind = Expr::FunApp;
+    add.fn_lib = Expr::Lib::StanLib;
+    add.name = "Plus__";
+    add.type_ = e.type_;
+    add.unsized = e.unsized;
+    add.data_only = e.data_only;
+    add.args = {std::move(mul), std::move(e.args[2])};
+    return add;
+  }
   return e;
 }
 
@@ -477,13 +508,17 @@ void validate_checks(const Stmt& s, Bindings& bindings) {
       throw std::runtime_error("mir: unsupported or malformed FnCheck");
     }
     const Expr& value = s.fn_args[0];
-    const auto binding =
-        value.kind == Expr::Var ? bindings.find(value.name) : bindings.end();
-    if (binding == bindings.end() ||
-        binding->second.depth != value.unsized.depth ||
-        binding->second.leaf != value.unsized.leaf)
-      throw std::runtime_error(
-          "mir: FnCheck value type disagrees with its declaration");
+    // --O1 constant propagation may substitute the checked value itself
+    // (`(var 2)` where the source said `(var K)`); a non-Var value carries
+    // its own type and has no declaration to cross-check.
+    if (value.kind == Expr::Var) {
+      const auto binding = bindings.find(value.name);
+      if (binding == bindings.end() ||
+          binding->second.depth != value.unsized.depth ||
+          binding->second.leaf != value.unsized.leaf)
+        throw std::runtime_error(
+            "mir: FnCheck value type disagrees with its declaration");
+    }
   }
   if (s.kind == Stmt::IfElse) {
     for (const auto& child : s.body) {
@@ -553,6 +588,16 @@ Program read_program(const sexp::Node& root) {
     for (size_t i = 0; i < f.arg_names.size(); ++i)
       args[f.arg_names[i]] = f.arg_views[i];
     validate_checks(f.body, args);
+  }
+  if (const Node* ov = field(root, "output_vars")) {
+    // ((name <opaque> (...)) ...): parameters, transformed parameters and
+    // generated quantities in declaration order -- the order FnWriteParam
+    // statements emit them in. Only the names matter here; they are the
+    // naming fallback for a write whose variable reference the optimizer
+    // replaced with the value itself.
+    const Node& vars = (*ov)[1];
+    for (size_t i = 0; i < vars.size(); ++i)
+      prog.output_vars.push_back(vars[i][0].atom);
   }
   return prog;
 }

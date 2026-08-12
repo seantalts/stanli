@@ -116,6 +116,24 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       base = &base->args[0];
     }
     std::string name = base->name;
+    if (name.empty()) {
+      // The optimizer (--O1 constant propagation) replaced the write's
+      // variable reference with the value itself, so the name is gone
+      // from the statement. Writes happen in output_vars order, and a
+      // substituted write is always a whole variable, so the name is the
+      // output var after the last one written.
+      const auto& ov = prog_->output_vars;
+      size_t idx = 0;
+      if (!last_written_.empty()) {
+        auto it = std::find(ov.begin(), ov.end(), last_written_);
+        if (it != ov.end()) idx = (size_t)(it - ov.begin()) + 1;
+      }
+      if (idx >= ov.size())
+        throw CompileError(
+            "stanli write_array: cannot name a substituted FnWriteParam");
+      name = ov[idx];
+    }
+    last_written_ = name;
     for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
       name += "." + std::to_string(*it);
     using Naming = CompiledModel::ParamView::Naming;

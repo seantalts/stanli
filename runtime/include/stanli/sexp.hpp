@@ -1,4 +1,5 @@
-// Minimal s-expression parser for stanc3 --debug-transformed-mir output.
+// Minimal s-expression parser for stanc3 MIR dumps (--debug-optimized-mir
+// and --debug-transformed-mir share the format).
 // Atoms are bare tokens (including <opaque>) or double-quoted strings with
 // backslash escapes.
 #ifndef STANLI_SEXP_HPP

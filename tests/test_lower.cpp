@@ -1200,6 +1200,134 @@ int main() {
           "glm: lp matches the var path (propto reached the kernel)");
   }
 
+  // normal_id_glm with the OUTCOME as a parameter. stanc3's --O1 partial
+  // evaluator rewrites `theta ~ normal(x * b, 1)` into
+  // normal_id_glm_lupdf(theta | x, 0, b, 1), a shape the source language
+  // never hands the kernel directly: y is the thing being sampled, so its
+  // gradient must come back too, not only alpha/beta/sigma's.
+  {
+    DataMap d = DataMap::from_json(
+        R"({"N": 3, "K": 2,
+            "x": [[1.0, 2.0], [0.5, -1.0], [2.0, 0.25]]})");
+    CompiledModel gm = compile_model(slurp("tests/fixtures/glmy.tmir.sexp"), d);
+    Executor gex(std::move(gm.graph));
+    gm.bind(gex);
+    const double q[5] = {0.3, -0.2, 1.1, 0.7, -0.4};  // theta[3], b[2]
+    for (int i = 0; i < 5; ++i) gex.params_data()[i] = q[i];
+    double grad[5] = {0, 0, 0, 0, 0};
+    const double lp = gex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> theta(3), b(2);
+    for (int i = 0; i < 3; ++i) theta(i) = q[i];
+    for (int i = 0; i < 2; ++i) b(i) = q[3 + i];
+    Eigen::MatrixXd X(3, 2);
+    X << 1.0, 2.0, 0.5, -1.0, 2.0, 0.25;
+    var acc = stan::math::normal_id_glm_lpdf<true>(theta, X, 0, b, 1);
+    acc.grad();
+
+    bool g_ok = true;
+    for (int i = 0; i < 3; ++i)
+      if (grad[i] != theta(i).adj()) g_ok = false;
+    for (int i = 0; i < 2; ++i)
+      if (grad[3 + i] != b(i).adj()) g_ok = false;
+    check(g_ok, "glm param y: gradients bitwise against the var path");
+    check(lp == acc.val(), "glm param y: lp matches the var path");
+  }
+
+  // An inlined user function's return variable: --O1 declares it
+  // zero-length (`vector[0] inline_..._return_sym__`) and sizes it by
+  // assignment, so the lowering adopts the assigned shape instead of
+  // rejecting the width mismatch.
+  {
+    DataMap d = DataMap::from_json(R"({"N": 4, "y": [1.0, 2.0, 4.0, -0.5]})");
+    CompiledModel im =
+        compile_model(slurp("tests/fixtures/inlret.tmir.sexp"), d);
+    Executor iex(std::move(im.graph));
+    im.bind(iex);
+    iex.params_data()[0] = 0.4;  // mu
+    double grad[1] = {0};
+    const double lp = iex.gradient(grad);
+
+    using stan::math::var;
+    var mu = 0.4;
+    Eigen::VectorXd y(4);
+    y << 1.0, 2.0, 4.0, -0.5;
+    Eigen::VectorXd c = y.array() - y.mean();
+    var acc = stan::math::normal_lpdf<false>(c, mu, 1);
+    acc.grad();
+    const double tol = 64 * 2.220446049250313e-16;
+    check(std::abs(lp - acc.val()) <= tol * std::abs(acc.val()),
+          "inlined return: lp matches the var path");
+    check(
+        std::abs(grad[0] - mu.adj()) <= tol * std::max(1.0, std::abs(mu.adj())),
+        "inlined return: gradient matches the var path");
+  }
+
+  // A declaration sized by a shape query on a COMPUTED value:
+  // `vector[rows(segment(beta, 1, 2)) + 1]` after --O1 inlines a callee
+  // and substitutes the call argument into its size expressions.
+  {
+    DataMap d = DataMap::from_json(R"({"N": 3})");
+    CompiledModel sm =
+        compile_model(slurp("tests/fixtures/inlseg.tmir.sexp"), d);
+    Executor sex(std::move(sm.graph));
+    sm.bind(sex);
+    const double q[3] = {0.6, -0.3, 0.2};
+    for (int i = 0; i < 3; ++i) sex.params_data()[i] = q[i];
+    double grad[3] = {0, 0, 0};
+    const double lp = sex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> beta(3);
+    for (int i = 0; i < 3; ++i) beta(i) = q[i];
+    Eigen::Matrix<var, -1, 1> u(3);
+    u << 0.0, beta(0), beta(1);
+    var acc = stan::math::sum(stan::math::cumulative_sum(u));
+    acc += stan::math::normal_lpdf<true>(beta, 0, 1);
+    acc.grad();
+    const double tol = 64 * 2.220446049250313e-16;
+    check(std::abs(lp - acc.val()) <= tol * std::max(1.0, std::abs(acc.val())),
+          "shape query on expression: lp matches the var path");
+    bool g_ok = true;
+    for (int i = 0; i < 3; ++i)
+      if (std::abs(grad[i] - beta(i).adj()) >
+          tol * std::max(1.0, std::abs(beta(i).adj())))
+        g_ok = false;
+    check(g_ok, "shape query on expression: gradients match the var path");
+  }
+
+  // Vector fma from --O1 partial evaluation (`k .* t + c` becomes
+  // fma(k, t, c)): the reader's desugar has to be elementwise, and the
+  // result bitwise what the unfused form computes.
+  {
+    DataMap d = DataMap::from_json(R"({"N": 3, "t": [2.0, -1.0, 0.5]})");
+    CompiledModel fm =
+        compile_model(slurp("tests/fixtures/vecfma.tmir.sexp"), d);
+    Executor fex(std::move(fm.graph));
+    fm.bind(fex);
+    const double q[6] = {0.3, -0.2, 1.1, 0.7, -0.4, 0.9};  // k[3], c[3]
+    for (int i = 0; i < 6; ++i) fex.params_data()[i] = q[i];
+    double grad[6] = {0, 0, 0, 0, 0, 0};
+    const double lp = fex.gradient(grad);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> k(3), c(3);
+    for (int i = 0; i < 3; ++i) k(i) = q[i];
+    for (int i = 0; i < 3; ++i) c(i) = q[3 + i];
+    Eigen::VectorXd t(3);
+    t << 2.0, -1.0, 0.5;
+    Eigen::Matrix<var, -1, 1> mu(3);
+    for (int i = 0; i < 3; ++i) mu(i) = k(i) * t(i) + c(i);
+    var acc = stan::math::normal_lpdf<false>(mu, 0, 1);
+    acc.grad();
+    check(lp == acc.val(), "vector fma: lp bitwise against the var path");
+    bool g_ok = true;
+    for (int i = 0; i < 3; ++i)
+      if (grad[i] != k(i).adj() || grad[3 + i] != c(i).adj()) g_ok = false;
+    check(g_ok, "vector fma: gradients bitwise against the var path");
+  }
+
   // Where the CSV's three sections meet. stanc marks the boundaries with
   // early-return guards on emit_transformed_parameters__ /
   // emit_generated_quantities__; lowering pins both flags on, so the

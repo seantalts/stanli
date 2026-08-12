@@ -290,6 +290,18 @@ def test_stan_to_mir_round_trips():
     assert (g_a == g_b).all(), f"gradient differs: {g_a} vs {g_b}"
 
 
+def test_stan_to_mir_is_optimized():
+    # The MIR handed to the runtime is stanc3's optimized MIR (--O1), not
+    # the raw transformed MIR. Partial evaluation is the observable: at O1
+    # stanc3 rewrites log(1 - theta) to log1m(theta), and the transformed
+    # MIR never contains log1m. Both compile paths -- the embedded stanc
+    # and the subprocess fallback -- must agree on this.
+    code = ("parameters { real<lower=0, upper=1> theta; } "
+            "model { target += log(1 - theta); }")
+    mir = stanli.stan_to_mir(code)
+    assert "log1m" in mir, "MIR is not optimized (expected log1m from --O1)"
+
+
 def test_stan_to_mir_reports_syntax_errors():
     try:
         stanli.stan_to_mir("parameters { real x } model { }")

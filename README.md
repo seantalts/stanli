@@ -71,7 +71,7 @@ run by a small interpreter. There is no JIT and no C++ codegen;
 model.stan + data.json
   |  stanc3 (official OCaml compiler, linked into the library)
   v
-transformed MIR (s-expression)
+optimized MIR (--O1, s-expression)
   |  lowering: runtime/src/lower.cpp
   v
 op graph + preallocated value/adjoint arenas
@@ -83,7 +83,7 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
 1. **stanc3, in process.** The official Stan compiler (OCaml) is built
    as a self-contained object and linked into the shared library. It
    parses, typechecks, and optimizes the model; stanli consumes its
-   transformed MIR. Full language fidelity without a subprocess or a
+   optimized MIR (--O1). Full language fidelity without a subprocess or a
    reimplemented parser.
 
 2. **Lowering** (`runtime/src/lower.cpp`). Transformed data is evaluated

@@ -38,7 +38,7 @@ onmessage = async (e) => {
       // and never load the compiler.
       say("compiling Stan -> MIR (stanc3)");
       ensureStanc();
-      const sc = stanc("browser_model", req.code, ["debug-transformed-mir"]);
+      const sc = stanc("browser_model", req.code, ["O1", "debug-optimized-mir"]);
       if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
       postMessage({ done: { mir: String(sc.result),
                             ms: { stanc: performance.now() - t0 } } });
@@ -49,7 +49,7 @@ onmessage = async (e) => {
     if (!mir) {
       say("compiling Stan -> MIR (stanc3)");
       ensureStanc();
-      const sc = stanc("browser_model", req.code, ["debug-transformed-mir"]);
+      const sc = stanc("browser_model", req.code, ["O1", "debug-optimized-mir"]);
       if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
       mir = String(sc.result);
     }

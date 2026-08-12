@@ -12,7 +12,7 @@
 // one chain each -- run simultaneously. Compiling once and passing `mir`
 // keeps the 2.8 MB compiler in a single worker (or out of the page
 // entirely, if the model was precompiled at build time with
-// stanc --debug-transformed-mir).
+// stanc --O1 --debug-optimized-mir).
 
 const pool = [];
 const waiters = [];
@@ -99,8 +99,8 @@ export function compile(opts) {
  * @param {Object} opts
  * @param {string} [opts.code]     Stan source (compiled in the worker by
  *   stanc3, which loads lazily on first use).
- * @param {string} [opts.mir]      Precompiled transformed MIR (from
- *   `compile()` here, or `stanc --debug-transformed-mir` at build time).
+ * @param {string} [opts.mir]      Precompiled MIR (from `compile()`
+ *   here, or `stanc --O1 --debug-optimized-mir` at build time).
  *   When given, the 2.8 MB compiler never loads: the runtime alone is
  *   ~1.3 MB gzipped.
  * @param {Object|string} [opts.data]  Data as an object or JSON text.

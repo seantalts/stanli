@@ -35,7 +35,7 @@ WASM runtime plus the stanc3 compiler. The compiler loads lazily, only
 when a call passes Stan source. `preload()` starts both loads in the
 background; call it at page idle so the first `sample()` skips the
 fetch and parse. An app that ships a fixed model can precompile it at
-build time (`stanc --debug-transformed-mir model.stan`) and pass `mir`
+build time (`stanc --O1 --debug-optimized-mir model.stan`) and pass `mir`
 instead of `code`; the runtime alone is ~1.5 MB gzipped.
 
 118 of 119 posteriordb corpus models verify against CmdStan's log

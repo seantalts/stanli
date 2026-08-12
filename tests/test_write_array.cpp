@@ -543,12 +543,40 @@ void test_transformed_parameter_checks() {
 
 }  // namespace
 
+// A generated quantity the optimizer folds to a constant: --O1 replaces
+// the FnWriteParam's variable reference with the literal value, so the
+// column's name has to come from the program's output_vars instead.
+void test_constant_folded_gq_column() {
+  using namespace stanli;
+  DataMap data;
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/gqconst.tmir.sexp"), data);
+  if (!cm.write_array || !cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gqconst: no interpreted write_array\n");
+    return;
+  }
+  WaInterp& wi = *cm.write_array->interp;
+  std::map<std::string, DataMap::Entry> params;
+  DataMap::Entry x;
+  x.r = {0.25};
+  params["x"] = x;
+  WaRng rng(1);
+  const std::vector<double> row = wi.eval(params, rng);
+  expect_eq("gqconst header", joined(wi.columns()), "x,z");
+  if (row.size() != 2 || row[0] != 0.25 || row[1] != 3.0) {
+    ++failures;
+    std::printf("FAIL gqconst row: got %zu values\n", row.size());
+  }
+}
+
 int main() {
   test_naming_rules();
   test_wanames_pipeline();
   test_wanames_interpreter_schema();
   test_array_of_matrix_columns();
   test_interpreted_gq();
+  test_constant_folded_gq_column();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   if (failures == 0) std::printf("test_write_array OK\n");

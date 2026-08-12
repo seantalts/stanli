@@ -1,7 +1,7 @@
 (executable
  (name stanc_embed)
  (modes object)
- (libraries core fmt common frontend driver)
+ (libraries core fmt common frontend driver analysis_and_optimization)
  ; -runtime-variant _pic: link the PIC build of the OCaml runtime
  ; (libasmrun_pic.a). The default runtime carries R_X86_64_32 absolute
  ; relocations, which the linker rejects inside a shared object on Linux.

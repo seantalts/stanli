@@ -37,7 +37,7 @@ function evalPoint(i, variant) {
 let mir;
 try {
   mir = execFileSync(path.join(repo, "deps", "stanc3", "stanc"),
-                     ["--debug-transformed-mir", model],
+                     ["--O1", "--debug-optimized-mir", model],
                      { maxBuffer: 1 << 28, encoding: "utf8" });
 } catch (e) {
   console.log("COMPILE_FAIL stanc: " + String(e.message).split("\n")[0]);

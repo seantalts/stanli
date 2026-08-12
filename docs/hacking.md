@@ -65,7 +65,7 @@ repeatedly below.
 ```
 model.stan + data.json
   |  stanc3, linked in-process (stanc_embed)
-  v  transformed MIR, as s-expressions
+  v  optimized MIR (--O1), as s-expressions
 mir_reader.cpp
   |  parsed into mir::Stmt / mir::Expr structs
   v

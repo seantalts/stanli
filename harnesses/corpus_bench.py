@@ -108,7 +108,7 @@ def main():
 
         # ---- stanli ----
         sexp = tmp / f"{model}.sexp"
-        r = run([str(STANC), "--debug-transformed-mir", str(stan)], timeout)
+        r = run([str(STANC), "--O1", "--debug-optimized-mir", str(stan)], timeout)
         if r is None:
             notes.append("stanc_fail")
         else:

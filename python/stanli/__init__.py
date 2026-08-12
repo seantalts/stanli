@@ -176,7 +176,7 @@ def _dptr(a):
 
 def _stanc_mir(model_path: pathlib.Path) -> str:
     stanc = _BIN / ("stanc.exe" if sys.platform == "win32" else "stanc")
-    r = subprocess.run([str(stanc), "--debug-transformed-mir",
+    r = subprocess.run([str(stanc), "--O1", "--debug-optimized-mir",
                         str(model_path)],
                        capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout:
@@ -185,7 +185,7 @@ def _stanc_mir(model_path: pathlib.Path) -> str:
 
 
 def stan_to_mir(stan_code: str) -> str:
-    """Stan source to transformed-MIR text, without building a model.
+    """Stan source to optimized-MIR text, without building a model.
 
     The first half of compiling a model, on its own. Useful when the MIR
     is what you want to keep -- to cache it, ship it, or hand it to
@@ -539,8 +539,8 @@ class Model:
         err = ctypes.create_string_buffer(8192)
 
         if mir is not None:
-            # Already-compiled transformed MIR, from stan_to_mir or from
-            # `stanc --debug-transformed-mir`. Skips the compiler
+            # Already-compiled MIR, from stan_to_mir or from
+            # `stanc --O1 --debug-optimized-mir`. Skips the compiler
             # entirely, which is what a cached or shipped model wants.
             self._m = _lib.stanli_model_new(mir.encode(), data_json.encode(),
                                             err, len(err))

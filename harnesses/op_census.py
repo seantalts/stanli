@@ -56,7 +56,7 @@ def main():
         dj = tmp / f"{model}.json"
         with zipfile.ZipFile(dz) as z:
             dj.write_bytes(z.read(z.namelist()[0]))
-        r = run([str(STANC), "--debug-transformed-mir", str(stan)])
+        r = run([str(STANC), "--O1", "--debug-optimized-mir", str(stan)])
         if r is None or r.returncode != 0:
             skipped.append(f"{model}: stanc")
             continue

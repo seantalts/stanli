@@ -198,6 +198,10 @@ struct Program {
   // emit_generated_quantities__, which the lowering pins to 1.
   std::vector<Stmt> generate_quantities;
   std::vector<FunDef> fun_defs;
+  // Output variable names (params, transformed params, generated
+  // quantities) in FnWriteParam emission order, from the MIR's
+  // output_vars section.
+  std::vector<std::string> output_vars;
 };
 
 Program read_program(const sexp::Node& root);

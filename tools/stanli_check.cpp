@@ -39,7 +39,7 @@ static double eval_point(int64_t i, int variant) {
 static std::string run_stanc(const std::string& stanc,
                              const std::string& model) {
   const std::string cmd =
-      stanc + " --debug-transformed-mir '" + model + "' 2>/dev/null";
+      stanc + " --O1 --debug-optimized-mir '" + model + "' 2>/dev/null";
   std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd.c_str(), "r"), pclose);
   if (!pipe) throw std::runtime_error("cannot run stanc");
   std::string out;

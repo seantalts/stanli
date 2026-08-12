@@ -65,7 +65,7 @@ def main():
         sexp = tmp / f"{model}.sexp"
         t0 = time.perf_counter()
         sexp.write_text(subprocess.run(
-            [str(stanc), "--debug-transformed-mir", str(stan)],
+            [str(stanc), "--O1", "--debug-optimized-mir", str(stan)],
             capture_output=True, text=True, check=True).stdout)
         t_stanc = time.perf_counter() - t0
 

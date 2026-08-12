@@ -911,6 +911,13 @@ class MirInterp {
       return bin([](const T& x, const T& y) { return stan::math::fmax(x, y); });
     if (e.name == "fmin")
       return bin([](const T& x, const T& y) { return stan::math::fmin(x, y); });
+    // --O1 partial evaluation rewrites `x * log(y)` to lmultiply(x, y);
+    // multiply_log computes exactly x * log(y), so the value is bitwise
+    // what the unoptimized form produced.
+    if (e.name == "lmultiply" || e.name == "multiply_log")
+      return bin([](const T& x, const T& y) {
+        return stan::math::multiply_log(x, y);
+      });
     if (e.name == "PMinus__") return un([](const T& x) { return -x; });
     if (e.name == "PPlus__") return un([](const T& x) { return x; });
     if (e.name == "exp")

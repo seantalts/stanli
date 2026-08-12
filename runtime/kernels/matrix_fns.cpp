@@ -323,28 +323,40 @@ void lkjc_bwd(KernelCtx& ctx) { lkj_eval<true, false>(ctx); }
 double nid_glm_eval(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
   const bool propto = (ctx.variant & 0x80u) != 0;
+  // y is a parameter when stanc3's --O1 partial evaluator built the GLM
+  // out of `theta ~ normal(X * b, s)`: the outcome needs its gradient
+  // back. y-as-data (every hand-written GLM) keeps the double fast path.
+  const bool y_var = (ctx.variant & 0x1u) != 0;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   CMapV yd(ctx.in[0].data, rows);
   CMapM X(ctx.in[1].data, rows, cols);
+  VarV yv(y_var ? rows : 0);
+  for (int64_t i = 0; i < yv.size(); ++i) yv(i) = ctx.in[0].data[i];
   VarV alpha(ctx.in[2].len), beta(ctx.in[3].len), sigma(ctx.in[4].len);
   for (int64_t i = 0; i < ctx.in[2].len; ++i) alpha(i) = ctx.in[2].data[i];
   for (int64_t i = 0; i < ctx.in[3].len; ++i) beta(i) = ctx.in[3].data[i];
   for (int64_t i = 0; i < ctx.in[4].len; ++i) sigma(i) = ctx.in[4].data[i];
   var out;
   const bool one_a = ctx.in[2].len == 1, one_s = ctx.in[4].len == 1;
-  auto call = [&](auto&& a, auto&& s) {
-    return propto ? stan::math::normal_id_glm_lpdf<true>(yd, X, a, beta, s)
-                  : stan::math::normal_id_glm_lpdf<false>(yd, X, a, beta, s);
+  auto call = [&](auto&& y, auto&& a, auto&& s) {
+    return propto ? stan::math::normal_id_glm_lpdf<true>(y, X, a, beta, s)
+                  : stan::math::normal_id_glm_lpdf<false>(y, X, a, beta, s);
   };
-  if (one_a && one_s)
-    out = call(alpha(0), sigma(0));
-  else if (one_a)
-    out = call(alpha(0), sigma);
-  else if (one_s)
-    out = call(alpha, sigma(0));
+  auto dispatch = [&](auto&& y) {
+    if (one_a && one_s)
+      out = call(y, alpha(0), sigma(0));
+    else if (one_a)
+      out = call(y, alpha(0), sigma);
+    else if (one_s)
+      out = call(y, alpha, sigma(0));
+    else
+      out = call(y, alpha, sigma);
+  };
+  if (y_var)
+    dispatch(yv);
   else
-    out = call(alpha, sigma);
+    dispatch(yd);
   const double v = out.val();
   // One tape per gradient, not two. The forward differentiates it once
   // with a seed of 1 and keeps the partials; the backward is then the
@@ -354,6 +366,7 @@ double nid_glm_eval(KernelCtx& ctx) {
   // work than CmdStan does for the same statement.
   stan::math::grad(out.vi_);
   double* s = ctx.scratch;
+  for (int64_t i = 0; i < yv.size(); ++i) *s++ = yv(i).adj();
   for (int64_t i = 0; i < ctx.in[2].len; ++i) *s++ = alpha(i).adj();
   for (int64_t i = 0; i < ctx.in[3].len; ++i) *s++ = beta(i).adj();
   for (int64_t i = 0; i < ctx.in[4].len; ++i) *s++ = sigma(i).adj();
@@ -361,7 +374,10 @@ double nid_glm_eval(KernelCtx& ctx) {
 }
 
 int64_t nid_glm_scratch(const Op& op, const Slot* slots) {
-  return slots[op.in[2]].len + slots[op.in[3]].len + slots[op.in[4]].len;
+  // The y section exists only when y is active (variant bit 0), but the
+  // sizing hook cannot see the variant, so reserve it unconditionally.
+  return slots[op.in[0]].len + slots[op.in[2]].len + slots[op.in[3]].len +
+         slots[op.in[4]].len;
 }
 
 void nid_glm_fwd(KernelCtx& ctx) { ctx.out.data[0] = nid_glm_eval(ctx); }
@@ -370,6 +386,15 @@ void nid_glm_bwd(KernelCtx& ctx) {
   const unsigned mask = ctx.variant == 0 ? 0x1fu : (ctx.variant & 0x3fu);
   const double* s = ctx.scratch;
   const double w = ctx.out_adj;
+  // Mirror of the forward's scratch layout: y's partials are present
+  // exactly when variant bit 0 is set (never under the legacy variant==0
+  // encoding, whose forward bound y as data).
+  if (ctx.variant & 0x1u) {
+    if (ctx.in_adj[0].data)
+      for (int64_t i = 0; i < ctx.in[0].len; ++i)
+        ctx.in_adj[0].data[i] += w * s[i];
+    s += ctx.in[0].len;
+  }
   for (int k = 2; k <= 4; ++k) {
     const bool active = (mask & (0x4u << (k - 2))) && ctx.in_adj[k].data;
     for (int64_t i = 0; i < ctx.in[k].len; ++i, ++s)

@@ -109,7 +109,7 @@ def main():
         if not stan.exists() or not dz.exists():
             continue
         sexp = tmp / f"{model}.sexp"
-        r = run([str(STANC), "--debug-transformed-mir", str(stan)], None, timeout)
+        r = run([str(STANC), "--O1", "--debug-optimized-mir", str(stan)], None, timeout)
         if r is None or not r.stdout:
             continue
         sexp.write_text(r.stdout)

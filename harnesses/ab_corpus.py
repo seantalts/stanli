@@ -103,7 +103,7 @@ def main():
 
         # op counts (reuse one stanc run for both dumps)
         sexp = tmp / f"{model}.sexp"
-        r = run([str(STANC), "--debug-transformed-mir", str(stan)])
+        r = run([str(STANC), "--O1", "--debug-optimized-mir", str(stan)])
         ops_a = ops_b = -1
         if r is not None and r.returncode == 0:
             sexp.write_text(r.stdout)

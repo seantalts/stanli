@@ -278,7 +278,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
 
     ns = None
     sexp = d / "m.sexp"
-    mir = run([str(REPO / "deps/stanc3/stanc"), "--debug-transformed-mir", str(stan)])
+    mir = run([str(REPO / "deps/stanc3/stanc"), "--O1", "--debug-optimized-mir", str(stan)])
     if mir.returncode == 0:
         sexp.write_text(mir.stdout)
         bench = run([str(REPO / BUILD / "bench_grad"), str(sexp), str(data), "20000"])

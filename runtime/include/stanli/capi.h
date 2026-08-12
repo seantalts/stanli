@@ -30,9 +30,10 @@ typedef struct stanli_model stanli_model;
 #define STANLI_ABI_VERSION 1
 int stanli_abi_version(void);
 
-/* Compile transformed-MIR sexp text (from `stanc --debug-transformed-mir`)
- * against JSON data (CmdStan conventions). Returns null on failure with a
- * message in err. */
+/* Compile MIR sexp text (from `stanc --O1 --debug-optimized-mir`; the
+ * unoptimized --debug-transformed-mir form is the same format and also
+ * accepted) against JSON data (CmdStan conventions). Returns null on
+ * failure with a message in err. */
 stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
                                char* err, size_t err_len);
 

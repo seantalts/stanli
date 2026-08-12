@@ -346,6 +346,28 @@ struct Lowering {
             return (long)std::max(en->r.size(), en->i.size());
           }
         }
+        // Shape query on a COMPUTED value: --O1 inlining substitutes call
+        // arguments into the callee's size expressions, so `rows(beta)`
+        // arrives as `rows(segment(beta, pos[i], m[i]))`. Lower the
+        // argument and answer from its slot metadata; any op this emits
+        // is one the body was about to emit anyway.
+        if ((e.name == "rows" || e.name == "cols" || e.name == "size" ||
+             e.name == "num_elements" || e.name == "FnLength") &&
+            e.args.size() == 1 && e.args[0].kind != mir::Expr::Var) {
+          const Val v = lower_expr(e.args[0]);
+          const int64_t len = g.slots[v.slot].len;
+          if (is_array(v.si)) {
+            const ArrayShape& sh = array_shape(v.si);
+            if (e.name == "size" || e.name == "FnLength")
+              return sh.dims.front();
+            if (e.name == "num_elements") return len;
+            fail(e.name + " is undefined for an array value", e.raw);
+          }
+          const LogicalDims dims = logical_dims(v.si, len, e.name);
+          if (e.name == "rows") return dims.rows;
+          if (e.name == "cols") return dims.cols;
+          return len;
+        }
         // Anything else data-only the td interpreter can evaluate (sum of an
         // int array in a size expression, etc.).
         if (e.data_only) {
@@ -934,6 +956,10 @@ struct Lowering {
   struct IslandRegion {
     std::vector<int> in_slots;
     std::vector<std::string> out_names;
+    // The register view of each live-out as the region compiler left it:
+    // the authority on shape when the outside declaration was the --O1
+    // inliner's zero-length sentinel and the region's assignment sized it.
+    std::vector<Range> out_views;
     bool has_target = false;  // the region contributed to the target
   };
 
@@ -1029,6 +1055,7 @@ struct Lowering {
           auto it = c.reals.find(name);
           if (it == c.reals.end()) continue;
           reg->out_names.push_back(name);
+          reg->out_views.push_back(it->second);
           for (int k = 0; k < it->second.len; ++k)
             prog->out_regs.push_back(it->second.reg + k);
         }
@@ -1086,20 +1113,11 @@ struct Lowering {
     std::shared_ptr<IslandProg> prog;
     Range ignored;
     lower_island(&s, nullptr, &reg, &ignored, &prog);
+    // Widths come from the region compiler's own registers: they are what
+    // out_regs packs, and they already reflect a zero-length sentinel
+    // declaration the region's assignment sized.
     std::vector<int> out_lens;
-    for (const std::string& name : reg.out_names) {
-      auto it = scope.find(name);
-      if (it != scope.end()) {
-        out_lens.push_back((int)g.slots[it->second.slot].len);
-        continue;
-      }
-      auto dl = decls.find(name);
-      if (dl == decls.end())
-        fail("parameter-dependent region assigns " + name +
-                 ", which has no declared shape",
-             s.raw);
-      out_lens.push_back((int)dl->second.len);
-    }
+    for (const Range& v : reg.out_views) out_lens.push_back(v.len);
     if (reg.has_target) out_lens.push_back(1);
     std::vector<int> out_slots;
     emit_island(prog, reg, out_lens, &out_slots);
@@ -1107,12 +1125,30 @@ struct Lowering {
     for (size_t k = 0; k < reg.out_names.size(); ++k) {
       const std::string& name = reg.out_names[k];
       SlotInfo si;
+      bool shaped_outside = false;
       auto old = scope.find(name);
       if (old != scope.end()) {
         si = old->second.si;
+        shaped_outside = g.slots[old->second.slot].len != 0;
       } else {
         auto dl = decls.find(name);
-        if (dl != decls.end()) si = dl->second.si;
+        if (dl != decls.end()) {
+          si = dl->second.si;
+          shaped_outside = dl->second.len != 0;
+        }
+      }
+      if (!shaped_outside) {
+        // The outside declaration was the inliner's zero-length sentinel;
+        // the region's registers carry the real shape.
+        si = SlotInfo{};
+        si.rows = reg.out_views[k].rows;
+        si.cols = reg.out_views[k].cols;
+        si.kind = reg.out_views[k].kind;
+        auto dl = decls.find(name);
+        if (dl != decls.end()) {
+          dl->second.len = reg.out_views[k].len;
+          dl->second.si = si;
+        }
       }
       // The island is parameter-dependent regardless of the old binding's
       // provenance; treating its live-out as data would select kernels that
@@ -2804,6 +2840,11 @@ struct Lowering {
           // inlined function), which only eval_int can answer.
           if (s.has_init) int_env[s.decl_id] = eval_int(s.init);
         } else {
+          // A redeclaration shadows whatever the name held: --O1 inlining
+          // reuses one symbol for a callee's local across loop iterations,
+          // and its size can differ per iteration. The stale binding must
+          // not constrain the fresh variable's width.
+          scope.erase(s.decl_id);
           DeclView sh;
           sh.len = sized_len(s.decl_type);
           sh.si = view_of(s.decl_type);
@@ -2967,11 +3008,21 @@ struct Lowering {
           } else {
             auto dl = decls.find(s.lhs);
             if (dl != decls.end()) {
-              SlotInfo expected = dl->second.si;
-              require_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
-              const bool pf = rhs.si.param_free;
-              rhs.si = expected;
-              rhs.si.param_free = pf;
+              if (dl->second.len == 0 && g.slots[rhs.slot].len != 0) {
+                // stanc3's --O1 inliner declares a function's return
+                // variable zero-length (`array[real, 0]`, `vector[0]`)
+                // because the returned size is the callee's business, and
+                // C++ assignment resizes. Slots do not, so the first
+                // whole-variable assignment defines the shape instead.
+                dl->second.len = g.slots[rhs.slot].len;
+                dl->second.si = rhs.si;
+              } else {
+                SlotInfo expected = dl->second.si;
+                require_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
+                const bool pf = rhs.si.param_free;
+                rhs.si = expected;
+                rhs.si.param_free = pf;
+              }
             }
           }
           scope[s.lhs] = rhs;
