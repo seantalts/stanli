@@ -94,6 +94,7 @@ namespace stanli {
   X(OP_LOG1M)                       \
   X(OP_TANHV)                       \
   X(OP_CUMSUM)                      \
+  X(OP_FMA)                         \
   X(OP_CONSTRAIN_LOWER)             \
   X(OP_CONSTRAIN_UPPER)             \
   X(OP_CONSTRAIN_LU)                \

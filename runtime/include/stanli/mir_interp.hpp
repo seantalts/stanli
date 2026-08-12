@@ -918,6 +918,27 @@ class MirInterp {
       return bin([](const T& x, const T& y) {
         return stan::math::multiply_log(x, y);
       });
+    // fma from --O1 partial evaluation (`c + a*b`) or written explicitly:
+    // fused like stan-math's, elementwise with scalar broadcast.
+    if (e.name == "fma" && e.args.size() == 3) {
+      Value a = eval(e.args[0]), b = eval(e.args[1]), c = eval(e.args[2]);
+      Value o;
+      const size_t n = std::max(a.r.size(), std::max(b.r.size(), c.r.size()));
+      for (const Value* x : {&a, &b, &c})
+        if (x->r.size() != n && x->r.size() != 1)
+          fail("fma: incompatible lengths", e.raw);
+      o.r.resize(n);
+      for (size_t i = 0; i < n; ++i)
+        o.r[i] = stan::math::fma(a.r[a.r.size() == 1 ? 0 : i],
+                                 b.r[b.r.size() == 1 ? 0 : i],
+                                 c.r[c.r.size() == 1 ? 0 : i]);
+      for (const Value* x : {&a, &b, &c})
+        if (x->r.size() == n && !x->dims.empty()) {
+          o.dims = x->dims;
+          break;
+        }
+      return o;
+    }
     if (e.name == "PMinus__") return un([](const T& x) { return -x; });
     if (e.name == "PPlus__") return un([](const T& x) { return x; });
     if (e.name == "exp")

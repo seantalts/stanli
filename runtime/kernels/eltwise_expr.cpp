@@ -94,6 +94,34 @@ void sub_bwd(KernelCtx& ctx) {
   }
 }
 
+// fma(a, b, c) elementwise with scalar broadcast on any argument, FUSED
+// (std::fma, one rounding) -- the arithmetic stanc3's --O1 partial
+// evaluator asks for and what CmdStan computes for an explicit fma().
+void fma_fwd(KernelCtx& ctx) {
+  const auto v = [&](int k, int64_t i) {
+    return ctx.in[k].data[ctx.in[k].len == 1 ? 0 : i];
+  };
+  for (int64_t i = 0; i < ctx.out.len; ++i)
+    ctx.out.data[i] = std::fma(v(0, i), v(1, i), v(2, i));
+}
+void fma_bwd(KernelCtx& ctx) {
+  const auto v = [&](int k, int64_t i) {
+    return ctx.in[k].data[ctx.in[k].len == 1 ? 0 : i];
+  };
+  const auto adj = [&](int64_t i) {
+    return ctx.out.len == 1 ? ctx.out_adj : ctx.out_adj_vec.data[i];
+  };
+  for (int k = 0; k < 2; ++k) {
+    if (!ctx.in_adj[k].data) continue;
+    const int other = 1 - k;
+    for (int64_t i = 0; i < ctx.out.len; ++i)
+      ctx.in_adj[k].data[ctx.in[k].len == 1 ? 0 : i] += adj(i) * v(other, i);
+  }
+  if (ctx.in_adj[2].data)
+    for (int64_t i = 0; i < ctx.out.len; ++i)
+      ctx.in_adj[2].data[ctx.in[2].len == 1 ? 0 : i] += adj(i);
+}
+
 void mul_fwd(KernelCtx& ctx) {
   if (scal(ctx, 0) && scal(ctx, 1))
     ctx.out.data[0] = ctx.in[0].data[0] * ctx.in[1].data[0];
@@ -395,6 +423,7 @@ void register_eltwise_kernels() {
   register_kernel(OP_ADD, Kernel{add_fwd, add_bwd, nullptr});
   register_kernel(OP_SUB, Kernel{sub_fwd, sub_bwd, nullptr});
   register_kernel(OP_MUL, Kernel{mul_fwd, mul_bwd, nullptr});
+  register_kernel(OP_FMA, Kernel{fma_fwd, fma_bwd, nullptr});
   register_kernel(OP_DIV, Kernel{div_fwd, div_bwd, nullptr});
   register_kernel(OP_POW, Kernel{pow_fwd, pow_bwd, nullptr});
   register_kernel(OP_DOT, Kernel{dot_fwd, dot_bwd, nullptr});
