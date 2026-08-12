@@ -327,6 +327,23 @@ jobs:
         if: matrix.plat == 'manylinux_2_28_x86_64'
         run: |
           /tmp/wheeltest/bin/pip install bridgestan
+          # bridgestan downloads its own C++ sources from github the first
+          # time a model is compiled, inside the first conformance run. A
+          # 503 from that download surfaces as a conformance failure, which
+          # reads as "the facade disagrees with the reference" when nothing
+          # was ever compared -- main went red on exactly that. Fetch the
+          # sources up front, where a flaky mirror gets a few tries and a
+          # real outage says so in its own words. bridgestan retries the
+          # download itself, but only a URLError: it calls every HTTPError
+          # unrecoverable, and a 503 is an HTTPError.
+          for try in 1 2 3 4 5; do
+            /tmp/wheeltest/bin/python \
+              -c 'import bridgestan.download as d; d.get_bridgestan_src()' &&
+              break
+            echo "bridgestan source download failed (attempt $try of 5)"
+            [ "$try" = 5 ] && exit 1
+            sleep $((try * 20))
+          done
           for m in es simp newtrans conj; do
             case $m in
               es) data=tests/fixtures/eight_schools.json ;;
