@@ -216,6 +216,57 @@ void expect_runtime_bound_rejected() {
   stanli_model_free(model);
 }
 
+void expect_structured_checks() {
+  const std::string mir = slurp("tests/fixtures/structured_checks.tmir.sexp");
+  const std::string good = slurp("tests/fixtures/structured_checks.json");
+  std::string bad = good;
+  const std::string valid_leaf = "[0.2, 0.3, 0.5]";
+  const size_t at = bad.find(valid_leaf);
+  if (at == std::string::npos) {
+    ++failures;
+    std::printf("FAIL C API structured fixture replacement\n");
+    return;
+  }
+  bad.replace(at, valid_leaf.size(), "[0.2, 0.3, 0.6]");
+
+  char err[8192]{};
+  stanli_model* model =
+      stanli_model_new(mir.c_str(), bad.c_str(), err, sizeof err);
+  if (model != nullptr) {
+    ++failures;
+    std::printf("FAIL C API accepted invalid simplex data\n");
+    stanli_model_free(model);
+  } else if (std::string(err).find("d_simplex") == std::string::npos) {
+    ++failures;
+    std::printf("FAIL C API invalid simplex error: %s\n", err);
+  }
+
+  model = stanli_model_new(mir.c_str(), good.c_str(), err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL C API structured-check construction: %s\n", err);
+    return;
+  }
+
+  double q[2] = {0.25, 0.0};
+  double lp = 0.0;
+  double grad[2]{};
+  if (stanli_grad(model, q, &lp, grad) != 1 ||
+      lp != -std::numeric_limits<double>::infinity()) {
+    ++failures;
+    std::printf("FAIL C API accepted invalid transformed simplex\n");
+  }
+
+  q[0] = 0.0;
+  q[1] = 1.0;
+  std::vector<double> row((size_t)stanli_wa_n_columns(model));
+  if (row.empty() || stanli_wa_row(model, q, row.data()) == 0) {
+    ++failures;
+    std::printf("FAIL C API accepted invalid generated sum-to-zero vector\n");
+  }
+  stanli_model_free(model);
+}
+
 }  // namespace
 
 int main() {
@@ -250,6 +301,7 @@ int main() {
   for (int B = 0; B <= 2; ++B) expect_structured_arrays(B);
   expect_invalid_data_rejected();
   expect_runtime_bound_rejected();
+  expect_structured_checks();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;

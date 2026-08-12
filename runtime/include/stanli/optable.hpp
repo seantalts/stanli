@@ -107,6 +107,7 @@ namespace stanli {
   X(OP_CONSTRAIN_CORR_MATRIX)       \
   X(OP_CONSTRAIN_COV_MATRIX)        \
   X(OP_CONSTRAIN_CHOL_COV)          \
+  X(OP_CHECK_STRUCTURED)            \
   X(OP_CHECK_MATCHING_DIMS)         \
   X(OP_CHECK_LOWER)                 \
   X(OP_CHECK_UPPER)                 \

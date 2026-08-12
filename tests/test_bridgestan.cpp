@@ -797,6 +797,64 @@ void test_construct_errors() {
     bs_model_destruct(m);
   }
 
+  // Structured declaration checks use the same phase and error contract,
+  // including arrays whose JSON storage interleaves their leaves.
+  const std::string structured_mir =
+      slurp("tests/fixtures/structured_checks.tmir.sexp");
+  const std::string structured_good =
+      slurp("tests/fixtures/structured_checks.json");
+  std::string structured_bad = structured_good;
+  const std::string valid_simplex = "[0.2, 0.3, 0.5]";
+  const size_t simplex_at = structured_bad.find(valid_simplex);
+  if (simplex_at == std::string::npos) {
+    fail("BridgeStan structured fixture replacement");
+  } else {
+    structured_bad.replace(simplex_at, valid_simplex.size(), "[0.2, 0.3, 0.6]");
+    err = nullptr;
+    m = bs_model_from_mir(structured_mir.c_str(), structured_bad.c_str(), 1,
+                          &err);
+    if (m != nullptr) {
+      fail("BridgeStan accepted invalid simplex data");
+      bs_model_destruct(m);
+    } else if (err == nullptr ||
+               std::string(err).find("d_simplex") == std::string::npos) {
+      fail(std::string("BridgeStan invalid simplex error: ") +
+           (err != nullptr ? err : "(no message)"));
+    }
+    bs_free_error_msg(err);
+  }
+
+  err = nullptr;
+  m = bs_model_from_mir(structured_mir.c_str(), structured_good.c_str(), 1,
+                        &err);
+  if (m == nullptr) {
+    fail(std::string("BridgeStan structured-check construction: ") +
+         (err != nullptr ? err : "(no message)"));
+    bs_free_error_msg(err);
+  } else {
+    double q[2] = {0.25, 0.0};
+    double lp = 0.0;
+    int rc = bs_log_density(m, true, true, q, &lp, &err);
+    expect_refused("structured transformed parameter", rc, &err, "tp_simplex");
+
+    q[0] = 0.0;
+    q[1] = 1.0;
+    std::vector<double> row((size_t)bs_param_num(m, true, true));
+    bs_rng* rng = bs_rng_construct(1, &err);
+    if (rng == nullptr) {
+      fail(std::string("structured-check rng construction: ") +
+           (err != nullptr ? err : "(no message)"));
+      bs_free_error_msg(err);
+      err = nullptr;
+    } else {
+      rc = bs_param_constrain(m, true, true, q, row.data(), rng, &err);
+      expect_refused("structured generated quantity", rc, &err,
+                     "gq_sum_to_zero");
+      bs_rng_destruct(rng);
+    }
+    bs_model_destruct(m);
+  }
+
   // The version globals name the ABI this file implements.
   expect_eq_int("bs_major_version", bs_major_version, 2);
   expect_eq_int("bs_minor_version", bs_minor_version, 9);

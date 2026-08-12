@@ -18,16 +18,153 @@
 #include <stanli/graph.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/structured_check.hpp>
 
+#include <stan/math/prim/err/check_cholesky_factor.hpp>
+#include <stan/math/prim/err/check_cholesky_factor_corr.hpp>
+#include <stan/math/prim/err/check_corr_matrix.hpp>
+#include <stan/math/prim/err/check_cov_matrix.hpp>
 #include <stan/math/prim/err/check_greater_or_equal.hpp>
 #include <stan/math/prim/err/check_less_or_equal.hpp>
+#include <stan/math/prim/err/check_ordered.hpp>
+#include <stan/math/prim/err/check_positive_ordered.hpp>
+#include <stan/math/prim/err/check_simplex.hpp>
+#include <stan/math/prim/err/check_sum_to_zero.hpp>
+#include <stan/math/prim/err/check_unit_vector.hpp>
 
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace stanli {
+
+namespace {
+
+int64_t checked_product(const std::vector<int64_t>& dims, size_t first,
+                        size_t last) {
+  int64_t n = 1;
+  for (size_t d = first; d < last; ++d) {
+    const int64_t extent = dims[d];
+    if (extent < 0 ||
+        (extent != 0 && n > std::numeric_limits<int64_t>::max() / extent))
+      throw std::logic_error("invalid structured-check geometry");
+    n *= extent;
+  }
+  return n;
+}
+
+bool matrix_kind(mir::Transform::Kind kind) {
+  return kind == mir::Transform::CholeskyCorr ||
+         kind == mir::Transform::Correlation ||
+         kind == mir::Transform::Covariance ||
+         kind == mir::Transform::CholeskyCov;
+}
+
+void check_leaf(const double* values, int64_t rows, int64_t cols,
+                const std::string& name, const StructuredCheckSpec& spec) {
+  Eigen::Map<const Eigen::VectorXd> vector(values, (Eigen::Index)rows);
+  Eigen::Map<const Eigen::MatrixXd> matrix(values, (Eigen::Index)rows,
+                                           (Eigen::Index)cols);
+  constexpr const char* function = "stanli MIR check";
+  switch (spec.kind) {
+    case mir::Transform::Simplex:
+      stan::math::check_simplex(function, name.c_str(), vector);
+      return;
+    case mir::Transform::Ordered:
+      stan::math::check_ordered(function, name.c_str(), vector);
+      return;
+    case mir::Transform::PositiveOrdered:
+      stan::math::check_positive_ordered(function, name.c_str(), vector);
+      return;
+    case mir::Transform::UnitVector:
+      stan::math::check_unit_vector(function, name.c_str(), vector);
+      return;
+    case mir::Transform::SumToZero:
+      if (spec.leaf == StructuredLeaf::Matrix)
+        stan::math::check_sum_to_zero(function, name.c_str(), matrix);
+      else
+        stan::math::check_sum_to_zero(function, name.c_str(), vector);
+      return;
+    case mir::Transform::CholeskyCorr:
+      stan::math::check_cholesky_factor_corr(function, name.c_str(), matrix);
+      return;
+    case mir::Transform::Correlation:
+      stan::math::check_corr_matrix(function, name.c_str(), matrix);
+      return;
+    case mir::Transform::Covariance:
+      stan::math::check_cov_matrix(function, name.c_str(), matrix);
+      return;
+    case mir::Transform::CholeskyCov:
+      stan::math::check_cholesky_factor(function, name.c_str(), matrix);
+      return;
+    default:
+      throw std::logic_error("unsupported structured-check kind");
+  }
+}
+
+}  // namespace
+
+void check_structured_value(const double* values, int64_t len,
+                            const StructuredCheckSpec& spec) {
+  const size_t leaf_rank = spec.leaf == StructuredLeaf::Matrix ? 2 : 1;
+  if (spec.dims.size() < leaf_rank || len < 0 ||
+      (len != 0 && values == nullptr))
+    throw std::logic_error("malformed structured-check value");
+  if ((matrix_kind(spec.kind) && spec.leaf != StructuredLeaf::Matrix) ||
+      (!matrix_kind(spec.kind) && spec.kind != mir::Transform::SumToZero &&
+       spec.leaf != StructuredLeaf::Vector))
+    throw std::logic_error("structured-check leaf type mismatch");
+
+  const size_t outer_rank = spec.dims.size() - leaf_rank;
+  const int64_t batch = checked_product(spec.dims, 0, outer_rank);
+  const int64_t leaf_len =
+      checked_product(spec.dims, outer_rank, spec.dims.size());
+  if ((batch != 0 && leaf_len > std::numeric_limits<int64_t>::max() / batch) ||
+      batch * leaf_len != len)
+    throw std::logic_error("structured-check width does not match geometry");
+  if (batch == 0) return;
+
+  const int64_t rows = spec.dims[outer_rank];
+  const int64_t cols =
+      spec.leaf == StructuredLeaf::Matrix ? spec.dims[outer_rank + 1] : 1;
+  const double zero = 0.0;
+  std::vector<double> gathered;
+  if (leaf_len != 0 && spec.storage == StructuredStorage::FirstIndexFast)
+    gathered.resize((size_t)leaf_len);
+  std::vector<int64_t> index(outer_rank);
+  for (int64_t leaf = 0; leaf < batch; ++leaf) {
+    int64_t rem = leaf;
+    for (size_t d = outer_rank; d-- > 0;) {
+      index[d] = rem % spec.dims[d];
+      rem /= spec.dims[d];
+    }
+
+    const double* one = &zero;
+    if (leaf_len != 0 && spec.storage == StructuredStorage::ContiguousLeaves) {
+      one = values + leaf * leaf_len;
+    } else if (leaf_len != 0) {
+      int64_t outer_serial = 0;
+      int64_t stride = 1;
+      for (size_t d = 0; d < outer_rank; ++d) {
+        outer_serial += index[d] * stride;
+        stride *= spec.dims[d];
+      }
+      for (int64_t e = 0; e < leaf_len; ++e)
+        gathered[(size_t)e] = values[outer_serial + batch * e];
+      one = gathered.data();
+    }
+
+    std::string name = spec.name;
+    // Stan Math's corr/cov std::vector overloads intentionally retain the
+    // base name; the other validators append one index at every array level.
+    if (spec.kind != mir::Transform::Correlation &&
+        spec.kind != mir::Transform::Covariance)
+      for (int64_t i : index) name += "[" + std::to_string(i + 1) + "]";
+    check_leaf(one, rows, cols, name, spec);
+  }
+}
 
 namespace {
 
@@ -65,6 +202,14 @@ void reject_fwd(KernelCtx& ctx) {
 }
 
 void print_fwd(KernelCtx& ctx) { emit_message(render(ctx)); }
+
+void check_structured_fwd(KernelCtx& ctx) {
+  if (ctx.n_in != 1 || ctx.out.len != 1 || ctx.udata == nullptr)
+    throw std::logic_error("malformed structured-check op");
+  check_structured_value(ctx.in[0].data, ctx.in[0].len,
+                         *static_cast<const StructuredCheckSpec*>(ctx.udata));
+  ctx.out.data[0] = 0.0;
+}
 
 void check_matching_dims_fwd(KernelCtx& ctx) {
   if (ctx.n_in != 2 || ctx.out.len != 1 || ctx.udata == nullptr)
@@ -106,6 +251,8 @@ void check_fwd(KernelCtx& ctx) {
 }  // namespace
 
 void register_message_kernels() {
+  register_kernel(OP_CHECK_STRUCTURED,
+                  Kernel{check_structured_fwd, nullptr, nullptr});
   register_kernel(OP_CHECK_MATCHING_DIMS,
                   Kernel{check_matching_dims_fwd, nullptr, nullptr});
   register_kernel(OP_CHECK_LOWER, Kernel{check_fwd<true>, nullptr, nullptr});

@@ -9,6 +9,7 @@
 #include <stanli/island.hpp>
 #include <stanli/reroll.hpp>
 #include <stanli/sexp.hpp>
+#include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <cstdio>
@@ -3013,9 +3014,62 @@ struct Lowering {
           // this lowering belongs to log_prob/write_array and must retain its
           // per-evaluation position, even when its value is parameter-free.
           if (!s.check_transform) fail("malformed FnCheck", s.raw);
-          // Structural value validation is a separate, explicitly closed
-          // compatibility seam; lower/upper checks below are never erased.
-          if (mir::is_structured_check(s.check_transform->kind)) return;
+          if (mir::is_structured_check(s.check_transform->kind)) {
+            if (!s.check_transform->args.empty() || s.fn_args.size() != 1)
+              fail("malformed structured FnCheck", s.raw);
+            const Val value = lower_expr(s.fn_args[0]);
+            const int64_t value_len = g.slots[value.slot].len;
+            validate_view(value.si, value_len, "structured FnCheck value");
+
+            auto spec = std::make_shared<StructuredCheckSpec>();
+            spec->kind = s.check_transform->kind;
+            spec->name =
+                s.check_var_name.empty() ? s.fn_args[0].name : s.check_var_name;
+            if (is_array(value.si)) {
+              const ArrayShape& shape = array_shape(value.si);
+              spec->dims = shape.dims;
+              if (shape.leaf == ViewKind::Vector)
+                spec->leaf = StructuredLeaf::Vector;
+              else if (shape.leaf == ViewKind::Matrix)
+                spec->leaf = StructuredLeaf::Matrix;
+              else
+                fail("structured FnCheck requires vector or matrix leaves",
+                     s.raw);
+            } else if (is_vector(value.si)) {
+              spec->dims = {value_len};
+              spec->leaf = StructuredLeaf::Vector;
+            } else if (is_matrix(value.si)) {
+              spec->dims = {value.si.rows, value.si.cols};
+              spec->leaf = StructuredLeaf::Matrix;
+            } else {
+              fail("structured FnCheck requires a vector or matrix", s.raw);
+            }
+
+            const size_t leaf_rank =
+                spec->leaf == StructuredLeaf::Matrix ? 2 : 1;
+            const mir::UnsizedLeaf expr_leaf = s.fn_args[0].unsized.leaf;
+            if (s.fn_args[0].unsized.depth != spec->dims.size() - leaf_rank ||
+                (spec->leaf == StructuredLeaf::Vector &&
+                 expr_leaf != mir::UnsizedLeaf::Vector) ||
+                (spec->leaf == StructuredLeaf::Matrix &&
+                 expr_leaf != mir::UnsizedLeaf::Matrix))
+              fail("structured FnCheck type does not match its value", s.raw);
+            const bool matrix_only =
+                spec->kind == mir::Transform::CholeskyCorr ||
+                spec->kind == mir::Transform::Correlation ||
+                spec->kind == mir::Transform::Covariance ||
+                spec->kind == mir::Transform::CholeskyCov;
+            const bool vector_only =
+                spec->kind != mir::Transform::SumToZero && !matrix_only;
+            if ((matrix_only && spec->leaf != StructuredLeaf::Matrix) ||
+                (vector_only && spec->leaf != StructuredLeaf::Vector))
+              fail("structured FnCheck transform and leaf disagree", s.raw);
+
+            (void)emit_value(OP_CHECK_STRUCTURED, {value}, 1);
+            g.ops.back().udata = spec.get();
+            g.udata_pool.push_back(std::move(spec));
+            return;
+          }
           if (s.check_transform->args.size() != 1 || s.fn_args.size() != 2)
             fail("malformed FnCheck", s.raw);
           const uint16_t opcode =

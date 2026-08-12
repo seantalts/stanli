@@ -1,6 +1,7 @@
 #include <stanli/mir.hpp>
 
 #include <limits>
+#include <map>
 #include <stdexcept>
 
 namespace stanli {
@@ -414,6 +415,91 @@ Stmt read_stmt(const Node& n) {
   return s;
 }
 
+using Bindings = std::map<std::string, UnsizedView>;
+
+UnsizedView declared_view(const SizedType& type) {
+  const std::string& base = type.base == "SArray" ? type.elem_base : type.base;
+  UnsizedView view;
+  if (base == "SInt")
+    view.leaf = UnsizedLeaf::Int;
+  else if (base == "SReal")
+    view.leaf = UnsizedLeaf::Real;
+  else if (base == "SComplex")
+    view.leaf = UnsizedLeaf::Complex;
+  else if (base == "SVector")
+    view.leaf = UnsizedLeaf::Vector;
+  else if (base == "SRowVector")
+    view.leaf = UnsizedLeaf::RowVector;
+  else if (base == "SMatrix")
+    view.leaf = UnsizedLeaf::Matrix;
+  if (type.base != "SArray") return view;
+
+  size_t leaf_rank = 0;
+  if (view.leaf == UnsizedLeaf::Matrix)
+    leaf_rank = 2;
+  else if (view.leaf == UnsizedLeaf::Vector ||
+           view.leaf == UnsizedLeaf::RowVector)
+    leaf_rank = 1;
+  if (view.leaf == UnsizedLeaf::Unknown || type.dims.size() < leaf_rank ||
+      type.dims.size() - leaf_rank > std::numeric_limits<uint8_t>::max())
+    throw std::runtime_error("mir: malformed sized declaration type");
+  view.depth = static_cast<uint8_t>(type.dims.size() - leaf_rank);
+  return view;
+}
+
+void validate_checks(const std::vector<Stmt>& body, Bindings& bindings);
+
+void validate_checks(const Stmt& s, Bindings& bindings) {
+  if (s.kind == Stmt::Decl) bindings[s.decl_id] = declared_view(s.decl_type);
+  if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
+    if (!s.check_transform)
+      throw std::runtime_error("mir: FnCheck has no transform");
+    const Transform::Kind kind = s.check_transform->kind;
+    if (is_structured_check(kind)) {
+      if (!s.check_transform->args.empty() || s.fn_args.size() != 1)
+        throw std::runtime_error("mir: malformed structured FnCheck");
+      const UnsizedLeaf leaf = s.fn_args[0].unsized.leaf;
+      const bool matrix = leaf == UnsizedLeaf::Matrix;
+      const bool vector = leaf == UnsizedLeaf::Vector;
+      const bool matrix_only =
+          kind == Transform::CholeskyCorr || kind == Transform::Correlation ||
+          kind == Transform::Covariance || kind == Transform::CholeskyCov;
+      const bool vector_only = kind != Transform::SumToZero && !matrix_only;
+      if ((!matrix && !vector) || (matrix_only && !matrix) ||
+          (vector_only && !vector))
+        throw std::runtime_error(
+            "mir: structured FnCheck transform and value type disagree");
+    } else if ((kind == Transform::Lower || kind == Transform::Upper) &&
+               s.check_transform->args.size() == 1 && s.fn_args.size() == 2) {
+      // Exact scalar/container compatibility is value- and shape-dependent;
+      // the lowering/interpreter check it at the original statement site.
+    } else {
+      throw std::runtime_error("mir: unsupported or malformed FnCheck");
+    }
+    const Expr& value = s.fn_args[0];
+    const auto binding =
+        value.kind == Expr::Var ? bindings.find(value.name) : bindings.end();
+    if (binding == bindings.end() ||
+        binding->second.depth != value.unsized.depth ||
+        binding->second.leaf != value.unsized.leaf)
+      throw std::runtime_error(
+          "mir: FnCheck value type disagrees with its declaration");
+  }
+  if (s.kind == Stmt::IfElse) {
+    for (const auto& child : s.body) {
+      Bindings branch = bindings;
+      validate_checks(child, branch);
+    }
+  } else if (!s.body.empty()) {
+    Bindings nested = bindings;
+    validate_checks(s.body, nested);
+  }
+}
+
+void validate_checks(const std::vector<Stmt>& body, Bindings& bindings) {
+  for (const auto& s : body) validate_checks(s, bindings);
+}
+
 }  // namespace
 
 Program read_program(const sexp::Node& root) {
@@ -453,6 +539,21 @@ Program read_program(const sexp::Node& root) {
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
     read_stmt_list((*gq)[1], prog.generate_quantities);
+  Bindings inputs;
+  for (const auto& [name, type] : prog.input_vars)
+    inputs[name] = declared_view(type);
+  Bindings prepare_bindings = inputs;
+  validate_checks(prog.prepare_data, prepare_bindings);
+  Bindings log_prob_bindings = inputs;
+  validate_checks(prog.log_prob, log_prob_bindings);
+  Bindings gq_bindings = inputs;
+  validate_checks(prog.generate_quantities, gq_bindings);
+  for (const auto& f : prog.fun_defs) {
+    Bindings args;
+    for (size_t i = 0; i < f.arg_names.size(); ++i)
+      args[f.arg_names[i]] = f.arg_views[i];
+    validate_checks(f.body, args);
+  }
   return prog;
 }
 

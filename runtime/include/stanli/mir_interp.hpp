@@ -26,6 +26,7 @@
 #include <stanli/mir.hpp>
 #include <stanli/optable.hpp>  // STANLI_SCALAR_UNARY_LIST
 #include <stanli/program.hpp>
+#include <stanli/structured_check.hpp>
 
 #include <stan/math.hpp>
 
@@ -197,6 +198,14 @@ class MirInterp {
     }
     switch (st.kind) {
       case mir::Stmt::Decl: {
+        // Keep the declaration's evaluated geometry available to its later
+        // FnCheck. A flat FnReadData assignment intentionally erases runtime
+        // dims, and JSON [] cannot carry trailing zero-batch leaf extents.
+        std::vector<int64_t>& declared_dims = decl_dims_[st.decl_id];
+        declared_dims.clear();
+        declared_dims.reserve(st.decl_type.dims.size());
+        for (const auto& d : st.decl_type.dims)
+          declared_dims.push_back(as_int(d));
         Value e;
         if (st.decl_type.base == "SInt" ||
             (st.decl_type.base == "SArray" && st.decl_type.elem_base == "SInt"))
@@ -232,16 +241,11 @@ class MirInterp {
           // Bare sized decl: allocate so element writes work; real elements
           // are NaN until written (see the scalar case above).
           int64_t n = 1;
-          std::vector<int64_t> dims;
-          for (const auto& d : st.decl_type.dims) {
-            const long v = as_int(d);
-            dims.push_back(v);
-            n *= v;
-          }
+          for (int64_t d : declared_dims) n *= d;
           e.r.assign(n, e.is_int ? T(0.0)
                                  : T(std::numeric_limits<double>::quiet_NaN()));
           if (e.is_int) e.i.assign(n, 0);
-          e.dims = std::move(dims);
+          e.dims = declared_dims;
         }
         env_[st.decl_id] = std::move(e);
         return;
@@ -443,6 +447,7 @@ class MirInterp {
   std::string where_;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
+  std::map<std::string, std::vector<int64_t>> decl_dims_;
   int udf_depth_ = 0;
 
   [[noreturn]] void fail(const std::string& msg,
@@ -471,8 +476,11 @@ class MirInterp {
     // FnReadData is a sequential flat buffer, so its assignment erases a
     // declaration's dimensions in env_. The source DataMap still owns the
     // complete logical shape. Computed transformed-data values keep theirs.
-    if (e.kind == mir::Expr::Var)
+    if (e.kind == mir::Expr::Var) {
+      auto decl = decl_dims_.find(e.name);
+      if (decl != decl_dims_.end()) return decl->second;
       if (const DataMap::Entry* d = data_lookup(e.name)) return d->dims;
+    }
     return v.dims;
   }
 
@@ -510,10 +518,46 @@ class MirInterp {
   void exec_check(const mir::Stmt& st) {
     if (!st.check_transform) fail("malformed FnCheck", st.raw);
     const auto kind = st.check_transform->kind;
-    // Structural value validation has distinct matrix/vector tolerances and
-    // stays an explicit follow-up seam; this list is closed so a new check
-    // kind cannot silently become a no-op.
-    if (mir::is_structured_check(kind)) return;
+    if (mir::is_structured_check(kind)) {
+      if (!st.check_transform->args.empty() || st.fn_args.size() != 1)
+        fail("malformed structured FnCheck", st.raw);
+      const Value y = eval(st.fn_args[0]);
+      StructuredCheckSpec spec;
+      spec.kind = kind;
+      spec.storage = StructuredStorage::FirstIndexFast;
+      spec.name =
+          st.check_var_name.empty() ? st.fn_args[0].name : st.check_var_name;
+      if (st.fn_args[0].unsized.leaf == mir::UnsizedLeaf::Vector)
+        spec.leaf = StructuredLeaf::Vector;
+      else if (st.fn_args[0].unsized.leaf == mir::UnsizedLeaf::Matrix)
+        spec.leaf = StructuredLeaf::Matrix;
+      else
+        fail("structured FnCheck requires vector or matrix leaves", st.raw);
+      spec.dims = check_dims(st.fn_args[0], y);
+      const size_t leaf_rank = spec.leaf == StructuredLeaf::Matrix ? 2 : 1;
+      if (spec.dims.size() != st.fn_args[0].unsized.depth + leaf_rank)
+        fail("structured FnCheck dimensions do not match its type", st.raw);
+
+      int64_t expected = 1;
+      for (int64_t d : spec.dims) {
+        if (d < 0 ||
+            (d != 0 && expected > std::numeric_limits<int64_t>::max() / d))
+          fail("invalid or overflowing structured FnCheck extent", st.raw);
+        expected *= d;
+      }
+      if (expected != static_cast<int64_t>(y.r.size()))
+        fail("structured FnCheck width does not match its dimensions", st.raw);
+
+      if constexpr (std::is_same_v<T, double>) {
+        check_structured_value(y.r.data(), expected, spec);
+      } else {
+        std::vector<double> values;
+        values.reserve(y.r.size());
+        for (const T& v : y.r) values.push_back(val(v));
+        check_structured_value(values.data(), expected, spec);
+      }
+      return;
+    }
     if (kind != mir::Transform::Lower && kind != mir::Transform::Upper)
       fail("unsupported FnCheck transform", st.raw);
     if (st.check_transform->args.size() != 1 || st.fn_args.size() != 2)
