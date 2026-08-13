@@ -98,6 +98,12 @@ int main() {
     OptimizeResult r2 = run_optimize(ex, nullptr, c2);
     expect_near("optimize is stable at the mode", r2.unconstrained[0], want,
                 1e-6);
+
+    OptimizeConfig c3 = cfg;
+    c3.init_radius = 0.0;
+    OptimizeResult r3 = run_optimize(ex, nullptr, c3);
+    expect_near("optimize accepts an origin init", r3.unconstrained[0], want,
+                1e-6);
   }
 
   if (failures == 0) std::printf("test_estimate: all checks passed\n");

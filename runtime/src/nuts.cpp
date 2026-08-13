@@ -2,19 +2,17 @@
 
 #include <stanli/model_adapter.hpp>
 
+#include "initialize.hpp"
+
 #include <stan/callbacks/logger.hpp>
 #include <stan/math/rev/core/chainablestack.hpp>
 #include <stan/mcmc/hmc/nuts/adapt_diag_e_nuts.hpp>
 #include <stan/services/util/create_rng.hpp>
 
-#include <boost/random/uniform_real_distribution.hpp>
-
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <stdexcept>
-#include <string>
 #include <thread>
 
 namespace stanli {
@@ -38,8 +36,6 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
 
   const int64_t n = ex.n_params();
   Eigen::VectorXd q(n);
-  boost::random::uniform_real_distribution<double> init_dist(-cfg.init_radius,
-                                                             cfg.init_radius);
 
   // CmdStan draws uniform(-2, 2) on the unconstrained scale and REJECTS the
   // draw unless both the log density and its whole gradient are finite,
@@ -48,62 +44,8 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   // part of that hypercube -- accel_gp's GP hyperparameters overflow exp()
   // over much of it -- failed outright on seeds whose first draw landed
   // badly, with the failure surfacing later as a stepsize-search error.
-  {
-    // An explicit init and a zero radius both name ONE point, so retrying
-    // is pointless there: the same point fails the same way, and a
-    // hundred identical attempts would only hide which of the two the
-    // user asked for behind a generic message.
-    const bool fixed_point = cfg.init != nullptr || cfg.init_radius == 0.0;
-    const int kMaxInitAttempts = fixed_point ? 1 : 100;
-    std::vector<double> grad((size_t)n);
-    bool ok = false;
-    for (int attempt = 0; attempt < kMaxInitAttempts && !ok; ++attempt) {
-      if (cfg.init != nullptr)
-        for (int64_t i = 0; i < n; ++i) q(i) = cfg.init[i];
-      else if (cfg.init_radius == 0.0)
-        q.setZero();
-      else
-        // stan::io::random_var_context draws one per unconstrained
-        // parameter, in declaration order, from this distribution.
-        for (int64_t i = 0; i < n; ++i) q(i) = init_dist(rng);
-      for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q(i);
-      // A density that rejects its argument outright (stan-math throws on a
-      // NaN location, an out-of-support outcome) counts as a rejected draw,
-      // exactly as CmdStan's initialize treats it -- not as a fatal error.
-      // CmdStan's two-stage check, in its order: the log density on
-      // doubles first (stan::services::util::initialize), then the
-      // gradient. The stages can disagree on an ODE model -- the value
-      // path solves the states alone and the gradient path solves the
-      // coupled system -- and running only the second accepted initial
-      // points CmdStan rejects, which on lotka_volterra meant starting
-      // in a region warmup could not climb out of.
-      try {
-        const double lp = ex.forward_value_only();
-        ok = std::isfinite(lp);
-        if (ok) {
-          const double glp = ex.gradient(grad.data());
-          ok = std::isfinite(glp);
-          for (int64_t i = 0; ok && i < n; ++i)
-            ok = std::isfinite(grad[(size_t)i]);
-        }
-      } catch (const std::exception&) {
-        ok = false;
-      }
-    }
-    if (!ok)
-      throw std::runtime_error(
-          cfg.init != nullptr
-              ? std::string("initialization failed: the supplied "
-                            "unconstrained init has no finite log density "
-                            "and gradient")
-          : cfg.init_radius == 0.0
-              ? std::string("initialization failed: the origin has no "
-                            "finite log density and gradient (init "
-                            "radius is 0)")
-              : "initialization failed: no draw in " +
-                    std::to_string(kMaxInitAttempts) +
-                    " attempts had finite log density and gradient");
-  }
+  initialize_point(ex, rng, cfg.init_radius, cfg.init, q.data(),
+                   FixedInitPolicy::Validate);
   if (std::getenv("STANLI_DEBUG_INIT")) {
     std::fprintf(stderr, "init");
     for (int64_t i = 0; i < n; ++i) std::fprintf(stderr, " %.17g", q(i));

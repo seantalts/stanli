@@ -1,55 +1,15 @@
 #include <stanli/estimate.hpp>
 
-#include <stan/callbacks/interrupt.hpp>
-#include <stan/callbacks/logger.hpp>
-#include <stan/callbacks/writer.hpp>
+#include "initialize.hpp"
+
 #include <stan/optimization/bfgs.hpp>
 #include <stan/services/util/create_rng.hpp>
 
-#include <cmath>
-#include <limits>
 #include <sstream>
-#include <stdexcept>
 
 namespace stanli {
 
 namespace {
-
-// Draw a starting point the way the sampler does, so `optimize` and
-// `sample` disagree about where to start only when asked to. Rejects a
-// draw whose log density or gradient is not finite, as CmdStan's
-// initialize does.
-std::vector<double> initial_point(Executor& ex, uint32_t seed, int chain_id,
-                                  double radius, const double* init) {
-  const int64_t n = ex.n_params();
-  std::vector<double> q((size_t)n, 0.0);
-  if (init != nullptr) {
-    for (int64_t i = 0; i < n; ++i) q[(size_t)i] = init[i];
-    return q;
-  }
-  if (radius == 0.0) return q;
-
-  stan::rng_t rng = stan::services::util::create_rng(seed, chain_id);
-  boost::random::uniform_real_distribution<double> dist(-radius, radius);
-  std::vector<double> grad((size_t)n);
-  for (int attempt = 0; attempt < 100; ++attempt) {
-    for (int64_t i = 0; i < n; ++i) q[(size_t)i] = dist(rng);
-    for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
-    try {
-      const double lp = ex.forward_value_only();
-      if (!std::isfinite(lp)) continue;
-      const double g = ex.gradient(grad.data());
-      if (!std::isfinite(g)) continue;
-      bool ok = true;
-      for (int64_t i = 0; ok && i < n; ++i) ok = std::isfinite(grad[(size_t)i]);
-      if (ok) return q;
-    } catch (const std::exception&) {
-    }
-  }
-  throw std::runtime_error(
-      "initialization failed: no draw in 100 attempts had finite log density "
-      "and gradient");
-}
 
 // run_optimize refuses the Jacobian-free form before it gets here, so only
 // the Jacobian form is ever instantiated.
@@ -106,8 +66,10 @@ OptimizeResult run_optimize(Executor& ex, const WriteArray* wa,
     return out;
   }
   ExecutorModel model(ex, wa);
-  std::vector<double> cont =
-      initial_point(ex, cfg.seed, cfg.chain_id, cfg.init_radius, cfg.init);
+  stan::rng_t rng = stan::services::util::create_rng(cfg.seed, cfg.chain_id);
+  std::vector<double> cont((size_t)ex.n_params());
+  initialize_point(ex, rng, cfg.init_radius, cfg.init, cont.data(),
+                   FixedInitPolicy::SkipValidation);
 
   out.return_code = run_lbfgs(model, cont, cfg, &out.lp, &out.message);
   out.unconstrained = cont;

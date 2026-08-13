@@ -1698,42 +1698,53 @@ struct Lowering {
   }
 
   std::optional<Val> lower_density_fn(const mir::Expr& e) {
-    // Densities. n_int leading args come from int data (idata); the rest are
-    // real slots. Layouts: one int group = raw values; two groups =
+    // Leading integer arguments become idata; the rest become real slots.
+    // Layouts: one integer group = raw values; two groups =
     // [len, vals..., len, vals...]; glm = [y..., rows, cols].
-    struct Dens {
-      uint16_t op;
-      int nargs;
-      int n_int;
-      bool glm = false;
+    enum class DensityShape {
+      Plain,
+      FirstMatrixRows,
+      FirstMatrixDimensions,
+      LastMatrixRowsAndRepetitions,
     };
-    static const std::map<std::string, Dens> kDens = {
+    struct DensitySpec {
+      uint16_t opcode;
+      int arity;
+      int integer_args;
+      bool glm_layout = false;
+      DensityShape shape = DensityShape::Plain;
+      int activity_mask = -1;  // negative: derive from MIR arguments
+    };
+    static const std::map<std::string, DensitySpec> kDensities = {
         {"poisson_log_lpmf", {OP_POISSON_LOG_LPMF, 2, 1}},
         {"bernoulli_logit_lpmf", {OP_BERNOULLI_LOGIT_LPMF, 2, 1}},
-    // Generated from STANLI_SCALAR_DENSITY_LIST (optable.hpp): the same
-    // one line that made the opcode and the kernel makes this entry.
+
+    // clang-format off
+        // These macros use the same lists that define opcodes and kernels.
 #define STANLI_DENSITY_TABLE(code, fn, n, m) {#fn, {code, n, 0}},
         STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_TABLE)
 #undef STANLI_DENSITY_TABLE
-    // Discrete densities: outcome + n real arguments, one int group.
-    // Ordered ones have the same lowering shape -- their cutpoint
-    // vector is an ordinary real slot -- and differ only in that
-    // reroll never fuses them.
+
+        // Discrete densities: outcome + n real arguments, one int group.
+        // Ordered cutpoints remain an ordinary real slot.
 #define STANLI_INT_DENSITY_TABLE(code, fn, nreal, t) \
   {#fn, {code, nreal + 1, 1}},
-            STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TABLE)
+        STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TABLE)
 #undef STANLI_INT_DENSITY_TABLE
-    // cdf/lcdf/lccdf: all-real arguments, no int group, and
-    // fn_propto is never set on them.
+
+        // Continuous cdf/lcdf/lccdf functions have no integer group.
 #define STANLI_CDF_TABLE(code, fn, n, t) {#fn, {code, n, 0}},
-                STANLI_SCALAR_CDF_LIST(STANLI_CDF_TABLE)
+        STANLI_SCALAR_CDF_LIST(STANLI_CDF_TABLE)
 #undef STANLI_CDF_TABLE
-    // Integer-outcome cdfs: the count is the one int group.
+
+        // Integer-outcome cdfs keep the count in the one integer group.
 #define STANLI_INT_CDF_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 1, 1}},
-                    STANLI_INT_CDF_LIST(STANLI_INT_CDF_TABLE)
-                        STANLI_ORDERED_DENSITY_LIST(STANLI_INT_CDF_TABLE)
+        STANLI_INT_CDF_LIST(STANLI_INT_CDF_TABLE)
+        STANLI_ORDERED_DENSITY_LIST(STANLI_INT_CDF_TABLE)
 #undef STANLI_INT_CDF_TABLE
-                            {"bernoulli_lpmf", {OP_BERNOULLI_LPMF, 2, 1}},
+        // clang-format on
+
+        {"bernoulli_lpmf", {OP_BERNOULLI_LPMF, 2, 1}},
         {"poisson_lpmf", {OP_POISSON_LPMF, 2, 1}},
         {"neg_binomial_2_lpmf", {OP_NEG_BINOMIAL_2_LPMF, 3, 1}},
         {"binomial_lpmf", {OP_BINOMIAL_LPMF, 3, 2}},
@@ -1744,16 +1755,71 @@ struct Lowering {
         {"beta_binomial_lpmf", {OP_BETA_BINOMIAL_LPMF, 4, 2}},
         {"bernoulli_logit_glm_lpmf", {OP_BERNOULLI_LOGIT_GLM_LPMF, 4, 1, true}},
         {"dirichlet_lpdf", {OP_DIRICHLET_LPDF, 2, 0}},
+        {"multi_normal_cholesky_lpdf",
+         {OP_MULTI_NORMAL_CHOL_LPDF, 3, 0, false,
+          DensityShape::LastMatrixRowsAndRepetitions}},
+        {"multi_normal_lpdf",
+         {OP_MULTI_NORMAL_LPDF, 3, 0, false,
+          DensityShape::LastMatrixRowsAndRepetitions}},
+        {"multi_normal_prec_lpdf",
+         {OP_MULTI_NORMAL_PREC_LPDF, 3, 0, false,
+          DensityShape::LastMatrixRowsAndRepetitions}},
+        {"lkj_corr_cholesky_lpdf",
+         {OP_LKJ_CORR_CHOL_LPDF, 2, 0, false, DensityShape::FirstMatrixRows,
+          0x1}},
+        {"lkj_corr_lpdf",
+         {OP_LKJ_CORR_LPDF, 2, 0, false, DensityShape::FirstMatrixRows, 0x1}},
+        {"lkj_cov_lpdf",
+         {OP_LKJ_COV_LPDF, 4, 0, false, DensityShape::FirstMatrixRows, 0xf}},
+        {"multi_gp_lpdf",
+         {OP_MULTI_GP_LPDF, 3, 0, false, DensityShape::FirstMatrixDimensions,
+          0x7}},
+        {"multi_gp_cholesky_lpdf",
+         {OP_MULTI_GP_CHOL_LPDF, 3, 0, false,
+          DensityShape::FirstMatrixDimensions, 0x7}},
+        {"multi_student_t_lpdf",
+         {OP_MULTI_STUDENT_T_LPDF, 4, 0, false,
+          DensityShape::LastMatrixRowsAndRepetitions, 0xf}},
+        {"multi_student_t_cholesky_lpdf",
+         {OP_MULTI_STUDENT_T_CHOL_LPDF, 4, 0, false,
+          DensityShape::LastMatrixRowsAndRepetitions, 0xf}},
+        {"multinomial_lpmf",
+         {OP_MULTINOMIAL_LPMF, 2, 1, false, DensityShape::Plain, 0x1}},
+        {"multinomial_logit_lpmf",
+         {OP_MULTINOMIAL_LOGIT_LPMF, 2, 1, false, DensityShape::Plain, 0x1}},
+        {"dirichlet_multinomial_lpmf",
+         {OP_DIRICHLET_MULTINOMIAL_LPMF, 2, 1, false, DensityShape::Plain,
+          0x1}},
+        {"ordered_probit_lpmf",
+         {OP_ORDERED_PROBIT_LPMF, 3, 1, false, DensityShape::Plain, 0x3}},
+        {"wiener_lpdf",
+         {OP_WIENER_LPDF, 5, 0, false, DensityShape::Plain, 0x1f}},
+        {"wishart_lpdf",
+         {OP_WISHART_LPDF, 3, 0, false, DensityShape::FirstMatrixRows, 0x7}},
+        {"inv_wishart_lpdf",
+         {OP_INV_WISHART_LPDF, 3, 0, false, DensityShape::FirstMatrixRows,
+          0x7}},
+        {"wishart_cholesky_lpdf",
+         {OP_WISHART_CHOL_LPDF, 3, 0, false, DensityShape::FirstMatrixRows,
+          0x7}},
+        {"inv_wishart_cholesky_lpdf",
+         {OP_INV_WISHART_CHOL_LPDF, 3, 0, false, DensityShape::FirstMatrixRows,
+          0x7}},
     };
-    auto dit = kDens.find(e.name);
-    if (dit != kDens.end()) {
-      const Dens& d = dit->second;
-      if ((int)e.args.size() != d.nargs)
-        fail(e.name + ": expected " + std::to_string(d.nargs) + " args");
+    auto density = kDensities.find(e.name);
+    if (density != kDensities.end()) {
+      const DensitySpec& spec = density->second;
+      if ((int)e.args.size() != spec.arity) {
+        // The compact cases below used to decline a bad arity and let the
+        // common unsupported-function diagnostic report it.
+        if (spec.shape != DensityShape::Plain || spec.activity_mask >= 0)
+          return std::nullopt;
+        fail(e.name + ": expected " + std::to_string(spec.arity) + " args");
+      }
       std::vector<int> idata;
-      if (d.n_int == 1) {
+      if (spec.integer_args == 1) {
         idata = int_arg_values(e.args[0]);
-      } else if (d.n_int == 2) {
+      } else if (spec.integer_args == 2) {
         // Group length -1 marks a language-level scalar (broadcast in
         // stan-math); a length-1 array stays a vector, as CmdStan would
         // instantiate it.
@@ -1767,28 +1833,53 @@ struct Lowering {
         put(e.args[1]);
       }
       std::vector<int> ins;
-      SlotInfo first_real_si;
+      SlotInfo shapes[6]{};
       SlotInfo result_si{0, 0, true};
       bool result_autodiff = false;
-      uint8_t variant = 0;
-      for (size_t i = d.n_int; i < e.args.size(); ++i) {
+      uint8_t variant =
+          spec.activity_mask < 0 ? 0 : (uint8_t)spec.activity_mask;
+      for (size_t i = spec.integer_args; i < e.args.size(); ++i) {
         const Val arg = lower_expr(e.args[i]);
-        if (i == d.n_int) first_real_si = arg.si;
+        shapes[i - spec.integer_args] = arg.si;
         ins.push_back(arg.slot);
         result_si.param_free = result_si.param_free && arg.si.param_free;
         result_autodiff = result_autodiff || arg.autodiff;
-        if (!e.args[i].data_only) variant |= (uint8_t)(1u << (i - d.n_int));
+        if (spec.activity_mask < 0 && !e.args[i].data_only)
+          variant |= (uint8_t)(1u << (i - spec.integer_args));
       }
       if (propto(e)) variant |= 0x80u;
-      if (d.glm) {
+      if (spec.glm_layout) {
         // X must be a data matrix; append its dims to idata.
-        const SlotInfo& xsi = first_real_si;
+        const SlotInfo& xsi = shapes[0];
         if (!is_matrix(xsi) || !xsi.param_free)
           fail(e.name + ": X must be a data matrix");
         idata.push_back((int)xsi.rows);
         idata.push_back((int)xsi.cols);
       }
-      Val dv = emit_raw(d.op, ins, 1, result_si, idata, -1, result_autodiff);
+      if (spec.shape == DensityShape::FirstMatrixRows) {
+        if (!is_matrix(shapes[0])) {
+          if (e.name == "lkj_cov_lpdf") fail("lkj_cov needs a matrix", e.raw);
+          fail(e.name + " needs a matrix", e.raw);
+        }
+        idata = {(int)shapes[0].rows};
+      } else if (spec.shape == DensityShape::FirstMatrixDimensions) {
+        if (!is_matrix(shapes[0]) || !is_matrix(shapes[1]))
+          fail(e.name + " needs matrix arguments", e.raw);
+        idata = {(int)shapes[0].rows, (int)shapes[0].cols};
+      } else if (spec.shape == DensityShape::LastMatrixRowsAndRepetitions) {
+        const size_t last = ins.size() - 1;
+        if (!is_matrix(shapes[last])) {
+          if (e.name.rfind("multi_normal", 0) == 0)
+            fail(e.name + ": needs a matrix argument (got length " +
+                     std::to_string(g.slots[ins[last]].len) + ")",
+                 e.raw);
+          fail(e.name + " needs a matrix argument", e.raw);
+        }
+        const int64_t K = shapes[last].rows;
+        idata = {(int)K, (int)(g.slots[ins[0]].len / K)};
+      }
+      Val dv =
+          emit_raw(spec.opcode, ins, 1, result_si, idata, -1, result_autodiff);
       // GLM ops used to be the one density shape that got no variant at
       // all, so their kernels hardcoded propto=false and poisson_log_glm's
       // lp landed sum(log(y!)) -- 10.45 on a six-row test -- away from
@@ -1813,57 +1904,6 @@ struct Lowering {
       const Val outcome = lower_expr(e.args[0]);
       Val th = lower_expr(e.args[1]);
       return emit_categorical(e, outcome, th, false);
-    }
-
-    if ((e.name == "multi_normal_cholesky_lpdf" ||
-         e.name == "multi_normal_lpdf" || e.name == "multi_normal_prec_lpdf") &&
-        e.args.size() == 3) {
-      Val y = lower_expr(e.args[0]);
-      Val mu = lower_expr(e.args[1]);
-      Val m = lower_expr(e.args[2]);
-      uint8_t variant = 0;
-      for (int i = 0; i < 3; ++i)
-        if (!e.args[i].data_only) variant |= (uint8_t)(1u << i);
-      if (propto(e)) variant |= 0x80u;
-      // K comes from the matrix argument; y may be one K-vector or an
-      // array of m of them (stan-math's vectorized signature).
-      if (!is_matrix(m.si))
-        fail(e.name + ": needs a matrix argument (got length " +
-                 std::to_string(g.slots[m.slot].len) + ")",
-             e.raw);
-      const int64_t K = m.si.rows;
-      const int64_t reps = g.slots[y.slot].len / K;
-      const uint16_t mn_op = e.name.find("cholesky") != std::string::npos
-                                 ? OP_MULTI_NORMAL_CHOL_LPDF
-                                 : (e.name.find("prec") != std::string::npos
-                                        ? OP_MULTI_NORMAL_PREC_LPDF
-                                        : OP_MULTI_NORMAL_LPDF);
-      Val v = emit_value(mn_op, {y, mu, m}, 1, {}, {(int)K, (int)reps});
-      g.ops.back().variant = variant;
-      return v;
-    }
-    if ((e.name == "lkj_corr_cholesky_lpdf" || e.name == "lkj_corr_lpdf") &&
-        e.args.size() == 2) {
-      Val L = lower_expr(e.args[0]);
-      Val eta = lower_expr(e.args[1]);
-      if (!is_matrix(L.si)) fail(e.name + " needs a matrix", e.raw);
-      Val v = emit_value(
-          e.name == "lkj_corr_lpdf" ? OP_LKJ_CORR_LPDF : OP_LKJ_CORR_CHOL_LPDF,
-          {L, eta}, 1, {}, {(int)L.si.rows});
-      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1u);
-      return v;
-    }
-    // lkj_cov(Sigma | mu, sigma, eta).
-    if (e.name == "lkj_cov_lpdf" && e.args.size() == 4) {
-      Val S = lower_expr(e.args[0]);
-      Val mu = lower_expr(e.args[1]);
-      Val sig = lower_expr(e.args[2]);
-      Val eta = lower_expr(e.args[3]);
-      if (!is_matrix(S.si)) fail("lkj_cov needs a matrix", e.raw);
-      Val v = emit_value(OP_LKJ_COV_LPDF, {S, mu, sig, eta}, 1, {},
-                         {(int)S.si.rows});
-      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0xfu);
-      return v;
     }
 
     // gaussian_dlm_obs takes seven arguments and Op::in holds six, so it
@@ -1917,109 +1957,6 @@ struct Lowering {
       return v;
     }
 
-    // multi_gp: (matrix y[K x N], matrix Sigma[K x K], vector w[K]).
-    if ((e.name == "multi_gp_lpdf" || e.name == "multi_gp_cholesky_lpdf") &&
-        e.args.size() == 3) {
-      Val y = lower_expr(e.args[0]);
-      Val S = lower_expr(e.args[1]);
-      Val w = lower_expr(e.args[2]);
-      if (!is_matrix(y.si) || !is_matrix(S.si))
-        fail(e.name + " needs matrix arguments", e.raw);
-      Val v = emit_value(
-          e.name == "multi_gp_lpdf" ? OP_MULTI_GP_LPDF : OP_MULTI_GP_CHOL_LPDF,
-          {y, S, w}, 1, {}, {(int)y.si.rows, (int)y.si.cols});
-      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
-      return v;
-    }
-
-    // multi_student_t: (vector y, real nu, vector mu, matrix Sigma). K from
-    // the matrix; y may be an array of K-vectors, as multi_normal allows.
-    if ((e.name == "multi_student_t_lpdf" ||
-         e.name == "multi_student_t_cholesky_lpdf") &&
-        e.args.size() == 4) {
-      Val y = lower_expr(e.args[0]);
-      Val nu = lower_expr(e.args[1]);
-      Val mu = lower_expr(e.args[2]);
-      Val S = lower_expr(e.args[3]);
-      if (!is_matrix(S.si)) fail(e.name + " needs a matrix argument", e.raw);
-      const int64_t K = S.si.rows;
-      const int64_t reps = g.slots[y.slot].len / K;
-      Val v = emit_value(e.name == "multi_student_t_lpdf"
-                             ? OP_MULTI_STUDENT_T_LPDF
-                             : OP_MULTI_STUDENT_T_CHOL_LPDF,
-                         {y, nu, mu, S}, 1, {}, {(int)K, (int)reps});
-      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0xfu);
-      return v;
-    }
-
-    // The multinomial family: (array[] int ns, vector theta). The counts
-    // must be data (they ride in idata); theta is the only edge.
-    {
-      static const std::map<std::string, uint16_t> kMult = {
-          {"multinomial_lpmf", OP_MULTINOMIAL_LPMF},
-          {"multinomial_logit_lpmf", OP_MULTINOMIAL_LOGIT_LPMF},
-          {"dirichlet_multinomial_lpmf", OP_DIRICHLET_MULTINOMIAL_LPMF},
-      };
-      auto mit = kMult.find(e.name);
-      if (mit != kMult.end() && e.args.size() == 2) {
-        std::vector<int> ns = int_arg_values(e.args[0]);
-        Val th = lower_expr(e.args[1]);
-        Val v = emit_value(mit->second, {th}, 1, {}, ns);
-        g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1u);
-        return v;
-      }
-    }
-
-    // ordered_probit(y | lambda, c): outcome in idata, lambda and the
-    // cutpoints are real edges.
-    if (e.name == "ordered_probit_lpmf" && e.args.size() == 3) {
-      std::vector<int> y = int_arg_values(e.args[0]);
-      Val lam = lower_expr(e.args[1]);
-      Val c = lower_expr(e.args[2]);
-      Val v = emit_value(OP_ORDERED_PROBIT_LPMF, {lam, c}, 1, {}, y);
-      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x3u);
-      return v;
-    }
-
-    // wiener(y | alpha, tau, beta, delta): five real arguments.
-    if (e.name == "wiener_lpdf" && e.args.size() == 5) {
-      std::vector<int> ins;
-      SlotInfo result_si{0, 0, true};
-      bool result_autodiff = false;
-      for (int i = 0; i < 5; ++i) {
-        const Val arg = lower_expr(e.args[i]);
-        ins.push_back(arg.slot);
-        result_si.param_free = result_si.param_free && arg.si.param_free;
-        result_autodiff = result_autodiff || arg.autodiff;
-      }
-      Val v =
-          emit_raw(OP_WIENER_LPDF, ins, 1, result_si, {}, -1, result_autodiff);
-      g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1fu);
-      return v;
-    }
-
-    // The wishart family: (matrix, real, matrix), all four of them. K
-    // comes from the first matrix; the kernels bind every argument as var
-    // (docs/coverage.md, "write the kernel" tier) so no activity mask is
-    // needed, only the propto bit.
-    {
-      static const std::map<std::string, uint16_t> kWish = {
-          {"wishart_lpdf", OP_WISHART_LPDF},
-          {"inv_wishart_lpdf", OP_INV_WISHART_LPDF},
-          {"wishart_cholesky_lpdf", OP_WISHART_CHOL_LPDF},
-          {"inv_wishart_cholesky_lpdf", OP_INV_WISHART_CHOL_LPDF},
-      };
-      auto wit = kWish.find(e.name);
-      if (wit != kWish.end() && e.args.size() == 3) {
-        Val W = lower_expr(e.args[0]);
-        Val nu = lower_expr(e.args[1]);
-        Val S = lower_expr(e.args[2]);
-        if (!is_matrix(W.si)) fail(e.name + " needs a matrix", e.raw);
-        Val v = emit_value(wit->second, {W, nu, S}, 1, {}, {(int)W.si.rows});
-        g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x7u);
-        return v;
-      }
-    }
     if (e.name == "normal_id_glm_lpdf" && e.args.size() == 5) {
       Val y = lower_expr(e.args[0]);
       Val X = lower_expr(e.args[1]);
