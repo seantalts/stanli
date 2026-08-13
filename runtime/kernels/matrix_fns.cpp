@@ -141,19 +141,40 @@ VarV tail_v(const KernelCtx& ctx, int k, int64_t n) {
   for (int64_t i = 0; i < n; ++i) v(i) = ctx.in[k].data[i];
   return v;
 }
-void tail_scatter_m(KernelCtx& ctx, int k, const VarM& M) {
+void tail_scatter(KernelCtx& ctx, int k, const VarM& M) {
   if (!ctx.in_adj[k].data) return;
   const int64_t rows = M.rows(), cols = M.cols();
   for (int64_t j = 0; j < cols; ++j)
     for (int64_t i = 0; i < rows; ++i)
       ctx.in_adj[k].data[j * rows + i] += M(i, j).adj();
 }
-void tail_scatter_v(KernelCtx& ctx, int k, const VarV& v) {
+void tail_scatter(KernelCtx& ctx, int k, const VarV& v) {
   if (!ctx.in_adj[k].data) return;
   for (int64_t i = 0; i < v.size(); ++i) ctx.in_adj[k].data[i] += v(i).adj();
 }
-void tail_scatter_s(KernelCtx& ctx, int k, const stan::math::var& x) {
+void tail_scatter(KernelCtx& ctx, int k, const stan::math::var& x) {
   if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += x.adj();
+}
+void tail_scatter(KernelCtx& ctx, int k, const std::vector<VarV>& xs) {
+  if (!ctx.in_adj[k].data) return;
+  int64_t at = 0;
+  for (const auto& x : xs)
+    for (int64_t i = 0; i < x.size(); ++i)
+      ctx.in_adj[k].data[at++] += x(i).adj();
+}
+
+// Complete a compact density and return all argument adjoints in slot order.
+template <bool Grad, typename... Args>
+[[gnu::always_inline]] inline double finish_tail_density(
+    KernelCtx& ctx, const stan::math::var& density, const Args&... args) {
+  const double value = density.val();
+  if constexpr (Grad) {
+    stan::math::var seeded = density * ctx.out_adj;
+    stan::math::grad(seeded.vi_);
+    int slot = 0;
+    (tail_scatter(ctx, slot++, args), ...);
+  }
+  return value;
 }
 
 // ---- multi_normal_lpdf(y | mu, Sigma) -------------------------------------
@@ -223,8 +244,8 @@ double mn_eval(KernelCtx& ctx) {
         for (int64_t k = 0; k < m; ++k)
           for (int64_t i = 0; i < n; ++i)
             ctx.in_adj[0].data[k * n + i] += ys[k](i).adj();
-      if (am) tail_scatter_v(ctx, 1, mu);
-      if (aS) tail_scatter_m(ctx, 2, S);
+      if (am) tail_scatter(ctx, 1, mu);
+      if (aS) tail_scatter(ctx, 2, S);
     }
     return vv;
   }
@@ -249,9 +270,9 @@ double mn_eval(KernelCtx& ctx) {
   if constexpr (Grad) {
     var j = out * ctx.out_adj;
     stan::math::grad(j.vi_);
-    if (ay) tail_scatter_v(ctx, 0, y);
-    if (am) tail_scatter_v(ctx, 1, mu);
-    if (aS) tail_scatter_m(ctx, 2, S);
+    if (ay) tail_scatter(ctx, 0, y);
+    if (am) tail_scatter(ctx, 1, mu);
+    if (aS) tail_scatter(ctx, 2, S);
   }
   return v;
 }
@@ -303,13 +324,7 @@ double lkj_eval(KernelCtx& ctx) {
     out = propto ? stan::math::lkj_corr_lpdf<true>(L, eta)
                  : stan::math::lkj_corr_lpdf<false>(L, eta);
   }
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    tail_scatter_m(ctx, 0, L);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, L);
 }
 void lkj_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkj_eval<false>(ctx); }
 void lkj_bwd(KernelCtx& ctx) { lkj_eval<true>(ctx); }
@@ -490,15 +505,7 @@ double wish_eval(KernelCtx& ctx) {
     out = propto ? stan::math::inv_wishart_cholesky_lpdf<true>(W, nu, S)
                  : stan::math::inv_wishart_cholesky_lpdf<false>(W, nu, S);
   }
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    tail_scatter_m(ctx, 0, W);
-    tail_scatter_s(ctx, 1, nu);
-    tail_scatter_m(ctx, 2, S);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, W, nu, S);
 }
 #define STANLI_WISH_KERNEL(name, kind)             \
   void name##_fwd(KernelCtx& ctx) {                \
@@ -530,15 +537,7 @@ double mgp_eval(KernelCtx& ctx) {
     out = propto ? stan::math::multi_gp_cholesky_lpdf<true>(y, S, w)
                  : stan::math::multi_gp_cholesky_lpdf<false>(y, S, w);
   }
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    tail_scatter_m(ctx, 0, y);
-    tail_scatter_m(ctx, 1, S);
-    tail_scatter_v(ctx, 2, w);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, y, S, w);
 }
 
 // ---- multi_student_t: (vector y, real nu, vector mu, matrix Sigma) ------
@@ -573,19 +572,7 @@ double mst_eval(KernelCtx& ctx) {
     }
   };
   var out = reps > 1 ? call(ys) : call(ys[0]);
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    if (ctx.in_adj[0].data)
-      for (int64_t r = 0; r < reps; ++r)
-        for (int64_t i = 0; i < K; ++i)
-          ctx.in_adj[0].data[r * K + i] += ys[r](i).adj();
-    tail_scatter_s(ctx, 1, nu);
-    tail_scatter_v(ctx, 2, mu);
-    tail_scatter_m(ctx, 3, S);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, ys, nu, mu, S);
 }
 
 // ---- multinomial family: (array[] int ns, vector theta) -----------------
@@ -610,13 +597,7 @@ double mult_eval(KernelCtx& ctx) {
     out = propto ? stan::math::dirichlet_multinomial_lpmf<true>(ns, theta)
                  : stan::math::dirichlet_multinomial_lpmf<false>(ns, theta);
   }
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    tail_scatter_v(ctx, 0, theta);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, theta);
 }
 
 // ---- the two the recorder cannot take ----------------------------------
@@ -641,14 +622,7 @@ double oprobit_eval(KernelCtx& ctx) {
     out = propto ? stan::math::ordered_probit_lpmf<true>(y, lambda, c)
                  : stan::math::ordered_probit_lpmf<false>(y, lambda, c);
   }
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    tail_scatter_v(ctx, 0, lambda);
-    tail_scatter_v(ctx, 1, c);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, lambda, c);
 }
 
 // wiener(y | alpha, tau, beta, delta): five real arguments, all scalars.
@@ -663,17 +637,7 @@ double wiener_eval(KernelCtx& ctx) {
   var beta = ctx.in[3].data[0], delta = ctx.in[4].data[0];
   var out = propto ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
                    : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    tail_scatter_v(ctx, 0, y);
-    tail_scatter_s(ctx, 1, alpha);
-    tail_scatter_s(ctx, 2, tau);
-    tail_scatter_s(ctx, 3, beta);
-    tail_scatter_s(ctx, 4, delta);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, y, alpha, tau, beta, delta);
 }
 
 #define STANLI_TAIL_KERNEL(name, fn, kind)                                    \
@@ -707,16 +671,7 @@ double lkjcov_eval(KernelCtx& ctx) {
   var eta = ctx.in[3].data[0];
   var out = propto ? stan::math::lkj_cov_lpdf<true>(S, mu, sig, eta)
                    : stan::math::lkj_cov_lpdf<false>(S, mu, sig, eta);
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    tail_scatter_m(ctx, 0, S);
-    tail_scatter_v(ctx, 1, mu);
-    tail_scatter_v(ctx, 2, sig);
-    tail_scatter_s(ctx, 3, eta);
-  }
-  return v;
+  return finish_tail_density<Grad>(ctx, out, S, mu, sig, eta);
 }
 
 // The three remaining GLMs. Unlike the ones in densities.cpp these carry
@@ -743,15 +698,7 @@ double tglm_eval(KernelCtx& ctx) {
                                                              beta)
                  : stan::math::binomial_logit_glm_lpmf<false>(nn, NN, X, alpha,
                                                               beta);
-    const double v0 = out.val();
-    if constexpr (Grad) {
-      var j = out * ctx.out_adj;
-      stan::math::grad(j.vi_);
-      tail_scatter_m(ctx, 0, X);
-      tail_scatter_s(ctx, 1, alpha);
-      tail_scatter_v(ctx, 2, beta);
-    }
-    return v0;
+    return finish_tail_density<Grad>(ctx, out, X, alpha, beta);
   } else {
     std::vector<int> y(ctx.idata, ctx.idata + rows);
     if constexpr (Kind == kCatLogitGlm) {
@@ -761,15 +708,7 @@ double tglm_eval(KernelCtx& ctx) {
                                                                   beta)
                    : stan::math::categorical_logit_glm_lpmf<false>(y, X, alpha,
                                                                    beta);
-      const double vv = out.val();
-      if constexpr (Grad) {
-        var j = out * ctx.out_adj;
-        stan::math::grad(j.vi_);
-        tail_scatter_m(ctx, 0, X);
-        tail_scatter_v(ctx, 1, alpha);
-        tail_scatter_m(ctx, 2, beta);
-      }
-      return vv;
+      return finish_tail_density<Grad>(ctx, out, X, alpha, beta);
     } else {
       // in = {X, beta, cutpoints}; alpha above is beta for this one.
       VarV beta = tail_v(ctx, 1, cols);
@@ -778,15 +717,7 @@ double tglm_eval(KernelCtx& ctx) {
           propto
               ? stan::math::ordered_logistic_glm_lpmf<true>(y, X, beta, cuts)
               : stan::math::ordered_logistic_glm_lpmf<false>(y, X, beta, cuts);
-      const double vv = out.val();
-      if constexpr (Grad) {
-        var j = out * ctx.out_adj;
-        stan::math::grad(j.vi_);
-        tail_scatter_m(ctx, 0, X);
-        tail_scatter_v(ctx, 1, beta);
-        tail_scatter_v(ctx, 2, cuts);
-      }
-      return vv;
+      return finish_tail_density<Grad>(ctx, out, X, beta, cuts);
     }
   }
 }

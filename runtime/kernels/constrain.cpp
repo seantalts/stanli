@@ -168,32 +168,81 @@ int64_t constrain_scratch(const Op& op, const Slot* slots) {
   return slots[op.in[0]].len;
 }
 
-// Structured transforms (simplex / ordered / positive_ordered): forward runs
-// the prim double implementation; backward replays the actual REV constrain
-// on a nested tape with output + jacobian adjoints seeded via the dot trick.
-// Correct by construction against CmdStan's own code path.
-// Batched for array-of-simplex etc.: idata contains the outer batch count,
-// one leaf's raw width, and one leaf's constrained width. Keeping those
-// independent also makes an empty outer batch a plain zero-iteration loop.
-template <typename FwdF>
-void structured_fwd(KernelCtx& ctx, FwdF&& f) {
+// Every transform below has the same execution protocol: prim forward, then
+// a nested REV replay seeded by constrained-value and jacobian adjoints.
+// idata starts with the outer batch count and one leaf's raw width; keeping
+// both explicit makes an empty outer batch a plain zero-iteration loop. The
+// kind is compile-time data, so registration still installs direct function
+// pointers and adds no dispatch to the execution path.
+enum class StructuredKind {
+  Simplex,
+  Ordered,
+  PositiveOrdered,
+  CholeskyCorr,
+  UnitVector,
+  SumToZero,
+  CorrMatrix,
+  CovMatrix,
+  CholeskyCov
+};
+
+template <StructuredKind K, typename Y, typename Lp>
+auto apply_structured(Y& y, Lp& lp, const KernelCtx& ctx) {
+  if constexpr (K == StructuredKind::Simplex)
+    return stan::math::simplex_constrain(y, lp);
+  else if constexpr (K == StructuredKind::Ordered)
+    return stan::math::ordered_constrain(y, lp);
+  else if constexpr (K == StructuredKind::PositiveOrdered)
+    return stan::math::positive_ordered_constrain(y, lp);
+  else if constexpr (K == StructuredKind::CholeskyCorr)
+    return stan::math::cholesky_corr_constrain(y, (int)ctx.idata[2], lp);
+  else if constexpr (K == StructuredKind::UnitVector)
+    return stan::math::unit_vector_constrain(y, lp);
+  else if constexpr (K == StructuredKind::SumToZero)
+    // Volume preserving: intentionally leave lp untouched.
+    return stan::math::sum_to_zero_constrain(y);
+  else if constexpr (K == StructuredKind::CorrMatrix)
+    return stan::math::corr_matrix_constrain(y, (Eigen::Index)ctx.idata[2], lp);
+  else if constexpr (K == StructuredKind::CovMatrix)
+    return stan::math::cov_matrix_constrain(y, (Eigen::Index)ctx.idata[2], lp);
+  else
+    return stan::math::cholesky_factor_constrain(y, (int)ctx.idata[2],
+                                                 (int)ctx.idata[3], lp);
+}
+
+template <StructuredKind K>
+constexpr bool kMatrixStructured =
+    K == StructuredKind::CholeskyCorr || K == StructuredKind::CorrMatrix ||
+    K == StructuredKind::CovMatrix || K == StructuredKind::CholeskyCov;
+
+template <StructuredKind K>
+int64_t structured_output_width(const KernelCtx& ctx) {
+  if constexpr (kMatrixStructured<K>)
+    return ctx.idata[2] * ctx.idata[3];
+  else
+    return ctx.idata[2];
+}
+
+template <StructuredKind K>
+void structured_fwd(KernelCtx& ctx) {
   const int64_t nb = ctx.idata[0], inner_raw = ctx.idata[1];
-  const int64_t inner_con = ctx.idata[2];
+  const int64_t inner_con = structured_output_width<K>(ctx);
   double lp = 0.0;
   for (int64_t b = 0; b < nb; ++b) {
-    Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data + b * inner_raw,
-                                        inner_raw);
-    Eigen::VectorXd x = f(y, lp);
+    const Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data + b * inner_raw,
+                                              inner_raw);
+    const auto x = apply_structured<K>(y, lp, ctx);
     for (int64_t i = 0; i < inner_con; ++i)
-      ctx.out.data[b * inner_con + i] = x(i);
+      ctx.out.data[b * inner_con + i] = x.data()[i];
   }
   ctx.out2.data[0] = lp;
 }
-template <typename RevF>
-void structured_bwd(KernelCtx& ctx, RevF&& f) {
+
+template <StructuredKind K>
+void structured_bwd(KernelCtx& ctx) {
   if (ctx.in_adj[0].data == nullptr) return;
   const int64_t nb = ctx.idata[0], inner_raw = ctx.idata[1];
-  const int64_t inner_con = ctx.idata[2];
+  const int64_t inner_con = structured_output_width<K>(ctx);
   using stan::math::var;
   for (int64_t b = 0; b < nb; ++b) {
     stan::math::nested_rev_autodiff nested;
@@ -201,45 +250,29 @@ void structured_bwd(KernelCtx& ctx, RevF&& f) {
     for (int64_t i = 0; i < inner_raw; ++i)
       y(i) = ctx.in[0].data[b * inner_raw + i];
     var lp = 0.0;
-    auto x = f(y, lp);
-    Eigen::Map<const Eigen::VectorXd> seed(ctx.out_adj_vec.data + b * inner_con,
-                                           inner_con);
-    var j = stan::math::dot_product(seed, x) + ctx.out2_adj * lp;
-    stan::math::grad(j.vi_);
+    const auto x = apply_structured<K>(y, lp, ctx);
+    const Eigen::Map<const Eigen::VectorXd> seed(
+        ctx.out_adj_vec.data + b * inner_con, inner_con);
+    if constexpr (kMatrixStructured<K>) {
+      // Eigen storage is column-major here, matching the old explicit
+      // j*rows+i flattening and therefore its dot-product construction order.
+      Eigen::Matrix<var, -1, 1> flat(inner_con);
+      for (int64_t i = 0; i < inner_con; ++i) flat(i) = x.data()[i];
+      var objective = stan::math::dot_product(seed, flat) + ctx.out2_adj * lp;
+      stan::math::grad(objective.vi_);
+    } else {
+      var objective = stan::math::dot_product(seed, x) + ctx.out2_adj * lp;
+      stan::math::grad(objective.vi_);
+    }
     for (int64_t i = 0; i < inner_raw; ++i)
       ctx.in_adj[0].data[b * inner_raw + i] += y(i).adj();
   }
 }
 
-void simplex_fwd(KernelCtx& ctx) {
-  structured_fwd(ctx, [](const auto& y, double& lp) {
-    return stan::math::simplex_constrain(y, lp);
-  });
-}
-void simplex_bwd(KernelCtx& ctx) {
-  structured_bwd(ctx, [](auto& y, stan::math::var& lp) {
-    return stan::math::simplex_constrain(y, lp);
-  });
-}
-void ordered_fwd(KernelCtx& ctx) {
-  structured_fwd(ctx, [](const auto& y, double& lp) {
-    return stan::math::ordered_constrain(y, lp);
-  });
-}
-void ordered_bwd(KernelCtx& ctx) {
-  structured_bwd(ctx, [](auto& y, stan::math::var& lp) {
-    return stan::math::ordered_constrain(y, lp);
-  });
-}
-void pos_ordered_fwd(KernelCtx& ctx) {
-  structured_fwd(ctx, [](const auto& y, double& lp) {
-    return stan::math::positive_ordered_constrain(y, lp);
-  });
-}
-void pos_ordered_bwd(KernelCtx& ctx) {
-  structured_bwd(ctx, [](auto& y, stan::math::var& lp) {
-    return stan::math::positive_ordered_constrain(y, lp);
-  });
+template <StructuredKind K>
+void register_structured(uint16_t opcode) {
+  register_kernel(opcode,
+                  Kernel{structured_fwd<K>, structured_bwd<K>, nullptr});
 }
 
 // offset_multiplier_constrain(x, mu, sigma, lp):
@@ -303,35 +336,6 @@ void offset_mult_bwd(KernelCtx& ctx) {
   }
 }
 
-// The remaining structured transforms. unit_vector and sum_to_zero are
-// vector -> vector and go straight through the batched helpers; the three
-// matrix-valued ones flatten column-major to match slot layout, like
-// cholesky_corr above.
-void unit_vector_fwd(KernelCtx& ctx) {
-  structured_fwd(ctx, [](const auto& y, double& lp) {
-    return stan::math::unit_vector_constrain(y, lp);
-  });
-}
-void unit_vector_bwd(KernelCtx& ctx) {
-  structured_bwd(ctx, [](auto& y, stan::math::var& lp) {
-    return stan::math::unit_vector_constrain(y, lp);
-  });
-}
-
-// sum_to_zero_constrain has no lp overload: the transform is
-// volume-preserving, so its log-jacobian is exactly 0 and stan-math does
-// not offer somewhere to add one. out2 stays 0.
-void sum_to_zero_fwd(KernelCtx& ctx) {
-  structured_fwd(ctx, [](const auto& y, double&) {
-    return Eigen::VectorXd(stan::math::sum_to_zero_constrain(y));
-  });
-}
-void sum_to_zero_bwd(KernelCtx& ctx) {
-  structured_bwd(ctx, [](auto& y, stan::math::var&) {
-    return stan::math::sum_to_zero_constrain(y);
-  });
-}
-
 // sum_to_zero_matrix[N, M] is the two-axis form: (N-1)*(M-1) unconstrained
 // in, N x M out with every row AND every column summing to zero. Not the
 // vector transform applied per row, and not the same free size. Also
@@ -376,133 +380,28 @@ void sum_to_zero_mat_bwd(KernelCtx& ctx) {
   }
 }
 
-// Batched vector -> K x K (or M x N), flattened column-major within each
-// outer element. The raw width is explicit rather than inferred by division.
-template <typename F>
-void matrix_constrain_fwd(KernelCtx& ctx, int64_t nb, int64_t raw, int64_t rows,
-                          int64_t cols, F&& f) {
-  double lp = 0.0;
-  const int64_t con = rows * cols;
-  for (int64_t b = 0; b < nb; ++b) {
-    Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data + b * raw, raw);
-    Eigen::MatrixXd x = f(y, lp);
-    for (int64_t j = 0; j < cols; ++j)
-      for (int64_t i = 0; i < rows; ++i)
-        ctx.out.data[b * con + j * rows + i] = x(i, j);
-  }
-  ctx.out2.data[0] = lp;
-}
-template <typename F>
-void matrix_constrain_bwd(KernelCtx& ctx, int64_t nb, int64_t raw, int64_t rows,
-                          int64_t cols, F&& f) {
-  if (ctx.in_adj[0].data == nullptr) return;
-  using stan::math::var;
-  const int64_t con = rows * cols;
-  for (int64_t b = 0; b < nb; ++b) {
-    stan::math::nested_rev_autodiff nested;
-    Eigen::Matrix<var, -1, 1> y(raw);
-    for (int64_t i = 0; i < raw; ++i) y(i) = ctx.in[0].data[b * raw + i];
-    var lp = 0.0;
-    auto x = f(y, lp);
-    Eigen::Matrix<var, -1, 1> flat(con);
-    for (int64_t j = 0; j < cols; ++j)
-      for (int64_t i = 0; i < rows; ++i) flat(j * rows + i) = x(i, j);
-    Eigen::Map<const Eigen::VectorXd> seed(ctx.out_adj_vec.data + b * con, con);
-    var j2 = stan::math::dot_product(seed, flat) + ctx.out2_adj * lp;
-    stan::math::grad(j2.vi_);
-    for (int64_t i = 0; i < raw; ++i)
-      ctx.in_adj[0].data[b * raw + i] += y(i).adj();
-  }
-}
-
-void chol_corr_fwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t K = ctx.idata[2];
-  matrix_constrain_fwd(ctx, nb, raw, K, K, [K](const auto& y, auto& lp) {
-    return stan::math::cholesky_corr_constrain(y, (int)K, lp);
-  });
-}
-void chol_corr_bwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t K = ctx.idata[2];
-  matrix_constrain_bwd(ctx, nb, raw, K, K, [K](auto& y, auto& lp) {
-    return stan::math::cholesky_corr_constrain(y, (int)K, lp);
-  });
-}
-
-void corr_matrix_fwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t K = ctx.idata[2];
-  matrix_constrain_fwd(ctx, nb, raw, K, K, [K](const auto& y, auto& lp) {
-    return stan::math::corr_matrix_constrain(y, (Eigen::Index)K, lp);
-  });
-}
-void corr_matrix_bwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t K = ctx.idata[2];
-  matrix_constrain_bwd(ctx, nb, raw, K, K, [K](auto& y, auto& lp) {
-    return stan::math::corr_matrix_constrain(y, (Eigen::Index)K, lp);
-  });
-}
-void cov_matrix_fwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t K = ctx.idata[2];
-  matrix_constrain_fwd(ctx, nb, raw, K, K, [K](const auto& y, auto& lp) {
-    return stan::math::cov_matrix_constrain(y, (Eigen::Index)K, lp);
-  });
-}
-void cov_matrix_bwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t K = ctx.idata[2];
-  matrix_constrain_bwd(ctx, nb, raw, K, K, [K](auto& y, auto& lp) {
-    return stan::math::cov_matrix_constrain(y, (Eigen::Index)K, lp);
-  });
-}
-void chol_cov_fwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t M = ctx.idata[2], N = ctx.idata[3];
-  matrix_constrain_fwd(ctx, nb, raw, M, N, [M, N](const auto& y, auto& lp) {
-    return stan::math::cholesky_factor_constrain(y, (int)M, (int)N, lp);
-  });
-}
-void chol_cov_bwd(KernelCtx& ctx) {
-  const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
-  const int64_t M = ctx.idata[2], N = ctx.idata[3];
-  matrix_constrain_bwd(ctx, nb, raw, M, N, [M, N](auto& y, auto& lp) {
-    return stan::math::cholesky_factor_constrain(y, (int)M, (int)N, lp);
-  });
-}
-
 }  // namespace
 
 void register_constrain_kernels() {
   register_kernel(OP_CONSTRAIN_OFFSET_MULT,
                   Kernel{offset_mult_fwd, offset_mult_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_UNIT_VECTOR,
-                  Kernel{unit_vector_fwd, unit_vector_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_SUM_TO_ZERO,
-                  Kernel{sum_to_zero_fwd, sum_to_zero_bwd, nullptr});
+  register_structured<StructuredKind::UnitVector>(OP_CONSTRAIN_UNIT_VECTOR);
+  register_structured<StructuredKind::SumToZero>(OP_CONSTRAIN_SUM_TO_ZERO);
   register_kernel(OP_CONSTRAIN_SUM_TO_ZERO_MAT,
                   Kernel{sum_to_zero_mat_fwd, sum_to_zero_mat_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_CORR_MATRIX,
-                  Kernel{corr_matrix_fwd, corr_matrix_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_COV_MATRIX,
-                  Kernel{cov_matrix_fwd, cov_matrix_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_CHOL_COV,
-                  Kernel{chol_cov_fwd, chol_cov_bwd, nullptr});
+  register_structured<StructuredKind::CorrMatrix>(OP_CONSTRAIN_CORR_MATRIX);
+  register_structured<StructuredKind::CovMatrix>(OP_CONSTRAIN_COV_MATRIX);
+  register_structured<StructuredKind::CholeskyCov>(OP_CONSTRAIN_CHOL_COV);
   register_kernel(OP_CONSTRAIN_LOWER,
                   Kernel{clower_fwd, clower_bwd, constrain_scratch});
   register_kernel(OP_CONSTRAIN_UPPER,
                   Kernel{cupper_fwd, cupper_bwd, constrain_scratch});
   register_kernel(OP_CONSTRAIN_LU, Kernel{clu_fwd, clu_bwd, constrain_scratch});
-  register_kernel(OP_CONSTRAIN_CHOL_CORR,
-                  Kernel{chol_corr_fwd, chol_corr_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_SIMPLEX,
-                  Kernel{simplex_fwd, simplex_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_ORDERED,
-                  Kernel{ordered_fwd, ordered_bwd, nullptr});
-  register_kernel(OP_CONSTRAIN_POS_ORDERED,
-                  Kernel{pos_ordered_fwd, pos_ordered_bwd, nullptr});
+  register_structured<StructuredKind::CholeskyCorr>(OP_CONSTRAIN_CHOL_CORR);
+  register_structured<StructuredKind::Simplex>(OP_CONSTRAIN_SIMPLEX);
+  register_structured<StructuredKind::Ordered>(OP_CONSTRAIN_ORDERED);
+  register_structured<StructuredKind::PositiveOrdered>(
+      OP_CONSTRAIN_POS_ORDERED);
 }
 
 }  // namespace stanli
