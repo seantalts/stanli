@@ -8,6 +8,7 @@ import dataclasses
 import io
 import json
 import math
+import os
 import pathlib
 import stat
 import sys
@@ -151,15 +152,22 @@ class SignatureParserTests(unittest.TestCase):
     def test_fake_stanc_inventory_process(self):
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)
-            executable = root / "stanc"
-            executable.write_text(
+            script = root / "fake_stanc.py"
+            script.write_text(
                 "#!/usr/bin/env python3\n"
                 "import sys\n"
                 "if '--version' in sys.argv: print('stanc3 fake')\n"
                 "elif '--dump-stan-math-signatures' in sys.argv:\n"
                 " print('f(real) => real')\n"
                 "else: sys.exit(2)\n", encoding="utf-8")
-            executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+            if os.name == "nt":
+                executable = root / "stanc.cmd"
+                executable.write_text(
+                    f'@"{sys.executable}" "{script}" %*\r\n',
+                    encoding="utf-8")
+            else:
+                executable = script
+                executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
             inventory = load_inventory(executable)
             self.assertEqual(inventory.signature_count, 1)
             self.assertEqual(inventory.name_count, 1)
