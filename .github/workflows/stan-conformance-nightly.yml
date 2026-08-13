@@ -162,15 +162,63 @@ jobs:
             --output conformance-aggregate \
             --failure-limit 40
 
-      - name: Write the compact Actions summary
+      - name: Upload aggregate report and reproducers
+        id: aggregate_artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-aggregate
+          if-no-files-found: error
+          path: conformance-aggregate/
+
+      - name: Write the Actions summary
         if: always() && hashFiles('conformance-aggregate/conformance.json') != ''
+        env:
+          ARTIFACT_URL: ${{ steps.aggregate_artifact.outputs.artifact-url }}
         run: |
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import html
           import json
+          import os
+
           report = json.load(open("conformance-aggregate/conformance.json"))
+          artifact_url = os.environ.get("ARTIFACT_URL", "")
+          missing_statuses = {"generator_gap", "unexpected_unsupported"}
+          blocking_statuses = {
+              "generator_gap", "harness_error", "mismatch",
+              "unexpected_unsupported",
+          }
+
+          def cell(value, limit=None):
+              text = " ".join(str(value or "").split())
+              if limit is not None and len(text) > limit:
+                  text = text[:limit - 1] + "…"
+              return html.escape(text).replace("|", "&#124;")
+
+          def findings_table(rows, limit):
+              shown = rows[:limit]
+              print(f"Showing {len(shown)} of {len(rows)} findings.")
+              print()
+              print("| Status | Case ID | Reason | Reproduce |")
+              print("| --- | --- | --- | --- |")
+              for row in shown:
+                  command = row.get("repro_command") or ""
+                  print(
+                      f"| `{cell(row['status'])}` "
+                      f"| <code>{cell(row['case_id'])}</code> "
+                      f"| {cell(row['reason'], 240)} "
+                      f"| <code>{cell(command, 240)}</code> |"
+                  )
+
           print("# Generated Stan conformance")
           print()
-          print("**Gate:**", "GREEN" if report["green"] else "RED")
+          gate = "GREEN" if report["green"] else "RED"
+          if artifact_url:
+              print(f"**Gate:** {gate} · "
+                    f"[Download the complete report, unsupported list, "
+                    f"and reproducers]({artifact_url})")
+          else:
+              print(f"**Gate:** {gate}")
           print()
           print("| Status | Count |")
           print("| --- | ---: |")
@@ -178,15 +226,46 @@ jobs:
               print(f"| `{status}` | {count} |")
           print()
           print("Gate issues:", ", ".join(report["gate_issues"]) or "none")
-          PY
 
-      - name: Upload aggregate report and reproducers
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: conformance-aggregate
-          if-no-files-found: error
-          path: conformance-aggregate/
+          missing = [
+              row for row in report["results"]
+              if row["kind"] == "signature"
+              and row["status"] in missing_statuses
+          ]
+          missing.sort(key=lambda row: (
+              0 if row["status"] == "unexpected_unsupported" else 1,
+              row["case_id"],
+          ))
+          print()
+          print("## Missing signature coverage")
+          print()
+          if missing:
+              findings_table(missing, 40)
+          else:
+              print("No generated or runtime support gaps were found.")
+
+          missing_ids = {row["case_id"] for row in missing}
+          other_blocking = [
+              row for row in report["results"]
+              if row["status"] in blocking_statuses
+              and row["case_id"] not in missing_ids
+          ]
+          other_priority = {
+              "harness_error": 0, "mismatch": 1,
+              "unexpected_unsupported": 2, "generator_gap": 3,
+          }
+          other_blocking.sort(key=lambda row: (
+              other_priority[row["status"]], row["case_id"],
+          ))
+          print()
+          print("## Other blocking findings")
+          print()
+          if other_blocking:
+              findings_table(other_blocking, 20)
+          else:
+              print("No mismatches, construct gaps, or infrastructure "
+                    "errors were found.")
+          PY
 
       - name: Enforce the aggregate gate
         if: always()

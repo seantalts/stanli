@@ -99,7 +99,9 @@ without reevaluation.
 job nightly and on manual dispatch. It builds the public runtime once, executes
 eight stable differential partitions with content-addressed reference caches,
 then strictly aggregates and uploads reports even while the semantic gate is
-red.
+red. The aggregate Actions summary links directly to the complete artifact and
+shows the first 40 missing signatures plus the first 20 other blocking findings,
+including their reasons and copy-paste reproduction commands.
 
 ## Fast harness tests
 
