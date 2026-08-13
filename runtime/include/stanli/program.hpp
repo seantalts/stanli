@@ -33,47 +33,74 @@ namespace stanli {
 
 struct KernelCtx;  // graph.hpp; only CALL's helpers touch it
 
+// Structural facts used by the program compilers and the generated-adjoint
+// pass. The evaluator's arithmetic stays in the explicit switch below: its
+// grouping is observable and deliberately mirrors stan-math. These facts are
+// different -- output/range shape and values that must survive until reverse
+// -- and having one row per instruction prevents several classification
+// switches from drifting apart.
+enum ProgramOpFlag : uint16_t {
+  kProgramNoInputs = 1u << 0,
+  kProgramNoAdjoint = 1u << 1,
+  kProgramRangeA = 1u << 2,
+  kProgramRangeB = 1u << 3,
+  kProgramSaveA = 1u << 4,
+  kProgramSaveB = 1u << 5,
+  kProgramSaveC = 1u << 6,
+  kProgramSaveOut = 1u << 7,
+  kProgramNoOutput = 1u << 8,
+  kProgramRangeOutput = 1u << 9,
+};
+
+#define STANLI_PROGRAM_CODE_LIST(X)                                       \
+  X(CONST, kProgramNoInputs)                                              \
+  X(CONSTR, kProgramNoInputs | kProgramRangeOutput)                       \
+  X(MOV, 0)                                                               \
+  X(MOVR, kProgramRangeA | kProgramRangeOutput)                           \
+  X(ADD, 0)                                                               \
+  X(SUB, 0)                                                               \
+  X(MUL, kProgramSaveA | kProgramSaveB)                                   \
+  X(DIV, kProgramSaveA | kProgramSaveB)                                   \
+  X(POW, kProgramSaveA | kProgramSaveB | kProgramSaveOut)                 \
+  X(FMAX, kProgramSaveA | kProgramSaveB)                                  \
+  X(FMIN, kProgramSaveA | kProgramSaveB)                                  \
+  X(NEG, 0)                                                               \
+  X(EXP, kProgramSaveOut)                                                 \
+  X(LOG, kProgramSaveA)                                                   \
+  X(SQRT, kProgramSaveOut)                                                \
+  X(SQUARE, kProgramSaveA)                                                \
+  X(INV, kProgramSaveA)                                                   \
+  X(FABS, kProgramSaveA)                                                  \
+  X(INV_LOGIT, kProgramSaveOut)                                           \
+  X(LOG1M, kProgramSaveA)                                                 \
+  X(TANH, kProgramSaveA)                                                  \
+  X(GT, 0)                                                                \
+  X(GE, 0)                                                                \
+  X(LT, 0)                                                                \
+  X(LE, 0)                                                                \
+  X(EQ, 0)                                                                \
+  X(NE, 0)                                                                \
+  X(JZ, kProgramNoAdjoint | kProgramNoOutput)                             \
+  X(JMP, kProgramNoAdjoint | kProgramNoOutput)                            \
+  X(LOG_RANGE, kProgramRangeA | kProgramSaveA | kProgramRangeOutput)      \
+  X(EXP_RANGE, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)    \
+  X(DOT, kProgramRangeA | kProgramRangeB | kProgramSaveA | kProgramSaveB) \
+  X(LSE_RANGE, kProgramRangeA | kProgramSaveA | kProgramSaveOut)          \
+  X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)      \
+  X(LSE2, kProgramSaveA | kProgramSaveB)                                  \
+  X(LOG_MIX, kProgramSaveA | kProgramSaveB | kProgramSaveC)               \
+  X(FMA, kProgramSaveA | kProgramSaveB)                                   \
+  X(DENSITY, 0)                                                           \
+  X(CALL, 0)
+
 struct Program {
   enum Code : uint8_t {
-    CONST,   // dst = pool[a]
-    CONSTR,  // dst[0..len) = pool[a + i]
-    MOV,     // dst = r[a]
-    MOVR,    // dst[0..len) = r[a + i]
-    ADD,
-    SUB,
-    MUL,
-    DIV,  // dst = r[a] op r[b]
-    POW,
-    FMAX,
-    FMIN,
-    NEG,
-    EXP,
-    LOG,
-    SQRT,
-    SQUARE,  // dst = op(r[a])
-    INV,
-    FABS,
-    INV_LOGIT,
-    LOG1M,
-    TANH,
-    // Comparisons produce a plain 0/1 with no derivative, matching how
-    // generated C++ evaluates them on values.
-    GT,
-    GE,
-    LT,
-    LE,
-    EQ,
-    NE,
-    JZ,   // jump to `dst` when r[a] is zero
-    JMP,  // jump to `dst`
-    LOG_RANGE,
-    EXP_RANGE,  // dst[i] = op(r[a+i]), i < len
-    DOT,        // dst = sum_i r[a+i] * r[b+i]      (Eigen redux, as OP_DOT)
-    LSE_RANGE,  // dst = log_sum_exp(r[a..a+len))
-    SOFTMAX,    // dst[0..len) = softmax(r[a..a+len))
-    LSE2,       // dst = log_sum_exp(r[a], r[b])
-    LOG_MIX,    // dst = log_mix(r[a], r[b], r[c])
-    FMA,        // dst = fma(r[a], r[b], r[c]), fused like stan-math's
+#define STANLI_PROGRAM_ENUM(name, flags) name,
+    STANLI_PROGRAM_CODE_LIST(STANLI_PROGRAM_ENUM)
+#undef STANLI_PROGRAM_ENUM
+    // CONST/CONSTR, MOV/MOVR, arithmetic, comparisons, jumps, ranged
+    // arithmetic, densities, and CALL appear above in that order. Their
+    // exact execution semantics live in run_program below.
     // Any scalar continuous density: `len` selects which
     // (program_density.hpp). One opcode rather than one per density is
     // what lets the machine speak the runtime's whole list instead of a
@@ -93,7 +120,6 @@ struct Program {
     // autodiff, so binding all of them as T reproduces the scalar op's
     // value exactly; the extra partials computed for data arguments are
     // discarded when the executor hands the island a null adjoint.
-    DENSITY,
     // Any graph kernel, by opcode: the payload is calls[a]. This is the
     // union point with the graph executor -- one instruction gives the
     // register machine the graph's whole vocabulary, and its derivative
@@ -101,7 +127,6 @@ struct Program {
     // kernels compute on doubles, so only run_program<double> can execute
     // one; the carver keeps a CALL-bearing island only when the generated
     // adjoint exists, so the var replay never meets it.
-    CALL,
   };
   struct Instr {
     Code code = CONST;
@@ -137,6 +162,40 @@ struct Program {
   int n_regs = 0;
   std::vector<int> out_regs;  // the values the caller reads back
 };
+
+struct ProgramOpSpec {
+  const char* name;
+  uint16_t flags;
+
+  constexpr bool has(ProgramOpFlag flag) const {
+    return (flags & static_cast<uint16_t>(flag)) != 0;
+  }
+};
+
+inline constexpr ProgramOpSpec kProgramOpSpecs[] = {
+#define STANLI_PROGRAM_SPEC(name, flags) {#name, static_cast<uint16_t>(flags)},
+    STANLI_PROGRAM_CODE_LIST(STANLI_PROGRAM_SPEC)
+#undef STANLI_PROGRAM_SPEC
+};
+#undef STANLI_PROGRAM_CODE_LIST
+
+inline constexpr size_t program_code_count() {
+  return sizeof(kProgramOpSpecs) / sizeof(kProgramOpSpecs[0]);
+}
+
+inline constexpr const ProgramOpSpec& program_code_spec(Program::Code code) {
+  return kProgramOpSpecs[static_cast<size_t>(code)];
+}
+
+inline constexpr int program_output_len(const Program::Instr& instr) {
+  const ProgramOpSpec& spec = program_code_spec(instr.code);
+  return spec.has(kProgramNoOutput)      ? 0
+         : spec.has(kProgramRangeOutput) ? instr.len
+                                         : 1;
+}
+
+static_assert(program_code_count() == static_cast<size_t>(Program::CALL) + 1,
+              "every Program::Code needs exactly one ProgramOpSpec");
 
 // Assemble the forward context for `call` over the register file `reg`.
 // Backward-only fields are left null; run_adjoint fills its own.

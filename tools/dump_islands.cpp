@@ -23,90 +23,8 @@ static std::string slurp(const char* p) {
   return ss.str();
 }
 
-static const char* mn(Program::Code c) {
-  switch (c) {
-    case Program::CONST:
-      return "CONST";
-    case Program::CONSTR:
-      return "CONSTR";
-    case Program::MOV:
-      return "MOV";
-    case Program::MOVR:
-      return "MOVR";
-    case Program::ADD:
-      return "ADD";
-    case Program::SUB:
-      return "SUB";
-    case Program::MUL:
-      return "MUL";
-    case Program::DIV:
-      return "DIV";
-    case Program::POW:
-      return "POW";
-    case Program::FMAX:
-      return "FMAX";
-    case Program::FMIN:
-      return "FMIN";
-    case Program::NEG:
-      return "NEG";
-    case Program::EXP:
-      return "EXP";
-    case Program::LOG:
-      return "LOG";
-    case Program::SQRT:
-      return "SQRT";
-    case Program::SQUARE:
-      return "SQUARE";
-    case Program::INV:
-      return "INV";
-    case Program::FABS:
-      return "FABS";
-    case Program::INV_LOGIT:
-      return "INV_LOGIT";
-    case Program::LOG1M:
-      return "LOG1M";
-    case Program::TANH:
-      return "TANH";
-    case Program::GT:
-      return "GT";
-    case Program::GE:
-      return "GE";
-    case Program::LT:
-      return "LT";
-    case Program::LE:
-      return "LE";
-    case Program::EQ:
-      return "EQ";
-    case Program::NE:
-      return "NE";
-    case Program::JZ:
-      return "JZ";
-    case Program::JMP:
-      return "JMP";
-    case Program::LOG_RANGE:
-      return "LOG_RANGE";
-    case Program::EXP_RANGE:
-      return "EXP_RANGE";
-    case Program::DOT:
-      return "DOT";
-    case Program::LSE_RANGE:
-      return "LSE_RANGE";
-    case Program::SOFTMAX:
-      return "SOFTMAX";
-    case Program::LSE2:
-      return "LSE2";
-    case Program::LOG_MIX:
-      return "LOG_MIX";
-    case Program::DENSITY:
-      return "DENSITY";
-    case Program::CALL:
-      return "CALL";
-  }
-  return "?";
-}
-
 static void print_instr(const Program& p, size_t i, const Program::Instr& I) {
-  std::printf("  %3zu  %-9s", i, mn(I.code));
+  std::printf("  %3zu  %-9s", i, program_code_spec(I.code).name);
   switch (I.code) {
     case Program::CONST:
       std::printf(" r%d <- pool[%d] (=%g)", I.dst, I.a, p.pool[(size_t)I.a]);
@@ -148,10 +66,12 @@ static void print_instr(const Program& p, size_t i, const Program::Instr& I) {
     }
     default:
       std::printf(" r%d <- r%d", I.dst, I.a);
+      const bool ternary = I.code == Program::LOG_MIX || I.code == Program::FMA;
       if ((I.code >= Program::ADD && I.code <= Program::FMIN) ||
           (I.code >= Program::GT && I.code <= Program::NE) ||
-          I.code == Program::LSE2)
+          I.code == Program::LSE2 || ternary)
         std::printf(", r%d", I.b);
+      if (ternary) std::printf(", r%d", I.c);
       if (I.len) std::printf(" (len %d)", I.len);
   }
   std::printf("\n");
@@ -193,7 +113,8 @@ int main(int argc, char** argv) {
         std::printf(
             "  %3zu  %-9s dst=%d a=%d b=%d c=%d | va=%d vb=%d vc=%d "
             "vd=%d\n",
-            i, mn(A.code), A.dst, A.a, A.b, A.c, A.va, A.vb, A.vc, A.vd);
+            i, program_code_spec(A.code).name, A.dst, A.a, A.b, A.c, A.va, A.vb,
+            A.vc, A.vd);
       }
     }
   }

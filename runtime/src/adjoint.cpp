@@ -37,48 +37,15 @@
 #include <vector>
 
 namespace stanli {
-namespace {
-
-// How many registers an instruction writes, starting at dst.
-int out_len(const Program::Instr& I) {
-  switch (I.code) {
-    case Program::CONSTR:
-    case Program::MOVR:
-    case Program::LOG_RANGE:
-    case Program::EXP_RANGE:
-    case Program::SOFTMAX:
-      return I.len;
-    case Program::JZ:
-    case Program::JMP:
-      return 0;
-    default:
-      return 1;
-  }
-}
-
-// Opcodes whose adjoint this pass knows. The jumps are the deliberate
-// omission: reversing control flow needs the structured form (the if/else
-// nesting the flat list has already lost), and inserting checkpoint saves
-// would move the jump targets besides. Regions carrying them -- the ones
-// lowering emits for parameter-dependent control flow -- keep the replay.
-bool supported(Program::Code c) {
-  switch (c) {
-    case Program::JZ:
-    case Program::JMP:
-      return false;
-    default:
-      return true;
-  }
-}
-
-}  // namespace
 
 bool gen_adjoint(IslandProg& p) {
   Program& fwd = p;
   const std::vector<Program::Instr> orig = fwd.code;
   const int n0 = fwd.n_regs;
+  // Reversing flat jumps needs the structured if/else form the instruction
+  // stream has already lost. Such programs keep the var replay.
   for (const auto& I : orig)
-    if (!supported(I.code)) return false;
+    if (program_code_spec(I.code).has(kProgramNoAdjoint)) return false;
 
   // Where each register was first and last written. A value the backward
   // needs survives in place exactly when no later instruction overwrites it;
@@ -101,7 +68,7 @@ bool gen_adjoint(IslandProg& p) {
         if (!mark_write(i, call.scratch + k)) return false;
       continue;
     }
-    const int wl = out_len(orig[i]);
+    const int wl = program_output_len(orig[i]);
     for (int k = 0; k < wl; ++k)
       if (!mark_write(i, orig[i].dst + k)) return false;
   }
@@ -133,20 +100,18 @@ bool gen_adjoint(IslandProg& p) {
     }
   }
 
-  // Two ranges that overlap without coinciding would have the elementwise
-  // adjoint loop read a cell it has already zeroed. Coinciding is fine and
-  // common (an in-place `x = exp(x)`); partial overlap is not emitted by
-  // either front end, so refuse rather than reason about it.
-  auto bad_overlap = [](int x, int y, int len) {
-    return x != y && x < y + len && y < x + len;
+  // An input range may coincide with a range output (`x = exp(x)`), but a
+  // partial overlap would read a cell the adjoint loop has already cleared.
+  auto overlaps = [](int x, int nx, int y, int ny) {
+    return nx > 0 && ny > 0 && x < y + ny && y < x + nx;
   };
   // Every register an adjoint rule will READ, checked once here rather than
   // trusted per rule. The write side is bounded by the loop above; nothing
   // bounded the operands, and they index the same vectors.
   auto in_range = [&](int r, int len) { return r >= 0 && r + len <= n0; };
   for (const auto& I : orig) {
-    const int reads =
-        I.code == Program::CONST || I.code == Program::CONSTR ? 0 : 3;
+    const ProgramOpSpec& spec = program_code_spec(I.code);
+    const int reads = spec.has(kProgramNoInputs) ? 0 : 3;
     if (I.code == Program::DENSITY && program_density_arity(I.len) > 3 &&
         !in_range(I.a, program_density_arity(I.len)))
       return false;
@@ -166,37 +131,16 @@ bool gen_adjoint(IslandProg& p) {
       if (reads > 1 && !in_range(I.b, 1)) return false;
       if (reads > 2 && !in_range(I.c, 1)) return false;
     }
-    switch (I.code) {
-      case Program::MOVR:
-      case Program::LOG_RANGE:
-      case Program::EXP_RANGE:
-      case Program::SOFTMAX:
-      case Program::LSE_RANGE:
-        if (!in_range(I.a, I.len)) return false;
-        break;
-      case Program::DOT:
-        if (!in_range(I.a, I.len) || !in_range(I.b, I.len)) return false;
-        break;
-      default:
-        break;
-    }
-    switch (I.code) {
-      case Program::MOVR:
-      case Program::LOG_RANGE:
-      case Program::EXP_RANGE:
-      case Program::SOFTMAX:
-        if (bad_overlap(I.dst, I.a, I.len)) return false;
-        break;
-      case Program::LSE_RANGE:
-        if (I.dst >= I.a && I.dst < I.a + I.len) return false;
-        break;
-      case Program::DOT:
-        if (I.dst >= I.a && I.dst < I.a + I.len) return false;
-        if (I.dst >= I.b && I.dst < I.b + I.len) return false;
-        break;
-      default:
-        break;
-    }
+    const int wl = program_output_len(I);
+    const bool coincident_range = spec.has(kProgramRangeOutput);
+    if (spec.has(kProgramRangeA) &&
+        (!in_range(I.a, I.len) || (overlaps(I.dst, wl, I.a, I.len) &&
+                                   !(coincident_range && I.dst == I.a))))
+      return false;
+    if (spec.has(kProgramRangeB) &&
+        (!in_range(I.b, I.len) || (overlaps(I.dst, wl, I.b, I.len) &&
+                                   !(coincident_range && I.dst == I.b))))
+      return false;
   }
 
   std::vector<Program::Instr> ncode;
@@ -206,6 +150,19 @@ bool gen_adjoint(IslandProg& p) {
   ap.adj_reg.resize((size_t)n0);
   for (int r = 0; r < n0; ++r) ap.adj_reg[(size_t)r] = r;
   int n_regs = n0;
+
+  auto checkpoint = [&](int r, int len, bool needed) {
+    if (!needed) return r;
+    const int ck = n_regs;
+    n_regs += len;
+    Program::Instr save;
+    save.code = len == 1 ? Program::MOV : Program::MOVR;
+    save.dst = ck;
+    save.a = r;
+    save.len = len;
+    ncode.push_back(save);
+    return ck;
+  };
 
   // A copy the forward never rewrites shares its source's adjoint cell.
   // This is the replay's vari sharing, written down: `reg[d] = reg[a]` on
@@ -240,16 +197,7 @@ bool gen_adjoint(IslandProg& p) {
     bool need = false;
     for (int k = 0; k < len && !need; ++k)
       need = last_write[(size_t)(r + k)] > i;
-    if (!need) return r;
-    const int ck = n_regs;
-    n_regs += len;
-    Program::Instr S;
-    S.code = len == 1 ? Program::MOV : Program::MOVR;
-    S.dst = ck;
-    S.a = r;
-    S.len = len;
-    ncode.push_back(S);
-    return ck;
+    return checkpoint(r, len, need);
   };
 
   for (int i = 0; i < (int)orig.size(); ++i) {
@@ -288,7 +236,7 @@ bool gen_adjoint(IslandProg& p) {
     A.vb = I.b;
     A.vc = I.c;
     A.vd = I.dst;
-    const int wl = out_len(I);
+    const int wl = program_output_len(I);
 
     // An operand value is needed as it stood on ENTRY to this instruction,
     // so it must be saved when this instruction overwrites it (`d = d * b`
@@ -298,102 +246,31 @@ bool gen_adjoint(IslandProg& p) {
       bool need = r < I.dst + wl && I.dst < r + len;
       for (int k = 0; k < len && !need; ++k)
         need = last_write[(size_t)(r + k)] > i;
-      if (!need) return r;
-      const int ck = n_regs;
-      n_regs += len;
-      Program::Instr S;
-      S.code = len == 1 ? Program::MOV : Program::MOVR;
-      S.dst = ck;
-      S.a = r;
-      S.len = len;
-      ncode.push_back(S);
-      return ck;
+      return checkpoint(r, len, need);
     };
-    switch (I.code) {
-      case Program::MUL:
-      case Program::DIV:
-      case Program::POW:
-      case Program::FMAX:
-      case Program::FMIN:
-      case Program::LSE2:
+    const ProgramOpSpec& spec = program_code_spec(I.code);
+    if (I.code == Program::DENSITY) {
+      const int ar = program_density_arity(I.len);
+      if (ar > 3) {
+        A.va = save_before(I.a, ar);
+      } else {
         A.va = save_before(I.a, 1);
-        A.vb = save_before(I.b, 1);
-        break;
-      case Program::LOG:
-      case Program::SQUARE:
-      case Program::INV:
-      case Program::FABS:
-      case Program::LOG1M:
-      case Program::TANH:
-        A.va = save_before(I.a, 1);
-        break;
-      case Program::LOG_MIX:
-        A.va = save_before(I.a, 1);
-        A.vb = save_before(I.b, 1);
-        A.vc = save_before(I.c, 1);
-        break;
-      case Program::FMA:
-        // d(a*b+c)/da = b, /db = a, /dc = 1: only a and b are re-read.
-        A.va = save_before(I.a, 1);
-        A.vb = save_before(I.b, 1);
-        break;
-      case Program::LOG_RANGE:
-      case Program::LSE_RANGE:
-        A.va = save_before(I.a, I.len);
-        break;
-      case Program::DOT:
-        A.va = save_before(I.a, I.len);
-        A.vb = save_before(I.b, I.len);
-        break;
-      case Program::DENSITY: {
-        const int ar = program_density_arity(I.len);
-        if (ar > 3) {
-          A.va = save_before(I.a, ar);
-        } else {
-          A.va = save_before(I.a, 1);
-          if (ar > 1) A.vb = save_before(I.b, 1);
-          if (ar > 2) A.vc = save_before(I.c, 1);
-        }
-        break;
+        if (ar > 1) A.vb = save_before(I.b, 1);
+        if (ar > 2) A.vc = save_before(I.c, 1);
       }
-      default:
-        break;
+    } else {
+      if (spec.has(kProgramSaveA))
+        A.va = save_before(I.a, spec.has(kProgramRangeA) ? I.len : 1);
+      if (spec.has(kProgramSaveB))
+        A.vb = save_before(I.b, spec.has(kProgramRangeB) ? I.len : 1);
+      if (spec.has(kProgramSaveC)) A.vc = save_before(I.c, 1);
     }
 
     ncode.push_back(I);
 
     // An output value is needed as this instruction LEFT it, so only a
     // later overwrite can lose it.
-    auto save_after = [&](int r, int len) {
-      bool need = false;
-      for (int k = 0; k < len && !need; ++k)
-        need = last_write[(size_t)(r + k)] > i;
-      if (!need) return r;
-      const int ck = n_regs;
-      n_regs += len;
-      Program::Instr S;
-      S.code = len == 1 ? Program::MOV : Program::MOVR;
-      S.dst = ck;
-      S.a = r;
-      S.len = len;
-      ncode.push_back(S);
-      return ck;
-    };
-    switch (I.code) {
-      case Program::EXP:
-      case Program::SQRT:
-      case Program::INV_LOGIT:
-      case Program::POW:
-      case Program::LSE_RANGE:
-        A.vd = save_after(I.dst, 1);
-        break;
-      case Program::EXP_RANGE:
-      case Program::SOFTMAX:
-        A.vd = save_after(I.dst, I.len);
-        break;
-      default:
-        break;
-    }
+    if (spec.has(kProgramSaveOut)) A.vd = save_range(I.dst, wl, i);
 
     // Adjoint operands go through the sharing map; value operands do not.
     // A range has to map to a range: aliasing builds contiguous maps from
@@ -407,41 +284,20 @@ bool gen_adjoint(IslandProg& p) {
         if (ap.adj_reg[(size_t)(r + k)] != base + k) ok = false;
       return base;
     };
-    const int wlen = out_len(I);
-    A.dst = wlen > 1 ? mapn(I.dst, wlen) : map1(I.dst);
-    switch (I.code) {
-      case Program::MOVR:
-      case Program::LOG_RANGE:
-      case Program::EXP_RANGE:
-      case Program::SOFTMAX:
-        A.a = mapn(I.a, I.len);
-        break;
-      case Program::LSE_RANGE:
-        A.a = mapn(I.a, I.len);
-        break;
-      case Program::DOT:
-        A.a = mapn(I.a, I.len);
-        A.b = mapn(I.b, I.len);
-        break;
-      case Program::DENSITY: {
-        const int ar = program_density_arity(I.len);
-        if (ar > 3) {
-          A.a = mapn(I.a, ar);
-        } else {
-          A.a = map1(I.a);
-          A.b = map1(I.b);
-          A.c = map1(I.c);
-        }
-        break;
-      }
-      case Program::CONST:
-      case Program::CONSTR:
-        break;  // no operand adjoints
-      default:
+    A.dst = wl > 1 ? mapn(I.dst, wl) : map1(I.dst);
+    if (I.code == Program::DENSITY) {
+      const int ar = program_density_arity(I.len);
+      if (ar > 3) {
+        A.a = mapn(I.a, ar);
+      } else {
         A.a = map1(I.a);
         A.b = map1(I.b);
         A.c = map1(I.c);
-        break;
+      }
+    } else if (!spec.has(kProgramNoInputs)) {
+      A.a = spec.has(kProgramRangeA) ? mapn(I.a, I.len) : map1(I.a);
+      A.b = spec.has(kProgramRangeB) ? mapn(I.b, I.len) : map1(I.b);
+      A.c = map1(I.c);
     }
     if (!ok) return false;
     ap.code.push_back(A);
@@ -744,6 +600,8 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
       case Program::JZ:
       case Program::JMP:
         break;  // gen_adjoint refuses these; unreachable
+      case Program::CALL:
+        break;  // handled before this switch
     }
   }
 }

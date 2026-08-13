@@ -105,57 +105,6 @@ static std::vector<double> native_adjoints(const IslandProg& p,
   return got;
 }
 
-static const char* code_name(Program::Code c) {
-  switch (c) {
-    case Program::CONST:
-      return "CONST";
-    case Program::CONSTR:
-      return "CONSTR";
-    case Program::MOV:
-      return "MOV";
-    case Program::MOVR:
-      return "MOVR";
-    case Program::ADD:
-      return "ADD";
-    case Program::SUB:
-      return "SUB";
-    case Program::MUL:
-      return "MUL";
-    case Program::DIV:
-      return "DIV";
-    case Program::NEG:
-      return "NEG";
-    case Program::EXP:
-      return "EXP";
-    case Program::LOG:
-      return "LOG";
-    case Program::SQRT:
-      return "SQRT";
-    case Program::SQUARE:
-      return "SQUARE";
-    case Program::TANH:
-      return "TANH";
-    case Program::DOT:
-      return "DOT";
-    case Program::LSE_RANGE:
-      return "LSE_RNG";
-    case Program::LOG_RANGE:
-      return "LOG_RNG";
-    case Program::EXP_RANGE:
-      return "EXP_RNG";
-    case Program::SOFTMAX:
-      return "SOFTMAX";
-    case Program::LSE2:
-      return "LSE2";
-    case Program::LOG_MIX:
-      return "LOG_MIX";
-    case Program::FMA:
-      return "FMA";
-    default:
-      return "OTHER";
-  }
-}
-
 // The program, for when a fuzz case fails: a random program is only useful
 // if you can read it back.
 static void dump(const IslandProg& p) {
@@ -166,8 +115,8 @@ static void dump(const IslandProg& p) {
   std::printf("\n");
   for (size_t i = 0; i < p.code.size(); ++i) {
     const auto& I = p.code[i];
-    std::printf("  %3zu %-7s r%d <- r%d, r%d (len %d)\n", i, code_name(I.code),
-                I.dst, I.a, I.b, I.len);
+    std::printf("  %3zu %-7s r%d <- r%d, r%d (len %d)\n", i,
+                program_code_spec(I.code).name, I.dst, I.a, I.b, I.len);
   }
 }
 
