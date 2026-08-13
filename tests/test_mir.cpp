@@ -1,5 +1,6 @@
 // MIR reader over the transformed-MIR sexp of eight schools.
 #include <stanli/mir.hpp>
+#include <stanli/mir_interp.hpp>
 #include <stanli/sexp.hpp>
 
 #include <cstdio>
@@ -94,6 +95,174 @@ int main(int argc, char** argv) {
   };
   for (const auto& s : p.log_prob) swalk(s);
   check(n_propto == 4, "4 propto lpdf calls");
+
+  // A scalar broadcasts over the container's logical geometry, including a
+  // zero-width vector. Flat width alone cannot identify the scalar when the
+  // vector has zero or one element.
+  {
+    std::map<std::string, const mir::FunDef*> functions;
+    MirInterp<double> interp(functions, "broadcast test");
+    auto real_value = [&](const std::string& name, std::vector<double> values,
+                          std::vector<int64_t> dims) {
+      DataMap::Entry value;
+      value.r = std::move(values);
+      value.dims = std::move(dims);
+      interp.env()[name] = std::move(value);
+    };
+    DataMap::Entry empty;
+    empty.dims = {0};
+    interp.env()["empty"] = empty;
+    real_value("one", {3.0}, {1});
+
+    mir::Expr scalar;
+    scalar.kind = mir::Expr::LitReal;
+    scalar.lit = 2.0;
+    scalar.type_ = "UReal";
+    scalar.unsized.leaf = mir::UnsizedLeaf::Real;
+    scalar.data_only = true;
+    for (const std::string& name : {"Plus__", "Times__"}) {
+      for (const std::string& variable : {"empty", "one"}) {
+        mir::Expr vector;
+        vector.kind = mir::Expr::Var;
+        vector.name = variable;
+        vector.type_ = "UVector";
+        vector.unsized.leaf = mir::UnsizedLeaf::Vector;
+        vector.data_only = true;
+        for (bool scalar_first : {false, true}) {
+          mir::Expr call;
+          call.kind = mir::Expr::FunApp;
+          call.name = name;
+          call.type_ = "UVector";
+          call.unsized.leaf = mir::UnsizedLeaf::Vector;
+          call.data_only = true;
+          call.args = scalar_first ? std::vector<mir::Expr>{scalar, vector}
+                                   : std::vector<mir::Expr>{vector, scalar};
+          const DataMap::Entry got = interp.eval(call);
+          const size_t want_size = variable == "empty" ? 0 : 1;
+          check(got.r.size() == want_size && got.dims.size() == 1 &&
+                    got.dims[0] == (int64_t)want_size,
+                name + " scalar/vector geometry");
+          if (want_size)
+            check(got.r[0] == (name == "Plus__" ? 5.0 : 6.0),
+                  name + " scalar/vector value");
+        }
+      }
+    }
+    for (const std::string& variable : {"empty", "one"}) {
+      mir::Expr vector;
+      vector.kind = mir::Expr::Var;
+      vector.name = variable;
+      vector.type_ = "UVector";
+      vector.unsized.leaf = mir::UnsizedLeaf::Vector;
+      vector.data_only = true;
+      for (int container_arg = 0; container_arg < 3; ++container_arg) {
+        mir::Expr call;
+        call.kind = mir::Expr::FunApp;
+        call.name = "fma";
+        call.type_ = "UVector";
+        call.unsized.leaf = mir::UnsizedLeaf::Vector;
+        call.data_only = true;
+        call.args = {scalar, scalar, scalar};
+        call.args[(size_t)container_arg] = vector;
+        const DataMap::Entry got = interp.eval(call);
+        const size_t want_size = variable == "empty" ? 0 : 1;
+        check(got.r.size() == want_size && got.dims.size() == 1 &&
+                  got.dims[0] == (int64_t)want_size,
+              "fma scalar/vector geometry");
+        if (want_size)
+          check(got.r[0] == (container_arg == 2 ? 7.0 : 8.0),
+                "fma scalar/vector value");
+      }
+    }
+
+    auto variable = [](const std::string& name, const std::string& type) {
+      mir::Expr e;
+      e.kind = mir::Expr::Var;
+      e.name = name;
+      e.type_ = type;
+      e.data_only = true;
+      return e;
+    };
+    auto times = [&](const std::string& lhs, const std::string& lhs_type,
+                     const std::string& rhs, const std::string& rhs_type,
+                     const std::string& result_type) {
+      mir::Expr e;
+      e.kind = mir::Expr::FunApp;
+      e.name = "Times__";
+      e.type_ = result_type;
+      e.data_only = true;
+      e.args = {variable(lhs, lhs_type), variable(rhs, rhs_type)};
+      return interp.eval(e);
+    };
+    real_value("m11", {2.0}, {1, 1});
+    real_value("m12", {3.0, 4.0}, {1, 2});
+    DataMap::Entry matrix =
+        times("m11", "UMatrix", "m12", "UMatrix", "UMatrix");
+    check(matrix.dims == std::vector<int64_t>({1, 2}) &&
+              matrix.r == std::vector<double>({6.0, 8.0}),
+          "Times__ width-one matrix product");
+    real_value("rv1", {2.0}, {1});
+    real_value("v1", {3.0}, {1});
+    DataMap::Entry dot = times("rv1", "URowVector", "v1", "UVector", "UReal");
+    check(dot.dims.empty() && dot.r == std::vector<double>({6.0}),
+          "Times__ width-one dot product");
+
+    real_value("v2", {4.0, 5.0}, {2});
+    auto refuses_elementwise =
+        [&](const std::string& name, const std::string& lhs,
+            const std::string& rhs, const std::string& type) {
+          mir::Expr call;
+          call.kind = mir::Expr::FunApp;
+          call.name = name;
+          call.type_ = type;
+          call.data_only = true;
+          call.args = {variable(lhs, type), variable(rhs, type)};
+          if (name == "fma") call.args.push_back(scalar);
+          bool refused = false;
+          try {
+            (void)interp.eval(call);
+          } catch (const std::exception&) {
+            refused = true;
+          }
+          return refused;
+        };
+    for (const std::string& name : {"Plus__", "fma"}) {
+      check(refuses_elementwise(name, "one", "v2", "UVector"),
+            name + " refuses vector[1]/vector[2] broadcast");
+    }
+
+    real_value("m23", {1, 2, 3, 4, 5, 6}, {2, 3});
+    real_value("m32", {1, 2, 3, 4, 5, 6}, {3, 2});
+    real_value("m03", {}, {0, 3});
+    real_value("m02", {}, {0, 2});
+    for (const std::string& name : {"Plus__", "fma"}) {
+      check(refuses_elementwise(name, "m23", "m32", "UMatrix"),
+            name + " refuses equal-width unequal matrix shapes");
+      check(refuses_elementwise(name, "m03", "m02", "UMatrix"),
+            name + " refuses unequal zero-width matrix shapes");
+    }
+
+    // The positional ODE fallback entry point reconstructs scalar/container
+    // geometry from each formal rather than flattening every argument.
+    mir::FunDef scale;
+    scale.name = "scale";
+    scale.arg_names = {"a", "x"};
+    scale.arg_views = {{0, mir::UnsizedLeaf::Real},
+                       {0, mir::UnsizedLeaf::Vector}};
+    scale.arg_types = {"UReal", "UVector"};
+    mir::Stmt returned;
+    returned.kind = mir::Stmt::Return;
+    returned.has_init = true;
+    returned.rhs.kind = mir::Expr::FunApp;
+    returned.rhs.name = "Times__";
+    returned.rhs.type_ = "UVector";
+    returned.rhs.args = {variable("a", "UReal"), variable("x", "UVector")};
+    scale.body = {returned};
+    const std::vector<double> scaled =
+        interp.call(scale, {{2.0}, {3.0, 4.0}}, {});
+    check(scaled == std::vector<double>({6.0, 8.0}),
+          "ODE call scalar formal broadcasts over vector");
+  }
 
   if (failures == 0) std::printf("test_mir OK\n");
   return failures == 0 ? 0 : 1;
