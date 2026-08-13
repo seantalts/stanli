@@ -1,0 +1,193 @@
+name: Stan conformance nightly
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stan-conformance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore pinned Stan and CmdStan sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+            deps/stanc3
+            deps/cmdstan
+            deps/bridgestan
+          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh') }}
+
+      - name: Validate the complete pinned reference toolchain
+        run: |
+          ./deps/fetch.sh
+          ./harnesses/conformance/fetch_cmdstan.sh
+
+      - name: Build the public stanli Python runtime
+        run: |
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-rel --target stanli_shared -j2
+          mkdir -p python/stanli/_bin
+          cp build-rel/libstanli.so python/stanli/_bin/
+          cp deps/stanc3/stanc python/stanli/_bin/stanc
+
+      - name: Emit the deterministic partition manifest
+        run: |
+          python3 harnesses/stan_conformance.py \
+            --stanc deps/stanc3/stanc \
+            --cmdstan deps/cmdstan \
+            --write-manifest 8 \
+            --output conformance-manifest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conformance-manifest
+          path: conformance-manifest/partition-manifest.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conformance-runtime-linux-x86_64
+          path: python/stanli/_bin/
+
+  partition:
+    needs: inventory
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore pinned Stan and CmdStan sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+            deps/stanc3
+            deps/cmdstan
+            deps/bridgestan
+          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh') }}
+
+      - name: Revalidate restored reference inputs
+        run: |
+          ./deps/fetch.sh
+          ./harnesses/conformance/fetch_cmdstan.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: conformance-runtime-linux-x86_64
+          path: python/stanli/_bin
+
+      - name: Restore executable mode stripped by artifact transport
+        run: chmod +x python/stanli/_bin/stanc
+
+      - name: Install the conformance runtime
+        run: |
+          python3 -m venv "$RUNNER_TEMP/stanli-conformance-venv"
+          "$RUNNER_TEMP/stanli-conformance-venv/bin/pip" install \
+            --disable-pip-version-check \
+            -r harnesses/conformance/requirements.txt
+
+      - name: Restore content-addressed reference shards
+        uses: actions/cache@v4
+        with:
+          path: conformance-cache
+          key: conformance-reference-linux-x86_64-${{ matrix.partition }}-${{ github.sha }}
+          restore-keys: |
+            conformance-reference-linux-x86_64-${{ matrix.partition }}-
+
+      - name: Run differential partition ${{ matrix.partition }}/8
+        id: conformance
+        continue-on-error: true
+        run: |
+          python3 harnesses/stan_conformance.py \
+            --stanc deps/stanc3/stanc \
+            --cmdstan deps/cmdstan \
+            --build build-rel \
+            --shard ${{ matrix.partition }}/8 \
+            --jobs 2 \
+            --resume conformance-cache \
+            --stanli-python "$RUNNER_TEMP/stanli-conformance-venv/bin/python" \
+            --stanli-pythonpath python \
+            --failure-limit 20 \
+            --output conformance-part-${{ matrix.partition }}
+
+      - name: Upload partition report and reproducers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-part-${{ matrix.partition }}
+          if-no-files-found: error
+          path: |
+            conformance-part-${{ matrix.partition }}/
+            !conformance-part-${{ matrix.partition }}/cache/
+
+  aggregate:
+    needs: [inventory, partition]
+    if: always() && needs.inventory.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: conformance-manifest
+          path: conformance-manifest
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-part-*
+          path: conformance-parts
+
+      - name: Reject missing or duplicate rows and render the aggregate
+        id: aggregate
+        continue-on-error: true
+        run: |
+          python3 harnesses/stan_conformance.py \
+            --aggregate conformance-parts/*/conformance.json \
+            --manifest conformance-manifest/partition-manifest.json \
+            --output conformance-aggregate \
+            --failure-limit 40
+
+      - name: Write the compact Actions summary
+        if: always() && hashFiles('conformance-aggregate/conformance.json') != ''
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          report = json.load(open("conformance-aggregate/conformance.json"))
+          print("# Generated Stan conformance")
+          print()
+          print("**Gate:**", "GREEN" if report["green"] else "RED")
+          print()
+          print("| Status | Count |")
+          print("| --- | ---: |")
+          for status, count in report["status_counts"].items():
+              print(f"| `{status}` | {count} |")
+          print()
+          print("Gate issues:", ", ".join(report["gate_issues"]) or "none")
+          PY
+
+      - name: Upload aggregate report and reproducers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-aggregate
+          if-no-files-found: error
+          path: conformance-aggregate/
+
+      - name: Enforce the aggregate gate
+        if: always()
+        run: test '${{ steps.aggregate.outcome }}' = success

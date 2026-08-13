@@ -1,0 +1,30 @@
+schema_version = 1
+policy_version = "2026-08-12.1"
+
+# Stan parameters are real-valued today.  Complex signatures need a separate
+# source convention and a real projection before log-density parity has a
+# well-defined meaning; stanli deliberately does not promise that surface yet.
+[[classification]]
+id = "complex-types"
+status = "expected_unsupported"
+reason = "Complex arguments and results are outside stanli's current runtime contract."
+contains_complex = true
+
+# Tuple results require destructuring and lane-wise reduction.  They are kept
+# visible as a reviewed product boundary until the runtime and generator both
+# have tuple value support.  Complex tuples are owned by the preceding rule.
+[[classification]]
+id = "tuple-results"
+status = "expected_unsupported"
+reason = "Tuple-valued results are not represented by stanli's value graph."
+return_kind = "tuple"
+contains_complex = false
+
+# Matched solvers at matched tolerances agree closely but are not bitwise
+# operations.  These values are inherited from harnesses/ode_sweep.py.
+[[numeric_gate]]
+id = "iterative-ode-solvers"
+reason = "ODE integration is iterative and has a measured near-zero floor."
+name_regex = "^(ode_|integrate_ode)"
+abs_tol = 1e-12
+rel_tol = 1e-9

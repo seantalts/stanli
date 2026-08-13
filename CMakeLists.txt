@@ -476,4 +476,15 @@ add_executable(test_capi tests/test_capi.cpp)
 target_link_libraries(test_capi PRIVATE stanli_shared)
 add_test(NAME test_capi COMMAND test_capi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# The conformance gate has its own failure modes (parser drift, a broad policy
+# rule, nonfinite comparison, partition loss) which C++ runtime tests cannot
+# exercise. Python 3.11 supplies the TOML parser in the standard library;
+# standalone runs on older Python use the Tomli backport in requirements.txt.
+find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME test_conformance_harness
+           COMMAND ${Python3_EXECUTABLE} tests/test_conformance.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 endif()  # NOT EMSCRIPTEN

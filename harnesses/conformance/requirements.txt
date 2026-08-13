@@ -1,0 +1,5 @@
+# Official reference/client stack. BridgeStan's C++ build is pinned separately
+# by fetch_cmdstan.sh so both sides use stanli's exact Stan and Stan Math commits.
+bridgestan==2.9.0
+numpy==2.0.2
+tomli==2.2.1; python_version < "3.11"

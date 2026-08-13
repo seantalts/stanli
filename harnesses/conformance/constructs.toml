@@ -1,0 +1,327 @@
+schema_version = 1
+catalog_version = "2026-08-12.3"
+
+[[case]]
+id = "phase.data.valid"
+category = "block_phase"
+description = "The merged PR #78 constrained data values are accepted during construction."
+source = "tests/fixtures/data_and_tp_checks.stan"
+data = "harnesses/conformance/constructs/bounds-valid.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.5]]
+
+[[case]]
+id = "validation.data.later-lane-reject"
+category = "declaration_validation"
+description = "An upper-bound violation in a later integer-array lane rejects at construction."
+source = "tests/fixtures/cat.stan"
+data = "harnesses/conformance/constructs/bounds-invalid-later.json"
+oracle_gate = "semantic"
+expected_accept = false
+expected_phase = "construction"
+expected_exception = "domain_error"
+point_profile = "not-evaluated"
+
+[[case]]
+id = "phase.transformed-parameter.valid"
+category = "block_phase"
+description = "A valid transformed-parameter declaration contributes to target."
+source = "tests/fixtures/data_and_tp_checks.stan"
+data = "harnesses/conformance/constructs/bounds-valid.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.5]]
+
+[[case]]
+id = "validation.transformed-parameter.scalar-reject"
+category = "declaration_validation"
+description = "The merged PR #78 scalar transformed-parameter lower bound rejects during evaluation."
+source = "tests/fixtures/data_and_tp_checks.stan"
+data = "harnesses/conformance/constructs/bounds-valid.json"
+oracle_gate = "semantic"
+expected_accept = false
+expected_phase = "evaluation"
+expected_exception = "domain_error"
+points = [[-0.5]]
+
+[[case]]
+id = "validation.transformed-parameter.later-lane-reject"
+category = "declaration_validation"
+description = "A lower-bound violation in a later transformed-parameter lane rejects during evaluation."
+source = "harnesses/conformance/constructs/bounds.stan"
+data = "harnesses/conformance/constructs/bounds-vector-valid.json"
+oracle_gate = "semantic"
+expected_accept = false
+expected_phase = "evaluation"
+expected_exception = "domain_error"
+points = [[-0.5]]
+
+[[case]]
+id = "validation.structured-data-and-write-array-valid"
+category = "declaration_validation"
+description = "Merged structured declaration checks accept valid array data, transformed parameters, and generated quantities."
+source = "tests/fixtures/structured_checks.stan"
+data = "tests/fixtures/structured_checks.json"
+oracle_gate = "write_array"
+expected_accept = true
+points = [[0.0, 0.0]]
+
+[[case]]
+id = "validation.structured-transformed-parameter-reject"
+category = "declaration_validation"
+description = "A transformed-parameter simplex violation rejects during log-density evaluation."
+source = "tests/fixtures/structured_checks.stan"
+data = "tests/fixtures/structured_checks.json"
+oracle_gate = "semantic"
+expected_accept = false
+expected_phase = "evaluation"
+expected_exception = "domain_error"
+points = [[0.5, 0.0]]
+
+[[case]]
+id = "validation.structured-generated-quantity-reject"
+category = "declaration_validation"
+description = "A sum-to-zero generated quantity rejects only on the write-array path."
+source = "tests/fixtures/structured_checks.stan"
+data = "tests/fixtures/structured_checks.json"
+oracle_gate = "write_array"
+expected_accept = false
+expected_phase = "write_array"
+expected_exception = "domain_error"
+points = [[0.0, 0.5]]
+
+[[case]]
+id = "phase.full-log-density-pipeline"
+category = "block_phase"
+description = "Data, transformed data, parameters, transformed parameters, and model execute in phase order."
+source = "harnesses/conformance/constructs/block_phases.stan"
+data = "harnesses/conformance/constructs/block_phases.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.0], [0.4], [-0.3]]
+
+[[case]]
+id = "phase.generated-quantities-write-array"
+category = "block_phase"
+description = "Generated quantities and transformed parameters agree through the write-array path."
+source = "harnesses/conformance/constructs/block_phases.stan"
+data = "harnesses/conformance/constructs/block_phases.json"
+oracle_gate = "write_array"
+expected_accept = true
+points = [[0.0], [0.4], [-0.3]]
+
+[[case]]
+id = "declaration.zero-length"
+category = "declarations"
+description = "Zero-length data, transformed-parameter, and generated-quantity containers preserve shape."
+source = "harnesses/conformance/constructs/zero_length.stan"
+data = "harnesses/conformance/constructs/zero_length.json"
+oracle_gate = "write_array"
+expected_accept = true
+points = [[0.0], [0.25]]
+
+[[case]]
+id = "declaration.data-shape-valid"
+category = "declarations"
+description = "A vector whose JSON shape matches its data size evaluates normally."
+source = "harnesses/conformance/constructs/shape.stan"
+data = "harnesses/conformance/constructs/shape-valid.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.0], [0.25]]
+
+[[case]]
+id = "declaration.data-shape-mismatch"
+category = "declarations"
+description = "A vector whose JSON shape disagrees with its declared size rejects at construction."
+source = "harnesses/conformance/constructs/shape.stan"
+data = "harnesses/conformance/constructs/shape-invalid.json"
+oracle_gate = "semantic"
+expected_accept = false
+expected_phase = "construction"
+expected_exception = "invalid_argument"
+point_profile = "not-evaluated"
+
+[[case]]
+id = "declaration.structured-parameters"
+category = "declarations"
+description = "Ordered, simplex, and Cholesky-correlation parameters share one informative target."
+source = "harnesses/conformance/constructs/structured.stan"
+data = "harnesses/conformance/constructs/empty.json"
+oracle_gate = "numeric"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+
+[[case]]
+id = "assignment.index-slice-gather-layout"
+category = "assignment_indexing"
+description = "Indexed assignment, slices, gathers, and matrix layout affect unequal target weights."
+source = "harnesses/conformance/constructs/indexing.stan"
+data = "harnesses/conformance/constructs/empty.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.0, 0.0, 0.0, 0.0], [0.2, -0.1, 0.3, -0.4]]
+
+[[case]]
+id = "control.parameter-dependent-branches"
+category = "control_flow"
+description = "For, while, break, continue, if, and ternary execute under parameter-dependent conditions."
+source = "harnesses/conformance/constructs/control_flow.stan"
+data = "harnesses/conformance/constructs/control_flow.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.2, -0.1, 0.3], [-0.2, 0.1, -0.3]]
+
+[[case]]
+id = "udf.probability-lupdf-propto"
+category = "user_functions"
+description = "A probability UDF called through its lupdf spelling obeys propto semantics."
+source = "harnesses/conformance/constructs/user_probability.stan"
+data = "harnesses/conformance/constructs/empty.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.0], [0.4], [-0.3]]
+
+[[case]]
+id = "sampling.truncation-and-target"
+category = "sampling_target"
+description = "Sampling syntax, truncation normalization, target accumulation, and a constrained Jacobian agree."
+source = "harnesses/conformance/constructs/sampling.stan"
+data = "harnesses/conformance/constructs/empty.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.0, 0.0], [0.25, -0.2]]
+
+[[case]]
+id = "statement.print-valid"
+category = "reject_print"
+description = "Print executes without changing a valid log density or gradient."
+source = "harnesses/conformance/constructs/reject_print.stan"
+data = "harnesses/conformance/constructs/empty.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[0.25]]
+
+[[case]]
+id = "statement.reject-evaluation"
+category = "reject_print"
+description = "A parameter-dependent reject is attributed to evaluation."
+source = "harnesses/conformance/constructs/reject_print.stan"
+data = "harnesses/conformance/constructs/empty.json"
+oracle_gate = "semantic"
+expected_accept = false
+expected_phase = "evaluation"
+expected_exception = "domain_error"
+points = [[-0.25]]
+
+[[case]]
+id = "udf.recursion-classification"
+category = "user_functions"
+description = "Direct recursion is either evaluated like CmdStan or reported as an explicit product refusal."
+source = "harnesses/conformance/constructs/recursion.stan"
+data = "harnesses/conformance/constructs/empty.json"
+oracle_gate = "numeric"
+expected_accept = true
+points = [[-0.25], [2.25]]
+
+[[case]]
+id = "callback.modern-variadic-ode"
+category = "solver_callbacks"
+description = "Modern rk45, bdf, adams, ckrk, tolerance, and mixed variadic ODE calls share one model."
+source = "tests/fixtures/odevariadic.stan"
+data = "tests/fixtures/odevariadic.json"
+oracle_gate = "write_array"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+numeric_policy = "iterative-ode-solvers"
+
+[[case]]
+id = "stanc3.multi-declaration-blocks"
+category = "upstream_integration"
+description = "Multi-declarations across blocks and local scopes remain runnable."
+source = "tests/stanc3/declare-define-multi.stan"
+data = "tests/stanc3/declare-define-multi.json"
+oracle_gate = "census"
+expected_accept = true
+census_reason = "The upstream model deliberately leaves declarations uninitialized, so it is a compilation census rather than a numeric oracle."
+
+[[case]]
+id = "stanc3.multidimensional-matrix-array"
+category = "upstream_integration"
+description = "Nested multidimensional arrays of constrained matrices preserve layout and transforms."
+source = "tests/stanc3/multidim_var_param_ar45_mat23.stan"
+data = "tests/stanc3/multidim_var_param_ar45_mat23.json"
+oracle_gate = "write_array"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+
+[[case]]
+id = "stanc3.offset-multiplier-validation"
+category = "upstream_integration"
+description = "Offset and multiplier declarations validate in transformed-data and write-array phases."
+source = "tests/stanc3/validate_set_double_offset_multiplier_good.stan"
+data = "tests/stanc3/validate_set_double_offset_multiplier_good.json"
+oracle_gate = "write_array"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+
+[[case]]
+id = "stanc3.operators-and-linear-solves"
+category = "upstream_integration"
+description = "Operators, comparison, modulo, unary signs, and left/right matrix division remain executable."
+source = "tests/stanc3/operators.stan"
+data = "tests/stanc3/operators.json"
+oracle_gate = "write_array"
+expected_accept = true
+points = [[0.1, 0.2, 0.3, 0.4, -0.1, 0.2, -0.3, 0.4, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]]
+
+[[case]]
+id = "stanc3.parameter-ternary"
+category = "upstream_integration"
+description = "A parameter-dependent ternary selects vector lanes inside a sampling statement."
+source = "tests/stanc3/tern_op_contains_var.stan"
+data = "tests/stanc3/tern_op_contains_var.json"
+oracle_gate = "numeric"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+
+[[case]]
+id = "stanc3.reduction-autodiff-levels"
+category = "upstream_integration"
+description = "Reductions across mixed autodiff levels remain legal in transformed parameters and UDFs."
+source = "tests/stanc3/reductions_allowed.stan"
+data = "tests/stanc3/reductions_allowed.json"
+oracle_gate = "write_array"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+
+[[case]]
+id = "stanc3.cholesky-covariance-parameters"
+category = "upstream_integration"
+description = "Rectangular and square Cholesky covariance parameter transforms preserve shape."
+source = "tests/stanc3/cholesky_cov_param_block.stan"
+data = "tests/stanc3/cholesky_cov_param_block.json"
+oracle_gate = "write_array"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+
+[[case]]
+id = "stanc3.dynamic-container-sizes"
+category = "upstream_integration"
+description = "Dynamic vector, row-vector, matrix, and array sizes execute in every block."
+source = "tests/stanc3/vector-size-stmts.stan"
+data = "tests/stanc3/vector-size-stmts.json"
+oracle_gate = "write_array"
+expected_accept = true
+point_profile = "zeros-and-asymmetric"
+
+[[case]]
+id = "stanc3.lupdf-inlining"
+category = "upstream_integration"
+description = "Nested probability UDFs preserve lpdf/lupdf and lpmf/lupmf inlining semantics."
+source = "tests/stanc3/lupdf-inlining.stan"
+data = "tests/stanc3/lupdf-inlining.json"
+oracle_gate = "write_array"
+expected_accept = true
+points = [[0.5], [1.25]]

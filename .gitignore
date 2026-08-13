@@ -12,6 +12,15 @@ compile_commands.json
 python/stanli/LICENSE
 python/stanli/THIRD_PARTY_LICENSES.md
 .cache/
+conformance-out/
+# Conformance reports, snapshots, reproducers, and retained generated shards
+# are run artifacts. Keep even manually redirected outputs out of source.
+harnesses/conformance/conformance-baseline.json
+harnesses/conformance/conformance.json
+harnesses/conformance/unsupported.md
+harnesses/conformance/signatures.txt
+harnesses/conformance/repro/
+harnesses/conformance/generated/
 tests/fixtures/*.hpp
 tests/stanc3/*.hpp
 build-wasm/
@@ -38,6 +47,6 @@ r/*.tar.gz
 # Python bytecode, and the model libraries reference BridgeStan
 # compiles next to a .stan file when the conformance harness runs.
 __pycache__/
-*.pyc
+*.py[cod]
 tests/fixtures/*_model.so
 tests/fixtures/*.hpp
