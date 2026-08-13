@@ -266,7 +266,11 @@ class MirInterp {
           // The flat read buffer is consumed with sequential 1-D indexing
           // regardless of the source variable's shape.
           Value flat = read_data(read_name, st.raw);
-          flat.dims = {(int64_t)std::max(flat.r.size(), flat.i.size())};
+          const auto declared = decl_dims_.find(st.lhs);
+          if (declared != decl_dims_.end() && declared->second.empty())
+            flat.dims.clear();
+          else
+            flat.dims = {(int64_t)std::max(flat.r.size(), flat.i.size())};
           env_[st.lhs] = std::move(flat);
           return;
         }

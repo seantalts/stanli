@@ -262,6 +262,34 @@ int main(int argc, char** argv) {
         interp.call(scale, {{2.0}, {3.0, 4.0}}, {});
     check(scaled == std::vector<double>({6.0, 8.0}),
           "ODE call scalar formal broadcasts over vector");
+
+    // stanc may reconstruct a scalar data declaration through a flat
+    // FnReadData assignment. The declaration still owns scalar geometry;
+    // treating its one value as vector[1] breaks later scalar broadcasts.
+    DataMap::Entry scale_data;
+    scale_data.r = {2.0};
+    MirHooks hooks;
+    hooks.data = [&](const std::string& name) {
+      return name == "scale_data" ? &scale_data : nullptr;
+    };
+    MirInterp<double> read_interp(functions, "scalar data read", hooks);
+    mir::Stmt scale_decl;
+    scale_decl.kind = mir::Stmt::Decl;
+    scale_decl.decl_id = "scale_data";
+    scale_decl.decl_type.base = "SReal";
+    mir::Stmt scale_read;
+    scale_read.kind = mir::Stmt::Assignment;
+    scale_read.lhs = "scale_data";
+    scale_read.rhs.kind = mir::Expr::FunApp;
+    scale_read.rhs.name = "FnReadData";
+    scale_read.rhs.fn_lib = mir::Expr::Lib::Internal;
+    mir::Expr data_name;
+    data_name.kind = mir::Expr::LitStr;
+    data_name.lit_s = "scale_data";
+    scale_read.rhs.args = {data_name};
+    read_interp.run({scale_decl, scale_read});
+    check(read_interp.env().at("scale_data").dims.empty(),
+          "flat data read preserves declared scalar geometry");
   }
 
   if (failures == 0) std::printf("test_mir OK\n");
