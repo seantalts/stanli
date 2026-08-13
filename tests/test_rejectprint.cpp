@@ -175,6 +175,17 @@ int main() {
   // mode, so they cannot preserve that contract yet. Refusal is the honest
   // boundary: silently dropping either effect changes observable behavior,
   // and dropping reject changes the posterior support.
+  //
+  // The generated-Stan oracle at x=0.1 and x=-0.04 is:
+  //
+  //   mode  x      target  grad  observable effect
+  //      1   0.10    0.10     1  prints once
+  //      1  -0.04   -0.04     1  none (print arm untaken)
+  //      2   0.10    0.10     1  none (reject arm untaken)
+  //      2  -0.04       -     -  throws domain_error once
+  //
+  // Construction cannot know which parameter point a host will evaluate,
+  // so it must refuse both models before either arm can run.
   {
     const std::string effect_mir =
         slurp("tests/fixtures/necessity_effects.tmir.sexp");

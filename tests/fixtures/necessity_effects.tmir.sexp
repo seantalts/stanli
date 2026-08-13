@@ -2,7 +2,7 @@
  (prepare_data
   (((pattern
      (Decl (decl_adtype DataOnly) (decl_id mode) (decl_type (Sized SInt))
-      (initialize Default)))
+      (initialize Uninit)))
     (meta <opaque>))
    ((pattern
      (Assignment ((LVariable mode) ()) UInt
@@ -147,7 +147,7 @@
         ((pattern
           (FunApp
            (CompilerInternal
-            (FnReadParam (constrain Identity) (dims ()) (mem_pattern AoS)))
+            (FnReadParam (constrain Identity) (dims ()) (mem_pattern SoA)))
            ()))
          (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))))))
     (meta <opaque>))
@@ -156,7 +156,7 @@
       (((pattern
          (IfElse
           ((pattern
-            (FunApp (StanLib Equals__ FnPlain AoS)
+            (FunApp (StanLib Equals__ FnPlain SoA)
              (((pattern (Var mode))
                (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
               ((pattern (Lit Int 1))
@@ -167,7 +167,7 @@
              (((pattern
                 (IfElse
                  ((pattern
-                   (FunApp (StanLib Greater__ FnPlain AoS)
+                   (FunApp (StanLib Greater__ FnPlain SoA)
                     (((pattern (Var x))
                       (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))
                      ((pattern (Lit Int 0))
@@ -203,7 +203,7 @@
               (((pattern
                  (IfElse
                   ((pattern
-                    (FunApp (StanLib Less__ FnPlain AoS)
+                    (FunApp (StanLib Less__ FnPlain SoA)
                      (((pattern (Var x))
                        (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))
                       ((pattern (Lit Int 0))
@@ -282,7 +282,7 @@
  (transform_inits
   (((pattern
      (Decl (decl_adtype AutoDiffable) (decl_id x) (decl_type (Sized SReal))
-      (initialize Default)))
+      (initialize Uninit)))
     (meta <opaque>))
    ((pattern
      (Assignment ((LVariable x) ()) UReal
@@ -309,7 +309,7 @@
  (unconstrain_array
   (((pattern
      (Decl (decl_adtype AutoDiffable) (decl_id x) (decl_type (Sized SReal))
-      (initialize Default)))
+      (initialize Uninit)))
     (meta <opaque>))
    ((pattern
      (Assignment ((LVariable x) ()) UReal

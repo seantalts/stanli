@@ -326,6 +326,30 @@ void expect_categorical_interpreted_write_array() {
   stanli_model_free(model);
 }
 
+void expect_necessity_effects_refused() {
+  const std::string mir = slurp("tests/fixtures/necessity_effects.tmir.sexp");
+  for (int mode = 1; mode <= 2; ++mode) {
+    const std::string effect = mode == 1 ? "FnPrint" : "FnReject";
+    const std::string data = "{\"mode\":" + std::to_string(mode) + "}";
+    char err[8192]{};
+    stanli_model* model =
+        stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+    if (model != nullptr) {
+      ++failures;
+      std::printf("FAIL C API accepted necessity island containing %s\n",
+                  effect.c_str());
+      stanli_model_free(model);
+      continue;
+    }
+    const std::string msg = err;
+    if (msg.find("parameter-dependent region") == std::string::npos ||
+        msg.find(effect) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL C API necessity %s error: %s\n", effect.c_str(), err);
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -363,6 +387,7 @@ int main() {
   expect_structured_checks();
   expect_categorical_check();
   expect_categorical_interpreted_write_array();
+  expect_necessity_effects_refused();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;
