@@ -50,87 +50,6 @@ constexpr int64_t kMinLanes = 4;
 constexpr int kMaxPeriod = 32;
 constexpr int kMaxClassifyAttempts = 6;
 
-// Real-argument lpdfs whose vector instantiation returns the summed lp
-// with per-element partials (densities.cpp bind_args shape dispatch).
-bool is_density(uint16_t oc) {
-  switch (oc) {
-    case OP_NORMAL_LPDF:
-    case OP_CAUCHY_LPDF:
-    case OP_STUDENT_T_LPDF:
-    case OP_GAMMA_LPDF:
-    case OP_BETA_LPDF:
-    case OP_LOGNORMAL_LPDF:
-    case OP_UNIFORM_LPDF:
-    case OP_DOUBLE_EXP_LPDF:
-    case OP_EXPONENTIAL_LPDF:
-    case OP_INV_GAMMA_LPDF:
-    case OP_STD_NORMAL_LPDF:
-      return true;
-    default:
-      return false;
-  }
-}
-
-// lpmfs whose integer outcome rides in idata, one value per scalar lane, and
-// whose vector instantiation takes the outcomes as one idata array (see
-// densities.cpp: Eigen::Map<const VectorXi>(ctx.idata, n_idata)). Lanes of
-// these match as a template even though their immediates differ; fusing them
-// concatenates the immediates.
-bool is_idata_outcome_density(uint16_t oc) {
-  switch (oc) {
-    case OP_BERNOULLI_LPMF:
-    case OP_BERNOULLI_LOGIT_LPMF:
-    case OP_POISSON_LPMF:
-    case OP_POISSON_LOG_LPMF:
-    case OP_NEG_BINOMIAL_2_LPMF:
-      return true;
-      // Everything in STANLI_INT_DENSITY_LIST has exactly this shape by
-      // construction. The ordered densities deliberately do NOT appear:
-      // their cutpoint vector is shared by every lane, so element n of it
-      // is not lane n's, and the elementwise rewrite would be silently
-      // wrong rather than merely unfused.
-#define STANLI_INT_DENSITY_CASE(code, fn, nreal, t) case code:
-      STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_CASE)
-#undef STANLI_INT_DENSITY_CASE
-      return true;
-    default:
-      return false;
-  }
-}
-
-// Ops whose forward and backward shape-dispatch at runtime (len-1
-// broadcasts for the binaries, ctx.out.len loops with scalar/vector adjoint
-// dispatch for the unaries), so widening scalar lanes to one vector op is
-// the same opcode (eltwise_expr.cpp).
-bool is_widenable(uint16_t oc) {
-  switch (oc) {
-    case OP_ADD:
-    case OP_SUB:
-    case OP_MUL:
-    case OP_DIV:
-    // Ternary, but the same shape contract: every argument len 1 or N,
-    // out len N, per-element math bit-identical to the scalar op.
-    case OP_FMA:
-    case OP_NEG:
-    case OP_EXPV:
-    case OP_LOGV:
-    case OP_INV_LOGIT:
-    case OP_SQRT:
-    case OP_SQUARE:
-    case OP_LOG1M:
-    case OP_TANHV:
-    case OP_LOG_INV_LOGIT:
-    case OP_LOG1M_INV_LOGIT:
-    // Batched since mixture.cpp grew shape dispatch: any argument len 1 or
-    // N, out len N, per-element math bit-identical to the scalar op.
-    case OP_LOG_MIX:
-    case OP_LSE2:
-      return true;
-    default:
-      return false;
-  }
-}
-
 enum class InKind { kInvariant, kConstLanes, kLaneLocal, kBad };
 
 struct PosIn {
@@ -180,7 +99,8 @@ bool ops_match(const Graph& g, const Op& a, const Op& b) {
   if (a.opcode == OP_INDEX || a.opcode == OP_SET_INDEX ||
       a.opcode == OP_SET_INDEX_INPLACE)
     return a.n_idata == 1 && b.n_idata == 1;
-  if (is_idata_outcome_density(a.opcode)) return a.n_idata == b.n_idata;
+  if (has_op_trait(a.opcode, op_trait::kRerollIdataDensity))
+    return a.n_idata == b.n_idata;
   if (a.n_idata != b.n_idata) return false;
   for (int64_t k = 0; k < a.n_idata; ++k)
     if (a.idata[k] != b.idata[k]) return false;
@@ -315,9 +235,11 @@ RerollStats reroll(Graph& g,
       bool candidate = false;
       for (int p = 0; p < P && !candidate; ++p) {
         const Op& t = g.ops[i + p];
-        candidate = is_density(t.opcode) ||
-                    is_idata_outcome_density(t.opcode) || is_element_store(t) ||
-                    (is_widenable(t.opcode) && term_set.count(t.out) != 0);
+        const uint8_t traits = op_traits(t.opcode);
+        candidate = (traits & op_trait::kRerollAnyDensity) != 0 ||
+                    is_element_store(t) ||
+                    ((traits & op_trait::kRerollWidenable) != 0 &&
+                     term_set.count(t.out) != 0);
       }
       if (!candidate) continue;
 
@@ -543,8 +465,7 @@ RerollStats reroll(Graph& g,
               ap.store_written_after = written_after;
               any_store = true;
             }
-          } else if (is_density(t.opcode) ||
-                     is_idata_outcome_density(t.opcode)) {
+          } else if (has_op_trait(t.opcode, op_trait::kRerollAnyDensity)) {
             // Two fusable dispositions: every lane's out IS a target term
             // (one summed vector density), or NO lane's out is a term and
             // each is consumed only inside its own lane (one elementwise
@@ -556,7 +477,8 @@ RerollStats reroll(Graph& g,
               ok = false;
               prefix = std::min(
                   prefix, std::min(br_internal, std::max(br_term, br_nonterm)));
-            } else if (is_idata_outcome_density(t.opcode) && t.n_idata != 1) {
+            } else if (has_op_trait(t.opcode, op_trait::kRerollIdataDensity) &&
+                       t.n_idata != 1) {
               ok = false;
               prefix = 0;  // already a vector op; nothing to fuse
             } else if (all_terms) {
@@ -564,7 +486,8 @@ RerollStats reroll(Graph& g,
                 ok = false;
                 prefix = 0;  // a term that is also an op input
               } else if (all_inputs_invariant &&
-                         !is_idata_outcome_density(t.opcode)) {
+                         !has_op_trait(t.opcode,
+                                       op_trait::kRerollIdataDensity)) {
                 // L identical lanes (the const pool dedup'd even the data
                 // argument): the "fused" density would compute one lane's
                 // lp where the target owes L of them.
@@ -575,7 +498,7 @@ RerollStats reroll(Graph& g,
                 any_term_density = true;
               }
             } else if (all_inputs_invariant &&
-                       !is_idata_outcome_density(t.opcode)) {
+                       !has_op_trait(t.opcode, op_trait::kRerollIdataDensity)) {
               // Every lane computes the same scalar lp: keep ONE scalar op
               // and let the lanes' consumers broadcast it. Widening scalar
               // inputs into a len-N out is the losscurve hazard.
@@ -592,7 +515,7 @@ RerollStats reroll(Graph& g,
               ok = false;
               prefix = std::min(prefix, io_ok);
             }
-          } else if (is_widenable(t.opcode)) {
+          } else if (has_op_trait(t.opcode, op_trait::kRerollWidenable)) {
             if (br_term == Luse && br_internal == Luse) {
               // Every lane's out is a target term (log_mix under
               // `target +=`): widen the op, SUM_VEC the lanes, and swap
@@ -620,7 +543,7 @@ RerollStats reroll(Graph& g,
           // the two fusing density dispositions need it; the hoist arm
           // above excludes idata-outcome densities.
           if ((ap.term_density || ap.elt_density) &&
-              is_idata_outcome_density(t.opcode)) {
+              has_op_trait(t.opcode, op_trait::kRerollIdataDensity)) {
             ap.outcome_idata.reserve((size_t)Luse);
             for (int64_t l = 0; l < Luse; ++l)
               ap.outcome_idata.push_back(op_at(p, l).idata[0]);

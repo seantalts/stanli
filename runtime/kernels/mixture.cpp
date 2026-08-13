@@ -16,7 +16,7 @@
 //
 // The second point is not just bookkeeping: a backward that reads only
 // scratch cannot be broken by a destructive write to its input, which is
-// what puts these ops on the whitelist in inplace.cpp and lets the HMM
+// what gives these ops the value-free trait in optable.hpp and lets the HMM
 // forward algorithm -- fill `acc` element by element, read it whole --
 // take the in-place path.
 #include <stanli/graph.hpp>

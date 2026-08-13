@@ -44,29 +44,8 @@
 
 namespace stanli {
 
-// Declared in the header. tests/test_pass_safety.cpp checks every opcode
-// this returns true for, by poisoning inputs between forward and backward
-// and requiring the adjoints to be unchanged.
-bool backward_ignores_input_values(uint16_t oc) {
-  switch (oc) {
-    case OP_INDEX:
-    case OP_SLICE:
-    case OP_SLICE_STRIDED:
-    case OP_GATHER:
-    case OP_SET_INDEX:
-    case OP_SET_INDEX_INPLACE:
-    // Since runtime/kernels/mixture.cpp made these native, their partials
-    // live in scratch (which destructive writes never touch) rather than
-    // being recomputed from the inputs. That is what lets the HMM forward
-    // algorithm -- fill `acc` element by element, read it whole -- take
-    // the destructive path.
-    case OP_LOG_SUM_EXP:
-    case OP_LSE2:
-    case OP_LOG_MIX:
-      return true;
-    default:
-      return false;
-  }
+bool backward_ignores_input_values(uint16_t opcode) {
+  return has_op_trait(opcode, op_trait::kBackwardValueFree);
 }
 
 int make_inplace_updates(Graph& g, const std::vector<int>& roots) {
