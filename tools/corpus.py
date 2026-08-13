@@ -156,10 +156,9 @@ def main():
                "parameters, transformed parameters, generated quantities). "
                "tools/verify_refs.py replays them in CI with the column "
                "names matched exactly and the values sharing the model's "
-               "gate. Models with RNG draws are exercised structurally "
-               "(all columns produced and finite) by "
-               "harnesses/wa_coverage.py instead, since their values are "
-               "a property of the RNG stream.", "",
+               "gate. For models with RNG draws, `tools/verify_refs.py "
+               "--wa-report` reports structural coverage instead, since "
+               "their values are a property of the RNG stream.", "",
                "| model | write_array values compared |",
                "| --- | ---: |"]
         for m in sorted(wa_refs):

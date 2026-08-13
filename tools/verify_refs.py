@@ -18,14 +18,18 @@ and honest cross-libm drift sits well below.
 
 Usage: tools/verify_refs.py PDB_DIR [--check BIN] [--max-rel X]
                             [--jobs N] [--timeout S] [model ...]
+       tools/verify_refs.py PDB_DIR --wa-report [--filter SUBSTR]
+       tools/verify_refs.py PDB_DIR --wa-headers CMDSTAN_DIR [model ...]
 Exit nonzero if any referenced model fails to run, changes shape, or
 exceeds the gate.
 """
 import argparse
+import collections
 import concurrent.futures
 import gzip
 import json
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -38,6 +42,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # posterior happens to use, so they live beside the corpus rather than in
 # it, and a reference is keyed on the file name either way.
 LANG = REPO / "tests" / "stanc3"
+N_SAMPLER_COLS = 7
 
 
 def default_check_bin():
@@ -119,6 +124,105 @@ def parse_wa(out):
     return (names, vals)
 
 
+def corpus_models(pdb, wanted=(), contains="", excluded=()):
+    """Unique (model, data-name) pairs, in posteriordb order."""
+    wanted, excluded, seen = set(wanted), set(excluded), set()
+    for path in sorted((pdb / "posteriors").glob("*.json")):
+        meta = json.loads(path.read_text())
+        model = meta["model_name"]
+        if (model in seen or model in excluded
+                or (wanted and model not in wanted)
+                or (contains and contains not in model)):
+            continue
+        seen.add(model)
+        yield model, meta["data_name"]
+
+
+def corpus_input(pdb, tmp, model, data_name):
+    stan = pdb / "models" / "stan" / f"{model}.stan"
+    zipped = pdb / "data" / "data" / f"{data_name}.json.zip"
+    if not stan.exists() or not zipped.exists():
+        return None
+    data = tmp / f"{data_name}.json"
+    if not data.exists():
+        with zipfile.ZipFile(zipped) as archive:
+            data.write_bytes(archive.read(archive.namelist()[0]))
+    return stan, data
+
+
+def cmdstan_header(cmdstan, work, stan, data):
+    """One CmdStan CSV header, less the seven sampler columns."""
+    local = work / stan.name
+    local.write_bytes(stan.read_bytes())
+    exe = work / stan.stem
+    built = subprocess.run(["make", str(exe)], cwd=cmdstan,
+                           capture_output=True, text=True)
+    if built.returncode != 0:
+        lines = built.stderr.strip().splitlines()
+        return None, "build failed: " + (lines[-1][:120] if lines else "")
+    csv = work / f"{stan.stem}.csv"
+    run = subprocess.run(
+        [str(exe), "sample", "num_warmup=2", "num_samples=1", "data",
+         f"file={data}", "output", f"file={csv}"],
+        cwd=work, capture_output=True, text=True)
+    if not csv.exists():
+        return None, "run failed: " + (run.stdout + run.stderr).strip()[-160:]
+    for line in csv.read_text().splitlines():
+        if line and not line.startswith("#"):
+            return line.split(",")[N_SAMPLER_COLS:], ""
+    return None, "no header in csv"
+
+
+def check_wa_headers(pdb, check_bin, cmdstan, models, excluded=()):
+    """Compare write_array columns with a live CmdStan, model by model."""
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_hdr_"))
+    ok, bad, skipped = [], [], []
+    selected = list(corpus_models(pdb, models, excluded=excluded))
+    if not selected:
+        print("no corpus models selected", file=sys.stderr)
+        return 2
+    runnable = 0
+    for model, data_name in selected:
+        inputs = corpus_input(pdb, tmp, model, data_name)
+        if inputs is None:
+            continue
+        runnable += 1
+        stan, data = inputs
+        ours = subprocess.run([str(check_bin), str(stan), str(data), "--columns"],
+                              capture_output=True, text=True, cwd=REPO)
+        if ours.returncode != 0:
+            skipped.append((model, ours.stdout.strip()[:110]))
+            continue
+        theirs, why = cmdstan_header(cmdstan, tmp, stan, data)
+        if theirs is None:
+            skipped.append((model, why))
+            continue
+        got = ours.stdout.strip().split(",")
+        truncated = ours.stderr.startswith("TRUNCATED")
+        ref = theirs[:len(got)] if truncated else theirs
+        if got == ref:
+            ok.append((model, len(got), truncated))
+        else:
+            first = next((i for i in range(max(len(got), len(ref)))
+                          if i >= len(got) or i >= len(ref) or got[i] != ref[i]),
+                         0)
+            bad.append((model, len(got), len(ref), first,
+                        got[first:first + 4], ref[first:first + 4]))
+    print(f"\n== {len(ok)} match, {len(bad)} differ, {len(skipped)} skipped ==")
+    for model, n, truncated in ok:
+        print(f"  MATCH   {model:44s} {n:6d} cols"
+              + ("  (prefix)" if truncated else ""))
+    for model, no, nr, first, got, ref in bad:
+        print(f"  DIFFER  {model:44s} ours {no} cols, cmdstan {nr}; "
+              f"first difference at {first}\n      ours    {got}\n      cmdstan {ref}")
+    for model, why in skipped:
+        print(f"  skip    {model:44s} {why}")
+    if runnable == 0 or not (ok or bad):
+        print("no selected model was checked", file=sys.stderr)
+        return 2
+    return 1 if bad else 0
+
+
 def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
                 no_lp=False):
     """Returns (model, status, max_rel, max_ulp, n_values, detail)."""
@@ -193,6 +297,83 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
     return (model, "OK", worst, worst_ulp, n, "")
 
 
+def short_wa(msg):
+    match = re.search(r"unsupported (?:function |statement function )?([\w]+)",
+                      msg)
+    return (f"unsupported {match[1]}" if match
+            else msg.split("|")[0].strip()[:80])
+
+
+def check_wa_coverage(pdb, check_bin, models, contains, timeout, excluded=()):
+    """Probe write_array at points 0--2 and report corpus coverage."""
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_wa_"))
+    rows, reasons = [], collections.Counter()
+    selected = list(corpus_models(pdb, models, contains, excluded))
+    if not selected:
+        print("no corpus models selected", file=sys.stderr)
+        return 2
+    runnable = 0
+    for model, data_name in selected:
+        inputs = corpus_input(pdb, tmp, model, data_name)
+        if inputs is None:
+            continue
+        runnable += 1
+        stan, data = inputs
+        try:
+            for point in ("0", "1", "2"):
+                proc = subprocess.run(
+                    [str(check_bin), str(stan), str(data), "--point", point],
+                    capture_output=True, text=True, timeout=timeout, cwd=REPO)
+                if proc.stdout.startswith("OK"):
+                    break
+        except subprocess.TimeoutExpired:
+            rows.append((model, "TIMEOUT", ""))
+            continue
+        if not proc.stdout.startswith("OK"):
+            continue
+        wa_lines = [line[3:] for line in proc.stderr.splitlines()
+                    if line.startswith("WA ")]
+        wa = wa_lines[-1] if wa_lines else ""
+        if wa.startswith("none"):
+            rows.append((model, "NO_GQ_SECTION", ""))
+            continue
+        if wa.startswith("empty"):
+            detail = wa[6:]
+            rows.append((model, "EMPTY", detail))
+            reasons[short_wa(detail)] += 1
+            continue
+        match = re.match(r"(\d+) vars (\d+) values (\d+) nonfinite (.*)", wa)
+        if not match:
+            rows.append((model, "UNPARSED", wa))
+            continue
+        nvars, nvals, nbad = map(int, match.groups()[:3])
+        tail = match[4]
+        note = f", {nbad}/{nvals} nonfinite" if nbad else ""
+        if tail.startswith("complete"):
+            mode = " (interpreted)" if "interpreted" in tail else ""
+            rows.append((model, "COMPLETE", f"{nvars} vars{mode}{note}"))
+        else:
+            rows.append((model, "TRUNCATED", tail + note))
+            reasons[short_wa(tail)] += 1
+    counts = collections.Counter(row[1] for row in rows)
+    print(f"{len(rows)} compiling models")
+    for name in ("COMPLETE", "TRUNCATED", "NONFINITE", "EMPTY", "NO_GQ_SECTION",
+                 "TIMEOUT", "UNPARSED"):
+        if counts[name]:
+            print(f"  {counts[name]:4d}  {name}")
+    if reasons:
+        print("\nwhat stops the rest:")
+        for reason, count in reasons.most_common(30):
+            print(f"  {count:4d}  {reason}")
+    print("\nper model:")
+    for model, status, detail in sorted(rows, key=lambda row: (row[1], row[0])):
+        print(f"  {status:14s} {model:44s} {detail[:110]}")
+    if runnable == 0 or not rows:
+        print("no selected model was checked", file=sys.stderr)
+        return 2
+    return 0
+
+
 def gate_for(ref, default):
     """The threshold this model is held to.
 
@@ -229,17 +410,36 @@ def main():
     ap.add_argument("--no-wa", action="store_true",
                     help="replay lp and gradients only (the WASM check "
                          "driver has no write_array entry point yet)")
+    ap.add_argument("--wa-report", action="store_true",
+                    help="report structural write_array coverage")
+    ap.add_argument("--wa-headers", type=pathlib.Path, metavar="CMDSTAN_DIR",
+                    help="compare write_array headers with live CmdStan")
     ap.add_argument("--skip", default="",
                     help="comma-separated models to exclude (the wasm32 "
                          "build cannot fit nn_rbm1bJ100's compile in 4GB)")
     ap.add_argument("--timeout", type=float, default=300)
-    args = ap.parse_args()
+    ap.add_argument("--filter", default="", metavar="SUBSTR",
+                    help="with --wa-report, select model names containing this")
+    args = ap.parse_intermixed_args()
 
+    pdb = args.pdb / "posterior_database"
+    if args.wa_headers and args.wa_report:
+        ap.error("--wa-headers and --wa-report are separate modes")
+    if args.filter and not args.wa_report:
+        ap.error("--filter requires --wa-report")
+    check_bin = args.check
+    skip = set(filter(None, args.skip.split(",")))
+    if args.models and all(model in skip for model in args.models):
+        ap.error("--skip excludes every requested model")
+    if args.wa_headers:
+        return check_wa_headers(pdb, check_bin, args.wa_headers.resolve(),
+                                args.models, skip)
+    if args.wa_report:
+        return check_wa_coverage(pdb, check_bin, args.models, args.filter,
+                                 args.timeout, skip)
     refs = json.loads(gzip.decompress(
         (REPO / "docs" / "corpus-refs.json.gz").read_bytes()))
-    pdb = args.pdb / "posterior_database"
     models = args.models or sorted(refs)
-    skip = set(filter(None, args.skip.split(",")))
     models = [m for m in models if m not in skip]
     missing = [m for m in models if m not in refs]
     if missing:
@@ -250,7 +450,7 @@ def main():
     failures = []
     worst_overall = ("", 0.0, 0)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        futs = [pool.submit(check_model, m, refs[m], pdb, args.check, tmp,
+        futs = [pool.submit(check_model, m, refs[m], pdb, check_bin, tmp,
                             args.timeout, args.no_wa, args.no_lp)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):

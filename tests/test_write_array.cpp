@@ -2,7 +2,7 @@
 //
 // The column names are a contract with every downstream reader, and two of
 // the rules were real bugs found only by diffing headers against CmdStan
-// (harnesses/wa_header_check.py, which needs a CmdStan build and cannot run in
+// (tools/verify_refs.py --wa-headers, which needs CmdStan and cannot run in
 // CI): a container is indexed even at length one (`vector[1] v` is v.1, not
 // v), and a matrix carries two indices in column-major order (M.1.1, M.2.1,
 // M.1.2). This test pins those rules in-repo, at two levels:

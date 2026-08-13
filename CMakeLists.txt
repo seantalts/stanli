@@ -197,10 +197,9 @@ if(STANLI_THREADS)
   string(APPEND STANLI_BUILD_ID "-threads")
 endif()
 
-if(NOT EMSCRIPTEN)
-add_library(stanli_shared SHARED
-  runtime/src/capi.cpp
-  runtime/src/bridgestan_abi.cpp
+# One runtime source inventory, compiled separately for the shared and static
+# targets so each keeps its own flags and link behavior.
+set(STANLI_RUNTIME_SOURCES
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
@@ -237,7 +236,13 @@ add_library(stanli_shared SHARED
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
   runtime/src/data.cpp
-  runtime/src/data_var_context.cpp
+  runtime/src/data_var_context.cpp)
+
+if(NOT EMSCRIPTEN)
+add_library(stanli_shared SHARED
+  runtime/src/capi.cpp
+  runtime/src/bridgestan_abi.cpp
+  ${STANLI_RUNTIME_SOURCES}
   tests/tbb_stub.cpp)
 target_include_directories(stanli_shared PUBLIC runtime/include)
 target_compile_definitions(stanli_shared
@@ -298,44 +303,7 @@ endfunction()
 stanli_embed_stanc(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
-add_library(stanli STATIC
-  runtime/src/executor.cpp
-  runtime/kernels/elementwise.cpp
-  runtime/kernels/densities.cpp
-  runtime/kernels/densities_common.cpp
-  runtime/kernels/densities_lpmf.cpp
-  runtime/kernels/densities_glm.cpp
-  runtime/kernels/densities_common_b.cpp
-  runtime/kernels/densities_rest.cpp
-  runtime/kernels/densities_rest_b.cpp
-  runtime/kernels/densities_cdf_a.cpp
-  runtime/kernels/densities_cdf_b.cpp
-  runtime/kernels/legacy_fns.cpp
-  runtime/kernels/matrix_fns.cpp
-  runtime/kernels/ode.cpp
-  runtime/src/ode_prog.cpp
-  runtime/kernels/constrain.cpp
-  runtime/kernels/eltwise_expr.cpp
-  runtime/kernels/mixture.cpp
-  runtime/kernels/message.cpp
-  runtime/kernels/island.cpp
-  runtime/src/island.cpp
-  runtime/src/adjoint.cpp
-  runtime/src/program_density.cpp
-  runtime/src/nuts.cpp
-  runtime/src/walnuts.cpp
-  runtime/src/diagnose.cpp
-  runtime/src/estimate.cpp
-  runtime/src/mir_reader.cpp
-  runtime/src/lower.cpp
-  runtime/src/wa_interp.cpp
-  runtime/src/message_sink.cpp
-  runtime/src/executor_pool.cpp
-  runtime/src/reroll.cpp
-  runtime/src/inplace.cpp
-  runtime/src/constfold.cpp
-  runtime/src/data.cpp
-  runtime/src/data_var_context.cpp)
+add_library(stanli STATIC ${STANLI_RUNTIME_SOURCES})
 target_include_directories(stanli PUBLIC runtime/include)
 target_compile_definitions(stanli PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 # The BridgeStan facade is native-only: it finds its own sidecar manifest
@@ -424,51 +392,20 @@ install(TARGETS stanli_shared
 install(DIRECTORY runtime/include/stanli
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-stanli_add_test(test_smoke)
-stanli_add_test(test_executor)
-stanli_add_test(test_recorder)
-stanli_add_test(test_densities)
-stanli_add_test(test_matvec)
-stanli_add_test(test_legacy)
-stanli_add_test(test_eight_schools)
-stanli_add_test(test_glm)
-stanli_add_test(test_nuts)
-stanli_add_test(test_walnuts)
-stanli_add_test(test_sexp)
-stanli_add_test(test_mir)
-stanli_add_test(test_transforms)
-stanli_add_test(test_eltwise)
-stanli_add_test(test_lower)
-stanli_add_test(test_lower_views)
-stanli_add_test(test_lower_view_contract)
-stanli_add_test(test_lower_array_contract)
-stanli_add_test(test_data)
-stanli_add_test(test_e2e)
-stanli_add_test(test_reroll)
-stanli_add_test(test_profile)
-stanli_add_test(test_inplace)
-stanli_add_test(test_pass_safety)
-stanli_add_test(test_sampling)
-stanli_add_test(test_ode_prog)
-stanli_add_test(test_mir_program_conformance)
-stanli_add_test(test_mir_checks)
-stanli_add_test(test_structured_checks)
-stanli_add_test(test_mir_unary_fallback)
-stanli_add_test(test_constfold)
-stanli_add_test(test_write_array)
-stanli_add_test(test_pool)
-stanli_add_test(test_bridgestan)
-stanli_add_test(test_mixture)
-stanli_add_test(test_island)
-stanli_add_test(test_adjoint)
-stanli_add_test(test_diagnose)
-stanli_add_test(test_multichain)
-stanli_add_test(test_newtrans)
-stanli_add_test(test_rejectprint)
-stanli_add_test(test_odevariadic)
-stanli_add_test(test_estimate)
-stanli_add_test(test_brmsmono)
-stanli_add_test(test_structured_arrays)
+set(STANLI_TESTS
+  test_smoke test_executor test_recorder test_densities test_matvec
+  test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp
+  test_mir test_transforms test_eltwise test_lower test_lower_views
+  test_lower_view_contract test_lower_array_contract test_data test_e2e
+  test_reroll test_profile test_inplace test_pass_safety test_sampling
+  test_ode_prog test_mir_program_conformance test_mir_checks
+  test_structured_checks test_mir_unary_fallback test_constfold
+  test_write_array test_pool test_bridgestan test_mixture test_island
+  test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
+  test_odevariadic test_estimate test_brmsmono test_structured_arrays)
+foreach(STANLI_TEST IN LISTS STANLI_TESTS)
+  stanli_add_test(${STANLI_TEST})
+endforeach()
 
 # The C ABI lives only in the shared library. Test it through that shipped
 # boundary rather than compiling capi.cpp into the C++ unit-test library.

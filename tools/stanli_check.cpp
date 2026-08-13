@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
   }
 
   // --columns: the CSV header the write_array graph would write, for
-  // comparison against CmdStan's (harnesses/wa_header_check.py).
+  // comparison against CmdStan's (verify_refs.py --wa-headers).
   if (columns_only) {
     if (!cm.write_array || cm.write_array->columns.empty()) {
       std::printf("NO_COLUMNS %s\n", cm.write_array

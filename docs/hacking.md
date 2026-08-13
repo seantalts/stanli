@@ -164,7 +164,8 @@ The tools you will reach for most:
 - [`dump_islands`](../tools/dump_islands.cpp): print every island's
   forward and adjoint programs, instruction by instruction.
 - [`verify_refs.py`](../tools/verify_refs.py): replay the whole model
-  corpus against recorded CmdStan values. Runs in CI.
+  corpus against recorded CmdStan values and report write_array coverage.
+  Runs in CI; `--wa-headers` compares column names with a live CmdStan.
 - [`verify_sample.py`](../tools/verify_sample.py): record those
   reference values (needs a CmdStan checkout).
 - [`sampler_trace.py`](../tools/sampler_trace.py): compare sampler
@@ -384,9 +385,9 @@ a branch to `eval_fun` in
 [`mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp), or for
 `_rng` functions to `rng_fun` in
 [`wa_interp.cpp`](../runtime/src/wa_interp.cpp). Both fail loudly on
-anything unhandled, and
-`python3 harnesses/wa_coverage.py deps/posteriordb` reports what the
-corpus needs that is still missing.
+anything unhandled, and `python3 tools/verify_refs.py deps/posteriordb
+--wa-report --check build-rel/stanli_check` reports what the corpus needs
+that is still missing.
 
 **An op.** Anything the log density touches must become an op, because
 ops are the only path with a backward.
@@ -464,8 +465,9 @@ python3 tools/verify_refs.py deps/posteriordb --check build-lite/stanli_check --
 
 For sampler changes, use
 [`tools/sampler_trace.py`](../tools/sampler_trace.py). For
-generated-quantities coverage,
-[`harnesses/wa_coverage.py`](../harnesses/wa_coverage.py). For any
+generated-quantities coverage, run the verifier with `--wa-report`.
+For a live CmdStan column-name comparison, use `--wa-headers deps/cmdstan`.
+Both modes default to `build-rel/stanli_check`. For any
 performance claim, measure with `STANLI_PROFILE=1` before and after;
 [`docs/benchmarks.md`](benchmarks.md) has the harnesses.
 

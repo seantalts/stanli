@@ -1,6 +1,6 @@
 // Column-naming shapes for tests/test_write_array.cpp. One of each case the
 // CSV naming rules must get right, chosen because two of them were real
-// bugs found by diffing headers against CmdStan (spikes/wa_header_check.py):
+// bugs found by diffing headers against CmdStan (verify_refs.py --wa-headers):
 //   s     scalar          -> "s"        (bare, never "s.1")
 //   v     vector[1]       -> "v.1"      (a container is indexed even at
 //                                        length one; we wrote "v")
