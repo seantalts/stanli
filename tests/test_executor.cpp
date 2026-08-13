@@ -36,11 +36,11 @@ int main() {
 
   expect_eq("forward", ex.forward(), std::exp(0.3) + -1.1);
 
-  // The value-only forward is the same value for every kernel that has no
-  // partials to skip -- which is all of them but OP_ODE -- and it must not
-  // disturb a gradient taken afterwards. That second half is the whole
-  // safety argument for the mode: gradient() runs its own full forward, so
-  // nothing a value-only sweep skipped can survive into a reverse sweep.
+  // This graph has no kernel whose double instantiation changes its value,
+  // and a value-only pass must not disturb a gradient taken afterwards.
+  // That second half is the safety argument for the mode: gradient() runs
+  // its own full forward, so nothing a value-only sweep skipped can survive
+  // into a reverse sweep.
   expect_eq("forward_value_only", ex.forward_value_only(),
             std::exp(0.3) + -1.1);
 

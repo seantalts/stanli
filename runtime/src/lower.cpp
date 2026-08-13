@@ -147,6 +147,7 @@ std::vector<double> graph_order(const DataMap::Entry& en,
 struct Lowering {
   struct Val {
     int slot;
+    bool autodiff = false;  // instantiated C++ scalar type carries var
     SlotInfo si;
   };
   static_assert(sizeof(Val) == 32);
@@ -187,6 +188,9 @@ struct Lowering {
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
   std::map<std::string, const mir::FunDef*> fun_defs;
+  // A generic UDF keeps one scalar template type per formal. Locals and its
+  // return use the promoted type, but a direct formal reference keeps its own.
+  std::map<std::string, bool> udf_formal_autodiff;
   std::map<std::string, bool> effectful_cache;
   std::set<std::string> effectful_visiting;
   std::set<std::string> int_locals;  // SInt locals in log_prob (data-only)
@@ -205,7 +209,33 @@ struct Lowering {
   // density inside an inlined user function is unnormalized only if the
   // call that reached it was.
   bool propto_ctx = true;
+  // OR of the actual real/container scalar types for the current inlined
+  // UDF. Generic AutoDiffable locals and returns instantiate to this type.
+  bool udf_autodiff_ctx = false;
+  bool scalar_autodiff() const {
+    return udf_depth == 0 ? !in_write_array : udf_autodiff_ctx;
+  }
   bool propto(const mir::Expr& e) const { return e.fn_propto && propto_ctx; }
+
+  // Static C++ scalar type without lowering/evaluating the expression. This
+  // is intentionally small: ordinary ops propagate Val::autodiff from their
+  // lowered operands; only a data-condition ternary needs the unchosen arm.
+  bool expression_autodiff(const mir::Expr& e) const {
+    if (e.unsized.leaf == mir::UnsizedLeaf::Int || e.data_only) return false;
+    if (e.promoted) return scalar_autodiff();
+    if (e.kind == mir::Expr::Var) {
+      const auto formal = udf_formal_autodiff.find(e.name);
+      if (formal != udf_formal_autodiff.end()) return formal->second;
+      const auto value = scope.find(e.name);
+      return value != scope.end() ? value->second.autodiff : scalar_autodiff();
+    }
+    if (e.kind == mir::Expr::TernaryIf && e.args.size() == 3)
+      return expression_autodiff(e.args[1]) || expression_autodiff(e.args[2]);
+    bool autodiff = false;
+    for (const mir::Expr& arg : e.args)
+      autodiff = autodiff || expression_autodiff(arg);
+    return autodiff;
+  }
 
   explicit Lowering(const DataMap& d, std::shared_ptr<ShapeInterner> pool =
                                           std::make_shared<ShapeInterner>())
@@ -250,7 +280,7 @@ struct Lowering {
   }
 
   Val constant(double v) {
-    Val out{const_slot(v), SlotInfo{0, 0, true}};
+    Val out{const_slot(v), false, SlotInfo{0, 0, true}};
     DataMap::Entry en;
     en.r = {v};
     observe(out, std::move(en));
@@ -585,7 +615,8 @@ struct Lowering {
     std::vector<double> vals(dims.begin(), dims.end());
     const int slot = add_slot((int64_t)vals.size(), false);
     out.fills.emplace_back(slot, vals);
-    Val v{slot, array_view({(int64_t)dims.size()}, ViewKind::Flat, true)};
+    Val v{slot, false,
+          array_view({(int64_t)dims.size()}, ViewKind::Flat, true)};
     DataMap::Entry en;
     en.is_int = true;
     en.r = std::move(vals);
@@ -696,7 +727,7 @@ struct Lowering {
     validate_view(si, (int64_t)vals.size(), "data value " + name);
     const int s = add_slot((int64_t)vals.size(), false);
     out.fills.emplace_back(s, vals);
-    Val v{s, si};
+    Val v{s, false, si};
     scope[name] = v;
     observe(v, *en);
     return s;
@@ -704,6 +735,22 @@ struct Lowering {
 
   // ---- expressions ----------------------------------------------------------
   Val lower_expr(const mir::Expr& e) {
+    Val value = lower_expr_impl(e);
+    if (e.promoted) {
+      value.autodiff = expression_autodiff(e);
+    } else if (e.kind == mir::Expr::Var) {
+      const auto formal = udf_formal_autodiff.find(e.name);
+      if (formal != udf_formal_autodiff.end()) value.autodiff = formal->second;
+    } else if (e.kind == mir::Expr::TernaryIf && e.args.size() == 3) {
+      // A known data condition chooses one implementation value, but C++ has
+      // already promoted the expression. MIR records that promoted type, so
+      // no arm may be evaluated merely to rediscover it.
+      value.autodiff = expression_autodiff(e);
+    }
+    return value;
+  }
+
+  Val lower_expr_impl(const mir::Expr& e) {
     switch (e.kind) {
       case mir::Expr::Var: {
         auto it = scope.find(e.name);
@@ -1154,7 +1201,7 @@ struct Lowering {
       // provenance; treating its live-out as data would select kernels that
       // deliberately omit adjoints for that input.
       si.param_free = false;
-      scope[name] = Val{out_slots[k], si};
+      scope[name] = Val{out_slots[k], scalar_autodiff(), si};
     }
     if (reg.has_target) target_terms.push_back(out_slots.back());
   }
@@ -1171,11 +1218,11 @@ struct Lowering {
     si.rows = value.rows;
     si.cols = value.cols;
     si.kind = value.kind;
-    return {out_slots[0], si};
+    return {out_slots[0], scalar_autodiff(), si};
   }
 
   Val finish_emit(Op op, int64_t out_len, SlotInfo out_si,
-                  std::vector<int> idata) {
+                  std::vector<int> idata, bool autodiff) {
     const int o = add_slot(out_len, false);
     op.out = o;
     if (!idata.empty()) {
@@ -1184,19 +1231,20 @@ struct Lowering {
       op.n_idata = (int64_t)g.idata_pool.back().size();
     }
     g.ops.push_back(op);
-    return {o, out_si};
+    return {o, autodiff, out_si};
   }
 
   // Low-level emission for dynamic slot lists and graph scaffolding whose
   // output dependency is explicit at the call site.
   Val emit_raw(uint16_t opcode, std::vector<int> ins, int64_t out_len,
-               SlotInfo out_si, std::vector<int> idata = {}, int out2 = -1) {
+               SlotInfo out_si, std::vector<int> idata = {}, int out2 = -1,
+               bool autodiff = false) {
     Op op;
     op.opcode = opcode;
     op.out2 = out2;
     op.n_in = 0;
     for (int s : ins) op.in[op.n_in++] = s;
-    return finish_emit(op, out_len, out_si, std::move(idata));
+    return finish_emit(op, out_len, out_si, std::move(idata), autodiff);
   }
 
   // The expression seam: a pure result is parameter-free exactly when all of
@@ -1210,18 +1258,20 @@ struct Lowering {
     op.out2 = out2;
     op.n_in = 0;
     out_si.param_free = true;
+    bool autodiff = false;
     for (const Val& in : ins) {
       op.in[op.n_in++] = in.slot;
       out_si.param_free = out_si.param_free && in.si.param_free;
+      autodiff = autodiff || in.autodiff;
     }
-    return finish_emit(op, out_len, out_si, std::move(idata));
+    return finish_emit(op, out_len, out_si, std::move(idata), autodiff);
   }
 
   // Fallback for expressions with no native lowering: a data-only subtree
-  // is evaluated at compile time and materialized as a constant. Declines
-  // (returns nullopt) when the interpreter can't evaluate it either;
-  // propto densities never fold (their value is
-  // instantiation-dependent).
+  // is evaluated at compile time and materialized as a constant. Unsupported
+  // expressions and Stan validation failures decline; the latter must stay
+  // at model evaluation rather than move to construction. Propto densities
+  // never fold because their value is instantiation-dependent.
   bool expr_effectful(const mir::Expr& e) {
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined && fun_effectful(e.name))
@@ -1272,6 +1322,10 @@ struct Lowering {
       return td.eval(e);
     } catch (const CompileError&) {
       return std::nullopt;
+    } catch (const std::domain_error&) {
+      return std::nullopt;
+    } catch (const std::invalid_argument&) {
+      return std::nullopt;
     }
   }
 
@@ -1298,7 +1352,7 @@ struct Lowering {
     std::vector<double> vals = graph_order(en, e.type_ == "UMatrix", false);
     const int s = add_slot((int64_t)vals.size(), false);
     out.fills.emplace_back(s, vals);
-    Val v{s, si};
+    Val v{s, false, si};
     observe(v, std::move(en));
     return v;
   }
@@ -1393,7 +1447,7 @@ struct Lowering {
     struct Binding {
       bool is_int = false;
       long iv = 0;
-      Val v{-1, {}};
+      Val v{-1, false, {}};
       std::optional<DataMap::Entry> data;
     };
     std::vector<Binding> binds(e.args.size());
@@ -1416,28 +1470,41 @@ struct Lowering {
             observe(binds[i].v, *binds[i].data);
         }
       }
+      const bool formal_data = i < f.arg_data_only.size() && f.arg_data_only[i];
+      if (!in_write_array && formal_data && !binds[i].is_int &&
+          (binds[i].v.autodiff || !binds[i].v.si.param_free))
+        fail(e.name + ": data-only argument depends on a parameter", e.raw);
     }
     if (++udf_depth > 64) {
       --udf_depth;
       fail("UDF recursion too deep in " + e.name);
     }
     auto sc_saved = scope;
+    auto formal_autodiff_saved = udf_formal_autodiff;
     auto ie_saved = int_env;
     auto decls_saved = decls;
     auto il_saved = int_locals;
     auto env_saved = td.env();
     scope.clear();
+    udf_formal_autodiff.clear();
     int_env.clear();
     decls.clear();
     int_locals.clear();
     td.env().clear();
-    Val ret{-1, {}};
+    Val ret{-1, false, {}};
     bool returned = false;
     const bool propto_saved = propto_ctx;
+    const bool autodiff_saved = udf_autodiff_ctx;
     propto_ctx = propto_ctx && e.fn_propto;
+    udf_autodiff_ctx = false;
+    for (size_t i = 0; i < binds.size(); ++i)
+      if (!binds[i].is_int && f.arg_views[i].leaf != mir::UnsizedLeaf::Int)
+        udf_autodiff_ctx = udf_autodiff_ctx || binds[i].v.autodiff;
     auto restore = [&] {
       propto_ctx = propto_saved;
+      udf_autodiff_ctx = autodiff_saved;
       scope = std::move(sc_saved);
+      udf_formal_autodiff = std::move(formal_autodiff_saved);
       int_env = std::move(ie_saved);
       decls = std::move(decls_saved);
       int_locals = std::move(il_saved);
@@ -1459,7 +1526,9 @@ struct Lowering {
           int_env[name] = binds[i].iv;
         } else {
           scope[name] = binds[i].v;
-          decls[name] = DeclView{g.slots[binds[i].v.slot].len, binds[i].v.si};
+          udf_formal_autodiff[name] = binds[i].v.autodiff;
+          decls[name] = DeclView{g.slots[binds[i].v.slot].len,
+                                 binds[i].v.autodiff, binds[i].v.si};
         }
       }
       // CmdStan passes the CALLER's propto__ value into a user density.
@@ -1471,6 +1540,7 @@ struct Lowering {
       restore();
       throw;
     }
+    ret.autodiff = e.unsized.leaf != mir::UnsizedLeaf::Int && udf_autodiff_ctx;
     restore();
     if (!returned) fail(e.name + ": no return value on the executed path");
     return ret;
@@ -1494,7 +1564,7 @@ struct Lowering {
       if (parts.empty()) {
         SlotInfo empty;
         empty.param_free = true;
-        acc = Val{add_slot(0, false), empty};
+        acc = Val{add_slot(0, false), false, empty};
         out.fills.emplace_back(acc.slot, std::vector<double>{});
       } else {
         acc = parts[0];
@@ -1594,9 +1664,39 @@ struct Lowering {
     fail("unsupported function " + e.name);
   }
 
-  // Density calls: the table-driven kernels plus the ones that decompose
-  // onto existing ops (categorical) or carry matrix arguments
-  // (multi_normal, lkj, glm).
+  // Density calls: the table-driven kernels plus exact categorical and
+  // matrix-argument implementations (multi_normal, lkj, glm).
+  Val emit_categorical(const mir::Expr& e, const Val& outcome, const Val& arg,
+                       bool logit) {
+    const bool scalar_outcome = e.args[0].unsized.depth == 0;
+    if (e.args[0].unsized.leaf != mir::UnsizedLeaf::Int ||
+        e.args[0].unsized.depth > 1 ||
+        e.args[1].unsized.leaf != mir::UnsizedLeaf::Vector ||
+        e.args[1].unsized.depth != 0)
+      fail(e.name + ": expected int or array[] int and vector", e.raw);
+    const bool array_outcome = is_array(outcome.si) &&
+                               array_shape(outcome.si).leaf == ViewKind::Flat &&
+                               array_shape(outcome.si).dims.size() == 1;
+    if ((scalar_outcome && !is_scalar(outcome)) ||
+        (!scalar_outcome && !array_outcome) || !is_vector(arg.si))
+      fail(e.name + ": MIR type does not match lowered values", e.raw);
+    if (!e.args[0].data_only || !outcome.si.param_free ||
+        (udf_depth == 0 && e.args[1].data_only == arg.autodiff))
+      fail(e.name + ": MIR adlevel contradicts lowered dependencies", e.raw);
+    auto spec = std::make_shared<CategoricalSpec>();
+    spec->logit = logit;
+    spec->scalar_outcome = scalar_outcome;
+    // The graph dependency and instantiated C++ scalar type are independent:
+    // write_array varies with q but uses double, while an autodiff local can
+    // be graph-constant and still make Stan retain a propto summand.
+    spec->arg_autodiff = arg.autodiff;
+    spec->propto = propto(e);
+    Val checked = emit_value(OP_CATEGORICAL, {outcome, arg}, 1, {});
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+    return checked;
+  }
+
   std::optional<Val> lower_density_fn(const mir::Expr& e) {
     // Densities. n_int leading args come from int data (idata); the rest are
     // real slots. Layouts: one int group = raw values; two groups =
@@ -1669,12 +1769,14 @@ struct Lowering {
       std::vector<int> ins;
       SlotInfo first_real_si;
       SlotInfo result_si{0, 0, true};
+      bool result_autodiff = false;
       uint8_t variant = 0;
       for (size_t i = d.n_int; i < e.args.size(); ++i) {
         const Val arg = lower_expr(e.args[i]);
         if (i == d.n_int) first_real_si = arg.si;
         ins.push_back(arg.slot);
         result_si.param_free = result_si.param_free && arg.si.param_free;
+        result_autodiff = result_autodiff || arg.autodiff;
         if (!e.args[i].data_only) variant |= (uint8_t)(1u << (i - d.n_int));
       }
       if (propto(e)) variant |= 0x80u;
@@ -1686,7 +1788,7 @@ struct Lowering {
         idata.push_back((int)xsi.rows);
         idata.push_back((int)xsi.cols);
       }
-      Val dv = emit_raw(d.op, ins, 1, result_si, idata);
+      Val dv = emit_raw(d.op, ins, 1, result_si, idata, -1, result_autodiff);
       // GLM ops used to be the one density shape that got no variant at
       // all, so their kernels hardcoded propto=false and poisson_log_glm's
       // lp landed sum(log(y!)) -- 10.45 on a six-row test -- away from
@@ -1703,36 +1805,14 @@ struct Lowering {
     }
 
     if (e.name == "categorical_logit_lpmf" && e.args.size() == 2) {
-      // stan-math evaluates log_softmax(beta) then picks the outcomes,
-      // which is exactly this composition.
-      if (propto(e) && e.args[1].data_only) return constant(0.0);
+      const Val outcome = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);
-      Val ls = emit_value(OP_LOG_SOFTMAX, {b}, g.slots[b.slot].len);
-      auto ns = int_arg_values(e.args[0]);
-      if (e.args[0].type_ == "UInt" && ns.size() == 1)
-        return emit_value(OP_INDEX, {ls}, 1, {}, {ns[0] - 1});
-      std::vector<int> idata;
-      for (int n : ns) idata.push_back(n - 1);
-      Val ga = emit_value(OP_GATHER, {ls}, (int64_t)idata.size(), {}, idata);
-      return emit_value(OP_SUM_VEC, {ga}, 1);
+      return emit_categorical(e, outcome, b, true);
     }
     if (e.name == "categorical_lpmf" && e.args.size() == 2) {
-      // stan-math computes log(theta[n-1]) on the scalar type directly (no
-      // ops_partials), so this decomposes exactly onto existing ops. For an
-      // array outcome the reference logs the whole simplex once and gathers,
-      // which also fixes the adjoint association for repeated categories.
-      if (propto(e) && e.args[1].data_only) return constant(0.0);
+      const Val outcome = lower_expr(e.args[0]);
       Val th = lower_expr(e.args[1]);
-      auto ns = int_arg_values(e.args[0]);
-      if (e.args[0].type_ == "UInt" && ns.size() == 1) {
-        Val el = emit_value(OP_INDEX, {th}, 1, {}, {ns[0] - 1});
-        return emit_value(OP_LOGV, {el}, 1);
-      }
-      Val lg = emit_value(OP_LOGV, {th}, g.slots[th.slot].len);
-      std::vector<int> idata;
-      for (int n : ns) idata.push_back(n - 1);
-      Val ga = emit_value(OP_GATHER, {lg}, (int64_t)idata.size(), {}, idata);
-      return emit_value(OP_SUM_VEC, {ga}, 1);
+      return emit_categorical(e, outcome, th, false);
     }
 
     if ((e.name == "multi_normal_cholesky_lpdf" ||
@@ -1905,12 +1985,15 @@ struct Lowering {
     if (e.name == "wiener_lpdf" && e.args.size() == 5) {
       std::vector<int> ins;
       SlotInfo result_si{0, 0, true};
+      bool result_autodiff = false;
       for (int i = 0; i < 5; ++i) {
         const Val arg = lower_expr(e.args[i]);
         ins.push_back(arg.slot);
         result_si.param_free = result_si.param_free && arg.si.param_free;
+        result_autodiff = result_autodiff || arg.autodiff;
       }
-      Val v = emit_raw(OP_WIENER_LPDF, ins, 1, result_si, {});
+      Val v =
+          emit_raw(OP_WIENER_LPDF, ins, 1, result_si, {}, -1, result_autodiff);
       g.ops.back().variant = (uint8_t)((propto(e) ? 0x80u : 0u) | 0x1fu);
       return v;
     }
@@ -2194,9 +2277,9 @@ struct Lowering {
           fail("to_matrix: requested shape does not match source length",
                e.raw);
         si = matrix_view(rows, cols, a.si.param_free);
-        return Val{a.slot, si};
+        return Val{a.slot, a.autodiff, si};
       }
-      if (is_matrix(a.si)) return Val{a.slot, a.si};
+      if (is_matrix(a.si)) return Val{a.slot, a.autodiff, a.si};
       std::vector<int64_t> dims;
       if (is_array(a.si)) dims = array_shape(a.si).dims;
       if (dims.size() != 2) fail("to_matrix: unknown source shape", e.raw);
@@ -2214,7 +2297,7 @@ struct Lowering {
       si.rows = 0;
       si.cols = 0;
       stamp_kind(&si, e.type_);
-      return Val{a.slot, si};
+      return Val{a.slot, a.autodiff, si};
     }
     if (e.name == "rep_matrix") {
       SlotInfo si;
@@ -2708,7 +2791,7 @@ struct Lowering {
     if (declared_len != con_len)
       fail("parameter view length does not match constrained storage", s.raw);
     validate_view(psi, con_len, "parameter " + s.decl_id);
-    decls[s.decl_id] = DeclView{con_len, psi};
+    decls[s.decl_id] = DeclView{con_len, scalar_autodiff(), psi};
     const int raw = add_slot(raw_len, /*is_param=*/true);
     out.param_names.push_back(s.decl_id);
     {
@@ -2725,7 +2808,7 @@ struct Lowering {
     out.n_unconstrained += raw_len;
 
     if (tr.kind == mir::Transform::Identity) {
-      Val value{raw, psi};
+      Val value{raw, scalar_autodiff(), psi};
       CompiledModel::ParamView serial_view = parameter_view(s, raw, raw_len);
       scope[s.decl_id] = value;
       // In write_array mode the column order is dictated by the FnWriteParam
@@ -2828,7 +2911,8 @@ struct Lowering {
                   checked_immediate(matrix_rows, "structured matrix rows"),
                   checked_immediate(matrix_cols, "structured matrix columns")};
     }
-    Val con = emit_raw(opcode, ins, con_len, psi, tr_idata, jac);
+    Val con =
+        emit_raw(opcode, ins, con_len, psi, tr_idata, jac, scalar_autodiff());
     jac_slots.push_back(jac);
     scope[s.decl_id] = con;
     if (!in_write_array)
@@ -2837,10 +2921,12 @@ struct Lowering {
 
   struct DeclView {
     int64_t len = 0;
+    bool autodiff = false;
     SlotInfo si;
   };
   // The only name-keyed declaration protocol. Runtime values carry the same
-  // SlotInfo in `scope`; this registry is needed only before first binding.
+  // static scalar type and SlotInfo in `scope`; this registry is needed only
+  // before first binding.
   std::map<std::string, DeclView> decls;
 
   void lower_stmt(const mir::Stmt& s) {
@@ -2864,11 +2950,13 @@ struct Lowering {
           scope.erase(s.decl_id);
           DeclView sh;
           sh.len = sized_len(s.decl_type);
+          sh.autodiff = !s.decl_data_only && scalar_autodiff();
           sh.si = view_of(s.decl_type);
           if (s.has_init) {
             Val v = lower_expr(s.init);
             SlotInfo expected = view_of(s.decl_type, v.si.param_free);
             require_binding(v, sh.len, expected, s.decl_id, s.raw);
+            v.autodiff = sh.autodiff;
             v.si = expected;
             scope[s.decl_id] = v;
           }
@@ -2886,7 +2974,7 @@ struct Lowering {
         }
         if (!s.lhs_idx.empty()) {
           // Element write under unrolled control flow: functional update.
-          Val prev_v{-1, {}};
+          Val prev_v{-1, false, {}};
           auto it = scope.find(s.lhs);
           if (it != scope.end()) {
             prev_v = it->second;
@@ -2896,7 +2984,8 @@ struct Lowering {
               fail("indexed assignment to undeclared " + s.lhs);
             SlotInfo si = dl->second.si;
             si.param_free = true;
-            prev_v = Val{add_slot(dl->second.len, false), si};
+            prev_v =
+                Val{add_slot(dl->second.len, false), dl->second.autodiff, si};
             out.fills.emplace_back(prev_v.slot,
                                    std::vector<double>(dl->second.len, 0.0));
           }
@@ -3020,6 +3109,7 @@ struct Lowering {
             require_binding(rhs, g.slots[old->second.slot].len, old->second.si,
                             s.lhs, s.raw);
             const bool param_free = rhs.si.param_free;
+            rhs.autodiff = old->second.autodiff;
             rhs.si = old->second.si;
             rhs.si.param_free = param_free;
           } else {
@@ -3040,6 +3130,7 @@ struct Lowering {
                 rhs.si = expected;
                 rhs.si.param_free = pf;
               }
+              rhs.autodiff = dl->second.autodiff;
             }
           }
           scope[s.lhs] = rhs;

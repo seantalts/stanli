@@ -169,7 +169,7 @@ bool ops_match(const Graph& g, const Op& a, const Op& b) {
   if (a.opcode != b.opcode || a.variant != b.variant || a.n_in != b.n_in ||
       a.out2 >= 0 || b.out2 >= 0 || a.opcode == OP_CHECK_STRUCTURED ||
       a.opcode == OP_CHECK_MATCHING_DIMS || a.opcode == OP_CHECK_LOWER ||
-      a.opcode == OP_CHECK_UPPER)
+      a.opcode == OP_CHECK_UPPER || a.opcode == OP_CATEGORICAL)
     return false;
   for (int j = 0; j < a.n_in; ++j)
     if (g.slots[a.in[j]].len != g.slots[b.in[j]].len) return false;

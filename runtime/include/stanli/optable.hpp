@@ -112,6 +112,7 @@ namespace stanli {
   X(OP_CHECK_MATCHING_DIMS)         \
   X(OP_CHECK_LOWER)                 \
   X(OP_CHECK_UPPER)                 \
+  X(OP_CATEGORICAL)                 \
   X(OP_REJECT)                      \
   X(OP_PRINT)                       \
   X(OP_DIRICHLET_LPDF)

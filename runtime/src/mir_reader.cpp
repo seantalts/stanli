@@ -143,6 +143,7 @@ Expr read_expr_pattern(const Node& p) {
     }
   } else if (p.head_is("Promotion")) {
     e = read_expr(p[1]);  // transparent: keep inner, adopt promoted type later
+    e.promoted = true;
     return e;
   } else if (p.head_is("TernaryIf")) {
     e.kind = Expr::TernaryIf;
@@ -294,6 +295,8 @@ Stmt read_stmt(const Node& n) {
   if (head == "Decl") {
     s.kind = Stmt::Decl;
     if (const Node* id = field(p, "decl_id")) s.decl_id = (*id)[1].atom;
+    if (const Node* ad = field(p, "decl_adtype"))
+      s.decl_data_only = (*ad)[1].is_atom() && (*ad)[1].atom == "DataOnly";
     if (const Node* dt = field(p, "decl_type")) {
       const Node& t = (*dt)[1];  // (Sized ST) or (Unsized T)
       s.decl_type = t.head_is("Sized") ? read_sized(t[1]) : SizedType{};
@@ -415,7 +418,13 @@ Stmt read_stmt(const Node& n) {
   return s;
 }
 
-using Bindings = std::map<std::string, UnsizedView>;
+struct Binding {
+  UnsizedView view;
+  bool declared_data_only = false;
+};
+
+using Bindings = std::map<std::string, Binding>;
+using Functions = std::map<std::string, const FunDef*>;
 
 UnsizedView declared_view(const SizedType& type) {
   const std::string& base = type.base == "SArray" ? type.elem_base : type.base;
@@ -447,10 +456,80 @@ UnsizedView declared_view(const SizedType& type) {
   return view;
 }
 
-void validate_checks(const std::vector<Stmt>& body, Bindings& bindings);
+void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
+                       const Functions& functions);
 
-void validate_checks(const Stmt& s, Bindings& bindings) {
-  if (s.kind == Stmt::Decl) bindings[s.decl_id] = declared_view(s.decl_type);
+void validate_expression(const Expr& e, const Bindings& bindings,
+                         const Functions& functions) {
+  if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::StanLib &&
+      (e.name == "categorical_lpmf" || e.name == "categorical_logit_lpmf")) {
+    if (e.args.size() != 2 || e.args[0].unsized.leaf != UnsizedLeaf::Int ||
+        e.args[0].unsized.depth > 1 ||
+        e.args[1].unsized.leaf != UnsizedLeaf::Vector ||
+        e.args[1].unsized.depth != 0)
+      throw std::runtime_error("mir: malformed categorical signature");
+    for (const Expr& arg : e.args) {
+      if (arg.kind != Expr::Var) continue;
+      const auto binding = bindings.find(arg.name);
+      if (binding == bindings.end())
+        throw std::runtime_error("mir: categorical argument has no binding");
+      if (binding->second.view.depth != arg.unsized.depth ||
+          binding->second.view.leaf != arg.unsized.leaf)
+        throw std::runtime_error(
+            "mir: categorical argument type disagrees with its binding");
+      // GQ is statically double even for a constrained-parameter read. In
+      // log_prob, though, DataOnly metadata on an AutoDiffable declaration is
+      // contradictory and must not be allowed to change propto semantics.
+      if (arg.data_only && !binding->second.declared_data_only)
+        throw std::runtime_error(
+            "mir: categorical argument adlevel disagrees with its binding");
+    }
+  }
+  if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined) {
+    const auto found = functions.find(e.name);
+    if (found == functions.end())
+      throw std::runtime_error("mir: call to unknown user function " + e.name);
+    const FunDef& function = *found->second;
+    if (e.args.size() != function.arg_names.size())
+      throw std::runtime_error("mir: user function arity mismatch for " +
+                               e.name);
+    for (size_t i = 0; i < e.args.size(); ++i) {
+      if (e.args[i].unsized.depth != function.arg_views[i].depth ||
+          e.args[i].unsized.leaf != function.arg_views[i].leaf)
+        throw std::runtime_error(
+            "mir: user function argument type mismatch for " + e.name);
+      if (e.args[i].kind == Expr::Var && !e.args[i].promoted) {
+        const auto binding = bindings.find(e.args[i].name);
+        if (binding == bindings.end() ||
+            binding->second.view.depth != e.args[i].unsized.depth ||
+            binding->second.view.leaf != e.args[i].unsized.leaf)
+          throw std::runtime_error(
+              "mir: user function argument type disagrees with its binding "
+              "for " +
+              e.name);
+      }
+      if (function.arg_data_only[i] && !e.args[i].data_only)
+        throw std::runtime_error(
+            "mir: data-only function argument depends on a parameter");
+    }
+  }
+  for (const Expr& arg : e.args) validate_expression(arg, bindings, functions);
+}
+
+void validate_bindings(const Stmt& s, Bindings& bindings,
+                       const Functions& functions) {
+  for (const Expr* e :
+       {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    validate_expression(*e, bindings, functions);
+  for (const auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
+    for (const Expr& e : *expressions)
+      validate_expression(e, bindings, functions);
+  for (const Transform* transform :
+       {s.read_transform ? &*s.read_transform : nullptr,
+        s.check_transform ? &*s.check_transform : nullptr})
+    if (transform)
+      for (const Expr& e : transform->args)
+        validate_expression(e, bindings, functions);
   if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
     if (!s.check_transform)
       throw std::runtime_error("mir: FnCheck has no transform");
@@ -483,25 +562,33 @@ void validate_checks(const Stmt& s, Bindings& bindings) {
     if (value.kind == Expr::Var) {
       const auto binding = bindings.find(value.name);
       if (binding == bindings.end() ||
-          binding->second.depth != value.unsized.depth ||
-          binding->second.leaf != value.unsized.leaf)
+          binding->second.view.depth != value.unsized.depth ||
+          binding->second.view.leaf != value.unsized.leaf)
         throw std::runtime_error(
             "mir: FnCheck value type disagrees with its declaration");
     }
   }
-  if (s.kind == Stmt::IfElse) {
+  if (s.kind == Stmt::Decl) {
+    bindings[s.decl_id] = Binding{declared_view(s.decl_type), s.decl_data_only};
+  }
+  if (s.kind == Stmt::SList) {
+    validate_bindings(s.body, bindings, functions);
+  } else if (s.kind == Stmt::IfElse) {
     for (const auto& child : s.body) {
       Bindings branch = bindings;
-      validate_checks(child, branch);
+      validate_bindings(child, branch, functions);
     }
   } else if (!s.body.empty()) {
     Bindings nested = bindings;
-    validate_checks(s.body, nested);
+    if (s.kind == Stmt::For)
+      nested[s.loopvar] = Binding{UnsizedView{0, UnsizedLeaf::Int}, true};
+    validate_bindings(s.body, nested, functions);
   }
 }
 
-void validate_checks(const std::vector<Stmt>& body, Bindings& bindings) {
-  for (const auto& s : body) validate_checks(s, bindings);
+void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
+                       const Functions& functions) {
+  for (const auto& s : body) validate_bindings(s, bindings, functions);
 }
 
 }  // namespace
@@ -529,6 +616,8 @@ Program read_program(const sexp::Node& root) {
           // (AutoDiffable name type) or (DataOnly name type)
           f.arg_names.push_back(args[a][1].atom);
           f.arg_views.push_back(read_unsized(args[a][2]));
+          f.arg_data_only.push_back(args[a][0].is_atom() &&
+                                    args[a][0].atom == "DataOnly");
           f.arg_types.push_back(args[a][2].is_atom() ? args[a][2].atom
                                                      : dump(args[a][2], 40));
         }
@@ -543,20 +632,22 @@ Program read_program(const sexp::Node& root) {
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
     read_stmt_list((*gq)[1], prog.generate_quantities);
+  Functions functions;
+  for (const auto& f : prog.fun_defs) functions[f.name] = &f;
   Bindings inputs;
   for (const auto& [name, type] : prog.input_vars)
-    inputs[name] = declared_view(type);
+    inputs[name] = Binding{declared_view(type), true};
   Bindings prepare_bindings = inputs;
-  validate_checks(prog.prepare_data, prepare_bindings);
-  Bindings log_prob_bindings = inputs;
-  validate_checks(prog.log_prob, log_prob_bindings);
-  Bindings gq_bindings = inputs;
-  validate_checks(prog.generate_quantities, gq_bindings);
+  validate_bindings(prog.prepare_data, prepare_bindings, functions);
+  Bindings log_prob_bindings = prepare_bindings;
+  validate_bindings(prog.log_prob, log_prob_bindings, functions);
+  Bindings gq_bindings = prepare_bindings;
+  validate_bindings(prog.generate_quantities, gq_bindings, functions);
   for (const auto& f : prog.fun_defs) {
     Bindings args;
     for (size_t i = 0; i < f.arg_names.size(); ++i)
-      args[f.arg_names[i]] = f.arg_views[i];
-    validate_checks(f.body, args);
+      args[f.arg_names[i]] = Binding{f.arg_views[i], f.arg_data_only[i]};
+    validate_bindings(f.body, args, functions);
   }
   if (const Node* ov = field(root, "output_vars")) {
     // ((name <opaque> (...)) ...): parameters, transformed parameters and

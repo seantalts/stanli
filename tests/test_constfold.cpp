@@ -132,6 +132,27 @@ static void test_env_disable() {
   test_unsetenv("STANLI_NO_CONSTFOLD");
 }
 
+static void test_keeps_categorical_op() {
+  Graph g;
+  Fills fills;
+  const int outcome = g.add_slot(1, false);
+  const int theta = g.add_slot(3, false);
+  fills.emplace_back(outcome, std::vector<double>{2.0});
+  fills.emplace_back(theta, std::vector<double>{0.2, 0.3, 0.5});
+  const int checked = g.add_slot(1, false);
+  const int op = g.add_op(OP_CATEGORICAL, {outcome, theta}, checked);
+  auto spec = std::make_shared<CategoricalSpec>();
+  spec->scalar_outcome = true;
+  g.ops[(size_t)op].udata = spec.get();
+  g.udata_pool.push_back(std::move(spec));
+  g.result_slot = checked;
+
+  ConstFoldStats st = const_fold(g, fills, {checked});
+  expect("categorical op is not folded", st.ops_removed == 0);
+  expect("categorical op survives", g.ops.size() == 1);
+  expect("categorical op still runs", run_grad(std::move(g), fills)[0] == 0);
+}
+
 int main() {
   {  // kernels register through the first Executor
     Graph g;
@@ -143,6 +164,7 @@ int main() {
   }
   test_folds_data_arithmetic();
   test_refuses_midchain_reader();
+  test_keeps_categorical_op();
   test_env_disable();
   if (failures == 0) std::printf("test_constfold OK\n");
   return failures == 0 ? 0 : 1;

@@ -13,6 +13,7 @@
 // return exactly -1 with a message, never a plausible number for flags it
 // did not implement.
 #include "../runtime/third_party/bridgestan.h"
+#include "categorical_check_mir.hpp"
 
 #include "../runtime/third_party/nlohmann_json.hpp"
 
@@ -438,6 +439,39 @@ void test_constrain_interp() {
   bs_rng_destruct(a);
   bs_rng_destruct(b);
   bs_model_destruct(m);
+
+  // The RNG-bearing outcome forces the whole section through WaInterp; the
+  // categorical call before it must remain available through BridgeStan.
+  const std::string categorical = categorical_write_array_mir(
+      slurp("tests/fixtures/cat.tmir.sexp"), "categorical_logit_lpmf", false,
+      false, false, true);
+  err = nullptr;
+  m = bs_model_from_mir(categorical.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})",
+                        1234, &err);
+  if (m == nullptr) {
+    fail(std::string("interpreted categorical construct: ") +
+         (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_str("interpreted categorical names", bs_param_names(m, true, true),
+                "theta.1,theta.2,theta.3,categorical_value");
+  const double categorical_q[2] = {0.0, 0.0};
+  std::vector<double> categorical_row(4);
+  bs_rng* categorical_rng = bs_rng_construct(1234, &err);
+  if (categorical_rng == nullptr) {
+    fail("interpreted categorical rng construction");
+  } else {
+    expect_eq_int(
+        "interpreted categorical constrain rc",
+        bs_param_constrain(m, true, true, categorical_q, categorical_row.data(),
+                           categorical_rng, &err),
+        0);
+    expect_bitwise("interpreted categorical value", categorical_row[3],
+                   -std::log(3.0));
+    bs_rng_destruct(categorical_rng);
+  }
+  bs_model_destruct(m);
 }
 
 void test_unsupported() {
@@ -852,6 +886,26 @@ void test_construct_errors() {
                      "gq_sum_to_zero");
       bs_rng_destruct(rng);
     }
+    bs_model_destruct(m);
+  }
+
+  // All-data propto categorical calls remain runtime checks. The facade must
+  // propagate the same Stan Math error instead of reporting a finite density.
+  err = nullptr;
+  const std::string categorical_mir =
+      categorical_check_mir("categorical_logit_lpmf", false, 1, 3);
+  m = bs_model_from_mir(categorical_mir.c_str(),
+                        R"({"outcome":[4],"arg":[-1,0,1]})", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("categorical-check model construction: ") +
+         (err != nullptr ? err : "(no message)"));
+    bs_free_error_msg(err);
+  } else {
+    const double q = 0.0;
+    double lp = 0.0;
+    const int rc = bs_log_density(m, true, true, &q, &lp, &err);
+    expect_refused("categorical-check density", rc, &err,
+                   "categorical outcome out of support");
     bs_model_destruct(m);
   }
 

@@ -4,6 +4,7 @@
 // scalars are bare, containers are indexed even at length one, and matrices
 // carry row/column indices in column-major order. This test is intentionally
 // at the ABI boundary so a second flattening policy in capi.cpp cannot drift.
+#include "categorical_check_mir.hpp"
 #include "structured_array_oracles.hpp"
 
 #include <stanli/capi.h>
@@ -267,6 +268,64 @@ void expect_structured_checks() {
   stanli_model_free(model);
 }
 
+void expect_categorical_check() {
+  const std::string mir = categorical_check_mir("categorical_lpmf", true, 1, 3);
+  char err[8192]{};
+  stanli_model* model = stanli_model_new(
+      mir.c_str(), R"({"outcome":4,"arg":[0.2,0.3,0.5]})", err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL C API categorical-check construction: %s\n", err);
+    return;
+  }
+  double q = 0.0;
+  double lp = 0.0;
+  double grad = 0.0;
+  if (stanli_grad(model, &q, &lp, &grad) != 1 ||
+      lp != -std::numeric_limits<double>::infinity()) {
+    ++failures;
+    std::printf("FAIL C API accepted invalid categorical outcome\n");
+  }
+  stanli_model_free(model);
+}
+
+void expect_categorical_interpreted_write_array() {
+  const std::string mir = categorical_write_array_mir(
+      slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false, false,
+      false, true);
+  char err[8192]{};
+  stanli_model* model = stanli_model_new(
+      mir.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})", err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL C API interpreted categorical construction: %s\n", err);
+    return;
+  }
+  const int64_t n = stanli_wa_n_columns(model);
+  std::vector<double> row((size_t)n);
+  const double q[2] = {0.0, 0.0};
+  stanli_wa_seed(model, 1234);
+  if (stanli_wa_row(model, q, row.data()) != 0) {
+    ++failures;
+    std::printf("FAIL C API interpreted categorical row\n");
+  } else {
+    bool found = false;
+    for (int64_t i = 0; i < n; ++i) {
+      const char* name = stanli_wa_column_name(model, i);
+      if (name != nullptr && std::string(name) == "categorical_value") {
+        found = true;
+        expect_near("C API interpreted categorical value", row[(size_t)i],
+                    -std::log(3.0));
+      }
+    }
+    if (!found) {
+      ++failures;
+      std::printf("FAIL C API interpreted categorical column\n");
+    }
+  }
+  stanli_model_free(model);
+}
+
 }  // namespace
 
 int main() {
@@ -302,6 +361,8 @@ int main() {
   expect_invalid_data_rejected();
   expect_runtime_bound_rejected();
   expect_structured_checks();
+  expect_categorical_check();
+  expect_categorical_interpreted_write_array();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;

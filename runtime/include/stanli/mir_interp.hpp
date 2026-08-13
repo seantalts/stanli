@@ -30,6 +30,7 @@
 
 #include <stan/math.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -110,6 +111,7 @@ class MirInterp {
                       const std::vector<std::vector<T>>& args,
                       const std::vector<std::vector<int>>& int_args) {
     MirInterp sub(funs_, where_, hooks_);
+    sub.propto_ctx_ = propto_ctx_;
     size_t ai = 0, ii = 0;
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
       const bool is_int = f.arg_types[k].find("UInt") != std::string::npos;
@@ -449,6 +451,7 @@ class MirInterp {
   std::map<std::string, Value> env_;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
   int udf_depth_ = 0;
+  bool propto_ctx_ = true;
 
   [[noreturn]] void fail(const std::string& msg,
                          const std::string& raw = "") const {
@@ -637,6 +640,7 @@ class MirInterp {
     // Function bodies see their arguments and nothing else.
     MirInterp sub(funs_, where_, hooks_);
     sub.udf_depth_ = udf_depth_ + 1;
+    sub.propto_ctx_ = propto_ctx_ && e.fn_propto;
     for (size_t i = 0; i < e.args.size(); ++i)
       sub.env_[f.arg_names[i]] = eval(e.args[i]);
     try {
@@ -1384,6 +1388,45 @@ class MirInterp {
   }
     STANLI_SCALAR_UNARY_LIST(STANLI_INTERP_UNARY)
 #undef STANLI_INTERP_UNARY
+
+    // Categorical arguments are containers as a whole, not elementwise
+    // broadcasts. Preserve scalar-vs-array outcome overloads and the
+    // caller's propto instantiation exactly as the graph kernel does.
+    if ((e.name == "categorical_lpmf" || e.name == "categorical_logit_lpmf") &&
+        e.args.size() == 2) {
+      Value outcome = eval(e.args[0]);
+      Value value = eval(e.args[1]);
+      std::vector<int> outcomes = outcome.i;
+      if (outcomes.empty() && !outcome.r.empty()) {
+        outcomes.reserve(outcome.r.size());
+        for (const T& x : outcome.r) {
+          const double v = val(x);
+          if (!std::isfinite(v) || std::trunc(v) != v ||
+              v < std::numeric_limits<int>::min() ||
+              v > std::numeric_limits<int>::max())
+            fail("malformed integer categorical outcome", e.raw);
+          outcomes.push_back(static_cast<int>(v));
+        }
+      }
+      const bool scalar = e.args[0].unsized.depth == 0;
+      if (scalar && outcomes.size() != 1)
+        fail("categorical scalar outcome has wrong width", e.raw);
+      if (value.dims.size() != 1)
+        fail("categorical probability argument is not a vector", e.raw);
+      Eigen::Matrix<T, Eigen::Dynamic, 1> arg(value.r.size());
+      for (size_t k = 0; k < value.r.size(); ++k)
+        arg((Eigen::Index)k) = value.r[k];
+      const bool propto = e.fn_propto && propto_ctx_;
+      const auto density = [&](const auto& n) -> T {
+        if (e.name == "categorical_logit_lpmf")
+          return propto ? stan::math::categorical_logit_lpmf<true>(n, arg)
+                        : stan::math::categorical_logit_lpmf<false>(n, arg);
+        return propto ? stan::math::categorical_lpmf<true>(n, arg)
+                      : stan::math::categorical_lpmf<false>(n, arg);
+      };
+      r.r = {scalar ? density(outcomes[0]) : density(outcomes)};
+      return r;
+    }
 
     // The continuous scalar ones come from the shared list, so this can
     // never be narrower than what the register-machine compiler accepts

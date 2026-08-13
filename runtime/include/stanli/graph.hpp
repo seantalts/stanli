@@ -116,6 +116,18 @@ struct BoundCheckSpec {
   bool shapes_match = false;
 };
 
+// The two categorical families share one exact value/check/pullback op.
+// `scalar_outcome` is a language type distinction: array[1] int must select
+// Stan Math's vector overload even though its flat slot also has length one.
+struct CategoricalSpec {
+  bool logit = false;
+  bool scalar_outcome = false;
+  // These are independent: write_array values depend on q but instantiate on
+  // double, while a graph-constant AutoDiffable local instantiates on var.
+  bool arg_autodiff = false;
+  bool propto = true;  // template flag; Stan Math decides what it can drop
+};
+
 class Executor {
  public:
   explicit Executor(Graph g);
@@ -150,13 +162,12 @@ class Executor {
 
   // Forward through all ops; returns value of result_slot (must be scalar).
   double forward();
-  // The same value, computed the way CmdStan's log_prob<double> computes
-  // it: kernels that would build partials for a later reverse sweep may
-  // skip them. Only OP_ODE currently differs, and it differs a lot -- it
-  // solves the states alone instead of the coupled state-plus-sensitivity
-  // system, which is both cheaper and, at a solution grazing zero, a
-  // different answer. Use it where CmdStan uses the double path, chiefly
-  // deciding whether an initial point is valid.
+  // The value from CmdStan's log_prob<double> instantiation. Kernels may
+  // skip partials or select a double-only overload. OP_CATEGORICAL thereby
+  // observes propto's compile-time scalar type, while OP_ODE solves states
+  // alone instead of the coupled state-plus-sensitivity system. Use this
+  // where CmdStan uses the double path, chiefly when deciding whether an
+  // initial point is valid.
   //
   // Safe to interleave with gradient(): that always runs a full forward
   // first, so nothing stale survives into a reverse sweep.

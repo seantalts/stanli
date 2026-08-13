@@ -53,6 +53,7 @@ struct Expr {
   std::string type_;       // UInt UReal UVector URowVector UMatrix ...
   UnsizedView unsized;     // structural (UArray ...), without text parsing
   bool data_only = false;  // adlevel DataOnly
+  bool promoted = false;   // explicit MIR Promotion to this adlevel/type
   std::string raw;         // Unsupported diagnostics
 };
 
@@ -124,6 +125,7 @@ struct Stmt {
   // Decl
   std::string decl_id;
   SizedType decl_type;
+  bool decl_data_only = false;
   bool has_init = false;
   Expr init;
   std::optional<Transform> read_transform;  // set iff init is FnReadParam
@@ -184,6 +186,7 @@ struct FunDef {
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_types;  // unsized: UReal UVector UMatrix ...
   std::vector<UnsizedView> arg_views;
+  std::vector<bool> arg_data_only;
   std::vector<Stmt> body;
 };
 

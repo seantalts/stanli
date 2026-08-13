@@ -18,6 +18,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/packet.hpp>
 #include <stanli/structured_check.hpp>
 
 #include <stan/math/prim/err/check_cholesky_factor.hpp>
@@ -31,7 +32,11 @@
 #include <stan/math/prim/err/check_simplex.hpp>
 #include <stan/math/prim/err/check_sum_to_zero.hpp>
 #include <stan/math/prim/err/check_unit_vector.hpp>
+#include <stan/math/prim/prob/categorical_logit_lpmf.hpp>
+#include <stan/math/prim/prob/categorical_lpmf.hpp>
+#include <stan/math/rev.hpp>
 
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -248,6 +253,81 @@ void check_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = 0.0;
 }
 
+int categorical_outcome(double value) {
+  if (!std::isfinite(value) || std::trunc(value) != value ||
+      value < std::numeric_limits<int>::min() ||
+      value > std::numeric_limits<int>::max())
+    throw std::logic_error("malformed integer categorical outcome");
+  return static_cast<int>(value);
+}
+
+std::vector<int> categorical_outcomes(const KernelCtx& ctx,
+                                      const CategoricalSpec& spec) {
+  if (spec.scalar_outcome && ctx.in[0].len != 1)
+    throw std::logic_error("categorical scalar outcome has wrong width");
+  std::vector<int> outcomes;
+  outcomes.reserve((size_t)ctx.in[0].len);
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    outcomes.push_back(categorical_outcome(ctx.in[0].data[i]));
+  return outcomes;
+}
+
+template <typename Arg>
+auto categorical_eval(const CategoricalSpec& spec,
+                      const std::vector<int>& outcomes, const Arg& arg) {
+  if (spec.scalar_outcome) {
+    if (spec.logit)
+      return spec.propto
+                 ? stan::math::categorical_logit_lpmf<true>(outcomes[0], arg)
+                 : stan::math::categorical_logit_lpmf<false>(outcomes[0], arg);
+    return spec.propto ? stan::math::categorical_lpmf<true>(outcomes[0], arg)
+                       : stan::math::categorical_lpmf<false>(outcomes[0], arg);
+  }
+  if (spec.logit)
+    return spec.propto
+               ? stan::math::categorical_logit_lpmf<true>(outcomes, arg)
+               : stan::math::categorical_logit_lpmf<false>(outcomes, arg);
+  return spec.propto ? stan::math::categorical_lpmf<true>(outcomes, arg)
+                     : stan::math::categorical_lpmf<false>(outcomes, arg);
+}
+
+Eigen::Matrix<stan::math::var, -1, 1> categorical_vars(const Desc& input) {
+  Eigen::Matrix<stan::math::var, -1, 1> arg(input.len);
+  for (int64_t k = 0; k < input.len; ++k) arg(k) = input.data[k];
+  return arg;
+}
+
+void categorical_fwd(KernelCtx& ctx) {
+  if (ctx.n_in != 2 || ctx.out.len != 1 || ctx.udata == nullptr)
+    throw std::logic_error("malformed categorical op");
+  const auto& spec = *static_cast<const CategoricalSpec*>(ctx.udata);
+  const std::vector<int> outcomes = categorical_outcomes(ctx, spec);
+  if (spec.arg_autodiff && !values_only()) {
+    stan::math::nested_rev_autodiff nested;
+    const auto arg = categorical_vars(ctx.in[1]);
+    ctx.out.data[0] = categorical_eval(spec, outcomes, arg).val();
+  } else {
+    Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
+    ctx.out.data[0] = categorical_eval(spec, outcomes, arg);
+  }
+}
+
+void categorical_bwd(KernelCtx& ctx) {
+  const auto& spec = *static_cast<const CategoricalSpec*>(ctx.udata);
+  if (!spec.arg_autodiff || ctx.in_adj[1].data == nullptr ||
+      (!spec.scalar_outcome && ctx.in[0].len == 0))
+    return;
+  stan::math::nested_rev_autodiff nested;
+  auto arg = categorical_vars(ctx.in[1]);
+  for (int64_t k = 0; k < ctx.in[1].len; ++k)
+    arg(k).adj() = ctx.in_adj[1].data[k];
+  const auto outcomes = categorical_outcomes(ctx, spec);
+  const stan::math::var lp = categorical_eval(spec, outcomes, arg);
+  stan::math::grad((lp * ctx.out_adj).vi_);
+  for (int64_t k = 0; k < ctx.in[1].len; ++k)
+    ctx.in_adj[1].data[k] = arg(k).adj();
+}
+
 }  // namespace
 
 void register_message_kernels() {
@@ -257,6 +337,8 @@ void register_message_kernels() {
                   Kernel{check_matching_dims_fwd, nullptr, nullptr});
   register_kernel(OP_CHECK_LOWER, Kernel{check_fwd<true>, nullptr, nullptr});
   register_kernel(OP_CHECK_UPPER, Kernel{check_fwd<false>, nullptr, nullptr});
+  register_kernel(OP_CATEGORICAL,
+                  Kernel{categorical_fwd, categorical_bwd, nullptr});
   register_kernel(OP_REJECT, Kernel{reject_fwd, nullptr, nullptr});
   register_kernel(OP_PRINT, Kernel{print_fwd, nullptr, nullptr});
 }

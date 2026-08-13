@@ -1076,6 +1076,38 @@ static void test_bail_extra_root() {
   }
 }
 
+static void test_bail_categorical_ops() {
+  Graph g;
+  Fills fills;
+  const int outcome = g.add_slot(1, false);
+  const int theta = g.add_slot(3, false);
+  const int mu = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  fills.emplace_back(outcome, std::vector<double>{2.0});
+  fills.emplace_back(theta, std::vector<double>{0.2, 0.3, 0.5});
+  auto spec = std::make_shared<CategoricalSpec>();
+  spec->scalar_outcome = true;
+  std::vector<int> terms;
+  for (int lane = 0; lane < 8; ++lane) {
+    const int checked = g.add_slot(1, false);
+    const int op = g.add_op(OP_CATEGORICAL, {outcome, theta}, checked);
+    g.ops[(size_t)op].udata = spec.get();
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{0.1 * lane});
+    const int lp = g.add_slot(1, false);
+    const int density = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    g.ops[(size_t)density].variant = 0x06;
+    terms.push_back(lp);
+  }
+  g.udata_pool.push_back(std::move(spec));
+
+  const size_t before = g.ops.size();
+  RerollStats st = reroll(g, fills, terms, {});
+  expect("categorical ops are not rerolled", st.regions == 0);
+  expect("categorical ops survive", g.ops.size() == before);
+  expect("categorical terms survive", terms.size() == 8);
+}
+
 int main() {
   test_radon_shape();
   test_ark_shape();
@@ -1091,6 +1123,7 @@ int main() {
   test_first_lane_anomalous();
   test_block_structured();
   test_bail_extra_root();
+  test_bail_categorical_ops();
   test_lda_shape_gradients();
   test_lda_shape_cost();
   test_write_fusion();
