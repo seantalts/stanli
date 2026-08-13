@@ -192,37 +192,6 @@ Expr read_expr(const Node& n) {
         e.data_only = (*a)[1].is_atom() && (*a)[1].atom == "DataOnly";
     }
   }
-  // stanc3's partial evaluator (--O1) rewrites `c + a*b` into fma(a,b,c),
-  // whose fused rounding CmdStan's default (unoptimized) build never
-  // performs. The corpus references are that default build, so read it
-  // back as the mul+add it came from: bitwise what CmdStan computes, and
-  // no dedicated kernel needed. The optimizer's fma is elementwise over
-  // containers (prophet gets fma(vector, vector, vector)), hence
-  // EltTimes__, which is a plain product on scalars.
-  if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::StanLib &&
-      e.name == "fma" && e.args.size() == 3) {
-    Expr mul;
-    mul.kind = Expr::FunApp;
-    mul.fn_lib = Expr::Lib::StanLib;
-    mul.name = "EltTimes__";
-    const bool a_scalar = e.args[0].unsized.depth == 0 &&
-                          (e.args[0].unsized.leaf == UnsizedLeaf::Real ||
-                           e.args[0].unsized.leaf == UnsizedLeaf::Int);
-    const Expr& shaped = a_scalar ? e.args[1] : e.args[0];
-    mul.type_ = shaped.type_.empty() ? "UReal" : shaped.type_;
-    mul.unsized = shaped.unsized;
-    mul.data_only = e.args[0].data_only && e.args[1].data_only;
-    mul.args = {e.args[0], e.args[1]};
-    Expr add;
-    add.kind = Expr::FunApp;
-    add.fn_lib = Expr::Lib::StanLib;
-    add.name = "Plus__";
-    add.type_ = e.type_;
-    add.unsized = e.unsized;
-    add.data_only = e.data_only;
-    add.args = {std::move(mul), std::move(e.args[2])};
-    return add;
-  }
   return e;
 }
 

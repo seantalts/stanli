@@ -73,6 +73,7 @@ struct Program {
     SOFTMAX,    // dst[0..len) = softmax(r[a..a+len))
     LSE2,       // dst = log_sum_exp(r[a], r[b])
     LOG_MIX,    // dst = log_mix(r[a], r[b], r[c])
+    FMA,        // dst = fma(r[a], r[b], r[c]), fused like stan-math's
     // Any scalar continuous density: `len` selects which
     // (program_density.hpp). One opcode rather than one per density is
     // what lets the machine speak the runtime's whole list instead of a
@@ -289,6 +290,9 @@ void run_program(const Program& p, T* reg) {
         break;
       case Program::LOG_MIX:
         d() = stan::math::log_mix(ra(), rb(), reg[(size_t)I.c]);
+        break;
+      case Program::FMA:
+        d() = stan::math::fma(ra(), rb(), reg[(size_t)I.c]);
         break;
         // One call for every scalar continuous density the runtime has;
       // program_density.cpp holds the switch, so the 27 instantiations

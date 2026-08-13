@@ -108,6 +108,9 @@ bool is_widenable(uint16_t oc) {
     case OP_SUB:
     case OP_MUL:
     case OP_DIV:
+    // Ternary, but the same shape contract: every argument len 1 or N,
+    // out len N, per-element math bit-identical to the scalar op.
+    case OP_FMA:
     case OP_NEG:
     case OP_EXPV:
     case OP_LOGV:

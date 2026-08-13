@@ -2,43 +2,6 @@
 
 ## 0.7.0
 
-### Compiled through stanc3's optimizer
-
-Every path that turns Stan source into MIR now asks stanc3 for the
-optimized MIR at `--O1` -- inlining, constant and copy propagation,
-dead code elimination, partial evaluation -- rather than the raw
-transformed MIR: the embedded compiler, the Python fallback, the JS
-worker, the CLI tools, and the harnesses. The MIR format is unchanged,
-so MIR compiled by an earlier version still loads.
-
-The optimizer emits shapes the runtime had never seen, each now handled
-and covered by a fixture test:
-
-- `fma(a, b, c)` from partial evaluation, all-vector arguments included
-  (prophet). The reader desugars it elementwise to `a*b + c`, which is
-  bitwise what the unfused form computes and what the CmdStan
-  references recorded.
-- `lmultiply(x, y)` from `x * log(y)`, interpreted through
-  `multiply_log`.
-- `normal_id_glm_lpdf` with the outcome as a parameter, which is what
-  `theta ~ normal(X*b, s)` gets rewritten to. The kernel now returns
-  `dlp/dy` instead of dropping it, which was a 0.68 relative error on
-  the IRT models.
-- Zero-length return declarations in inlined callees, a `vector[0]`
-  sized by assignment: the lowering and the parameter-dependent region
-  compiler adopt the assigned shape.
-- Size expressions that query computed values
-  (`rows(segment(beta, ...))`), answered by lowering the argument and
-  reading its slot.
-- Inliner symbol reuse across loop iterations with per-iteration sizes,
-  where a redeclaration now shadows the stale binding.
-- `FnWriteParam` whose variable reference was constant-folded away,
-  where the column name falls back to the MIR's `output_vars` order.
-
-Corpus: 129 of 129 within gate, worst deviation identical to the
-transformed-MIR baseline (`hmm_gaussian` at 3.63e-12), so the optimizer
-introduces no numeric drift against the reference oracle.
-
 ### A DataMap from a Stan var_context
 
 `DataMap::from_var_context` builds the runtime's data map straight from

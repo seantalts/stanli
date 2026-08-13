@@ -149,6 +149,8 @@ static const char* code_name(Program::Code c) {
       return "LSE2";
     case Program::LOG_MIX:
       return "LOG_MIX";
+    case Program::FMA:
+      return "FMA";
     default:
       return "OTHER";
   }
@@ -317,6 +319,27 @@ static void test_binary_ops() {
     Build b({1.7, 0.6});
     const int d = b.emit(c, 0, 1);
     check("binary", b.done({d}, {2.5}));
+  }
+}
+
+static void test_fma() {
+  {
+    Build b({1.7, 0.6, -0.9});
+    const int d = b.emit(Program::FMA, 0, 1, 2);
+    check("fma", b.done({d}, {2.5}));
+  }
+  {
+    // In place over its own addend: dst == c needs the checkpointed a, b.
+    Build b({1.7, 0.6, -0.9});
+    b.emit_to(Program::FMA, 2, 0, 1, 2);
+    check("fma in place", b.done({2}, {2.5}));
+  }
+  {
+    // Repeated accumulation, the recurrence shape arK's lanes carve.
+    Build b({0.4, 0.3, 0.2});
+    const int d1 = b.emit(Program::FMA, 0, 1, 2);
+    const int d2 = b.emit(Program::FMA, 0, d1, 2);
+    check("fma chain", b.done({d2}, {1.5}));
   }
 }
 
@@ -849,6 +872,7 @@ static void test_fuzz_ranges() {
 
 int main() {
   test_binary_ops();
+  test_fma();
   test_unary_ops();
   test_overwrite_needs_checkpoint();
   test_self_write();

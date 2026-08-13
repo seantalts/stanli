@@ -124,6 +124,7 @@ bool in_vocab(const Graph& g, const Op& op) {
     case OP_SUB:
     case OP_MUL:
     case OP_DIV:
+    case OP_FMA:
     case OP_ADD_N:
     case OP_LSE2:
     case OP_LOG_MIX:
@@ -405,6 +406,12 @@ struct Compiler {
         const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
         const int c = read_reg(op.in[2]);
         emit(Program::LOG_MIX, write_reg(op.out), a, b, c);
+        return ok;
+      }
+      case OP_FMA: {
+        const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
+        const int c = read_reg(op.in[2]);
+        emit(Program::FMA, write_reg(op.out), a, b, c);
         return ok;
       }
       default: {

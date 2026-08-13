@@ -1298,10 +1298,12 @@ int main() {
   }
 
   // Vector fma from --O1 partial evaluation (`k .* t + c` becomes
-  // fma(k, t, c)): the reader's desugar has to be elementwise, and the
-  // result bitwise what the unfused form computes.
+  // fma(k, t, c)): OP_FMA is FUSED, so the reference is stan::math::fma,
+  // and the data avoids powers of two -- with t = 2.0/-1.0/0.5 the
+  // products are exact and fused equals unfused bitwise, which once let
+  // both implementations pass this test.
   {
-    DataMap d = DataMap::from_json(R"({"N": 3, "t": [2.0, -1.0, 0.5]})");
+    DataMap d = DataMap::from_json(R"({"N": 3, "t": [1.7, -0.3, 0.9]})");
     CompiledModel fm =
         compile_model(slurp("tests/fixtures/vecfma.tmir.sexp"), d);
     Executor fex(std::move(fm.graph));
@@ -1316,9 +1318,9 @@ int main() {
     for (int i = 0; i < 3; ++i) k(i) = q[i];
     for (int i = 0; i < 3; ++i) c(i) = q[3 + i];
     Eigen::VectorXd t(3);
-    t << 2.0, -1.0, 0.5;
+    t << 1.7, -0.3, 0.9;
     Eigen::Matrix<var, -1, 1> mu(3);
-    for (int i = 0; i < 3; ++i) mu(i) = k(i) * t(i) + c(i);
+    for (int i = 0; i < 3; ++i) mu(i) = stan::math::fma(k(i), t(i), c(i));
     var acc = stan::math::normal_lpdf<false>(mu, 0, 1);
     acc.grad();
     check(lp == acc.val(), "vector fma: lp bitwise against the var path");

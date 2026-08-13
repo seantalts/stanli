@@ -332,6 +332,11 @@ bool gen_adjoint(IslandProg& p) {
         A.vb = save_before(I.b, 1);
         A.vc = save_before(I.c, 1);
         break;
+      case Program::FMA:
+        // d(a*b+c)/da = b, /db = a, /dc = 1: only a and b are re-read.
+        A.va = save_before(I.a, 1);
+        A.vb = save_before(I.b, 1);
+        break;
       case Program::LOG_RANGE:
       case Program::LSE_RANGE:
         A.va = save_before(I.a, I.len);
@@ -519,6 +524,12 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         adj[I.dst] = 0.0;
         adj[I.a] += val[I.vb] * t;
         adj[I.b] += val[I.va] * t;
+        break;
+      case Program::FMA:
+        adj[I.dst] = 0.0;
+        adj[I.a] += val[I.vb] * t;
+        adj[I.b] += val[I.va] * t;
+        adj[I.c] += t;
         break;
       case Program::DIV:
         adj[I.dst] = 0.0;

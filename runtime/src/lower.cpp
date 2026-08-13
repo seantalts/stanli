@@ -2026,6 +2026,23 @@ struct Lowering {
       const int64_t len = std::max(g.slots[a.slot].len, g.slots[b.slot].len);
       return emit_value(OP_MUL, {a, b}, len);
     }
+    // fma from --O1 partial evaluation (`c + a*b`) or written explicitly:
+    // fused (std::fma), elementwise with scalar broadcast on any argument.
+    if (e.name == "fma" && e.args.size() == 3) {
+      Val a = lower_expr(e.args[0]);
+      Val b = lower_expr(e.args[1]);
+      Val c = lower_expr(e.args[2]);
+      const int64_t la = g.slots[a.slot].len, lb = g.slots[b.slot].len,
+                    lc = g.slots[c.slot].len;
+      const int64_t n = std::max(la, std::max(lb, lc));
+      for (int64_t l : {la, lb, lc})
+        if (l != n && l != 1) fail("fma: incompatible lengths", e.raw);
+      // The shape of whichever operand carries one, like the binaries.
+      SlotInfo si = shape_of(a, b);
+      if (is_scalar(a) && is_scalar(b)) si = shape_of(a, c);
+      si.param_free = a.si.param_free && b.si.param_free && c.si.param_free;
+      return emit_value(OP_FMA, {a, b, c}, n, si);
+    }
     auto bit = kBin.find(e.name);
     if (bit != kBin.end()) {
       Val a = lower_expr(e.args[0]);
