@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1
 
 ### WALNUTS chains no longer freeze on stiff posteriors
 
