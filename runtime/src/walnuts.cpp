@@ -31,7 +31,14 @@ struct ExecLogpGrad {
     const int64_t n = ex->n_params();
     for (int64_t i = 0; i < n; ++i) ex->params_data()[i] = x(i);
     grad.resize(n);
-    logp = ex->gradient(grad.data());
+    // The catch matters when this callable is used directly (the step
+    // search below); through walnutpie it is redundant with
+    // NoExceptLogpGrad, harmlessly.
+    try {
+      logp = ex->gradient(grad.data());
+    } catch (const std::exception&) {
+      logp = -std::numeric_limits<double>::infinity();
+    }
     // walnutpie assumes the density throws or is finite: its acceptance
     // statistic is exp(-|logp - logp_next|), and a NaN there -- which
     // stanli's kernels produce freely, log of a negative is a NaN and
@@ -106,20 +113,31 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
   std::seed_seq seq{cfg.seed, static_cast<uint32_t>(cfg.chain_id)};
   std::mt19937_64 rng(seq);
 
-  // Same initialization contract as run_nuts: uniform(-radius, radius)
-  // on the unconstrained scale, kept only when the log density and the
-  // whole gradient are finite, up to 100 attempts. A fixed point (an
-  // explicit init or radius 0) gets one attempt; retrying an identical
-  // point cannot help.
+  // Initialization: uniform(-radius, radius) on the unconstrained scale,
+  // finite log density and gradient required, up to 100 attempts as in
+  // run_nuts -- but among the first 16 finite candidates the BEST log
+  // density wins, where NUTS takes the first. WALNUTS earns the extra 15
+  // evaluations: walnutpie's mass adaptation starts learning the metric
+  // immediately, and one draw from the far tail of a stiff posterior
+  // (lotka_volterra had inits at lp -16000 against a posterior living
+  // near -12) collapses the inverse mass to the tail's huge gradients,
+  // leaving a chain that crawls there for the whole run. Any finite init
+  // is a valid init, so preferring a better one costs nothing in
+  // correctness. A fixed point (an explicit init or radius 0) is taken
+  // as given, once.
   Eigen::VectorXd q(n);
   {
     std::uniform_real_distribution<double> init_dist(-cfg.init_radius,
                                                      cfg.init_radius);
     const bool fixed_point = cfg.init != nullptr || cfg.init_radius == 0.0;
     const int kMaxInitAttempts = fixed_point ? 1 : 100;
+    const int kWantCandidates = fixed_point ? 1 : 16;
     std::vector<double> grad((size_t)n);
-    bool ok = false;
-    for (int attempt = 0; attempt < kMaxInitAttempts && !ok; ++attempt) {
+    Eigen::VectorXd best_q(n);
+    double best_lp = -std::numeric_limits<double>::infinity();
+    int found = 0;
+    for (int attempt = 0; attempt < kMaxInitAttempts && found < kWantCandidates;
+         ++attempt) {
       if (cfg.init != nullptr)
         for (int64_t i = 0; i < n; ++i) q(i) = cfg.init[i];
       else if (cfg.init_radius == 0.0)
@@ -127,8 +145,10 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
       else
         for (int64_t i = 0; i < n; ++i) q(i) = init_dist(rng);
       for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q(i);
+      bool ok = false;
+      double lp = 0;
       try {
-        const double lp = ex.forward_value_only();
+        lp = ex.forward_value_only();
         ok = std::isfinite(lp);
         if (ok) {
           const double glp = ex.gradient(grad.data());
@@ -139,11 +159,19 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
       } catch (const std::exception&) {
         ok = false;
       }
+      if (ok) {
+        ++found;
+        if (lp > best_lp) {
+          best_lp = lp;
+          best_q = q;
+        }
+      }
     }
-    if (!ok)
+    if (found == 0)
       throw std::runtime_error(
           "initialization failed: no draw in (-init_radius, init_radius) "
           "had a finite log density and gradient after 100 attempts");
+    q = best_q;
   }
 
   std::vector<std::vector<double>> draws;
@@ -151,12 +179,45 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
   CollectHandler handler{&draws, stats, &observe};
   ExecLogpGrad logp_grad{&ex};
 
-  const walnutpie::InitChainConfig init_cfg(cfg.init_step_size, q,
-                                            Eigen::VectorXd::Ones(n));
-  const walnutpie::WarmupConfig warmup_cfg =
-      walnutpie::WarmupConfigBuilder{}
-          .min_max_iter((size_t)cfg.warmup, (size_t)cfg.warmup)
-          .build();
+  // Stan's find_reasonable_epsilon, on the unit metric: one leapfrog step
+  // from the init, double or halve until the Hamiltonian error crosses
+  // log(2). WALNUTS needs this MORE than NUTS does: NUTS's progressive
+  // sampling still moves off a divergent trajectory's partial tree, but a
+  // WALNUTS extension whose energy error survives max_step_halvings
+  // simply fails, so a chain whose step is far too large for its
+  // neighborhood does not move at all and Adam only learns from the ~1%
+  // per iteration it drifts. From a tail init that deadlock lasted the
+  // whole warmup.
+  double step0 = cfg.init_step_size;
+  {
+    std::normal_distribution<double> stdnorm(0.0, 1.0);
+    Eigen::VectorXd rho(n);
+    for (int64_t i = 0; i < n; ++i) rho(i) = stdnorm(rng);
+    double lp_q;
+    Eigen::VectorXd g(n);
+    logp_grad(q, lp_q, g);
+    const double h0 = lp_q - 0.5 * rho.squaredNorm();
+    const auto h_err = [&](double step) {
+      Eigen::VectorXd r = rho + 0.5 * step * g;
+      Eigen::VectorXd q2 = q + step * r;
+      double lp2;
+      Eigen::VectorXd g2(n);
+      logp_grad(q2, lp2, g2);
+      r += 0.5 * step * g2;
+      return (lp2 - 0.5 * r.squaredNorm()) - h0;
+    };
+    const double thresh = std::log(2.0);
+    const bool shrink = !(std::fabs(h_err(step0)) < thresh);
+    for (int it = 0; it < 60; ++it) {
+      const double err = std::fabs(h_err(step0));
+      if (shrink ? (err < thresh) : (err > thresh)) break;
+      step0 *= shrink ? 0.5 : 2.0;
+    }
+    // Growing overshoots by construction: the loop stops at the first
+    // step past the threshold, so hand back the last one under it.
+    if (!shrink) step0 *= 0.5;
+  }
+
   const walnutpie::SamplingConfig sampling_cfg =
       walnutpie::SamplingConfigBuilder{}
           .min_max_iter((size_t)cfg.samples, (size_t)cfg.samples)
@@ -165,6 +226,14 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
           .max_hamiltonian_error(cfg.max_error)
           .build();
 
+  // Warmup itself stays walnutpie's algorithm, untouched: only the two
+  // inputs its API asks the caller for -- the starting position and the
+  // starting step -- are chosen more carefully above.
+  const walnutpie::InitChainConfig init_cfg(step0, q, Eigen::VectorXd::Ones(n));
+  const walnutpie::WarmupConfig warmup_cfg =
+      walnutpie::WarmupConfigBuilder{}
+          .min_max_iter((size_t)cfg.warmup, (size_t)cfg.warmup)
+          .build();
   walnutpie::AdaptiveWalnuts<ExecLogpGrad, std::mt19937_64, CollectHandler>
       adaptive(rng, handler, logp_grad, init_cfg, warmup_cfg, sampling_cfg);
   for (int i = 0; i < cfg.warmup; ++i) adaptive();

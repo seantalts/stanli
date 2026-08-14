@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### WALNUTS chains no longer freeze on stiff posteriors
+
+On lotka_volterra the comparison page showed a WALNUTS chain drawn as a
+flat line: warmup had trapped it at lp ~ -8000 against a posterior
+living near -12. Two causes, both at initialization, both fixed in how
+stanli supplies walnutpie's caller-provided inputs; the warmup and
+sampling algorithms themselves are untouched. First, a uniform(-2, 2)
+init can land so deep in the tail that walnutpie's mass adaptation --
+which starts learning the metric from its first observation -- collapses
+the inverse mass to the tail's huge gradients, leaving a chain that
+crawls there for the whole run; WALNUTS inits now take the best log
+density among the first 16 finite candidates instead of the first one.
+Second, a starting step far too large for the init's neighborhood means
+every trajectory extension fails outright (unlike NUTS, which still
+moves off a partial tree), so the chain deadlocks while the step only
+shrinks about a percent per iteration; the step now starts from Stan's
+find_reasonable_epsilon search on the unit metric. Across eight seeds on
+lotka_volterra the old behavior froze one chain and left two others
+outside the typical set; now all eight sample, with a lotka regression
+test pinning the freeze. The underlying warmup sensitivity is being
+reported to walnutpie upstream.
+
 ## 0.7.0
 
 ### A DataMap from a Stan var_context

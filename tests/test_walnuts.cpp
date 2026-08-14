@@ -3,9 +3,12 @@
 // test_nuts.cpp so the two samplers stay comparable.
 #include "models.hpp"
 
+#include <stanli/compile.hpp>
 #include <stanli/walnuts.hpp>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -182,6 +185,44 @@ int main() {
     expect_in("observer warmup", n_warm, 50, 50);
     expect_in("observer samples", n_samp, 60, 60);
     expect_in("draws", (double)draws.size(), 60, 60);
+  }
+
+  // ---- lotka_volterra: warmup must reach the typical set -----------------
+  // The stiff ODE posterior that exposed the frozen-chain failure: from a
+  // deep-tail init (this seed started near lp -16000; the posterior lives
+  // near -12), walnutpie's continuous mass adaptation learned the tail's
+  // huge gradients immediately (mass_init_count 4), the inverse mass
+  // collapsed, and the chain crawled at lp ~ -8000 for the entire run --
+  // the flat trace the comparison page showed. NUTS escapes from the very
+  // same point. Guarded by init selection and the unit-metric step
+  // search. The bound is -200, not the posterior's -12: this posterior
+  // also has a metastable basin near lp -52 that any sampler can linger
+  // in legitimately (R-hat flags it), and the bug pinned here is the
+  // freeze, which sits thousands below the bound.
+  {
+    auto slurp = [](const char* p) {
+      std::ifstream f(p);
+      std::ostringstream ss;
+      ss << f.rdbuf();
+      return ss.str();
+    };
+    const std::string mir = slurp("tests/fixtures/lotka.omir.sexp");
+    DataMap data =
+        DataMap::from_json_file("tests/fixtures/hudson_lynx_hare.json");
+    auto cm = compile_model(mir, data);
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+
+    WalnutsConfig cfg;
+    cfg.seed = 4;
+    cfg.warmup = 500;
+    cfg.samples = 200;
+    SamplerStats stats;
+    auto draws = run_walnuts(ex, cfg, &stats);
+    double lp_mean = 0;
+    for (const auto& row : stats.rows) lp_mean += row[0];
+    lp_mean /= (double)stats.rows.size();
+    expect_in("lotka mean lp", lp_mean, -200.0, 0.0);
   }
 
   if (failures) {
