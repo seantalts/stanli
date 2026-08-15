@@ -593,10 +593,12 @@ int main() {
         if (vectors[k]) {
           for (int i = 0; i < vectors[k]->size(); ++i)
             expect_eq(tag + " g" + std::to_string(gi), r.grad[gi],
-                      (*vectors[k])(i).adj()), ++gi;
+                      (*vectors[k])(i).adj()),
+                ++gi;
         } else {
           expect_eq(tag + " g" + std::to_string(gi), r.grad[gi],
-                    scalars[k]->adj()), ++gi;
+                    scalars[k]->adj()),
+              ++gi;
         }
       }
       return r;
@@ -616,9 +618,9 @@ int main() {
       var a = wa[0], t = wt[0], b = wb[0], d = wd[0];
       var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
       lp.grad();
-      auto r = grads("wiener y-vector", {wy, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
-                     {nullptr, &a, &t, &b, &d},
-                     {&y, nullptr, nullptr, nullptr, nullptr});
+      auto r = grads(
+          "wiener y-vector", {wy, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
+          {nullptr, &a, &t, &b, &d}, {&y, nullptr, nullptr, nullptr, nullptr});
       expect_eq("wiener y-vector lp", r.value, lp.val());
       stan::math::recover_memory();
     }
@@ -626,10 +628,9 @@ int main() {
       var y = wy[0], a = wa[0], t = wt[0], b = wb[0], d = wd[0];
       var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
       lp.grad();
-      auto r = grads("wiener scalar",
-                     {{wy[0]}, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
-                     {&y, &a, &t, &b, &d},
-                     {nullptr, nullptr, nullptr, nullptr, nullptr});
+      auto r = grads(
+          "wiener scalar", {{wy[0]}, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
+          {&y, &a, &t, &b, &d}, {nullptr, nullptr, nullptr, nullptr, nullptr});
       expect_eq("wiener scalar lp", r.value, lp.val());
       stan::math::recover_memory();
     }
