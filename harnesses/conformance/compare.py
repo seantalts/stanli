@@ -35,6 +35,15 @@ class Gate:
             raise ValueError("numeric tolerances must be nonnegative")
 
 
+# The gate a case gets when no policy rule names one. Reviewed decision
+# (2026-08-15): a lane within 5 ULP of the reference is green -- the same
+# order of tolerance the corpus oracle runs at -- so the mismatch bucket
+# holds disagreements someone should read, not accumulated last-bit noise
+# from equivalent-but-differently-grouped arithmetic. Anything looser than
+# this stays a reviewed [[numeric_gate]] rule in policy.toml.
+DEFAULT_GATE = Gate(max_ulp=5)
+
+
 @dataclasses.dataclass(frozen=True)
 class NumericComparison:
     agrees: bool

@@ -11,7 +11,8 @@ import time
 from typing import Dict, Mapping, Optional, Tuple
 
 from .catalog import ConstructCase, ConstructCatalog
-from .compare import (Expectation, Gate, Observation, OutcomeComparison,
+from .compare import (DEFAULT_GATE, Expectation, Gate, Observation,
+                      OutcomeComparison,
                       compare_observations)
 from .oracle import (OracleError, ReferenceBuild, ToolchainVersions,
                      cached_reference_build, prepare_reference_runtime,
@@ -68,7 +69,7 @@ def _observation(response: Mapping[str, object]) -> Observation:
 
 def _numeric_gate(case: ConstructCase, policy: CapabilityPolicy) -> Gate:
     if case.numeric_policy is None:
-        return Gate(max_ulp=0)
+        return DEFAULT_GATE
     configured = policy.numeric_gate_named(case.numeric_policy)
     return Gate(max_ulp=configured.max_ulp, abs_tol=configured.abs_tol,
                 rel_tol=configured.rel_tol)

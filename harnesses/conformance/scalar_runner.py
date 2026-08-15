@@ -9,7 +9,7 @@ import pathlib
 import sys
 from typing import Mapping, Optional, Sequence, Tuple
 
-from .compare import Gate
+from .compare import DEFAULT_GATE, Gate
 from .evaluate import evaluate_generated_case
 from .generate import (GeneratedCase, GeneratedShard, VectorizedCaseSpec,
                        generated_inventory, make_scalar_shards,
@@ -51,7 +51,7 @@ def _failure(case, status: ResultStatus, reason: str,
 def _gate(policy: CapabilityPolicy, case) -> Gate:
     numeric = policy.numeric_gate_for(case.spec.signature)
     if numeric is None:
-        return Gate(max_ulp=0)
+        return DEFAULT_GATE
     return Gate(max_ulp=numeric.max_ulp, abs_tol=numeric.abs_tol,
                 rel_tol=numeric.rel_tol)
 
