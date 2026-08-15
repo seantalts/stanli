@@ -60,6 +60,8 @@ jobs:
             "$url/$OPAM_VERSION/opam-$OPAM_VERSION-x86_64-linux"
           chmod +x /tmp/opam
           sudo install -m 755 /tmp/opam /usr/local/bin/opam
+          # Runner images lack bubblewrap; same flag the wheels use.
+          opam init --bare --disable-sandboxing --no-setup -y
 
       - name: Validate the complete pinned reference toolchain
         run: |
@@ -126,6 +128,8 @@ jobs:
             "$url/$OPAM_VERSION/opam-$OPAM_VERSION-x86_64-linux"
           chmod +x /tmp/opam
           sudo install -m 755 /tmp/opam /usr/local/bin/opam
+          # Runner images lack bubblewrap; same flag the wheels use.
+          opam init --bare --disable-sandboxing --no-setup -y
 
       - name: Revalidate restored reference inputs
         run: |
