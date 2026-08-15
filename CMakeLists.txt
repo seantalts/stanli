@@ -227,6 +227,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/walnuts.cpp
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp
+  runtime/src/pathfinder.cpp
   runtime/src/mir_reader.cpp
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
@@ -402,7 +403,7 @@ set(STANLI_TESTS
   test_structured_checks test_mir_unary_fallback test_constfold
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
-  test_odevariadic test_estimate test_brmsmono test_structured_arrays)
+  test_odevariadic test_estimate test_brmsmono test_structured_arrays test_pathfinder)
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
