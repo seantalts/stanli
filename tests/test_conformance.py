@@ -281,8 +281,12 @@ return_kind = "tuple"
         policy = load_policy(DEFAULT_POLICY)
         ode = parse_signature("ode_rk45(real, real) => real")
         normal = parse_signature("normal_lpdf(real, real, real) => real")
-        self.assertEqual(policy.numeric_gate_for(ode).rel_tol, 1e-9)
+        # O(rtol) discretization error each side; see the policy comment.
+        self.assertEqual(policy.numeric_gate_for(ode).rel_tol, 1e-6)
         self.assertIsNone(policy.numeric_gate_for(normal))
+        wiener = parse_signature(
+            "wiener_lpdf(real, real, real, real, real) => real")
+        self.assertEqual(policy.numeric_gate_for(wiener).rel_tol, 1e-12)
         self.assertEqual(policy.numeric_gate_named("iterative-ode-solvers"),
                          policy.numeric_gate_for(ode))
         with self.assertRaises(PolicyError):
