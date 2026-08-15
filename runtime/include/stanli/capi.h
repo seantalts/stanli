@@ -272,6 +272,32 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
                                  stanli_draw_cb cb, void* user, char* err,
                                  size_t err_len);
 
+/* Single-path Pathfinder: a normal approximation fitted along an L-BFGS
+ * path, drawn from in milliseconds where a sampler takes seconds. Draws
+ * come back UNCONSTRAINED, num_draws rows of stanli_n_unconstrained
+ * doubles, the same layout stanli_sample writes, so the same
+ * stanli_wa_row call constrains them.
+ *
+ * `lp` and `lp_approx` each receive num_draws doubles: the model's log
+ * density at the draw, and the approximation's. Their difference is the
+ * log importance ratio k-hat is fitted to. Either may be null.
+ *
+ * `cb`, when non-null, fires once per L-BFGS iterate as the optimizer
+ * climbs, which is the whole path -- there is no other way to get it.
+ *
+ * `summary` receives STANLI_N_PATHFINDER_SUMMARY doubles. */
+#define STANLI_PATHFINDER_KHAT 0
+#define STANLI_PATHFINDER_SELECTED_ITER 1
+#define STANLI_PATHFINDER_SELECTED_ELBO 2
+#define STANLI_PATHFINDER_ELAPSED_MS 3
+#define STANLI_N_PATHFINDER_SUMMARY 4
+typedef void (*stanli_path_cb)(int32_t iter, double lp, void* user);
+int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
+                          int num_draws, double* draws, double* lp,
+                          double* lp_approx, double* summary,
+                          stanli_path_cb cb, void* user, char* err,
+                          size_t err_len);
+
 /* write_array: every CSV column CmdStan would emit for one draw --
  * constrained parameters, transformed parameters, generated quantities,
  * in CmdStan's column order. n_columns is 0 when the model has no

@@ -15,6 +15,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -350,6 +351,69 @@ void expect_necessity_effects_refused() {
   }
 }
 
+// Pathfinder across the ABI: draws, the per-draw log densities, the
+// summary block, and the per-iterate callback that lets a caller animate
+// the climb. The statistics are test_pathfinder's job; what this pins is
+// that the shipped boundary hands all of it back.
+void expect_pathfinder() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string data = slurp("tests/fixtures/eight_schools.json");
+  char err[8192]{};
+  stanli_model* model =
+      stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL C API pathfinder construction: %s\n", err);
+    return;
+  }
+  const int64_t n = stanli_n_unconstrained(model);
+  const int num_draws = 200;
+  std::vector<double> draws((size_t)(num_draws * n));
+  std::vector<double> lp(num_draws), lp_approx(num_draws);
+  double summary[STANLI_N_PATHFINDER_SUMMARY]{};
+  std::vector<std::pair<int32_t, double>> path;
+  const auto on_iter = [](int32_t iter, double value, void* user) {
+    static_cast<std::vector<std::pair<int32_t, double>>*>(user)->emplace_back(
+        iter, value);
+  };
+  const int rc = stanli_run_pathfinder(model, 4242, 1, num_draws, draws.data(),
+                                       lp.data(), lp_approx.data(), summary,
+                                       on_iter, &path, err, sizeof err);
+  if (rc != 0) {
+    ++failures;
+    std::printf("FAIL C API pathfinder: %s\n", err);
+    stanli_model_free(model);
+    return;
+  }
+  bool all_finite = true;
+  for (double v : draws) all_finite &= std::isfinite(v);
+  for (double v : lp) all_finite &= std::isfinite(v);
+  for (double v : lp_approx) all_finite &= std::isfinite(v);
+  if (!all_finite) {
+    ++failures;
+    std::printf("FAIL C API pathfinder produced nonfinite output\n");
+  }
+  if (path.size() < 2) {
+    ++failures;
+    std::printf("FAIL C API pathfinder path: %zu iterates\n", path.size());
+  } else if (path[0].first != 0) {
+    ++failures;
+    std::printf("FAIL C API pathfinder path starts at iterate %d\n",
+                path[0].first);
+  }
+  const double khat = summary[STANLI_PATHFINDER_KHAT];
+  const double selected = summary[STANLI_PATHFINDER_SELECTED_ITER];
+  if (!std::isfinite(khat) || selected < 0 ||
+      selected >= (double)path.size() ||
+      !std::isfinite(summary[STANLI_PATHFINDER_SELECTED_ELBO]) ||
+      !(summary[STANLI_PATHFINDER_ELAPSED_MS] >= 0)) {
+    ++failures;
+    std::printf("FAIL C API pathfinder summary: khat %g selected %g\n", khat,
+                selected);
+  }
+  stanli_model_free(model);
+}
+
 }  // namespace
 
 int main() {
@@ -388,6 +452,7 @@ int main() {
   expect_categorical_check();
   expect_categorical_interpreted_write_array();
   expect_necessity_effects_refused();
+  expect_pathfinder();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;

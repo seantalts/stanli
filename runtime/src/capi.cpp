@@ -270,6 +270,48 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
   }
 }
 
+int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
+                          int num_draws, double* draws, double* lp,
+                          double* lp_approx, double* summary,
+                          stanli_path_cb cb, void* user, char* err,
+                          size_t err_len) {
+  try {
+    stanli::PathfinderConfig cfg;
+    cfg.seed = seed;
+    cfg.chain_id = chain_id;
+    cfg.num_draws = num_draws;
+    stanli::PathObserver observe;
+    if (cb) {
+      observe = [&](const stanli::PathIterate& it) {
+        cb((int32_t)it.iter, it.lp, user);
+      };
+    }
+    stanli::PathfinderResult r =
+        stanli::run_pathfinder(*m->ex, cfg, observe);
+    if (r.return_code != 0) {
+      put_err(err, err_len,
+              r.message.empty() ? "pathfinder failed" : r.message.c_str());
+      return r.return_code;
+    }
+    const int64_t n = m->ex->n_params();
+    for (size_t s = 0; s < r.draws.size(); ++s) {
+      if (draws) std::memcpy(draws + s * n, r.draws[s].data(), sizeof(double) * n);
+      if (lp) lp[s] = r.lp[s];
+      if (lp_approx) lp_approx[s] = r.lp_approx[s];
+    }
+    if (summary) {
+      summary[STANLI_PATHFINDER_KHAT] = r.khat;
+      summary[STANLI_PATHFINDER_SELECTED_ITER] = r.selected_iter;
+      summary[STANLI_PATHFINDER_SELECTED_ELBO] = r.selected_elbo;
+      summary[STANLI_PATHFINDER_ELAPSED_MS] = r.elapsed_ms;
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
 void stanli_sample_opts_init(stanli_sample_opts* o) {
   if (o == nullptr) return;
   *o = stanli_sample_opts{};

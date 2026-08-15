@@ -344,7 +344,7 @@ if(EMSCRIPTEN)
     "SHELL:-s MAXIMUM_MEMORY=4GB"
     "SHELL:-s STACK_SIZE=8MB"
     "SHELL:-s ENVIRONMENT=web,worker,node"
-    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_stanli_sample_walnuts_stream,_malloc,_free"
+    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_stanli_sample_walnuts_stream,_stanli_run_pathfinder,_malloc,_free"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,stringToNewUTF8,HEAPF64,addFunction,removeFunction"
     "SHELL:-s ALLOW_TABLE_GROWTH=1")
 endif()
