@@ -74,6 +74,15 @@
   /* A wide summary table scrolls inside its own column instead of
      overlapping its neighbor. */
   .cmp .ctable { overflow-x: auto; }
+  /* NUTS vs Pathfinder shares ONE table under both columns: the row is a
+     comparison, not two independent summaries side by side. */
+  .cmpsum { overflow-x: auto; margin-top: .6rem; }
+  .cmpsum table { margin: 0 auto; }
+  .cap { font-size: .75rem; opacity: .65; margin: -.35rem 0 .5rem; }
+  .khat { font-weight: 600; }
+  .khat.ok { color: #2a7; }
+  .khat.warn { color: #b81; }
+  .khat.bad { color: #c33; }
   /* The model picker: a text input that filters a listbox under it, so
      120 models stay reachable by typing instead of by scrolling. */
   .combo { position: relative; }
@@ -113,8 +122,9 @@
 <p class="sub">No server, no C++ toolchain;
 everything below happens in this tab, runs in the browser, samples on your machine.
 stanc3 (OCaml&rarr;JS) compiles the model, stanli.wasm lowers it to an op graph and runs
-Stan-dard Dynamic HMC or <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a>
-&mdash; or both at once, side by side.
+Stan-dard Dynamic HMC, <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a>
+or <a href="https://arxiv.org/abs/2108.03782">Pathfinder</a>
+&mdash; or a pair of them at once, side by side.
 <p class="sub">And it's often FASTER?? </p>
 <a href="https://github.com/seantalts/stanli">github.com/seantalts/stanli</a>
 &middot; <a href="https://www.npmjs.com/package/@seantalts/stanli">npm</a>
@@ -133,6 +143,8 @@ Stan-dard Dynamic HMC or <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a>
     <option value="nuts">Stan-dard Dynamic HMC</option>
     <option value="walnuts">WALNUTS</option>
     <option value="both">both, side by side</option>
+    <option value="pathfinder">Pathfinder</option>
+    <option value="nutspf">NUTS vs Pathfinder, side by side</option>
   </select></label>
   <label class="combo" for="model">model
     <input id="model" type="text" role="combobox" aria-expanded="false"
@@ -464,15 +476,23 @@ choose(CATALOG[0]);
 // variant Stan has shipped for years. Spelled out rather than "NUTS"
 // because the choice sits beside WALNUTS, and an acronym next to an
 // acronym says nothing about which one is the familiar option.
-const SAMPLER_LABEL = { nuts: "Stan-dard Dynamic HMC", walnuts: "WALNUTS" };
+const SAMPLER_LABEL = { nuts: "Stan-dard Dynamic HMC", walnuts: "WALNUTS",
+                        pathfinder: "Pathfinder" };
+// Which samplers each mode puts on screen, which is what decides whose
+// tuning knobs are shown and which column each run fills.
+const MODE_SAMPLERS = {
+  nuts: ["nuts"], walnuts: ["walnuts"], both: ["nuts", "walnuts"],
+  pathfinder: ["pathfinder"], nutspf: ["nuts", "pathfinder"],
+};
 function samplerMode() { return $("sampler").value; }
 $("sampler").onchange = () => {
-  const m = samplerMode();
+  const on = MODE_SAMPLERS[samplerMode()];
   // delta tunes NUTS's adaptation target; max err tunes how much the
   // joint log density may drift across one WALNUTS macro step. Each is
-  // shown only when its sampler is in play.
-  $("deltalab").hidden = m === "walnuts";
-  $("maxerrlab").hidden = m === "nuts";
+  // shown only when its sampler is in play. Pathfinder has neither: it
+  // optimizes rather than samples.
+  $("deltalab").hidden = !on.includes("nuts");
+  $("maxerrlab").hidden = !on.includes("walnuts");
 };
 
 // ---- run -------------------------------------------------------------------
@@ -480,7 +500,11 @@ $("sampler").onchange = () => {
 // Single-sampler runs keep one fit; a comparison run keeps one per
 // sampler so both stay inspectable (and downloadable) side by side.
 let fit = null;
-let cmpFits = null;  // { nuts: fit, walnuts: fit } after a "both" run
+// { nuts, walnuts } after a "both" run, { nuts, pathfinder } after a
+// "nutspf" one. cmpMode says which, because the two comparisons draw
+// different panels from the same pair of fits.
+let cmpFits = null;
+let cmpMode = null;
 
 // Run nChains chains of one sampler from already-compiled MIR, streaming
 // live draws into `onLive(chain, msg)`. Returns {fit, ms}.
@@ -509,6 +533,8 @@ function newLive(nChains) {
            chains: Array.from({ length: nChains }, () => []),
            warm: new Array(nChains).fill(0),
            drawn: new Array(nChains).fill(0),
+           // Pathfinder streams L-BFGS iterates instead of draws.
+           path: [],
            lo: Infinity, hi: -Infinity };
 }
 // Fold one chain's live messages into `live`, then let `redraw` decide
@@ -518,6 +544,12 @@ function liveHandler(live, progress, redraw) {
   return (c, m) => {
     if (m.liveMeta) { live.names = m.liveMeta.names; return; }
     const lv = m.live;
+    if (lv.phase === "path") {
+      live.path.push({ iter: lv.iter, lp: lv.lp });
+      progress();
+      redraw();
+      return;
+    }
     if (lv.phase === "warmup") {
       live.warm[c] = lv.i;
       progress();
@@ -559,6 +591,9 @@ $("run").onclick = async () => {
   $("hist").hidden = true;
   fit = null;
   cmpFits = null;
+  cmpMode = null;
+  cmpSelName = null;
+  pfView = null;
   const mode = samplerMode();
   const nChains = Math.max(1, parseInt($("chains").value, 10) || 4);
   const seed = parseInt($("seed").value, 10) || 1;
@@ -579,6 +614,8 @@ $("run").onclick = async () => {
     const runOpts = { ...opts, mir: compiled.mir };
     if (mode === "both") {
       await runCompare(runOpts, nChains, seed, compiled, tWall);
+    } else if (mode === "nutspf") {
+      await runNutsPathfinder(runOpts, nChains, seed, compiled, tWall);
     } else {
       await runSingle(mode, runOpts, nChains, seed, compiled, tWall);
     }
@@ -599,6 +636,8 @@ async function runSingle(mode, opts, nChains, seed, compiled, tWall) {
     $("status").textContent = d
         ? `${label} sampling: ${d}/${nChains * opts.samples} draws across ` +
           `${nChains} chains`
+        : live.path.length
+        ? `${label}: ${live.path.length} L-BFGS iterates`
         : `${label} warmup: ${w}/${nChains * opts.warmup} across ` +
           `${nChains} chains`;
   });
@@ -690,6 +729,7 @@ async function runCompare(opts, nChains, seed, compiled, tWall) {
   };
   const rn = collect("nuts"), rw = collect("walnuts");
   cmpFits = { nuts: rn.fit, walnuts: rw.fit };
+  cmpMode = "both";
   const wall = performance.now() - tWall;
 
   for (const [w, r] of [["nuts", rn], ["walnuts", rw]]) {
@@ -744,12 +784,13 @@ document.addEventListener("keydown", (e) => {
   if (names[next] === cmpSelName) return;
   e.preventDefault();
   cmpSelect(names[next]);
-  document.querySelector(`#col-nuts tr[data-n="${CSS.escape(names[next])}"]`)
+  document.querySelector(`#out tr[data-n="${CSS.escape(names[next])}"]`)
       ?.scrollIntoView({ block: "nearest" });
 });
 
 function cmpSelect(name) {
   cmpSelName = name;
+  if (cmpMode === "nutspf") { pfPaint(); return; }
   // The shared scales: y across both samplers' draws of this parameter,
   // x likewise for the histograms.
   let lo = Infinity, hi = -Infinity;
@@ -769,10 +810,279 @@ function cmpSelect(name) {
               lo, hi);
     const h = col.querySelector(".chist");
     h.hidden = false;
-    drawHist(h, f, name, lo, hi);
+    drawHist(h, allDraws(f, name), name, lo, hi);
     for (const tr of col.querySelectorAll("tr[data-n]"))
       tr.classList.toggle("selected", tr.dataset.n === name);
   }
+}
+
+
+// ---- NUTS vs Pathfinder ----------------------------------------------------
+// A different comparison from NUTS vs WALNUTS, because Pathfinder is not
+// a sampler. It has no chains, no warmup and no trace: it fits a normal
+// approximation along an L-BFGS path and draws from that, in
+// milliseconds. So the question is not "did it mix" but "is the
+// approximation any good", and the right column answers it three ways --
+// the climb, the two posteriors on shared axes, and a Q-Q plot.
+//
+// Both start from the same point: Pathfinder's L-BFGS and NUTS's first
+// chain are handed the same (seed, chain id), and the runtime draws one
+// init for both.
+let pfView = null;
+
+function pfCol() {
+  const col = document.createElement("div");
+  col.className = "col";
+  col.id = "col-pathfinder";
+  col.innerHTML =
+      `<h3>Pathfinder</h3>` +
+      `<canvas class="cpath" width="540" height="170"></canvas>` +
+      `<div class="cap cpathcap"></div>` +
+      `<canvas class="chist" width="540" height="140" hidden></canvas>` +
+      `<canvas class="cqq" width="540" height="200" hidden></canvas>` +
+      `<div class="times"></div>`;
+  return col;
+}
+
+// The NUTS draws so far for one parameter, gathered out of the live row
+// buffers. Only constrained parameters stream; transformed parameters
+// and generated quantities arrive with the finished fit, so this returns
+// null for those and the panels wait.
+function liveColumn(live, name) {
+  const j = live.names ? live.names.indexOf(name) : -1;
+  if (j < 0) return null;
+  let n = 0;
+  for (const ch of live.chains) n += ch.length;
+  const out = new Float64Array(n);
+  let k = 0;
+  for (const ch of live.chains) for (const r of ch) out[k++] = r[j];
+  return out;
+}
+// Mean and sd of every live column in one pass. Per-column extraction
+// would walk the same rows once per parameter, which at a hundred
+// parameters is a hundred passes per repaint.
+function liveMoments(live) {
+  if (!live.names) return null;
+  const k = live.names.length;
+  const s = new Float64Array(k), s2 = new Float64Array(k);
+  let n = 0;
+  for (const ch of live.chains)
+    for (const r of ch) {
+      ++n;
+      for (let j = 0; j < k; ++j) { s[j] += r[j]; s2[j] += r[j] * r[j]; }
+    }
+  if (n < 2) return null;
+  const out = {};
+  live.names.forEach((name, j) => {
+    const mean = s[j] / n;
+    out[name] = { mean, sd: Math.sqrt(Math.max(0, s2[j] / n - mean * mean)) };
+  });
+  return out;
+}
+function fitMoments(f) {
+  const out = {};
+  for (const name of f.names) {
+    const xs = allDraws(f, name);
+    const mean = meanOf(xs);
+    out[name] = { mean, sd: Math.sqrt(varOf(xs, mean)) };
+  }
+  return out;
+}
+
+// One row per parameter, both methods on it, plus the discrepancy that
+// says whether the difference matters: how far apart the means are in
+// units of NUTS's own sd.
+function pfTable(names) {
+  let html = "<table><tr><th>parameter</th><th>NUTS mean</th><th>NUTS sd</th>" +
+             "<th>PF mean</th><th>PF sd</th>" +
+             "<th>|&Delta;mean| / NUTS sd</th></tr>";
+  for (const n of names)
+    html += `<tr data-n="${n}"><td>${n}</td><td class="nm"></td>` +
+            `<td class="nsd"></td><td class="pm"></td><td class="psd"></td>` +
+            `<td class="ds"></td></tr>`;
+  return html + "</table>";
+}
+const pfFmt = (x) => (x == null || !Number.isFinite(x) ? "-"
+    : Math.abs(x) >= 1000 ? x.toFixed(0) : x.toPrecision(4));
+function pfTableUpdate(root, nuts, pf) {
+  for (const tr of root.querySelectorAll("tr[data-n]")) {
+    const n = tr.dataset.n;
+    const a = nuts && nuts[n], b = pf && pf[n];
+    tr.querySelector(".nm").textContent = pfFmt(a && a.mean);
+    tr.querySelector(".nsd").textContent = pfFmt(a && a.sd);
+    tr.querySelector(".pm").textContent = pfFmt(b && b.mean);
+    tr.querySelector(".psd").textContent = pfFmt(b && b.sd);
+    const cell = tr.querySelector(".ds");
+    const d = a && b && a.sd > 0 ? Math.abs(a.mean - b.mean) / a.sd : NaN;
+    cell.textContent = Number.isFinite(d) ? d.toFixed(2) : "-";
+    cell.className = "ds" + (d > 0.3 ? " bad" : "");
+  }
+}
+
+// Everything that depends on NUTS's draws repaints on one throttle tick:
+// the two histograms share an x range, the Q-Q plot shares its quantile
+// grid, and the discrepancy column is those same numbers in text.
+// Recomputing any of it per draw would be the same work a thousand times.
+function pfPaint() {
+  const v = pfView;
+  if (!v || !cmpSelName) return;
+  const nuts = v.nutsFit ? allDraws(v.nutsFit, cmpSelName)
+                         : liveColumn(v.live, cmpSelName);
+  const pf = v.pfFit && cmpSelName in v.pfFit.chains[0]
+      ? allDraws(v.pfFit, cmpSelName) : null;
+  for (const tr of v.sum.querySelectorAll("tr[data-n]"))
+    tr.classList.toggle("selected", tr.dataset.n === cmpSelName);
+  pfTableUpdate(v.sum, v.nutsFit ? fitMoments(v.nutsFit) : liveMoments(v.live),
+                v.pfMoments);
+  if (v.nutsFit && cmpSelName in v.nutsFit.chains[0])
+    drawTrace(v.cols.nuts.querySelector(".ctrace"), v.nutsFit, cmpSelName,
+              `${cmpSelName}  ${SAMPLER_LABEL.nuts}, ` +
+              `${v.nutsFit.chains.length} chains`);
+  if (!nuts || nuts.length < 2) return;
+  let lo = Infinity, hi = -Infinity;
+  const span = (xs) => {
+    for (const x of xs) { if (x < lo) lo = x; if (x > hi) hi = x; }
+  };
+  span(nuts);
+  if (pf) span(pf);
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  drawHist(v.cols.nuts.querySelector(".chist"), nuts, cmpSelName, lo, hi,
+           pf && { xs: pf, label: "Pathfinder" });
+  if (!pf) return;
+  drawHist(v.cols.pathfinder.querySelector(".chist"), pf, cmpSelName, lo, hi,
+           { xs: nuts, label: "NUTS" });
+  drawQQ(v.cols.pathfinder.querySelector(".cqq"), nuts, pf, cmpSelName);
+}
+
+const khatClass = (k) => (k < 0.5 ? "ok" : k < 0.7 ? "warn" : "bad");
+const msText = (ms) =>
+    (ms < 1000 ? ms.toFixed(0) + " ms" : (ms / 1000).toFixed(1) + " s");
+
+async function runNutsPathfinder(opts, nChains, seed, compiled, tWall) {
+  cmpMode = "nutspf";
+  const wrap = document.createElement("div");
+  wrap.className = "cmp";
+  const cols = { nuts: cmpCol("nuts"), pathfinder: pfCol() };
+  wrap.append(cols.nuts, cols.pathfinder);
+  const sum = document.createElement("div");
+  sum.className = "cmpsum";
+  $("out").append(wrap, sum);
+  cols.nuts.querySelector(".ctable").remove();
+
+  const live = newLive(nChains);
+  const pfLive = newLive(1);
+  const v = { live, cols, sum, nutsFit: null, pfFit: null, pfMoments: null,
+              pf: null };
+  pfView = v;
+
+  const progress = throttled(() => {
+    const d = live.drawn.reduce((a, b) => a + b, 0);
+    const w = live.warm.reduce((a, b) => a + b, 0);
+    $("status").textContent =
+        (d ? `NUTS ${d}/${nChains * opts.samples} draws`
+           : `NUTS warmup ${w}/${nChains * opts.warmup}`) + " · " +
+        (v.pf ? `Pathfinder done in ${msText(v.pf.elapsedMs)}`
+              : `Pathfinder: ${pfLive.path.length} L-BFGS iterates`);
+  });
+  const redrawPath = throttled(() => {
+    drawPath(cols.pathfinder.querySelector(".cpath"), pfLive.path,
+             v.pf ? v.pf.selectedIter : -1,
+             cols.pathfinder.querySelector(".cpathcap"));
+  });
+  const redrawNuts = throttled(() => {
+    liveTrace(cols.nuts.querySelector(".ctrace"), live, nChains, false,
+              SAMPLER_LABEL.nuts);
+    pfPaint();
+  });
+  // NUTS's elapsed time ticks while it runs, next to a Pathfinder figure
+  // that stopped moving seconds ago. That contrast is the headline.
+  const t0 = performance.now();
+  const clock = setInterval(() => {
+    if (v.nutsFit) return;
+    cols.nuts.querySelector(".times").textContent =
+        `${msText(performance.now() - t0)} elapsed`;
+  }, 200);
+
+  const pfHandler = liveHandler(pfLive, progress, redrawPath);
+  const nutsHandler = liveHandler(live, progress, redrawNuts);
+  const jobs = [];
+  // Pathfinder goes in first so it holds a pool slot from the start; it
+  // is one extra job beside the chains, and it gives the slot back in
+  // milliseconds.
+  jobs.push(sample({
+    ...opts, code: undefined, seed, sampler: "pathfinder",
+    onLive: (m) => pfHandler(0, m),
+  }).then((r) => ({ w: "pathfinder", r })));
+  for (let c = 0; c < nChains; ++c)
+    jobs.push(sample({
+      ...opts, code: undefined, seed: seed + c, sampler: "nuts",
+      onLive: (m) => nutsHandler(c, m),
+    }).then((r) => ({ w: "nuts", r })));
+  // The Pathfinder job is awaited on its own below, so a failure there
+  // would leave the chains' rejections unclaimed until the Promise.all
+  // that never runs. Claiming them here keeps the first error the one
+  // that gets reported.
+  for (const j of jobs) j.catch(() => {});
+
+  // The Pathfinder half lands first and its panels settle immediately;
+  // the NUTS half keeps streaming into the same shared axes.
+  const pfJob = await jobs[0];
+  v.pf = pfJob.r.pathfinder;
+  v.pfFit = { names: pfJob.r.names, samples: pfJob.r.samples,
+              chains: [pfJob.r.columns] };
+  v.pfMoments = fitMoments(v.pfFit);
+  sum.innerHTML = pfTable(v.pfFit.names);
+  for (const tr of sum.querySelectorAll("tr[data-n]"))
+    tr.onclick = () => cmpSelect(tr.dataset.n);
+  if (!cmpSelName || !v.pfFit.names.includes(cmpSelName))
+    cmpSelName = v.pfFit.names[0];
+  const k = v.pf.khat;
+  const elbo = v.pf.selectedElbo;
+  cols.pathfinder.querySelector(".times").innerHTML =
+      `${msText(v.pf.elapsedMs)} total · ` +
+      (Number.isFinite(k)
+          ? `<span class="khat ${khatClass(k)}">k&#770; ${k.toFixed(2)}</span>`
+          : `k&#770; n/a`) +
+      ` · ELBO ${Number.isFinite(elbo) ? elbo.toPrecision(4) : "n/a"} ` +
+      `at iterate ${v.pf.selectedIter}`;
+  cols.pathfinder.querySelector(".times").insertAdjacentHTML("afterend",
+      `<div class="cap">k&#770; &gt; 0.7: importance weights unreliable, ` +
+      `draws should not be trusted. A small k&#770; says the weights are ` +
+      `stable, never that the approximation covers the posterior.</div>`);
+  drawPath(cols.pathfinder.querySelector(".cpath"), pfLive.path,
+           v.pf.selectedIter, cols.pathfinder.querySelector(".cpathcap"));
+  pfPaint();
+
+  const done = await Promise.all(jobs);
+  clearInterval(clock);
+  const rs = done.filter((d) => d.w === "nuts").map((d) => d.r);
+  const ms = { lower: 0, sample: 0 };
+  for (const r of rs)
+    for (const key of ["lower", "sample"]) ms[key] += r.ms[key];
+  v.nutsFit = { names: rs[0].names, samples: rs[0].samples,
+                chains: rs.map((r) => r.columns) };
+  cmpFits = { nuts: v.nutsFit, pathfinder: v.pfFit };
+  const wall = performance.now() - tWall;
+
+  let minEss = Infinity;
+  for (const n of v.nutsFit.names) {
+    const e = rhatEss(v.nutsFit, n).ess;
+    if (Number.isFinite(e)) minEss = Math.min(minEss, e);
+  }
+  const perChain = ms.sample / nChains;
+  cols.nuts.querySelector(".times").textContent =
+      `${msText(perChain)} sampling per chain · ` +
+      (Number.isFinite(minEss)
+          ? `min ESS ${minEss.toFixed(0)} ` +
+            `(${(minEss / (perChain / 1000)).toFixed(0)}/s)`
+          : "min ESS n/a");
+  $("times").textContent =
+      `${nChains} NUTS chains and one Pathfinder path, all in parallel: ` +
+      `${(wall / 1000).toFixed(1)} s wall ` +
+      `(stanc ${compiled.ms.stanc.toFixed(0)} ms, once); ` +
+      `Pathfinder's whole run was ${msText(v.pf.elapsedMs)}. ` +
+      `Click a row or use the arrow keys to compare that parameter`;
+  pfPaint();
 }
 
 // ---- summaries -------------------------------------------------------------
@@ -900,7 +1210,7 @@ function showPlots(tr, label) {
   const name = tr.dataset.n;
   drawTrace($("trace"), fit, name,
             `${name}  trace, ${fit.chains.length} chains`);
-  drawHist($("hist"), fit, name);
+  drawHist($("hist"), allDraws(fit, name), name);
 }
 
 // ---- plots -----------------------------------------------------------------
@@ -1019,30 +1329,153 @@ function drawTrace(c, f, name, title, ylo, yhi) {
   });
   g.globalAlpha = 1;
 }
-function drawHist(c, f, name, xlo, xhi) {
-  const xs = allDraws(f, name);
+// `xs` is the draws to bin. `overlay`, when given, is a second set drawn
+// as an outline over the same bins, rescaled to `xs`'s draw count so the
+// two shapes compare even when one method produced ten times the draws.
+// Two methods whose posteriors differ then differ visibly in place,
+// rather than in the reader's memory of the panel above.
+function drawHist(c, xs, name, xlo, xhi, overlay) {
   let lo = xlo, hi = xhi;
   if (lo == null || hi == null) {
     lo = Infinity; hi = -Infinity;
     for (const x of xs) { if (x < lo) lo = x; if (x > hi) hi = x; }
     if (!(hi > lo)) { lo -= 1; hi += 1; }
   }
-  const nb = 40, counts = new Array(nb).fill(0);
-  for (const x of xs)
-    ++counts[Math.min(nb - 1, Math.max(0, ((x - lo) / (hi - lo) * nb) | 0))];
-  const peak = Math.max(...counts);
+  const nb = 40;
+  const bin = (vs, scale) => {
+    const k = new Array(nb).fill(0);
+    for (const x of vs)
+      ++k[Math.min(nb - 1, Math.max(0, ((x - lo) / (hi - lo) * nb) | 0))];
+    return scale === 1 ? k : k.map((v) => v * scale);
+  };
+  const counts = bin(xs, 1);
+  const over = overlay && overlay.xs.length
+      ? bin(overlay.xs, xs.length / overlay.xs.length) : null;
+  const peak = Math.max(...counts, ...(over || [0]));
   const g = c.getContext("2d");
   c.hidden = false;
   g.clearRect(0, 0, c.width, c.height);
   const { X, Y } = axes(c, g, {
-    title: name + "  posterior", xlabel: name, ylabel: "draws",
+    title: name + "  posterior" + (overlay ? `  (outline: ${overlay.label})` : ""),
+    xlabel: name, ylabel: "draws",
     xlo: lo, xhi: hi, ylo: 0, yhi: peak });
+  const edge = (b) => X(lo + (hi - lo) * b / nb);
   g.fillStyle = "#4a7";
   counts.forEach((k, b) => {
-    const xa = X(lo + (hi - lo) * b / nb);
-    const xb = X(lo + (hi - lo) * (b + 1) / nb);
-    g.fillRect(xa + 1, Y(k), Math.max(xb - xa - 2, 1), Y(0) - Y(k));
+    g.fillRect(edge(b) + 1, Y(k), Math.max(edge(b + 1) - edge(b) - 2, 1),
+               Y(0) - Y(k));
   });
+  if (!over) return;
+  g.strokeStyle = "#47a";
+  g.lineWidth = 1.5;
+  g.beginPath();
+  g.moveTo(edge(0), Y(0));
+  over.forEach((k, b) => {
+    g.lineTo(edge(b), Y(k));
+    g.lineTo(edge(b + 1), Y(k));
+  });
+  g.lineTo(edge(nb), Y(0));
+  g.stroke();
+  g.lineWidth = 1;
+}
+
+// Pathfinder's quantiles against NUTS's, with the y = x line. A normal
+// approximation that got the location right but the spread wrong reads
+// as a straight line off the diagonal; one that missed a tail bends
+// away only at the end. Neither is visible in a pair of histograms.
+function drawQQ(c, xs, ys, name) {
+  const g = c.getContext("2d");
+  c.hidden = false;
+  g.clearRect(0, 0, c.width, c.height);
+  if (!xs.length || !ys.length) return;
+  const a = Float64Array.from(xs).sort();
+  const b = Float64Array.from(ys).sort();
+  const n = 200;
+  const q = (s, p) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
+  const px = [], py = [];
+  for (let i = 0; i < n; ++i) {
+    const p = (i + 0.5) / n;
+    px.push(q(a, p));
+    py.push(q(b, p));
+  }
+  let lo = Math.min(px[0], py[0]), hi = Math.max(px[n - 1], py[n - 1]);
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  const { X, Y } = axes(c, g, {
+    title: `${name}  Q-Q`, xlabel: "NUTS quantile",
+    ylabel: "Pathfinder", xlo: lo, xhi: hi, ylo: lo, yhi: hi });
+  g.strokeStyle = "#8886";
+  g.beginPath();
+  g.moveTo(X(lo), Y(lo));
+  g.lineTo(X(hi), Y(hi));
+  g.stroke();
+  g.strokeStyle = "#a47";
+  g.lineWidth = 1.5;
+  g.beginPath();
+  for (let i = 0; i < n; ++i)
+    i ? g.lineTo(X(px[i]), Y(py[i])) : g.moveTo(X(px[i]), Y(py[i]));
+  g.stroke();
+  g.lineWidth = 1;
+}
+
+// The optimizer's climb: lp at every L-BFGS iterate, with the iterate
+// the ELBO chose marked. A random start can sit astronomically below the
+// mode -- an lp of -1e12 is ordinary -- and one such point flattens
+// every other iterate onto the top edge of the frame. When the whole
+// range is more than ten times the range of the last 90% of iterates,
+// the axis is clamped to those and the caption says so; the line still
+// runs off the bottom, clipped to the plot area, so nothing is hidden.
+function drawPath(c, path, selected, capEl) {
+  const g = c.getContext("2d");
+  c.hidden = false;
+  g.clearRect(0, 0, c.width, c.height);
+  if (capEl) capEl.textContent = "";
+  const lps = path.map((p) => p.lp).filter(Number.isFinite);
+  if (!lps.length) return;
+  let lo = Math.min(...lps), hi = Math.max(...lps);
+  const tail = path.slice(Math.floor(path.length * 0.1))
+                   .map((p) => p.lp).filter(Number.isFinite);
+  if (tail.length > 1) {
+    const tlo = Math.min(...tail), thi = Math.max(...tail);
+    if (thi > tlo && hi - lo > 10 * (thi - tlo)) {
+      lo = tlo;
+      if (capEl)
+        capEl.textContent =
+            `y axis clamped to iterate ${Math.floor(path.length * 0.1)} ` +
+            `onward; the start is at lp ${lps[0].toPrecision(3)}`;
+    }
+  }
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  const last = path[path.length - 1].iter;
+  const { X, Y } = axes(c, g, {
+    title: `log density along the L-BFGS path`,
+    xlabel: "L-BFGS iterate", ylabel: "lp__",
+    xlo: 0, xhi: Math.max(last, 1), ylo: lo, yhi: hi });
+  g.save();
+  g.beginPath();
+  g.rect(PAD.l, PAD.t, c.width - PAD.l - PAD.r, c.height - PAD.t - PAD.b);
+  g.clip();
+  g.strokeStyle = "#4a7";
+  g.lineWidth = 1.5;
+  g.beginPath();
+  path.forEach((p, i) => {
+    i ? g.lineTo(X(p.iter), Y(p.lp)) : g.moveTo(X(p.iter), Y(p.lp));
+  });
+  g.stroke();
+  g.lineWidth = 1;
+  const sel = path[selected];
+  if (sel) {
+    g.fillStyle = "#a47";
+    g.beginPath();
+    g.arc(X(sel.iter), Y(sel.lp), 4, 0, 2 * Math.PI);
+    g.fill();
+    g.font = "10px system-ui";
+    g.textAlign = X(sel.iter) > c.width / 2 ? "right" : "left";
+    g.fillText(`ELBO picked iterate ${sel.iter}`,
+               X(sel.iter) + (X(sel.iter) > c.width / 2 ? -8 : 8),
+               Y(sel.lp) - 8);
+    g.textAlign = "left";
+  }
+  g.restore();
 }
 
 // ---- CSV -------------------------------------------------------------------
@@ -1055,9 +1488,9 @@ $("csv").onclick = () => {
                    f.names.map((n) => f.chains[ci][n][s]).join(","));
   };
   if (cmpFits) {
-    lines.push("sampler,chain," + cmpFits.nuts.names.join(","));
-    emit("nuts", cmpFits.nuts);
-    emit("walnuts", cmpFits.walnuts);
+    const which = Object.keys(cmpFits);
+    lines.push("sampler,chain," + cmpFits[which[0]].names.join(","));
+    for (const w of which) emit(w, cmpFits[w]);
   } else {
     lines.push("chain," + fit.names.join(","));
     emit("", fit);

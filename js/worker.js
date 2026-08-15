@@ -2,7 +2,8 @@
 // stanli.wasm lowers it and runs NUTS or WALNUTS. Everything heavy lives
 // here so the page never blocks. Protocol: {cmd: "run", code, dataJson,
 // seed, warmup, samples, delta, sampler, maxError} in; {status} progress
-// messages and one {done} or {error} out.
+// messages and one {done} or {error} out. `sampler` is "nuts",
+// "walnuts" or "pathfinder".
 "use strict";
 importScripts("stanli.js");
 
@@ -16,6 +17,35 @@ function ensureStanc() {
     importScripts("stancjs.bc.js");
 }
 
+
+// Pathfinder: one L-BFGS climb, a normal approximation fitted along it,
+// and draws from that approximation -- milliseconds, where a sampler
+// takes seconds. There is no warmup and no per-draw streaming to do,
+// but the climb itself streams out iterate by iterate so the page can
+// animate it.
+//
+// chain_id is 1, which is what stanli_sample_stream passes too, so
+// Pathfinder and a NUTS chain given the same seed start from the exact
+// same point. lp and lp_approx per draw are available from the same
+// call and left unasked-for here: k-hat, the one thing the page shows
+// them for, already comes back computed.
+function runPathfinder(M, model, req, numDraws, drawsPtr, errPtr, errLen) {
+  const sumPtr = M._malloc(8 * 4);
+  const path = [];
+  const cbPtr = M.addFunction((iter, lp) => {
+    path.push({ iter, lp });
+    if (req.live) postMessage({ live: { phase: "path", iter, lp } });
+  }, "vidi");
+  const rc = M._stanli_run_pathfinder(model, req.seed >>> 0, 1, numDraws,
+                                      drawsPtr, 0, 0, sumPtr, cbPtr, 0,
+                                      errPtr, errLen);
+  M.removeFunction(cbPtr);
+  const sum = Array.from(M.HEAPF64.subarray(sumPtr / 8, sumPtr / 8 + 4));
+  M._free(sumPtr);
+  if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
+  return { path, khat: sum[0], selectedIter: sum[1], selectedElbo: sum[2],
+           elapsedMs: sum[3] };
+}
 
 onmessage = async (e) => {
   const req = e.data;
@@ -69,9 +99,12 @@ onmessage = async (e) => {
     const n = Number(M._stanli_n_unconstrained(model));
     const samples = req.samples | 0;
     const warmup = req.warmup | 0;
+    const pathfinder = req.sampler === "pathfinder";
     const walnuts = req.sampler === "walnuts";
-    say((walnuts ? "WALNUTS: " : "NUTS: ") + warmup + " warmup + " +
-        samples + " draws");
+    say(pathfinder
+        ? "Pathfinder: L-BFGS path + " + samples + " draws"
+        : (walnuts ? "WALNUTS: " : "NUTS: ") + warmup + " warmup + " +
+          samples + " draws");
     const drawsPtr = M._malloc(8 * samples * n);
 
     // Stream: every draw lands in the buffer before its callback, so the
@@ -80,7 +113,7 @@ onmessage = async (e) => {
     // Streaming is opt-in: without a live consumer the sampler runs the
     // plain path and pays nothing for callbacks or message traffic.
     let cbPtr = 0, liveRowPtr = 0;
-    if (req.live) {
+    if (req.live && !pathfinder) {
     const nLive = Number(M._stanli_n_constrained(model));
     const liveNames = [];
     for (let i = 0; i < nLive; ++i)
@@ -111,16 +144,21 @@ onmessage = async (e) => {
     // Same streaming contract either way; WALNUTS's tunable is the max
     // Hamiltonian error per macro step rather than NUTS's target
     // acceptance rate, and 0 asks the runtime for its default.
-    const rc = walnuts
-        ? M._stanli_sample_walnuts_stream(model, req.seed >>> 0, warmup,
-                                          samples, +req.maxError || 0,
-                                          drawsPtr, cbPtr, 0, errPtr, errLen)
-        : M._stanli_sample_stream(model, req.seed >>> 0, warmup,
-                                  samples, +req.delta, drawsPtr,
-                                  cbPtr, 0, errPtr, errLen);
-    if (cbPtr) M.removeFunction(cbPtr);
-    if (liveRowPtr) M._free(liveRowPtr);
-    if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
+    let pf = null;
+    if (pathfinder) {
+      pf = runPathfinder(M, model, req, samples, drawsPtr, errPtr, errLen);
+    } else {
+      const rc = walnuts
+          ? M._stanli_sample_walnuts_stream(model, req.seed >>> 0, warmup,
+                                            samples, +req.maxError || 0,
+                                            drawsPtr, cbPtr, 0, errPtr, errLen)
+          : M._stanli_sample_stream(model, req.seed >>> 0, warmup,
+                                    samples, +req.delta, drawsPtr,
+                                    cbPtr, 0, errPtr, errLen);
+      if (cbPtr) M.removeFunction(cbPtr);
+      if (liveRowPtr) M._free(liveRowPtr);
+      if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
+    }
     const tSample = performance.now();
 
     say("computing CSV columns");
@@ -156,7 +194,7 @@ onmessage = async (e) => {
 
     postMessage({
       done: {
-        names, samples,
+        names, samples, pathfinder: pf,
         // True unless the runtime was built with STANLI_LITE_LP, which
         // drops stan-math's propto instantiations and shifts lp__ by a
         // per-model constant. The shipped browser build does not, so this

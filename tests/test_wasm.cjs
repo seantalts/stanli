@@ -85,7 +85,39 @@ createStanli().then((M) => {
   const muW = muSumW / samples;
   if (!(muW > 3.0 && muW < 6.0)) fail("walnuts mu " + muW + " outside (3, 6)");
 
+  // Pathfinder through the entry the worker calls, including the
+  // per-iterate callback: the path is the only way that data leaves the
+  // service, so a silent no-op callback would be an empty plot with no
+  // other symptom.
+  const sumPtr = M._malloc(8 * 4);
+  const climb = [];
+  const cbPtr = M.addFunction((iter, plp) => climb.push([iter, plp]), "vidi");
+  const rcP = M._stanli_run_pathfinder(model, 1, 1, samples, drawsPtr, 0, 0,
+                                       sumPtr, cbPtr, 0, errPtr, errLen);
+  M.removeFunction(cbPtr);
+  if (rcP !== 0) fail("pathfinder: " + M.UTF8ToString(errPtr));
+  if (climb.length < 2) fail("pathfinder path has " + climb.length + " iterates");
+  if (climb[0][0] !== 0) fail("pathfinder path starts at " + climb[0][0]);
+  const khat = M.HEAPF64[sumPtr / 8];
+  const selected = M.HEAPF64[sumPtr / 8 + 1];
+  if (!Number.isFinite(khat)) fail("pathfinder khat " + khat);
+  if (!(selected >= 0 && selected < climb.length))
+    fail("pathfinder selected iterate " + selected);
+  let muSumP = 0;
+  for (let s = 0; s < samples; ++s) {
+    M._stanli_constrain(model, drawsPtr + 8 * s * n, rowPtr);
+    const v = M.HEAPF64[rowPtr / 8 + muIdx];
+    if (!Number.isFinite(v)) fail("pathfinder nonfinite draw " + s);
+    muSumP += v;
+  }
+  const muP = muSumP / samples;
+  const pfMs = M.HEAPF64[sumPtr / 8 + 3];
+  M._free(sumPtr);
+
   M._stanli_model_free(model);
   console.log("test_wasm OK  lp(0) = " + lp.toFixed(6) + "  mean(mu) = " +
-              mu.toFixed(3) + "  walnuts mean(mu) = " + muW.toFixed(3));
+              mu.toFixed(3) + "  walnuts mean(mu) = " + muW.toFixed(3) +
+              "  pathfinder mean(mu) = " + muP.toFixed(3) +
+              " in " + pfMs.toFixed(0) + " ms" +
+              " (khat " + khat.toFixed(2) + ", " + climb.length + " iterates)");
 }).catch((e) => fail(String(e && e.stack || e)));

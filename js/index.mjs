@@ -108,8 +108,11 @@ export function compile(opts) {
  * @param {number} [opts.warmup=1000]
  * @param {number} [opts.samples=1000]
  * @param {number} [opts.delta=0.8]    Adaptation target acceptance (NUTS).
- * @param {string} [opts.sampler="nuts"]  "nuts" or "walnuts" (within-orbit
- *   adaptive step-length NUTS, arXiv:2506.18746).
+ * @param {string} [opts.sampler="nuts"]  "nuts", "walnuts" (within-orbit
+ *   adaptive step-length NUTS, arXiv:2506.18746), or "pathfinder"
+ *   (a normal approximation fitted along an L-BFGS path). Pathfinder
+ *   ignores warmup and delta, treats `samples` as its draw count, and
+ *   returns an extra `pathfinder` block.
  * @param {number} [opts.maxError]     WALNUTS only: largest drift in the
  *   joint log density allowed across one macro step before the step is
  *   halved within the trajectory. Omit for the runtime default (0.5).
@@ -118,9 +121,15 @@ export function compile(opts) {
  *   runs: {liveMeta: {names, warmup, samples}} once per call, then
  *   {live: {phase: "warmup"|"sampling", i, nCon?, rows?}} where rows is
  *   a transferred ArrayBuffer of constrained draws, nCon wide.
+ *   Pathfinder streams {live: {phase: "path", iter, lp}} instead, one
+ *   message per L-BFGS iterate.
  * @returns {Promise<{names: string[], samples: number,
  *                    columns: Object<string, Float64Array>,
  *                    exactLp: boolean,
+ *                    pathfinder?: {path: {iter, lp}[], khat: number,
+ *                                  selectedIter: number,
+ *                                  selectedElbo: number,
+ *                                  elapsedMs: number},
  *                    ms: {stanc: number, lower: number, sample: number,
  *                         total: number}}>}
  *   One column per CSV column CmdStan would write: constrained
@@ -139,15 +148,16 @@ export function sample(opts) {
     warmup: opts.warmup == null ? 1000 : opts.warmup,
     samples: opts.samples == null ? 1000 : opts.samples,
     delta: opts.delta == null ? 0.8 : opts.delta,
-    sampler: opts.sampler === "walnuts" ? "walnuts" : "nuts",
+    sampler: opts.sampler === "walnuts" || opts.sampler === "pathfinder"
+        ? opts.sampler : "nuts",
     maxError: opts.maxError == null ? 0 : opts.maxError,
   }, opts).then((done) => {
-    const { names, samples, ms, exactLp } = done;
+    const { names, samples, ms, exactLp, pathfinder } = done;
     const flat = new Float64Array(done.columns);
     const columns = {};
     names.forEach((name, i) => {
       columns[name] = flat.subarray(i * samples, (i + 1) * samples);
     });
-    return { names, samples, columns, ms, exactLp };
+    return { names, samples, columns, ms, exactLp, pathfinder };
   });
 }
