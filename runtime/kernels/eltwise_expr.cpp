@@ -210,15 +210,36 @@ void div_bwd(KernelCtx& ctx) {
   }
 }
 
+// Scalar libm per element, like the transcendental unaries: stan-math's
+// vectorized pow applies its scalar op elementwise, so packet math would
+// break bitwise parity. Partials keep the scalar grouping (b*v/a and
+// log(a)*v), which is what the ss case has always matched.
 void pow_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = std::pow(ctx.in[0].data[0], ctx.in[1].data[0]);
+  const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
+  for (int64_t i = 0; i < ctx.out.len; ++i)
+    ctx.out.data[i] = std::pow(ctx.in[0].data[s0 ? 0 : i],
+                               ctx.in[1].data[s1 ? 0 : i]);
 }
 void pow_bwd(KernelCtx& ctx) {
-  const double a = ctx.in[0].data[0], b = ctx.in[1].data[0];
-  const double v = ctx.out.data[0];
-  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj * b * v / a;
-  if (ctx.in_adj[1].data)
-    ctx.in_adj[1].data[0] += ctx.out_adj * std::log(a) * v;
+  const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
+  if (ctx.out.len == 1) {
+    const double a = ctx.in[0].data[0], b = ctx.in[1].data[0];
+    const double v = ctx.out.data[0];
+    if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj * b * v / a;
+    if (ctx.in_adj[1].data)
+      ctx.in_adj[1].data[0] += ctx.out_adj * std::log(a) * v;
+    return;
+  }
+  for (int64_t i = 0; i < ctx.out.len; ++i) {
+    const double a = ctx.in[0].data[s0 ? 0 : i];
+    const double b = ctx.in[1].data[s1 ? 0 : i];
+    const double v = ctx.out.data[i];
+    const double dout = ctx.out_adj_vec.data[i];
+    if (ctx.in_adj[0].data)
+      ctx.in_adj[0].data[s0 ? 0 : i] += dout * b * v / a;
+    if (ctx.in_adj[1].data)
+      ctx.in_adj[1].data[s1 ? 0 : i] += dout * std::log(a) * v;
+  }
 }
 
 void dot_fwd(KernelCtx& ctx) {

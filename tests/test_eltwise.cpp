@@ -99,7 +99,18 @@ int main() {
   });
   check_case("div ss", OP_DIV, 1, {{S}, {T}},
              [](auto& v) { return v[0](0) / v[1](0); });
-  // POW (ss)
+  // POW: all shape combos, like the binaries above. Bases stay positive so
+  // fractional exponents remain in support on both sides of the comparison.
+  const std::vector<double> P{0.5, 1.2, 2.0, 0.3};
+  check_case("pow vv", OP_POW, N, {P, B}, [](auto& v) {
+    return stan::math::sum(stan::math::pow(v[0], v[1]));
+  });
+  check_case("pow vs", OP_POW, N, {P, {T}}, [](auto& v) {
+    return stan::math::sum(stan::math::pow(v[0], v[1](0)));
+  });
+  check_case("pow sv", OP_POW, N, {{S}, B}, [](auto& v) {
+    return stan::math::sum(stan::math::pow(v[0](0), v[1]));
+  });
   check_case("pow ss", OP_POW, 1, {{S}, {T}},
              [](auto& v) { return stan::math::pow(v[0](0), v[1](0)); });
 
