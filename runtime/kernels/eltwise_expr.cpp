@@ -217,8 +217,8 @@ void div_bwd(KernelCtx& ctx) {
 void pow_fwd(KernelCtx& ctx) {
   const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
   for (int64_t i = 0; i < ctx.out.len; ++i)
-    ctx.out.data[i] = std::pow(ctx.in[0].data[s0 ? 0 : i],
-                               ctx.in[1].data[s1 ? 0 : i]);
+    ctx.out.data[i] =
+        std::pow(ctx.in[0].data[s0 ? 0 : i], ctx.in[1].data[s1 ? 0 : i]);
 }
 void pow_bwd(KernelCtx& ctx) {
   const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
@@ -235,8 +235,7 @@ void pow_bwd(KernelCtx& ctx) {
     const double b = ctx.in[1].data[s1 ? 0 : i];
     const double v = ctx.out.data[i];
     const double dout = ctx.out_adj_vec.data[i];
-    if (ctx.in_adj[0].data)
-      ctx.in_adj[0].data[s0 ? 0 : i] += dout * b * v / a;
+    if (ctx.in_adj[0].data) ctx.in_adj[0].data[s0 ? 0 : i] += dout * b * v / a;
     if (ctx.in_adj[1].data)
       ctx.in_adj[1].data[s1 ? 0 : i] += dout * std::log(a) * v;
   }
