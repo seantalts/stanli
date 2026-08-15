@@ -50,3 +50,4 @@ __pycache__/
 *.py[cod]
 tests/fixtures/*_model.so
 tests/fixtures/*.hpp
+conformance-cache/

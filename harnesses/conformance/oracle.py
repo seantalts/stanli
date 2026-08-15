@@ -198,7 +198,13 @@ def cached_reference_build(
     key = hashlib.sha256(json.dumps(
         payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
                          ).hexdigest()
-    workdir = pathlib.Path(cache_root) / namespace / key
+    # Absolute, unconditionally: the library path below is handed to
+    # `make -C deps/bridgestan`, and -C makes a relative target resolve
+    # inside the bridgestan tree, where no generated source exists. make
+    # then reports "No rule to make target" for every shard -- which is
+    # exactly what the nightly did from its first run, since the workflow
+    # passes `--resume conformance-cache`.
+    workdir = pathlib.Path(cache_root).resolve() / namespace / key
     source = workdir / source_name
     library = source.with_name(source.stem + "_model.so")
     metadata = workdir / "build-metadata.json"
