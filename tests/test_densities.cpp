@@ -568,6 +568,73 @@ int main() {
         [&](int64_t i) { return std::vector<int>{-1, counts[i], -1, 20}; });
   }
 
+  // wiener: every argument vectorizes in the language, and a length-1 slot
+  // must enter stan-math as a scalar (vectors do not broadcast there).
+  {
+    using stan::math::var;
+    using VecV = Eigen::Matrix<var, -1, 1>;
+    std::vector<double> wy{1.45, 1.54}, wa{1.15, 1.24}, wt{0.15, 0.24},
+        wb{0.40, 0.49}, wd{0.05, 0.14};
+    auto vec = [](const std::vector<double>& v) {
+      VecV x(v.size());
+      for (size_t i = 0; i < v.size(); ++i) x(i) = v[i];
+      return x;
+    };
+    auto grads = [&](const std::string& tag,
+                     const std::vector<std::vector<double>>& vals,
+                     const std::vector<var*>& scalars,
+                     const std::vector<VecV*>& vectors) {
+      // Slot order: any vector slot's elements then the next slot's, matching
+      // run_op_sum's parameter concatenation.
+      auto r = stanli::testutil::run_op_sum(OP_WIENER_LPDF, 1, vals,
+                                            std::vector<bool>(5, true));
+      size_t gi = 0;
+      for (size_t k = 0; k < 5; ++k) {
+        if (vectors[k]) {
+          for (int i = 0; i < vectors[k]->size(); ++i)
+            expect_eq(tag + " g" + std::to_string(gi), r.grad[gi],
+                      (*vectors[k])(i).adj()), ++gi;
+        } else {
+          expect_eq(tag + " g" + std::to_string(gi), r.grad[gi],
+                    scalars[k]->adj()), ++gi;
+        }
+      }
+      return r;
+    };
+    {
+      VecV y = vec(wy), a = vec(wa), t = vec(wt), b = vec(wb), d = vec(wd);
+      var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
+      lp.grad();
+      auto r = grads("wiener all-vector", {wy, wa, wt, wb, wd},
+                     {nullptr, nullptr, nullptr, nullptr, nullptr},
+                     {&y, &a, &t, &b, &d});
+      expect_eq("wiener all-vector lp", r.value, lp.val());
+      stan::math::recover_memory();
+    }
+    {
+      VecV y = vec(wy);
+      var a = wa[0], t = wt[0], b = wb[0], d = wd[0];
+      var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
+      lp.grad();
+      auto r = grads("wiener y-vector", {wy, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
+                     {nullptr, &a, &t, &b, &d},
+                     {&y, nullptr, nullptr, nullptr, nullptr});
+      expect_eq("wiener y-vector lp", r.value, lp.val());
+      stan::math::recover_memory();
+    }
+    {
+      var y = wy[0], a = wa[0], t = wt[0], b = wb[0], d = wd[0];
+      var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
+      lp.grad();
+      auto r = grads("wiener scalar",
+                     {{wy[0]}, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
+                     {&y, &a, &t, &b, &d},
+                     {nullptr, nullptr, nullptr, nullptr, nullptr});
+      expect_eq("wiener scalar lp", r.value, lp.val());
+      stan::math::recover_memory();
+    }
+  }
+
   if (failures == 0) std::printf("test_densities OK\n");
   return failures == 0 ? 0 : 1;
 }

@@ -12,6 +12,7 @@
 
 #include <stan/math.hpp>
 
+#include <variant>
 #include <vector>
 
 namespace stanli {
@@ -625,19 +626,40 @@ double oprobit_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, lambda, c);
 }
 
-// wiener(y | alpha, tau, beta, delta): five real arguments, all scalars.
+// wiener(y | alpha, tau, beta, delta): five real arguments, and every one
+// of them vectorizes in the language. A length-1 slot must enter stan-math
+// as a scalar: its sequence views broadcast scalars but require vectors to
+// match sizes, and the conformance sweep caught the old scalar-only tail
+// silently evaluating every observation with element 0's parameters.
 template <bool Grad>
 double wiener_eval(KernelCtx& ctx) {
   const bool propto = (ctx.variant & 0x80u) != 0;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
-  const int64_t n = ctx.in[0].len;
-  VarV y = tail_v(ctx, 0, n);
-  var alpha = ctx.in[1].data[0], tau = ctx.in[2].data[0];
-  var beta = ctx.in[3].data[0], delta = ctx.in[4].data[0];
-  var out = propto ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
-                   : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
-  return finish_tail_density<Grad>(ctx, out, y, alpha, tau, beta, delta);
+  using Arg = std::variant<var, VarV>;
+  auto load = [&](int k) -> Arg {
+    if (ctx.in[k].len == 1) return var(ctx.in[k].data[0]);
+    return tail_v(ctx, k, ctx.in[k].len);
+  };
+  Arg y = load(0), alpha = load(1), tau = load(2), beta = load(3),
+      delta = load(4);
+  var out = std::visit(
+      [&](const auto&... a) -> var {
+        return propto ? stan::math::wiener_lpdf<true>(a...)
+                      : stan::math::wiener_lpdf<false>(a...);
+      },
+      y, alpha, tau, beta, delta);
+  const double value = out.val();
+  if constexpr (Grad) {
+    var seeded = out * ctx.out_adj;
+    stan::math::grad(seeded.vi_);
+    int slot = 0;
+    for (const Arg* p : {&y, &alpha, &tau, &beta, &delta}) {
+      std::visit([&](const auto& a) { tail_scatter(ctx, slot, a); }, *p);
+      ++slot;
+    }
+  }
+  return value;
 }
 
 #define STANLI_TAIL_KERNEL(name, fn, kind)                                    \
