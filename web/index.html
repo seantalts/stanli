@@ -163,10 +163,14 @@ or <a href="https://arxiv.org/abs/2108.03782">Pathfinder</a>
 </div>
 <div id="note"></div>
 <div id="err"></div>
-<div id="plotshome"><div class="plots" id="plots">
-  <canvas id="trace" width="620" height="180" hidden></canvas>
-  <canvas id="hist" width="420" height="180" hidden></canvas>
-</div></div>
+<div id="plotshome">
+  <canvas id="path" width="620" height="180" hidden></canvas>
+  <div class="cap" id="pathcap"></div>
+  <div class="plots" id="plots">
+    <canvas id="trace" width="620" height="180" hidden></canvas>
+    <canvas id="hist" width="420" height="180" hidden></canvas>
+  </div>
+</div>
 <div id="out"></div>
 <div class="times" id="times"></div>
 
@@ -520,6 +524,9 @@ async function runChains(sampler, opts, nChains, seed, onLive) {
   return {
     fit: { names: results[0].names, samples: results[0].samples,
            chains: results.map((r) => r.columns) },
+    // Pathfinder only: which iterate of each path the ELBO chose.
+    selected: results.map((r) => (r.pathfinder ? r.pathfinder.selectedIter
+                                               : -1)),
     ms,
   };
 }
@@ -533,8 +540,9 @@ function newLive(nChains) {
            chains: Array.from({ length: nChains }, () => []),
            warm: new Array(nChains).fill(0),
            drawn: new Array(nChains).fill(0),
-           // Pathfinder streams L-BFGS iterates instead of draws.
-           path: [],
+           // Pathfinder streams L-BFGS iterates instead of draws, one
+           // climb per chain slot.
+           path: Array.from({ length: nChains }, () => []),
            lo: Infinity, hi: -Infinity };
 }
 // Fold one chain's live messages into `live`, then let `redraw` decide
@@ -545,7 +553,7 @@ function liveHandler(live, progress, redraw) {
     if (m.liveMeta) { live.names = m.liveMeta.names; return; }
     const lv = m.live;
     if (lv.phase === "path") {
-      live.path.push({ iter: lv.iter, lp: lv.lp });
+      live.path[c].push({ iter: lv.iter, lp: lv.lp });
       progress();
       redraw();
       return;
@@ -589,6 +597,8 @@ $("run").onclick = async () => {
   $("csv").hidden = true;
   $("trace").hidden = true;
   $("hist").hidden = true;
+  $("path").hidden = true;
+  $("pathcap").textContent = "";
   fit = null;
   cmpFits = null;
   cmpMode = null;
@@ -629,27 +639,35 @@ $("run").onclick = async () => {
 
 async function runSingle(mode, opts, nChains, seed, compiled, tWall) {
   const label = SAMPLER_LABEL[mode];
+  const pathfinder = mode === "pathfinder";
   const live = newLive(nChains);
+  const iterates = () => live.path.reduce((a, b) => a + b.length, 0);
   const progress = throttled(() => {
     const w = live.warm.reduce((a, b) => a + b, 0);
     const d = live.drawn.reduce((a, b) => a + b, 0);
-    $("status").textContent = d
+    $("status").textContent = pathfinder
+        ? `${label}: ${iterates()} L-BFGS iterates across ${nChains} paths`
+        : d
         ? `${label} sampling: ${d}/${nChains * opts.samples} draws across ` +
           `${nChains} chains`
-        : live.path.length
-        ? `${label}: ${live.path.length} L-BFGS iterates`
         : `${label} warmup: ${w}/${nChains * opts.warmup} across ` +
           `${nChains} chains`;
   });
-  const r = await runChains(
-      mode, opts, nChains, seed,
-      liveHandler(live, progress, throttled(
-          () => liveTrace($("trace"), live, nChains, false, label))));
-  liveTrace($("trace"), live, nChains, true, label);
+  // Pathfinder has no trace to draw. Its draws are importance resamples
+  // from one fitted normal, in no order at all, so a trace of them would
+  // show flawless mixing by construction and mean nothing. What moves
+  // while it runs is the optimizer, so that is what animates.
+  const redraw = pathfinder
+      ? () => drawPath($("path"), live.path, [], $("pathcap"))
+      : () => liveTrace($("trace"), live, nChains, false, label);
+  const r = await runChains(mode, opts, nChains, seed,
+                            liveHandler(live, progress, throttled(redraw)));
   fit = r.fit;
+  if (pathfinder) drawPath($("path"), live.path, r.selected, $("pathcap"));
+  else liveTrace($("trace"), live, nChains, true, label);
   const ms = { stanc: compiled.ms.stanc, ...r.ms,
                wall: performance.now() - tWall };
-  render(ms, nChains, label);
+  render(ms, nChains, mode);
 }
 
 // ---- the comparison --------------------------------------------------------
@@ -982,11 +1000,11 @@ async function runNutsPathfinder(opts, nChains, seed, compiled, tWall) {
         (d ? `NUTS ${d}/${nChains * opts.samples} draws`
            : `NUTS warmup ${w}/${nChains * opts.warmup}`) + " · " +
         (v.pf ? `Pathfinder done in ${msText(v.pf.elapsedMs)}`
-              : `Pathfinder: ${pfLive.path.length} L-BFGS iterates`);
+              : `Pathfinder: ${pfLive.path[0].length} L-BFGS iterates`);
   });
   const redrawPath = throttled(() => {
     drawPath(cols.pathfinder.querySelector(".cpath"), pfLive.path,
-             v.pf ? v.pf.selectedIter : -1,
+             [v.pf ? v.pf.selectedIter : -1],
              cols.pathfinder.querySelector(".cpathcap"));
   });
   const redrawNuts = throttled(() => {
@@ -1050,7 +1068,7 @@ async function runNutsPathfinder(opts, nChains, seed, compiled, tWall) {
       `draws should not be trusted. A small k&#770; says the weights are ` +
       `stable, never that the approximation covers the posterior.</div>`);
   drawPath(cols.pathfinder.querySelector(".cpath"), pfLive.path,
-           v.pf.selectedIter, cols.pathfinder.querySelector(".cpathcap"));
+           [v.pf.selectedIter], cols.pathfinder.querySelector(".cpathcap"));
   pfPaint();
 
   const done = await Promise.all(jobs);
@@ -1167,25 +1185,31 @@ function summaryTable(f) {
   return html + "</table>";
 }
 
-function render(ms, nChains, label) {
+function render(ms, nChains, mode) {
+  const label = SAMPLER_LABEL[mode];
+  const pathfinder = mode === "pathfinder";
   $("out").innerHTML = summaryTable(fit);
   const perChain = ms.sample / nChains;
   $("times").textContent =
-      `${nChains} ${label} chain${nChains > 1 ? "s" : ""} in parallel: ` +
-      `${(ms.wall / 1000).toFixed(1)} s wall, ` +
+      `${nChains} ${label} ` +
+      (pathfinder ? `path${nChains > 1 ? "s" : ""}`
+                  : `chain${nChains > 1 ? "s" : ""}`) +
+      ` in parallel: ${(ms.wall / 1000).toFixed(1)} s wall, ` +
       `${perChain < 1000 ? perChain.toFixed(0) + " ms"
                          : (perChain / 1000).toFixed(1) + " s"} ` +
-      `sampling per chain (stanc ${ms.stanc.toFixed(0)} ms, once); ` +
-      `click a row for trace + histogram`;
+      (pathfinder ? "per path" : "sampling per chain") +
+      ` (stanc ${ms.stanc.toFixed(0)} ms, once); ` +
+      (pathfinder ? "click a row for a histogram"
+                  : "click a row for trace + histogram");
   for (const tr of $("out").querySelectorAll("tr[data-n]"))
-    tr.onclick = () => showPlots(tr, label);
+    tr.onclick = () => showPlots(tr, mode);
 }
 
 // The plots follow the selection: one pair, parked above the table while
 // the sampler streams, then moved into a row of its own directly under
 // whichever parameter was clicked. Moving the node keeps the canvases and
 // their contexts alive, so nothing has to be redrawn to relocate them.
-function showPlots(tr, label) {
+function showPlots(tr, mode) {
   const plots = $("plots");
   const prev = $("out").querySelector("tr.plotrow");
   if (prev && prev.previousElementSibling === tr) {
@@ -1208,8 +1232,12 @@ function showPlots(tr, label) {
   tr.after(row);
   tr.classList.add("selected");
   const name = tr.dataset.n;
-  drawTrace($("trace"), fit, name,
-            `${name}  trace, ${fit.chains.length} chains`);
+  // Same reason as the live view: Pathfinder's draws have no serial
+  // order, so the histogram is the whole of what there is to see.
+  if (mode === "pathfinder") $("trace").hidden = true;
+  else
+    drawTrace($("trace"), fit, name,
+              `${name}  trace, ${fit.chains.length} chains`);
   drawHist($("hist"), allDraws(fit, name), name);
 }
 
@@ -1417,64 +1445,81 @@ function drawQQ(c, xs, ys, name) {
   g.lineWidth = 1;
 }
 
-// The optimizer's climb: lp at every L-BFGS iterate, with the iterate
-// the ELBO chose marked. A random start can sit astronomically below the
-// mode -- an lp of -1e12 is ordinary -- and one such point flattens
-// every other iterate onto the top edge of the frame. When the whole
-// range is more than ten times the range of the last 90% of iterates,
-// the axis is clamped to those and the caption says so; the line still
-// runs off the bottom, clipped to the plot area, so nothing is hidden.
-function drawPath(c, path, selected, capEl) {
+// The optimizer's climb: lp at every L-BFGS iterate, one line per path,
+// with the iterate the ELBO chose marked on each. `paths` is an array of
+// paths and `selected` the chosen index within each, or -1.
+//
+// A random start can sit astronomically below the mode -- an lp of -1e12
+// is ordinary -- and one such point flattens every other iterate onto
+// the top edge of the frame. When the whole range is more than ten times
+// the range of the last 90% of iterates, the axis is clamped to those
+// and the caption says so; the lines still run off the bottom, clipped
+// to the plot area, so nothing is hidden.
+function drawPath(c, paths, selected, capEl) {
   const g = c.getContext("2d");
   c.hidden = false;
   g.clearRect(0, 0, c.width, c.height);
   if (capEl) capEl.textContent = "";
-  const lps = path.map((p) => p.lp).filter(Number.isFinite);
+  const drawn = paths.filter((p) => p.length);
+  if (!drawn.length) return;
+  const lps = drawn.flat().map((p) => p.lp).filter(Number.isFinite);
   if (!lps.length) return;
   let lo = Math.min(...lps), hi = Math.max(...lps);
-  const tail = path.slice(Math.floor(path.length * 0.1))
-                   .map((p) => p.lp).filter(Number.isFinite);
+  // The clamp is judged on the longest path: they all start at their own
+  // random point and one bad start is enough to flatten the frame.
+  const longest = drawn.reduce((a, b) => (b.length > a.length ? b : a));
+  const cut = Math.floor(longest.length * 0.1);
+  const tail = drawn.flatMap((p) => p.slice(Math.floor(p.length * 0.1)))
+                    .map((p) => p.lp).filter(Number.isFinite);
   if (tail.length > 1) {
     const tlo = Math.min(...tail), thi = Math.max(...tail);
     if (thi > tlo && hi - lo > 10 * (thi - tlo)) {
       lo = tlo;
       if (capEl)
         capEl.textContent =
-            `y axis clamped to iterate ${Math.floor(path.length * 0.1)} ` +
-            `onward; the start is at lp ${lps[0].toPrecision(3)}`;
+            `y axis clamped to iterate ${cut} onward; the lowest start ` +
+            `is at lp ${Math.min(...drawn.map((p) => p.lp)).toPrecision(3)}`;
     }
   }
   if (!(hi > lo)) { lo -= 1; hi += 1; }
-  const last = path[path.length - 1].iter;
+  const last = Math.max(...drawn.map((p) => p[p.length - 1].iter));
   const { X, Y } = axes(c, g, {
-    title: `log density along the L-BFGS path`,
+    title: `log density along the L-BFGS ` +
+           `path${drawn.length > 1 ? "s" : ""}`,
     xlabel: "L-BFGS iterate", ylabel: "lp__",
     xlo: 0, xhi: Math.max(last, 1), ylo: lo, yhi: hi });
   g.save();
   g.beginPath();
   g.rect(PAD.l, PAD.t, c.width - PAD.l - PAD.r, c.height - PAD.t - PAD.b);
   g.clip();
-  g.strokeStyle = "#4a7";
-  g.lineWidth = 1.5;
-  g.beginPath();
-  path.forEach((p, i) => {
-    i ? g.lineTo(X(p.iter), Y(p.lp)) : g.moveTo(X(p.iter), Y(p.lp));
-  });
-  g.stroke();
-  g.lineWidth = 1;
-  const sel = path[selected];
-  if (sel) {
-    g.fillStyle = "#a47";
+  drawn.forEach((path, pi) => {
+    g.strokeStyle = CHAIN_COLORS[pi % CHAIN_COLORS.length];
+    g.lineWidth = 1.5;
+    g.beginPath();
+    path.forEach((p, i) => {
+      i ? g.lineTo(X(p.iter), Y(p.lp)) : g.moveTo(X(p.iter), Y(p.lp));
+    });
+    g.stroke();
+    g.lineWidth = 1;
+    const sel = path[selected[pi]];
+    if (!sel) return;
+    g.fillStyle = CHAIN_COLORS[pi % CHAIN_COLORS.length];
     g.beginPath();
     g.arc(X(sel.iter), Y(sel.lp), 4, 0, 2 * Math.PI);
     g.fill();
+    // One label is enough to say what the dots mean; more than one path
+    // and they would overprint each other.
+    if (pi > 0) return;
     g.font = "10px system-ui";
     g.textAlign = X(sel.iter) > c.width / 2 ? "right" : "left";
+    // A pick at the very top of the frame would put its label above the
+    // plot area, where the clip drops it; those labels go below the dot.
+    const above = Y(sel.lp) - 8 > PAD.t + 10;
     g.fillText(`ELBO picked iterate ${sel.iter}`,
                X(sel.iter) + (X(sel.iter) > c.width / 2 ? -8 : 8),
-               Y(sel.lp) - 8);
+               Y(sel.lp) + (above ? -8 : 14));
     g.textAlign = "left";
-  }
+  });
   g.restore();
 }
 
