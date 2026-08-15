@@ -209,8 +209,8 @@ int main() {
     PathfinderConfig cfg;
     cfg.seed = 4242;
     cfg.num_draws = 100;
-    PathfinderResult r =
-        run_pathfinder(ex, cfg, [&](const PathIterate& it) { seen.push_back(it); });
+    PathfinderResult r = run_pathfinder(
+        ex, cfg, [&](const PathIterate& it) { seen.push_back(it); });
     expect("observer saw every iterate", seen.size() == r.path.size());
     for (size_t i = 0; i < seen.size() && i < r.path.size(); ++i)
       expect("observer iterate " + std::to_string(i),

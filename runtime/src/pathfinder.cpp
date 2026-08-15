@@ -133,7 +133,9 @@ class PathLogger : public stan::callbacks::logger {
     if (!errors.empty()) errors += "; ";
     errors += message;
   }
-  void error(const std::stringstream& message) override { error(message.str()); }
+  void error(const std::stringstream& message) override {
+    error(message.str());
+  }
 
   int best_iter = -1;
   double best_elbo = kNaN;
@@ -190,9 +192,9 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
     values.assign(cfg.init, cfg.init + names.size());
   }
   stan::io::array_var_context fixed(names, values, dims);
-  const stan::io::var_context& init =
-      cfg.init != nullptr ? (const stan::io::var_context&)fixed
-                          : (const stan::io::var_context&)empty;
+  const stan::io::var_context& init = cfg.init != nullptr
+                                          ? (const stan::io::var_context&)fixed
+                                          : (const stan::io::var_context&)empty;
 
   const auto start = std::chrono::steady_clock::now();
   try {
@@ -206,10 +208,9 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
     out.return_code = 1;
     out.message = e.what();
   }
-  out.elapsed_ms =
-      std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - start)
-          .count();
+  out.elapsed_ms = std::chrono::duration<double, std::milli>(
+                       std::chrono::steady_clock::now() - start)
+                       .count();
 
   out.draws = std::move(draws.draws);
   out.lp = std::move(draws.lp);
@@ -222,7 +223,8 @@ PathfinderResult run_pathfinder(Executor& ex, const PathfinderConfig& cfg,
   }
 
   std::vector<double> ratios(out.lp.size());
-  for (size_t i = 0; i < ratios.size(); ++i) ratios[i] = out.lp[i] - out.lp_approx[i];
+  for (size_t i = 0; i < ratios.size(); ++i)
+    ratios[i] = out.lp[i] - out.lp_approx[i];
   out.khat = pareto_khat(std::move(ratios));
   return out;
 }
@@ -251,8 +253,9 @@ double pareto_khat(std::vector<double> log_ratios) {
   if (!(xstar > 0)) return 0.0;
   std::vector<double> theta(grid), k(grid), profile(grid);
   for (size_t j = 0; j < grid; ++j) {
-    theta[j] = 1.0 / x.back() +
-               (1.0 - std::sqrt((double)grid / ((double)j + 0.5))) / (3 * xstar);
+    theta[j] =
+        1.0 / x.back() +
+        (1.0 - std::sqrt((double)grid / ((double)j + 0.5))) / (3 * xstar);
     double mean = 0;
     for (double v : x) mean += std::log1p(-theta[j] * v);
     k[j] = mean / N;

@@ -403,8 +403,7 @@ void expect_pathfinder() {
   }
   const double khat = summary[STANLI_PATHFINDER_KHAT];
   const double selected = summary[STANLI_PATHFINDER_SELECTED_ITER];
-  if (!std::isfinite(khat) || selected < 0 ||
-      selected >= (double)path.size() ||
+  if (!std::isfinite(khat) || selected < 0 || selected >= (double)path.size() ||
       !std::isfinite(summary[STANLI_PATHFINDER_SELECTED_ELBO]) ||
       !(summary[STANLI_PATHFINDER_ELAPSED_MS] >= 0)) {
     ++failures;

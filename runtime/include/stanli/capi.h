@@ -294,9 +294,8 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
 typedef void (*stanli_path_cb)(int32_t iter, double lp, void* user);
 int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
                           int num_draws, double* draws, double* lp,
-                          double* lp_approx, double* summary,
-                          stanli_path_cb cb, void* user, char* err,
-                          size_t err_len);
+                          double* lp_approx, double* summary, stanli_path_cb cb,
+                          void* user, char* err, size_t err_len);
 
 /* write_array: every CSV column CmdStan would emit for one draw --
  * constrained parameters, transformed parameters, generated quantities,
