@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.2
 
 ### NUTS and WALNUTS start from the same point
 
