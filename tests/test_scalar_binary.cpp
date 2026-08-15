@@ -101,6 +101,43 @@ int main() {
   check_fn("owens_t", OP_OWENS_T, xs, ys, F(owens_t));
 #undef F
 
+  // A data argument must reach stan-math as a double, not a promoted var:
+  // the var,double overloads of fmax and fmin give TIES to the var side,
+  // and the var,var overloads give them to b. The conformance sweep hit
+  // this through int arrays (int slots are always data) probed at exact
+  // ties: fmax(2 + eps*theta, 2) at theta = 0.
+  {
+    auto r =
+        stanli::testutil::run_op_sum(OP_FMAX, 1, {{2.0}, {2.0}}, {true, false});
+    var a = 2.0;
+    var lp = stan::math::fmax(a, 2.0);
+    lp.grad();
+    expect_eq("fmax tie-vs-data lp", r.value, lp.val());
+    expect_eq("fmax tie-vs-data g0", r.grad[0], a.adj());
+    stan::math::recover_memory();
+  }
+  {
+    auto r =
+        stanli::testutil::run_op_sum(OP_FMIN, 1, {{2.0}, {2.0}}, {true, false});
+    var a = 2.0;
+    var lp = stan::math::fmin(a, 2.0);
+    lp.grad();
+    expect_eq("fmin tie-vs-data lp", r.value, lp.val());
+    expect_eq("fmin tie-vs-data g0", r.grad[0], a.adj());
+    stan::math::recover_memory();
+  }
+  {
+    // Data on the left, parameter on the right: dv overloads.
+    auto r =
+        stanli::testutil::run_op_sum(OP_FMAX, 1, {{2.0}, {2.0}}, {false, true});
+    var b = 2.0;
+    var lp = stan::math::fmax(2.0, b);
+    lp.grad();
+    expect_eq("fmax data-tie-v lp", r.value, lp.val());
+    expect_eq("fmax data-tie-v g0", r.grad[0], b.adj());
+    stan::math::recover_memory();
+  }
+
   if (failures == 0) std::printf("test_scalar_binary OK\n");
   return failures == 0 ? 0 : 1;
 }
