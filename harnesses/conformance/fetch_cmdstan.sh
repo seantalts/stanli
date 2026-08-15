@@ -9,41 +9,21 @@ cmdstan_dir=${1:-"$repo_root/deps/cmdstan"}
 cmdstan_sha=11cb052d3e1fc8c799e0fec559e2ee5452b38d27
 stan_sha=c96d04115d35cb04f42e45c5a69a82f9704798f1
 math_sha=8f326d14599d3030c626c46532d8e8534c1cdbec
-stanc_build='stanc3 b96c001 (Unix)'
 bridgestan_sha=49e248f351d4dac18d7fd154dbc3a0ab39c5de10
 
-case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64)
-    stanc_sha=d73ab1dfdd7ecbb7c750f978b1aaa09a263718e38c97a74eb83e427a7870761f ;;
-  Darwin-x86_64)
-    stanc_sha=292508d1dab4d31f0e051d4b44cc20013053c5e98d2ff90e78d67327c34bc805 ;;
-  Linux-x86_64)
-    stanc_sha=eadfb96fba274d51c0d8e46cfa0cfe9402a35701b94ed219c2e0990c47cf3905 ;;
-  Linux-aarch64)
-    stanc_sha=fa8e324752ba1dfdf9bb4ff118e79732c5d0851c358252e89c305971658d413e ;;
-  *)
-    echo "No reviewed stanc binary digest for $(uname -s)-$(uname -m)." >&2
-    exit 1
-    ;;
-esac
-
-if [[ ! -x "$repo_root/deps/stanc3/stanc" ]]; then
-  "$repo_root/deps/fetch.sh"
-fi
-
-actual_stanc=$("$repo_root/deps/stanc3/stanc" --version)
-if [[ "$actual_stanc" != "$stanc_build" ]]; then
-  echo "stanc pin mismatch: expected '$stanc_build', got '$actual_stanc'" >&2
-  echo "Refusing to build a reference for a moving nightly compiler." >&2
-  exit 1
-fi
-if command -v sha256sum >/dev/null 2>&1; then
-  actual_stanc_sha=$(sha256sum "$repo_root/deps/stanc3/stanc" | awk '{print $1}')
-else
-  actual_stanc_sha=$(shasum -a 256 "$repo_root/deps/stanc3/stanc" | awk '{print $1}')
-fi
-if [[ "$actual_stanc_sha" != "$stanc_sha" ]]; then
-  echo "stanc binary digest mismatch: expected $stanc_sha, got $actual_stanc_sha" >&2
+# The conformance stanc is built from source at STANC3_SRC_SHA -- the
+# revision the wheels embed -- not downloaded from stanc3's `nightly`
+# release tag. That tag is republished in place upstream, so a binary
+# pinned against it stops existing the first time no cache holds a
+# copy; a git SHA can be fetched and rebuilt forever, and the run then
+# tests the frontend the shipped runtime actually uses.
+"$repo_root/harnesses/conformance/build_stanc.sh"
+stanc_pinned="$repo_root/deps/stanc3/stanc-pinned"
+stanc3_src_sha=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
+                 "$repo_root/tools/dev_setup.sh")
+if [[ "$(cat "$stanc_pinned.src" 2>/dev/null)" != "$stanc3_src_sha" ]]; then
+  echo "conformance stanc provenance mismatch: built from" \
+       "'$(cat "$stanc_pinned.src" 2>/dev/null)', pin is '$stanc3_src_sha'" >&2
   exit 1
 fi
 
@@ -77,7 +57,10 @@ git -C "$bridgestan_dir" checkout -q --detach "$bridgestan_sha"
 verify_head "$bridgestan_dir" "$bridgestan_sha" BridgeStan
 
 mkdir -p "$cmdstan_dir/bin"
-cp "$repo_root/deps/stanc3/stanc" "$cmdstan_dir/bin/stanc"
+# Both sides of the differential compile with the identical frontend:
+# CmdStan gets the same source-built stanc that stanli lowers through,
+# in place of whatever make/stanc would download.
+cp "$stanc_pinned" "$cmdstan_dir/bin/stanc"
 
 case "$(uname -s)" in
   Darwin) tbb_target=stan/lib/stan_math/lib/tbb/libtbb.dylib ;;

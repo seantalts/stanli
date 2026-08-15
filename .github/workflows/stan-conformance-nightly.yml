@@ -8,16 +8,37 @@ on:
 permissions:
   contents: read
 
+env:
+  # Must match tools/dev_setup.sh and wheels.yml; only used when the
+  # toolchain cache misses and the pinned stanc is rebuilt from source.
+  OPAM_VERSION: 2.5.2
+
 concurrency:
   group: stan-conformance-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  # What has the Stan language grown that the pinned toolchain cannot
+  # see? stanc3 checks its full signature dump into its own repository,
+  # so this is a text diff between our pin and upstream master: nothing
+  # is downloaded but two files, and no unreviewed compiler runs. Its
+  # own job, so a toolchain-build failure cannot hide the report.
+  # Reporting only: a frozen toolchain cannot *test* a new signature --
+  # that is a reviewed pin advance (STANC3_SRC_SHA in dev_setup.sh).
+  signature-watch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diff pinned signatures against upstream master
+        run: ./harnesses/conformance/signature_watch.sh
+
   inventory:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
+      # dev_setup.sh is in the key: the stanc pin (STANC3_SRC_SHA)
+      # lives there, so advancing it rolls this cache.
       - name: Restore pinned Stan and CmdStan sources
         uses: actions/cache@v4
         with:
@@ -27,7 +48,18 @@ jobs:
             deps/stanc3
             deps/cmdstan
             deps/bridgestan
-          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh') }}
+          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+
+      # Only exercised when the cache misses: fetch_cmdstan.sh builds
+      # the pinned stanc from source then, and the build needs opam.
+      # Same pinned opam release the wheels use.
+      - name: opam (for a cold stanc build)
+        run: |
+          url=https://github.com/ocaml/opam/releases/download
+          curl -fsSL --retry 5 -o /tmp/opam \
+            "$url/$OPAM_VERSION/opam-$OPAM_VERSION-x86_64-linux"
+          chmod +x /tmp/opam
+          sudo install -m 755 /tmp/opam /usr/local/bin/opam
 
       - name: Validate the complete pinned reference toolchain
         run: |
@@ -40,12 +72,12 @@ jobs:
           cmake --build build-rel --target stanli_shared -j2
           mkdir -p python/stanli/_bin
           cp build-rel/libstanli.so python/stanli/_bin/
-          cp deps/stanc3/stanc python/stanli/_bin/stanc
+          cp deps/stanc3/stanc-pinned python/stanli/_bin/stanc
 
       - name: Emit the deterministic partition manifest
         run: |
           python3 harnesses/stan_conformance.py \
-            --stanc deps/stanc3/stanc \
+            --stanc deps/stanc3/stanc-pinned \
             --cmdstan deps/cmdstan \
             --write-manifest 8 \
             --output conformance-manifest
@@ -70,6 +102,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Identical key to the inventory job, so this restores what that
+      # job built and saved -- including the source-built stanc, whose
+      # provenance file makes the revalidation below a no-op.
       - name: Restore pinned Stan and CmdStan sources
         uses: actions/cache@v4
         with:
@@ -79,7 +114,18 @@ jobs:
             deps/stanc3
             deps/cmdstan
             deps/bridgestan
-          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh') }}
+          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+
+      # Insurance for the cache evaporating between inventory and here:
+      # revalidation would then rebuild stanc from source, which needs
+      # opam. On the ordinary path this binary is installed and unused.
+      - name: opam (for a cold stanc build)
+        run: |
+          url=https://github.com/ocaml/opam/releases/download
+          curl -fsSL --retry 5 -o /tmp/opam \
+            "$url/$OPAM_VERSION/opam-$OPAM_VERSION-x86_64-linux"
+          chmod +x /tmp/opam
+          sudo install -m 755 /tmp/opam /usr/local/bin/opam
 
       - name: Revalidate restored reference inputs
         run: |
@@ -114,7 +160,7 @@ jobs:
         continue-on-error: true
         run: |
           python3 harnesses/stan_conformance.py \
-            --stanc deps/stanc3/stanc \
+            --stanc deps/stanc3/stanc-pinned \
             --cmdstan deps/cmdstan \
             --build build-rel \
             --shard ${{ matrix.partition }}/8 \

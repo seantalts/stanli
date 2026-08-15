@@ -31,10 +31,18 @@ their dedicated domain and reduction cases are added.
 ## Setup and run
 
 Fetch stanli's pinned dependencies first. The helper then prepares the exact
-CmdStan/Stan/Stan Math combination used by BridgeStan and verifies both
-the build ID and platform-specific SHA-256 of stanc instead of silently
-accepting a different nightly. The workflow likewise pins the public
-BridgeStan Python client used to drive stanli's facade.
+CmdStan/Stan/Stan Math combination used by BridgeStan, and builds the
+conformance stanc from source at `STANC3_SRC_SHA` (`tools/dev_setup.sh`) --
+the same revision the wheels embed -- rather than trusting any downloaded
+binary. The build needs opam and takes ~30 minutes once per pin; it is a
+no-op when `deps/stanc3/stanc-pinned` already matches the pin. The workflow
+likewise pins the public BridgeStan Python client used to drive stanli's
+facade.
+
+`signature_watch.sh` is the other half: it diffs stanc3's checked-in
+signature dump between the pin and upstream master, so new language surface
+is reported nightly without executing anything unreviewed. Adopting what it
+reports is a pin advance: bump `STANC3_SRC_SHA` and rerun this suite.
 
 ```sh
 ./deps/fetch.sh
@@ -42,7 +50,7 @@ BridgeStan Python client used to drive stanli's facade.
 python3 -m pip install -r harnesses/conformance/requirements.txt
 
 python3 harnesses/stan_conformance.py \
-  --stanc deps/stanc3/stanc \
+  --stanc deps/stanc3/stanc-pinned \
   --cmdstan deps/cmdstan \
   --build build-rel \
   --jobs 4
@@ -55,11 +63,11 @@ selectors are stable:
 
 ```sh
 python3 harnesses/stan_conformance.py \
-  --stanc deps/stanc3/stanc --cmdstan deps/cmdstan --build build-rel \
+  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan --build build-rel \
   --case 'abs(real)=>real'
 
 python3 harnesses/stan_conformance.py \
-  --stanc deps/stanc3/stanc --mode inventory --shard 2/8
+  --stanc deps/stanc3/stanc-pinned --mode inventory --shard 2/8
 ```
 
 The default output directory is `conformance-out/`. It contains the complete
@@ -79,7 +87,7 @@ source. To freeze a run, pass an explicit ignored or externally retained path:
 
 ```sh
 python3 harnesses/stan_conformance.py \
-  --stanc deps/stanc3/stanc --cmdstan deps/cmdstan --build build-rel \
+  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan --build build-rel \
   --baseline conformance-out/conformance-baseline.json --update-snapshot
 ```
 
