@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
 ### Pathfinder, and a NUTS vs Pathfinder comparison
 
@@ -22,6 +22,11 @@ per-parameter discrepancy column. k-hat is shown with its honest
 caveat: it certifies weight stability, never coverage -- on centered
 eight schools the approximation misses the funnel badly while k-hat
 stays green, which is exactly the failure the view exists to show.
+
+Standalone Pathfinder mode draws no trace plots: its draws are
+importance resamples with no serial order, so a trace would read as
+perfect mixing by construction. It shows the live L-BFGS climb (one
+line per path, ELBO pick marked) and per-parameter histograms instead.
 
 ## 0.7.2
 
