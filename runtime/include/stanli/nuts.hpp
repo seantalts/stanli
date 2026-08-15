@@ -109,6 +109,20 @@ std::vector<ChainResult> run_nuts_chains(const std::vector<Executor*>& execs,
 std::vector<std::unique_ptr<Executor>> clone_executors(const Executor& src,
                                                        int n);
 
+// The exact starting point run_nuts draws for (seed, chain_id): CmdStan's
+// stream via create_rng, uniform(-init_radius, init_radius), finite log
+// density and gradient required, up to 100 attempts. The init is the
+// first thing run_nuts consumes from its fresh generator, so a fresh
+// generator here reproduces it byte for byte. This is what lets a
+// sampler comparison start every sampler from the SAME point: init
+// policy belongs to the service layer (stan::services::util::initialize
+// in Stan's stack), not to any one sampler, so every sampler this
+// runtime drives shares this one. Throws as run_nuts does when no
+// acceptable point is found.
+std::vector<double> cmdstan_init_point(Executor& ex, uint32_t seed,
+                                       int chain_id, double init_radius,
+                                       const double* init);
+
 }  // namespace stanli
 
 #endif

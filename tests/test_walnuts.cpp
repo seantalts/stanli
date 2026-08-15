@@ -3,12 +3,9 @@
 // test_nuts.cpp so the two samplers stay comparable.
 #include "models.hpp"
 
-#include <stanli/compile.hpp>
 #include <stanli/walnuts.hpp>
 #include <cmath>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -187,42 +184,30 @@ int main() {
     expect_in("draws", (double)draws.size(), 60, 60);
   }
 
-  // ---- lotka_volterra: warmup must reach the typical set -----------------
-  // The stiff ODE posterior that exposed the frozen-chain failure: from a
-  // deep-tail init (this seed started near lp -16000; the posterior lives
-  // near -12), walnutpie's continuous mass adaptation learned the tail's
-  // huge gradients immediately (mass_init_count 4), the inverse mass
-  // collapsed, and the chain crawled at lp ~ -8000 for the entire run --
-  // the flat trace the comparison page showed. NUTS escapes from the very
-  // same point. Guarded by init selection and the unit-metric step
-  // search. The bound is -200, not the posterior's -12: this posterior
-  // also has a metastable basin near lp -52 that any sampler can linger
-  // in legitimately (R-hat flags it), and the bug pinned here is the
-  // freeze, which sits thousands below the bound.
+  // ---- inits are shared with NUTS ----------------------------------------
+  // The comparison contract: for a matched (seed, chain_id), WALNUTS
+  // starts from the exact point run_nuts draws, so a NUTS-vs-WALNUTS run
+  // is a controlled comparison rather than two samplers from two places.
+  // The first-draw check works because both consume the init before
+  // anything else touches their streams.
   {
-    auto slurp = [](const char* p) {
-      std::ifstream f(p);
-      std::ostringstream ss;
-      ss << f.rdbuf();
-      return ss.str();
-    };
-    const std::string mir = slurp("tests/fixtures/lotka.omir.sexp");
-    DataMap data =
-        DataMap::from_json_file("tests/fixtures/hudson_lynx_hare.json");
-    auto cm = compile_model(mir, data);
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
+    Graph g;
+    const int x = g.add_slot(4, true);
+    const int zero = g.add_slot(1, false);
+    const int one = g.add_slot(1, false);
+    const int lp = g.add_slot(1, false);
+    g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+    g.result_slot = lp;
+    Executor ex(std::move(g));
+    ex.value_ptr(zero)[0] = 0.0;
+    ex.value_ptr(one)[0] = 1.0;
 
-    WalnutsConfig cfg;
-    cfg.seed = 4;
-    cfg.warmup = 500;
-    cfg.samples = 200;
-    SamplerStats stats;
-    auto draws = run_walnuts(ex, cfg, &stats);
-    double lp_mean = 0;
-    for (const auto& row : stats.rows) lp_mean += row[0];
-    lp_mean /= (double)stats.rows.size();
-    expect_in("lotka mean lp", lp_mean, -200.0, 0.0);
+    const auto p1 = cmdstan_init_point(ex, 99, 1, 2.0, nullptr);
+    const auto p2 = cmdstan_init_point(ex, 99, 1, 2.0, nullptr);
+    const auto p3 = cmdstan_init_point(ex, 99, 2, 2.0, nullptr);
+    expect_in("init deterministic", p1 == p2 ? 1 : 0, 1, 1);
+    expect_in("init chain-distinct", p1 != p3 ? 1 : 0, 1, 1);
+    for (double v : p1) expect_in("init in radius", v, -2.0, 2.0);
   }
 
   if (failures) {

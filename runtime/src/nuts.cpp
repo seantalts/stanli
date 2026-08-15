@@ -102,6 +102,16 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   return draws;
 }
 
+std::vector<double> cmdstan_init_point(Executor& ex, uint32_t seed,
+                                       int chain_id, double init_radius,
+                                       const double* init) {
+  stan::rng_t rng = stan::services::util::create_rng(seed, chain_id);
+  std::vector<double> q((size_t)ex.n_params());
+  initialize_point(ex, rng, init_radius, init, q.data(),
+                   FixedInitPolicy::Validate);
+  return q;
+}
+
 bool thread_safe_build() {
 #ifdef STAN_THREADS
   return true;

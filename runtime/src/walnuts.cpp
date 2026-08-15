@@ -106,73 +106,27 @@ std::vector<std::vector<double>> run_walnuts(Executor& ex,
                                              const DrawObserver& observe) {
   const int64_t n = ex.n_params();
 
-  // One generator for init and sampling, a distinct stream per
-  // (seed, chain) pair. WALNUTS is a different sampler with a different
-  // consumption pattern, so there is no CmdStan stream to match the way
-  // nuts.cpp must; reproducibility per seed is the whole contract.
+  // The sampler's generator, a distinct stream per (seed, chain) pair.
+  // The INIT does not come from here -- it comes from the CmdStan stream
+  // below, shared with run_nuts -- but WALNUTS's own consumption pattern
+  // has no CmdStan analogue to match, so for the step search and the
+  // transitions reproducibility per seed is the whole contract.
   std::seed_seq seq{cfg.seed, static_cast<uint32_t>(cfg.chain_id)};
   std::mt19937_64 rng(seq);
 
-  // Initialization: uniform(-radius, radius) on the unconstrained scale,
-  // finite log density and gradient required, up to 100 attempts as in
-  // run_nuts -- but among the first 16 finite candidates the BEST log
-  // density wins, where NUTS takes the first. WALNUTS earns the extra 15
-  // evaluations: walnutpie's mass adaptation starts learning the metric
-  // immediately, and one draw from the far tail of a stiff posterior
-  // (lotka_volterra had inits at lp -16000 against a posterior living
-  // near -12) collapses the inverse mass to the tail's huge gradients,
-  // leaving a chain that crawls there for the whole run. Any finite init
-  // is a valid init, so preferring a better one costs nothing in
-  // correctness. A fixed point (an explicit init or radius 0) is taken
-  // as given, once.
-  Eigen::VectorXd q(n);
-  {
-    std::uniform_real_distribution<double> init_dist(-cfg.init_radius,
-                                                     cfg.init_radius);
-    const bool fixed_point = cfg.init != nullptr || cfg.init_radius == 0.0;
-    const int kMaxInitAttempts = fixed_point ? 1 : 100;
-    const int kWantCandidates = fixed_point ? 1 : 16;
-    std::vector<double> grad((size_t)n);
-    Eigen::VectorXd best_q(n);
-    double best_lp = -std::numeric_limits<double>::infinity();
-    int found = 0;
-    for (int attempt = 0; attempt < kMaxInitAttempts && found < kWantCandidates;
-         ++attempt) {
-      if (cfg.init != nullptr)
-        for (int64_t i = 0; i < n; ++i) q(i) = cfg.init[i];
-      else if (cfg.init_radius == 0.0)
-        q.setZero();
-      else
-        for (int64_t i = 0; i < n; ++i) q(i) = init_dist(rng);
-      for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q(i);
-      bool ok = false;
-      double lp = 0;
-      try {
-        lp = ex.forward_value_only();
-        ok = std::isfinite(lp);
-        if (ok) {
-          const double glp = ex.gradient(grad.data());
-          ok = std::isfinite(glp);
-          for (int64_t i = 0; ok && i < n; ++i)
-            ok = std::isfinite(grad[(size_t)i]);
-        }
-      } catch (const std::exception&) {
-        ok = false;
-      }
-      if (ok) {
-        ++found;
-        if (lp > best_lp) {
-          best_lp = lp;
-          best_q = q;
-        }
-      }
-    }
-    if (found == 0)
-      throw std::runtime_error(
-          "initialization failed: no draw in (-init_radius, init_radius) "
-          "had a finite log density and gradient after 100 attempts");
-    q = best_q;
-  }
+  // The SAME starting point run_nuts draws for this (seed, chain_id) --
+  // CmdStan's stream, first acceptable draw. Init policy is the service
+  // layer's, not any one sampler's, and sharing it is what makes a
+  // NUTS-vs-WALNUTS run with a matched seed a controlled comparison: both
+  // samplers start from the identical point, and how each handles a bad
+  // one is visible rather than papered over. (An earlier version chose
+  // the best of 16 candidates here, which hid walnutpie's tail-init
+  // sensitivity from the comparison; that sensitivity is reported
+  // upstream instead.)
+  const std::vector<double> q0 =
+      cmdstan_init_point(ex, cfg.seed, cfg.chain_id, cfg.init_radius, cfg.init);
+  Eigen::VectorXd q =
+      Eigen::Map<const Eigen::VectorXd>(q0.data(), (Eigen::Index)n);
 
   std::vector<std::vector<double>> draws;
   draws.reserve((size_t)cfg.samples);

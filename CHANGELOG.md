@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### NUTS and WALNUTS start from the same point
+
+For a matched (seed, chain_id), WALNUTS now initializes at the exact
+point run_nuts draws: CmdStan's stream, first draw with a finite log
+density and gradient. Init policy belongs to the service layer, not to
+any one sampler -- in Stan's stack it lives in
+stan::services::util::initialize -- so every sampler this runtime
+drives shares one policy, and a NUTS-vs-WALNUTS run on the comparison
+page is a controlled comparison: both samplers start from the identical
+point, and how each handles a bad one is visible.
+
+This replaces 0.7.1's best-of-16 init selection, which started WALNUTS
+from easier points than NUTS and thereby hid walnutpie's sensitivity to
+deep-tail inits from the very comparison built to show such things.
+That sensitivity is walnutpie's to address and is reported upstream;
+the lotka regression test went with it, since it pinned upstream
+warmup behavior rather than anything this runtime owns. The
+find_reasonable_epsilon step search stays: Stan's service layer runs
+the same search for NUTS, so it is shared policy too, and without it a
+too-large starting step deadlocks WALNUTS outright.
+
 ## 0.7.1
 
 ### WALNUTS chains no longer freeze on stiff posteriors
