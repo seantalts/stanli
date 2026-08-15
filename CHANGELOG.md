@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Pathfinder, and a NUTS vs Pathfinder comparison
+
+Single-path Pathfinder (Stan's own service, stan/services/pathfinder/)
+now runs over the executor's gradient, sharing the CmdStan init stream
+with NUTS and WALNUTS so a matched seed is a controlled comparison.
+The result carries the draws, the log density along the L-BFGS path
+with the ELBO-selected iterate, and a Pareto k-hat computed from the
+importance ratios. Multi-path is out of scope: it needs real TBB,
+which this build stubs.
+
+The comparison page gets a "NUTS vs Pathfinder" mode. Pathfinder has
+no chains, so its column shows the optimization path animating live
+per L-BFGS iterate, a histogram on a shared x range with each
+sampler's outline overlaid on the other's panel, and a Q-Q plot
+against NUTS quantiles. Pathfinder finishes in milliseconds and then
+the NUTS side keeps streaming into the shared plots, the Q-Q, and a
+per-parameter discrepancy column. k-hat is shown with its honest
+caveat: it certifies weight stability, never coverage -- on centered
+eight schools the approximation misses the funnel badly while k-hat
+stays green, which is exactly the failure the view exists to show.
+
 ## 0.7.2
 
 ### NUTS and WALNUTS start from the same point
