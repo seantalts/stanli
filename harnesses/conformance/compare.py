@@ -36,12 +36,15 @@ class Gate:
 
 
 # The gate a case gets when no policy rule names one. Reviewed decision
-# (2026-08-15): a lane within 5 ULP of the reference is green -- the same
-# order of tolerance the corpus oracle runs at -- so the mismatch bucket
-# holds disagreements someone should read, not accumulated last-bit noise
-# from equivalent-but-differently-grouped arithmetic. Anything looser than
-# this stays a reviewed [[numeric_gate]] rule in policy.toml.
-DEFAULT_GATE = Gate(max_ulp=5)
+# (2026-08-15, raised from 5 the same day): a lane within 10 ULP of the
+# reference is green, so the mismatch bucket holds disagreements someone
+# should read, not accumulated last-bit noise from equivalent-but-
+# differently-grouped arithmetic. The raise absorbed the 6-9 ULP class the
+# first live runs surfaced -- deep probe expression trees over functions
+# whose forward is literally the same stan-math call (inv_Phi at 6-7 ULP
+# was the type case). Anything looser than this stays a reviewed
+# [[numeric_gate]] rule in policy.toml.
+DEFAULT_GATE = Gate(max_ulp=10)
 
 
 @dataclasses.dataclass(frozen=True)

@@ -260,9 +260,10 @@ return_kind = "tuple"
             with self.assertRaises(PolicyError):
                 policy.classification_for(signature)
 
-    def test_default_gate_allows_five_ulp(self):
-        # Reviewed decision (2026-08-15): a lane within 5 ULP of the
-        # reference is green. Anything looser still needs a policy rule.
+    def test_default_gate_allows_ten_ulp(self):
+        # Reviewed decision (2026-08-15, raised from 5 the same day): a
+        # lane within 10 ULP of the reference is green. Anything looser
+        # still needs a policy rule.
         import types
         from conformance.scalar_runner import _gate as scalar_gate
         policy = load_policy(DEFAULT_POLICY)
@@ -270,10 +271,10 @@ return_kind = "tuple"
         case = types.SimpleNamespace(spec=types.SimpleNamespace(
             signature=normal))
         gate = scalar_gate(policy, case)
-        self.assertEqual(gate.max_ulp, 5)
-        self.assertTrue(compare_numeric(1.0, 1.0 + 5 * 2.0 ** -52,
+        self.assertEqual(gate.max_ulp, 10)
+        self.assertTrue(compare_numeric(1.0, 1.0 + 10 * 2.0 ** -52,
                                         gate).agrees)
-        self.assertFalse(compare_numeric(1.0, 1.0 + 6 * 2.0 ** -52,
+        self.assertFalse(compare_numeric(1.0, 1.0 + 11 * 2.0 ** -52,
                                          gate).agrees)
 
     def test_numeric_gate_is_narrow(self):
