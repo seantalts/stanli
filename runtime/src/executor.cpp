@@ -98,6 +98,7 @@ void register_matrix_kernels();
 void register_ode_kernels();
 void register_constrain_kernels();
 void register_eltwise_kernels();
+void register_scalar_binary_kernels();
 void register_mixture_kernels();
 void register_message_kernels();
 void register_island_kernel();
@@ -112,6 +113,7 @@ static void ensure_registered() {
     register_constrain_kernels();
     register_message_kernels();
     register_eltwise_kernels();
+    register_scalar_binary_kernels();
     register_mixture_kernels();
     register_island_kernel();
     return true;

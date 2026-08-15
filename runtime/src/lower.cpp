@@ -1981,9 +1981,20 @@ struct Lowering {
   std::optional<Val> lower_eltwise_fn(const mir::Expr& e) {
     // Elementwise binaries.
     static const std::map<std::string, uint16_t> kBin = {
-        {"Plus__", OP_ADD},     {"Minus__", OP_SUB},     {"Divide__", OP_DIV},
-        {"EltTimes__", OP_MUL}, {"EltDivide__", OP_DIV}, {"Pow__", OP_POW},
+        {"Plus__", OP_ADD},
+        {"Minus__", OP_SUB},
+        {"Divide__", OP_DIV},
+        {"EltTimes__", OP_MUL},
+        {"EltDivide__", OP_DIV},
+        {"Pow__", OP_POW},
         {"pow", OP_POW},
+// Generated from STANLI_SCALAR_BINARY_LIST (optable.hpp), which also made
+// the opcode and the kernel. multiply_log is the pre-optimizer spelling of
+// lmultiply, so it rides the same opcode.
+#define STANLI_BINARY_TABLE(code, name, fn) {#name, code},
+        STANLI_SCALAR_BINARY_LIST(STANLI_BINARY_TABLE)
+#undef STANLI_BINARY_TABLE
+            {"multiply_log", OP_LMULTIPLY},
     };
     if (e.name == "Times__") {
       Val a = lower_expr(e.args[0]);

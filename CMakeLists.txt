@@ -213,6 +213,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/densities_cdf_b.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
+  runtime/kernels/scalar_binary.cpp
   runtime/kernels/ode.cpp
   runtime/src/ode_prog.cpp
   runtime/kernels/constrain.cpp
@@ -396,7 +397,8 @@ install(DIRECTORY runtime/include/stanli
 set(STANLI_TESTS
   test_smoke test_executor test_recorder test_densities test_matvec
   test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp
-  test_mir test_transforms test_eltwise test_lower test_lower_views
+  test_mir test_transforms test_eltwise test_scalar_binary test_lower
+  test_lower_views
   test_lower_view_contract test_lower_array_contract test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
   test_ode_prog test_mir_program_conformance test_mir_checks

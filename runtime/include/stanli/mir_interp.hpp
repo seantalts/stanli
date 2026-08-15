@@ -935,6 +935,50 @@ class MirInterp {
       return bin([](const T& x, const T& y) { return stan::math::fmax(x, y); });
     if (e.name == "fmin")
       return bin([](const T& x, const T& y) { return stan::math::fmin(x, y); });
+    if (e.name == "atan2")
+      return bin(
+          [](const T& x, const T& y) { return stan::math::atan2(x, y); });
+    if (e.name == "beta" && e.args.size() == 2)
+      return bin([](const T& x, const T& y) { return stan::math::beta(x, y); });
+    if (e.name == "fdim")
+      return bin([](const T& x, const T& y) { return stan::math::fdim(x, y); });
+    if (e.name == "fmod")
+      return bin([](const T& x, const T& y) { return stan::math::fmod(x, y); });
+    if (e.name == "gamma_p")
+      return bin(
+          [](const T& x, const T& y) { return stan::math::gamma_p(x, y); });
+    if (e.name == "gamma_q")
+      return bin(
+          [](const T& x, const T& y) { return stan::math::gamma_q(x, y); });
+    if (e.name == "hypot")
+      return bin(
+          [](const T& x, const T& y) { return stan::math::hypot(x, y); });
+    if (e.name == "lbeta")
+      return bin(
+          [](const T& x, const T& y) { return stan::math::lbeta(x, y); });
+    if (e.name == "lchoose" || e.name == "binomial_coefficient_log")
+      return bin([](const T& x, const T& y) {
+        return stan::math::binomial_coefficient_log(x, y);
+      });
+    if (e.name == "log_falling_factorial")
+      return bin([](const T& x, const T& y) {
+        return stan::math::log_falling_factorial(x, y);
+      });
+    if (e.name == "log_inv_logit_diff")
+      return bin([](const T& x, const T& y) {
+        return stan::math::log_inv_logit_diff(x, y);
+      });
+    if (e.name == "log_modified_bessel_first_kind")
+      return bin([](const T& x, const T& y) {
+        return stan::math::log_modified_bessel_first_kind(x, y);
+      });
+    if (e.name == "log_rising_factorial")
+      return bin([](const T& x, const T& y) {
+        return stan::math::log_rising_factorial(x, y);
+      });
+    if (e.name == "owens_t")
+      return bin(
+          [](const T& x, const T& y) { return stan::math::owens_t(x, y); });
     // --O1 partial evaluation rewrites `x * log(y)` to lmultiply(x, y);
     // multiply_log computes exactly x * log(y), so the value is bitwise
     // what the unoptimized form produced.

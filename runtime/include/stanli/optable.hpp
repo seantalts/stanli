@@ -95,6 +95,23 @@ namespace stanli {
   X(OP_TANHV)                       \
   X(OP_CUMSUM)                      \
   X(OP_FMA)                         \
+  X(OP_ATAN2)                       \
+  X(OP_BETA_FN)                     \
+  X(OP_FDIM)                        \
+  X(OP_FMAX)                        \
+  X(OP_FMIN)                        \
+  X(OP_FMOD)                        \
+  X(OP_GAMMA_P)                     \
+  X(OP_GAMMA_Q)                     \
+  X(OP_HYPOT)                       \
+  X(OP_LBETA)                       \
+  X(OP_LCHOOSE)                     \
+  X(OP_LMULTIPLY)                   \
+  X(OP_LOG_FALLING_FACTORIAL)       \
+  X(OP_LOG_INV_LOGIT_DIFF)          \
+  X(OP_LOG_MODIFIED_BESSEL_1)       \
+  X(OP_LOG_RISING_FACTORIAL)        \
+  X(OP_OWENS_T)                     \
   X(OP_CONSTRAIN_LOWER)             \
   X(OP_CONSTRAIN_UPPER)             \
   X(OP_CONSTRAIN_LU)                \
@@ -472,6 +489,35 @@ constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
   X(OP_ROUND, round, std::round(x), 0.0, UnaryTopology::Disconnected)        \
   X(OP_TRUNC, trunc, std::trunc(x), 0.0, UnaryTopology::Disconnected)        \
   X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0, UnaryTopology::Disconnected)
+
+// Two-argument scalar math: opcode, language name, stan-math function.
+// Unlike the unary list, no hand-written derivative: the kernel evaluates
+// stan-math's own var overload on a nested tape, so the value and every
+// partial are the reference's by construction. That trade is deliberate --
+// these are long-tail functions (lchoose alone has a stability recursion
+// and five gradient edge cases), and a transcription error here is exactly
+// the class of bug the conformance sweep exists to catch. The language
+// name feeds the lowering table and the MIR interpreter; lchoose is
+// stanc3's name for stan-math's binomial_coefficient_log.
+#define STANLI_SCALAR_BINARY_LIST(X)                                        \
+  X(OP_ATAN2, atan2, atan2)                                                 \
+  X(OP_BETA_FN, beta, beta)                                                 \
+  X(OP_FDIM, fdim, fdim)                                                    \
+  X(OP_FMAX, fmax, fmax)                                                    \
+  X(OP_FMIN, fmin, fmin)                                                    \
+  X(OP_FMOD, fmod, fmod)                                                    \
+  X(OP_GAMMA_P, gamma_p, gamma_p)                                           \
+  X(OP_GAMMA_Q, gamma_q, gamma_q)                                           \
+  X(OP_HYPOT, hypot, hypot)                                                 \
+  X(OP_LBETA, lbeta, lbeta)                                                 \
+  X(OP_LCHOOSE, lchoose, binomial_coefficient_log)                          \
+  X(OP_LMULTIPLY, lmultiply, lmultiply)                                     \
+  X(OP_LOG_FALLING_FACTORIAL, log_falling_factorial, log_falling_factorial) \
+  X(OP_LOG_INV_LOGIT_DIFF, log_inv_logit_diff, log_inv_logit_diff)          \
+  X(OP_LOG_MODIFIED_BESSEL_1, log_modified_bessel_first_kind,               \
+    log_modified_bessel_first_kind)                                         \
+  X(OP_LOG_RISING_FACTORIAL, log_rising_factorial, log_rising_factorial)    \
+  X(OP_OWENS_T, owens_t, owens_t)
 
 // The tier a density is actually built at. STANLI_LITE_LP drops the
 // propto family from every one of them: about half the library, at the
