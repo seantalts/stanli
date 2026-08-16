@@ -2834,6 +2834,51 @@ int main() {
     check(threw2, "unsupported function rejected with its name");
   }
 
+  {
+    // Data whose JSON shape disagrees with its declaration. CmdStan's
+    // var_context validates every declared dimension before it reads a
+    // value and throws std::invalid_argument naming the variable and both
+    // shapes; stanli used to walk off the end of the short array instead,
+    // which surfaced as whatever std::vector::at happened to say. A host
+    // distinguishing bad data from a broken model reads the exception
+    // type, so the type is the contract.
+    DataMap d;
+    d.set_int("J", 8);
+    d.set_real_array("y", std::vector<double>(kY, kY + 7));
+    d.set_real_array("sigma", std::vector<double>(kSigma, kSigma + 8));
+    bool rejected = false;
+    std::string msg;
+    try {
+      compile_model(slurp("tests/fixtures/es.tmir.sexp"), d);
+    } catch (const std::invalid_argument& e) {
+      rejected = true;
+      msg = e.what();
+    } catch (const std::exception& e) {
+      msg = e.what();
+    }
+    check(rejected, "short data array rejected as invalid_argument: " + msg);
+    check(msg.find("mismatch in dimension") != std::string::npos &&
+              msg.find("name=y") != std::string::npos &&
+              msg.find("(8)") != std::string::npos &&
+              msg.find("(7)") != std::string::npos,
+          "the rejection names the variable and both shapes: " + msg);
+
+    // Too many values is the same disagreement; reading the declared
+    // prefix and dropping the rest would be silent data loss.
+    DataMap wide;
+    wide.set_int("J", 8);
+    wide.set_real_array("y", std::vector<double>(kY, kY + 8));
+    wide.set_real_array("sigma", std::vector<double>(9, 1.0));
+    bool wide_rejected = false;
+    try {
+      compile_model(slurp("tests/fixtures/es.tmir.sexp"), wide);
+    } catch (const std::invalid_argument&) {
+      wide_rejected = true;
+    } catch (const std::exception&) {
+    }
+    check(wide_rejected, "over-long data array is rejected too");
+  }
+
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;
 }

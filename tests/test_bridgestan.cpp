@@ -474,6 +474,49 @@ void test_constrain_interp() {
   bs_model_destruct(m);
 }
 
+// Generated quantities the graph cannot lower and the interpreter has to:
+// integer `%` and `%/%`, and the two matrix solves. The facade discovers
+// interpreted columns by evaluating the section at probe points and drops
+// write_array entirely when every probe throws -- so an operator the
+// interpreter does not know does not surface as an error, it silently
+// shortens the CSV to the constrained parameters. That is what this pins:
+// the columns are all there, and they carry the right values.
+void test_constrain_interp_operators() {
+  const std::string mir = slurp("tests/fixtures/gqops.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m =
+      bs_model_from_mir(mir.c_str(), "tests/fixtures/gqops.json", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("gqops construct: ") + (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_int("gqops param_num(F,F)", bs_param_num(m, false, false), 8);
+  expect_eq_int("gqops param_num(T,T)", bs_param_num(m, true, true), 14);
+  expect_eq_str("gqops param_names(T,T)", bs_param_names(m, true, true),
+                "v.1,v.2,rv.1,rv.2,A.1.1,A.2.1,A.1.2,A.2.2,i,q,dv.1,dv.2,"
+                "drv.1,drv.2");
+
+  // v = (1,2), rv = (3,4), A = diag(2,4) column-major. Every generated
+  // value is exact in binary: 7 % 2 = 1, 7 %/% 2 = 3, A \ v = (0.5, 0.5),
+  // rv / A = (1.5, 1).
+  const double q[8] = {1, 2, 3, 4, 2, 0, 0, 4};
+  std::vector<double> row(14, 0.0);
+  bs_rng* rng = bs_rng_construct(1, &err);
+  if (rng == nullptr) {
+    fail("gqops rng construction");
+    bs_model_destruct(m);
+    return;
+  }
+  expect_eq_int("gqops constrain rc",
+                bs_param_constrain(m, true, true, q, row.data(), rng, &err), 0);
+  const double want[14] = {1, 2, 3, 4, 2, 0, 0, 4, 1, 3, 0.5, 0.5, 1.5, 1};
+  for (size_t k = 0; k < row.size(); ++k)
+    expect_bitwise("gqops row[" + std::to_string(k) + "]", row[k], want[k]);
+  bs_rng_destruct(rng);
+  bs_model_destruct(m);
+}
+
 void test_unsupported() {
   const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
   char* err = nullptr;
@@ -960,6 +1003,7 @@ int main() {
   test_nested_scalar_array_order();
   test_constrain_graph();
   test_constrain_interp();
+  test_constrain_interp_operators();
   test_unsupported();
   test_initialize();
   test_print_callback();

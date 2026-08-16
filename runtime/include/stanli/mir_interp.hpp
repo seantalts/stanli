@@ -927,8 +927,71 @@ class MirInterp {
     }
     if (e.name == "EltTimes__")
       return bin([](const T& x, const T& y) { return x * y; });
+    // `A \ v` and `rv / A` are linear solves. stanc spells them with the
+    // ordinary division operators, so the divisor's type is what tells a
+    // solve from elementwise division by a scalar; `./` is never a solve.
+    if (e.name == "LDivide__" ||
+        (e.name == "Divide__" && e.args.at(1).type_ == "UMatrix")) {
+      const bool left = e.name == "LDivide__";
+      Value a = eval(e.args[0]), b = eval(e.args[1]);
+      const Value& divisor = left ? a : b;
+      const Value& dividend = left ? b : a;
+      if (divisor.dims.size() != 2)
+        fail(e.name + ": divisor is not a matrix", e.raw);
+      using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+      // A non-matrix operand is the vector its side implies -- a column
+      // under `\`, a row under `/` -- the same rule Times__ follows.
+      const auto shaped = [](const Value& v, bool column) {
+        const Eigen::Index rows = v.dims.size() == 2
+                                      ? (Eigen::Index)v.dims[0]
+                                      : (column ? (Eigen::Index)v.r.size() : 1);
+        const Eigen::Index cols = v.dims.size() == 2
+                                      ? (Eigen::Index)v.dims[1]
+                                      : (column ? 1 : (Eigen::Index)v.r.size());
+        Mat m(rows, cols);
+        for (Eigen::Index j = 0; j < cols; ++j)
+          for (Eigen::Index i = 0; i < rows; ++i)
+            m(i, j) = v.r.at((size_t)(j * rows + i));
+        return m;
+      };
+      const Mat d = shaped(divisor, true);
+      const Mat x = shaped(dividend, left);
+      // stan-math checks squareness and the shared extent, and throws the
+      // std::invalid_argument CmdStan would.
+      const Mat out = left ? stan::math::mdivide_left(d, x)
+                           : stan::math::mdivide_right(x, d);
+      r.r.resize((size_t)(out.rows() * out.cols()));
+      for (Eigen::Index j = 0; j < out.cols(); ++j)
+        for (Eigen::Index i = 0; i < out.rows(); ++i)
+          r.r[(size_t)(j * out.rows() + i)] = out(i, j);
+      if (e.type_ == "UMatrix")
+        r.dims = {(int64_t)out.rows(), (int64_t)out.cols()};
+      else
+        r.dims = {(int64_t)r.r.size()};
+      return r;
+    }
     if (e.name == "Divide__" || e.name == "EltDivide__")
       return bin([](const T& x, const T& y) { return x / y; });
+    // `%` and `%/%`. Both operands are int by stanc's typing, so these are
+    // C++ integer operators -- truncated toward zero -- and not fmod and
+    // real division rounded afterwards, which disagree on negatives.
+    // stan::math::modulus is what CmdStan calls, down to the exception it
+    // throws on a zero divisor; `%/%` becomes a bare C++ `/`, where a zero
+    // divisor is undefined behavior, so this refuses it instead.
+    if (e.name == "Modulo__" || e.name == "IntDivide__") {
+      const long x = as_int(e.args[0]), y = as_int(e.args[1]);
+      long q;
+      if (e.name == "Modulo__") {
+        q = stan::math::modulus((int)x, (int)y);
+      } else {
+        if (y == 0) fail("integer division by zero", e.raw);
+        q = x / y;
+      }
+      r.is_int = true;
+      r.i = {(int)q};
+      r.r = {T((double)q)};
+      return r;
+    }
     if (e.name == "Pow__" || e.name == "pow")
       return bin([](const T& x, const T& y) { return stan::math::pow(x, y); });
     if (e.name == "fmax")

@@ -683,6 +683,41 @@ struct Lowering {
     }
   }
 
+  // CmdStan's var_context validates every declared dimension against the
+  // supplied values before it reads one, and throws std::invalid_argument
+  // naming the variable and both shapes. Without the same check the short
+  // side is read past its end, and a host that tells bad data from a
+  // broken model by the exception type sees the wrong answer. Only the
+  // element count is compared: JSON carries a nested shape but stanc has
+  // already flattened the read, and a declaration whose extents multiply
+  // out to the supplied count is the shape the reader would produce.
+  void validate_data_dims(const std::string& name, const mir::SizedType& t) {
+    if (!data.has(name)) return;
+    const DataMap::Entry& en = data.at(name);
+    const int64_t found = (int64_t)std::max(en.r.size(), en.i.size());
+    const std::vector<int64_t> declared = sized_dims(t);
+    int64_t want = 1;
+    for (int64_t d : declared) {
+      if (d < 0) fail("negative extent for data " + name, t.raw);
+      want *= d;
+    }
+    if (want == found) return;
+    const auto tuple = [](const std::vector<int64_t>& dims) {
+      std::string s = "(";
+      for (size_t k = 0; k < dims.size(); ++k) {
+        if (k) s += ',';
+        s += std::to_string(dims[k]);
+      }
+      return s + ")";
+    };
+    throw std::invalid_argument(
+        "mismatch in dimension declared and found in context; processing "
+        "stage=data initialization; variable name=" +
+        name + "; position=0; dims declared=" + tuple(declared) +
+        "; dims found=" +
+        tuple(en.dims.empty() ? std::vector<int64_t>{found} : en.dims));
+  }
+
   void bind_data(const mir::Program& p) {
     for (const auto& [name, type] : p.input_vars) {
       (void)type;
@@ -695,7 +730,10 @@ struct Lowering {
       sh.si = view_of(type, true);
       decls[name] = sh;
     };
-    for (const auto& [name, type] : p.input_vars) record(name, type);
+    for (const auto& [name, type] : p.input_vars) {
+      record(name, type);
+      validate_data_dims(name, type);
+    }
     for (const auto& st : p.prepare_data) {
       if (st.kind == mir::Stmt::Decl) record(st.decl_id, st.decl_type);
       td.exec(st);
