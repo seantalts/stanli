@@ -214,6 +214,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
   runtime/kernels/scalar_binary.cpp
+  runtime/kernels/scalar_unary_ad.cpp
   runtime/kernels/ode.cpp
   runtime/src/ode_prog.cpp
   runtime/kernels/constrain.cpp

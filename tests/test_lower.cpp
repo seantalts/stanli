@@ -1762,6 +1762,95 @@ int main() {
     }
   }
 
+  // The one-argument scalar math library over containers. See
+  // tests/fixtures/unaryfns.stan: transformed data runs the MIR interpreter
+  // on doubles and the model block runs the graph kernels, so a name wired
+  // into one and not the other is caught here rather than as a wrong lp.
+  {
+    const std::vector<double> matv = {0.5, 1.5, 1.25, 0.25, 2.0, 2.5};
+    DataMap d;
+    d.set_real_array("mat", matv, {2, 3});
+    CompiledModel um =
+        compile_model(slurp("tests/fixtures/unaryfns.tmir.sexp"), d);
+    Executor uex(std::move(um.graph));
+    um.bind(uex);
+    // Transformed data: evaluated once by the interpreter, on doubles. Its
+    // reference is spelled the way the block is, left to right, each sum
+    // ascending from zero, because that is the arithmetic the interpreter
+    // performs.
+    const double tdx[3] = {0.5, 1.5, 2.5};
+    const double tdm[3] = {1.5, 2.5, 3.5};
+    double s_gamma = 0, s_tri = 0, s_minus = 0, s_plus = 0;
+    for (int i = 0; i < 3; ++i) {
+      s_gamma += stan::math::tgamma(tdx[i]);
+      s_tri += stan::math::trigamma(tdx[i]);
+      s_minus += -tdm[i];
+      s_plus += tdm[i];
+    }
+    const double td_sum =
+        s_gamma + s_tri + stan::math::inv_Phi(0.6) +
+        stan::math::std_normal_log_qf(-0.5) + stan::math::lambert_w0(0.5) +
+        stan::math::lambert_wm1(-0.2) + stan::math::inv_erfc(0.75) +
+        stan::math::Phi_approx(0.25) + s_minus + s_plus;
+
+    const double pts[2][3] = {{0.4, -0.7, 0.25}, {-0.3, 0.9, -0.15}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 3; ++i) uex.params_data()[i] = pts[c][i];
+      double grad[3] = {0, 0, 0};
+      const double lp = uex.gradient(grad);
+
+      using stan::math::var;
+      std::vector<var> a = {pts[c][0], pts[c][1], pts[c][2]};
+      std::vector<var> u, lu, wm, pos;
+      for (int i = 0; i < 3; ++i) {
+        u.push_back(stan::math::inv_logit(a[i]));
+        lu.push_back(stan::math::log(u[i]));
+        wm.push_back(-0.2 * u[i]);
+        pos.push_back(stan::math::exp(a[i]));
+      }
+      var acc = 0, s = 0;
+#define TERM(expr)                         \
+  s = 0;                                   \
+  for (int i = 0; i < 3; ++i) s += (expr); \
+  acc += s;
+      TERM(stan::math::tgamma(pos[i]))
+      TERM(stan::math::trigamma(pos[i]))
+      TERM(stan::math::lambert_w0(pos[i]))
+      TERM(stan::math::lambert_wm1(wm[i]))
+      TERM(stan::math::inv_Phi(u[i]))
+      TERM(stan::math::std_normal_log_qf(lu[i]))
+      TERM(stan::math::inv_erfc(u[i]))
+      TERM(stan::math::Phi_approx(a[i]))
+      TERM(-a[i])
+      TERM(a[i])
+#undef TERM
+      s = 0;
+      for (double m : matv) s += stan::math::Phi_approx(m + a[0]);
+      acc += s;
+      // `sum(na[1]) + sum(na[2])` is one target term, so the two element
+      // sums join each other before they reach the accumulator.
+      var n1 = 0, n2 = 0;
+      for (int i = 0; i < 3; ++i) n1 += stan::math::tgamma(pos[i]);
+      for (int i = 0; i < 3; ++i) n2 += stan::math::tgamma(u[i]);
+      acc += n1 + n2;
+      acc += td_sum;
+      acc.grad();
+
+      // Each element of `a` feeds a dozen terms through `u`, `pos` and
+      // `lu`, and the graph folds a slot's contributions in op order where
+      // the var chain folds them one vari at a time, so this lands inside
+      // the project's 2 ULP budget rather than on it -- measured at 1 ULP
+      // on one element of one point and 0 everywhere else. The per-function
+      // pullbacks themselves are pinned bitwise in
+      // tests/test_mir_unary_fallback.cpp.
+      for (int i = 0; i < 3; ++i)
+        expect_ulp("unaryfns grad", grad[i], a[i].adj());
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol,
+            "unaryfns: lp matches the var path");
+    }
+  }
+
   // array[N] vector[K] data into a vectorized multivariate density. See
   // tests/fixtures/mnarr.stan: the data path stores this shape the way it
   // stores a matrix, and the kernel wants each element contiguous, so the

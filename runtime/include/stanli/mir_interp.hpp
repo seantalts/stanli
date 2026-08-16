@@ -1071,8 +1071,14 @@ class MirInterp {
                                  c.r[c.r.size() == 1 ? 0 : i]);
       return o;
     }
-    if (e.name == "PMinus__") return un([](const T& x) { return -x; });
-    if (e.name == "PPlus__") return un([](const T& x) { return x; });
+    // minus and plus are the named spellings of the unary operators, so
+    // they are the same identity and the same negation over the same
+    // shapes. The graph lowering knows them too; teaching only one side is
+    // what let a vectorized log_sum_exp leave elements uninitialized here.
+    if (e.name == "PMinus__" || (e.name == "minus" && e.args.size() == 1))
+      return un([](const T& x) { return -x; });
+    if (e.name == "PPlus__" || (e.name == "plus" && e.args.size() == 1))
+      return un([](const T& x) { return x; });
     if (e.name == "exp")
       return un([](const T& x) { return stan::math::exp(x); });
     if (e.name == "log")
@@ -1505,6 +1511,17 @@ class MirInterp {
   }
     STANLI_SCALAR_UNARY_LIST(STANLI_INTERP_UNARY)
 #undef STANLI_INTERP_UNARY
+
+    // The two unaries the shared list cannot generate. std_normal_qf is
+    // stanc3's alias for inv_Phi (Lower_expr.ml maps it onto
+    // stan::math::inv_Phi), and trigamma's derivative is the derivative of
+    // AS121's recurrence rather than a formula, so both take Math's own
+    // overload: on doubles that is the prim call, on var it is the tape the
+    // graph kernel replays.
+    if (e.name == "std_normal_qf" && e.args.size() == 1)
+      return un([](const T& x) { return stan::math::inv_Phi(x); });
+    if (e.name == "trigamma" && e.args.size() == 1)
+      return un([](const T& x) { return stan::math::trigamma(x); });
 
     // Categorical arguments are containers as a whole, not elementwise
     // broadcasts. Preserve scalar-vs-array outcome overloads and the
