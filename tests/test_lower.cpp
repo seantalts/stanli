@@ -1773,13 +1773,15 @@ int main() {
     // {{0, 3}, {1, 2}}: distinct, so a swapped pairing is a factor of two.
     const int expo[2][2] = {{0, 3}, {1, 2}};
     const int expo3[2][2][2] = {{{0, 3}, {1, 2}}, {{2, 0}, {3, 1}}};
-    DataMap d;
-    d.set_int("k", kk);
-    d.set_int_array("counts", counts);
-    // A DataMap entry for a nested array is flattened first-index-fastest,
-    // which is what the JSON reader produces and what the lowering repacks
-    // from -- not the row-major order the array reads in.
-    d.set_int_array("expo3", {0, 2, 1, 3, 3, 0, 2, 1}, {2, 2, 2});
+    // Through the JSON reader, because expo3 is rank three and the data
+    // path is the only thing that stores an array of that rank. `nn` is
+    // the same shape as `expo` below but read rather than built from a
+    // literal: the interpreter reaches a data variable and a literal by
+    // different paths, and only one of them is covered by `expo`.
+    DataMap d = DataMap::from_json(R"({"k": )" + std::to_string(kk) + R"(,
+            "counts": [0, 1, 2],
+            "expo3": [[[0, 3], [1, 2]], [[2, 0], [3, 1]]],
+            "nn": [[2, 0], [3, 1]]})");
     CompiledModel lm =
         compile_model(slurp("tests/fixtures/binint.tmir.sexp"), d);
     Executor lex(std::move(lm.graph));
@@ -1853,9 +1855,13 @@ int main() {
       for (int i = 0; i < 3; ++i) s += stan::math::ldexp(b, counts[i]);
       acc += s;
       // Transformed data: the MIR interpreter's own copies of the same
-      // three shapes, including the matrix-against-int-array layout.
+      // shapes. 39 is [[1, 2], [3, 4]] against the literal {{0, 3}, {1, 2}}
+      // and 38 the same matrix against the data array {{2, 0}, {3, 1}},
+      // both paired n[i][j] with m(i, j). A flat pairing would answer 45
+      // and 31.
       acc += stan::math::ldexp(1.5, 0) + stan::math::ldexp(2.5, 1) +
-             stan::math::ldexp(3.5, 2) + stan::math::lmgamma(2, 1.75) + 39.0;
+             stan::math::ldexp(3.5, 2) + stan::math::lmgamma(2, 1.75) + 39.0 +
+             38.0;
       acc.grad();
 
       // Measured bitwise at both points: the graph builds the same lanes

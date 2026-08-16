@@ -20,6 +20,10 @@ data {
   // rest of the runtime addresses arrays by, which is a layout bug of its
   // own and would put this fixture's answer on top of it.
   array[2, 2, 2] int expo3;
+  // Same shape as `expo` below but read rather than built, because the
+  // interpreter reaches a literal and a data variable by different paths
+  // and only one of them can be checked by `expo`.
+  array[2, 2] int nn;
 }
 transformed data {
   array[2, 2] int expo = {{0, 3}, {1, 2}};
@@ -27,6 +31,10 @@ transformed data {
   real td2 = lmgamma(2, 1.75);
   // The layout case again, on the interpreter's own storage.
   real td3 = sum(ldexp([[1.0, 2.0], [3.0, 4.0]], expo));
+  // And once more against an int array that came from the data reader
+  // rather than from a literal. Different exponents from td3, so the two
+  // cannot be confused for each other.
+  real td4 = sum(ldexp([[1.0, 2.0], [3.0, 4.0]], nn));
 }
 parameters {
   vector[3] a;
@@ -60,5 +68,5 @@ model {
   // A real scalar against an int array widens to an array.
   array[3] real sa = ldexp(b, counts);
   target += sum(sa);
-  target += td[1] + td[2] + td[3] + td2 + td3;
+  target += td[1] + td[2] + td[3] + td2 + td3 + td4;
 }
