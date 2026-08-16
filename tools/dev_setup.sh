@@ -5,12 +5,17 @@
 #   tools/dev_setup.sh            core: vendored deps + cmake builds + tests
 #   tools/dev_setup.sh --embed    + OCaml toolchain and in-process stanc3
 #   tools/dev_setup.sh --corpus   + posteriordb and the CmdStan verify rig
+#   tools/dev_setup.sh --conformance + the Stan conformance reference stack
 #   tools/dev_setup.sh --all      everything
 #   tools/dev_setup.sh --no-build stop before cmake (CI builds separately)
 #
 # Core needs: git, curl, cmake, a C++17 clang, python3.
 # --embed adds: opam (OCaml 5.5.0 switch built automatically).
 # --corpus adds: ~2 GB of checkouts under deps/ and a CmdStan build.
+# --conformance adds: opam, the source-built pinned stanc, the pinned
+#   CmdStan/BridgeStan pair, and a venv holding the reference client.
+#   Linux and macOS both; the nightly workflow runs Linux, nothing else
+#   in the harness is specific to it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
@@ -23,17 +28,24 @@ OCAML_VERSION=5.5.0
 
 WANT_EMBED=0
 WANT_CORPUS=0
+WANT_CONFORMANCE=0
 WANT_BUILD=1
 for arg in "$@"; do
   case "$arg" in
     --embed) WANT_EMBED=1 ;;
     --corpus) WANT_CORPUS=1 ;;
-    --all) WANT_EMBED=1; WANT_CORPUS=1 ;;
+    --conformance) WANT_CONFORMANCE=1 ;;
+    --all) WANT_EMBED=1; WANT_CORPUS=1; WANT_CONFORMANCE=1 ;;
     --no-build) WANT_BUILD=0 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg (try --help)"; exit 2 ;;
   esac
 done
+
+# Where --conformance puts the reference client. Its own venv rather than
+# the host interpreter: the harness pins bridgestan and numpy exactly, and
+# the driver itself needs tomllib, which arrived in 3.11.
+CONFORMANCE_VENV=${CONFORMANCE_VENV:-$PWD/.venv-conformance}
 
 step() { printf '\n== %s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -44,6 +56,7 @@ missing=()
 for tool in git curl cmake python3; do have "$tool" || missing+=("$tool"); done
 if ! have clang++ && ! have g++; then missing+=("clang++ (Xcode CLT or clang)"); fi
 if [ "$WANT_EMBED" = 1 ] && ! have opam; then missing+=(opam); fi
+if [ "$WANT_CONFORMANCE" = 1 ] && ! have opam; then missing+=(opam); fi
 if [ ${#missing[@]} -gt 0 ]; then
   if have brew; then
     echo "installing via homebrew: ${missing[*]}"
@@ -145,9 +158,45 @@ if [ "$WANT_CORPUS" = 1 ]; then
   python3 tools/corpus.py deps/posteriordb || true
 fi
 
+# --- Stan conformance reference stack (optional) ---------------------------
+# The nightly sweep's oracle: the pinned stanc built from source, the exact
+# CmdStan/Stan/Math triple BridgeStan compiles against, and the reference
+# client. fetch_cmdstan.sh does all three and is idempotent, so the cost is
+# paid once per pin -- and once per machine, not once per session, which is
+# the part that is easy to mistake for a wall.
+if [ "$WANT_CONFORMANCE" = 1 ]; then
+  step "conformance reference toolchain (stanc from source, CmdStan, BridgeStan)"
+  ./harnesses/conformance/fetch_cmdstan.sh
+
+  step "conformance reference client ($CONFORMANCE_VENV)"
+  [ -d "$CONFORMANCE_VENV" ] || python3 -m venv "$CONFORMANCE_VENV"
+  "$CONFORMANCE_VENV/bin/pip" install -q --disable-pip-version-check \
+    -r harnesses/conformance/requirements.txt
+
+  # The harness drives stanli through its public Python package, which
+  # loads the shared library out of python/stanli/_bin. Staging it here
+  # means a plain `--case` run works immediately after setup.
+  step "staging the runtime the harness drives"
+  cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
+  cmake --build build-rel --target stanli_shared -j8
+  mkdir -p python/stanli/_bin
+  case "$(uname -s)" in
+    Darwin) cp build-rel/libstanli.dylib python/stanli/_bin/ ;;
+    *) cp build-rel/libstanli.so python/stanli/_bin/ ;;
+  esac
+  cp deps/stanc3/stanc-pinned python/stanli/_bin/stanc
+  chmod +x python/stanli/_bin/stanc
+fi
+
 step "done"
 echo "dev build:   build/            (tests: ctest --test-dir build)"
 echo "bench build: build-rel/        (tools/bench_grad.cpp)"
 echo "corpus:      python3 tools/corpus.py deps/posteriordb"
 echo "verify:      python3 tools/verify_sample.py deps/cmdstan deps/posteriordb MODEL..."
+if [ "$WANT_CONFORMANCE" = 1 ]; then
+  echo "conformance: $CONFORMANCE_VENV/bin/python harnesses/stan_conformance.py \\"
+  echo "               --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan \\"
+  echo "               --build build-rel --stanli-python $CONFORMANCE_VENV/bin/python \\"
+  echo "               --stanli-pythonpath python --case 'abs(real)=>real'"
+fi
 echo "wheel:       tools/build_wheel.sh"

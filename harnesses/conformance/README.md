@@ -30,31 +30,64 @@ their dedicated domain and reduction cases are added.
 
 ## Setup and run
 
-Fetch stanli's pinned dependencies first. The helper then prepares the exact
-CmdStan/Stan/Stan Math combination used by BridgeStan, and builds the
-conformance stanc from source at `STANC3_SRC_SHA` (`tools/dev_setup.sh`) --
-the same revision the wheels embed -- rather than trusting any downloaded
-binary. The build needs opam and takes ~30 minutes once per pin; it is a
-no-op when `deps/stanc3/stanc-pinned` already matches the pin. The workflow
-likewise pins the public BridgeStan Python client used to drive stanli's
-facade.
+One command, on Linux or macOS:
+
+```sh
+tools/dev_setup.sh --conformance
+```
+
+That prepares the exact CmdStan/Stan/Stan Math combination BridgeStan uses,
+builds the conformance stanc from source at `STANC3_SRC_SHA`
+(`tools/dev_setup.sh`) -- the same revision the wheels embed, rather than
+trusting any downloaded binary -- pins the public BridgeStan Python client
+in a venv, and stages the runtime the harness drives. It prints the
+invocation to run afterwards.
+
+The stanc build needs opam and takes ~30 minutes, but only the first time:
+it is a no-op once `deps/stanc3/stanc-pinned` matches the pin, so the cost
+is once per machine per pin advance, not once per run. `--all` includes it.
+
+Only the nightly *workflow* is pinned to Linux. Nothing in the harness is:
+`fetch_cmdstan.sh` selects the TBB target per `uname`, and a full local run
+on macOS reproduces the same statuses.
 
 `signature_watch.sh` is the other half: it diffs stanc3's checked-in
 signature dump between the pin and upstream master, so new language surface
 is reported nightly without executing anything unreviewed. Adopting what it
 reports is a pin advance: bump `STANC3_SRC_SHA` and rerun this suite.
 
-```sh
-./deps/fetch.sh
-./harnesses/conformance/fetch_cmdstan.sh
-python3 -m pip install -r harnesses/conformance/requirements.txt
+The full sweep, once set up (`$VENV` is `.venv-conformance` by default):
 
-python3 harnesses/stan_conformance.py \
+```sh
+$VENV/bin/python harnesses/stan_conformance.py \
   --stanc deps/stanc3/stanc-pinned \
   --cmdstan deps/cmdstan \
   --build build-rel \
+  --stanli-python $VENV/bin/python \
+  --stanli-pythonpath python \
   --jobs 4
 ```
+
+Drive the harness with the venv's interpreter, not the host's: it needs
+`tomllib`, which arrived in Python 3.11, and the pinned client besides.
+
+Chasing one finding is a `--case` away, which is the loop worth knowing --
+a single case runs in seconds against the real oracle, so a fix does not
+have to wait for a nightly to be confirmed:
+
+```sh
+$VENV/bin/python harnesses/stan_conformance.py \
+  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan --build build-rel \
+  --stanli-python $VENV/bin/python --stanli-pythonpath python \
+  --case 'log_diff_exp(matrix,real)=>matrix'
+```
+
+`verified=1` means that case agrees with the reference. A single-case run
+also reports `RED` with `gate issues: partial_run`, which is the
+completeness gate noting the sweep was not exhaustive, not a failure. Note
+that `--build` points at the *staged* runtime: restage
+`python/stanli/_bin/libstanli.*` after rebuilding, or the harness measures
+the previous one.
 
 By default `--cmdstan` selects the generated differential mode (the historical
 CLI spelling is `--mode scalar`) and also executes matching construct cases.
