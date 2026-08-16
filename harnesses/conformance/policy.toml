@@ -53,8 +53,13 @@ rel_tol = 1e-12
 # inv_Phi's forward is literally the same stan-math call on both sides;
 # the deep-vectorized probes' weighted-sum trees leave up to ~7e-15
 # relative between the two evaluations of the same arithmetic.
+# std_normal_qf is stanc3's alias for inv_Phi -- Lower_expr.ml emits
+# stan::math::inv_Phi for it and stanli lowers it to the same opcode, so
+# the reference and the runtime are running the identical call under both
+# names. It measures the same 7.29e-15, on the same weighted-sum trees,
+# with gradients that agree exactly.
 [[numeric_gate]]
 id = "inv-phi-probe-depth"
 reason = "Deep probe expression trees over an identical forward call; last-bit accumulation only."
-name_regex = "^inv_Phi$"
+name_regex = "^(inv_Phi|std_normal_qf)$"
 rel_tol = 1e-13
