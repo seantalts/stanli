@@ -845,6 +845,40 @@ class MirInterp {
       }
       return o;
     };
+    // Two-argument scalar math with one int argument (bessel_first_kind
+    // and friends): bin's broadcast and shape rules, but the int side
+    // reaches stan-math as an int, which is what those overloads take.
+    // `int_first` says which position holds it. No layout correction like
+    // the graph kernel's -- every container here is column-major, arrays
+    // included, so a matrix and an int array of the same dims already pair
+    // element for element, which is the pairing stan-math makes.
+    auto bin_int = [&](bool int_first, auto f) {
+      Value a = eval(e.args[0]), b = eval(e.args[1]);
+      if (!shapes_match(a, b)) fail(e.name + ": incompatible shapes", e.raw);
+      const Value& re = int_first ? b : a;
+      const Value& iv = int_first ? a : b;
+      Value o;
+      const size_t n = broadcast_size(a, b);
+      o.r.resize(n);
+      o.dims = broadcast_dims(a, b);
+      const bool rs = re.r.size() == 1, is = iv.r.size() == 1;
+      for (size_t i = 0; i < n; ++i) {
+        const size_t k = is ? 0 : i;
+        const int q = iv.is_int && k < iv.i.size()
+                          ? iv.i[k]
+                          : (int)std::llround(val(iv.r[k]));
+        o.r[i] = f(re.r[rs ? 0 : i], q);
+      }
+      // Only falling_factorial and rising_factorial have an int,int
+      // overload that answers int; everywhere else two int arguments still
+      // make a real, so stanc's own result type decides rather than the
+      // arguments.
+      if (e.type_ == "UInt" && n == 1) {
+        o.is_int = true;
+        o.i = {(int)val(o.r[0])};
+      }
+      return o;
+    };
     auto un = [&](auto f) {
       Value a = eval(e.args[0]);
       Value o;
@@ -1042,6 +1076,40 @@ class MirInterp {
     if (e.name == "owens_t")
       return bin(
           [](const T& x, const T& y) { return stan::math::owens_t(x, y); });
+    if (e.name == "bessel_first_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::bessel_first_kind(k, x);
+      });
+    if (e.name == "bessel_second_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::bessel_second_kind(k, x);
+      });
+    if (e.name == "modified_bessel_first_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::modified_bessel_first_kind(k, x);
+      });
+    if (e.name == "modified_bessel_second_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::modified_bessel_second_kind(k, x);
+      });
+    if (e.name == "binary_log_loss")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::binary_log_loss(k, x);
+      });
+    if (e.name == "lmgamma")
+      return bin_int(
+          true, [](const T& x, int k) { return stan::math::lmgamma(k, x); });
+    if (e.name == "falling_factorial")
+      return bin_int(false, [](const T& x, int k) {
+        return stan::math::falling_factorial(x, k);
+      });
+    if (e.name == "rising_factorial")
+      return bin_int(false, [](const T& x, int k) {
+        return stan::math::rising_factorial(x, k);
+      });
+    if (e.name == "ldexp")
+      return bin_int(false,
+                     [](const T& x, int k) { return stan::math::ldexp(x, k); });
     // --O1 partial evaluation rewrites `x * log(y)` to lmultiply(x, y);
     // multiply_log computes exactly x * log(y), so the value is bitwise
     // what the unoptimized form produced.

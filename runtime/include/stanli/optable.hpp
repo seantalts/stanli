@@ -112,6 +112,15 @@ namespace stanli {
   X(OP_LOG_MODIFIED_BESSEL_1)       \
   X(OP_LOG_RISING_FACTORIAL)        \
   X(OP_OWENS_T)                     \
+  X(OP_BESSEL_1)                    \
+  X(OP_BESSEL_2)                    \
+  X(OP_MODIFIED_BESSEL_1)           \
+  X(OP_MODIFIED_BESSEL_2)           \
+  X(OP_BINARY_LOG_LOSS)             \
+  X(OP_LMGAMMA)                     \
+  X(OP_FALLING_FACTORIAL)           \
+  X(OP_RISING_FACTORIAL)            \
+  X(OP_LDEXP)                       \
   X(OP_CONSTRAIN_LOWER)             \
   X(OP_CONSTRAIN_UPPER)             \
   X(OP_CONSTRAIN_LU)                \
@@ -518,6 +527,28 @@ constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
     log_modified_bessel_first_kind)                                         \
   X(OP_LOG_RISING_FACTORIAL, log_rising_factorial, log_rising_factorial)    \
   X(OP_OWENS_T, owens_t, owens_t)
+
+// Two-argument scalar math where one argument is an INT. Stan vectorizes
+// these exactly like the list above, but stan-math's overloads take the
+// order/count/exponent as `int`, not as a promoted double, so they cannot
+// ride the var,var kernel: the int side is bound as an int on both the
+// forward and the reverse call, and only the real side has a derivative.
+// Split by which position the int occupies, because that is the only thing
+// the two kernels differ in.
+#define STANLI_SCALAR_BINARY_INT_FIRST_LIST(X)            \
+  X(OP_BESSEL_1, bessel_first_kind, bessel_first_kind)    \
+  X(OP_BESSEL_2, bessel_second_kind, bessel_second_kind)  \
+  X(OP_MODIFIED_BESSEL_1, modified_bessel_first_kind,     \
+    modified_bessel_first_kind)                           \
+  X(OP_MODIFIED_BESSEL_2, modified_bessel_second_kind,    \
+    modified_bessel_second_kind)                          \
+  X(OP_BINARY_LOG_LOSS, binary_log_loss, binary_log_loss) \
+  X(OP_LMGAMMA, lmgamma, lmgamma)
+
+#define STANLI_SCALAR_BINARY_INT_SECOND_LIST(X)                 \
+  X(OP_FALLING_FACTORIAL, falling_factorial, falling_factorial) \
+  X(OP_RISING_FACTORIAL, rising_factorial, rising_factorial)    \
+  X(OP_LDEXP, ldexp, ldexp)
 
 // The tier a density is actually built at. STANLI_LITE_LP drops the
 // propto family from every one of them: about half the library, at the
