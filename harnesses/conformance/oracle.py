@@ -221,7 +221,15 @@ def cached_reference_build(
         workdir.mkdir(parents=True, exist_ok=True)
         source.write_bytes(source_bytes)
         header = source.with_suffix(".hpp")
-        translated = _run((stanc, source, f"--o={header}"), timeout=180.0)
+        # --O1, because that is the only MIR stanli ever consumes. stanc3
+        # rewrites `c + w*x` into fma at that level, so without it the two
+        # sides compile different arithmetic and differ by one rounding per
+        # accumulation. That is invisible in a well-scaled result and large
+        # in ULP once a probe's weighted sum cancels toward zero, where it
+        # was being reported as a semantic mismatch. Passed here rather
+        # than through STANCFLAGS because this call bypasses make.
+        translated = _run((stanc, "--O1", source, f"--o={header}"),
+                          timeout=180.0)
         if translated.returncode:
             detail = (translated.stderr or translated.stdout).strip()[-4000:]
             return ReferenceBuild(None, "stanc_fail: " + detail, source,
