@@ -1,6 +1,6 @@
 // The integer-outcome densities: the hand-written lpmfs, the ones
 // generated from STANLI_INT_DENSITY_LIST, the binomials with their two
-// int groups, beta_binomial, and the ordered pair.
+// int groups (lpmf and cdf alike), beta_binomial, and the ordered pair.
 //
 // One of the density shards: see densities_impl.hpp for why they
 // are split and what they share.
@@ -93,6 +93,23 @@ void beta_binomial_fwd(KernelCtx& ctx) {
     });
   });
 }
+
+// The binomials' cumulative-distribution functions, which have the same
+// two integer groups and so live beside the unpacker rather than with the
+// other cdfs. No propto form and no elementwise one, exactly as the
+// one-group int cdfs in densities_cdf_b.cpp: cdf_fwd is what says so.
+#define STANLI_DEFINE_TWO_INT_CDF_FWD(code, fn, nreal, tier)               \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                      \
+    with_int_group(ctx.idata, [&](const auto& n, const int* rest) {        \
+      with_int_group(rest, [&](const auto& N, const int*) {                \
+        cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(    \
+            ctx,                                                           \
+            [&](const auto&... a) { return stan::math::fn(n, N, a...); }); \
+      });                                                                  \
+    });                                                                    \
+  }
+STANLI_TWO_INT_CDF_LIST(STANLI_DEFINE_TWO_INT_CDF_FWD)
+#undef STANLI_DEFINE_TWO_INT_CDF_FWD
 
 STANLI_ORDERED_DENSITY_LIST(STANLI_DEFINE_ORDERED_FWD)
 

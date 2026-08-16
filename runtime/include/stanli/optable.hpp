@@ -355,9 +355,9 @@ namespace stanli {
 // arguments behave as above. Field 3 is the count of REAL arguments, so
 // the lowering entry is one more than that with one int group.
 //
-// Not every discrete cdf fits: binomial and beta_binomial carry a second
-// int group (the trial count) and discrete_range is integers all the way
-// down, so those nine keep waiting for a layout rather than a list line.
+// Not every discrete cdf fits: discrete_range is integers all the way
+// down, so those three keep waiting for a layout rather than a list line.
+// The binomials carry a second int group and have their own list below.
 #define STANLI_INT_CDF_LIST(X)                                 \
   X(OP_BERNOULLI_CDF, bernoulli_cdf, 1, 0)                     \
   X(OP_BERNOULLI_LCCDF, bernoulli_lccdf, 1, 0)                 \
@@ -368,12 +368,31 @@ namespace stanli {
   X(OP_NEG_BINOMIAL_CDF, neg_binomial_cdf, 2, 0)               \
   X(OP_NEG_BINOMIAL_LCCDF, neg_binomial_lccdf, 2, 0)           \
   X(OP_NEG_BINOMIAL_LCDF, neg_binomial_lcdf, 2, 0)             \
+  X(OP_NEG_BINOMIAL_2_CDF, neg_binomial_2_cdf, 2, 0)           \
   X(OP_POISSON_CDF, poisson_cdf, 1, 0)                         \
   X(OP_POISSON_LCCDF, poisson_lccdf, 1, 0)                     \
   X(OP_POISSON_LCDF, poisson_lcdf, 1, 0)                       \
   X(OP_YULE_SIMON_CDF, yule_simon_cdf, 1, 0)                   \
   X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1, 0)               \
   X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1, 0)
+
+// The binomials: an outcome group AND a trials group, so idata is the
+// [len, vals...] pair their lpmfs already write rather than raw values,
+// and the kernel unpacks it with with_int_group. Field 3 is again the
+// count of REAL arguments, so the lowering entry is two more than that
+// with two int groups.
+//
+// Neither group is a lane broadcast the lowering can do on its own: a
+// scalar is spelled with a length of -1 and stan-math broadcasts it,
+// which is what keeps `binomial_lcdf(n | N, theta)` with a bare int `n`
+// from arriving as a size-1 container.
+#define STANLI_TWO_INT_CDF_LIST(X)                     \
+  X(OP_BETA_BINOMIAL_CDF, beta_binomial_cdf, 2, 0)     \
+  X(OP_BETA_BINOMIAL_LCCDF, beta_binomial_lccdf, 2, 0) \
+  X(OP_BETA_BINOMIAL_LCDF, beta_binomial_lcdf, 2, 0)   \
+  X(OP_BINOMIAL_CDF, binomial_cdf, 1, 0)               \
+  X(OP_BINOMIAL_LCCDF, binomial_lccdf, 1, 0)           \
+  X(OP_BINOMIAL_LCDF, binomial_lcdf, 1, 0)
 
 // Ordinal regression. Two things make these different from the list
 // above, and both are expressed in the kernel rather than here: the
@@ -555,6 +574,7 @@ constexpr bool exact_lp_build() {
   STANLI_INT_DENSITY_LIST(DENSITY)                \
   STANLI_SCALAR_CDF_LIST(DENSITY)                 \
   STANLI_INT_CDF_LIST(DENSITY)                    \
+  STANLI_TWO_INT_CDF_LIST(DENSITY)                \
   STANLI_ORDERED_DENSITY_LIST(DENSITY)            \
   STANLI_SCALAR_UNARY_LIST(UNARY)
 
