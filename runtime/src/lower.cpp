@@ -12,6 +12,7 @@
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -1752,10 +1753,19 @@ struct Lowering {
       bool glm_layout = false;
       DensityShape shape = DensityShape::Plain;
       int activity_mask = -1;  // negative: derive from MIR arguments
+      // The single integer group is one outcome per lane of the vectorized
+      // reduction, so a language-level scalar broadcasts across the real
+      // arguments (see the expansion below). False for the densities whose
+      // integer group means something else: multinomial's outcome is the
+      // whole count vector, and the ordinal pair reads a cutpoint vector
+      // that is one argument rather than lanes.
+      bool lane_outcome = false;
     };
     static const std::map<std::string, DensitySpec> kDensities = {
-        {"poisson_log_lpmf", {OP_POISSON_LOG_LPMF, 2, 1}},
-        {"bernoulli_logit_lpmf", {OP_BERNOULLI_LOGIT_LPMF, 2, 1}},
+        {"poisson_log_lpmf",
+         {OP_POISSON_LOG_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
+        {"bernoulli_logit_lpmf",
+         {OP_BERNOULLI_LOGIT_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
 
     // clang-format off
         // These macros use the same lists that define opcodes and kernels.
@@ -1763,10 +1773,10 @@ struct Lowering {
         STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_TABLE)
 #undef STANLI_DENSITY_TABLE
 
-        // Discrete densities: outcome + n real arguments, one int group.
-        // Ordered cutpoints remain an ordinary real slot.
+        // Discrete densities: outcome + n real arguments, one int group,
+        // one outcome per lane.
 #define STANLI_INT_DENSITY_TABLE(code, fn, nreal, t) \
-  {#fn, {code, nreal + 1, 1}},
+  {#fn, {code, nreal + 1, 1, false, DensityShape::Plain, -1, true}},
         STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TABLE)
 #undef STANLI_INT_DENSITY_TABLE
 
@@ -1775,16 +1785,27 @@ struct Lowering {
         STANLI_SCALAR_CDF_LIST(STANLI_CDF_TABLE)
 #undef STANLI_CDF_TABLE
 
-        // Integer-outcome cdfs keep the count in the one integer group.
-#define STANLI_INT_CDF_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 1, 1}},
+        // Integer-outcome cdfs keep the count in the one integer group, and
+        // it is per-lane there too: a vectorized cdf is the product over
+        // lanes, an lcdf/lccdf the sum.
+#define STANLI_INT_CDF_TABLE(code, fn, nreal, t) \
+  {#fn, {code, nreal + 1, 1, false, DensityShape::Plain, -1, true}},
         STANLI_INT_CDF_LIST(STANLI_INT_CDF_TABLE)
-        STANLI_ORDERED_DENSITY_LIST(STANLI_INT_CDF_TABLE)
 #undef STANLI_INT_CDF_TABLE
+        // The ordinal densities have the same argument counts but not the
+        // same meaning: their trailing cutpoint vector is one argument, so
+        // a scalar outcome stays one lane whatever its length.
+#define STANLI_ORDERED_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 1, 1}},
+        STANLI_ORDERED_DENSITY_LIST(STANLI_ORDERED_TABLE)
+#undef STANLI_ORDERED_TABLE
         // clang-format on
 
-        {"bernoulli_lpmf", {OP_BERNOULLI_LPMF, 2, 1}},
-        {"poisson_lpmf", {OP_POISSON_LPMF, 2, 1}},
-        {"neg_binomial_2_lpmf", {OP_NEG_BINOMIAL_2_LPMF, 3, 1}},
+        {"bernoulli_lpmf",
+         {OP_BERNOULLI_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
+        {"poisson_lpmf",
+         {OP_POISSON_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
+        {"neg_binomial_2_lpmf",
+         {OP_NEG_BINOMIAL_2_LPMF, 3, 1, false, DensityShape::Plain, -1, true}},
         {"binomial_lpmf", {OP_BINOMIAL_LPMF, 3, 2}},
         {"binomial_logit_lpmf", {OP_BINOMIAL_LOGIT_LPMF, 3, 2}},
         {"poisson_log_glm_lpmf", {OP_POISSON_LOG_GLM_LPMF, 4, 1, true}},
@@ -1855,8 +1876,14 @@ struct Lowering {
         fail(e.name + ": expected " + std::to_string(spec.arity) + " args");
       }
       std::vector<int> idata;
+      // Whether argument 0 was written as a bare `int` rather than an
+      // array. Same test as the two-group path below, and for the same
+      // reason: a length-1 array is a container that must match the other
+      // arguments' size, a scalar broadcasts.
+      bool scalar_outcome = false;
       if (spec.integer_args == 1) {
         idata = int_arg_values(e.args[0]);
+        scalar_outcome = e.args[0].type_ == "UInt" && idata.size() == 1;
       } else if (spec.integer_args == 2) {
         // Group length -1 marks a language-level scalar (broadcast in
         // stan-math); a length-1 array stays a vector, as CmdStan would
@@ -1884,6 +1911,29 @@ struct Lowering {
         result_autodiff = result_autodiff || arg.autodiff;
         if (spec.activity_mask < 0 && !e.args[i].data_only)
           variant |= (uint8_t)(1u << (i - spec.integer_args));
+      }
+      // A scalar outcome against vectorized real arguments: replicate it to
+      // the lane count. The kernels map the whole integer group as one
+      // Eigen::VectorXi, so a scalar arrived at stan-math as a size-1
+      // container and lost against a longer argument on
+      // check_consistent_sizes -- "Failures variable has size = 1, but
+      // Number of successes parameter has size 2". Expanding here rather
+      // than adding a scalar-bound instantiation to every kernel keeps the
+      // graph identical to the one the equivalent array-outcome model
+      // produces, which is already the verified shape: each of these is a
+      // per-lane reduction (sum for the lpmfs and lcdf/lccdf, product for
+      // the cdfs), so N copies of the outcome is the same math in the same
+      // order as one broadcast scalar. binomial_logit_glm below does the
+      // same thing for the same reason.
+      if (spec.lane_outcome && scalar_outcome) {
+        int64_t lanes = 1;
+        for (int slot : ins) lanes = std::max(lanes, g.slots[slot].len);
+        if (lanes > 1) {
+          // By value: assign() may reallocate, and a reference into the
+          // vector being assigned would dangle mid-fill.
+          const int outcome = idata[0];
+          idata.assign((size_t)lanes, outcome);
+        }
       }
       if (propto(e)) variant |= 0x80u;
       if (spec.glm_layout) {

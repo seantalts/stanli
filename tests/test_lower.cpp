@@ -1635,6 +1635,63 @@ int main() {
     }
   }
 
+  // A scalar int outcome against vectorized real arguments. See
+  // tests/fixtures/intbcast.stan: the outcome rides in idata, which had no
+  // way to say "this was one int, not an array of one", so the kernel handed
+  // stan-math a size-1 container and every such call threw a size-consistency
+  // error against the longer real arguments. The reference here is the call
+  // CmdStan would instantiate -- a bare int -- so it checks the broadcast
+  // itself, not just that the throw stopped.
+  {
+    const int n = 3;
+    DataMap d;
+    d.set_int("n", n);
+    CompiledModel bm =
+        compile_model(slurp("tests/fixtures/intbcast.tmir.sexp"), d);
+    Executor bex(std::move(bm.graph));
+    bm.bind(bex);
+    // Declaration order: theta[2], lambda.
+    const double pts[2][3] = {{0.3, -0.45, 0.7}, {-0.6, 0.15, -1.1}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 3; ++i) bex.params_data()[i] = pts[c][i];
+      double grad[3] = {0, 0, 0};
+      const double lp = bex.gradient(grad);
+
+      using stan::math::var;
+      Eigen::Matrix<var, Eigen::Dynamic, 1> th(2);
+      th(0) = pts[c][0];
+      th(1) = pts[c][1];
+      var lam = pts[c][2];
+      Eigen::Matrix<var, Eigen::Dynamic, 1> r = stan::math::exp(th);
+      Eigen::VectorXd a(2), b(2), cut(3);
+      a << 2.0, 3.0;
+      b << 1.3, 1.4;
+      cut << -1.0, 0.5, 2.0;
+      var acc = stan::math::beta_neg_binomial_lpmf<false>(n, r, a, b);
+      acc += stan::math::beta_neg_binomial_lcdf(n, r, a, b);
+      acc += stan::math::poisson_log_lpmf<false>(n, th);
+      // The cutpoints are one whole argument, not lanes: broadcasting the
+      // outcome to their length would multiply this term by three.
+      acc += stan::math::ordered_logistic_lpmf<false>(2, lam, cut);
+      acc.grad();
+
+      // Not bitwise: the kernels bind every argument as an rvar while this
+      // reference passes the data arguments as double, which sends stan-math
+      // down different to_ref_if caching paths and reassociates the shared
+      // subexpressions. Same bound as the density parity tests use for that
+      // difference.
+      const double want[3] = {th(0).adj(), th(1).adj(), lam.adj()};
+      bool gok = true;
+      for (int i = 0; i < 3; ++i)
+        gok = gok && std::abs(grad[i] - want[i]) <=
+                         1e-13 * std::max(1.0, std::abs(want[i]));
+      check(gok, "intbcast: gradients match the scalar-outcome var path");
+      check(std::abs(lp - acc.val()) <=
+                1e-13 * std::max(1.0, std::abs(acc.val())),
+            "intbcast: lp matches the scalar-outcome var path");
+    }
+  }
+
   // array[N] vector[K] data into a vectorized multivariate density. See
   // tests/fixtures/mnarr.stan: the data path stores this shape the way it
   // stores a matrix, and the kernel wants each element contiguous, so the
