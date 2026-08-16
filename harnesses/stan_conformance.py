@@ -61,6 +61,24 @@ def _shard(value: str) -> Tuple[int, int]:
             "shard must be one-based N/M, for example 1/8") from exc
 
 
+class _Once(argparse.Action):
+    """Refuse a repeated selector instead of silently keeping the last one.
+
+    Mutual exclusion catches --case beside --filter, but a second --case is
+    only an assignment over the first, so `--case A --case B` runs B and
+    never mentions A. Selecting cases is the commonest interactive use of
+    this harness, and a dropped selector does not look like a dropped
+    selector: it looks like the harness disagreeing about the case you named
+    first. One case per invocation; --filter takes a group.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest) is not None:
+            parser.error(f"{option_string} may be given only once "
+                         "(it is not repeatable; use --filter for a group)")
+        setattr(namespace, self.dest, values)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Discover and differentially classify Stan signatures")
@@ -83,8 +101,10 @@ def _parser() -> argparse.ArgumentParser:
                         default="auto",
                         help="auto runs scalar parity when --cmdstan is given")
     selection = parser.add_mutually_exclusive_group()
-    selection.add_argument("--case", help="one exact canonical or case ID")
-    selection.add_argument("--filter", help="case-insensitive signature substring")
+    selection.add_argument("--case", action=_Once,
+                           help="one exact canonical or case ID")
+    selection.add_argument("--filter", action=_Once,
+                           help="case-insensitive signature substring")
     parser.add_argument("--shard", type=_shard,
                         help="stable one-based distributed partition N/M")
     parser.add_argument("--jobs", type=int, default=1)

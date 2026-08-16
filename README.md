@@ -268,11 +268,16 @@ python3 -m http.server -d web     # then open http://localhost:8000
 One-shot setup (fetches pinned deps, builds, runs tests):
 
 ```
-./tools/dev_setup.sh            # core build + tests
-./tools/dev_setup.sh --embed    # + OCaml toolchain, in-process stanc3
-./tools/dev_setup.sh --corpus   # + posteriordb and the CmdStan verify rig
+./tools/dev_setup.sh               # core build + tests
+./tools/dev_setup.sh --embed       # + OCaml toolchain, in-process stanc3
+./tools/dev_setup.sh --corpus      # + posteriordb and the CmdStan verify rig
+./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
 ./tools/dev_setup.sh --all
 ```
+
+`--conformance` is what makes the differential Stan language sweep runnable
+here rather than only in the nightly; see
+[harnesses/conformance/README.md](harnesses/conformance/README.md).
 
 Or manually:
 

@@ -777,6 +777,26 @@ class ReportAndSnapshotTests(unittest.TestCase):
             stan_conformance._update_configured_snapshot(
                 _report([_result("signature:f(real)=>real")]), args)
 
+    def _rejected(self, argv) -> str:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit):
+                stan_conformance._parser().parse_args(argv)
+        return stderr.getvalue()
+
+    def test_selectors_are_single_use_and_mutually_exclusive(self):
+        parser = stan_conformance._parser()
+        self.assertEqual(parser.parse_args(["--case", "a"]).case, "a")
+        self.assertEqual(parser.parse_args(["--filter", "b"]).filter, "b")
+        # A second --case used to win silently, so `--case A --case B`
+        # reported on B while reading as a claim about A.
+        for argv in (["--case", "a", "--case", "b"],
+                     ["--filter", "a", "--filter", "b"]):
+            with self.subTest(argv=argv):
+                self.assertIn("only once", self._rejected(argv))
+        self.assertIn("not allowed", self._rejected(["--case", "a",
+                                                     "--filter", "b"]))
+
     def test_snapshot_is_optional_but_explicit_snapshot_is_enforced(self):
         report = _report([_result("signature:f(real)=>real")])
         self.assertTrue(report.green)

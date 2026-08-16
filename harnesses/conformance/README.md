@@ -30,45 +30,98 @@ their dedicated domain and reduction cases are added.
 
 ## Setup and run
 
-Fetch stanli's pinned dependencies first. The helper then prepares the exact
-CmdStan/Stan/Stan Math combination used by BridgeStan, and builds the
-conformance stanc from source at `STANC3_SRC_SHA` (`tools/dev_setup.sh`) --
-the same revision the wheels embed -- rather than trusting any downloaded
-binary. The build needs opam and takes ~30 minutes once per pin; it is a
-no-op when `deps/stanc3/stanc-pinned` already matches the pin. The workflow
-likewise pins the public BridgeStan Python client used to drive stanli's
-facade.
-
-`signature_watch.sh` is the other half: it diffs stanc3's checked-in
-signature dump between the pin and upstream master, so new language surface
-is reported nightly without executing anything unreviewed. Adopting what it
-reports is a pin advance: bump `STANC3_SRC_SHA` and rerun this suite.
+One command, on Linux or macOS:
 
 ```sh
-./deps/fetch.sh
-./harnesses/conformance/fetch_cmdstan.sh
-python3 -m pip install -r harnesses/conformance/requirements.txt
+tools/dev_setup.sh --conformance
+```
 
-python3 harnesses/stan_conformance.py \
+That prepares the whole oracle: the exact CmdStan/Stan/Stan Math combination
+BridgeStan compiles against, the conformance stanc built from source at
+`STANC3_SRC_SHA` -- the same revision the wheels embed, rather than a
+downloaded binary -- the version-pinned BridgeStan Python client in
+`.venv-conformance/`, and the stanli library staged where the harness drives
+it from. Every step is a no-op once its output exists, so the stanc build's
+half hour is paid once per machine per pin, not once per session, and
+`--embed` and `--corpus` pay most of it already. It ends by printing the
+invocation below with your paths filled in.
+
+Run the driver under the venv interpreter, not the host's `python3`. The
+harness reads its policy and catalog as TOML; `tomllib` arrived in Python
+3.11, and `requirements.txt` carries the backport for older hosts -- but
+into the venv, so on an older system `python3` the driver refuses to start
+at all. Running it from the venv also makes `--stanli-python` default to the
+same interpreter, which is where the pinned BridgeStan client lives.
+
+```sh
+.venv-conformance/bin/python harnesses/stan_conformance.py \
   --stanc deps/stanc3/stanc-pinned \
   --cmdstan deps/cmdstan \
   --build build-rel \
+  --stanli-pythonpath python \
   --jobs 4
 ```
 
-By default `--cmdstan` selects the generated differential mode (the historical
-CLI spelling is `--mode scalar`) and also executes matching construct cases.
-Use `--mode inventory` for the fast classification-only pass. Development
-selectors are stable:
+`--stanli-pythonpath python` points the worker at this checkout's package
+instead of an installed wheel. The library it loads is the staged copy in
+`python/stanli/_bin`, not the one in `--build`; `--build` only labels the
+report and the reproduction commands. So restage after a rebuild, or the run
+measures the library from before it:
 
 ```sh
-python3 harnesses/stan_conformance.py \
-  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan --build build-rel \
-  --case 'abs(real)=>real'
+cmake --build build-rel --target stanli_shared
+cp build-rel/libstanli.* python/stanli/_bin/
+```
 
-python3 harnesses/stan_conformance.py \
+`signature_watch.sh` is the other half of the pin story: it diffs stanc3's
+checked-in signature dump between the pin and upstream master, so new
+language surface is reported nightly without executing anything unreviewed.
+Adopting what it reports is a pin advance: bump `STANC3_SRC_SHA` and rerun
+this suite.
+
+### Selecting what to run
+
+The full differential sweep is a nightly-sized job. Day to day you want a
+slice, and three stable selectors give you one:
+
+| selector | meaning |
+| --- | --- |
+| `--filter SUBSTR` | case-insensitive substring of the signature; the one you usually want |
+| `--case CASE` | one exact canonical or case ID |
+| `--shard N/M` | stable one-based partition, the same split the nightly uses |
+
+```sh
+.venv-conformance/bin/python harnesses/stan_conformance.py \
+  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan --build build-rel \
+  --stanli-pythonpath python --filter log1p
+
+.venv-conformance/bin/python harnesses/stan_conformance.py \
+  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan --build build-rel \
+  --stanli-pythonpath python --case 'abs(real)=>real'
+
+.venv-conformance/bin/python harnesses/stan_conformance.py \
   --stanc deps/stanc3/stanc-pinned --mode inventory --shard 2/8
 ```
+
+`--case` is not repeatable, and `--case` and `--filter` do not combine: one
+case per invocation, `--filter` for a group. Passing `--case` twice used to
+run only the second one silently, which reads as the harness disagreeing
+about the case you named first; it is now rejected.
+
+By default `--cmdstan` selects the generated differential mode (the historical
+CLI spelling is `--mode scalar`) and also executes matching construct cases.
+Use `--mode inventory` for the fast classification-only pass.
+
+Any selected run prints `RED` and `gate issues: partial_run`. That is the
+gate reporting its scope, not a finding: the suite is green only when it is
+complete, and a slice is by construction not complete. Read `status_counts`
+in `conformance-out/conformance.json` -- or the `verified=`/`mismatch=`
+summary on the first line of output -- for what the slice actually found.
+
+The `reproduce:` line printed under each blocking row spells the driver
+`python3`, because a report is read on machines other than the one that
+wrote it. Substitute your own interpreter, which on a pre-3.11 host means
+`.venv-conformance/bin/python`.
 
 The default output directory is `conformance-out/`. It contains the complete
 `conformance.json`, generated `unsupported.md`, raw `signatures.txt`, cached
@@ -86,8 +139,9 @@ snapshot. Generated reports and snapshots are build artifacts, not checked-in
 source. To freeze a run, pass an explicit ignored or externally retained path:
 
 ```sh
-python3 harnesses/stan_conformance.py \
+.venv-conformance/bin/python harnesses/stan_conformance.py \
   --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan --build build-rel \
+  --stanli-pythonpath python \
   --baseline conformance-out/conformance-baseline.json --update-snapshot
 ```
 
@@ -114,8 +168,11 @@ including their reasons and copy-paste reproduction commands.
 ## Fast harness tests
 
 ```sh
-python3 tests/test_conformance.py
+.venv-conformance/bin/python tests/test_conformance.py
 ```
+
+Any Python 3.11 or newer works; the venv is simply the one the setup step
+leaves you with, and on an older host it is the only one that imports.
 
 The tests cover recursive signature parsing, policy mutation guards,
 deterministic generation and sharding, catalog validation, construct phase and

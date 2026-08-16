@@ -6,6 +6,9 @@ build-rel/
 # measurement needs next. Named entries above are kept for clarity.
 build-*/
 python/stanli/_bin/
+# The conformance reference client, version-pinned separately from whatever
+# python3 the host happens to have (tools/dev_setup.sh --conformance).
+.venv-conformance/
 dist/
 *.egg-info/
 compile_commands.json
