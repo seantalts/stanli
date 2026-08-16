@@ -1693,6 +1693,75 @@ int main() {
     }
   }
 
+  // Two-argument log_sum_exp / log_diff_exp on containers. See
+  // tests/fixtures/lsepair.stan: Stan vectorizes both elementwise with
+  // scalar broadcast, and the lowering used to emit them at width 1, so
+  // every container form died at the assignment that consumed the result.
+  {
+    // mat is column-major: the JSON reader stores the first index fastest.
+    const std::vector<double> matv = {0.5, 1.5, 1.25, 0.25, 2.0, 2.5};
+    DataMap d;
+    d.set_int_array("counts", {1, 2, 3});
+    d.set_real_array("mat", matv, {2, 3});
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/lsepair.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    // Declaration order: a[3], b.
+    const double pts[2][4] = {{0.4, -0.7, 0.25, 0.6},
+                              {-0.3, 0.9, -0.15, -0.45}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 4; ++i) lex.params_data()[i] = pts[c][i];
+      double grad[4] = {0, 0, 0, 0};
+      const double lp = lex.gradient(grad);
+
+      using stan::math::log_diff_exp;
+      using stan::math::log_sum_exp;
+      using stan::math::var;
+      std::vector<var> a = {pts[c][0], pts[c][1], pts[c][2]};
+      var b = pts[c][3];
+      std::vector<var> hi = {a[0] + 8, a[1] + 8, a[2] + 8};
+      // Each `sum` is one reduction over its own result, so the reference
+      // reassociates the same way the graph does and can be held bitwise.
+      var acc = 0;
+      var s = 0;
+      for (int i = 0; i < 3; ++i) s += log_diff_exp(hi[i], a[i]);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += log_diff_exp(hi[i], b);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += log_sum_exp(b, hi[i]);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += log_sum_exp(var(i + 1), b);
+      acc += s;
+      s = 0;
+      for (size_t i = 0; i < matv.size(); ++i)
+        s += log_diff_exp(matv[i] + 8, b);
+      acc += s;
+      // `sum(na[1]) + sum(na[2])` is one target term, so the two element
+      // sums join each other before they reach the accumulator.
+      var n1 = 0, n2 = 0;
+      for (int i = 0; i < 3; ++i) n1 += log_sum_exp(b, hi[i]);
+      for (int i = 0; i < 3; ++i) n2 += log_sum_exp(b, a[i]);
+      acc += n1 + n2;
+      acc.grad();
+
+      bool gok = true;
+      for (int i = 0; i < 3; ++i) gok = gok && grad[i] == a[i].adj();
+      check(gok, "lsepair: element gradients bitwise against the var path");
+      // b is the broadcast operand of six of these ops. mixture.cpp sums
+      // an op's N broadcast contributions into a local before touching the
+      // adjoint, where the scalar var path folds them in one at a time, so
+      // this one lands inside the project's 2 ULP budget rather than on it.
+      expect_ulp("lsepair b grad", grad[3], b.adj());
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol,
+            "lsepair: lp matches the var path");
+    }
+  }
+
   // array[N] vector[K] data into a vectorized multivariate density. See
   // tests/fixtures/mnarr.stan: the data path stores this shape the way it
   // stores a matrix, and the kernel wants each element contiguous, so the

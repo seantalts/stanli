@@ -3,6 +3,7 @@
 #include <stanli/mir_interp.hpp>
 #include <stanli/sexp.hpp>
 
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <functional>
@@ -173,6 +174,61 @@ int main(int argc, char** argv) {
           check(got.r[0] == (container_arg == 2 ? 7.0 : 8.0),
                 "fma scalar/vector value");
       }
+    }
+
+    // Two-argument log_sum_exp / log_diff_exp are elementwise with scalar
+    // broadcast; only the one-argument log_sum_exp is a reduction. Taking
+    // the two-argument form for a scalar op silently produced one value
+    // where the declaration asked for N, which the transformed data block
+    // reaches directly (log_prob then reads N-1 uninitialized elements).
+    real_value("three", {1.0, 2.0, 3.0}, {3});
+    {
+      mir::Expr three;
+      three.kind = mir::Expr::Var;
+      three.name = "three";
+      three.type_ = "UVector";
+      three.unsized.leaf = mir::UnsizedLeaf::Vector;
+      three.data_only = true;
+      for (const std::string& name : {"log_sum_exp", "log_diff_exp"}) {
+        for (bool scalar_first : {false, true}) {
+          mir::Expr call;
+          call.kind = mir::Expr::FunApp;
+          call.name = name;
+          call.type_ = "UVector";
+          call.unsized.leaf = mir::UnsizedLeaf::Vector;
+          call.data_only = true;
+          call.args = scalar_first ? std::vector<mir::Expr>{scalar, three}
+                                   : std::vector<mir::Expr>{three, scalar};
+          const DataMap::Entry got = interp.eval(call);
+          bool ok = got.r.size() == 3 && got.dims == std::vector<int64_t>{3};
+          for (size_t i = 0; ok && i < 3; ++i) {
+            // log_diff_exp is only finite in one operand order, so the
+            // other direction is checked as the NaN stan-math returns.
+            const double x = (double)(i + 1), y = 2.0;
+            const double lo = scalar_first ? y : x, hi = scalar_first ? x : y;
+            const double want = name == "log_sum_exp"
+                                    ? stan::math::log_sum_exp(lo, hi)
+                                    : stan::math::log_diff_exp(lo, hi);
+            ok = got.r[i] == want || (std::isnan(got.r[i]) && std::isnan(want));
+          }
+          check(ok, name + " broadcasts over the container operand");
+        }
+      }
+      // The one-argument form stays the reduction it always was.
+      mir::Expr reduce;
+      reduce.kind = mir::Expr::FunApp;
+      reduce.name = "log_sum_exp";
+      reduce.type_ = "UReal";
+      reduce.unsized.leaf = mir::UnsizedLeaf::Real;
+      reduce.data_only = true;
+      reduce.args = {three};
+      const DataMap::Entry got = interp.eval(reduce);
+      // The interpreter shifts by the max and stan-math does not, so this
+      // is a value check, not a bitwise one.
+      check(got.r.size() == 1 &&
+                std::abs(got.r[0] - stan::math::log_sum_exp(std::vector<double>{
+                                        1.0, 2.0, 3.0})) < 1e-14,
+            "one-argument log_sum_exp still reduces");
     }
 
     auto variable = [](const std::string& name, const std::string& type) {

@@ -1434,6 +1434,22 @@ struct Lowering {
     return si;
   }
 
+  // Two-argument log_sum_exp / log_diff_exp. Stan vectorizes these over
+  // every container shape, so they are elementwise binaries with scalar
+  // broadcast, not reductions -- `log_diff_exp(vector[N], real)` is N
+  // values, not one. mixture.cpp's kernels already dispatch on length
+  // (each argument len 1 or len N, out len N); emitting them at width 1
+  // was what truncated the result, which the assignment then rejected.
+  Val lower_binary_mix(uint16_t opcode, const mir::Expr& e) {
+    Val a = lower_expr(e.args[0]);
+    Val b = lower_expr(e.args[1]);
+    // shape_of rejects two containers whose views disagree; what is left
+    // is one width, or one width and a broadcast scalar.
+    SlotInfo si = shape_of(a, b);
+    const int64_t n = std::max(g.slots[a.slot].len, g.slots[b.slot].len);
+    return emit_value(opcode, {a, b}, n, si);
+  }
+
   // Value of a data-only expression at compile time. The interpreter
   // handles most cases; a UDF-local constant lives only as a slot, so fall
   // back to that slot's recorded fill.
@@ -2227,19 +2243,14 @@ struct Lowering {
       return emit_value(OP_REP_VEC, {a}, n, view_of("UVector"));
     }
     if (e.name == "log_sum_exp" || e.name == "sum") {
-      if (e.name == "log_sum_exp" && e.args.size() == 2) {
-        Val a = lower_expr(e.args[0]);
-        Val b = lower_expr(e.args[1]);
-        return emit_value(OP_LSE2, {a, b}, 1);
-      }
+      // One argument is the reduction; two is the elementwise form below.
+      if (e.name == "log_sum_exp" && e.args.size() == 2)
+        return lower_binary_mix(OP_LSE2, e);
       Val a = lower_expr(e.args[0]);
       return emit_value(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a}, 1);
     }
-    if (e.name == "log_diff_exp" && e.args.size() == 2) {
-      Val a = lower_expr(e.args[0]);
-      Val b = lower_expr(e.args[1]);
-      return emit_value(OP_LOG_DIFF_EXP, {a, b}, 1);
-    }
+    if (e.name == "log_diff_exp" && e.args.size() == 2)
+      return lower_binary_mix(OP_LOG_DIFF_EXP, e);
     if (e.name == "log_mix" && e.args.size() == 3) {
       Val a = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);

@@ -1266,12 +1266,18 @@ class MirInterp {
       r.r = {m};
       return r;
     }
+    // Two arguments is the elementwise form, which Stan vectorizes over
+    // every container shape with scalar broadcast, so it belongs with the
+    // binaries above; only one-argument log_sum_exp is a reduction, and
+    // log_diff_exp has no reduction form at all.
+    if (e.name == "log_sum_exp" && e.args.size() == 2)
+      return bin(
+          [](const T& x, const T& y) { return stan::math::log_sum_exp(x, y); });
+    if (e.name == "log_diff_exp" && e.args.size() == 2)
+      return bin([](const T& x, const T& y) {
+        return stan::math::log_diff_exp(x, y);
+      });
     if (e.name == "log_sum_exp") {
-      if (e.args.size() == 2) {
-        r.r = {stan::math::log_sum_exp(eval(e.args[0]).r.at(0),
-                                       eval(e.args[1]).r.at(0))};
-        return r;
-      }
       Value a = eval(e.args[0]);
       r.r = {lse(a.r)};
       return r;
