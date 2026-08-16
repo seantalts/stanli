@@ -1675,20 +1675,21 @@ int main() {
       acc += stan::math::ordered_logistic_lpmf<false>(2, lam, cut);
       acc.grad();
 
-      // Not bitwise: the kernels bind every argument as an rvar while this
-      // reference passes the data arguments as double, which sends stan-math
-      // down different to_ref_if caching paths and reassociates the shared
-      // subexpressions. Same bound as the density parity tests use for that
-      // difference.
+      // Measured bitwise on arm64/clang at both points, which is what the
+      // replication predicts: N copies of the outcome reduce in the same
+      // order as one broadcast scalar. The few-ULP window is the headroom
+      // the other var-path comparisons in this file carry, for a toolchain
+      // that reassociates the shared subexpressions differently.
+      const double tol = 8 * 2.220446049250313e-16;
       const double want[3] = {th(0).adj(), th(1).adj(), lam.adj()};
       bool gok = true;
       for (int i = 0; i < 3; ++i)
         gok = gok && std::abs(grad[i] - want[i]) <=
-                         1e-13 * std::max(1.0, std::abs(want[i]));
+                         tol * std::max(1.0, std::abs(want[i]));
       check(gok, "intbcast: gradients match the scalar-outcome var path");
-      check(std::abs(lp - acc.val()) <=
-                1e-13 * std::max(1.0, std::abs(acc.val())),
-            "intbcast: lp matches the scalar-outcome var path");
+      check(
+          std::abs(lp - acc.val()) <= tol * std::max(1.0, std::abs(acc.val())),
+          "intbcast: lp matches the scalar-outcome var path");
     }
   }
 
