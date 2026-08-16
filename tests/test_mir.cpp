@@ -231,6 +231,98 @@ int main(int argc, char** argv) {
             "one-argument log_sum_exp still reduces");
     }
 
+    // Stan's bound transforms called as functions. The interpreter serves
+    // transformed data, which reaches them directly, and it instantiates
+    // `jacobian__ = false`, so the `_jacobian` direction is the constrained
+    // value with no other effect. Bounds broadcast: shared or one per
+    // element, exactly as the lowered kernels take them.
+    real_value("bounds", {1.5, 2.5, 3.5}, {3});
+    {
+      const auto container = [](const std::string& name) {
+        mir::Expr e;
+        e.kind = mir::Expr::Var;
+        e.name = name;
+        e.type_ = "UVector";
+        e.unsized.leaf = mir::UnsizedLeaf::Vector;
+        e.data_only = true;
+        return e;
+      };
+      const mir::Expr three = container("three");
+      const mir::Expr bounds = container("bounds");
+      mir::Expr upper = scalar;
+      upper.lit = 5.0;
+      // three = {1,2,3}, bounds = {1.5,2.5,3.5}, scalar = 2.0. The values
+      // keep every call inside its transform's support: three < bounds for
+      // the upper direction, and the lower direction's free argument is
+      // built from its own constrained result.
+      struct Case {
+        const char* name;
+        bool shared_bound;
+        double (*want)(double, double, double);
+      };
+      const Case cases[] = {
+          {"lower_bound_constrain", true,
+           [](double x, double b, double) {
+             return stan::math::lb_constrain(x, b);
+           }},
+          {"lower_bound_jacobian", false,
+           [](double x, double b, double) {
+             return stan::math::lb_constrain(x, b);
+           }},
+          {"upper_bound_constrain", false,
+           [](double x, double b, double) {
+             return stan::math::ub_constrain(x, b);
+           }},
+          {"upper_bound_unconstrain", false,
+           [](double x, double b, double) {
+             return stan::math::ub_free(x, b);
+           }},
+          {"lower_upper_bound_jacobian", true,
+           [](double x, double b, double c) {
+             return stan::math::lub_constrain(x, b, c);
+           }},
+          {"offset_multiplier_unconstrain", false,
+           [](double x, double b, double c) {
+             return stan::math::offset_multiplier_free(x, b, c);
+           }},
+      };
+      for (const Case& c : cases) {
+        const bool ternary = std::string(c.name).find("lower_upper") == 0 ||
+                             std::string(c.name).find("offset_") == 0;
+        mir::Expr call;
+        call.kind = mir::Expr::FunApp;
+        call.name = c.name;
+        call.type_ = "UVector";
+        call.unsized.leaf = mir::UnsizedLeaf::Vector;
+        call.data_only = true;
+        // The second bound is always shared, so the ternary transforms
+        // cover a mixed pair as well as a uniform one.
+        call.args = {three, c.shared_bound ? scalar : bounds};
+        if (ternary) call.args.push_back(upper);
+        const DataMap::Entry got = interp.eval(call);
+        bool ok = got.r.size() == 3 && got.dims == std::vector<int64_t>{3};
+        for (size_t i = 0; ok && i < 3; ++i) {
+          const double b = c.shared_bound ? 2.0 : 1.5 + (double)i;
+          ok = got.r[i] == c.want((double)(i + 1), b, 5.0);
+        }
+        check(ok, std::string(c.name) +
+                      " is elementwise with a broadcast "
+                      "bound");
+      }
+      // The scalar shape, where the jacobian direction still returns only
+      // the constrained value.
+      mir::Expr call;
+      call.kind = mir::Expr::FunApp;
+      call.name = "lower_bound_jacobian";
+      call.type_ = "UReal";
+      call.unsized.leaf = mir::UnsizedLeaf::Real;
+      call.data_only = true;
+      call.args = {scalar, scalar};
+      const DataMap::Entry got = interp.eval(call);
+      check(got.r.size() == 1 && got.r[0] == stan::math::lb_constrain(2.0, 2.0),
+            "a scalar bound transform stays one value");
+    }
+
     auto variable = [](const std::string& name, const std::string& type) {
       mir::Expr e;
       e.kind = mir::Expr::Var;

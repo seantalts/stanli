@@ -465,6 +465,49 @@ class MirInterp {
 
   static double val(const T& x) { return stan::math::value_of(x); }
 
+  // Arity of a bound transform called as a function, or 0 for any other
+  // name. The three directions of one transform share an arity, so the name
+  // alone decides how many arguments to expect.
+  static size_t bound_transform_arity(const std::string& name) {
+    static const std::pair<const char*, size_t> kStems[] = {
+        {"lower_bound_", 2},
+        {"upper_bound_", 2},
+        {"lower_upper_bound_", 3},
+        {"offset_multiplier_", 3}};
+    for (const auto& stem : kStems) {
+      const std::string prefix(stem.first);
+      if (name.compare(0, prefix.size(), prefix) != 0) continue;
+      const std::string tail = name.substr(prefix.size());
+      if (tail == "constrain" || tail == "jacobian" || tail == "unconstrain")
+        return stem.second;
+    }
+    return 0;
+  }
+
+  // One element of a bound transform, through stan-math's own scalar
+  // overloads: the free direction is stan-math's inverse rather than a
+  // hand-written one, so the two directions cannot drift apart here. `b2` is
+  // unread by the two-argument transforms.
+  static T bound_transform(const std::string& name, const T& x, const T& b1,
+                           const T& b2) {
+    if (name == "lower_bound_unconstrain") return stan::math::lb_free(x, b1);
+    if (name == "upper_bound_unconstrain") return stan::math::ub_free(x, b1);
+    if (name == "lower_upper_bound_unconstrain")
+      return stan::math::lub_free(x, b1, b2);
+    if (name == "offset_multiplier_unconstrain")
+      return stan::math::offset_multiplier_free(x, b1, b2);
+    // The constrain and jacobian directions differ only in a target
+    // increment, and this path has no target.
+    if (name == "lower_bound_constrain" || name == "lower_bound_jacobian")
+      return stan::math::lb_constrain(x, b1);
+    if (name == "upper_bound_constrain" || name == "upper_bound_jacobian")
+      return stan::math::ub_constrain(x, b1);
+    if (name == "lower_upper_bound_constrain" ||
+        name == "lower_upper_bound_jacobian")
+      return stan::math::lub_constrain(x, b1, b2);
+    return stan::math::offset_multiplier_constrain(x, b1, b2);
+  }
+
   static bool check_scalar_type(const mir::Expr& e) {
     return e.unsized.depth == 0 && (e.unsized.leaf == mir::UnsizedLeaf::Int ||
                                     e.unsized.leaf == mir::UnsizedLeaf::Real);
@@ -1069,6 +1112,29 @@ class MirInterp {
         o.r[i] = stan::math::fma(a.r[a.r.size() == 1 ? 0 : i],
                                  b.r[b.r.size() == 1 ? 0 : i],
                                  c.r[c.r.size() == 1 ? 0 : i]);
+      return o;
+    }
+    // Stan's bound transforms, callable as functions rather than written on
+    // a declaration: elementwise over every container shape, with each bound
+    // either one value for the whole container or one value per element.
+    // The interpreter serves transformed data and the interpreted
+    // write_array, both of which the generated model instantiates with
+    // `jacobian__ = false`, so the `_jacobian` direction is the constrained
+    // value and nothing else -- there is no target here to increment.
+    const size_t bound_arity = bound_transform_arity(e.name);
+    if (bound_arity != 0 && bound_arity == e.args.size()) {
+      std::vector<Value> a;
+      a.reserve(e.args.size());
+      for (const mir::Expr& arg : e.args) a.push_back(eval(arg));
+      const auto at = [&](size_t k, size_t i) {
+        return a[k].r[a[k].r.size() == 1 ? 0 : i];
+      };
+      Value o;
+      o.dims = a[0].dims;
+      o.r.resize(a[0].r.size());
+      for (size_t i = 0; i < o.r.size(); ++i)
+        o.r[i] = bound_transform(e.name, at(0, i), at(1, i),
+                                 a.size() > 2 ? at(2, i) : T(0));
       return o;
     }
     if (e.name == "PMinus__") return un([](const T& x) { return -x; });
