@@ -2022,6 +2022,101 @@ int main() {
     }
   }
 
+  // Stan's bound transforms called as functions. See
+  // tests/fixtures/boundfn.stan: all twelve names, over the container
+  // shapes and both bound widths, inside the `_jacobian` user function the
+  // conformance sweep generates. The lowering refused every one of them,
+  // and the jacobian direction is the half that can be silently wrong --
+  // it has to add the log absolute jacobian determinant in log_prob and
+  // nothing at all in write_array.
+  {
+    // md in slot order (first index fastest), which is also what a 2x2
+    // Eigen matrix stores.
+    const std::vector<double> mdv = {0.5, 1.5, 1.25, 0.25};
+    DataMap d;
+    d.set_real_array("md", mdv, {2, 2});
+    CompiledModel bm =
+        compile_model(slurp("tests/fixtures/boundfn.tmir.sexp"), d);
+    Executor bex(std::move(bm.graph));
+    bm.bind(bex);
+    // Declaration order: a[2], s.
+    const double pts[2][3] = {{0.4, -0.7, 1.25}, {-0.3, 0.9, -0.45}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 3; ++i) bex.params_data()[i] = pts[c][i];
+      double grad[3] = {0, 0, 0};
+      const double lp = bex.gradient(grad);
+
+      using stan::math::var;
+      using Vec = Eigen::Matrix<var, -1, 1>;
+      Vec a(2);
+      a << pts[c][0], pts[c][1];
+      var s = pts[c][2];
+      Vec lo(2), hi(2);
+      for (int i = 0; i < 2; ++i) {
+        lo(i) = a(i) - 4.0;
+        hi(i) = stan::math::exp(a(i)) + 1.0;
+      }
+      Eigen::Matrix<var, -1, -1> m(2, 2);
+      for (int i = 0; i < 4; ++i) m(i) = mdv[i];
+      // Every `sum` in the fixture is one ascending reduction over its own
+      // result, and OP_SUM_VEC accumulates the same way.
+      const auto vsum = [](const auto& v) {
+        var t = 0;
+        for (int i = 0; i < v.size(); ++i) t += v(i);
+        return t;
+      };
+      // The four jacobian increments land on lp__, which the model adds to
+      // the returned contribution.
+      var jac = 0;
+      var cc = 0;
+      cc += vsum(stan::math::lb_constrain(a, s));
+      cc += vsum(stan::math::lb_constrain<true>(a, lo, jac));
+      cc += vsum(stan::math::lb_free(stan::math::lb_constrain(a, s), s));
+      cc += vsum(stan::math::ub_constrain(m, s));
+      cc += vsum(stan::math::ub_constrain<true>(a, hi, jac));
+      cc += vsum(stan::math::ub_free(stan::math::ub_constrain(a, s), s));
+      cc += vsum(stan::math::lub_constrain(a, lo, hi));
+      cc += vsum(stan::math::lub_constrain<true>(a, var(-3.0), var(3.0), jac));
+      cc += vsum(
+          stan::math::lub_free(stan::math::lub_constrain(a, lo, hi), lo, hi));
+      cc += vsum(stan::math::offset_multiplier_constrain(a, s, var(2.5)));
+      cc += vsum(stan::math::offset_multiplier_constrain(a, s, var(2.5)));
+      cc += vsum(stan::math::offset_multiplier_constrain<true>(a, lo, hi, jac));
+      cc += vsum(stan::math::offset_multiplier_free(a, lo, hi));
+      var acc = cc + jac;
+      acc.grad();
+
+      for (int i = 0; i < 2; ++i)
+        expect_ulp("boundfn a grad", grad[i], a(i).adj());
+      expect_ulp("boundfn s grad", grad[2], s.adj());
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol,
+            "boundfn: lp matches the var path");
+      stan::math::recover_memory();
+    }
+    // write_array runs the same calls with `jacobian__ = false`, so the
+    // `total` column is the returned contribution alone. log_prob adds the
+    // four jacobian increments to it, and each of those is nonzero here.
+    check(bm.write_array && bm.write_array->truncated.empty(),
+          "boundfn write_array compiled");
+    if (bm.write_array && bm.write_array->truncated.empty()) {
+      Executor wex(std::move(bm.write_array->graph));
+      bm.write_array->bind(wex);
+      for (int i = 0; i < 3; ++i) wex.params_data()[i] = pts[0][i];
+      wex.run_forward_only();
+      for (int i = 0; i < 3; ++i) bex.params_data()[i] = pts[0][i];
+      const double lp = bex.forward();
+      bool found = false;
+      for (const auto& col : bm.write_array->columns) {
+        if (col.name != "total") continue;
+        found = true;
+        check(*wex.value_ptr(col.slot) != lp,
+              "boundfn: write_array drops the jacobian increments");
+      }
+      check(found, "boundfn write_array has total");
+    }
+  }
+
   // array[N] vector[K] data into a vectorized multivariate density. See
   // tests/fixtures/mnarr.stan: the data path stores this shape the way it
   // stores a matrix, and the kernel wants each element contiguous, so the

@@ -1486,6 +1486,104 @@ struct Lowering {
     return emit_value(opcode, {a, b}, std::max(lr, li), si, std::move(idata));
   }
 
+  // Stan's bound transforms, callable as ordinary functions rather than
+  // written on a declaration. `<t>_constrain(x, bounds...)` is the value
+  // half of the declaration transform, `<t>_jacobian(...)` is the same
+  // value and also adds the transform's log absolute jacobian determinant
+  // to the target, and `<t>_unconstrain(y, bounds...)` is the inverse.
+  //
+  // stanc3 marks the jacobian direction with an FnJacobian suffix and emits
+  // no separate target statement for it, so the increment has to come from
+  // here -- and only in log_prob, because the generated model instantiates
+  // write_array with `jacobian__ = false`, which drops it.
+  //
+  // Argument 0 always carries the result's shape: every signature in the
+  // library pairs it either with scalar bounds or with bounds of exactly
+  // its own type, and none of them widens a scalar first argument against a
+  // container bound.
+  std::optional<Val> lower_bound_transform(const mir::Expr& e) {
+    struct Transform {
+      const char* stem;
+      uint16_t opcode;
+      size_t arity;
+    };
+    static const Transform kTransforms[] = {
+        {"lower_bound_", OP_CONSTRAIN_LOWER, 2},
+        {"upper_bound_", OP_CONSTRAIN_UPPER, 2},
+        {"lower_upper_bound_", OP_CONSTRAIN_LU, 3},
+        {"offset_multiplier_", OP_CONSTRAIN_OFFSET_MULT, 3},
+    };
+    const Transform* tr = nullptr;
+    std::string direction;
+    for (const Transform& t : kTransforms) {
+      const std::string prefix(t.stem);
+      if (e.name.compare(0, prefix.size(), prefix) != 0) continue;
+      const std::string tail = e.name.substr(prefix.size());
+      if (tail != "constrain" && tail != "jacobian" && tail != "unconstrain")
+        continue;
+      tr = &t;
+      direction = tail;
+    }
+    if (tr == nullptr || e.args.size() != tr->arity) return std::nullopt;
+
+    std::vector<Val> a;
+    a.reserve(e.args.size());
+    for (const mir::Expr& arg : e.args) a.push_back(lower_expr(arg));
+    const int64_t n = g.slots[a[0].slot].len;
+    SlotInfo si = a[0].si;
+    std::vector<int> ins;
+    bool autodiff = false;
+    for (const Val& v : a) {
+      const int64_t len = g.slots[v.slot].len;
+      if (len != 1 && len != n)
+        fail(e.name + ": bound is neither one value nor one per element",
+             e.raw);
+      si.param_free = si.param_free && v.si.param_free;
+      autodiff = autodiff || v.autodiff;
+      ins.push_back(v.slot);
+    }
+
+    if (direction == "unconstrain") return free_transform(tr->opcode, a, si, n);
+    // The declaration kernels, unchanged: they carry the arithmetic that was
+    // measured against stan-math's rev overloads, which composing exp,
+    // inv_logit, and fma out of the elementwise ops would not reproduce.
+    // They always write the jacobian, so `_constrain` allocates the output
+    // and simply leaves it unrooted -- no term reaches the target, and its
+    // adjoint stays zero, which is exactly the no-lp overload's gradient.
+    const int jac = add_slot(1, /*is_param=*/false);
+    Val v = emit_raw(tr->opcode, ins, n, si, {}, jac, autodiff);
+    if (direction == "jacobian" && !in_write_array) target_terms.push_back(jac);
+    return v;
+  }
+
+  // The inverse transforms. stan-math has no rev overloads for these: its
+  // `log(y - lb)` is ordinary var arithmetic, which is what these
+  // elementwise ops emit, so the composition is the reference rather than an
+  // approximation of it, and no new kernel is needed.
+  Val free_transform(uint16_t opcode, const std::vector<Val>& a, SlotInfo si,
+                     int64_t n) {
+    // An intermediate keeps the argument's logical view only when it is as
+    // wide as the argument; `ub - lb` on two scalars is one value.
+    const auto elt = [&](uint16_t op, const Val& x, const Val& y) {
+      const int64_t w = std::max(g.slots[x.slot].len, g.slots[y.slot].len);
+      return emit_value(op, {x, y}, w, w == n ? si : SlotInfo{});
+    };
+    const auto un = [&](uint16_t op, const Val& x) {
+      return emit_value(op, {x}, g.slots[x.slot].len, x.si);
+    };
+    switch (opcode) {
+      case OP_CONSTRAIN_LOWER:  // lb_free: log(y - lb)
+        return un(OP_LOGV, elt(OP_SUB, a[0], a[1]));
+      case OP_CONSTRAIN_UPPER:  // ub_free: log(ub - y)
+        return un(OP_LOGV, elt(OP_SUB, a[1], a[0]));
+      case OP_CONSTRAIN_LU:  // lub_free: logit((y - lb) / (ub - lb))
+        return un(OP_LOGIT, elt(OP_DIV, elt(OP_SUB, a[0], a[1]),
+                                elt(OP_SUB, a[2], a[1])));
+      default:  // offset_multiplier_free: (y - mu) / sigma
+        return elt(OP_DIV, elt(OP_SUB, a[0], a[1]), a[2]);
+    }
+  }
+
   // Value of a data-only expression at compile time. The interpreter
   // handles most cases; a UDF-local constant lives only as a slot, so fall
   // back to that slot's recorded fill.
@@ -1735,6 +1833,7 @@ struct Lowering {
     // The stan-library names split into disjoint groups; each helper owns
     // one and declines the rest.
     if (auto v = lower_density_fn(e)) return *v;
+    if (auto v = lower_bound_transform(e)) return *v;
     if (auto v = lower_eltwise_fn(e)) return *v;
     if (auto v = lower_matrix_fn(e)) return *v;
     if (auto v = lower_ode_fn(e)) return *v;

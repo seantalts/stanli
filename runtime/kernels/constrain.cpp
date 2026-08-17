@@ -37,22 +37,53 @@ inline double seq_sum(const double* p, int64_t n) {
   return s;
 }
 
+// A bound argument is either one value shared by the whole container or one
+// value per element -- the only two shapes stan-math's own overloads take,
+// and the only two the callable `*_constrain(x, bounds)` functions can be
+// given. Reading it through a 0/1 stride keeps one code path for both, and
+// on the shared path every operation is the one the scalar-bound code did,
+// in the same order, so the declaration transforms stay bitwise.
+struct Bound {
+  const double* p;
+  int64_t stride;
+  explicit Bound(const Desc& a) : p(a.data), stride(a.len > 1 ? 1 : 0) {}
+  double operator[](int64_t i) const { return p[i * stride]; }
+  bool varies() const { return stride != 0; }
+};
+
+// A bound's reverse lane. A per-element bound takes its own term; a shared
+// one collects all N, which is what the rev overloads' `.sum()` over the
+// same expression comes to.
+inline void add_bound_adj(KernelCtx& ctx, int k, const double* terms,
+                          int64_t n) {
+  if (ctx.in_adj[k].data == nullptr) return;
+  if (Bound(ctx.in[k]).varies())
+    for (int64_t i = 0; i < n; ++i) ctx.in_adj[k].data[i] += terms[i];
+  else
+    ctx.in_adj[k].data[0] += seq_sum(terms, n);
+}
+
 // rev lb_constrain(matrix, scalar, lp):
 //   exp_x = x.val().array().exp() (strided -> scalar std::exp);
 //   ret = exp_x + lb;  lp += x.val().sum() (sequential);
 //   bwd: x.adj += ret.adj * exp_x + lp.adj
+// The matrix-bound overload differs only in reading lb per element, and in
+// giving lb its own adjoint lane instead of the sum of all of them.
 void clower_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
   const double* x = ctx.in[0].data;
   double* exp_x = ctx.scratch;
-  const double lb = ctx.in[1].data[0];
+  const Bound lb(ctx.in[1]);
   if (packet_math() && n > 1) {
     MapA(exp_x, n) = CMapA(x, n).exp();
-    MapA(ctx.out.data, n) = MapA(exp_x, n) + lb;
+    if (lb.varies())
+      MapA(ctx.out.data, n) = MapA(exp_x, n) + CMapA(lb.p, n);
+    else
+      MapA(ctx.out.data, n) = MapA(exp_x, n) + lb[0];
   } else {
     for (int64_t i = 0; i < n; ++i) {
       exp_x[i] = std::exp(x[i]);
-      ctx.out.data[i] = exp_x[i] + lb;
+      ctx.out.data[i] = exp_x[i] + lb[i];
     }
   }
   ctx.out2.data[0] = seq_sum(x, n);
@@ -65,8 +96,9 @@ void clower_bwd(KernelCtx& ctx) {
     for (int64_t i = 0; i < n; ++i)
       ctx.in_adj[0].data[i] += dout[i] * exp_x[i] + ctx.out2_adj;
   }
-  // Parameter-dependent bound: rev lb_constrain adds ret.adj().sum().
-  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += seq_sum(dout, n);
+  // Parameter-dependent bound: rev lb_constrain adds ret.adj() straight
+  // through, summed only where one bound serves the whole container.
+  add_bound_adj(ctx, 1, dout, n);
 }
 
 // rev ub_constrain(matrix, scalar, lp):
@@ -76,14 +108,17 @@ void cupper_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
   const double* x = ctx.in[0].data;
   double* exp_x = ctx.scratch;
-  const double ub = ctx.in[1].data[0];
+  const Bound ub(ctx.in[1]);
   if (packet_math() && n > 1) {
     MapA(exp_x, n) = CMapA(x, n).exp();
-    MapA(ctx.out.data, n) = ub - MapA(exp_x, n);
+    if (ub.varies())
+      MapA(ctx.out.data, n) = CMapA(ub.p, n) - MapA(exp_x, n);
+    else
+      MapA(ctx.out.data, n) = ub[0] - MapA(exp_x, n);
   } else {
     for (int64_t i = 0; i < n; ++i) {
       exp_x[i] = std::exp(x[i]);
-      ctx.out.data[i] = ub - exp_x[i];
+      ctx.out.data[i] = ub[i] - exp_x[i];
     }
   }
   ctx.out2.data[0] = seq_sum(x, n);
@@ -96,7 +131,7 @@ void cupper_bwd(KernelCtx& ctx) {
     for (int64_t i = 0; i < n; ++i)
       ctx.in_adj[0].data[i] += -dout[i] * exp_x[i] + ctx.out2_adj;
   }
-  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += seq_sum(dout, n);
+  add_bound_adj(ctx, 1, dout, n);
 }
 
 // rev lub_constrain(matrix, scalar, scalar, lp):
@@ -108,12 +143,17 @@ void clu_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
   const double* x = ctx.in[0].data;
   double* il = ctx.scratch;
-  const double lb = ctx.in[1].data[0], ub = ctx.in[2].data[0];
-  const double diff = ub - lb;
-  const double log_diff = std::log(diff);
+  const Bound lb(ctx.in[1]), ub(ctx.in[2]);
+  // Shared bounds make log(diff) loop-invariant, and std::log is opaque
+  // enough that only hoisting it by hand keeps a parameter block at one
+  // call rather than one per element.
+  const bool varies = lb.varies() || ub.varies();
+  const double diff0 = ub[0] - lb[0];
+  const double log_diff0 = std::log(diff0);
   double jac = 0.0;
   for (int64_t i = 0; i < n; ++i) {
     const double nax = -std::abs(x[i]);
+    const double log_diff = varies ? std::log(ub[i] - lb[i]) : log_diff0;
     jac += log_diff + (nax - 2.0 * stan::math::log1p_exp(nax));
   }
   ctx.out2.data[0] = jac;
@@ -134,33 +174,64 @@ void clu_fwd(KernelCtx& ctx) {
       }
     }
   }
-  for (int64_t i = 0; i < n; ++i) ctx.out.data[i] = diff * il[i] + lb;
+  for (int64_t i = 0; i < n; ++i)
+    ctx.out.data[i] = (varies ? ub[i] - lb[i] : diff0) * il[i] + lb[i];
 }
 void clu_bwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
   const double* il = ctx.scratch;
   const double* dout = ctx.out_adj_vec.data;
-  const double lb = ctx.in[1].data[0], ub = ctx.in[2].data[0];
-  const double diff = ub - lb;
+  const Bound lb(ctx.in[1]), ub(ctx.in[2]);
+  const bool varies = lb.varies() || ub.varies();
+  const double diff0 = ub[0] - lb[0];
   if (ctx.in_adj[0].data) {
     for (int64_t i = 0; i < n; ++i)
-      ctx.in_adj[0].data[i] += dout[i] * diff * il[i] * (1.0 - il[i]) +
-                               ctx.out2_adj * (1.0 - 2.0 * il[i]);
+      ctx.in_adj[0].data[i] +=
+          dout[i] * (varies ? ub[i] - lb[i] : diff0) * il[i] * (1.0 - il[i]) +
+          ctx.out2_adj * (1.0 - 2.0 * il[i]);
   }
-  // rev lub_constrain bound adjoints (matrix-with-lp form):
-  //   lb.adj += (ret.adj*(1-il)).sum() - (1/diff)*lp.adj*N
-  //   ub.adj += (ret.adj*il).sum() + (1/diff)*lp.adj*N
-  const double nd = static_cast<double>(n);
-  const double one_over_diff = 1.0 / diff;
-  if (ctx.in_adj[1].data) {
-    double s = 0.0;
-    for (int64_t i = 0; i < n; ++i) s += dout[i] * (1.0 - il[i]);
-    ctx.in_adj[1].data[0] += s + -one_over_diff * ctx.out2_adj * nd;
+  if (!varies) {
+    // rev lub_constrain bound adjoints, both bounds scalar:
+    //   lb.adj += (ret.adj*(1-il)).sum() - (1/diff)*lp.adj*N
+    //   ub.adj += (ret.adj*il).sum() + (1/diff)*lp.adj*N
+    // One diff for the whole container is what lets that overload fold N
+    // identical jacobian halves into a single multiply, and the fold does
+    // not round like N separate additions -- so this shape keeps exactly
+    // the arithmetic it was calibrated against.
+    const double nd = static_cast<double>(n);
+    const double one_over_diff = 1.0 / diff0;
+    if (ctx.in_adj[1].data) {
+      double s = 0.0;
+      for (int64_t i = 0; i < n; ++i) s += dout[i] * (1.0 - il[i]);
+      ctx.in_adj[1].data[0] += s + -one_over_diff * ctx.out2_adj * nd;
+    }
+    if (ctx.in_adj[2].data) {
+      double s = 0.0;
+      for (int64_t i = 0; i < n; ++i) s += dout[i] * il[i];
+      ctx.in_adj[2].data[0] += s + one_over_diff * ctx.out2_adj * nd;
+    }
+    return;
   }
-  if (ctx.in_adj[2].data) {
-    double s = 0.0;
-    for (int64_t i = 0; i < n; ++i) s += dout[i] * il[i];
-    ctx.in_adj[2].data[0] += s + one_over_diff * ctx.out2_adj * nd;
+  // A diff that varies denies that fold: the overloads that take at least
+  // one matrix bound build the term per element,
+  //   lb term = ret.adj*(1-il) + -(1/diff)*lp.adj
+  //   ub term = ret.adj*il     +  (1/diff)*lp.adj
+  // and a bound that is still shared reduces all N of them with .sum().
+  for (int k = 1; k <= 2; ++k) {
+    if (ctx.in_adj[k].data == nullptr) continue;
+    const bool is_lb = k == 1;
+    const Bound& b = is_lb ? lb : ub;
+    double lane = 0.0;
+    for (int64_t i = 0; i < n; ++i) {
+      const double half = 1.0 / (ub[i] - lb[i]) * ctx.out2_adj;
+      const double t =
+          dout[i] * (is_lb ? 1.0 - il[i] : il[i]) + (is_lb ? -half : half);
+      if (b.varies())
+        ctx.in_adj[k].data[i] += t;
+      else
+        lane += t;
+    }
+    if (!b.varies()) ctx.in_adj[k].data[0] += lane;
   }
 }
 
