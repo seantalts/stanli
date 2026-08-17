@@ -2260,6 +2260,16 @@ struct Lowering {
         STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_TABLE)
 #undef STANLI_UNARY_TABLE
             {"PMinus__", OP_NEG},
+        // minus is the named spelling of the unary operator, so it is the
+        // same negation over the same shapes.
+        {"minus", OP_NEG},
+        // stanc3's Lower_expr.ml maps std_normal_qf onto stan::math::inv_Phi;
+        // one opcode keeps the two spellings from drifting apart.
+        {"std_normal_qf", OP_INV_PHI},
+        // trigamma is the one unary whose derivative has no closed form to
+        // put in the shared list: Math differentiates AS121's recurrence
+        // through its own tape, so the kernel does too (scalar_unary_ad.cpp).
+        {"trigamma", OP_TRIGAMMA},
         {"exp", OP_EXPV},
         {"log", OP_LOGV},
         {"inv_logit", OP_INV_LOGIT},
@@ -2287,7 +2297,9 @@ struct Lowering {
       si.param_free = a.si.param_free;
       return emit_value(uit->second, {a}, g.slots[a.slot].len, si);
     }
-    if (e.name == "PPlus__") return lower_expr(e.args[0]);
+    // plus, and its operator spelling, are the identity on every shape.
+    if (e.name == "PPlus__" || (e.name == "plus" && e.args.size() == 1))
+      return lower_expr(e.args[0]);
     if (e.name == "logit") {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_LOGIT, {a}, g.slots[a.slot].len, a.si);

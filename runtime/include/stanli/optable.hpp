@@ -93,6 +93,7 @@ namespace stanli {
   X(OP_SQUARE)                      \
   X(OP_LOG1M)                       \
   X(OP_TANHV)                       \
+  X(OP_TRIGAMMA)                    \
   X(OP_CUMSUM)                      \
   X(OP_FMA)                         \
   X(OP_ATAN2)                       \
@@ -447,75 +448,96 @@ constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
 // written out rather than obtained by instantiating an autodiff template.
 // fn_sweep.py checks every one against CmdStan, which is what makes
 // hand-written derivatives safe to write at this rate.
-#define STANLI_SCALAR_UNARY_LIST(X)                                          \
-  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), seed* stan::math::digamma(x),  \
-    UnaryTopology::Chained)                                                  \
-  X(OP_DIGAMMA, digamma, stan::math::digamma(x),                             \
-    seed* stan::math::trigamma(x), UnaryTopology::Chained)                   \
-  X(OP_LOG1P, log1p, stan::math::log1p(x), seed / (1.0 + x),                 \
-    UnaryTopology::Chained)                                                  \
-  X(OP_EXPM1, expm1, stan::math::expm1(x), seed*(y + 1.0),                   \
-    UnaryTopology::Chained)                                                  \
-  X(OP_PHI, Phi, stan::math::Phi(x),                                         \
-    (seed * stan::math::INV_SQRT_TWO_PI) * std::exp(-0.5 * x * x),           \
-    UnaryTopology::Chained)                                                  \
-  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x),                             \
-    seed* std::exp(-stan::math::std_normal_lpdf(y)), UnaryTopology::Chained) \
-  X(OP_ERF, erf, std::erf(x),                                                \
-    seed*(stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x)),                  \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ERFC, erfc, std::erfc(x),                                             \
-    -(seed * (stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x))),             \
-    UnaryTopology::Chained)                                                  \
-  X(OP_INV, inv, 1.0 / x, -(seed / (x * x)), UnaryTopology::Chained)         \
-  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x),                          \
-    -((0.5 * seed) / (x * std::sqrt(x))), UnaryTopology::Chained)            \
-  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -((2.0 * seed) / (x * x * x)), \
-    UnaryTopology::Chained)                                                  \
-  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x),                       \
-    -(seed / std::expm1(-x)), UnaryTopology::Chained)                        \
-  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x),                       \
-    seed* stan::math::inv_logit(x), UnaryTopology::Chained)                  \
-  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x),           \
-    seed* stan::math::inv_logit(-x), UnaryTopology::Chained)                 \
-  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x),     \
-    seed * -stan::math::inv_logit(x), UnaryTopology::Chained)                \
-  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x),                 \
-    seed* std::exp(x - std::exp(x)), UnaryTopology::Chained)                 \
-  X(OP_SIN, sin, std::sin(x), seed* std::cos(x), UnaryTopology::Chained)     \
-  X(OP_COS, cos, std::cos(x), -(seed * std::sin(x)), UnaryTopology::Chained) \
-  X(OP_TAN, tan, std::tan(x), seed * (1.0 + y * y), UnaryTopology::Chained)  \
-  X(OP_ASIN, asin, std::asin(x), seed / std::sqrt(1.0 - (x * x)),            \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ACOS, acos, std::acos(x), -(seed / std::sqrt(1.0 - (x * x))),         \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ATAN, atan, std::atan(x), seed / (1.0 + (x * x)),                     \
-    UnaryTopology::Chained)                                                  \
-  X(OP_SINH, sinh, std::sinh(x), seed* std::cosh(x), UnaryTopology::Chained) \
-  X(OP_COSH, cosh, std::cosh(x), seed* std::sinh(x), UnaryTopology::Chained) \
-  X(OP_ASINH, asinh, std::asinh(x), seed / std::sqrt(x * x + 1.0),           \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ACOSH, acosh, stan::math::acosh(x), seed / std::sqrt(x * x - 1.0),    \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ATANH, atanh, stan::math::atanh(x), seed / (1.0 - x * x),             \
-    UnaryTopology::Chained)                                                  \
-  X(OP_CBRT, cbrt, std::cbrt(x), seed / ((3.0 * y) * y),                     \
-    UnaryTopology::Chained)                                                  \
-  X(OP_EXP2, exp2, std::exp2(x), (seed * y) * stan::math::LOG_TWO,           \
-    UnaryTopology::Chained)                                                  \
-  X(OP_LOG2, log2, stan::math::log2(x), seed / (stan::math::LOG_TWO * x),    \
-    UnaryTopology::Chained)                                                  \
-  X(OP_LOG10, log10, std::log10(x), seed / (stan::math::LOG_TEN * x),        \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ABS, abs, std::fabs(x),                                               \
-    x < 0.0   ? -seed                                                        \
-    : x > 0.0 ? seed                                                         \
-              : std::numeric_limits<double>::quiet_NaN(),                    \
-    UnaryTopology::Nonzero)                                                  \
-  X(OP_FLOOR, floor, std::floor(x), 0.0, UnaryTopology::Disconnected)        \
-  X(OP_CEIL, ceil, std::ceil(x), 0.0, UnaryTopology::Disconnected)           \
-  X(OP_ROUND, round, std::round(x), 0.0, UnaryTopology::Disconnected)        \
-  X(OP_TRUNC, trunc, std::trunc(x), 0.0, UnaryTopology::Disconnected)        \
+#define STANLI_SCALAR_UNARY_LIST(X)                                            \
+  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), seed* stan::math::digamma(x),    \
+    UnaryTopology::Chained)                                                    \
+  X(OP_DIGAMMA, digamma, stan::math::digamma(x),                               \
+    seed* stan::math::trigamma(x), UnaryTopology::Chained)                     \
+  X(OP_LOG1P, log1p, stan::math::log1p(x), seed / (1.0 + x),                   \
+    UnaryTopology::Chained)                                                    \
+  X(OP_EXPM1, expm1, stan::math::expm1(x), seed*(y + 1.0),                     \
+    UnaryTopology::Chained)                                                    \
+  X(OP_PHI, Phi, stan::math::Phi(x),                                           \
+    (seed * stan::math::INV_SQRT_TWO_PI) * std::exp(-0.5 * x * x),             \
+    UnaryTopology::Chained)                                                    \
+  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x),                               \
+    seed* std::exp(-stan::math::std_normal_lpdf(y)), UnaryTopology::Chained)   \
+  X(OP_ERF, erf, std::erf(x),                                                  \
+    seed*(stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x)),                    \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ERFC, erfc, std::erfc(x),                                               \
+    -(seed * (stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x))),               \
+    UnaryTopology::Chained)                                                    \
+  X(OP_INV, inv, 1.0 / x, -(seed / (x * x)), UnaryTopology::Chained)           \
+  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x),                            \
+    -((0.5 * seed) / (x * std::sqrt(x))), UnaryTopology::Chained)              \
+  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -((2.0 * seed) / (x * x * x)),   \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x),                         \
+    -(seed / std::expm1(-x)), UnaryTopology::Chained)                          \
+  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x),                         \
+    seed* stan::math::inv_logit(x), UnaryTopology::Chained)                    \
+  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x),             \
+    seed* stan::math::inv_logit(-x), UnaryTopology::Chained)                   \
+  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x),       \
+    seed * -stan::math::inv_logit(x), UnaryTopology::Chained)                  \
+  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x),                   \
+    seed* std::exp(x - std::exp(x)), UnaryTopology::Chained)                   \
+  X(OP_SIN, sin, std::sin(x), seed* std::cos(x), UnaryTopology::Chained)       \
+  X(OP_COS, cos, std::cos(x), -(seed * std::sin(x)), UnaryTopology::Chained)   \
+  X(OP_TAN, tan, std::tan(x), seed * (1.0 + y * y), UnaryTopology::Chained)    \
+  X(OP_ASIN, asin, std::asin(x), seed / std::sqrt(1.0 - (x * x)),              \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ACOS, acos, std::acos(x), -(seed / std::sqrt(1.0 - (x * x))),           \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ATAN, atan, std::atan(x), seed / (1.0 + (x * x)),                       \
+    UnaryTopology::Chained)                                                    \
+  X(OP_SINH, sinh, std::sinh(x), seed* std::cosh(x), UnaryTopology::Chained)   \
+  X(OP_COSH, cosh, std::cosh(x), seed* std::sinh(x), UnaryTopology::Chained)   \
+  X(OP_ASINH, asinh, std::asinh(x), seed / std::sqrt(x * x + 1.0),             \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ACOSH, acosh, stan::math::acosh(x), seed / std::sqrt(x * x - 1.0),      \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ATANH, atanh, stan::math::atanh(x), seed / (1.0 - x * x),               \
+    UnaryTopology::Chained)                                                    \
+  X(OP_CBRT, cbrt, std::cbrt(x), seed / ((3.0 * y) * y),                       \
+    UnaryTopology::Chained)                                                    \
+  X(OP_EXP2, exp2, std::exp2(x), (seed * y) * stan::math::LOG_TWO,             \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LOG2, log2, stan::math::log2(x), seed / (stan::math::LOG_TWO * x),      \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LOG10, log10, std::log10(x), seed / (stan::math::LOG_TEN * x),          \
+    UnaryTopology::Chained)                                                    \
+  /* Phi_approx's value is written out rather than called, because Math's */   \
+  /* two overloads disagree: the double one cubes with pow(x, 3.0), the   */   \
+  /* var one with x * x * x, and those round differently. The var one is  */   \
+  /* what a parameter reaches in CmdStan and what every route here has to */   \
+  /* agree with, so it is the one spelled.                                */   \
+  X(OP_PHI_APPROX, Phi_approx,                                                 \
+    stan::math::inv_logit(0.07056 * x * (x * x) + 1.5976 * x),                 \
+    seed*(y * (1.0 - y) * (3.0 * 0.07056 * (x * x) + 1.5976)),                 \
+    UnaryTopology::Chained)                                                    \
+  X(OP_INV_ERFC, inv_erfc, stan::math::inv_erfc(x),                            \
+    -(seed * std::exp(stan::math::LOG_SQRT_PI - stan::math::LOG_TWO + y * y)), \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LAMBERT_W0, lambert_w0, stan::math::lambert_w0(x),                      \
+    seed / (x + std::exp(y)), UnaryTopology::Chained)                          \
+  X(OP_LAMBERT_WM1, lambert_wm1, stan::math::lambert_wm1(x),                   \
+    seed / (x + std::exp(y)), UnaryTopology::Chained)                          \
+  X(OP_STD_NORMAL_LOG_QF, std_normal_log_qf, stan::math::std_normal_log_qf(x), \
+    seed* std::exp(x - stan::math::std_normal_lpdf(y)),                        \
+    UnaryTopology::Chained)                                                    \
+  X(OP_TGAMMA, tgamma, stan::math::tgamma(x),                                  \
+    (seed * y) * stan::math::digamma(x), UnaryTopology::Chained)               \
+  X(OP_ABS, abs, std::fabs(x),                                                 \
+    x < 0.0   ? -seed                                                          \
+    : x > 0.0 ? seed                                                           \
+              : std::numeric_limits<double>::quiet_NaN(),                      \
+    UnaryTopology::Nonzero)                                                    \
+  X(OP_FLOOR, floor, std::floor(x), 0.0, UnaryTopology::Disconnected)          \
+  X(OP_CEIL, ceil, std::ceil(x), 0.0, UnaryTopology::Disconnected)             \
+  X(OP_ROUND, round, std::round(x), 0.0, UnaryTopology::Disconnected)          \
+  X(OP_TRUNC, trunc, std::trunc(x), 0.0, UnaryTopology::Disconnected)          \
   X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0, UnaryTopology::Disconnected)
 
 // Two-argument scalar math: opcode, language name, stan-math function.

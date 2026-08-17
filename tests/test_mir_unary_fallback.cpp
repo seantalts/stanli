@@ -245,6 +245,10 @@ double probe(const std::string& name) {
   if (name == "acosh") return 1.7;
   if (name == "log1m_exp") return -0.37;
   if (name == "inv") return 0.3;
+  // lambert_wm1's branch exists only on [-1/e, 0), and std_normal_log_qf
+  // takes the logarithm of a probability, so 0 is its upper bound.
+  if (name == "lambert_wm1") return -0.2;
+  if (name == "std_normal_log_qf") return -0.5;
   return 0.37;
 }
 
@@ -274,6 +278,9 @@ void test_manifest_and_rows() {
       "OP_SIN:sin;OP_COS:cos;OP_TAN:tan;OP_ASIN:asin;OP_ACOS:acos;"
       "OP_ATAN:atan;OP_SINH:sinh;OP_COSH:cosh;OP_ASINH:asinh;OP_ACOSH:acosh;"
       "OP_ATANH:atanh;OP_CBRT:cbrt;OP_EXP2:exp2;OP_LOG2:log2;OP_LOG10:log10;"
+      "OP_PHI_APPROX:Phi_approx;OP_INV_ERFC:inv_erfc;"
+      "OP_LAMBERT_W0:lambert_w0;OP_LAMBERT_WM1:lambert_wm1;"
+      "OP_STD_NORMAL_LOG_QF:std_normal_log_qf;OP_TGAMMA:tgamma;"
       "OP_ABS:abs;OP_FLOOR:floor;OP_CEIL:ceil;OP_ROUND:round;OP_TRUNC:trunc;"
       "OP_STEP:step;";
   if (manifest != expected) {
@@ -345,6 +352,36 @@ void test_program_and_topology() {
     }
 }
 
+// The four unary names no X-macro generates. trigamma's derivative is the
+// derivative of an algorithm (AS121, differentiated through stan-math's own
+// tape), so it has no closed form to put in the shared list; std_normal_qf
+// is stanc3's alias for inv_Phi; minus and plus are the named spellings of
+// the unary operators. Each is wired by hand in lower.cpp AND in
+// mir_interp.hpp, so each is checked on the graph and on both interpreter
+// routes -- teaching the graph and not the interpreter is what let a
+// two-argument log_sum_exp leave transformed-data elements uninitialized
+// with no error raised anywhere.
+void test_manual_unaries() {
+  for (std::optional<double> seed :
+       {std::optional<double>{}, std::optional<double>{0.7}}) {
+    check_row("trigamma", stanli::OP_TRIGAMMA, 1.4, seed,
+              [](const stan::math::var& x) { return stan::math::trigamma(x); });
+    check_row("std_normal_qf", stanli::OP_INV_PHI, 0.37, seed,
+              [](const stan::math::var& p) { return stan::math::inv_Phi(p); });
+    check_row("minus", stanli::OP_NEG, 0.37, seed,
+              [](const stan::math::var& x) { return -x; });
+    // plus is the identity: the lowering hands back its operand and there
+    // is no opcode to run, so only the interpreter routes have code here.
+    const Observation want =
+        stan(0.37, seed, [](const stan::math::var& x) { return x; });
+    Observation want_double = want;
+    want_double.gradient = 0;
+    expect_same("plus MIR<double>", mir_double("plus", 0.37, seed),
+                want_double);
+    expect_same("plus MIR<var>", mir_var("plus", 0.37, seed), want);
+  }
+}
+
 void test_blocker_edges() {
 #define EDGE(label, fn, opcode, x) \
   check_row(label, opcode, x, {},  \
@@ -361,6 +398,21 @@ void test_blocker_edges() {
        std::numeric_limits<double>::infinity());
   EDGE("inv_Phi", inv_Phi, stanli::OP_INV_PHI, 1e-12);
   EDGE("tan", tan, stanli::OP_TAN, 0x1.921fb54442d17p+0);
+  // Restricted domains. Each of these has to refuse -- or return the
+  // non-finite value -- exactly the way stan-math does, on every route: a
+  // quiet NaN out of one route and a throw out of another is the shape a
+  // host cannot tell a bad model from a bad draw with.
+  EDGE("lambert_w0", lambert_w0, stanli::OP_LAMBERT_W0, -0.5);
+  EDGE("lambert_w0", lambert_w0, stanli::OP_LAMBERT_W0, -0.36787944117144233);
+  EDGE("lambert_wm1", lambert_wm1, stanli::OP_LAMBERT_WM1, 0.1);
+  EDGE("inv_erfc", inv_erfc, stanli::OP_INV_ERFC, 0.0);
+  EDGE("inv_erfc", inv_erfc, stanli::OP_INV_ERFC, 2.5);
+  EDGE("std_normal_log_qf", std_normal_log_qf, stanli::OP_STD_NORMAL_LOG_QF,
+       0.1);
+  EDGE("std_normal_log_qf", std_normal_log_qf, stanli::OP_STD_NORMAL_LOG_QF,
+       0.0);
+  EDGE("tgamma", tgamma, stanli::OP_TGAMMA, 0.0);
+  EDGE("tgamma", tgamma, stanli::OP_TGAMMA, -1.5);
 #undef EDGE
 }
 
@@ -452,6 +504,7 @@ void test_ode_fallback() {
 
 int main() {
   test_manifest_and_rows();
+  test_manual_unaries();
   test_program_and_topology();
   test_blocker_edges();
   test_vector_jacobian();
