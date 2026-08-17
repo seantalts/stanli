@@ -55,6 +55,9 @@ void register_density_kernels() {
                   Kernel{fn##_fwd_gen, density_bwd<n>, density_scratch<n>});
   STANLI_SCALAR_CDF_LIST(STANLI_REGISTER_CDF)
   STANLI_INT_CDF_LIST(STANLI_REGISTER_CDF)
+  // Field 3 is the real-argument count for the two-group cdfs as well,
+  // so the same expansion gives them the right backward.
+  STANLI_TWO_INT_CDF_LIST(STANLI_REGISTER_CDF)
 #undef STANLI_REGISTER_CDF
 #define STANLI_REGISTER_ORDERED(code, fn, nargs, vm) \
   register_kernel(                                   \

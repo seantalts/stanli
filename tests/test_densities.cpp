@@ -568,6 +568,116 @@ int main() {
         [&](int64_t i) { return std::vector<int>{-1, counts[i], -1, 20}; });
   }
 
+  // The two-integer-group cdfs. binomial and beta_binomial carry an
+  // outcome group and a trials group, so their idata is the same
+  // [len, vals...] pair their lpmfs use, and a len of -1 marks a
+  // language-level scalar that stan-math broadcasts. Every combination of
+  // the three group forms -- vector, scalar, and the array of one that is
+  // a container rather than a scalar -- reaches a different stan-math
+  // overload, which is why each one is pinned rather than just the vector
+  // case.
+  {
+    using stan::math::var;
+    using VecV = Eigen::Matrix<var, -1, 1>;
+    const std::vector<double> th3{0.2, 0.5, 0.75};
+    const std::vector<double> a3{2.0, 3.0, 4.0};
+    const std::vector<double> b3{1.3, 1.4, 1.5};
+    auto vec = [](const std::vector<double>& v) {
+      VecV x((Eigen::Index)v.size());
+      for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
+      return x;
+    };
+    auto ivec = [](std::vector<int> v) {
+      Eigen::VectorXi x((Eigen::Index)v.size());
+      for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
+      return x;
+    };
+    // Both groups vectors.
+    {
+      auto r = testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true},
+                                    {3, 1, 2, 3, 3, 5, 7, 9});
+      VecV theta = vec(th3);
+      var lp =
+          stan::math::binomial_lcdf(ivec({1, 2, 3}), ivec({5, 7, 9}), theta);
+      lp.grad();
+      expect_eq("binomial_lcdf vv value", r.value, lp.val());
+      for (int i = 0; i < 3; ++i)
+        expect_eq("binomial_lcdf vv d" + std::to_string(i), r.grad[(size_t)i],
+                  theta(i).adj());
+      stan::math::recover_memory();
+    }
+    // Scalar outcome against a vector of trials.
+    {
+      auto r = testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true},
+                                    {-1, 3, 3, 5, 7, 9});
+      VecV theta = vec(th3);
+      var lp = stan::math::binomial_lcdf(3, ivec({5, 7, 9}), theta);
+      lp.grad();
+      expect_eq("binomial_lcdf sv value", r.value, lp.val());
+      for (int i = 0; i < 3; ++i)
+        expect_eq("binomial_lcdf sv d" + std::to_string(i), r.grad[(size_t)i],
+                  theta(i).adj());
+      stan::math::recover_memory();
+    }
+    // Both groups scalars, broadcast across the real argument's lanes.
+    {
+      auto r =
+          testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true}, {-1, 3, -1, 9});
+      VecV theta = vec(th3);
+      var lp = stan::math::binomial_lcdf(3, 9, theta);
+      lp.grad();
+      expect_eq("binomial_lcdf ss value", r.value, lp.val());
+      for (int i = 0; i < 3; ++i)
+        expect_eq("binomial_lcdf ss d" + std::to_string(i), r.grad[(size_t)i],
+                  theta(i).adj());
+      stan::math::recover_memory();
+    }
+    // An array of one is a container: it must not be confused with the
+    // scalar form, which is what the -1 length exists to distinguish.
+    {
+      auto r = testutil::run_one_op(OP_BINOMIAL_LCCDF, {{0.4}}, {true},
+                                    {1, 2, 1, 7});
+      VecV theta = vec({0.4});
+      var lp = stan::math::binomial_lccdf(ivec({2}), ivec({7}), theta);
+      lp.grad();
+      expect_eq("binomial_lccdf 11 value", r.value, lp.val());
+      expect_eq("binomial_lccdf 11 d0", r.grad[0], theta(0).adj());
+      stan::math::recover_memory();
+    }
+    // beta_binomial: the same two groups, then two real arguments.
+    {
+      auto r = testutil::run_one_op(OP_BETA_BINOMIAL_CDF, {a3, b3},
+                                    {true, true}, {3, 1, 2, 3, 3, 5, 7, 9});
+      VecV alpha = vec(a3), beta = vec(b3);
+      var lp = stan::math::beta_binomial_cdf(ivec({1, 2, 3}), ivec({5, 7, 9}),
+                                             alpha, beta);
+      lp.grad();
+      expect_eq("beta_binomial_cdf vv value", r.value, lp.val());
+      for (int i = 0; i < 3; ++i)
+        expect_eq("beta_binomial_cdf vv da" + std::to_string(i),
+                  r.grad[(size_t)i], alpha(i).adj());
+      for (int i = 0; i < 3; ++i)
+        expect_eq("beta_binomial_cdf vv db" + std::to_string(i),
+                  r.grad[(size_t)(3 + i)], beta(i).adj());
+      stan::math::recover_memory();
+    }
+    {
+      auto r = testutil::run_one_op(OP_BETA_BINOMIAL_LCCDF, {a3, b3},
+                                    {true, true}, {-1, 3, -1, 9});
+      VecV alpha = vec(a3), beta = vec(b3);
+      var lp = stan::math::beta_binomial_lccdf(3, 9, alpha, beta);
+      lp.grad();
+      expect_eq("beta_binomial_lccdf ss value", r.value, lp.val());
+      for (int i = 0; i < 3; ++i)
+        expect_eq("beta_binomial_lccdf ss da" + std::to_string(i),
+                  r.grad[(size_t)i], alpha(i).adj());
+      for (int i = 0; i < 3; ++i)
+        expect_eq("beta_binomial_lccdf ss db" + std::to_string(i),
+                  r.grad[(size_t)(3 + i)], beta(i).adj());
+      stan::math::recover_memory();
+    }
+  }
+
   // wiener: every argument vectorizes in the language, and a length-1 slot
   // must enter stan-math as a scalar (vectors do not broadcast there).
   {

@@ -1844,6 +1844,14 @@ struct Lowering {
   {#fn, {code, nreal + 1, 1, false, DensityShape::Plain, -1, true}},
         STANLI_INT_CDF_LIST(STANLI_INT_CDF_TABLE)
 #undef STANLI_INT_CDF_TABLE
+        // The binomials' cdfs: an outcome group and a trials group, so
+        // the two-group branch below writes both as [len, vals...] and
+        // spells a language-level scalar -1. lane_outcome stays false --
+        // that flag replicates the ONE group these do not have, and the
+        // -1 length is how these broadcast instead.
+#define STANLI_TWO_INT_CDF_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 2, 2}},
+        STANLI_TWO_INT_CDF_LIST(STANLI_TWO_INT_CDF_TABLE)
+#undef STANLI_TWO_INT_CDF_TABLE
         // The ordinal densities have the same argument counts but not the
         // same meaning: their trailing cutpoint vector is one argument, so
         // a scalar outcome stays one lane whatever its length.

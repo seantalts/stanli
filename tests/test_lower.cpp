@@ -1693,6 +1693,64 @@ int main() {
     }
   }
 
+  // The cumulative-distribution side of the discrete densities. See
+  // tests/fixtures/dcdf.stan: the lpmfs had been listed for a long time
+  // and their cdfs had not, so every one of these was an unsupported
+  // function. neg_binomial_2_cdf is the one-integer-group shape the
+  // generated int cdfs already had; binomial and beta_binomial carry two
+  // groups (outcome and trials) and needed the [len, vals...] layout
+  // their lpmfs use. The reference is the call CmdStan would instantiate,
+  // so the scalar lines check the broadcast rather than just the absence
+  // of a throw.
+  {
+    DataMap d;
+    d.set_int("n", 3);
+    d.set_int_array("ns", {1, 2, 3});
+    d.set_int_array("N", {5, 7, 9});
+    CompiledModel bm = compile_model(slurp("tests/fixtures/dcdf.tmir.sexp"), d);
+    Executor bex(std::move(bm.graph));
+    bm.bind(bex);
+    // Both points keep every parameter inside (0, 1), which is a
+    // probability for binomial and a positive mean or shape for the other
+    // two, so one unconstrained vector serves all three families.
+    const double pts[2][3] = {{0.3, 0.45, 0.7}, {0.6, 0.15, 0.9}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 3; ++i) bex.params_data()[i] = pts[c][i];
+      double grad[3] = {0, 0, 0};
+      const double lp = bex.gradient(grad);
+
+      using stan::math::var;
+      Eigen::Matrix<var, Eigen::Dynamic, 1> th(3);
+      for (int i = 0; i < 3; ++i) th(i) = pts[c][i];
+      Eigen::Matrix<var, Eigen::Dynamic, 1> b = stan::math::exp(th);
+      // The integer groups reach the kernels as Eigen vectors of int.
+      // The real arguments all reach them as the recording scalar, data
+      // or not: the cdfs are tier 0, so there is one all-active
+      // instantiation rather than one per activity mask, and the
+      // reference has to bind the same way to be the same computation.
+      Eigen::VectorXi ns(3), NN(3);
+      ns << 1, 2, 3;
+      NN << 5, 7, 9;
+      Eigen::Matrix<var, Eigen::Dynamic, 1> phi(3), bb(3);
+      phi << 2.0, 3.0, 4.0;
+      bb << 1.3, 1.4, 1.5;
+      const int n = 3;
+      var acc = stan::math::neg_binomial_2_cdf(ns, b, phi);
+      acc += stan::math::binomial_lcdf(ns, NN, th);
+      acc += stan::math::binomial_lccdf(n, 9, th);
+      acc += stan::math::binomial_cdf(ns, NN, th);
+      acc += stan::math::beta_binomial_lcdf(ns, NN, b, bb);
+      acc += stan::math::beta_binomial_lccdf(n, 9, b, bb);
+      acc += stan::math::beta_binomial_cdf(ns, NN, b, bb);
+      acc.grad();
+
+      // Same activity on both sides, so this is bitwise: no tolerance.
+      for (int i = 0; i < 3; ++i)
+        expect_eq("dcdf g" + std::to_string(i), grad[i], th(i).adj());
+      expect_eq("dcdf lp", lp, acc.val());
+    }
+  }
+
   // Two-argument log_sum_exp / log_diff_exp on containers. See
   // tests/fixtures/lsepair.stan: Stan vectorizes both elementwise with
   // scalar broadcast, and the lowering used to emit them at width 1, so

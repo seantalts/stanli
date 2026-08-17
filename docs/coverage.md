@@ -8,7 +8,7 @@ against CmdStan with a generated single-function model.
 | family | supported |
 |---|---|
 | densities (`_lpdf`, `_lpmf`) | 69 / 72 |
-| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 90 / 105 |
+| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 97 / 105 |
 | scalar math (all-real signature) | 47 / 129 |
 
 Every supported density's **gradients** match CmdStan bitwise, at three
@@ -65,6 +65,19 @@ contract.
 constant zero, but Stan Math performs support checks first. Until Stanli has
 an exact checked implementation, lowering refuses rather than silently
 accepting invalid data.
+
+**Five distribution functions the recorder cannot evaluate.**
+`von_mises_cdf`, `von_mises_lcdf`, `von_mises_lccdf`,
+`neg_binomial_2_lcdf` and `neg_binomial_2_lccdf` build their result with
+arithmetic on the autodiff scalar -- `res *= 0.0`, `phi / (phi + mu)` --
+rather than through stan-math's partials propagator. `rvar` deliberately
+has no operators, so these do not compile against it however they are
+listed. The same var-tape treatment `ordered_probit` and `wiener` get
+would take them; nobody has written it. `neg_binomial_2_cdf` is not in
+this group -- it does use the propagator, and it works.
+
+**`discrete_range`'s three.** Integers all the way down, so there is no
+real edge for a kernel to differentiate and no layout for one yet.
 
 **`gaussian_dlm_obs`.** It is unsupported for a structural reason: it takes
 seven arguments and `Op::in` holds six. Raising the limit would grow every
