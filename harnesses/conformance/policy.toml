@@ -63,3 +63,29 @@ id = "inv-phi-probe-depth"
 reason = "Deep probe expression trees over an identical forward call; last-bit accumulation only."
 name_regex = "^(inv_Phi|std_normal_qf)$"
 rel_tol = 1e-13
+
+# The bound transforms called as functions. stanli composes the inverse
+# direction from elementwise ops -- stan-math has no rev overloads for
+# lb_free/ub_free/lub_free, so its own `logit((y - lb) / (ub - lb))` is
+# ordinary var arithmetic and the composition is the reference rather than
+# an approximation of it. The formulas match term for term, and OP_LOGIT
+# calls stan::math::logit itself.
+#
+# What is left is the probe, not the transform. These signatures produce
+# outputs that straddle zero, so the generated model's weighted sum cancels
+# three digits out of lanes of order 0.1 and a last-bit difference becomes
+# a large relative one. Measured across the 29 rows: worst 1.735e-15
+# absolute, 3.69e-14 relative. An absolute gate is the honest metric for a
+# cancelling sum -- ULP and relative both describe the cancellation rather
+# than the disagreement -- and 1e-13 leaves two orders of headroom.
+#
+# The fma half of this class is fixed at source rather than gated: the
+# reference now compiles from the same --O1 MIR stanli reads. That removed
+# 28 of the original 57 here and all 9 on upper_bound_jacobian. The second
+# source of last-bit difference behind these 29 is not identified; it is a
+# gate on a known-small quantity, not an explanation.
+[[numeric_gate]]
+id = "bound-transform-probe-cancellation"
+reason = "Probe outputs straddle zero, so the weighted sum cancels and a last-bit difference reads as a large relative one."
+name_regex = "^(lower_bound|upper_bound|lower_upper_bound|offset_multiplier)_(constrain|unconstrain|jacobian)$"
+abs_tol = 1e-13
