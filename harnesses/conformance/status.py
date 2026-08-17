@@ -21,7 +21,33 @@ class ResultStatus(str, enum.Enum):
         return self in BLOCKING_STATUSES
 
 
+# The gate asks one question: does stanli disagree with CmdStan, or is the
+# harness itself broken? A function stanli has not implemented yet is
+# neither. This suite is a build-out to-do list, and a red gate that means
+# "there is still work to do" is a gate nobody reads.
+#
+# So `unexpected_unsupported` and `generator_gap` are reported, counted and
+# listed in the summary, but they do not fail the run. `mismatch` does --
+# stanli answered, and answered differently from the reference, which is a
+# wrong answer rather than a missing one. `harness_error` does, because a
+# harness that cannot run has not measured anything.
+#
+# Worth revisiting for one slice of `generator_gap`: the rows reading
+# "stanc rejected the generated scalar shard" are a generator bug, not a
+# generator to-do, and once that is fixed they could block on their own.
 BLOCKING_STATUSES = frozenset(
+    {
+        ResultStatus.MISMATCH,
+        ResultStatus.HARNESS_ERROR,
+    }
+)
+
+# Everything that is not a clean pass. Wider than BLOCKING_STATUSES: a
+# coverage gap does not fail the run, but it is still a finding, and it
+# still needs its reproducer written out and its row listed. Keeping the
+# two ideas apart is what lets the gate relax without the report going
+# quiet about the backlog.
+FINDING_STATUSES = frozenset(
     {
         ResultStatus.UNEXPECTED_UNSUPPORTED,
         ResultStatus.MISMATCH,

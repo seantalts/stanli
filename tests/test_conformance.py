@@ -43,7 +43,7 @@ from conformance.signatures import (ArrayType, DataType, FunctionType,
                                     SignatureParseError, TupleType,
                                     inventory_from_dump, load_inventory,
                                     parse_signature)
-from conformance.status import CaseResult, ResultStatus
+from conformance.status import (FINDING_STATUSES, CaseResult, ResultStatus)
 from conformance.toml_compat import loads as toml_loads
 import stan_conformance
 from conformance.model_worker import (TransportUnavailable,
@@ -783,16 +783,30 @@ class ReportAndSnapshotTests(unittest.TestCase):
         self.assertTrue(checked.snapshot_delta.required)
         self.assertFalse(checked.snapshot_delta.stale)
 
-    def test_every_red_status_blocks(self):
-        for status in (ResultStatus.UNEXPECTED_UNSUPPORTED,
-                       ResultStatus.MISMATCH, ResultStatus.GENERATOR_GAP,
-                       ResultStatus.HARNESS_ERROR):
+    def test_disagreement_and_harness_failure_block(self):
+        # The gate asks whether stanli answered differently, or whether the
+        # harness failed to ask. Those two fail the run.
+        for status in (ResultStatus.MISMATCH, ResultStatus.HARNESS_ERROR):
             with self.subTest(status=status):
                 report = _report([_result("signature:f(real)=>real", status,
                                           "deliberate mutation")])
                 self.assertFalse(report.green)
                 self.assertTrue(any(issue.startswith(status.value)
                                     for issue in report.gate_issues))
+
+    def test_coverage_gaps_are_reported_without_blocking(self):
+        # An unimplemented function is a to-do, not a failure. It still has
+        # to be counted, listed, and given a reproducer -- a gate that goes
+        # quiet about the backlog is as useless as one that never goes green.
+        for status in (ResultStatus.UNEXPECTED_UNSUPPORTED,
+                       ResultStatus.GENERATOR_GAP):
+            with self.subTest(status=status):
+                report = _report([_result("signature:f(real)=>real", status,
+                                          "not wired up yet")])
+                self.assertTrue(report.green)
+                self.assertEqual(report.gate_issues, ())
+                self.assertEqual(report.status_counts[status.value], 1)
+                self.assertIn(status, FINDING_STATUSES)
 
     def test_snapshot_refuses_partial_and_failed_runs(self):
         partial = _report([_result("signature:f(real)=>real")],

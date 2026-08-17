@@ -13,7 +13,8 @@ import shutil
 import tempfile
 from typing import Dict, List, Mapping, Optional, Tuple
 
-from .status import BLOCKING_STATUSES, CaseResult, ResultStatus
+from .status import (BLOCKING_STATUSES, FINDING_STATUSES, CaseResult,
+                     ResultStatus)
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -467,7 +468,10 @@ def write_markdown(report: ConformanceReport, path: pathlib.Path) -> None:
 
 def _populate_reproducers(report: ConformanceReport,
                           staging: pathlib.Path) -> None:
-    blockers = [result for result in report.results if result.status.is_blocking]
+    # Findings, not just blockers: a coverage gap is the main thing a
+    # reader of this suite wants a copy-pasteable command for.
+    blockers = [result for result in report.results
+                if result.status in FINDING_STATUSES]
     index = []
     copied_sources: Dict[str, pathlib.Path] = {}
     source_digests: Dict[pathlib.Path, str] = {}
