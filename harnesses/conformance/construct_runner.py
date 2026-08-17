@@ -94,14 +94,20 @@ def _construction_outcome(case: ConstructCase,
             comparison, details={**common, **dict(comparison.details)})
 
     if not stanli_accepted:
-        status = (ResultStatus.MISMATCH if not case.expected_accept
-                  else ResultStatus.UNEXPECTED_UNSUPPORTED)
+        # A construction-time refusal is a coverage gap whatever the catalog
+        # expected of the accepted case. stanli said no, loudly, at compile
+        # time -- it did not compute a different answer, and a caller cannot
+        # mistake it for one. That is the same kind of finding as a function
+        # that is not wired up, so it is reported and not gated. A genuine
+        # disagreement about a value still reaches MISMATCH below, through
+        # the evaluation comparison, which is where a wrong answer lives.
         reason = ("stanli rejected during construction instead of the "
                   f"cataloged {case.expected_phase} phase."
                   if not case.expected_accept else
                   "The reference constructed the case but stanli refused it: "
                   + str(stanli.get("message", "unknown rejection")))
-        return OutcomeComparison(status, reason, common)
+        return OutcomeComparison(
+            ResultStatus.UNEXPECTED_UNSUPPORTED, reason, common)
 
     if not case.expected_accept and case.expected_phase == "construction":
         return OutcomeComparison(

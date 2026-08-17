@@ -327,7 +327,13 @@ class ConstructCatalogTests(unittest.TestCase):
         stanli = {"accepted": False, "phase": "construction",
                   "exception_category": "domain_error", "message": "early"}
         outcome = _construction_outcome(case, reference, stanli)
-        self.assertEqual(outcome.status, ResultStatus.MISMATCH)
+        # A construction-time refusal is a coverage gap, not a wrong answer:
+        # stanli declined at compile time rather than computing something
+        # different, and the reason still names the phase it should have
+        # rejected in. A disagreement about a value reaches MISMATCH through
+        # the evaluation comparison instead.
+        self.assertEqual(outcome.status, ResultStatus.UNEXPECTED_UNSUPPORTED)
+        self.assertIn("cataloged evaluation phase", outcome.reason)
 
     def test_stanli_process_failure_is_an_implementation_finding(self):
         catalog = load_construct_catalog(DEFAULT_CONSTRUCTS, REPO)
