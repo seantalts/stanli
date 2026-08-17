@@ -46,6 +46,13 @@ half hour is paid once per machine per pin, not once per session, and
 `--embed` and `--corpus` pay most of it already. It ends by printing the
 invocation below with your paths filled in.
 
+Only the nightly *workflow* is pinned to Linux. Nothing in the harness is:
+`fetch_cmdstan.sh` selects its TBB target per `uname` and has handled Darwin
+all along, and a full local run on macOS reproduces the same statuses. The
+half-hour figure above reads like a wall and is not one, which is how this
+suite ended up treated as CI-only and its findings argued from the last
+nightly's recorded rows instead of being checked.
+
 Run the driver under the venv interpreter, not the host's `python3`. The
 harness reads its policy and catalog as TOML; `tomllib` arrived in Python
 3.11, and `requirements.txt` carries the backport for older hosts -- but
