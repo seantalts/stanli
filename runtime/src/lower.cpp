@@ -1450,6 +1450,42 @@ struct Lowering {
     return emit_value(opcode, {a, b}, n, si);
   }
 
+  // Two-argument scalar math with one int argument
+  // (STANLI_SCALAR_BINARY_INT_FIRST_LIST and its SECOND twin): elementwise
+  // with scalar broadcast like the all-real binaries, but shape_of does not
+  // apply. Those two sides may legitimately carry different views --
+  // `ldexp(matrix, array[,] int)` is a matrix, `falling_factorial(real,
+  // array[,] int)` is an array -- so the result takes the real side's view
+  // when it has one and the int side's when the real side is a scalar,
+  // which is what the signature list says in every case.
+  Val lower_binary_int(uint16_t opcode, bool int_first, const mir::Expr& e) {
+    Val a = lower_expr(e.args[0]);
+    Val b = lower_expr(e.args[1]);
+    const Val& re = int_first ? b : a;
+    const Val& iv = int_first ? a : b;
+    const int64_t lr = g.slots[re.slot].len, li = g.slots[iv.slot].len;
+    // Only a language scalar broadcasts. A one-element container against a
+    // wider one is the size error stan-math throws, not a broadcast.
+    if (!is_scalar(re) && !is_scalar(iv) && lr != li)
+      fail(e.name + ": arguments must match in size", e.raw);
+    const SlotInfo si = is_scalar(re) ? iv.si : re.si;
+    // The one place the two flat orders disagree: a matrix leaf is stored
+    // column-major and an int array's trailing two extents are row-major.
+    // Handing the kernel that leaf's rows and cols is what tells it to undo
+    // the difference; see IntLane in kernels/scalar_binary.cpp.
+    std::vector<int> idata;
+    if (!is_scalar(iv)) {
+      if (is_matrix(re.si)) {
+        idata = {(int)re.si.rows, (int)re.si.cols};
+      } else if (is_array(re.si)) {
+        const ArrayShape& s = array_shape(re.si);
+        if (s.leaf == ViewKind::Matrix)
+          idata = {(int)s.dims[s.dims.size() - 2], (int)s.dims.back()};
+      }
+    }
+    return emit_value(opcode, {a, b}, std::max(lr, li), si, std::move(idata));
+  }
+
   // Value of a data-only expression at compile time. The interpreter
   // handles most cases; a UDF-local constant lives only as a slot, so fall
   // back to that slot's recorded fill.
@@ -2192,6 +2228,21 @@ struct Lowering {
       const int64_t n = as ? lb : (bs ? la : la);
       return emit_value(bit->second, {a, b}, n, si);
     }
+
+    // The same surface with one int argument, from the two int lists in
+    // optable.hpp. The flag is which position holds the int, which is the
+    // only thing that varies across the nine.
+    static const std::map<std::string, std::pair<uint16_t, bool>> kBinInt = {
+#define STANLI_BINARY_INT_TABLE(code, name, fn) {#name, {code, true}},
+        STANLI_SCALAR_BINARY_INT_FIRST_LIST(STANLI_BINARY_INT_TABLE)
+#undef STANLI_BINARY_INT_TABLE
+#define STANLI_BINARY_INT_TABLE(code, name, fn) {#name, {code, false}},
+            STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_BINARY_INT_TABLE)
+#undef STANLI_BINARY_INT_TABLE
+    };
+    auto iit = kBinInt.find(e.name);
+    if (iit != kBinInt.end() && e.args.size() == 2)
+      return lower_binary_int(iit->second.first, iit->second.second, e);
 
     // Elementwise unaries + reductions.
     static const std::map<std::string, uint16_t> kUn = {

@@ -1762,6 +1762,119 @@ int main() {
     }
   }
 
+  // Two-argument scalar math with an int argument. See
+  // tests/fixtures/binint.stan. The int side has no derivative, so the
+  // whole gradient belongs to the real side, and the interesting case is
+  // the pairing: a matrix is column-major, an int array's trailing extents
+  // are row-major, and stan-math pairs n[i][j] with m(i, j).
+  {
+    const int kk = 2;
+    const std::vector<int> counts = {0, 1, 2};
+    // {{0, 3}, {1, 2}}: distinct, so a swapped pairing is a factor of two.
+    const int expo[2][2] = {{0, 3}, {1, 2}};
+    const int expo3[2][2][2] = {{{0, 3}, {1, 2}}, {{2, 0}, {3, 1}}};
+    // Through the JSON reader, because expo3 is rank three and the data
+    // path is the only thing that stores an array of that rank. `nn` is
+    // the same shape as `expo` below but read rather than built from a
+    // literal: the interpreter reaches a data variable and a literal by
+    // different paths, and only one of them is covered by `expo`.
+    DataMap d = DataMap::from_json(R"({"k": )" + std::to_string(kk) + R"(,
+            "counts": [0, 1, 2],
+            "expo3": [[[0, 3], [1, 2]], [[2, 0], [3, 1]]],
+            "nn": [[2, 0], [3, 1]]})");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/binint.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    // Declaration order: a[3], b.
+    const double pts[2][4] = {{0.4, -0.7, 0.25, 0.6},
+                              {-0.3, 0.9, -0.15, -0.45}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 4; ++i) lex.params_data()[i] = pts[c][i];
+      double grad[4] = {0, 0, 0, 0};
+      const double lp = lex.gradient(grad);
+
+      using stan::math::var;
+      std::vector<var> a = {pts[c][0], pts[c][1], pts[c][2]};
+      var b = pts[c][3];
+      std::vector<var> p;
+      for (int i = 0; i < 3; ++i) p.push_back(stan::math::exp(a[i]) + 1);
+      // One reduction per target statement, in statement order, so the
+      // reference reassociates the way the graph does.
+      var acc = 0, s = 0;
+      for (int i = 0; i < 3; ++i) s += stan::math::bessel_first_kind(kk, a[i]);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i)
+        s += stan::math::modified_bessel_first_kind(kk, a[i]);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += stan::math::bessel_second_kind(kk, p[i]);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i)
+        s += stan::math::modified_bessel_second_kind(kk, p[i]);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += stan::math::lmgamma(kk, p[i]);
+      acc += s;
+      acc += stan::math::binary_log_loss(1, stan::math::inv_logit(b));
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += stan::math::falling_factorial(p[i], kk);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i)
+        s += stan::math::rising_factorial(p[i], counts[i]);
+      acc += s;
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += stan::math::ldexp(a[i], counts[i]);
+      acc += s;
+      // m = [[a1, a2], [a3, b]], summed column-major, each entry against
+      // the int array entry at the SAME logical position.
+      const std::vector<var> mcol = {a[0], a[2], a[1], b};
+      const int ecol[4] = {expo[0][0], expo[1][0], expo[0][1], expo[1][1]};
+      s = 0;
+      for (int i = 0; i < 4; ++i) s += stan::math::ldexp(mcol[i], ecol[i]);
+      acc += s;
+      // An array of matrices against a deeper int array. The extents that
+      // set the pairing are the leaf's, so each element repeats the case
+      // above with its own slice of expo3; `sum(am[1]) + sum(am[2])` is one
+      // target statement, so the two element sums join before the
+      // accumulator sees them.
+      var e1 = 0, e2 = 0;
+      for (int i = 0; i < 4; ++i) {
+        const int lo[4] = {expo3[0][0][0], expo3[0][1][0], expo3[0][0][1],
+                           expo3[0][1][1]};
+        const int hi[4] = {expo3[1][0][0], expo3[1][1][0], expo3[1][0][1],
+                           expo3[1][1][1]};
+        e1 += stan::math::ldexp(mcol[i], lo[i]);
+        e2 += stan::math::ldexp(mcol[i] + 1, hi[i]);
+      }
+      acc += e1 + e2;
+      s = 0;
+      for (int i = 0; i < 3; ++i) s += stan::math::ldexp(b, counts[i]);
+      acc += s;
+      // Transformed data: the MIR interpreter's own copies of the same
+      // shapes. 39 is [[1, 2], [3, 4]] against the literal {{0, 3}, {1, 2}}
+      // and 38 the same matrix against the data array {{2, 0}, {3, 1}},
+      // both paired n[i][j] with m(i, j). A flat pairing would answer 45
+      // and 31.
+      acc += stan::math::ldexp(1.5, 0) + stan::math::ldexp(2.5, 1) +
+             stan::math::ldexp(3.5, 2) + stan::math::lmgamma(2, 1.75) + 39.0 +
+             38.0;
+      acc.grad();
+
+      // Measured bitwise at both points: the graph builds the same lanes
+      // in the same order the reference tape does.
+      bool gok = grad[3] == b.adj();
+      for (int i = 0; i < 3; ++i) gok = gok && grad[i] == a[i].adj();
+      check(gok, "binint: gradients bitwise against the var path");
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol, "binint: lp matches the var path");
+      stan::math::recover_memory();
+    }
+  }
+
   // array[N] vector[K] data into a vectorized multivariate density. See
   // tests/fixtures/mnarr.stan: the data path stores this shape the way it
   // stores a matrix, and the kernel wants each element contiguous, so the

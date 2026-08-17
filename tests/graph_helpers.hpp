@@ -89,7 +89,8 @@ inline RunResult run_one_op(uint16_t opcode,
 // lp (sum), matching a var reference of sum(f(args)).
 inline RunResult run_op_sum(uint16_t opcode, int64_t out_len,
                             const std::vector<std::vector<double>>& vals,
-                            const std::vector<bool>& params) {
+                            const std::vector<bool>& params,
+                            std::vector<int> idata = {}) {
   Graph g;
   std::vector<int> slots;
   int64_t n_par = 0;
@@ -104,6 +105,11 @@ inline RunResult run_op_sum(uint16_t opcode, int64_t out_len,
   op.out = out;
   op.n_in = 0;
   for (int s : slots) op.in[op.n_in++] = s;
+  if (!idata.empty()) {
+    g.idata_pool.push_back(std::move(idata));
+    op.idata = g.idata_pool.back().data();
+    op.n_idata = (int64_t)g.idata_pool.back().size();
+  }
   g.ops.push_back(op);
   if (out_len == 1) {
     g.add_op(OP_ADD_N, {out}, lp);
