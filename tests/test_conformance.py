@@ -610,6 +610,32 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn(f"array[{outer}] vector[{inner}]", body)
         self.assertIn("conformance_result", body)
 
+    def test_data_only_argument_is_inlined_not_bound_to_a_local(self):
+        # Stan has no data-only local: binding the value to a name loses the
+        # property the signature demands, stanc rejects the whole shard, and
+        # every unrelated case packed beside it is reported as a generator
+        # gap. That cost 490 rows across two shards, 279 of them wiener's own
+        # and the rest collateral from weibull, von_mises and the bound
+        # transforms that happened to share them.
+        inventory = inventory_from_dump(
+            "wiener_lpdf(real, real, real, real, real, real, real) => real\n"
+            "wiener_lpdf(vector, vector, vector, vector, vector, vector, "
+            "real) => real\n", "test")
+        spec = next(spec for spec in generated_inventory(inventory)
+                    if spec.inventory_id.startswith("wiener_lpdf(vector"))
+        self.assertEqual(spec.data_positions, (6,))
+        body = "\n".join(spec.render_body(0, 1.0))
+        # The data-only argument is the only one without a declaration, and
+        # its literal reaches the call directly.
+        self.assertNotIn("conformance_arg_7 =", body)
+        for index in range(1, 7):
+            self.assertIn(f"conformance_arg_{index} =", body)
+        call = next(line for line in body.splitlines() if "wiener_lpdf(" in line)
+        self.assertNotIn("conformance_arg_7", call)
+        self.assertIn("1e-05", call.replace("1.0000000000000001e-05", "1e-05"))
+        # And it consumes no parameter lane, since it is not perturbed.
+        self.assertEqual(spec.parameter_count, 12)
+
     def test_mixed_depth_matrix_multiply_uses_compatible_square_shapes(self):
         inventory = inventory_from_dump(
             "multiply(real, real) => real\n"

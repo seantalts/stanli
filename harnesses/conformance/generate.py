@@ -324,10 +324,21 @@ class VectorizedCaseSpec:
             name = f"conformance_arg_{index + 1}"
             literal = _numeric_literal(argument, int(center), next_real,
                                        self.dimensions)
-            declarations.append(
-                f"{_type_declaration(argument, name, self.dimensions)} "
-                f"= {literal};")
-            arguments.append(name)
+            if data_only:
+                # Pass the literal straight to the call. A local is never
+                # data-only in Stan however it was initialized, so binding
+                # this one to a name loses exactly the property the
+                # signature requires -- "the Nth argument must be data-only"
+                # -- and stanc rejects the whole shard, taking every
+                # unrelated case packed beside it down as a generator gap.
+                # The scalar renderer already inlines these; this is the
+                # vectorized half catching up.
+                arguments.append(literal)
+            else:
+                declarations.append(
+                    f"{_type_declaration(argument, name, self.dimensions)} "
+                    f"= {literal};")
+                arguments.append(name)
 
         if theta_lane != self.parameter_count:
             raise ValueError(f"{self.inventory_id}: vectorized lane mismatch")
