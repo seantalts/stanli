@@ -202,6 +202,21 @@ jobs:
           pattern: conformance-part-*
           path: conformance-parts
 
+      # --baseline is the ratchet. The gate stopped failing on coverage
+      # gaps, which is right -- a runtime being built out has them by
+      # definition -- but that left nothing watching for coverage going
+      # BACKWARDS: a lowering regression that turns a verified function
+      # into a compile refusal lands in unexpected_unsupported, which no
+      # longer blocks, and a green run would not mention it.
+      #
+      # The comparison is directional. Wiring a function up changes its
+      # classification and does not fail the run; losing one that used to
+      # match CmdStan does, as does a case vanishing from the inventory or
+      # the pinned stanc or policy moving under the baseline.
+      #
+      # Advancing it is a reviewed act: re-run with --update-snapshot and
+      # commit docs/conformance-baseline.json.gz in the same PR as the work
+      # that earned it.
       - name: Reject missing or duplicate rows and render the aggregate
         id: aggregate
         continue-on-error: true
@@ -209,6 +224,7 @@ jobs:
           python3 harnesses/stan_conformance.py \
             --aggregate conformance-parts/*/conformance.json \
             --manifest conformance-manifest/partition-manifest.json \
+            --baseline docs/conformance-baseline.json.gz \
             --output conformance-aggregate \
             --failure-limit 40
 

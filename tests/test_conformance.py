@@ -900,6 +900,56 @@ class ReportAndSnapshotTests(unittest.TestCase):
         # by the partial gate, not misreported as removed inventory.
         self.assertEqual(delta.missing_ids, ())
 
+    def test_lost_coverage_blocks_and_gained_coverage_does_not(self):
+        # The ratchet. Wiring a function up is the point of the project, so
+        # a gate that went red for it would be re-baselined on reflex until
+        # nobody read it. Losing a function that used to match CmdStan is
+        # the thing worth stopping a run for, and nothing else caught it:
+        # a lowering regression that turns a verified case into a compile
+        # refusal lands in unexpected_unsupported, which does not block.
+        baseline = snapshot_for(_report([_result("signature:f(real)=>real"),
+                                         _result("signature:g(real)=>real")]))
+
+        gained = _report([_result("signature:f(real)=>real"),
+                          _result("signature:g(real)=>real",
+                                  ResultStatus.VERIFIED)])
+        self.assertEqual(compare_snapshot(gained, baseline).regressed_ids, ())
+
+        wired_up = snapshot_for(_report([
+            _result("signature:f(real)=>real"),
+            _result("signature:g(real)=>real",
+                    ResultStatus.UNEXPECTED_UNSUPPORTED, "not wired yet")]))
+        now_works = with_snapshot(
+            _report([_result("signature:f(real)=>real"),
+                     _result("signature:g(real)=>real")]), wired_up)
+        self.assertEqual(now_works.snapshot_delta.regressed_ids, ())
+        self.assertFalse(now_works.snapshot_delta.stale)
+        self.assertTrue(now_works.green)
+        # Still reported, just not fatal.
+        self.assertEqual(now_works.snapshot_delta.changed_ids,
+                         ("g(real)=>real",))
+
+        lost = with_snapshot(
+            _report([_result("signature:f(real)=>real"),
+                     _result("signature:g(real)=>real",
+                             ResultStatus.UNEXPECTED_UNSUPPORTED,
+                             "lowering stopped accepting it")]), baseline)
+        self.assertEqual(lost.snapshot_delta.regressed_ids,
+                         ("g(real)=>real",))
+        self.assertTrue(lost.snapshot_delta.stale)
+        self.assertFalse(lost.green)
+        self.assertIn("coverage_regressed:1", lost.gate_issues)
+
+    def test_a_vanished_case_blocks_on_a_complete_run(self):
+        baseline = snapshot_for(_report([_result("signature:f(real)=>real"),
+                                         _result("signature:g(real)=>real")]))
+        vanished = with_snapshot(
+            _report([_result("signature:f(real)=>real")], total=1), baseline)
+        self.assertEqual(vanished.snapshot_delta.missing_ids,
+                         ("g(real)=>real",))
+        self.assertFalse(vanished.green)
+        self.assertIn("cases_vanished:1", vanished.gate_issues)
+
     def test_markdown_is_generated_and_deterministic(self):
         gap = _result("signature:f(real)=>real", ResultStatus.GENERATOR_GAP,
                       "generator missing", repro_command="run f")

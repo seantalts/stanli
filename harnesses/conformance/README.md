@@ -140,10 +140,43 @@ command. Generated Stan sources are content-addressed once under
 ## Gates and snapshots
 
 Every inventory row has exactly one of the seven design statuses. A run is
-green only when it is complete, contains no blocking status, has no stale
-policy exception, and (when configured) exactly matches its classification
-snapshot. Generated reports and snapshots are build artifacts, not checked-in
-source. To freeze a run, pass an explicit ignored or externally retained path:
+green only when it is complete, carries no blocking status, has no stale
+policy exception, and does not lose ground against its baseline.
+
+The gate blocks on two things: `mismatch`, where stanli answered and
+answered differently from CmdStan, and `harness_error`, where the harness
+failed to ask. A function stanli has not implemented yet is neither, and
+this suite is a build-out to-do list -- so `unexpected_unsupported` and
+`generator_gap` are counted, listed and given reproducers without failing
+the run.
+
+That leaves a hole the baseline closes. A lowering regression which turns a
+verified function into a compile refusal lands in `unexpected_unsupported`,
+so nothing would stop a run that quietly lost coverage. The nightly compares
+against `docs/conformance-baseline.json.gz` and the comparison is
+**directional**:
+
+| change | blocks |
+| --- | --- |
+| a case that verified no longer does | yes, `coverage_regressed:N` |
+| a case in the baseline is gone | yes, `cases_vanished:N` |
+| pinned stanc, inventory or policy moved | yes, `baseline_metadata_moved:...` |
+| a case that did not verify now does | no, recorded in `changed_ids` |
+| a new signature appears | no, recorded in `new_ids` |
+
+Wiring a function up is the point of the project. A gate that went red for
+it would be re-baselined on reflex until nobody read it, which is how the
+previous one -- red on every unimplemented function -- stopped meaning
+anything.
+
+Advancing the baseline is a reviewed act: re-run with `--update-snapshot`
+and commit the result in the same PR as the work that earned it. A `.gz`
+path is written and read compressed; the baseline is one line per case over
+the whole inventory, 2.5 MB of mostly-repeated JSON and 0.09 MB gzipped.
+
+Other generated reports are build artifacts, not checked-in source. To
+freeze a run somewhere else, pass an explicit ignored or externally
+retained path:
 
 ```sh
 .venv-conformance/bin/python harnesses/stan_conformance.py \

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections
+import gzip
 import dataclasses
 import datetime as _datetime
 import hashlib
@@ -71,13 +72,24 @@ class SnapshotDelta:
     new_ids: Tuple[str, ...] = ()
     missing_ids: Tuple[str, ...] = ()
     changed_ids: Tuple[str, ...] = ()
+    regressed_ids: Tuple[str, ...] = ()
     metadata_changes: Tuple[str, ...] = ()
 
     @property
     def stale(self) -> bool:
+        # Directional. The gate blocks on ground lost -- a case that used to
+        # verify and no longer does, or one that has vanished from the
+        # inventory -- and on the pinned toolchain or policy moving under
+        # the baseline, which invalidates the comparison itself.
+        #
+        # It deliberately does not block on new_ids or on changed_ids at
+        # large. Wiring up a function turns unexpected_unsupported into
+        # verified, which is the whole point of the project; a gate that
+        # went red for it would be re-baselined reflexively until nobody
+        # read it, which is how the old one stopped meaning anything. Those
+        # stay in the report as information.
         return ((self.required and not self.baseline_present)
-                or bool(self.new_ids)
-                or bool(self.missing_ids) or bool(self.changed_ids)
+                or bool(self.missing_ids) or bool(self.regressed_ids)
                 or bool(self.metadata_changes))
 
     def to_dict(self) -> Dict[str, object]:
@@ -88,6 +100,7 @@ class SnapshotDelta:
             "new_ids": list(self.new_ids),
             "missing_ids": list(self.missing_ids),
             "changed_ids": list(self.changed_ids),
+            "regressed_ids": list(self.regressed_ids),
             "metadata_changes": list(self.metadata_changes),
         }
 
@@ -99,6 +112,8 @@ class SnapshotDelta:
             new_ids=tuple(str(x) for x in value.get("new_ids", [])),
             missing_ids=tuple(str(x) for x in value.get("missing_ids", [])),
             changed_ids=tuple(str(x) for x in value.get("changed_ids", [])),
+            regressed_ids=tuple(str(x)
+                                for x in value.get("regressed_ids", [])),
             metadata_changes=tuple(str(x)
                                    for x in value.get("metadata_changes", [])),
         )
@@ -156,7 +171,19 @@ class ConformanceReport:
         if self.policy_improvements:
             issues.append(f"policy_improvements:{len(self.policy_improvements)}")
         if self.snapshot_delta.stale:
-            issues.append("snapshot_stale")
+            # Name what went wrong: "snapshot_stale" alone sent a reader to
+            # the JSON to find out whether coverage had been lost or the
+            # stanc pin had moved.
+            delta = self.snapshot_delta
+            if delta.regressed_ids:
+                issues.append(f"coverage_regressed:{len(delta.regressed_ids)}")
+            if delta.missing_ids:
+                issues.append(f"cases_vanished:{len(delta.missing_ids)}")
+            if delta.metadata_changes:
+                issues.append("baseline_metadata_moved:"
+                              + ",".join(delta.metadata_changes))
+            if not delta.baseline_present:
+                issues.append("baseline_missing")
         return tuple(issues)
 
     @property
@@ -323,7 +350,15 @@ def snapshot_for(report: ConformanceReport) -> Dict[str, object]:
 
 def write_snapshot(report: ConformanceReport, path: pathlib.Path) -> None:
     value = snapshot_for(report)
-    _atomic_write(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
+    text = json.dumps(value, indent=2, sort_keys=True) + "\n"
+    # A .gz path is written compressed. The baseline is one line per case
+    # over the whole inventory -- 2.5 MB of mostly-repeated JSON, an order
+    # of magnitude less gzipped -- and this is the same trade
+    # docs/corpus-refs.json.gz already makes for the same reason.
+    if pathlib.Path(path).suffix == ".gz":
+        _atomic_write_bytes(path, gzip.compress(text.encode("utf-8"), 9))
+        return
+    _atomic_write(path, text)
 
 
 def load_snapshot(path: pathlib.Path) -> Optional[Mapping[str, object]]:
@@ -331,8 +366,10 @@ def load_snapshot(path: pathlib.Path) -> Optional[Mapping[str, object]]:
     if not path.exists():
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        raw = (gzip.decompress(path.read_bytes()).decode("utf-8")
+               if path.suffix == ".gz" else path.read_text(encoding="utf-8"))
+        value = json.loads(raw)
+    except (OSError, gzip.BadGzipFile, json.JSONDecodeError) as exc:
         raise ReportError(f"could not read baseline {path}: {exc}") from exc
     if int(value.get("schema_version", 0)) != SNAPSHOT_SCHEMA_VERSION:
         raise ReportError(f"unsupported snapshot schema_version in {path}")
@@ -371,12 +408,20 @@ def compare_snapshot(report: ConformanceReport,
         for key in keys:
             if old.get(key) != current.get(key):
                 metadata_changes.append(f"{section}.{key}")
+    # A regression is ground lost: it verified against CmdStan in the
+    # baseline and does not now. Everything else a status change can mean
+    # is progress or noise, and neither should fail a run.
+    regressed = tuple(sorted(
+        case_id for case_id in changed
+        if dict(baseline[case_id]).get("status") == ResultStatus.VERIFIED.value
+        and dict(live[case_id]).get("status") != ResultStatus.VERIFIED.value))
     return SnapshotDelta(
         True, required=required,
         new_ids=tuple(sorted(live_ids - baseline_ids)),
         missing_ids=(tuple(sorted(baseline_ids - live_ids))
                      if report.scope.complete else ()),
         changed_ids=changed,
+        regressed_ids=regressed,
         metadata_changes=tuple(metadata_changes),
     )
 
@@ -633,6 +678,18 @@ def write_generated_sources(report: ConformanceReport,
             shutil.rmtree(staging)
         if backup is not None and backup.exists():
             shutil.rmtree(backup)
+
+
+def _atomic_write_bytes(path: pathlib.Path, content: bytes) -> None:
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+            "wb", dir=str(path.parent), prefix=path.name + ".",
+            suffix=".tmp", delete=False) as handle:
+        handle.write(content)
+        temporary = pathlib.Path(handle.name)
+    temporary.chmod(path.stat().st_mode if path.exists() else 0o644)
+    temporary.replace(path)
 
 
 def _atomic_write(path: pathlib.Path, content: str) -> None:
