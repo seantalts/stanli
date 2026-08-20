@@ -140,13 +140,15 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
 One self-contained shared library, 29.3 MB installed, 10.6 MB compressed
 in the wheel, measured on the manylinux_2_28_x86_64 artifact.
 
-The per-symbol breakdown lives in [docs/binary-size.md](docs/binary-size.md),
-written by `tools/binary_size.py` during `tools/build_wheel.sh`. It has to
-be measured there and nowhere else: the shipped library exports a few
-hundred C ABI names and carries no static symbol table, so the attribution
-cannot be reconstructed from any artifact a user or CI downloads. It used
-to be hand-maintained, which is why it described a 22.2 MB library long
-after the library stopped being one.
+The per-symbol breakdown rides with every build as the `binary-size`
+artifact, written by `tools/binary_size.py` during `tools/build_wheel.sh`.
+It has to be measured there and nowhere else: the shipped library exports
+a few hundred C ABI names and carries no static symbol table, so the
+attribution cannot be reconstructed from the wheel or the runtime tarball
+after the fact -- only from the object as it exists a moment before the
+strip. It is not checked in for the same reason it went stale as a typed
+table: a number nothing recomputes is a number that drifts. Run
+`tools/binary_size.py` on an unstripped build for it locally.
 
 The densities dominate. A distribution is instantiated once per activity
 mask (which arguments are autodiff), twice for propto, and again for the
