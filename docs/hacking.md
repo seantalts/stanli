@@ -410,8 +410,11 @@ density kernels call stan-math's own code with a recording scalar type
 that computes in plain doubles and has no arithmetic operators, so a
 function whose implementation does arithmetic on the scalar type
 itself (`von_mises_cdf`, `wiener_lpdf`) fails to compile rather than
-silently losing derivatives. [`docs/coverage.md`](coverage.md) lists
-which functions and why.
+silently losing derivatives. Those go on `STANLI_TAIL_CDF_LIST` or
+beside `wiener` instead, and get a nested var tape in
+[`matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp);
+[`docs/coverage.md`](coverage.md) says how to tell which list a
+function belongs on.
 
 Everything else takes four steps:
 

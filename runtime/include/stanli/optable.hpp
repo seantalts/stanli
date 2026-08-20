@@ -404,6 +404,31 @@ namespace stanli {
   X(OP_BINOMIAL_LCCDF, binomial_lccdf, 1, 0)           \
   X(OP_BINOMIAL_LCDF, binomial_lcdf, 1, 0)
 
+// The distribution functions that cannot go through the recorder at all,
+// whatever list they are put on. These build their result with arithmetic
+// on the autodiff scalar rather than through stan-math's partials
+// propagator -- von_mises_cdf writes `res *= 0.0` and compares
+// `x_n == -pi`, neg_binomial_2_lcdf forms `phi_vec[i] / (phi_vec[i] +
+// mu_vec[i])` -- and rvar deliberately has no operators (recorder.hpp),
+// so listing them above produces a compile error rather than a wrong
+// answer. The discriminator is mechanical: `grep -c
+// operands_and_partials` on the prim header is 2 for everything on the
+// lists above and 0 for these five.
+//
+// They get the nested var tape ordered_probit and wiener get, in
+// matrix_fns.cpp, which has no restriction on what a density does with
+// its scalar type and costs a tape per gradient call. Field 3 is the
+// count of REAL arguments; the int list carries one integer group on top
+// of that, exactly as STANLI_INT_CDF_LIST does.
+#define STANLI_TAIL_CDF_LIST(X)                \
+  X(OP_VON_MISES_CDF, von_mises_cdf, 3, 0)     \
+  X(OP_VON_MISES_LCCDF, von_mises_lccdf, 3, 0) \
+  X(OP_VON_MISES_LCDF, von_mises_lcdf, 3, 0)
+
+#define STANLI_TAIL_INT_CDF_LIST(X)                      \
+  X(OP_NEG_BINOMIAL_2_LCCDF, neg_binomial_2_lccdf, 2, 0) \
+  X(OP_NEG_BINOMIAL_2_LCDF, neg_binomial_2_lcdf, 2, 0)
+
 // Ordinal regression. Two things make these different from the list
 // above, and both are expressed in the kernel rather than here: the
 // cutpoint argument is a whole vector whatever its length (field 4 is
@@ -628,6 +653,8 @@ constexpr bool exact_lp_build() {
   STANLI_SCALAR_CDF_LIST(DENSITY)                 \
   STANLI_INT_CDF_LIST(DENSITY)                    \
   STANLI_TWO_INT_CDF_LIST(DENSITY)                \
+  STANLI_TAIL_CDF_LIST(DENSITY)                   \
+  STANLI_TAIL_INT_CDF_LIST(DENSITY)               \
   STANLI_ORDERED_DENSITY_LIST(DENSITY)            \
   STANLI_SCALAR_UNARY_LIST(UNARY)
 

@@ -759,6 +759,79 @@ void olglm_fwd(KernelCtx& ctx) {
 }
 void olglm_bwd(KernelCtx& ctx) { tglm_eval<true, kOrdLogisticGlm>(ctx); }
 
+// ---- the cdfs the recorder cannot take ---------------------------------
+// Same reason ordered_probit and wiener are here, one step further out:
+// von_mises_cdf writes `res *= 0.0` and compares `x_n == -pi` on the
+// scalar type, and neg_binomial_2_lcdf forms `phi / (phi + mu)`. Neither
+// builds its result through stan-math's partials propagator, so neither
+// can be handed an rvar. See STANLI_TAIL_CDF_LIST in optable.hpp.
+//
+// A length-1 slot enters stan-math as a scalar rather than a
+// one-element vector: the sequence views broadcast a scalar but require
+// vectors to match sizes. That is the same rule bind_args_m follows in
+// densities_impl.hpp, and getting it wrong is not a size error -- it is
+// every observation evaluated with element 0's parameters, which is what
+// the sweep caught in the old scalar-only wiener tail.
+using TailArg = std::variant<stan::math::var, VarV>;
+TailArg tail_arg(const KernelCtx& ctx, int k) {
+  if (ctx.in[k].len == 1) return stan::math::var(ctx.in[k].data[0]);
+  return tail_v(ctx, k, ctx.in[k].len);
+}
+
+// finish_tail_density's shape, over arguments that are variants: one
+// visit picks the scalar-or-vector instantiation, a second scatters each
+// argument's adjoints back through the overload its own alternative
+// selects.
+template <bool Grad, typename F, typename... A>
+double tail_visit(KernelCtx& ctx, F&& f, const A&... a) {
+  stan::math::var out = std::visit(
+      [&](const auto&... x) -> stan::math::var { return f(x...); }, a...);
+  const double value = out.val();
+  if constexpr (Grad) {
+    stan::math::var seeded = out * ctx.out_adj;
+    stan::math::grad(seeded.vi_);
+    int slot = 0;
+    ((std::visit([&](const auto& x) { tail_scatter(ctx, slot, x); }, a),
+      ++slot),
+     ...);
+  }
+  return value;
+}
+
+#define STANLI_TAIL_CDF_KERNEL(code, fn, nreal, tier)                        \
+  template <bool Grad>                                                       \
+  double fn##_eval(KernelCtx& ctx) {                                         \
+    stan::math::nested_rev_autodiff nested;                                  \
+    const TailArg a0 = tail_arg(ctx, 0), a1 = tail_arg(ctx, 1),              \
+                  a2 = tail_arg(ctx, 2);                                     \
+    return tail_visit<Grad>(                                                 \
+        ctx, [](const auto&... x) { return stan::math::fn(x...); }, a0, a1,  \
+        a2);                                                                 \
+  }                                                                          \
+  void fn##_fwd(KernelCtx& ctx) { ctx.out.data[0] = fn##_eval<false>(ctx); } \
+  void fn##_bwd(KernelCtx& ctx) { fn##_eval<true>(ctx); }
+STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_KERNEL)
+#undef STANLI_TAIL_CDF_KERNEL
+
+// The integer outcome rides in idata as one whole group, the way the
+// other integer-outcome cdfs read theirs; the lowering has already
+// replicated a language-level scalar to the lane count.
+#define STANLI_TAIL_INT_CDF_KERNEL(code, fn, nreal, tier)                    \
+  template <bool Grad>                                                       \
+  double fn##_eval(KernelCtx& ctx) {                                         \
+    stan::math::nested_rev_autodiff nested;                                  \
+    Eigen::Map<const Eigen::VectorXi> y(                                     \
+        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));                  \
+    const TailArg a0 = tail_arg(ctx, 0), a1 = tail_arg(ctx, 1);              \
+    return tail_visit<Grad>(                                                 \
+        ctx, [&](const auto&... x) { return stan::math::fn(y, x...); }, a0,  \
+        a1);                                                                 \
+  }                                                                          \
+  void fn##_fwd(KernelCtx& ctx) { ctx.out.data[0] = fn##_eval<false>(ctx); } \
+  void fn##_bwd(KernelCtx& ctx) { fn##_eval<true>(ctx); }
+STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_KERNEL)
+#undef STANLI_TAIL_INT_CDF_KERNEL
+
 }  // namespace
 
 void register_matrix_kernels() {
@@ -781,6 +854,11 @@ void register_matrix_kernels() {
   register_kernel(OP_ORDERED_PROBIT_LPMF,
                   Kernel{oprobit_fwd, oprobit_bwd, nullptr});
   register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, nullptr});
+#define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
+  register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
+  STANLI_TAIL_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
+  STANLI_TAIL_INT_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
+#undef STANLI_REGISTER_TAIL_CDF
   register_kernel(OP_LKJ_COV_LPDF, Kernel{lkjcov_fwd, lkjcov_bwd, nullptr});
   register_kernel(OP_BINOMIAL_LOGIT_GLM_LPMF,
                   Kernel{blglm_fwd, blglm_bwd, nullptr});

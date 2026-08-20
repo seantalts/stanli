@@ -1751,6 +1751,77 @@ int main() {
     }
   }
 
+  // The five distribution functions the recorder cannot evaluate at all.
+  // See tests/fixtures/tcdf.stan: these go to the nested var tape in
+  // matrix_fns.cpp, which is the tier ordered_probit and wiener already
+  // use, so what this checks past the value is the plumbing -- argument
+  // counts, the one integer group, and a length-1 slot entering stan-math
+  // as a scalar rather than a one-element vector.
+  {
+    DataMap d;
+    d.set_int("n", 3);
+    d.set_int_array("ns", {1, 2, 3});
+    CompiledModel tm = compile_model(slurp("tests/fixtures/tcdf.tmir.sexp"), d);
+    Executor tex(std::move(tm.graph));
+    tm.bind(tex);
+    // Declaration order: y1[3], k1[3], y2[3], k2[3], y3, k3, m4[3], p4[3],
+    // m5, m6[3].
+    const int kNP = 24;
+    const double pts[2][kNP] = {
+        {0.30, 0.45, 0.70,  -0.20, 0.15, 0.35, -0.40, 0.25,
+         0.60, 0.10, -0.30, 0.50,  0.20, 0.55, -0.10, 0.40,
+         0.05, 0.28, -0.12, 0.34,  0.18, 0.22, -0.18, 0.46},
+        {-0.25, 0.60,  -0.15, 0.30, -0.45, 0.20, 0.35, -0.05,
+         0.50,  -0.35, 0.15,  0.65, -0.20, 0.45, 0.25, -0.30,
+         0.55,  -0.08, 0.42,  0.12, -0.22, 0.38, 0.08, -0.28}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < kNP; ++i) tex.params_data()[i] = pts[c][i];
+      double grad[kNP] = {0};
+      const double lp = tex.gradient(grad);
+
+      using stan::math::var;
+      using VecV = Eigen::Matrix<var, Eigen::Dynamic, 1>;
+      std::vector<var> th((size_t)kNP);
+      for (int i = 0; i < kNP; ++i) th[(size_t)i] = pts[c][i];
+      const auto seg = [&](int at) {
+        VecV v(3);
+        for (int i = 0; i < 3; ++i) v(i) = th[(size_t)(at + i)];
+        return v;
+      };
+      // The tail kernels bind every argument as var, data or not, so the
+      // reference binds the literals as var too and this stays bitwise.
+      VecV mu3(3);
+      mu3 << 0.1, 0.2, 0.3;
+      Eigen::VectorXi ns(3);
+      ns << 1, 2, 3;
+      Eigen::VectorXi n1(1);
+      n1 << 3;
+      var acc = stan::math::von_mises_cdf(seg(0), var(0.1),
+                                          VecV(stan::math::exp(seg(3))));
+      acc += stan::math::von_mises_lcdf(seg(6), mu3,
+                                        VecV(stan::math::exp(seg(9))));
+      acc += stan::math::von_mises_lccdf(th[12], var(0.1),
+                                         stan::math::exp(th[13]));
+      acc += stan::math::neg_binomial_2_lcdf(ns, VecV(stan::math::exp(seg(14))),
+                                             VecV(stan::math::exp(seg(17))));
+      acc += stan::math::neg_binomial_2_lccdf(n1, stan::math::exp(th[20]),
+                                              var(2.0));
+      // The scalar outcome replicated to the lane count, which is what the
+      // lowering does before the kernel ever sees the integer group.
+      Eigen::VectorXi n3(3);
+      n3 << 3, 3, 3;
+      acc += stan::math::neg_binomial_2_lccdf(
+          n3, VecV(stan::math::exp(seg(21))), var(2.0));
+      acc.grad();
+
+      // Same activity on both sides and no parameter shared between two
+      // densities, so this is bitwise: no tolerance.
+      for (int i = 0; i < kNP; ++i)
+        expect_eq("tcdf g" + std::to_string(i), grad[i], th[(size_t)i].adj());
+      expect_eq("tcdf lp", lp, acc.val());
+    }
+  }
+
   // Two-argument log_sum_exp / log_diff_exp on containers. See
   // tests/fixtures/lsepair.stan: Stan vectorizes both elementwise with
   // scalar broadcast, and the lowering used to emit them at width 1, so

@@ -63,7 +63,16 @@ the shared helpers (`tail_m`, `tail_v`, `tail_scatter_*` in
 `runtime/kernels/matrix_fns.cpp`) reduce each kernel to about twenty
 lines. Unlike the recorder, this tier has no restriction on what the
 density does with its scalar type: `ordered_probit` and `wiener` use
-operators `rvar` deliberately lacks, and both work on a var tape. These
+operators `rvar` deliberately lacks, and both work on a var tape. So do
+the five distribution functions that build their result with arithmetic
+on the scalar -- `von_mises_cdf`, `von_mises_lcdf`, `von_mises_lccdf`
+(`res *= 0.0`) and `neg_binomial_2_lcdf`, `neg_binomial_2_lccdf`
+(`phi / (phi + mu)`). Whether a distribution function needs this tier is
+mechanical rather than a judgement: `grep -c operands_and_partials` on
+its prim header is 2 for everything the recorder takes and 0 for these
+five. The price is a nested tape per gradient call, so they are slower
+than a listed cdf by roughly the cost of building and sweeping that
+tape. These
 kernels are **compact** (one instantiation, every argument bound as
 autodiff), so `lp__` carries a per-model constant while gradients stay
 exact; [docs/compact-densities.md](compact-densities.md) is the
@@ -75,16 +84,6 @@ contract.
 constant zero, but Stan Math performs support checks first. Until Stanli has
 an exact checked implementation, lowering refuses rather than silently
 accepting invalid data.
-
-**Five distribution functions the recorder cannot evaluate.**
-`von_mises_cdf`, `von_mises_lcdf`, `von_mises_lccdf`,
-`neg_binomial_2_lcdf` and `neg_binomial_2_lccdf` build their result with
-arithmetic on the autodiff scalar -- `res *= 0.0`, `phi / (phi + mu)` --
-rather than through stan-math's partials propagator. `rvar` deliberately
-has no operators, so these do not compile against it however they are
-listed. The same var-tape treatment `ordered_probit` and `wiener` get
-would take them; nobody has written it. `neg_binomial_2_cdf` is not in
-this group -- it does use the propagator, and it works.
 
 **`discrete_range`'s three.** Integers all the way down, so there is no
 real edge for a kernel to differentiate and no layout for one yet.

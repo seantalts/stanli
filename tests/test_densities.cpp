@@ -746,6 +746,168 @@ int main() {
     }
   }
 
+  // The var-tape cdfs: von_mises_{cdf,lcdf,lccdf} and
+  // neg_binomial_2_{lcdf,lccdf}. The recorder cannot evaluate these at all
+  // -- they do arithmetic on the autodiff scalar rather than going through
+  // stan-math's partials propagator -- so the kernel binds every argument
+  // as var on a nested tape (matrix_fns.cpp). The reference below binds
+  // every argument as var too, so this is same-activity and bitwise: no
+  // tolerance, and no evaluation-order divergence to bound.
+  {
+    using stan::math::var;
+    using VecV = Eigen::Matrix<var, -1, 1>;
+    auto vec = [](const std::vector<double>& v) {
+      VecV x((Eigen::Index)v.size());
+      for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
+      return x;
+    };
+    auto ivec = [](std::vector<int> v) {
+      Eigen::VectorXi x((Eigen::Index)v.size());
+      for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
+      return x;
+    };
+    const std::vector<double> vy{0.30, -0.50}, vmu{0.10, 0.20}, vk{1.50, 2.50};
+    // Every argument a vector, then a length-1 slot beside them: that slot
+    // has to reach stan-math as a scalar, because its sequence views
+    // broadcast a scalar but require a vector to match the others' size.
+    struct VonMises {
+      uint16_t opcode;
+      const char* tag;
+      std::function<var(const VecV&, const VecV&, const VecV&)> vvv;
+      std::function<var(const VecV&, const var&, const var&)> vss;
+      std::function<var(const var&, const var&, const var&)> sss;
+    };
+    const VonMises kVm[3] = {{OP_VON_MISES_CDF, "von_mises_cdf",
+                              [](const VecV& y, const VecV& m, const VecV& k) {
+                                return stan::math::von_mises_cdf(y, m, k);
+                              },
+                              [](const VecV& y, const var& m, const var& k) {
+                                return stan::math::von_mises_cdf(y, m, k);
+                              },
+                              [](const var& y, const var& m, const var& k) {
+                                return stan::math::von_mises_cdf(y, m, k);
+                              }},
+                             {OP_VON_MISES_LCDF, "von_mises_lcdf",
+                              [](const VecV& y, const VecV& m, const VecV& k) {
+                                return stan::math::von_mises_lcdf(y, m, k);
+                              },
+                              [](const VecV& y, const var& m, const var& k) {
+                                return stan::math::von_mises_lcdf(y, m, k);
+                              },
+                              [](const var& y, const var& m, const var& k) {
+                                return stan::math::von_mises_lcdf(y, m, k);
+                              }},
+                             {OP_VON_MISES_LCCDF, "von_mises_lccdf",
+                              [](const VecV& y, const VecV& m, const VecV& k) {
+                                return stan::math::von_mises_lccdf(y, m, k);
+                              },
+                              [](const VecV& y, const var& m, const var& k) {
+                                return stan::math::von_mises_lccdf(y, m, k);
+                              },
+                              [](const var& y, const var& m, const var& k) {
+                                return stan::math::von_mises_lccdf(y, m, k);
+                              }}};
+    for (const VonMises& c : kVm) {
+      {
+        auto r = stanli::testutil::run_one_op(c.opcode, {vy, vmu, vk},
+                                              {true, true, true});
+        VecV y = vec(vy), m = vec(vmu), k = vec(vk);
+        var lp = c.vvv(y, m, k);
+        lp.grad();
+        expect_eq(std::string(c.tag) + " vvv value", r.value, lp.val());
+        for (int i = 0; i < 2; ++i) {
+          expect_eq(std::string(c.tag) + " vvv dy" + std::to_string(i),
+                    r.grad[(size_t)i], y(i).adj());
+          expect_eq(std::string(c.tag) + " vvv dmu" + std::to_string(i),
+                    r.grad[(size_t)(2 + i)], m(i).adj());
+          expect_eq(std::string(c.tag) + " vvv dk" + std::to_string(i),
+                    r.grad[(size_t)(4 + i)], k(i).adj());
+        }
+        stan::math::recover_memory();
+      }
+      {
+        auto r = stanli::testutil::run_one_op(c.opcode, {vy, {vmu[0]}, {vk[0]}},
+                                              {true, true, true});
+        VecV y = vec(vy);
+        var m = vmu[0], k = vk[0];
+        var lp = c.vss(y, m, k);
+        lp.grad();
+        expect_eq(std::string(c.tag) + " vss value", r.value, lp.val());
+        for (int i = 0; i < 2; ++i)
+          expect_eq(std::string(c.tag) + " vss dy" + std::to_string(i),
+                    r.grad[(size_t)i], y(i).adj());
+        expect_eq(std::string(c.tag) + " vss dmu", r.grad[2], m.adj());
+        expect_eq(std::string(c.tag) + " vss dk", r.grad[3], k.adj());
+        stan::math::recover_memory();
+      }
+      {
+        auto r = stanli::testutil::run_one_op(
+            c.opcode, {{vy[0]}, {vmu[0]}, {vk[0]}}, {true, true, true});
+        var y = vy[0], m = vmu[0], k = vk[0];
+        var lp = c.sss(y, m, k);
+        lp.grad();
+        expect_eq(std::string(c.tag) + " sss value", r.value, lp.val());
+        expect_eq(std::string(c.tag) + " sss dy", r.grad[0], y.adj());
+        expect_eq(std::string(c.tag) + " sss dmu", r.grad[1], m.adj());
+        expect_eq(std::string(c.tag) + " sss dk", r.grad[2], k.adj());
+        stan::math::recover_memory();
+      }
+    }
+    // neg_binomial_2: the outcome rides in idata, so the real arguments are
+    // the only propagator edges. Both a per-lane outcome and the scalar
+    // form the lowering replicates to the lane count.
+    const std::vector<double> vmn{2.00, 3.00}, vphi{1.50, 2.50};
+    struct Nb2 {
+      uint16_t opcode;
+      const char* tag;
+      std::function<var(const Eigen::VectorXi&, const VecV&, const VecV&)> vv;
+      std::function<var(const Eigen::VectorXi&, const var&, const var&)> ss;
+    };
+    const Nb2 kNb[2] = {
+        {OP_NEG_BINOMIAL_2_LCDF, "neg_binomial_2_lcdf",
+         [](const Eigen::VectorXi& n, const VecV& m, const VecV& p) {
+           return stan::math::neg_binomial_2_lcdf(n, m, p);
+         },
+         [](const Eigen::VectorXi& n, const var& m, const var& p) {
+           return stan::math::neg_binomial_2_lcdf(n, m, p);
+         }},
+        {OP_NEG_BINOMIAL_2_LCCDF, "neg_binomial_2_lccdf",
+         [](const Eigen::VectorXi& n, const VecV& m, const VecV& p) {
+           return stan::math::neg_binomial_2_lccdf(n, m, p);
+         },
+         [](const Eigen::VectorXi& n, const var& m, const var& p) {
+           return stan::math::neg_binomial_2_lccdf(n, m, p);
+         }}};
+    for (const Nb2& c : kNb) {
+      {
+        auto r = stanli::testutil::run_one_op(c.opcode, {vmn, vphi},
+                                              {true, true}, {1, 3});
+        VecV m = vec(vmn), p = vec(vphi);
+        var lp = c.vv(ivec({1, 3}), m, p);
+        lp.grad();
+        expect_eq(std::string(c.tag) + " vv value", r.value, lp.val());
+        for (int i = 0; i < 2; ++i) {
+          expect_eq(std::string(c.tag) + " vv dmu" + std::to_string(i),
+                    r.grad[(size_t)i], m(i).adj());
+          expect_eq(std::string(c.tag) + " vv dphi" + std::to_string(i),
+                    r.grad[(size_t)(2 + i)], p(i).adj());
+        }
+        stan::math::recover_memory();
+      }
+      {
+        auto r = stanli::testutil::run_one_op(c.opcode, {{vmn[0]}, {vphi[0]}},
+                                              {true, true}, {2});
+        var m = vmn[0], p = vphi[0];
+        var lp = c.ss(ivec({2}), m, p);
+        lp.grad();
+        expect_eq(std::string(c.tag) + " ss value", r.value, lp.val());
+        expect_eq(std::string(c.tag) + " ss dmu", r.grad[0], m.adj());
+        expect_eq(std::string(c.tag) + " ss dphi", r.grad[1], p.adj());
+        stan::math::recover_memory();
+      }
+    }
+  }
+
   if (failures == 0) std::printf("test_densities OK\n");
   return failures == 0 ? 0 : 1;
 }

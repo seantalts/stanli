@@ -1951,6 +1951,20 @@ struct Lowering {
 #define STANLI_TWO_INT_CDF_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 2, 2}},
         STANLI_TWO_INT_CDF_LIST(STANLI_TWO_INT_CDF_TABLE)
 #undef STANLI_TWO_INT_CDF_TABLE
+        // The var-tape cdfs. Same argument shapes as the two lists above,
+        // and a fixed all-active mask because their kernel binds every
+        // argument as var whatever the MIR says: one instantiation, no
+        // activity-mask expansion, and a data argument's partials
+        // computed and dropped.
+#define STANLI_TAIL_CDF_TABLE(code, fn, n, t) \
+  {#fn, {code, n, 0, false, DensityShape::Plain, (1 << n) - 1}},
+        STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_TABLE)
+#undef STANLI_TAIL_CDF_TABLE
+#define STANLI_TAIL_INT_CDF_TABLE(code, fn, nreal, t)                        \
+  {#fn,                                                                      \
+   {code, nreal + 1, 1, false, DensityShape::Plain, (1 << nreal) - 1, true}},
+        STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_TABLE)
+#undef STANLI_TAIL_INT_CDF_TABLE
         // The ordinal densities have the same argument counts but not the
         // same meaning: their trailing cutpoint vector is one argument, so
         // a scalar outcome stays one lane whatever its length.

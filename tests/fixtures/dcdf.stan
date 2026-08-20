@@ -14,7 +14,8 @@
 // neg_binomial_2's lcdf and lccdf are absent on purpose. Unlike the cdf
 // they compute their result by arithmetic on the autodiff scalar rather
 // than through stan-math's partials propagator, which the recorder
-// scalar does not implement. See docs/coverage.md.
+// scalar does not implement, so they are on the nested var tape instead
+// and are pinned by tests/fixtures/tcdf.stan.
 //
 // theta reaches the densities directly rather than through inv_logit,
 // which would put a one-ULP unary divergence between this model and its
