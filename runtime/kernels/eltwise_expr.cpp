@@ -4,8 +4,11 @@
 // Shape dispatch is runtime: len==1 broadcasts.
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/packet.hpp>
 
 #include <stan/math/prim.hpp>
+
+#include <cmath>
 
 namespace stanli {
 namespace {
@@ -326,13 +329,33 @@ void logv_bwd(KernelCtx& ctx) {
   else
     dx_a(ctx, 0) += dout_a(ctx) / in_a(ctx, 0);
 }
-// Matrix<var> inv_logit resolves to a vectorized overload (packet values);
-// scalar var inv_logit uses libm. Match the vectorized path for len > 1.
+// The one unary here whose two stan-math overloads compute DIFFERENT
+// expressions, so its two shapes cannot share a formula -- exactly the split
+// clu_fwd makes, and for the same reason (see constrain.cpp's header):
+//   scalar var  -> stan's `inv_logit(double)`, which branches on sign;
+//   Matrix<var> -> `x.val().array().logistic()`, Eigen's logistic functor,
+//                  `e/(1+e)` with an inf guard, no sign branch.
+// They disagree by a ulp on about a third of positive arguments.
+//
+// The len > 1 branch used to hand `logistic()` a CONTIGUOUS temporary, on the
+// belief that the Matrix<var> overload vectorized. It does not -- `.val()` is
+// strided, so Eigen runs the functor's SCALAR body with libm exp. Contiguous
+// doubles select Eigen's `pexp` instead, a ulp off libm on ~7% of arguments,
+// and that was the entire divergence: forward only, with the backward's exact
+// multiplies inheriting it. So the default spells the scalar functor out and
+// the vectorized form stays behind packet_math(), whose reference is varmat.
 void invlogit_fwd(KernelCtx& ctx) {
-  if (ctx.out.len == 1) {
+  const int64_t n = ctx.out.len;
+  if (n == 1) {
     ctx.out.data[0] = stan::math::inv_logit(ctx.in[0].data[0]);
-  } else {
+  } else if (packet_math()) {
     out_a(ctx) = stan::math::inv_logit(in_a(ctx, 0).matrix().eval().array());
+  } else {
+    const double* x = ctx.in[0].data;
+    for (int64_t i = 0; i < n; ++i) {
+      const double e = std::exp(x[i]);
+      ctx.out.data[i] = std::isinf(e) ? 1.0 : e / (1.0 + e);
+    }
   }
 }
 void invlogit_bwd(KernelCtx& ctx) {

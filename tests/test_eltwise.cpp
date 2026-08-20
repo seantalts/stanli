@@ -126,6 +126,21 @@ int main() {
   check_case("inv_logit v", OP_INV_LOGIT, N, {A}, [](auto& v) {
     return stan::math::sum(stan::math::inv_logit(v[0]));
   });
+  // inv_logit is the one unary whose container and scalar overloads compute
+  // different expressions, so its two shapes need values that separate them.
+  // -0.45 and -1.53 are points where Eigen's PACKET exp disagrees with libm's
+  // by a ulp -- they fail if the vector shape evaluates over contiguous
+  // doubles instead of mirroring the strided (scalar-libm) `.val()` the
+  // Matrix<var> overload gets. 1.1 and 2.0 are points where Eigen's logistic
+  // functor, `e/(1+e)`, disagrees with stan's scalar `inv_logit`, `1/(1+e^-x)`
+  // -- they fail if the vector shape is "simplified" to the scalar function.
+  check_case(
+      "inv_logit v ulp", OP_INV_LOGIT, N, {{-0.45, 2.0, 1.1, -1.53}},
+      [](auto& v) { return stan::math::sum(stan::math::inv_logit(v[0])); });
+  // And the mirror of that last point: at length 1 the reference IS the
+  // scalar function, so 1.1 fails here if the two shapes are unified.
+  check_case("inv_logit s", OP_INV_LOGIT, 1, {{1.1}},
+             [](auto& v) { return stan::math::inv_logit(v[0](0)); });
   check_case("sqrt v", OP_SQRT, N, {{0.5, 1.2, 2.0, 0.3}},
              [](auto& v) { return stan::math::sum(stan::math::sqrt(v[0])); });
   check_case("square v", OP_SQUARE, N, {A},
