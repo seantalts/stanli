@@ -1820,6 +1820,97 @@ int main() {
     }
   }
 
+  // The named spellings of the binary operators, plus squared_distance.
+  // See tests/fixtures/opalias.stan: every call is made twice, once on
+  // data in transformed data and once on parameters in the model block,
+  // and the transformed-data results are summed into the target. That is
+  // what makes this test cover both halves -- the graph lowering and the
+  // MIR interpreter -- rather than only the one the log density walks.
+  // Teaching a function to one of them and not the other is silent: a
+  // vectorized log_sum_exp taught only to the lowering reported lp
+  // 2.6252 where the answer was 2.9302, with no exception raised.
+  {
+    const std::vector<double> dvv = {0.4, -0.7};
+    const std::vector<double> drvv = {0.25, 0.6};
+    // Column-major: dm = [[1.5, 0.5], [-0.25, 2.0]].
+    const std::vector<double> dmv = {1.5, -0.25, 0.5, 2.0};
+    DataMap d;
+    d.set_real_array("dv", dvv, {2});
+    d.set_real_array("drv", drvv, {2});
+    d.set_real_array("dm", dmv, {2, 2});
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/opalias.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+
+    using stan::math::var;
+    using MatV = Eigen::Matrix<var, Eigen::Dynamic, Eigen::Dynamic>;
+    using VecV = Eigen::Matrix<var, Eigen::Dynamic, 1>;
+    Eigen::VectorXd DV(2), DRVc(2);
+    Eigen::RowVectorXd DRV(2);
+    Eigen::MatrixXd DM(2, 2);
+    DV << dvv[0], dvv[1];
+    DRV << drvv[0], drvv[1];
+    DRVc << drvv[0], drvv[1];
+    DM << dmv[0], dmv[2], dmv[1], dmv[3];
+
+    // Declaration order: p[2], q.
+    const double pts[2][3] = {{0.4, -0.7, 0.6}, {-0.3, 0.9, -0.45}};
+    for (int c = 0; c < 2; ++c) {
+      for (int i = 0; i < 3; ++i) lex.params_data()[i] = pts[c][i];
+      double grad[3] = {0, 0, 0};
+      const double lp = lex.gradient(grad);
+
+      using stan::math::add;
+      using stan::math::divide;
+      using stan::math::elt_divide;
+      using stan::math::elt_multiply;
+      using stan::math::multiply;
+      using stan::math::squared_distance;
+      using stan::math::subtract;
+      using stan::math::sum;
+      // stan-math's own answer for both halves. Transformed data is
+      // doubles on either side, so it is the same call with the same
+      // types the interpreter makes.
+      double td = sum(add(DV, 0.5)) + sum(add(DV, DV)) +
+                  sum(subtract(DV, 0.25)) + sum(subtract(0.75, DV)) +
+                  sum(multiply(DM, DV)) + multiply(DRV, DV) +
+                  sum(multiply(DV, DRV)) + sum(multiply(DM, DM)) +
+                  sum(elt_multiply(DV, DV)) + sum(elt_multiply(2.0, DV)) +
+                  sum(divide(DV, 2.0)) + sum(divide(1.5, DM)) +
+                  sum(elt_divide(DV, DV)) + sum(elt_divide(1.0, DV)) +
+                  squared_distance(DV, DRV) + squared_distance(dvv[0], dvv[1]);
+
+      VecV P(2);
+      P << pts[c][0], pts[c][1];
+      var q = pts[c][2];
+      var acc = td;
+      acc += sum(add(P, q));
+      acc += sum(add(P, DV));
+      acc += sum(subtract(q, P));
+      acc += sum(elt_multiply(P, P));
+      acc += sum(elt_multiply(q, P));
+      acc += sum(divide(P, q));
+      acc += sum(elt_divide(q, P));
+      acc += sum(divide(q, DM));
+      acc += sum(multiply(DM, P));
+      acc += multiply(P.transpose().eval(), P);
+      acc += sum(MatV(multiply(P, P.transpose().eval())));
+      acc += squared_distance(P, DRVc);
+      acc += squared_distance(P, DV);
+      acc += squared_distance(q, P(0));
+      acc += add(P(0), q) - divide(P(1), q);
+      acc.grad();
+
+      const std::string tag = "opalias c" + std::to_string(c);
+      expect_ulp(tag + " gp0", grad[0], P(0).adj());
+      expect_ulp(tag + " gp1", grad[1], P(1).adj());
+      expect_ulp(tag + " gq", grad[2], q.adj());
+      const double tol = 8 * 2.220446049250313e-16 * std::abs(acc.val());
+      check(std::abs(lp - acc.val()) <= tol, tag + " lp");
+    }
+  }
+
   // Two-argument scalar math with an int argument. See
   // tests/fixtures/binint.stan. The int side has no derivative, so the
   // whole gradient belongs to the real side, and the interesting case is

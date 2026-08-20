@@ -147,10 +147,17 @@ struct ProgramCompiler {
       }
       case mir::Expr::FunApp:
         if (e.args.size() == 2) {
-          if (e.name == "Plus__") return cint(e.args[0]) + cint(e.args[1]);
-          if (e.name == "Minus__") return cint(e.args[0]) - cint(e.args[1]);
-          if (e.name == "Times__") return cint(e.args[0]) * cint(e.args[1]);
-          if (e.name == "IntDivide__" || e.name == "Divide__")
+          // Each operator with the named spelling beside it: on ints the
+          // alias is the operator, down to `divide`'s truncation.
+          if (e.name == "Plus__" || e.name == "add")
+            return cint(e.args[0]) + cint(e.args[1]);
+          if (e.name == "Minus__" || e.name == "subtract")
+            return cint(e.args[0]) - cint(e.args[1]);
+          if (e.name == "Times__" || e.name == "multiply" ||
+              e.name == "elt_multiply")
+            return cint(e.args[0]) * cint(e.args[1]);
+          if (e.name == "IntDivide__" || e.name == "Divide__" ||
+              e.name == "divide" || e.name == "elt_divide")
             return cint(e.args[0]) / cint(e.args[1]);
         }
         if (e.args.size() == 1 && e.name == "PMinus__") return -cint(e.args[0]);
@@ -449,6 +456,14 @@ struct ProgramCompiler {
       return typed(out, e.type_);
     }
     if (e.args.size() == 2) {
+      // An int-typed binary is integer arithmetic, and `divide` truncates
+      // where the real DIV below does not: `divide(7, 2)` is 3, not 3.5.
+      // The register file holds only reals, so fold the integer answer
+      // whenever cint can reach it rather than emitting real arithmetic.
+      if (e.type_ == "UInt") {
+        long v;
+        if (try_cint(e, &v)) return {konst((double)v), 1};
+      }
       const Range a = expr(e.args[0]), b = expr(e.args[1]);
       const bool a_scalar = is_scalar(a);
       const bool b_scalar = is_scalar(b);
@@ -456,20 +471,30 @@ struct ProgramCompiler {
         bail("array arithmetic is unsupported by the register program");
       if (!a_scalar && !b_scalar && !same_view(a, b))
         bail("binary " + e.name + " on different logical views");
-      if (e.name == "Times__" && !a_scalar && !b_scalar) {
+      // `multiply` rides with `Times__` here for the same reason it does
+      // in the graph lowering: on two containers it is linear algebra,
+      // not the elementwise MUL the register file would emit.
+      if ((e.name == "Times__" || e.name == "multiply") && !a_scalar &&
+          !b_scalar) {
         if (a.kind == ViewKind::Matrix || b.kind == ViewKind::Matrix)
           bail("matrix multiplication is unsupported by the register program");
         bail("container multiplication is unsupported by the register program");
       }
       const int n = a_scalar ? b.len : (b_scalar ? a.len : a.len);
       Program::Code c;
-      if (e.name == "Plus__")
+      // The named spellings of the operators, on the same opcodes: a
+      // region whose control flow depends on a parameter has to compile
+      // here or not at all, so a gap is a hard error rather than a slow
+      // path.
+      if (e.name == "Plus__" || e.name == "add")
         c = Program::ADD;
-      else if (e.name == "Minus__")
+      else if (e.name == "Minus__" || e.name == "subtract")
         c = Program::SUB;
-      else if (e.name == "Times__" || e.name == "EltTimes__")
+      else if (e.name == "Times__" || e.name == "EltTimes__" ||
+               e.name == "multiply" || e.name == "elt_multiply")
         c = Program::MUL;
-      else if (e.name == "Divide__" || e.name == "EltDivide__")
+      else if (e.name == "Divide__" || e.name == "EltDivide__" ||
+               e.name == "divide" || e.name == "elt_divide")
         c = Program::DIV;
       else if (e.name == "Pow__" || e.name == "pow")
         c = Program::POW;

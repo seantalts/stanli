@@ -937,11 +937,17 @@ class MirInterp {
         return T(f(val(x), val(y)) ? 1.0 : 0.0);
       });
     };
-    if (e.name == "Plus__")
+    // add/subtract/multiply/elt_multiply/divide/elt_divide are the named
+    // spellings of the binary operators, and they are taught here beside
+    // the operators rather than in a table of their own: the graph
+    // lowering knows them too, and teaching only one side is what let a
+    // vectorized log_sum_exp answer transformed data with the wrong value
+    // and no exception.
+    if (e.name == "Plus__" || e.name == "add")
       return bin([](const T& x, const T& y) { return x + y; });
-    if (e.name == "Minus__")
+    if (e.name == "Minus__" || e.name == "subtract")
       return bin([](const T& x, const T& y) { return x - y; });
-    if (e.name == "Times__") {
+    if (e.name == "Times__" || e.name == "multiply") {
       // Times on shaped operands is linear algebra, not elementwise; only
       // a scalar operand (either side) scales elementwise.
       Value a = eval(e.args[0]), b = eval(e.args[1]);
@@ -951,7 +957,7 @@ class MirInterp {
         const int64_t Ca = a_mat ? a.dims[1] : (int64_t)a.r.size();
         const int64_t Rb = b_mat ? b.dims[0] : (int64_t)b.r.size();
         const int64_t Cb = b_mat ? b.dims[1] : 1;
-        if (Ca != Rb) fail("Times__: inner dimension mismatch", e.raw);
+        if (Ca != Rb) fail(e.name + ": inner dimension mismatch", e.raw);
         // Col-major storage on both sides.
         r.r.assign((size_t)(Ra * Cb), T(0.0));
         for (int64_t j = 0; j < Cb; ++j)
@@ -980,7 +986,7 @@ class MirInterp {
         }
         if (e.type_ == "UReal" || e.type_ == "UInt") {
           if (a.r.size() != b.r.size())
-            fail("Times__: dot product length mismatch", e.raw);
+            fail(e.name + ": dot product length mismatch", e.raw);
           T s = T(0.0);
           for (size_t i = 0; i < a.r.size(); ++i) s += a.r[i] * b.r[i];
           r.r = {s};
@@ -990,7 +996,7 @@ class MirInterp {
       // Scalar scale, elementwise on the already-evaluated operands (an
       // argument may hold an RNG call; evaluating twice would draw twice).
       if (a.r.size() != b.r.size() && !is_scalar(a) && !is_scalar(b))
-        fail("Times__: incompatible lengths", e.raw);
+        fail(e.name + ": incompatible lengths", e.raw);
       const size_t n = broadcast_size(a, b);
       r.r.resize(n);
       for (size_t i = 0; i < n; ++i)
@@ -1002,7 +1008,7 @@ class MirInterp {
       }
       return r;
     }
-    if (e.name == "EltTimes__")
+    if (e.name == "EltTimes__" || e.name == "elt_multiply")
       return bin([](const T& x, const T& y) { return x * y; });
     // `A \ v` and `rv / A` are linear solves. stanc spells them with the
     // ordinary division operators, so the divisor's type is what tells a
@@ -1047,7 +1053,29 @@ class MirInterp {
         r.dims = {(int64_t)r.r.size()};
       return r;
     }
-    if (e.name == "Divide__" || e.name == "EltDivide__")
+    // `divide` reaches here and never the solve above: stan::math::divide
+    // divides by a scalar or divides a scalar elementwise, and has no
+    // matrix-divisor overload at all.
+    //
+    // Its int,int overload is the exception to that elementwise reading:
+    // it truncates and refuses a zero denominator, where the real
+    // division below would answer 3.5 for `divide(7, 2)`. The value the
+    // caller sees is `r`, not `i` -- lower.cpp's fold_const takes r[0]
+    // for a UInt result -- so the truncation has to land in both.
+    if ((e.name == "divide" || e.name == "elt_divide") && e.type_ == "UInt") {
+      const int x = (int)as_int(e.args[0]), y = (int)as_int(e.args[1]);
+      // divide is the one with the zero check; elt_divide is a bare `/`,
+      // so a zero denominator there is undefined behavior and refused.
+      if (e.name == "elt_divide" && y == 0)
+        fail("integer division by zero", e.raw);
+      const int q = e.name == "divide" ? stan::math::divide(x, y) : x / y;
+      r.is_int = true;
+      r.i = {q};
+      r.r = {T((double)q)};
+      return r;
+    }
+    if (e.name == "Divide__" || e.name == "EltDivide__" || e.name == "divide" ||
+        e.name == "elt_divide")
       return bin([](const T& x, const T& y) { return x / y; });
     // `%` and `%/%`. Both operands are int by stanc's typing, so these are
     // C++ integer operators -- truncated toward zero -- and not fmod and
@@ -1360,6 +1388,24 @@ class MirInterp {
         r.r.push_back(a.r.at((size_t)(off + k)));
         if (a.is_int) r.i.push_back(a.i.at((size_t)(off + k)));
       }
+      return r;
+    }
+    // squared_distance is dot_self of the difference, which is how the
+    // graph lowers it too (lower.cpp); the two spellings agreeing keeps
+    // transformed data and the log density on the same summation order.
+    // A vector may be paired with a row_vector, and neither view carries
+    // anything but a length, so there is nothing to reorder. No
+    // broadcasting: the language has no scalar-against-container overload.
+    if (e.name == "squared_distance" && e.args.size() == 2) {
+      Value a = eval(e.args[0]), b = eval(e.args[1]);
+      if (a.r.size() != b.r.size())
+        fail("squared_distance: length mismatch", e.raw);
+      T s = T(0.0);
+      for (size_t i = 0; i < a.r.size(); ++i) {
+        const T d = a.r[i] - b.r[i];
+        s += d * d;
+      }
+      r.r = {s};
       return r;
     }
     if ((e.name == "dot_product" || e.name == "dot_self")) {

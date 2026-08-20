@@ -2235,6 +2235,16 @@ struct Lowering {
         {"EltDivide__", OP_DIV},
         {"Pow__", OP_POW},
         {"pow", OP_POW},
+        // The named spellings of the same operators. `divide` is the one
+        // that is not simply the operator renamed: `rv / A` is a solve,
+        // but stan::math::divide only ever divides by a scalar or divides
+        // a scalar elementwise, so it is OP_DIV on every one of its
+        // overloads (deps/math/stan/math/prim/fun/divide.hpp).
+        {"add", OP_ADD},
+        {"subtract", OP_SUB},
+        {"divide", OP_DIV},
+        {"elt_multiply", OP_MUL},
+        {"elt_divide", OP_DIV},
 // Generated from STANLI_SCALAR_BINARY_LIST (optable.hpp), which also made
 // the opcode and the kernel. multiply_log is the pre-optimizer spelling of
 // lmultiply, so it rides the same opcode.
@@ -2243,7 +2253,10 @@ struct Lowering {
 #undef STANLI_BINARY_TABLE
             {"multiply_log", OP_LMULTIPLY},
     };
-    if (e.name == "Times__") {
+    // multiply is the named spelling of `*`, including its linear algebra:
+    // the branches below pick matvec, GEMM, outer and inner products off
+    // the operand views and the result type, which the alias shares.
+    if (e.name == "Times__" || (e.name == "multiply" && e.args.size() == 2)) {
       Val a = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);
       // Scalar on either side is an elementwise scale, whatever shape the
@@ -2262,7 +2275,7 @@ struct Lowering {
           // Data matrix * vector keeps the tuned MATVEC kernel (its
           // accumulation order is matched to the var path).
           if (g.slots[b.slot].len != a.si.cols)
-            fail("Times__: inner dimension mismatch", e.raw);
+            fail(e.name + ": inner dimension mismatch", e.raw);
           return emit_value(OP_MATVEC, {a, b}, a.si.rows, view_of("UVector"),
                             {(int)a.si.rows, (int)a.si.cols});
         }
@@ -2270,7 +2283,7 @@ struct Lowering {
         const int64_t cb = is_matrix(b.si) ? b.si.cols : 1;
         const int64_t rb = is_matrix(b.si) ? b.si.rows : g.slots[b.slot].len;
         if (rb != a.si.cols)
-          fail("Times__: inner dimension mismatch (" +
+          fail(e.name + ": inner dimension mismatch (" +
                    std::to_string(a.si.rows) + "x" + std::to_string(a.si.cols) +
                    " times " + std::to_string(rb) + "x" + std::to_string(cb) +
                    ")",
@@ -2288,7 +2301,7 @@ struct Lowering {
       }
       if (is_row_vector(a.si) && is_matrix(b.si)) {
         const int64_t k = g.slots[a.slot].len;
-        if (k != b.si.rows) fail("Times__: inner dimension mismatch", e.raw);
+        if (k != b.si.rows) fail(e.name + ": inner dimension mismatch", e.raw);
         return emit_value(OP_GEMM, {a, b}, b.si.cols, view_of("URowVector"),
                           {1, (int)k, (int)b.si.cols});
       }
@@ -2296,11 +2309,11 @@ struct Lowering {
       if (is_row_vector(a.si) && is_vector(b.si) &&
           (e.type_ == "UReal" || e.type_ == "UInt")) {
         if (g.slots[a.slot].len != g.slots[b.slot].len)
-          fail("Times__: inner dimension mismatch", e.raw);
+          fail(e.name + ": inner dimension mismatch", e.raw);
         return emit_value(OP_DOT, {a, b}, 1);
       }
       if (a.si.kind != ViewKind::Flat || b.si.kind != ViewKind::Flat)
-        fail("Times__: unsupported container product", e.raw);
+        fail(e.name + ": unsupported container product", e.raw);
       const int64_t len = std::max(g.slots[a.slot].len, g.slots[b.slot].len);
       return emit_value(OP_MUL, {a, b}, len);
     }
@@ -2436,6 +2449,24 @@ struct Lowering {
     if (e.name == "dot_self") {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_DOT, {a, a}, 1);
+    }
+
+    // squared_distance(x, y) = dot_self(x - y). Two graph kernels that
+    // already carry native adjoints, so no new opcode. It does not go
+    // through shape_of: the language pairs a vector with a row_vector
+    // here, which same_view rejects and stan-math accepts, and the only
+    // thing the difference could change -- element order -- is the same
+    // on both sides because a length is all either view carries.
+    if (e.name == "squared_distance" && e.args.size() == 2) {
+      Val a = lower_expr(e.args[0]);
+      Val b = lower_expr(e.args[1]);
+      const int64_t la = g.slots[a.slot].len, lb = g.slots[b.slot].len;
+      if (la != lb) fail(e.name + ": arguments must match in size", e.raw);
+      SlotInfo si;
+      si.param_free = a.si.param_free && b.si.param_free;
+      if (la > 1) si.kind = ViewKind::Vector;
+      Val d = emit_value(OP_SUB, {a, b}, la, si);
+      return emit_value(OP_DOT, {d, d}, 1);
     }
     return std::nullopt;
   }
