@@ -2100,6 +2100,29 @@ struct Lowering {
         const SlotInfo& xsi = shapes[0];
         if (!is_matrix(xsi) || !xsi.param_free)
           fail(e.name + ": X must be a data matrix");
+        // A GLM's outcome group is one value per ROW of X, and the kernels
+        // map exactly that many out of idata -- so a group of any other
+        // length is refused here rather than read past the end of the
+        // vector. These are the entries left lane_outcome = false, and not
+        // by oversight: that expansion sizes itself from the longest real
+        // argument, which for a GLM is X at rows*cols.
+        //
+        // Nor could poisson_log_glm simply replicate to `rows`. stan-math
+        // accepts a language-level scalar outcome and broadcasts it, but
+        // its <false> form then subtracts lgamma(y+1) ONCE rather than once
+        // per row (four rows of y = 3: -4.98, against the -10.36 the
+        // replicated array gives, with identical gradients). Replicating
+        // would buy the right gradients and an lp a constant off CmdStan's,
+        // which is the one thing these kernels exist to get right. The
+        // other two were measured and do not have that problem; they share
+        // this layout and this check, so they are refused with it. Refusing
+        // by name is what the vector-alpha form already gets; see
+        // docs/coverage.md.
+        if ((int64_t)idata.size() != xsi.rows)
+          fail(e.name + ": outcome has " + std::to_string(idata.size()) +
+                   " value(s) but X has " + std::to_string(xsi.rows) +
+                   " rows; a scalar or short outcome is unsupported",
+               e.raw);
         idata.push_back((int)xsi.rows);
         idata.push_back((int)xsi.cols);
       }
@@ -2171,9 +2194,18 @@ struct Lowering {
       Val beta = lower_expr(e.args[4]);
       if (!is_matrix(X.si)) fail("binomial_logit_glm needs a matrix", e.raw);
       // Both int groups are one value per row, so a scalar broadcasts.
+      // By value, as the lane_outcome expansion above is: assign() may
+      // reallocate, and a reference into the vector being assigned would
+      // dangle mid-fill.
       const int64_t rows = X.si.rows;
-      if ((int64_t)idata.size() == 1) idata.assign(rows, idata[0]);
-      if ((int64_t)NN.size() == 1) NN.assign(rows, NN[0]);
+      if ((int64_t)idata.size() == 1) {
+        const int outcome = idata[0];
+        idata.assign(rows, outcome);
+      }
+      if ((int64_t)NN.size() == 1) {
+        const int trials = NN[0];
+        NN.assign(rows, trials);
+      }
       idata.insert(idata.end(), NN.begin(), NN.end());
       idata.push_back((int)rows);
       idata.push_back((int)X.si.cols);
@@ -2190,7 +2222,13 @@ struct Lowering {
       Val a2 = lower_expr(e.args[2]);
       Val a3 = lower_expr(e.args[3]);
       if (!is_matrix(X.si)) fail(e.name + " needs a matrix", e.raw);
-      if ((int64_t)idata.size() == 1) idata.assign(X.si.rows, idata[0]);
+      if ((int64_t)idata.size() == 1) {
+        // By value, as the lane_outcome expansion is: assign() may
+        // reallocate, and a reference into the vector being assigned would
+        // dangle mid-fill.
+        const int outcome = idata[0];
+        idata.assign(X.si.rows, outcome);
+      }
       idata.push_back((int)X.si.rows);
       idata.push_back((int)X.si.cols);
       // categorical: (y, x, alpha, beta). ordered: (y, x, beta, cuts).

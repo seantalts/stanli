@@ -2382,6 +2382,32 @@ int main() {
           "glm: lp matches the var path (propto reached the kernel)");
   }
 
+  // A GLM whose outcome is a language-level scalar rather than an array of
+  // one value per row. The kernels map `rows` integers out of idata, so a
+  // one-element group used to be read past the end and answered with
+  // whatever followed it in the vector -- on this fixture -29.48 where the
+  // equivalent array outcome gives -16.22, no diagnostic. It is refused at
+  // lowering rather than replicated because for poisson_log_glm stan-math's
+  // own broadcast is not the replicated call: its <false> form subtracts
+  // lgamma(y+1) once for a scalar and once per row for an array, so
+  // replicating would put stanli's lp a constant off CmdStan's. See
+  // docs/coverage.md.
+  {
+    DataMap d = DataMap::from_json(
+        R"({"N": 4, "K": 2,
+            "x": [[0.3, -0.2], [1.1, 0.4], [-0.5, 0.9], [0.2, 0.7]],
+            "y": 3})");
+    std::string msg;
+    try {
+      compile_model(slurp("tests/fixtures/glmscalary.tmir.sexp"), d);
+    } catch (const CompileError& e) {
+      msg = e.what();
+    }
+    check(msg.find("poisson_log_glm_lpmf") != std::string::npos &&
+              msg.find("4 rows") != std::string::npos,
+          "glm scalar outcome refused by name, not read past the end");
+  }
+
   // normal_id_glm with the OUTCOME as a parameter. stanc3's --O1 partial
   // evaluator rewrites `theta ~ normal(x * b, 1)` into
   // normal_id_glm_lupdf(theta | x, 0, b, 1), a shape the source language

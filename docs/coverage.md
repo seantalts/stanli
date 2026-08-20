@@ -99,6 +99,21 @@ and says why.
 scalar; stan-math also allows a per-row vector, and the kernels refuse
 that form by name.
 
+**A scalar outcome in those same three GLMs.** `y ~ poisson_log_glm(x, ...)`
+wants one outcome per row of `x`; stan-math also accepts a single `int` and
+broadcasts it, and the lowering refuses that form by name. The three share
+one integer-group layout and one length check, so they are refused together,
+and `poisson_log_glm` is why the check is a refusal rather than a
+replication: its non-`propto` form subtracts `lgamma(y + 1)` once for a
+scalar and once per row for an array -- on four rows of `y = 3`, -4.98
+against -10.36, with identical gradients -- so replicating would buy the
+right gradient and an lp a constant off CmdStan's. `bernoulli_logit_glm` and
+`neg_binomial_2_log_glm` were measured and do not have that problem; they are
+refused for uniformity, and either could be replicated if a model wanted it.
+`binomial_logit_glm` and `categorical_logit_glm` do replicate, and are
+checked to: for those two the scalar and array calls agree bitwise in both
+`propto` forms.
+
 ## Parameter transforms
 
 All of them, every one bitwise against CmdStan:
