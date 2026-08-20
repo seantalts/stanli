@@ -27,7 +27,7 @@ different binding, so a model samples to the same draws from any of them.
 The R package is not on CRAN yet; until it is, install it from this
 repository with `remotes::install_github()` or from a checkout (see
 [R](#r) below). It downloads its runtime on first use
-rather than bundling it, because CRAN will not carry a 16 MB binary and
+rather than bundling it, because CRAN will not carry a 29 MB binary and
 could not build one on their farm.
 
 - Performance vs CmdStan: [docs/benchmarks.md](docs/benchmarks.md).
@@ -48,7 +48,7 @@ could not build one on their farm.
 - Distribution coverage: [docs/coverage.md](docs/coverage.md). 69 of 72
   densities, 90 of 105 cdf/lcdf/lccdf, truncation, censoring, ordinal
   regression and the count GLMs, each bitwise against CmdStan.
-- Install size: one 22.2 MB shared library, a 7.8 MB wheel. Breakdown in
+- Install size: one 29.3 MB shared library, a 10.6 MB wheel. Breakdown in
   [Binary size](#binary-size).
 - How this is possible, for statisticians:
   [docs/how-it-works.md](docs/how-it-works.md)
@@ -137,18 +137,16 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
 
 ## Binary size
 
-One self-contained shared library, 22.2 MB installed, 7.8 MB compressed
-in the wheel. Attributed by demangled symbol:
+One self-contained shared library, 29.3 MB installed, 10.6 MB compressed
+in the wheel, measured on the manylinux_2_28_x86_64 artifact.
 
-| | | |
-| --- | ---: | ---: |
-| densities and distribution functions | 12.03 MB | 54.9% |
-| embedded stanc3 (all OCaml) | 5.73 MB | 26.1% |
-| Boost, nlohmann/json, NUTS, libc++, unattributed | 1.61 MB | 7.3% |
-| stanli itself | 0.92 MB | 4.2% |
-| stan-math, everything else | 0.78 MB | 3.6% |
-| Eigen (out-of-line) | 0.71 MB | 3.3% |
-| SUNDIALS | 0.14 MB | 0.7% |
+The per-symbol breakdown lives in [docs/binary-size.md](docs/binary-size.md),
+written by `tools/binary_size.py` during `tools/build_wheel.sh`. It has to
+be measured there and nowhere else: the shipped library exports a few
+hundred C ABI names and carries no static symbol table, so the attribution
+cannot be reconstructed from any artifact a user or CI downloads. It used
+to be hand-maintained, which is why it described a 22.2 MB library long
+after the library stopped being one.
 
 The densities dominate. A distribution is instantiated once per activity
 mask (which arguments are autodiff), twice for propto, and again for the

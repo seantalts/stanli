@@ -9,7 +9,17 @@ against CmdStan with a generated single-function model.
 |---|---|
 | densities (`_lpdf`, `_lpmf`) | 69 / 72 |
 | distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 97 / 105 |
-| scalar math (all-real signature) | 47 / 129 |
+| scalar math (all-real signature) | 78 / 100 |
+
+The scalar-math denominator counts distinct function names in
+`stanc --dump-stan-math-signatures` whose arguments and result are all
+`real` and whose name is not a distribution suffix, and the numerator is
+what `harnesses/fn_sweep.py deps/cmdstan --from-stanc --missing` compiles
+and matches. It read `47 / 129` for a long time against no invocation
+that still reproduces either number, so the definition is written down
+here now rather than living in whoever last measured it. The count moved
+because the definition became checkable, not because coverage shrank:
+#109, #116 and #119 added 36 of those functions between them.
 
 Every supported density's **gradients** match CmdStan bitwise, at three
 evaluation points. That is the standard here: a density whose gradients

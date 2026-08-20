@@ -26,7 +26,7 @@ Then, once per machine:
 stanli_install()
 ```
 
-That downloads the ~16 MB runtime for your platform into
+That downloads the ~9-12 MB runtime for your platform into
 `tools::R_user_dir("stanli", "cache")`. Nothing is fetched without it.
 It takes the release the package was built against rather than
 whichever is newest, so the binding and the library always agree; pass
@@ -66,7 +66,7 @@ asserts.
 
 Two pieces are not in the package, for two different reasons.
 
-**The runtime** is a ~16 MB shared library holding stan-math, every
+**The runtime** is a ~29 MB shared library holding stan-math, every
 density kernel, and the interpreter. CRAN builds its own binaries from
 source and would have to compile all of that, so `stanli_install()`
 downloads the prebuilt library instead. Because the package and the
