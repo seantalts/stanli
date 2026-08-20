@@ -1500,12 +1500,14 @@ class MirInterp {
       o.is_int = true;
       bool rows_mode = false;
       int64_t row_len = 0;
+      std::vector<int64_t> elem_dims;  // shape of one element, once known
       for (const auto& a : e.args) {
         Value v2 = eval(a);
         if (v2.r.size() > 1 || rows_mode) {
           // Row-vector elements: build a matrix, row-major.
           rows_mode = true;
           row_len = (int64_t)v2.r.size();
+          elem_dims = v2.dims;
           o.is_int = false;
           o.r.insert(o.r.end(), v2.r.begin(), v2.r.end());
           continue;
@@ -1518,17 +1520,37 @@ class MirInterp {
       }
       if (!o.is_int) o.i.clear();
       if (rows_mode) {
-        // Rows arrived row-by-row; store column-major.
+        // Rows arrived row-by-row; store column-major. Each element is
+        // already first-index-fastest in itself, so sending its cell j to
+        // j*R+i makes the whole result first-index-fastest over {R} ++ the
+        // element's extents, at any rank.
         const int64_t R = (int64_t)e.args.size(), C = row_len;
         std::vector<T> cm(R * C);
         for (int64_t i = 0; i < R; ++i)
           for (int64_t j = 0; j < C; ++j) cm[j * R + i] = o.r[i * C + j];
         o.r = std::move(cm);
       }
-      if (rows_mode)
-        o.dims = {(int64_t)e.args.size(), row_len};
-      else
+      if (rows_mode) {
+        // Keep the element's own extents instead of collapsing them into
+        // one. The placement above does not pin them down -- Fortran order
+        // over {2,4} is byte-for-byte Fortran order over {2,2,2} -- but
+        // graph_order permutes by exactly these extents on the way to a
+        // slot, and eval_indexed strides by them, so a collapsed shape
+        // silently transposes the trailing two axes of every array literal
+        // of rank 3 or deeper.
+        // The extents still have to multiply out to the storage, because
+        // graph_order walks them to place every cell; one axis is the
+        // honest answer for anything that cannot say more.
+        o.dims = {(int64_t)e.args.size()};
+        int64_t elem_n = 1;
+        for (int64_t d : elem_dims) elem_n *= d;
+        if (elem_dims.empty() || elem_n != row_len)
+          o.dims.push_back(row_len);
+        else
+          o.dims.insert(o.dims.end(), elem_dims.begin(), elem_dims.end());
+      } else {
         o.dims = {(int64_t)o.r.size()};
+      }
       return o;
     }
     if (e.name == "Transpose__") {

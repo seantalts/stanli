@@ -42,7 +42,9 @@ class DataMap {
     m_[name] = std::move(e);
   }
   // `dims` defaults to one axis; pass it for a nested array, whose values
-  // are the row-major flattening the JSON reader also produces.
+  // are the first-index-fastest flattening the JSON reader also produces --
+  // one convention for every rank, which the lowering permutes into graph
+  // order once, at materialization.
   void set_int_array(const std::string& name, std::vector<int> v,
                      std::vector<int64_t> dims = {}) {
     Entry e;

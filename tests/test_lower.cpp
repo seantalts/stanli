@@ -378,6 +378,65 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // Deep array literals in transformed data have to land in a slot with the
+  // same layout the JSON reader gives a data-block array of the same shape.
+  // Rank 2 cannot tell the two apart -- an array-of-arrays and a matrix share
+  // a flattening -- so the disagreement only shows from rank 3 down, where a
+  // literal reached its slot with the trailing two extents swapped: a wrong
+  // log density and wrong gradients, no error and no NaN.
+  {
+    DataMap d = DataMap::from_json(R"({
+      "d2": [[11.0,12.0],[21.0,22.0]],
+      "d3": [[[111.0,112.0],[121.0,122.0]],[[211.0,212.0],[221.0,222.0]]],
+      "d4": [[[[1111.0,1112.0],[1121.0,1122.0]],
+              [[1211.0,1212.0],[1221.0,1222.0]]],
+             [[[2111.0,2112.0],[2121.0,2122.0]],
+              [[2211.0,2212.0],[2221.0,2222.0]]]],
+      "dvv": [[[111.0,112.0,113.0],[121.0,122.0,123.0]],
+              [[211.0,212.0,213.0],[221.0,222.0,223.0]]],
+      "dm": [[[111.0,112.0,113.0],[121.0,122.0,123.0]],
+             [[211.0,212.0,213.0],[221.0,222.0,223.0]]]
+    })");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/ndlit.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    const double q[3] = {0.3, 0.5, -0.25};
+    for (int i = 0; i < 3; ++i) lex.params_data()[i] = q[i];
+    double grad[3] = {0, 0, 0};
+    const double lp = lex.gradient(grad);
+
+    // Every element of both the literal and the data holds its own decimal
+    // index code, and each is weighted by that same code, so the reference is
+    // a sum of squares and any permutation of a layout moves it. Codes are
+    // small integers: the sums are exact, and expect_eq can be exact too.
+    double wt = 0, s3 = 0;
+    for (int i = 1; i <= 2; ++i)
+      for (int j = 1; j <= 2; ++j) {
+        const double c2 = 10 * i + j;
+        wt += c2 * c2;
+        for (int k = 1; k <= 2; ++k) {
+          const double c3 = 100 * i + 10 * j + k;
+          wt += c3 * c3;
+          s3 += c3 * c3;
+          for (int l = 1; l <= 2; ++l) {
+            const double c4 = 1000 * i + 100 * j + 10 * k + l;
+            wt += c4 * c4;
+          }
+        }
+        for (int k = 1; k <= 3; ++k) {
+          const double c = 100 * i + 10 * j + k;
+          wt += 2 * c * c;  // the array of vectors and the array of matrices
+        }
+      }
+    // literal minus data, element by element: zero only if both paths agree.
+    expect_eq("ndlit ddiff", grad[0], 0.0);
+    expect_eq("ndlit dwt", grad[1], wt);
+    // The interpreter's own N-D read of the literal, inside transformed data.
+    expect_eq("ndlit ds3", grad[2], s3);
+    expect_eq("ndlit lp", lp, wt * q[1] + s3 * q[2]);
+  }
+
   // Model-block UDFs on parameters, inlined: scalar chain, vector return,
   // statement body with local accumulator + loop.
   {
