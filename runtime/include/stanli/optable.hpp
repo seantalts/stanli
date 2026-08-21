@@ -46,6 +46,8 @@ namespace stanli {
   X(OP_MULTI_NORMAL_LPDF)           \
   X(OP_MULTI_NORMAL_PREC_LPDF)      \
   X(OP_GEMM)                        \
+  X(OP_MDIVIDE_LEFT)                \
+  X(OP_MDIVIDE_RIGHT)               \
   X(OP_LOG_SOFTMAX)                 \
   X(OP_CONSTRAIN_CHOL_CORR)         \
   X(OP_LKJ_CORR_CHOL_LPDF)          \

@@ -2305,6 +2305,48 @@ struct Lowering {
 #undef STANLI_BINARY_TABLE
             {"multiply_log", OP_LMULTIPLY},
     };
+    // `A \ B` and `B / A` with a matrix divisor are linear solves, not
+    // elementwise division: stanc spells them with the ordinary division
+    // operators and lowers them to mdivide_left/mdivide_right. The divisor's
+    // type is the whole discriminator -- a scalar divisor is elementwise, and
+    // `./` is never a solve -- which is the rule the MIR interpreter applies,
+    // kept identical here so a solve does not mean one thing in the model
+    // block and another in transformed data.
+    if (e.name == "LDivide__" ||
+        (e.name == "Divide__" && e.args.at(1).type_ == "UMatrix")) {
+      const bool left = e.name == "LDivide__";
+      Val a = lower_expr(e.args[0]);
+      Val b = lower_expr(e.args[1]);
+      const Val& divisor = left ? a : b;
+      const Val& dividend = left ? b : a;
+      // rows <= 0 is a matrix view whose shape the lowering never resolved;
+      // the kernel would map n x n over the slot and read past it.
+      if (!is_matrix(divisor.si) || divisor.si.rows != divisor.si.cols ||
+          divisor.si.rows <= 0)
+        fail(e.name + ": divisor is not a square matrix of known size", e.raw);
+      const int64_t n = divisor.si.rows;
+      // A non-matrix dividend is the vector its side implies -- a column
+      // under `\`, a row under `/` -- the same rule Times__ follows. Either
+      // way the shared extent is n and the result has the dividend's shape.
+      const bool dm = is_matrix(dividend.si);
+      if (!dm && !is_vector(dividend.si) && !is_row_vector(dividend.si))
+        fail(e.name + ": dividend is not a matrix or vector", e.raw);
+      const int64_t shared = dm ? (left ? dividend.si.rows : dividend.si.cols)
+                                : g.slots[dividend.slot].len;
+      if (shared != n)
+        fail(e.name + ": inner dimension mismatch (" + std::to_string(n) + "x" +
+                 std::to_string(n) + " against " + std::to_string(shared) + ")",
+             e.raw);
+      const int64_t k = dm ? (left ? dividend.si.cols : dividend.si.rows) : 1;
+      Val v = emit_value(left ? OP_MDIVIDE_LEFT : OP_MDIVIDE_RIGHT, {a, b},
+                         n * k, dividend.si, {(int)n, (int)k});
+      // The kernel solves through the operand types CmdStan's generated code
+      // would have used, because stan-math answers differently for each: bit
+      // 0 is the scalar type (var reaches other overloads than double), bit 1
+      // says the dividend is a vector rather than a one-column matrix.
+      g.ops.back().variant = (uint8_t)((v.autodiff ? 1u : 0u) | (dm ? 0u : 2u));
+      return v;
+    }
     // multiply is the named spelling of `*`, including its linear algebra:
     // the branches below pick matvec, GEMM, outer and inner products off
     // the operand views and the result type, which the alias shares.

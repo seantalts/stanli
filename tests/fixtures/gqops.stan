@@ -1,11 +1,13 @@
 // Integer `%` and `%/%`, and the matrix solves `A \ v` and `rv / A`, in
-// generated quantities. None of them are graph ops, so the section falls
-// back to the per-draw interpreter -- which has to know them too. When it
-// does not, column discovery throws at every probe point and the driver
-// reports the constrained parameters as the whole CSV: the generated
-// quantities disappear with no error anywhere, which is the one outcome a
-// caller cannot detect. Same shapes as tests/stanc3/operators.stan, which
-// is where the gap was found.
+// generated quantities. Every one of them has to produce CmdStan's value
+// through whichever path the section lands on -- the solves became graph
+// ops (runtime/kernels/matrix_fns.cpp) and the integer operators fold, so
+// today that is the graph. What this pins is that the columns are all
+// there: when an operator is missing from the path the section takes,
+// column discovery throws at every probe point and the driver reports the
+// constrained parameters as the whole CSV, so the generated quantities
+// disappear with no error anywhere. Same shapes as
+// tests/stanc3/operators.stan, which is where the gap was found.
 data {
   int N;
 }

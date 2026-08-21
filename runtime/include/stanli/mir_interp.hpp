@@ -1038,11 +1038,29 @@ class MirInterp {
         return m;
       };
       const Mat d = shaped(divisor, true);
-      const Mat x = shaped(dividend, left);
+      // stan-math solves through whatever Eigen type it is handed, and a
+      // vector passed as a one-column matrix takes the matrix code paths,
+      // which reassociate -- 1 ULP against CmdStan, measured on `A \ v`. So
+      // a vector goes in as a vector, which is also what the graph kernels
+      // do (runtime/kernels/matrix_fns.cpp).
+      //
       // stan-math checks squareness and the shared extent, and throws the
       // std::invalid_argument CmdStan would.
-      const Mat out = left ? stan::math::mdivide_left(d, x)
-                           : stan::math::mdivide_right(x, d);
+      Mat out;
+      if (dividend.dims.size() == 2) {
+        out = left ? stan::math::mdivide_left(d, shaped(dividend, left))
+                   : stan::math::mdivide_right(shaped(dividend, left), d);
+      } else if (left) {
+        Eigen::Matrix<T, Eigen::Dynamic, 1> x(dividend.r.size());
+        for (size_t i = 0; i < dividend.r.size(); ++i)
+          x((Eigen::Index)i) = dividend.r[i];
+        out = stan::math::mdivide_left(d, x);
+      } else {
+        Eigen::Matrix<T, 1, Eigen::Dynamic> x(dividend.r.size());
+        for (size_t i = 0; i < dividend.r.size(); ++i)
+          x((Eigen::Index)i) = dividend.r[i];
+        out = stan::math::mdivide_right(x, d);
+      }
       r.r.resize((size_t)(out.rows() * out.cols()));
       for (Eigen::Index j = 0; j < out.cols(); ++j)
         for (Eigen::Index i = 0; i < out.rows(); ++i)

@@ -404,6 +404,7 @@ set(STANLI_TESTS
   test_reroll test_profile test_inplace test_pass_safety test_sampling
   test_ode_prog test_mir_program_conformance test_mir_checks
   test_structured_checks test_mir_unary_fallback test_constfold
+  test_solve
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
   test_odevariadic test_estimate test_brmsmono test_structured_arrays test_pathfinder)
