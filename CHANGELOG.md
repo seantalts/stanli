@@ -10,6 +10,33 @@ every overload under the same function name in the MIR; the reader now
 gives each overload a distinct internal name and resolves every call
 site to the overload its argument types select.
 
+### Deep array literals no longer reach their slot transposed
+
+A rank-3 or deeper array literal in transformed data recorded a
+collapsed shape, so the graph's layout bridge permuted it with the
+trailing two extents swapped: wrong log density and gradients, no
+error (#122). The interpreter now records the literal's full nested
+shape.
+
+### Vector inv_logit is bitwise CmdStan again
+
+The elementwise inv_logit kernel handed Eigen's logistic functor a
+contiguous temporary, which selects the packet exp that CmdStan's
+strided Matrix-of-var path never uses; it was 1 ulp off at some
+inputs, within budget but enough to break bitwise fixtures. It now
+runs the scalar body CmdStan runs. The same change fixes a GLM with a
+scalar outcome reading past the end of its integer group (#123).
+
+### Operator aliases and the var-tape distribution functions
+
+320 conformance rows move to verified (#124). The named spellings of
+the binary operators (add, subtract, multiply, divide, elt_multiply,
+elt_divide, squared_distance) now lower in all three dispatch paths,
+and constant folding of an integer-typed divide no longer returns the
+real quotient. von_mises_{cdf,lcdf,lccdf} and
+neg_binomial_2_{lcdf,lccdf} join the nested-var-tape tier beside
+wiener and ordered_probit.
+
 ## 0.8.0
 
 ### Pathfinder, and a NUTS vs Pathfinder comparison
