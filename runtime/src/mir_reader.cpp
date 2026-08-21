@@ -591,6 +591,121 @@ void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
   for (const auto& s : body) validate_bindings(s, bindings, functions);
 }
 
+// stanc3 keeps every overload of a user function under one fdname, and calls
+// carry only that name, so the by-name function maps downstream would
+// collide (last definition wins). Give each overload a distinct internal
+// name and rewrite every call site to the overload its argument types
+// select. stanc3 already ran overload resolution and inserted promotions at
+// typecheck time, so a call's (leaf, depth) views match exactly one
+// signature; parenthesized signatures cannot collide with Stan identifiers.
+
+using Overloads = std::map<std::string, std::vector<FunDef*>>;
+
+std::string signature(const std::vector<UnsizedView>& views) {
+  std::string out = "(";
+  for (size_t i = 0; i < views.size(); ++i) {
+    if (i) out += ',';
+    switch (views[i].leaf) {
+      case UnsizedLeaf::Int:
+        out += "int";
+        break;
+      case UnsizedLeaf::Real:
+        out += "real";
+        break;
+      case UnsizedLeaf::Complex:
+        out += "complex";
+        break;
+      case UnsizedLeaf::Vector:
+        out += "vector";
+        break;
+      case UnsizedLeaf::RowVector:
+        out += "row_vector";
+        break;
+      case UnsizedLeaf::Matrix:
+        out += "matrix";
+        break;
+      default:
+        out += "?";
+        break;
+    }
+    for (uint8_t d = 0; d < views[i].depth; ++d) out += "[]";
+  }
+  return out + ")";
+}
+
+bool views_match(const std::vector<UnsizedView>& a,
+                 const std::vector<UnsizedView>& b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i)
+    if (a[i].depth != b[i].depth || a[i].leaf != b[i].leaf) return false;
+  return true;
+}
+
+bool views_match(const std::vector<Expr>& args,
+                 const std::vector<UnsizedView>& views) {
+  if (args.size() != views.size()) return false;
+  for (size_t i = 0; i < args.size(); ++i)
+    if (args[i].unsized.depth != views[i].depth ||
+        args[i].unsized.leaf != views[i].leaf)
+      return false;
+  return true;
+}
+
+void resolve_calls(Expr& e, const Overloads& overloads) {
+  for (Expr& a : e.args) resolve_calls(a, overloads);
+  if (e.kind != Expr::FunApp || e.fn_lib != Expr::Lib::UserDefined) return;
+  const auto it = overloads.find(e.name);
+  if (it == overloads.end()) return;
+  const FunDef* match = nullptr;
+  for (const FunDef* f : it->second) {
+    if (!views_match(e.args, f->arg_views)) continue;
+    if (match)
+      throw std::runtime_error("mir: ambiguous overload for " + e.name);
+    match = f;
+  }
+  if (!match)
+    throw std::runtime_error("mir: no overload of " + it->first +
+                             " matches its call");
+  e.name = match->name;
+}
+
+void resolve_calls(Stmt& s, const Overloads& overloads) {
+  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    resolve_calls(*e, overloads);
+  for (auto* exprs : {&s.read_dims, &s.lhs_idx, &s.fn_args})
+    for (Expr& e : *exprs) resolve_calls(e, overloads);
+  for (Expr& e : s.decl_type.dims) resolve_calls(e, overloads);
+  for (Transform* t : {s.read_transform ? &*s.read_transform : nullptr,
+                       s.check_transform ? &*s.check_transform : nullptr})
+    if (t)
+      for (Expr& e : t->args) resolve_calls(e, overloads);
+  for (Stmt& k : s.body) resolve_calls(k, overloads);
+}
+
+void resolve_overloads(Program& prog) {
+  std::map<std::string, std::vector<FunDef*>> by_name;
+  for (FunDef& f : prog.fun_defs) by_name[f.name].push_back(&f);
+  Overloads overloads;
+  for (auto& [name, defs] : by_name) {
+    if (defs.size() < 2) continue;
+    for (size_t i = 0; i < defs.size(); ++i)
+      for (size_t j = i + 1; j < defs.size(); ++j)
+        if (views_match(defs[i]->arg_views, defs[j]->arg_views))
+          throw std::runtime_error("mir: indistinguishable overloads of " +
+                                   name);
+    for (FunDef* f : defs) f->name += signature(f->arg_views);
+    overloads[name] = std::move(defs);
+  }
+  if (overloads.empty()) return;
+  for (auto& [name, type] : prog.input_vars)
+    for (Expr& d : type.dims) resolve_calls(d, overloads);
+  for (auto* body :
+       {&prog.prepare_data, &prog.log_prob, &prog.generate_quantities})
+    for (Stmt& s : *body) resolve_calls(s, overloads);
+  for (FunDef& f : prog.fun_defs)
+    for (Stmt& s : f.body) resolve_calls(s, overloads);
+}
+
 }  // namespace
 
 Program read_program(const sexp::Node& root) {
@@ -632,6 +747,7 @@ Program read_program(const sexp::Node& root) {
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
     read_stmt_list((*gq)[1], prog.generate_quantities);
+  resolve_overloads(prog);
   Functions functions;
   for (const auto& f : prog.fun_defs) functions[f.name] = &f;
   Bindings inputs;

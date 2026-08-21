@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Overloaded user-defined functions
+
+Models that overload a user-defined function no longer fail to compile
+with "mir: user function argument type mismatch" (#125). stanc3 keeps
+every overload under the same function name in the MIR; the reader now
+gives each overload a distinct internal name and resolves every call
+site to the overload its argument types select.
+
 ## 0.8.0
 
 ### Pathfinder, and a NUTS vs Pathfinder comparison

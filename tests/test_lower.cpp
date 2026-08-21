@@ -416,6 +416,42 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // Overloaded user functions (issue #125): stanc3 keeps every overload of
+  // cox_lccdf under the same fdname, and --O1 inlines the lcdf wrapper so
+  // log_prob calls both the vector and the scalar overload directly.
+  // Resolution must go by argument type, not last-definition-wins.
+  {
+    DataMap d = DataMap::from_json(
+        R"({"N": 3, "Y": [1.0, 2.0, 3.0], "bhaz": [0.4, 0.5, 0.6],
+            "cbhaz": [0.2, 0.3, 0.4]})");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/overload.tmir.sexp"), d);
+    check(lm.n_unconstrained == 1, "overload 1 unconstrained");
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    lex.params_data()[0] = 0.7;
+    double grad[1] = {0};
+    const double lp = lex.gradient(grad);
+
+    using stan::math::var;
+    var alpha = 0.7;
+    Eigen::VectorXd bh(3), cb(3);
+    bh << 0.4, 0.5, 0.6;
+    cb << 0.2, 0.3, 0.4;
+    Eigen::Matrix<var, -1, 1> mu = alpha * bh;
+    var acc = -stan::math::dot_product(cb, mu) +
+              stan::math::log1m_exp(-cb(0) * alpha) +
+              stan::math::normal_lpdf<false>(alpha, 0.0, 1.0);
+    acc.grad();
+    expect_ulp("overload lp", lp, acc.val());
+    // alpha collects adjoints from three terms; the graph and the var tape
+    // associate that sum differently, so this is a few-ulp comparison.
+    check(std::fabs(grad[0] - alpha.adj()) < 1e-12,
+          "overload galpha " + std::to_string(grad[0]) + " vs " +
+              std::to_string(alpha.adj()));
+    stan::math::recover_memory();
+  }
+
   // Index forms on parameters: gather, Between read/write, matrix row and
   // column slices, column writes.
   {
