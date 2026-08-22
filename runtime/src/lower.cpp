@@ -271,6 +271,26 @@ struct Lowering {
                        (raw.empty() ? "" : " | in: " + raw));
   }
 
+  // Every index the graph lowering sees is a bind-time constant, so the
+  // bounds CmdStan checks at runtime are checked here, before an op that
+  // would silently read a neighboring arena slot can be emitted.
+  void check_index(int64_t i, int64_t n, const char* what,
+                   const std::string& raw) {
+    if (i < 1 || i > n)
+      fail(std::string(what) + ": index " + std::to_string(i) +
+               " out of bounds for size " + std::to_string(n),
+           raw);
+  }
+  // A range with hi < lo is empty and never reads, whatever the endpoints.
+  void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
+                   const std::string& raw) {
+    if (hi >= lo && (lo < 1 || hi > n))
+      fail(std::string(what) + ": range [" + std::to_string(lo) + ", " +
+               std::to_string(hi) + "] out of bounds for size " +
+               std::to_string(n),
+           raw);
+  }
+
   int const_slot(double v) {
     auto it = const_cache.find(v);
     if (it != const_cache.end()) return it->second;
@@ -822,8 +842,7 @@ struct Lowering {
           if (e.args[1].name == "IndexBetween") {
             const int64_t lo = eval_int(e.args[1].args[0]);
             const int64_t hi = eval_int(e.args[1].args[1]);
-            if (lo < 1 || hi < lo || hi > base.si.rows)
-              fail("matrix row range out of bounds", e.raw);
+            check_range(lo, hi, base.si.rows, "matrix row range", e.raw);
             for (int64_t i = lo; i <= hi; ++i) rows.push_back((int)i - 1);
           } else {
             DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
@@ -871,6 +890,7 @@ struct Lowering {
         if (e.args.size() == 2 && e.args[1].name == "IndexBetween") {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
+          check_range(lo, hi, g.slots[base.slot].len, "range", e.raw);
           const int64_t len = hi >= lo ? hi - lo + 1 : 0;
           return emit_value(OP_SLICE, {base}, len, view_of(e.type_),
                             {(int)(len ? lo - 1 : 0)});
@@ -907,7 +927,10 @@ struct Lowering {
             fail("gather index must be int data", e.raw);
           std::vector<int> idata;
           idata.reserve(iv.i.size());
-          for (int x : iv.i) idata.push_back(x - 1);
+          for (int x : iv.i) {
+            check_index(x, g.slots[base.slot].len, "gather index", e.raw);
+            idata.push_back(x - 1);
+          }
           return emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
                             view_of(e.type_), idata);
         }
@@ -915,15 +938,18 @@ struct Lowering {
         // storage remains column-major even when either extent is zero.
         if (e.args.size() == 3 && is_matrix(base.si) &&
             e.args[1].name == "IndexSingle" && e.args[2].name == "IndexAll") {
-          const int64_t i = eval_int(e.args[1].args[0]) - 1;
+          const int64_t i = eval_int(e.args[1].args[0]);
+          check_index(i, base.si.rows, "matrix row", e.raw);
           return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
-                            view_of(e.type_), {(int)i, (int)base.si.rows});
+                            view_of(e.type_),
+                            {(int)(i - 1), (int)base.si.rows});
         }
         if (e.args.size() == 3 && is_matrix(base.si) &&
             e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
-          const int64_t j = eval_int(e.args[2].args[0]) - 1;
+          const int64_t j = eval_int(e.args[2].args[0]);
+          check_index(j, base.si.cols, "matrix column", e.raw);
           return emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.type_),
-                            {(int)(j * base.si.rows)});
+                            {(int)((j - 1) * base.si.rows)});
         }
         // Column of a canonical graph-order 2-D array (array[N, S] real):
         // each outer element is contiguous, so successive rows sit S apart.
@@ -942,10 +968,12 @@ struct Lowering {
             e.args[2].name == "IndexSingle") {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
-          const int64_t j = eval_int(e.args[2].args[0]) - 1;
+          const int64_t j = eval_int(e.args[2].args[0]);
+          check_index(j, base.si.cols, "matrix column", e.raw);
+          check_range(lo, hi, base.si.rows, "matrix row range", e.raw);
           const int64_t len = hi >= lo ? hi - lo + 1 : 0;
           return emit_value(OP_SLICE, {base}, len, view_of(e.type_),
-                            {(int)(len ? j * base.si.rows + lo - 1 : 0)});
+                            {(int)(len ? (j - 1) * base.si.rows + lo - 1 : 0)});
         }
         // Params/locals with recorded dims, laid out by flat_addr above.
         // Matrix views are col-major and never take this array-major path.
@@ -954,8 +982,11 @@ struct Lowering {
           const auto& D = *bdims;
           const bool mat = array_shape(base.si).leaf == ViewKind::Matrix;
           std::vector<int64_t> ix;
-          for (size_t d = 0; d < n_idx; ++d)
-            ix.push_back(eval_int(e.args[1 + d].args[0]) - 1);
+          for (size_t d = 0; d < n_idx; ++d) {
+            const int64_t one = eval_int(e.args[1 + d].args[0]);
+            check_index(one, D[d], "array index", e.raw);
+            ix.push_back(one - 1);
+          }
           const Addr a = flat_addr(D, mat, ix);
           if (a.stride != 1)
             return emit_value(OP_SLICE_STRIDED, {base}, a.len,
@@ -973,9 +1004,11 @@ struct Lowering {
         // Row of a column-major data matrix / 2-D array: strided slice.
         if (all_single && e.args.size() == 2 && is_matrix(base.si) &&
             e.type_ != "UReal" && e.type_ != "UInt") {
-          const int64_t t = eval_int(e.args[1].args[0]) - 1;
+          const int64_t t = eval_int(e.args[1].args[0]);
+          check_index(t, base.si.rows, "matrix row", e.raw);
           return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
-                            view_of(e.type_), {(int)t, (int)base.si.rows});
+                            view_of(e.type_),
+                            {(int)(t - 1), (int)base.si.rows});
         }
         // Data-only slicing with no native path (e.g. one matrix out of a
         // data array of matrices) evaluates at compile time.
@@ -983,11 +1016,16 @@ struct Lowering {
         int64_t flat = 0;
         if (all_single && e.args.size() == 2 &&
             (e.type_ == "UReal" || e.type_ == "UInt")) {
-          flat = eval_int(e.args[1].args[0]) - 1;
+          const int64_t one = eval_int(e.args[1].args[0]);
+          check_index(one, g.slots[base.slot].len, "element", e.raw);
+          flat = one - 1;
         } else if (all_single && e.args.size() == 3 && is_matrix(base.si) &&
                    (e.type_ == "UReal" || e.type_ == "UInt")) {
-          flat = (eval_int(e.args[2].args[0]) - 1) * base.si.rows +
-                 (eval_int(e.args[1].args[0]) - 1);
+          const int64_t ri = eval_int(e.args[1].args[0]);
+          const int64_t cj = eval_int(e.args[2].args[0]);
+          check_index(ri, base.si.rows, "matrix row", e.raw);
+          check_index(cj, base.si.cols, "matrix column", e.raw);
+          flat = (cj - 1) * base.si.rows + (ri - 1);
         } else {
           std::string desc =
               "unsupported index expression: base=" +

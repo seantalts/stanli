@@ -463,6 +463,16 @@ class MirInterp {
                        (raw.empty() ? "" : " | in: " + raw));
   }
 
+  // The .at() reads in eval_indexed would throw a bare
+  // std::out_of_range("vector"); check first so an out-of-range index
+  // names the index and the extent instead.
+  void bounds(long i, int64_t n, const mir::Expr& e) const {
+    if (i < 1 || i > n)
+      fail("index " + std::to_string(i) + " out of bounds for size " +
+               std::to_string(n),
+           e.raw);
+  }
+
   static double val(const T& x) { return stan::math::value_of(x); }
 
   // Arity of a bound transform called as a function, or 0 for any other
@@ -714,6 +724,7 @@ class MirInterp {
     if (e.args.size() == 2 && e.args[1].name == "IndexSingle" &&
         base.dims.size() <= 1) {
       const long ix = as_int(e.args[1].args[0]);
+      bounds(ix, (int64_t)base.r.size(), e);
       r.is_int = base.is_int;
       if (base.is_int) r.i = {base.i.at(ix - 1)};
       r.r = {base.r.at(ix - 1)};
@@ -727,6 +738,7 @@ class MirInterp {
           e.args[2].name == "IndexAll"))) {
       const long i = as_int(e.args[1].args[0]);
       const int64_t R = base.dims[0], C = base.dims[1];
+      bounds(i, R, e);
       r.is_int = base.is_int;
       r.dims = {C};
       for (int64_t j = 0; j < C; ++j) {
@@ -744,7 +756,9 @@ class MirInterp {
       if (all_single) {
         int64_t flatpos = 0, stride = 1;
         for (size_t d = 0; d < base.dims.size(); ++d) {
-          flatpos += (as_int(e.args[1 + d].args[0]) - 1) * stride;
+          const long ixd = as_int(e.args[1 + d].args[0]);
+          bounds(ixd, base.dims[d], e);
+          flatpos += (ixd - 1) * stride;
           stride *= base.dims[d];
         }
         r.is_int = base.is_int;
@@ -758,6 +772,7 @@ class MirInterp {
         e.args[2].name == "IndexSingle" && base.dims.size() == 2) {
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
+      bounds(j, base.dims[1], e);
       r.is_int = base.is_int;
       r.dims = {R};
       r.r.assign(base.r.begin() + (j - 1) * R, base.r.begin() + j * R);
@@ -772,6 +787,7 @@ class MirInterp {
         base.dims.size() > 2) {
       const long i = as_int(e.args[1].args[0]);
       const int64_t d0 = base.dims[0];
+      bounds(i, d0, e);
       int64_t rest = 1;
       for (size_t d = 1; d < base.dims.size(); ++d) rest *= base.dims[d];
       r.is_int = base.is_int;
@@ -791,6 +807,7 @@ class MirInterp {
       r.dims = {(int64_t)n};
       for (size_t k = 0; k < n; ++k) {
         const long p = k < ix.i.size() ? ix.i[k] : (long)val(ix.r.at(k));
+        bounds(p, (int64_t)base.r.size(), e);
         r.r.push_back(base.r.at((size_t)(p - 1)));
         if (base.is_int) r.i.push_back(base.i.at((size_t)(p - 1)));
       }
@@ -801,6 +818,10 @@ class MirInterp {
         base.dims.size() <= 1) {
       const long a = as_int(e.args[1].args[0]);
       const long b = as_int(e.args[1].args[1]);
+      if (b >= a) {
+        bounds(a, (int64_t)base.r.size(), e);
+        bounds(b, (int64_t)base.r.size(), e);
+      }
       r.is_int = base.is_int;
       r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long k = a; k <= b; ++k) {
@@ -816,6 +837,11 @@ class MirInterp {
       const long a = as_int(e.args[2].args[0]);
       const long b = as_int(e.args[2].args[1]);
       const int64_t R = base.dims[0];
+      bounds(i, R, e);
+      if (b >= a) {
+        bounds(a, base.dims[1], e);
+        bounds(b, base.dims[1], e);
+      }
       r.is_int = base.is_int;
       r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long j = a; j <= b; ++j) {
@@ -831,6 +857,11 @@ class MirInterp {
       const long b = as_int(e.args[1].args[1]);
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
+      bounds(j, base.dims[1], e);
+      if (b >= a) {
+        bounds(a, R, e);
+        bounds(b, R, e);
+      }
       r.is_int = base.is_int;
       r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long k = a; k <= b; ++k) {

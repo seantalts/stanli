@@ -27,6 +27,18 @@ rvalue semantics: hi < lo is an empty slice whatever the endpoints,
 bounds are checked only when a range is nonempty, and an empty slice
 contributes exactly nothing.
 
+### Out-of-bounds indices are rejected at compile time
+
+Every index the graph lowering sees is a bind-time constant, but most
+index forms never checked it: v[7] on a length-4 vector, a gather by
+[1, 9], Y[2:9], M[1:2, 5], and their friends silently read a
+neighboring arena slot and produced a wrong log density with no error.
+CmdStan rejects all of these at runtime. Every indexing path now
+checks its bounds at compile time and names the index and the extent;
+the matrix row range also accepts hi < lo as empty now, completing the
+empty-range semantics. The interpreter's index paths get the same
+named errors in place of a bare std::out_of_range("vector").
+
 ### Matrix division is a linear solve again
 
 `B / A` on two matrices in the model block computed elementwise

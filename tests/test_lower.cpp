@@ -645,6 +645,112 @@ int main() {
     }
   }
 
+  // Index bounds are data, so the lowering must reject an out-of-bounds
+  // index at bind time the way CmdStan rejects it at runtime; the silent
+  // alternative is reading a neighboring arena slot. hi < lo ranges stay
+  // empty. One fixture; the base dataset is in bounds and each violation
+  // overrides one index.
+  {
+    const auto base_data = [] {
+      DataMap d = DataMap::from_json(
+          R"({"k": 2, "idx": [1, 4], "lo": 2, "hi": 3, "i1": 1, "j1": 2,
+              "rl": 2, "rh": 3, "m": 3, "Y": [1.5, -0.5, 2.0, 0.25],
+              "Zm": [[1, 5], [2, 6], [3, 7], [4, 8]]})");
+      return d;
+    };
+    const std::string mir = slurp("tests/fixtures/oob.tmir.sexp");
+
+    const auto reference = [&](bool rows_empty, double q) {
+      using stan::math::var;
+      var mu = q;
+      const double yv[4] = {1.5, -0.5, 2.0, 0.25};
+      const double zm[4][2] = {{1, 5}, {2, 6}, {3, 7}, {4, 8}};
+      Eigen::Matrix<var, -1, 1> v(4);
+      for (int i = 0; i < 4; ++i) v(i) = yv[i] + mu;
+      Eigen::Matrix<var, -1, -1> M(4, 2);
+      for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 2; ++j) M(i, j) = zm[i][j] + mu;
+      var acc = stan::math::normal_lpdf<false>(v(1), 0.0, 1.0);
+      Eigen::Matrix<var, -1, 1> vg(2);
+      vg << v(0), v(3);
+      acc += stan::math::normal_lpdf<false>(vg, 0.0, 1.0);
+      Eigen::Matrix<var, -1, 1> vs(2);
+      vs << v(1), v(2);
+      acc += stan::math::normal_lpdf<false>(vs, 0.0, 1.0);
+      acc += stan::math::normal_lpdf<false>(M(0, 0) + M(0, 1), 0.0, 1.0);
+      acc += stan::math::normal_lpdf<false>(
+          M(0, 1) + M(1, 1) + M(2, 1) + M(3, 1), 0.0, 1.0);
+      if (rows_empty) {
+        // sum over the empty row range is 0 on both terms.
+        acc += stan::math::normal_lpdf<false>(0.0, 0.0, 1.0) * 2.0;
+      } else {
+        acc += stan::math::normal_lpdf<false>(
+            M(1, 0) + M(2, 0) + M(1, 1) + M(2, 1), 0.0, 1.0);
+        acc += stan::math::normal_lpdf<false>(M(1, 1) + M(2, 1), 0.0, 1.0);
+      }
+      acc += stan::math::normal_lpdf<false>(3.0, 0.0, 1.0);  // tds = xs[3]
+      acc += stan::math::normal_lpdf<false>(mu, 0.0, 2.0);
+      return acc;
+    };
+
+    const auto run_case = [&](DataMap d, bool rows_empty,
+                              const std::string& tag) {
+      CompiledModel lm = compile_model(mir, d);
+      Executor lex(std::move(lm.graph));
+      lm.bind(lex);
+      lex.params_data()[0] = 0.35;
+      double grad[1] = {0};
+      const double lp = lex.gradient(grad);
+      using stan::math::var;
+      var acc = reference(rows_empty, 0.35);
+      acc.grad();
+      expect_ulp(tag + " lp", lp, acc.val());
+      stan::math::recover_memory();
+    };
+    run_case(base_data(), false, "oob ctrl");
+    {
+      DataMap d = base_data();
+      d.set_int("rl", 5);
+      d.set_int("rh", 2);
+      run_case(std::move(d), true, "oob rows-empty");
+    }
+
+    const auto expect_oob = [&](const char* name, long v,
+                                const std::string& tag) {
+      DataMap d = base_data();
+      d.set_int(name, v);
+      bool threw = false;
+      try {
+        compile_model(mir, d);
+      } catch (const std::exception& ex) {
+        threw =
+            std::string(ex.what()).find("out of bounds") != std::string::npos;
+        if (!threw)
+          std::printf("  %s threw without 'out of bounds': %s\n", tag.c_str(),
+                      ex.what());
+      }
+      check(threw, tag + " rejected");
+    };
+    expect_oob("k", 7, "oob v[7]");
+    expect_oob("hi", 9, "oob v[2:9]");
+    expect_oob("i1", 5, "oob M[5]");
+    expect_oob("j1", 5, "oob M[:,5]");
+    expect_oob("rh", 9, "oob M[2:9]");
+    expect_oob("m", 9, "oob interp xs[9]");
+    {
+      DataMap d = base_data();
+      d.set_int_array("idx", {1, 9});
+      bool threw = false;
+      try {
+        compile_model(mir, d);
+      } catch (const std::exception& ex) {
+        threw =
+            std::string(ex.what()).find("out of bounds") != std::string::npos;
+      }
+      check(threw, "oob v[[1,9]] rejected");
+    }
+  }
+
   // Index forms on parameters: gather, Between read/write, matrix row and
   // column slices, column writes.
   {
