@@ -39,6 +39,15 @@ the matrix row range also accepts hi < lo as empty now, completing the
 empty-range semantics. The interpreter's index paths get the same
 named errors in place of a bare std::out_of_range("vector").
 
+### Non-integer data for an int variable is a data error
+
+A declared-int variable supplied with non-integer values (JSON 1.0 is
+not an int, matching CmdStan's var_context) used to bind as typeless
+reals, and the failure surfaced at whatever consumer touched it first,
+e.g. "gather index must be int data". It is rejected at data binding
+now, as std::invalid_argument naming the variable, the same contract
+as the existing dimension check.
+
 ### Matrix division is a linear solve again
 
 `B / A` on two matrices in the model block computed elementwise

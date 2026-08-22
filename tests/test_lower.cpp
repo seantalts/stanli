@@ -3840,6 +3840,32 @@ int main() {
   }
 
   {
+    // A declared-int variable supplied with non-integer values. CmdStan's
+    // var_context rejects this at read time; stanli used to bind it as a
+    // typeless real entry, and the failure surfaced later as whatever
+    // consumer touched it first ("gather index must be int data").
+    DataMap d = DataMap::from_json(
+        R"({"k": 2, "idx": [1.0, 2.5], "lo": 2, "hi": 3, "i1": 1, "j1": 2,
+            "rl": 2, "rh": 3, "m": 3, "Y": [1.5, -0.5, 2.0, 0.25],
+            "Zm": [[1, 5], [2, 6], [3, 7], [4, 8]]})");
+    bool rejected = false;
+    std::string msg;
+    try {
+      compile_model(slurp("tests/fixtures/oob.tmir.sexp"), d);
+    } catch (const std::invalid_argument& e) {
+      rejected = true;
+      msg = e.what();
+    } catch (const std::exception& e) {
+      msg = e.what();
+    }
+    check(rejected, "non-int data for int variable rejected: " + msg);
+    check(msg.find("int variable contained non-int values") !=
+                  std::string::npos &&
+              msg.find("name=idx") != std::string::npos,
+          "the rejection names the int variable: " + msg);
+  }
+
+  {
     // Data whose JSON shape disagrees with its declaration. CmdStan's
     // var_context validates every declared dimension before it reads a
     // value and throws std::invalid_argument naming the variable and both

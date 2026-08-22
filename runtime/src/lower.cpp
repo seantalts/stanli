@@ -715,6 +715,16 @@ struct Lowering {
   void validate_data_dims(const std::string& name, const mir::SizedType& t) {
     if (!data.has(name)) return;
     const DataMap::Entry& en = data.at(name);
+    // A declared-int variable must arrive integer-typed, as CmdStan's
+    // var_context requires (JSON 1.0 is not an int there either). Without
+    // this the entry binds as typeless reals and the failure surfaces at
+    // whatever consumer touches it first, e.g. the gather index guard.
+    if ((t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt")) &&
+        !en.is_int)
+      throw std::invalid_argument(
+          "int variable contained non-int values; processing stage=data "
+          "initialization; variable name=" +
+          name + "; base type=int");
     const int64_t found = (int64_t)std::max(en.r.size(), en.i.size());
     const std::vector<int64_t> declared = sized_dims(t);
     int64_t want = 1;
