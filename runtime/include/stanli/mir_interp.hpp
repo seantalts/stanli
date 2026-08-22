@@ -802,7 +802,7 @@ class MirInterp {
       const long a = as_int(e.args[1].args[0]);
       const long b = as_int(e.args[1].args[1]);
       r.is_int = base.is_int;
-      r.dims = {b - a + 1};
+      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long k = a; k <= b; ++k) {
         r.r.push_back(base.r.at(k - 1));
         if (base.is_int) r.i.push_back(base.i.at(k - 1));
@@ -817,7 +817,7 @@ class MirInterp {
       const long b = as_int(e.args[2].args[1]);
       const int64_t R = base.dims[0];
       r.is_int = base.is_int;
-      r.dims = {b - a + 1};
+      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long j = a; j <= b; ++j) {
         r.r.push_back(base.r.at((j - 1) * R + (i - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (i - 1)));
@@ -832,7 +832,7 @@ class MirInterp {
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
       r.is_int = base.is_int;
-      r.dims = {b - a + 1};
+      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long k = a; k <= b; ++k) {
         r.r.push_back(base.r.at((j - 1) * R + (k - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (k - 1)));

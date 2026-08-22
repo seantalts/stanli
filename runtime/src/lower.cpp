@@ -851,23 +851,29 @@ struct Lowering {
           const ArrayShape& sh = array_shape(base.si);
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
-          if (lo < 1 || hi < lo || hi > sh.dims.front())
+          // hi < lo is an empty slice whatever the endpoints (CmdStan's
+          // rvalue checks bounds only when a range is nonempty), and the
+          // bounds are data, so rejecting it would make compilation
+          // data-dependent.
+          if (hi >= lo && (lo < 1 || hi > sh.dims.front()))
             fail("array outer range out of bounds", e.raw);
           std::vector<int64_t> out_dims = sh.dims;
-          out_dims[0] = hi - lo + 1;
+          out_dims[0] = hi >= lo ? hi - lo + 1 : 0;
           const std::vector<int64_t> suffix(sh.dims.begin() + 1, sh.dims.end());
           const int64_t width = checked_product(suffix, "array element");
           const int64_t len = checked_product(out_dims, "array range");
           return emit_value(OP_SLICE, {base}, len,
                             array_view(std::move(out_dims), sh.leaf),
-                            {(int)((lo - 1) * width)});
+                            {(int)(hi >= lo ? (lo - 1) * width : 0)});
         }
         // Between subrange read on a 1-D value: v[a:b] is contiguous.
+        // hi < lo is empty, not negative-length.
         if (e.args.size() == 2 && e.args[1].name == "IndexBetween") {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
-          return emit_value(OP_SLICE, {base}, hi - lo + 1, view_of(e.type_),
-                            {(int)(lo - 1)});
+          const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+          return emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+                            {(int)(len ? lo - 1 : 0)});
         }
         // A data gather on a one-dimensional scalar array keeps an exact
         // one-dimensional Array view. More structural forms need strides
@@ -937,8 +943,9 @@ struct Lowering {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
           const int64_t j = eval_int(e.args[2].args[0]) - 1;
-          return emit_value(OP_SLICE, {base}, hi - lo + 1, view_of(e.type_),
-                            {(int)(j * base.si.rows + lo - 1)});
+          const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+          return emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+                            {(int)(len ? j * base.si.rows + lo - 1 : 0)});
         }
         // Params/locals with recorded dims, laid out by flat_addr above.
         // Matrix views are col-major and never take this array-major path.

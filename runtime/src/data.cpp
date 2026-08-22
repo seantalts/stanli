@@ -24,6 +24,10 @@ static DataMap::Entry entry_from_json(const std::string& name, const json& v) {
   }
   if (v.is_array()) {
     if (v.empty()) {
+      // An empty array is vacuously all-int (R's integer(0) arrives as []),
+      // and its empty real side satisfies a real declaration just as well,
+      // so claiming int here never misleads: empty satisfies both types.
+      e.is_int = true;
       e.dims = {0};
       return e;
     }

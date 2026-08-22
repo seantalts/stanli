@@ -556,6 +556,95 @@ int main() {
     }
   }
 
+  // An empty int data array as a gather index: JSON [] must stay
+  // integer-typed, the empty density term must contribute nothing, and the
+  // generated quantity over the empty gather must write 0.
+  {
+    const double yv[4] = {1.5, -0.5, 2.0, 0.25};
+    for (int empty = 0; empty < 2; ++empty) {
+      DataMap d = DataMap::from_json(
+          empty ? R"({"M": 0, "idx": [], "Y": [1.5, -0.5, 2.0, 0.25]})"
+                : R"({"M": 2, "idx": [3, 1], "Y": [1.5, -0.5, 2.0, 0.25]})");
+      CompiledModel lm =
+          compile_model(slurp("tests/fixtures/emptyidx.tmir.sexp"), d);
+      Executor lex(std::move(lm.graph));
+      lm.bind(lex);
+      lex.params_data()[0] = 0.4;
+      double grad[1] = {0};
+      const double lp = lex.gradient(grad);
+
+      using stan::math::var;
+      var mu = 0.4;
+      var acc = stan::math::normal_lpdf<false>(mu, 0.0, 2.0);
+      if (!empty) {
+        Eigen::Matrix<var, -1, 1> yg(2);
+        yg << yv[2], yv[0];
+        acc += stan::math::normal_lpdf<false>(yg, mu, 1.0);
+      }
+      acc.grad();
+      const std::string tag = empty ? "emptyidx empty" : "emptyidx full";
+      expect_ulp(tag + " lp", lp, acc.val());
+      check(std::fabs(grad[0] - mu.adj()) < 1e-12, tag + " grad");
+      stan::math::recover_memory();
+      check(lm.write_array && lm.write_array->truncated.empty(),
+            tag + " write_array compiled");
+      if (lm.write_array && lm.write_array->truncated.empty()) {
+        Executor wex(std::move(lm.write_array->graph));
+        lm.write_array->bind(wex);
+        wex.params_data()[0] = 0.4;
+        wex.run_forward_only();
+        bool found = false;
+        for (const auto& col : lm.write_array->columns) {
+          if (col.name != "gsum") continue;
+          found = true;
+          check(*wex.value_ptr(col.slot) == (empty ? 0.0 : yv[2] + yv[0]),
+                tag + " gsum value");
+        }
+        check(found, tag + " has gsum");
+      }
+    }
+  }
+
+  // Data-dependent range bounds: hi < lo is an empty slice under CmdStan's
+  // rvalue semantics, whatever the endpoints, on the array, vector, and
+  // matrix row-range paths alike.
+  {
+    for (int empty = 0; empty < 2; ++empty) {
+      DataMap d = DataMap::from_json(
+          empty ? R"({"K": 0, "lo": 5, "hi": 2, "Y": [1.5, -0.5, 2.0, 0.25],
+                      "Zm": [[1, 5], [2, 6], [3, 7], [4, 8]]})"
+                : R"({"K": 2, "lo": 2, "hi": 3, "Y": [1.5, -0.5, 2.0, 0.25],
+                      "Zm": [[1, 5], [2, 6], [3, 7], [4, 8]]})");
+      CompiledModel lm =
+          compile_model(slurp("tests/fixtures/rangeclamp.tmir.sexp"), d);
+      Executor lex(std::move(lm.graph));
+      lm.bind(lex);
+      lex.params_data()[0] = -0.3;
+      double grad[1] = {0};
+      const double lp = lex.gradient(grad);
+
+      using stan::math::var;
+      var mu = -0.3;
+      var acc = stan::math::normal_lpdf<false>(mu, 0.0, 2.0);
+      if (empty) {
+        // sum over an empty slice is 0 on the array and matrix paths; the
+        // empty vector slice contributes nothing at all.
+        acc += stan::math::normal_lpdf<false>(0.0, mu, 1.0) * 2.0;
+      } else {
+        acc += stan::math::normal_lpdf<false>(1.0 + 2.0, mu, 1.0);
+        Eigen::Matrix<var, -1, 1> yg(2);
+        yg << -0.5, 2.0;
+        acc += stan::math::normal_lpdf<false>(yg, mu, 1.0);
+        acc += stan::math::normal_lpdf<false>(1.0 + 2.0, mu, 1.0);
+      }
+      acc.grad();
+      const std::string tag = empty ? "rangeclamp empty" : "rangeclamp full";
+      expect_ulp(tag + " lp", lp, acc.val());
+      check(std::fabs(grad[0] - mu.adj()) < 1e-12, tag + " grad");
+      stan::math::recover_memory();
+    }
+  }
+
   // Index forms on parameters: gather, Between read/write, matrix row and
   // column slices, column writes.
   {

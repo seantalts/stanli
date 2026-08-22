@@ -13,6 +13,20 @@ to a zero-length gather that contributes exactly zero to the density
 and the gradient; the guard still rejects an index whose int values
 disagree with its shape.
 
+### Empty data arrays and empty ranges
+
+The rest of the #133 family, found by auditing every place a
+zero-size value can reach the lowering. An empty JSON array ([], which
+is what R's integer(0) serializes to) arrived untyped, so an empty int
+data array could not index a gather. A range whose realized bounds
+make it empty was rejected on the array path ("array outer range out
+of bounds") and, worse, emitted a negative-length slice on the vector
+and matrix row-range paths, which read out of bounds and produced a
+wrong log density with no error. All three now follow CmdStan's
+rvalue semantics: hi < lo is an empty slice whatever the endpoints,
+bounds are checked only when a range is nonempty, and an empty slice
+contributes exactly nothing.
+
 ### Matrix division is a linear solve again
 
 `B / A` on two matrices in the model block computed elementwise
