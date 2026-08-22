@@ -48,7 +48,7 @@ could not build one on their farm.
 - Distribution coverage: [docs/coverage.md](docs/coverage.md). 69 of 72
   densities, 90 of 105 cdf/lcdf/lccdf, truncation, censoring, ordinal
   regression and the count GLMs, each bitwise against CmdStan.
-- Install size: one 29.3 MB shared library, a 10.6 MB wheel. Breakdown in
+- Install size: one 29.7 MB shared library, a 10.8 MB wheel. Breakdown in
   [Binary size](#binary-size).
 - How this is possible, for statisticians:
   [docs/how-it-works.md](docs/how-it-works.md)
@@ -137,7 +137,7 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
 
 ## Binary size
 
-One self-contained shared library, 29.3 MB installed, 10.6 MB compressed
+One self-contained shared library, 29.7 MB installed, 10.8 MB compressed
 in the wheel, measured on the manylinux_2_28_x86_64 artifact.
 
 The per-symbol breakdown rides with every build as the `binary-size`

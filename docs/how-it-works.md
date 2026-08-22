@@ -208,7 +208,7 @@ difference between a nanosecond of dispatch and code the C++ compiler
 inlined into the model binary.
 
 The other cost is size, the deliberate trade at the center of the
-design: the wheel is 10.6 MB because it carries the entire Stan compiler
+design: the wheel is 10.8 MB because it carries the entire Stan compiler
 and every operation in the math library, whether your model uses them
 or not. In exchange, `pip install stanli` is the entire installation.
 
