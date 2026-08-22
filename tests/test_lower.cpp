@@ -511,6 +511,51 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // Data-dependent gather width (issue #133): the same program gathers a
+  // slice whose length transformed data computes from the data. Nev > 0 is
+  // an ordinary gather; Nev == 0 must compile and contribute exactly zero
+  // to lp and the gradient.
+  {
+    const double yv[4] = {1.5, -0.5, 2.0, 0.25};
+    const double q[4] = {0.3, -0.8, 0.1, 0.6};
+    for (int empty = 0; empty < 2; ++empty) {
+      DataMap d;
+      d.set_int("N", 4);
+      d.set_real_array("Y", {yv[0], yv[1], yv[2], yv[3]});
+      d.set_int_array("cens", empty ? std::vector<int>{1, 1, 1, 1}
+                                    : std::vector<int>{0, 1, 0, 1});
+      CompiledModel lm =
+          compile_model(slurp("tests/fixtures/emptygather.tmir.sexp"), d);
+      check(lm.n_unconstrained == 4, "emptygather 4 unconstrained");
+      Executor lex(std::move(lm.graph));
+      lm.bind(lex);
+      for (int i = 0; i < 4; ++i) lex.params_data()[i] = q[i];
+      double grad[4] = {0, 0, 0, 0};
+      const double lp = lex.gradient(grad);
+
+      using stan::math::var;
+      Eigen::Matrix<var, -1, 1> mu(4);
+      mu << q[0], q[1], q[2], q[3];
+      var acc = 0.0;
+      if (!empty) {
+        Eigen::Matrix<var, -1, 1> mg(2);
+        mg << mu(0) * 2.0, mu(2) * 2.0;
+        Eigen::VectorXd yg(2);
+        yg << yv[0], yv[2];
+        acc += stan::math::dot_product(yg, stan::math::exp(mg)) +
+               stan::math::sum(mg);
+      }
+      acc += stan::math::normal_lpdf<false>(mu, 0.0, 1.0);
+      acc.grad();
+      const std::string tag = empty ? "emptygather empty" : "emptygather full";
+      expect_ulp(tag + " lp", lp, acc.val());
+      for (int i = 0; i < 4; ++i)
+        check(std::fabs(grad[i] - mu(i).adj()) < 1e-12,
+              tag + " g" + std::to_string(i));
+      stan::math::recover_memory();
+    }
+  }
+
   // Index forms on parameters: gather, Between read/write, matrix row and
   // column slices, column writes.
   {

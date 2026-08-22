@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Empty gathers compile
+
+A gather whose index slice is empty, such as `Y[Jevent[1:Nevent]]` with
+`Nevent == 0`, failed to compile with "gather index must be int data"
+(#133). The length is computed from the data, so whether the model
+compiled depended on the data: a survival model with no observed events
+in one censoring category refused to build. An empty index now lowers
+to a zero-length gather that contributes exactly zero to the density
+and the gradient; the guard still rejects an index whose int values
+disagree with its shape.
+
 ## 0.8.1
 
 ### Overloaded user-defined functions

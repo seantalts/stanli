@@ -878,7 +878,8 @@ struct Lowering {
           if (sh.leaf != ViewKind::Flat || sh.dims.size() != 1)
             fail("unsupported index expression", e.raw);
           DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
-          if (!iv.is_int) fail("gather index must be int data", e.raw);
+          if (!iv.is_int || iv.i.size() != iv.r.size())
+            fail("gather index must be int data", e.raw);
           std::vector<int> idata;
           idata.reserve(iv.i.size());
           for (int x : iv.i) {
@@ -892,8 +893,11 @@ struct Lowering {
         }
         // Gather by a data int array: v[idx].
         if (e.args.size() == 2 && e.args[1].name == "IndexMulti") {
+          // An empty index is a legitimate data-dependent gather (a slice
+          // whose computed length is zero); an int-flagged entry whose int
+          // mirror disagrees with its values is not.
           DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
-          if (!iv.is_int || iv.i.empty())
+          if (!iv.is_int || iv.i.size() != iv.r.size())
             fail("gather index must be int data", e.raw);
           std::vector<int> idata;
           idata.reserve(iv.i.size());
