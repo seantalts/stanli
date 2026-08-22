@@ -13,6 +13,23 @@ to a zero-length gather that contributes exactly zero to the density
 and the gradient; the guard still rejects an index whose int values
 disagree with its shape.
 
+### Matrix division is a linear solve again
+
+`B / A` on two matrices in the model block computed elementwise
+division: no exception, no NaN, a wrong log density and wrong
+gradients. stanc3 spells `mdivide_right` with the ordinary division
+operator, and the graph lowering read the operator rather than the
+divisor's type. `rv / A` refused to compile and `A \ v` was not lowered
+at all.
+
+All four shapes -- matrix/matrix, row_vector/matrix, matrix\vector,
+matrix\matrix -- now lower to a pair of graph kernels with adjoints,
+keyed on the same rule the MIR interpreter already used: a matrix
+divisor is a solve, a scalar divisor is not, and `./` never is. A solve
+in generated quantities no longer truncates the graph write_array and
+sends the whole section to the per-draw interpreter, which measured
+6.5x on a 50-element block (5.78 to 0.89 us/draw).
+
 ## 0.8.1
 
 ### Overloaded user-defined functions
@@ -49,23 +66,6 @@ and constant folding of an integer-typed divide no longer returns the
 real quotient. von_mises_{cdf,lcdf,lccdf} and
 neg_binomial_2_{lcdf,lccdf} join the nested-var-tape tier beside
 wiener and ordered_probit.
-
-### Matrix division is a linear solve again
-
-`B / A` on two matrices in the model block computed elementwise
-division: no exception, no NaN, a wrong log density and wrong
-gradients. stanc3 spells `mdivide_right` with the ordinary division
-operator, and the graph lowering read the operator rather than the
-divisor's type. `rv / A` refused to compile and `A \ v` was not lowered
-at all.
-
-All four shapes -- matrix/matrix, row_vector/matrix, matrix\vector,
-matrix\matrix -- now lower to a pair of graph kernels with adjoints,
-keyed on the same rule the MIR interpreter already used: a matrix
-divisor is a solve, a scalar divisor is not, and `./` never is. A solve
-in generated quantities no longer truncates the graph write_array and
-sends the whole section to the per-draw interpreter, which measured
-6.5x on a 50-element block (5.78 to 0.89 us/draw).
 
 ## 0.8.0
 
