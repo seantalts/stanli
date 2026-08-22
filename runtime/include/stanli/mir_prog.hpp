@@ -76,6 +76,12 @@ struct ProgramCompiler {
   // Where `target +=` accumulates, or -1 when the region may not have
   // one. Set by the caller, which also seeds it to zero.
   int target_reg = -1;
+  // Register runs allocated by the zero-length adoption in Assignment,
+  // which is the one allocation site whose write can sit under a jump.
+  // finish() fills them with NaN ahead of the program, restoring the
+  // contract run_program states (program.hpp): every register is written
+  // before it is read.
+  std::vector<std::pair<int, int>> late_bound;
 
   // Registers are never recycled. Right-hand sides are a few lines over a
   // handful of states, so the count stays in the dozens; the cap is a
@@ -110,10 +116,14 @@ struct ProgramCompiler {
   }
 
   // dst[0..n) = the given values, as one instruction.
+  Program::Instr const_instr(int dst, const double* v, int n) {
+    return Program::Instr{
+        n == 1 ? Program::CONST : Program::CONSTR, dst, pool_at(v, n), 0, 0, n};
+  }
+
   void emit_const(int dst, const double* v, int n) {
     if (n == 0) return;
-    p.code.push_back(Program::Instr{n == 1 ? Program::CONST : Program::CONSTR,
-                                    dst, pool_at(v, n), 0, 0, n});
+    p.code.push_back(const_instr(dst, v, n));
   }
 
   int konst(double v) {
@@ -594,6 +604,30 @@ struct ProgramCompiler {
     return r;
   }
 
+  // Close the program: prepend the NaN fills the zero-length adoption in
+  // Assignment (below) deferred.
+  // Every caller runs this once the region has compiled and before the
+  // program runs; it is idempotent, and a region with no adoption pays
+  // nothing. The fills go in front rather than at the declaration because
+  // the width is only known once the assignment inside the branch has
+  // compiled, and the jumps are the only instructions that name a code
+  // position (CONST/CONSTR's `a` is a pool index, CALL's is a call index).
+  void finish() {
+    if (late_bound.empty()) return;
+    std::vector<Program::Instr> prologue;
+    for (const auto& [reg, len] : late_bound) {
+      const std::vector<double> nan((size_t)len,
+                                    std::numeric_limits<double>::quiet_NaN());
+      prologue.push_back(const_instr(reg, nan.data(), len));
+    }
+    const int n = (int)prologue.size();
+    for (auto& instr : p.code)
+      if (instr.code == Program::JZ || instr.code == Program::JMP)
+        instr.dst += n;
+    p.code.insert(p.code.begin(), prologue.begin(), prologue.end());
+    late_bound.clear();
+  }
+
   void stmt(const mir::Stmt& s) {
     switch (s.kind) {
       case mir::Stmt::Decl: {
@@ -654,8 +688,18 @@ struct ProgramCompiler {
             // assignment to size; adopt the assigned shape. The inliner
             // assigns it exactly once, right where the call was, so no
             // two branch arms can disagree about the size.
+            //
+            // That one assignment can still sit inside a data-dependent
+            // branch -- `cond ? udf(x) : y` inlines to an assignment under
+            // `if (cond)` -- and then the arm that does not run leaves
+            // these registers unwritten. They are the variable's live-out,
+            // so the harvest reads them anyway: under the backward's var
+            // replay that is a null (or a previous call's, already
+            // recovered) vari. finish() fills them with NaN, which is what
+            // Stan holds in a value it never computed.
             Range nd = v;
             nd.reg = alloc(v.len);
+            late_bound.emplace_back(nd.reg, v.len);
             for (int k = 0; k < v.len; ++k)
               emit(Program::MOV, nd.reg + k, v.reg + k);
             it->second = nd;

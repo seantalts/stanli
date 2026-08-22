@@ -110,6 +110,7 @@ RhsProgram compile_rhs_args(
       c.bail("right-hand side returns " + std::to_string(out.len) +
              " values for " + std::to_string(n_y) + " states");
     for (int k = 0; k < out.len; ++k) p.out_regs.push_back(out.reg + k);
+    c.finish();
     p.ok = true;
   } catch (Bail& b) {
     p.ok = false;

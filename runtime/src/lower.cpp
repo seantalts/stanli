@@ -1154,6 +1154,7 @@ struct Lowering {
         for (int k = 0; k < expr_out->len; ++k)
           prog->out_regs.push_back(expr_out->reg + k);
       }
+      c.finish();
     } catch (Bail& b) {
       fail("parameter-dependent region: " + b.why, s ? s->raw : e->raw);
     }
