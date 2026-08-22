@@ -176,26 +176,23 @@ def _evaluate_shard(shard: GeneratedShard, reference: ReferenceBuild,
                             raise ProtocolError(
                                 "reference description omitted acceptance "
                                 "status")
+                        # A worker that stopped answering did not decline
+                        # the signature -- a refusal returns a response
+                        # saying so -- and no capability policy covers a
+                        # dead process, so the rule is not consulted here
+                        # (status.py). What the reference made of the same
+                        # case goes in the reason and not in the status: a
+                        # generated case the oracle rejects is a generator
+                        # gap when stanli merely disagrees, and still a
+                        # crash when stanli died.
+                        policy_rule = None
+                        status = ResultStatus.CRASHED
+                        reason = ("the stanli worker stopped answering while "
+                                  "loading the isolated case: "
+                                  + stanli_failure)
                         if not reference_description["accepted"]:
-                            return (_failure(
-                                case, ResultStatus.GENERATOR_GAP,
-                                "The reference rejected the isolated case "
-                                "while stanli's transport failed.",
-                                {"shard": shard.result_metadata(),
-                                 "source_path": str(reference.source),
-                                 "reference_description":
-                                     reference_description,
-                                 "stanli_transport_error": stanli_failure},
-                                repros[case.case_id],
-                                probe_attempted=True),)
-                        policy_rule = policy.classification_for(
-                            case.spec.signature)
-                        status = (ResultStatus.EXPECTED_UNSUPPORTED
-                                  if policy_rule is not None else
-                                  ResultStatus.UNEXPECTED_UNSUPPORTED)
-                        reason = (policy_rule.reason if policy_rule is not None
-                                  else "stanli failed while loading the "
-                                  "isolated case: " + stanli_failure)
+                            reason += ("; the reference rejected the isolated "
+                                       "case as well")
                         return (_failure(
                             case, status, reason,
                             {"shard": shard.result_metadata(),

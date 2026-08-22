@@ -28,12 +28,13 @@ class _PointResult:
 
 _PRECEDENCE = {
     ResultStatus.HARNESS_ERROR: 0,
-    ResultStatus.GENERATOR_GAP: 1,
-    ResultStatus.MISMATCH: 2,
-    ResultStatus.UNEXPECTED_UNSUPPORTED: 3,
-    ResultStatus.EXPECTED_UNSUPPORTED: 4,
-    ResultStatus.INAPPLICABLE: 5,
-    ResultStatus.VERIFIED: 6,
+    ResultStatus.CRASHED: 1,
+    ResultStatus.GENERATOR_GAP: 2,
+    ResultStatus.MISMATCH: 3,
+    ResultStatus.UNEXPECTED_UNSUPPORTED: 4,
+    ResultStatus.EXPECTED_UNSUPPORTED: 5,
+    ResultStatus.INAPPLICABLE: 6,
+    ResultStatus.VERIFIED: 7,
 }
 
 
@@ -88,15 +89,15 @@ def _point_outcome(case: GeneratedCase, point_index: int,
     try:
         stanli_response = stanli_client.request(payload)
     except Exception as exc:
+        # The worker stopped answering rather than declining the case: a
+        # refusal comes back as a response with accepted=False. Blocking
+        # either way, whatever the reference did with the point -- a
+        # process that died reported no capability (status.py).
         details["reference"] = _compact_observation(reference, case)
-        status = (ResultStatus.UNEXPECTED_UNSUPPORTED if reference.accepted
-                  else ResultStatus.GENERATOR_GAP)
-        reason = ("stanli failed after the reference accepted the case: "
-                  if reference.accepted else
-                  "The reference rejected the nominal case before stanli "
-                  "transport failed: ")
         return _PointResult(OutcomeComparison(
-            status, reason + str(exc), details), reference)
+            ResultStatus.CRASHED,
+            f"point {point_index}: the stanli worker stopped answering: "
+            + str(exc), details), reference)
 
     try:
         if stanli_response.get("protocol_error"):

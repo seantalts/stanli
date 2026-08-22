@@ -31,7 +31,8 @@ from conformance.generate import (generated_inventory, make_scalar_shards,
                                   make_subshard_source, scalar_case_for,
                                   scalar_inventory)
 from conformance.policy import PolicyError, load_policy
-from conformance.protocol import JsonLinesClient, ProtocolError
+from conformance.protocol import (JsonLinesClient, ProtocolError,
+                                  _exit_description)
 from conformance.report import (ConformanceReport, ReportError, Scope,
                                 SnapshotRefused, compare_snapshot,
                                 render_markdown, snapshot_for, with_snapshot,
@@ -335,16 +336,26 @@ class ConstructCatalogTests(unittest.TestCase):
         self.assertEqual(outcome.status, ResultStatus.UNEXPECTED_UNSUPPORTED)
         self.assertIn("cataloged evaluation phase", outcome.reason)
 
-    def test_stanli_process_failure_is_an_implementation_finding(self):
+    def test_stanli_process_failure_blocks_as_a_crash(self):
         catalog = load_construct_catalog(DEFAULT_CONSTRUCTS, REPO)
         case = next(case for case in catalog.cases
                     if case.id == "phase.data.valid")
         outcome = _stanli_transport_outcome(
             case, {"accepted": True}, "evaluation",
-            ProtocolError("stanli process exited before replying"))
-        self.assertEqual(outcome.status,
-                         ResultStatus.UNEXPECTED_UNSUPPORTED)
-        self.assertIn("stanli transport failed", outcome.reason)
+            ProtocolError("stanli process exited before replying "
+                          "(killed by signal 11 (SIGSEGV))"))
+        # A worker that died said nothing about the construct, so it is not
+        # a coverage gap: coverage gaps do not block, and a segfault
+        # wearing that status passed the gate for a month.
+        self.assertEqual(outcome.status, ResultStatus.CRASHED)
+        self.assertTrue(outcome.status.is_blocking)
+        self.assertIn("SIGSEGV", outcome.reason)
+
+    def test_signal_deaths_are_named_not_numbered(self):
+        self.assertEqual(_exit_description(-11),
+                         "killed by signal 11 (SIGSEGV)")
+        self.assertEqual(_exit_description(2), "exit 2")
+        self.assertEqual(_exit_description(None), "still running")
 
     def test_worker_normalizes_public_error_categories(self):
         self.assertEqual(worker_category(RuntimeError(
@@ -719,11 +730,14 @@ class GeneratedEvaluationTests(unittest.TestCase):
             def request(self, payload):
                 raise ProtocolError(f"{self.label} process exited")
 
+        # Both block, and which process died stays readable: the rig
+        # failing and the runtime under test failing are different
+        # findings for whoever reads the report.
         scenarios = (
             (FailingClient("reference"), self.Client(),
              ResultStatus.HARNESS_ERROR, "reference"),
             (self.Client(), FailingClient("stanli"),
-             ResultStatus.UNEXPECTED_UNSUPPORTED, "stanli"),
+             ResultStatus.CRASHED, "stanli"),
         )
         for reference, stanli, status, label in scenarios:
             with self.subTest(label=label):

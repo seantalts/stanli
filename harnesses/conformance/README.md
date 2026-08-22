@@ -139,16 +139,23 @@ command. Generated Stan sources are content-addressed once under
 
 ## Gates and snapshots
 
-Every inventory row has exactly one of the seven design statuses. A run is
+Every inventory row has exactly one of the eight design statuses. A run is
 green only when it is complete, carries no blocking status, has no stale
 policy exception, and does not lose ground against its baseline.
 
-The gate blocks on two things: `mismatch`, where stanli answered and
-answered differently from CmdStan, and `harness_error`, where the harness
-failed to ask. A function stanli has not implemented yet is neither, and
-this suite is a build-out to-do list -- so `unexpected_unsupported` and
+The gate blocks on three things: `mismatch`, where stanli answered and
+answered differently from CmdStan, `crashed`, where the stanli worker
+stopped answering at all, and `harness_error`, where the harness failed to
+ask. A function stanli has not implemented yet is none of them, and this
+suite is a build-out to-do list -- so `unexpected_unsupported` and
 `generator_gap` are counted, listed and given reproducers without failing
 the run.
+
+`crashed` is separate from both of its neighbours on purpose. A refusal is
+a response that says "not implemented"; a segfault is no response, and
+folding the two together let a SIGSEGV read as a coverage gap and pass the
+gate. It is separate from `harness_error` because the process that died is
+the runtime under test rather than the rig measuring it.
 
 That leaves a hole the baseline closes. A lowering regression which turns a
 verified function into a compile refusal lands in `unexpected_unsupported`,

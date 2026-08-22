@@ -251,7 +251,7 @@ jobs:
           artifact_url = os.environ.get("ARTIFACT_URL", "")
           missing_statuses = {"generator_gap", "unexpected_unsupported"}
           blocking_statuses = {
-              "generator_gap", "harness_error", "mismatch",
+              "crashed", "generator_gap", "harness_error", "mismatch",
               "unexpected_unsupported",
           }
 
@@ -317,8 +317,8 @@ jobs:
               and row["case_id"] not in missing_ids
           ]
           other_priority = {
-              "harness_error": 0, "mismatch": 1,
-              "unexpected_unsupported": 2, "generator_gap": 3,
+              "harness_error": 0, "crashed": 1, "mismatch": 2,
+              "unexpected_unsupported": 3, "generator_gap": 4,
           }
           other_blocking.sort(key=lambda row: (
               other_priority[row["status"]], row["case_id"],
@@ -329,8 +329,8 @@ jobs:
           if other_blocking:
               findings_table(other_blocking, 20)
           else:
-              print("No mismatches, construct gaps, or infrastructure "
-                    "errors were found.")
+              print("No crashes, mismatches, construct gaps, or "
+                    "infrastructure errors were found.")
           PY
 
       - name: Enforce the aggregate gate
