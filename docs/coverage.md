@@ -7,19 +7,41 @@ against CmdStan with a generated single-function model.
 
 | family | supported |
 |---|---|
-| densities (`_lpdf`, `_lpmf`) | 69 / 72 |
-| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 97 / 105 |
-| scalar math (all-real signature) | 78 / 100 |
+| densities (`_lpdf`, `_lpmf`) | 71 / 72 |
+| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 105 / 105 |
+| scalar math (all-real signature) | 94 / 100 |
 
-The scalar-math denominator counts distinct function names in
-`stanc --dump-stan-math-signatures` whose arguments and result are all
-`real` and whose name is not a distribution suffix, and the numerator is
-what `harnesses/fn_sweep.py deps/cmdstan --from-stanc --missing` compiles
-and matches. It read `47 / 129` for a long time against no invocation
-that still reproduces either number, so the definition is written down
-here now rather than living in whoever last measured it. The count moved
-because the definition became checkable, not because coverage shrank:
-#109, #116 and #119 added 36 of those functions between them.
+All three rows come from the same place and mean the same thing: a
+function name counts as supported when the nightly conformance sweep
+reports no `unexpected_unsupported` row for it, over the whole signature
+space rather than one probe per name. The scalar-math family is the
+distinct names in `stanc --dump-stan-math-signatures` whose arguments and
+result are all `real` and whose name carries no distribution suffix.
+
+This used to be three numbers from two different tools with the
+definition living in whoever last measured it -- the scalar-math row read
+`47 / 129` against no invocation that reproduced either half. It is worth
+regenerating them from a green nightly rather than trusting them:
+
+```sh
+python3 - <<'EOF'
+import json, re, collections
+r = json.load(open("conformance-aggregate/conformance.json"))
+seen = collections.defaultdict(set)
+for row in r["results"]:
+    m = re.match(r"signature:([A-Za-z_0-9]+)\(", row["case_id"])
+    if m:
+        seen[m.group(1)].add(row["status"])
+def tally(pred):
+    names = [n for n in seen if pred(n)]
+    return sum("unexpected_unsupported" not in seen[n] for n in names), len(names)
+print(tally(lambda n: n.endswith(("_lpdf", "_lpmf"))))
+EOF
+```
+
+What is left in scalar math is six names: `hypergeometric_1F0`,
+`hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`, and the two
+`wiener_*_unnorm` forms.
 
 Every supported density's **gradients** match CmdStan bitwise, at three
 evaluation points. That is the standard here: a density whose gradients

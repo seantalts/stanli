@@ -213,7 +213,7 @@ RStan ships through RTools), and bundles `stanc.exe` as a subprocess
 instead of embedding the compiler; the API works the same way either
 way.
 
-The installed library is 29.3 MB: over half of it is the density
+The installed library is 29.7 MB: over half of it is the density
 kernels, about a quarter the embedded stanc3, and the interpreter and
 NUTS together are about 410 KB. That is the trade this design makes:
 ship the compiler and every kernel once, so nothing is ever built on

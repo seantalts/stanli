@@ -281,6 +281,19 @@ jobs:
       - name: Wheel
         run: ./tools/build_wheel.sh
 
+      # build_wheel.sh measures the size breakdown just before it strips
+      # the library, into a checkout this job then throws away. Publish it,
+      # or the only moment it can be measured produces nothing anyone can
+      # read. One platform: the attribution is the same everywhere and the
+      # manylinux build is the one the README's totals describe.
+      - name: Publish the binary size breakdown
+        if: matrix.runtime == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-size
+          if-no-files-found: error
+          path: docs/binary-size.md
+
       # The tag is a promise about the oldest system the library runs on,
       # and nothing so far has checked it. glibc is the only versioned
       # dependency left after the static C++ runtime, so the highest
