@@ -6,6 +6,7 @@ import collections
 import json
 import pathlib
 import queue
+import signal
 import subprocess
 import threading
 from typing import Deque, Dict, Mapping, Optional, Sequence
@@ -16,6 +17,24 @@ class ProtocolError(RuntimeError):
 
 
 _EOF = object()
+
+
+def _exit_description(code: Optional[int]) -> str:
+    """How a worker ended, in words.
+
+    A negative returncode is a signal, and "exit -11" is a poor way to say
+    "it segfaulted" -- poor enough that a crash in this suite read as a
+    missing feature for a month.
+    """
+    if code is None:
+        return "still running"
+    if code >= 0:
+        return f"exit {code}"
+    try:
+        name = signal.Signals(-code).name
+    except ValueError:
+        name = "unknown signal"
+    return f"killed by signal {-code} ({name})"
 
 
 class JsonLinesClient:
@@ -100,9 +119,9 @@ class JsonLinesClient:
                     f"{self.label} protocol timed out after {self.timeout:g}s"
                     f"{self._context()}") from exc
             if raw is _EOF:
-                code = self.process.poll()
                 raise ProtocolError(
-                    f"{self.label} process exited before replying (exit {code})"
+                    f"{self.label} process exited before replying "
+                    f"({_exit_description(self.process.poll())})"
                     f"{self._context()}")
             try:
                 response = json.loads(str(raw))

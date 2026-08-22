@@ -3,6 +3,7 @@
 // safe must stay untouched.
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
+#include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
@@ -10,6 +11,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,6 +39,43 @@ using stanli::testutil::Fills;
 static double fill_at(int64_t i) { return 0.3 + 0.15 * (i % 4); }
 static std::vector<double> run_grad(Graph g, const Fills& fills) {
   return testutil::run_grad(std::move(g), fills, fill_at);
+}
+
+static std::string slurp(const std::string& path) {
+  std::ifstream f(path);
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+
+// A necessity island whose live-out is written only inside the branch:
+// `sum(a) > 0 ? ident(b + c) : c` inlines to an assignment of the --O1
+// inliner's zero-length return symbol under `if (sum(a) > 0)`, and the
+// program compiler sizes that symbol where it is assigned. At the zero
+// point the condition is false, so those registers are the arm that did
+// not run -- and the live-out harvest reads them regardless. Before the
+// prologue fill (mir_prog.hpp) the backward's var replay read a register
+// file no one had written and dereferenced a null vari: SIGSEGV, not a
+// wrong number. Runs first so the replay's thread_local register file is
+// still empty, which is the state that makes that a null rather than a
+// vari from an already-recovered nested tape.
+static void test_branch_bound_live_out() {
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/branchudf.tmir.sexp"), DataMap());
+  Executor ex(std::move(cm.graph));
+  cm.bind(ex);
+  const int64_t n = ex.n_params();
+  expect("branchudf params", n == 150);
+  for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = 0.0;
+  std::vector<double> grad((size_t)n, 0.0);
+  const double lp = ex.gradient(grad.data());
+  // The untaken arm contributes nothing: mix is c, so the target is
+  // sum(c) = 0 and only c's 50 entries carry an adjoint.
+  expect("branchudf lp", lp == 0.0);
+  int64_t wrong = 0;
+  for (int64_t i = 0; i < n; ++i)
+    if (grad[(size_t)i] != (i < 100 ? 0.0 : 1.0)) ++wrong;
+  expect("branchudf grad", wrong == 0);
 }
 
 // A mini HMM forward pass: per step, index the previous state pair, take
@@ -443,6 +483,7 @@ int main() {
   // What the compiler does with a region, on graphs small enough to
   // reason about. The cost estimate would refuse most of them -- it is
   // policy, tested separately below, and these are about correctness.
+  test_branch_bound_live_out();
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
   test_hmm_parity();
   test_env_disable();

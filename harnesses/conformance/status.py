@@ -14,6 +14,7 @@ class ResultStatus(str, enum.Enum):
     UNEXPECTED_UNSUPPORTED = "unexpected_unsupported"
     MISMATCH = "mismatch"
     GENERATOR_GAP = "generator_gap"
+    CRASHED = "crashed"
     HARNESS_ERROR = "harness_error"
 
     @property
@@ -32,12 +33,24 @@ class ResultStatus(str, enum.Enum):
 # wrong answer rather than a missing one. `harness_error` does, because a
 # harness that cannot run has not measured anything.
 #
+# `crashed` is the third blocking one, and it exists because a refusal and
+# a dead process arrive at this vocabulary through the same door. A worker
+# that segfaults never replies, so the transport raises where a refusal
+# would have returned a message -- and folding that into
+# unexpected_unsupported (which it was, until it stopped blocking) let a
+# SIGSEGV read as "this function is not wired up yet" and pass the gate. A
+# process that died made no capability statement at all. It stays separate
+# from harness_error because the process that failed is the runtime under
+# test, not the rig measuring it, and pointing the reader at the wrong one
+# is most of what a status is for.
+#
 # Worth revisiting for one slice of `generator_gap`: the rows reading
 # "stanc rejected the generated scalar shard" are a generator bug, not a
 # generator to-do, and once that is fixed they could block on their own.
 BLOCKING_STATUSES = frozenset(
     {
         ResultStatus.MISMATCH,
+        ResultStatus.CRASHED,
         ResultStatus.HARNESS_ERROR,
     }
 )
@@ -52,6 +65,7 @@ FINDING_STATUSES = frozenset(
         ResultStatus.UNEXPECTED_UNSUPPORTED,
         ResultStatus.MISMATCH,
         ResultStatus.GENERATOR_GAP,
+        ResultStatus.CRASHED,
         ResultStatus.HARNESS_ERROR,
     }
 )

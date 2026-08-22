@@ -29,10 +29,11 @@ CONSTRUCT_GENERATOR_VERSION = "construct-catalog-v2-bridgestan"
 
 _PRECEDENCE = {
     ResultStatus.HARNESS_ERROR: 0,
-    ResultStatus.GENERATOR_GAP: 1,
-    ResultStatus.MISMATCH: 2,
-    ResultStatus.UNEXPECTED_UNSUPPORTED: 3,
-    ResultStatus.VERIFIED: 4,
+    ResultStatus.CRASHED: 1,
+    ResultStatus.GENERATOR_GAP: 2,
+    ResultStatus.MISMATCH: 3,
+    ResultStatus.UNEXPECTED_UNSUPPORTED: 4,
+    ResultStatus.VERIFIED: 5,
 }
 
 
@@ -135,19 +136,18 @@ def _stanli_transport_outcome(case: ConstructCase,
                               reference: Mapping[str, object],
                               phase: str, error: ProtocolError) \
         -> OutcomeComparison:
+    # The worker stopped answering: it died, timed out, or spoke nonsense.
+    # None of those is a refusal, so this does not go through
+    # compare_observations -- a refusal carries a message stanli chose to
+    # send, and reading a dead process as one that declined the case is
+    # what let a SIGSEGV here count as a coverage gap (status.py).
+    del case
     message = f"stanli transport failed during {phase}: {error}"
-    comparison = compare_observations(
-        Observation(accepted=False, message=message),
-        _observation(reference),
-        Expectation(should_accept=case.expected_accept,
-                    phase=case.expected_phase,
-                    exception_category=case.expected_exception), Gate())
-    reason = (comparison.reason + "; " + message
-              if comparison.status == ResultStatus.GENERATOR_GAP
-              else message)
-    return dataclasses.replace(
-        comparison, reason=reason,
-        details={**dict(comparison.details), "transport_phase": phase})
+    return OutcomeComparison(
+        ResultStatus.CRASHED, message,
+        {"stanli": Observation(accepted=False, message=message).to_dict(),
+         "reference": _observation(reference).to_dict(),
+         "transport_phase": phase})
 
 
 def _result(case: ConstructCase, status: ResultStatus, reason: str,

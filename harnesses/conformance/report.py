@@ -283,6 +283,7 @@ def live_classifications(report: ConformanceReport) \
         # comparison; snapshot creation is refused before this can be written.
         blocking_precedence = (
             ResultStatus.HARNESS_ERROR,
+            ResultStatus.CRASHED,
             ResultStatus.MISMATCH,
             ResultStatus.UNEXPECTED_UNSUPPORTED,
             ResultStatus.GENERATOR_GAP,
@@ -440,6 +441,7 @@ _SECTION_TITLES = {
     ResultStatus.INAPPLICABLE: "Inapplicable",
     ResultStatus.GENERATOR_GAP: "Generator gaps",
     ResultStatus.MISMATCH: "Mismatches",
+    ResultStatus.CRASHED: "Crashes",
     ResultStatus.HARNESS_ERROR: "Harness errors",
 }
 
