@@ -3910,6 +3910,118 @@ int main() {
     check(wide_rejected, "over-long data array is rejected too");
   }
 
+  {
+    // `target += <container>`. Stan defines the increment for a container
+    // `e` as adding `sum(e)`; lowering used to push the container's slot
+    // straight into the target terms, where a scalar consumer read element
+    // zero and the rest of the container reached neither lp nor gradient.
+    // Every container shape a `target +=` can name is here, plus a
+    // container expression, because the truncation was in the consumer and
+    // so was blind to which shape produced the value.
+    DataMap d = DataMap::from_json(R"({"N": 3, "w": [1.25, 2.5, 0.75]})");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/tpecont.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    // Unconstrained parameters throughout, so the target terms are the
+    // five increments and nothing else: no jacobian term joins the fold.
+    const double q[12] = {0.3, -1.2, 0.7,  2.1, -0.4, 1.6,
+                          0.9, 1.3,  -2.2, 0.5, 1.1,  -0.6};
+    for (int i = 0; i < 12; ++i) lex.params_data()[i] = q[i];
+    double g[12], lp = lex.gradient(g);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, 1> v(3);
+    Eigen::Matrix<var, 1, -1> r(3);
+    Eigen::Matrix<var, -1, -1> M(2, 2);
+    std::vector<var> a(2);
+    for (int i = 0; i < 3; ++i) v(i) = q[i];
+    for (int i = 0; i < 3; ++i) r(i) = q[3 + i];
+    // Matrices are column-major in the slot, as they are in Eigen, so the
+    // reference's redux walks the same elements in the same order.
+    for (int i = 0; i < 4; ++i) M(i % 2, i / 2) = q[6 + i];
+    for (int i = 0; i < 2; ++i) a[i] = q[10 + i];
+    var acc = stan::math::sum(v);
+    acc = acc + stan::math::sum(r);
+    acc = acc + stan::math::sum(M);
+    acc = acc + stan::math::sum(a);
+    acc = acc + stan::math::sum(stan::math::multiply(2.0, v));
+    acc.grad();
+    expect_eq("tpecont lp", lp, acc.val());
+    for (int i = 0; i < 3; ++i)
+      expect_eq("tpecont gv" + std::to_string(i), g[i], v(i).adj());
+    for (int i = 0; i < 3; ++i)
+      expect_eq("tpecont gr" + std::to_string(i), g[3 + i], r(i).adj());
+    for (int i = 0; i < 4; ++i)
+      expect_eq("tpecont gM" + std::to_string(i), g[6 + i],
+                M(i % 2, i / 2).adj());
+    for (int i = 0; i < 2; ++i)
+      expect_eq("tpecont ga" + std::to_string(i), g[10 + i], a[i].adj());
+    stan::math::recover_memory();
+  }
+
+  {
+    // The same increment reached once per loop iteration: the loop unrolls
+    // into one target term per pass, each of them a container.
+    DataMap d = DataMap::from_json(R"({"N": 3})");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/tpeloop.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    const double q[7] = {0.3, -1.2, 0.7, 2.1, -0.4, 1.6, 0.9};
+    for (int i = 0; i < 7; ++i) lex.params_data()[i] = q[i];
+    double g[7], lp = lex.gradient(g);
+
+    using stan::math::var;
+    // array[3] vector[2] is outer-major: f[n] is a contiguous pair.
+    std::vector<Eigen::Matrix<var, -1, 1>> f(3, Eigen::Matrix<var, -1, 1>(2));
+    for (int n = 0; n < 3; ++n)
+      for (int i = 0; i < 2; ++i) f[n](i) = q[2 * n + i];
+    var z = q[6];
+    var acc = stan::math::sum(f[0]);
+    for (int n = 1; n < 3; ++n) acc = acc + stan::math::sum(f[n]);
+    acc = acc + z * 0.5;
+    acc.grad();
+    expect_eq("tpeloop lp", lp, acc.val());
+    for (int n = 0; n < 3; ++n)
+      for (int i = 0; i < 2; ++i)
+        expect_eq("tpeloop gf" + std::to_string(2 * n + i), g[2 * n + i],
+                  f[n](i).adj());
+    expect_eq("tpeloop gz", g[6], z.adj());
+    stan::math::recover_memory();
+  }
+
+  {
+    // The increment inside a parameter-dependent branch, which lowering
+    // compiles into an island region: its register program has to sum the
+    // container too, and both arms are checked because only one of them
+    // runs per evaluation.
+    DataMap d;
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/tpeisland.tmir.sexp"), d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    const double q[4] = {0.3, -1.2, 0.7, 1.5};
+    for (int arm = 0; arm < 2; ++arm) {
+      const double zv = arm ? -1.5 : q[3];
+      for (int i = 0; i < 3; ++i) lex.params_data()[i] = q[i];
+      lex.params_data()[3] = zv;
+      double g[4], lp = lex.gradient(g);
+
+      using stan::math::var;
+      Eigen::Matrix<var, -1, 1> v(3);
+      for (int i = 0; i < 3; ++i) v(i) = q[i];
+      var acc = zv > 0.0 ? stan::math::sum(v) : stan::math::sum(-v);
+      acc.grad();
+      const std::string tag = "tpeisland" + std::to_string(arm);
+      expect_eq(tag + " lp", lp, acc.val());
+      for (int i = 0; i < 3; ++i)
+        expect_eq(tag + " gv" + std::to_string(i), g[i], v(i).adj());
+      expect_eq(tag + " gz", g[3], 0.0);
+      stan::math::recover_memory();
+    }
+  }
+
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;
 }

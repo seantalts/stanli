@@ -767,8 +767,12 @@ struct ProgramCompiler {
         // so all this does is accumulate.
         if (target_reg < 0) bail("target += is not available in this region");
         const Range v = expr(s.target);
-        if (!is_scalar(v)) bail("target += of a container");
-        emit(Program::ADD, target_reg, target_reg, v.reg);
+        // `target += e` for a container adds `sum(e)`. Accumulating the
+        // elements in ascending order is that sum, and it is the order
+        // OP_SUM_VEC uses on the graph side, so the two paths agree to the
+        // bit. A scalar is the one-element case of the same loop.
+        for (int k = 0; k < v.len; ++k)
+          emit(Program::ADD, target_reg, target_reg, v.reg + k);
         return;
       }
       case mir::Stmt::NRFunApp:

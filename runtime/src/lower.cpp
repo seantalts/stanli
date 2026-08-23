@@ -3539,9 +3539,17 @@ struct Lowering {
         }
         return;
       }
-      case mir::Stmt::TargetPE:
-        target_terms.push_back(lower_expr(s.target).slot);
+      case mir::Stmt::TargetPE: {
+        // Stan defines `target += e` for a container `e` as adding `sum(e)`
+        // -- CmdStan's `lp_accum__.add(e)` reduces the whole container. A
+        // target term is consumed as a scalar, so the reduction has to
+        // happen here; pushing the container's slot would silently
+        // contribute element zero alone.
+        Val t = lower_expr(s.target);
+        if (g.slots[t.slot].len != 1) t = emit_value(OP_SUM_VEC, {t}, 1);
+        target_terms.push_back(t.slot);
         return;
+      }
       case mir::Stmt::Block:
       case mir::Stmt::SList:
         for (const auto& k : s.body) lower_stmt(k);
@@ -3805,6 +3813,12 @@ struct Lowering {
 
   // Scalar terms reduce through chained ADD_N ops (6-input limit per op).
   int reduce_terms(std::vector<int> terms) {
+    // The target is a scalar, and every consumer of a term reads one value
+    // from it. A container term is therefore not a shape to accommodate but
+    // a lowering bug -- one whose symptom, before this check, was a model
+    // that sampled a wrong posterior without saying anything.
+    for (int t : terms)
+      if (g.slots[t].len != 1) fail("target term is not a scalar");
     if (terms.empty()) return const_slot(0.0);
     while (terms.size() > 1) {
       std::vector<int> next;
