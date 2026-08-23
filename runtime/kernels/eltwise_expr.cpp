@@ -371,10 +371,20 @@ void sqrtv_fwd(KernelCtx& ctx) { out_a(ctx) = in_a(ctx, 0).sqrt(); }
 void sqrtv_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   CMapA out_v(ctx.out.data, ctx.out.len);
-  if (ctx.out.len == 1)
-    ctx.in_adj[0].data[0] += ctx.out_adj / (2.0 * ctx.out.data[0]);
-  else
-    dx_a(ctx, 0) += dout_a(ctx) / (2.0 * out_v);
+  // sqrt(0) contributes nothing rather than 1/(2*0) = inf. That is what
+  // stan-math's rev overload does (rev/fun/sqrt.hpp guards on
+  // `vi.val() != 0.0`), and matching it is what keeps a model whose input
+  // underflows to exact zero differentiable: the inf would meet the zero
+  // value on the way back through the op that produced it and become NaN.
+  // accel_gp is the corpus case -- spd_cov_exp_quad's exp() underflows for
+  // the largest Laplacian eigenvalue. select, not a mask multiply, because
+  // multiplying an inf by zero is the NaN we are avoiding.
+  if (ctx.out.len == 1) {
+    if (ctx.out.data[0] != 0.0)
+      ctx.in_adj[0].data[0] += ctx.out_adj / (2.0 * ctx.out.data[0]);
+  } else {
+    dx_a(ctx, 0) += (out_v != 0.0).select(dout_a(ctx) / (2.0 * out_v), 0.0);
+  }
 }
 void squarev_fwd(KernelCtx& ctx) { out_a(ctx) = in_a(ctx, 0).square(); }
 void squarev_bwd(KernelCtx& ctx) {

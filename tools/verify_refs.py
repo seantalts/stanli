@@ -63,10 +63,11 @@ N_SAMPLER_COLS = 7
 POINTS = (0, 1, 2)
 
 # (model, point) pairs excused from probe_point's finite-gradient rule.
-# Every entry was settled against a live CmdStan -- tools/ref_driver.cpp
-# compiled for that model and run at that point -- not by argument, and
-# the two entries came out opposite ways, which is why the rule is worth
-# keeping for everything else.
+# The one entry was settled against a live CmdStan -- tools/ref_driver.cpp
+# compiled for that model and run at that point -- not by argument. The
+# other entry this list once held, accel_gp, came out the opposite way and
+# was a real bug (sqrt's adjoint at exactly zero, sqrtv_bwd), which is why
+# the rule is worth keeping for everything else.
 NONFINITE_GRAD_OK = {
     # Agreement. kronecker_gp is the corpus's one recorded MISMATCH: two
     # of its 438 gradients flow through eigenvectors of a nearly
@@ -75,18 +76,6 @@ NONFINITE_GRAD_OK = {
     # identical lp (-187.85795069042379) and the identical 435 of 438
     # nonfinite gradients. Both engines, same numbers: not a stanli bug.
     ("kronecker_gp", 2): "CmdStan is nonfinite here too, 435/438, same lp",
-    # NOT agreement -- an open bug this check found on its first run.
-    # accel_gp's gradients for sdgp_1 and lscale_1 (unconstrained indices
-    # 1 and 2, the GP marginal SD and length scale, both through
-    # spd_cov_exp_quad) come back NaN at points 1 and 2 where CmdStan
-    # returns finite values, with lp bitwise equal on both sides. Point 0
-    # is clean, which is why the reference never saw it. Listed rather
-    # than left failing so the rule can gate the other 128 models
-    # meanwhile; delete these two lines with the fix.
-    #   deps/cmdstan ref_driver: grads 1,2 = -94.655, 94.951 at point 1
-    #                            and 0.99897, -1.10721 at point 2
-    ("accel_gp", 1): "OPEN BUG: CmdStan is finite here (grads 1, 2)",
-    ("accel_gp", 2): "OPEN BUG: CmdStan is finite here (grads 1, 2)",
 }
 
 
@@ -314,7 +303,7 @@ def probe_point(model, stan, dj, check_bin, point, timeout):
         unwritten register reads as.
       * A finite lp must come with finite gradients. lp finite next to a
         nonfinite gradient is the shape a dropped tape link takes, and
-        spotting it needs no reference. NONFINITE_GRAD_OK carries the two
+        spotting it needs no reference. NONFINITE_GRAD_OK carries the
         (model, point) pairs excused from this, each with the CmdStan run
         that settled it.
 

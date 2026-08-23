@@ -143,6 +143,19 @@ int main() {
              [](auto& v) { return stan::math::inv_logit(v[0](0)); });
   check_case("sqrt v", OP_SQRT, N, {{0.5, 1.2, 2.0, 0.3}},
              [](auto& v) { return stan::math::sum(stan::math::sqrt(v[0])); });
+  // sqrt at exactly zero, both shapes. d/dx sqrt(x) is 1/(2 sqrt(x)), which
+  // at x = 0 is a division by zero; stan-math's rev overload answers with a
+  // zero contribution instead (rev/fun/sqrt.hpp: `if (vi.val() != 0.0)`),
+  // and a kernel that divides anyway hands +inf back to whatever produced
+  // the zero, where inf * 0 turns into NaN one op later. accel_gp reaches
+  // this: its spd_cov_exp_quad underflows exp() to exact zero for the
+  // largest Laplacian eigenvalue, and sqrt of that fed NaN into the
+  // sdgp/lscale gradients. Nonzero neighbours in the same vector keep the
+  // vector branch honest -- the guard has to be elementwise.
+  check_case("sqrt v at zero", OP_SQRT, N, {{0.0, 1.2, 2.0, 0.3}},
+             [](auto& v) { return stan::math::sum(stan::math::sqrt(v[0])); });
+  check_case("sqrt s at zero", OP_SQRT, 1, {{0.0}},
+             [](auto& v) { return stan::math::sqrt(v[0](0)); });
   check_case("square v", OP_SQUARE, N, {A},
              [](auto& v) { return stan::math::sum(stan::math::square(v[0])); });
   check_case("log1m v", OP_LOG1M, N, {{0.2, -0.5, 0.7, 0.05}},
