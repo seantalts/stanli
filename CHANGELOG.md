@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.8.3
+
+Five wrong-number fixes, every one found by testing machinery that did
+not exist two weeks ago, and the machinery itself so the next class of
+these is caught on the pull request that makes it.
+
+### target += of a container adds sum(e), not its first element
+
+`target += f;` on a `vector[3]` added `f[1]`: lp came out as the first
+element and the other gradients were zero, silently. Stan defines
+`target += e` for a container as adding `sum(e)`. No posteriordb model
+writes the bare form -- they all go through an `_lpdf`, which returns a
+scalar -- and the signature-directed conformance sweep generates calls,
+never this statement, which is how it survived. Found by the new model
+census over stanc3's own 1,231 integration models; on that suite's
+`increment-target.stan` the fixed lp and every gradient are byte
+identical to CmdStan's. The register machine's refusal of the same
+statement inside parameter-dependent control flow is lifted too, and the
+term-reduction path now rejects a non-scalar term outright so this class
+is loud forever.
+
+### A row_vector answers rows = 1, cols = n in every engine
+
+The MIR interpreter read orientation off storage rank, so every
+`row_vector[n]` answered `rows = n, cols = 1`. Through transformed data
+that reaches the log density: a target term built from `rows(rv)` graded
+31 where CmdStan gives 13. Invisible to the conformance sweep, because
+int-returning signatures have no real-bearing lane; the new cross-path
+harness caught it on its first sweep. The graph side carried a latent
+copy of the same logic, proven unreachable and deleted. The fix
+initially removed a fallback that `size()` of a scalar int data value
+still needed -- caught within days by the census ratchet's tally and
+restored, so no release ever shipped without it.
+
+### sqrt and pow adjoints at exactly zero
+
+Both computed their backward unconditionally, so an output of exactly
+zero produced NaN gradients where CmdStan is finite: `dout / (2 * out)`
+for sqrt, `0/0` and `log(0) * 0` for pow. accel_gp -- a real posteriordb
+posterior -- hit the sqrt case whenever its GP length scale made a
+spectral density underflow to zero: lp bitwise equal to CmdStan, two
+gradients NaN, at two of three evaluation points, with the recorded
+reference sitting on the clean one. The fixes mirror stan-math's own
+guards, and the audit behind them swept every rev-mode boundary guard in
+stan-math: exactly four exist, stanli now matches all four, and the
+kernels deliberately unguarded on both sides are named in the pow fix so
+the next boundary report starts from a map.
+
+### The oracles remember
+
+The corpus replay now evaluates every model at all three deterministic
+points against full CmdStan references -- 800,674 compared values, up
+from 146,534 -- with a crash at any point a named, blocking failure. The
+conformance sweep and the new census both ratchet against checked-in
+baselines: coverage lost blocks with the case named, coverage gained
+records. A cross-path harness compares the op graph, the MIR
+interpreter, and the register machine against each other on every
+fixture, bitwise, with known divergences in a ledger that requires a
+cause. The test suite runs under AddressSanitizer on every pull request.
+And the one remaining engineered disagreement -- write_array sums that
+cancel to zero, where stanli reduces sequentially for lp parity while
+CmdStan lets Eigen vectorize -- is gated at 1e-15 absolute with its
+mechanism written down, so the sweep is green with nothing swept under
+it.
+
 ## 0.8.2
 
 ### A register program writes every register it reads
