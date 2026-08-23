@@ -619,11 +619,16 @@ jobs:
       # of a dead runner; it is touched only if the spike happens.
       - name: Swap, so a compiler memory spike degrades instead of killing
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
+          # Not /swapfile: the runner image already runs ~4 GB of swap
+          # there (fallocate on it says "Text file busy"), and the job
+          # OOM'd straight through that allowance. This adds 8 GB more
+          # beside it. The before/after prints are the capacity record.
+          swapon --show && free -h
+          sudo fallocate -l 8G /swapfile-asan
+          sudo chmod 600 /swapfile-asan
+          sudo mkswap /swapfile-asan
+          sudo swapon /swapfile-asan
+          swapon --show && free -h
       - name: Build with -fsanitize=address
         run: |
           which ccache || sudo apt-get install -y ccache
@@ -643,7 +648,21 @@ jobs:
             -DSTANLI_SANITIZE=address \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build build-asan -j2
+          # Peak of the largest single compile, the wheel build's own
+          # instrumentation: GNU time reports the largest child, which is
+          # exactly the number -j has to fit. This job has been OOM-killed
+          # by guessed ceilings twice; from here the number is read off
+          # the log. The same cache-hit caveat applies -- a warm build
+          # compiles nothing and its peak is not a memory ceiling.
+          /usr/bin/time -v cmake --build build-asan -j2 2>/tmp/build.err ||
+            { cat /tmp/build.err; exit 1; }
+          kb=$(awk '/[Mm]aximum resident/ {print $NF}' /tmp/build.err)
+          miss=$(ccache -s | awk '/^ *Misses:/ {print $2; exit}')
+          echo "ASan peak RSS $(( kb / 1024 )) MB on the largest single" \
+               "compile, over ${miss:-?} ccache misses" \
+               "$([ "${miss:-0}" -lt 20 ] && echo '(cached build:' \
+               'this peak is not a memory ceiling)')"
+          free -h && swapon --show
           ccache -s
       # Save even when the build or tests fail: the cache is compile
       # artifacts, not results, and the original save-on-success rule
