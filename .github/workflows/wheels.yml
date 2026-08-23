@@ -663,8 +663,15 @@ jobs:
           # by guessed ceilings twice; from here the number is read off
           # the log. The same cache-hit caveat applies -- a warm build
           # compiles nothing and its peak is not a memory ceiling.
+          # On failure, dump the capacity picture BEFORE exiting: five
+          # attempts in, every theory so far died for want of exactly the
+          # number a failed run did not print.
           /usr/bin/time -v cmake --build build-asan -j2 2>/tmp/build.err ||
-            { cat /tmp/build.err; exit 1; }
+            { cat /tmp/build.err
+              df -h /; du -sh build-asan 2>/dev/null
+              du -sh build-asan/* 2>/dev/null | sort -rh | head -15
+              du -sh /mnt/swapfile-asan /home/runner/work 2>/dev/null
+              exit 1; }
           kb=$(awk '/[Mm]aximum resident/ {print $NF}' /tmp/build.err)
           miss=$(ccache -s | awk '/^ *Misses:/ {print $2; exit}')
           echo "ASan peak RSS $(( kb / 1024 )) MB on the largest single" \
