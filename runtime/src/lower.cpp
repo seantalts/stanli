@@ -389,12 +389,26 @@ struct Lowering {
             if (e.name == "cols") return dims.cols;
             return sh.len;
           }
-          // A name td knows but neither scope nor decls does falls through
-          // to the data_only case below, which asks the one interpreter.
-          // bind_data records every input var and every prepare_data decl,
-          // so nothing with an orientation to lose lands there; the copy
-          // that used to answer here read rows/cols off DataMap::Entry::dims
-          // and so carried the rank-1 bug the interpreter just shed.
+          // A name td knows but neither scope nor decls does: the scalar
+          // `int` input. bind_data fills both tables from a declared shape
+          // and a scalar int has none, so it falls past both -- the one
+          // case, not the none this used to claim. The data_only branch
+          // below does not catch it either, because a shape query in a
+          // real-valued context is not data_only: `real p = size(n)` in
+          // transformed parameters is AutoDiffable, so it reached the
+          // failure instead and cost the census stanc3's
+          // function-signatures/math/matrix/size.stan.
+          //
+          // Asking the interpreter is what the previous copy here should
+          // have done all along. It answers rows/cols off the MIR type, so
+          // the rank-1 orientation bug that copy carried cannot come back
+          // through this route.
+          if (td.find(e.args[0].name)) {
+            try {
+              return td.as_int(e);
+            } catch (const CompileError&) {
+            }
+          }
         }
         // Shape query on a COMPUTED value: --O1 inlining substitutes call
         // arguments into the callee's size expressions, so `rows(beta)`

@@ -3002,6 +3002,33 @@ int main() {
     check(g_ok, "shape query on expression: gradients match the var path");
   }
 
+  // A shape query on a scalar `int` input, alone on the right of a
+  // real-valued assignment: `real p = size(n)`. eval_int answers rows/cols/
+  // size from the graph's slot metadata or from the declaration table, and
+  // bind_data fills both from a declared shape, which a scalar int does not
+  // have -- so this is the one name that falls past both. tests/fixtures/
+  // intsize.stan says what else has to line up to reach it. The lowering
+  // used to refuse the whole model here, which is stanc3's
+  // function-signatures/math/matrix/size.stan and nothing smaller.
+  {
+    DataMap d = DataMap::from_json(R"({"n": 7})");
+    CompiledModel im =
+        compile_model(slurp("tests/fixtures/intsize.tmir.sexp"), d);
+    Executor iex(std::move(im.graph));
+    im.bind(iex);
+    iex.params_data()[0] = 0.4;
+    double grad[1] = {0};
+    const double lp = iex.gradient(grad);
+    // size(n) is 1 for any scalar, and td_n is the interpreter's copy of
+    // the same 1, so the mean is 2 -- not 7, and not 8.
+    using stan::math::var;
+    var y = 0.4;
+    var acc = stan::math::normal_lpdf<true>(y, 2.0, 1);
+    acc.grad();
+    expect_eq("int size: lp", lp, acc.val());
+    expect_eq("int size: gradient", grad[0], y.adj());
+  }
+
   // Vector fma from --O1 partial evaluation (`k .* t + c` becomes
   // fma(k, t, c)): OP_FMA is FUSED, so the reference is stan::math::fma,
   // and the data avoids powers of two -- with t = 2.0/-1.0/0.5 the
