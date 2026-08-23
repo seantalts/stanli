@@ -191,10 +191,16 @@ def repo_rel(path):
     the absolute path rather than losing the command.
     """
     path = pathlib.Path(path)
+    # POSIX separators regardless of host: these strings are identity --
+    # the corpus field the baseline is compared on, and the repro commands
+    # in reports read on other machines. A baseline recorded on macOS must
+    # compare equal on Windows, where relative_to() would otherwise spell
+    # the same path with backslashes and void every row. The CI shell on
+    # Windows is msys, which reads forward slashes fine.
     try:
-        return str(path.relative_to(REPO))
+        return path.relative_to(REPO).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def write_once(path, data):
@@ -336,7 +342,11 @@ def cached_data(model, model_sha, cache, stanc, timeout):
 
 def census_one(model, corpus, cache, check, stanc, shim, timeout):
     """Classify one model. Returns exactly one row with exactly one status."""
-    relpath = str(model.relative_to(corpus))
+    # as_posix for the same reason repo_rel gives: this is the baseline's
+    # per-model KEY, and a key spelled with backslashes on Windows would
+    # make every model read as new-plus-missing against a mac-recorded
+    # baseline.
+    relpath = model.relative_to(corpus).as_posix()
     started = time.monotonic()
     try:
         source = model.read_bytes()
@@ -1061,7 +1071,7 @@ def main():
     # repro command in the report into a machine-specific absolute path.
     corpus = pathlib.Path(os.path.abspath(args.corpus))
     models = sorted(p for p in corpus.rglob("*.stan")
-                    if args.filter in str(p.relative_to(corpus)))
+                    if args.filter in p.relative_to(corpus).as_posix())
     if not models:
         print(f"no models under {corpus} matching {args.filter!r}",
               file=sys.stderr)
