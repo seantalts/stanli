@@ -428,5 +428,19 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_conformance_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_conformance.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  # The corpus replay's per-point verdicts, over a stub stanli_check. The
+  # oracle itself needs posteriordb and a real binary and so runs in CI
+  # rather than here; what runs here is the classification it depends on,
+  # which is what let a segfault at an unreferenced point go unreported.
+  #
+  # Not on Windows: the stub is a /bin/sh script that kills itself with
+  # SIGSEGV, and what the test asserts is that a negative returncode is
+  # read as a crash. Both halves are POSIX, and so is the corpus check
+  # this defends, which only ever runs on Linux and macOS.
+  if(NOT WIN32)
+    add_test(NAME test_verify_refs
+             COMMAND ${Python3_EXECUTABLE} tests/test_verify_refs.py
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
 endif()
 endif()  # NOT EMSCRIPTEN

@@ -16,18 +16,23 @@ corpus (silent in-place corruption at 1.7e+05 relative, quadratic
 recompute, dropped tape links) sits many orders of magnitude above it,
 and honest cross-libm drift sits well below.
 
+Every model is evaluated at all three deterministic points, not only at
+the one its reference was recorded at; see POINTS below for what the
+other two are held to.
+
 Usage: tools/verify_refs.py PDB_DIR [--check BIN] [--max-rel X]
                             [--jobs N] [--timeout S] [model ...]
        tools/verify_refs.py PDB_DIR --wa-report [--filter SUBSTR]
        tools/verify_refs.py PDB_DIR --wa-headers CMDSTAN_DIR [model ...]
-Exit nonzero if any referenced model fails to run, changes shape, or
-exceeds the gate.
+Exit nonzero if any referenced model fails to run at any point, changes
+shape, or exceeds the gate.
 """
 import argparse
 import collections
 import concurrent.futures
 import gzip
 import json
+import math
 import pathlib
 import re
 import struct
@@ -43,6 +48,46 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # it, and a reference is keyed on the file name either way.
 LANG = REPO / "tests" / "stanc3"
 N_SAMPLER_COLS = 7
+# The deterministic unconstrained points stanli_check and ref_driver both
+# know (eval_point, defined identically in each). A reference exists at
+# exactly ONE of them: the recorder walks the list and stops at the first
+# point both engines accept and put the model inside its support, so 128
+# of the 129 references are point 0 and one is point 2.
+#
+# The replay evaluates all three anyway. Stopping where the recorder
+# stopped means the recorder's search actively selects AWAY from a point
+# that crashes -- which is how reductions_allowed segfaulted at point 2
+# for a month while the corpus ran green at point 0, and 25 of the 120
+# corpus models carry a conditional whose other side only some point
+# reaches. What the unreferenced points are held to is in probe_point.
+POINTS = (0, 1, 2)
+
+# (model, point) pairs excused from probe_point's finite-gradient rule.
+# Every entry was settled against a live CmdStan -- tools/ref_driver.cpp
+# compiled for that model and run at that point -- not by argument, and
+# the two entries came out opposite ways, which is why the rule is worth
+# keeping for everything else.
+NONFINITE_GRAD_OK = {
+    # Agreement. kronecker_gp is the corpus's one recorded MISMATCH: two
+    # of its 438 gradients flow through eigenvectors of a nearly
+    # degenerate covariance (see gate_for). At the all-zeros point that
+    # covariance is degenerate outright, and CmdStan answers with the
+    # identical lp (-187.85795069042379) and the identical 435 of 438
+    # nonfinite gradients. Both engines, same numbers: not a stanli bug.
+    ("kronecker_gp", 2): "CmdStan is nonfinite here too, 435/438, same lp",
+    # NOT agreement -- an open bug this check found on its first run.
+    # accel_gp's gradients for sdgp_1 and lscale_1 (unconstrained indices
+    # 1 and 2, the GP marginal SD and length scale, both through
+    # spd_cov_exp_quad) come back NaN at points 1 and 2 where CmdStan
+    # returns finite values, with lp bitwise equal on both sides. Point 0
+    # is clean, which is why the reference never saw it. Listed rather
+    # than left failing so the rule can gate the other 128 models
+    # meanwhile; delete these two lines with the fix.
+    #   deps/cmdstan ref_driver: grads 1,2 = -94.655, 94.951 at point 1
+    #                            and 0.99897, -1.10721 at point 2
+    ("accel_gp", 1): "OPEN BUG: CmdStan is finite here (grads 1, 2)",
+    ("accel_gp", 2): "OPEN BUG: CmdStan is finite here (grads 1, 2)",
+}
 
 
 def default_check_bin():
@@ -223,6 +268,86 @@ def check_wa_headers(pdb, check_bin, cmdstan, models, excluded=()):
     return 1 if bad else 0
 
 
+def fail_detail(proc, got):
+    """Why a stanli_check run did not print OK.
+
+    Say HOW it died, not just that it did: a negative returncode is a
+    signal (ldaK5's 49 GB compile came back as a bare RUN_FAIL because
+    the OOM killer leaves no stdout).
+    """
+    detail = " ".join(got[:3])
+    if not detail:
+        detail = (f"killed by signal {-proc.returncode}"
+                  if proc.returncode < 0
+                  else f"exit {proc.returncode}, no output")
+    err = proc.stderr.strip().splitlines()
+    if err:
+        detail += " | " + err[-1][:120]
+    return detail
+
+
+def probe_point(model, stan, dj, check_bin, point, timeout):
+    """Evaluate a point with no recorded reference. (status, detail).
+
+    No CmdStan values means no parity check, so the bar here is only what
+    the run can be held to on its own evidence:
+
+      * It must not crash. A signal, or a nonzero exit with none of
+        stanli_check's machine-readable lines on stdout, is a hard
+        failure. This is the whole reason the extra points are run: a
+        SIGSEGV is not a numerical disagreement anyone needs a reference
+        to adjudicate.
+      * A clean rejection passes. stanli_check prints EVAL_FAIL only when
+        evaluation THREW, which is how a model outside its declared
+        support at this point reports itself (an ODE solution dipping
+        below a lower bound, say). CmdStan's ref_driver throws in the
+        same place, and the recorder counts both engines refusing a point
+        as agreement rather than a stanli failure -- REJECTED_BOTH in
+        verify_sample.py. Only one engine is present here, so the
+        rejection is accepted, not confirmed.
+      * An lp of -inf passes for the same reason: a zero density is a
+        value both engines produce and agree on (bernoulli_lccdf(1|theta)
+        is log(0) by definition, and stanli_check deliberately prints
+        nonfinite values rather than refusing them so the two drivers
+        stay comparable). +inf or NaN does not pass -- no reference in
+        the corpus was recorded that way, and a NaN lp is exactly what an
+        unwritten register reads as.
+      * A finite lp must come with finite gradients. lp finite next to a
+        nonfinite gradient is the shape a dropped tape link takes, and
+        spotting it needs no reference. NONFINITE_GRAD_OK carries the two
+        (model, point) pairs excused from this, each with the CmdStan run
+        that settled it.
+
+    COMPILE_FAIL is a failure here rather than a rejection: compiling does
+    not depend on the evaluation point, so a model that compiled at its
+    recorded point must compile at every other one.
+    """
+    try:
+        proc = subprocess.run(
+            [str(check_bin), str(stan), str(dj), "--point", str(point)],
+            capture_output=True, text=True, cwd=REPO, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return ("POINT_TIMEOUT", "")
+    lines = proc.stdout.splitlines()
+    got = lines[0].split() if lines else []
+    kind = got[0] if got else ""
+    if kind == "EVAL_FAIL":
+        return ("OK", "")
+    if kind != "OK":
+        return ("POINT_COMPILE_FAIL" if kind == "COMPILE_FAIL" else "CRASH",
+                fail_detail(proc, got))
+    lp = float(got[1])
+    if math.isnan(lp) or lp == math.inf:
+        return ("POINT_NONFINITE_LP", f"lp {got[1]}")
+    if lp == -math.inf:
+        return ("OK", "")
+    bad = sum(1 for x in got[2:] if not math.isfinite(float(x)))
+    if bad and (model, point) not in NONFINITE_GRAD_OK:
+        return ("POINT_NONFINITE_GRAD",
+                f"lp {got[1]} but {bad}/{len(got) - 2} gradients nonfinite")
+    return ("OK", "")
+
+
 def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
                 no_lp=False):
     """Returns (model, status, max_rel, max_ulp, n_values, detail)."""
@@ -240,18 +365,7 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
     lines = proc.stdout.splitlines()
     got = lines[0].split() if lines else []
     if not got or got[0] != "OK":
-        # Say HOW it died, not just that it did: a negative returncode is
-        # a signal (ldaK5's 49 GB compile came back as a bare RUN_FAIL
-        # because the OOM killer leaves no stdout).
-        detail = " ".join(got[:3])
-        if not detail:
-            detail = (f"killed by signal {-proc.returncode}"
-                      if proc.returncode < 0
-                      else f"exit {proc.returncode}, no output")
-        err = proc.stderr.strip().splitlines()
-        if err:
-            detail += " | " + err[-1][:120]
-        return (model, "RUN_FAIL", 0.0, 0, 0, detail)
+        return (model, "RUN_FAIL", 0.0, 0, 0, fail_detail(proc, got))
     rv = [float(x) for x in ref["values"]]
     gv = [float(x) for x in got[1:]]
     if len(rv) != len(gv):
@@ -294,6 +408,20 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
             worst = max(worst, rel)
             worst_ulp = max(worst_ulp, ulp)
         n += len(wref)
+    # The two points with no reference. Sequential and in-process rather
+    # than separate pool tasks, because model_files unpacks the shared
+    # posteriordb data zip to one path per model and three workers writing
+    # it at once would race. The write_array section runs on every
+    # stanli_check invocation whether or not --wa-values asks for its
+    # numbers, so these points cover it against a crash for free.
+    for point in POINTS:
+        if point == int(ref["point"]):
+            continue
+        status, detail = probe_point(model, stan, dj, check_bin, point,
+                                     timeout)
+        if status != "OK":
+            return (model, status, worst, worst_ulp, n,
+                    f"point {point}: {detail}")
     return (model, "OK", worst, worst_ulp, n, "")
 
 
@@ -470,7 +598,8 @@ def main():
 
     ok = len(models) - len(failures)
     print(f"\n{ok}/{len(models)} models within {args.max_rel:.0e} of the "
-          f"CmdStan references"
+          f"CmdStan references, and clean at all "
+          f"{len(POINTS)} evaluation points"
           + (" (gradients only)" if args.no_lp else "")
           + (f"; worst {worst_overall[0]} at {worst_overall[1]:.2e} "
              f"({worst_overall[2]} ulp)" if worst_overall[0] else ""))
