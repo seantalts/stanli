@@ -35,13 +35,26 @@ respecting the declared constraints. It is not free of consequences:
 Phase B (`--differential`) settles what the census can only guess: it
 compiles the model through CmdStan the way tools/verify_sample.py does
 and compares lp and the full gradient at the same deterministic points.
-It is opt-in because a CmdStan reference binary costs tens of seconds per
-model where the census costs tens of milliseconds.
+A model that lowered and then disagrees with CmdStan is a wrong number
+rather than a missing feature, and outranks every other row in the
+report.
 
-Cost: 1,231 models in about two minutes at --jobs 8 with a warm cache.
-Cold it is a quarter of an hour, nearly all of it stanc -- the
-function-signatures models take ten to twenty-five seconds each to
-compile, which is why the MIR is cached alongside the data.
+Cost, measured on a 32-core arm64 Mac against a built CmdStan:
+
+  census only, warm cache   1,231 models   2m 04s at --jobs 8
+  census only, cold cache   1,231 models   7m 58s at --jobs 8
+  census + --differential     392 refs     7m 45s at --jobs 10
+                                           (9.2s per reference on
+                                            average, 50s at the worst,
+                                            56 CPU-minutes in total)
+
+Cold is nearly all stanc: the function-signatures models take ten to
+twenty-five seconds each at --O1, which is why the MIR is cached beside
+the data. The whole cache is 22 MB. Every reference is cached too, so
+the differential above costs about a second on a second run:
+
+  harnesses/model_census.py --differential --cmdstan deps/cmdstan \
+      --jobs 10 --out model-census.json
 
 Usage:
   harnesses/model_census.py [--filter SUBSTR] [--jobs N]
