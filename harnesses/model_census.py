@@ -508,6 +508,10 @@ def differential_one(entry, corpus, cache, check, stanc, shim, cmdstan, opt,
         result = run([check, model, data, "--stanc", stanc,
                       "--point", point], timeout, cwd=REPO, env=env)
         kind, detail = status_line(result.stdout if result else "")
+        # A timeout lands here as `ours = None`, indistinguishable from a
+        # refusal. Every model reaching this function already evaluated
+        # inside the same timeout during the census, so it is an edge the
+        # census would have caught as `crashed` first.
         ours = [float(v) for v in detail.split()] if kind == "OK" else None
         if reference is None or ours is None:
             if (reference is None) != (ours is None):
@@ -570,6 +574,16 @@ def summarize(report, limit):
         if n:
             print(f"  {status:<{width}}  {n:>5}  "
                   f"{100.0 * n / max(len(rows), 1):5.1f}%")
+
+    # A lowering that returns -inf is still a lowering -- both engines
+    # agree at log(0) and verify_refs' arithmetic scores it as agreement --
+    # but it exercised no density, so it is weaker evidence than the count
+    # alone suggests and the summary says how much of the count it is.
+    flat = sum(1 for r in rows
+               if r["status"] == "lowered" and not r["lp_finite"])
+    if flat:
+        print(f"\n  of the lowered, {flat} returned a nonfinite lp at the "
+              "point that evaluated")
 
     crashes = [r for r in rows if r["status"] == "crashed"]
     print(f"\ncrashes: {len(crashes)}")
