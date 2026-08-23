@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+### A register program writes every register it reads
+
+stanc3's --O1 inliner can declare a user function's return symbol
+under a parameter-dependent branch, so a model shaped like
+`cond ? udf(x) : y` produced register programs whose live-out
+registers were never written when the branch was not taken. The lucky
+outcome was a SIGSEGV in log_prob; the quiet one replayed varis from
+an already-recovered nested tape and returned a wrong gradient with
+no diagnostic. Register programs now prepend a NaN fill for every
+adopted register run, on both the island and the ODE right-hand-side
+compilers. The conformance harness also stops classifying a killed
+worker as not-implemented: a dead child is a blocking `crashed`
+status now, which is how this had been hiding in the nightlies.
+
+### Matrix division is a linear solve again
+
+`B / A` on two matrices in the model block computed elementwise
+division: no exception, no NaN, a wrong log density and wrong
+gradients. stanc3 spells `mdivide_right` with the ordinary division
+operator, and the graph lowering read the operator rather than the
+divisor's type. `rv / A` refused to compile and `A \ v` was not lowered
+at all.
+
+All four shapes -- matrix/matrix, row_vector/matrix, matrix\vector,
+matrix\matrix -- now lower to a pair of graph kernels with adjoints,
+keyed on the same rule the MIR interpreter already used: a matrix
+divisor is a solve, a scalar divisor is not, and `./` never is. A solve
+in generated quantities no longer truncates the graph write_array and
+sends the whole section to the per-draw interpreter, which measured
+6.5x on a 50-element block (5.78 to 0.89 us/draw).
+
+### Out-of-bounds indices are rejected at compile time
+
+Every index the graph lowering sees is a bind-time constant, but most
+index forms never checked it: v[7] on a length-4 vector, a gather by
+[1, 9], Y[2:9], M[1:2, 5], and their friends silently read a
+neighboring arena slot and produced a wrong log density with no error.
+CmdStan rejects all of these at runtime. Every indexing path now
+checks its bounds at compile time and names the index and the extent;
+the matrix row range also accepts hi < lo as empty now, completing the
+empty-range semantics. The interpreter's index paths get the same
+named errors in place of a bare std::out_of_range("vector").
+
 ### Empty gathers compile
 
 A gather whose index slice is empty, such as `Y[Jevent[1:Nevent]]` with
@@ -27,18 +70,6 @@ rvalue semantics: hi < lo is an empty slice whatever the endpoints,
 bounds are checked only when a range is nonempty, and an empty slice
 contributes exactly nothing.
 
-### Out-of-bounds indices are rejected at compile time
-
-Every index the graph lowering sees is a bind-time constant, but most
-index forms never checked it: v[7] on a length-4 vector, a gather by
-[1, 9], Y[2:9], M[1:2, 5], and their friends silently read a
-neighboring arena slot and produced a wrong log density with no error.
-CmdStan rejects all of these at runtime. Every indexing path now
-checks its bounds at compile time and names the index and the extent;
-the matrix row range also accepts hi < lo as empty now, completing the
-empty-range semantics. The interpreter's index paths get the same
-named errors in place of a bare std::out_of_range("vector").
-
 ### Non-integer data for an int variable is a data error
 
 A declared-int variable supplied with non-integer values (JSON 1.0 is
@@ -47,23 +78,6 @@ reals, and the failure surfaced at whatever consumer touched it first,
 e.g. "gather index must be int data". It is rejected at data binding
 now, as std::invalid_argument naming the variable, the same contract
 as the existing dimension check.
-
-### Matrix division is a linear solve again
-
-`B / A` on two matrices in the model block computed elementwise
-division: no exception, no NaN, a wrong log density and wrong
-gradients. stanc3 spells `mdivide_right` with the ordinary division
-operator, and the graph lowering read the operator rather than the
-divisor's type. `rv / A` refused to compile and `A \ v` was not lowered
-at all.
-
-All four shapes -- matrix/matrix, row_vector/matrix, matrix\vector,
-matrix\matrix -- now lower to a pair of graph kernels with adjoints,
-keyed on the same rule the MIR interpreter already used: a matrix
-divisor is a solve, a scalar divisor is not, and `./` never is. A solve
-in generated quantities no longer truncates the graph write_array and
-sends the whole section to the per-draw interpreter, which measured
-6.5x on a 50-element block (5.78 to 0.89 us/draw).
 
 ## 0.8.1
 
