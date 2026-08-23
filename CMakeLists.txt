@@ -498,6 +498,14 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_conformance_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_conformance.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  # The model census's coverage ratchet, over synthetic rows plus the
+  # checked-in baseline. The census itself needs deps/stanc3-src, a stanc
+  # and a CmdStan and so runs by hand; what runs here is the gate it grew,
+  # which is the part that decides whether a run failed. Pure Python and no
+  # shell stub, so no WIN32 guard.
+  add_test(NAME test_census
+           COMMAND ${Python3_EXECUTABLE} tests/test_census.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # The corpus replay's per-point verdicts, over a stub stanli_check. The
   # oracle itself needs posteriordb and a real binary and so runs in CI
   # rather than here; what runs here is the classification it depends on,

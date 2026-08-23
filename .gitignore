@@ -58,5 +58,8 @@ conformance-cache/
 # harnesses/model_census.py run artifacts: the invented data and CmdStan
 # reference values it caches content-addressed (once per model ever), and
 # the report it writes. The cache is a rerun's determinism, not a source.
-model-census-cache/
+# No trailing slash: a worktree usually symlinks the cache in from a
+# sibling checkout rather than growing its own, and a `dir/` rule does not
+# match a symlink.
+model-census-cache
 model-census.json

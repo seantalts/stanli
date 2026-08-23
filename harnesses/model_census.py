@@ -56,15 +56,24 @@ the differential above costs about a second on a second run:
   harnesses/model_census.py --differential --cmdstan deps/cmdstan \
       --jobs 10 --out model-census.json
 
+Every run is also held to a recorded one. docs/census-baseline.json.gz
+carries a status per model, and a model that used to lower and no longer
+does fails the run by name; see "The coverage ratchet" below for why the
+tally alone was not enough and what it cost.
+
 Usage:
   harnesses/model_census.py [--filter SUBSTR] [--jobs N]
                             [--corpus DIR] [--cache DIR] [--out FILE]
                             [--check BIN] [--differential --cmdstan DIR]
+                            [--baseline FILE] [--update-baseline]
 
   --filter SUBSTR   substring of the path relative to the corpus root, so
                     `--filter tuples/` takes one directory
   --differential    also compare lp + gradient against CmdStan for every
                     model that lowered; needs --cmdstan
+  --baseline FILE   the recorded run to hold this one to; defaults to the
+                    checked-in one, so the ratchet is on without a flag
+  --update-baseline record this run into --baseline instead
 """
 import argparse
 import concurrent.futures
@@ -600,6 +609,298 @@ def differential_one(entry, corpus, cache, check, stanc, shim, cmdstan, opt,
 
 
 # ---------------------------------------------------------------------------
+# The coverage ratchet.
+#
+# The census is the only oracle that looks at a whole model, and until now
+# it had no memory: a model sliding from `lowered` to `unsupported` moved
+# one number in a table nobody diffed. That is how #145 broke `size()` of a
+# scalar int. stanc3's function-signatures/math/matrix/size.stan went from
+# 2,742 values verified bitwise against CmdStan to COMPILE_FAIL, no oracle
+# went red -- not the corpus, which uses no such model; not the conformance
+# sweep, whose generator never emits the shape; not the conformance
+# ratchet, which watches sweep classifications only -- and it took days and
+# a 392-vs-391 tally somebody refused to shrug off. Fixed as #151.
+#
+# So: the same directional ratchet the conformance sweep got in #121
+# (harnesses/conformance/report.py, `compare_snapshot`), per model rather
+# than per count. Per model because a total hides a swap -- one model
+# regressing while another improves leaves 392 reading 392 -- and because
+# a failure has to name the file somebody has to go look at.
+#
+# Directional means ground lost blocks and ground gained records. A gate
+# that goes red for progress is re-baselined reflexively until nobody reads
+# it, which is how the sweep's previous gate stopped meaning anything.
+
+BASELINE = REPO / "docs" / "census-baseline.json.gz"
+BASELINE_SCHEMA = 1
+
+# Ladder one: what the census itself decided, best rung to worst.
+#
+#   2  lowered        stanli compiled the model and produced lp and a
+#                     gradient. This is the ground being defended, and
+#                     `lowered` -> anything is the #151 regression.
+#   1  the backlog    unsupported, data_rejected, eval_failed,
+#                     stanc_rejected, data_unavailable, not_a_model: the
+#                     census got no number, for one of six reasons. One
+#                     rung and not six, because the boundaries between them
+#                     are a regex (_DATA_REFUSAL) and a pipeline stage, so
+#                     gating a lateral move would fire on tuning that
+#                     heuristic rather than on anything stanli did. Which
+#                     bucket a refusal lands in is already in the report.
+#   0  no statement   crashed, timed_out, harness_error. The first two
+#                     already fail the run outright and do so with or
+#                     without a baseline; harness_error does not, and a
+#                     model falling into it from either rung above is
+#                     ground lost that nothing else would say out loud.
+_CENSUS_RUNG = {
+    "lowered": 2,
+    "unsupported": 1, "data_rejected": 1, "eval_failed": 1,
+    "stanc_rejected": 1, "data_unavailable": 1, "not_a_model": 1,
+    "crashed": 0, "timed_out": 0, "harness_error": 0,
+}
+
+# Ladder two: what CmdStan said about the models that lowered,
+# best rung to worst.
+#
+#   2  verified       lp and the whole gradient agree with CmdStan at every
+#                     shared point. The strongest statement the census makes.
+#   1  rejected_both  the model lowered and every point sits outside its
+#                     support, so both engines refused. Agreement, but over
+#                     no values: sliding from `verified` to here is
+#                     thousands of compared numbers becoming none.
+#   0  disagreement   mismatch, shape_mismatch, one_side_threw. Which
+#                     flavour of disagreement is not a ranking -- a
+#                     mismatch becoming a one_side_threw is news, not
+#                     progress -- so they share a rung and only arriving
+#                     from above blocks.
+#
+# ref_stanc_fail and ref_build_fail are deliberately absent. They say the
+# reference toolchain would not build, which is a statement about CmdStan
+# and not about stanli, so they read as "no verdict" and void this ladder
+# for that model exactly like not running --differential at all.
+_DIFF_RUNG = {
+    "verified": 2,
+    "rejected_both": 1,
+    "mismatch": 0, "shape_mismatch": 0, "one_side_threw": 0,
+}
+
+# Toolchain identity a recorded verdict is conditioned on. Moving one
+# invalidates the comparison rather than losing ground, so it blocks the
+# way conformance's inventory/policy metadata does, and the fix is a
+# deliberate re-record.
+#
+# check_sha256 is pointedly NOT here. The stanli_check binary is the
+# subject under test: it changes on every build that could possibly matter,
+# and a ratchet that blocked on it would be red exactly when something
+# happened and green when nothing did. Conformance blocks on its pinned
+# stanc for the opposite reason -- there the pin is the fixed frame of
+# reference, here the binary is the thing being measured. It is still
+# recorded, because the first question about a failing run is which build
+# wrote the baseline.
+#
+# corpus_head is not here either, and that is a deliberate divergence from
+# conformance, which blocks wholesale on its inventory sha. It has to:
+# that sha covers one opaque signature dump it cannot take apart. The
+# census's corpus is 1,231 separately-sha256'd files, so an advanced
+# stanc3-src pin can be resolved to the handful of models that actually
+# changed and voided one at a time. A wholesale block would throw away
+# every still-valid row to protect the few that moved.
+#
+# Advancing the stanc pin needs the cache cleared as well as the baseline
+# re-recorded: cached_mir and cached_data key on the model's sha alone, so
+# a warm cache keeps serving the old stanc's MIR to the new one. The block
+# here makes that a decision somebody has to take, which is all it can do.
+_PINNED_TOOLS = ("stanc_sha256", "cmdstan_head")
+
+
+def baseline_record(r):
+    """What the baseline keeps about one model.
+
+    Its status, the two shas the comparison is conditioned on, and its
+    differential verdict. Deliberately not `reason` or `detail`: those are
+    the first line of a refusal message, and gating on them would make
+    every reworded error string a regression.
+    """
+    record = {"status": r["status"], "sha256": r["sha256"]}
+    if r["data_sha256"]:
+        record["data_sha256"] = r["data_sha256"]
+    if r.get("differential"):
+        record["differential"] = r["differential"]["status"]
+    return record
+
+
+def write_baseline(report, path):
+    """Record this run as the ground the next one has to hold.
+
+    Refuses a run that made no trustworthy statement about every model: a
+    partial scope, a harness that broke, or a row that came back with no
+    status at all.
+
+    It does NOT refuse `crashed` or `timed_out`, though those fail the run.
+    The corpus permanently contains one model that segfaults stanli and one
+    that does not terminate by construction, so refusing them would mean no
+    baseline could ever be recorded. They are recorded on the bottom rung
+    instead, which is what makes a third model joining them a named
+    regression rather than a count going from 2 to 3.
+
+    It does not refuse differential disagreements either. Those are the
+    backlog the ratchet exists to hold flat rather than to erase, and the
+    file is checked in, so whatever is being blessed arrives in review as a
+    diff. What it does refuse is losing phase B by accident: re-recording a
+    differential baseline from a census-only run would quietly turn every
+    `verified` row into a `lowered` one inside a gzipped file no diff can
+    show.
+    """
+    reasons = []
+    if report["filter"]:
+        reasons.append(f"run is partial (--filter {report['filter']!r})")
+    if report["counts"]["harness_error"]:
+        reasons.append(f"{report['counts']['harness_error']} models "
+                       "harness_error")
+    blank = [r["path"] for r in report["rows"] if r["status"] not in STATUSES]
+    if blank:
+        reasons.append(f"{len(blank)} rows carry no status")
+    try:
+        recorded = load_baseline(path)
+    except ValueError:
+        # Unreadable or an older schema. This call is about to overwrite it
+        # anyway, so refusing to re-record over a file nothing can read
+        # would leave no way forward.
+        recorded = None
+    if (recorded and not any(r.get("differential") for r in report["rows"])
+            and any("differential" in m
+                    for m in recorded.get("models", {}).values())):
+        reasons.append("the recorded baseline holds differential verdicts "
+                       "and this run made none; re-record with --differential")
+    if reasons:
+        raise ValueError("baseline update refused: " + "; ".join(reasons))
+
+    value = {
+        "schema": BASELINE_SCHEMA,
+        "corpus": report["corpus"],
+        "tools": report["tools"],
+        "models": {r["path"]: baseline_record(r) for r in report["rows"]},
+    }
+    text = json.dumps(value, indent=1, sort_keys=True) + "\n"
+    # mtime=0 so that re-recording an unchanged census produces unchanged
+    # bytes -- the same reason cached_mir gzips that way. A baseline whose
+    # sha moved because the clock did is one nobody can review.
+    path = pathlib.Path(path)
+    write_once(path, gzip.compress(text.encode("utf-8"), 9, mtime=0)
+               if path.suffix == ".gz" else text.encode("utf-8"))
+    # write_once builds the file with mkstemp, which is 0600 by design.
+    # This one is checked in beside docs/corpus-refs.json.gz and read by
+    # everybody, so it gets the mode the rest of docs/ has.
+    path.chmod(0o644)
+
+
+def load_baseline(path):
+    """The recorded run, or None when there is nothing recorded."""
+    path = pathlib.Path(path)
+    if not path.exists():
+        return None
+    try:
+        raw = (gzip.decompress(path.read_bytes()).decode("utf-8")
+               if path.suffix == ".gz" else path.read_text(encoding="utf-8"))
+        value = json.loads(raw)
+    except (OSError, gzip.BadGzipFile, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read baseline {path}: {exc}") from exc
+    if int(value.get("schema", 0)) != BASELINE_SCHEMA:
+        raise ValueError(f"baseline {path} is not schema {BASELINE_SCHEMA}")
+    if not isinstance(value.get("models"), dict):
+        raise ValueError(f"baseline {path} has no models object")
+    return value
+
+
+def compare_baseline(report, baseline):
+    """This run against a recorded one, per model and directionally.
+
+    Everything it finds is reported; only `blocked` fails the run.
+    """
+    delta = {"blocked": False, "regressed": [], "improved": [], "voided": [],
+             "new_models": [], "missing_models": [], "moved_tools": []}
+    if baseline is None:
+        return delta
+    if baseline.get("corpus") != report["corpus"]:
+        # A run pointed at a different corpus shares no model paths with
+        # the recorded one, so every row would read as missing. Say what
+        # happened instead of failing 1,231 times.
+        delta["voided"].append(
+            f"whole baseline: recorded over {baseline.get('corpus')}, "
+            f"this run over {report['corpus']}")
+        return delta
+
+    for key in _PINNED_TOOLS:
+        old = baseline.get("tools", {}).get(key)
+        new = report["tools"].get(key)
+        # Only when both runs observed it. A census without --differential
+        # never asks CmdStan its revision, and reading that absence as a
+        # moved pin would block every run that skipped phase B.
+        if old is not None and new is not None and old != new:
+            delta["moved_tools"].append(f"tools.{key}: {old} -> {new}")
+
+    live = {r["path"]: r for r in report["rows"]}
+    recorded = baseline["models"]
+    delta["new_models"] = sorted(set(live) - set(recorded))
+    if not report["filter"]:
+        # A model the baseline knows and this run never saw. Either the
+        # corpus pin deleted it or the harness quietly stopped globbing
+        # it, and the second is precisely how coverage loss hides, so it
+        # blocks until somebody re-records on purpose. Suppressed under
+        # --filter, which is partial by construction; conformance
+        # suppresses its missing_ids on an incomplete scope for the same
+        # reason.
+        delta["missing_models"] = sorted(set(recorded) - set(live))
+
+    for path in sorted(set(live) & set(recorded)):
+        now, was = live[path], recorded[path]
+        if now["sha256"] != was.get("sha256"):
+            # The model file changed: the stanc3-src pin advanced under the
+            # baseline. The recorded verdict describes a file that no
+            # longer exists, so there is nothing to compare and nothing was
+            # lost.
+            delta["voided"].append(f"{path}: model changed")
+            continue
+        note = ""
+        if (now["data_sha256"] and was.get("data_sha256")
+                and now["data_sha256"] != was["data_sha256"]):
+            # Annotated, not voided, and the choice matters. `stanc
+            # --debug-generate-data` draws fresh values on every
+            # invocation -- two runs over one unchanged model give two
+            # different shas -- and the draws are cached under the model's
+            # own sha, so identical model bytes beside different data bytes
+            # can only mean the cache was lost. Voiding on that would
+            # disarm all 1,231 rows on any cold cache, which is every CI
+            # runner and every fresh clone, and a ratchet that switches
+            # itself off exactly where nobody is watching is the failure
+            # #121 was written against. Not voiding costs a possible false
+            # alarm, and only on a row that both regressed and redrew --
+            # the ambiguous set somebody has to look at either way. The
+            # note is what tells them which set they are in.
+            note = " (data regenerated from a lost cache; may be the draw)"
+        for rungs, what, before, after in (
+                (_CENSUS_RUNG, "status", was.get("status"), now["status"]),
+                (_DIFF_RUNG, "differential", was.get("differential"),
+                 (now.get("differential") or {}).get("status"))):
+            was_rung, now_rung = rungs.get(before), rungs.get(after)
+            if was_rung is None or now_rung is None or was_rung == now_rung:
+                # A verdict this ladder does not rank is one that side never
+                # reached: a census run without --differential, a reference
+                # CmdStan could not build. Compare what both runs measured,
+                # or the 382 verified rows in the baseline become 382
+                # regressions the first time somebody runs phase A alone.
+                continue
+            moved = {"path": path, "what": what, "from": before, "to": after,
+                     "note": note, "repro": now["repro"]}
+            delta["regressed" if now_rung < was_rung
+                  else "improved"].append(moved)
+
+    delta["blocked"] = bool(delta["regressed"] or delta["missing_models"]
+                            or delta["moved_tools"])
+    return delta
+
+
+# ---------------------------------------------------------------------------
 # Reporting.
 
 
@@ -620,11 +921,43 @@ def buckets(rows, statuses):
                    in counts.items()), key=lambda t: (-len(t[2]), t[0], t[1]))
 
 
+def summarize_baseline(delta, baseline, path, limit):
+    """The ratchet's verdict, in the order somebody debugging wants it."""
+    if baseline is None:
+        print(f"\nratchet: no baseline at {repo_rel(path)}, nothing compared")
+        return
+    print(f"\nratchet against {repo_rel(path)}: "
+          f"{'RED' if delta['blocked'] else 'green'}")
+    for moved in delta["moved_tools"]:
+        print(f"  ! pinned toolchain moved, so the comparison is void: "
+              f"{moved}")
+    for gone in delta["missing_models"][:limit]:
+        print(f"  ! vanished from the corpus: {gone}")
+    if len(delta["missing_models"]) > limit:
+        print(f"  ... {len(delta['missing_models']) - limit} more vanished")
+    # Uncapped, like the crash and timeout lists above it and for the same
+    # reason: a regression is the headline of the run it appears in.
+    for moved in delta["regressed"]:
+        print(f"  ! {moved['path']}: {moved['what']} "
+              f"{moved['from']} -> {moved['to']}{moved['note']}")
+        print(f"    {moved['repro']}")
+    # Everything below is information, not a failure: the ratchet is
+    # directional and progress must never turn a run red.
+    for moved in delta["improved"][:limit]:
+        print(f"  + {moved['path']}: {moved['what']} "
+              f"{moved['from']} -> {moved['to']}")
+    if len(delta["improved"]) > limit:
+        print(f"  ... {len(delta['improved']) - limit} more improvements")
+    for key, what in (("voided", "rows void"), ("new_models", "new models")):
+        if delta[key]:
+            print(f"  {len(delta[key])} {what}, e.g. {delta[key][0]}")
+
+
 def summarize(report, limit):
     rows = report["rows"]
     print(f"\n{len(rows)} models from {report['corpus']}")
-    print(f"stanc {report['stanc_version']}  "
-          f"stanli_check {report['check_sha256'][:12]}\n")
+    print(f"stanc {report['tools']['stanc_version']}  "
+          f"stanli_check {report['tools']['check_sha256'][:12]}\n")
     width = max(len(s) for s in STATUSES)
     for status in STATUSES:
         n = sum(1 for r in rows if r["status"] == status)
@@ -705,6 +1038,14 @@ def main():
                     help="relative deviation gate for --differential")
     ap.add_argument("--ref-opt", default="-O1",
                     help="optimization level for the reference binary")
+    # On by default, because a ratchet nobody remembers to pass a flag for
+    # is a ratchet nobody has. The checked-in file exists in every clone;
+    # pointing --baseline somewhere empty is how a run opts out.
+    ap.add_argument("--baseline", type=pathlib.Path, default=BASELINE,
+                    help="recorded run this one may not fall below")
+    ap.add_argument("--update-baseline", action="store_true",
+                    help="record this run into --baseline instead of "
+                         "comparing against it")
     args = ap.parse_args()
 
     check = (args.check or default_check_bin()).resolve()
@@ -754,14 +1095,33 @@ def main():
         print(file=sys.stderr)
 
     unknown = [r for r in rows if r["status"] not in STATUSES]
+    cmdstan_head = None
+    if args.differential:
+        head = run(["git", "-C", args.cmdstan.resolve(), "rev-parse", "HEAD"],
+                   30)
+        cmdstan_head = (head.stdout.strip()
+                        if head and not head.returncode else "unknown")
+    corpus_head = run(["git", "-C", corpus, "rev-parse", "HEAD"], 30)
     report = {
-        "schema": 1,
+        "schema": 2,
         "corpus": repo_rel(corpus),
         "filter": args.filter,
-        "stanc_version": ((version.stdout or version.stderr).strip()
-                          if version else "unknown"),
         "check": str(check),
-        "check_sha256": sha256(check.read_bytes()),
+        # Everything about the world that could change a verdict, in one
+        # place because the baseline records exactly this block and the
+        # ratchet reads it back. Identities only, no paths: this block is
+        # checked in, and a path here would be one machine's worktree.
+        # See _PINNED_TOOLS for which of these moving invalidates a
+        # comparison and which is merely provenance.
+        "tools": {
+            "check_sha256": sha256(check.read_bytes()),
+            "stanc_sha256": sha256(pathlib.Path(args.stanc).read_bytes()),
+            "stanc_version": ((version.stdout or version.stderr).strip()
+                              if version else "unknown"),
+            "corpus_head": (corpus_head.stdout.strip() if corpus_head
+                            and not corpus_head.returncode else "unknown"),
+            "cmdstan_head": cmdstan_head,
+        },
         "max_rel": args.max_rel if args.differential else None,
         "wall_seconds": time.monotonic() - started,
         "counts": {s: sum(1 for r in rows if r["status"] == s)
@@ -770,22 +1130,55 @@ def main():
                     for s, why, paths in buckets(rows, STATUSES)],
         "rows": sorted(rows, key=lambda r: r["path"]),
     }
+
+    # A refused update or an unreadable baseline must not cost the run its
+    # report: this census took two minutes and the rows are the product.
+    # Record the complaint, write everything, complain at the end.
+    baseline, refused = None, None
+    try:
+        if args.update_baseline:
+            write_baseline(report, args.baseline)
+    except ValueError as exc:
+        refused = str(exc)
+    # Loaded either way, so a refused update still says what the run did
+    # against the baseline already on disk instead of reporting none.
+    try:
+        baseline = load_baseline(args.baseline)
+    except ValueError as exc:
+        refused = refused or str(exc)
+    # Compared even right after recording, so that --update-baseline
+    # demonstrates its own round trip instead of asserting it.
+    delta = compare_baseline(report, baseline)
+    report["baseline"] = repo_rel(args.baseline)
+    report["baseline_delta"] = delta
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
     summarize(report, args.buckets)
+    summarize_baseline(delta, baseline, args.baseline, args.buckets)
     print(f"\nwrote {args.out}  ({report['wall_seconds']:.1f}s)")
+    if args.update_baseline and refused is None:
+        print(f"recorded {repo_rel(args.baseline)}  "
+              f"({args.baseline.stat().st_size / 1024.0:.0f} KB, "
+              f"{len(report['rows'])} models)")
+    if refused is not None:
+        print(refused, file=sys.stderr)
+        return 2
 
     if unknown:
         print(f"\n{len(unknown)} rows carry no status; that is a bug in "
               "this harness", file=sys.stderr)
         return 1
-    # A process that died or hung is the headline, not a footnote, so it
-    # is the only census outcome that fails the run. Everything else --
-    # including every unsupported bucket -- is the backlog this report
+    # A process that died or hung is the headline, not a footnote, so it is
+    # the only census *status* that fails the run on its own -- with or
+    # without a baseline, which is what keeps gate 4 true. Everything else
+    # -- including every unsupported bucket -- is the backlog this report
     # exists to rank, and a red exit that means "there is work to do" is
-    # one nobody reads.
-    return 1 if (report["counts"]["crashed"]
-                 or report["counts"]["timed_out"]) else 0
+    # one nobody reads. The ratchet adds the other half: not a level, a
+    # direction. A backlog of 643 stays green; one model leaving the 392
+    # does not.
+    return 1 if (report["counts"]["crashed"] or report["counts"]["timed_out"]
+                 or delta["blocked"]) else 0
 
 
 if __name__ == "__main__":

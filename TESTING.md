@@ -18,6 +18,8 @@ agrees to 1e-12 is a bug report, not a feature.
 | corpus oracle | 129 real models, lp + full gradient vs recorded CmdStan | every PR | `python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 4` |
 | conformance sweep | all ~24k signatures + 31 constructs vs live BridgeStan | nightly, and locally on demand | see below |
 | coverage ratchet | classifications vs a checked-in baseline, directional | inside the nightly | `--baseline docs/conformance-baseline.json.gz` |
+| model census | stanc3's 1,231 integration models: does each one lower, and does its gradient match CmdStan | by hand; needs `deps/stanc3-src` | `python3 harnesses/model_census.py --differential --cmdstan deps/cmdstan --jobs 10` |
+| census ratchet | per-model statuses vs a checked-in baseline, directional | with the census, on by default | `--baseline docs/census-baseline.json.gz` |
 | doc consistency | headline numbers vs their artifacts | every PR | `python3 tools/gen_docs.py --check` |
 | formatting | clang-format over tracked C/C++ | every PR | `./tools/format.sh --check` |
 
@@ -128,6 +130,43 @@ the baseline gets re-stamped on reflex until nobody reads it.
 
 Advancing the baseline is a reviewed act: rerun with `--update-snapshot`
 and commit the result in the same PR as the work that earned it.
+
+## The census ratchet
+
+The same idea, over whole models rather than signatures, and it exists
+because the sweep's version could not have caught what broke. #145 turned
+`size()` of a scalar `int` into a compile refusal. The corpus uses no model
+of that shape; the sweep's generator emits no such case, so its ratchet had
+nothing to watch; and the census, which did see it, only moved a number in
+a table -- 392 lowered became 391 -- with no memory to compare it to. It
+took days and somebody refusing to shrug off the tally to find. Fixed as
+#151.
+
+So `harnesses/model_census.py` now holds every run to
+`docs/census-baseline.json.gz`, per model and on by default. Two ladders,
+both directional:
+
+- what the census decided -- `lowered` above the six-way backlog
+  (`unsupported`, `data_rejected`, ...) above `crashed`/`timed_out`/
+  `harness_error`. A model leaving `lowered` blocks by name and prints its
+  repro command. A lateral move inside the backlog does not: the line
+  between those buckets is a heuristic, and gating it would fire on tuning
+  the heuristic.
+- what CmdStan said about the models that lowered -- `verified` above
+  `rejected_both` above disagreement. Consulted only when both runs reached
+  a verdict, so a census without `--differential` still ratchets on the
+  first ladder rather than reading 382 absent verdicts as 382 regressions.
+
+A model whose own sha256 moved is void, not regressed: the stanc3-src pin
+advanced and the recorded verdict describes a file that no longer exists.
+A model whose *data* sha moved still gates, annotated -- the invented data
+is redrawn on every generation and cached under the model's sha, so a
+changed data sha means a lost cache, and voiding on it would disarm all
+1,231 rows on any cold checkout.
+
+`crashed` and `timed_out` fail the run with or without a baseline; the
+ratchet adds direction, not a level. Advancing it is the same reviewed act:
+rerun with `--update-baseline` and commit the file with the work.
 
 ## Numeric standards, in one place
 
