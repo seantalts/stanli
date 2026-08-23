@@ -7,7 +7,6 @@ PDB_DIR is a posteriordb checkout containing posterior_database/.
 Writes docs/corpus-status.md and prints the failure histogram.
 """
 import collections
-import gzip
 import json
 import pathlib
 import re
@@ -18,7 +17,8 @@ import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from verify_refs import default_check_bin  # noqa: E402
+from verify_refs import (REFS_PATH, default_check_bin,  # noqa: E402
+                         load_refs)
 
 CHECK = default_check_bin()
 
@@ -142,12 +142,16 @@ def main():
         v = ver[m]
         rel = "0 (bitwise)" if v["max_rel"] == 0 else f"{v['max_rel']:.1e}"
         md.append(f"| `{m}` | {v['n_values']} | {rel} | {v['max_ulp']} |")
-    refs_path = REPO / "docs" / "corpus-refs.json.gz"
     wa_refs = {}
-    if refs_path.exists():
-        refs = json.loads(gzip.decompress(refs_path.read_bytes()))
-        wa_refs = {m: len(v["wa"]["values"])
-                   for m, v in refs.items() if "wa" in v and m in ver}
+    if REFS_PATH.exists():
+        # Every point carries its own write_array reference; the table
+        # counts the primary point's, the one this scoreboard's other
+        # columns already describe.
+        refs = load_refs()[0]
+        for m, v in refs.items():
+            pt = v["points"].get(str(v.get("primary")), {})
+            if "wa" in pt and m in ver:
+                wa_refs[m] = len(pt["wa"]["values"])
     if wa_refs:
         md += ["", "## write_array references", "",
                "For models whose generated quantities are deterministic "

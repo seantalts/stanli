@@ -57,9 +57,13 @@ cp deps/stanc3-src/test/integration/good/PATH/foo.stan tests/stanc3/
 python3 tools/verify_sample.py deps/cmdstan deps/posteriordb foo
 ```
 
-That prints `VERIFIED` and writes the reference; commit
-`docs/corpus-refs.json.gz` and `docs/verification.json` with the model,
-then run `tools/gen_docs.py` so the README count follows. Pick models
+That prints one line per evaluation point and writes a reference at each
+of them; commit `docs/corpus-refs.json.gz` and `docs/verification.json`
+with the model, then run `tools/gen_docs.py` so the README count follows.
+A point CmdStan refuses is recorded as a refusal, and one where stanli
+disagrees is recorded anyway -- references describe CmdStan. Read the
+per-point lines before committing: a `MISMATCH` on a new model is a
+finding, not a formality. Pick models
 that reach something the corpus does not: `tools/corpus.py` and the
 `FAIL` reasons from a sweep of the upstream directory are the fastest way
 to see what is left.

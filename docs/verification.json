@@ -1,6 +1,6 @@
 {
  "2pl_latent_reg_irt": {
-  "max_rel": 1.970818854445716e-15,
+  "max_rel": 8.759194908647637e-16,
   "max_ulp": 64,
   "n_values": 532,
   "point": 0,
@@ -14,8 +14,8 @@
   "status": "VERIFIED"
  },
  "GLMM_Poisson_model": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
+  "max_rel": 1.7892413727483378e-15,
+  "max_ulp": 16,
   "n_values": 46,
   "point": 0,
   "status": "VERIFIED"
@@ -28,7 +28,7 @@
   "status": "VERIFIED"
  },
  "GLM_Poisson_model": {
-  "max_rel": 1.1623849757747407e-16,
+  "max_rel": 2.16534387769236e-16,
   "max_ulp": 1,
   "n_values": 5,
   "point": 0,
@@ -147,8 +147,8 @@
   "status": "VERIFIED"
  },
  "blr": {
-  "max_rel": 5.07247517111007e-16,
-  "max_ulp": 3,
+  "max_rel": 1.8301202581837216e-16,
+  "max_ulp": 1,
   "n_values": 7,
   "point": 0,
   "status": "VERIFIED"
@@ -203,8 +203,8 @@
   "status": "VERIFIED"
  },
  "dogs": {
-  "max_rel": 4.605114374019914e-15,
-  "max_ulp": 26,
+  "max_rel": 4.7822341576360636e-15,
+  "max_ulp": 27,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -224,8 +224,8 @@
   "status": "VERIFIED"
  },
  "dogs_nonhierarchical": {
-  "max_rel": 7.437150827885549e-16,
-  "max_ulp": 5,
+  "max_rel": 6.942788341818394e-16,
+  "max_ulp": 4,
   "n_values": 66,
   "point": 0,
   "status": "VERIFIED"
@@ -266,8 +266,8 @@
   "status": "VERIFIED"
  },
  "garch11": {
-  "max_rel": 7.11691192956733e-16,
-  "max_ulp": 4,
+  "max_rel": 1.5549675653005763e-15,
+  "max_ulp": 8,
   "n_values": 5,
   "point": 0,
   "status": "VERIFIED"
@@ -287,8 +287,8 @@
   "status": "VERIFIED"
  },
  "gpcm_latent_reg_irt": {
-  "max_rel": 1.4812172919344156e-14,
-  "max_ulp": 3928,
+  "max_rel": 1.5416751405847987e-14,
+  "max_ulp": 992,
   "n_values": 531,
   "point": 0,
   "status": "VERIFIED"
@@ -399,8 +399,8 @@
   "status": "VERIFIED"
  },
  "kidscore_momhsiq": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
+  "max_rel": 1.429234925299734e-16,
+  "max_ulp": 1,
   "n_values": 5,
   "point": 0,
   "status": "VERIFIED"
@@ -483,8 +483,8 @@
   "status": "VERIFIED"
  },
  "logistic_regression_rhs": {
-  "max_rel": 6.592010755002513e-16,
-  "max_ulp": 5,
+  "max_rel": 2.584610084899681e-15,
+  "max_ulp": 1024,
   "n_values": 3076,
   "point": 0,
   "status": "VERIFIED"
@@ -532,8 +532,8 @@
   "status": "VERIFIED"
  },
  "lotka_volterra": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
+  "max_rel": 4.2978347285503614e-15,
+  "max_ulp": 22,
   "n_values": 9,
   "point": 0,
   "status": "VERIFIED"
@@ -651,7 +651,7 @@
   "status": "VERIFIED"
  },
  "prophet": {
-  "max_rel": 8.140703995943674e-15,
+  "max_rel": 9.854536416142326e-15,
   "max_ulp": 46,
   "n_values": 63,
   "point": 0,
@@ -672,8 +672,8 @@
   "status": "VERIFIED"
  },
  "radon_hierarchical_intercept_centered": {
-  "max_rel": 8.477578192919925e-14,
-  "max_ulp": 404,
+  "max_rel": 8.540530506233687e-14,
+  "max_ulp": 407,
   "n_values": 392,
   "point": 0,
   "status": "VERIFIED"
@@ -694,7 +694,7 @@
  },
  "radon_partially_pooled_noncentered": {
   "max_rel": 1.6102594283907918e-14,
-  "max_ulp": 75,
+  "max_ulp": 152,
   "n_values": 390,
   "point": 0,
   "status": "VERIFIED"
@@ -728,8 +728,8 @@
   "status": "VERIFIED"
  },
  "radon_variable_intercept_slope_noncentered": {
-  "max_rel": 2.590245859587703e-15,
-  "max_ulp": 24,
+  "max_rel": 4.440892098500626e-15,
+  "max_ulp": 40,
   "n_values": 778,
   "point": 0,
   "status": "VERIFIED"
@@ -743,7 +743,7 @@
  },
  "radon_variable_slope_noncentered": {
   "max_rel": 1.5024701057543596e-14,
-  "max_ulp": 144,
+  "max_ulp": 848,
   "n_values": 391,
   "point": 0,
   "status": "VERIFIED"
@@ -798,15 +798,15 @@
   "status": "REJECTED_BOTH"
  },
  "soil_incubation": {
-  "max_rel": 1.299664972131347e-16,
-  "max_ulp": 1,
+  "max_rel": 1.567256422483897e-13,
+  "max_ulp": 1241,
   "n_values": 7,
   "point": 0,
   "status": "VERIFIED"
  },
  "state_space_stochastic_level_stochastic_seasonal": {
   "max_rel": 8.651030440464789e-16,
-  "max_ulp": 6,
+  "max_ulp": 12,
   "n_values": 390,
   "point": 0,
   "status": "VERIFIED"

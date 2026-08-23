@@ -270,14 +270,17 @@ jobs:
       # models silently wrong by up to 1.7e5 relative reached main with
       # every test green, and only the corpus diff flagged them.
       #
-      # Every model runs at all three deterministic points, not only the
-      # one its reference was recorded at -- the recorder stops at the
-      # first point that works, so an unreferenced point is exactly where
-      # a crash hides (reductions_allowed, a month of green runs). There
-      # is no faster mode to pick instead: a strict mode nobody runs is
-      # the failure this replaces. Wall time 26s -> 77s at --jobs 4 on the
-      # development machine, and nn_rbm1bJ100's three points ARE that wall
-      # clock: the other 128 models total about 25 seconds between them.
+      # Every model runs at all three deterministic points, and every
+      # point carries its own reference. The recorder used to stop at the
+      # first point that works, which selects away from the points where
+      # anything is wrong: that is how reductions_allowed segfaulted at
+      # point 2 through a month of green runs, and a wrong-but-finite
+      # gradient at an unreferenced point had nothing to be wrong
+      # against. There is no faster mode to pick instead: a strict mode
+      # nobody runs is the failure this replaces. Wall time 26s -> 77s at
+      # --jobs 4 on the development machine, and nn_rbm1bJ100's three
+      # points ARE that wall clock: the other 128 models total about 25
+      # seconds between them.
       - name: Corpus verification against CmdStan references
         run: |
           python3 tools/verify_refs.py deps/posteriordb \

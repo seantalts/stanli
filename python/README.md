@@ -109,7 +109,7 @@ Nothing here ships on "looks close".
 **<!--gen:corpus_verified_of-->118 of 120<!--/gen--> posteriordb models**
 are differentially verified against CmdStan: same model, same data, same
 evaluation point, comparing the log density and every single gradient
-component. **<!--gen:corpus_bitwise-->44<!--/gen--> agree bitwise.** The
+component. **<!--gen:corpus_bitwise-->41<!--/gen--> agree bitwise.** The
 worst deviation across the entire corpus is
 **<!--gen:corpus_worst-->2.6e-12<!--/gen--> relative**.
 

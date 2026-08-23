@@ -32,13 +32,13 @@ Exit nonzero if any model breaks either claim.
 """
 import argparse
 import concurrent.futures
-import gzip
-import json
 import pathlib
 import subprocess
 import sys
 import tempfile
 import zipfile
+
+from verify_refs import load_refs
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 POINTS = (0, 1, 2)
@@ -70,7 +70,9 @@ def run(check_bin, stan, data, point):
 def check_model(model, ref, pdb, exact_bin, lite_bin, tmp):
     """(model, status, detail)."""
     stan = pdb / "models" / "stan" / f"{model}.stan"
-    dz = pdb / "data" / "data" / f"{ref['data']}.json.zip"
+    # The language models in tests/stanc3 carry no posteriordb dataset;
+    # they fall out here as SKIP, which is what they were before.
+    dz = pdb / "data" / "data" / f"{ref.get('data')}.json.zip"
     if not stan.exists() or not dz.exists():
         return (model, "SKIP", "input missing")
     dj = tmp / f"{model}_data.json"
@@ -126,8 +128,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     args = ap.parse_args()
 
-    refs = json.loads(gzip.decompress(
-        (REPO / "docs" / "corpus-refs.json.gz").read_bytes()))
+    refs = load_refs()[0]
     pdb = args.pdb / "posterior_database"
     models = args.models or sorted(refs)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_lite_"))

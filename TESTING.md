@@ -57,14 +57,20 @@ large factors have reached main with every test green, and only this diff
 flagged them.
 
 References live in `docs/corpus-refs.json.gz`, recorded by the local
-CmdStan rig (`tools/verify_sample.py`; needs `--corpus` from dev_setup).
+CmdStan rig (`tools/verify_sample.py`; needs `--corpus` from dev_setup),
+and the file names the CmdStan, Stan, Math, stanc3 and posteriordb
+revisions its values came out of. Every model carries a reference at
+every one of the three points, including the points CmdStan itself
+refuses -- those record the refusal, which stanli then has to reproduce.
 Recording is a reviewed act, like advancing the baseline: regenerating
 references to make a diff go away defeats the oracle.
 
-What this layer cannot see: language surface no real posterior uses --
-which is most of it -- and, historically, any evaluation point other than
-the recorded one. The multi-point replay closes the second gap; the
-conformance sweep exists for the first.
+What this layer cannot see: language surface no real posterior uses,
+which is most of it. The conformance sweep exists for that. It used to
+be blind to any evaluation point other than the one recorded, which is
+two gaps -- a crash at an unreferenced point, and a wrong-but-finite
+gradient there with nothing to be wrong against. The three-point replay
+closes the first and the three-point references close the second.
 
 ## The conformance sweep
 

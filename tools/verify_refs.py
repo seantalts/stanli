@@ -16,9 +16,8 @@ corpus (silent in-place corruption at 1.7e+05 relative, quadratic
 recompute, dropped tape links) sits many orders of magnitude above it,
 and honest cross-libm drift sits well below.
 
-Every model is evaluated at all three deterministic points, not only at
-the one its reference was recorded at; see POINTS below for what the
-other two are held to.
+Every model is evaluated at all three deterministic points, and every
+point carries its own recorded reference; see POINTS below.
 
 Usage: tools/verify_refs.py PDB_DIR [--check BIN] [--max-rel X]
                             [--jobs N] [--timeout S] [model ...]
@@ -48,35 +47,78 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # it, and a reference is keyed on the file name either way.
 LANG = REPO / "tests" / "stanc3"
 N_SAMPLER_COLS = 7
+REFS_PATH = REPO / "docs" / "corpus-refs.json.gz"
+# The reference file's format. Bumping this is a hard break on purpose:
+# load_refs refuses anything else rather than reading what it recognizes
+# and silently skipping the rest, which for an oracle is the failure mode
+# that matters. Schema 1 held one point per model; see load_refs.
+SCHEMA = 2
 # The deterministic unconstrained points stanli_check and ref_driver both
-# know (eval_point, defined identically in each). A reference exists at
-# exactly ONE of them: the recorder walks the list and stops at the first
-# point both engines accept and put the model inside its support, so 128
-# of the 129 references are point 0 and one is point 2.
+# know (eval_point, defined identically in each). Every model carries a
+# recorded CmdStan reference at every one of them.
 #
-# The replay evaluates all three anyway. Stopping where the recorder
-# stopped means the recorder's search actively selects AWAY from a point
-# that crashes -- which is how reductions_allowed segfaulted at point 2
-# for a month while the corpus ran green at point 0, and 25 of the 120
-# corpus models carry a conditional whose other side only some point
-# reaches. What the unreferenced points are held to is in probe_point.
+# It did not always: schema 1 recorded exactly one point per model,
+# because the recorder walked the list and stopped at the first point
+# both engines accept and put the model inside its support. That search
+# actively selects AWAY from a point that crashes -- which is how
+# reductions_allowed segfaulted at point 2 for a month while the corpus
+# ran green at point 0, and 25 of the 120 corpus models carry a
+# conditional whose other side only some point reaches. Evaluating the
+# other two points closed the crash gap; recording them closes the rest,
+# since a wrong-but-finite gradient at an unreferenced point has nothing
+# to be wrong against. What a point with no reference is still held to,
+# for the cases where recording is impossible, is in probe_point.
 POINTS = (0, 1, 2)
 
-# (model, point) pairs excused from probe_point's finite-gradient rule.
-# The one entry was settled against a live CmdStan -- tools/ref_driver.cpp
-# compiled for that model and run at that point -- not by argument. The
-# other entry this list once held, accel_gp, came out the opposite way and
-# was a real bug (sqrt's adjoint at exactly zero, sqrtv_bwd), which is why
-# the rule is worth keeping for everything else.
-NONFINITE_GRAD_OK = {
-    # Agreement. kronecker_gp is the corpus's one recorded MISMATCH: two
-    # of its 438 gradients flow through eigenvectors of a nearly
-    # degenerate covariance (see gate_for). At the all-zeros point that
-    # covariance is degenerate outright, and CmdStan answers with the
-    # identical lp (-187.85795069042379) and the identical 435 of 438
-    # nonfinite gradients. Both engines, same numbers: not a stanli bug.
-    ("kronecker_gp", 2): "CmdStan is nonfinite here too, 435/438, same lp",
+# (model, point) pairs whose recorded reference is not enforced, because
+# stanli is known to disagree with it and the bug is open. The reference
+# itself is recorded from CmdStan regardless -- references describe
+# CmdStan, not stanli -- so deleting an entry here is all it takes for the
+# full three-point parity to bite once the fix lands.
+#
+# Nothing may be added here on an argument. Every entry names the live
+# CmdStan run that settled it: tools/ref_driver.cpp compiled for that
+# model and run at that point.
+QUARANTINED = {
+    # No entries. accel_gp's two (NaN gradients through spd_cov_exp_quad
+    # at points 1 and 2, CmdStan finite) lived here for the hours between
+    # the recording and the sqrt adjoint fix -- sqrtv_bwd at exactly
+    # zero -- landing; full three-point parity now bites everywhere. The
+    # dict stays so the next open bug has a reviewed home, and the unit
+    # test covers the mechanism with a patched entry.
 }
+
+# (model, point) pairs excused from probe_point's finite-gradient rule,
+# for points that carry no reference at all. Empty while every point is
+# referenced -- pair_dev already counts NaN against NaN as agreement, so
+# kronecker_gp at point 2 (435 of its 438 gradients nonfinite on BOTH
+# engines, at the identical lp -187.85795069042379, because the all-zeros
+# point makes its covariance degenerate outright) needs no entry: its
+# reference records those nonfinite values and stanli reproduces them.
+NONFINITE_GRAD_OK = {}
+
+
+def load_refs(path=REFS_PATH):
+    """(models, provenance) from the reference file, or a hard failure.
+
+    The one reader of docs/corpus-refs.json.gz, shared by the replay, the
+    recorder, the lite-build cross-check and the corpus scoreboard, so a
+    schema change cannot land in one and not the others. `models` maps a
+    model name to {"data", "primary", "points": {"0": {...}, ...}};
+    `provenance` names the CmdStan/Stan/Math/stanc3/posteriordb revisions
+    the values were recorded against.
+    """
+    blob = json.loads(gzip.decompress(path.read_bytes()))
+    schema = blob.get("schema")
+    if schema != SCHEMA:
+        raise SystemExit(
+            f"{path} is schema {schema!r}, and these tools read schema "
+            f"{SCHEMA}. Schema 1 recorded one point per model and its "
+            f"entries are not a subset of this format, so half-reading it "
+            f"would gate on a fraction of the corpus while reporting a "
+            f"full pass. Re-record with tools/verify_sample.py "
+            f"--from-refs, or check out the commit that matches the file.")
+    return blob["models"], blob["recorded"]
 
 
 def default_check_bin():
@@ -303,9 +345,12 @@ def probe_point(model, stan, dj, check_bin, point, timeout):
         unwritten register reads as.
       * A finite lp must come with finite gradients. lp finite next to a
         nonfinite gradient is the shape a dropped tape link takes, and
-        spotting it needs no reference. NONFINITE_GRAD_OK carries the
-        (model, point) pairs excused from this, each with the CmdStan run
-        that settled it.
+        spotting it needs no reference. NONFINITE_GRAD_OK and QUARANTINED
+        carry the (model, point) pairs excused from this, each with the
+        CmdStan run that settled it.
+
+    Every point of every model is referenced today, so this runs only for
+    a quarantined point or a reference file with a gap in it.
 
     COMPILE_FAIL is a failure here rather than a rejection: compiling does
     not depend on the evaluation point, so a model that compiled at its
@@ -331,34 +376,73 @@ def probe_point(model, stan, dj, check_bin, point, timeout):
     if lp == -math.inf:
         return ("OK", "")
     bad = sum(1 for x in got[2:] if not math.isfinite(float(x)))
-    if bad and (model, point) not in NONFINITE_GRAD_OK:
+    excused = ((model, point) in NONFINITE_GRAD_OK
+               or (model, point) in QUARANTINED)
+    if bad and not excused:
         return ("POINT_NONFINITE_GRAD",
                 f"lp {got[1]} but {bad}/{len(got) - 2} gradients nonfinite")
     return ("OK", "")
 
 
-def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
-                no_lp=False):
-    """Returns (model, status, max_rel, max_ulp, n_values, detail)."""
-    stan, dj = model_files(model, ref, pdb, tmp)
-    if not stan.exists() or not dj.exists():
-        return (model, "MISSING_INPUT", 0.0, 0, 0, str(stan))
-    cmd = [str(check_bin), str(stan), str(dj), "--point", str(ref["point"])]
-    if "wa" in ref and not no_wa:
+def worst_pair(rv, gv):
+    """(worst relative deviation, worst ULP distance) over paired values."""
+    worst, worst_ulp = 0.0, 0
+    for a, b in zip(rv, gv):
+        rel, ulp = pair_dev(a, b)
+        worst = max(worst, rel)
+        worst_ulp = max(worst_ulp, ulp)
+    return worst, worst_ulp
+
+
+def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
+                no_lp):
+    """Replay one recorded point. (status, worst, worst_ulp, n, detail).
+
+    A point whose entry has no `values` is one CmdStan itself refuses (it
+    threw, or answered with a row of nan, which is how a unit_vector at
+    the origin reports itself). The reference records the refusal, and
+    stanli has to refuse it too: EVAL_FAIL, which stanli_check prints only
+    when evaluation threw. Accepting a point CmdStan rejects is a real
+    disagreement, not a free pass -- it is the same asymmetry as one
+    engine throwing, read from the other side.
+    """
+    cmd = [str(check_bin), str(stan), str(dj), "--point", str(point)]
+    want_wa = "wa" in pt and not no_wa
+    if want_wa:
         cmd.append("--wa-values")
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO,
                               timeout=timeout)
     except subprocess.TimeoutExpired:
-        return (model, "TIMEOUT", 0.0, 0, 0, "")
+        return ("TIMEOUT", 0.0, 0, 0, f"point {point}")
     lines = proc.stdout.splitlines()
     got = lines[0].split() if lines else []
-    if not got or got[0] != "OK":
-        return (model, "RUN_FAIL", 0.0, 0, 0, fail_detail(proc, got))
-    rv = [float(x) for x in ref["values"]]
+    kind = got[0] if got else ""
+    if "values" not in pt:
+        if kind == "EVAL_FAIL":
+            return ("OK", 0.0, 0, 0, "")
+        if kind == "OK":
+            return ("POINT_NOT_REJECTED", 0.0, 0, 0,
+                    f"point {point}: CmdStan rejects it, stanli returned "
+                    f"lp {got[1]}")
+        # Refusing for the wrong reason is not agreement: COMPILE_FAIL
+        # says the model never ran, and a crash says nothing at all.
+        return ("POINT_COMPILE_FAIL" if kind == "COMPILE_FAIL" else "CRASH",
+                0.0, 0, 0, f"point {point}: {fail_detail(proc, got)}")
+    if kind != "OK":
+        # A death with nothing to say (a signal, or a nonzero exit and no
+        # machine-readable line) is reported as a crash even here, where a
+        # reference exists: "stanli disagrees with CmdStan" and "stanli
+        # segfaulted" are different bugs and reading the first one for the
+        # second is how reductions_allowed stayed green for a month.
+        crashed = proc.returncode < 0 or not got
+        return ("CRASH" if crashed else "RUN_FAIL", 0.0, 0, 0,
+                f"point {point}: {fail_detail(proc, got)}")
+    rv = [float(x) for x in pt["values"]]
     gv = [float(x) for x in got[1:]]
     if len(rv) != len(gv):
-        return (model, "SHAPE_FAIL", 0.0, 0, 0, f"{len(rv)} vs {len(gv)}")
+        return ("SHAPE_FAIL", 0.0, 0, 0,
+                f"point {point}: {len(rv)} vs {len(gv)}")
     if no_lp:
         # Element 0 is lp. A STANLI_LITE_LP build computes the full
         # density where CmdStan's `~` drops constant terms, so its lp sits
@@ -369,49 +453,88 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, no_wa=False,
         # the one that can actually catch a bug; tools/verify_lite.py
         # answers it by evaluating both builds at several points.
         rv, gv = rv[1:], gv[1:]
-    worst, worst_ulp = 0.0, 0
-    for a, b in zip(rv, gv):
-        rel, ulp = pair_dev(a, b)
-        worst = max(worst, rel)
-        worst_ulp = max(worst_ulp, ulp)
+    worst, worst_ulp = worst_pair(rv, gv)
     n = len(rv)
-    if "wa" in ref and not no_wa:
+    if want_wa:
         # The write_array reference: column names must match exactly, and
-        # the values (transformed parameters + generated quantities at the
-        # same point) share the model's gate.
+        # the values (constrained parameters, transformed parameters and
+        # generated quantities at the same point) share the model's gate.
         wa = parse_wa(proc.stdout)
         if wa is None:
-            return (model, "WA_FAIL", worst, worst_ulp, n,
-                    "no or failed write_array output")
+            return ("WA_FAIL", worst, worst_ulp, n,
+                    f"point {point}: no or failed write_array output")
         names, vals = wa
-        if names != ref["wa"]["names"]:
-            return (model, "WA_NAMES_FAIL", worst, worst_ulp, n,
-                    f"got {names[:60]} want {ref['wa']['names'][:60]}")
-        wref = [float(x) for x in ref["wa"]["values"]]
+        if names != pt["wa"]["names"]:
+            return ("WA_NAMES_FAIL", worst, worst_ulp, n,
+                    f"point {point}: got {names[:60]} "
+                    f"want {pt['wa']['names'][:60]}")
+        wref = [float(x) for x in pt["wa"]["values"]]
         wgot = [float(x) for x in vals]
         if len(wref) != len(wgot):
-            return (model, "WA_SHAPE_FAIL", worst, worst_ulp, n,
-                    f"{len(wref)} vs {len(wgot)}")
-        for a, b in zip(wref, wgot):
-            rel, ulp = pair_dev(a, b)
-            worst = max(worst, rel)
-            worst_ulp = max(worst_ulp, ulp)
+            return ("WA_SHAPE_FAIL", worst, worst_ulp, n,
+                    f"point {point}: {len(wref)} vs {len(wgot)}")
+        wworst, wulp = worst_pair(wref, wgot)
+        worst, worst_ulp = max(worst, wworst), max(worst_ulp, wulp)
         n += len(wref)
-    # The two points with no reference. Sequential and in-process rather
-    # than separate pool tasks, because model_files unpacks the shared
-    # posteriordb data zip to one path per model and three workers writing
-    # it at once would race. The write_array section runs on every
-    # stanli_check invocation whether or not --wa-values asks for its
-    # numbers, so these points cover it against a crash for free.
+    return ("OK", worst, worst_ulp, n, "")
+
+
+def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
+                no_wa=False, no_lp=False):
+    """Replay every point of one model.
+
+    Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
+    The deviation reported is the worst over the points held to the clean
+    gate; a point recorded as MISMATCH is gated against what it was
+    recorded at (gate_for) and kept out of the headline number, so one
+    documented deviation cannot become the corpus-wide "worst".
+
+    The points run sequentially inside one pool task rather than as three
+    tasks, because model_files unpacks the shared posteriordb data zip to
+    one path per model and three workers writing it at once would race.
+    """
+    stan, dj = model_files(model, ref, pdb, tmp)
+    if not stan.exists() or not dj.exists():
+        return (model, "MISSING_INPUT", 0.0, 0, 0, str(stan), [])
+    worst, worst_ulp, total, notes = 0.0, 0, 0, []
     for point in POINTS:
-        if point == int(ref["point"]):
+        pt = ref["points"].get(str(point))
+        if (model, point) in QUARANTINED:
+            # The reference is recorded and is not enforced: stanli is
+            # known to disagree here. Say so on every run -- a quarantine
+            # nobody sees is an exception that outlives its bug -- and
+            # hold the point to what a point with no reference is held to,
+            # so a crash here still fails.
+            notes.append(f"QUARANTINE {model} point {point}: "
+                         f"{QUARANTINED[(model, point)]}")
+            status, detail = probe_point(model, stan, dj, check_bin, point,
+                                         timeout)
+            if status != "OK":
+                return (model, status, worst, worst_ulp, total,
+                        f"point {point}: {detail}", notes)
             continue
-        status, detail = probe_point(model, stan, dj, check_bin, point,
-                                     timeout)
+        if pt is None:
+            status, detail = probe_point(model, stan, dj, check_bin, point,
+                                         timeout)
+            if status != "OK":
+                return (model, status, worst, worst_ulp, total,
+                        f"point {point}: {detail}", notes)
+            notes.append(f"UNREFERENCED {model} point {point}: ran clean, "
+                         f"but nothing compared it against CmdStan")
+            continue
+        status, rel, ulp, n, detail = check_point(
+            model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp)
+        total += n
         if status != "OK":
-            return (model, status, worst, worst_ulp, n,
-                    f"point {point}: {detail}")
-    return (model, "OK", worst, worst_ulp, n, "")
+            return (model, status, worst, worst_ulp, total, detail, notes)
+        gate = gate_for(pt, max_rel)
+        if rel >= gate:
+            return (model, "GATE", rel, ulp, total,
+                    f"point {point}: {rel:.2e} ({ulp} ulp) over {n} "
+                    f"values, allowed {gate:.1e}", notes)
+        if pt.get("status") != "MISMATCH":
+            worst, worst_ulp = max(worst, rel), max(worst_ulp, ulp)
+    return (model, "OK", worst, worst_ulp, total, "", notes)
 
 
 def short_wa(msg):
@@ -491,15 +614,23 @@ def check_wa_coverage(pdb, check_bin, models, contains, timeout, excluded=()):
     return 0
 
 
-def gate_for(ref, default):
-    """The threshold this model is held to.
+def gate_for(pt, default):
+    """The threshold this recorded point is held to.
 
-    A model recorded as MISMATCH is one whose disagreement with CmdStan is
+    A point recorded as MISMATCH is one whose disagreement with CmdStan is
     documented and understood (kronecker_gp: two of 438 gradients flow
     through eigenvectors of a nearly degenerate covariance). Gating it at
     the clean threshold would fail every run; ignoring it would let a real
     regression hide behind a known deviation. Gate it above what it was
     recorded at, so it can never get much worse unnoticed.
+
+    A point recorded with no finite deviation at all -- one side nonfinite
+    where the other is not, which pair_dev scores as infinite -- gets the
+    clean gate and therefore fails. There is no threshold above infinity,
+    and deriving one from the recording would turn "stanli was wrong here
+    when this was recorded" into "stanli may be wrong here forever". Such
+    a point passes only by being fixed, or by an entry in QUARANTINED that
+    someone has to write down and delete.
 
     4x, not 2x: an ill-conditioned eigendecomposition amplifies ISA-level
     differences, and the deviation itself moves across platforms. Measured
@@ -508,8 +639,9 @@ def gate_for(ref, default):
     tripwire for the regression class this corpus has actually caught,
     which measured 1.7e+5 relative, seven orders of magnitude above it.
     """
-    if ref.get("status") == "MISMATCH":
-        return max(ref.get("max_rel", 0.0) * 4.0, default)
+    rel = pt.get("max_rel")
+    if pt.get("status") == "MISMATCH" and rel is not None:
+        return max(rel * 4.0, default)
     return default
 
 
@@ -554,8 +686,7 @@ def main():
     if args.wa_report:
         return check_wa_coverage(pdb, check_bin, args.models, args.filter,
                                  args.timeout, skip)
-    refs = json.loads(gzip.decompress(
-        (REPO / "docs" / "corpus-refs.json.gz").read_bytes()))
+    refs, recorded = load_refs()
     models = args.models or sorted(refs)
     models = [m for m in models if m not in skip]
     missing = [m for m in models if m not in refs]
@@ -563,32 +694,35 @@ def main():
         print(f"no reference recorded for: {' '.join(missing)}")
         return 2
 
+    # Which CmdStan these values came from is part of reading the result:
+    # the gate is 1e-9 against one specific build of one specific pin.
+    print(f"references recorded against CmdStan "
+          f"{recorded['cmdstan_version']} ({recorded['cmdstan'][:12]}), "
+          f"math {recorded['math'][:12]}, on {recorded['platform']}")
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_refs_"))
-    failures = []
+    failures, values = [], 0
     worst_overall = ("", 0.0, 0)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futs = [pool.submit(check_model, m, refs[m], pdb, check_bin, tmp,
-                            args.timeout, args.no_wa, args.no_lp)
+                            args.timeout, args.max_rel, args.no_wa,
+                            args.no_lp)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
-            model, status, rel, ulp, n, detail = fut.result()
+            model, status, rel, ulp, n, detail, notes = fut.result()
+            for note in notes:
+                print(note)
+            values += n
             if status != "OK":
                 failures.append((model, status, detail))
                 print(f"{status} {model} {detail}")
                 continue
-            if (rel > worst_overall[1]
-                    and refs[model].get("status") != "MISMATCH"):
+            if rel > worst_overall[1]:
                 worst_overall = (model, rel, ulp)
-            gate = gate_for(refs[model], args.max_rel)
-            if rel >= gate:
-                failures.append((model, f"rel {rel:.2e}", f"{ulp} ulp"))
-                print(f"GATE {model}: {rel:.2e} ({ulp} ulp) over {n} "
-                      f"values, allowed {gate:.1e}")
 
     ok = len(models) - len(failures)
     print(f"\n{ok}/{len(models)} models within {args.max_rel:.0e} of the "
-          f"CmdStan references, and clean at all "
-          f"{len(POINTS)} evaluation points"
+          f"CmdStan references at all {len(POINTS)} evaluation points "
+          f"({values} values compared)"
           + (" (gradients only)" if args.no_lp else "")
           + (f"; worst {worst_overall[0]} at {worst_overall[1]:.2e} "
              f"({worst_overall[2]} ulp)" if worst_overall[0] else ""))
