@@ -295,6 +295,7 @@ data = "tests/stanc3/reductions_allowed.json"
 oracle_gate = "write_array"
 expected_accept = true
 point_profile = "zeros-and-asymmetric"
+numeric_policy = "cancelling-reduction-order"
 
 [[case]]
 id = "stanc3.cholesky-covariance-parameters"

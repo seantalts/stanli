@@ -1,5 +1,5 @@
 schema_version = 1
-policy_version = "2026-08-15.1"
+policy_version = "2026-08-23.1"
 
 # Stan parameters are real-valued today.  Complex signatures need a separate
 # source convention and a real projection before log-density parity has a
@@ -89,3 +89,19 @@ id = "bound-transform-probe-cancellation"
 reason = "Probe outputs straddle zero, so the weighted sum cancels and a last-bit difference reads as a large relative one."
 name_regex = "^(lower_bound|upper_bound|lower_upper_bound|offset_multiplier)_(constrain|unconstrain|jacobian)$"
 abs_tol = 1e-13
+
+# stanli reduces sums sequentially on the double path, deliberately: lp is
+# computed there, and CmdStan's lp comes from AoS sum_v_vari, which is also
+# sequential -- that pairing is what keeps lp bitwise (packet.hpp). CmdStan's
+# write_array, though, evaluates on plain doubles where Eigen's redux
+# vectorizes, so a write_array column whose sum cancels toward zero can
+# differ in its last bits while lp and every gradient agree. Measured on
+# reduction-autodiff-levels: 3.47e-18 absolute on an exactly-zero quantity.
+# Fixing it would mean one kernel reducing in two different orders by
+# context, which is a worse property than a named gate. Absolute, because
+# ULP and relative both describe the cancellation, not the disagreement.
+[[numeric_gate]]
+id = "cancelling-reduction-order"
+reason = "write_array sums that cancel to ~0; stanli reduces sequentially for lp parity, CmdStan's double path uses Eigen's redux."
+name_regex = "^sum$"
+abs_tol = 1e-15
