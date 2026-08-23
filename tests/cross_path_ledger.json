@@ -30,13 +30,5 @@
     "bound_ulp": -1,
     "cause": "OPEN BUG: on `array[0] matrix[2, 3]` the interpreter throws 'index 2 out of bounds for size 1' evaluating dims() of the empty array, where the graph answers from the declaration. mir_interp.hpp keeps no shape for a zero-length array of matrices.",
     "since": "2026-08-23"
-  },
-  {
-    "model": "view_gq_data_matrix",
-    "quantity": "shaped",
-    "pair": "graph/wa_interp",
-    "bound_ulp": -1,
-    "cause": "OPEN BUG: mir_interp.hpp:1683 reads rows()/cols() off Value::dims, which is rank 1 for a row_vector, so every row_vector answers rows=n, cols=1 where the graph answers rows=1, cols=n. Reproduced on a literal `[1.0, 2.0, 3.0]` as well as on row(M, 2), so it is the rank-1 assumption and not the transformed-data path.",
-    "since": "2026-08-23"
   }
 ]

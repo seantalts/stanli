@@ -440,6 +440,64 @@ int main(int argc, char** argv) {
           "flat data read preserves declared scalar geometry");
   }
 
+  // rows()/cols() answer from the MIR type, not from the storage rank.
+  // Both vector kinds are stored rank-1 -- orientation is type-level here
+  // exactly as it is in the graph, where it lives in the slot view and not
+  // in the dims -- so reading rows() off dims alone called every
+  // row_vector[n] an n-by-1 column. That is a wrong int, and through a
+  // transformed-data `int r = rows(rv)` it is a wrong log density.
+  {
+    std::map<std::string, const mir::FunDef*> functions;
+    MirInterp<double> interp(functions, "rows/cols orientation test");
+    auto real_value = [&](const std::string& name, std::vector<double> values,
+                          std::vector<int64_t> dims) {
+      DataMap::Entry value;
+      value.r = std::move(values);
+      value.dims = std::move(dims);
+      interp.env()[name] = std::move(value);
+    };
+    real_value("v3", {1.0, 2.0, 3.0}, {3});
+    real_value("rv3", {1.0, 2.0, 3.0}, {3});
+    real_value("m23", {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, {2, 3});
+    auto query = [&](const std::string& name, const std::string& arg,
+                     const std::string& arg_type) {
+      mir::Expr a;
+      a.kind = mir::Expr::Var;
+      a.name = arg;
+      a.type_ = arg_type;
+      a.data_only = true;
+      mir::Expr call;
+      call.kind = mir::Expr::FunApp;
+      call.name = name;
+      call.type_ = "UInt";
+      call.data_only = true;
+      call.args = {a};
+      const DataMap::Entry got = interp.eval(call);
+      return got.is_int && got.i.size() == 1 ? (long)got.i[0] : -1;
+    };
+    check(query("rows", "v3", "UVector") == 3 &&
+              query("cols", "v3", "UVector") == 1,
+          "vector[3] is 3 rows by 1 col");
+    check(query("rows", "rv3", "URowVector") == 1 &&
+              query("cols", "rv3", "URowVector") == 3,
+          "row_vector[3] is 1 row by 3 cols");
+    check(query("rows", "m23", "UMatrix") == 2 &&
+              query("cols", "m23", "UMatrix") == 3,
+          "matrix[2, 3] is 2 rows by 3 cols");
+    // The task-shaped repro: `int r = rows(rv); int c = cols(rv);` folds to
+    // 13 for a row_vector[3], and folded to 31 while orientation was lost.
+    check(query("rows", "rv3", "URowVector") * 10 +
+                  query("cols", "rv3", "URowVector") ==
+              13,
+          "row_vector shape query reaches transformed data as 13");
+    // size()/num_elements() count elements and are orientation-blind; they
+    // must not move when rows()/cols() start consulting the type.
+    for (const std::string& name : {"size", "num_elements"})
+      check(query(name, "rv3", "URowVector") == 3 &&
+                query(name, "v3", "UVector") == 3,
+            name + " counts elements of either vector kind");
+  }
+
   if (failures == 0) std::printf("test_mir OK\n");
   return failures == 0 ? 0 : 1;
 }

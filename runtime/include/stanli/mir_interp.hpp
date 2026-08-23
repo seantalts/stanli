@@ -1680,11 +1680,27 @@ class MirInterp {
         e.name == "num_elements" || e.name == "FnLength") {
       Value a = eval(e.args[0]);
       long v = 0;
-      if (e.name == "rows")
-        v = a.dims.size() == 2 ? a.dims[0] : (long)a.r.size();
-      else if (e.name == "cols")
-        v = a.dims.size() == 2 ? a.dims[1] : 1;
-      else
+      if (e.name == "rows" || e.name == "cols") {
+        // A vector's orientation is type-level, not storage-level: both
+        // kinds are stored rank-1, so dims cannot say which way one points.
+        // The MIR type can, and it is where the graph keeps orientation too
+        // -- lower.cpp stamps ViewKind::RowVector from this same string and
+        // its logical_dims answers {1, len} off the view, never off dims.
+        // This restates that function, so the two paths cannot drift.
+        // Reading rows() off the storage rank alone made every row_vector an
+        // n-by-1 column, and through a transformed-data `int r = rows(rv)`
+        // that is a silently wrong log density.
+        const long n = (long)a.r.size();
+        std::pair<long, long> rc =
+            a.dims.size() == 2
+                ? std::pair<long, long>{(long)a.dims[0], (long)a.dims[1]}
+                : std::pair<long, long>{n, 1};
+        if (e.args[0].type_ == "URowVector")
+          rc = {1, n};
+        else if (e.args[0].type_ == "UVector")
+          rc = {n, 1};
+        v = e.name == "rows" ? rc.first : rc.second;
+      } else
         v = a.dims.empty() ? (long)std::max(a.r.size(), a.i.size())
                            : (long)a.dims[0];
       if (e.name == "num_elements" || e.name == "FnLength")
