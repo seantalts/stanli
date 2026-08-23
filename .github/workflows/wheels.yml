@@ -639,18 +639,21 @@ jobs:
         run: |
           which ccache || sudo apt-get install -y ccache
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
-          # -O1 -g, the standard sanitizer configuration: ASan's checks do
-          # not depend on the optimizer, -g is what turns a report into an
-          # actionable stack, and gcc compiles the density shards several
-          # times faster than at -O2. None of this is shipped.
+          # -O1 -g1, and every number here was read off a failed run's
+          # log rather than guessed. -O1: ASan's checks do not depend on
+          # the optimizer, and gcc compiles the density shards several
+          # times faster than at -O2. -g1, not -g: line tables are what
+          # turn an ASan report into file:line, and they are ALL this job
+          # needs -- at full -g the 52 test binaries each carry stan-math's
+          # duplicated .debug_info and the build tree overran a disk that
+          # started with 86 GB free ("No space left on device" at the
+          # link, twice). -j2, not -j3: the largest single compile peaks
+          # at 10.3 GB, so two of them need the swap on a 16 GB VM and
+          # three of them killed the runner. None of this is shipped.
           # STANLI_SANITIZE adds the flags globally, so the vendored
           # SUNDIALS C is instrumented on the same terms as the kernels.
-          #
-          # -j2, not -j3: the first -j3 attempt is what proved the memory
-          # ceiling is real. Two instrumented density shards at once is
-          # the most this VM holds without leaning on the swap.
           cmake -B build-asan -DCMAKE_BUILD_TYPE=None \
-            -DCMAKE_C_FLAGS="-O1 -g" -DCMAKE_CXX_FLAGS="-O1 -g" \
+            -DCMAKE_C_FLAGS="-O1 -g1" -DCMAKE_CXX_FLAGS="-O1 -g1" \
             -DSTANLI_SANITIZE=address \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
@@ -669,6 +672,7 @@ jobs:
                "$([ "${miss:-0}" -lt 20 ] && echo '(cached build:' \
                'this peak is not a memory ceiling)')"
           free -h && swapon --show && df -h / /mnt
+          du -sh build-asan
           ccache -s
       # Save even when the build or tests fail: the cache is compile
       # artifacts, not results, and the original save-on-success rule
