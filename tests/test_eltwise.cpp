@@ -113,6 +113,30 @@ int main() {
   });
   check_case("pow ss", OP_POW, 1, {{S}, {T}},
              [](auto& v) { return stan::math::pow(v[0](0), v[1](0)); });
+  // pow at a base of exactly zero, one shape per guard site. Both partials
+  // are nonfinite there -- b*v/a is 0/0, and log(a) is -inf meeting v = 0 --
+  // and stan-math answers with a zero contribution instead, in all four of
+  // its rev overloads. The bases carrying the zero sit next to nonzero
+  // neighbours so the vector shapes cannot pass with a whole-op skip, and
+  // the exponents opposite a zero base stay positive so the FORWARD stays
+  // finite: this is a gradient bug, and 0^-1.7 = inf would hide it behind a
+  // nonfinite lp. stanc3's pow.stan, validate_exponentiation_good.stan and
+  // mem_patterns/ad_scalar_data_matrix.stan all reach this at the
+  // all-zeros evaluation point, where CmdStan returns 0 and stanli did not.
+  const std::vector<double> Z{0.0, 1.2, 2.0, 0.3};
+  const std::vector<double> E{1.5, 0.7, 2.4, 2.2};
+  const double U = 2.3;
+  check_case("pow vv at zero", OP_POW, N, {Z, E}, [](auto& v) {
+    return stan::math::sum(stan::math::pow(v[0], v[1]));
+  });
+  check_case("pow vs at zero", OP_POW, N, {Z, {U}}, [](auto& v) {
+    return stan::math::sum(stan::math::pow(v[0], v[1](0)));
+  });
+  check_case("pow sv at zero", OP_POW, N, {{0.0}, E}, [](auto& v) {
+    return stan::math::sum(stan::math::pow(v[0](0), v[1]));
+  });
+  check_case("pow ss at zero", OP_POW, 1, {{0.0}, {U}},
+             [](auto& v) { return stan::math::pow(v[0](0), v[1](0)); });
 
   // Unaries, vector + scalar shapes.
   check_case("neg v", OP_NEG, N, {A},

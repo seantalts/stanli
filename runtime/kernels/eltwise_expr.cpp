@@ -223,11 +223,22 @@ void pow_fwd(KernelCtx& ctx) {
     ctx.out.data[i] =
         std::pow(ctx.in[0].data[s0 ? 0 : i], ctx.in[1].data[s1 ? 0 : i]);
 }
+// A zero base contributes nothing to either partial. Every one of
+// stan-math's four rev pow overloads says so -- the scalar and the
+// (scalar base, matrix exponent) ones return early on
+// `value_of(base) == 0.0`, the two matrix ones `select` on
+// `value_of(base) != 0.0` -- and both partials would otherwise be
+// nonfinite there: b*v/a is 0/0 when a is 0, and log(a) is -inf meeting
+// v = 0. The skip is elementwise because the base is, and it is a skip
+// rather than a multiply by a zero mask for the reason sqrtv_bwd's is:
+// multiplying an inf by zero is the NaN being avoided. A NaN base still
+// propagates, since `NaN == 0.0` is false.
 void pow_bwd(KernelCtx& ctx) {
   const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
   if (ctx.out.len == 1) {
     const double a = ctx.in[0].data[0], b = ctx.in[1].data[0];
     const double v = ctx.out.data[0];
+    if (a == 0.0) return;
     if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj * b * v / a;
     if (ctx.in_adj[1].data)
       ctx.in_adj[1].data[0] += ctx.out_adj * std::log(a) * v;
@@ -238,6 +249,7 @@ void pow_bwd(KernelCtx& ctx) {
     const double b = ctx.in[1].data[s1 ? 0 : i];
     const double v = ctx.out.data[i];
     const double dout = ctx.out_adj_vec.data[i];
+    if (a == 0.0) continue;
     if (ctx.in_adj[0].data) ctx.in_adj[0].data[s0 ? 0 : i] += dout * b * v / a;
     if (ctx.in_adj[1].data)
       ctx.in_adj[1].data[s1 ? 0 : i] += dout * std::log(a) * v;
