@@ -1,7 +1,7 @@
 Package: stanli
 Type: Package
 Title: The Stan Language Interpreter
-Version: 0.8.1
+Version: 0.8.2
 Authors@R: person("Sean", "Talts", email = "xitrium@gmail.com",
                   role = c("aut", "cre"))
 Description: Compile and sample Stan models without a C++ toolchain. Stan
