@@ -621,13 +621,19 @@ jobs:
         run: |
           # Not /swapfile: the runner image already runs ~4 GB of swap
           # there (fallocate on it says "Text file busy"), and the job
-          # OOM'd straight through that allowance. This adds 8 GB more
-          # beside it. The before/after prints are the capacity record.
-          swapon --show && free -h
-          sudo fallocate -l 8G /swapfile-asan
-          sudo chmod 600 /swapfile-asan
-          sudo mkswap /swapfile-asan
-          sudo swapon /swapfile-asan
+          # OOM'd straight through that allowance. And not on the root
+          # disk: 8 GB of swap there is exactly the 8 GB the link step
+          # later ran out of -- the debug-heavy ASan test binaries filled
+          # the rest ("No space left on device" at 88%). /mnt is the
+          # runner's ephemeral disk with room to spare. The before/after
+          # prints are the capacity record; measured on this job, the
+          # largest single compile peaks at 10.3 GB, so -j2 needs the
+          # swap and the swap needs to be off the build's disk.
+          swapon --show && free -h && df -h / /mnt
+          sudo fallocate -l 8G /mnt/swapfile-asan
+          sudo chmod 600 /mnt/swapfile-asan
+          sudo mkswap /mnt/swapfile-asan
+          sudo swapon /mnt/swapfile-asan
           swapon --show && free -h
       - name: Build with -fsanitize=address
         run: |
@@ -662,7 +668,7 @@ jobs:
                "compile, over ${miss:-?} ccache misses" \
                "$([ "${miss:-0}" -lt 20 ] && echo '(cached build:' \
                'this peak is not a memory ceiling)')"
-          free -h && swapon --show
+          free -h && swapon --show && df -h / /mnt
           ccache -s
       # Save even when the build or tests fail: the cache is compile
       # artifacts, not results, and the original save-on-success rule
