@@ -347,7 +347,36 @@ endfunction()
 stanli_embed_stanc(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
-add_library(stanli STATIC ${STANLI_RUNTIME_SOURCES})
+# Static everywhere except under a sanitizer, where the library is
+# shared. The reason is disk, not elegance: 52 statically linked test
+# binaries each carry their own instrumented copy of the runtime and its
+# debug info, and under ASan that tree overran a disk which started with
+# 86 GB free -- the link step died of "No space left on device" three
+# runs straight. One shared object holds the single copy; the binaries
+# shrink to their own test code; CMake's build-tree RPATH makes ctest
+# find it with no further ceremony. Unlike stanli_shared this library
+# keeps every symbol visible, which is what the tests link against.
+if(STANLI_SANITIZE)
+  set(_stanli_kind SHARED)
+else()
+  set(_stanli_kind STATIC)
+endif()
+add_library(stanli ${_stanli_kind} ${STANLI_RUNTIME_SOURCES})
+if(STANLI_SANITIZE)
+  # Not libstanli: stanli_shared already owns that name -- it is the
+  # file the wheel ships -- and two targets writing one .dylib means the
+  # last one clobbers the first, which surfaced as test_capi failing to
+  # find the C ABI it links.
+  set_target_properties(stanli PROPERTIES OUTPUT_NAME stanli_core)
+  # The archive let every binary satisfy the TBB symbols with its own
+  # tests/tbb_stub.cpp; a shared library must either resolve them at
+  # link time or defer them to the executable. Defer, so the stub
+  # arrangement is unchanged: macOS needs it said out loud, Linux
+  # already allows undefined symbols in a shared object.
+  if(APPLE)
+    target_link_options(stanli PRIVATE -Wl,-undefined,dynamic_lookup)
+  endif()
+endif()
 target_include_directories(stanli PUBLIC runtime/include)
 target_compile_definitions(stanli PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 # The BridgeStan facade is native-only: it finds its own sidecar manifest
