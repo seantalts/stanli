@@ -389,13 +389,12 @@ struct Lowering {
             if (e.name == "cols") return dims.cols;
             return sh.len;
           }
-          DataMap::Entry* en = td.find(e.args[0].name);
-          if (en) {
-            if (e.name == "rows")
-              return en->dims.size() == 2 ? en->dims[0] : (long)en->r.size();
-            if (e.name == "cols") return en->dims.size() == 2 ? en->dims[1] : 1;
-            return (long)std::max(en->r.size(), en->i.size());
-          }
+          // A name td knows but neither scope nor decls does falls through
+          // to the data_only case below, which asks the one interpreter.
+          // bind_data records every input var and every prepare_data decl,
+          // so nothing with an orientation to lose lands there; the copy
+          // that used to answer here read rows/cols off DataMap::Entry::dims
+          // and so carried the rank-1 bug the interpreter just shed.
         }
         // Shape query on a COMPUTED value: --O1 inlining substitutes call
         // arguments into the callee's size expressions, so `rows(beta)`

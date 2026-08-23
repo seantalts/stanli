@@ -28,7 +28,7 @@
     "quantity": "write_array",
     "pair": "graph/wa_interp",
     "bound_ulp": -1,
-    "cause": "OPEN BUG: on `array[0] matrix[2, 3]` the interpreter throws 'index 2 out of bounds for size 1' evaluating dims() of the empty array, where the graph answers from the declaration. mir_interp.hpp keeps no shape for a zero-length array of matrices.",
+    "cause": "OPEN BUG, and the GRAPH is the wrong side: on `array[0] matrix[2, 3]` the interpreter throws 'index 2 out of bounds for size 1' evaluating dims() of the empty array, where the graph answers {0, 2, 3} from the declaration. CmdStan agrees with the interpreter -- stan::math::dims on a std::vector recurses into element 0 only `if (x.size() > 0)`, so dims(x) is {0} and the generated `rvalue(stan::math::dims(x), \"dims(x)\", index_uni(2))` throws out_of_range. Retire by teaching the graph to stop answering from the declaration for a zero-length array, not by giving the interpreter the declared shape. Unrelated to the rows()/cols() orientation bug retired 2026-08-23: that one was rank-1 storage losing a vector's orientation, this one is a declared shape the value no longer carries.",
     "since": "2026-08-23"
   }
 ]
