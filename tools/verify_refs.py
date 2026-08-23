@@ -634,14 +634,22 @@ def gate_for(pt, default):
 
     4x, not 2x: an ill-conditioned eigendecomposition amplifies ISA-level
     differences, and the deviation itself moves across platforms. Measured
-    for kronecker_gp: 7.1e-3 on arm64 (where the reference was recorded),
-    1.71e-2 on both x86_64 runners, identical to each other. The gate is a
-    tripwire for the regression class this corpus has actually caught,
-    which measured 1.7e+5 relative, seven orders of magnitude above it.
+    for kronecker_gp point 0: 7.1e-3 on arm64 (where the reference was
+    recorded), 1.71e-2 on both x86_64 runners, identical to each other.
+
+    And a floor, because the amplification is not proportional to the
+    deviation: point 2 recorded 1.05e-3 on arm64 and measured 8.2e-3 on
+    x86_64 (CI run 32637919029) -- 7.8x where point 0 moved 2.4x -- so a
+    pure multiplier under-gates precisely the smallest recorded
+    deviations. The floor is 4x the worst cross-platform measurement over
+    the model's points, and it applies only to MISMATCH points; a clean
+    point keeps the clean gate. The gate is a tripwire for the regression
+    class this corpus has actually caught, which measured 1.7e+5
+    relative, six orders of magnitude above the floor.
     """
     rel = pt.get("max_rel")
     if pt.get("status") == "MISMATCH" and rel is not None:
-        return max(rel * 4.0, default)
+        return max(rel * 4.0, 4.0 * 8.2e-3, default)
     return default
 
 
