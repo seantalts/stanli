@@ -454,6 +454,21 @@ runs in CI on every push, and
 through the WASM build. A change that claims to be a pure refactor
 should leave the replay's worst-deviation line exactly as it found it.
 
+If the change touches raw pointers, an `Eigen::Map` over a buffer
+somebody else sized, or the island register file, run the suite with
+AddressSanitizer as well. CI does this on every pull request, and it is
+one flag locally:
+
+```
+cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address
+cmake --build build-asan -j8 && ctest --test-dir build-asan
+```
+
+`address,undefined` also passes clean. What ASan cannot see is a stale
+`var`: stan-math's arena recovers a nested tape by rewinding a bump
+pointer, so reading a `vari` from a tape that was already recovered
+lands inside a live allocation and reports nothing.
+
 If the change touches a density tier or anything about propto, also
 check the lite build, the smaller build variant that reports lp only
 up to a constant ([`docs/lite-lp.md`](lite-lp.md)). CI does not cover
