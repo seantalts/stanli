@@ -38,6 +38,11 @@ and compares lp and the full gradient at the same deterministic points.
 It is opt-in because a CmdStan reference binary costs tens of seconds per
 model where the census costs tens of milliseconds.
 
+Cost: 1,231 models in about two minutes at --jobs 8 with a warm cache.
+Cold it is a quarter of an hour, nearly all of it stanc -- the
+function-signatures models take ten to twenty-five seconds each to
+compile, which is why the MIR is cached alongside the data.
+
 Usage:
   harnesses/model_census.py [--filter SUBSTR] [--jobs N]
                             [--corpus DIR] [--cache DIR] [--out FILE]
@@ -90,7 +95,8 @@ STATUSES = (
     "stanc_rejected",  # stanc would not produce MIR; not stanli's problem
     "data_unavailable",  # stanc could not invent data for it
     "not_a_model",     # a functions-only fragment, not a standalone model
-    "crashed",         # died, hung, or printed nothing recognizable
+    "crashed",         # died, or printed nothing recognizable
+    "timed_out",       # still running when the budget ran out
     "harness_error",   # this script broke
 )
 
@@ -107,12 +113,40 @@ STATUSES = (
 # such row keeps the message it matched on, and `--differential` is what
 # actually proves the reference agrees. Treat the count as a ceiling on
 # "not stanli's fault", never as a pass.
+# The first alternative carries most of the weight. Stan Math spells
+# every domain complaint the same way -- "<what> is <value>, but must be
+# <constraint>" -- and nothing stanli says about a missing feature has
+# that shape. The rest are the validators that phrase it differently.
+# Deliberately NOT matched: "type must be number, but is array", which is
+# nlohmann's complaint that stanli's JSON reader cannot express a shape.
+# That is a stanli gap and belongs in `unsupported`.
 _DATA_REFUSAL = re.compile(
-    r"is not a valid|must be (greater|less|positive|non-negative|finite)"
-    r"|does not sum to|is not positive definite|is not symmetric"
+    r"is .{0,80}?, but must be"
+    r"|is not a valid|is not positive definite|is not symmetric"
+    r"|is not lower triangular|does not sum to"
     r"|not found in data|missing data|no data (variable|value)"
-    r"|size mismatch|sizes? .{0,40}do not match|out[ _]of[ _]range",
+    r"|size mismatch|must match in size|sizes? .{0,40}do not match"
+    r"|mismatch in dimension declared|argument outside range"
+    r"|out[ _]of[ _]range",
     re.I)
+
+# What a bucket key drops from a message so that one refusal is one row.
+#
+# stanli appends the offending expression to some refusals after " | in: "
+# -- a whole s-expression, different for every model, which splits
+# "unsupported sized type SComplexMatrix" into as many buckets as there
+# are matrix dimensions anybody wrote. And a validator's message embeds
+# the value it rejected, so "atanh: x is 3" and "atanh: x is 4.63241" are
+# two entries for one problem. Neither distinction survives into the
+# to-do list this report exists to rank; both stay in the row's `detail`.
+# Not preceded by a word character or an `=`, so a rejected *value* is
+# normalised while an identifier keeps its digits: pareto_type_2_lpdf and
+# `dims=2` name what failed, `x is 4.63241` does not.
+_NUMERAL = re.compile(r"(?<![\w=])-?\d+(\.\d+)?([eE][+-]?\d+)?")
+
+
+def bucket_key(message):
+    return _NUMERAL.sub("N", message.split(" | in: ")[0])
 
 # Blocks a standalone model can declare. A file naming none of them but
 # `functions` is a fragment stanc3 compiles with --standalone-functions;
@@ -174,11 +208,12 @@ def run(cmd, timeout, **kw):
         return None
 
 
-def first_line(text, limit=200):
-    """The message a bucket is keyed on: one line, no absolute paths.
+def first_line(text, limit=300):
+    """One line of a refusal, with absolute paths stripped.
 
     Paths differ per checkout and per worktree, so leaving them in splits
-    one bucket into as many buckets as there are machines.
+    one bucket into as many buckets as there are machines. This is the
+    message a row keeps; `bucket_key` decides what a bucket keys on.
     """
     line = (text or "").strip().splitlines()
     line = line[0].strip() if line else ""
@@ -303,14 +338,15 @@ def census_one(model, corpus, cache, check, stanc, shim, timeout):
     mir, why = cached_mir(model, model_sha, cache, stanc, timeout)
     if mir is None:
         return row(relpath, status="stanc_rejected", sha256=model_sha,
-                   reason=first_line(why), detail=why.strip()[:400],
+                   reason=bucket_key(first_line(why)),
+                   detail=first_line(why),
                    repro=f"{repo_rel(stanc)} --O1 "
                          f"--debug-optimized-mir {repo_rel(model)}")
 
     data, data_sha, why = cached_data(model, model_sha, cache, stanc, timeout)
     if data is None:
         return row(relpath, status="data_unavailable", sha256=model_sha,
-                   reason=why,
+                   reason=bucket_key(why), detail=why,
                    repro=f"{repo_rel(stanc)} --debug-generate-data "
                          f"{repo_rel(model)}")
 
@@ -328,9 +364,17 @@ def census_one(model, corpus, cache, check, stanc, shim, timeout):
         result = run([check, model, data, "--stanc", stanc,
                       "--point", point], timeout, cwd=REPO, env=env)
         if result is None:
-            return row(relpath, status="crashed", sha256=model_sha,
+            # Separate from `crashed` because the two point at different
+            # things. A dead process made no statement; a live one is
+            # still making it, and the corpus contains at least one model
+            # that does not terminate by construction, which no engine
+            # could answer. stanli has a "while loop did not terminate"
+            # guard -- see function-signatures/math/while.stan -- so a row
+            # here is either a model nobody can run or a path that guard
+            # does not cover. Both are worth naming, neither is a crash.
+            return row(relpath, status="timed_out", sha256=model_sha,
                        data_sha256=data_sha, point=point,
-                       reason=f"timed out after {timeout}s",
+                       reason=f"still running after {timeout}s",
                        repro=repro(point),
                        seconds=time.monotonic() - started)
         kind, detail = status_line(result.stdout)
@@ -358,16 +402,16 @@ def census_one(model, corpus, cache, check, stanc, shim, timeout):
                       else "unsupported")
             return row(relpath, status=status, sha256=model_sha,
                        data_sha256=data_sha, point=point,
-                       reason=first_line(detail), detail=detail[:400],
-                       repro=repro(point),
+                       reason=bucket_key(first_line(detail)),
+                       detail=first_line(detail), repro=repro(point),
                        seconds=time.monotonic() - started)
         last_eval = detail
 
     status = ("data_rejected" if _DATA_REFUSAL.search(last_eval)
               else "eval_failed")
     return row(relpath, status=status, sha256=model_sha, data_sha256=data_sha,
-               point=None, reason=first_line(last_eval),
-               detail=last_eval[:400], repro=repro(POINTS[-1]),
+               point=None, reason=bucket_key(first_line(last_eval)),
+               detail=first_line(last_eval), repro=repro(POINTS[-1]),
                seconds=time.monotonic() - started)
 
 
@@ -585,11 +629,13 @@ def summarize(report, limit):
         print(f"\n  of the lowered, {flat} returned a nonfinite lp at the "
               "point that evaluated")
 
-    crashes = [r for r in rows if r["status"] == "crashed"]
-    print(f"\ncrashes: {len(crashes)}")
-    for r in crashes:
-        print(f"  {r['path']}: {r['reason']}")
-        print(f"    {r['repro']}")
+    for status, heading in (("crashed", "crashes"),
+                            ("timed_out", "timeouts")):
+        listed = [r for r in rows if r["status"] == status]
+        print(f"\n{heading}: {len(listed)}")
+        for r in listed:
+            print(f"  {r['path']}: {r['reason']}")
+            print(f"    {r['repro']}")
 
     print("\nrejection buckets, by model count "
           "(unsupported + eval_failed + data_rejected):")
@@ -720,11 +766,13 @@ def main():
         print(f"\n{len(unknown)} rows carry no status; that is a bug in "
               "this harness", file=sys.stderr)
         return 1
-    # A crash is the headline, not a footnote, so it is the only census
-    # outcome that fails the run. Everything else -- including every
-    # unsupported bucket -- is the backlog this report exists to rank,
-    # and a red exit that means "there is work to do" is one nobody reads.
-    return 1 if report["counts"]["crashed"] else 0
+    # A process that died or hung is the headline, not a footnote, so it
+    # is the only census outcome that fails the run. Everything else --
+    # including every unsupported bucket -- is the backlog this report
+    # exists to rank, and a red exit that means "there is work to do" is
+    # one nobody reads.
+    return 1 if (report["counts"]["crashed"]
+                 or report["counts"]["timed_out"]) else 0
 
 
 if __name__ == "__main__":
