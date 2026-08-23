@@ -7,6 +7,15 @@
 //                          ref_driver.cpp so the two can be compared
 // Used by tools/corpus.py to build the coverage scoreboard, and by the
 // reference harness to compare against CmdStan at the same point.
+//
+// Two other modes, both stanli-against-itself rather than stanli against
+// CmdStan (tests/cross_path.hpp has the full account):
+//   --paths   which engines this model reaches -- islands, adjoints,
+//             write_array mode, ODE mode
+//   --cross   the cross-path agreement matrix: recompile once per engine
+//             configuration and demand the answers agree bitwise
+#include "../tests/cross_path.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/wa_interp.hpp>
@@ -54,19 +63,36 @@ int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
-                 "[--stanc PATH] [--point N] [--columns]\n");
+                 "[--stanc PATH] [--point N] [--columns]\n"
+                 "       [--paths] [--cross [--cross-one lp|grad|wa] "
+                 "[--draw-variant N] [--ledger PATH]]\n");
     return 2;
   }
   std::string stanc = "deps/stanc3/stanc";
   int variant = 0;
   bool columns_only = false;
   bool wa_values = false;
+  bool paths_only = false;
+  bool cross = false;
+  std::string cross_one;
+  std::string ledger_path = "tests/cross_path_ledger.json";
+  int draw_variant = -1;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--columns")
       columns_only = true;
     else if (a == "--wa-values")
       wa_values = true;
+    else if (a == "--paths")
+      paths_only = true;
+    else if (a == "--cross")
+      cross = true;
+    else if (a == "--cross-one" && i + 1 < argc)
+      cross_one = argv[++i];
+    else if (a == "--draw-variant" && i + 1 < argc)
+      draw_variant = std::atoi(argv[++i]);
+    else if (a == "--ledger" && i + 1 < argc)
+      ledger_path = argv[++i];
     else if (a == "--stanc" && i + 1 < argc)
       stanc = argv[++i];
     else if (a == "--point" && i + 1 < argc)
@@ -84,6 +110,66 @@ int main(int argc, char** argv) {
   } catch (const std::exception& e) {
     std::printf("COMPILE_FAIL stanc: %s\n", e.what());
     return 1;
+  }
+
+  // --paths / --cross: stanli against itself. Both need the data and the
+  // MIR but not the ordinary single compile, so they answer here and exit.
+  if (paths_only || cross) {
+    stanli::DataMap data;
+    try {
+      data = stanli::DataMap::from_json_file(argv[2]);
+    } catch (const std::exception& e) {
+      std::printf("COMPILE_FAIL data: %s\n", e.what());
+      return 1;
+    }
+    // The model name the report prints and the ledger keys on: the .stan
+    // basename, so an entry survives the file being moved.
+    std::string name = argv[1];
+    const size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) name = name.substr(slash + 1);
+    const size_t dot = name.rfind(".stan");
+    if (dot != std::string::npos) name = name.substr(0, dot);
+
+    if (paths_only) {
+      std::string err;
+      const stanli::cross::Paths p =
+          stanli::cross::path_report(mir, data, &err);
+      if (!err.empty()) {
+        std::printf("COMPILE_FAIL %s\n", err.c_str());
+        return 1;
+      }
+      std::printf("PATHS %s ops %lld, %s\n", name.c_str(), (long long)p.ops,
+                  p.line().c_str());
+      if (!cross) return 0;
+    }
+
+    const stanli::cross::Ledger led = stanli::cross::Ledger::load(ledger_path);
+    if (!led.error.empty()) {
+      std::printf("CROSS LEDGER_BAD %s\n", led.error.c_str());
+      return 1;
+    }
+    stanli::cross::Options opt;
+    opt.model = name;
+    opt.repro_model = argv[1];
+    opt.repro_data = argv[2];
+    opt.only = cross_one;
+    opt.variant = draw_variant;
+    const stanli::cross::Result r =
+        stanli::cross::run_matrix(mir, data, opt, led);
+    std::fputs(r.report.c_str(), stdout);
+    if (!r.skipped.empty()) {
+      std::printf("CROSS SKIP %s %s\n", name.c_str(), r.skipped.c_str());
+      return 0;
+    }
+    std::printf(
+        "CROSS %s %s variant %d: %d comparisons, %d failures, %d declared; "
+        "write_array %d columns compared, %d rng-excluded, %d "
+        "name-set-excluded\n",
+        r.ok ? "OK" : "FAIL", name.c_str(), r.variant, r.comparisons,
+        r.failures, r.declared, r.wa_compared, r.wa_rng_excluded,
+        r.wa_name_excluded);
+    std::printf("  paths: %s\n", r.paths.line().c_str());
+    return r.ok ? 0 : 1;
   }
 
   stanli::CompiledModel cm;

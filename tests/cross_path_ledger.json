@@ -1,0 +1,42 @@
+[
+  {
+    "model": "brmsmono",
+    "quantity": "write_array",
+    "pair": "graph/wa_interp",
+    "bound_ulp": -1,
+    "cause": "the write_array graph lowers dirichlet_lpdf and the interpreter does not (wa_interp: 'unsupported function dirichlet_lpdf'), so this section has one implementation rather than two and no cross-check. Retire by teaching mir_interp.hpp the density, not by removing the fixture.",
+    "since": "2026-08-23"
+  },
+  {
+    "model": "odevariadic",
+    "quantity": "write_array",
+    "pair": "graph/wa_interp",
+    "bound_ulp": -1,
+    "cause": "the write_array graph lowers ode_rk45 and the interpreter refuses it ('unsupported function ode_rk45'); WaInterp reaches the integrator only through the ODE kernel's own fallback, never as a generated-quantities call.",
+    "since": "2026-08-23"
+  },
+  {
+    "model": "viewalias",
+    "quantity": "write_array",
+    "pair": "graph/wa_interp",
+    "bound_ulp": -1,
+    "cause": "the write_array graph lowers to_matrix and the interpreter refuses it ('unsupported function to_matrix'). One of the three vocabulary tables is missing an entry the other two have -- the class of gap this axis exists to find.",
+    "since": "2026-08-23"
+  },
+  {
+    "model": "viewa_data_empty_matrix",
+    "quantity": "write_array",
+    "pair": "graph/wa_interp",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG: on `array[0] matrix[2, 3]` the interpreter throws 'index 2 out of bounds for size 1' evaluating dims() of the empty array, where the graph answers from the declaration. mir_interp.hpp keeps no shape for a zero-length array of matrices.",
+    "since": "2026-08-23"
+  },
+  {
+    "model": "view_gq_data_matrix",
+    "quantity": "shaped",
+    "pair": "graph/wa_interp",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG: mir_interp.hpp:1683 reads rows()/cols() off Value::dims, which is rank 1 for a row_vector, so every row_vector answers rows=n, cols=1 where the graph answers rows=1, cols=n. Reproduced on a literal `[1.0, 2.0, 3.0]` as well as on row(M, 2), so it is the rank-1 assumption and not the transformed-data path.",
+    "since": "2026-08-23"
+  }
+]

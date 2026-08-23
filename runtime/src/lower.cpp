@@ -3931,7 +3931,16 @@ CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
       w.columns.clear();
       w.n_tp_start = w.n_gq_start = 0;
     }
-    if (!w.truncated.empty()) {
+    // STANLI_WA_FORCE_INTERP is a TEST-ONLY hook: it attaches the
+    // interpreter beside a graph that lowered the whole section, so the
+    // cross-path harness (tests/cross_path.hpp) can read both engines off
+    // one model and hold them against each other on the same draw. It
+    // changes which objects are retained, never what either engine
+    // computes -- the graph above is built identically either way. Never
+    // set it in a shipped environment: drivers PREFER an attached
+    // interpreter (capi.cpp, bridgestan_abi.cpp), so it moves every caller
+    // onto the slow per-draw path.
+    if (!w.truncated.empty() || std::getenv("STANLI_WA_FORCE_INTERP")) {
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
