@@ -744,6 +744,57 @@ jobs:
             build-wasm/stanli.js
             build-wasm/stanli.wasm
 
+  # The webR runtime: libstanli.so as an Emscripten side module, the
+  # artifact stanli_install() downloads on emscripten-wasm32 (webR under
+  # r-universe). The emsdk here is pinned to the version the CURRENT webR
+  # release builds with, NOT the browser build's pin: side modules are
+  # not binary compatible across webR's Emscripten bumps, so when webR
+  # updates Emscripten this pin must follow and a release must be cut, or
+  # users on the new webR load an incompatible artifact and dyn.load
+  # fails. webR 0.6.0 = Emscripten 4.0.8; the npm webr pinned below is
+  # the same release, so the load test answers the exact ABI question.
+  wasm-webr:
+    name: webR runtime
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.8
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-wasm-webr-${{ github.sha }}
+          restore-keys: ccache-wasm-webr-
+      - name: Fetch pinned dependencies
+        run: ./deps/fetch.sh
+      - name: Build the side module
+        run: |
+          which ccache || sudo apt-get install -y ccache
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          emcmake cmake -B build-wasm-side -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_WASM_SIDE=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-wasm-side -j4 --target stanli_webr
+          ccache -s
+      - name: Load it into webR
+        run: |
+          npm install webr@0.6.0
+          node tests/test_webr.mjs build-wasm-side/libstanli.so
+      - name: Runtime tarball
+        run: |
+          mkdir -p runtime-dist
+          tar czf runtime-dist/stanli-runtime-emscripten-wasm32.tar.gz \
+            -C build-wasm-side libstanli.so
+          tar tzf runtime-dist/stanli-runtime-emscripten-wasm32.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-emscripten-wasm32
+          path: runtime-dist/*.tar.gz
+
   # The public demo: web/ plus the two build artifacts, deployed to
   # GitHub Pages on every main push. stancjs is stanc3's own js_of_ocaml
   # target, cached like the embedded object (a miss costs the opam path
@@ -940,7 +991,7 @@ jobs:
   # web form, and this is where that file comes from.
   runtime-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, windows]
+    needs: [build, windows, wasm-webr]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # create the release and attach assets to it
@@ -976,12 +1027,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la runtime/
-          # Five platforms, one asset each. A partial upload is worse
-          # than none: releases/latest/download resolves for four
-          # platforms and 404s for the fifth, and nothing says which.
+          # Six platforms, one asset each. A partial upload is worse
+          # than none: releases/latest/download resolves for five
+          # platforms and 404s for the sixth, and nothing says which.
           n=$(ls runtime/*.tar.gz | wc -l)
           echo "$n runtime assets"
-          [ "$n" -eq 5 ]
+          [ "$n" -eq 6 ]
           # Immutable releases freeze their assets the moment they are
           # published, so everything must attach while the release is a
           # draft and publishing is the last step. Publishing first and

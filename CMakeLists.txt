@@ -403,6 +403,22 @@ endif()
 # entry point (no embedded stanc; stanc.js supplies the MIR in JS). One
 # .js + .wasm pair, MODULARIZE'd so web pages and Node both load it.
 if(EMSCRIPTEN)
+  # The C API surface the wasm artifacts export: without an explicit list
+  # wasm-ld garbage-collects the capi functions, which nothing inside the
+  # module references (SIDE_MODULE=1 does not root them either). The list
+  # is read out of capi.h so a new entry point exports without anyone
+  # remembering this file; the R bridge resolves whatever subset it needs
+  # (stanli_abi_version among it, which the hand-kept browser list missed).
+  file(READ runtime/include/stanli/capi.h _capi_h)
+  string(REGEX MATCHALL "(stanli|bs)_[a-zA-Z0-9_]+[ \t]*\\(" _capi_decls
+         "${_capi_h}")
+  set(_capi_names "")
+  foreach(_d ${_capi_decls})
+    string(REGEX REPLACE "[ \t]*\\($" "" _d "${_d}")
+    list(APPEND _capi_names "_${_d}")
+  endforeach()
+  list(REMOVE_DUPLICATES _capi_names)
+  list(JOIN _capi_names "," STANLI_CAPI_EXPORTS)
   add_executable(stanli_wasm runtime/src/capi.cpp tests/tbb_stub.cpp)
   target_compile_definitions(stanli_wasm
                              PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
@@ -416,9 +432,38 @@ if(EMSCRIPTEN)
     "SHELL:-s MAXIMUM_MEMORY=4GB"
     "SHELL:-s STACK_SIZE=8MB"
     "SHELL:-s ENVIRONMENT=web,worker,node"
-    "SHELL:-s EXPORTED_FUNCTIONS=_stanli_model_new,_stanli_model_new_from_stan,_stanli_has_embedded_stanc,_stanli_exact_lp,_stanli_model_free,_stanli_n_unconstrained,_stanli_grad,_stanli_sample,_stanli_n_constrained,_stanli_constrained_name,_stanli_constrain,_stanli_wa_n_columns,_stanli_wa_column_name,_stanli_wa_seed,_stanli_wa_row,_stanli_sample_stream,_stanli_sample_walnuts_stream,_stanli_run_pathfinder,_malloc,_free"
+    "SHELL:-s EXPORTED_FUNCTIONS=${STANLI_CAPI_EXPORTS},_malloc,_free"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,stringToNewUTF8,HEAPF64,addFunction,removeFunction"
     "SHELL:-s ALLOW_TABLE_GROWTH=1")
+
+# The webR runtime: the same capi surface as a relocatable SIDE_MODULE
+# that webR's main module dlopens, which is how the R package loads
+# libstanli.so on every platform. Memory, stack, and environment belong
+# to the main module, so none of stanli_wasm's -s settings apply; the
+# whole tree must be compiled -fPIC, which is why this is its own build
+# configuration (-DSTANLI_WASM_SIDE=ON) rather than a second target in
+# the browser build. The emsdk version must match the webR release the
+# artifact is for -- side modules are not binary compatible across
+# webR's Emscripten bumps.
+option(STANLI_WASM_SIDE
+  "Build libstanli.so as an Emscripten side module for webR" OFF)
+if(STANLI_WASM_SIDE)
+  # add_executable, not add_library: Emscripten's CMake platform archives
+  # a SHARED library instead of linking it, so the side module is spelled
+  # as an "executable" whose output name and SIDE_MODULE flag make emcc
+  # emit a relocatable wasm dylib.
+  add_executable(stanli_webr runtime/src/capi.cpp tests/tbb_stub.cpp)
+  target_compile_definitions(stanli_webr
+                             PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
+  target_link_libraries(stanli_webr PRIVATE stanli)
+  set_target_properties(stanli_webr PROPERTIES
+    OUTPUT_NAME libstanli
+    SUFFIX ".so")
+  target_link_options(stanli_webr PRIVATE
+    -fwasm-exceptions
+    "SHELL:-s SIDE_MODULE=2"
+    "SHELL:-s EXPORTED_FUNCTIONS=${STANLI_CAPI_EXPORTS}")
+endif()
 endif()
 
 if(NOT EMSCRIPTEN)

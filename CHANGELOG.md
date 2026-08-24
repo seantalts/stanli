@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### A runtime for webR
+
+`stanli_install()` on webR resolves the asset name
+stanli-runtime-emscripten-wasm32.tar.gz, which no release published, so
+the R package installed from r-universe could never find its runtime
+(#163). The release pipeline now builds libstanli.so as an Emscripten
+side module and attaches it to every release beside the five native
+runtimes. The build is pinned to the Emscripten version the current
+webR release uses (webR 0.6.0, Emscripten 4.0.8) because side modules
+are not binary compatible across webR's Emscripten bumps; CI loads the
+artifact into webR itself and resolves the bridge's symbols. The full
+flow -- the r-universe package, log_prob_grad, NUTS -- was verified
+against webR 0.6.0 by hand. Compiling Stan source inside webR still
+needs a compiler: the V8 package is not available there, so pass
+precompiled MIR via stanli_model(mir = ...) for now.
+
 ## 0.8.3
 
 Five wrong-number fixes, every one found by testing machinery that did
