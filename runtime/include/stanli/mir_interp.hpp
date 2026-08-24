@@ -91,6 +91,14 @@ class MirInterp {
 
   std::map<std::string, Value>& env() { return env_; }
 
+  // A host may bind a typed value directly and skip stanc's generated input
+  // declaration/rebuild statements. Keep the declaration-owned geometry
+  // that FnCheck needs separately: an empty JSON array cannot encode trailing
+  // extents such as array[0] vector[3].
+  void set_declared_dims(const std::string& name, std::vector<int64_t> dims) {
+    decl_dims_[name] = std::move(dims);
+  }
+
   Value* find(const std::string& n) {
     auto it = env_.find(n);
     return it == env_.end() ? nullptr : &it->second;

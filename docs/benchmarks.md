@@ -12,6 +12,19 @@ recover_memory cycle `stan::model::gradient` performs per leapfrog
 step. Reproduce the whole table with
 `tools/bench_models.py deps/cmdstan deps/posteriordb`.
 
+The preparation cells in this 2026-08-06 snapshot predate the dedicated
+`bench_grad --prep` mode and include the old driver's warmup/evaluation work.
+The harness now records file read, parse, compile, construction, and binding
+only; that column should be refreshed as a unit rather than mixing definitions.
+Targeted preparation measurements later on this page use the new mode.
+
+One targeted 2026-08-23 remeasurement is newer than the full snapshot below.
+Packed row-wise `log_sum_exp` reduces `ldaK2` from 15,854 ops to 22 and
+154 to 94 us/gradient (1.11x CmdStan), and `ldaK5` from 434,126 ops to 156
+and 6.82 to 3.70 ms/gradient (1.51x CmdStan). `ldaK5` file-to-bound-model
+preparation also falls from about 0.59 s to 0.27 s. The committed full-corpus
+tables retain one measurement definition and will be refreshed as a unit.
+
 ## Per-gradient latency
 
 A representative slice; the complete 120-model table is at the bottom of
@@ -66,9 +79,15 @@ by the model's *shape*, not its size.
   vector element by element) arrives unrolled and is re-rolled back
   into the class above: the radon family up to 6.1x, `election88_full`
   3.0x, `dogs` 2.8x.
-- **Everything, on preparation.** Lowering takes 4-400 ms against a
-  ~7 s CmdStan compile, so short runs and iterative model development
-  are dominated by this regardless of gradient speed.
+- **Nested fixed-width mixtures.** LDA's per-document `gamma[K]` construction
+  and row `log_sum_exp` become two packed gathers, vector arithmetic, and one
+  row-reduction op. This takes `ldaK2` from 0.71x to 1.11x and `ldaK5` from
+  1.10x to 1.51x against the existing CmdStan measurements.
+- **Everything, on preparation.** Graph compilation takes 4-400 ms against a
+  ~7 s CmdStan compile, so short runs and iterative model development are
+  dominated by this regardless of gradient speed. The largest JSON input in
+  the corpus takes another ~2.6 s to read and parse; the benchmark reports
+  that complete file-to-bound-model path separately from graph compilation.
 
 **Near parity (0.9-1.3x), two shapes:**
 
@@ -90,10 +109,6 @@ by the model's *shape*, not its size.
 
 **Slower (a shrinking tail, mostly 0.5-0.9x):**
 
-- **Mixture models with K > 2 components** (`ldaK2`/`ldaK5`): their
-  inner `log_sum_exp` runs over K-vectors built per document, a
-  row-wise reduction the elementwise-lp fusion does not yet express.
-  The binary-mixture case is closed.
 - **ODE models**, at about 0.6x: our per-call dispatch of the compiled
   right-hand side against CmdStan's fully inlined one inside the same
   CVODES solver. (They were 0.015x before the right-hand side compiled;
@@ -276,12 +291,18 @@ removes a second, independently stepped solve. Anything the compiler
 cannot express keeps the interpreter, so coverage never shrinks;
 `STANLI_DEBUG_ODE=1` reports when that happens.
 
-Preparation scales too: the largest corpus model (`nn_rbm1bJ100`,
-MNIST, 60,000 rows, 79,411 parameters) lowers to a 192,030-op graph in
-20.7 s and evaluates its gradient in 0.43 s. Lowering used to be
-quadratic in data size (the transformed-data interpreter copied an
-indexed expression's whole base per read). Overall, stanli lowers a
-model in 4-200 ms against a 6.2-7.6 s CmdStan compile (warm precompiled
+Preparation scales too: the largest corpus model (`nn_rbm1bJ100`, MNIST,
+60,000 rows, 79,411 parameters) lowers to a 132,024-op graph. Its old 23.80 s
+compile was almost entirely stanc's generated loop reconstructing the
+47-million-element input matrix after `DataMap` had already parsed it. Direct
+typed input preload removes that loop; an indexed reroll candidate scan removes
+another empty 0.13 s pass over the resulting graph. Together they reduce graph
+compilation to 0.23 s (103x), and the full file-to-bound-executor path from
+26.33 s to 2.76 s (9.5x); JSON parsing is now the largest preparation stage.
+The same profiled A/B removes 1.34 GB of peak RSS. The log density and all
+79,411 gradient components remain within the existing CmdStan oracle
+tolerance. Overall, graph
+compilation is 4-400 ms against a 6.2-7.6 s CmdStan compile (warm precompiled
 header, after a multi-minute one-time `make build`); that gap is what
 time-to-first-draw is made of.
 

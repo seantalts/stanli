@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -107,6 +108,375 @@ bool ops_match(const Graph& g, const Op& a, const Op& b) {
   return true;
 }
 
+// LDA's likelihood is a small inner loop nested in a much larger document
+// loop:
+//
+//   gamma[k] = log(a[index_a[n,k]]) + log(b[index_b[n,k]]);
+//   target += log_sum_exp(gamma);
+//
+// K=2 is below the generic reroller's four-lane threshold, and for K=5 the
+// scalar LOG_SUM_EXP between rows prevents the outer loop from looking
+// periodic. Recognize this one exact scalar grammar before ordinary rerolling
+// and flatten the complete rows into two gathers, vector arithmetic, and one
+// packed row reduction. This is deliberately not a second symbolic loop
+// vectorizer: every removed producer, consumer, store index, and target term is
+// proven here against the already concrete graph.
+int fuse_log_sum_exp_rows(Graph& g, std::vector<int>& target_terms,
+                          const std::vector<int>& extra_roots,
+                          int64_t& row_steps) {
+  if (g.ops.empty() || (int64_t)target_terms.size() < kMinLanes) return 0;
+
+  // Most graphs have no row-store/LSE boundary at all. Keep their cost to one
+  // cache-friendly scan and, in particular, do not defeat the generic
+  // candidate fast path by building target sets or allocating dense ownership
+  // arrays first. Target membership is proven by the exact parser below.
+  bool maybe_rows = false;
+  for (size_t u = 1; u < g.ops.size(); ++u) {
+    ++row_steps;
+    const Op& lse = g.ops[u];
+    const Op& store = g.ops[u - 1];
+    if (lse.opcode == OP_LOG_SUM_EXP && lse.n_in == 1 &&
+        (store.opcode == OP_SET_INDEX ||
+         store.opcode == OP_SET_INDEX_INPLACE) &&
+        store.out == lse.in[0]) {
+      maybe_rows = true;
+      break;
+    }
+  }
+  if (!maybe_rows) return 0;
+
+  std::unordered_set<int> roots(extra_roots.begin(), extra_roots.end());
+  if (g.result_slot >= 0) roots.insert(g.result_slot);
+  std::unordered_set<int> term_set(target_terms.begin(), target_terms.end());
+
+  std::unordered_map<int, int> term_count;
+  for (int s : target_terms) ++term_count[s];
+
+  // Exact ownership for slots the rewrite deletes. Reader/writer counts and
+  // their last positions make reused/in-place hand-built graphs fail closed
+  // too.
+  std::vector<int64_t> read_count(g.slots.size(), 0);
+  std::vector<int64_t> write_count(g.slots.size(), 0);
+  std::vector<int64_t> last_reader(g.slots.size(), -1);
+  std::vector<int64_t> last_writer(g.slots.size(), -1);
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    ++row_steps;
+    const Op& op = g.ops[u];
+    for (int j = 0; j < op.n_in; ++j) {
+      if (op.in[j] < 0) continue;
+      ++read_count[(size_t)op.in[j]];
+      last_reader[(size_t)op.in[j]] = (int64_t)u;
+    }
+    const auto wrote = [&](int s) {
+      if (s < 0) return;
+      ++write_count[(size_t)s];
+      last_writer[(size_t)s] = (int64_t)u;
+    };
+    wrote(op.out);
+    wrote(op.out2);
+  }
+
+  struct Row {
+    size_t begin = 0;
+    size_t end = 0;
+    int K = 0;
+    int a_base = -1;
+    int b_base = -1;
+    int gamma_in = -1;
+    int gamma_out = -1;
+    int lse_out = -1;
+    bool functional_start = false;
+    std::vector<int> a_index;
+    std::vector<int> b_index;
+    std::vector<int> gamma_slots;
+    std::vector<int> deleted_slots;
+  };
+
+  const auto valid_slot = [&](int s) {
+    return s >= 0 && (size_t)s < g.slots.size();
+  };
+  const auto plain = [](const Op& op, uint16_t opcode, int n_in) {
+    return op.opcode == opcode && op.variant == 0 && op.n_in == n_in &&
+           op.n_idata == 0 && op.out2 < 0 && op.udata == nullptr;
+  };
+  const auto deleted_scalar = [&](int slot, size_t writer, size_t reader) {
+    return valid_slot(slot) && g.slots[(size_t)slot].len == 1 &&
+           !g.slots[(size_t)slot].is_param && !roots.count(slot) &&
+           !term_set.count(slot) && write_count[(size_t)slot] == 1 &&
+           last_writer[(size_t)slot] == (int64_t)writer &&
+           read_count[(size_t)slot] == 1 &&
+           last_reader[(size_t)slot] == (int64_t)reader;
+  };
+
+  const auto parse_row = [&](size_t start, int want_k, int want_a, int want_b,
+                             Row& row) {
+    ++row_steps;
+    if (start + 7 > g.ops.size()) return false;
+    // The first store reveals gamma's width, hence the number of six-op scalar
+    // lanes before the row's LOG_SUM_EXP.
+    const Op& first_store = g.ops[start + 5];
+    if ((first_store.opcode != OP_SET_INDEX &&
+         first_store.opcode != OP_SET_INDEX_INPLACE) ||
+        first_store.n_in != 2 || first_store.n_idata != 1 ||
+        first_store.out2 >= 0 || first_store.udata != nullptr ||
+        !valid_slot(first_store.in[0]))
+      return false;
+    const int64_t k64 = g.slots[(size_t)first_store.in[0]].len;
+    if (k64 <= 0 || k64 > std::numeric_limits<int>::max()) return false;
+    const int K = (int)k64;
+    if ((want_k > 0 && K != want_k) ||
+        start + (size_t)6 * (size_t)K + 1 > g.ops.size())
+      return false;
+
+    row = Row{};
+    row.begin = start;
+    row.K = K;
+    row.a_index.reserve((size_t)K);
+    row.b_index.reserve((size_t)K);
+    int gamma = first_store.in[0];
+    row.gamma_in = gamma;
+    row.functional_start = first_store.opcode == OP_SET_INDEX &&
+                           first_store.out != first_store.in[0];
+    row.gamma_slots.push_back(gamma);
+
+    for (int k = 0; k < K; ++k) {
+      row_steps += 6;
+      const size_t p = start + (size_t)6 * (size_t)k;
+      const Op& ai = g.ops[p];
+      const Op& al = g.ops[p + 1];
+      const Op& bi = g.ops[p + 2];
+      const Op& bl = g.ops[p + 3];
+      const Op& add = g.ops[p + 4];
+      const Op& store = g.ops[p + 5];
+      if (!plain(al, OP_LOGV, 1) || !plain(bl, OP_LOGV, 1) ||
+          !plain(add, OP_ADD, 2) || ai.opcode != OP_INDEX ||
+          bi.opcode != OP_INDEX || ai.variant != 0 || bi.variant != 0 ||
+          ai.n_in != 1 || bi.n_in != 1 || ai.n_idata != 1 || bi.n_idata != 1 ||
+          ai.out2 >= 0 || bi.out2 >= 0 || ai.udata != nullptr ||
+          bi.udata != nullptr || !valid_slot(ai.in[0]) ||
+          !valid_slot(bi.in[0]) || ai.idata[0] < 0 || bi.idata[0] < 0 ||
+          ai.idata[0] >= g.slots[(size_t)ai.in[0]].len ||
+          bi.idata[0] >= g.slots[(size_t)bi.in[0]].len || al.in[0] != ai.out ||
+          bl.in[0] != bi.out || add.in[0] != al.out || add.in[1] != bl.out ||
+          (store.opcode != OP_SET_INDEX &&
+           store.opcode != OP_SET_INDEX_INPLACE) ||
+          store.variant != 0 || store.n_in != 2 || store.n_idata != 1 ||
+          store.out2 >= 0 || store.udata != nullptr || store.in[0] != gamma ||
+          store.in[1] != add.out || store.idata[0] != k ||
+          !valid_slot(store.out) || g.slots[(size_t)store.out].len != K ||
+          (store.opcode == OP_SET_INDEX_INPLACE && store.out != gamma) ||
+          !deleted_scalar(ai.out, p, p + 1) ||
+          !deleted_scalar(al.out, p + 1, p + 4) ||
+          !deleted_scalar(bi.out, p + 2, p + 3) ||
+          !deleted_scalar(bl.out, p + 3, p + 4) ||
+          !deleted_scalar(add.out, p + 4, p + 5))
+        return false;
+
+      if (k == 0) {
+        row.a_base = ai.in[0];
+        row.b_base = bi.in[0];
+        if ((want_a >= 0 && row.a_base != want_a) ||
+            (want_b >= 0 && row.b_base != want_b))
+          return false;
+      } else if (ai.in[0] != row.a_base || bi.in[0] != row.b_base) {
+        return false;
+      }
+      row.a_index.push_back(ai.idata[0]);
+      row.b_index.push_back(bi.idata[0]);
+      row.deleted_slots.insert(row.deleted_slots.end(),
+                               {ai.out, al.out, bi.out, bl.out, add.out});
+      gamma = store.out;
+      row.gamma_slots.push_back(gamma);
+    }
+
+    const size_t lp_pos = start + (size_t)6 * (size_t)K;
+    ++row_steps;
+    const Op& lse = g.ops[lp_pos];
+    if (!plain(lse, OP_LOG_SUM_EXP, 1) || lse.in[0] != gamma ||
+        !valid_slot(lse.out) || g.slots[(size_t)lse.out].len != 1 ||
+        g.slots[(size_t)lse.out].is_param || roots.count(lse.out) ||
+        !term_set.count(lse.out) || term_count[lse.out] != 1 ||
+        write_count[(size_t)lse.out] != 1 ||
+        last_writer[(size_t)lse.out] != (int64_t)lp_pos ||
+        read_count[(size_t)lse.out] != 0)
+      return false;
+    row.gamma_out = gamma;
+    row.lse_out = lse.out;
+    row.deleted_slots.push_back(lse.out);
+    row.end = lp_pos + 1;
+    return true;
+  };
+
+  std::vector<Op> result;
+  result.reserve(g.ops.size());
+  int regions = 0;
+  size_t i = 0;
+  while (i < g.ops.size()) {
+    Row first;
+    if (!parse_row(i, -1, -1, -1, first)) {
+      result.push_back(g.ops[i++]);
+      continue;
+    }
+
+    std::vector<Row> rows;
+    rows.push_back(std::move(first));
+    std::unordered_set<int> run_gamma(rows[0].gamma_slots.begin(),
+                                      rows[0].gamma_slots.end());
+    while (true) {
+      Row next;
+      const Row& prev = rows.back();
+      if (!parse_row(prev.end, prev.K, prev.a_base, prev.b_base, next)) break;
+
+      // Lowering has two safe row-to-row forms. A declaration reused across
+      // the outer loop continues the previous row's gamma chain, normally
+      // entirely in place. An unrolled declaration starts each row from a
+      // distinct scratch slot with a functional first write; because indices
+      // 0..K-1 are then all overwritten before LOG_SUM_EXP, its old contents
+      // are immaterial. Do not accept a different in-place buffer or a fresh
+      // chain that aliases an earlier row: those are neither of the proven
+      // forms and can hide cross-row state.
+      const bool shared = next.gamma_in == prev.gamma_out;
+      bool compatible = shared || next.functional_start;
+      for (int s : next.gamma_slots)
+        if (run_gamma.count(s) && (!shared || s != prev.gamma_out)) {
+          compatible = false;
+          break;
+        }
+      if (!compatible) break;
+
+      run_gamma.insert(next.gamma_slots.begin(), next.gamma_slots.end());
+      rows.push_back(std::move(next));
+    }
+    if ((int64_t)rows.size() < kMinLanes) {
+      result.push_back(g.ops[i++]);
+      continue;
+    }
+
+    const size_t batch_end = rows.back().end;
+    std::unordered_set<int> gamma_slots;
+    std::unordered_set<int> deleted_slots;
+    for (const Row& row : rows) {
+      gamma_slots.insert(row.gamma_slots.begin(), row.gamma_slots.end());
+      deleted_slots.insert(row.deleted_slots.begin(), row.deleted_slots.end());
+    }
+    bool safe = true;
+    for (int s : gamma_slots) {
+      if (!valid_slot(s) || g.slots[(size_t)s].is_param || roots.count(s) ||
+          term_set.count(s) || last_reader[(size_t)s] >= (int64_t)batch_end ||
+          last_writer[(size_t)s] >= (int64_t)batch_end) {
+        safe = false;
+        break;
+      }
+    }
+    // Hoisting all scalar reads into two leading gathers is only valid when
+    // neither base is part of the mutable/deleted row state.
+    if (gamma_slots.count(rows[0].a_base) ||
+        gamma_slots.count(rows[0].b_base) ||
+        deleted_slots.count(rows[0].a_base) ||
+        deleted_slots.count(rows[0].b_base))
+      safe = false;
+
+    size_t term_at = target_terms.size();
+    for (size_t t = 0; t < target_terms.size(); ++t)
+      if (target_terms[t] == rows[0].lse_out) {
+        term_at = t;
+        break;
+      }
+    if (term_at + rows.size() > target_terms.size()) safe = false;
+    for (size_t r = 0; safe && r < rows.size(); ++r)
+      if (target_terms[term_at + r] != rows[r].lse_out) safe = false;
+
+    if (!safe) {
+      // A late safety refusal (an escaped gamma or interleaved target term)
+      // applies to this whole packed-row run. Copy it once rather than
+      // reparsing every suffix, which would turn a fail-closed path quadratic.
+      result.insert(result.end(), g.ops.begin() + (ptrdiff_t)i,
+                    g.ops.begin() + (ptrdiff_t)batch_end);
+      i = batch_end;
+      continue;
+    }
+
+    const int64_t total = (int64_t)rows.size() * rows[0].K;
+    std::vector<int> a_index;
+    std::vector<int> b_index;
+    a_index.reserve((size_t)total);
+    b_index.reserve((size_t)total);
+    for (const Row& row : rows) {
+      a_index.insert(a_index.end(), row.a_index.begin(), row.a_index.end());
+      b_index.insert(b_index.end(), row.b_index.begin(), row.b_index.end());
+    }
+    const auto attach_idata = [&](Op& op, std::vector<int> idata) {
+      g.idata_pool.push_back(std::move(idata));
+      op.idata = g.idata_pool.back().data();
+      op.n_idata = (int64_t)g.idata_pool.back().size();
+    };
+    const auto unary = [&](uint16_t opcode, int in, int64_t len) {
+      Op op;
+      op.opcode = opcode;
+      op.n_in = 1;
+      op.in[0] = in;
+      op.out = g.add_slot(len, false);
+      result.push_back(op);
+      return op.out;
+    };
+    Op gather_a;
+    gather_a.opcode = OP_GATHER;
+    gather_a.n_in = 1;
+    gather_a.in[0] = rows[0].a_base;
+    gather_a.out = g.add_slot(total, false);
+    attach_idata(gather_a, std::move(a_index));
+    result.push_back(gather_a);
+    const int log_a = unary(OP_LOGV, gather_a.out, total);
+
+    Op gather_b;
+    gather_b.opcode = OP_GATHER;
+    gather_b.n_in = 1;
+    gather_b.in[0] = rows[0].b_base;
+    gather_b.out = g.add_slot(total, false);
+    attach_idata(gather_b, std::move(b_index));
+    result.push_back(gather_b);
+    const int log_b = unary(OP_LOGV, gather_b.out, total);
+
+    Op add;
+    add.opcode = OP_ADD;
+    add.n_in = 2;
+    add.in[0] = log_a;
+    add.in[1] = log_b;
+    add.out = g.add_slot(total, false);
+    result.push_back(add);
+
+    Op lse;
+    lse.opcode = OP_LOG_SUM_EXP_ROWS;
+    lse.n_in = 1;
+    lse.in[0] = add.out;
+    lse.out = g.add_slot((int64_t)rows.size(), false);
+    attach_idata(lse, std::vector<int>{rows[0].K});
+    result.push_back(lse);
+
+    Op sum;
+    sum.opcode = OP_SUM_VEC;
+    sum.n_in = 1;
+    sum.in[0] = lse.out;
+    sum.out = g.add_slot(1, false);
+    result.push_back(sum);
+
+    std::vector<int> next_terms;
+    next_terms.reserve(target_terms.size() - rows.size() + 1);
+    next_terms.insert(next_terms.end(), target_terms.begin(),
+                      target_terms.begin() + (ptrdiff_t)term_at);
+    next_terms.push_back(sum.out);
+    next_terms.insert(next_terms.end(),
+                      target_terms.begin() + (ptrdiff_t)(term_at + rows.size()),
+                      target_terms.end());
+    target_terms = std::move(next_terms);
+    term_set.insert(sum.out);
+    i = batch_end;
+    ++regions;
+  }
+  g.ops = std::move(result);
+  return regions;
+}
+
 }  // namespace
 
 RerollStats reroll(Graph& g,
@@ -115,6 +485,33 @@ RerollStats reroll(Graph& g,
                    const std::vector<int>& extra_roots) {
   RerollStats st;
   if (std::getenv("STANLI_NO_REROLL")) return st;
+
+  st.regions +=
+      fuse_log_sum_exp_rows(g, target_terms, extra_roots, st.row_steps);
+
+  std::unordered_set<int> term_set(target_terms.begin(), target_terms.end());
+  const auto is_candidate_op = [&](const Op& t) {
+    const uint8_t traits = op_traits(t.opcode);
+    return (traits & op_trait::kRerollAnyDensity) != 0 || is_element_store(t) ||
+           ((traits & op_trait::kRerollWidenable) != 0 &&
+            term_set.count(t.out) != 0);
+  };
+
+  // Every profitable region must contain one of these ops in its first period.
+  // Index the next one at or after every position, making the [i, i + P)
+  // question below O(1) instead of rescanning up to P ops for every P. The
+  // target set can only lose original outputs from a region the scan then skips
+  // over, and gains only new result slots that are not outputs in g.ops, so the
+  // index stays valid as rewrites advance through the original graph.
+  const size_t no_candidate = g.ops.size();
+  std::vector<size_t> next_candidate(no_candidate + 1, no_candidate);
+  for (size_t u = g.ops.size(); u-- > 0;) {
+    ++st.candidate_steps;
+    next_candidate[u] = is_candidate_op(g.ops[u]) ? u : next_candidate[u + 1];
+  }
+  // If the whole graph contains none, no period can classify. Return before
+  // allocating dense reader/writer lists.
+  if (next_candidate[0] == no_candidate) return st;
 
   // The dedup'd constant pool: slot -> value, for len-1 fills.
   std::unordered_map<int, double> const_val;
@@ -186,8 +583,6 @@ RerollStats reroll(Graph& g,
     return first_at_or_after(v, x) != v.end();
   };
 
-  std::unordered_set<int> term_set(target_terms.begin(), target_terms.end());
-
   // Write-fusion renaming, done lazily. When a store region is fused, every
   // later reference to its vector means the fused value instead. Rewriting
   // the tail eagerly is quadratic when one vector chains through many
@@ -232,16 +627,8 @@ RerollStats reroll(Graph& g,
       // element write (which fuses into one vector store), or a widenable
       // op whose out is a target term (log_mix lanes over already-vector
       // lps: the region is INDEX/INDEX/LOG_MIX with no density at all).
-      bool candidate = false;
-      for (int p = 0; p < P && !candidate; ++p) {
-        const Op& t = g.ops[i + p];
-        const uint8_t traits = op_traits(t.opcode);
-        candidate = (traits & op_trait::kRerollAnyDensity) != 0 ||
-                    is_element_store(t) ||
-                    ((traits & op_trait::kRerollWidenable) != 0 &&
-                     term_set.count(t.out) != 0);
-      }
-      if (!candidate) continue;
+      ++st.candidate_steps;
+      if (next_candidate[i] >= i + (size_t)P) continue;
 
       // Count template-matching lanes.
       int64_t L = 1;

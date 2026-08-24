@@ -90,6 +90,10 @@ static std::vector<double> route_adjoints(uint16_t oc, bool poison) {
     case OP_LOG_SUM_EXP:
       out_len = 1;
       break;
+    case OP_LOG_SUM_EXP_ROWS:
+      idata = {3};  // two packed rows of width three
+      out_len = 2;
+      break;
     case OP_LSE2:
       // Two scalar inputs; reuse the vector buffer's first element.
       ctx.n_in = 2;

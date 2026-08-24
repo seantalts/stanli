@@ -157,7 +157,6 @@ void Executor::bind_() {
     }
   }
   values_.assign(off, 0.0);
-  adjoints_.assign(off, 0.0);
 
   // A slot carries adjoint if it is a parameter or an op writes it. Slots
   // that are neither are data: kernels see a null adjoint Desc and skip them.
@@ -165,6 +164,36 @@ void Executor::bind_() {
   for (const auto& op : graph_.ops) {
     written[op.out] = 1;
     if (op.out2 >= 0) written[op.out2] = 1;
+  }
+
+  // Adjoint addresses never escape the executor, so unlike values they do
+  // not need a hole for every externally addressable data slot or for slots
+  // whose producer an optimization pass removed. Pack the active cells into
+  // one arena. Keeping parameters first preserves the contiguous memcpy of
+  // the returned gradient; keeping one arena preserves the single fast
+  // memset on dense graphs.
+  std::vector<int64_t> adjoint_offsets(graph_.slots.size(), -1);
+  int64_t adj_off = 0;
+  for (size_t i = 0; i < graph_.slots.size(); ++i) {
+    const Slot& s = graph_.slots[i];
+    if (s.is_param) {
+      adjoint_offsets[i] = adj_off;
+      adj_off += s.len;
+    }
+  }
+  assert(adj_off == n_params_);
+  for (size_t i = 0; i < graph_.slots.size(); ++i) {
+    const Slot& s = graph_.slots[i];
+    if (!s.is_param && (written[i] || (int)i == graph_.result_slot)) {
+      adjoint_offsets[i] = adj_off;
+      adj_off += s.len;
+    }
+  }
+  adjoints_.assign(adj_off, 0.0);
+  result_adjoint_offset_ = -1;
+  if (graph_.result_slot >= 0) {
+    result_adjoint_offset_ = adjoint_offsets[graph_.result_slot];
+    assert(result_adjoint_offset_ >= 0);
   }
 
   int64_t scratch = 0;
@@ -191,9 +220,12 @@ void Executor::bind_() {
   ctx_.resize(graph_.ops.size());
   out2_adj_ptr_.assign(graph_.ops.size(), nullptr);
   for (size_t i = 0; i < graph_.ops.size(); ++i) {
-    ctx_[i] = make_ctx_(graph_.ops[i], written);
+    ctx_[i] = make_ctx_(graph_.ops[i], written, adjoint_offsets);
     const int o2 = graph_.ops[i].out2;
-    if (o2 >= 0) out2_adj_ptr_[i] = adjoints_.data() + graph_.slots[o2].offset;
+    if (o2 >= 0) {
+      assert(adjoint_offsets[o2] >= 0);
+      out2_adj_ptr_[i] = adjoints_.data() + adjoint_offsets[o2];
+    }
   }
   // Resolve dispatch now that ctx_ is final (it never reallocates after
   // this, so BwdStep may hold pointers into it).
@@ -208,7 +240,8 @@ void Executor::bind_() {
   }
 }
 
-KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written) {
+KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written,
+                              const std::vector<int64_t>& adjoint_offsets) {
   KernelCtx ctx;
   ctx.n_in = op.n_in;
   for (int i = 0; i < op.n_in; ++i) {
@@ -230,11 +263,18 @@ KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written) {
     const int si = op.in[i];
     const Slot& s = graph_.slots[si];
     const bool active = s.is_param || written[si];
-    ctx.in_adj[i] = Desc{active ? adjoints_.data() + s.offset : nullptr, s.len};
+    assert(!active || adjoint_offsets[si] >= 0);
+    ctx.in_adj[i] =
+        Desc{active ? adjoints_.data() + adjoint_offsets[si] : nullptr, s.len};
   }
-  if (so.len == 1) ctx.out_adj = adjoints_[so.offset];
-  ctx.out_adj_vec = Desc{adjoints_.data() + so.offset, so.len};
-  if (op.out2 >= 0) ctx.out2_adj = adjoints_[graph_.slots[op.out2].offset];
+  assert(adjoint_offsets[op.out] >= 0);
+  const int64_t out_adj_off = adjoint_offsets[op.out];
+  if (so.len == 1) ctx.out_adj = adjoints_[out_adj_off];
+  ctx.out_adj_vec = Desc{adjoints_.data() + out_adj_off, so.len};
+  if (op.out2 >= 0) {
+    assert(adjoint_offsets[op.out2] >= 0);
+    ctx.out2_adj = adjoints_[adjoint_offsets[op.out2]];
+  }
   return ctx;
 }
 
@@ -329,7 +369,8 @@ double Executor::gradient(double* grad_out) {
   ++n_grad_evals_;
   const double v = forward();
   std::memset(adjoints_.data(), 0, sizeof(double) * adjoints_.size());
-  adjoints_[graph_.slots[graph_.result_slot].offset] = 1.0;
+  assert(result_adjoint_offset_ >= 0);
+  adjoints_[result_adjoint_offset_] = 1.0;
   if (profile_) {
     for (size_t pi = graph_.ops.size(); pi-- > 0;) {
       const Kernel& k = kernel(graph_.ops[pi].opcode);

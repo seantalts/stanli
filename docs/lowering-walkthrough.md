@@ -114,10 +114,11 @@ Eight ops for the whole model. Read the columns first: each op writes
 one output slot (`out=s10(len1)`: slot 10, one element) and reads
 input slots; `P` marks a slot that is part of the unconstrained
 parameter vector; `l5` is a length. Slots are not variables -- they
-are offsets into one flat array, the *arena*, assigned at load time
-and never reassigned. There is a value arena and a parallel adjoint
-arena of the same shape; slot k's derivative lives at the same offset
-in the second array.
+are offsets into one flat value array, the *arena*, assigned at load
+time and never reassigned. Reverse mode has a second, compact arena:
+parameters first, then only slots surviving ops write (plus an otherwise
+constant result). Data and slots left behind by graph rewrites need no
+adjoint cell and are not cleared on every gradient.
 
 Now read the ops as the model:
 

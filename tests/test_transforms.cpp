@@ -76,6 +76,14 @@ static void run_case(const std::string& tag, uint16_t opcode, int n,
   expect_eq(tag + " lp", got, vlp.val());
   for (int i = 0; i < n; ++i)
     expect_eq(tag + " g" + std::to_string(i), grad[i], vx(i).adj());
+
+  // out2 carries the Jacobian adjoint. A second reverse sweep must start
+  // from a clean compact arena just like an ordinary single-output op.
+  double grad2[8];
+  const double got2 = ex.gradient(grad2);
+  expect_eq(tag + " lp repeat", got2, got);
+  for (int i = 0; i < n; ++i)
+    expect_eq(tag + " g repeat" + std::to_string(i), grad2[i], grad[i]);
   stan::math::recover_memory();
 }
 
@@ -167,6 +175,31 @@ static void run_bound_case(const std::string& tag, uint16_t opcode, int n,
   stan::math::recover_memory();
 }
 
+static void test_out2_is_result() {
+  using namespace stanli;
+  Graph g;
+  const int x = g.add_slot(1, true);
+  const int lb = g.add_slot(1, false);
+  const int constrained = g.add_slot(1, false);
+  const int jac = g.add_slot(1, false);
+  Op op;
+  op.opcode = OP_CONSTRAIN_LOWER;
+  op.out = constrained;
+  op.out2 = jac;
+  op.n_in = 2;
+  op.in[0] = x;
+  op.in[1] = lb;
+  g.ops.push_back(op);
+  g.result_slot = jac;
+
+  Executor ex(std::move(g));
+  *ex.param_ptr(x) = 0.7;
+  *ex.value_ptr(lb) = -2.0;
+  double grad = 0.0;
+  expect_eq("out2 result lp", ex.gradient(&grad), 0.7);
+  expect_eq("out2 result grad", grad, 1.0);
+}
+
 int main() {
   const double xs[3] = {0.3, -1.2, 2.0};
   const double x1[1] = {0.7};
@@ -175,6 +208,7 @@ int main() {
   run_case("upper vec", stanli::OP_CONSTRAIN_UPPER, 3, xs, 1.5, 0.0);
   run_case("lu vec", stanli::OP_CONSTRAIN_LU, 3, xs, -1.0, 2.0);
   run_case("lu scalar", stanli::OP_CONSTRAIN_LU, 1, x1, 0.0, 1.0);
+  test_out2_is_result();
 
   // Parameter-dependent bounds, shared and per-element, with and without
   // the jacobian.

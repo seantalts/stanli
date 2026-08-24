@@ -81,6 +81,16 @@ int main() {
       same = same && g1[(size_t)i] == g2[(size_t)i];
     expect("clone gradient is bitwise identical", same);
 
+    // Copying after a reverse sweep must rebuild compact adjoint offsets and
+    // contexts, not inherit the source arena's interior pointers or dirt.
+    Executor post_grad_clone(src);
+    std::vector<double> g_after((size_t)n);
+    const double lp_after = post_grad_clone.gradient(g_after.data());
+    bool same_after = lp_after == lp1;
+    for (int64_t i = 0; i < n; ++i)
+      same_after = same_after && g_after[(size_t)i] == g1[(size_t)i];
+    expect("post-gradient clone is bitwise identical", same_after);
+
     // And the two arenas are independent: evaluating one must not move
     // the other.
     for (int64_t i = 0; i < n; ++i) clone.params_data()[i] = 5.0;

@@ -624,12 +624,12 @@ int count(const Graph& g, uint16_t oc) {
 
 }  // namespace writefuse
 
-// (n) ldaK5 shape: one shared gamma vector, refilled by every unrolled
-// iteration's inner loop and read once by LOG_SUM_EXP before the next
-// refill. N iterations chain N store regions through that single slot, so
-// eager tail renaming made the pass quadratic in both time and memory
-// (the real model: 32,877 iterations, 52 s and 49 GB to compile, which
-// OOM-killed every CI runner).
+// (n) ldaK5 shape: gamma may be one shared vector refilled by every outer
+// iteration, or a fresh unrolled declaration per row. Each inner loop writes
+// every element and LOG_SUM_EXP reads the completed row. The former chains N
+// store regions through one slot, so eager tail renaming made the pass
+// quadratic in both time and memory (the real model: 32,877 iterations, 52 s
+// and 49 GB to compile, which OOM-killed every CI runner).
 //
 // Both are linear now, but they were fixed in two separate goes: the
 // lazy renaming took the quadratic term out of the allocation and left
@@ -652,8 +652,10 @@ struct Built {
   std::vector<int> terms;
 };
 
-Built build(int N) {
-  const int K = 5, V = 7;
+enum class GammaMode { Shared, Fresh };
+
+Built build(int N, int K = 5, GammaMode mode = GammaMode::Shared) {
+  const int V = 7;
   Built b;
   Graph& g = b.g;
   const int t0 = g.add_slot(1, true);
@@ -662,9 +664,16 @@ Built build(int N) {
   g.add_op(OP_REP_VEC, {t0}, thetav);
   const int phiv = g.add_slot(V, false);
   g.add_op(OP_REP_VEC, {p0}, phiv);
-  const int gamma = g.add_slot(K, false);
-  b.fills.emplace_back(gamma, std::vector<double>(K, 0.0));
+  int gamma = -1;
+  if (mode == GammaMode::Shared) {
+    gamma = g.add_slot(K, false);
+    b.fills.emplace_back(gamma, std::vector<double>(K, 0.0));
+  }
   for (int n = 0; n < N; ++n) {
+    if (mode == GammaMode::Fresh) {
+      gamma = g.add_slot(K, false);
+      b.fills.emplace_back(gamma, std::vector<double>(K, 0.0));
+    }
     for (int k = 0; k < K; ++k) {
       const int i1 = g.add_slot(1, false);
       g.add_op(OP_INDEX, {thetav}, i1, {k});
@@ -676,7 +685,17 @@ Built build(int N) {
       g.add_op(OP_LOGV, {i2}, l2);
       const int s = g.add_slot(1, false);
       g.add_op(OP_ADD, {l1, l2}, s);
-      g.add_op(OP_SET_INDEX_INPLACE, {gamma, s}, gamma, {k});
+      if (k == 0 && (n == 0 || mode == GammaMode::Fresh)) {
+        // The in-place pass cannot mutate a fill-backed declaration on its
+        // first write: repeated evaluations would inherit the last draw. A
+        // shared declaration copies once; fresh unrolled declarations copy at
+        // the start of every row. Later writes share the copied output.
+        const int next = g.add_slot(K, false);
+        g.add_op(OP_SET_INDEX, {gamma, s}, next, {k});
+        gamma = next;
+      } else {
+        g.add_op(OP_SET_INDEX_INPLACE, {gamma, s}, gamma, {k});
+      }
     }
     const int lse = g.add_slot(1, false);
     g.add_op(OP_LOG_SUM_EXP, {gamma}, lse);
@@ -685,30 +704,172 @@ Built build(int N) {
   return b;
 }
 
+static void test_lda_shape_refusals() {
+  // Fewer than four row targets cannot amortize the packed form and should
+  // return before even scanning the graph for a row signature.
+  {
+    ldashape::Built b = ldashape::build(3, 2);
+    const size_t before = b.g.ops.size();
+    const RerollStats st = reroll(b.g, b.fills, b.terms, {});
+    expect("lda short rows do not pack",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 0);
+    expect("lda short rows skip recognizer", st.row_steps == 0);
+    expect("lda short rows keep graph", b.g.ops.size() == before);
+  }
+
+  // A graph-external view of gamma is invisible to op use counts. The explicit
+  // root must keep the complete mutable row chain intact.
+  {
+    ldashape::Built b = ldashape::build(12, 2);
+    int gamma = -1;
+    for (const Op& op : b.g.ops)
+      if (op.opcode == OP_SET_INDEX || op.opcode == OP_SET_INDEX_INPLACE)
+        gamma = op.out;
+    const size_t before = b.g.ops.size();
+    const RerollStats st = reroll(b.g, b.fills, b.terms, {gamma});
+    expect("lda rows refuse gamma root",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 0);
+    expect("lda gamma-root refusal keeps graph", b.g.ops.size() == before);
+    expect("lda gamma-root refusal stays linear",
+           st.row_steps < 4 * (int64_t)before);
+  }
+
+  // The gathers are hoisted ahead of every row. A base that is also the
+  // mutable gamma buffer would therefore turn a recurrence into independent
+  // reads and must be rejected explicitly.
+  {
+    ldashape::Built b = ldashape::build(12, 2);
+    int gamma = -1;
+    for (const Op& op : b.g.ops)
+      if (op.opcode == OP_SET_INDEX || op.opcode == OP_SET_INDEX_INPLACE)
+        gamma = op.out;
+    int seen_index = 0;
+    for (Op& op : b.g.ops)
+      if (op.opcode == OP_INDEX && (seen_index++ % 2) == 0) op.in[0] = gamma;
+    reroll(b.g, b.fills, b.terms, {});
+    expect("lda rows refuse mutable base",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 0);
+  }
+
+  // Full overwrite makes the old gamma contents dead, but its final contents
+  // are not dead when another op observes them after the candidate batch.
+  {
+    ldashape::Built b = ldashape::build(12, 2);
+    int gamma = -1;
+    for (const Op& op : b.g.ops)
+      if (op.opcode == OP_SET_INDEX || op.opcode == OP_SET_INDEX_INPLACE)
+        gamma = op.out;
+    const int escaped = b.g.add_slot(1, false);
+    b.g.add_op(OP_LOG_SUM_EXP, {gamma}, escaped);
+    reroll(b.g, b.fills, b.terms, {});
+    expect("lda rows refuse live gamma",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 0);
+  }
+
+  // Fresh scratch does not weaken the escape rule: observing any completed
+  // row buffer after the candidate run keeps all of its stores intact.
+  {
+    ldashape::Built b = ldashape::build(12, 2, ldashape::GammaMode::Fresh);
+    int gamma = -1;
+    int row = 0;
+    for (const Op& op : b.g.ops)
+      if (op.opcode == OP_SET_INDEX && ++row == 6) gamma = op.out;
+    const int escaped = b.g.add_slot(1, false);
+    b.g.add_op(OP_LOG_SUM_EXP, {gamma}, escaped);
+    reroll(b.g, b.fills, b.terms, {});
+    expect("lda fresh rows refuse live gamma",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 0);
+  }
+
+  // The packed SUM replaces one contiguous subsequence. A target list with
+  // the same slots in a different order must not be silently regrouped.
+  {
+    ldashape::Built b = ldashape::build(12, 2);
+    std::swap(b.terms[1], b.terms[2]);
+    const size_t before = b.g.ops.size();
+    reroll(b.g, b.fills, b.terms, {});
+    expect("lda rows refuse reordered targets",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 0);
+    expect("lda target-order refusal keeps graph", b.g.ops.size() == before);
+  }
+
+  // Every scalar intermediate must belong solely to its grammar consumer.
+  // Give one ADD per row a second reader; K=2 also prevents the generic inner
+  // reroller from obscuring the row recognizer's refusal.
+  {
+    ldashape::Built b = ldashape::build(12, 2);
+    int seen_add = 0;
+    std::vector<int> escaped;
+    for (const Op& op : b.g.ops)
+      if (op.opcode == OP_ADD && (seen_add++ % 2) == 0)
+        escaped.push_back(op.out);
+    for (int s : escaped) {
+      const int dead = b.g.add_slot(1, false);
+      b.g.add_op(OP_NEG, {s}, dead);
+    }
+    reroll(b.g, b.fills, b.terms, {});
+    expect("lda rows refuse escaped intermediates",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 0);
+  }
+
+  // One malformed first row is a boundary, not a model-wide bail: the exact
+  // suffix still fuses, while the incomplete row retains its scalar LSE.
+  {
+    ldashape::Built b = ldashape::build(12, 2);
+    for (Op& op : b.g.ops) {
+      if (op.opcode != OP_SET_INDEX) continue;
+      b.g.idata_pool.push_back(std::vector<int>{1});  // duplicate k=1
+      op.idata = b.g.idata_pool.back().data();
+      op.n_idata = 1;
+      break;
+    }
+    reroll(b.g, b.fills, b.terms, {});
+    expect("lda malformed row stays scalar",
+           writefuse::count(b.g, OP_LOG_SUM_EXP) == 1);
+    expect("lda valid suffix still packs",
+           writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 1);
+  }
+}
+
 }  // namespace ldashape
 
 static void test_lda_shape_gradients() {
   const int N = 40;
-  ldashape::Built b = ldashape::build(N);
-  Graph ref = b.g;
-  reduce_into_result(ref, b.terms);
-  const std::vector<double> want = run_grad(std::move(ref), b.fills);
+  for (ldashape::GammaMode mode :
+       {ldashape::GammaMode::Shared, ldashape::GammaMode::Fresh})
+    for (int K : {2, 5}) {
+      const std::string shape =
+          mode == ldashape::GammaMode::Shared ? "shared" : "fresh";
+      const std::string label = "lda " + shape + " K" + std::to_string(K);
+      ldashape::Built b = ldashape::build(N, K, mode);
+      expect((label + " fill shape").c_str(),
+             b.fills.size() ==
+                 (mode == ldashape::GammaMode::Shared ? 1u : (size_t)N));
+      Graph ref = b.g;
+      reduce_into_result(ref, b.terms);
+      const std::vector<double> want = run_grad(std::move(ref), b.fills);
 
-  std::vector<int> tt = b.terms;
-  Fills f2 = b.fills;
-  RerollStats st = reroll(b.g, f2, tt, {});
-  expect("lda one region per iteration", st.regions == N);
-  // Per iteration: LOGV(theta) + GATHER + LOGV + ADD + LOG_SUM_EXP, plus a
-  // SET_SLICE chaining gamma everywhere but the last iteration (nothing
-  // writes gamma after it, so its lanes' values ARE the vector).
-  expect("lda stores chain", writefuse::count(b.g, OP_SET_SLICE) == N - 1);
-  expect("lda no element writes left",
-         writefuse::count(b.g, OP_SET_INDEX_INPLACE) == 0);
-  reduce_into_result(b.g, tt);
-  const std::vector<double> got = run_grad(std::move(b.g), f2);
-  expect("lda sizes", got.size() == want.size());
-  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
-    expect_close(("lda v" + std::to_string(i)).c_str(), got[i], want[i]);
+      std::vector<int> tt = b.terms;
+      Fills f2 = b.fills;
+      RerollStats st = reroll(b.g, f2, tt, {});
+      expect((label + " becomes one region").c_str(), st.regions == 1);
+      expect((label + " has seven fused ops plus inputs").c_str(),
+             b.g.ops.size() == 9);
+      expect((label + " has one packed reduction").c_str(),
+             writefuse::count(b.g, OP_LOG_SUM_EXP_ROWS) == 1);
+      expect((label + " has no scalar reductions").c_str(),
+             writefuse::count(b.g, OP_LOG_SUM_EXP) == 0);
+      expect((label + " has no stores").c_str(),
+             writefuse::count(b.g, OP_SET_INDEX) == 0 &&
+                 writefuse::count(b.g, OP_SET_INDEX_INPLACE) == 0);
+      expect((label + " has one target").c_str(), tt.size() == 1);
+      reduce_into_result(b.g, tt);
+      const std::vector<double> got = run_grad(std::move(b.g), f2);
+      expect((label + " gradient sizes").c_str(), got.size() == want.size());
+      for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+        expect_close((label + " v" + std::to_string(i)).c_str(), got[i],
+                     want[i]);
+    }
 }
 
 // Peak resident set for the process in MB, or -1 where the platform does
@@ -728,11 +889,10 @@ static double peak_rss_mb() {
 #endif
 }
 
-// What reroll costs on the lda shape at size n: the list entries it looks
-// at, which is the term that was quadratic, and the wall clock, which is
-// reported but not asserted on. The region count is checked along the way
-// so a pass that got cheap by doing less is not mistaken for a pass that
-// got cheap.
+// What reroll costs on the lda shape at size n: deterministic row-recognizer
+// work and the wall clock, which is reported but not asserted on. The fused
+// graph shape is checked so a pass that got cheap by doing less is not mistaken
+// for a pass that got cheap.
 struct LdaCost {
   double sec;
   int64_t steps;
@@ -746,8 +906,9 @@ static LdaCost lda_reroll_cost(int n) {
   const double sec =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
           .count();
-  expect("lda big all regions found", st.regions == n);
-  return {sec, st.list_steps};
+  expect("lda big rows fused", st.regions == 1);
+  expect("lda big fixed fused graph", b.g.ops.size() == 9 && tt.size() == 1);
+  return {sec, st.row_steps};
 }
 
 static void test_lda_shape_cost() {
@@ -771,11 +932,10 @@ static void test_lda_shape_cost() {
   // 12 GB at n=16000, so 1 GB separates them with room on both sides.
   if (rss > 0.0) expect("lda reroll space stays linear", rss < 1024.0);
 
-  // Count the work, do not time it. A doubling of n doubles the entries
-  // this pass reads (2.1x measured) against a quadrupling for the
-  // whole-list scan it replaced (4.0x measured), so 3x separates the two
-  // with room on both sides, and the count is the same integer on every
-  // machine.
+  // Count the work, do not time it. A doubling of n doubles the scalar row
+  // grammar and the ownership scan. The count is the same integer on every
+  // machine and also covers late fail-closed runs, which must not retry every
+  // suffix of one shared gamma chain.
   //
   // The wall clock is not. Two earlier versions of this check gated on
   // it, first as an absolute budget and then as a ratio, and between
@@ -784,6 +944,122 @@ static void test_lda_shape_cost() {
   // quiet laptop. The ratio formulation barely separated the two cases
   // even there: the quadratic scan timed 3.1x against a 3.0x bound.
   expect("lda reroll work stays near-linear", big.steps < 3 * small.steps);
+}
+
+// A graph with no density, element store, or target-term widenable op cannot
+// contain a profitable region at any period. LOG_SUM_EXP is deliberately not
+// in that allowlist: this is the scalar residue left by ldaK5 after its gamma
+// rows are built, and making every output a target proves the fast path is not
+// merely relying on an empty target list.
+struct NoCandidateCost {
+  double sec;
+  int64_t steps;
+};
+
+static NoCandidateCost no_candidate_cost(int n) {
+  Graph g;
+  Fills fills;
+  const int row = g.add_slot(5, true);
+  std::vector<int> terms;
+  terms.reserve((size_t)n);
+  for (int i = 0; i < n; ++i) {
+    const int out = g.add_slot(1, false);
+    g.add_op(OP_LOG_SUM_EXP, {row}, out);
+    terms.push_back(out);
+  }
+  const size_t before_ops = g.ops.size();
+  const std::vector<int> before_terms = terms;
+  const auto t0 = std::chrono::steady_clock::now();
+  const RerollStats st = reroll(g, fills, terms, {});
+  const double sec =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  expect("no-candidate finds no regions", st.regions == 0);
+  expect("no-candidate never reads use lists", st.list_steps == 0);
+  expect("no-candidate graph unchanged", g.ops.size() == before_ops);
+  expect("no-candidate terms unchanged", terms == before_terms);
+  return {sec, st.candidate_steps};
+}
+
+static void test_no_candidate_cost() {
+  const NoCandidateCost small = no_candidate_cost(8000);
+  const NoCandidateCost big = no_candidate_cost(16000);
+  std::printf(
+      "  no-candidate reroll: n=8000 %.6f s / %lld steps,"
+      " n=16000 %.6f s / %lld steps (%.1fx steps, %.1fx time)\n",
+      small.sec, (long long)small.steps, big.sec, (long long)big.steps,
+      small.steps > 0 ? (double)big.steps / (double)small.steps : 0.0,
+      small.sec > 0.0 ? big.sec / small.sec : 0.0);
+
+  // Count the work rather than asserting on a machine-dependent timer. The
+  // one viability pass examines every op exactly once; the old nested period
+  // scan performed O(kMaxPeriod^2 * n) checks after reaching the same answer.
+  expect("no-candidate small scans once", small.steps == 8000);
+  expect("no-candidate big scans once", big.steps == 16000);
+  expect("no-candidate work scales linearly", big.steps == 2 * small.steps);
+}
+
+// One early density makes the whole-graph guard pass, but the long tail has no
+// candidates. This is nn_rbm's shape: a few prior densities followed by a
+// large scalar residue. Candidate windows must be range queries over the index,
+// not repeated scans through that tail.
+struct SparseCandidateCost {
+  double sec;
+  int64_t steps;
+  int64_t expected;
+};
+
+static SparseCandidateCost sparse_candidate_cost(int n) {
+  Graph g;
+  Fills fills;
+  const int y = g.add_slot(1, false);
+  const int mu = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  std::vector<int> terms{lp};
+  const int row = g.add_slot(5, true);
+  terms.reserve((size_t)n + 1);
+  for (int i = 0; i < n; ++i) {
+    const int out = g.add_slot(1, false);
+    g.add_op(OP_LOG_SUM_EXP, {row}, out);
+    terms.push_back(out);
+  }
+
+  const size_t n_ops = g.ops.size();
+  int64_t expected = (int64_t)n_ops;  // build the next-candidate index
+  for (size_t i = 0; i < n_ops; ++i)
+    for (int P = 1; P <= 32 && i + 2 * (size_t)P <= n_ops; ++P) ++expected;
+
+  const size_t before_ops = g.ops.size();
+  const std::vector<int> before_terms = terms;
+  const auto t0 = std::chrono::steady_clock::now();
+  const RerollStats st = reroll(g, fills, terms, {});
+  const double sec =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  expect("sparse-candidate finds no regions", st.regions == 0);
+  expect("sparse-candidate never reads use lists", st.list_steps == 0);
+  expect("sparse-candidate graph unchanged", g.ops.size() == before_ops);
+  expect("sparse-candidate terms unchanged", terms == before_terms);
+  return {sec, st.candidate_steps, expected};
+}
+
+static void test_sparse_candidate_cost() {
+  const SparseCandidateCost small = sparse_candidate_cost(8000);
+  const SparseCandidateCost big = sparse_candidate_cost(16000);
+  std::printf(
+      "  sparse-candidate reroll: n=8000 %.6f s / %lld steps,"
+      " n=16000 %.6f s / %lld steps (%.1fx steps, %.1fx time)\n",
+      small.sec, (long long)small.steps, big.sec, (long long)big.steps,
+      small.steps > 0 ? (double)big.steps / (double)small.steps : 0.0,
+      small.sec > 0.0 ? big.sec / small.sec : 0.0);
+
+  expect("sparse-candidate small counts index queries",
+         small.steps == small.expected);
+  expect("sparse-candidate big counts index queries",
+         big.steps == big.expected);
+  expect("sparse-candidate work stays linear", big.steps < 3 * small.steps);
 }
 
 static void test_write_fusion() {
@@ -1125,7 +1401,10 @@ int main() {
   test_bail_extra_root();
   test_bail_categorical_ops();
   test_lda_shape_gradients();
+  ldashape::test_lda_shape_refusals();
   test_lda_shape_cost();
+  test_no_candidate_cost();
+  test_sparse_candidate_cost();
   test_write_fusion();
   test_write_fusion_bails();
   test_write_fusion_scalar_chain();

@@ -443,6 +443,22 @@ add_executable(stanli_check tools/stanli_check.cpp tests/tbb_stub.cpp)
 target_link_libraries(stanli_check PRIVATE stanli)
 add_executable(bench_grad tools/bench_grad.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_grad PRIVATE stanli)
+add_test(NAME test_prep_only
+         COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
+                 tests/fixtures/ar1.json --prep
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(test_prep_only PROPERTIES
+  ENVIRONMENT "STANLI_PROFILE_PREP=0"
+  PASS_REGULAR_EXPRESSION "[0-9]+\\.[0-9]+ 24"
+  FAIL_REGULAR_EXPRESSION "stanli_prep")
+add_test(NAME test_prep_profile
+         COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
+                 tests/fixtures/ar1.json --prep
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(test_prep_profile PROPERTIES
+  ENVIRONMENT "STANLI_PROFILE_PREP=1"
+  PASS_REGULAR_EXPRESSION
+    "stanli_prep graph=driver stage=total ns=[0-9]+")
 add_executable(bench_opcost tools/bench_opcost.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_dispatch tools/bench_dispatch.cpp)

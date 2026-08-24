@@ -15,6 +15,15 @@ namespace stanli {
 
 struct RerollStats {
   int regions = 0;
+  // Deterministic work in the exact packed-row recognizer. It counts one
+  // initial ownership scan plus the scalar ops inspected while matching rows;
+  // a long recognized or refused run must remain linear in its op count.
+  int64_t row_steps = 0;
+  // Deterministic work in the candidate index: one step per original op while
+  // building it, plus one per [i, i + P) window query. A graph with no
+  // candidate op returns after exactly g.ops.size() steps, before building the
+  // use/writer lists; sparse candidates keep every later query O(1).
+  int64_t candidate_steps = 0;
   // Entries of the per-slot use and writer lists the pass read. This is
   // the term that was once quadratic in the op count, and it is what
   // tests/test_reroll.cpp asserts near-linearity on: an exact integer,

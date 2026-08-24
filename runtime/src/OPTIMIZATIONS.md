@@ -5,6 +5,29 @@ people who have not worked on compilers. Each section says what the
 problem is, what the pass does, and how to turn it off when debugging.
 Measurements are in [`docs/benchmarks.md`](../../docs/benchmarks.md).
 
+## Data input preload (`lower.cpp`, disable: `STANLI_NO_DATA_PRELOAD=1`)
+
+stanc's transformed MIR contains a small program that reconstructs each input
+from a flat `FnReadData` buffer. That is useful to generated C++, but redundant
+here: `DataMap` has already parsed the JSON into the same typed, column-major
+layout. Replaying the program is especially expensive for matrices because it
+performs one interpreted assignment per element.
+
+Lowering therefore binds declared inputs directly and recognizes the statement
+and name envelope used by stanc's pinned hydration code: a direct
+scalar/vector load, or the generated flat-buffer container-copy loop. Anything
+with another statement kind, effect, data source, or written name still goes
+through the transformed-data interpreter. User-written transformed-data
+statements always run; `STANLI_NO_DATA_PRELOAD=1` remains the exact interpreter
+oracle for auditing future stanc output changes.
+
+On `nn_rbm1bJ100`, whose MNIST input is a 60,000 x 784 matrix, this reduces the
+`bind_data` stage from 23.56 s to 0.09 s and complete graph compilation from
+23.80 s to 0.23 s. It also avoids carrying an integer mirror merely because
+the JSON happened to spell a real matrix with integer tokens. Set
+`STANLI_NO_DATA_PRELOAD=1` to replay the generated hydration as a correctness
+oracle.
+
 ## Background: why op count matters
 
 stanli turns a Stan model into a list of operations ("ops"). Each op
@@ -140,6 +163,21 @@ usual, and one summing op replaces the N per-lane target entries. A
 density whose inputs are the same buffer in every lane stays one scalar
 op instead.
 
+Fixed-width row reductions get one deliberately narrower pre-pass. The LDA
+shape fills every element of a short `gamma` vector, then contributes
+`log_sum_exp(gamma)` once per document. Because K=2 is below the ordinary
+lane threshold and the scalar reduction separates the outer rows, the exact
+concrete grammar is recognized as a unit: two indexed reads, logs, an add,
+the complete element stores, and a target-only reduction. Consecutive rows
+become two gathers over packed row-major indices, vector logs/add, one
+`OP_LOG_SUM_EXP_ROWS`, and `OP_SUM_VEC`. Every removed temporary and the
+row scratch buffers must have only the proven readers/writers and no external
+root. Rows may continue one shared in-place chain or start from disjoint fresh
+scratch, but every accepted row overwrites indices 0 through K-1 before its
+reduction. Target terms must be one unique contiguous subsequence. Repeated
+gather indices are safe, while partial stores, recurrences, escaped values, or
+mixed bases refuse the rewrite.
+
 Anything the pass cannot prove safe it leaves alone. The common
 reasons: a lane reads a result computed by the previous lane (a
 recurrence involving parameters), a lane's intermediate is used outside
@@ -150,6 +188,15 @@ tries again on the rest, which handles data that comes in blocks.
 Scale: `radon_pooled` drops from 27,670 ops to 8, `radon_county` from
 25,152 to 10, `election88_full` from 289,165 to 65, `dogs` from 12,751
 to 261, `low_dim_gauss_mix` to 16.
+
+Candidate discovery is indexed once before classification. A period window can
+therefore ask in O(1) whether it contains any density, element store, or
+target-producing widenable op; a graph with none returns before allocating the
+reader/writer lists. This matters for large scalar residue the pass cannot
+express: `nn_rbm1bJ100`'s zero-region scan falls from 126 ms to 13 ms, and the
+candidate-free million-op LDA shape from 1.16 s to about 3.4 ms. The exact
+candidate-index, packed-row, and use-list work counters live in `RerollStats`
+and have deterministic scaling tests.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 
@@ -280,11 +327,21 @@ Together these made the ODE models 29-39x faster.
 - Each op's context (the pointers telling the kernel where its inputs,
   outputs, and scratch are) is built once at setup; nothing moves
   afterwards, so there is nothing to rebuild per evaluation.
-- All values live in one arena, all adjoints in another, both allocated
-  once. A steady-state gradient evaluation performs no allocation.
+- All values live in one arena. Adjoint storage is a separate compact
+  layout: parameters first, then only slots surviving ops write (plus a
+  constant result). Data and slots left behind by graph rewrites therefore
+  consume no adjoint memory and are absent from the one reset `memset`.
+  Both arenas are allocated once; a steady-state gradient evaluation
+  performs no allocation.
 - Kernel function pointers are resolved once at setup into two flat
   lists (forward order and reverse order, with backward-less ops left
   out of the second), and both sweeps are unrolled four at a time.
+
+On `iohmm_reg` this packs 1,604,979 adjoint doubles down to 3,084 and
+moves the median gradient from 282.9 to 233.7 us (1.21x). Values deliberately
+keep their original slot layout: a compiler-final value tombstone prototype
+was correct but shifted hot buffers and consistently slowed `Mtbh_model` by
+about 8%, so it is not part of this optimization.
 
 A tail-call threaded dispatch, the usual next step, measured slower
 than the unrolled loop (`tools/bench_dispatch.cpp` keeps the
@@ -311,7 +368,8 @@ silently. Three layers:
 - Direct verification against CmdStan (`tools/verify_sample.py`) for
   models a change affects.
 
-The env switches (`STANLI_NO_INPLACE`, `STANLI_NO_CONSTFOLD`,
-`STANLI_NO_REROLL`, `STANLI_NO_ISLAND`) exist so a wrong result can be
-attributed to one pass quickly, and they are how each pass is measured:
-every speed number is the same build with one variable set and unset.
+The env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
+`STANLI_NO_CONSTFOLD`, `STANLI_NO_REROLL`, `STANLI_NO_ISLAND`) exist so a wrong
+result can be attributed to one optimization quickly, and they are how each
+one is measured: every speed number is the same build with one variable set
+and unset.

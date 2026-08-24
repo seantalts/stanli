@@ -76,6 +76,7 @@ namespace stanli {
   X(OP_EIGENVALUES_SYM)             \
   X(OP_EIGENVECTORS_SYM)            \
   X(OP_LOG_SUM_EXP)                 \
+  X(OP_LOG_SUM_EXP_ROWS)            \
   X(OP_LSE2)                        \
   X(OP_LOG_DIFF_EXP)                \
   X(OP_LOG_MIX)                     \
@@ -745,6 +746,7 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_SET_INDEX:
     case OP_SET_INDEX_INPLACE:
     case OP_LOG_SUM_EXP:
+    case OP_LOG_SUM_EXP_ROWS:
       return op_trait::kBackwardValueFree;
     default:
       return 0;

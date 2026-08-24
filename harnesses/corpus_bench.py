@@ -2,7 +2,8 @@
 """Corpus-wide head-to-head: stanli vs CmdStan on every posteriordb model.
 
 Per model, both engines get one column each for
-  - model preparation (stanli: lower+bind; CmdStan: stanc + full make)
+  - model preparation (stanli: file read + parse + compile + bind;
+    CmdStan: stanc + full make)
   - per-gradient latency
   - end to end 1000 warmup + 1000 draws
 Results stream to a TSV as they complete, so a partial run is still
@@ -121,9 +122,19 @@ def main():
             else:
                 n_params = int(probe.stdout.split()[-1])
                 row["params"] = n_params
-                t0 = time.perf_counter()
-                run([str(BENCH), str(sexp), str(dj), "1"], timeout)
-                row["stanli_prep_s"] = f"{time.perf_counter() - t0:.3f}"
+                # Compile and bind only. The old `1` invocation also ran a
+                # time-capped warmup plus one measured gradient, which made
+                # this column depend on model runtime and mislabeled ~200 ms
+                # as preparation even on small models.
+                prep = run([str(BENCH), str(sexp), str(dj), "--prep"], timeout)
+                prep_lines = ([line for line in prep.stdout.splitlines()
+                               if line.strip()]
+                              if prep and prep.returncode == 0 else [])
+                if prep_lines:
+                    row["stanli_prep_s"] = (
+                        f"{float(prep_lines[-1].split()[0]):.3f}")
+                else:
+                    notes.append("stanli_prep_fail")
                 g = run([str(BENCH), str(sexp), str(dj),
                          str(evals_for(n_params))], timeout)
                 if g:

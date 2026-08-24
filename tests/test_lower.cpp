@@ -20,6 +20,8 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 static int failures = 0;
 static void check(bool ok, const std::string& what) {
@@ -74,6 +76,79 @@ static stanli::DataMap bound_check_data(double raw = 0.0, int N = 1, int M = 1,
   return d;
 }
 
+// Compile and evaluate once with either the direct data preload or its
+// interpreter oracle.  The escape hatch is compile-time only; always clear it
+// before execution (and on exceptions) so one comparison cannot contaminate
+// the next test in this process.
+struct LowerSnapshot {
+  double lp = 0.0;
+  std::vector<double> grad;
+  size_t ops = 0;
+  size_t slots = 0;
+  std::vector<std::pair<int, std::vector<double>>> fills;
+};
+
+static LowerSnapshot lower_snapshot(const std::string& mir,
+                                    const stanli::DataMap& data,
+                                    const std::vector<double>& q,
+                                    bool disable_preload) {
+  if (disable_preload)
+    test_setenv("STANLI_NO_DATA_PRELOAD", "1", 1);
+  else
+    test_unsetenv("STANLI_NO_DATA_PRELOAD");
+  stanli::CompiledModel cm;
+  try {
+    cm = stanli::compile_model(mir, data);
+  } catch (...) {
+    test_unsetenv("STANLI_NO_DATA_PRELOAD");
+    throw;
+  }
+  test_unsetenv("STANLI_NO_DATA_PRELOAD");
+
+  LowerSnapshot out;
+  out.ops = cm.graph.ops.size();
+  out.slots = cm.graph.slots.size();
+  out.fills = cm.fills;
+  stanli::Executor ex(std::move(cm.graph));
+  cm.bind(ex);
+  check(ex.n_params() == static_cast<int64_t>(q.size()),
+        "data preload snapshot parameter count");
+  for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i];
+  out.grad.resize(q.size());
+  out.lp = ex.gradient(out.grad.data());
+  return out;
+}
+
+static std::string lower_error(const std::string& mir,
+                               const stanli::DataMap& data,
+                               bool disable_preload) {
+  if (disable_preload)
+    test_setenv("STANLI_NO_DATA_PRELOAD", "1", 1);
+  else
+    test_unsetenv("STANLI_NO_DATA_PRELOAD");
+  try {
+    (void)stanli::compile_model(mir, data);
+  } catch (const std::exception& e) {
+    test_unsetenv("STANLI_NO_DATA_PRELOAD");
+    return e.what();
+  }
+  test_unsetenv("STANLI_NO_DATA_PRELOAD");
+  return {};
+}
+
+static void expect_same_lowering(const std::string& tag,
+                                 const LowerSnapshot& fast,
+                                 const LowerSnapshot& oracle) {
+  check(fast.ops == oracle.ops, tag + " op count");
+  check(fast.slots == oracle.slots, tag + " slot count");
+  check(fast.fills == oracle.fills, tag + " fills bitwise");
+  expect_eq(tag + " lp", fast.lp, oracle.lp);
+  check(fast.grad.size() == oracle.grad.size(), tag + " gradient size");
+  const size_t n = std::min(fast.grad.size(), oracle.grad.size());
+  for (size_t i = 0; i < n; ++i)
+    expect_eq(tag + " g" + std::to_string(i), fast.grad[i], oracle.grad[i]);
+}
+
 static const double kY[8] = {28, 8, -3, 7, -1, 1, 18, 12};
 static const double kSigma[8] = {15, 10, 16, 11, 9, 11, 10, 18};
 
@@ -118,6 +193,70 @@ int main() {
   // to `stanc --O1` instead and is verified there.
   stanli::set_packet_math(false);
   using namespace stanli;
+
+  // Direct input preload must be an exact replacement for stanc's generated
+  // FnReadData reconstruction.  This one fixture covers a vector, a matrix,
+  // and two array-of-vector inputs; y is deliberately written with integer
+  // JSON tokens even though its Stan declaration is real, exercising the
+  // schema-based removal of the JSON reader's int mirror.
+  {
+    const DataMap d = DataMap::from_json(
+        R"({"N": 3, "K": 2,
+             "t": [0.5, 1.75, 2.25],
+             "y": [[1, 2], [3, 4], [5, 6]],
+             "p": [[0.3, 0.7], [0.4, 0.6], [0.2, 0.8]],
+             "Sigma": [[2.0, 0.5], [0.5, 1.0]]})");
+    const std::vector<double> q = {0.35, -0.2,  0.4,  0.15, -0.3,
+                                   0.5,  -0.45, 0.25, -0.1};
+    const std::string mir = slurp("tests/fixtures/shapes.tmir.sexp");
+    const LowerSnapshot fast = lower_snapshot(mir, d, q, false);
+    const LowerSnapshot oracle = lower_snapshot(mir, d, q, true);
+    expect_same_lowering("data preload shapes", fast, oracle);
+  }
+
+  // A future stanc version may put another effect in the same top-level block
+  // as an input rebuild.  Make that shape synthetically by changing the inner
+  // generated `pos__ = pos__ + 1` into `N = pos__ + 1`.  The conservative
+  // classifier must interpret the whole mixed block; skipping it would leave
+  // y as [3,4], while the interpreter rebuilds it as [3,3].
+  {
+    std::string mir = slurp("tests/fixtures/loopy.tmir.sexp");
+    const std::string from = "(Assignment ((LVariable pos__) ()) UInt";
+    const std::string to = "(Assignment ((LVariable N) ()) UInt";
+    size_t pos = 0;
+    for (int occurrence = 0; occurrence < 3 && pos != std::string::npos;
+         ++occurrence) {
+      pos = mir.find(from, pos);
+      if (occurrence < 2 && pos != std::string::npos) pos += from.size();
+    }
+    check(pos != std::string::npos, "data preload mixed-block mutation");
+    if (pos != std::string::npos) mir.replace(pos, from.size(), to);
+    const DataMap d = DataMap::from_json(R"({"N": 2, "y": [3, 4]})");
+    const LowerSnapshot fast = lower_snapshot(mir, d, {0.4}, false);
+    const LowerSnapshot oracle = lower_snapshot(mir, d, {0.4}, true);
+    expect_same_lowering("data preload mixed block", fast, oracle);
+  }
+
+  // A missing input and a real-valued JSON token for an integer input must
+  // take the checked interpreter path, not become a partial preload or a
+  // truncating cast.  The fast-path-on and escape-hatch diagnostics agree.
+  {
+    DataMap missing;
+    missing.set_int("N", 2);
+    const std::string mir = slurp("tests/fixtures/loopy.tmir.sexp");
+    const std::string fast = lower_error(mir, missing, false);
+    const std::string oracle = lower_error(mir, missing, true);
+    check(!fast.empty() && fast.find("y") != std::string::npos,
+          "data preload missing input rejected");
+    check(fast == oracle, "data preload missing input diagnostic");
+
+    const DataMap malformed = DataMap::from_json(R"({"K": 1.5})");
+    const std::string simp = slurp("tests/fixtures/simp.tmir.sexp");
+    const std::string fast_int = lower_error(simp, malformed, false);
+    const std::string oracle_int = lower_error(simp, malformed, true);
+    check(!fast_int.empty(), "data preload real token for int rejected");
+    check(fast_int == oracle_int, "data preload int diagnostic");
+  }
 
   DataMap data;
   data.set_int("J", 8);

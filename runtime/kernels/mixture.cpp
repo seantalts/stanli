@@ -20,12 +20,12 @@
 // forward algorithm -- fill `acc` element by element, read it whole --
 // take the in-place path.
 #include <stanli/graph.hpp>
-#include <stanli/legacy.hpp>
 #include <stanli/optable.hpp>
 
 #include <stan/math.hpp>
 
 #include <array>
+#include <cassert>
 
 namespace stanli {
 namespace {
@@ -35,9 +35,20 @@ int64_t lse_scratch(const Op& op, const Slot* slots) {
   return slots[op.in[0]].len;
 }
 
+double lse_fwd_partials(const double* data, int64_t len, double* partials) {
+  stan::math::nested_rev_autodiff nested;
+  stan::math::var_value<Eigen::VectorXd> x(
+      Eigen::Map<const Eigen::VectorXd>(data, len));
+  stan::math::var out = stan::math::log_sum_exp(x);
+  const double value = out.val();
+  stan::math::grad(out.vi_);
+  Eigen::Map<Eigen::VectorXd>(partials, len) = x.adj();
+  return value;
+}
+
 void lse_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = legacy_fwd_partials_vec(
-      ctx, [](const auto& x) { return stan::math::log_sum_exp(x); });
+  ctx.out.data[0] =
+      lse_fwd_partials(ctx.in[0].data, ctx.in[0].len, ctx.scratch);
 }
 
 void lse_bwd(KernelCtx& ctx) {
@@ -45,6 +56,35 @@ void lse_bwd(KernelCtx& ctx) {
   const int64_t n = ctx.in[0].len;
   for (int64_t i = 0; i < n; ++i)
     ctx.in_adj[0].data[i] += ctx.out_adj * ctx.scratch[i];
+}
+
+// ---- log_sum_exp over packed rows -----------------------------------------
+// One flat row-major input, idata[0] = row width K, and one scalar output per
+// row. Each row takes the exact scalar OP_LOG_SUM_EXP path above. Reduction is
+// deliberately a separate op: this kernel maps rows and does not choose how
+// the caller groups their target terms.
+void lse_rows_fwd(KernelCtx& ctx) {
+  assert(ctx.n_idata == 1);
+  const int64_t K = ctx.idata[0];
+  assert(K > 0 && ctx.in[0].len == ctx.out.len * K);
+  for (int64_t r = 0; r < ctx.out.len; ++r) {
+    const int64_t off = r * K;
+    ctx.out.data[r] =
+        lse_fwd_partials(ctx.in[0].data + off, K, ctx.scratch + off);
+  }
+}
+
+void lse_rows_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  assert(ctx.n_idata == 1);
+  const int64_t K = ctx.idata[0];
+  assert(K > 0 && ctx.in[0].len == ctx.out.len * K);
+  for (int64_t r = 0; r < ctx.out.len; ++r) {
+    const int64_t off = r * K;
+    const double scale = ctx.out_adj_vec.data[r];
+    for (int64_t k = 0; k < K; ++k)
+      ctx.in_adj[0].data[off + k] += scale * ctx.scratch[off + k];
+  }
 }
 
 // ---- log_sum_exp(a, b) / log_mix(theta, a, b) -----------------------------
@@ -120,6 +160,8 @@ void log_mix_fwd(KernelCtx& ctx) {
 
 void register_mixture_kernels() {
   register_kernel(OP_LOG_SUM_EXP, Kernel{lse_fwd, lse_bwd, lse_scratch});
+  register_kernel(OP_LOG_SUM_EXP_ROWS,
+                  Kernel{lse_rows_fwd, lse_rows_bwd, lse_scratch});
   register_kernel(OP_LSE2, Kernel{lse2_fwd, mix_bwd<2>, mix_scratch<2>});
   register_kernel(OP_LOG_DIFF_EXP,
                   Kernel{log_diff_exp_fwd, mix_bwd<2>, mix_scratch<2>});

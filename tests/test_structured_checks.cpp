@@ -4,6 +4,8 @@
 // transformed-parameter, or generated-quantity declaration. The value may be
 // an array, whose JSON/interpreter storage interleaves leaves even though the
 // lowered graph keeps each leaf contiguous.
+#include "env_helpers.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/sexp.hpp>
@@ -490,10 +492,22 @@ void test_data_arrays() {
     "d_cov":[], "d_cholesky_corr":[], "d_cholesky_cov":[],
     "d_sum_to_zero_matrix":[]
   })";
-  check(outcome([&] {
-          (void)stanli::compile_model(mir, DataMap::from_json(empty));
-        }) == Outcome::Accepted,
+  const auto compile_empty = [&](bool disable_preload) {
+    if (disable_preload)
+      test_setenv("STANLI_NO_DATA_PRELOAD", "1", 1);
+    else
+      test_unsetenv("STANLI_NO_DATA_PRELOAD");
+    const Outcome result = outcome(
+        [&] { (void)stanli::compile_model(mir, DataMap::from_json(empty)); });
+    test_unsetenv("STANLI_NO_DATA_PRELOAD");
+    return result;
+  };
+  const Outcome empty_fast = compile_empty(false);
+  const Outcome empty_oracle = compile_empty(true);
+  check(empty_fast == Outcome::Accepted,
         "zero outer batch executes zero structured leaf checks");
+  check(empty_fast == empty_oracle,
+        "preloaded empty structured arrays match interpreter oracle");
 
   std::string malformed = mir;
   const size_t gq = malformed.find("(decl_id gq_sum_to_zero)");

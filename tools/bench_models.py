@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Per-gradient benchmark across a set of posteriordb models: stanli vs
 CmdStan, both at the same deterministic unconstrained point, both -O3 and
--ffp-contract=off. Also reports model-preparation time (stanli lowering vs
-CmdStan's stanc + clang compile), which is the time-to-first-draw term.
+-ffp-contract=off. Also reports model-preparation time (stanli file read,
+parse, graph compile, and bind vs CmdStan's stanc + clang compile), which is
+the time-to-first-draw term.
 
 Usage: tools/bench_models.py CMDSTAN_DIR PDB_DIR [model ...]
 
@@ -85,11 +86,17 @@ def main():
         rt_ns = float(out[0])
         t_rt_total = time.perf_counter() - t0
 
-        # stanli preparation: lowering only (one eval run, minus the eval).
-        t0 = time.perf_counter()
-        subprocess.run([str(REPO / "build-rel/bench_grad"), str(sexp),
-                        str(dj), "1"], capture_output=True, text=True)
-        t_lower = time.perf_counter() - t0
+        # File read + JSON parse + MIR compile + Executor construction/bind,
+        # with no gradient warmup or measured evaluation.
+        prep = subprocess.run(
+            [str(REPO / "build-rel/bench_grad"), str(sexp), str(dj),
+             "--prep"], capture_output=True, text=True)
+        prep_lines = [line for line in prep.stdout.splitlines() if line.strip()]
+        if prep.returncode != 0 or not prep_lines:
+            print(f"SKIP {model}: stanli preparation failed")
+            continue
+        # A transformed-data print may precede bench_grad's result line.
+        t_lower = float(prep_lines[-1].split()[0])
 
         # CmdStan: stanc to C++, clang compile, then time the same loop.
         hpp = tmp / f"{model}.hpp"

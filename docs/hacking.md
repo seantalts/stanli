@@ -159,6 +159,12 @@ The tools you will reach for most:
   gradient evaluation, printed.
 - [`stanli_run`](../tools/stanli_run.cpp): a full sampling run,
   CmdStan-style CSV out.
+- [`bench_grad`](../tools/bench_grad.cpp): gradient/forward timing. Pass
+  `--prep` instead of an evaluation count to measure file-to-bound-executor
+  preparation without warmup; `STANLI_PROFILE_PREP=1` splits that path into
+  JSON/MIR parsing, every lowering pass, Executor construction, and binding.
+  For compile timing, use `graph=compile stage=total`: the enclosing driver
+  call also includes emitting the buffered profile rows.
 - [`dump_ops`](../tools/dump_ops.cpp): print the op list a model
   lowered to. Usually the first thing to look at.
 - [`dump_islands`](../tools/dump_islands.cpp): print every island's
@@ -486,7 +492,8 @@ For sampler changes, use
 generated-quantities coverage, run the verifier with `--wa-report`.
 For a live CmdStan column-name comparison, use `--wa-headers deps/cmdstan`.
 Both modes default to `build-rel/stanli_check`. For any
-performance claim, measure with `STANLI_PROFILE=1` before and after;
+performance claim, measure with `STANLI_PROFILE=1` before and after for
+evaluation work, or `STANLI_PROFILE_PREP=1` for compilation and binding;
 [`docs/benchmarks.md`](benchmarks.md) has the harnesses.
 
 ## Landing a change

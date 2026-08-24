@@ -4,6 +4,7 @@
 #include <stanli/optable.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 static int failures = 0;
@@ -57,6 +58,35 @@ int main() {
   expect_eq("d/da after value-only", grad2[0], grad[0]);
   expect_eq("d/db after value-only", grad2[1], grad[1]);
 
+  // A large data slot between active slots used to occupy the adjoint arena
+  // and get cleared on every gradient even though kernels correctly receive
+  // a null adjoint for it. The private adjoint layout must contain only the
+  // parameter, the indexed scalar, and the result -- not the million data
+  // values. Repeating after changing both inputs catches stale compact cells.
+  Graph sparse;
+  const int sx = sparse.add_slot(1, true);
+  const int sd = sparse.add_slot(INT64_C(1) << 20, false);
+  const int sp = sparse.add_slot(1, false);
+  const int slp = sparse.add_slot(1, false);
+  sparse.add_op(OP_INDEX, {sd}, sp, {17});
+  sparse.add_op(OP_MUL, {sx, sp}, slp);
+  sparse.result_slot = slp;
+  Executor sparse_ex(std::move(sparse));
+  if (sparse_ex.adjoint_storage_size() != 3) {
+    ++failures;
+    std::printf("FAIL compact adjoints got %lld want 3\n",
+                (long long)sparse_ex.adjoint_storage_size());
+  }
+  *sparse_ex.param_ptr(sx) = 2.0;
+  sparse_ex.value_ptr(sd)[17] = 3.5;
+  double sparse_grad[1] = {0};
+  expect_eq("sparse value", sparse_ex.gradient(sparse_grad), 7.0);
+  expect_eq("sparse grad", sparse_grad[0], 3.5);
+  *sparse_ex.param_ptr(sx) = -4.0;
+  sparse_ex.value_ptr(sd)[17] = -1.25;
+  expect_eq("sparse value 2", sparse_ex.gradient(sparse_grad), 5.0);
+  expect_eq("sparse grad 2", sparse_grad[0], -1.25);
+
   // BCAST_FMA forward: out[i] = a + b * x[i].
   Graph g2;
   const int s_a = g2.add_slot(1, true);
@@ -77,6 +107,32 @@ int main() {
   expect_eq("fma[0]", o[0], 0.5 + 2.0 * 1.0);
   expect_eq("fma[1]", o[1], 0.5 + 2.0 * -2.0);
   expect_eq("fma[2]", o[2], 0.5 + 2.0 * 0.25);
+
+  // A forward-only graph need not designate a scalar result. Binding still
+  // compacts its written adjoints without indexing result_slot == -1.
+  Graph no_result;
+  const int nr_in = no_result.add_slot(1, false);
+  const int nr_out = no_result.add_slot(1, false);
+  no_result.add_op(OP_EXP, {nr_in}, nr_out);
+  Executor nr_ex(std::move(no_result));
+  *nr_ex.value_ptr(nr_in) = -0.4;
+  nr_ex.run_forward_only();
+  expect_eq("no-result forward", *nr_ex.value_ptr(nr_out), std::exp(-0.4));
+
+  // A zero-op constant graph still needs one seed cell even with no
+  // parameters or written slots.
+  Graph constant;
+  const int constant_result = constant.add_slot(1, false);
+  constant.result_slot = constant_result;
+  Executor constant_ex(std::move(constant));
+  *constant_ex.value_ptr(constant_result) = 2.75;
+  double no_grad = 0.0;
+  expect_eq("constant result", constant_ex.gradient(&no_grad), 2.75);
+  if (constant_ex.adjoint_storage_size() != 1) {
+    ++failures;
+    std::printf("FAIL constant adjoints got %lld want 1\n",
+                (long long)constant_ex.adjoint_storage_size());
+  }
 
   if (failures == 0) std::printf("test_executor OK\n");
   return failures == 0 ? 0 : 1;

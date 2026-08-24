@@ -22,7 +22,7 @@ struct Desc {
 // A value in the graph. Slots with is_param are the unconstrained parameter
 // vector, in declaration order; everything else is data or an intermediate.
 struct Slot {
-  int64_t offset = 0;  // into the value / adjoint arenas (filled at bind)
+  int64_t offset = 0;  // into the value arena (filled at bind)
   int64_t len = 0;
   bool is_param = false;
 };
@@ -145,6 +145,12 @@ class Executor {
   Executor& operator=(const Executor&) = delete;
 
   int64_t n_params() const { return n_params_; }
+  // Number of doubles in the reverse-mode arena. This is intentionally
+  // observable: inactive data and slots left behind by graph rewrites must
+  // not silently return to the per-gradient clear path.
+  int64_t adjoint_storage_size() const {
+    return static_cast<int64_t>(adjoints_.size());
+  }
   // The bound graph, so a second executor over the same model can be
   // built without re-lowering. Multi-chain sampling needs one executor
   // per chain -- the arenas are mutable per-evaluation state -- and
@@ -190,7 +196,8 @@ class Executor {
 
  private:
   void bind_();
-  KernelCtx make_ctx_(const Op& op, const std::vector<char>& written);
+  KernelCtx make_ctx_(const Op& op, const std::vector<char>& written,
+                      const std::vector<int64_t>& adjoint_offsets);
 
   struct ProfEntry {
     int64_t calls = 0;  // forward invocations
@@ -202,6 +209,7 @@ class Executor {
   Graph graph_;
   std::vector<double> values_;
   std::vector<double> adjoints_;
+  int64_t result_adjoint_offset_ = -1;
   std::vector<double> scratch_;
   // One context per op, assembled once at bind. Every field in it is a
   // pointer into an arena that never moves after binding, or an immediate

@@ -10,15 +10,23 @@
 
 #include <stan/math.hpp>
 
+#include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 
 using namespace stanli;
 
 static int failures = 0;
+static void expect(const std::string& what, bool ok) {
+  if (!ok) {
+    ++failures;
+    std::printf("FAIL %s\n", what.c_str());
+  }
+}
 static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
+  if (got != want && !(std::isnan(got) && std::isnan(want))) {
     ++failures;
     std::printf("FAIL %-28s got %.17g want %.17g\n", what.c_str(), got, want);
   }
@@ -154,6 +162,145 @@ static void check_bitwise(const std::string& tag, uint16_t opcode, int64_t n,
     expect_eq(tag + " g" + std::to_string(i), f.grad[i], u.grad[i]);
 }
 
+// ---- 3. Packed row-wise log_sum_exp ---------------------------------------
+struct RowsRun {
+  double value;
+  std::vector<double> out;
+  std::vector<double> grad;
+};
+
+static RowsRun run_rows(const std::vector<double>& x, int K,
+                        const std::vector<double>& weights = {}) {
+  const int64_t R = (int64_t)x.size() / K;
+  Graph g;
+  const int in = g.add_slot((int64_t)x.size(), true);
+  const int out = g.add_slot(R, false);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_LOG_SUM_EXP_ROWS, {in}, out, {K});
+  int weight_slot = -1;
+  if (weights.empty()) {
+    g.add_op(OP_SUM_VEC, {out}, lp);
+  } else {
+    weight_slot = g.add_slot(R, false);
+    g.add_op(OP_DOT, {out, weight_slot}, lp);
+  }
+  g.result_slot = lp;
+
+  Executor ex(std::move(g));
+  for (size_t i = 0; i < x.size(); ++i) ex.param_ptr(in)[i] = x[i];
+  for (size_t i = 0; i < weights.size(); ++i)
+    ex.value_ptr(weight_slot)[i] = weights[i];
+  RowsRun r;
+  r.grad.resize(x.size());
+  r.value = ex.gradient(r.grad.data());
+  r.out.assign(ex.value_ptr(out), ex.value_ptr(out) + R);
+  return r;
+}
+
+static void check_row_edge(const std::string& tag,
+                           const std::vector<double>& x) {
+  const RowsRun got = run_rows(x, (int)x.size());
+  Eigen::Matrix<var, -1, 1> xv((int)x.size());
+  for (int i = 0; i < (int)x.size(); ++i) xv(i) = x[(size_t)i];
+  var want = stan::math::log_sum_exp(xv);
+  want.grad();
+  expect_eq(tag + " value", got.value, want.val());
+  expect_eq(tag + " row value", got.out[0], want.val());
+  for (int i = 0; i < (int)x.size(); ++i)
+    expect_eq(tag + " g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj());
+  stan::math::recover_memory();
+}
+
+static void check_rows() {
+  const int K = 5;
+  const std::vector<double> x{-1.3,
+                              0.4,
+                              2.1,
+                              -0.7,
+                              0.2,  // ordinary
+                              1000.0,
+                              999.0,
+                              998.0,
+                              997.0,
+                              996.0,  // stable at large magnitudes
+                              -std::numeric_limits<double>::infinity(),
+                              -2.0,
+                              -3.0,
+                              -4.0,
+                              -5.0,
+                              0.1,
+                              0.1,
+                              0.1,
+                              0.1,
+                              0.1};  // ties
+  const int R = (int)x.size() / K;
+  const RowsRun got = run_rows(x, K);
+
+  Eigen::Matrix<var, -1, 1> xv((int)x.size());
+  for (int i = 0; i < (int)x.size(); ++i) xv(i) = x[(size_t)i];
+  std::vector<var> row_lp;
+  row_lp.reserve((size_t)R);
+  var lp = 0.0;
+  for (int r = 0; r < R; ++r) {
+    Eigen::Matrix<var, -1, 1> row(K);
+    for (int k = 0; k < K; ++k) row(k) = xv(r * K + k);
+    row_lp.push_back(stan::math::log_sum_exp(row));
+    lp += row_lp.back();
+  }
+  lp.grad();
+
+  expect_eq("rows lp", got.value, lp.val());
+  for (int r = 0; r < R; ++r)
+    expect_eq("rows out" + std::to_string(r), got.out[(size_t)r],
+              row_lp[(size_t)r].val());
+  for (int i = 0; i < (int)x.size(); ++i)
+    expect_eq("rows g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj());
+  stan::math::recover_memory();
+
+  // A nonuniform consumer verifies that backward uses each row's own output
+  // adjoint rather than treating the rows as an implicit sum.
+  const std::vector<double> weights{0.5, -1.25, 2.0, 0.0};
+  const RowsRun weighted = run_rows(x, K, weights);
+  Eigen::Matrix<var, -1, 1> wx((int)x.size());
+  for (int i = 0; i < (int)x.size(); ++i) wx(i) = x[(size_t)i];
+  var weighted_lp = 0.0;
+  for (int r = 0; r < R; ++r) {
+    Eigen::Matrix<var, -1, 1> row(K);
+    for (int k = 0; k < K; ++k) row(k) = wx(r * K + k);
+    weighted_lp += weights[(size_t)r] * stan::math::log_sum_exp(row);
+  }
+  weighted_lp.grad();
+  for (int i = 0; i < (int)x.size(); ++i)
+    expect_eq("weighted rows g" + std::to_string(i), weighted.grad[(size_t)i],
+              wx(i).adj());
+  stan::math::recover_memory();
+
+  Graph shape;
+  const int in = shape.add_slot((int64_t)x.size(), true);
+  const int out = shape.add_slot(R, false);
+  const int oi = shape.add_op(OP_LOG_SUM_EXP_ROWS, {in}, out, {K});
+  const Kernel* kernel = find_kernel(OP_LOG_SUM_EXP_ROWS);
+  expect("rows kernel registered", kernel != nullptr);
+  if (kernel) {
+    expect("rows scratch callback", kernel->scratch_size != nullptr);
+    if (kernel->scratch_size)
+      expect("rows scratch=input len",
+             kernel->scratch_size(shape.ops[(size_t)oi], shape.slots.data()) ==
+                 (int64_t)x.size());
+  }
+  expect("rows backward is value-free",
+         has_op_trait(OP_LOG_SUM_EXP_ROWS, op_trait::kBackwardValueFree));
+  expect("rows opcode name", std::string(opcode_name(OP_LOG_SUM_EXP_ROWS)) ==
+                                 "OP_LOG_SUM_EXP_ROWS");
+
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  check_row_edge("rows K=1", {-3.25});
+  check_row_edge("rows all -inf", {-inf, -inf, -inf});
+  check_row_edge("rows +inf", {inf, 0.5, inf});
+  check_row_edge("rows nan", {-1.0, nan, 2.0});
+}
+
 int main() {
   const int64_t N = 4;
 
@@ -179,6 +326,8 @@ int main() {
   check_bitwise("unroll lse2 vs", OP_LSE2, N, {A, {S}});
   check_bitwise("unroll lmix svv", OP_LOG_MIX, N, {{S}, A, B});
   check_bitwise("unroll lmix vvv", OP_LOG_MIX, N, {TH, A, B});
+
+  check_rows();
 
   if (failures) {
     std::printf("%d failures\n", failures);

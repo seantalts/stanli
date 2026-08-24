@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <array>
+#include <chrono>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -29,6 +31,178 @@ namespace stanli {
 namespace {
 
 using ShapeId = uint32_t;
+
+// Opt-in lowering telemetry.  Preparation is normally too short to justify
+// putting clocks (or even formatting) on the path, so STANLI_PROFILE_PREP is
+// deliberately separate from the executor's STANLI_PROFILE and the disabled
+// path never calls the clock. Rows are buffered until every timed compile
+// stage is done: stderr I/O must not become part of a later pass's timing.
+struct PrepTrace {
+  using Clock = std::chrono::steady_clock;
+  using Time = Clock::time_point;
+
+  enum class Extra {
+    None,
+    Rewrites,
+    Removed,
+    ConstFold,
+    Reroll,
+    Regions,
+    Truncated,
+    MirBytes,
+  };
+
+  struct Row {
+    const char* graph = nullptr;
+    const char* stage = nullptr;
+    int64_t ns = 0;
+    int64_t ops = -1;
+    int64_t slots = -1;
+    int64_t fills = -1;
+    int64_t terms = -1;
+    int64_t views = -1;
+    Extra extra = Extra::None;
+    int64_t a = 0;
+    int64_t b = 0;
+    int64_t c = 0;
+    int64_t d = 0;
+    bool deep = false;
+    int64_t params = 0;
+    int64_t slot_elems = 0;
+    int64_t fill_elems = 0;
+    int64_t idata_arrays = 0;
+    int64_t idata_elems = 0;
+    int64_t udata = 0;
+  };
+
+  explicit PrepTrace(bool enabled) : enabled_(enabled) {}
+
+  Time start() const { return enabled_ ? Clock::now() : Time{}; }
+
+  void plain(const char* graph, const char* stage, Time from,
+             Extra extra = Extra::None, int64_t a = 0) {
+    if (!enabled_) return;
+    Row& r = next();
+    r.graph = graph;
+    r.stage = stage;
+    r.ns = elapsed(from);
+    r.extra = extra;
+    r.a = a;
+  }
+
+  void graph(const char* graph_name, const char* stage, Time from,
+             const Graph& g,
+             const std::vector<std::pair<int, std::vector<double>>>& fills,
+             size_t terms, size_t views, Extra extra = Extra::None,
+             int64_t a = 0, int64_t b = 0, bool deep = false,
+             int64_t params = 0, int64_t c = 0, int64_t d = 0) {
+    if (!enabled_) return;
+    Row& r = next();
+    r.graph = graph_name;
+    r.stage = stage;
+    // Stop the timer before any diagnostic scan below.
+    r.ns = elapsed(from);
+    r.ops = static_cast<int64_t>(g.ops.size());
+    r.slots = static_cast<int64_t>(g.slots.size());
+    r.fills = static_cast<int64_t>(fills.size());
+    r.terms = static_cast<int64_t>(terms);
+    r.views = static_cast<int64_t>(views);
+    r.extra = extra;
+    r.a = a;
+    r.b = b;
+    r.c = c;
+    r.d = d;
+    r.deep = deep;
+    r.params = params;
+    if (deep) {
+      for (const Slot& s : g.slots) r.slot_elems += s.len;
+      for (const auto& f : fills)
+        r.fill_elems += static_cast<int64_t>(f.second.size());
+      r.idata_arrays = static_cast<int64_t>(g.idata_pool.size());
+      for (const auto& v : g.idata_pool)
+        r.idata_elems += static_cast<int64_t>(v.size());
+      r.udata = static_cast<int64_t>(g.udata_pool.size());
+    }
+  }
+
+  void report() const {
+    if (!enabled_) return;
+    for (size_t i = 0; i < size_; ++i) {
+      const Row& r = rows_[i];
+      std::string line = "stanli_prep graph=" + std::string(r.graph) +
+                         " stage=" + r.stage + " ns=" + std::to_string(r.ns);
+      const auto field = [&](const char* name, int64_t value) {
+        line += " ";
+        line += name;
+        line += "=";
+        line += std::to_string(value);
+      };
+      if (r.ops >= 0) {
+        field("ops", r.ops);
+        field("slots", r.slots);
+        field("fills", r.fills);
+        field("terms", r.terms);
+        field("views", r.views);
+      }
+      switch (r.extra) {
+        case Extra::Rewrites:
+          field("rewrites", r.a);
+          break;
+        case Extra::Removed:
+          field("removed", r.a);
+          break;
+        case Extra::ConstFold:
+          field("ops_removed", r.a);
+          field("slots_folded", r.b);
+          break;
+        case Extra::Reroll:
+          field("regions", r.a);
+          field("row_steps", r.d);
+          field("list_steps", r.b);
+          field("candidate_steps", r.c);
+          break;
+        case Extra::Regions:
+          field("regions", r.a);
+          break;
+        case Extra::Truncated:
+          field("truncated", r.a);
+          break;
+        case Extra::MirBytes:
+          field("mir_bytes", r.a);
+          break;
+        case Extra::None:
+          break;
+      }
+      if (r.deep) {
+        field("params", r.params);
+        field("slot_elems", r.slot_elems);
+        field("fill_elems", r.fill_elems);
+        field("idata_arrays", r.idata_arrays);
+        field("idata_elems", r.idata_elems);
+        field("udata", r.udata);
+      }
+      std::fprintf(stderr, "%s\n", line.c_str());
+    }
+  }
+
+ private:
+  bool enabled_ = false;
+  std::array<Row, 32> rows_{};
+  size_t size_ = 0;
+
+  int64_t elapsed(Time from) const {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
+                                                                from)
+        .count();
+  }
+
+  Row& next() {
+    // There are currently 18 rows with a write_array graph. Keep this a fixed
+    // buffer so the profiler itself cannot show up as allocator work.
+    if (size_ >= rows_.size()) std::abort();
+    return rows_[size_++];
+  }
+};
 
 struct SlotInfo {
   int64_t rows = 0, cols = 0;  // set for matrices
@@ -155,6 +329,8 @@ struct Lowering {
 
   const DataMap& data;
   std::shared_ptr<ShapeInterner> shape_pool;
+  PrepTrace& prep;
+  const char* prep_graph;
   // The MIR interpreter instance for everything DataOnly: prepare_data,
   // data-only conditions, size expressions. Its environment doubles as the
   // lowering's view of transformed data. Hooks route FnReadData to the
@@ -238,9 +414,10 @@ struct Lowering {
     return autodiff;
   }
 
-  explicit Lowering(const DataMap& d, std::shared_ptr<ShapeInterner> pool =
-                                          std::make_shared<ShapeInterner>())
-      : data(d), shape_pool(std::move(pool)) {}
+  explicit Lowering(
+      const DataMap& d, PrepTrace& p, const char* graph_name,
+      std::shared_ptr<ShapeInterner> pool = std::make_shared<ShapeInterner>())
+      : data(d), shape_pool(std::move(pool)), prep(p), prep_graph(graph_name) {}
 
   void observe(const Val& v, DataMap::Entry en) {
     const int64_t len = g.slots[v.slot].len;
@@ -762,10 +939,164 @@ struct Lowering {
         tuple(en.dims.empty() ? std::vector<int64_t>{found} : en.dims));
   }
 
+  static void data_reads(const mir::Expr& e, std::set<std::string>& names) {
+    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::Internal &&
+        e.name == "FnReadData" && !e.args.empty() &&
+        e.args[0].kind == mir::Expr::LitStr)
+      names.insert(e.args[0].lit_s);
+    for (const auto& a : e.args) data_reads(a, names);
+  }
+
+  static bool direct_input_load(const mir::Stmt& s,
+                                const std::set<std::string>& inputs) {
+    if (s.kind != mir::Stmt::Assignment || !s.lhs_idx.empty() ||
+        !inputs.count(s.lhs))
+      return false;
+    std::set<std::string> reads;
+    data_reads(s.rhs, reads);
+    return reads.size() == 1 && *reads.begin() == s.lhs;
+  }
+
+  struct RebuildShape {
+    bool supported = true;
+    int loaders = 0;
+    std::string loader_lhs;
+    std::set<std::string> reads;
+    std::set<std::string> decls;
+    std::set<std::string> writes;
+  };
+
+  static void scan_rebuild(const mir::Stmt& s, RebuildShape& shape) {
+    switch (s.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        for (const auto& k : s.body) scan_rebuild(k, shape);
+        return;
+      case mir::Stmt::For: {
+        std::set<std::string> bounds_reads;
+        data_reads(s.lower, bounds_reads);
+        data_reads(s.upper, bounds_reads);
+        if (!bounds_reads.empty()) shape.supported = false;
+        for (const auto& k : s.body) scan_rebuild(k, shape);
+        return;
+      }
+      case mir::Stmt::Decl: {
+        shape.decls.insert(s.decl_id);
+        if (!s.has_init) return;
+        std::set<std::string> reads;
+        data_reads(s.init, reads);
+        shape.reads.insert(reads.begin(), reads.end());
+        if (!reads.empty()) {
+          ++shape.loaders;
+          shape.loader_lhs = s.decl_id;
+        }
+        return;
+      }
+      case mir::Stmt::Assignment: {
+        shape.writes.insert(s.lhs);
+        std::set<std::string> reads;
+        data_reads(s.rhs, reads);
+        for (const auto& ix : s.lhs_idx) data_reads(ix, reads);
+        shape.reads.insert(reads.begin(), reads.end());
+        if (!reads.empty()) {
+          if (!s.lhs_idx.empty()) shape.supported = false;
+          ++shape.loaders;
+          shape.loader_lhs = s.lhs;
+        }
+        return;
+      }
+      default:
+        // A generated input rebuild has no effects, conditionals, target
+        // writes, validation calls, or returns. New statement kinds fall back
+        // to interpretation rather than guessing which children are safe.
+        shape.supported = false;
+        return;
+    }
+  }
+
+  static bool canonical_input_rebuild(const mir::Stmt& s,
+                                      const std::set<std::string>& inputs) {
+    if (s.kind != mir::Stmt::Block && s.kind != mir::Stmt::SList) return false;
+    RebuildShape shape;
+    scan_rebuild(s, shape);
+    if (!shape.supported || shape.loaders != 1 || shape.reads.size() != 1)
+      return false;
+    const std::string& input = *shape.reads.begin();
+    if (!inputs.count(input) || shape.loader_lhs.empty() ||
+        shape.loader_lhs == input || !shape.decls.count(shape.loader_lhs) ||
+        !shape.writes.count(input))
+      return false;
+    const auto allowed = [&](const std::string& name) {
+      return name == input || name == shape.loader_lhs || name == "pos__";
+    };
+    for (const auto& name : shape.decls)
+      if (!allowed(name)) return false;
+    for (const auto& name : shape.writes)
+      if (!allowed(name)) return false;
+    return true;
+  }
+
   void bind_data(const mir::Program& p) {
+    std::set<std::string> input_names;
+    bool all_inputs_bound = true;
+    bool use_prebound = std::getenv("STANLI_NO_DATA_PRELOAD") == nullptr;
     for (const auto& [name, type] : p.input_vars) {
-      (void)type;
-      if (data.has(name)) td.env()[name] = data.at(name);
+      input_names.insert(name);
+      if (!data.has(name)) {
+        all_inputs_bound = false;
+        continue;
+      }
+      // DataMap does not have the Stan schema, so JSON values spelled with
+      // integer tokens carry an int mirror even when the declaration is
+      // real. Reconstruct the typed value directly, without copying an
+      // irrelevant mirror for a large real matrix.
+      const DataMap::Entry& src = data.at(name);
+      if (!use_prebound) {
+        td.env()[name] = src;
+        continue;
+      }
+      DataMap::Entry dst;
+      const bool want_int = type.base == "SInt" ||
+                            (type.base == "SArray" && type.elem_base == "SInt");
+      dst.is_int = want_int;
+      dst.r = src.r;
+      dst.dims = src.dims;
+      if (want_int) {
+        if (!src.i.empty()) {
+          dst.i = src.i;
+        } else if (!src.r.empty()) {
+          // Preserve the interpreter's existing error/coercion behavior for
+          // malformed data instead of silently truncating real values here.
+          use_prebound = false;
+        }
+      }
+      td.env()[name] = std::move(dst);
+    }
+    use_prebound = use_prebound && all_inputs_bound;
+    if (use_prebound) {
+      // The generated reconstruction allocated the MIR-declared shape and
+      // copied exactly that many flat elements. Normalize to the same shape;
+      // a malformed length falls back to that checked interpreter path.
+      for (const auto& [name, type] : p.input_vars) {
+        DataMap::Entry& dst = td.env().at(name);
+        if (static_cast<int64_t>(dst.r.size()) != sized_len(type)) {
+          use_prebound = false;
+          break;
+        }
+        dst.dims.clear();
+        if (type.base != "SInt" && type.base != "SReal")
+          for (const auto& d : type.dims) dst.dims.push_back(eval_int(d));
+      }
+    }
+    if (use_prebound) {
+      // Skipping the generated declarations also skips MirInterp's normal
+      // declaration-geometry bookkeeping. Preserve it explicitly so checks
+      // on an empty outer array still see its trailing vector/matrix extents,
+      // which JSON [] cannot represent.
+      for (const auto& input : p.input_vars) {
+        const std::string& name = input.first;
+        td.set_declared_dims(name, td.env().at(name).dims);
+      }
     }
     auto record = [&](const std::string& name, const mir::SizedType& type) {
       if (type.base == "SInt") return;
@@ -780,6 +1111,19 @@ struct Lowering {
     }
     for (const auto& st : p.prepare_data) {
       if (st.kind == mir::Stmt::Decl) record(st.decl_id, st.decl_type);
+      // stanc's prepare_data first rebuilds every input from a flat
+      // FnReadData buffer. DataMap has already parsed that buffer into the
+      // same typed, column-major representation above. Replaying the
+      // canonical matrix reconstruction means one interpreted assignment
+      // per element (47 million for nn_rbm1bJ100) and used to dominate model
+      // preparation. FnReadData is compiler-internal and cannot occur in
+      // source transformed-data code, so a top-level statement containing it
+      // is input hydration, not user computation.
+      if (use_prebound &&
+          ((st.kind == mir::Stmt::Decl && input_names.count(st.decl_id)) ||
+           direct_input_load(st, input_names) ||
+           canonical_input_rebuild(st, input_names)))
+        continue;
       td.exec(st);
     }
     for (auto& [name, e] : td.env()) {
@@ -3855,6 +4199,7 @@ struct Lowering {
   // lowering, and the same passes, because generated quantities are unrolled
   // over the data exactly like the model block is.
   CompiledModel::WriteArray run_write_array(const mir::Program& p) {
+    const auto total_time = prep.start();
     for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
     in_write_array = true;
     // stanc3 guards the two emission groups on these flags; the sampler wants
@@ -3862,6 +4207,7 @@ struct Lowering {
     int_env["emit_transformed_parameters__"] = 1;
     int_env["emit_generated_quantities__"] = 1;
     CompiledModel::WriteArray wa;
+    const auto lower_time = prep.start();
     try {
       for (const auto& s : p.generate_quantities) lower_stmt(s);
     } catch (const CompileError& e) {
@@ -3872,13 +4218,35 @@ struct Lowering {
     }
     std::vector<int> roots = jac_slots;
     for (const auto& v : out.views) roots.push_back(v.slot);
-    make_inplace_updates(g, roots);
-    forward_stores_to_loads(g, roots);
-    reroll(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "lower", lower_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Truncated, !wa.truncated.empty());
+    const auto inplace_time = prep.start();
+    const int inplace = make_inplace_updates(g, roots);
+    prep.graph(prep_graph, "inplace", inplace_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Rewrites, inplace);
+    const auto forward_time = prep.start();
+    const int forwarded = forward_stores_to_loads(g, roots);
+    prep.graph(prep_graph, "store_forward", forward_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
+               forwarded);
+    const auto reroll_time = prep.start();
+    const RerollStats rerolled = reroll(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "reroll", reroll_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Reroll,
+               rerolled.regions, rerolled.list_steps, false, 0,
+               rerolled.candidate_steps, rerolled.row_steps);
+    const auto finalize_time = prep.start();
     // Nothing reads a result here, but forward() asserts a scalar result
     // slot, so point it at one.
     g.result_slot = const_slot(0.0);
     wa.n_unconstrained = out.n_unconstrained;
+    prep.graph(prep_graph, "finalize", finalize_time, g, out.fills,
+               target_terms.size(), out.views.size());
+    prep.graph(prep_graph, "total", total_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::None, 0,
+               0, true, out.n_unconstrained);
     wa.graph = std::move(g);
     // A section stanc did not emit a guard for (or one lowering stopped
     // short of) has no columns of its own: it starts where the CSV ends.
@@ -3893,9 +4261,16 @@ struct Lowering {
   }
 
   CompiledModel run(const mir::Program& p) {
+    const auto total_time = prep.start();
     for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+    const auto bind_time = prep.start();
     bind_data(p);
+    prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
+               target_terms.size(), out.views.size());
+    const auto lower_time = prep.start();
     for (const auto& s : p.log_prob) lower_stmt(s);
+    prep.graph(prep_graph, "lower", lower_time, g, out.fills,
+               target_terms.size(), out.views.size());
     // Jacobian terms and constrained-parameter views are read straight out
     // of the arena, so no op consumes them and the pass cannot infer them.
     std::vector<int> roots = jac_slots;
@@ -3905,21 +4280,51 @@ struct Lowering {
     std::vector<int> update_roots = roots;
     update_roots.insert(update_roots.end(), target_terms.begin(),
                         target_terms.end());
-    make_inplace_updates(g, update_roots);  // off under STANLI_NO_INPLACE
+    const auto inplace_time = prep.start();
+    const int inplace =
+        make_inplace_updates(g, update_roots);  // off under STANLI_NO_INPLACE
+    prep.graph(prep_graph, "inplace", inplace_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Rewrites, inplace);
     // Deleting the write/read-back pairs first is what leaves a plain
     // arithmetic lane for reroll to vectorize.
-    forward_stores_to_loads(g, update_roots);
+    const auto forward_time = prep.start();
+    const int forwarded = forward_stores_to_loads(g, update_roots);
+    prep.graph(prep_graph, "store_forward", forward_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
+               forwarded);
     // After the update chains collapse, so a data-only chain is one slot
     // rather than N; before reroll, so the lanes it sees have data operands.
-    const_fold(g, out.fills, update_roots);
-    reroll(g, out.fills, target_terms, roots);  // off under STANLI_NO_REROLL
+    const auto constfold_time = prep.start();
+    const ConstFoldStats constfolded = const_fold(g, out.fills, update_roots);
+    prep.graph(prep_graph, "constfold", constfold_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::ConstFold, constfolded.ops_removed,
+               constfolded.slots_folded);
+    const auto reroll_time = prep.start();
+    const RerollStats rerolled =
+        reroll(g, out.fills, target_terms, roots);  // STANLI_NO_REROLL
+    prep.graph(prep_graph, "reroll", reroll_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Reroll,
+               rerolled.regions, rerolled.list_steps, false, 0,
+               rerolled.candidate_steps, rerolled.row_steps);
     // LAST, after every other pass has had first crack: compile whatever
     // scalar residue survives (recurrences the re-roll can never widen)
     // into island ops. Off under STANLI_NO_ISLAND.
-    carve_islands(g, out.fills, target_terms, roots);
+    const auto island_time = prep.start();
+    const int islands = carve_islands(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "island", island_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Regions,
+               islands);
+    const auto reduce_time = prep.start();
     std::vector<int> all = target_terms;
     all.insert(all.end(), jac_slots.begin(), jac_slots.end());
     g.result_slot = reduce_terms(all);
+    prep.graph(prep_graph, "reduce", reduce_time, g, out.fills,
+               target_terms.size(), out.views.size());
+    prep.graph(prep_graph, "total", total_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::None, 0,
+               0, true, out.n_unconstrained);
     out.graph = std::move(g);
     return std::move(out);
   }
@@ -3928,24 +4333,32 @@ struct Lowering {
 }  // namespace
 
 CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
+  const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
+  PrepTrace prep(prep_env && prep_env[0] != '0');
+  const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,
   // keeps the generate_quantities statements and UDF bodies alive for the
   // model's whole life.
+  const auto parse_time = prep.start();
   auto prog =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(tmir_text)));
-  Lowering lo(data);
+  prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
+             static_cast<int64_t>(tmir_text.size()));
+  Lowering lo(data, prep, "log_prob");
   CompiledModel cm = lo.run(*prog);
   if (!prog->generate_quantities.empty()) {
     // A second lowering, over the transformed data the first one already
     // interpreted: re-running prepare_data would double preparation time on
     // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
-    Lowering wa(data, lo.shape_pool);
+    Lowering wa(data, prep, "write_array", lo.shape_pool);
+    const auto env_copy_time = prep.start();
     wa.td.env() = lo.td.env();
     wa.int_env = lo.int_env_data;
     // bind_data owns immutable declaration shape and physical-layout facts;
     // write_array skips that expensive pass, so its fresh lexical lowering
     // receives the facts together with the already-prepared environment.
     wa.decls = lo.decls;
+    prep.plain("write_array", "env_copy", env_copy_time);
     CompiledModel::WriteArray w = wa.run_write_array(*prog);
     if (w.n_unconstrained != cm.n_unconstrained) {
       // The two graphs read the same draw; if they disagree on its length the
@@ -3984,6 +4397,8 @@ CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
     }
     cm.write_array = std::move(w);
   }
+  prep.plain("compile", "total", compile_time);
+  prep.report();
   return cm;
 }
 
