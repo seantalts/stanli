@@ -14,10 +14,10 @@
 //     order, for all four shapes -- matrix/matrix, row_vector/matrix,
 //     matrix\vector, matrix\matrix -- with a data divisor and a parameter
 //     divisor, so both operand adjoints are exercised;
-//   * the two halves agreeing: solve.stan and solverng.stan have identical
-//     generated quantities except for a trailing RNG draw, which pushes the
-//     second one onto the per-draw interpreter. The shared columns must come
-//     out bit for bit the same.
+//   * generated quantities agreeing before an effect: solve.stan and
+//     solverng.stan have identical deterministic columns except for one
+//     trailing scalar RNG draw. The shared columns must remain bitwise equal,
+//     and the compiled draw must consume the caller's exact Stan stream.
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
@@ -209,30 +209,44 @@ int main() {
     }
   }
 
-  // The same generated quantities behind an RNG draw, so the interpreter
-  // computes them. Every shared column must match the graph bit for bit:
-  // the bug this file exists for was the two halves disagreeing.
+  // The same generated quantities plus a trailing graph-native normal draw.
+  // Every deterministic column must remain bitwise equal, and reseeding the
+  // caller-owned stream must reproduce the stochastic column.
   {
     CompiledModel im =
         compile_model(slurp("tests/fixtures/solverng.tmir.sexp"), d);
-    check(!im.write_array->truncated.empty(), "solverng write_array truncates");
-    check(im.write_array->interp != nullptr, "solverng has an interpreter");
-    Executor ex(std::move(im.graph));
-    im.bind(ex);
+    check(im.write_array && im.write_array->truncated.empty(),
+          "solverng write_array compiles");
+    check(im.write_array && im.write_array->interp == nullptr,
+          "solverng stays on graph");
+    Executor ex(std::move(im.write_array->graph));
+    im.write_array->bind(ex);
     for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i];
-    ex.run_forward_only();
     WaRng rng(1);
-    const std::vector<double> irow =
-        im.write_array->interp->eval(im.constrained_env(ex), rng);
-    const auto inames =
-        CompiledModel::csv_names(im.write_array->interp->columns());
-    check(irow.size() == inames.size(), "interpreted row matches its names");
+    const auto draw = [&] {
+      ex.run_forward_only(EvalState{&rng});
+      std::vector<double> values;
+      for (const auto& c : im.write_array->columns) {
+        const double* p = ex.value_ptr(c.slot);
+        for (int64_t i = 0; i < c.len; ++i)
+          values.push_back(p[c.storage_index(i)]);
+      }
+      return values;
+    };
+    const std::vector<double> irow = draw();
+    const auto inames = CompiledModel::csv_names(im.write_array->columns);
+    check(irow.size() == inames.size(), "solverng row matches its names");
     // solverng adds one trailing column; everything before it is shared.
-    check(inames.size() == names.size() + 1, "one extra interpreted column");
+    check(inames.size() == names.size() + 1, "one extra RNG column");
     for (size_t k = 0; k < names.size() && k < irow.size(); ++k) {
       check(inames[k] == names[k], "column " + std::to_string(k) + " name");
-      expect_eq("interp " + names[k], irow[k], row[k]);
+      expect_eq("solverng " + names[k], irow[k], row[k]);
     }
+    const std::vector<double> second = draw();
+    rng.seed(1);
+    const std::vector<double> reseeded = draw();
+    check(irow != second, "solverng stream advances");
+    check(irow == reseeded, "solverng reseed reproduces row");
   }
 
   if (failures == 0) std::printf("test_solve OK\n");

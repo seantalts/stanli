@@ -102,6 +102,7 @@ void register_scalar_binary_kernels();
 void register_scalar_unary_ad_kernels();
 void register_mixture_kernels();
 void register_message_kernels();
+void register_rng_kernel();
 void register_island_kernel();
 
 static void ensure_registered() {
@@ -113,6 +114,7 @@ static void ensure_registered() {
     register_ode_kernels();
     register_constrain_kernels();
     register_message_kernels();
+    register_rng_kernel();
     register_eltwise_kernels();
     register_scalar_binary_kernels();
     register_scalar_unary_ad_kernels();
@@ -258,6 +260,7 @@ KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written,
   ctx.scratch = scratch_.data() + op.scratch_off;
   ctx.idata = op.idata;
   ctx.udata = op.udata;
+  ctx.eval_state = &eval_state_;
   ctx.n_idata = op.n_idata;
   for (int i = 0; i < op.n_in; ++i) {
     const int si = op.in[i];
@@ -316,7 +319,15 @@ std::string Executor::profile_report() const {
   return out;
 }
 
-void Executor::run_forward_only() {
+void Executor::run_forward_only() { run_forward_only(EvalState{}); }
+
+void Executor::run_forward_only(EvalState state) {
+  struct RestoreState {
+    EvalState& slot;
+    EvalState previous;
+    ~RestoreState() { slot = previous; }
+  } restore{eval_state_, eval_state_};
+  eval_state_ = state;
   // The profiled path keeps the opcode-keyed loop (attribution needs the
   // opcode anyway, and the timing calls dwarf dispatch cost).
   if (profile_) {

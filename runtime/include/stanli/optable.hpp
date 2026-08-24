@@ -74,6 +74,7 @@ namespace stanli {
   X(OP_NORMAL_ID_GLM_LPDF)          \
   X(OP_TRANSPOSE)                   \
   X(OP_ODE)                         \
+  X(OP_RNG)                         \
   X(OP_ISLAND)                      \
   X(OP_EIGENVALUES_SYM)             \
   X(OP_EIGENVECTORS_SYM)            \

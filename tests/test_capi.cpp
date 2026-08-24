@@ -327,6 +327,37 @@ void expect_categorical_interpreted_write_array() {
   stanli_model_free(model);
 }
 
+void expect_compiled_scalar_rng() {
+  const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model = stanli_model_new(mir.c_str(), "{}", err, sizeof err);
+  if (model == nullptr) {
+    ++failures;
+    std::printf("FAIL C API scalar RNG construction: %s\n", err);
+    return;
+  }
+  const int64_t n = stanli_wa_n_columns(model);
+  if (n != 6) {
+    ++failures;
+    std::printf("FAIL C API scalar RNG columns: got %lld want 6\n",
+                static_cast<long long>(n));
+    stanli_model_free(model);
+    return;
+  }
+  const double q[1] = {0.25};
+  std::vector<double> first((size_t)n), second((size_t)n), reseeded((size_t)n);
+  stanli_wa_seed(model, 77);
+  const int r1 = stanli_wa_row(model, q, first.data());
+  const int r2 = stanli_wa_row(model, q, second.data());
+  stanli_wa_seed(model, 77);
+  const int r3 = stanli_wa_row(model, q, reseeded.data());
+  if (r1 != 0 || r2 != 0 || r3 != 0 || first != reseeded || first == second) {
+    ++failures;
+    std::printf("FAIL C API scalar RNG stream/reseed ownership\n");
+  }
+  stanli_model_free(model);
+}
+
 void expect_necessity_effects_refused() {
   const std::string mir = slurp("tests/fixtures/necessity_effects.tmir.sexp");
   for (int mode = 1; mode <= 2; ++mode) {
@@ -450,6 +481,7 @@ int main() {
   expect_structured_checks();
   expect_categorical_check();
   expect_categorical_interpreted_write_array();
+  expect_compiled_scalar_rng();
   expect_necessity_effects_refused();
   expect_pathfinder();
 

@@ -1729,6 +1729,9 @@ struct Lowering {
   // at model evaluation rather than move to construction. Propto densities
   // never fold because their value is instantiation-dependent.
   bool expr_effectful(const mir::Expr& e) {
+    if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
+        e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
+      return true;
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined && fun_effectful(e.name))
       return true;
@@ -2152,6 +2155,50 @@ struct Lowering {
     return ret;
   }
 
+  std::optional<Val> lower_scalar_rng(const mir::Expr& e) {
+    static const std::map<std::string, ScalarRng> kFamilies = {
+        {"poisson_log_rng", ScalarRng::PoissonLog},
+        {"uniform_rng", ScalarRng::Uniform},
+        {"bernoulli_rng", ScalarRng::Bernoulli},
+        {"normal_rng", ScalarRng::Normal},
+        {"lognormal_rng", ScalarRng::Lognormal},
+    };
+    const auto found = kFamilies.find(e.name);
+    if (found == kFamilies.end()) return std::nullopt;
+    if (!in_write_array)
+      fail(e.name + " is supported only in generated quantities", e.raw);
+    const ScalarRng family = found->second;
+    const size_t arity = scalar_rng_arity(family);
+    if (e.args.size() != arity || e.unsized.depth != 0)
+      fail(e.name + ": expected scalar result and " + std::to_string(arity) +
+               " scalar argument(s)",
+           e.raw);
+    const mir::UnsizedLeaf result_leaf = scalar_rng_is_int(family)
+                                             ? mir::UnsizedLeaf::Int
+                                             : mir::UnsizedLeaf::Real;
+    if (e.unsized.leaf != result_leaf)
+      fail(e.name + ": result type does not match RNG family", e.raw);
+    std::vector<Val> args;
+    args.reserve(arity);
+    for (const mir::Expr& arg : e.args) {
+      if (arg.unsized.depth != 0)
+        fail(e.name + ": container arguments stay on WaInterp", e.raw);
+      args.push_back(lower_expr(arg));
+      if (!is_scalar(args.back()))
+        fail(e.name + ": container arguments stay on WaInterp", e.raw);
+    }
+    Val draw = arity == 1 ? emit_value(OP_RNG, {args[0]}, 1, view_of(e.type_))
+                          : emit_value(OP_RNG, {args[0], args[1]}, 1,
+                                       view_of(e.type_));
+    g.ops.back().variant = static_cast<uint8_t>(family);
+    // An effect is never a graph constant, even when all distribution
+    // parameters are. This also keeps downstream compile-time demands from
+    // mistaking a draw for data.
+    draw.si.param_free = false;
+    draw.autodiff = false;
+    return draw;
+  }
+
   Val lower_funapp(const mir::Expr& e) {
     if (e.fn_lib == mir::Expr::Lib::StanLib && e.name == "dims")
       return lower_dims(e);
@@ -2249,6 +2296,7 @@ struct Lowering {
     }
     // The stan-library names split into disjoint groups; each helper owns
     // one and declines the rest.
+    if (auto v = lower_scalar_rng(e)) return *v;
     if (auto v = lower_density_fn(e)) return *v;
     if (auto v = lower_bound_transform(e)) return *v;
     if (auto v = lower_eltwise_fn(e)) return *v;
@@ -2722,6 +2770,13 @@ struct Lowering {
 #undef STANLI_BINARY_TABLE
             {"multiply_log", OP_LMULTIPLY},
     };
+    // Once a generated int RNG has become a runtime scalar slot, named
+    // integer division is no longer foldable. OP_DIV is real division and
+    // would return 3.5 for divide(7, 2), while Stan truncates to 3. Refuse it
+    // so the whole write_array stays on WaInterp until there is a native int
+    // division op. The operator spelling is IntDivide__ and already refuses.
+    if ((e.name == "divide" || e.name == "elt_divide") && e.type_ == "UInt")
+      fail(e.name + ": runtime integer division stays on WaInterp", e.raw);
     // `A \ B` and `B / A` with a matrix divisor are linear solves, not
     // elementwise division: stanc spells them with the ordinary division
     // operators and lowers them to mdivide_left/mdivide_right. The divisor's
@@ -3700,6 +3755,20 @@ struct Lowering {
         if (s.read_transform) {
           lower_read_param(s);
         } else if (s.decl_type.base == "SInt") {
+          if (in_write_array && s.has_init && expr_effectful(s.init)) {
+            Val v = lower_expr(s.init);
+            SlotInfo expected = view_of(s.decl_type);
+            require_binding(v, 1, expected, s.decl_id, s.raw);
+            v.autodiff = false;
+            v.si = expected;
+            v.si.param_free = false;
+            scope[s.decl_id] = v;
+            decls[s.decl_id] = DeclView{1, false, expected};
+            int_env.erase(s.decl_id);
+            int_locals.erase(s.decl_id);
+            td.env().erase(s.decl_id);
+            return;
+          }
           // Int locals are always data-only in Stan; keep them in int_env
           // so size expressions and indices resolve at compile time.
           int_locals.insert(s.decl_id);
@@ -3734,6 +3803,20 @@ struct Lowering {
         return;
       case mir::Stmt::Assignment: {
         if (s.lhs_idx.empty() && int_locals.count(s.lhs)) {
+          if (in_write_array && expr_effectful(s.rhs)) {
+            Val rhs = lower_expr(s.rhs);
+            SlotInfo expected = view_of("UInt");
+            require_binding(rhs, 1, expected, s.lhs, s.raw);
+            rhs.autodiff = false;
+            rhs.si = expected;
+            rhs.si.param_free = false;
+            scope[s.lhs] = rhs;
+            decls[s.lhs] = DeclView{1, false, expected};
+            int_env.erase(s.lhs);
+            int_locals.erase(s.lhs);
+            td.env().erase(s.lhs);
+            return;
+          }
           int_env[s.lhs] = eval_int(s.rhs);
           return;
         }
@@ -4217,9 +4300,10 @@ struct Lowering {
     try {
       for (const auto& s : p.generate_quantities) lower_stmt(s);
     } catch (const CompileError& e) {
-      // Whatever lowered before the failure is still correct and still worth
-      // emitting: an `normal_rng` late in generated quantities should not
-      // cost us the transformed parameters ahead of it.
+      // Keep the valid prefix for diagnostics, but drivers select WaInterp
+      // whenever this marker is set and it evaluates the whole section from
+      // statement zero. There is no continuation frame for an arbitrary
+      // nested failure or its lexical live-outs.
       wa.truncated = e.what();
     }
     std::vector<int> roots = jac_slots;

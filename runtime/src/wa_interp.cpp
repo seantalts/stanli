@@ -9,6 +9,43 @@
 
 namespace stanli {
 
+size_t scalar_rng_arity(ScalarRng family) {
+  switch (family) {
+    case ScalarRng::PoissonLog:
+    case ScalarRng::Bernoulli:
+      return 1;
+    case ScalarRng::Uniform:
+    case ScalarRng::Normal:
+    case ScalarRng::Lognormal:
+      return 2;
+  }
+  throw std::logic_error("unknown scalar RNG family");
+}
+
+bool scalar_rng_is_int(ScalarRng family) {
+  return family == ScalarRng::PoissonLog || family == ScalarRng::Bernoulli;
+}
+
+double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
+                       WaRng& rng) {
+  if (nargs != scalar_rng_arity(family) || (nargs != 0 && args == nullptr))
+    throw std::logic_error("malformed scalar RNG arguments");
+  boost::ecuyer1988& g = rng.gen();
+  switch (family) {
+    case ScalarRng::PoissonLog:
+      return static_cast<double>(stan::math::poisson_log_rng(args[0], g));
+    case ScalarRng::Uniform:
+      return stan::math::uniform_rng(args[0], args[1], g);
+    case ScalarRng::Bernoulli:
+      return static_cast<double>(stan::math::bernoulli_rng(args[0], g));
+    case ScalarRng::Normal:
+      return stan::math::normal_rng(args[0], args[1], g);
+    case ScalarRng::Lognormal:
+      return stan::math::lognormal_rng(args[0], args[1], g);
+  }
+  throw std::logic_error("unknown scalar RNG family");
+}
+
 double wa_probe_point(int64_t i, int variant) {
   switch (variant) {
     case 1:
@@ -283,13 +320,16 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
     int vi = 0;
     bool iv = false;
     if (base == "normal") {
-      v = stan::math::normal_rng(sc(0, i), sc(1, i), g);
+      const double args[] = {sc(0, i), sc(1, i)};
+      v = scalar_rng_draw(ScalarRng::Normal, args, 2, rng);
     } else if (base == "std_normal") {
       v = stan::math::std_normal_rng(g);
     } else if (base == "lognormal") {
-      v = stan::math::lognormal_rng(sc(0, i), sc(1, i), g);
+      const double args[] = {sc(0, i), sc(1, i)};
+      v = scalar_rng_draw(ScalarRng::Lognormal, args, 2, rng);
     } else if (base == "uniform") {
-      v = stan::math::uniform_rng(sc(0, i), sc(1, i), g);
+      const double args[] = {sc(0, i), sc(1, i)};
+      v = scalar_rng_draw(ScalarRng::Uniform, args, 2, rng);
     } else if (base == "gamma") {
       v = stan::math::gamma_rng(sc(0, i), sc(1, i), g);
     } else if (base == "inv_gamma") {
@@ -311,7 +351,9 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
     } else if (base == "weibull") {
       v = stan::math::weibull_rng(sc(0, i), sc(1, i), g);
     } else if (base == "bernoulli") {
-      vi = stan::math::bernoulli_rng(sc(0, i), g);
+      const double args[] = {sc(0, i)};
+      vi =
+          static_cast<int>(scalar_rng_draw(ScalarRng::Bernoulli, args, 1, rng));
       iv = true;
     } else if (base == "bernoulli_logit") {
       vi = stan::math::bernoulli_logit_rng(sc(0, i), g);
@@ -323,7 +365,9 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
       vi = stan::math::poisson_rng(sc(0, i), g);
       iv = true;
     } else if (base == "poisson_log") {
-      vi = stan::math::poisson_log_rng(sc(0, i), g);
+      const double args[] = {sc(0, i)};
+      vi = static_cast<int>(
+          scalar_rng_draw(ScalarRng::PoissonLog, args, 1, rng));
       iv = true;
     } else if (base == "neg_binomial_2") {
       vi = stan::math::neg_binomial_2_rng(sc(0, i), sc(1, i), g);

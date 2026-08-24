@@ -12,12 +12,14 @@
 //     header was taken verbatim from a CmdStan run of the same model.
 #include <stanli/compile.hpp>
 #include <stanli/mir.hpp>
+#include <stanli/optable.hpp>
 #include <stanli/sexp.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -242,9 +244,9 @@ void test_wanames_interpreter_schema() {
   }
 }
 
-// Generated quantities the graph cannot express (RNG draws, a
-// draw-dependent branch) run through the interpreted fallback: same
-// columns contract, per-draw evaluation, seeded RNG stream.
+// Generated quantities the graph cannot express (an unsupported binomial
+// draw feeding dynamic behavior here) run through the interpreted fallback:
+// same columns contract, per-draw evaluation, seeded RNG stream.
 void test_interpreted_gq() {
   using namespace stanli;
   DataMap data;
@@ -570,6 +572,148 @@ void test_constant_folded_gq_column() {
   }
 }
 
+void test_compiled_scalar_rng() {
+  using namespace stanli;
+  const std::string path = "tests/fixtures/gq_scalar_rng.tmir.sexp";
+  const std::string text = slurp(path);
+  DataMap data;
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL scalar rng: write_array did not compile completely\n");
+    return;
+  }
+  int rng_ops = 0;
+  for (const Op& op : cm.write_array->graph.ops)
+    if (op.opcode == OP_RNG) ++rng_ops;
+  if (rng_ops != 5) {
+    ++failures;
+    std::printf("FAIL scalar rng: got %d OP_RNG, want 5\n", rng_ops);
+  }
+  expect_eq("scalar rng columns", joined(cm.write_array->columns),
+            "x,p,u,b,n,l");
+
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  const double x = 0.25;
+  wex.params_data()[0] = x;
+  const auto graph_row = [&](WaRng& rng) {
+    wex.run_forward_only(EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& c : cm.write_array->columns) {
+      const double* p = wex.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    return row;
+  };
+
+  auto prog =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  std::map<std::string, DataMap::Entry> base;
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  WaInterp interp(prog, std::move(base));
+  std::map<std::string, DataMap::Entry> params;
+  params["x"].r = {x};
+
+  WaRng graph_rng(42), interp_rng(42);
+  const std::vector<double> graph_first = graph_row(graph_rng);
+  const std::vector<double> interp_first = interp.eval(params, interp_rng);
+  if (graph_first != interp_first) {
+    ++failures;
+    std::printf("FAIL scalar rng: graph/interpreter first rows differ\n");
+  }
+  const std::vector<double> graph_second = graph_row(graph_rng);
+  const std::vector<double> interp_second = interp.eval(params, interp_rng);
+  if (graph_second != interp_second || graph_second == graph_first) {
+    ++failures;
+    std::printf("FAIL scalar rng: consecutive stream rows disagree\n");
+  }
+  graph_rng.seed(42);
+  if (graph_row(graph_rng) != graph_first) {
+    ++failures;
+    std::printf("FAIL scalar rng: reseed did not reproduce first row\n");
+  }
+
+  // Two caller-owned streams stay independent even when interleaved through
+  // the same mutable executor.
+  WaRng a(91), b(91);
+  const auto a1 = graph_row(a);
+  const auto b1 = graph_row(b);
+  const auto a2 = graph_row(a);
+  const auto b2 = graph_row(b);
+  if (a1 != b1 || a2 != b2 || a1 == a2) {
+    ++failures;
+    std::printf("FAIL scalar rng: independent streams diverged or stalled\n");
+  }
+  Executor clone(wex);
+  clone.params_data()[0] = x;
+  const auto clone_row = [&](WaRng& rng) {
+    clone.run_forward_only(EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& c : cm.write_array->columns) {
+      const double* p = clone.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    return row;
+  };
+  WaRng original_stream(123), clone_stream(123);
+  if (graph_row(original_stream) != clone_row(clone_stream) ||
+      graph_row(original_stream) != clone_row(clone_stream)) {
+    ++failures;
+    std::printf("FAIL scalar rng: executor copy did not rebind state\n");
+  }
+
+  // No implicit/default stream. A throwing evaluation must restore that
+  // empty state too, so a pooled executor cannot retain the caller's pointer.
+  bool missing = false;
+  try {
+    wex.run_forward_only();
+  } catch (const std::logic_error& e) {
+    missing = std::string(e.what()).find("caller-owned") != std::string::npos;
+  }
+  if (!missing) {
+    ++failures;
+    std::printf("FAIL scalar rng: missing evaluation state was accepted\n");
+  }
+  wex.params_data()[0] = std::numeric_limits<double>::infinity();
+  params["x"].r = {std::numeric_limits<double>::infinity()};
+  WaRng failing(17), interp_failing(17);
+  bool domain = false, interp_domain = false;
+  try {
+    (void)graph_row(failing);
+  } catch (const std::domain_error&) {
+    domain = true;
+  }
+  try {
+    (void)interp.eval(params, interp_failing);
+  } catch (const std::domain_error&) {
+    interp_domain = true;
+  }
+  wex.params_data()[0] = x;
+  bool restored = false;
+  try {
+    wex.run_forward_only();
+  } catch (const std::logic_error& e) {
+    restored = std::string(e.what()).find("caller-owned") != std::string::npos;
+  }
+  params["x"].r = {x};
+  const std::vector<double> recovered = graph_row(failing);
+  const std::vector<double> interp_recovered =
+      interp.eval(params, interp_failing);
+  if (!domain || !interp_domain || !restored || recovered != interp_recovered) {
+    ++failures;
+    std::printf("FAIL scalar rng: exception/reuse contract\n");
+  }
+}
+
 int main() {
   test_naming_rules();
   test_wanames_pipeline();
@@ -577,6 +721,7 @@ int main() {
   test_array_of_matrix_columns();
   test_interpreted_gq();
   test_constant_folded_gq_column();
+  test_compiled_scalar_rng();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   if (failures == 0) std::printf("test_write_array OK\n");

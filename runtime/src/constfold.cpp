@@ -56,8 +56,8 @@ std::vector<char> mark_constant_ops(const Graph& g) {
       bool c = op.n_in > 0 && op.opcode != OP_CHECK_STRUCTURED &&
                op.opcode != OP_CHECK_MATCHING_DIMS &&
                op.opcode != OP_CHECK_LOWER && op.opcode != OP_CHECK_UPPER &&
-               op.opcode != OP_CATEGORICAL && op.opcode != OP_PRINT &&
-               op.opcode != OP_REJECT;
+               op.opcode != OP_CATEGORICAL && op.opcode != OP_RNG &&
+               op.opcode != OP_PRINT && op.opcode != OP_REJECT;
       for (int k = 0; k < op.n_in; ++k)
         if (op.in[k] >= 0 && live[(size_t)op.in[k]]) c = false;
       if (c && op.out >= 0 && no_fold[(size_t)op.out]) c = false;

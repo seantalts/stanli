@@ -382,8 +382,8 @@ void test_constrain_graph() {
   bs_model_destruct(m);
 }
 
-// The interpreted write_array path: RNG draws, an int-valued RNG and a
-// draw-dependent branch, with the stream owned by the caller's bs_rng.
+// The interpreted write_array path: an unsupported int RNG and
+// draw-dependent behavior, with the stream owned by the caller's bs_rng.
 void test_constrain_interp() {
   const std::string mir = slurp("tests/fixtures/gqrng.tmir.sexp");
   char* err = nullptr;
@@ -440,8 +440,9 @@ void test_constrain_interp() {
   bs_rng_destruct(b);
   bs_model_destruct(m);
 
-  // The RNG-bearing outcome forces the whole section through WaInterp; the
-  // categorical call before it must remain available through BridgeStan.
+  // The unsupported binomial-RNG outcome forces the whole section through
+  // WaInterp; the categorical call before it must remain available through
+  // BridgeStan.
   const std::string categorical = categorical_write_array_mir(
       slurp("tests/fixtures/cat.tmir.sexp"), "categorical_logit_lpmf", false,
       false, false, true);
@@ -471,6 +472,53 @@ void test_constrain_interp() {
                    -std::log(3.0));
     bs_rng_destruct(categorical_rng);
   }
+  bs_model_destruct(m);
+}
+
+void test_constrain_compiled_rng() {
+  const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
+  char* err = nullptr;
+  bs_model* m = bs_model_from_mir(mir.c_str(), "{}", 1, &err);
+  if (m == nullptr) {
+    fail(std::string("compiled scalar RNG construct: ") +
+         (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+    return;
+  }
+  expect_eq_str("compiled scalar RNG names", bs_param_names(m, true, true),
+                "x,p,u,b,n,l");
+  if (bs_param_num(m, true, true) != 6) {
+    fail("compiled scalar RNG column count is not six");
+    bs_model_destruct(m);
+    return;
+  }
+  const double q[1] = {0.25};
+  bs_rng* a = bs_rng_construct(42, &err);
+  bs_rng* b = bs_rng_construct(42, &err);
+  if (a == nullptr || b == nullptr) {
+    fail("compiled scalar RNG handle construction");
+    bs_rng_destruct(a);
+    bs_rng_destruct(b);
+    bs_model_destruct(m);
+    return;
+  }
+  std::vector<double> a1(6), b1(6), a2(6), b2(6);
+  const int a1rc = bs_param_constrain(m, true, true, q, a1.data(), a, &err);
+  const int b1rc = bs_param_constrain(m, true, true, q, b1.data(), b, &err);
+  const int a2rc = bs_param_constrain(m, true, true, q, a2.data(), a, &err);
+  const int b2rc = bs_param_constrain(m, true, true, q, b2.data(), b, &err);
+  if (a1rc != 0 || b1rc != 0 || a2rc != 0 || b2rc != 0 || a1 != b1 ||
+      a2 != b2 || a1 == a2)
+    fail("compiled BridgeStan RNG streams are shared, stalled, or divergent");
+
+  // No generated quantities requested: null is legal and the graph's
+  // discarded effects run on an internal scratch stream.
+  double x = 0.0;
+  expect_eq_int("compiled scalar RNG no-gq null stream",
+                bs_param_constrain(m, false, false, q, &x, nullptr, &err), 0);
+  expect_bitwise("compiled scalar RNG parameter-only value", x, q[0]);
+  bs_rng_destruct(a);
+  bs_rng_destruct(b);
   bs_model_destruct(m);
 }
 
@@ -1003,6 +1051,7 @@ int main() {
   test_nested_scalar_array_order();
   test_constrain_graph();
   test_constrain_interp();
+  test_constrain_compiled_rng();
   test_constrain_operators();
   test_unsupported();
   test_initialize();

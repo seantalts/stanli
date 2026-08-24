@@ -281,36 +281,42 @@ int main(int argc, char** argv) {
     } else if (cm.write_array->columns.empty()) {
       std::fprintf(stderr, "WA empty %s\n", cm.write_array->truncated.c_str());
     } else {
-      stanli::Executor wex(std::move(cm.write_array->graph));
-      cm.write_array->bind(wex);
-      for (int64_t i = 0; i < wex.n_params(); ++i)
-        wex.params_data()[i] = eval_point(i, variant);
-      wex.run_forward_only();
-      int64_t width = 0, bad = 0;
-      for (const auto& c : cm.write_array->columns) {
-        const double* p = wex.value_ptr(c.slot);
-        for (int64_t i = 0; i < c.len; ++i, ++width)
-          if (!std::isfinite(p[i])) ++bad;
-      }
-      std::fprintf(stderr, "WA %zu vars %lld values %lld nonfinite %s\n",
-                   cm.write_array->columns.size(), (long long)width,
-                   (long long)bad,
-                   cm.write_array->truncated.empty()
-                       ? "complete"
-                       : ("truncated: " + cm.write_array->truncated).c_str());
-      if (wa_values) {
-        std::string joined;
-        for (const auto& nm :
-             stanli::CompiledModel::csv_names(cm.write_array->columns)) {
-          if (!joined.empty()) joined += ',';
-          joined += nm;
-        }
-        std::printf("WANAMES %s\nWAVALS", joined.c_str());
+      try {
+        stanli::Executor wex(std::move(cm.write_array->graph));
+        cm.write_array->bind(wex);
+        for (int64_t i = 0; i < wex.n_params(); ++i)
+          wex.params_data()[i] = eval_point(i, variant);
+        stanli::WaRng rng(1234);
+        wex.run_forward_only(stanli::EvalState{&rng});
+        int64_t width = 0, bad = 0;
         for (const auto& c : cm.write_array->columns) {
           const double* p = wex.value_ptr(c.slot);
-          for (int64_t i = 0; i < c.len; ++i) std::printf(" %.17g", p[i]);
+          for (int64_t i = 0; i < c.len; ++i, ++width)
+            if (!std::isfinite(p[i])) ++bad;
         }
-        std::printf("\n");
+        std::fprintf(stderr, "WA %zu vars %lld values %lld nonfinite %s\n",
+                     cm.write_array->columns.size(), (long long)width,
+                     (long long)bad,
+                     cm.write_array->truncated.empty()
+                         ? "complete"
+                         : ("truncated: " + cm.write_array->truncated).c_str());
+        if (wa_values) {
+          std::string joined;
+          for (const auto& nm :
+               stanli::CompiledModel::csv_names(cm.write_array->columns)) {
+            if (!joined.empty()) joined += ',';
+            joined += nm;
+          }
+          std::printf("WANAMES %s\nWAVALS", joined.c_str());
+          for (const auto& c : cm.write_array->columns) {
+            const double* p = wex.value_ptr(c.slot);
+            for (int64_t i = 0; i < c.len; ++i) std::printf(" %.17g", p[i]);
+          }
+          std::printf("\n");
+        }
+      } catch (const std::exception& we) {
+        std::fprintf(stderr, "WA empty graph: %s\n", we.what());
+        if (wa_values) std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", we.what());
       }
     }
     if (wa_values && (!cm.write_array || (!cm.write_array->interp &&

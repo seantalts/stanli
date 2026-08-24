@@ -190,6 +190,30 @@ the top of the page, not replacements for the current corpus rows:
   the categorical-logit RBM controls were unchanged. These targeted medians
   are not replacements for the full-corpus warmed means in the table below,
   which await the next corpus refresh.
+- **Compiled scalar generated-quantities RNGs** keep caller-owned chain state
+  on the forward-only write-array graph for scalar `poisson_log`, `uniform`,
+  `bernoulli`, `normal`, and `lognormal` draws. Unsupported/container RNGs and
+  draws used as dynamic control, indices, or geometry still fail closed to the
+  whole-section interpreter. In an exact census of the 24 previously
+  interpreted corpus models, eight moved to the graph and the other 16 kept
+  the interpreter; all 24 still produced complete rows. A targeted 2026-08-24
+  C-ABI A/B (point 0, two warmups, seven matched batch medians) measured:
+
+  | model | interpreted row | compiled row | improvement |
+  | --- | ---: | ---: | ---: |
+  | `covid19imperial_v2` | 156.239 ms | 2.089 ms | 74.81x |
+  | `covid19imperial_v3` | 157.176 ms | 2.077 ms | 75.69x |
+  | `dogs_hierarchical` | 1.929 ms | 24.105 us | 80.02x |
+  | `dogs_nonhierarchical` | 2.078 ms | 32.317 us | 64.29x |
+  | `GLMM1_model` | 75.541 us | 2.176 us | 34.72x |
+  | `hierarchical_gp` | 2.291 ms | 46.301 us | 49.47x |
+  | `lotka_volterra` | 1.797 ms | 31.434 us | 57.16x |
+  | `one_comp_mm_elim_abs` | 5.123 ms | 139.431 us | 36.74x |
+
+  The largest setup tradeoff is the two Covid graphs: C-API model
+  construction rises from about 0.239 s to 2.20-2.21 s, but the 154 ms saved
+  per row repays it after roughly 13 draws. These are targeted write-array
+  medians, not replacements for the sampling columns in the full corpus table.
 - **Packed row-wise reductions** (the LDA inner loop): targeted medians fall
   from 154 to 94 us for `ldaK2` and 6.82 to 3.70 ms for `ldaK5`, while their
   graphs collapse from 15,854 to 22 and 434,126 to 156 ops. The full

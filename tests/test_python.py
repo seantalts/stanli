@@ -57,9 +57,9 @@ def test_sample_returns_transformed_parameters():
 
 
 def test_sample_returns_generated_quantities():
-    # RNG draws and draw-dependent branches run through the interpreted
-    # write_array; the columns and the seeded RNG stream must both reach
-    # Python.
+    # This model's unsupported binomial draw and dynamic behavior select the
+    # interpreted write_array; its columns and seeded RNG stream must both
+    # reach Python.
     code = (FIXTURES / "gqrng.stan").read_text()
     m = stanli.Model(stan_code=code, data={"N": 5})
     d = m.sample(seed=7, warmup=200, samples=50)

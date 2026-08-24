@@ -177,12 +177,14 @@ struct CompiledModel {
     size_t n_gq_start = 0;
     std::vector<std::pair<int, std::vector<double>>> fills;
     int64_t n_unconstrained = 0;  // must agree with the log_prob graph's
-    // Non-empty when lowering stopped early (an RNG in generated quantities,
-    // say). `columns` then holds the prefix that did lower, and this says
-    // what stopped it -- silently short CSV rows would be worse.
+    // Non-empty when lowering stopped early (an unsupported RNG family or
+    // draw-dependent branch, say). `columns` then holds the prefix that did
+    // lower, and this says what stopped it -- silently short CSV rows would
+    // be worse.
     std::string truncated;
     // Set alongside `truncated`: the per-draw interpreter that runs the
-    // whole section, RNG draws and draw-dependent branches included.
+    // whole section, unsupported RNG draws and draw-dependent branches
+    // included.
     // Drivers prefer it over the truncated graph (see wa_interp.hpp);
     // the graph remains the fast path whenever lowering completes.
     std::shared_ptr<WaInterp> interp;

@@ -287,7 +287,8 @@ inline Run evaluate(const std::string& mir_text, const DataMap& data,
           wa.bind(wex);
           for (int64_t i = 0; i < wex.n_params(); ++i)
             wex.params_data()[i] = draw_point(i, variant);
-          wex.run_forward_only();
+          WaRng graph_rng(1234);
+          wex.run_forward_only(EvalState{&graph_rng});
           r.graph_names = CompiledModel::csv_names(wa.columns);
           for (const auto& c : wa.columns) {
             const double* p = wex.value_ptr(c.slot);
@@ -589,13 +590,9 @@ class Matrix {
       const size_t j = it->second;
       if (k >= a.graph_row.size() || j >= a.interp_row.size()) continue;
       // RNG taint: the interpreter drew this column from a stream, so the
-      // two seeds moved it. Nothing to compare -- the graph never draws.
-      // Today this excludes nothing, because graph lowering TRUNCATES at
-      // the first RNG call, so a shared column is always upstream of every
-      // draw. It stays because that is a property of the lowering rather
-      // than of the comparison, and the count is reported so a section
-      // whose shared columns all become RNG-tainted reads as zero columns
-      // compared instead of as a vacuous pass.
+      // two seeds moved it. The graph receives the first interpreter seed,
+      // which tests exact same-stream behavior separately; this matrix still
+      // excludes stochastic values so it compares only deterministic columns.
       if (!same_bits(a.interp_row[j], a.interp_row_b[j])) {
         ++res_.wa_rng_excluded;
         continue;

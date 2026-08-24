@@ -290,6 +290,8 @@ int main(int argc, char** argv) {
     if (want_summary) summary_draws.reserve(draws.size() * col_names.size());
 
     std::vector<double> row;
+    size_t graph_bad = 0;
+    std::string first_graph_bad;
     for (size_t d = 0; d < draws.size(); ++d) {
       row.clear();
       if (wi) {
@@ -297,11 +299,18 @@ int main(int argc, char** argv) {
       } else {
         const auto& q = draws[d];
         for (size_t i = 0; i < q.size(); ++i) out.params_data()[i] = q[i];
-        out.run_forward_only();
-        for (const auto& v : cols) {
-          const double* p = out.value_ptr(v.slot);
-          for (int64_t i = 0; i < v.len; ++i)
-            row.push_back(p[v.storage_index(i)]);
+        try {
+          out.run_forward_only(stanli::EvalState{&wa_rng});
+          for (const auto& v : cols) {
+            const double* p = out.value_ptr(v.slot);
+            for (int64_t i = 0; i < v.len; ++i)
+              row.push_back(p[v.storage_index(i)]);
+          }
+        } catch (const std::domain_error& e) {
+          if (!have_wa) throw;
+          if (graph_bad++ == 0) first_graph_bad = e.what();
+          row.assign(col_names.size(),
+                     std::numeric_limits<double>::quiet_NaN());
         }
       }
       bool first = true;
@@ -319,6 +328,11 @@ int main(int argc, char** argv) {
       if (want_summary)
         summary_draws.insert(summary_draws.end(), row.begin(), row.end());
     }
+    if (graph_bad)
+      std::fprintf(stderr,
+                   "stanli_run: %zu of %zu draws could not produce generated "
+                   "quantities, written as nan: %s\n",
+                   graph_bad, draws.size(), first_graph_bad.c_str());
 
     if (want_summary && per_chain > 0) {
       // The draws were concatenated chain by chain above, which is

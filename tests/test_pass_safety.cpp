@@ -15,6 +15,7 @@
 //    the interleavings no hand-written test would think to write.
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
+#include <stanli/constfold.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/island.hpp>
@@ -345,9 +346,35 @@ static void test_random_graphs_preserve_gradients() {
   }
 }
 
+static void test_rng_is_an_effect_barrier() {
+  Graph g;
+  Fills fills;
+  const int mean = g.add_slot(1, false);
+  fills.emplace_back(mean, std::vector<double>{0.0});
+  std::vector<int> roots;
+  for (int i = 0; i < 40; ++i) {
+    const int out = g.add_slot(1, false);
+    g.add_op(OP_RNG, {mean}, out);  // variant 0: scalar poisson_log_rng
+    if (i == 39) roots.push_back(out);
+  }
+  g.result_slot = roots.back();
+  const ConstFoldStats folded = const_fold(g, fills, roots);
+  std::vector<int> terms;
+  const RerollStats rerolled = reroll(g, fills, terms, roots);
+  const int islands = carve_islands(g, fills, terms, roots);
+  int rng_ops = 0;
+  for (const Op& op : g.ops)
+    if (op.opcode == OP_RNG) ++rng_ops;
+  expect("RNG effects survive constfold", folded.ops_removed == 0);
+  expect("RNG effects survive reroll/hoist", rerolled.regions == 0);
+  expect("RNG effects split islands", islands == 0);
+  expect("RNG effect count/order preserved", rng_ops == 40);
+}
+
 int main() {
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);  // see the fuzz loop
   test_whitelist_backwards_ignore_values();
+  test_rng_is_an_effect_barrier();
   test_random_graphs_preserve_gradients();
   if (failures) {
     std::printf("%d failures\n", failures);

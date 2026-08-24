@@ -262,6 +262,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/eltwise_expr.cpp
   runtime/kernels/mixture.cpp
   runtime/kernels/message.cpp
+  runtime/kernels/rng.cpp
   runtime/kernels/island.cpp
   runtime/src/island.cpp
   runtime/src/adjoint.cpp

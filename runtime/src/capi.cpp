@@ -582,7 +582,7 @@ int stanli_wa_row(stanli_model* m, const double* q, double* out) {
     if (m->wa_ex) {
       std::memcpy(m->wa_ex->params_data(), q,
                   sizeof(double) * m->wa_ex->n_params());
-      m->wa_ex->run_forward_only();
+      m->wa_ex->run_forward_only(stanli::EvalState{&m->wa_rng});
       int64_t at = 0;
       for (const auto& c : m->wa_cols) {
         const double* p = m->wa_ex->value_ptr(c.slot);

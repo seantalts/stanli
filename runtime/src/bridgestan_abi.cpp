@@ -230,7 +230,11 @@ class bs_model {
     auto lease = p.acquire();
     std::memcpy(lease->params_data(), theta_unc,
                 sizeof(double) * (size_t)lease->n_params());
-    lease->run_forward_only();
+    // The compiled graph, like WaInterp above, always evaluates the complete
+    // row. Discarded generated quantities therefore draw from a scratch
+    // stream when the caller did not request them.
+    stanli::WaRng scratch(1);
+    lease->run_forward_only(stanli::EvalState{rng == nullptr ? &scratch : rng});
     for (const auto& c : cols) {
       const double* v = lease->value_ptr(c.slot);
       for (int64_t i = 0; i < c.len; ++i) row.push_back(v[c.storage_index(i)]);

@@ -1,8 +1,7 @@
-// tests/fixtures/solve.stan with one RNG draw appended to generated
-// quantities. The RNG stops graph lowering there, so the whole section
-// falls to the per-draw MIR interpreter and the solve columns come out of
-// mir_interp.hpp instead of the kernels -- which is what lets a test hold
-// the two halves of the runtime against each other on the same draw.
+// tests/fixtures/solve.stan with one graph-native scalar RNG draw appended to
+// generated quantities. The solve columns and the draw now share the compiled
+// write_array graph; tests separately compare its deterministic prefix with
+// solve.stan and pin caller-owned stream advancement and reseeding.
 //
 // The four linear-solve shapes stanc3 spells with the division operators,
 // and the two divisions that must stay elementwise. `A` is data and `P`

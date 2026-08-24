@@ -1638,9 +1638,9 @@ int main() {
     }
   }
 
-  // An RNG anywhere in generated quantities selects the interpreted
-  // write_array for the whole section. Categorical calls before that fallback
-  // retain their scalar/array and normalized/propto semantics there too.
+  // An unsupported binomial RNG selects the interpreted write_array for the
+  // whole section. Categorical calls before that fallback retain their
+  // scalar/array and normalized/propto semantics there too.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
     for (bool propto : {false, true}) {
       for (int outcome_count : {1, 3}) {
@@ -1798,9 +1798,10 @@ int main() {
     check(found, fn + " scalar-left vector column");
   }
 
-  // A shaped zero-width operand also owns the broadcast geometry. The RNG
-  // forces WaInterp; Stan's empty-outcome logit overload returns zero without
-  // indexing either the outcomes or the empty vector.
+  // A shaped zero-width operand also owns the broadcast geometry. An
+  // unsupported gamma RNG keeps this interpreter-specific oracle on WaInterp;
+  // Stan's empty-outcome logit overload returns zero without indexing either
+  // the outcomes or the empty vector.
   {
     const std::string fn = "categorical_logit_lpmf";
     std::string mir =
@@ -1819,8 +1820,8 @@ int main() {
       const std::string scaled_empty = R"(((pattern
              (FunApp (StanLib Times__ FnPlain AoS)
               (((pattern
-                 (FunApp (StanLib normal_rng FnRng AoS)
-                  (((pattern (Lit Real 0.0))
+                 (FunApp (StanLib gamma_rng FnRng AoS)
+                  (((pattern (Lit Real 1.0))
                     (meta ((type_ UReal) (adlevel DataOnly))))
                    ((pattern (Lit Real 1.0))
                     (meta ((type_ UReal) (adlevel DataOnly)))))))
