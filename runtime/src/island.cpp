@@ -37,17 +37,17 @@ namespace {
 
 constexpr int64_t kMinIslandOps = 32;
 constexpr int kMaxLiveIns = 6;
-// What one register costs against one element of graph traffic. The file is
-// written by the forward and read by the backward, and the backward's
-// adjoint file is zeroed once per call besides -- so three passes over a
-// register against one element moved.
+// What one value register costs against one element of graph traffic. The
+// value file is written by the forward and read by the backward. The compact
+// adjoint file is charged separately below: copied registers share a cell,
+// and checkpoint registers have no adjoint cell at all.
 //
 // It was 4 while the backward replayed the program under var, where a
 // register meant an allocated vari and a virtual chain() call. That term
 // dominated the estimate and is what refused thirteen of the fourteen
 // regions the carver could compile; the generated adjoint (adjoint.hpp)
 // is what makes it a memory cost again.
-constexpr int kRegWeight = 3;
+constexpr int kValueRegWeight = 2;
 // And what one graph op costs against one element. An op that writes a
 // scalar still pays a dispatch, a context load and a scratch-partials
 // backward; measured at ~5 ns against ~1 ns for an island instruction
@@ -165,8 +165,9 @@ struct Compiler {
   std::vector<int> live_in_slots;
   size_t op_index = 0;  // graph index of the op being compiled
   // Scratch registers CALLs allocated: working memory the graph op also
-  // had, free in the estimate's eyes, so the estimate counts these at
-  // weight 1 rather than kRegWeight.
+  // had, free in the estimate's eyes. They are subtracted from the two
+  // value-file passes and retain only their identity cell in the compact
+  // adjoint count below: effective weight 1.
   int64_t n_call_scratch = 0;
   bool ok = true;
 
@@ -538,16 +539,22 @@ int carve_islands(Graph& g,
       // kernel with the graph's own per-call overhead (context assembly,
       // indirect call, twice per gradient), so absorbing one buys
       // continuity, never speed. Two corrections make that true in the
-      // arithmetic: its scratch counts at weight 1 rather than
-      // kRegWeight (working memory the graph op also had, free in this
-      // accounting), and each CALL pays the same kOpCost the graph side
-      // is charged -- without which a region of nothing but CALLs reads
-      // as a win and measures a loss (dugongs_model, 0.63x, the first
-      // sweep after the vocabulary widened).
+      // arithmetic: its scratch is subtracted from the two value-file passes
+      // (working memory the graph op also had) but retains its identity cell
+      // in the compact adjoint count, for effective weight 1; and each CALL
+      // pays the same kOpCost the graph side is charged -- without which a
+      // region of nothing but CALLs reads as a win and measures a loss
+      // (dugongs_model, 0.63x, the first sweep after the vocabulary widened).
       const int64_t n_calls = (int64_t)cc.prog.calls.size();
+      // A rare program the generator refuses keeps the replay. Preserve its
+      // old one-cell-per-value charge rather than treating an absent compact
+      // adjoint program as a zero-sized file.
+      const int64_t adj_regs = cc.prog.adj.empty()
+                                   ? (int64_t)cc.prog.n_regs
+                                   : (int64_t)cc.prog.adj.n_regs;
       const int64_t island_cost =
-          kRegWeight * ((int64_t)cc.prog.n_regs - cc.n_call_scratch) +
-          cc.n_call_scratch + (int64_t)cc.prog.code.size() +
+          kValueRegWeight * ((int64_t)cc.prog.n_regs - cc.n_call_scratch) +
+          adj_regs + (int64_t)cc.prog.code.size() +
           (int64_t)cc.prog.adj.code.size() + (kOpCost - 1) * 2 * n_calls;
       if (std::getenv("STANLI_DEBUG_ISLAND"))
         std::fprintf(stderr, "island? ops=%zu graph=%lld island=%lld\n", j - i,
@@ -630,9 +637,9 @@ int carve_islands(Graph& g,
           const IslandProg& p = *static_cast<const IslandProg*>(is.udata);
           std::fprintf(stderr,
                        "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu "
-                       "adj=%zu\n",
+                       "adj=%zu adj_regs=%d\n",
                        j - i, p.code.size(), p.n_regs, p.ins.size(),
-                       p.out_regs.size(), p.adj.code.size());
+                       p.out_regs.size(), p.adj.code.size(), p.adj.n_regs);
           // Which instructions the region is made of, so a disagreement
           // with the replay can be attributed to an opcode rather than
           // guessed at.

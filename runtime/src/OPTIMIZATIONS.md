@@ -285,12 +285,26 @@ the register file makes free, which is why it was the one winner before
 The pass still estimates both sides before committing, because one shape
 is still wrong for it: a region carrying far more state than it
 computes, where the register file costs more to write and read back than
-the ops ever moved. The estimate weighs what the ops move and what they
-pay per dispatch against the register file and the two instruction
-lists, and it keeps every region that measured clearly above parity
-while dropping that shape and two more that were slower compiled.
-`STANLI_ISLAND_ALWAYS=1` skips it, which is how to ask why a region was
-left alone.
+the ops ever moved. Value and adjoint storage are accounted separately.
+Every value or checkpoint register other than CALL scratch is charged for
+its forward write and backward read. Checkpoints have no adjoint cell, and
+copies that share a stan-math vari share an adjoint equivalence class; those
+classes are packed densely and charged once for the runtime's zeroing pass.
+The estimate then adds both instruction lists, the graph's per-op dispatch
+cost, and a cost-neutral correction for calls to graph kernels. This is the
+same layout the native island backward allocates and clears, rather than a
+fixed weight per forward register.
+
+On `iohmm_reg`, 95,424 forward register ids contain only 39,000 distinct
+adjoint classes, while 4,488 checkpoint registers are value-only. Correct
+accounting moves the estimate from 389,640 to 328,728 against a graph cost of
+361,045, so the default path now takes the same 27-op island as
+`STANLI_ISLAND_ALWAYS=1`. A targeted seven-run Release A/B measured
+498.612 -> 241.453 us/gradient (2.065x). A default/disabled/forced census of
+all 21 corpus models with compilable regions changed only this decision and
+preserved every known refusal, including `bones_model`, `dugongs_model`,
+`Survey_model`, and both `covid19imperial` models. The environment switch
+still skips the estimate, which is how to ask why a region was left alone.
 
 Vocabulary is no longer a refusal for scalar work. The machine has its
 own instructions for the arithmetic a recurrence is made of, and

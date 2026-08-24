@@ -91,7 +91,7 @@ static std::vector<double> native_adjoints(const IslandProg& p,
   for (size_t m = 0; m < p.out_regs.size(); ++m)
     out_vals->push_back(val[(size_t)p.out_regs[m]]);
 
-  std::vector<double> adj((size_t)p.n_regs, 0.0);
+  std::vector<double> adj((size_t)p.adj.n_regs, 0.0);
   const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += seed[m];
@@ -377,6 +377,32 @@ static void test_copy_then_modify_chain() {
     st = d;
   }
   check("copy then modify chain", b.done({acc}, {1.0}));
+}
+
+// Copy sharing is storage sharing, not only an arithmetic shortcut. The
+// value file keeps its original register ids, while adjoint equivalence
+// classes are packed densely. Removing the copied range's old ids must also
+// preserve the contiguity the following ranged EXP rule requires.
+static void test_compact_adjoint_ranges() {
+  Build b({0.31, 0.72, -0.45, 1.1}, 4);
+  const int copy = b.alloc(4);
+  b.emit_to(Program::MOVR, copy, 0, 0, 0, 4);
+  const int out = b.emit(Program::EXP_RANGE, copy, 0, 0, 4, 4);
+  Case c = b.done({out, out + 1, out + 2, out + 3}, {0.2, 0.4, 0.6, 0.8});
+  Case parity = c;
+  expect("compact ranges generated", gen_adjoint(c.p));
+  expect("compact ranges forward ids", c.p.adj.adj_reg.size() == 12);
+  expect("compact ranges cells", c.p.adj.n_regs == 8);
+  const std::vector<int32_t> want_map{0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7};
+  expect("compact ranges map", c.p.adj.adj_reg == want_map);
+  expect("compact ranges instruction count", c.p.adj.code.size() == 1);
+  if (c.p.adj.code.size() == 1) {
+    const AdjInstr& A = c.p.adj.code[0];
+    expect("compact ranges opcode", A.code == Program::EXP_RANGE);
+    expect("compact ranges contiguous output", A.dst == 4);
+    expect("compact ranges contiguous input", A.a == 0);
+  }
+  check("compact ranges parity", std::move(parity));
 }
 
 static void test_accumulate_into_one_register() {
@@ -827,6 +853,7 @@ int main() {
   test_self_write();
   test_live_copy_both_read();
   test_copy_then_modify_chain();
+  test_compact_adjoint_ranges();
   test_accumulate_into_one_register();
   test_ranged();
   test_in_place_ranges();

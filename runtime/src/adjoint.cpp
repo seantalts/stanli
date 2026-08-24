@@ -149,20 +149,6 @@ bool gen_adjoint(IslandProg& p) {
   ap.code.reserve(orig.size());
   ap.adj_reg.resize((size_t)n0);
   for (int r = 0; r < n0; ++r) ap.adj_reg[(size_t)r] = r;
-  int n_regs = n0;
-
-  auto checkpoint = [&](int r, int len, bool needed) {
-    if (!needed) return r;
-    const int ck = n_regs;
-    n_regs += len;
-    Program::Instr save;
-    save.code = len == 1 ? Program::MOV : Program::MOVR;
-    save.dst = ck;
-    save.a = r;
-    save.len = len;
-    ncode.push_back(save);
-    return ck;
-  };
 
   // A copy the forward never rewrites shares its source's adjoint cell.
   // This is the replay's vari sharing, written down: `reg[d] = reg[a]` on
@@ -191,6 +177,54 @@ bool gen_adjoint(IslandProg& p) {
     return true;
   };
 
+  // Discover every shared cell before emitting the adjoint instructions.
+  // Besides making their indices final for map1/mapn below, this lets the
+  // file store one double per equivalence class rather than retaining holes
+  // at the copied registers' original ids. Representatives are packed in
+  // numeric order: if an old mapped range was base+k, every integer in that
+  // interval is present, so rank compression preserves base'+k. That is the
+  // contiguity contract the ranged rules and CALL backwards rely on.
+  for (int i = 0; i < (int)orig.size(); ++i) {
+    const Program::Instr& I = orig[(size_t)i];
+    if (!aliasable(I, i)) continue;
+    const int len = I.code == Program::MOV ? 1 : I.len;
+    for (int k = 0; k < len; ++k)
+      ap.adj_reg[(size_t)(I.dst + k)] = ap.adj_reg[(size_t)(I.a + k)];
+  }
+  std::vector<char> used_adj((size_t)n0, 0);
+  for (int32_t r : ap.adj_reg) {
+    if (r < 0 || r >= n0) return false;
+    used_adj[(size_t)r] = 1;
+  }
+  std::vector<int32_t> compact_adj((size_t)n0, -1);
+  for (int r = 0; r < n0; ++r)
+    if (used_adj[(size_t)r]) compact_adj[(size_t)r] = ap.n_regs++;
+  for (int32_t& r : ap.adj_reg) r = compact_adj[(size_t)r];
+
+  bool mapped_ranges_ok = true;
+  auto map1 = [&](int32_t r) { return ap.adj_reg[(size_t)r]; };
+  auto mapn = [&](int32_t r, int len) {
+    if (len == 0) return int32_t{0};
+    const int32_t base = ap.adj_reg[(size_t)r];
+    for (int k = 1; k < len; ++k)
+      if (ap.adj_reg[(size_t)(r + k)] != base + k) mapped_ranges_ok = false;
+    return base;
+  };
+
+  int n_regs = n0;
+  auto checkpoint = [&](int r, int len, bool needed) {
+    if (!needed) return r;
+    const int ck = n_regs;
+    n_regs += len;
+    Program::Instr save;
+    save.code = len == 1 ? Program::MOV : Program::MOVR;
+    save.dst = ck;
+    save.a = r;
+    save.len = len;
+    ncode.push_back(save);
+    return ck;
+  };
+
   // A range needs a checkpoint when any element is overwritten strictly
   // after i; the copy is one MOVR and the backward reads it instead.
   auto save_range = [&](int r, int len, int i) {
@@ -208,8 +242,12 @@ bool gen_adjoint(IslandProg& p) {
       // guarantee), and some read their output values too -- so both are
       // checkpointed whenever a later instruction overwrites them.
       Program::Call& call = fwd.calls[(size_t)I.a];
-      for (int j = 0; j < call.n_in; ++j)
+      for (int j = 0; j < call.n_in; ++j) {
+        (void)mapn(call.in[j], call.in_len[j]);
         call.bwd_in[j] = save_range(call.in[j], call.in_len[j], i);
+      }
+      (void)mapn(call.out, call.out_len);
+      if (!mapped_ranges_ok) return false;
       ncode.push_back(I);
       call.bwd_out = save_range(call.out, call.out_len, i);
       AdjInstr A;
@@ -219,9 +257,6 @@ bool gen_adjoint(IslandProg& p) {
       continue;
     }
     if (aliasable(I, i)) {
-      const int len = I.code == Program::MOV ? 1 : I.len;
-      for (int k = 0; k < len; ++k)
-        ap.adj_reg[(size_t)(I.dst + k)] = ap.adj_reg[(size_t)(I.a + k)];
       ncode.push_back(I);
       continue;  // no adjoint instruction: the cells are already shared
     }
@@ -276,14 +311,6 @@ bool gen_adjoint(IslandProg& p) {
     // A range has to map to a range: aliasing builds contiguous maps from
     // contiguous copies, so this holds, and refusing is cheaper than
     // scattering the interpreter's loops.
-    bool ok = true;
-    auto map1 = [&](int32_t r) { return ap.adj_reg[(size_t)r]; };
-    auto mapn = [&](int32_t r, int len) {
-      const int32_t base = ap.adj_reg[(size_t)r];
-      for (int k = 1; k < len; ++k)
-        if (ap.adj_reg[(size_t)(r + k)] != base + k) ok = false;
-      return base;
-    };
     A.dst = wl > 1 ? mapn(I.dst, wl) : map1(I.dst);
     if (I.code == Program::DENSITY) {
       const int ar = program_density_arity(I.len);
@@ -299,7 +326,7 @@ bool gen_adjoint(IslandProg& p) {
       A.b = spec.has(kProgramRangeB) ? mapn(I.b, I.len) : map1(I.b);
       A.c = map1(I.c);
     }
-    if (!ok) return false;
+    if (!mapped_ranges_ok) return false;
     ap.code.push_back(A);
   }
 
@@ -316,29 +343,31 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
     if (I.code == Program::CALL) {
       // The kernel's own backward is the rule: values from the (possibly
       // checkpointed) forward registers, partials from the scratch the
-      // forward stashed inside the file, adjoints accumulated straight
-      // into the adjoint file at the same ranges the values occupy --
-      // every CALL range is excluded from cell sharing, so range index
-      // and cell index agree. Then the output's cells are cleared, the
-      // same consume-and-clear every other rule performs.
+      // forward stashed inside the file, adjoints accumulated into the
+      // compact ranges named by adj_reg -- every CALL range is excluded
+      // from cell sharing, and numeric-order compaction preserves its
+      // contiguity. Then the output's cells are cleared, the same
+      // consume-and-clear every other rule performs.
       const Program::Call& call = fwd.calls[(size_t)I.a];
       KernelCtx ctx;
       ctx.n_in = call.n_in;
       for (int k = 0; k < call.n_in; ++k) {
         ctx.in[k] =
             Desc{const_cast<double*>(val) + call.bwd_in[k], call.in_len[k]};
-        ctx.in_adj[k] = Desc{adj + call.in[k], call.in_len[k]};
+        const int in_adj = call.in_len[k] ? ap.adj_reg[(size_t)call.in[k]] : 0;
+        ctx.in_adj[k] = Desc{adj + in_adj, call.in_len[k]};
       }
       ctx.out = Desc{const_cast<double*>(val) + call.bwd_out, call.out_len};
-      ctx.out_adj_vec = Desc{adj + call.out, call.out_len};
-      if (call.out_len == 1) ctx.out_adj = adj[call.out];
+      const int out_adj = ap.adj_reg[(size_t)call.out];
+      ctx.out_adj_vec = Desc{adj + out_adj, call.out_len};
+      if (call.out_len == 1) ctx.out_adj = adj[out_adj];
       ctx.variant = call.variant;
       ctx.scratch = const_cast<double*>(val) + call.scratch;
       ctx.idata = call.idata.data();
       ctx.n_idata = (int64_t)call.idata.size();
       const Kernel* k = find_kernel(call.opcode);
       k->backward(ctx);
-      for (int j = 0; j < call.out_len; ++j) adj[call.out + j] = 0.0;
+      for (int j = 0; j < call.out_len; ++j) adj[out_adj + j] = 0.0;
       continue;
     }
     // Every instruction consumes its output's adjoint and clears it: the

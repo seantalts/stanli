@@ -41,6 +41,25 @@ static std::vector<double> run_grad(Graph g, const Fills& fills) {
   return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
+// The island kernel reuses its thread-local compact adjoint file. Running the
+// same executor twice catches a stale cell beyond the shortened zeroed range.
+static std::vector<double> run_grad_twice(Graph g, const Fills& fills) {
+  Executor ex(std::move(g));
+  for (const auto& f : fills) {
+    double* p = ex.value_ptr(f.first);
+    for (size_t j = 0; j < f.second.size(); ++j) p[j] = f.second[j];
+  }
+  for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = fill_at(i);
+  std::vector<double> first(1 + (size_t)ex.n_params());
+  std::vector<double> second(1 + (size_t)ex.n_params());
+  first[0] = ex.gradient(first.data() + 1);
+  second[0] = ex.gradient(second.data() + 1);
+  expect("repeat sizes", first.size() == second.size());
+  for (size_t i = 0; i < first.size(); ++i)
+    expect_close("repeat v" + std::to_string(i), second[i], first[i]);
+  return second;
+}
+
 static std::string slurp(const std::string& path) {
   std::ifstream f(path);
   std::ostringstream ss;
@@ -270,10 +289,68 @@ static void test_vector_copies_carved() {
   const int carved = carve_islands(isl.g, isl.fills, isl.terms, {});
   expect("copies carved==1", carved == 1);
   expect("copies ops==4", isl.g.ops.size() == 4);
-  const std::vector<double> got = run_grad(std::move(isl.g), isl.fills);
+  const std::vector<double> got = run_grad_twice(std::move(isl.g), isl.fills);
   expect("copies sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close("copies v" + std::to_string(i), got[i], want[i]);
+}
+
+// A measured-cost boundary made from the same two facts as iohmm_reg:
+// INDEX copies share their source's adjoint cell, while ADD_N expands to a
+// short instruction chain. Charging one adjoint cell per forward register
+// refuses this region; charging the compact file carves it. Constants keep
+// the boundary honest by adding real value/adjoint work without a graph op.
+static HmmGraph build_compact_cost_boundary() {
+  HmmGraph h;
+  Graph& g = h.g;
+  constexpr int W = 4;
+  const int x = g.add_slot(W, true);
+  int last = -1;
+  for (int t = 0; t < 8; ++t) {
+    int e[W];
+    for (int k = 0; k < W; ++k) {
+      e[k] = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {x}, e[k], {k});
+    }
+    const int c = g.add_slot(1, false);
+    h.fills.emplace_back(c, std::vector<double>{0.1 * (t + 1)});
+    last = g.add_slot(1, false);
+    g.add_op(OP_ADD_N, {e[0], e[1], e[2], e[3], c}, last);
+  }
+  h.body_ops = g.ops.size();  // 40 scalar ops, all one maximal run
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {last, last}, lp);  // target term ends the run
+  h.terms.push_back(lp);
+  g.result_slot = lp;
+  return h;
+}
+
+static void test_compact_adjoint_cost_boundary() {
+  HmmGraph forced = build_compact_cost_boundary();
+  const int64_t graph_cost = 6 * (int64_t)forced.body_ops;
+  test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
+  expect("compact boundary forced carve",
+         carve_islands(forced.g, forced.fills, forced.terms, {}) == 1);
+  test_unsetenv("STANLI_ISLAND_ALWAYS");
+  const IslandProg* p = nullptr;
+  for (const Op& op : forced.g.ops)
+    if (op.opcode == OP_ISLAND) p = static_cast<const IslandProg*>(op.udata);
+  expect("compact boundary has island", p != nullptr);
+  if (p) {
+    const int64_t streams =
+        (int64_t)p->code.size() + (int64_t)p->adj.code.size();
+    const int64_t old_sparse_cost = 3 * (int64_t)p->n_regs + streams;
+    const int64_t compact_cost =
+        2 * (int64_t)p->n_regs + p->adj.n_regs + streams;
+    expect("compact boundary new wins", compact_cost < graph_cost);
+    expect("compact boundary old loses", graph_cost < old_sparse_cost);
+    expect("compact boundary actually smaller",
+           p->adj.n_regs < (int)p->adj.adj_reg.size());
+  }
+
+  HmmGraph normal = build_compact_cost_boundary();
+  expect("compact boundary default carve",
+         carve_islands(normal.g, normal.fills, normal.terms, {}) == 1);
 }
 
 // The same recurrence on a two-element state: nothing is copied, so the
@@ -309,12 +386,18 @@ static void test_kernel_call_ops_carved() {
   Fills fills;
   const int p0 = g.add_slot(1, true);
   const int p1 = g.add_slot(1, true);
+  const int seed_vec = g.add_slot(2, true);
+  const int seed = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {seed_vec}, seed, {0});
   auto cslot = [&](double v) {
     const int s = g.add_slot(1, false);
     fills.emplace_back(s, std::vector<double>{v});
     return s;
   };
-  int acc = p0;
+  // INDEX compiles to an aliasable MOV before the first CALL. Compacting
+  // that shared cell shifts the CALL's later ranges, so the assertions
+  // below exercise mapped addressing rather than identity by accident.
+  int acc = seed;
   for (int t = 0; t < 12; ++t) {
     // inv_logit keeps the recurrence in (0, 1): pow of a negative base at
     // a non-integer exponent is NaN, and tanh below goes negative.
@@ -358,7 +441,27 @@ static void test_kernel_call_ops_carved() {
   const std::vector<double> want = run_grad(std::move(ref), fills);
   const int carved = carve_islands(g, fills, terms, {});
   expect("callops carved==1", carved == 1);
-  const std::vector<double> got = run_grad(std::move(g), fills);
+  bool shifted_call_range = false;
+  for (const Op& op : g.ops) {
+    if (op.opcode != OP_ISLAND) continue;
+    const auto& p = *static_cast<const IslandProg*>(op.udata);
+    for (const Program::Call& call : p.calls) {
+      auto check_range = [&](int reg, int len) {
+        if (len == 0) return;
+        const int base = p.adj.adj_reg[(size_t)reg];
+        expect("call compact base", base >= 0 && base + len <= p.adj.n_regs);
+        for (int k = 1; k < len; ++k)
+          expect("call compact contiguous",
+                 p.adj.adj_reg[(size_t)(reg + k)] == base + k);
+        if (base != reg) shifted_call_range = true;
+      };
+      for (int k = 0; k < call.n_in; ++k)
+        check_range(call.in[k], call.in_len[k]);
+      check_range(call.out, call.out_len);
+    }
+  }
+  expect("call range actually compacted", shifted_call_range);
+  const std::vector<double> got = run_grad_twice(std::move(g), fills);
   expect("callops sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close("callops v" + std::to_string(i), got[i], want[i]);
@@ -545,6 +648,7 @@ int main() {
   test_unsetenv("STANLI_ISLAND_ALWAYS");
   test_wide_state_refused();
   test_vector_copies_carved();
+  test_compact_adjoint_cost_boundary();
   test_scalar_chain_carved();
   test_inplace_slice_cost_refuses_wide_state();
   if (failures) {

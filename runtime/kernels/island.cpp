@@ -66,8 +66,8 @@ void island_fwd(KernelCtx& ctx) {
 // The generated backward: seed the live-outs, sweep, harvest the live-ins.
 void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
   static thread_local std::vector<double> adj;
-  if ((int64_t)adj.size() < p.n_regs) adj.resize((size_t)p.n_regs);
-  std::fill(adj.begin(), adj.begin() + p.n_regs, 0.0);
+  if ((int64_t)adj.size() < p.adj.n_regs) adj.resize((size_t)p.adj.n_regs);
+  std::fill(adj.begin(), adj.begin() + p.adj.n_regs, 0.0);
   // Through the sharing map, since a live-out register need not own its
   // adjoint cell. Descending, because two live-out slots can share a
   // register range (the carver aliases a dead copy-then-modify chain onto

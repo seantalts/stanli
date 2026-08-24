@@ -259,21 +259,38 @@ because the registers also make its vector copies disappear.
 
 The estimate changed with it. It weighed the register file 4x because the
 file was built as vars, and that term is what refused thirteen of the
-fourteen regions it could compile. A register is a memory cost again
-(written by the forward, read by the backward, plus one zeroing of the
-adjoint file: `kRegWeight = 3`), and what an island buys is now mostly
-the per-op tax the graph pays -- a dispatch, a context load and a
-scratch-partials backward, ~5 ns against ~1 ns for an island instruction,
-which the estimate had no term for at all (`kOpCost = 5`). Without it a
-region like `garch11`, whose 1,797 scalar ops barely move more elements
-than there are ops, read as a wash; it measures 1.27x. Against the table
-it carves all eight regions that clear parity by more than run-to-run
-noise, and refuses `bones_model` -- 36 ops behind a 4,024-register file,
-still exactly the shape islands are wrong for -- and the
-`covid19imperial` pair. The seven left sit between 0.97x and 1.00x, which
-is inside the noise; it carves five of them and leaves two.
-`STANLI_ISLAND_ALWAYS=1` skips the estimate, which is how to ask why a
-region was left alone.
+fourteen regions it could compile. A value register is a memory cost again:
+one forward write and one backward read. The adjoint file is a separate
+cost, however. Checkpoints hold values only, and registers made equivalent
+by a copy already share an adjoint cell to reproduce stan-math's tape order.
+Those equivalence classes are now packed densely, so the runtime zeroes one
+cell per distinct class rather than one per value or checkpoint register.
+The estimate mirrors the storage exactly: two passes over value and
+checkpoint registers other than CALL scratch, one pass over the compact
+adjoint file, both instruction streams, and the existing neutral charge for
+CALLs.
+
+What an island buys is still mostly the per-op tax the graph pays -- a
+dispatch, a context load and a scratch-partials backward, ~5 ns against
+~1 ns for an island instruction (`kOpCost = 5`). Without it a region like
+`garch11`, whose scalar ops barely move more elements than there are ops,
+reads as a wash. The 2026-08-24 structural census reran default, disabled,
+and forced islands on all 21 corpus models with compilable regions. Compact
+accounting changed exactly one decision, `iohmm_reg`, and preserved every
+previous selection and refusal, including the measured loss guards
+`bones_model`, `dugongs_model`, `Survey_model`, and both `covid19imperial`
+models. `STANLI_ISLAND_ALWAYS=1` skips the estimate, which is how to ask why
+a region was left alone.
+
+In the targeted Release A/B from that census, `iohmm_reg`'s 95,424 forward
+register ids reduce to 39,000 distinct adjoint cells; 4,488 additional
+checkpoint registers remain value-only. Its estimated island cost falls
+from 389,640 to 328,728 against the graph's 361,045, so the default path now
+collapses 53,456 ops to 27. Seven clean, interleaved runs moved the median
+from 498.612 to 241.453 us/gradient (2.065x internally), within 0.3% of the
+forced-island path and 1.33x faster than the retained 320.335 us CmdStan
+reference. This is a targeted A/B; the warmed corpus table above remains the
+last full-corpus run until the next benchmark refresh.
 
 `STANLI_NO_NATIVE_ADJ=1` restores the replay. It changes nothing else --
 the adjoint is still generated, the estimate still assumes it, and the

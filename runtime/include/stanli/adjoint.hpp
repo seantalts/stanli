@@ -59,6 +59,11 @@ struct AdjProgram {
   // copy's contributions separately and transferring them in one lump would
   // regroup the sum and cost the last few bits.
   std::vector<int32_t> adj_reg;
+  // Number of cells in the adjoint file. `adj_reg` is indexed by forward
+  // register, but its entries are compact: registers made equivalent by a
+  // copy share one cell, and the remaining equivalence classes are packed
+  // densely. Checkpoint registers hold values only and are absent entirely.
+  int n_regs = 0;
   bool empty() const { return adj_reg.empty(); }
 };
 
