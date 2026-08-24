@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.8.4
+
+### Three kernels stop replaying stan-math
+
+Performance work from three directions, each replacing a nested
+autodiff replay with the pinned pullback formulas over doubles, with
+bitwise value and gradient coverage against the replay it replaces
+(#160, #161, #162). Symmetric eigendecompositions computed in the
+forward sweep are reused in the backward one: kronecker_gp goes from
+289.0 to 185.7 us per gradient, 0.75x to 1.17x against CmdStan. ODE
+solves keep the initial-state and parameter activity types the
+lowering already knew instead of promoting both when either is active:
+one_comp_mm_elim_abs gains 1.09x. And the single-observation
+multi_normal_cholesky shape gp_regr uses gets a native pullback:
+6.05 to 4.20 us per gradient, 0.77x to 1.12x against CmdStan.
 
 ### A runtime for webR
 
