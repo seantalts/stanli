@@ -14,9 +14,19 @@ webR release uses (webR 0.6.0, Emscripten 4.0.8) because side modules
 are not binary compatible across webR's Emscripten bumps; CI loads the
 artifact into webR itself and resolves the bridge's symbols. The full
 flow -- the r-universe package, log_prob_grad, NUTS -- was verified
-against webR 0.6.0 by hand. Compiling Stan source inside webR still
-needs a compiler: the V8 package is not available there, so pass
-precompiled MIR via stanli_model(mir = ...) for now.
+against webR 0.6.0 by hand.
+
+### Stan compiles inside webR
+
+`stanli_model(code = ...)` works on webR now, with no V8 package. webR
+already runs inside a JavaScript engine, so the webr support package's
+eval_js() is the engine the V8 package would otherwise provide: the
+bundled stanc.js defines stanc() in the worker's global scope once per
+session, and source and MIR travel through the shared Emscripten
+filesystem, so nothing is escaped into a JavaScript literal and no
+marshalling limit sees a megabyte of MIR. A native stanc still wins
+where one can run; under webR the binary probe returns early, which
+also silences a Sys.which warning webR printed on every first compile.
 
 ## 0.8.3
 
