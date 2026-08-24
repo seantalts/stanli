@@ -382,8 +382,8 @@ void test_constrain_graph() {
   bs_model_destruct(m);
 }
 
-// The interpreted write_array path: an unsupported int RNG and
-// draw-dependent behavior, with the stream owned by the caller's bs_rng.
+// The interpreted write_array path: per-draw control flow, with the stream
+// owned by the caller's bs_rng.
 void test_constrain_interp() {
   const std::string mir = slurp("tests/fixtures/gqrng.tmir.sexp");
   char* err = nullptr;
@@ -440,9 +440,9 @@ void test_constrain_interp() {
   bs_rng_destruct(b);
   bs_model_destruct(m);
 
-  // The unsupported binomial-RNG outcome forces the whole section through
-  // WaInterp; the categorical call before it must remain available through
-  // BridgeStan.
+  // A runtime RNG outcome cannot become categorical's compile-time integer
+  // payload, so the whole section uses WaInterp; the categorical call must
+  // remain available through BridgeStan.
   const std::string categorical = categorical_write_array_mir(
       slurp("tests/fixtures/cat.tmir.sexp"), "categorical_logit_lpmf", false,
       false, false, true);
@@ -486,9 +486,9 @@ void test_constrain_compiled_rng() {
     return;
   }
   expect_eq_str("compiled scalar RNG names", bs_param_names(m, true, true),
-                "x,p,u,b,n,l");
-  if (bs_param_num(m, true, true) != 6) {
-    fail("compiled scalar RNG column count is not six");
+                "x,p,u,b,n,l,k");
+  if (bs_param_num(m, true, true) != 7) {
+    fail("compiled scalar RNG column count is not seven");
     bs_model_destruct(m);
     return;
   }
@@ -502,7 +502,7 @@ void test_constrain_compiled_rng() {
     bs_model_destruct(m);
     return;
   }
-  std::vector<double> a1(6), b1(6), a2(6), b2(6);
+  std::vector<double> a1(7), b1(7), a2(7), b2(7);
   const int a1rc = bs_param_constrain(m, true, true, q, a1.data(), a, &err);
   const int b1rc = bs_param_constrain(m, true, true, q, b1.data(), b, &err);
   const int a2rc = bs_param_constrain(m, true, true, q, a2.data(), a, &err);

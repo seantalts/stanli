@@ -16,6 +16,8 @@
 #include <stanli/sexp.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <stan/math.hpp>
+
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -244,9 +246,9 @@ void test_wanames_interpreter_schema() {
   }
 }
 
-// Generated quantities the graph cannot express (an unsupported binomial
-// draw feeding dynamic behavior here) run through the interpreted fallback:
-// same columns contract, per-draw evaluation, seeded RNG stream.
+// Generated quantities the graph cannot express (per-draw control flow) run
+// through the interpreted fallback: same columns contract, per-draw
+// evaluation, seeded RNG stream.
 void test_interpreted_gq() {
   using namespace stanli;
   DataMap data;
@@ -572,6 +574,143 @@ void test_constant_folded_gq_column() {
   }
 }
 
+// Keep the shared helper a transparent call into Stan Math. In particular,
+// endpoint results must not become shortcuts: Stan Math owns validation and
+// however much of the engine it consumes, including at N=0 and p in {0,1}.
+void test_binomial_rng_helper_contract() {
+  using namespace stanli;
+  const auto helper_draw = [](int n, double p, WaRng& rng) {
+    const double args[] = {static_cast<double>(n), p};
+    return scalar_rng_draw(ScalarRng::Binomial, args, 2, rng);
+  };
+  const auto next = [](WaRng& rng) {
+    return stan::math::uniform_rng(0.0, 1.0, rng.gen());
+  };
+
+  struct ValidCase {
+    int n;
+    double p;
+  };
+  const ValidCase valid[] = {
+      {0, 0.0}, {0, 0.37}, {0, 1.0},  {9, -0.0},   {9, 0.0},
+      {9, 1.0}, {20, 0.5}, {21, 0.5}, {100, 0.49}, {100, 0.51},
+  };
+  for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i) {
+    WaRng got_rng(static_cast<unsigned>(101 + i));
+    WaRng want_rng(static_cast<unsigned>(101 + i));
+    const double got = helper_draw(valid[i].n, valid[i].p, got_rng);
+    const double want = static_cast<double>(
+        stan::math::binomial_rng(valid[i].n, valid[i].p, want_rng.gen()));
+    if (got != want || next(got_rng) != next(want_rng)) {
+      ++failures;
+      std::printf("FAIL binomial helper valid case %zu\n", i);
+    }
+  }
+
+  // Both-invalid cases pin Stan Math's validation priority. The remaining
+  // cases cover finite values just outside the interval, NaN, and infinities.
+  const ValidCase invalid[] = {
+      {-1, 0.4},
+      {-1, -0.2},
+      {4, -0.1},
+      {4, std::nextafter(1.0, std::numeric_limits<double>::infinity())},
+      {4, std::numeric_limits<double>::quiet_NaN()},
+      {4, std::numeric_limits<double>::infinity()},
+      {4, -std::numeric_limits<double>::infinity()},
+  };
+  for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+    WaRng got_rng(static_cast<unsigned>(211 + i));
+    WaRng want_rng(static_cast<unsigned>(211 + i));
+    std::string got_message, want_message;
+    try {
+      (void)helper_draw(invalid[i].n, invalid[i].p, got_rng);
+    } catch (const std::domain_error& e) {
+      got_message = e.what();
+    }
+    try {
+      (void)stan::math::binomial_rng(invalid[i].n, invalid[i].p,
+                                     want_rng.gen());
+    } catch (const std::domain_error& e) {
+      want_message = e.what();
+    }
+    if (got_message.empty() || got_message != want_message ||
+        next(got_rng) != next(want_rng)) {
+      ++failures;
+      std::printf("FAIL binomial helper invalid case %zu\n", i);
+    }
+  }
+}
+
+void test_binomial_rng_lowering_guards() {
+  using namespace stanli;
+  const std::string base = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
+  const size_t call = base.find("(FunApp (StanLib binomial_rng");
+  if (call == std::string::npos) {
+    ++failures;
+    std::printf("FAIL binomial lowering guard fixture has no call\n");
+    return;
+  }
+
+  const auto expect_interp = [](const std::string& mir,
+                                const std::string& reason, const char* what) {
+    DataMap data;
+    CompiledModel cm = compile_model(mir, data);
+    if (!cm.write_array || !cm.write_array->interp ||
+        cm.write_array->truncated.find(reason) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL %s: got %s\n", what,
+                  cm.write_array ? cm.write_array->truncated.c_str()
+                                 : "no write_array");
+    }
+  };
+
+  const std::string scalar_trials =
+      "((pattern (Lit Int 5))\n"
+      "               (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))";
+  const size_t trials = base.find(scalar_trials, call);
+  if (trials == std::string::npos) {
+    ++failures;
+    std::printf("FAIL binomial lowering guard cannot find trials\n");
+    return;
+  }
+
+  std::string malformed = base;
+  malformed.replace(trials, scalar_trials.size(),
+                    "((pattern (Lit Real 5.0))\n"
+                    "               (meta ((type_ UReal) (loc <opaque>) "
+                    "(adlevel DataOnly))))");
+  expect_interp(malformed, "first argument must be int",
+                "binomial real trials stay interpreted");
+
+  std::string container_arg = base;
+  container_arg.replace(
+      trials, scalar_trials.size(),
+      "((pattern\n"
+      "                (FunApp (CompilerInternal FnMakeArray)\n"
+      "                 (((pattern (Lit Int 5))\n"
+      "                   (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly)))))))\n"
+      "               (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
+      "DataOnly))))");
+  expect_interp(container_arg, "container arguments stay on WaInterp",
+                "binomial container argument stays interpreted");
+
+  std::string container_result = base;
+  const std::string result_meta =
+      "\n           (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))";
+  const size_t result = container_result.find(result_meta, call);
+  if (result == std::string::npos) {
+    ++failures;
+    std::printf("FAIL binomial lowering guard cannot find result type\n");
+    return;
+  }
+  container_result.replace(result, result_meta.size(),
+                           "\n           (meta ((type_ (UArray UInt)) (loc "
+                           "<opaque>) (adlevel DataOnly)))");
+  expect_interp(container_result, "expected scalar result",
+                "binomial container result stays interpreted");
+}
+
 void test_compiled_scalar_rng() {
   using namespace stanli;
   const std::string path = "tests/fixtures/gq_scalar_rng.tmir.sexp";
@@ -587,12 +726,12 @@ void test_compiled_scalar_rng() {
   int rng_ops = 0;
   for (const Op& op : cm.write_array->graph.ops)
     if (op.opcode == OP_RNG) ++rng_ops;
-  if (rng_ops != 5) {
+  if (rng_ops != 6) {
     ++failures;
-    std::printf("FAIL scalar rng: got %d OP_RNG, want 5\n", rng_ops);
+    std::printf("FAIL scalar rng: got %d OP_RNG, want 6\n", rng_ops);
   }
   expect_eq("scalar rng columns", joined(cm.write_array->columns),
-            "x,p,u,b,n,l");
+            "x,p,u,b,n,l,k");
 
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
@@ -721,6 +860,8 @@ int main() {
   test_array_of_matrix_columns();
   test_interpreted_gq();
   test_constant_folded_gq_column();
+  test_binomial_rng_helper_contract();
+  test_binomial_rng_lowering_guards();
   test_compiled_scalar_rng();
   test_caller_owned_rng();
   test_transformed_parameter_checks();

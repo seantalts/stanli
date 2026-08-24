@@ -193,12 +193,13 @@ the top of the page, not replacements for the current corpus rows:
   which await the next corpus refresh.
 - **Compiled scalar generated-quantities RNGs** keep caller-owned chain state
   on the forward-only write-array graph for scalar `poisson_log`, `uniform`,
-  `bernoulli`, `normal`, and `lognormal` draws. Unsupported/container RNGs and
-  draws used as dynamic control, indices, or geometry still fail closed to the
-  whole-section interpreter. In an exact census of the 24 previously
-  interpreted corpus models, eight moved to the graph and the other 16 kept
-  the interpreter; all 24 still produced complete rows. A targeted 2026-08-24
-  C-ABI A/B (point 0, two warmups, seven matched batch medians) measured:
+  `bernoulli`, `normal`, `lognormal`, and `binomial` draws.
+  Unsupported/container RNGs and draws used as dynamic control, indices, or
+  geometry still fail closed to the whole-section interpreter. In an exact
+  census of the 24 previously interpreted corpus models, 12 moved to the graph
+  and the other 12 kept the interpreter; all 24 still produced complete rows.
+  A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched batch
+  medians) measured:
 
   | model | interpreted row | compiled row | improvement |
   | --- | ---: | ---: | ---: |
@@ -210,11 +211,20 @@ the top of the page, not replacements for the current corpus rows:
   | `hierarchical_gp` | 2.291 ms | 46.301 us | 49.47x |
   | `lotka_volterra` | 1.797 ms | 31.434 us | 57.16x |
   | `one_comp_mm_elim_abs` | 5.123 ms | 139.431 us | 36.74x |
+  | `M0_model` | 15.378 us | 0.119 us | 129.55x |
+  | `Mb_model` | 2.020 ms | 26.703 us | 75.65x |
+  | `Rate_4_model` | 4.007 us | 0.126 us | 31.93x |
+  | `Rate_5_model` | 4.311 us | 0.124 us | 34.82x |
 
   The largest setup tradeoff is the two Covid graphs: C-API model
   construction rises from about 0.239 s to 2.20-2.21 s, but the 154 ms saved
-  per row repays it after roughly 13 draws. These are targeted write-array
-  medians, not replacements for the sampling columns in the full corpus table.
+  per row repays it after roughly 13 draws. For the four added scalar-binomial
+  models, across 1,000 rows of each model their aggregate time falls from
+  2.0438 s to 0.0271 s (75.50x), and construction also gets faster in every
+  case, so break-even is immediate. Their graph and frozen-interpreter rows
+  were bitwise identical for all 28,926 compared values. These are targeted
+  write-array medians, not replacements for the sampling columns in the full
+  corpus table.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven

@@ -247,13 +247,14 @@ draw; even a late scalar draw therefore reinterpreted constrained parameters,
 transformed parameters, and all earlier generated quantities.
 
 `OP_RNG` now covers scalar `poisson_log_rng`, `uniform_rng`, `bernoulli_rng`,
-`normal_rng`, and `lognormal_rng`. The graph and interpreter share one draw
-helper, so they call the same Stan Math function in the same order on the same
-caller-owned `WaRng`. An executor holds only a temporary pointer to that chain
-resource for one forward sweep; scoped restoration and copy rebinding prevent
-pooled or interleaved executors from retaining another caller's stream. The
-graph passes treat every RNG op as an ordered effect, so they cannot fold,
-reroll, carve, delete, or duplicate a draw whose result is otherwise unused.
+`normal_rng`, `lognormal_rng`, and `binomial_rng`. The graph and interpreter
+share one draw helper, so they call the same Stan Math function in the same
+order on the same caller-owned `WaRng`. An executor holds only a temporary
+pointer to that chain resource for one forward sweep; scoped restoration and
+copy rebinding prevent pooled or interleaved executors from retaining another
+caller's stream. The graph passes treat every RNG op as an ordered effect, so
+they cannot fold, reroll, carve, delete, or duplicate a draw whose result is
+otherwise unused.
 
 The boundary is deliberately fail-closed. Container-valued or unsupported
 RNGs, and integer draws needed as a loop bound, index, shape, or branch
@@ -262,14 +263,23 @@ live exactly in one double slot only while used by ordinary graph arithmetic;
 integer division and other dynamic-integer operations still refuse lowering.
 
 An exact census of the 24 corpus models that previously used `WaInterp` moved
-only eight to the graph: `GLMM1_model`, both `covid19imperial` models, both
-`dogs` models, `hierarchical_gp`, `lotka_volterra`, and
-`one_comp_mm_elim_abs`. The other 16 remained interpreted and all 24 retained
-complete rows. In targeted seven-batch C-ABI medians, those eight write-array
-rows became 34.72x to 80.02x faster. The two largest absolute wins were
-`covid19imperial_v2` (156.239 -> 2.089 ms) and v3 (157.176 -> 2.077 ms).
-Their C-API construction rises from about 0.239 s to 2.20-2.21 s because the
-full graphs are now built, a cost recovered after roughly 13 output rows.
+12 to the graph: `GLMM1_model`, both `covid19imperial` models, both `dogs`
+models, `hierarchical_gp`, `lotka_volterra`, `one_comp_mm_elim_abs`, `M0_model`,
+`Mb_model`, `Rate_4_model`, and `Rate_5_model`. The other 12 remained
+interpreted and all 24 retained complete rows. In targeted seven-batch C-ABI
+medians, the original eight write-array rows became 34.72x to 80.02x faster.
+The two largest absolute wins were `covid19imperial_v2` (156.239 -> 2.089 ms)
+and v3 (157.176 -> 2.077 ms). Their C-API construction rises from about 0.239 s
+to 2.20-2.21 s because the full graphs are now built, a cost recovered after
+roughly 13 output rows.
+
+The four scalar-binomial additions measured 31.93x to 129.55x faster per row:
+`M0_model` 15.3778 -> 0.1187 us, `Mb_model` 2020.1042 -> 26.7033 us,
+`Rate_4_model` 4.0072 -> 0.1255 us, and `Rate_5_model` 4.3111 -> 0.1238 us.
+Across 1,000 rows of each model, their aggregate time falls from 2.0438003 s to
+0.0270713 s (75.50x). Construction also improves in all four, so the change
+breaks even immediately. Graph and frozen-interpreter output was bitwise exact
+for all 28,926 compared values across six seeds and three sequential rows.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 

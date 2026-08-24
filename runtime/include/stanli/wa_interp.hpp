@@ -57,6 +57,7 @@ enum class ScalarRng : uint8_t {
   Bernoulli,
   Normal,
   Lognormal,
+  Binomial,
 };
 
 size_t scalar_rng_arity(ScalarRng family);

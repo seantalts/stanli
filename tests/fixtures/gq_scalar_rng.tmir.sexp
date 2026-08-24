@@ -177,6 +177,49 @@
        (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))))
     (meta <opaque>))
    ((pattern
+     (Decl (decl_adtype DataOnly) (decl_id k) (decl_type (Sized SInt))
+      (initialize Uninit)))
+    (meta <opaque>))
+   ((pattern
+     (Assignment ((LVariable k) ()) UInt
+      ((pattern
+        (FunApp (StanLib Plus__ FnPlain AoS)
+         (((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+          ((pattern
+            (FunApp (StanLib binomial_rng FnRng AoS)
+             (((pattern (Lit Int 5))
+               (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+              ((pattern
+                (FunApp (StanLib inv_logit FnPlain AoS)
+                 (((pattern (Var x))
+                   (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))))
+               (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))))
+           (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
+    (meta <opaque>))
+   ((pattern
+     (NRFunApp
+      (CompilerInternal
+       (FnCheck
+        (trans
+         (Lower
+          ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
+        (var_name k)
+        (var ((pattern (Var k)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+      (((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+    (meta <opaque>))
+   ((pattern
+     (NRFunApp
+      (CompilerInternal
+       (FnCheck
+        (trans
+         (Upper
+          ((pattern (Lit Int 7)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
+        (var_name k)
+        (var ((pattern (Var k)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+      (((pattern (Lit Int 7)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+    (meta <opaque>))
+   ((pattern
      (NRFunApp
       (CompilerInternal
        (FnWriteParam (unconstrain_opt ())
@@ -212,6 +255,13 @@
        (FnWriteParam (unconstrain_opt ())
         (var
          ((pattern (Var l)) (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))))
+      ()))
+    (meta <opaque>))
+   ((pattern
+     (NRFunApp
+      (CompilerInternal
+       (FnWriteParam (unconstrain_opt ())
+        (var ((pattern (Var k)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
       ()))
     (meta <opaque>))))
  (transform_inits
@@ -277,5 +327,12 @@
      (out_block GeneratedQuantities) (out_trans Identity)))
    (l <opaque>
     ((out_unconstrained_st SReal) (out_constrained_st SReal)
-     (out_block GeneratedQuantities) (out_trans Identity)))))
+     (out_block GeneratedQuantities) (out_trans Identity)))
+   (k <opaque>
+    ((out_unconstrained_st SInt) (out_constrained_st SInt)
+     (out_block GeneratedQuantities)
+     (out_trans
+      (LowerUpper
+       ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+       ((pattern (Lit Int 7)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))))
  (prog_name gq_scalar_rng_model) (prog_path tests/fixtures/gq_scalar_rng.stan))

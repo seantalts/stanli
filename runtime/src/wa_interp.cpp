@@ -17,13 +17,15 @@ size_t scalar_rng_arity(ScalarRng family) {
     case ScalarRng::Uniform:
     case ScalarRng::Normal:
     case ScalarRng::Lognormal:
+    case ScalarRng::Binomial:
       return 2;
   }
   throw std::logic_error("unknown scalar RNG family");
 }
 
 bool scalar_rng_is_int(ScalarRng family) {
-  return family == ScalarRng::PoissonLog || family == ScalarRng::Bernoulli;
+  return family == ScalarRng::PoissonLog || family == ScalarRng::Bernoulli ||
+         family == ScalarRng::Binomial;
 }
 
 double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
@@ -42,6 +44,9 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
       return stan::math::normal_rng(args[0], args[1], g);
     case ScalarRng::Lognormal:
       return stan::math::lognormal_rng(args[0], args[1], g);
+    case ScalarRng::Binomial:
+      return static_cast<double>(
+          stan::math::binomial_rng(static_cast<int>(args[0]), args[1], g));
   }
   throw std::logic_error("unknown scalar RNG family");
 }
@@ -359,7 +364,8 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
       vi = stan::math::bernoulli_logit_rng(sc(0, i), g);
       iv = true;
     } else if (base == "binomial") {
-      vi = stan::math::binomial_rng((int)sc(0, i), sc(1, i), g);
+      const double args[] = {sc(0, i), sc(1, i)};
+      vi = static_cast<int>(scalar_rng_draw(ScalarRng::Binomial, args, 2, rng));
       iv = true;
     } else if (base == "poisson") {
       vi = stan::math::poisson_rng(sc(0, i), g);

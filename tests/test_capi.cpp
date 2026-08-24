@@ -337,9 +337,9 @@ void expect_compiled_scalar_rng() {
     return;
   }
   const int64_t n = stanli_wa_n_columns(model);
-  if (n != 6) {
+  if (n != 7) {
     ++failures;
-    std::printf("FAIL C API scalar RNG columns: got %lld want 6\n",
+    std::printf("FAIL C API scalar RNG columns: got %lld want 7\n",
                 static_cast<long long>(n));
     stanli_model_free(model);
     return;

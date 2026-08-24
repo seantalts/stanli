@@ -17,7 +17,7 @@ namespace {
 
 void rng_fwd(KernelCtx& ctx) {
   if (ctx.out.len != 1 ||
-      ctx.variant > static_cast<uint8_t>(ScalarRng::Lognormal))
+      ctx.variant > static_cast<uint8_t>(ScalarRng::Binomial))
     throw std::logic_error("malformed scalar RNG op");
   const ScalarRng family = static_cast<ScalarRng>(ctx.variant);
   const size_t nargs = scalar_rng_arity(family);

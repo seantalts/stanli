@@ -1,7 +1,7 @@
-// Generated quantities the graph cannot fully express: the unsupported
-// binomial RNG result feeds dynamic behavior, and prod is not yet lowered.
-// The interpreted write_array fallback runs the whole section, including the
-// otherwise graph-native normal draw.
+// Generated quantities the graph cannot fully express: the per-draw sigma
+// branch is data-only in write_array's double instantiation but unavailable
+// while lowering. The interpreted write_array fallback runs the whole section,
+// including both graph-native RNG draws.
 data {
   int<lower=1> N;
 }

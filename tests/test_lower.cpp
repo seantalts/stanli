@@ -1638,9 +1638,9 @@ int main() {
     }
   }
 
-  // An unsupported binomial RNG selects the interpreted write_array for the
-  // whole section. Categorical calls before that fallback retain their
-  // scalar/array and normalized/propto semantics there too.
+  // A runtime RNG outcome cannot become categorical's compile-time integer
+  // payload, so it selects the interpreted write_array for the whole section.
+  // Scalar/array and normalized/propto semantics remain intact there.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
     for (bool propto : {false, true}) {
       for (int outcome_count : {1, 3}) {
@@ -1706,7 +1706,7 @@ int main() {
     }
   }
 
-  // Propto still validates on the interpreted route. A deterministic RNG
+  // Propto still validates on the interpreted route. A runtime RNG outcome
   // keeps the section in WaInterp while producing an out-of-range category.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
     std::string mir = categorical_write_array_mir(

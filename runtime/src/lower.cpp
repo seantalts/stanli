@@ -2162,6 +2162,7 @@ struct Lowering {
         {"bernoulli_rng", ScalarRng::Bernoulli},
         {"normal_rng", ScalarRng::Normal},
         {"lognormal_rng", ScalarRng::Lognormal},
+        {"binomial_rng", ScalarRng::Binomial},
     };
     const auto found = kFamilies.find(e.name);
     if (found == kFamilies.end()) return std::nullopt;
@@ -2178,6 +2179,13 @@ struct Lowering {
                                              : mir::UnsizedLeaf::Real;
     if (e.unsized.leaf != result_leaf)
       fail(e.name + ": result type does not match RNG family", e.raw);
+    // Unlike the other scalar families, binomial's first argument is a
+    // population count. Valid stanc MIR always marks it UInt; fail closed on
+    // malformed hand-authored MIR rather than silently truncating a real in
+    // the runtime helper's graph-storage conversion.
+    if (family == ScalarRng::Binomial &&
+        e.args[0].unsized.leaf != mir::UnsizedLeaf::Int)
+      fail("binomial_rng: first argument must be int", e.raw);
     std::vector<Val> args;
     args.reserve(arity);
     for (const mir::Expr& arg : e.args) {
