@@ -297,10 +297,39 @@ Eigen::Matrix<stan::math::var, -1, 1> categorical_vars(const Desc& input) {
   return arg;
 }
 
+// The scalar-outcome probability form is just log(theta[n - 1]), with one
+// selected reciprocal in reverse.  Its generic implementation used to build
+// and tear down a nested var tape in both sweeps.  Keep Stan Math's double
+// overload responsible for the value and every check, then write the exact
+// scalar rev rule directly below.  Array outcomes deliberately stay on the
+// replay: repeated selections share log nodes, and replacing that tape with
+// counts would regroup low bits (pinned in test_lower.cpp).
+bool native_scalar_probability(const CategoricalSpec& spec) {
+  return !spec.logit && spec.scalar_outcome && spec.arg_autodiff;
+}
+
+int categorical_scalar_outcome(const KernelCtx& ctx) {
+  if (ctx.in[0].len != 1)
+    throw std::logic_error("categorical scalar outcome has wrong width");
+  return categorical_outcome(ctx.in[0].data[0]);
+}
+
 void categorical_fwd(KernelCtx& ctx) {
   if (ctx.n_in != 2 || ctx.out.len != 1 || ctx.udata == nullptr)
     throw std::logic_error("malformed categorical op");
   const auto& spec = *static_cast<const CategoricalSpec*>(ctx.udata);
+  // forward_value_only intentionally instantiates the expression on doubles:
+  // a propto call whose source type was var therefore returns its dropped
+  // zero in that mode.  Preserve that existing contract and use the native
+  // active-type path only for a normal forward/gradient evaluation.
+  if (native_scalar_probability(spec) && !values_only()) {
+    const int outcome = categorical_scalar_outcome(ctx);
+    const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
+    // With an active argument, both <true> and <false> retain this summand;
+    // the double <false> body is the same value/check order without a tape.
+    ctx.out.data[0] = stan::math::categorical_lpmf<false>(outcome, arg);
+    return;
+  }
   const std::vector<int> outcomes = categorical_outcomes(ctx, spec);
   if (spec.arg_autodiff && !values_only()) {
     stan::math::nested_rev_autodiff nested;
@@ -317,6 +346,12 @@ void categorical_bwd(KernelCtx& ctx) {
   if (!spec.arg_autodiff || ctx.in_adj[1].data == nullptr ||
       (!spec.scalar_outcome && ctx.in[0].len == 0))
     return;
+  if (native_scalar_probability(spec)) {
+    const int outcome = categorical_scalar_outcome(ctx);
+    ctx.in_adj[1].data[outcome - 1] +=
+        ctx.out_adj / ctx.in[1].data[outcome - 1];
+    return;
+  }
   stan::math::nested_rev_autodiff nested;
   auto arg = categorical_vars(ctx.in[1]);
   for (int64_t k = 0; k < ctx.in[1].len; ++k)

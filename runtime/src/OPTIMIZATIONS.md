@@ -215,6 +215,30 @@ candidate-free million-op LDA shape from 1.16 s to about 3.4 ms. The exact
 candidate-index, packed-row, and use-list work counters live in `RerollStats`
 and have deterministic scaling tests.
 
+## Native scalar probability categorical (`message.cpp`)
+
+The active scalar-outcome probability form of `categorical_lpmf` has a narrow
+derivative: only the selected probability receives the incoming seed divided
+by that probability. Its kernel therefore asks Stan Math's double overload to
+compute the value and perform every domain and bounds check, then applies that
+single pullback directly. This removes the nested reverse-mode tape from both
+sweeps without changing the graph or its operation count.
+
+The contract is intentionally no wider: the outcome must be scalar, the
+probability vector must be active, and the call must use probabilities rather
+than logits. Array outcomes retain the existing replay so repeated selections
+keep the exact log-node and accumulation topology, while categorical-logit
+retains replay for its dense softmax pullback. The categorical-logit RBM models
+are therefore unchanged controls.
+
+In a targeted 2026-08-24 Release A/B using seven matched-run medians,
+`gpcm_latent_reg_irt` moved 1.741465 -> 0.955609 ms/gradient (1.8224x
+internally and 1.3998x CmdStan), while `grsm_latent_reg_irt` moved 0.9705208 ->
+0.4953192 ms/gradient (1.9594x internally and 1.5387x CmdStan). Time in their
+categorical opcode fell 4.45x and 5.00x respectively. These are targeted
+medians, not the full-corpus warmed means; `docs/corpus-bench.tsv` and the
+generated corpus table remain unchanged until the next refresh.
+
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 
 `if (theta > 0) ...` cannot become ops: the op list is fixed at load

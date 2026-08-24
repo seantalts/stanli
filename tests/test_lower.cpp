@@ -1175,6 +1175,121 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // The native scalar probability rule has one selected reciprocal. Pin its
+  // non-unit upstream seed, += into an adjoint a later consumer already
+  // wrote, propto/type behavior, and value-only -> gradient reuse against the
+  // exact Stan tape it replaces.
+  {
+    Graph g;
+    const int theta = g.add_slot(3, true);
+    const int outcome = g.add_slot(1, false);
+    const int cat = g.add_slot(1, false);
+    const int cat_op = g.add_op(OP_CATEGORICAL, {outcome, theta}, cat);
+    auto spec = std::make_shared<CategoricalSpec>();
+    spec->logit = false;
+    spec->scalar_outcome = true;
+    spec->arg_autodiff = true;
+    spec->propto = true;
+    g.ops[(size_t)cat_op].udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+    const int cat_scale = g.add_slot(1, false);
+    const int scaled_cat = g.add_slot(1, false);
+    g.add_op(OP_MUL, {cat, cat_scale}, scaled_cat);
+    const int selected = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {theta}, selected, {1});
+    const int linear_scale = g.add_slot(1, false);
+    const int linear = g.add_slot(1, false);
+    g.add_op(OP_MUL, {selected, linear_scale}, linear);
+    const int total = g.add_slot(1, false);
+    g.add_op(OP_ADD, {scaled_cat, linear}, total);
+    g.result_slot = total;
+
+    Executor ex(std::move(g));
+    const double point[3] = {0.2, 0.7, 0.1};
+    std::copy(std::begin(point), std::end(point), ex.params_data());
+    ex.value_ptr(outcome)[0] = 2.0;
+    ex.value_ptr(cat_scale)[0] = 0.3;
+    ex.value_ptr(linear_scale)[0] = -0.2;
+    expect_eq("categorical native value-only propto", ex.forward_value_only(),
+              point[1] * -0.2);
+    double got_grad[3];
+    const double got = ex.gradient(got_grad);
+
+    Eigen::Matrix<stan::math::var, -1, 1> ref_theta(3);
+    ref_theta << point[0], point[1], point[2];
+    stan::math::var ref =
+        stan::math::categorical_lpmf<true>(2, ref_theta) * 0.3 +
+        ref_theta(1) * -0.2;
+    ref.grad();
+    expect_eq("categorical native scalar value", got, ref.val());
+    for (int i = 0; i < 3; ++i)
+      expect_eq("categorical native scalar g" + std::to_string(i), got_grad[i],
+                ref_theta(i).adj());
+    stan::math::recover_memory();
+  }
+
+  // Direct kernel edges for the same rule. A scalar categorical log only
+  // connects the selected probability: an infinite seed must leave an
+  // unselected signed zero untouched, while a zero seed over a selected zero
+  // still follows the connected log edge and forms 0 / 0. Reusing the context
+  // also pins that the native path carries no hidden scratch state.
+  {
+    const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+    check(kernel != nullptr, "categorical native kernel registered");
+    check(kernel && kernel->scratch_size == nullptr,
+          "categorical native kernel scratchless");
+    if (kernel) {
+      CategoricalSpec spec;
+      spec.logit = false;
+      spec.scalar_outcome = true;
+      spec.arg_autodiff = true;
+      spec.propto = true;
+      double outcome = 1.0;
+      double theta[2] = {1.0, 0.0};
+      double theta_adj[2] = {0.0, -0.0};
+      double out = 0.0;
+      KernelCtx ctx{};
+      ctx.n_in = 2;
+      ctx.in[0] = Desc{&outcome, 1};
+      ctx.in[1] = Desc{theta, 2};
+      ctx.in_adj[0] = Desc{nullptr, 1};
+      ctx.in_adj[1] = Desc{theta_adj, 2};
+      ctx.out = Desc{&out, 1};
+      ctx.udata = &spec;
+
+      kernel->forward(ctx);
+      ctx.out_adj = std::numeric_limits<double>::infinity();
+      kernel->backward(ctx);
+      check(std::isinf(theta_adj[0]) && theta_adj[0] > 0.0,
+            "categorical native infinite selected adjoint");
+      check(theta_adj[1] == 0.0 && std::signbit(theta_adj[1]),
+            "categorical native unselected signed zero");
+
+      theta[0] = 0.0;
+      theta[1] = 1.0;
+      theta_adj[0] = 0.0;
+      theta_adj[1] = -0.0;
+      kernel->forward(ctx);
+      check(std::isinf(out) && out < 0.0,
+            "categorical native selected zero value");
+      ctx.out_adj = 0.0;
+      kernel->backward(ctx);
+      check(std::isnan(theta_adj[0]),
+            "categorical native selected zero topology");
+      check(theta_adj[1] == 0.0 && std::signbit(theta_adj[1]),
+            "categorical native repeated unselected zero");
+
+      outcome = 2.0;
+      theta[0] = 0.2;
+      theta[1] = 0.8;
+      ctx.in_adj[1] = Desc{nullptr, 2};
+      kernel->forward(ctx);
+      expect_eq("categorical native null-adjoint value", out, std::log(0.8));
+      ctx.out_adj = 1.0;
+      kernel->backward(ctx);  // active source type, but no graph adjoint edge
+    }
+  }
+
   // Array outcomes add one callback contribution per observation. Preserve
   // that exact accumulation order under a non-unit upstream adjoint; replacing
   // it with count * adjoint changes the selected gradient's low bit. The zero

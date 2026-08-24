@@ -175,6 +175,21 @@ the top of the page, not replacements for the current corpus rows:
   26.8 us after the slice fix. The combined `Mtbh_model` improvement is
   106.5 -> 26.8 us (3.98x). In the full warmed-mean snapshot the three models
   are 19.0, 57.1, and 27.0 us/gradient, or 1.05x, 1.65x, and 1.59x CmdStan.
+- **Native scalar probability categorical** removes the nested autodiff replay
+  only when one categorical outcome selects from an active probability vector.
+  Stan Math's double overload still computes the value and performs every
+  check; reverse adds the incoming seed divided by the selected probability to
+  that probability's adjoint. Array outcomes retain replay to preserve their
+  repeated-selection accumulation topology, and categorical-logit calls retain
+  replay for their dense pullback. The graph is unchanged. In a targeted
+  2026-08-24 Release A/B (seven matched-run medians),
+  `gpcm_latent_reg_irt` moved 1.741465 -> 0.955609 ms/gradient (1.8224x
+  internally, now 1.3998x CmdStan), and `grsm_latent_reg_irt` moved
+  0.9705208 -> 0.4953192 ms/gradient (1.9594x internally, now 1.5387x
+  CmdStan). Their categorical opcode time fell 4.45x and 5.00x respectively;
+  the categorical-logit RBM controls were unchanged. These targeted medians
+  are not replacements for the full-corpus warmed means in the table below,
+  which await the next corpus refresh.
 - **Packed row-wise reductions** (the LDA inner loop): targeted medians fall
   from 154 to 94 us for `ldaK2` and 6.82 to 3.70 ms for `ldaK5`, while their
   graphs collapse from 15,854 to 22 and 434,126 to 156 ops. The full
