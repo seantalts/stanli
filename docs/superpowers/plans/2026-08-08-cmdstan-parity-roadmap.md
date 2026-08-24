@@ -178,14 +178,17 @@ warmed arithmetic means.
 - **Native `multi_normal_cholesky` partials — LANDED.** Retaining the exact
   active-Cholesky partial matrix moved `gp_regr` from 6.05 to 4.20 us/gradient
   in the targeted A/B. Its current full-corpus ratio is 1.11x CmdStan.
-- **Mixed ODE activity types — LANDED.** Removing the inactive initial-state
-  sensitivity moved `one_comp_mm_elim_abs` from 699 to 639 us/gradient in the
-  targeted A/B; its current full-corpus ratio is 0.75x CmdStan. The fully
-  active `lotka_volterra` and `soil_incubation` shapes do not benefit from this
-  specialization and currently sit at 0.53x and 0.59x.
-- **The remaining tail.** `lotka_volterra` now completes sampling in 10.00 s
-  versus CmdStan's 6.24 s; the earlier timeout claim is no longer reproducible,
-  although its 0.53x gradient ratio still points to solver/RHS dispatch.
+- **Mixed ODE activity and allocation-free RHS seeding — LANDED.** Removing
+  the inactive initial-state sensitivity first moved `one_comp_mm_elim_abs`
+  from 699 to 639 us/gradient. The later targeted 2026-08-24 A/B removed
+  per-callback `y`/`theta` staging and improved all three ODEs by
+  1.11107-1.14597x (1.13245x geometric mean; 63/63 bitwise LP/gradient
+  checks). The retained full-corpus ratios remain 0.53x, 0.59x, and 0.75x
+  until the next refresh.
+- **The remaining tail.** In the retained pre-patch full-corpus run,
+  `lotka_volterra` completed sampling in 10.00 s versus CmdStan's 6.24 s; the
+  earlier timeout claim is no longer reproducible, although its 0.53x gradient
+  ratio still points to solver/RHS dispatch.
   `iohmm_reg` is 0.65x CmdStan in the current full warmed-mean run. Its 4.74x
   generated-adjoint result was a targeted comparison against islands disabled,
   not a CmdStan speedup; stored loop bodies do not remove per-executed-

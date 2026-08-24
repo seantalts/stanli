@@ -15,17 +15,35 @@
 #include <stanli/ode_prog.hpp>
 #include <stanli/sexp.hpp>
 
+#include <stan/math.hpp>
+
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
 
 int failures = 0;
+
+void expect(const std::string& what, bool ok) {
+  if (!ok) {
+    ++failures;
+    std::printf("FAIL %s\n", what.c_str());
+  }
+}
+
+uint64_t bits(double x) {
+  uint64_t out;
+  std::memcpy(&out, &x, sizeof(out));
+  return out;
+}
 
 std::string slurp(const std::string& path) {
   std::ifstream f(path);
@@ -87,6 +105,111 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
   }
 }
 
+// Capture the observable result and the exact scalar tape written by one RHS
+// replay. The staged case spells the old MirRhs path: promote all y/theta
+// values first, then t, before entering the register machine. The direct case
+// is the allocation-free path. Tape values as well as counts make moving one
+// of those promotions across t visible even when the gradient is unchanged.
+struct MixedRun {
+  std::vector<uint64_t> values;
+  std::vector<uint64_t> y_grads;
+  std::vector<uint64_t> theta_grads;
+  std::vector<uint64_t> chain_tape;
+  std::vector<uint64_t> nochain_tape;
+};
+
+std::vector<uint64_t> tape_bits(const std::vector<stan::math::vari_base*>& tape,
+                                size_t first) {
+  std::vector<uint64_t> out;
+  out.reserve(tape.size() - first);
+  for (size_t i = first; i < tape.size(); ++i) {
+    const auto* scalar = dynamic_cast<const stan::math::vari*>(tape[i]);
+    if (!scalar) {
+      ++failures;
+      std::printf("FAIL mixed seed produced a non-scalar tape node\n");
+      return {};
+    }
+    out.push_back(bits(scalar->val_));
+  }
+  return out;
+}
+
+template <bool YAutodiff, bool ThetaAutodiff, bool Staged>
+MixedRun mixed_run(const stanli::RhsProgram& p, double t,
+                   const std::vector<double>& y_values,
+                   const std::vector<double>& theta_values,
+                   const std::vector<double>& x_r) {
+  using T_y = std::conditional_t<YAutodiff, stan::math::var, double>;
+  using T_theta = std::conditional_t<ThetaAutodiff, stan::math::var, double>;
+  using T = stan::return_type_t<T_y, T_theta>;
+
+  stan::math::nested_rev_autodiff nested;
+  std::vector<T_y> y(y_values.begin(), y_values.end());
+  std::vector<T_theta> theta(theta_values.begin(), theta_values.end());
+  auto* stack = stan::math::ChainableStack::instance_;
+  const size_t chain_first = stack->var_stack_.size();
+  const size_t nochain_first = stack->var_nochain_stack_.size();
+
+  std::vector<T> out;
+  if constexpr (Staged) {
+    std::vector<T> staged_y(y.begin(), y.end());
+    std::vector<T> staged_theta(theta.begin(), theta.end());
+    const T staged_t(t);
+    stanli::run_rhs<T>(p, staged_t, staged_y.data(), staged_theta.data(),
+                       staged_theta.size(), x_r.data(), out);
+  } else {
+    stanli::run_rhs<T>(p, t, y.data(), theta.data(), theta.size(), x_r.data(),
+                       out);
+  }
+
+  MixedRun run;
+  for (const T& value : out)
+    run.values.push_back(bits(stan::math::value_of(value)));
+  run.chain_tape = tape_bits(stack->var_stack_, chain_first);
+  run.nochain_tape = tape_bits(stack->var_nochain_stack_, nochain_first);
+
+  if constexpr (std::is_same_v<T, stan::math::var>) {
+    const stan::math::var root = out.at(0) * 0.37 + out.at(1) * -0.29;
+    stan::math::grad(root.vi_);
+  }
+  run.y_grads.reserve(y.size());
+  for (size_t i = 0; i < y.size(); ++i) {
+    if constexpr (YAutodiff)
+      run.y_grads.push_back(bits(y[i].adj()));
+    else
+      run.y_grads.push_back(bits(0.0));
+  }
+  run.theta_grads.reserve(theta.size());
+  for (size_t i = 0; i < theta.size(); ++i) {
+    if constexpr (ThetaAutodiff)
+      run.theta_grads.push_back(bits(theta[i].adj()));
+    else
+      run.theta_grads.push_back(bits(0.0));
+  }
+  return run;
+}
+
+template <bool YAutodiff, bool ThetaAutodiff>
+void check_mixed_seed(const stanli::RhsProgram& p, const char* label) {
+  const std::vector<double> y{1.1, 0.7};
+  // The fifth value models lower_ode_variadic's unread scalar placeholder.
+  // The program consumes four, but the old staging vector promoted all five.
+  const std::vector<double> theta{0.2, 0.35, 0.17, 0.41, 19.25};
+  const std::vector<double> x_r{2.5, 1.25};
+  const MixedRun staged =
+      mixed_run<YAutodiff, ThetaAutodiff, true>(p, 0.73, y, theta, x_r);
+  const MixedRun direct =
+      mixed_run<YAutodiff, ThetaAutodiff, false>(p, 0.73, y, theta, x_r);
+  const std::string prefix = std::string("mixed seed ") + label + ": ";
+  expect(prefix + "output bits", direct.values == staged.values);
+  expect(prefix + "y gradient bits", direct.y_grads == staged.y_grads);
+  expect(prefix + "theta gradient bits",
+         direct.theta_grads == staged.theta_grads);
+  expect(prefix + "chain tape order", direct.chain_tape == staged.chain_tape);
+  expect(prefix + "nochain tape order",
+         direct.nochain_tape == staged.nochain_tape);
+}
+
 }  // namespace
 
 int main() {
@@ -119,6 +242,21 @@ int main() {
       continue;
     }
     check(c.name, *it->second, funs, c.n_y, c.n_th, x_r, x_i, c.want_ok);
+  }
+
+  // stan-math instantiates a var state whenever either side is active. The
+  // data-y/active-theta case is included too: run_rhs is a generic boundary,
+  // and this is the combination most likely to expose a changed y promotion.
+  {
+    const auto it = funs.find("f_lin");
+    const RhsProgram p = compile_rhs(*it->second, funs, 2, 4, 2, x_i);
+    expect("mixed seed fixture compiles", p.ok);
+    if (p.ok) {
+      check_mixed_seed<true, false>(p, "var/double");
+      check_mixed_seed<false, true>(p, "double/var");
+      check_mixed_seed<true, true>(p, "var/var");
+      check_mixed_seed<false, false>(p, "double/double");
+    }
   }
 
   // A right-hand side whose arity is not the integrate_ode_* one is refused

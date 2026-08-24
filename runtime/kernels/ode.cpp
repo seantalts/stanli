@@ -1,7 +1,8 @@
 // ODE integrator ops. stan-math does the solving and the sensitivities; the
 // right-hand side is the model's own user-defined function, evaluated at
-// runtime by the MIR interpreter (see mir_interp.hpp) because the integrator
-// picks the times, so the body cannot be inlined at compile time.
+// runtime by a compiled register program (with the MIR interpreter as its
+// fallback) because the integrator picks the times, so the body cannot be
+// inlined at compile time.
 //
 // One solve per gradient, in the forward sweep, with the solution's jacobian
 // stashed for the backward one.
@@ -44,20 +45,35 @@ struct MirRhs {
   const OdeSpec* spec;
 
   template <typename T_y, typename T_param>
+  std::vector<stan::return_type_t<T_y, T_param>> eval(
+      const double& t, const T_y* y, size_t n_y,
+      const std::vector<T_param>& theta, const std::vector<double>& x_r,
+      const std::vector<int>& x_i, std::ostream* msgs = nullptr) const {
+    using T = stan::return_type_t<T_y, T_param>;
+    if (spec->prog.ok) {
+      // Seed mixed scalar inputs directly into the result-typed register file.
+      // theta.size(), rather than prog.n_th, retains promotion of lowering's
+      // unread no-parameter placeholder in the old tape position.
+      std::vector<T> out;
+      run_rhs<T>(spec->prog, t, y, theta.data(), theta.size(), x_r.data(), out);
+      return out;
+    }
+    // Preserve the interpreter adapter exactly. The modern caller used to
+    // make this state vector before entering MirRhs; doing it here keeps the
+    // fallback's ownership and evaluation path unchanged.
+    std::vector<T_y> state;
+    if (n_y != 0) state.assign(y, y + n_y);
+    return (*this)(t, state, theta, x_r, x_i, msgs);
+  }
+
+  template <typename T_y, typename T_param>
   std::vector<stan::return_type_t<T_y, T_param>> operator()(
       const double& t, const std::vector<T_y>& y,
       const std::vector<T_param>& theta, const std::vector<double>& x_r,
-      const std::vector<int>& x_i, std::ostream* = nullptr) const {
+      const std::vector<int>& x_i, std::ostream* msgs = nullptr) const {
     using T = stan::return_type_t<T_y, T_param>;
-    if (spec->prog.ok) {
-      // y and theta arrive as T_y / T_param, which are T or double; the
-      // register file is T, so promote through a small staging buffer only
-      // when they differ.
-      std::vector<T> out, ys(y.begin(), y.end()),
-          ths(theta.begin(), theta.end());
-      run_rhs<T>(spec->prog, T(t), ys.data(), ths.data(), x_r.data(), out);
-      return out;
-    }
+    if (spec->prog.ok)
+      return eval(t, y.data(), y.size(), theta, x_r, x_i, msgs);
     // Rebuild the formal argument list the right-hand side declares.
     // MirInterp::call binds positionally by declared type, so the real
     // arguments have to arrive already split out of the packed theta and
@@ -101,8 +117,8 @@ struct VarRhs {
              const std::vector<double>& x_r,
              const std::vector<int>& x_i) const {
     using T = stan::return_type_t<T_y, T_param>;
-    const std::vector<T_y> yv(y.data(), y.data() + y.size());
-    const std::vector<T> dy = MirRhs{spec}(t, yv, theta, x_r, x_i);
+    const std::vector<T> dy =
+        MirRhs{spec}.eval(t, y.data(), (size_t)y.size(), theta, x_r, x_i);
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(dy.size());
     for (size_t i = 0; i < dy.size(); ++i) out(i) = dy[i];
     return out;

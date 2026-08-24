@@ -455,7 +455,28 @@ scratch layout and gating inactive columns in the backward sweep. On
 sensitivity width from four to three and median latency from 699 to 639 us
 per gradient (1.09x); fully active ODE models are unchanged.
 
-Together these made the ODE models 29-39x faster.
+The compiled right-hand side also used to allocate promoted `y` and `theta`
+staging vectors on every callback. It now seeds those inputs directly into the
+reusable result-scalar register file in the original promotion order, including
+unused parameter source slots, before executing the unchanged instruction
+list. Solver math, output ownership, and the interpreter fallback are
+unchanged. A targeted 2026-08-24 Release A/B (seven alternating matched-batch
+medians) measured:
+
+| model | staged inputs | direct register seeding | improvement |
+| --- | ---: | ---: | ---: |
+| `lotka_volterra` | 78.6216 us | 68.6068 us | 1.14597x |
+| `soil_incubation` | 102.1527 us | 89.5593 us | 1.14062x |
+| `one_comp_mm_elim_abs` | 643.1571 us | 578.8621 us | 1.11107x |
+
+The geometric-mean improvement is 1.13245x, or 38.5-39.3 ns saved per callback
+at the known callback counts. Three evaluation points produced bitwise-
+identical LP and gradient values for all 63/63 checked scalars. This dated
+targeted A/B isolates the direct-seeding change; it does not replace the
+retained full-corpus warmed means and CmdStan ratios in `docs/benchmarks.md`.
+
+The original RHS compiler, solve reuse, and mixed-activity work made the ODE
+models 29-39x faster; direct input seeding compounds that historical gain.
 
 ## Executor details (`executor.cpp`)
 

@@ -113,11 +113,12 @@ by the model's *shape*, not its size.
 
 **Slower (a shrinking tail, mostly 0.5-0.9x):**
 
-- **ODE models**: `lotka_volterra`, `soil_incubation`, and
-  `one_comp_mm_elim_abs` are 0.53x, 0.59x, and 0.75x. The remaining gap is our
-  per-call dispatch of the compiled right-hand side against CmdStan's fully
-  inlined one inside the same CVODES solver. (They were 0.015-0.025x before
-  the right-hand side compiled; see below.)
+- **ODE models (retained full-corpus snapshot)**: `lotka_volterra`,
+  `soil_incubation`, and `one_comp_mm_elim_abs` are 0.53x, 0.59x, and 0.75x.
+  The remaining gap is our per-call dispatch of the compiled right-hand side
+  against CmdStan's native C++ right-hand side inside the same underlying Stan
+  Math integrator. (They were 0.015-0.025x before the right-hand side compiled;
+  see below.)
 - **Large scalar residue, occupancy, and latent-regression IRT shapes**:
   `iohmm_reg` is 0.65x, `gpcm_latent_reg_irt` and `grsm_latent_reg_irt` are
   0.74x and 0.79x, and `multi_occupancy` is 0.79x. These are all the non-ODE
@@ -214,6 +215,23 @@ the top of the page, not replacements for the current corpus rows:
   construction rises from about 0.239 s to 2.20-2.21 s, but the 154 ms saved
   per row repays it after roughly 13 draws. These are targeted write-array
   medians, not replacements for the sampling columns in the full corpus table.
+- **Allocation-free ODE right-hand-side input seeding** removes the promoted
+  `y` and `theta` staging vectors built on every solver callback and seeds the
+  reusable register file directly. A targeted 2026-08-24 Release A/B (seven
+  alternating matched-batch medians) measured:
+
+  | model | staged inputs | direct register seeding | improvement |
+  | --- | ---: | ---: | ---: |
+  | `lotka_volterra` | 78.6216 us | 68.6068 us | 1.14597x |
+  | `soil_incubation` | 102.1527 us | 89.5593 us | 1.14062x |
+  | `one_comp_mm_elim_abs` | 643.1571 us | 578.8621 us | 1.11107x |
+
+  The geometric-mean improvement is 1.13245x, and the known callback counts
+  put the saving at a consistent 38.5-39.3 ns/callback. LP and gradient
+  results were bitwise identical for all 63/63 checked scalars across three
+  points. This targeted A/B attributes the direct-seeding change; it does not
+  replace the retained full-corpus warmed means or CmdStan ratios above and in
+  the table below, which await the next corpus refresh.
 - **Packed row-wise reductions** (the LDA inner loop): targeted medians fall
   from 154 to 94 us for `ldaK2` and 6.82 to 3.70 ms for `ldaK5`, while their
   graphs collapse from 15,854 to 22 and 434,126 to 156 ops. The full
@@ -389,9 +407,10 @@ input promoted both to reverse mode and integrated sensitivities for both.
 On `one_comp_mm_elim_abs` the initial state is data, so the sensitivity width
 falls from four to three and median latency from 699 to 639 us/gradient. The
 fully active `lotka_volterra` and `soil_incubation` shapes take the same path
-as before and remain flat within measurement noise. The current warmed means
-are 629 us for `one_comp_mm_elim_abs`, 78 us for `lotka_volterra`, and 103 us
-for `soil_incubation`, or 0.75x, 0.53x, and 0.59x CmdStan.
+as before and remain flat within measurement noise. The retained pre-patch
+full-corpus warmed means are 629 us for `one_comp_mm_elim_abs`, 78 us for
+`lotka_volterra`, and 103 us for `soil_incubation`, or 0.75x, 0.53x, and
+0.59x CmdStan.
 
 Preparation scales too: the largest corpus model (`nn_rbm1bJ100`, MNIST,
 60,000 rows, 79,411 parameters) lowers to a 132,024-op graph. Its old 23.80 s
