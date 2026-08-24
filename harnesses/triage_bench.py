@@ -4,6 +4,7 @@ and by how much. Reads the TSV corpus_bench.py writes.
 
 Usage: python3 harnesses/triage_bench.py docs/corpus-bench.tsv [--all]
 """
+import csv
 import pathlib
 import sys
 
@@ -18,10 +19,8 @@ def num(s):
 def main():
     rows = []
     path = pathlib.Path(sys.argv[1])
-    lines = path.read_text().splitlines()
-    cols = lines[0].split("\t")
-    for line in lines[1:]:
-        rows.append(dict(zip(cols, line.split("\t"))))
+    with path.open(newline="") as f:
+        rows.extend(csv.DictReader(f, delimiter="\t"))
 
     done = len(rows)
     losses, wins, flags = [], [], []

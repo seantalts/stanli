@@ -1,10 +1,10 @@
 # Competing with CmdStan: the seven-item roadmap
 
-**Premise.** The corpus fight is essentially won: median 2.07x per
-gradient, 93/119 at or above CmdStan, ~20x time-to-first-draw, 118/120
-differentially verified, 71/72 densities. What decides the competition
-from here is *not* posteriordb. It is three things posteriordb does not
-measure:
+**Premise (2026-08-08 framing; corpus figures refreshed 2026-08-24).** The
+corpus fight is essentially won: median 2.18x per gradient, 109/119 at or
+above CmdStan, ~20x time-to-first-draw, 118/120 differentially verified,
+71/72 densities. What decides the competition from here is *not*
+posteriordb. It is three things posteriordb does not measure:
 
 1. **Workflow.** A Bayesian workflow tool runs four chains and reports
    R-hat, ESS and divergences. stanli runs one chain and reports draws.
@@ -23,6 +23,11 @@ can be picked up cold.
 **Status, 2026-08-08:** items 1, 2 and the solver half of 3 are done and verified (30/30 tests,
 20/20 transforms bitwise vs CmdStan, 119/119 corpus models unchanged
 against the stored references). Items 3-7 are as written.
+
+**Status, 2026-08-24:** item 5's native adjoint program and the six scoped
+optimizations named there have landed. Its current ratios below come from the
+refreshed full-corpus run; the before/after arrows remain the historical
+targeted A/B medians that attribute each change.
 
 ## 1. Multi-chain, sampler stats, inits, diagnostics — DONE
 
@@ -145,35 +150,50 @@ draws-CSV-in entry point.
 
 ---
 
-## 5. Native adjoint program, and the scoped tail fixes
+## 5. Native adjoint program, and the scoped tail fixes — DONE (named work), open (remaining tail)
 
-The perf class-changer. Full design:
+`gen_adjoint` and the six named tail optimizations have landed. Full native
+adjoint design:
 [2026-08-08-native-adjoint-program.md](2026-08-08-native-adjoint-program.md).
 
-Alongside it, the tail fixes the profile already names:
+Unless a measurement is explicitly labeled a targeted A/B, the ratios below
+are CmdStan/stanli from the 2026-08-24 full corpus, whose gradient cells are
+warmed arithmetic means.
 
-- **Slice writes in place.** `Mtbh_model` (0.45x, the corpus floor)
-  spends 36% in `OP_SET_SLICE_STRIDED` — 146 calls moving 106,580
-  elements. The in-place rule rewrites element writes and not slice
-  writes, so a model filling a matrix column by column copies the whole
-  matrix per column. Flagged "Open" in docs/benchmarks.md.
-- **Row-wise `log_sum_exp`** closes `ldaK2`/`ldaK5` (0.71x). The K=2
-  case is already closed by the elementwise-lp fusion.
-- **Kernel-bound stragglers**, in the shape of the `diamonds` and
-  `prophet` fixes. `Mt_model` is now closed: direct Bernoulli partials move it
-  from 30.6 to 19.2 us/gradient, or 0.99x CmdStan. `kronecker_gp` is closed as
-  well: retaining each symmetric eigendecomposition for its native pullback
-  moves it from 289.0 to 185.7 us/gradient, or 1.17x CmdStan. `gp_regr` is
-  closed too: retaining the exact active-Cholesky partial matrix moves it from
-  6.05 to 4.20 us/gradient, or 1.12x CmdStan. Preserving mixed ODE scalar types
-  removes the inactive initial-state sensitivity from
-  `one_comp_mm_elim_abs`, moving it from 699 to 639 us/gradient; the remaining
-  ODE gap is inside the solver/RHS execution rather than graph dispatch.
-- **Two loose threads.** `lotka_volterra` is 0.61x per gradient yet blows
-  the 900 s sampling cap CmdStan clears in 6.2 s — untraced, and
-  `tools/sampler_trace.py` is the tool. `sir`'s benchmark probe point
-  lands where its ODE solution dips to -4.4e-10; move the point and the
-  corpus goes 119/120 verified.
+- **Slice writes in place — LANDED.** The original profile found 146
+  `OP_SET_SLICE_STRIDED` calls copying a 730-value matrix. The targeted A/B
+  median for `Mtbh_model` fell from 106.5 to 47.4 us/gradient (0.43x to 0.95x
+  CmdStan). After the later Bernoulli specialization, its current full-corpus
+  warmed mean is 27.0 us/gradient, or 1.59x CmdStan.
+- **Packed row-wise `log_sum_exp` — LANDED.** The targeted A/B medians fell
+  from 154 to 94 us for `ldaK2` and from 6.82 to 3.70 ms for `ldaK5`. Their
+  current full-corpus ratios are 1.05x and 1.52x CmdStan, respectively.
+- **Native Bernoulli forwards — LANDED.** The targeted A/B medians were 30.6
+  to 19.2 us for `Mt_model`, 113.2 to 57.3 us for `Mth_model`, and, after the
+  slice fix, 47.4 to 26.8 us for `Mtbh_model`. Their current full-corpus ratios
+  are 1.05x, 1.65x, and 1.59x CmdStan.
+- **Native symmetric-eigen pullbacks — LANDED.** Retaining each
+  eigendecomposition moved `kronecker_gp` from 289.0 to 185.7 us/gradient in
+  the targeted A/B. Its current full-corpus ratio is 1.18x CmdStan.
+- **Native `multi_normal_cholesky` partials — LANDED.** Retaining the exact
+  active-Cholesky partial matrix moved `gp_regr` from 6.05 to 4.20 us/gradient
+  in the targeted A/B. Its current full-corpus ratio is 1.11x CmdStan.
+- **Mixed ODE activity types — LANDED.** Removing the inactive initial-state
+  sensitivity moved `one_comp_mm_elim_abs` from 699 to 639 us/gradient in the
+  targeted A/B; its current full-corpus ratio is 0.75x CmdStan. The fully
+  active `lotka_volterra` and `soil_incubation` shapes do not benefit from this
+  specialization and currently sit at 0.53x and 0.59x.
+- **The remaining tail.** `lotka_volterra` now completes sampling in 10.00 s
+  versus CmdStan's 6.24 s; the earlier timeout claim is no longer reproducible,
+  although its 0.53x gradient ratio still points to solver/RHS dispatch.
+  `iohmm_reg` is 0.65x CmdStan in the current full warmed-mean run. Its 4.74x
+  generated-adjoint result was a targeted comparison against islands disabled,
+  not a CmdStan speedup; stored loop bodies do not remove per-executed-
+  instruction dispatch. The other sub-parity rows are the two
+  latent-regression IRT shapes at 0.74-0.79x, `multi_occupancy` at 0.79x,
+  and three near-parity rows at 0.89-0.94x. `sir`'s benchmark probe point still
+  lands where its ODE solution dips to -4.4e-10; moving the point would take
+  the corpus to 119/120 verified.
 
 ---
 

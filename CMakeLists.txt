@@ -512,6 +512,12 @@ add_test(NAME test_capi COMMAND test_capi
 # standalone runs on older Python use the Tomli backport in requirements.txt.
 find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME test_corpus_bench
+           COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_gen_web_models
+           COMMAND ${Python3_EXECUTABLE} tests/test_gen_web_models.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_conformance_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_conformance.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

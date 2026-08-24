@@ -1551,14 +1551,14 @@ $("csv").onclick = () => {
 <footer>
 <h2>Surprised it was that quick?</h2>
 <p><b>Look ma, no compiles!</b> Other Stan interfaces all lower your model to C++ and then use a system C++ compiler to build it,
-which takes a minimum of 6 seconds for the smallest models even after the precompiled headers have been built.
+which takes several seconds even for small models after the precompiled headers have been built.
 Stanli has its own lowering and optimization passes that run in tens of milliseconds and then just interprets that high level result rather than using a compiler.
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
 it works</a></p>
 <p><b>Not just faster to start up, but usually faster gradients and sampling??</b> Median
-<!--gen:corpus_median-->2.07x<!--/gen--> CmdStan across
+<!--gen:corpus_median-->2.18x<!--/gen--> CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
-<!--gen:corpus_at_par-->100<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
+<!--gen:corpus_at_par-->109<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
 <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.

@@ -20,6 +20,7 @@ stanli-side change (a new graph pass, a sampler fix): the CmdStan numbers
 are unaffected and rebuilding 120 model binaries to reproduce them is the
 expensive part of a full run.
 """
+import csv
 import json
 import os
 import pathlib
@@ -39,6 +40,16 @@ STANC = REPO / "deps/stanc3/stanc"
 COLS = ["model", "params", "stanli_prep_s", "stanli_ns_grad",
         "stanli_sample_s", "cmdstan_build_s", "cmdstan_ns_grad",
         "cmdstan_sample_s", "note"]
+
+
+def row_line(row):
+    values = [str(row.get(c, "")) for c in COLS]
+    # A literal trailing tab is valid TSV for an empty final field, but it is
+    # also trailing whitespace to git. Quoting the empty field preserves the
+    # same csv.DictReader value while keeping benchmark diffs checkable.
+    if not values[-1]:
+        values[-1] = '""'
+    return "\t".join(values) + "\n"
 
 
 # Returns (result, status): status is "ok", "fail" (non-zero exit) or
@@ -79,10 +90,10 @@ def main():
     done = set()
     old_rows = {}
     if out_path.exists():
-        for line in out_path.read_text().splitlines()[1:]:
-            parts = line.split("\t")
-            done.add(parts[0])
-            old_rows[parts[0]] = dict(zip(COLS, parts))
+        with out_path.open(newline="") as f:
+            for row in csv.DictReader(f, delimiter="\t"):
+                done.add(row["model"])
+                old_rows[row["model"]] = row
     else:
         out_path.write_text("\t".join(COLS) + "\n")
     if stanli_only:
@@ -164,8 +175,7 @@ def main():
             with out_path.open("w") as f:
                 f.write("\t".join(COLS) + "\n")
                 for m in sorted(old_rows):
-                    f.write("\t".join(str(old_rows[m].get(c, ""))
-                                      for c in COLS) + "\n")
+                    f.write(row_line(old_rows[m]))
             print(f"{model}: stanli {row['stanli_ns_grad']}ns/"
                   f"{row['stanli_sample_s']}s  {row['note']}", flush=True)
             continue
@@ -212,7 +222,7 @@ def main():
 
         row["note"] = ",".join(notes)
         with out_path.open("a") as f:
-            f.write("\t".join(str(row[c]) for c in COLS) + "\n")
+            f.write(row_line(row))
         print(f"{model}: stanli {row['stanli_ns_grad']}ns/"
               f"{row['stanli_sample_s']}s  cmdstan {row['cmdstan_ns_grad']}ns/"
               f"{row['cmdstan_sample_s']}s  {row['note']}", flush=True)

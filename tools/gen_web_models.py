@@ -44,7 +44,7 @@ DRAWS_MIN = 100
 
 def draws_for(sample_s):
     if sample_s is None:
-        return 1000
+        return DRAWS_MIN
     for limit, n in DRAWS:
         if sample_s <= limit:
             return n

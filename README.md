@@ -31,10 +31,10 @@ rather than bundling it, because CRAN will not carry a 29 MB binary and
 could not build one on their farm.
 
 - Performance vs CmdStan: [docs/benchmarks.md](docs/benchmarks.md).
-  Median gradient <!--gen:corpus_median-->2.07x<!--/gen--> across
+  Median gradient <!--gen:corpus_median-->2.18x<!--/gen--> across
   <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models,
-  <!--gen:corpus_at_par-->100<!--/gen--> of them at or above CmdStan;
-  <!--gen:bench_span-->1.0x-6.1x<!--/gen--> on vectorized shapes;
+  <!--gen:corpus_at_par-->109<!--/gen--> of them at or above CmdStan;
+  <!--gen:bench_span-->1.0x-8.0x<!--/gen--> on vectorized shapes;
   time-to-first-draw about 20x faster.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models

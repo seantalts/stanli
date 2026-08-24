@@ -130,48 +130,51 @@ point, both sides `-O3` with FP contraction pinned off:
 <!--gen:bench_table_us-->
 | model | params | stanli | CmdStan | speedup |
 | --- | ---: | ---: | ---: | ---: |
-| `radon_pooled` | 3 | 52.9 us | 320.9 us | **6.1x** |
-| `arK` | 7 | 2.4 us | 12.5 us | **5.2x** |
-| `radon_hierarchical_intercept_centered` | 391 | 111.6 us | 569.1 us | **5.1x** |
-| `radon_county_intercept` | 388 | 89.7 us | 431.6 us | **4.8x** |
-| `nes` | 10 | 19.7 us | 69.3 us | **3.5x** |
-| `eight_schools_noncentered` | 10 | 0.23 us | 0.74 us | **3.3x** |
-| `election88_full` | 90 | 295.3 us | 902.0 us | **3.0x** |
-| `bym2_offset_only` | 3845 | 39.6 us | 114.6 us | **2.9x** |
-| `dogs` | 3 | 22.0 us | 63.7 us | **2.9x** |
-| `kidscore_momiq` | 3 | 1.9 us | 4.9 us | **2.6x** |
-| `lsat_model` | 1006 | 45.5 us | 91.2 us | **2.0x** |
-| `state_space_stochastic_level_stochastic_seasonal` | 389 | 17.2 us | 26.3 us | **1.5x** |
-| `hmm_example` | 4 | 21.1 us | 27.1 us | **1.3x** |
-| `garch11` | 4 | 8.2 us | 9.7 us | **1.2x** |
-| `hmm_drive_0` | 6 | 117.6 us | 132.8 us | **1.1x** |
-| `normal_mixture` | 3 | 79.0 us | 88.2 us | **1.1x** |
-| `low_dim_gauss_mix` | 5 | 88.9 us | 98.3 us | **1.1x** |
-| `wells_dist100ars_model` | 3 | 17.4 us | 19.0 us | **1.1x** |
-| `iohmm_reg` | 29 | 301.4 us | 320.3 us | **1.1x** |
-| `radon_county` | 389 | 83.2 us | 82.1 us | **1.0x** |
-| `arma11` | 4 | 6.7 us | 6.2 us | 0.92x |
-| `diamonds` | 26 | 35.4 us | 31.5 us | 0.89x |
-| `ldaK2` | 7 | 145.9 us | 104.1 us | 0.71x |
+| `radon_pooled` | 3 | 45.5 us | 320.9 us | **7.0x** |
+| `arK` | 7 | 1.8 us | 12.5 us | **7.0x** |
+| `radon_hierarchical_intercept_centered` | 391 | 97.1 us | 569.1 us | **5.9x** |
+| `radon_county_intercept` | 388 | 81.5 us | 431.6 us | **5.3x** |
+| `nes` | 10 | 16.1 us | 69.3 us | **4.3x** |
+| `eight_schools_noncentered` | 10 | 0.27 us | 0.74 us | **2.8x** |
+| `election88_full` | 90 | 256.1 us | 902.0 us | **3.5x** |
+| `bym2_offset_only` | 3845 | 40.2 us | 114.6 us | **2.9x** |
+| `dogs` | 3 | 8.0 us | 63.7 us | **8.0x** |
+| `kidscore_momiq` | 3 | 1.5 us | 4.9 us | **3.2x** |
+| `lsat_model` | 1006 | 41.9 us | 91.2 us | **2.2x** |
+| `state_space_stochastic_level_stochastic_seasonal` | 389 | 17.3 us | 26.3 us | **1.5x** |
+| `hmm_example` | 4 | 21.0 us | 27.1 us | **1.3x** |
+| `garch11` | 4 | 6.9 us | 9.7 us | **1.4x** |
+| `hmm_drive_0` | 6 | 119.7 us | 132.8 us | **1.1x** |
+| `normal_mixture` | 3 | 79.8 us | 88.2 us | **1.1x** |
+| `low_dim_gauss_mix` | 5 | 90.7 us | 98.3 us | **1.1x** |
+| `wells_dist100ars_model` | 3 | 17.0 us | 19.0 us | **1.1x** |
+| `iohmm_reg` | 29 | 492.9 us | 320.3 us | 0.65x |
+| `radon_county` | 389 | 73.4 us | 82.1 us | **1.1x** |
+| `arma11` | 4 | 4.5 us | 6.2 us | **1.4x** |
+| `diamonds` | 26 | 31.2 us | 31.5 us | **1.0x** |
+| `ldaK2` | 7 | 99.5 us | 104.1 us | **1.1x** |
 <!--/gen-->
 
 The wins come from op granularity. CmdStan's var tape allocates, walks,
 and frees one node per scalar operation per leapfrog step; stanli pays
 a fixed cost per *op*, and a vectorized statement over N elements
 amortizes that to nothing. Across the whole posteriordb corpus the
-median is <!--gen:corpus_median-->2.07x<!--/gen--> and
-<!--gen:corpus_at_par-->100<!--/gen--> of
+median is <!--gen:corpus_median-->2.18x<!--/gen--> and
+<!--gen:corpus_at_par-->109<!--/gen--> of
 <!--gen:corpus_n_grad-->119<!--/gen--> models are at or above CmdStan.
 
-The former worst class -- recurrences -- crossed parity when the
-runtime started compiling them: `hmm_*`, `garch11` and `iohmm_reg`
-step through time with each step reading the last one's
-parameter-dependent result, which nothing can vectorize, so each model
-now compiles its recurrence into a register program with a generated
-derivative program alongside. The remaining losses are mixtures with
-more than two components (a reduction shape the fusion pass does not
-yet express) and ODE models at around 0.6x, whose right-hand side runs
-through the register machine where CmdStan runs native code.
+The former worst class -- recurrences -- mostly crossed parity when the
+runtime started compiling them. The `hmm_*` models and `garch11` step
+through time with each step reading the last one's parameter-dependent
+result, which nothing can vectorize, so each model now compiles its
+recurrence into a register program with a generated derivative program
+alongside. `iohmm_reg` remains the exception at 0.65x. The largest other
+current losses are ODE models at 0.53-0.75x, whose right-hand side runs
+through the register machine where CmdStan runs native code, two
+latent-regression IRT shapes at 0.74-0.79x, and `multi_occupancy` at 0.79x.
+The smaller gaps are `Mh_model` at 0.89x, `dogs_nonhierarchical` at 0.92x,
+and `Mb_model` at 0.94x. Packed row reductions now put both LDA mixture
+widths at or above parity.
 
 Method and full table:
 [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)

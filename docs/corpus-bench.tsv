@@ -1,121 +1,121 @@
 model	params	stanli_prep_s	stanli_ns_grad	stanli_sample_s	cmdstan_build_s	cmdstan_ns_grad	cmdstan_sample_s	note
-2pl_latent_reg_irt	531	0.101	89100	6.77	5.3	134556	7.94	
-GLMM1_model	237	0.018	10891	1.08	3.2	35558	1.68	
-GLMM_Poisson_model	45	0.005	749	0.18	3.7	2412	0.69	
-GLM_Binomial_model	3	0.006	858	0.06	3.2	1809	0.21	
-GLM_Poisson_model	4	0.004	418	0.07	3.2	2008	0.24	
-M0_model	2	0.018	12088	0.14	2.7	15595	0.37	
-Mb_model	3	0.081	63126	2.83	3.2	49570	1.15	
-Mh_model	388	0.052	45841	3.03	3.2	38956	2.66	
-Mt_model	4	0.033	26924	0.36	3.4	19984	0.48	
-Mtbh_model	154	0.113	95262	3.83	4.9	42791	2.38	
-Mth_model	394	0.107	96984	4.56	4.2	93922	5.43	
-Rate_1_model	1	0.004	59	0.02	2.3	260	0.15	
-Rate_2_model	2	0.004	103	0.02	2.5	561	0.23	
-Rate_3_model	1	0.004	74	0.02	2.4	268	0.18	
-Rate_4_model	2	0.004	86	0.02	2.4	311	0.17	
-Rate_5_model	1	0.004	72	0.02	2.4	262	0.19	
-Survey_model	1	0.066	59516	0.87	2.9	61578	1.14	
-accel_gp	66	0.018	6870	9.46	5.3	9532	16.99	
-accel_splines	82	0.020	7545	16.72	4.3	10584	19.74	
-arK	7	0.007	2382	0.20	2.8	12459	0.97	
-arma11	4	0.012	6717	0.11	2.9	6158	0.26	
-blr	6	0.005	709	0.34	3.1	1728	0.21	
-bones_model	13	0.064	52635	1.18	3.4	51501	1.31	
-bym2_offset_only	3845	0.046	39582	16.03	4.1	114620	23.40	
-covid19imperial_v2	51	0.325	452660	221.88	6.7	345937	176.00	
-covid19imperial_v3	51	0.325	448970	221.31	6.7	342943	175.70	
-diamonds	26	0.110	35358	58.51	3.4	31497	48.55	
-dogs	3	0.042	22014	0.86	3.5	63747	2.39	
-dogs_hierarchical	2	0.044	33092	0.43	2.7	34053	0.68	
-dogs_log	2	0.039	19967	0.61	3.2	41387	1.01	
-dogs_nonhierarchical	65	0.056	44788	2.66	6.8	40588	2.86	
-dugongs_model	4	0.006	724	0.06	3.0	1653	0.25	
-earn_height	3	0.012	5048	0.84	2.7	10866	1.86	
-eight_schools_centered	10	0.005	243	0.05	2.9	314	0.19	
-eight_schools_noncentered	10	0.006	227	0.04	3.2	745	0.20	
-election88_full	90	0.379	295265	148.24	3.9	901961	468.15	
-garch11	4	0.014	8157	0.23	2.8	9664	0.43	
-gp_pois_regr	13	0.010	3723	1.22	5.4	3935	1.47	
-gp_regr	3	0.012	5664	0.09	5.2	4698	0.23	
-gpcm_latent_reg_irt	530	0.769	821921	60.51	5.0	1337651	161.93	
-grsm_latent_reg_irt	408	0.516	454086	29.96	4.9	762133	66.92	
-hier_2pl	669	0.210	302488	18.71	6.5	397603	26.82	
-hierarchical_gp	933	0.046	35286	16.01	8.6	47565	17.20	
-hmm_drive_0	6	0.139	117566	7.90	4.5	132850	3.65	
-hmm_drive_1	6	0.141	121440	10.43	4.7	147829	6.94	
-hmm_example	4	0.028	21132	1.63	4.0	27145	1.00	
-hmm_gaussian	14	0.381	228979	376.93	4.6	263917	18.75	
-iohmm_reg	29	0.432	301447	151.08	5.7	320335	181.23	
-irt_2pl	144	0.028	20191	1.15	3.9	37468	2.17	
-kidscore_interaction	5	0.010	3176	0.71	2.9	9927	1.90	
-kidscore_interaction_c	5	0.010	3197	0.09	2.9	10333	0.39	
-kidscore_interaction_c2	5	0.010	3168	0.09	2.8	9901	0.40	
-kidscore_interaction_z	5	0.010	3154	0.13	2.9	10013	0.47	
-kidscore_mom_work	5	0.010	3192	0.16	2.8	9959	0.64	
-kidscore_momhs	3	0.008	1844	0.08	2.7	4483	0.30	
-kidscore_momhsiq	4	0.009	2497	0.30	2.8	7145	0.84	
-kidscore_momiq	3	0.008	1889	0.17	2.7	4861	0.42	
-kilpisjarvi	3	0.007	342	0.86	2.7	1532	1.60	
-kronecker_gp	438	0.213	309596		8.0	217990	451.09	stanli_sample_timeout
-ldaK2	7	0.165	145916	12.72	3.6	104059	3.19	
-ldaK5	7714	49.882	5085223		3.5	5580314		stanli_sample_timeout,cmdstan_sample_timeout
-log10earn_height	3	0.013	4947	0.91	2.7	11560	1.75	
-logearn_height	3	0.012	4974	0.73	2.7	11162	1.71	
-logearn_height_male	4	0.015	6911	1.68	2.8	19147	3.77	
-logearn_interaction	5	0.017	9020	3.56	2.8	26051	8.49	
-logearn_interaction_z	5	0.017	9121	0.28	3.0	26484	0.84	
-logearn_logheight_male	4	0.014	6887	5.41	2.8	18697	13.41	
-logistic_regression_rhs	3075	0.097	44919	12.68	4.6	113106	16.23	
-logmesquite	8	0.007	604	0.08	3.0	2902	0.33	
-logmesquite_logva	5	0.007	406	0.07	3.0	2070	0.29	
-logmesquite_logvas	8	0.007	574	0.11	3.2	3130	0.42	
-logmesquite_logvash	7	0.007	520	0.11	3.2	2841	0.39	
-logmesquite_logvolume	3	0.006	279	0.03	2.9	1304	0.20	
-losscurve_sislob	15	0.010	2104	0.51	4.1	3450	0.31	
-lotka_volterra	8	0.076	68116		4.1	41313	6.24	stanli_sample_timeout
-low_dim_gauss_mix	5	0.099	88949	1.40	3.0	98315	1.98	
-low_dim_gauss_mix_collapse	5	0.100	85801	3.65	3.0	95373	4.45	
-lsat_model	1006	0.055	45543	2.93	3.6	91173	4.66	
-mesquite	8	0.007	582	0.19	2.9	3055	0.57	
-multi_occupancy	106	0.106	68450	8.18	5.7	58996	7.34	
-nes	10	0.032	19696	1.62	3.1	69324	6.70	
-nes_logit_model	2	0.013	6232	0.15	3.0	7653	0.38	
-nn_rbm1bJ10	7951	0.210	162510	472.33	5.2	185731	456.82	
-nn_rbm1bJ100	79411	22.948	407814403		5.2	434981254		stanli_sample_timeout,cmdstan_sample_timeout
-normal_mixture	3	0.091	78960	0.74	2.5	88239	1.13	
-normal_mixture_k	14	0.384	251577	61.09	3.3	357439	101.61	
-one_comp_mm_elim_abs	4	0.208	632503	11.45	3.3	470681	11.23	
-pilots	18	0.007	742	0.37	3.2	1878	1.29	
-prophet	62	0.088	56912	98.22	4.7	69789	117.68	
-radon_county	389	0.105	83236	4.61	3.0	82076	4.49	
-radon_county_intercept	388	0.132	89669	6.13	2.9	431614	27.37	
-radon_hierarchical_intercept_centered	391	0.179	111649	8.90	3.2	569143	44.69	
-radon_hierarchical_intercept_noncentered	391	0.180	112121	12.48	3.3	570300	56.03	
-radon_partially_pooled_centered	389	0.099	69057	3.85	2.9	272243	13.96	
-radon_partially_pooled_noncentered	389	0.100	69749	5.46	3.1	273685	20.11	
-radon_pooled	3	0.083	52902	0.65	2.6	320938	3.78	
-radon_variable_intercept_centered	390	0.133	89668	5.11	2.9	427262	23.02	
-radon_variable_intercept_noncentered	390	0.133	90596	8.10	3.1	430721	33.78	
-radon_variable_intercept_slope_centered	777	0.171	125098	9.81	3.1	437889	27.23	
-radon_variable_intercept_slope_noncentered	777	0.173	126358	18.43	3.3	441463	58.56	
-radon_variable_slope_centered	390	0.133	90416	5.33	2.9	420987	23.66	
-radon_variable_slope_noncentered	390	0.134	91241	11.17	3.1	422894	51.94	
-rats_model	65	0.008	1224	0.21	2.9	6475	0.52	
-seeds_centered_model	26	0.007	759	0.10	3.7	2650	0.28	
-seeds_model	26	0.007	738	0.10	3.5	2130	0.29	
-seeds_stanified_model	26	0.007	726	0.08	3.4	2341	0.30	
-sesame_one_pred_a	3	0.007	1028	0.05	2.7	3440	0.23	
+2pl_latent_reg_irt	531	0.006	82784	6.41	5.3	134556	7.94	""
+GLMM1_model	237	0.003	10617	1.13	3.2	35558	1.68	""
+GLMM_Poisson_model	45	0.001	671	0.21	3.7	2412	0.69	""
+GLM_Binomial_model	3	0.001	830	0.07	3.2	1809	0.21	""
+GLM_Poisson_model	4	0.001	389	0.07	3.2	2008	0.24	""
+M0_model	2	0.002	11555	0.16	2.7	15595	0.37	""
+Mb_model	3	0.011	52956	3.14	3.2	49570	1.15	""
+Mh_model	388	0.003	43884	3.43	3.2	38956	2.66	""
+Mt_model	4	0.002	18986	0.29	3.4	19984	0.48	""
+Mtbh_model	154	0.009	26971	2.58	4.9	42791	2.38	""
+Mth_model	394	0.003	57065	4.59	4.2	93922	5.43	""
+Rate_1_model	1	0.000	63	0.02	2.3	260	0.15	""
+Rate_2_model	2	0.000	118	0.03	2.5	561	0.23	""
+Rate_3_model	1	0.000	84	0.02	2.4	268	0.18	""
+Rate_4_model	2	0.000	96	0.03	2.4	311	0.17	""
+Rate_5_model	1	0.000	80	0.03	2.4	262	0.19	""
+Survey_model	1	0.003	60958	1.99	2.9	61578	1.14	""
+accel_gp	66	0.005	6605	12.57	5.3	9532	16.99	""
+accel_splines	82	0.003	7174	16.14	4.3	10584	19.74	""
+arK	7	0.002	1776	0.16	2.8	12459	0.97	""
+arma11	4	0.001	4474	0.09	2.9	6158	0.26	""
+blr	6	0.001	576	0.06	3.1	1728	0.21	""
+bones_model	13	0.007	50524	0.88	3.4	51501	1.31	""
+bym2_offset_only	3845	0.002	40175	16.66	4.1	114620	23.40	""
+covid19imperial_v2	51	0.083	258205	260.70	6.7	345937	176.00	""
+covid19imperial_v3	51	0.083	241703	259.08	6.7	342943	175.70	""
+diamonds	26	0.021	31202	51.64	3.4	31497	48.55	""
+dogs	3	0.010	8006	0.57	3.5	63747	2.39	""
+dogs_hierarchical	2	0.005	31768	2.40	2.7	34053	0.68	""
+dogs_log	2	0.010	8345	0.47	3.2	41387	1.01	""
+dogs_nonhierarchical	65	0.006	44031	4.21	6.8	40588	2.86	""
+dugongs_model	4	0.001	797	0.08	3.0	1653	0.25	""
+earn_height	3	0.001	4232	0.77	2.7	10866	1.86	""
+eight_schools_centered	10	0.000	298	0.05	2.9	314	0.19	""
+eight_schools_noncentered	10	0.000	267	0.04	3.2	745	0.20	""
+election88_full	90	0.121	256132	92.15	3.9	901961	468.15	""
+garch11	4	0.002	6934	0.20	2.8	9664	0.43	""
+gp_pois_regr	13	0.001	3883	1.41	5.4	3935	1.47	""
+gp_regr	3	0.001	4240	0.08	5.2	4698	0.23	""
+gpcm_latent_reg_irt	530	0.050	1804319	131.10	5.0	1337651	161.93	""
+grsm_latent_reg_irt	408	0.018	959091	55.22	4.9	762133	66.92	""
+hier_2pl	669	0.005	296987	18.34	6.5	397603	26.82	""
+hierarchical_gp	933	0.004	30672	17.01	8.6	47565	17.20	""
+hmm_drive_0	6	0.014	119749	9.77	4.5	132850	3.65	""
+hmm_drive_1	6	0.015	128715	12.34	4.7	147829	6.94	""
+hmm_example	4	0.003	21042	2.02	4.0	27145	1.00	""
+hmm_gaussian	14	0.109	230946	395.86	4.6	263917	18.75	""
+iohmm_reg	29	0.183	492902	256.13	5.7	320335	181.23	""
+irt_2pl	144	0.001	16578	1.33	3.9	37468	2.17	""
+kidscore_interaction	5	0.001	2508	0.55	2.9	9927	1.90	""
+kidscore_interaction_c	5	0.001	2450	0.09	2.9	10333	0.39	""
+kidscore_interaction_c2	5	0.001	2509	0.09	2.8	9901	0.40	""
+kidscore_interaction_z	5	0.001	2487	0.11	2.9	10013	0.47	""
+kidscore_mom_work	5	0.001	2479	0.13	2.8	9959	0.64	""
+kidscore_momhs	3	0.001	1542	0.07	2.7	4483	0.30	""
+kidscore_momhsiq	4	0.001	2034	0.26	2.8	7145	0.84	""
+kidscore_momiq	3	0.001	1530	0.16	2.7	4861	0.42	""
+kilpisjarvi	3	0.001	326	0.97	2.7	1532	1.60	""
+kronecker_gp	438	0.005	184900	380.02	8.0	217990	451.09	""
+ldaK2	7	0.005	99542	2.27	3.6	104059	3.19	""
+ldaK5	7714	0.270	3664061		3.5	5580314		stanli_sample_timeout,cmdstan_sample_timeout
+log10earn_height	3	0.001	4130	0.95	2.7	11560	1.75	""
+logearn_height	3	0.001	4267	0.70	2.7	11162	1.71	""
+logearn_height_male	4	0.001	5835	1.38	2.8	19147	3.77	""
+logearn_interaction	5	0.001	7534	2.56	2.8	26051	8.49	""
+logearn_interaction_z	5	0.001	7484	0.22	3.0	26484	0.84	""
+logearn_logheight_male	4	0.001	5800	4.40	2.8	18697	13.41	""
+logistic_regression_rhs	3075	0.013	43070	11.64	4.6	113106	16.23	""
+logmesquite	8	0.001	484	0.08	3.0	2902	0.33	""
+logmesquite_logva	5	0.001	352	0.08	3.0	2070	0.29	""
+logmesquite_logvas	8	0.001	482	0.12	3.2	3130	0.42	""
+logmesquite_logvash	7	0.001	428	0.12	3.2	2841	0.39	""
+logmesquite_logvolume	3	0.001	262	0.04	2.9	1304	0.20	""
+losscurve_sislob	15	0.004	2066	0.54	4.1	3450	0.31	""
+lotka_volterra	8	0.001	78213	10.00	4.1	41313	6.24	""
+low_dim_gauss_mix	5	0.003	90712	1.46	3.0	98315	1.98	""
+low_dim_gauss_mix_collapse	5	0.003	88766	4.02	3.0	95373	4.45	""
+lsat_model	1006	0.003	41949	2.81	3.6	91173	4.66	""
+mesquite	8	0.001	487	0.19	2.9	3055	0.57	""
+multi_occupancy	106	0.006	74251	9.49	5.7	58996	7.34	""
+nes	10	0.004	16139	1.54	3.1	69324	6.70	""
+nes_logit_model	2	0.001	6163	0.16	3.0	7653	0.38	""
+nn_rbm1bJ10	7951	0.008	171460	497.11	5.2	185731	456.82	""
+nn_rbm1bJ100	79411	2.722	412143416		5.2	434981254		stanli_sample_timeout,cmdstan_sample_timeout
+normal_mixture	3	0.003	79768	0.82	2.5	88239	1.13	""
+normal_mixture_k	14	0.023	268845	66.78	3.3	357439	101.61	""
+one_comp_mm_elim_abs	4	0.001	628751	15.41	3.3	470681	11.23	""
+pilots	18	0.001	749	0.76	3.2	1878	1.29	""
+prophet	62	0.009	54467	92.69	4.7	69789	117.68	""
+radon_county	389	0.011	73425	4.05	3.0	82076	4.49	""
+radon_county_intercept	388	0.026	81516	5.43	2.9	431614	27.37	""
+radon_hierarchical_intercept_centered	391	0.042	97135	8.37	3.2	569143	44.69	""
+radon_hierarchical_intercept_noncentered	391	0.042	97542	10.63	3.3	570300	56.03	""
+radon_partially_pooled_centered	389	0.020	66505	3.84	2.9	272243	13.96	""
+radon_partially_pooled_noncentered	389	0.021	67234	5.30	3.1	273685	20.11	""
+radon_pooled	3	0.015	45516	0.55	2.6	320938	3.78	""
+radon_variable_intercept_centered	390	0.026	81672	4.85	2.9	427262	23.02	""
+radon_variable_intercept_noncentered	390	0.026	81801	7.38	3.1	430721	33.78	""
+radon_variable_intercept_slope_centered	777	0.029	119738	9.02	3.1	437889	27.23	""
+radon_variable_intercept_slope_noncentered	777	0.030	120490	17.57	3.3	441463	58.56	""
+radon_variable_slope_centered	390	0.026	83382	4.97	2.9	420987	23.66	""
+radon_variable_slope_noncentered	390	0.026	83532	10.78	3.1	422894	51.94	""
+rats_model	65	0.001	1112	0.18	2.9	6475	0.52	""
+seeds_centered_model	26	0.001	796	0.10	3.7	2650	0.28	""
+seeds_model	26	0.001	800	0.10	3.5	2130	0.29	""
+seeds_stanified_model	26	0.001	773	0.10	3.4	2341	0.30	""
+sesame_one_pred_a	3	0.000	849	0.04	2.7	3440	0.23	""
 sir					3.9		38.74	stanli_eval_fail
-soil_incubation	6	0.102	92300	22.75	3.3	60871	12.84	
-state_space_stochastic_level_stochastic_seasonal	389	0.023	17196	33.79	4.6	26320	39.76	
-surgical_model	14	0.004	507	0.05	3.3	1684	0.23	
-wells_daae_c_model	6	0.029	19688	0.49	3.2	20885	0.63	
-wells_dae_c_model	5	0.026	18021	0.37	3.2	19308	0.59	
-wells_dae_inter_model	7	0.028	20155	0.33	3.2	21310	0.55	
-wells_dae_model	4	0.028	19229	0.53	3.1	20356	0.76	
-wells_dist	2	0.030	24229	0.64	2.8	39202	1.44	
-wells_dist100_model	2	0.022	16070	0.26	3.0	17195	0.47	
-wells_dist100ars_model	3	0.025	17431	0.40	3.0	18997	0.62	
-wells_interaction_c_model	4	0.026	19203	0.27	3.1	20272	0.49	
-wells_interaction_model	4	0.026	19203	0.74	3.1	20402	0.94	
+soil_incubation	6	0.001	102741	23.22	3.3	60871	12.84	""
+state_space_stochastic_level_stochastic_seasonal	389	0.002	17344	40.89	4.6	26320	39.76	""
+surgical_model	14	0.001	580	0.06	3.3	1684	0.23	""
+wells_daae_c_model	6	0.002	19517	0.52	3.2	20885	0.63	""
+wells_dae_c_model	5	0.002	17807	0.39	3.2	19308	0.59	""
+wells_dae_inter_model	7	0.002	19547	0.32	3.2	21310	0.55	""
+wells_dae_model	4	0.002	18975	0.57	3.1	20356	0.76	""
+wells_dist	2	0.001	21198	0.67	2.8	39202	1.44	""
+wells_dist100_model	2	0.002	15558	0.25	3.0	17195	0.47	""
+wells_dist100ars_model	3	0.002	17019	0.41	3.0	18997	0.62	""
+wells_interaction_c_model	4	0.002	18952	0.27	3.1	20272	0.49	""
+wells_interaction_model	4	0.002	18986	0.70	3.1	20402	0.94	""

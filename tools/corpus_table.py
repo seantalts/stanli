@@ -12,6 +12,7 @@ sort to the bottom because a missing number is not a slow number.
 Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
 Prints markdown to stdout; benchmarks.md is edited by hand around it.
 """
+import csv
 import sys
 
 # The harness's machine tags, in the words a reader needs. The per-model
@@ -41,11 +42,11 @@ def ratio(a, b):
 
 def main():
     rows = []
-    with open(sys.argv[1]) as f:
-        header = f.readline().rstrip("\n").split("\t")
+    with open(sys.argv[1], newline="") as f:
+        reader = csv.reader(f, delimiter="\t")
+        header = next(reader)
         idx = {name: k for k, name in enumerate(header)}
-        for line in f:
-            c = line.rstrip("\n").split("\t")
+        for c in reader:
             if len(c) < len(header):
                 c += [""] * (len(header) - len(c))
             rows.append(c)
