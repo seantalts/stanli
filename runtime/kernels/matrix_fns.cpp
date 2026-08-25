@@ -181,6 +181,65 @@ template <bool Grad, typename... Args>
   return value;
 }
 
+double* tail_stash(double* s, const VarM& M) {
+  for (int64_t i = 0; i < M.size(); ++i) *s++ = M.data()[i].adj();
+  return s;
+}
+double* tail_stash(double* s, const VarV& v) {
+  for (int64_t i = 0; i < v.size(); ++i) *s++ = v(i).adj();
+  return s;
+}
+double* tail_stash(double* s, const stan::math::var& x) {
+  *s++ = x.adj();
+  return s;
+}
+double* tail_stash(double* s, const std::vector<VarV>& xs) {
+  for (const auto& x : xs) s = tail_stash(s, x);
+  return s;
+}
+
+// finish_tail_density split across the sweeps: one tape per gradient, gradded
+// in the FORWARD with a seed of 1, contracted in the backward. That is only
+// bitwise for a density whose reverse sweep multiplies the output adjoint in
+// once per operand -- the partials_propagator family. Densities that reduce
+// through var arithmetic (wishart, lkj, wiener, multi_normal_prec) round the
+// two orders differently and stay on the two-tape form above.
+template <typename... Args>
+[[gnu::always_inline]] inline double tail_density_fwd(
+    KernelCtx& ctx, const stan::math::var& density, const Args&... args) {
+  const double value = density.val();
+  if (!values_only()) {
+    stan::math::grad(density.vi_);
+    double* s = ctx.scratch;
+    ((s = tail_stash(s, args)), ...);
+  }
+  return value;
+}
+
+// Mirror of tail_density_fwd's layout: one partial per element of the first
+// NArgs inputs, in slot order.
+template <int NArgs>
+void tail_density_bwd(KernelCtx& ctx) {
+  const double* s = ctx.scratch;
+  const double w = ctx.out_adj;
+  for (int k = 0; k < NArgs; ++k) {
+    if (ctx.in_adj[k].data)
+      Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
+          w * Eigen::Map<const Eigen::ArrayXd>(s, ctx.in[k].len);
+    s += ctx.in[k].len;
+  }
+}
+
+template <int NArgs>
+int64_t tail_density_scratch(const Op& op, const Slot* slots) {
+  int64_t t = 0;
+  for (int k = 0; k < NArgs && k < op.n_in; ++k) {
+    if (op.in[k] < 0) return 0;
+    t += slots[op.in[k]].len;
+  }
+  return t;
+}
+
 // ---- multi_normal_lpdf(y | mu, Sigma) -------------------------------------
 // in = {y, mu, Sigma}; idata = {n}. Propto and per-argument activity follow
 // the density convention: stan-math drops terms by argument type, so inactive
@@ -239,19 +298,23 @@ double mn_eval(KernelCtx& ctx) {
     else
       v_out = aS ? (am ? call(ysd, mu, S) : call(ysd, mud, S))
                  : (am ? call(ysd, mu, Sd) : call(ysd, mud, Sd));
-    const double vv = v_out.val();
-    if constexpr (Grad) {
-      var jj = v_out * ctx.out_adj;
-      stan::math::grad(jj.vi_);
-      // y stays hand-written here: it is a std::vector<VarV>, not a VarV.
-      if (ay && ctx.in_adj[0].data)
-        for (int64_t k = 0; k < m; ++k)
-          for (int64_t i = 0; i < n; ++i)
-            ctx.in_adj[0].data[k * n + i] += ys[k](i).adj();
-      if (am) tail_scatter(ctx, 1, mu);
-      if (aS) tail_scatter(ctx, 2, S);
+    if constexpr (Kind == kMnPrec) {
+      const double vv = v_out.val();
+      if constexpr (Grad) {
+        var jj = v_out * ctx.out_adj;
+        stan::math::grad(jj.vi_);
+        // y stays hand-written here: it is a std::vector<VarV>, not a VarV.
+        if (ay && ctx.in_adj[0].data)
+          for (int64_t k = 0; k < m; ++k)
+            for (int64_t i = 0; i < n; ++i)
+              ctx.in_adj[0].data[k * n + i] += ys[k](i).adj();
+        if (am) tail_scatter(ctx, 1, mu);
+        if (aS) tail_scatter(ctx, 2, S);
+      }
+      return vv;
+    } else {
+      return tail_density_fwd(ctx, v_out, ys, mu, S);
     }
-    return vv;
   }
   if (ay && am && aS)
     out = call(y, mu, S);
@@ -270,18 +333,22 @@ double mn_eval(KernelCtx& ctx) {
   else
     return call(yd, mud, Sd);
 
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    if (ay) tail_scatter(ctx, 0, y);
-    if (am) tail_scatter(ctx, 1, mu);
-    if (aS) tail_scatter(ctx, 2, S);
+  if constexpr (Kind == kMnPrec) {
+    const double v = out.val();
+    if constexpr (Grad) {
+      var j = out * ctx.out_adj;
+      stan::math::grad(j.vi_);
+      if (ay) tail_scatter(ctx, 0, y);
+      if (am) tail_scatter(ctx, 1, mu);
+      if (aS) tail_scatter(ctx, 2, S);
+    }
+    return v;
+  } else {
+    return tail_density_fwd(ctx, out, y, mu, S);
   }
-  return v;
 }
 void mn_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_eval<false>(ctx); }
-void mn_bwd(KernelCtx& ctx) { mn_eval<true>(ctx); }
+void mn_bwd(KernelCtx& ctx) { tail_density_bwd<3>(ctx); }
 void mnprec_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = mn_eval<false, kMnPrec>(ctx);
 }
@@ -343,11 +410,8 @@ double mnc_native_fwd(KernelCtx& ctx) {
 
   double logp(0.0);
   logp += stan::math::sum(stan::math::log(inv_L.diagonal()));
-  if (!values_only()) {
-    MapM partials(ctx.scratch, n, n);
-    partials.setZero();
-    partials += scaled_diff * half - inv_L.transpose();
-  }
+  if (!values_only())
+    MapM(ctx.scratch, n, n) = scaled_diff * half - inv_L.transpose();
   logp -= 0.5 * stan::math::sum(stan::math::dot_self(half));
   return logp;
 }
@@ -358,7 +422,7 @@ void mnc_fwd(KernelCtx& ctx) {
 }
 void mnc_bwd(KernelCtx& ctx) {
   if (!mnc_native_shape(ctx)) {
-    mn_eval<true, kMnChol>(ctx);
+    tail_density_bwd<3>(ctx);
     return;
   }
   if (!ctx.in_adj[2].data) return;
@@ -367,15 +431,18 @@ void mnc_bwd(KernelCtx& ctx) {
     ctx.in_adj[2].data[i] += ctx.out_adj * ctx.scratch[i];
 }
 
+// Everything that misses the native gate replays through mn_eval, which
+// stashes one partial per input element instead of the pullback's n*n.
 int64_t mnc_scratch(const Op& op, const Slot* slots) {
-  if (!mnc_native_variant(op.variant, op.idata, op.n_idata) || op.n_in != 3 ||
-      op.out < 0 || slots == nullptr)
+  if (op.n_in != 3 || op.out < 0 || slots == nullptr || op.in[0] < 0 ||
+      op.in[1] < 0 || op.in[2] < 0)
     return 0;
+  if (!mnc_native_variant(op.variant, op.idata, op.n_idata))
+    return tail_density_scratch<3>(op, slots);
   const int64_t n = op.idata[0];
-  if (op.in[0] < 0 || op.in[1] < 0 || op.in[2] < 0 ||
-      slots[op.in[0]].len != n || slots[op.in[1]].len != n ||
+  if (slots[op.in[0]].len != n || slots[op.in[1]].len != n ||
       slots[op.in[2]].len != n * n || slots[op.out].len != 1)
-    return 0;
+    return tail_density_scratch<3>(op, slots);
   return n * n;
 }
 
@@ -931,7 +998,7 @@ double lkjcov_eval(KernelCtx& ctx) {
 // coefficient matrix, a second int group), so they take the var tape.
 // idata = [outcome..., rows, cols] and, for binomial, the trial counts.
 enum GlmKind { kBinomLogitGlm, kCatLogitGlm, kOrdLogisticGlm };
-template <bool Grad, GlmKind Kind>
+template <GlmKind Kind>
 double tglm_eval(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[ctx.n_idata - 2];
   const int64_t cols = ctx.idata[ctx.n_idata - 1];
@@ -950,7 +1017,7 @@ double tglm_eval(KernelCtx& ctx) {
                                                              beta)
                  : stan::math::binomial_logit_glm_lpmf<false>(nn, NN, X, alpha,
                                                               beta);
-    return finish_tail_density<Grad>(ctx, out, X, alpha, beta);
+    return tail_density_fwd(ctx, out, X, alpha, beta);
   } else {
     std::vector<int> y(ctx.idata, ctx.idata + rows);
     if constexpr (Kind == kCatLogitGlm) {
@@ -960,7 +1027,7 @@ double tglm_eval(KernelCtx& ctx) {
                                                                   beta)
                    : stan::math::categorical_logit_glm_lpmf<false>(y, X, alpha,
                                                                    beta);
-      return finish_tail_density<Grad>(ctx, out, X, alpha, beta);
+      return tail_density_fwd(ctx, out, X, alpha, beta);
     } else {
       // in = {X, beta, cutpoints}; alpha above is beta for this one.
       VarV beta = tail_v(ctx, 1, cols);
@@ -969,7 +1036,7 @@ double tglm_eval(KernelCtx& ctx) {
           propto
               ? stan::math::ordered_logistic_glm_lpmf<true>(y, X, beta, cuts)
               : stan::math::ordered_logistic_glm_lpmf<false>(y, X, beta, cuts);
-      return finish_tail_density<Grad>(ctx, out, X, beta, cuts);
+      return tail_density_fwd(ctx, out, X, beta, cuts);
     }
   }
 }
@@ -977,17 +1044,14 @@ double tglm_eval(KernelCtx& ctx) {
 void lkjcov_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkjcov_eval<false>(ctx); }
 void lkjcov_bwd(KernelCtx& ctx) { lkjcov_eval<true>(ctx); }
 void blglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<false, kBinomLogitGlm>(ctx);
+  ctx.out.data[0] = tglm_eval<kBinomLogitGlm>(ctx);
 }
-void blglm_bwd(KernelCtx& ctx) { tglm_eval<true, kBinomLogitGlm>(ctx); }
 void clglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<false, kCatLogitGlm>(ctx);
+  ctx.out.data[0] = tglm_eval<kCatLogitGlm>(ctx);
 }
-void clglm_bwd(KernelCtx& ctx) { tglm_eval<true, kCatLogitGlm>(ctx); }
 void olglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<false, kOrdLogisticGlm>(ctx);
+  ctx.out.data[0] = tglm_eval<kOrdLogisticGlm>(ctx);
 }
-void olglm_bwd(KernelCtx& ctx) { tglm_eval<true, kOrdLogisticGlm>(ctx); }
 
 // ---- the cdfs the recorder cannot take ---------------------------------
 // Same reason ordered_probit and wiener are here, one step further out:
@@ -1090,17 +1154,21 @@ void register_matrix_kernels() {
   STANLI_TAIL_INT_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
 #undef STANLI_REGISTER_TAIL_CDF
   register_kernel(OP_LKJ_COV_LPDF, Kernel{lkjcov_fwd, lkjcov_bwd, nullptr});
-  register_kernel(OP_BINOMIAL_LOGIT_GLM_LPMF,
-                  Kernel{blglm_fwd, blglm_bwd, nullptr});
-  register_kernel(OP_CATEGORICAL_LOGIT_GLM_LPMF,
-                  Kernel{clglm_fwd, clglm_bwd, nullptr});
-  register_kernel(OP_ORDERED_LOGISTIC_GLM_LPMF,
-                  Kernel{olglm_fwd, olglm_bwd, nullptr});
+  register_kernel(
+      OP_BINOMIAL_LOGIT_GLM_LPMF,
+      Kernel{blglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
+  register_kernel(
+      OP_CATEGORICAL_LOGIT_GLM_LPMF,
+      Kernel{clglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
+  register_kernel(
+      OP_ORDERED_LOGISTIC_GLM_LPMF,
+      Kernel{olglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
   register_kernel(OP_DIAG_MATRIX, Kernel{diag_fwd, diag_bwd, nullptr});
   register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, nullptr});
   register_kernel(OP_MULTI_NORMAL_CHOL_LPDF,
                   Kernel{mnc_fwd, mnc_bwd, mnc_scratch});
-  register_kernel(OP_MULTI_NORMAL_LPDF, Kernel{mn_fwd, mn_bwd, nullptr});
+  register_kernel(OP_MULTI_NORMAL_LPDF,
+                  Kernel{mn_fwd, mn_bwd, tail_density_scratch<3>});
   register_kernel(OP_MULTI_NORMAL_PREC_LPDF,
                   Kernel{mnprec_fwd, mnprec_bwd, nullptr});
   register_kernel(OP_GEMM, Kernel{gemm_fwd, gemm_bwd, nullptr});

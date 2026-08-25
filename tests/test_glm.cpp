@@ -79,6 +79,125 @@ static void check_empty_glm(uint16_t opcode, const std::string& name) {
   stan::math::recover_memory();
 }
 
+// The three GLMs that take the var tape rather than the recorder, each with
+// a non-unit output adjoint: their kernels seed the tape with 1.0 in the
+// forward and scale in the backward.
+static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
+                           const std::vector<int>& idata, int rows, int cols,
+                           int alpha_len, int beta_len) {
+  using namespace stanli;
+  using stan::math::var;
+  const double seed = -0.73;
+  std::vector<double> X((size_t)rows * cols), a((size_t)alpha_len),
+      b((size_t)beta_len);
+  for (int j = 0; j < cols; ++j)
+    for (int i = 0; i < rows; ++i)
+      X[(size_t)j * rows + i] = std::sin(0.31 * i + 0.7 * j);
+  for (int i = 0; i < alpha_len; ++i) a[(size_t)i] = 0.15 - 0.08 * i;
+  for (int i = 0; i < beta_len; ++i) b[(size_t)i] = 0.2 + 0.11 * i;
+
+  Graph g;
+  const int Xs = g.add_slot(rows * cols, true);
+  const int as = g.add_slot(alpha_len, true);
+  const int bs = g.add_slot(beta_len, true);
+  const int lp = g.add_slot(1, false);
+  const int ss = g.add_slot(1, false);
+  const int total = g.add_slot(1, false);
+  const int op = g.add_op(opcode, {Xs, as, bs}, lp, idata);
+  g.ops[(size_t)op].variant = propto ? 0x80u : 0x00u;
+  g.add_op(OP_MUL, {lp, ss}, total);
+  g.result_slot = total;
+
+  Executor ex(std::move(g));
+  std::copy(X.begin(), X.end(), ex.param_ptr(Xs));
+  std::copy(a.begin(), a.end(), ex.param_ptr(as));
+  std::copy(b.begin(), b.end(), ex.param_ptr(bs));
+  ex.value_ptr(ss)[0] = seed;
+  std::vector<double> grad(X.size() + a.size() + b.size(), 0.0);
+  const double got = ex.gradient(grad.data());
+
+  stan::math::nested_rev_autodiff nested;
+  Eigen::Matrix<var, -1, -1> Xv(rows, cols);
+  for (size_t i = 0; i < X.size(); ++i) Xv.data()[i] = X[i];
+  Eigen::Matrix<var, -1, 1> av(alpha_len), bv(beta_len);
+  for (int i = 0; i < alpha_len; ++i) av(i) = a[(size_t)i];
+  for (int i = 0; i < beta_len; ++i) bv(i) = b[(size_t)i];
+  var ref;
+  if (opcode == OP_BINOMIAL_LOGIT_GLM_LPMF) {
+    std::vector<int> nn(idata.begin(), idata.begin() + rows);
+    std::vector<int> NN(idata.begin() + rows, idata.begin() + 2 * rows);
+    ref =
+        propto
+            ? stan::math::binomial_logit_glm_lpmf<true>(nn, NN, Xv, av(0), bv)
+            : stan::math::binomial_logit_glm_lpmf<false>(nn, NN, Xv, av(0), bv);
+  } else if (opcode == OP_CATEGORICAL_LOGIT_GLM_LPMF) {
+    std::vector<int> yy(idata.begin(), idata.begin() + rows);
+    Eigen::Matrix<var, -1, -1> bm(cols, beta_len / cols);
+    for (int i = 0; i < beta_len; ++i) bm.data()[i] = bv(i);
+    ref = propto
+              ? stan::math::categorical_logit_glm_lpmf<true>(yy, Xv, av, bm)
+              : stan::math::categorical_logit_glm_lpmf<false>(yy, Xv, av, bm);
+    var scaled_cat = ref * seed;
+    stan::math::grad(scaled_cat.vi_);
+    expect_eq(tag + " total", got, scaled_cat.val());
+    size_t at = 0;
+    for (size_t i = 0; i < X.size(); ++i)
+      expect_eq(tag + " dX" + std::to_string(i), grad[at++],
+                Xv.data()[i].adj());
+    for (int i = 0; i < alpha_len; ++i)
+      expect_eq(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
+    for (int i = 0; i < beta_len; ++i)
+      expect_eq(tag + " db" + std::to_string(i), grad[at++],
+                bm.data()[i].adj());
+    return;
+  } else {
+    std::vector<int> yy(idata.begin(), idata.begin() + rows);
+    ref = propto ? stan::math::ordered_logistic_glm_lpmf<true>(yy, Xv, av, bv)
+                 : stan::math::ordered_logistic_glm_lpmf<false>(yy, Xv, av, bv);
+  }
+  var scaled = ref * seed;
+  stan::math::grad(scaled.vi_);
+  expect_eq(tag + " total", got, scaled.val());
+  size_t at = 0;
+  for (size_t i = 0; i < X.size(); ++i)
+    expect_eq(tag + " dX" + std::to_string(i), grad[at++], Xv.data()[i].adj());
+  for (int i = 0; i < alpha_len; ++i)
+    expect_eq(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
+  for (int i = 0; i < beta_len; ++i)
+    expect_eq(tag + " db" + std::to_string(i), grad[at++], bv(i).adj());
+}
+
+static void check_tail_glms() {
+  using namespace stanli;
+  const int rows = 5, cols = 3;
+  std::vector<int> bin;
+  for (int i = 0; i < rows; ++i) bin.push_back(1 + (i % 4));
+  for (int i = 0; i < rows; ++i) bin.push_back(5 + i);
+  bin.push_back(rows);
+  bin.push_back(cols);
+  check_tail_glm("binom glm", OP_BINOMIAL_LOGIT_GLM_LPMF, false, bin, rows,
+                 cols, 1, cols);
+  check_tail_glm("binom glm propto", OP_BINOMIAL_LOGIT_GLM_LPMF, true, bin,
+                 rows, cols, 1, cols);
+
+  const int cats = 3;
+  std::vector<int> cat;
+  for (int i = 0; i < rows; ++i) cat.push_back(1 + (i % cats));
+  cat.push_back(rows);
+  cat.push_back(cols);
+  check_tail_glm("cat glm", OP_CATEGORICAL_LOGIT_GLM_LPMF, false, cat, rows,
+                 cols, cats, cols * cats);
+  check_tail_glm("cat glm propto", OP_CATEGORICAL_LOGIT_GLM_LPMF, true, cat,
+                 rows, cols, cats, cols * cats);
+
+  // in = {X, beta, cutpoints}: the cutpoints ride the `alpha` slot here and
+  // must stay ordered.
+  check_tail_glm("ord glm", OP_ORDERED_LOGISTIC_GLM_LPMF, false, cat, rows,
+                 cols, cols, cats - 1);
+  check_tail_glm("ord glm propto", OP_ORDERED_LOGISTIC_GLM_LPMF, true, cat,
+                 rows, cols, cols, cats - 1);
+}
+
 static void reference(const double* q, double* lp_out, double* grad_out) {
   using stan::math::var;
   using stanli::testmodels::LogisticGlm;
@@ -133,6 +252,8 @@ int main() {
     for (int i = 0; i < NP; ++i)
       expect_eq(tag + " g" + std::to_string(i), grad[i], grad_ref[i]);
   }
+
+  check_tail_glms();
 
   check_empty_glm(OP_BERNOULLI_LOGIT_GLM_LPMF, "bernoulli_logit_glm");
   check_empty_glm(OP_POISSON_LOG_GLM_LPMF, "poisson_log_glm");

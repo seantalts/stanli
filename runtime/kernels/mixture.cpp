@@ -41,8 +41,8 @@ void lse_fwd(KernelCtx& ctx) {
 void lse_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   const int64_t n = ctx.in[0].len;
-  for (int64_t i = 0; i < n; ++i)
-    ctx.in_adj[0].data[i] += ctx.out_adj * ctx.scratch[i];
+  Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[0].data, n) +=
+      ctx.out_adj * Eigen::Map<const Eigen::ArrayXd>(ctx.scratch, n);
 }
 
 // ---- log_sum_exp over packed rows -----------------------------------------
@@ -69,8 +69,8 @@ void lse_rows_bwd(KernelCtx& ctx) {
   for (int64_t r = 0; r < ctx.out.len; ++r) {
     const int64_t off = r * K;
     const double scale = ctx.out_adj_vec.data[r];
-    for (int64_t k = 0; k < K; ++k)
-      ctx.in_adj[0].data[off + k] += scale * ctx.scratch[off + k];
+    Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[0].data + off, K) +=
+        scale * Eigen::Map<const Eigen::ArrayXd>(ctx.scratch + off, K);
   }
 }
 

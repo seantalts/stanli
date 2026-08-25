@@ -174,8 +174,10 @@ Result run_direct(const Inputs& x, uint8_t variant, double seed,
   if (!kernel) throw std::runtime_error("MNC kernel missing");
   int dims[2] = {x.n, x.m};
   double density = std::numeric_limits<double>::quiet_NaN();
+  // The generic fallback stashes one partial per input element, which is
+  // more than the native pullback's n*n.
   std::vector<double> scratch(
-      std::max<size_t>(1, static_cast<size_t>(x.n) * x.n),
+      std::max<size_t>(1, x.y.size() + x.mu.size() + x.L.size()),
       std::numeric_limits<double>::quiet_NaN());
   Result r;
   r.dy = dy0;
@@ -331,6 +333,90 @@ std::string reference_error(const Inputs& x) {
   return thrown([&] { (void)reference_l_only<true>(x, 0.7); });
 }
 
+// OP_MULTI_NORMAL_LPDF is the only shape that reaches mn_eval's covariance
+// overload. Non-unit output adjoint: the kernel seeds its nested tape with
+// 1.0 and scales in the backward.
+void check_multi_normal(const std::string& tag, int n, int m, uint8_t variant,
+                        double seed) {
+  using namespace stanli;
+  const Inputs x = inputs(n, m, 0.21);
+  Eigen::Map<const MatD> Lm(x.L.data(), n, n);
+  const MatD Sm = Lm * Lm.transpose();
+  const unsigned mask = variant == 0 ? 0x7u : (variant & 0x3fu);
+  const bool ay = mask & 1u, am = mask & 2u, aS = mask & 4u;
+  const bool propto = (variant & 0x80u) != 0;
+
+  Graph g;
+  const int y = g.add_slot(n * m, ay);
+  const int mu = g.add_slot(n, am);
+  const int S = g.add_slot(n * n, aS);
+  const int density = g.add_slot(1, false);
+  const int seed_slot = g.add_slot(1, false);
+  const int total = g.add_slot(1, false);
+  const int op = g.add_op(OP_MULTI_NORMAL_LPDF, {y, mu, S}, density, {n, m});
+  g.ops[(size_t)op].variant = variant;
+  g.add_op(OP_MUL, {density, seed_slot}, total);
+  g.result_slot = total;
+
+  Executor ex(std::move(g));
+  auto fill = [&](int slot, bool param, const double* src, int len) {
+    double* p = param ? ex.param_ptr(slot) : ex.value_ptr(slot);
+    std::copy(src, src + len, p);
+  };
+  fill(y, ay, x.y.data(), n * m);
+  fill(mu, am, x.mu.data(), n);
+  fill(S, aS, Sm.data(), n * n);
+  ex.value_ptr(seed_slot)[0] = seed;
+  std::vector<double> grad(
+      (size_t)(ay ? n * m : 0) + (am ? n : 0) + (aS ? n * n : 0), 0.0);
+  const double got = ex.gradient(grad.data());
+
+  stan::math::nested_rev_autodiff nested;
+  std::vector<VarV> yv((size_t)m, VarV(n));
+  std::vector<VecD> yd((size_t)m, VecD(n));
+  for (int k = 0; k < m; ++k)
+    for (int i = 0; i < n; ++i) {
+      yv[(size_t)k](i) = x.y[(size_t)k * n + i];
+      yd[(size_t)k](i) = x.y[(size_t)k * n + i];
+    }
+  VarV muv(n);
+  VarM Sv(n, n);
+  for (int i = 0; i < n; ++i) muv(i) = x.mu[(size_t)i];
+  for (int i = 0; i < n * n; ++i) Sv.data()[i] = Sm.data()[i];
+  Eigen::Map<const VecD> mud(x.mu.data(), n);
+  Eigen::Map<const MatD> Sd(Sm.data(), n, n);
+  auto call = [&](auto&& a, auto&& b, auto&& c) {
+    return propto ? stan::math::multi_normal_lpdf<true>(a, b, c)
+                  : stan::math::multi_normal_lpdf<false>(a, b, c);
+  };
+  auto dispatch = [&](auto&& yy) {
+    return aS ? (am ? call(yy, muv, Sv) : call(yy, mud, Sv))
+              : (am ? call(yy, muv, Sd) : call(yy, mud, Sd));
+  };
+  stan::math::var ref;
+  if (m > 1)
+    ref = ay ? dispatch(yv) : dispatch(yd);
+  else
+    ref = ay ? dispatch(yv[0]) : dispatch(yd[0]);
+  stan::math::var scaled = ref * seed;
+  stan::math::grad(scaled.vi_);
+
+  expect_bits(tag + " total", got, scaled.val());
+  size_t at = 0;
+  if (ay)
+    for (int k = 0; k < m; ++k)
+      for (int i = 0; i < n; ++i)
+        expect_bits(tag + " dy" + std::to_string(k * n + i), grad[at++],
+                    yv[(size_t)k](i).adj());
+  if (am)
+    for (int i = 0; i < n; ++i)
+      expect_bits(tag + " dmu" + std::to_string(i), grad[at++], muv(i).adj());
+  if (aS)
+    for (int i = 0; i < n * n; ++i)
+      expect_bits(tag + " dS" + std::to_string(i), grad[at++],
+                  Sv.data()[i].adj());
+}
+
 }  // namespace
 
 int main() {
@@ -372,25 +458,27 @@ int main() {
   compare_runner("reuse gradient a again", runner.gradient(eleven_a, seed),
                  ref_a, true);
 
-  // Exact scratch sizing is the fast-path sentinel. These near misses are
-  // real supported contracts and must continue through mn_eval: non-propto,
-  // another active argument, vectorized y, legacy activity, the hier_2pl
-  // all-active variant, a missing repetition immediate, or malformed slots.
+  // Exact scratch sizing is the fast-path sentinel: the native gate asks for
+  // the pullback's n*n, every near miss asks for the fallback's one partial
+  // per input element. These near misses are real supported contracts and
+  // must continue through mn_eval: non-propto, another active argument,
+  // vectorized y, legacy activity, the hier_2pl all-active variant, a missing
+  // repetition immediate, or malformed slots.
   check(scratch_for(0x84u, 11, 1, 11, 11, 121) == 121,
         "native gate gets n*n scratch");
-  check(scratch_for(0x04u, 11, 1, 11, 11, 121) == 0,
+  check(scratch_for(0x04u, 11, 1, 11, 11, 121) == 143,
         "non-propto refuses native path");
-  check(scratch_for(0x85u, 11, 1, 11, 11, 121) == 0,
+  check(scratch_for(0x85u, 11, 1, 11, 11, 121) == 143,
         "active y refuses native path");
-  check(scratch_for(0x84u, 11, 2, 22, 11, 121) == 0,
+  check(scratch_for(0x84u, 11, 2, 22, 11, 121) == 154,
         "vectorized y refuses native path");
-  check(scratch_for(0x00u, 11, 1, 11, 11, 121) == 0,
+  check(scratch_for(0x00u, 11, 1, 11, 11, 121) == 143,
         "legacy variant refuses native path");
-  check(scratch_for(0x07u, 11, 1, 11, 11, 121) == 0,
+  check(scratch_for(0x07u, 11, 1, 11, 11, 121) == 143,
         "hier_2pl variant refuses native path");
-  check(scratch_for(0x84u, 11, 1, 11, 11, 121, 1) == 0,
+  check(scratch_for(0x84u, 11, 1, 11, 11, 121, 1) == 143,
         "missing repetition immediate refuses native path");
-  check(scratch_for(0x84u, 11, 1, 11, 10, 121) == 0,
+  check(scratch_for(0x84u, 11, 1, 11, 10, 121) == 142,
         "malformed mu refuses native path");
 
   // Functional fallback oracles accompany the sizing sentinels: one changed
@@ -421,6 +509,11 @@ int main() {
   const std::string reference_y = reference_error(bad_y);
   check(!native_y.empty(), "native rejects NaN y");
   check(native_y == reference_y, "NaN y error matches fallback");
+
+  check_multi_normal("mn all active", 3, 1, 0x07u, seed);
+  check_multi_normal("mn sigma only propto", 3, 1, 0x84u, seed);
+  check_multi_normal("mn legacy activity", 3, 1, 0x00u, seed);
+  check_multi_normal("mn vectorized", 3, 2, 0x87u, seed);
 
   if (failures == 0) std::printf("test_mnc OK\n");
   return failures == 0 ? 0 : 1;

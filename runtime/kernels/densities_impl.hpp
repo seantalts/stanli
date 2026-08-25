@@ -277,10 +277,10 @@ void density_bwd(KernelCtx& ctx) {
   if (ctx.scratch[n_partials] == 0.0) return;
   int64_t off = 0;
   for (int k = 0; k < NArgs; ++k) {
-    if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr) {
-      for (int64_t i = 0; i < ctx.in[k].len; ++i)
-        ctx.in_adj[k].data[i] += ctx.out_adj * ctx.scratch[off + i];
-    }
+    if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr)
+      Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
+          ctx.out_adj *
+          Eigen::Map<const Eigen::ArrayXd>(ctx.scratch + off, ctx.in[k].len);
     off += ctx.in[k].len;
   }
 }

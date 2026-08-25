@@ -3,6 +3,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/legacy.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/packet.hpp>
 
 namespace stanli {
 namespace {
@@ -24,7 +25,6 @@ void softmax_bwd(KernelCtx& ctx) {
 // legacy propto op must bind each argument var-or-double per the activity
 // mask, exactly like the native kernels do; promoting an inactive argument
 // to var silently keeps terms CmdStan drops.
-template <bool Grad>
 double dirichlet_eval(KernelCtx& ctx) {
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
@@ -74,17 +74,15 @@ double dirichlet_eval(KernelCtx& ctx) {
       else
         lpv = stan::math::dirichlet_lpdf<false>(thd, alpha_d);
     }
-    if constexpr (Grad) {
-      var j = lpv * ctx.out_adj;
-      stan::math::grad(j.vi_);
-      if (a0 && ctx.in_adj[0].data)
-        for (int64_t r = 0; r < reps; ++r)
-          for (int64_t i = 0; i < K; ++i)
-            ctx.in_adj[0].data[r * K + i] += th[r](i).adj();
-      if (a1 && ctx.in_adj[1].data)
-        for (int64_t i = 0; i < K; ++i) ctx.in_adj[1].data[i] += alpha(i).adj();
+    const double vv = lpv.val();
+    if (!values_only()) {
+      stan::math::grad(lpv.vi_);
+      double* s = ctx.scratch;
+      for (int64_t r = 0; r < reps; ++r)
+        for (int64_t i = 0; i < K; ++i) *s++ = th[r](i).adj();
+      for (int64_t i = 0; i < K; ++i) *s++ = alpha(i).adj();
     }
-    return lpv.val();
+    return vv;
   }
   if (propto) {
     if (a0 && a1)
@@ -105,22 +103,29 @@ double dirichlet_eval(KernelCtx& ctx) {
     else
       lp = stan::math::dirichlet_lpdf<false>(theta_d, alpha_d);
   }
-  if constexpr (Grad) {
-    var j = lp * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    if (ctx.in_adj[0].data)
-      for (int64_t i = 0; i < ctx.in[0].len; ++i)
-        ctx.in_adj[0].data[i] += theta(i).adj();
-    if (ctx.in_adj[1].data)
-      for (int64_t i = 0; i < ctx.in[1].len; ++i)
-        ctx.in_adj[1].data[i] += alpha(i).adj();
+  const double value = lp.val();
+  if (!values_only()) {
+    stan::math::grad(lp.vi_);
+    double* s = ctx.scratch;
+    for (int64_t i = 0; i < ctx.in[0].len; ++i) *s++ = theta(i).adj();
+    for (int64_t i = 0; i < ctx.in[1].len; ++i) *s++ = alpha(i).adj();
   }
-  return lp.val();
+  return value;
 }
-void dirichlet_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = dirichlet_eval<false>(ctx);
+void dirichlet_fwd(KernelCtx& ctx) { ctx.out.data[0] = dirichlet_eval(ctx); }
+
+// One tape per gradient, not two: the forward grads it with a seed of 1 and
+// stashes, the backward scales. dirichlet_lpdf reduces through a partials
+// propagator, so the two seedings round identically.
+void dirichlet_bwd(KernelCtx& ctx) {
+  const double* s = ctx.scratch;
+  for (int k = 0; k < 2; ++k) {
+    if (ctx.in_adj[k].data)
+      Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
+          ctx.out_adj * Eigen::Map<const Eigen::ArrayXd>(s, ctx.in[k].len);
+    s += ctx.in[k].len;
+  }
 }
-void dirichlet_bwd(KernelCtx& ctx) { dirichlet_eval<true>(ctx); }
 
 void log_softmax_fwd(KernelCtx& ctx) {
   Eigen::Map<const Eigen::VectorXd> x(ctx.in[0].data, ctx.in[0].len);
@@ -139,7 +144,7 @@ void register_legacy_kernels() {
                   Kernel{log_softmax_fwd, log_softmax_bwd, nullptr});
   register_kernel(OP_SOFTMAX, Kernel{softmax_fwd, softmax_bwd, nullptr});
   register_kernel(OP_DIRICHLET_LPDF,
-                  Kernel{dirichlet_fwd, dirichlet_bwd, nullptr});
+                  Kernel{dirichlet_fwd, dirichlet_bwd, sum_in_lens});
 }
 
 }  // namespace stanli

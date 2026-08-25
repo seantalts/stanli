@@ -337,6 +337,13 @@ bool gen_adjoint(IslandProg& p) {
   return true;
 }
 
+// Ranged arms below map their operand and output ranges. The validator in
+// gen_adjoint admits only disjoint ranges or exactly coincident ones, and the
+// coincident case keeps the scalar loop: reading before clearing is what an
+// in-place `x = exp(x)` needs.
+using AdjA = Eigen::Map<Eigen::ArrayXd>;
+using CAdjA = Eigen::Map<const Eigen::ArrayXd>;
+
 void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
                  double* adj) {
   for (const AdjInstr& I : ap.code) {
@@ -382,18 +389,23 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         adj[I.dst] = 0.0;
         break;
       case Program::CONSTR:
-        for (int32_t k = 0; k < I.len; ++k) adj[I.dst + k] = 0.0;
+        AdjA(adj + I.dst, I.len).setZero();
         break;
       case Program::MOV:
         adj[I.dst] = 0.0;
         adj[I.a] += t;
         break;
       case Program::MOVR:
-        for (int32_t k = 0; k < I.len; ++k) {
-          const double u = adj[I.dst + k];
-          adj[I.dst + k] = 0.0;
-          adj[I.a + k] += u;
+        if (I.a == I.dst) {
+          for (int32_t k = 0; k < I.len; ++k) {
+            const double u = adj[I.dst + k];
+            adj[I.dst + k] = 0.0;
+            adj[I.a + k] += u;
+          }
+          break;
         }
+        AdjA(adj + I.a, I.len) += AdjA(adj + I.dst, I.len);
+        AdjA(adj + I.dst, I.len).setZero();
         break;
       case Program::ADD:
         adj[I.dst] = 0.0;
@@ -516,18 +528,30 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         adj[I.dst] = 0.0;
         break;
       case Program::LOG_RANGE:
-        for (int32_t k = 0; k < I.len; ++k) {
-          const double u = adj[I.dst + k];
-          adj[I.dst + k] = 0.0;
-          adj[I.a + k] += u / val[I.va + k];
+        if (I.a == I.dst) {
+          for (int32_t k = 0; k < I.len; ++k) {
+            const double u = adj[I.dst + k];
+            adj[I.dst + k] = 0.0;
+            adj[I.a + k] += u / val[I.va + k];
+          }
+          break;
         }
+        AdjA(adj + I.a, I.len) +=
+            AdjA(adj + I.dst, I.len) / CAdjA(val + I.va, I.len);
+        AdjA(adj + I.dst, I.len).setZero();
         break;
       case Program::EXP_RANGE:
-        for (int32_t k = 0; k < I.len; ++k) {
-          const double u = adj[I.dst + k];
-          adj[I.dst + k] = 0.0;
-          adj[I.a + k] += u * val[I.vd + k];
+        if (I.a == I.dst) {
+          for (int32_t k = 0; k < I.len; ++k) {
+            const double u = adj[I.dst + k];
+            adj[I.dst + k] = 0.0;
+            adj[I.a + k] += u * val[I.vd + k];
+          }
+          break;
         }
+        AdjA(adj + I.a, I.len) +=
+            AdjA(adj + I.dst, I.len) * CAdjA(val + I.vd, I.len);
+        AdjA(adj + I.dst, I.len).setZero();
         break;
       case Program::DOT:
         adj[I.dst] = 0.0;
