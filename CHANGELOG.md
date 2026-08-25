@@ -90,6 +90,16 @@ harness flagged the split. A partially assigned bare container now
 reports NaN in the untouched positions, which is a visible change for any
 model that has one. The integer arm already used its own sentinel.
 
+### Full-extent store chains stop copying
+
+`normal_mixture_k` carried 1,699 full-extent `SET_SLICE_INPLACE` copies
+per gradient, 16.6% of its profile: re-rolling's store fusion forces
+the store form whenever the destination is rewritten later. A pass
+after in-place conversion renames the readers onto the value slot when
+the value has a single reader and the next write is a covering
+destructive store (#195). 7.5-8% per gradient on that model, byte
+identical output on all 120 corpus models, and only its graph changes.
+
 ### Corpus
 
 The full posteriordb benchmark was re-measured on the merged stack
