@@ -194,10 +194,11 @@ the top of the page, not replacements for the current corpus rows:
 - **Compiled scalar generated-quantities RNGs** keep caller-owned chain state
   on the forward-only write-array graph for scalar `poisson_log`, `uniform`,
   `bernoulli`, `normal`, `lognormal`, and `binomial` draws.
-  Unsupported/container RNGs and draws used as dynamic control, indices, or
-  geometry still fail closed to the whole-section interpreter. In an exact
-  census of the 24 previously interpreted corpus models, this RNG tranche
-  moved 12 to the graph; all 24 still produced complete rows.
+  RNGs outside that scalar tranche, container-valued results, and draws used
+  as dynamic control, indices, or geometry still fail closed to the
+  whole-section interpreter. In an exact census of the 24 previously
+  interpreted corpus models, this RNG tranche moved 12 to the graph; all 24
+  still produced complete rows.
   A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched batch
   medians) measured:
 
@@ -234,10 +235,11 @@ the top of the page, not replacements for the current corpus rows:
   retain ascending scalar grouping. Shifted views, arbitrary expressions,
   reverse-mode products, and unproved integer arrays still fail closed to the
   interpreter. This moved `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`
-  to the graph, taking the current 24-model census from 12 graph / 12
-  interpreter to 16 / 8, with all 119 compiling corpus models still producing
-  complete rows. A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven
-  matched batch medians) measured:
+  to the graph, taking the then-current 24-model census from 12 graph / 12
+  interpreter to 16 / 8. The categorical tranche below subsequently advances
+  that census to 17 / 7. All 119 compiling corpus models still produce complete
+  rows. A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched
+  batch medians) measured:
 
   | model | interpreted row | compiled row | improvement |
   | --- | ---: | ---: | ---: |
@@ -257,6 +259,34 @@ the top of the page, not replacements for the current corpus rows:
   two ULP, while the graph is closer to live CmdStan at the shared point. These
   are targeted write-array medians; the full-corpus sampling table awaits the
   next refresh.
+- **Compiled categorical generated-quantities RNGs** extend the same
+  scalar-result `OP_RNG` path to `categorical_rng(vector)`. The graph and
+  `WaInterp` each copy their materialized probability vector into one shared
+  helper and call the pinned Stan Math implementation, preserving its simplex
+  validation order, one-based int result, and exact caller-owned stream
+  consumption. Lowering marks the int initialized but deliberately does not
+  infer a `[1, K]` range, so a later dynamic index still selects the
+  whole-section interpreter.
+
+  In a targeted matched C-ABI A/B, `Survey_model` moved from 1011.4736 to
+  60.3127 us/row (16.7705x), saving 0.9511609 s per 1,000 rows. Construction
+  moved from 4231.333 to 5406.709 us, so the 1175.376 us setup delta amortizes
+  after 1.236 rows, or two whole rows. It was the only model to change in the
+  exact 24-model write-array census, moving graph/interpreter coverage from
+  16 / 8 to 17 / 7; all 24 census models and all 119 compiling corpus models
+  still produced complete rows. `iohmm_reg` remains interpreted at the later
+  dynamic-index barrier, `value must be known at compile time: hatz`.
+
+  The categorical draw `n` matched exactly in all 18/18 C-ABI comparisons:
+  seeds 0, 1, 2, 7, 1234, and `UINT32_MAX`, each continued for three sequential
+  rows.
+  The same full-row comparison recorded 8,532 expected bit differences in
+  deterministic columns from the pre-existing graph/interpreter numerical
+  boundary; they are not RNG mismatches. Focused tests avoid that boundary by
+  routing the identical probability vector through the shared helper and the
+  direct pinned Stan Math call, then comparing the next engine state. These
+  targeted results do not refresh `docs/corpus-bench.tsv` or the generated
+  full-corpus table below.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven

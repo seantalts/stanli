@@ -256,11 +256,13 @@ caller's stream. The graph passes treat every RNG op as an ordered effect, so
 they cannot fold, reroll, carve, delete, or duplicate a draw whose result is
 otherwise unused.
 
-The boundary is deliberately fail-closed. Container-valued or unsupported
-RNGs, and integer draws needed as a loop bound, index, shape, or branch
-condition, still select the whole-section interpreter. Scalar integer results
-live exactly in one double slot only while used by ordinary graph arithmetic;
-integer division and other dynamic-integer operations still refuse lowering.
+The boundary is deliberately fail-closed. Container-valued results or
+unsupported RNGs, and integer draws needed as a loop bound, index, shape, or
+branch condition, still select the whole-section interpreter. Scalar integer
+results live exactly in one double slot only while used by ordinary graph
+arithmetic; integer division and other dynamic-integer operations still refuse
+lowering. A later tranche adds the one audited vector-argument exception,
+`categorical_rng(vector)`, without admitting container-valued results.
 
 An exact census of the 24 corpus models that previously used `WaInterp` moved
 12 to the graph in this tranche: `GLMM1_model`, both `covid19imperial` models, both `dogs`
@@ -307,8 +309,9 @@ interpreter paths; gaps, strides, unknown RNG ranges, possible overflow, and
 using the result as dynamic control or geometry all fail closed.
 
 This completed `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`, moving the
-current 24-model write-array census from 12 graph / 12 interpreter to 16 / 8;
-all 119 compiling corpus models still produce complete rows. Targeted
+then-current 24-model write-array census from 12 graph / 12 interpreter to
+16 / 8. The categorical tranche below subsequently advances that census to
+17 / 7. All 119 compiling corpus models still produce complete rows. Targeted
 2026-08-24 C-ABI A/B medians (point 0, two warmups, seven matched batches) were:
 
 | model | interpreted us/row | compiled us/row | speedup |
@@ -328,6 +331,47 @@ pre-existing write-array mode-boundary difference in deterministic transformed
 parameters: `Mtbh_model` is within two ULP and `Mth_model` within one, while the
 compiled graph is closer to live CmdStan at the shared point. These are
 targeted medians; the committed full-corpus timing table remains unchanged.
+
+## Compiled categorical generated-quantities RNG (`rng.cpp`, `wa_interp.cpp`)
+
+`categorical_rng` is the first graph-native RNG with a nonscalar argument but a
+scalar result. It reuses `OP_RNG`: variants 0 through 5 retain their scalar
+double inputs, while the categorical variant reads one variable-length vector
+descriptor and writes the one-based Stan int exactly into one double slot. It
+stays outside `ScalarRng`, whose arity counts scalar arguments rather than
+logical containers.
+
+The lowering gate is deliberately exact: write-array only, one `UVector`
+argument, and one `UInt` result. It marks the result initialized but does not
+infer the valid `[1, K]` interval, avoiding any expansion of runtime-integer
+reasoning. `Survey_model` therefore completes its graph, while `iohmm_reg`
+passes the categorical call and then still selects `WaInterp` at its dynamic
+index with `value must be known at compile time: hatz`.
+
+Both execution modes call one helper that copies the already-materialized
+probabilities into the exact Eigen vector accepted by pinned Stan Math. Stan
+Math therefore remains the single definition of empty-vector and simplex
+validation, exception class and message, validation priority, one-based result,
+and RNG consumption. Focused tests feed that helper and direct Stan Math the
+identical vector and compare sequential draws, rejected-call continuation, and
+the next raw engine value. A whole-`Survey_model` graph/interpreter bitwise
+comparison is not that oracle: its softmax input already has a pre-existing
+deterministic mode-boundary rounding difference.
+
+In a targeted matched C-ABI A/B, `Survey_model` moved from 1011.4736 to
+60.3127 us/row (16.7705x), saving 0.9511609 s per 1,000 rows. Construction moved
+from 4231.333 to 5406.709 us; the setup delta amortizes after 1.236 rows, or two
+whole rows. It was the only change in the exact 24-model census, moving coverage
+from 16 graph / 8 interpreter to 17 / 7. All 24 census models and all 119
+compiling corpus models retained complete rows.
+
+Across seeds 0, 1, 2, 7, 1234, and `UINT32_MAX`, each continued for three
+sequential rows, the categorical draw `n` matched in all 18/18 C-ABI
+comparisons. The full rows also contained 8,532 expected bit differences in
+deterministic columns from the pre-existing graph/interpreter numerical
+boundary; those are not categorical or stream mismatches. These targeted
+results do not refresh `docs/corpus-bench.tsv` or the generated full-corpus
+table in `docs/benchmarks.md`.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 

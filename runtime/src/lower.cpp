@@ -2243,6 +2243,32 @@ struct Lowering {
     return ret;
   }
 
+  std::optional<Val> lower_categorical_rng(const mir::Expr& e) {
+    if (e.name != "categorical_rng") return std::nullopt;
+    if (!in_write_array)
+      fail("categorical_rng is supported only in generated quantities", e.raw);
+    if (e.args.size() != 1 || e.type_ != "UInt" ||
+        e.unsized.leaf != mir::UnsizedLeaf::Int || e.unsized.depth != 0)
+      fail("categorical_rng: expected one scalar int result", e.raw);
+    const mir::Expr& probabilities = e.args[0];
+    if (probabilities.type_ != "UVector" || probabilities.unsized.depth != 0 ||
+        probabilities.unsized.leaf != mir::UnsizedLeaf::Vector)
+      fail("categorical_rng: expected one probability-vector argument", e.raw);
+
+    Val argument = lower_expr(probabilities);
+    if (!is_vector(argument.si))
+      fail("categorical_rng: argument is not a logical vector", e.raw);
+    Val draw = emit_value(OP_RNG, {argument}, 1, view_of(e.type_));
+    g.ops.back().variant = kCategoricalRngVariant;
+    // A successful call returns a Stan int, but deliberately do not widen
+    // this tranche into runtime-sum range reasoning. Survey only needs the
+    // scalar value; dynamic integer control and indexing still fail closed.
+    draw.si.param_free = false;
+    draw.autodiff = false;
+    set_int_initialized(draw);
+    return draw;
+  }
+
   std::optional<Val> lower_scalar_rng(const mir::Expr& e) {
     static const std::map<std::string, ScalarRng> kFamilies = {
         {"poisson_log_rng", ScalarRng::PoissonLog},
@@ -2516,6 +2542,7 @@ struct Lowering {
     }
     // The stan-library names split into disjoint groups; each helper owns
     // one and declines the rest.
+    if (auto v = lower_categorical_rng(e)) return *v;
     if (auto v = lower_scalar_rng(e)) return *v;
     if (auto v = lower_density_fn(e)) return *v;
     if (auto v = lower_bound_transform(e)) return *v;

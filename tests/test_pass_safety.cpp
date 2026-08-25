@@ -21,6 +21,9 @@
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/reroll.hpp>
+#include <stanli/wa_interp.hpp>
+
+#include <stan/math.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -349,12 +352,14 @@ static void test_random_graphs_preserve_gradients() {
 static void test_rng_is_an_effect_barrier() {
   Graph g;
   Fills fills;
-  const int mean = g.add_slot(1, false);
-  fills.emplace_back(mean, std::vector<double>{0.0});
+  const int probabilities = g.add_slot(4, false);
+  fills.emplace_back(probabilities,
+                     std::vector<double>{0.125, 0.25, 0.375, 0.25});
   std::vector<int> roots;
   for (int i = 0; i < 40; ++i) {
     const int out = g.add_slot(1, false);
-    g.add_op(OP_RNG, {mean}, out);  // variant 0: scalar poisson_log_rng
+    g.add_op(OP_RNG, {probabilities}, out);
+    g.ops.back().variant = kCategoricalRngVariant;
     if (i == 39) roots.push_back(out);
   }
   g.result_slot = roots.back();
@@ -369,6 +374,26 @@ static void test_rng_is_an_effect_barrier() {
   expect("RNG effects survive reroll/hoist", rerolled.regions == 0);
   expect("RNG effects split islands", islands == 0);
   expect("RNG effect count/order preserved", rng_ops == 40);
+
+  // The structural checks above are opcode-wide; executing the vector-input
+  // variant additionally proves that preserving 40 ops preserved their
+  // stream order, not merely their count.
+  Executor ex(std::move(g));
+  for (const auto& fill : fills) {
+    double* values = ex.value_ptr(fill.first);
+    for (size_t i = 0; i < fill.second.size(); ++i) values[i] = fill.second[i];
+  }
+  Eigen::VectorXd theta(4);
+  theta << 0.125, 0.25, 0.375, 0.25;
+  WaRng got_rng(20260824), want_rng(20260824);
+  ex.run_forward_only(EvalState{&got_rng});
+  int want = 0;
+  for (int i = 0; i < 40; ++i)
+    want = stan::math::categorical_rng(theta, want_rng.gen());
+  expect("categorical RNG effect order preserved",
+         ex.value_ptr(roots.back())[0] == static_cast<double>(want));
+  expect("categorical RNG next state preserved",
+         got_rng.gen()() == want_rng.gen()());
 }
 
 static void test_product_is_forward_only_pass_barrier() {

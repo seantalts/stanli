@@ -1,8 +1,9 @@
 // Scalar generated-quantities draws on the compiled write_array graph.
 //
 // OP_RNG is deliberately one effectful opcode. Its variant names the family;
-// every argument and the result are scalar doubles in graph storage (Stan int
-// draws are represented exactly there too). The stream is evaluation state,
+// variants 0..5 take scalar-double arguments, while categorical takes one
+// probability-vector slot. Every result is scalar (Stan int draws are
+// represented exactly in graph doubles too). The stream is evaluation state,
 // not graph/model state, so callers can interleave independent chains through
 // one compiled model without sharing or resetting a stream.
 #include <stanli/graph.hpp>
@@ -17,8 +18,20 @@ namespace {
 
 void rng_fwd(KernelCtx& ctx) {
   if (ctx.out.len != 1 ||
-      ctx.variant > static_cast<uint8_t>(ScalarRng::Binomial))
-    throw std::logic_error("malformed scalar RNG op");
+      (ctx.variant > static_cast<uint8_t>(ScalarRng::Binomial) &&
+       ctx.variant != kCategoricalRngVariant))
+    throw std::logic_error("malformed RNG op");
+  if (ctx.variant == kCategoricalRngVariant) {
+    if (ctx.n_in != 1 || ctx.in[0].len < 0)
+      throw std::logic_error("malformed categorical RNG op");
+    if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
+      throw std::logic_error(
+          "OP_RNG requires caller-owned evaluation RNG state");
+    ctx.out.data[0] = static_cast<double>(
+        categorical_rng_draw(ctx.in[0].data, static_cast<size_t>(ctx.in[0].len),
+                             *ctx.eval_state->wa_rng));
+    return;
+  }
   const ScalarRng family = static_cast<ScalarRng>(ctx.variant);
   const size_t nargs = scalar_rng_arity(family);
   if (ctx.n_in != static_cast<int>(nargs))

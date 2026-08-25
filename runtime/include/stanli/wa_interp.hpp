@@ -2,12 +2,14 @@
 // express the whole generate_quantities section.
 //
 // The graph is the fast path and stays it. It directly carries a first set of
-// scalar RNG calls, including their caller-owned stream. What still defeats
-// it is an unsupported or container-valued RNG, using an int draw as dynamic
-// geometry/index/control flow, or a branch on a value computed during the
-// draw (the HMM models' Viterbi recursions). Those are exactly what a per-draw
-// interpreter does naturally, and generated quantities run once per stored
-// draw on plain doubles: the sampler's leapfrog path never goes through here.
+// scalar-result RNG calls, including their caller-owned stream. What still
+// defeats it is an unsupported or container-valued-result RNG, using an int
+// draw as dynamic geometry/index/control flow, or a branch on a value computed
+// during the draw (the HMM models' Viterbi recursions). A categorical draw's
+// one probability-vector argument is graph-native. The remaining cases are
+// exactly what a per-draw interpreter does naturally, and generated quantities
+// run once per stored draw on plain doubles: the sampler's leapfrog path never
+// goes through here.
 //
 // Per draw the host supplies the CONSTRAINED parameter values by name (the
 // log_prob executor already computes them for its views); FnReadParam
@@ -48,9 +50,9 @@ class WaRng {
   boost::ecuyer1988 gen_;
 };
 
-// The first graph-native RNG tranche. One enum and one draw helper are shared
-// by OP_RNG and WaInterp, so both paths invoke the exact same Stan Math
-// function with the exact same stream.
+// The scalar-argument graph-native RNG tranche. One enum and one draw helper
+// are shared by OP_RNG and WaInterp, so both paths invoke the exact same Stan
+// Math function with the exact same stream.
 enum class ScalarRng : uint8_t {
   PoissonLog,
   Uniform,
@@ -60,10 +62,17 @@ enum class ScalarRng : uint8_t {
   Binomial,
 };
 
+// OP_RNG's first non-scalar-argument variant. Keep it outside ScalarRng:
+// scalar_rng_draw's `nargs` counts scalar doubles, whereas categorical has
+// one logical argument containing an arbitrary number of probabilities.
+inline constexpr uint8_t kCategoricalRngVariant =
+    static_cast<uint8_t>(ScalarRng::Binomial) + 1;
+
 size_t scalar_rng_arity(ScalarRng family);
 bool scalar_rng_is_int(ScalarRng family);
 double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
                        WaRng& rng);
+int categorical_rng_draw(const double* probabilities, size_t size, WaRng& rng);
 
 // The columns only exist after one evaluation, so every driver that wants
 // them at construction time has to probe. These two are that probe, shared

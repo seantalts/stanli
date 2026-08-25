@@ -645,6 +645,473 @@ void test_binomial_rng_helper_contract() {
   }
 }
 
+struct RngException {
+  int kind = 0;
+  std::string message;
+};
+
+template <typename F>
+RngException capture_rng_exception(F&& f) {
+  try {
+    f();
+  } catch (const std::invalid_argument& e) {
+    return {1, e.what()};
+  } catch (const std::domain_error& e) {
+    return {2, e.what()};
+  } catch (const std::logic_error& e) {
+    return {3, e.what()};
+  } catch (const std::exception& e) {
+    return {4, e.what()};
+  }
+  return {};
+}
+
+static Eigen::VectorXd categorical_theta(const std::vector<double>& p) {
+  Eigen::VectorXd theta(static_cast<Eigen::Index>(p.size()));
+  for (size_t i = 0; i < p.size(); ++i)
+    theta[static_cast<Eigen::Index>(i)] = p[i];
+  return theta;
+}
+
+// categorical_rng is unusual in this opcode family: one logical argument is
+// a variable-length vector, while the result is still one Stan int. Keep the
+// shared helper byte-for-byte on Stan Math's validation and engine schedule.
+void test_categorical_rng_helper_contract() {
+  using namespace stanli;
+  const std::vector<std::vector<double>> valid = {
+      {1.0},
+      {0.0, 1.0, 0.0},
+      {-0.0, 0.0, 1.0},
+      {0.125, 0.25, 0.375, 0.25},
+      {0.5, 0.5, 0.0},
+      {1.0 + 5e-9},  // inside Stan Math's simplex tolerance
+  };
+  for (size_t c = 0; c < valid.size(); ++c) {
+    for (unsigned seed : {1u, 17u, 2026u}) {
+      WaRng got_rng(seed + static_cast<unsigned>(c));
+      WaRng want_rng(seed + static_cast<unsigned>(c));
+      const int got =
+          categorical_rng_draw(valid[c].data(), valid[c].size(), got_rng);
+      const int want = stan::math::categorical_rng(categorical_theta(valid[c]),
+                                                   want_rng.gen());
+      const auto got_next = got_rng.gen()();
+      const auto want_next = want_rng.gen()();
+      if (got != want || got_next != want_next) {
+        ++failures;
+        std::printf("FAIL categorical helper valid case %zu seed %u\n", c,
+                    seed);
+      }
+    }
+  }
+
+  // Sum validation precedes the element scan in check_simplex. The two
+  // negative cases distinguish those paths; empty also pins invalid_argument
+  // rather than domain_error. No rejected input may advance the stream.
+  const std::vector<std::vector<double>> invalid = {
+      {},
+      {0.0},
+      {0.2, 0.2},
+      {1.0, -0.25, 0.25},
+      {1.0, -0.25, 0.5},
+      {std::numeric_limits<double>::quiet_NaN()},
+      {std::numeric_limits<double>::infinity()},
+  };
+  for (size_t c = 0; c < invalid.size(); ++c) {
+    WaRng got_rng(static_cast<unsigned>(401 + c));
+    WaRng want_rng(static_cast<unsigned>(401 + c));
+    const RngException got = capture_rng_exception([&] {
+      (void)categorical_rng_draw(
+          invalid[c].empty() ? nullptr : invalid[c].data(), invalid[c].size(),
+          got_rng);
+    });
+    const RngException want = capture_rng_exception([&] {
+      (void)stan::math::categorical_rng(categorical_theta(invalid[c]),
+                                        want_rng.gen());
+    });
+    const auto got_next = got_rng.gen()();
+    const auto want_next = want_rng.gen()();
+    if (got.kind == 0 || got.kind != want.kind || got.message != want.message ||
+        got_next != want_next) {
+      ++failures;
+      std::printf("FAIL categorical helper invalid case %zu\n", c);
+    }
+  }
+
+  // This is the graph/helper ABI guard, not a Stan language input: a nonempty
+  // descriptor must carry storage. It must fail before touching the engine.
+  WaRng malformed(991), untouched(991);
+  const RngException null_input = capture_rng_exception(
+      [&] { (void)categorical_rng_draw(nullptr, 1, malformed); });
+  if (null_input.kind != 3 || malformed.gen()() != untouched.gen()()) {
+    ++failures;
+    std::printf("FAIL categorical helper malformed pointer contract\n");
+  }
+}
+
+void test_categorical_rng_lowering_guards() {
+  using namespace stanli;
+  const std::string base = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
+  const size_t call = base.find("(FunApp (StanLib categorical_rng");
+  const std::string vector_arg =
+      "((pattern (Var p)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const size_t argument = base.find(vector_arg, call);
+  if (call == std::string::npos || argument == std::string::npos) {
+    ++failures;
+    std::printf("FAIL categorical lowering guard fixture has no call\n");
+    return;
+  }
+
+  const auto expect_interp = [](const std::string& mir,
+                                const std::string& reason, const char* what) {
+    DataMap data;
+    data.set_int("K", 4);
+    try {
+      CompiledModel cm = compile_model(mir, data);
+      if (!cm.write_array || !cm.write_array->interp ||
+          cm.write_array->truncated.find(reason) == std::string::npos) {
+        ++failures;
+        std::printf("FAIL %s: got %s\n", what,
+                    cm.write_array ? cm.write_array->truncated.c_str()
+                                   : "no write_array");
+      }
+    } catch (const std::exception& e) {
+      ++failures;
+      std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
+                  e.what());
+    }
+  };
+
+  struct BadArgument {
+    const char* type;
+    const char* label;
+  };
+  const BadArgument bad_arguments[] = {
+      {"UReal", "scalar"},
+      {"URowVector", "row-vector"},
+      {"(UArray UReal)", "array"},
+      {"(UArray UVector)", "array-vector"},
+  };
+  for (const BadArgument& bad : bad_arguments) {
+    std::string mutated = base;
+    const std::string replacement =
+        std::string("((pattern (Var p)) (meta ((type_ ") + bad.type +
+        ") (loc <opaque>) (adlevel DataOnly))))";
+    mutated.replace(argument, vector_arg.size(), replacement);
+    const std::string label =
+        std::string("categorical ") + bad.label + " input stays interpreted";
+    expect_interp(mutated, "probability-vector argument", label.c_str());
+  }
+
+  std::string no_args = base;
+  no_args.erase(argument, vector_arg.size());
+  expect_interp(no_args, "expected one scalar int result",
+                "zero-argument categorical stays interpreted");
+
+  std::string two_args = base;
+  two_args.insert(argument + vector_arg.size(), " " + vector_arg);
+  expect_interp(two_args, "expected one scalar int result",
+                "two-argument categorical stays interpreted");
+
+  std::string wrong_result = base;
+  const std::string result_type = "(meta ((type_ UInt)";
+  const size_t result = wrong_result.find(result_type, call);
+  if (result == std::string::npos) {
+    ++failures;
+    std::printf("FAIL categorical lowering guard cannot find result type\n");
+  } else {
+    wrong_result.replace(result, result_type.size(), "(meta ((type_ UReal)");
+    expect_interp(wrong_result, "expected one scalar int result",
+                  "categorical real result stays interpreted");
+
+    std::string container_result = base;
+    container_result.replace(result, result_type.size(),
+                             "(meta ((type_ (UArray UInt))");
+    expect_interp(container_result, "expected one scalar int result",
+                  "categorical container result stays interpreted");
+  }
+
+  std::string logit = base;
+  logit.replace(call + std::string("(FunApp (StanLib ").size(),
+                std::string("categorical_rng").size(), "categorical_logit_rng");
+  expect_interp(logit, "unsupported function categorical_logit_rng",
+                "categorical-logit stays interpreted");
+}
+
+static stanli::DataMap categorical_data(int k) {
+  stanli::DataMap data;
+  data.set_int("K", k);
+  return data;
+}
+
+static std::map<std::string, stanli::DataMap::Entry> categorical_base(
+    const stanli::DataMap& data) {
+  std::map<std::string, stanli::DataMap::Entry> base;
+  base["K"] = data.at("K");
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    stanli::DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  return base;
+}
+
+static stanli::DataMap::Entry categorical_parameter(
+    const std::vector<double>& probabilities) {
+  stanli::DataMap::Entry p;
+  p.r = probabilities;
+  p.dims = {static_cast<int64_t>(probabilities.size())};
+  return p;
+}
+
+static std::vector<double> categorical_direct_row(
+    const std::vector<double>& probabilities, stanli::WaRng& rng,
+    bool with_tail) {
+  std::vector<double> row = probabilities;
+  row.push_back(static_cast<double>(stan::math::categorical_rng(
+      categorical_theta(probabilities), rng.gen())));
+  if (with_tail) row.push_back(stan::math::uniform_rng(0.0, 1.0, rng.gen()));
+  return row;
+}
+
+void test_compiled_categorical_rng() {
+  using namespace stanli;
+  const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
+  const DataMap data = categorical_data(4);
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL categorical rng: write_array did not compile completely: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return;
+  }
+
+  int categorical_ops = 0, uniform_ops = 0, other_rng_ops = 0;
+  for (const Op& op : cm.write_array->graph.ops) {
+    if (op.opcode != OP_RNG) continue;
+    if (op.variant == kCategoricalRngVariant) {
+      ++categorical_ops;
+      if (op.n_in != 1 || cm.write_array->graph.slots[op.in[0]].len != 4 ||
+          cm.write_array->graph.slots[op.out].len != 1) {
+        ++failures;
+        std::printf("FAIL categorical rng: malformed graph descriptor\n");
+      }
+    } else if (op.variant == static_cast<uint8_t>(ScalarRng::Uniform)) {
+      ++uniform_ops;
+    } else {
+      ++other_rng_ops;
+    }
+  }
+  if (categorical_ops != 1 || uniform_ops != 1 || other_rng_ops != 0) {
+    ++failures;
+    std::printf(
+        "FAIL categorical rng op census: categorical=%d uniform=%d "
+        "other=%d\n",
+        categorical_ops, uniform_ops, other_rng_ops);
+  }
+  expect_eq("categorical rng columns", joined(cm.write_array->columns),
+            "p.1,p.2,p.3,p.4,draw,tail");
+
+  Executor graph(std::move(cm.write_array->graph));
+  cm.write_array->bind(graph);
+  const auto set_graph_probabilities = [&](const std::vector<double>& p) {
+    for (size_t i = 0; i < p.size(); ++i) graph.params_data()[i] = p[i];
+  };
+  const auto graph_row = [&](WaRng& rng) {
+    graph.run_forward_only(EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& column : cm.write_array->columns) {
+      const double* values = graph.value_ptr(column.slot);
+      for (int64_t i = 0; i < column.len; ++i)
+        row.push_back(values[column.storage_index(i)]);
+    }
+    return row;
+  };
+
+  auto program =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  WaInterp interpreted(program, categorical_base(data));
+  std::map<std::string, DataMap::Entry> params;
+  const std::vector<double> valid{0.125, 0.25, 0.375, 0.25};
+  set_graph_probabilities(valid);
+  params["p"] = categorical_parameter(valid);
+
+  // Feed both modes the same already-materialized probability vector. Survey
+  // computes that vector through softmax, whose graph/interpreter last bits
+  // can differ independently of RNG correctness; that mode boundary is not
+  // a categorical_rng oracle.
+  WaRng graph_rng(42), interp_rng(42), direct_rng(42);
+  const std::vector<double> graph_first = graph_row(graph_rng);
+  const std::vector<double> interp_first = interpreted.eval(params, interp_rng);
+  const std::vector<double> direct_first =
+      categorical_direct_row(valid, direct_rng, true);
+  const std::vector<double> graph_second = graph_row(graph_rng);
+  const std::vector<double> interp_second =
+      interpreted.eval(params, interp_rng);
+  const std::vector<double> direct_second =
+      categorical_direct_row(valid, direct_rng, true);
+  const auto graph_next = graph_rng.gen()();
+  const auto interp_next = interp_rng.gen()();
+  const auto direct_next = direct_rng.gen()();
+  if (graph_first != interp_first || graph_first != direct_first ||
+      graph_second != interp_second || graph_second != direct_second ||
+      graph_next != interp_next || graph_next != direct_next) {
+    ++failures;
+    std::printf("FAIL categorical rng sequential row/stream parity\n");
+  }
+  graph_rng.seed(42);
+  if (graph_row(graph_rng) != graph_first) {
+    ++failures;
+    std::printf("FAIL categorical rng reseed did not reproduce first row\n");
+  }
+
+  // The invalid call must throw before consuming a uniform. Reusing the same
+  // executor and all three streams must therefore recover at the exact draw
+  // direct Stan Math would have produced from the original seed.
+  const std::vector<double> invalid{1.0, -0.25, 0.25, 0.0};
+  set_graph_probabilities(invalid);
+  params["p"] = categorical_parameter(invalid);
+  WaRng graph_failing(211), interp_failing(211), direct_failing(211);
+  const RngException graph_error =
+      capture_rng_exception([&] { (void)graph_row(graph_failing); });
+  const RngException interp_error = capture_rng_exception(
+      [&] { (void)interpreted.eval(params, interp_failing); });
+  const RngException direct_error = capture_rng_exception([&] {
+    (void)stan::math::categorical_rng(categorical_theta(invalid),
+                                      direct_failing.gen());
+  });
+  if (graph_error.kind == 0 || graph_error.kind != interp_error.kind ||
+      graph_error.kind != direct_error.kind ||
+      graph_error.message != interp_error.message ||
+      graph_error.message != direct_error.message) {
+    ++failures;
+    std::printf("FAIL categorical rng invalid exception parity\n");
+  }
+
+  set_graph_probabilities(valid);
+  params["p"] = categorical_parameter(valid);
+  const RngException missing_state =
+      capture_rng_exception([&] { graph.run_forward_only(); });
+  const std::vector<double> graph_recovered = graph_row(graph_failing);
+  const std::vector<double> interp_recovered =
+      interpreted.eval(params, interp_failing);
+  const std::vector<double> direct_recovered =
+      categorical_direct_row(valid, direct_failing, true);
+  const auto graph_recovered_next = graph_failing.gen()();
+  const auto interp_recovered_next = interp_failing.gen()();
+  const auto direct_recovered_next = direct_failing.gen()();
+  if (missing_state.kind != 3 ||
+      missing_state.message.find("caller-owned") == std::string::npos ||
+      graph_recovered != interp_recovered ||
+      graph_recovered != direct_recovered ||
+      graph_recovered_next != interp_recovered_next ||
+      graph_recovered_next != direct_recovered_next) {
+    ++failures;
+    std::printf("FAIL categorical rng exception/reuse contract\n");
+  }
+}
+
+void test_categorical_rng_empty_vector() {
+  using namespace stanli;
+  const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
+  const DataMap data = categorical_data(0);
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL empty categorical vector did not compile: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return;
+  }
+
+  Executor graph(std::move(cm.write_array->graph));
+  cm.write_array->bind(graph);
+  auto program =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  WaInterp interpreted(program, categorical_base(data));
+  std::map<std::string, DataMap::Entry> params;
+  params["p"] = categorical_parameter({});
+
+  WaRng graph_rng(71), interp_rng(71), direct_rng(71);
+  const RngException graph_error = capture_rng_exception(
+      [&] { graph.run_forward_only(EvalState{&graph_rng}); });
+  const RngException interp_error = capture_rng_exception(
+      [&] { (void)interpreted.eval(params, interp_rng); });
+  const RngException direct_error = capture_rng_exception([&] {
+    (void)stan::math::categorical_rng(categorical_theta({}), direct_rng.gen());
+  });
+  const auto graph_next = graph_rng.gen()();
+  const auto interp_next = interp_rng.gen()();
+  const auto direct_next = direct_rng.gen()();
+  if (graph_error.kind != 1 || graph_error.kind != interp_error.kind ||
+      graph_error.kind != direct_error.kind ||
+      graph_error.message != interp_error.message ||
+      graph_error.message != direct_error.message ||
+      graph_next != interp_next || graph_next != direct_next) {
+    ++failures;
+    std::printf("FAIL empty categorical validation/stream parity\n");
+  }
+}
+
+void test_categorical_rng_dynamic_index_fallback() {
+  using namespace stanli;
+  const std::string text =
+      slurp("tests/fixtures/gq_categorical_dynamic.tmir.sexp");
+  const DataMap data = categorical_data(3);
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || !cm.write_array->interp ||
+      cm.write_array->truncated.find("unknown int draw") == std::string::npos) {
+    ++failures;
+    std::printf(
+        "FAIL categorical dynamic index fallback: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return;
+  }
+
+  int categorical_ops = 0;
+  for (const Op& op : cm.write_array->graph.ops) {
+    if (op.opcode != OP_RNG || op.variant != kCategoricalRngVariant) continue;
+    ++categorical_ops;
+    if (op.n_in != 1 || cm.write_array->graph.slots[op.in[0]].len != 3 ||
+        cm.write_array->graph.slots[op.out].len != 1) {
+      ++failures;
+      std::printf("FAIL categorical dynamic prefix descriptor\n");
+    }
+  }
+  if (categorical_ops != 1) {
+    ++failures;
+    std::printf("FAIL categorical dynamic prefix has %d categorical ops\n",
+                categorical_ops);
+  }
+
+  const std::vector<double> probabilities{0.25, 0.5, 0.25};
+  std::map<std::string, DataMap::Entry> params;
+  params["p"] = categorical_parameter(probabilities);
+  WaRng interp_rng(303), direct_rng(303);
+  const std::vector<double> got =
+      cm.write_array->interp->eval(params, interp_rng);
+  std::vector<double> want = probabilities;
+  const int draw = stan::math::categorical_rng(categorical_theta(probabilities),
+                                               direct_rng.gen());
+  want.push_back(static_cast<double>(draw));
+  want.push_back(probabilities[static_cast<size_t>(draw - 1)]);
+  const auto interp_next = interp_rng.gen()();
+  const auto direct_next = direct_rng.gen()();
+  expect_eq("categorical dynamic columns",
+            joined(cm.write_array->interp->columns()),
+            "p.1,p.2,p.3,draw,picked");
+  if (got != want || interp_next != direct_next) {
+    ++failures;
+    std::printf("FAIL categorical dynamic interpreter row/stream\n");
+  }
+}
+
 void test_binomial_rng_lowering_guards() {
   using namespace stanli;
   const std::string base = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
@@ -2060,6 +2527,11 @@ int main() {
   test_interpreted_gq();
   test_constant_folded_gq_column();
   test_binomial_rng_helper_contract();
+  test_categorical_rng_helper_contract();
+  test_categorical_rng_lowering_guards();
+  test_compiled_categorical_rng();
+  test_categorical_rng_empty_vector();
+  test_categorical_rng_dynamic_index_fallback();
   test_binomial_rng_lowering_guards();
   test_compiled_scalar_rng();
   test_product_exact_grouping();

@@ -51,6 +51,15 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
   throw std::logic_error("unknown scalar RNG family");
 }
 
+int categorical_rng_draw(const double* probabilities, size_t size, WaRng& rng) {
+  if (size != 0 && probabilities == nullptr)
+    throw std::logic_error("malformed categorical RNG arguments");
+  Eigen::VectorXd theta(static_cast<Eigen::Index>(size));
+  for (size_t i = 0; i < size; ++i)
+    theta[static_cast<Eigen::Index>(i)] = probabilities[i];
+  return stan::math::categorical_rng(theta, rng.gen());
+}
+
 double wa_probe_point(int64_t i, int variant) {
   switch (variant) {
     case 1:
@@ -304,11 +313,14 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
 
   // Whole-vector argument, one categorical draw.
   if (base == "categorical" || base == "categorical_logit") {
-    Eigen::VectorXd th((int64_t)av.at(0).r.size());
-    for (size_t i = 0; i < av[0].r.size(); ++i) th[(int64_t)i] = av[0].r[i];
-    const int k = base == "categorical"
-                      ? stan::math::categorical_rng(th, g)
-                      : stan::math::categorical_logit_rng(th, g);
+    int k = 0;
+    if (base == "categorical") {
+      k = categorical_rng_draw(av.at(0).r.data(), av.at(0).r.size(), rng);
+    } else {
+      Eigen::VectorXd th((int64_t)av.at(0).r.size());
+      for (size_t i = 0; i < av[0].r.size(); ++i) th[(int64_t)i] = av[0].r[i];
+      k = stan::math::categorical_logit_rng(th, g);
+    }
     out->is_int = true;
     out->i = {k};
     out->r = {(double)k};
