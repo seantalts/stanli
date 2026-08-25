@@ -1451,6 +1451,40 @@ static void test_bail_categorical_ops() {
   expect("categorical terms survive", terms.size() == 8);
 }
 
+static void test_bail_message_ops() {
+  for (uint16_t opcode : {OP_PRINT, OP_REJECT}) {
+    Graph g;
+    Fills fills;
+    const int mu = g.add_slot(1, true);
+    const int sigma = g.add_slot(1, true);
+    auto spec = std::make_shared<MessageSpec>();
+    spec->chunks = {"mu = ", ""};
+    std::vector<int> terms;
+    for (int lane = 0; lane < 8; ++lane) {
+      const int dead = g.add_slot(1, false);
+      const int msg = g.add_op(opcode, {mu}, dead);
+      g.ops[(size_t)msg].udata = spec.get();
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{0.1 * lane});
+      const int lp = g.add_slot(1, false);
+      const int density = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+      g.ops[(size_t)density].variant = 0x06;
+      terms.push_back(lp);
+    }
+    g.udata_pool.push_back(std::move(spec));
+
+    const size_t before = g.ops.size();
+    RerollStats st = reroll(g, fills, terms, {});
+    const char* name = opcode_name(opcode);
+    expect(name, st.regions == 0);
+    expect(name, g.ops.size() == before);
+    expect(name, terms.size() == 8);
+    int kept = 0;
+    for (const Op& op : g.ops) kept += op.opcode == opcode;
+    expect(name, kept == 8);
+  }
+}
+
 int main() {
   test_radon_shape();
   test_ark_shape();
@@ -1467,6 +1501,7 @@ int main() {
   test_block_structured();
   test_bail_extra_root();
   test_bail_categorical_ops();
+  test_bail_message_ops();
   test_lda_shape_gradients();
   ldashape::test_lda_shape_refusals();
   test_lda_shape_cost();
