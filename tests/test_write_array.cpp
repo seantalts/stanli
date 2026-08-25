@@ -863,6 +863,16 @@ static uint64_t reduction_bits(double x) {
   return out;
 }
 
+static bool same_reduction_value(double got, double want) {
+  // Eigen deliberately leaves the sign and payload of a propagated NaN
+  // unspecified.  Sanitizer instrumentation can therefore change those bits
+  // without changing the reduction's value contract.  Everything else --
+  // including signed zero and infinity -- remains a bitwise comparison.
+  if (std::isnan(got) || std::isnan(want))
+    return std::isnan(got) && std::isnan(want);
+  return reduction_bits(got) == reduction_bits(want);
+}
+
 static stanli::DataMap reduction_data() {
   stanli::DataMap data;
   data.set_real_array("d", {0.5, -2.0, 4.0});
@@ -967,18 +977,18 @@ void test_product_exact_grouping() {
     const std::vector<double>& values = cases[c];
     Eigen::VectorXd pinned(static_cast<Eigen::Index>(values.size()));
     for (size_t i = 0; i < values.size(); ++i) pinned[i] = values[i];
-    const uint64_t want = reduction_bits(stan::math::prod(pinned));
+    const double want = stan::math::prod(pinned);
 
     DataMap::Entry entry;
     entry.r = values;
     entry.dims = {static_cast<int64_t>(values.size())};
     interp.env()["x"] = std::move(entry);
-    const uint64_t interpreted = reduction_bits(interp.eval(call).r.at(0));
-    if (interpreted != want) {
+    const double interpreted = interp.eval(call).r.at(0);
+    if (!same_reduction_value(interpreted, want)) {
       ++failures;
       std::printf("FAIL product interpreter case %zu: got %llx want %llx\n", c,
-                  static_cast<unsigned long long>(interpreted),
-                  static_cast<unsigned long long>(want));
+                  static_cast<unsigned long long>(reduction_bits(interpreted)),
+                  static_cast<unsigned long long>(reduction_bits(want)));
     }
 
     // Pin the address-independence seam at every packet-relevant shift.  A
@@ -995,13 +1005,13 @@ void test_product_exact_grouping() {
           Desc{storage.data() + offset, static_cast<int64_t>(values.size())};
       ctx.out = Desc{&got, 1};
       product.forward(ctx);
-      if (reduction_bits(got) != want) {
+      if (!same_reduction_value(got, want)) {
         ++failures;
         std::printf(
             "FAIL product kernel case %zu offset %d: got %llx want "
             "%llx\n",
             c, offset, static_cast<unsigned long long>(reduction_bits(got)),
-            static_cast<unsigned long long>(want));
+            static_cast<unsigned long long>(reduction_bits(want)));
       }
     }
   }
