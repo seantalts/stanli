@@ -159,8 +159,8 @@ The wins come from op granularity. CmdStan's var tape allocates, walks,
 and frees one node per scalar operation per leapfrog step; stanli pays
 a fixed cost per *op*, and a vectorized statement over N elements
 amortizes that to nothing. Across the whole posteriordb corpus the
-median is <!--gen:corpus_median-->2.17x<!--/gen--> and
-<!--gen:corpus_at_par-->104<!--/gen--> of
+median is <!--gen:corpus_median-->2.91x<!--/gen--> and
+<!--gen:corpus_at_par-->116<!--/gen--> of
 <!--gen:corpus_n_grad-->119<!--/gen--> models are at or above CmdStan.
 
 The former worst class -- recurrences -- mostly crossed parity when the
