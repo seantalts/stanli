@@ -391,6 +391,27 @@ the top of the page, not replacements for the current corpus rows:
   results were bitwise identical for all 63/63 checked scalars across three
   points. This targeted A/B attributes the direct-seeding change; the current
   corpus rows above and in the table below are the later end-to-end refresh.
+- **Direct ODE Jacobian-row harvest plus scalar RHS cleanup.** Stan Math's ODE
+  outputs are already precomputed-gradient nodes directly connected to active
+  inputs, so the kernel now chains the selected output instead of running a
+  nested reverse sweep across every sibling output for each Jacobian row, and
+  clears only that output and its inputs between rows. A conservative
+  load-time pass also removes overwritten scalar initializer
+  constants and aliases stable single-definition copies; any range-reading,
+  dynamic, density, or kernel instruction leaves the RHS program unchanged. A
+  targeted 2026-08-25 three-binary A/B (seven rotating matched-batch medians)
+  measured:
+
+  | model | parent | direct node only | full change | improvement |
+  | --- | ---: | ---: | ---: | ---: |
+  | `lotka_volterra` | 78.5160 us | 70.3923 us | 60.8881 us | 1.28951x |
+  | `soil_incubation` | 101.3979 us | 88.5437 us | 82.0553 us | 1.23573x |
+  | `one_comp_mm_elim_abs` | 663.9302 us | 665.3790 us | 629.7752 us | 1.05423x |
+
+  The full change improves the geometric mean by 1.18876x. Fresh parent and
+  patched checkers were byte-identical for all 63/63 LP-and-gradient scalars
+  over three evaluation points. These targeted medians isolate the mechanism;
+  they do not refresh the full-corpus table or its retained CmdStan columns.
 - **Packed row-wise reductions** (the LDA inner loop): targeted medians fall
   from 154 to 94 us for `ldaK2` and 6.82 to 3.70 ms for `ldaK5`, while their
   graphs collapse from 15,854 to 22 and 434,126 to 156 ops. The full

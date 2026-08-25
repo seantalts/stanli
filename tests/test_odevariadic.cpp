@@ -213,6 +213,39 @@ void check_activity_case(const stanli::OdeSpec& spec, const char* label) {
   }
 }
 
+static void check_precomputed_jacobian_harvest() {
+  stan::math::nested_rev_autodiff nested;
+  std::vector<stan::math::var> inputs{0.2, -0.35, 1.1, 0.7};
+  const std::vector<std::vector<double>> jacobian{
+      {0.25, -0.5, 0.75, -1.0}, {-1.25, 1.5, -1.75, 2.0},
+      {2.25, -2.5, 2.75, -3.0}, {-3.25, 3.5, -3.75, 4.0},
+      {4.25, -4.5, 4.75, -5.0}, {-5.25, 5.5, -5.75, 6.0},
+  };
+  std::vector<stan::math::var> outputs;
+  for (size_t o = 0; o < jacobian.size(); ++o)
+    outputs.push_back(stan::math::precomputed_gradients(10.0 + (double)o,
+                                                        inputs, jacobian[o]));
+
+  std::vector<std::vector<double>> full(outputs.size());
+  for (size_t o = outputs.size(); o-- > 0;) {
+    stan::math::set_zero_all_adjoints_nested();
+    stan::math::grad(outputs[o].vi_);
+    for (const auto& input : inputs) full[o].push_back(input.adj());
+  }
+
+  stan::math::set_zero_all_adjoints_nested();
+  for (size_t o = outputs.size(); o-- > 0;) {
+    outputs[o].vi_->adj_ = 1.0;
+    outputs[o].vi_->chain();
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      expect("direct precomputed-gradient harvest matches full reverse sweep",
+             inputs[i].adj() == full[o][i]);
+      inputs[i].vi_->adj_ = 0.0;
+    }
+    outputs[o].vi_->adj_ = 0.0;
+  }
+}
+
 static const stanli::OdeSpec* fixture_rk45_spec(const stanli::Graph& graph) {
   using namespace stanli;
   for (const Op& op : graph.ops)
@@ -256,6 +289,8 @@ int main() {
         write_has_dd = write_has_dd || op.variant == 0x4u;
       }
   expect("write_array contains a double/double ODE", write_has_dd);
+
+  check_precomputed_jacobian_harvest();
 
   if (rk45_spec) {
     check_activity_case<true, false>(*rk45_spec, "active y/data theta");

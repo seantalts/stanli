@@ -15,6 +15,210 @@ namespace stanli {
 
 namespace {
 
+// The MIR spells an initialized local as its language-level default fill
+// followed by a copy of the initializer, and copies values again through
+// return temporaries. Native C++ optimization removes that bookkeeping. An
+// ODE right-hand side otherwise pays it on every solver callback, including
+// under var where a dead constant also allocates a disconnected tape node.
+//
+// Keep this deliberately narrower than a general Program optimizer. ODE
+// scalar arithmetic has no effects, range reads, densities, or kernel calls;
+// an unfamiliar instruction leaves the program unchanged. Dead constants
+// may disappear only before the next control-flow edge, and a MOV aliases its
+// source only when both registers have stable single definitions. Branch
+// joins therefore retain their initialized value.
+bool scalar_rhs_instruction(Program::Code code) {
+  switch (code) {
+    case Program::CONST:
+    case Program::CONSTR:
+    case Program::MOV:
+    case Program::ADD:
+    case Program::SUB:
+    case Program::MUL:
+    case Program::DIV:
+    case Program::POW:
+    case Program::FMAX:
+    case Program::FMIN:
+    case Program::NEG:
+    case Program::EXP:
+    case Program::LOG:
+    case Program::SQRT:
+    case Program::SQUARE:
+    case Program::INV:
+    case Program::FABS:
+    case Program::INV_LOGIT:
+    case Program::LOG1M:
+    case Program::TANH:
+    case Program::GT:
+    case Program::GE:
+    case Program::LT:
+    case Program::LE:
+    case Program::EQ:
+    case Program::NE:
+    case Program::JZ:
+    case Program::JMP:
+    case Program::LSE2:
+    case Program::LOG_MIX:
+    case Program::FMA:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool binary_rhs_instruction(Program::Code code) {
+  switch (code) {
+    case Program::ADD:
+    case Program::SUB:
+    case Program::MUL:
+    case Program::DIV:
+    case Program::POW:
+    case Program::FMAX:
+    case Program::FMIN:
+    case Program::GT:
+    case Program::GE:
+    case Program::LT:
+    case Program::LE:
+    case Program::EQ:
+    case Program::NE:
+    case Program::LSE2:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool unary_rhs_instruction(Program::Code code) {
+  switch (code) {
+    case Program::MOV:
+    case Program::NEG:
+    case Program::EXP:
+    case Program::LOG:
+    case Program::SQRT:
+    case Program::SQUARE:
+    case Program::INV:
+    case Program::FABS:
+    case Program::INV_LOGIT:
+    case Program::LOG1M:
+    case Program::TANH:
+    case Program::JZ:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool reads_rhs_register(const Program::Instr& instr, int reg) {
+  if (unary_rhs_instruction(instr.code)) return instr.a == reg;
+  if (binary_rhs_instruction(instr.code))
+    return instr.a == reg || instr.b == reg;
+  if (instr.code == Program::LOG_MIX || instr.code == Program::FMA)
+    return instr.a == reg || instr.b == reg || instr.c == reg;
+  return false;
+}
+
+bool writes_rhs_register(const Program::Instr& instr, int reg) {
+  if (instr.code == Program::JZ || instr.code == Program::JMP) return false;
+  if (instr.code == Program::CONSTR)
+    return reg >= instr.dst && reg < instr.dst + instr.len;
+  return instr.dst == reg;
+}
+
+void rewrite_rhs_reads(Program::Instr& instr, const std::vector<int>& alias) {
+  if (unary_rhs_instruction(instr.code)) {
+    instr.a = alias[(size_t)instr.a];
+    return;
+  }
+  if (binary_rhs_instruction(instr.code)) {
+    instr.a = alias[(size_t)instr.a];
+    instr.b = alias[(size_t)instr.b];
+    return;
+  }
+  if (instr.code == Program::LOG_MIX || instr.code == Program::FMA) {
+    instr.a = alias[(size_t)instr.a];
+    instr.b = alias[(size_t)instr.b];
+    instr.c = alias[(size_t)instr.c];
+  }
+}
+
+void optimize_scalar_rhs(RhsProgram& p) {
+  if (!std::all_of(p.code.begin(), p.code.end(), [](const auto& instr) {
+        return scalar_rhs_instruction(instr.code);
+      }))
+    return;
+
+  const size_t n = p.code.size();
+  std::vector<bool> remove(n, false);
+
+  // A scalar declaration fill overwritten before any read or branch is
+  // disconnected bookkeeping. Stop at a jump even when a later assignment
+  // looks unconditional in the linear instruction array.
+  for (size_t i = 0; i < n; ++i) {
+    const Program::Instr& init = p.code[i];
+    if (init.code != Program::CONST) continue;
+    for (size_t j = i + 1; j < n; ++j) {
+      const Program::Instr& next = p.code[j];
+      if (next.code == Program::JZ || next.code == Program::JMP) break;
+      if (reads_rhs_register(next, init.dst)) break;
+      if (writes_rhs_register(next, init.dst)) {
+        remove[i] = true;
+        break;
+      }
+    }
+  }
+
+  std::vector<int> writers((size_t)p.n_regs, 0);
+  std::vector<int> writer_pc((size_t)p.n_regs, -1);
+  for (size_t pc = 0; pc < n; ++pc) {
+    if (remove[pc]) continue;
+    const Program::Instr& instr = p.code[pc];
+    if (instr.code == Program::JZ || instr.code == Program::JMP) continue;
+    const int len = instr.code == Program::CONSTR ? instr.len : 1;
+    for (int k = 0; k < len; ++k) {
+      const size_t reg = (size_t)(instr.dst + k);
+      ++writers[reg];
+      writer_pc[reg] = (int)pc;
+    }
+  }
+
+  std::vector<int> alias((size_t)p.n_regs);
+  for (int reg = 0; reg < p.n_regs; ++reg) alias[(size_t)reg] = reg;
+  for (size_t pc = 0; pc < n; ++pc) {
+    if (remove[pc]) continue;
+    Program::Instr& instr = p.code[pc];
+    rewrite_rhs_reads(instr, alias);
+    if (instr.code == Program::MOV && writers[(size_t)instr.dst] == 1 &&
+        writers[(size_t)instr.a] <= 1 && writer_pc[(size_t)instr.a] < (int)pc) {
+      alias[(size_t)instr.dst] = instr.a;
+      remove[pc] = true;
+      continue;
+    }
+    if (instr.code == Program::JZ || instr.code == Program::JMP) continue;
+    const int len = instr.code == Program::CONSTR ? instr.len : 1;
+    for (int k = 0; k < len; ++k)
+      alias[(size_t)(instr.dst + k)] = instr.dst + k;
+  }
+  for (int& reg : p.out_regs) reg = alias[(size_t)reg];
+
+  std::vector<int> new_pc(n + 1, 0);
+  int at = 0;
+  for (size_t pc = 0; pc < n; ++pc) {
+    new_pc[pc] = at;
+    if (!remove[pc]) ++at;
+  }
+  new_pc[n] = at;
+  std::vector<Program::Instr> compact;
+  compact.reserve((size_t)at);
+  for (size_t pc = 0; pc < n; ++pc) {
+    if (remove[pc]) continue;
+    Program::Instr instr = p.code[pc];
+    if (instr.code == Program::JZ || instr.code == Program::JMP)
+      instr.dst = new_pc[(size_t)instr.dst];
+    compact.push_back(instr);
+  }
+  p.code = std::move(compact);
+}
+
 bool supported_rhs_view(const mir::UnsizedView& view) {
   if (view.depth > 1) return false;
   if (view.depth == 1)
@@ -111,6 +315,7 @@ RhsProgram compile_rhs_args(
              " values for " + std::to_string(n_y) + " states");
     for (int k = 0; k < out.len; ++k) p.out_regs.push_back(out.reg + k);
     c.finish();
+    optimize_scalar_rhs(p);
     p.ok = true;
   } catch (Bail& b) {
     p.ok = false;

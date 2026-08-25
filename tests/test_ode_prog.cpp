@@ -17,6 +17,7 @@
 
 #include <stan/math.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -252,6 +253,18 @@ int main() {
     const RhsProgram p = compile_rhs(*it->second, funs, 2, 4, 2, x_i);
     expect("mixed seed fixture compiles", p.ok);
     if (p.ok) {
+      const bool compact =
+          p.code.size() == 7 &&
+          std::none_of(p.code.begin(), p.code.end(), [](const auto& i) {
+            return i.code == Program::CONST || i.code == Program::MOV;
+          });
+      if (!compact) {
+        std::printf("optimized f_lin has %zu instructions:", p.code.size());
+        for (const auto& i : p.code)
+          std::printf(" %s", program_code_spec(i.code).name);
+        std::printf("\n");
+      }
+      expect("straight-line RHS drops initializer/copy bookkeeping", compact);
       check_mixed_seed<true, false>(p, "var/double");
       check_mixed_seed<false, true>(p, "double/var");
       check_mixed_seed<true, true>(p, "var/var");

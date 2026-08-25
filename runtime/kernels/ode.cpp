@@ -17,11 +17,11 @@
 // has no sensitivities and takes the plain double solve.
 //
 // Reading them out is cheap. stan-math integrates the coupled system on
-// doubles and only builds precomputed-gradient varis for the solution
-// itself, so the nested tape left standing after a solve holds the inputs
-// and the outputs and nothing else; one reverse sweep per output element
-// walks a few dozen varis, against several hundred right-hand-side
-// evaluations for a solve.
+// doubles and builds each solution element as one precomputed-gradient vari
+// directly connected to the active inputs. Chaining that selected output node
+// yields one Jacobian row without walking its sibling output nodes. After one
+// initial tape reset, only that output and those inputs need clearing between
+// rows; the graph backward later applies the rows in Stan's reverse order.
 #include <stanli/graph.hpp>
 #include <stanli/packet.hpp>
 #include <stanli/mir_interp.hpp>
@@ -212,21 +212,31 @@ void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
         ctx.out.data[(int64_t)n * S + k] = solv[n][k].val();
 
     // d(solution)/d(z_init, theta), row per flattened solution element.
-    // Sweep last-to-first to retain the accumulation order ode_bwd and the
-    // former all-var solve used. Only the scalar types changed.
+    // Harvest last-to-first to retain the row order ode_bwd and the former
+    // all-var solve used. Each solution is a precomputed-gradient node whose
+    // one chain call writes this raw row directly to the active inputs.
+    stan::math::set_zero_all_adjoints_nested();
     for (int64_t o = ctx.out.len; o-- > 0;) {
-      stan::math::set_zero_all_adjoints_nested();
-      stan::math::grad(solv[(size_t)(o / S)][(size_t)(o % S)].vi_);
+      auto* output = solv[(size_t)(o / S)][(size_t)(o % S)].vi_;
+      output->adj_ = 1.0;
+      output->chain();
       if constexpr (YAutodiff) {
-        for (int64_t i = 0; i < S; ++i) J[o * W + i] = z0[(size_t)i].adj();
+        for (int64_t i = 0; i < S; ++i) {
+          J[o * W + i] = z0[(size_t)i].adj();
+          z0[(size_t)i].vi_->adj_ = 0.0;
+        }
       } else {
         for (int64_t i = 0; i < S; ++i) J[o * W + i] = 0.0;
       }
       if constexpr (ThetaAutodiff) {
-        for (int64_t i = 0; i < P; ++i) J[o * W + S + i] = th[(size_t)i].adj();
+        for (int64_t i = 0; i < P; ++i) {
+          J[o * W + S + i] = th[(size_t)i].adj();
+          th[(size_t)i].vi_->adj_ = 0.0;
+        }
       } else {
         for (int64_t i = 0; i < P; ++i) J[o * W + S + i] = 0.0;
       }
+      output->adj_ = 0.0;
     }
   }
 }

@@ -711,6 +711,40 @@ means and CmdStan ratios remain the absolute source of truth in
 The original RHS compiler, solve reuse, and mixed-activity work made the ODE
 models 29-39x faster; direct input seeding compounds that historical gain.
 
+The remaining Jacobian extraction also used more reverse-mode machinery than
+the ODE result contains. Stan Math returns each solution scalar as one
+`precomputed_gradients_vari` directly connected to the active inputs. Calling
+`grad` once per output therefore walked every sibling output node merely to
+chain the selected node. The kernel now zeros the nested adjoints and chains
+that selected result node directly. Between rows it clears only that output
+and the active inputs it touched; the graph backward still consumes rows
+last-to-first and accumulates inputs in their original order.
+
+A narrow load-time cleanup complements that change inside the callback. MIR
+spells initialized scalar locals as a default constant followed by the real
+assignment and copies values through return temporaries. For an RHS containing
+only scalar, effect-free instructions, the compiler removes an initializer
+overwritten before any read/control-flow edge and aliases a `MOV` only when
+both registers have stable single definitions. It remaps jump targets after
+compaction. Any dynamic indexing, range read or transform, density, kernel
+call, or other unfamiliar instruction retains the original program unchanged.
+
+A targeted 2026-08-25 Release A/B used three isolated binaries from the same
+parent, seven rotating matched batches per model, a 200 ms warmup, and roughly
+one measured second per batch:
+
+| model | parent | direct Jacobian node only | node + RHS cleanup | total improvement |
+| --- | ---: | ---: | ---: | ---: |
+| `lotka_volterra` | 78.5160 us | 70.3923 us | 60.8881 us | 1.28951x |
+| `soil_incubation` | 101.3979 us | 88.5437 us | 82.0553 us | 1.23573x |
+| `one_comp_mm_elim_abs` | 663.9302 us | 665.3790 us | 629.7752 us | 1.05423x |
+
+The full change improves the geometric mean by 1.18876x. The same fresh
+parent and patched checkers produced byte-identical LP and gradient output at
+three evaluation points for all three models (63/63 scalars). This is a
+targeted mechanism A/B; it does not replace the full-corpus warmed means or
+CmdStan columns in `docs/corpus-bench.tsv`.
+
 ## Executor details (`executor.cpp`)
 
 - Each op's context (the pointers telling the kernel where its inputs,
