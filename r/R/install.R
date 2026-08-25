@@ -48,14 +48,17 @@ runtime_asset <- function() {
 #' Where the stanli runtime lives
 #'
 #' The path is taken from `STANLI_RUNTIME` when that is set (which is how
-#' a development build is used), and from the user cache directory
-#' otherwise.
+#' a development build is used), then from a runtime bundled into the
+#' package (wasm builds bundle one at build time, since a browser cannot
+#' download it), and from the user cache directory otherwise.
 #'
 #' @return A file path, which may not exist yet.
 #' @export
 stanli_runtime_path <- function() {
   from_env <- Sys.getenv("STANLI_RUNTIME", "")
   if (nzchar(from_env)) return(from_env)
+  bundled <- system.file("runtime", runtime_filename(), package = "stanli")
+  if (nzchar(bundled)) return(bundled)
   file.path(tools::R_user_dir("stanli", "cache"), runtime_filename())
 }
 
@@ -81,6 +84,11 @@ stanli_available <- function() {
 #' @export
 stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
                            overwrite = FALSE) {
+  bundled <- system.file("runtime", runtime_filename(), package = "stanli")
+  if (nzchar(bundled)) {
+    if (!quiet) message("this build bundles its runtime at ", bundled)
+    return(invisible(bundled))
+  }
   dest_dir <- tools::R_user_dir("stanli", "cache")
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   dest <- file.path(dest_dir, runtime_filename())

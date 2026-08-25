@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Wasm builds of the R package bundle their runtime
+
+`stanli_install()` cannot run in a browser: github.com serves release
+assets without CORS headers, so webR users had to fetch the runtime by
+hand (#163). A configure script now detects an Emscripten cross-build
+and bundles the matching runtime into the package, where
+`stanli_runtime_path()` finds it before looking at the cache.
+`stanli_install()` reports the bundle instead of downloading. Native
+builds are unchanged; the script exits before doing anything on a
+non-wasm compiler. Suggested by @StaffanBetner.
+
 ## 0.8.4
 
 ### Three kernels stop replaying stan-math

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Wasm cross-builds (r-universe building for webR) bundle the runtime
+# here, at package build time: the browser cannot download it later,
+# because github.com serves release assets without CORS headers.
+CC=`"${R_HOME}/bin/R" CMD config CC`
+case `$CC -dumpmachine 2>/dev/null` in
+  *emscripten*) ;;
+  *) exit 0 ;;
+esac
+release=`sed -n 's/^stanli_runtime_release <- "\(.*\)"$/\1/p' R/install.R`
+url="https://github.com/seantalts/stanli/releases/download/$release/stanli-runtime-emscripten-wasm32.tar.gz"
+mkdir -p inst/runtime
+if curl -fsSL "$url" | tar xz -C inst/runtime libstanli.so; then
+  echo "bundled the $release wasm runtime"
+else
+  echo "could not fetch $url; supply the runtime via STANLI_RUNTIME" >&2
+fi
+exit 0

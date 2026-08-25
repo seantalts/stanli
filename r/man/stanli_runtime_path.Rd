@@ -11,6 +11,7 @@ A file path, which may not exist yet.
 }
 \description{
 The path is taken from `STANLI_RUNTIME` when that is set (which is how
-a development build is used), and from the user cache directory
-otherwise.
+a development build is used), then from a runtime bundled into the
+package (wasm builds bundle one at build time, since a browser cannot
+download it), and from the user cache directory otherwise.
 }
