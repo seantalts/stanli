@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.5
 
 ### Wasm builds of the R package bundle their runtime
 
@@ -12,6 +12,23 @@ and bundles the matching runtime into the package, where
 `stanli_install()` reports the bundle instead of downloading. Native
 builds are unchanged; the script exits before doing anything on a
 non-wasm compiler. Suggested by @StaffanBetner.
+
+### Generated quantities compile instead of interpreting
+
+Five more shapes move from the per-draw interpreter onto the
+forward-only write_array graph: scalar RNGs (normal, lognormal,
+uniform, bernoulli, poisson_log, binomial, categorical), vector
+reductions, and min/max (#170, #172, #173, #174, #175). Models whose
+GQ blocks were interpreter-bound speed up accordingly: Mh_model rows
+went from 869 to 12.5 us, another from 330 to 3.4 us.
+
+### Gradient-path work
+
+Island adjoints pack into a dense file (#168), scalar categorical
+probability gets the selected-probability pullback instead of a
+nested tape (#169), and compiled ODE callbacks seed mixed scalar
+inputs directly into the register file instead of staging copies of
+y and theta (#171).
 
 ## 0.8.4
 
