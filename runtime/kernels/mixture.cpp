@@ -1,31 +1,20 @@
 // log_sum_exp / log_mix.
 //
-// These were legacy ops whose backward replayed on `Matrix<var>`: N varis
-// reached through N pointers, built and torn down per op per gradient.
-// That is the AoS var tape stanli exists to avoid, sitting in the hot loop
-// of every mixture and HMM model (40,636 ops across 9 corpus models).
-//
-// stan-math still computes every derivative here -- nothing is
-// hand-differentiated. Two things changed:
-//
-//   * the operand is `var_value<VectorXd>` (varmat, SoA) rather than
-//     `Matrix<var>`, which is what `stanc --O1` reaches for and roughly
-//     twice as fast: 3.39 vs 6.68 ns/element on Apple M-series, and
-//   * the replay runs in the FORWARD sweep and stashes the partials, so
-//     the backward is a scale of what stan-math already returned.
-//
-// The second point is not just bookkeeping: a backward that reads only
+// The forward computes the value and stashes every partial; the backward is
+// a scale of what the forward left in scratch. A backward that reads only
 // scratch cannot be broken by a destructive write to its input, which is
 // what gives these ops the value-free trait in optable.hpp and lets the HMM
 // forward algorithm -- fill `acc` element by element, read it whole --
 // take the in-place path.
+//
+// The partial forms are stan-math's own reverse-mode chains, written out.
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
 #include <stan/math.hpp>
 
-#include <array>
 #include <cassert>
+#include <cmath>
 
 namespace stanli {
 namespace {
@@ -35,14 +24,12 @@ int64_t lse_scratch(const Op& op, const Slot* slots) {
   return slots[op.in[0]].len;
 }
 
+// Scalar libm, not Eigen packet math: a vectorized exp rounds a last bit
+// away from the var reference, whose value extraction blocks vectorization.
 double lse_fwd_partials(const double* data, int64_t len, double* partials) {
-  stan::math::nested_rev_autodiff nested;
-  stan::math::var_value<Eigen::VectorXd> x(
-      Eigen::Map<const Eigen::VectorXd>(data, len));
-  stan::math::var out = stan::math::log_sum_exp(x);
-  const double value = out.val();
-  stan::math::grad(out.vi_);
-  Eigen::Map<Eigen::VectorXd>(partials, len) = x.adj();
+  const double value =
+      stan::math::log_sum_exp(Eigen::Map<const Eigen::VectorXd>(data, len));
+  for (int64_t i = 0; i < len; ++i) partials[i] = std::exp(data[i] - value);
   return value;
 }
 
@@ -91,11 +78,10 @@ void lse_rows_bwd(KernelCtx& ctx) {
 // Shape dispatch matches the elementwise binaries: each argument is len 1
 // (broadcast) or len N, out is len N, out[n] applies the scalar stan-math
 // function to element n. N == 1 is exactly the old scalar kernel; the len-N
-// form is the re-rolled body of a per-observation mixture loop. Each element
-// replays on its own nested tape, so element n's value and partials are
-// bit-identical to a lone scalar op over the same inputs.
+// form is the re-rolled body of a per-observation mixture loop.
 //
-// Scratch is NArgs partials per element, [n * NArgs + k].
+// Scratch is NArgs partials per element, [n * NArgs + k]. `f` writes that
+// element's partials and returns its value.
 template <int NArgs>
 int64_t mix_scratch(const Op& op, const Slot* slots) {
   return NArgs * slots[op.out].len;
@@ -105,14 +91,10 @@ template <int NArgs, typename F>
 void mix_fwd(KernelCtx& ctx, F&& f) {
   const int64_t n = ctx.out.len;
   for (int64_t i = 0; i < n; ++i) {
-    stan::math::nested_rev_autodiff nested;
-    std::array<stan::math::var, NArgs> a;
+    double a[NArgs];
     for (int k = 0; k < NArgs; ++k)
       a[k] = ctx.in[k].data[ctx.in[k].len == 1 ? 0 : i];
-    stan::math::var j = f(a);
-    ctx.out.data[i] = j.val();
-    stan::math::grad(j.vi_);
-    for (int k = 0; k < NArgs; ++k) ctx.scratch[i * NArgs + k] = a[k].adj();
+    ctx.out.data[i] = f(a, ctx.scratch + i * NArgs);
   }
 }
 
@@ -139,21 +121,48 @@ void mix_bwd(KernelCtx& ctx) {
 }
 
 void lse2_fwd(KernelCtx& ctx) {
-  mix_fwd<2>(ctx,
-             [](const auto& a) { return stan::math::log_sum_exp(a[0], a[1]); });
+  mix_fwd<2>(ctx, [](const double* a, double* p) {
+    p[0] = stan::math::inv_logit(a[0] - a[1]);
+    p[1] = stan::math::inv_logit(a[1] - a[0]);
+    return stan::math::log_sum_exp(a[0], a[1]);
+  });
 }
 
 // log_diff_exp(a, b) = log(exp(a) - exp(b)). Truncation is what wants
 // it: stanc3 lowers `y ~ foo(...) T[l, u]` into the density minus
 // log_diff_exp(foo_lcdf(u|...), foo_lcdf(l|...)).
 void log_diff_exp_fwd(KernelCtx& ctx) {
-  mix_fwd<2>(
-      ctx, [](const auto& a) { return stan::math::log_diff_exp(a[0], a[1]); });
+  mix_fwd<2>(ctx, [](const double* a, double* p) {
+    p[0] = -1.0 / stan::math::expm1(a[1] - a[0]);
+    p[1] = -1.0 / stan::math::expm1(a[0] - a[1]);
+    return stan::math::log_diff_exp(a[0], a[1]);
+  });
 }
 
 void log_mix_fwd(KernelCtx& ctx) {
-  mix_fwd<3>(
-      ctx, [](const auto& a) { return stan::math::log_mix(a[0], a[1], a[2]); });
+  mix_fwd<3>(ctx, [](const double* a, double* p) {
+    const double value = stan::math::log_mix(a[0], a[1], a[2]);
+    double theta = a[0];
+    double one_m_exp_lam2_m_lam1 = 0.0;
+    double one_m_t_prod_exp_lam2_m_lam1 = 0.0;
+    double one_d = 0.0;
+    if (a[1] > a[2]) {
+      stan::math::log_mix_partial_helper(theta, a[1], a[2],
+                                         one_m_exp_lam2_m_lam1,
+                                         one_m_t_prod_exp_lam2_m_lam1, one_d);
+    } else {
+      stan::math::log_mix_partial_helper(1.0 - theta, a[2], a[1],
+                                         one_m_exp_lam2_m_lam1,
+                                         one_m_t_prod_exp_lam2_m_lam1, one_d);
+      one_m_exp_lam2_m_lam1 = -one_m_exp_lam2_m_lam1;
+      theta = one_m_t_prod_exp_lam2_m_lam1;
+      one_m_t_prod_exp_lam2_m_lam1 = 1.0 - a[0];
+    }
+    p[0] = one_m_exp_lam2_m_lam1 * one_d;
+    p[1] = theta * one_d;
+    p[2] = one_m_t_prod_exp_lam2_m_lam1 * one_d;
+    return value;
+  });
 }
 
 }  // namespace
