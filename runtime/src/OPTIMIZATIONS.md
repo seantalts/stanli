@@ -215,6 +215,113 @@ candidate-free million-op LDA shape from 1.16 s to about 3.4 ms. The exact
 candidate-index, packed-row, and use-list work counters live in `RerollStats`
 and have deterministic scaling tests.
 
+## Lane partitioning (`partition.cpp`, disable: `STANLI_NO_PARTITION=1`)
+
+Re-rolling asks whether a template repeats with period P, which requires
+the repetitions to be adjacent and the scan to arrive in phase. Neither
+holds as often as the shape of the source suggests:
+`state_space_stochastic_level_stochastic_seasonal` contains one perfect
+four-op random walk that re-rolling leaves entirely scalar, because the
+window-sum loop ahead of it leaves the period scan two ops off phase.
+This pass asks a different question: where does a lane end?
+
+A lane ends at a target term or at an element store, and reaches back
+over the ops whose values never leave it. Lane bounds are therefore
+computed rather than discovered, and lanes need not be adjacent. They are
+grouped by a structural fingerprint (opcodes, shapes, dataflow edges, and
+the shapes of immediates, never which slot a lane reads), which is what
+lets the two branches of a data-dependent condition share one bucket, and
+each bucket is rewritten in place of its first lane.
+
+What a bucket's ops read is proven rather than assumed: no slot the fused
+ops read from outside may be written while the run is in flight. That one
+rule carries three soundness obligations at once (no cross-lane
+recurrence, no writer in the middle of the bucket, no destructive
+in-place store between the lanes), because all three appear as a writer
+between the first lane's position and the last lane's end. Ops only ever
+move earlier, so an in-place store already proven safe against a later
+reader stays safe, and a bucket that trips the rule splits at the writer
+rather than declining.
+
+A bucket is rewritten in one of these forms:
+
+- One template, one bucket: each input becomes a slice when the lanes
+  read a contiguous range, a gather when they do not, and a shared
+  operand when every lane reads the same slot. Contiguity is a cost
+  question here, not a legality one.
+- Density lanes whose outcomes ride along as immediates concatenate
+  those immediates into the layout the vector kernel unpacks, group by
+  group for the binomial family's `n`/`y` pairs and flat for everything
+  else. Width-W outcomes widen to the fused length.
+- Lanes delimited by an element store fuse into the vector computation
+  plus one store, with a `SUM_ROWS` tail where the stored rows are
+  reduced.
+- A bucket holding more than one template splits at any mid-range writer
+  and reconsiders both halves, so an interleaved model still gets the
+  lanes on either side of the writer. Splits are capped rather than
+  retried to a fixed point.
+- One arm rewrites a chain instead of widening it. A lane that multiplies
+  two scalars, subtracts a width-m vector, prepends a zero, cumulatively
+  sums, and hands the result to a scalar-outcome categorical is one row
+  of a `categorical_logit_glm_lpmf`, because
+  `cumsum([0, ta - b_1, ...])[j] = j*t*a - sum_{i<=j} b_i`. Buckets refine
+  on the subtracted vector (the item), and the slope is whichever of the
+  two scalars that refinement holds still.
+
+Fusing is not always a win, so each bucket is costed before it is
+emitted, in the currencies the island carver uses: about 5 ns per graph
+op against about 1 ns per element moved, with a density element charged
+six op dispatches. Two measured pessimizations live in that model rather
+than in the shipped graph. Lanes identical down to their immediates and
+their external slots are one op once CSE runs, so fusing them re-expands
+what CSE would collapse and the bucket is charged for every duplicate it
+brings back. And a density with no elementwise kernel trades one
+vectorized call for W recorder calls, so those buckets decline until the
+kernel gains a form that costs per element what its summed one does
+(`bernoulli_logit` and the binomials have one; forcing `multi_occupancy`
+past the estimate is a measured 90% regression).
+
+The pass runs after re-rolling and its in-place re-run, so re-roll keeps
+first crack at the contiguous shapes it already handles, and before CSE,
+which would merge ops shared between lanes and leave no lane whole.
+`state_space_stochastic_level_stochastic_seasonal` drops from 1,375 ops
+to 19 (2.29x per gradient), `Mth_model` 1,563 to 35 (1.63x), `Mh_model`
+1,542 to 18 (1.53x), `Mtbh_model` 1.43x, `Survey_model` 1,427 to 9,
+and the two IRT models that reach the GLM arm, `gpcm_latent_reg_irt`
+34,634 to 91 (6.5x) and `grsm_latent_reg_irt` (6.3x).
+
+## Common-subexpression elimination (`cse.cpp`, disable: `STANLI_NO_CSE=1`)
+
+The unrolled capture-recapture models evaluate one Bernoulli term per
+occasion per individual, and for most of them the arguments are the same
+slot: `Mh_model` emits 685 bit-identical `BERNOULLI_LPMF` ops and
+`Mb_model` 786, each a full kernel call plus a tape entry on every
+leapfrog step. Re-rolling leaves them alone, because they are target
+terms with no op consumer, so nothing upstream removes the
+recomputation.
+
+This is textbook local value numbering, made safe for a graph whose slots
+are mutable buffers rather than single-assignment values. Every write
+bumps a per-slot version and a key carries the version of each input, so
+two ops separated by a store to something they read are different
+computations. Only an op whose output slot is written exactly once in the
+whole graph can be the survivor, which is what excludes the destructive
+update chains: a slot a later in-place store mutates has two writers.
+Effectful and stateful opcodes never merge, and neither does anything
+carrying an opaque payload the key cannot compare. Renaming is lazy: ops
+are in evaluation order, so resolving each op's inputs through the map as
+one forward pass reaches it collapses chains within that pass, where
+rescanning the tail after every merge would be quadratic.
+
+Placement is measured, not incidental. Running it before re-rolling
+destroys the periodicity re-roll matches on, since the repeated ops it
+needs to see are exactly the ones this pass would collapse; running it
+after lane partitioning leaves the lanes whole for that pass and hands
+the island carver a smaller residue. `Mt_model` falls from 1,062 ops to
+70 (16.1x per gradient), `Mh_model` gains 1.39x, and `gpcm_latent_reg_irt`
+enters the partition pass with 34,634 ops rather than 61,612. Forward
+results are bitwise unchanged.
+
 ## Native scalar probability categorical (`message.cpp`)
 
 The active scalar-outcome probability form of `categorical_lpmf` has a narrow

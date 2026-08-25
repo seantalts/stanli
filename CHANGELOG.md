@@ -1,5 +1,117 @@
 # Changelog
 
+## 0.9.0
+
+### A pass for the lanes re-rolling cannot see
+
+Re-rolling needs a template that repeats with a fixed period, adjacent
+and in phase, which is not how most graphs present their per-observation
+work. A new pass (`runtime/src/partition.cpp`, #190, #191, #192) asks
+where a lane *ends* instead: at a target term or an element store,
+reaching back over the ops whose values never leave it. Lanes found that
+way need not be adjacent, so they are bucketed by a structural
+fingerprint that ignores which slot a lane reads, and each bucket is
+rewritten in place of its first lane as gathered vector ops, a density
+whose per-lane outcomes are concatenated into the layout its vector
+kernel unpacks, a store with a row-reduction tail, or a multi-template
+bucket split at whatever writes into the middle of it.
+`state_space_stochastic_level_stochastic_seasonal` falls from 1,375 ops
+to 19 (2.29x per gradient), `Mth_model` from 1,563 to 35 (1.63x),
+`Mh_model` from 1,542 to 18 (1.53x), `Mtbh_model` 1.43x, and
+`Survey_model` from 1,427 to 9. One arm rewrites a chain rather than
+widening it: the ordinal IRT idiom of scalar product, threshold
+subtraction, and cumulative sum feeding a categorical draw is one row of
+a `categorical_logit_glm_lpmf`, recognized by dataflow and emitted per
+item, which takes `gpcm_latent_reg_irt` from 34,634 ops to 91 (6.5x) and
+`grsm_latent_reg_irt` 6.3x. Two measured pessimizations live in the cost
+model rather than in the shipped graph: fusing lanes that are identical
+down to their immediates re-expands what CSE just collapsed, and a
+density with no elementwise kernel trades one vectorized call for W
+recorder calls. `STANLI_NO_PARTITION=1` disables the pass.
+
+### Repeated terms collapse before they are evaluated
+
+An unrolled capture-recapture model emits one Bernoulli term per capture
+occasion per individual, and most of them are bit-identical: `Mh_model`
+has 685 copies, `Mb_model` 786, each a kernel call and a tape entry on
+every leapfrog step. Re-rolling leaves them alone, since a target term
+has no op consumer. Local value numbering now merges them (#184), made
+safe for a graph of mutable buffers by versioning every write and by
+letting only an op whose output slot is written once in the whole graph
+be the survivor. `Mt_model` goes from 1,062 ops to 70 (16.1x per
+gradient), `Mh_model` gains 1.39x, and `gpcm_latent_reg_irt` enters the
+partition pass with 34,634 ops rather than 61,612. Placement was
+measured: before re-rolling it destroys the periodicity re-roll matches
+on, and it runs after lane partitioning, whose lanes it would otherwise
+leave in pieces. `STANLI_NO_CSE=1` disables it.
+
+### Kernels stop replaying stan-math, again
+
+The mixture kernels compute closed-form partials instead of building a
+nested autodiff tape per element (#184): `normal_mixture` and the
+`low_dim_gauss_mix` pair are 45-47% faster, `ldaK2` 46%, `ldaK5` 26%,
+with the `log_sum_exp` family bitwise unchanged. Dirichlet, both
+`multi_normal` parameterizations, and the tail GLMs stop building that
+tape twice per gradient (#189), which is worth 1.28x on
+`multi_occupancy` and 3-4% on `hier_2pl`, `gpcm_latent_reg_irt`, and
+`ldaK2`; the var-arithmetic densities that drift under seed-then-scale
+keep both tapes, so nothing moves for them. The forward `log` runs a
+packet at a time in the same change, and the binomial family gains
+elementwise forms that cost per element what their summed forms do
+(#192), which is what lets `Survey_model`'s bucket fuse at all. `pow`
+also joined re-rolling's widenable set (#184): `dogs_hierarchical` -69%,
+`dogs_nonhierarchical` -56%.
+
+### ODE callbacks and Jacobian rows
+
+Stan Math's ODE outputs are already precomputed-gradient nodes connected
+to the active inputs, so each Jacobian row is now harvested by chaining
+its own output node instead of running a nested reverse sweep across
+every sibling output, and effect-free scalar right-hand-side bytecode is
+compacted at load time (#188). Seven rotating matched Release medians:
+`lotka_volterra` 78.5 -> 60.9 us per gradient, `soil_incubation`
+101.4 -> 82.1 us, `one_comp_mm_elim_abs` 663.9 -> 629.8 us, with LP and
+every gradient component byte-identical to the parent build.
+
+### print and reject are not fusable
+
+Re-rolling's op-match blocklist was missing `OP_PRINT` and `OP_REJECT`,
+which constant folding and islands both refuse (#181). The hoist arm
+collapsed N per-lane prints into one, and straight-line prints with
+distinct literals deduped to the first, because op matching does not
+compare the literal payload. Both opcodes now refuse fusion.
+
+### A bare generated-quantities container reports NaN, not 0
+
+Graph-path `write_array` zero-filled the elements of a bare generated
+quantities container that indexed assignment never wrote, where CmdStan
+and stanli's own MIR interpreter leave them NaN (#182); the cross-path
+harness flagged the split. A partially assigned bare container now
+reports NaN in the untouched positions, which is a visible change for any
+model that has one. The integer arm already used its own sentinel.
+
+### Corpus
+
+The full posteriordb benchmark was re-measured on the merged stack
+(#187, #193). The median per-gradient speedup against CmdStan moves from
+2.17x to 2.91x, 116 of 119 measured models are at or above parity (up
+from 104), and nothing regressed by more than 10%. The whole sub-parity
+tail is the three ODE models, at 0.87x, 0.90x, and 0.90x. The tables in
+`docs/benchmarks.md` and the headline numbers in the READMEs and the demo
+page carry the new run.
+
+### Compatibility
+
+Fusion and packet arithmetic change the order of some reductions, so
+gradients can differ from 0.8.5 in their last bits. Every change here
+replayed the full CmdStan reference corpus with its worst line unmoved,
+and the committed verification record stands at 118 of 120 models
+verified, 41 of them bitwise, worst relative deviation 2.6e-12. The worst
+deviation any pass introduces against the untransformed graph is
+5.99e-13, from the IRT GLM synthesis.
+`STANLI_NO_PARTITION=1` and `STANLI_NO_CSE=1` restore the pre-pass
+graphs when a difference needs attributing.
+
 ## 0.8.5
 
 ### Wasm builds of the R package bundle their runtime

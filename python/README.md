@@ -130,29 +130,29 @@ point, both sides `-O3` with FP contraction pinned off:
 <!--gen:bench_table_us-->
 | model | params | stanli | CmdStan | speedup |
 | --- | ---: | ---: | ---: | ---: |
-| `radon_pooled` | 3 | 50.7 us | 320.9 us | **6.3x** |
-| `arK` | 7 | 1.8 us | 12.5 us | **7.1x** |
-| `radon_hierarchical_intercept_centered` | 391 | 97.0 us | 569.1 us | **5.9x** |
-| `radon_county_intercept` | 388 | 81.8 us | 431.6 us | **5.3x** |
-| `nes` | 10 | 16.0 us | 69.3 us | **4.3x** |
-| `eight_schools_noncentered` | 10 | 0.30 us | 0.74 us | **2.5x** |
-| `election88_full` | 90 | 292.2 us | 902.0 us | **3.1x** |
-| `bym2_offset_only` | 3845 | 40.6 us | 114.6 us | **2.8x** |
-| `dogs` | 3 | 9.1 us | 63.7 us | **7.0x** |
-| `kidscore_momiq` | 3 | 1.5 us | 4.9 us | **3.2x** |
-| `lsat_model` | 1006 | 43.7 us | 91.2 us | **2.1x** |
-| `state_space_stochastic_level_stochastic_seasonal` | 389 | 18.7 us | 26.3 us | **1.4x** |
-| `hmm_example` | 4 | 20.6 us | 27.1 us | **1.3x** |
+| `radon_pooled` | 3 | 45.4 us | 320.9 us | **7.1x** |
+| `arK` | 7 | 1.7 us | 12.5 us | **7.1x** |
+| `radon_hierarchical_intercept_centered` | 391 | 97.1 us | 569.1 us | **5.9x** |
+| `radon_county_intercept` | 388 | 81.6 us | 431.6 us | **5.3x** |
+| `nes` | 10 | 16.1 us | 69.3 us | **4.3x** |
+| `eight_schools_noncentered` | 10 | 0.23 us | 0.74 us | **3.2x** |
+| `election88_full` | 90 | 256.1 us | 902.0 us | **3.5x** |
+| `bym2_offset_only` | 3845 | 39.9 us | 114.6 us | **2.9x** |
+| `dogs` | 3 | 7.1 us | 63.7 us | **8.9x** |
+| `kidscore_momiq` | 3 | 1.6 us | 4.9 us | **3.1x** |
+| `lsat_model` | 1006 | 37.9 us | 91.2 us | **2.4x** |
+| `state_space_stochastic_level_stochastic_seasonal` | 389 | 6.7 us | 26.3 us | **4.0x** |
+| `hmm_example` | 4 | 17.5 us | 27.1 us | **1.6x** |
 | `garch11` | 4 | 7.0 us | 9.7 us | **1.4x** |
-| `hmm_drive_0` | 6 | 120.5 us | 132.8 us | **1.1x** |
-| `normal_mixture` | 3 | 85.7 us | 88.2 us | **1.0x** |
-| `low_dim_gauss_mix` | 5 | 90.3 us | 98.3 us | **1.1x** |
-| `wells_dist100ars_model` | 3 | 17.4 us | 19.0 us | **1.1x** |
-| `iohmm_reg` | 29 | 243.8 us | 320.3 us | **1.3x** |
-| `radon_county` | 389 | 73.2 us | 82.1 us | **1.1x** |
+| `hmm_drive_0` | 6 | 110.8 us | 132.8 us | **1.2x** |
+| `normal_mixture` | 3 | 41.8 us | 88.2 us | **2.1x** |
+| `low_dim_gauss_mix` | 5 | 48.2 us | 98.3 us | **2.0x** |
+| `wells_dist100ars_model` | 3 | 17.2 us | 19.0 us | **1.1x** |
+| `iohmm_reg` | 29 | 227.2 us | 320.3 us | **1.4x** |
+| `radon_county` | 389 | 73.6 us | 82.1 us | **1.1x** |
 | `arma11` | 4 | 4.5 us | 6.2 us | **1.4x** |
-| `diamonds` | 26 | 31.2 us | 31.5 us | **1.0x** |
-| `ldaK2` | 7 | 95.7 us | 104.1 us | **1.1x** |
+| `diamonds` | 26 | 31.1 us | 31.5 us | **1.0x** |
+| `ldaK2` | 7 | 48.2 us | 104.1 us | **2.2x** |
 <!--/gen-->
 
 The wins come from op granularity. CmdStan's var tape allocates, walks,

@@ -29,44 +29,47 @@ this page.
 
 | model | unconstrained params | stanli ns/grad | CmdStan ns/grad | speedup | stanli prep |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `radon_pooled` | 3 | 50,669 | 320,938 | 6.33x | 0.018 s |
-| `arK` | 7 | 1,754 | 12,459 | 7.10x | 0.002 s |
-| `radon_hierarchical_intercept_centered` | 391 | 97,029 | 569,143 | 5.87x | 0.042 s |
-| `radon_county_intercept` | 388 | 81,826 | 431,614 | 5.27x | 0.027 s |
-| `nes` | 10 | 16,046 | 69,324 | 4.32x | 0.004 s |
-| `eight_schools_noncentered` | 10 | 302 | 745 | 2.47x | 0.001 s |
-| `election88_full` | 90 | 292,172 | 901,961 | 3.09x | 0.153 s |
-| `bym2_offset_only` | 3845 | 40,559 | 114,620 | 2.83x | 0.002 s |
-| `dogs` | 3 | 9,098 | 63,747 | 7.01x | 0.012 s |
-| `kidscore_momiq` | 3 | 1,528 | 4,861 | 3.18x | 0.001 s |
-| `lsat_model` | 1006 | 43,739 | 91,173 | 2.08x | 0.003 s |
-| `state_space_stochastic_level_stochastic_seasonal` | 389 | 18,718 | 26,320 | 1.41x | 0.002 s |
-| `hmm_example` | 4 | 20,557 | 27,145 | 1.32x | 0.008 s |
-| `garch11` | 4 | 7,034 | 9,664 | 1.37x | 0.002 s |
-| `hmm_drive_0` | 6 | 120,467 | 132,850 | 1.10x | 0.037 s |
-| `normal_mixture` | 3 | 85,679 | 88,239 | 1.03x | 0.003 s |
-| `low_dim_gauss_mix` | 5 | 90,323 | 98,315 | 1.09x | 0.003 s |
-| `wells_dist100ars_model` | 3 | 17,446 | 18,997 | 1.09x | 0.002 s |
-| `iohmm_reg` | 29 | 243,847 | 320,335 | 1.31x | 0.270 s |
-| `radon_county` | 389 | 73,180 | 82,076 | 1.12x | 0.011 s |
-| `arma11` | 4 | 4,550 | 6,158 | 1.35x | 0.002 s |
-| `diamonds` | 26 | 31,202 | 31,497 | 1.01x | 0.021 s |
-| `ldaK2` | 7 | 95,716 | 104,059 | 1.09x | 0.006 s |
+| `radon_pooled` | 3 | 45,378 | 320,938 | 7.07x | 0.015 s |
+| `arK` | 7 | 1,748 | 12,459 | 7.13x | 0.002 s |
+| `radon_hierarchical_intercept_centered` | 391 | 97,078 | 569,143 | 5.86x | 0.042 s |
+| `radon_county_intercept` | 388 | 81,602 | 431,614 | 5.29x | 0.025 s |
+| `nes` | 10 | 16,100 | 69,324 | 4.31x | 0.004 s |
+| `eight_schools_noncentered` | 10 | 234 | 745 | 3.18x | 0.000 s |
+| `election88_full` | 90 | 256,087 | 901,961 | 3.52x | 0.123 s |
+| `bym2_offset_only` | 3845 | 39,938 | 114,620 | 2.87x | 0.002 s |
+| `dogs` | 3 | 7,130 | 63,747 | 8.94x | 0.010 s |
+| `kidscore_momiq` | 3 | 1,576 | 4,861 | 3.08x | 0.001 s |
+| `lsat_model` | 1006 | 37,934 | 91,173 | 2.40x | 0.003 s |
+| `state_space_stochastic_level_stochastic_seasonal` | 389 | 6,667 | 26,320 | 3.95x | 0.002 s |
+| `hmm_example` | 4 | 17,462 | 27,145 | 1.55x | 0.009 s |
+| `garch11` | 4 | 7,004 | 9,664 | 1.38x | 0.002 s |
+| `hmm_drive_0` | 6 | 110,835 | 132,850 | 1.20x | 0.040 s |
+| `normal_mixture` | 3 | 41,809 | 88,239 | 2.11x | 0.003 s |
+| `low_dim_gauss_mix` | 5 | 48,184 | 98,315 | 2.04x | 0.003 s |
+| `wells_dist100ars_model` | 3 | 17,171 | 18,997 | 1.11x | 0.002 s |
+| `iohmm_reg` | 29 | 227,247 | 320,335 | 1.41x | 0.276 s |
+| `radon_county` | 389 | 73,628 | 82,076 | 1.11x | 0.011 s |
+| `arma11` | 4 | 4,494 | 6,158 | 1.37x | 0.002 s |
+| `diamonds` | 26 | 31,110 | 31,497 | 1.01x | 0.021 s |
+| `ldaK2` | 7 | 48,159 | 104,059 | 2.16x | 0.006 s |
 
 Generated adjoints and native runtime control put every sequential model in
-this slice at parity or better: `arma11` and `garch11` are 1.35-1.37x, the
-fixed-state HMM rows are 1.10-1.32x, and `iohmm_reg` is now 1.31x. The island
-section below preserves the targeted per-region A/B that isolates what
-generated adjoints bought independently of absolute run noise.
+this slice at parity or better: `arma11` and `garch11` are 1.37-1.38x, the
+fixed-state HMM rows are 1.20-1.55x, and `iohmm_reg` is now 1.41x. Lane
+partitioning is what moved `state_space_stochastic_level_stochastic_seasonal`
+to 3.95x, by fusing a random walk whose period scan re-rolling could never
+phase correctly. The island section below preserves the targeted per-region
+A/B that isolates what generated adjoints bought independently of absolute
+run noise.
 
 ## Which models are faster, which are slower, and why
 
 Across the full corpus (`docs/corpus-bench.tsv`, 119 models with both
-gradients) the median per-gradient speedup is 2.17x and 104 of 119
+gradients) the median per-gradient speedup is 2.91x and 116 of 119
 models are at or above parity. The ratio is predicted almost entirely
 by the model's *shape*, not its size.
 
-**Faster (most of the corpus, typically 1.5-8x):**
+**Faster (most of the corpus, typically 1.5-11x):**
 
 - **Vectorized-statement models.** A `y ~ normal(X * beta, sigma)` over
   N observations is a handful of ops here; CmdStan builds and walks N
@@ -75,64 +78,78 @@ by the model's *shape*, not its size.
 - **Scalar loops the passes can vectorize.** The hierarchical indexing
   idiom (`y[n] ~ normal(mu[county[n]], sigma)` and loops that fill a
   vector element by element) arrives unrolled and is re-rolled back
-  into the class above: the radon family up to 6.3x, `election88_full`
-  3.1x, `dogs` 7.0x.
+  into the class above: the radon family up to 7.1x, `election88_full`
+  3.5x, `dogs` 8.9x.
 - **Nested fixed-width mixtures.** LDA's per-document `gamma[K]` construction
   and row `log_sum_exp` become two packed gathers, vector arithmetic, and one
-  row-reduction op. In the current corpus run, `ldaK2` is 95.7 us/gradient
-  (1.09x CmdStan) and `ldaK5` is 3.74 ms/gradient (1.49x).
+  row-reduction op, and the mixture kernels now differentiate in closed form
+  instead of building a tape per element. In the current corpus run, `ldaK2`
+  is 48.2 us/gradient (2.16x CmdStan) and `ldaK5` is 2.36 ms/gradient (2.36x).
+- **Repeated per-observation terms, adjacent or not.** The
+  capture-recapture family arrives as one Bernoulli term per occasion per
+  individual, most of them bit-identical. Re-rolling turns `Mtbh_model`'s 584
+  element writes into 146 destructive strided stores, common-subexpression
+  elimination removes the repeated terms, and lane partitioning fuses the
+  remainder across lanes that are neither adjacent nor in phase. The family
+  runs 2.57x (`Mh_model`) to 4.47x (`Mt_model`), with `Mth_model` 4.01x,
+  `M0_model` 3.55x, and `Mtbh_model` 3.32x. `Mb_model`, whose behavioral
+  recurrence stays scalar, is 1.19x.
+- **Ordinal IRT loops.** `gpcm_latent_reg_irt` and `grsm_latent_reg_irt` build
+  each item's category logits with a scalar product, a threshold subtraction,
+  and a cumulative sum feeding one categorical draw. That whole chain lowers
+  to one `categorical_logit_glm_lpmf` per item, and the two models are 11.0x
+  and 10.8x.
 - **Everything, on preparation.** The MIR/data-to-bound-executor path has a
-  2 ms median; 76 of 119 measured models prepare in at most 5 ms. The largest
-  JSON input, `nn_rbm1bJ100`, takes 3.158 s and `ldaK5` takes 0.293 s, against
+  2 ms median; 75 of 119 measured models prepare in at most 5 ms. The largest
+  JSON input, `nn_rbm1bJ100`, takes 2.832 s and `ldaK5` takes 0.276 s, against
   carried-over CmdStan builds of 5.2 s and 3.5 s respectively.
 
-**Near parity (roughly 0.9-1.5x), three shapes:**
+**Near parity (roughly 1.0-1.6x), two shapes:**
 
 - **Models dominated by one large dense operation** (a Cholesky, a
   big matrix product, the GP models). Both engines spend their time
   inside the same stan-math kernel; interpreter overhead is noise on
   top.
-- **Sequential models.** HMM recursions and state-space/ARMA/GARCH
-  updates read the previous step's parameter-dependent result, so
+- **Sequential models.** HMM recursions and ARMA/GARCH updates read the
+  previous step's parameter-dependent result, so
   re-rolling correctly refuses (vectorizing a recurrence would change
   the math). This is the class the island pass is for, and it sat at
   0.6-0.9x until the island backward stopped being a var replay and
-  became a generated adjoint program: `hmm_example` is now 1.32x,
-  `garch11` 1.37x, `hmm_gaussian` 1.19x, and the two `hmm_drive` models
-  1.10-1.17x against CmdStan. What keeps them at parity-plus rather than
+  became a generated adjoint program: `hmm_example` is now 1.55x,
+  `garch11` 1.38x, `hmm_gaussian` 1.43x, and the two `hmm_drive` models
+  1.20-1.27x against CmdStan. What keeps them at parity-plus rather than
   higher is per-op dispatch against CmdStan's inlined scalar code, one
   interpreted instruction at a time in each direction (the island section
   below has the targeted per-region numbers). Native runtime control now puts
-  `iohmm_reg` at 1.31x as well.
-- **Matrix-filling updates.** `Mtbh_model` re-rolls 584 element writes into
-  146 strided stores. A second in-place pass now keeps one initial copy and
-  makes all 146 stores destructive, reducing their profile share from 42.4%
-  to 5.5%. Native Bernoulli forwards then remove recorder overhead; the
-  current `Mt_model`, `Mth_model`, and `Mtbh_model` rows are 1.06x, 1.65x,
-  and 1.59x CmdStan.
+  `iohmm_reg` at 1.41x as well.
+  `state_space_stochastic_level_stochastic_seasonal` read as this class until
+  lane partitioning found the random walk hiding behind a mis-phased period
+  scan; it is 3.95x.
 
-**Slower (a shrinking tail, mostly 0.5-0.9x):**
+**Slower (three models):**
 
 - **ODE models**: `lotka_volterra`, `soil_incubation`, and
-  `one_comp_mm_elim_abs` are 0.59x, 0.59x, and 0.76x.
+  `one_comp_mm_elim_abs` are 0.87x, 0.90x, and 0.90x, and they are the whole
+  sub-parity tail.
   The remaining gap is our per-call dispatch of the compiled right-hand side
   against CmdStan's native C++ right-hand side inside the same underlying Stan
   Math integrator. (They were 0.015-0.025x before the right-hand side compiled;
   see below.)
-- **Occupancy and one matrix-filling shape**: `multi_occupancy` and
-  `dogs_nonhierarchical` are both 0.78x. These are the only non-ODE rows below
-  0.8x in this snapshot; `iohmm_reg`, GPCM, and GRSM have moved to 1.31x,
-  1.32x, and 1.50x respectively.
 
-A profile of every sub-parity model (`STANLI_PROFILE=1`) says the
-remaining tail is mostly not a graph problem: in seven of those models
-a single precompiled kernel is half to nine-tenths of the gradient.
+The two shapes that used to sit beside them have moved: `multi_occupancy` is
+2.65x on single-tape multi-normal partials and its share of the partition
+pass, and `dogs_nonhierarchical` is 2.09x once `pow` joined re-rolling's
+widenable set.
+
+A profile of the models that were sub-parity (`STANLI_PROFILE=1`) said the
+tail was mostly not a graph problem: in seven of them a single precompiled
+kernel was half to nine-tenths of the gradient.
 `diamonds` was the extreme, 90.9% in one GLM kernel that rebuilt a var
 tape in both sweeps; differentiating once and stashing the partials took it
 0.48x -> 0.89x in that targeted A/B; the current warmed mean is 1.01x.
 `prophet` was 82% in `OP_MATVEC` with one serial accumulation chain; four
 independent accumulators took it 0.67x -> 1.23x in the targeted A/B and it is
-1.23x in the current corpus run, bitwise unchanged.
+1.28x in the current corpus run, bitwise unchanged.
 
 ## Where the wins come from
 
@@ -161,6 +178,15 @@ the top of the page, not replacements for the current corpus rows:
   integer-outcome fusion closed the `dogs` family (0.65x -> 2.8x).
   57 of the 120 corpus models change under the passes, against 28
   before write-side fusion.
+- **Lane partitioning and CSE** (repeated work re-rolling cannot reach):
+  segmenting the graph at target terms and element stores finds lanes that are
+  neither adjacent nor in phase, and value numbering removes the terms an
+  unrolled model emits twice.
+  `state_space_stochastic_level_stochastic_seasonal` goes 1,375 ops -> 19
+  (2.29x), `Mth_model` 1,563 -> 35 (1.63x), `Mh_model` 1,542 -> 18 (1.53x),
+  `Survey_model` 1,427 -> 9, and `Mt_model` 1,062 -> 70 under CSE alone
+  (16.1x). The IRT arm rewrites `gpcm_latent_reg_irt`'s per-item chain as
+  `categorical_logit_glm_lpmf`, 34,634 ops -> 91 (6.5x internally).
 - **Post-reroll in-place slices** (chained partial matrix fills):
   `Mtbh_model` keeps the same 1,585-op graph, but 146 stores now move four
   values rather than copying a 730-value matrix. Median gradient latency
@@ -174,8 +200,10 @@ the top of the page, not replacements for the current corpus rows:
   reusing the partial column as their `ntheta` workspace. `Mt_model` falls
   30.6 -> 19.2 us, `Mth_model` 113.2 -> 57.3 us, and `Mtbh_model` 47.4 ->
   26.8 us after the slice fix. The combined `Mtbh_model` improvement is
-  106.5 -> 26.8 us (3.98x). In the full warmed-mean snapshot the three models
-  are 19.0, 57.1, and 27.0 us/gradient, or 1.05x, 1.65x, and 1.59x CmdStan.
+  106.5 -> 26.8 us (3.98x). Common-subexpression elimination and lane
+  partitioning have since taken the same three models further: their
+  warmed-mean rows are now 4.47, 23.4, and 12.9 us/gradient, or 4.47x, 4.01x,
+  and 3.32x CmdStan.
 - **Native scalar probability categorical** removes the nested autodiff replay
   only when one categorical outcome selects from an active probability vector.
   Stan Math's double overload still computes the value and performs every
@@ -185,12 +213,13 @@ the top of the page, not replacements for the current corpus rows:
   replay for their dense pullback. The graph is unchanged. In a targeted
   2026-08-24 Release A/B (seven matched-run medians),
   `gpcm_latent_reg_irt` moved 1.741465 -> 0.955609 ms/gradient (1.8224x
-  internally, now 1.3998x CmdStan), and `grsm_latent_reg_irt` moved
-  0.9705208 -> 0.4953192 ms/gradient (1.9594x internally, now 1.5387x
+  internally, 1.3998x CmdStan at that point), and `grsm_latent_reg_irt` moved
+  0.9705208 -> 0.4953192 ms/gradient (1.9594x internally, 1.5387x
   CmdStan). Their categorical opcode time fell 4.45x and 5.00x respectively;
-  the categorical-logit RBM controls were unchanged. These targeted medians
-  are not replacements for the current full-corpus warmed means of 1.014034
-  ms (1.32x CmdStan) and 0.508863 ms (1.50x CmdStan) in the table below.
+  the categorical-logit RBM controls were unchanged. Lane partitioning later
+  replaced those per-item categorical calls with one
+  `categorical_logit_glm_lpmf` each, so the current full-corpus warmed means
+  in the table below are 121.1 us (11.0x CmdStan) and 70.9 us (10.8x).
 - **Compiled scalar generated-quantities RNGs** keep caller-owned chain state
   on the forward-only write-array graph for scalar `poisson_log`, `uniform`,
   `bernoulli`, `normal`, `lognormal`, and `binomial` draws.
@@ -414,18 +443,20 @@ the top of the page, not replacements for the current corpus rows:
   they do not refresh the full-corpus table or its retained CmdStan columns.
 - **Packed row-wise reductions** (the LDA inner loop): targeted medians fall
   from 154 to 94 us for `ldaK2` and 6.82 to 3.70 ms for `ldaK5`, while their
-  graphs collapse from 15,854 to 22 and 434,126 to 156 ops. The full
-  warmed-mean rows are 95.7 us (1.09x) and 3.74 ms (1.49x).
+  graphs collapse from 15,854 to 22 and 434,126 to 156 ops. With the mixture
+  kernels' analytic partials on top, the full warmed-mean rows are 48.2 us
+  (2.16x) and 2.36 ms (2.36x).
 - **Native symmetric-eigen pullbacks** remove reverse-time eigensolves from
   `kronecker_gp`: the targeted median falls 289.0 -> 185.7 us/gradient. Its
-  current warmed mean is 184.6 us, 1.18x CmdStan.
+  current warmed mean is 183.3 us, 1.19x CmdStan.
 - **Native Cholesky-density partials** cover the exact single-observation,
   Cholesky-factor-active `multi_normal_cholesky` shape in `gp_regr`: the
   targeted median falls 6.05 -> 4.20 us/gradient. Its current warmed mean is
-  4.33 us, 1.09x CmdStan.
+  4.04 us, 1.16x CmdStan.
 - **Elementwise-lp fusion** (the mixture idiom): `low_dim_gauss_mix`
-  7,208 ops -> 16, crossing parity (0.78x -> 1.07x); `normal_mixture`
-  13 ops, 1.09x.
+  7,208 ops -> 16, crossing parity (0.78x -> 1.07x) at the time;
+  `normal_mixture` 13 ops. Analytic mixture partials took both further, to
+  2.04x and 2.11x in the current run.
 
 ## Tape islands, measured
 
@@ -587,10 +618,10 @@ input promoted both to reverse mode and integrated sensitivities for both.
 On `one_comp_mm_elim_abs` the initial state is data, so the sensitivity width
 falls from four to three and median latency from 699 to 639 us/gradient. The
 fully active `lotka_volterra` and `soil_incubation` shapes take the same path
-as before and remain flat within measurement noise. The retained pre-patch
-full-corpus warmed means are 629 us for `one_comp_mm_elim_abs`, 78 us for
-`lotka_volterra`, and 103 us for `soil_incubation`, or 0.75x, 0.53x, and
-0.59x CmdStan.
+as before and remain flat within measurement noise. After the callback and
+Jacobian-harvest work below, the current full-corpus warmed means are 523 us
+for `one_comp_mm_elim_abs`, 47.6 us for `lotka_volterra`, and 67.8 us for
+`soil_incubation`, or 0.90x, 0.87x, and 0.90x CmdStan.
 
 Preparation scales too: the largest corpus model (`nn_rbm1bJ100`, MNIST,
 60,000 rows, 79,411 parameters) lowers to a 132,024-op graph. Its old 23.80 s
@@ -605,7 +636,7 @@ The same profiled A/B removes 1.34 GB of peak RSS. The log density and all
 tolerance. Overall, graph
 compilation is 4-400 ms against a 6.2-7.6 s CmdStan compile (warm precompiled
 header, after a multi-minute one-time `make build`); that gap is what
-time-to-first-draw is made of. The current corpus run records 3.158 s for the
+time-to-first-draw is made of. The current corpus run records 2.832 s for the
 same `nn_rbm1bJ100` MIR/data-to-bound-executor path.
 
 ## End to end: eight schools, 1000 warmup + 1000 draws
@@ -676,9 +707,11 @@ values (every CSV column at the same point); recording those caught two
 interpreter bugs invisible to structural coverage checks.
 
 Transformed models change summation order relative to CmdStan's scalar
-loop, so they verify at tolerance rather than bitwise: the passes
-change 65 corpus models, and the worst gradient deviation any of them
-introduces vs the untransformed graph is 3.5e-13 relative -- `iohmm_reg`,
+loop, so they verify at tolerance rather than bitwise: the passes change
+at least 65 corpus models (a census taken before the partition pass), and
+the worst gradient deviation any of them introduces vs the untransformed
+graph is 5.99e-13 relative, measured on the A/B for the IRT GLM synthesis
+arm. Before that arm the worst was 3.5e-13 -- `iohmm_reg`,
 whose entire forward algorithm runs as one island. That was 6.0e-13 while
 the island replayed under `var`: generating the backward moved it closer
 to the graph it replaced rather than further, and `hmm_gaussian`, which
@@ -702,7 +735,7 @@ Sampling is 1000 warmup + 1000 draws at matched seeds and is indicative
 rather than controlled. Tiny numerical differences can send NUTS down
 different trajectories, and matched seeds do not guarantee matched modes.
 Across the 117 rows completed by both engines, the median end-to-end
-speedup is 2.25x and 110 finish at or above CmdStan's time for this seed.
+speedup is 2.57x and 114 finish at or above CmdStan's time for this seed.
 For example, CmdStan's `hmm_gaussian` run at this seed has every post-warmup
 draw divergent, so its 18.75 s is not a useful sampler comparison. Read the
 gradient column as controlled fixed-point throughput and the sampling column
@@ -711,125 +744,125 @@ as end-to-end behavior for this one seed. Regenerate both tables with
 
 | model | params | CmdStan ns/grad | grad speedup | CmdStan sample | sample speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `arK` | 7 | 12,459 | 7.10x | 0.97 s | 6.06x |
-| `dogs` | 3 | 63,747 | 7.01x | 2.39 s | 3.68x |
-| `logmesquite_logvash` | 7 | 2,841 | 6.59x | 0.39 s | 3.25x |
-| `logmesquite_logvas` | 8 | 3,130 | 6.58x | 0.42 s | 3.23x |
-| `radon_pooled` | 3 | 320,938 | 6.33x | 3.78 s | 6.20x |
-| `mesquite` | 8 | 3,055 | 6.31x | 0.57 s | 3.00x |
-| `logmesquite` | 8 | 2,902 | 5.96x | 0.33 s | 4.12x |
-| `logmesquite_logva` | 5 | 2,070 | 5.91x | 0.29 s | 3.62x |
-| `radon_hierarchical_intercept_centered` | 391 | 569,143 | 5.87x | 44.69 s | 4.80x |
-| `radon_county_intercept` | 388 | 431,614 | 5.27x | 27.37 s | 5.08x |
-| `GLM_Poisson_model` | 4 | 2,008 | 5.19x | 0.24 s | 3.43x |
-| `rats_model` | 65 | 6,475 | 5.11x | 0.52 s | 2.48x |
-| `logmesquite_logvolume` | 3 | 1,304 | 5.00x | 0.20 s | 5.00x |
-| `Rate_2_model` | 2 | 561 | 4.75x | 0.23 s | 7.67x |
-| `radon_hierarchical_intercept_noncentered` | 391 | 570,300 | 4.74x | 56.03 s | 4.53x |
-| `radon_variable_intercept_centered` | 390 | 427,262 | 4.72x | 23.02 s | 4.22x |
-| `radon_variable_intercept_noncentered` | 390 | 430,721 | 4.69x | 33.78 s | 4.08x |
-| `kilpisjarvi` | 3 | 1,532 | 4.60x | 1.60 s | 1.67x |
-| `radon_variable_slope_centered` | 390 | 420,987 | 4.56x | 23.66 s | 4.19x |
-| `radon_variable_slope_noncentered` | 390 | 422,894 | 4.48x | 51.94 s | 4.24x |
-| `dogs_log` | 2 | 41,387 | 4.37x | 1.01 s | 1.87x |
-| `nes` | 10 | 69,324 | 4.32x | 6.70 s | 4.38x |
-| `kidscore_interaction_c` | 5 | 10,333 | 4.19x | 0.39 s | 4.33x |
+| `gpcm_latent_reg_irt` | 530 | 1,337,651 | 11.04x | 161.93 s | 16.46x |
+| `grsm_latent_reg_irt` | 408 | 762,133 | 10.75x | 66.92 s | 16.77x |
+| `dogs` | 3 | 63,747 | 8.94x | 2.39 s | 4.27x |
+| `arK` | 7 | 12,459 | 7.13x | 0.97 s | 6.06x |
+| `radon_pooled` | 3 | 320,938 | 7.07x | 3.78 s | 6.41x |
+| `logmesquite_logvash` | 7 | 2,841 | 6.56x | 0.39 s | 3.90x |
+| `logmesquite_logvas` | 8 | 3,130 | 6.44x | 0.42 s | 3.82x |
+| `mesquite` | 8 | 3,055 | 6.39x | 0.57 s | 3.00x |
+| `rats_model` | 65 | 6,475 | 6.07x | 0.52 s | 3.25x |
+| `logmesquite` | 8 | 2,902 | 6.00x | 0.33 s | 4.71x |
+| `radon_hierarchical_intercept_centered` | 391 | 569,143 | 5.86x | 44.69 s | 6.80x |
+| `radon_hierarchical_intercept_noncentered` | 391 | 570,300 | 5.84x | 56.03 s | 4.99x |
+| `logmesquite_logva` | 5 | 2,070 | 5.78x | 0.29 s | 4.14x |
+| `radon_county_intercept` | 388 | 431,614 | 5.29x | 27.37 s | 4.74x |
+| `radon_variable_intercept_noncentered` | 390 | 430,721 | 5.26x | 33.78 s | 4.30x |
+| `radon_variable_intercept_centered` | 390 | 427,262 | 5.22x | 23.02 s | 4.62x |
+| `GLM_Poisson_model` | 4 | 2,008 | 5.20x | 0.24 s | 4.00x |
+| `dogs_log` | 2 | 41,387 | 5.09x | 1.01 s | 2.15x |
+| `radon_variable_slope_noncentered` | 390 | 422,894 | 5.07x | 51.94 s | 4.92x |
+| `radon_variable_slope_centered` | 390 | 420,987 | 5.04x | 23.66 s | 4.62x |
+| `logmesquite_logvolume` | 3 | 1,304 | 4.79x | 0.20 s | 6.67x |
+| `Rate_2_model` | 2 | 561 | 4.75x | 0.23 s | 11.50x |
+| `kilpisjarvi` | 3 | 1,532 | 4.56x | 1.60 s | 1.95x |
+| `Mt_model` | 4 | 19,984 | 4.47x | 0.48 s | 6.00x |
+| `nes` | 10 | 69,324 | 4.31x | 6.70 s | 3.58x |
+| `kidscore_interaction_c` | 5 | 10,333 | 4.15x | 0.39 s | 4.33x |
 | `Rate_1_model` | 1 | 260 | 4.13x | 0.15 s | 7.50x |
-| `kidscore_interaction_z` | 5 | 10,013 | 4.03x | 0.47 s | 4.27x |
-| `kidscore_mom_work` | 5 | 9,959 | 4.03x | 0.64 s | 4.57x |
-| `kidscore_interaction_c2` | 5 | 9,901 | 4.01x | 0.40 s | 4.44x |
-| `kidscore_interaction` | 5 | 9,927 | 3.98x | 1.90 s | 3.45x |
-| `GLMM_Poisson_model` | 45 | 2,412 | 3.59x | 0.69 s | 3.29x |
-| `radon_partially_pooled_centered` | 389 | 272,243 | 3.58x | 13.96 s | 3.19x |
-| `radon_partially_pooled_noncentered` | 389 | 273,685 | 3.57x | 20.11 s | 3.41x |
-| `sesame_one_pred_a` | 3 | 3,440 | 3.50x | 0.23 s | 3.83x |
-| `kidscore_momhsiq` | 4 | 7,145 | 3.49x | 0.84 s | 3.23x |
-| `GLMM1_model` | 237 | 35,558 | 3.46x | 1.68 s | 1.56x |
-| `logearn_interaction_z` | 5 | 26,484 | 3.45x | 0.84 s | 3.82x |
-| `logearn_interaction` | 5 | 26,051 | 3.40x | 8.49 s | 3.25x |
-| `Rate_4_model` | 2 | 311 | 3.31x | 0.17 s | 5.67x |
-| `Rate_3_model` | 1 | 268 | 3.27x | 0.18 s | 9.00x |
-| `radon_variable_intercept_slope_centered` | 777 | 437,889 | 3.22x | 27.23 s | 2.65x |
-| `radon_variable_intercept_slope_noncentered` | 777 | 441,463 | 3.22x | 58.56 s | 2.94x |
-| `logearn_logheight_male` | 4 | 18,697 | 3.22x | 13.41 s | 3.07x |
-| `kidscore_momiq` | 3 | 4,861 | 3.18x | 0.42 s | 2.80x |
-| `logearn_height_male` | 4 | 19,147 | 3.17x | 3.77 s | 2.65x |
-| `election88_full` | 90 | 901,961 | 3.09x | 468.15 s | 4.77x |
-| `Rate_5_model` | 1 | 262 | 3.05x | 0.19 s | 9.50x |
-| `blr` | 6 | 1,728 | 2.97x | 0.21 s | 3.50x |
-| `seeds_centered_model` | 26 | 2,650 | 2.91x | 0.28 s | 2.33x |
-| `kidscore_momhs` | 3 | 4,483 | 2.90x | 0.30 s | 4.29x |
-| `bym2_offset_only` | 3845 | 114,620 | 2.83x | 23.40 s | 1.39x |
-| `seeds_stanified_model` | 26 | 2,341 | 2.70x | 0.30 s | 2.73x |
-| `log10earn_height` | 3 | 11,560 | 2.64x | 1.75 s | 1.79x |
-| `logistic_regression_rhs` | 3075 | 113,106 | 2.61x | 16.23 s | 1.38x |
-| `surgical_model` | 14 | 1,684 | 2.55x | 0.23 s | 2.88x |
-| `logearn_height` | 3 | 11,162 | 2.55x | 1.71 s | 2.38x |
-| `eight_schools_noncentered` | 10 | 745 | 2.47x | 0.20 s | 4.00x |
-| `seeds_model` | 26 | 2,130 | 2.38x | 0.29 s | 2.42x |
-| `pilots` | 18 | 1,878 | 2.27x | 1.29 s | 1.63x |
-| `irt_2pl` | 144 | 37,468 | 2.24x | 2.17 s | 1.63x |
-| `earn_height` | 3 | 10,866 | 2.21x | 1.86 s | 2.11x |
-| `GLM_Binomial_model` | 3 | 1,809 | 2.17x | 0.21 s | 3.00x |
-| `lsat_model` | 1006 | 91,173 | 2.08x | 4.66 s | 1.60x |
-| `dugongs_model` | 4 | 1,653 | 1.75x | 0.25 s | 2.78x |
-| `wells_dist` | 2 | 39,202 | 1.75x | 1.44 s | 2.06x |
-| `Mth_model` | 394 | 93,922 | 1.65x | 5.43 s | 1.53x |
-| `2pl_latent_reg_irt` | 531 | 134,556 | 1.61x | 7.94 s | 1.24x |
-| `losscurve_sislob` | 15 | 3,450 | 1.60x | 0.31 s | 1.41x |
-| `Mtbh_model` | 154 | 42,791 | 1.59x | 2.38 s | 1.53x |
-| `hierarchical_gp` | 933 | 47,565 | 1.51x | 17.20 s | 1.15x |
-| `grsm_latent_reg_irt` | 408 | 762,133 | 1.50x | 66.92 s | 2.33x |
-| `accel_splines` | 82 | 10,584 | 1.45x | 19.74 s | 1.21x |
+| `radon_partially_pooled_centered` | 389 | 272,243 | 4.11x | 13.96 s | 3.66x |
+| `radon_partially_pooled_noncentered` | 389 | 273,685 | 4.08x | 20.11 s | 3.84x |
+| `Mth_model` | 394 | 93,922 | 4.01x | 5.43 s | 2.25x |
+| `kidscore_interaction_c2` | 5 | 9,901 | 3.98x | 0.40 s | 3.64x |
+| `kidscore_interaction_z` | 5 | 10,013 | 3.98x | 0.47 s | 3.92x |
+| `kidscore_mom_work` | 5 | 9,959 | 3.98x | 0.64 s | 4.57x |
+| `state_space_stochastic_level_stochastic_seasonal` | 389 | 26,320 | 3.95x | 39.76 s | 2.15x |
+| `sesame_one_pred_a` | 3 | 3,440 | 3.93x | 0.23 s | 5.75x |
+| `kidscore_interaction` | 5 | 9,927 | 3.89x | 1.90 s | 2.75x |
+| `radon_variable_intercept_slope_noncentered` | 777 | 441,463 | 3.67x | 58.56 s | 3.34x |
+| `radon_variable_intercept_slope_centered` | 777 | 437,889 | 3.66x | 27.23 s | 2.86x |
+| `seeds_centered_model` | 26 | 2,650 | 3.60x | 0.28 s | 3.50x |
+| `M0_model` | 2 | 15,595 | 3.55x | 0.37 s | 6.17x |
+| `logearn_interaction_z` | 5 | 26,484 | 3.55x | 0.84 s | 3.50x |
+| `election88_full` | 90 | 901,961 | 3.52x | 468.15 s | 3.80x |
+| `kidscore_momhsiq` | 4 | 7,145 | 3.52x | 0.84 s | 2.90x |
+| `GLMM_Poisson_model` | 45 | 2,412 | 3.47x | 0.69 s | 4.31x |
+| `logearn_interaction` | 5 | 26,051 | 3.46x | 8.49 s | 2.75x |
+| `GLMM1_model` | 237 | 35,558 | 3.42x | 1.68 s | 1.58x |
+| `dogs_hierarchical` | 2 | 34,053 | 3.32x | 0.68 s | 2.96x |
+| `Mtbh_model` | 154 | 42,791 | 3.32x | 2.38 s | 2.20x |
+| `Rate_4_model` | 2 | 311 | 3.31x | 0.17 s | 8.50x |
+| `seeds_stanified_model` | 26 | 2,341 | 3.28x | 0.30 s | 3.75x |
+| `blr` | 6 | 1,728 | 3.22x | 0.21 s | 4.20x |
+| `logearn_height_male` | 4 | 19,147 | 3.22x | 3.77 s | 2.43x |
+| `Rate_5_model` | 1 | 262 | 3.20x | 0.19 s | 9.50x |
+| `surgical_model` | 14 | 1,684 | 3.19x | 0.23 s | 4.60x |
+| `eight_schools_noncentered` | 10 | 745 | 3.18x | 0.20 s | 6.67x |
+| `logearn_logheight_male` | 4 | 18,697 | 3.18x | 13.41 s | 2.75x |
+| `Rate_3_model` | 1 | 268 | 3.15x | 0.18 s | 9.00x |
+| `dugongs_model` | 4 | 1,653 | 3.12x | 0.25 s | 5.00x |
+| `kidscore_momiq` | 3 | 4,861 | 3.08x | 0.42 s | 2.62x |
+| `seeds_model` | 26 | 2,130 | 2.91x | 0.29 s | 3.22x |
+| `kidscore_momhs` | 3 | 4,483 | 2.88x | 0.30 s | 4.29x |
+| `bym2_offset_only` | 3845 | 114,620 | 2.87x | 23.40 s | 1.40x |
+| `logistic_regression_rhs` | 3075 | 113,106 | 2.77x | 16.23 s | 1.35x |
+| `log10earn_height` | 3 | 11,560 | 2.75x | 1.75 s | 1.79x |
+| `multi_occupancy` | 106 | 58,996 | 2.65x | 7.34 s | 2.96x |
+| `earn_height` | 3 | 10,866 | 2.62x | 1.86 s | 2.30x |
+| `Mh_model` | 388 | 38,956 | 2.57x | 2.66 s | 1.87x |
+| `pilots` | 18 | 1,878 | 2.56x | 1.29 s | 1.95x |
+| `logearn_height` | 3 | 11,162 | 2.52x | 1.71 s | 2.01x |
+| `losscurve_sislob` | 15 | 3,450 | 2.50x | 0.31 s | 1.82x |
+| `lsat_model` | 1006 | 91,173 | 2.40x | 4.66 s | 1.80x |
+| `irt_2pl` | 144 | 37,468 | 2.28x | 2.17 s | 1.64x |
+| `GLM_Binomial_model` | 3 | 1,809 | 2.17x | 0.21 s | 3.50x |
+| `ldaK2` | 7 | 104,059 | 2.16x | 3.19 s | 2.47x |
+| `normal_mixture` | 3 | 88,239 | 2.11x | 1.13 s | 2.57x |
+| `dogs_nonhierarchical` | 65 | 40,588 | 2.09x | 2.86 s | 2.53x |
+| `low_dim_gauss_mix_collapse` | 5 | 95,373 | 2.07x | 4.45 s | 2.01x |
+| `low_dim_gauss_mix` | 5 | 98,315 | 2.04x | 1.98 s | 2.41x |
+| `wells_dist` | 2 | 39,202 | 1.86x | 1.44 s | 2.12x |
+| `normal_mixture_k` | 14 | 357,439 | 1.85x | 101.61 s | 1.67x |
+| `2pl_latent_reg_irt` | 531 | 134,556 | 1.62x | 7.94 s | 1.23x |
+| `hierarchical_gp` | 933 | 47,565 | 1.59x | 17.20 s | 1.20x |
+| `hmm_example` | 4 | 27,145 | 1.55x | 1.00 s | 1.96x |
+| `covid19imperial_v2` | 51 | 345,937 | 1.46x | 176.00 s | 1.66x |
+| `covid19imperial_v3` | 51 | 342,943 | 1.46x | 175.70 s | 1.67x |
+| `accel_splines` | 82 | 10,584 | 1.44x | 19.74 s | 1.20x |
+| `hmm_gaussian` | 14 | 263,917 | 1.43x | 18.75 s | 0.07x |
+| `hier_2pl` | 669 | 397,603 | 1.42x | 26.82 s | 1.54x |
 | `accel_gp` | 66 | 9,532 | 1.42x | 16.99 s | 1.33x |
-| `covid19imperial_v2` | 51 | 345,937 | 1.41x | 176.00 s | 1.56x |
-| `state_space_stochastic_level_stochastic_seasonal` | 389 | 26,320 | 1.41x | 39.76 s | 0.90x |
-| `garch11` | 4 | 9,664 | 1.37x | 0.43 s | 2.15x |
-| `arma11` | 4 | 6,158 | 1.35x | 0.26 s | 2.89x |
-| `M0_model` | 2 | 15,595 | 1.34x | 0.37 s | 2.47x |
-| `hier_2pl` | 669 | 397,603 | 1.33x | 26.82 s | 1.46x |
-| `hmm_example` | 4 | 27,145 | 1.32x | 1.00 s | 1.49x |
-| `gpcm_latent_reg_irt` | 530 | 1,337,651 | 1.32x | 161.93 s | 2.25x |
-| `iohmm_reg` | 29 | 320,335 | 1.31x | 181.23 s | 1.77x |
-| `normal_mixture_k` | 14 | 357,439 | 1.27x | 101.61 s | 1.41x |
-| `nes_logit_model` | 2 | 7,653 | 1.25x | 0.38 s | 2.38x |
-| `prophet` | 62 | 69,789 | 1.23x | 117.68 s | 1.26x |
-| `hmm_gaussian` | 14 | 263,917 | 1.19x | 18.75 s | 0.05x |
-| `kronecker_gp` | 438 | 217,990 | 1.18x | 451.09 s | 1.12x |
-| `hmm_drive_1` | 6 | 147,829 | 1.17x | 6.94 s | 1.33x |
-| `covid19imperial_v3` | 51 | 342,943 | 1.17x | 175.70 s | 1.54x |
-| `radon_county` | 389 | 82,076 | 1.12x | 4.49 s | 1.11x |
-| `low_dim_gauss_mix_collapse` | 5 | 95,373 | 1.11x | 4.45 s | 1.11x |
-| `hmm_drive_0` | 6 | 132,850 | 1.10x | 3.65 s | 1.17x |
-| `wells_dist100ars_model` | 3 | 18,997 | 1.09x | 0.62 s | 1.48x |
-| `low_dim_gauss_mix` | 5 | 98,315 | 1.09x | 1.98 s | 1.37x |
-| `ldaK2` | 7 | 104,059 | 1.09x | 3.19 s | 1.38x |
-| `gp_regr` | 3 | 4,698 | 1.08x | 0.23 s | 2.88x |
-| `wells_interaction_c_model` | 4 | 20,272 | 1.07x | 0.49 s | 1.81x |
-| `wells_interaction_model` | 4 | 20,402 | 1.07x | 0.94 s | 1.34x |
-| `Mt_model` | 4 | 19,984 | 1.06x | 0.48 s | 1.78x |
-| `wells_dist100_model` | 2 | 17,195 | 1.05x | 0.47 s | 1.81x |
-| `normal_mixture` | 3 | 88,239 | 1.03x | 1.13 s | 1.24x |
-| `Survey_model` | 1 | 61,578 | 1.02x | 1.14 s | 1.11x |
-| `diamonds` | 26 | 31,497 | 1.01x | 48.55 s | 0.86x |
-| `wells_dae_model` | 4 | 20,356 | 1.00x | 0.76 s | 1.33x |
-| `bones_model` | 13 | 51,501 | 1.00x | 1.31 s | 1.47x |
-| `gp_pois_regr` | 13 | 3,935 | 0.99x | 1.47 s | 1.04x |
-| `wells_dae_c_model` | 5 | 19,308 | 0.99x | 0.59 s | 1.34x |
-| `wells_dae_inter_model` | 7 | 21,310 | 0.97x | 0.55 s | 1.53x |
-| `nn_rbm1bJ10` | 7951 | 185,731 | 0.97x | 456.82 s | 0.90x |
-| `dogs_hierarchical` | 2 | 34,053 | 0.94x | 0.68 s | 1.17x |
-| `wells_daae_c_model` | 6 | 20,885 | 0.93x | 0.63 s | 1.11x |
-| `eight_schools_centered` | 10 | 314 | 0.93x | 0.19 s | 3.17x |
-| `Mb_model` | 3 | 49,570 | 0.93x | 1.15 s | 1.01x |
-| `Mh_model` | 388 | 38,956 | 0.88x | 2.66 s | 1.04x |
-| `dogs_nonhierarchical` | 65 | 40,588 | 0.78x | 2.86 s | 1.11x |
-| `multi_occupancy` | 106 | 58,996 | 0.78x | 7.34 s | 0.79x |
-| `one_comp_mm_elim_abs` | 4 | 470,681 | 0.76x | 11.23 s | 1.08x |
-| `soil_incubation` | 6 | 60,871 | 0.59x | 12.84 s | 0.57x |
-| `lotka_volterra` | 8 | 41,313 | 0.59x | 6.24 s | 0.91x |
+| `iohmm_reg` | 29 | 320,335 | 1.41x | 181.23 s | 1.68x |
+| `garch11` | 4 | 9,664 | 1.38x | 0.43 s | 1.87x |
+| `arma11` | 4 | 6,158 | 1.37x | 0.26 s | 2.36x |
+| `prophet` | 62 | 69,789 | 1.28x | 117.68 s | 1.27x |
+| `hmm_drive_1` | 6 | 147,829 | 1.27x | 6.94 s | 1.57x |
+| `nes_logit_model` | 2 | 7,653 | 1.25x | 0.38 s | 2.53x |
+| `eight_schools_centered` | 10 | 314 | 1.23x | 0.19 s | 4.75x |
+| `hmm_drive_0` | 6 | 132,850 | 1.20x | 3.65 s | 1.22x |
+| `Mb_model` | 3 | 49,570 | 1.19x | 1.15 s | 1.08x |
+| `kronecker_gp` | 438 | 217,990 | 1.19x | 451.09 s | 1.22x |
+| `gp_regr` | 3 | 4,698 | 1.16x | 0.23 s | 3.29x |
+| `Survey_model` | 1 | 61,578 | 1.15x | 1.14 s | 1.02x |
+| `bones_model` | 13 | 51,501 | 1.12x | 1.31 s | 1.72x |
+| `radon_county` | 389 | 82,076 | 1.11x | 4.49 s | 1.11x |
+| `wells_dist100_model` | 2 | 17,195 | 1.11x | 0.47 s | 1.88x |
+| `wells_dist100ars_model` | 3 | 18,997 | 1.11x | 0.62 s | 1.55x |
+| `wells_dae_inter_model` | 7 | 21,310 | 1.09x | 0.55 s | 1.77x |
+| `wells_dae_c_model` | 5 | 19,308 | 1.08x | 0.59 s | 1.55x |
+| `wells_dae_model` | 4 | 20,356 | 1.08x | 0.76 s | 1.38x |
+| `wells_interaction_model` | 4 | 20,402 | 1.08x | 0.94 s | 1.36x |
+| `nn_rbm1bJ10` | 7951 | 185,731 | 1.08x | 456.82 s | 0.93x |
+| `wells_daae_c_model` | 6 | 20,885 | 1.07x | 0.63 s | 1.26x |
+| `wells_interaction_c_model` | 4 | 20,272 | 1.07x | 0.49 s | 1.88x |
+| `gp_pois_regr` | 13 | 3,935 | 1.04x | 1.47 s | 1.13x |
+| `diamonds` | 26 | 31,497 | 1.01x | 48.55 s | 0.94x |
+| `one_comp_mm_elim_abs` | 4 | 470,681 | 0.90x | 11.23 s | 1.06x |
+| `soil_incubation` | 6 | 60,871 | 0.90x | 12.84 s | 1.08x |
+| `lotka_volterra` | 8 | 41,313 | 0.87x | 6.24 s | 1.12x |
 
-120 models; 119 with both gradients; median per-gradient speedup 2.17x; 104/119 at or above CmdStan.
+120 models; 119 with both gradients; median per-gradient speedup 2.91x; 116/119 at or above CmdStan.
 
 ### The models the run could not complete
 
@@ -838,8 +871,8 @@ complete table, and measured gradient ratios still stand.
 
 | model | params | CmdStan ns/grad | grad speedup | what stopped it |
 | --- | ---: | ---: | ---: | --- |
-| `ldaK5` | 7714 | 5,580,314 | 1.49x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
-| `nn_rbm1bJ100` | 79411 | 434,981,254 | 1.05x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
+| `ldaK5` | 7714 | 5,580,314 | 2.36x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
+| `nn_rbm1bJ100` | 79411 | 434,981,254 | 1.06x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
 | `sir` |  | - | - | stanli's gradient probe threw at the benchmark point; no stanli gradient |
 
 `ldaK5` and `nn_rbm1bJ100` are the two preparation outliers; both per-gradient
