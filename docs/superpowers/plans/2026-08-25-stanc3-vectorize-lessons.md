@@ -150,3 +150,28 @@ diff turns out.
    matched the scalar lanes to the last ulp). Zero of 240 corpus models
    use T[], so the pass investment is unjustified while the stanc3
    series covers the same ground.
+
+
+## 6. Design rule with a fresh proof: synthesize only shapes reachable from source
+
+Sequel to the stanc3 whole-variable assignment story. The pass wanted to
+turn its sliced assignment `v[1:N] = rhs` into a plain `v = rhs` because
+the slice costs an extra indexed pass at runtime (radon_county measured
+0.92x against its own scalar loop). Emitting an assignment with no index
+broke: the frontend never produces that statement where the pass put it,
+and it walked codegen paths that do not compile for some type mixes.
+Reverted. The working fix emits `v[ : ] = rhs` instead. That is a shape a
+user can write by hand, so every downstream stage handles it, including
+the SoA-into-AoS mix that broke the no-index form, and it reduces to the
+same plain assign in the generated code. radon_county went 0.92x to
+1.08x and election88_full 1.56x to 1.62x from this one change.
+
+The rule for stanli: when a pass synthesizes graph structure, prefer the
+op and variant combinations that lowering itself produces, because those
+are the ones every kernel and the interpreter see constantly. A
+pass-only combination (a variant bit set on an opcode lowering never
+emits it on, a stride pattern only the rewriter creates) is only as
+tested as its own unit tests. Where reroll or inplace need a shape
+lowering cannot produce, that is exactly where to concentrate tests, or
+better, find the nearest lowering-reachable equivalent the way `[ : ]`
+substituted for the missing no-index form.
