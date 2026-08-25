@@ -5,12 +5,25 @@
 #include <stanli/optable.hpp>
 
 #include <stan/math.hpp>
+#include <cmath>
 #include <cstdio>
+#include <limits>
 #include <string>
 
 static int failures = 0;
 static void expect_eq(const std::string& what, double got, double want) {
   if (got != want) {
+    ++failures;
+    std::printf("FAIL %-16s got %.17g want %.17g\n", what.c_str(), got, want);
+  }
+}
+
+// The log_sum_exp partials come off Eigen's packet exp, which rounds a last
+// bit away from the var reference's scalar libm.
+static void expect_ulp(const std::string& what, double got, double want) {
+  if (got == want) return;
+  const double ulp = std::nextafter(std::abs(want), 1e308) - std::abs(want);
+  if (!(std::abs(got - want) <= ulp)) {
     ++failures;
     std::printf("FAIL %-16s got %.17g want %.17g\n", what.c_str(), got, want);
   }
@@ -40,7 +53,7 @@ int main() {
     vlp.grad();
     expect_eq("lse value", val, vlp.val());
     for (int i = 0; i < N; ++i)
-      expect_eq("lse d" + std::to_string(i), grad[i], xv(i).adj());
+      expect_ulp("lse d" + std::to_string(i), grad[i], xv(i).adj());
     stan::math::recover_memory();
   }
 
