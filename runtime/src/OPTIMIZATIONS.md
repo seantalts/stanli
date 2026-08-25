@@ -738,6 +738,53 @@ comparison). After these changes per-op cost is dominated by loading
 the context, not the dispatch, so the remaining lever is fewer ops,
 which is what the passes above are.
 
+## Deferred: reduction reassociation (surveyed 2026-08-25)
+
+The candidates below change summation order rather than any elementwise
+result. Each was measured or profiled during the 2026-08-25 precision survey
+and deferred as a policy choice: the corpus reference gate passes either way,
+but models listed as bitwise against CmdStan in
+[`docs/corpus-status.md`](../../docs/corpus-status.md) would move into the
+small-ULP bands. Re-profile before implementing any of them, since profile
+share is a ceiling on the win and the `pow` entry below shows how a large
+share can still yield nothing.
+
+Softmax backward as a packet dot product (`adjoint.cpp`). The fold is written
+by hand because Stan Math reduces var expressions, which have no packet
+access. `Map(p).dot(Map(oa))` measured 5.86x on the reduction alone.
+`OP_SOFTMAX` is 37% of `gpcm_latent_reg_irt`'s gradient and most of that is
+backward. Drift is reorder-class, about 1e-15 relative on realistic lengths.
+
+Matvec through Eigen gemv (`elementwise.cpp`, `lower.cpp`). The scalar loop
+preserves Stan Math's multiply order at a cost the file comment puts at 82% of
+`prophet`'s gradient. Every matrix model pays something. Drift is 1-2 ULP per
+element against the current form.
+
+Gather backward via segmented reduction (`elementwise.cpp`). The ascending
+scatter-add matches var edge order; a rowwise sum over a presorted index
+(indices are lowering-time constants) was 37% of
+`radon_county_intercept`'s backward.
+
+Per-lane scalar density binding (`densities_impl.hpp`). N scalar recorder
+calls with a `sink_scope` each, where one vectorized call would do. Density
+share is 40-86% of most profiles but the math is libm-bound either way; the
+recoverable part is recorder overhead plus reduction reorder and was not
+measured separately.
+
+Broadcast adjoint accumulation (`eltwise_expr.cpp`, `mixture.cpp` `mix_bwd`,
+`densities_impl.hpp` column sums). Descending or in-memory accumulation orders
+that mirror the unrolled reverse sweep. Packet sums are 4-6x on the reduction;
+the whole-model effect is small per site but the pattern is wide.
+
+Three measured dead ends, recorded so they are not retried. `-ffp-contract=fast`
+is a 1.7% geomean slowdown on this corpus (`arK` 0.85, reproducible) and
+perturbs 101 of 120 models at reduction-class magnitudes, so the `off` in
+`CMakeLists.txt` stays. The `STANLI_PACKET_MATH` fast forms (constrain,
+`inv_logit`, `seq_sum`) measure 0.995 geomean: neutral, correctly left off.
+And Eigen's vectorized `pow` is 5x slower than scalar `std::pow` on Apple
+libm, with the `exp(k log x)` form costing 8 ULP, so the `POW` share of the
+`dogs` models stays where it is.
+
 ## How we check all of this
 
 Every pass changes the graph, and a wrong graph produces wrong numbers
