@@ -2243,6 +2243,44 @@ struct Lowering {
     return ret;
   }
 
+  std::optional<Val> lower_multi_normal_rng(const mir::Expr& e) {
+    if (e.name != "multi_normal_rng") return std::nullopt;
+    if (!in_write_array)
+      fail("multi_normal_rng is supported only in generated quantities", e.raw);
+    if (e.args.size() != 2 || e.type_ != "UVector" ||
+        e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
+      fail("multi_normal_rng: expected one vector result", e.raw);
+    const mir::Expr& location_expr = e.args[0];
+    const mir::Expr& covariance_expr = e.args[1];
+    if (location_expr.type_ != "UVector" ||
+        location_expr.unsized.leaf != mir::UnsizedLeaf::Vector ||
+        location_expr.unsized.depth != 0)
+      fail("multi_normal_rng: expected one vector location", e.raw);
+    if (covariance_expr.type_ != "UMatrix" ||
+        covariance_expr.unsized.leaf != mir::UnsizedLeaf::Matrix ||
+        covariance_expr.unsized.depth != 0)
+      fail("multi_normal_rng: expected one covariance matrix", e.raw);
+
+    Val location = lower_expr(location_expr);
+    Val covariance = lower_expr(covariance_expr);
+    if (!is_vector(location.si))
+      fail("multi_normal_rng: location is not a logical vector", e.raw);
+    if (!is_matrix(covariance.si))
+      fail("multi_normal_rng: covariance has no known matrix shape", e.raw);
+    const int64_t k = g.slots[location.slot].len;
+    if (k > std::numeric_limits<int>::max() || covariance.si.rows != k ||
+        covariance.si.cols != k ||
+        g.slots[covariance.slot].len != checked_product({k, k}, "covariance"))
+      fail("multi_normal_rng: covariance shape must match the location", e.raw);
+
+    Val draw = emit_value(OP_RNG, {location, covariance}, k, view_of(e.type_),
+                          {static_cast<int>(k)});
+    g.ops.back().variant = kMultiNormalRngVariant;
+    draw.si.param_free = false;
+    draw.autodiff = false;
+    return draw;
+  }
+
   std::optional<Val> lower_categorical_rng(const mir::Expr& e) {
     if (e.name != "categorical_rng") return std::nullopt;
     if (!in_write_array)
@@ -2542,6 +2580,7 @@ struct Lowering {
     }
     // The stan-library names split into disjoint groups; each helper owns
     // one and declines the rest.
+    if (auto v = lower_multi_normal_rng(e)) return *v;
     if (auto v = lower_categorical_rng(e)) return *v;
     if (auto v = lower_scalar_rng(e)) return *v;
     if (auto v = lower_density_fn(e)) return *v;

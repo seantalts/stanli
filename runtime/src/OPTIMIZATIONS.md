@@ -256,13 +256,13 @@ caller's stream. The graph passes treat every RNG op as an ordered effect, so
 they cannot fold, reroll, carve, delete, or duplicate a draw whose result is
 otherwise unused.
 
-The boundary is deliberately fail-closed. Container-valued results or
-unsupported RNGs, and integer draws needed as a loop bound, index, shape, or
-branch condition, still select the whole-section interpreter. Scalar integer
-results live exactly in one double slot only while used by ordinary graph
-arithmetic; integer division and other dynamic-integer operations still refuse
-lowering. A later tranche adds the one audited vector-argument exception,
-`categorical_rng(vector)`, without admitting container-valued results.
+The boundary is deliberately fail-closed. Apart from the audited categorical
+and covariance-form multivariate-normal extensions below, container-valued
+results or unsupported RNGs, and integer draws needed as a loop bound, index,
+shape, or branch condition, still select the whole-section interpreter. Scalar
+integer results live exactly in one double slot only while used by ordinary
+graph arithmetic; integer division and other dynamic-integer operations still
+refuse lowering.
 
 An exact census of the 24 corpus models that previously used `WaInterp` moved
 12 to the graph in this tranche: `GLMM1_model`, both `covid19imperial` models, both `dogs`
@@ -311,8 +311,9 @@ using the result as dynamic control or geometry all fail closed.
 This completed `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`, moving the
 then-current 24-model write-array census from 12 graph / 12 interpreter to
 16 / 8. The categorical tranche below subsequently advances that census to
-17 / 7, and the extrema tranche after it advances the current census to 18 / 6.
-All 119 compiling corpus models still produce complete rows. Targeted
+17 / 7, the extrema tranche advances it to 18 / 6, and the covariance-form
+multivariate-normal tranche advances the current census to 19 / 5. All 119
+compiling corpus models still produce complete rows. Targeted
 2026-08-24 C-ABI A/B medians (point 0, two warmups, seven matched batches) were:
 
 | model | interpreted us/row | compiled us/row | speedup |
@@ -390,12 +391,13 @@ lowering gate forward-only rather than allowing a graph transformation to
 place it in a reverse sweep.
 
 `losscurve_sislob` was the only model to change in the exact 24-model census,
-moving coverage from 17 graph / 7 interpreter to the current 18 / 6. All 24
-census models and all 119 compiling corpus models retained complete rows. Its
-1,218-op graph contains exactly one length-10 min opcode and one length-10 max
-opcode, and writes 384 columns. Graph and `WaInterp` output was bitwise exact
-for all 1,536/1,536 compared values, and the same-input pinned Stan Math oracle
-matched 8/8 cases.
+moving coverage from 17 graph / 7 interpreter to the then-current 18 / 6. The
+covariance-form multivariate-normal tranche below advances the current census
+to 19 / 5. All 24 census models and all 119 compiling corpus models retained
+complete rows. Its 1,218-op graph contains exactly one length-10 min opcode and
+one length-10 max opcode, and writes 384 columns. Graph and `WaInterp` output
+was bitwise exact for all 1,536/1,536 compared values, and the same-input pinned
+Stan Math oracle matched 8/8 cases.
 Against 1,200 stored CmdStan values, the worst difference was 4.44e-16, or
 eight ULP.
 
@@ -405,6 +407,40 @@ from 4107.375 to 5291.959 us, a 1184.584 us setup increase that amortizes after
 3.627 rows, or four whole rows. These targeted results do not refresh
 `docs/corpus-bench.tsv` or the generated full-corpus table in
 `docs/benchmarks.md`.
+
+## Compiled covariance-form multivariate-normal RNG (`rng.cpp`, `wa_interp.cpp`)
+
+The vector-result `multi_normal_rng(vector, matrix)` write-array surface reuses
+`OP_RNG` rather than adding a second effect vocabulary. Its variant reads a
+length-`K` mean and a column-major `K` by `K` covariance, and writes a
+length-`K` vector. Lowering admits only an exact non-array `UVector` result,
+one non-array `UVector` mean, and one square `UMatrix` covariance whose known
+dimensions match. Row-vector/array overloads, mismatched or unknown shapes,
+and `multi_normal_cholesky_rng` still select `WaInterp`.
+
+The graph and interpreter call one helper. It reconstructs the same owning
+Eigen vector and column-major matrix accepted by pinned Stan Math, invokes
+`multi_normal_rng` once, and copies the resulting vector out. Stan Math remains
+the single definition of finite-mean, NaN, symmetry, and positive-definiteness
+validation order, exception behavior, covariance factorization, output
+arithmetic, and engine consumption. Invalid calls therefore consume no draws,
+while valid graph and interpreter calls advance the caller-owned stream
+identically. The existing opcode-wide effect barriers keep the vector draw out
+of constant folding, rerolling, and islands without another pass-specific
+exception.
+
+`multi_occupancy` was the only model to change in the exact 24-model census,
+moving coverage from 18 graph / 6 interpreter to the current 19 / 5. All 24
+census models and all 119 compiling corpus models retained complete rows;
+overall corpus coverage is 114 graph and five interpreted models. Graph and
+forced-interpreter output was bitwise exact for all 5,616 values across seeds
+0, 1, 2, 7, 1234, and `UINT32_MAX`, each continued for three sequential rows.
+
+In a targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven batch
+medians), `multi_occupancy` moved from 298.9260 to 5.4898 us/row (54.4512x),
+saving 0.2934362 s per 1,000 rows. Construction also improved from 5864.792 to
+5368.583 us, so there is no setup break-even penalty. These targeted results
+do not refresh `docs/corpus-bench.tsv` or the generated full-corpus table.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 

@@ -194,9 +194,10 @@ the top of the page, not replacements for the current corpus rows:
 - **Compiled scalar generated-quantities RNGs** keep caller-owned chain state
   on the forward-only write-array graph for scalar `poisson_log`, `uniform`,
   `bernoulli`, `normal`, `lognormal`, and `binomial` draws.
-  RNGs outside that scalar tranche, container-valued results, and draws used
-  as dynamic control, indices, or geometry still fail closed to the
-  whole-section interpreter. In an exact census of the 24 previously
+  Apart from the audited categorical and multivariate-normal extensions below,
+  other RNGs, container-valued results, and draws used as dynamic control,
+  indices, or geometry still fail closed to the whole-section interpreter. In
+  an exact census of the 24 previously
   interpreted corpus models, this RNG tranche moved 12 to the graph; all 24
   still produced complete rows.
   A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched batch
@@ -237,9 +238,10 @@ the top of the page, not replacements for the current corpus rows:
   interpreter. This moved `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`
   to the graph, taking the then-current 24-model census from 12 graph / 12
   interpreter to 16 / 8. The categorical tranche below subsequently advances
-  that census to 17 / 7, and the extrema tranche after it advances the current
-  census to 18 / 6. All 119 compiling corpus models still produce complete
-  rows. A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched
+  that census to 17 / 7, the extrema tranche advances it to 18 / 6, and the
+  multivariate-normal tranche advances the current census to 19 / 5. All 119
+  compiling corpus models still produce complete rows. A targeted 2026-08-24
+  C-ABI A/B (point 0, two warmups, seven matched
   batch medians) measured:
 
   | model | interpreted row | compiled row | improvement |
@@ -300,10 +302,11 @@ the top of the page, not replacements for the current corpus rows:
   islands because it has no reverse kernel.
 
   `losscurve_sislob` was the only model to change in the exact 24-model
-  census, moving graph/interpreter coverage from 17 / 7 to the current 18 / 6;
-  all 24 census models and all 119 compiling corpus models retained complete
-  rows. Its 1,218-op graph contains exactly one length-10 min opcode and one
-  length-10 max opcode, and writes 384 columns. Graph and `WaInterp` matched
+  census, moving graph/interpreter coverage from 17 / 7 to the then-current
+  18 / 6; the multivariate-normal tranche below advances the current census to
+  19 / 5. All 24 census models and all 119 compiling corpus models retained
+  complete rows. Its 1,218-op graph contains exactly one length-10 min opcode
+  and one length-10 max opcode, and writes 384 columns. Graph and `WaInterp` matched
   bitwise for all 1,536/1,536 compared values; the same-input pinned Stan Math
   check matched 8/8 cases.
   Against 1,200 stored CmdStan values, the worst difference was 4.44e-16, or
@@ -314,6 +317,28 @@ the top of the page, not replacements for the current corpus rows:
   moved from 4107.375 to 5291.959 us, a 1184.584 us setup increase that
   amortizes after 3.627 rows, or four whole rows. These targeted results do not
   refresh `docs/corpus-bench.tsv` or the generated full-corpus table below.
+- **Compiled covariance-form multivariate-normal RNGs** extend `OP_RNG` to
+  the audited `multi_normal_rng(vector, matrix) -> vector` write-array surface.
+  The mean length and square covariance shape are fixed by lowering, and both
+  the graph and `WaInterp` copy their column-major inputs into the same owning
+  Eigen values before calling pinned Stan Math. This preserves its finite,
+  symmetry, and positive-definiteness validation order and its exact normal
+  draw schedule. Array overloads, non-square or mismatched shapes, and
+  `multi_normal_cholesky_rng` remain on the whole-section interpreter.
+
+  `multi_occupancy` was the only model to change in the exact 24-model census,
+  moving graph/interpreter coverage from 18 / 6 to the current 19 / 5. All 24
+  census models and all 119 compiling corpus models retained complete rows;
+  overall corpus coverage is now 114 graph and five interpreted models. Its
+  graph and forced-interpreter rows were bitwise identical for all 5,616
+  values from six seeds continued for three sequential rows.
+
+  In a targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven
+  batch medians), `multi_occupancy` moved from 298.9260 to 5.4898 us/row
+  (54.4512x), saving 0.2934362 s per 1,000 rows. Construction also improved,
+  from 5864.792 to 5368.583 us, so there is no setup break-even penalty. These
+  targeted results do not refresh `docs/corpus-bench.tsv` or the generated
+  full-corpus table below.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven

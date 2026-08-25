@@ -5,6 +5,7 @@
 #include <Eigen/Dense>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace stanli {
@@ -58,6 +59,35 @@ int categorical_rng_draw(const double* probabilities, size_t size, WaRng& rng) {
   for (size_t i = 0; i < size; ++i)
     theta[static_cast<Eigen::Index>(i)] = probabilities[i];
   return stan::math::categorical_rng(theta, rng.gen());
+}
+
+void multi_normal_rng_draw(const double* location, size_t location_size,
+                           const double* covariance, size_t covariance_size,
+                           size_t covariance_rows, size_t covariance_cols,
+                           double* output, size_t output_size, WaRng& rng) {
+  if ((location_size != 0 && location == nullptr) ||
+      (covariance_size != 0 && covariance == nullptr) ||
+      (output_size != 0 && output == nullptr) || output_size != location_size ||
+      (covariance_rows != 0 &&
+       covariance_cols >
+           std::numeric_limits<size_t>::max() / covariance_rows) ||
+      covariance_rows * covariance_cols != covariance_size)
+    throw std::logic_error("malformed multi-normal RNG arguments");
+
+  Eigen::VectorXd mu(static_cast<Eigen::Index>(location_size));
+  for (size_t i = 0; i < location_size; ++i)
+    mu[static_cast<Eigen::Index>(i)] = location[i];
+  Eigen::MatrixXd sigma(static_cast<Eigen::Index>(covariance_rows),
+                        static_cast<Eigen::Index>(covariance_cols));
+  for (size_t j = 0; j < covariance_cols; ++j)
+    for (size_t i = 0; i < covariance_rows; ++i)
+      sigma(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)) =
+          covariance[j * covariance_rows + i];
+
+  const Eigen::VectorXd draw =
+      stan::math::multi_normal_rng(mu, sigma, rng.gen());
+  for (size_t i = 0; i < output_size; ++i)
+    output[i] = draw[static_cast<Eigen::Index>(i)];
 }
 
 double wa_probe_point(int64_t i, int variant) {
@@ -292,22 +322,31 @@ bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
   };
 
   // Vector-valued draw from a mean vector and covariance (or Cholesky
-  // factor) matrix.
+  // factor) matrix. The covariance form shares its owning-Eigen helper with
+  // OP_RNG so validation and engine schedules cannot drift between modes.
   if (base == "multi_normal" || base == "multi_normal_cholesky") {
     const auto& mu = av.at(0);
     const auto& S = av.at(1);
     const int64_t K = (int64_t)mu.r.size();
-    Eigen::VectorXd m(K);
-    for (int64_t i = 0; i < K; ++i) m[i] = mu.r[(size_t)i];
-    Eigen::MatrixXd sig(K, K);
-    for (int64_t j = 0; j < K; ++j)
-      for (int64_t i = 0; i < K; ++i) sig(i, j) = S.r.at((size_t)(j * K + i));
-    const Eigen::VectorXd draw =
-        base == "multi_normal"
-            ? stan::math::multi_normal_rng(m, sig, g)
-            : stan::math::multi_normal_cholesky_rng(m, sig, g);
     out->dims = {K};
-    for (int64_t i = 0; i < K; ++i) out->r.push_back(draw[i]);
+    out->r.resize(static_cast<size_t>(K));
+    if (base == "multi_normal") {
+      if (S.dims.size() != 2)
+        throw std::logic_error("malformed multi-normal covariance shape");
+      multi_normal_rng_draw(mu.r.data(), mu.r.size(), S.r.data(), S.r.size(),
+                            static_cast<size_t>(S.dims[0]),
+                            static_cast<size_t>(S.dims[1]), out->r.data(),
+                            out->r.size(), rng);
+    } else {
+      Eigen::VectorXd m(K);
+      for (int64_t i = 0; i < K; ++i) m[i] = mu.r[(size_t)i];
+      Eigen::MatrixXd sig(K, K);
+      for (int64_t j = 0; j < K; ++j)
+        for (int64_t i = 0; i < K; ++i) sig(i, j) = S.r.at((size_t)(j * K + i));
+      const Eigen::VectorXd draw =
+          stan::math::multi_normal_cholesky_rng(m, sig, g);
+      for (int64_t i = 0; i < K; ++i) out->r[static_cast<size_t>(i)] = draw[i];
+    }
     return true;
   }
 

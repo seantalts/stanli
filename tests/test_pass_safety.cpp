@@ -355,11 +355,21 @@ static void test_rng_is_an_effect_barrier() {
   const int probabilities = g.add_slot(4, false);
   fills.emplace_back(probabilities,
                      std::vector<double>{0.125, 0.25, 0.375, 0.25});
+  const int location = g.add_slot(2, false);
+  const int covariance = g.add_slot(4, false);
+  fills.emplace_back(location, std::vector<double>{0.5, -1.25});
+  fills.emplace_back(covariance, std::vector<double>{1.69, 0.364, 0.364, 0.64});
   std::vector<int> roots;
   for (int i = 0; i < 40; ++i) {
-    const int out = g.add_slot(1, false);
-    g.add_op(OP_RNG, {probabilities}, out);
-    g.ops.back().variant = kCategoricalRngVariant;
+    const bool vector_draw = i == 39;
+    const int out = g.add_slot(vector_draw ? 2 : 1, false);
+    if (vector_draw) {
+      g.add_op(OP_RNG, {location, covariance}, out, {2});
+      g.ops.back().variant = kMultiNormalRngVariant;
+    } else {
+      g.add_op(OP_RNG, {probabilities}, out);
+      g.ops.back().variant = kCategoricalRngVariant;
+    }
     if (i == 39) roots.push_back(out);
   }
   g.result_slot = roots.back();
@@ -387,12 +397,18 @@ static void test_rng_is_an_effect_barrier() {
   theta << 0.125, 0.25, 0.375, 0.25;
   WaRng got_rng(20260824), want_rng(20260824);
   ex.run_forward_only(EvalState{&got_rng});
-  int want = 0;
-  for (int i = 0; i < 40; ++i)
-    want = stan::math::categorical_rng(theta, want_rng.gen());
-  expect("categorical RNG effect order preserved",
-         ex.value_ptr(roots.back())[0] == static_cast<double>(want));
-  expect("categorical RNG next state preserved",
+  for (int i = 0; i < 39; ++i)
+    (void)stan::math::categorical_rng(theta, want_rng.gen());
+  Eigen::VectorXd mu(2);
+  mu << 0.5, -1.25;
+  Eigen::MatrixXd sigma(2, 2);
+  sigma << 1.69, 0.364, 0.364, 0.64;
+  const Eigen::VectorXd want =
+      stan::math::multi_normal_rng(mu, sigma, want_rng.gen());
+  expect("vector RNG effect order preserved",
+         ex.value_ptr(roots.back())[0] == want[0] &&
+             ex.value_ptr(roots.back())[1] == want[1]);
+  expect("vector RNG next state preserved",
          got_rng.gen()() == want_rng.gen()());
 }
 

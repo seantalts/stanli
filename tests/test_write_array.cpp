@@ -673,6 +673,40 @@ static Eigen::VectorXd categorical_theta(const std::vector<double>& p) {
   return theta;
 }
 
+static Eigen::VectorXd multi_normal_location(const std::vector<double>& x) {
+  Eigen::VectorXd out(static_cast<Eigen::Index>(x.size()));
+  for (size_t i = 0; i < x.size(); ++i)
+    out[static_cast<Eigen::Index>(i)] = x[i];
+  return out;
+}
+
+static Eigen::MatrixXd multi_normal_covariance(const std::vector<double>& x,
+                                               size_t rows, size_t cols) {
+  Eigen::MatrixXd out(static_cast<Eigen::Index>(rows),
+                      static_cast<Eigen::Index>(cols));
+  for (size_t j = 0; j < cols; ++j)
+    for (size_t i = 0; i < rows; ++i)
+      out(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(j)) =
+          x.at(j * rows + i);
+  return out;
+}
+
+static std::vector<double> direct_multi_normal_rng(
+    const std::vector<double>& mu, const std::vector<double>& covariance,
+    size_t rows, size_t cols, stanli::WaRng& rng) {
+  const Eigen::VectorXd draw = stan::math::multi_normal_rng(
+      multi_normal_location(mu),
+      multi_normal_covariance(covariance, rows, cols), rng.gen());
+  return std::vector<double>(draw.data(), draw.data() + draw.size());
+}
+
+static bool same_double_bytes(const std::vector<double>& a,
+                              const std::vector<double>& b) {
+  return a.size() == b.size() &&
+         (a.empty() ||
+          std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
+}
+
 // categorical_rng is unusual in this opcode family: one logical argument is
 // a variable-length vector, while the result is still one Stan int. Keep the
 // shared helper byte-for-byte on Stan Math's validation and engine schedule.
@@ -745,6 +779,117 @@ void test_categorical_rng_helper_contract() {
   if (null_input.kind != 3 || malformed.gen()() != untouched.gen()()) {
     ++failures;
     std::printf("FAIL categorical helper malformed pointer contract\n");
+  }
+}
+
+void test_multi_normal_rng_helper_contract() {
+  using namespace stanli;
+  struct Valid {
+    std::vector<double> mu;
+    std::vector<double> covariance;
+  };
+  const Valid valid[] = {
+      {{-0.25}, {1.75}},
+      {{0.5, -1.25}, {1.69, 0.364, 0.364, 0.64}},
+      {{0.25, -0.5, 1.75}, {2.0, 0.25, -0.4, 0.25, 1.5, 0.3, -0.4, 0.3, 1.25}},
+  };
+  for (size_t c = 0; c < sizeof(valid) / sizeof(valid[0]); ++c) {
+    for (unsigned seed : {1u, 29u, 2026u}) {
+      const size_t k = valid[c].mu.size();
+      std::vector<double> got(k);
+      WaRng got_rng(seed + static_cast<unsigned>(c));
+      WaRng want_rng(seed + static_cast<unsigned>(c));
+      multi_normal_rng_draw(valid[c].mu.data(), k, valid[c].covariance.data(),
+                            valid[c].covariance.size(), k, k, got.data(),
+                            got.size(), got_rng);
+      const std::vector<double> want = direct_multi_normal_rng(
+          valid[c].mu, valid[c].covariance, k, k, want_rng);
+      if (!same_double_bytes(got, want) ||
+          got_rng.gen()() != want_rng.gen()()) {
+        ++failures;
+        std::printf("FAIL multi-normal helper valid case %zu seed %u\n", c,
+                    seed);
+      }
+    }
+  }
+
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double inf = std::numeric_limits<double>::infinity();
+  struct Invalid {
+    std::vector<double> mu;
+    std::vector<double> covariance;
+    size_t rows;
+    size_t cols;
+    const char* label;
+  };
+  // The asymmetric case uses four distinct column-major positions. Its Stan
+  // message names both off-diagonal values, catching a transposed rebuild.
+  const Invalid invalid[] = {
+      {{nan, 0.0}, {1.0, 0.0, 0.0, 1.0}, 2, 2, "NaN mean"},
+      {{inf, 0.0}, {1.0, 0.0, 0.0, 1.0}, 2, 2, "infinite mean"},
+      {{0.0, 0.0}, {1.0, 0.0, nan, 1.0}, 2, 2, "NaN covariance"},
+      {{0.0, 0.0}, {1.25, 0.75, 0.125, 0.8}, 2, 2, "asymmetric covariance"},
+      {{0.0, 0.0}, {1.0, 2.0, 2.0, 1.0}, 2, 2, "non-PD covariance"},
+      {{0.0, 0.0}, {1.0, 0.0, 0.0, 1.0}, 1, 4, "dimension mismatch"},
+      {{}, {}, 0, 0, "empty covariance"},
+  };
+  for (size_t c = 0; c < sizeof(invalid) / sizeof(invalid[0]); ++c) {
+    std::vector<double> got(invalid[c].mu.size());
+    WaRng got_rng(static_cast<unsigned>(501 + c));
+    WaRng want_rng(static_cast<unsigned>(501 + c));
+    const RngException got_error = capture_rng_exception([&] {
+      multi_normal_rng_draw(invalid[c].mu.data(), invalid[c].mu.size(),
+                            invalid[c].covariance.data(),
+                            invalid[c].covariance.size(), invalid[c].rows,
+                            invalid[c].cols, got.data(), got.size(), got_rng);
+    });
+    const RngException want_error = capture_rng_exception([&] {
+      (void)direct_multi_normal_rng(invalid[c].mu, invalid[c].covariance,
+                                    invalid[c].rows, invalid[c].cols, want_rng);
+    });
+    if (got_error.kind == 0 || got_error.kind != want_error.kind ||
+        got_error.message != want_error.message ||
+        got_rng.gen()() != want_rng.gen()()) {
+      ++failures;
+      std::printf("FAIL multi-normal helper %s contract\n", invalid[c].label);
+    }
+  }
+
+  const std::vector<double> mu{0.5, -1.25};
+  const std::vector<double> covariance{1.69, 0.364, 0.364, 0.64};
+  std::vector<double> output(2);
+  WaRng malformed(991), untouched(991);
+  const RngException mismatch = capture_rng_exception([&] {
+    multi_normal_rng_draw(mu.data(), mu.size(), covariance.data(),
+                          covariance.size(), 1, 3, output.data(), output.size(),
+                          malformed);
+  });
+  const RngException null_location = capture_rng_exception([&] {
+    multi_normal_rng_draw(nullptr, mu.size(), covariance.data(),
+                          covariance.size(), 2, 2, output.data(), output.size(),
+                          malformed);
+  });
+  if (mismatch.kind != 3 || null_location.kind != 3 ||
+      malformed.gen()() != untouched.gen()()) {
+    ++failures;
+    std::printf("FAIL multi-normal malformed helper contract\n");
+  }
+
+  // A rejected helper call is reusable at the exact untouched draw.
+  WaRng recovered(811), direct(811);
+  std::vector<double> recovered_draw(2);
+  (void)capture_rng_exception([&] {
+    const std::vector<double> bad{1.0, 2.0, 2.0, 1.0};
+    multi_normal_rng_draw(mu.data(), 2, bad.data(), 4, 2, 2,
+                          recovered_draw.data(), 2, recovered);
+  });
+  multi_normal_rng_draw(mu.data(), 2, covariance.data(), 4, 2, 2,
+                        recovered_draw.data(), 2, recovered);
+  const std::vector<double> direct_draw =
+      direct_multi_normal_rng(mu, covariance, 2, 2, direct);
+  if (recovered_draw != direct_draw || recovered.gen()() != direct.gen()()) {
+    ++failures;
+    std::printf("FAIL multi-normal helper rejected-call reuse\n");
   }
 }
 
@@ -1109,6 +1254,419 @@ void test_categorical_rng_dynamic_index_fallback() {
   if (got != want || interp_next != direct_next) {
     ++failures;
     std::printf("FAIL categorical dynamic interpreter row/stream\n");
+  }
+}
+
+static std::map<std::string, stanli::DataMap::Entry> multi_normal_base() {
+  std::map<std::string, stanli::DataMap::Entry> base;
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    stanli::DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  return base;
+}
+
+static stanli::DataMap::Entry real_entry(double value) {
+  stanli::DataMap::Entry out;
+  out.r = {value};
+  return out;
+}
+
+static stanli::DataMap::Entry vector_entry(std::vector<double> values) {
+  stanli::DataMap::Entry out;
+  out.dims = {static_cast<int64_t>(values.size())};
+  out.r = std::move(values);
+  return out;
+}
+
+static std::vector<double> multi_normal_direct_row(
+    const std::vector<double>& mu, const std::vector<double>& sigma, double rho,
+    stanli::WaRng& rng) {
+  const double cross = sigma[0] * sigma[1] * rho;
+  const std::vector<double> covariance = {sigma[0] * sigma[0], cross, cross,
+                                          sigma[1] * sigma[1]};
+  const std::vector<double> draw =
+      direct_multi_normal_rng(mu, covariance, 2, 2, rng);
+  return {mu[0],
+          mu[1],
+          sigma[0],
+          sigma[1],
+          rho,
+          draw[0],
+          draw[1],
+          draw[0] - draw[1],
+          stan::math::uniform_rng(0.0, 1.0, rng.gen())};
+}
+
+void test_multi_normal_rng_kernel_contract() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_RNG);
+  if (kernel == nullptr || kernel->forward == nullptr) {
+    ++failures;
+    std::printf("FAIL multi-normal RNG kernel is not registered\n");
+    return;
+  }
+  double mu[] = {0.5, -1.25};
+  double covariance[] = {1.69, 0.364, 0.364, 0.64};
+  double output[] = {-99.0, -99.0};
+  int k = 2;
+  WaRng rng(123), direct_rng(123);
+  EvalState state{&rng};
+  KernelCtx valid;
+  valid.variant = kMultiNormalRngVariant;
+  valid.n_in = 2;
+  valid.in[0] = Desc{mu, 2};
+  valid.in[1] = Desc{covariance, 4};
+  valid.out = Desc{output, 2};
+  valid.idata = &k;
+  valid.n_idata = 1;
+  valid.eval_state = &state;
+  kernel->forward(valid);
+  const std::vector<double> want = direct_multi_normal_rng(
+      {mu[0], mu[1]}, {1.69, 0.364, 0.364, 0.64}, 2, 2, direct_rng);
+  if (std::vector<double>(output, output + 2) != want ||
+      rng.gen()() != direct_rng.gen()()) {
+    ++failures;
+    std::printf("FAIL multi-normal RNG valid kernel contract\n");
+  }
+
+  struct Mutation {
+    const char* label;
+    void (*apply)(KernelCtx&);
+  };
+  const Mutation malformed[] = {
+      {"unknown variant", [](KernelCtx& c) { c.variant = 255; }},
+      {"arity", [](KernelCtx& c) { c.n_in = 1; }},
+      {"missing idata", [](KernelCtx& c) { c.n_idata = 0; }},
+      {"null idata", [](KernelCtx& c) { c.idata = nullptr; }},
+      {"mean length", [](KernelCtx& c) { c.in[0].len = 1; }},
+      {"covariance length", [](KernelCtx& c) { c.in[1].len = 3; }},
+      {"output length", [](KernelCtx& c) { c.out.len = 1; }},
+      {"missing evaluation state",
+       [](KernelCtx& c) { c.eval_state = nullptr; }},
+  };
+  for (size_t i = 0; i < sizeof(malformed) / sizeof(malformed[0]); ++i) {
+    WaRng got(static_cast<unsigned>(900 + i));
+    WaRng untouched(static_cast<unsigned>(900 + i));
+    EvalState got_state{&got};
+    KernelCtx ctx = valid;
+    ctx.eval_state = &got_state;
+    output[0] = output[1] = -99.0;
+    malformed[i].apply(ctx);
+    const RngException error =
+        capture_rng_exception([&] { kernel->forward(ctx); });
+    if (error.kind != 3 || got.gen()() != untouched.gen()() ||
+        output[0] != -99.0 || output[1] != -99.0) {
+      ++failures;
+      std::printf("FAIL multi-normal malformed kernel %s\n",
+                  malformed[i].label);
+    }
+  }
+}
+
+void test_multi_normal_rng_lowering_guards() {
+  using namespace stanli;
+  const std::string base =
+      slurp("tests/fixtures/gq_multi_normal_rng.tmir.sexp");
+  const size_t call = base.find("(FunApp (StanLib multi_normal_rng");
+  const std::string mean_arg =
+      "((pattern (Var mu)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const std::string covariance_arg =
+      "((pattern (Var inline_cov_matrix_2d_return_sym1__))\n"
+      "           (meta ((type_ UMatrix) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const size_t mean = base.find(mean_arg, call);
+  const size_t covariance = base.find(covariance_arg, call);
+  if (call == std::string::npos || mean == std::string::npos ||
+      covariance == std::string::npos) {
+    ++failures;
+    std::printf("FAIL multi-normal lowering guard fixture has no call\n");
+    return;
+  }
+
+  const auto expect_interp = [](const std::string& mir,
+                                const std::string& reason, const char* label) {
+    try {
+      CompiledModel cm = compile_model(mir, DataMap{});
+      if (!cm.write_array || !cm.write_array->interp ||
+          (!reason.empty() &&
+           cm.write_array->truncated.find(reason) == std::string::npos)) {
+        ++failures;
+        std::printf("FAIL %s: got %s\n", label,
+                    cm.write_array ? cm.write_array->truncated.c_str()
+                                   : "no write_array");
+      }
+    } catch (const std::exception& e) {
+      ++failures;
+      std::printf("FAIL %s: mutation did not parse/compile: %s\n", label,
+                  e.what());
+    }
+  };
+
+  const auto replace_once = [](std::string text, size_t at, size_t count,
+                               const std::string& replacement) {
+    text.replace(at, count, replacement);
+    return text;
+  };
+  for (const auto& bad : std::vector<std::pair<std::string, const char*>>{
+           {"UReal", "scalar"},
+           {"URowVector", "row-vector"},
+           {"(UArray UVector)", "array-vector"}}) {
+    const std::string replacement = "((pattern (Var mu)) (meta ((type_ " +
+                                    bad.first +
+                                    ") (loc <opaque>) (adlevel DataOnly))))";
+    expect_interp(
+        replace_once(base, mean, mean_arg.size(), replacement),
+        "expected one vector location",
+        (std::string("multi-normal ") + bad.second + " mean stays interpreted")
+            .c_str());
+  }
+  for (const auto& bad : std::vector<std::pair<std::string, const char*>>{
+           {"UVector", "vector"}, {"(UArray UMatrix)", "array-matrix"}}) {
+    std::string replacement = covariance_arg;
+    const size_t type = replacement.find("UMatrix");
+    replacement.replace(type, std::string("UMatrix").size(), bad.first);
+    expect_interp(
+        replace_once(base, covariance, covariance_arg.size(), replacement),
+        "expected one covariance matrix",
+        (std::string("multi-normal ") + bad.second +
+         " covariance stays interpreted")
+            .c_str());
+  }
+
+  std::string one_arg = base;
+  one_arg.erase(covariance, covariance_arg.size());
+  expect_interp(one_arg, "expected one vector result",
+                "one-argument multi-normal stays interpreted");
+  std::string zero_args = base;
+  zero_args.erase(covariance, covariance_arg.size());
+  zero_args.erase(mean, mean_arg.size());
+  expect_interp(zero_args, "expected one vector result",
+                "zero-argument multi-normal stays interpreted");
+  std::string three_args = base;
+  three_args.insert(covariance + covariance_arg.size(), " " + mean_arg);
+  expect_interp(three_args, "expected one vector result",
+                "three-argument multi-normal stays interpreted");
+
+  const size_t mean_type = base.find("(type_ UVector)", call);
+  const size_t result_type = base.find("(type_ UVector)", mean_type + 1);
+  if (result_type == std::string::npos) {
+    ++failures;
+    std::printf("FAIL multi-normal lowering guard cannot find result type\n");
+  } else {
+    std::string row_result = base;
+    row_result.replace(result_type, std::string("(type_ UVector)").size(),
+                       "(type_ URowVector)");
+    expect_interp(row_result, "expected one vector result",
+                  "multi-normal row-vector result stays interpreted");
+    std::string array_result = base;
+    array_result.replace(result_type, std::string("(type_ UVector)").size(),
+                         "(type_ (UArray UVector))");
+    expect_interp(array_result, "expected one vector result",
+                  "multi-normal array result stays interpreted");
+  }
+
+  std::string unknown_covariance = base;
+  const size_t covariance_var =
+      unknown_covariance.find("(Var inline_cov_matrix_2d_return_sym1__)", call);
+  unknown_covariance.replace(
+      covariance_var,
+      std::string("(Var inline_cov_matrix_2d_return_sym1__)").size(),
+      "(Var mu)");
+  expect_interp(unknown_covariance, "covariance has no known matrix shape",
+                "multi-normal unknown covariance shape stays interpreted");
+
+  std::string mismatched_covariance = base;
+  const size_t matrix_decl = mismatched_covariance.find(
+      "(decl_id inline_cov_matrix_2d_covariance_sym2__)");
+  size_t first_extent =
+      mismatched_covariance.find("((pattern (Lit Int 2))", matrix_decl);
+  size_t second_extent =
+      mismatched_covariance.find("((pattern (Lit Int 2))", first_extent + 1);
+  if (matrix_decl == std::string::npos || first_extent == std::string::npos ||
+      second_extent == std::string::npos) {
+    ++failures;
+    std::printf("FAIL multi-normal cannot locate covariance extents\n");
+  } else {
+    first_extent = mismatched_covariance.find("Int 2", first_extent) + 4;
+    second_extent = mismatched_covariance.find("Int 2", second_extent) + 4;
+    mismatched_covariance[first_extent] = '3';
+    mismatched_covariance[second_extent] = '3';
+    expect_interp(mismatched_covariance,
+                  "covariance shape must match the location",
+                  "multi-normal known dimension mismatch stays interpreted");
+  }
+
+  std::string mismatched_result = base;
+  const size_t draw_decl = mismatched_result.find("(decl_id draw)");
+  size_t draw_extent =
+      mismatched_result.find("((pattern (Lit Int 2))", draw_decl);
+  if (draw_decl == std::string::npos || draw_extent == std::string::npos) {
+    ++failures;
+    std::printf("FAIL multi-normal cannot locate result extent\n");
+  } else {
+    draw_extent = mismatched_result.find("Int 2", draw_extent) + 4;
+    mismatched_result[draw_extent] = '3';
+    expect_interp(mismatched_result, "",
+                  "multi-normal result dimension mismatch stays interpreted");
+  }
+
+  std::string cholesky = base;
+  cholesky.replace(call + std::string("(FunApp (StanLib ").size(),
+                   std::string("multi_normal_rng").size(),
+                   "multi_normal_cholesky_rng");
+  expect_interp(cholesky, "unsupported function multi_normal_cholesky_rng",
+                "multi-normal Cholesky stays interpreted");
+}
+
+void test_compiled_multi_normal_rng() {
+  using namespace stanli;
+  const std::string text =
+      slurp("tests/fixtures/gq_multi_normal_rng.tmir.sexp");
+  CompiledModel cm = compile_model(text, DataMap{});
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL multi-normal RNG did not compile completely: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return;
+  }
+  int multi_ops = 0, uniform_ops = 0, other_rng_ops = 0;
+  for (const Op& op : cm.write_array->graph.ops) {
+    if (op.opcode != OP_RNG) continue;
+    if (op.variant == kMultiNormalRngVariant) {
+      ++multi_ops;
+      if (op.n_in != 2 || op.n_idata != 1 || op.idata == nullptr ||
+          op.idata[0] != 2 || cm.write_array->graph.slots[op.in[0]].len != 2 ||
+          cm.write_array->graph.slots[op.in[1]].len != 4 ||
+          cm.write_array->graph.slots[op.out].len != 2) {
+        ++failures;
+        std::printf("FAIL multi-normal RNG malformed graph descriptor\n");
+      }
+    } else if (op.variant == static_cast<uint8_t>(ScalarRng::Uniform)) {
+      ++uniform_ops;
+    } else {
+      ++other_rng_ops;
+    }
+  }
+  if (multi_ops != 1 || uniform_ops != 1 || other_rng_ops != 0) {
+    ++failures;
+    std::printf(
+        "FAIL multi-normal RNG op census: multi=%d uniform=%d other=%d\n",
+        multi_ops, uniform_ops, other_rng_ops);
+  }
+  expect_eq("multi-normal RNG columns", joined(cm.write_array->columns),
+            "mu.1,mu.2,sigma.1,sigma.2,rho,draw.1,draw.2,shifted,tail");
+
+  Executor graph(std::move(cm.write_array->graph));
+  cm.write_array->bind(graph);
+  const std::vector<double> unconstrained = {0.5, -1.25, std::log(1.3),
+                                             std::log(0.8), 0.73};
+  std::copy(unconstrained.begin(), unconstrained.end(), graph.params_data());
+  const auto graph_row = [&](WaRng& rng) {
+    graph.run_forward_only(EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& column : cm.write_array->columns) {
+      const double* values = graph.value_ptr(column.slot);
+      for (int64_t i = 0; i < column.len; ++i)
+        row.push_back(values[column.storage_index(i)]);
+    }
+    return row;
+  };
+
+  // Obtain the exact constrained parameter bits produced by the graph; those
+  // are the write_array interpreter's public input contract.
+  WaRng probe_rng(999);
+  const std::vector<double> probe = graph_row(probe_rng);
+  const std::vector<double> mu{probe[0], probe[1]};
+  const std::vector<double> sigma{probe[2], probe[3]};
+  const double rho = probe[4];
+  std::map<std::string, DataMap::Entry> params;
+  params["mu"] = vector_entry(mu);
+  params["sigma"] = vector_entry(sigma);
+  params["rho"] = real_entry(rho);
+  auto program =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  WaInterp interpreted(program, multi_normal_base());
+
+  WaRng graph_rng(42), interp_rng(42), direct_rng(42);
+  const std::vector<double> graph_first = graph_row(graph_rng);
+  const std::vector<double> interp_first = interpreted.eval(params, interp_rng);
+  const std::vector<double> direct_first =
+      multi_normal_direct_row(mu, sigma, rho, direct_rng);
+  const std::vector<double> graph_second = graph_row(graph_rng);
+  const std::vector<double> interp_second =
+      interpreted.eval(params, interp_rng);
+  const std::vector<double> direct_second =
+      multi_normal_direct_row(mu, sigma, rho, direct_rng);
+  const auto graph_next = graph_rng.gen()();
+  const auto interp_next = interp_rng.gen()();
+  const auto direct_next = direct_rng.gen()();
+  if (!same_double_bytes(graph_first, interp_first) ||
+      !same_double_bytes(graph_first, direct_first) ||
+      !same_double_bytes(graph_second, interp_second) ||
+      !same_double_bytes(graph_second, direct_second) ||
+      graph_next != interp_next || graph_next != direct_next) {
+    ++failures;
+    std::printf("FAIL multi-normal sequential row/stream parity\n");
+  }
+  graph_rng.seed(42);
+  if (graph_row(graph_rng) != graph_first) {
+    ++failures;
+    std::printf("FAIL multi-normal reseed did not reproduce first row\n");
+  }
+
+  std::vector<double> invalid_q = unconstrained;
+  invalid_q[0] = std::numeric_limits<double>::infinity();
+  std::copy(invalid_q.begin(), invalid_q.end(), graph.params_data());
+  params["mu"] = vector_entry({std::numeric_limits<double>::infinity(), mu[1]});
+  WaRng graph_failing(211), interp_failing(211), direct_failing(211);
+  const RngException graph_error =
+      capture_rng_exception([&] { (void)graph_row(graph_failing); });
+  const RngException interp_error = capture_rng_exception(
+      [&] { (void)interpreted.eval(params, interp_failing); });
+  const RngException direct_error = capture_rng_exception([&] {
+    const std::vector<double> covariance = {
+        sigma[0] * sigma[0], sigma[0] * sigma[1] * rho,
+        sigma[0] * sigma[1] * rho, sigma[1] * sigma[1]};
+    (void)direct_multi_normal_rng(
+        {std::numeric_limits<double>::infinity(), mu[1]}, covariance, 2, 2,
+        direct_failing);
+  });
+  if (graph_error.kind == 0 || graph_error.kind != interp_error.kind ||
+      graph_error.kind != direct_error.kind ||
+      graph_error.message != interp_error.message ||
+      graph_error.message != direct_error.message) {
+    ++failures;
+    std::printf("FAIL multi-normal invalid exception parity\n");
+  }
+
+  std::copy(unconstrained.begin(), unconstrained.end(), graph.params_data());
+  params["mu"] = vector_entry(mu);
+  const RngException missing_state =
+      capture_rng_exception([&] { graph.run_forward_only(); });
+  const std::vector<double> graph_recovered = graph_row(graph_failing);
+  const std::vector<double> interp_recovered =
+      interpreted.eval(params, interp_failing);
+  const std::vector<double> direct_recovered =
+      multi_normal_direct_row(mu, sigma, rho, direct_failing);
+  const auto graph_recovered_next = graph_failing.gen()();
+  const auto interp_recovered_next = interp_failing.gen()();
+  const auto direct_recovered_next = direct_failing.gen()();
+  if (missing_state.kind != 3 ||
+      missing_state.message.find("caller-owned") == std::string::npos ||
+      !same_double_bytes(graph_recovered, interp_recovered) ||
+      !same_double_bytes(graph_recovered, direct_recovered) ||
+      graph_recovered_next != interp_recovered_next ||
+      graph_recovered_next != direct_recovered_next) {
+    ++failures;
+    std::printf("FAIL multi-normal exception/reuse contract\n");
   }
 }
 
@@ -2913,10 +3471,14 @@ int main() {
   test_constant_folded_gq_column();
   test_binomial_rng_helper_contract();
   test_categorical_rng_helper_contract();
+  test_multi_normal_rng_helper_contract();
   test_categorical_rng_lowering_guards();
   test_compiled_categorical_rng();
   test_categorical_rng_empty_vector();
   test_categorical_rng_dynamic_index_fallback();
+  test_multi_normal_rng_kernel_contract();
+  test_multi_normal_rng_lowering_guards();
+  test_compiled_multi_normal_rng();
   test_binomial_rng_lowering_guards();
   test_compiled_scalar_rng();
   test_product_exact_grouping();
