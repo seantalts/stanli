@@ -85,11 +85,20 @@ bool has_int_groups(uint16_t opcode) {
 int64_t group_len(const int* p) { return p[0] == -1 ? 2 : 1 + p[0]; }
 int group_elem(const int* p, int64_t e) { return p[0] == -1 ? p[1] : p[1 + e]; }
 
-// The bernoulli kernels evaluate one element at a time in their summed form
-// too (densities_lpmf.cpp), so widening a lane costs them nothing. Every
-// other density trades one vectorized call for W elementwise ones.
+// These kernels have an elementwise form that costs per element what their
+// summed one does (densities_lpmf.cpp), so widening a lane costs them
+// nothing. Every other density trades one vectorized call for W recorder
+// calls.
 bool elt_costs_per_element(uint16_t opcode) {
-  return opcode != OP_BERNOULLI_LPMF && opcode != OP_BERNOULLI_LOGIT_LPMF;
+  switch (opcode) {
+    case OP_BERNOULLI_LPMF:
+    case OP_BERNOULLI_LOGIT_LPMF:
+    case OP_BINOMIAL_LPMF:
+    case OP_BINOMIAL_LOGIT_LPMF:
+      return false;
+    default:
+      return true;
+  }
 }
 
 // Outcome elements per lane, or 0 when the immediates are not a layout this
@@ -650,6 +659,11 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           break;
       }
     }
+    const auto attach_idata = [&](Op& o, std::vector<int> v) {
+      g.idata_pool.push_back(std::move(v));
+      o.idata = g.idata_pool.back().data();
+      o.n_idata = (int64_t)g.idata_pool.back().size();
+    };
     added += ops_out * kOpCost + (L - distinct) * lane_elems;
     if (distinct * (int64_t)k * kOpCost <= added + kPartitionMargin) {
       ++st.declined;
@@ -659,11 +673,6 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     // ---- emit ---------------------------------------------------------
     std::vector<Op> out_ops;
     out_ops.reserve((size_t)ops_out);
-    const auto attach_idata = [&](Op& o, std::vector<int> v) {
-      g.idata_pool.push_back(std::move(v));
-      o.idata = g.idata_pool.back().data();
-      o.n_idata = (int64_t)g.idata_pool.back().size();
-    };
     // The fused lpmf's outcome vector is the lanes' immediates, laid out the
     // way the kernel unpacks them: one flat array, or group by group with a
     // [len, vals...] header each, every group widened to the fused length.

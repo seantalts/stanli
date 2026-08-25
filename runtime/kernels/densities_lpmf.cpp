@@ -293,9 +293,92 @@ int int_group_elem(const int* p, int64_t n) {
 const int* int_group_next(const int* p) {
   return p + (p[0] == -1 ? 2 : 1 + p[0]);
 }
-#define STANLI_BINOMIAL_FWD(fname, dist)                                  \
+// The elementwise variant with the per-element recorder call left off: this
+// walks stan-math's own branches for element i's value and its one partial,
+// so each element is what the scalar op it replaces computed, without a
+// tape. Survey_model presents 2,370 of them in one op, and at that width
+// two things the summed form does once per call have to stay once per call:
+// the argument checks, and the logs of a broadcast probability.
+template <bool Logit>
+void binomial_elt_vector_fwd(KernelCtx& ctx) {
+  static constexpr const char* function =
+      Logit ? "binomial_logit_lpmf" : "binomial_lpmf";
+  const int* g1 = ctx.idata;
+  const int* g2 = int_group_next(g1);
+  const Desc& theta = ctx.in[0];
+  const int64_t len = ctx.out.len;
+  const bool active = (ctx.variant & 0x01u) != 0;
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  std::fill_n(ctx.scratch, static_cast<size_t>(2 * len), 0.0);
+  with_int_group(g1, [&](const auto& n, const int*) {
+    with_int_group(g2, [&](const auto& trials, const int*) {
+      stan::math::check_bounded(function, "Successes variable", n, 0, trials);
+      stan::math::check_nonnegative(function, "Population size parameter",
+                                    trials);
+    });
+  });
+  const Eigen::Map<const Eigen::VectorXd> theta_vec(theta.data, theta.len);
+  if constexpr (Logit) {
+    stan::math::check_finite(function, "Probability parameter", theta_vec);
+  } else {
+    stan::math::check_bounded(function, "Probability parameter", theta_vec, 0.0,
+                              1.0);
+  }
+  if (propto && !active) {
+    std::fill_n(ctx.out.data, static_cast<size_t>(len), 0.0);
+    return;
+  }
+  const bool one_theta = theta.len == 1;
+  double la = 0.0, lb = 0.0;
+  const auto logs = [&](double t) {
+    if constexpr (Logit) {
+      la = stan::math::log_inv_logit(t);
+      lb = stan::math::log1m_inv_logit(t);
+    } else {
+      la = std::log(t);
+      lb = stan::math::log1m(t);
+    }
+  };
+  if (one_theta) logs(theta.data[0]);
+  for (int64_t i = 0; i < len; ++i) {
+    const int n = int_group_elem(g1, i);
+    const int trials = int_group_elem(g2, i);
+    const double t = theta.data[one_theta ? 0 : i];
+    if (!one_theta) logs(t);
+    double lp = 0.0, partial = 0.0;
+    if constexpr (Logit) {
+      lp = n * la + (trials - n) * lb;
+      if (!propto) lp += stan::math::binomial_coefficient_log(trials, n);
+      partial = n - trials * std::exp(la);
+    } else {
+      if (!propto) lp += stan::math::binomial_coefficient_log(trials, n);
+      if (trials != 0) {
+        if (n == 0) {
+          lp += trials * lb;
+          partial = -(trials / (1.0 - t));
+        } else if (n == trials) {
+          lp += n * la;
+          partial = n / t;
+        } else {
+          lp += n * la + (trials - n) * lb;
+          partial = n / t - (trials - n) / (1.0 - t);
+        }
+      }
+    }
+    ctx.out.data[i] = lp;
+    if (!active) continue;
+    ctx.scratch[i] = partial;
+    ctx.scratch[len + i] = 1.0;
+  }
+}
+
+#define STANLI_BINOMIAL_FWD(fname, dist, logit)                           \
   void fname(KernelCtx& ctx) {                                            \
     if (ctx.variant & 0x40u) {                                            \
+      if (ctx.out.len > 1) {                                              \
+        binomial_elt_vector_fwd<logit>(ctx);                              \
+        return;                                                           \
+      }                                                                   \
       const int* g1 = ctx.idata;                                          \
       const int* g2 = int_group_next(g1);                                 \
       density_fwd_elt<1, 3>(                                              \
@@ -324,8 +407,8 @@ const int* int_group_next(const int* p) {
     });                                                                   \
   }
 
-STANLI_BINOMIAL_FWD(binomial_fwd, binomial_lpmf)
-STANLI_BINOMIAL_FWD(binomial_logit_fwd, binomial_logit_lpmf)
+STANLI_BINOMIAL_FWD(binomial_fwd, binomial_lpmf, false)
+STANLI_BINOMIAL_FWD(binomial_logit_fwd, binomial_logit_lpmf, true)
 #undef STANLI_BINOMIAL_FWD
 
 // beta_binomial(n | N, alpha, beta): two integer groups, then two real

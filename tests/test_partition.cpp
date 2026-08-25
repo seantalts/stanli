@@ -408,6 +408,49 @@ static void test_width_w_outcome_group() {
   expect_same_grad("width-w", std::move(g), f2, tt, want);
 }
 
+// Survey_model's lane: a width-5 binomial group over one shared probability,
+// added to a per-lane constant and stored. The binomial's elementwise form
+// costs what its summed one does per element, so widening the group is what
+// the cost model has to say yes to.
+static void test_binomial_elt_fusion() {
+  const int L = 16, W = 5, N = 40;
+  Graph g;
+  Fills fills;
+  const int theta = g.add_slot(1, true);
+  const int vec = g.add_slot(N, false);
+  std::vector<double> vals((size_t)N);
+  for (int i = 0; i < N; ++i) vals[(size_t)i] = -0.5 + 0.05 * i;
+  fills.emplace_back(vec, vals);
+  for (int l = 0; l < L; ++l) {
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BINOMIAL_LPMF, {theta}, lp,
+                            {W, l % 3, (l + 1) % 3, l % 2, 1, 0, -1, 4});
+    g.ops[(size_t)id].variant = 0x01;
+    const int c = g.add_slot(1, false);
+    fills.emplace_back(c, std::vector<double>{0.3 + 0.1 * l});
+    const int s = g.add_slot(1, false);
+    g.add_op(OP_ADD, {c, lp}, s);
+    g.add_op(OP_SET_INDEX_INPLACE, {vec, s}, vec, {l});
+  }
+  const int lse = g.add_slot(1, false);
+  g.add_op(OP_LOG_SUM_EXP, {vec}, lse);
+  const std::vector<int> terms{lse};
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("binomial elt one group", st.groups == 1 && st.lanes == L);
+  // BINOMIAL, SUM_ROWS, ADD, SET_SLICE_INPLACE, LOG_SUM_EXP.
+  expect("binomial elt op count", g.ops.size() == 5 && tt == terms);
+  expect("binomial elt widens", count_opcode(g, OP_SUM_ROWS) == 1 &&
+                                    count_opcode(g, OP_BINOMIAL_LPMF) == 1);
+  expect("binomial elt groups concatenate",
+         g.ops[0].n_idata == 2 * (L * W + 1) && g.ops[0].idata[0] == L * W &&
+             g.ops[0].idata[L * W + 1] == L * W);
+  expect_same_grad("binomial elt", std::move(g), f2, tt, want);
+}
+
 // Survey_model's accumulator: lanes delimited by an element store rather
 // than a term, at indices that march by one. The run becomes a single slice
 // store, and the reduction that reads the whole vector afterwards is what
@@ -726,6 +769,7 @@ int main() {
   test_duplicate_lanes_decline();
   test_binomial_idata_groups();
   test_width_w_outcome_group();
+  test_binomial_elt_fusion();
   test_store_delimited_lanes();
   test_two_templates_interleaved();
   test_mid_bucket_writer_split();

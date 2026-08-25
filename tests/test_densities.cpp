@@ -1138,10 +1138,29 @@ int main() {
               [&](int64_t i) { return std::vector<int>{counts[i]}; });
 
     // binomial: int groups; y vector, trials a language-level scalar (-1).
+    // The elementwise binomials leave the recorder out entirely, so every
+    // shape they branch on is pinned against the lanes: both distributions,
+    // propto off and on, and a broadcast probability against a vector one.
     std::vector<int> fused_b{N, 3, 0, 7, 1, 2, -1, 20};
-    check_elt(
-        "elt binomial", OP_BINOMIAL_LPMF, 0x01, N, {unit}, {true}, fused_b,
-        [&](int64_t i) { return std::vector<int>{-1, counts[i], -1, 20}; });
+    const auto lane_b = [&](int64_t i) {
+      return std::vector<int>{-1, counts[i], -1, 20};
+    };
+    for (uint8_t v : {0x01, 0x81}) {
+      const std::string tag = v == 0x01 ? "" : " propto";
+      check_elt("elt binomial" + tag, OP_BINOMIAL_LPMF, v, N, {unit}, {true},
+                fused_b, lane_b);
+      check_elt("elt binomial scalar" + tag, OP_BINOMIAL_LPMF, v, N, {{0.4}},
+                {true}, fused_b, lane_b);
+      check_elt("elt binomial_logit" + tag, OP_BINOMIAL_LOGIT_LPMF, v, N, {mus},
+                {true}, fused_b, lane_b);
+      check_elt("elt binomial_logit scalar" + tag, OP_BINOMIAL_LOGIT_LPMF, v, N,
+                {{-0.3}}, {true}, fused_b, lane_b);
+    }
+    // n == 0 and n == N are separate branches of the value and the partial.
+    std::vector<int> edge{0, 20, 0, 20, 10};
+    check_elt("elt binomial edges", OP_BINOMIAL_LPMF, 0x01, N, {unit}, {true},
+              {N, 0, 20, 0, 20, 10, -1, 20},
+              [&](int64_t i) { return std::vector<int>{-1, edge[i], -1, 20}; });
   }
 
   // The two-integer-group cdfs. binomial and beta_binomial carry an
