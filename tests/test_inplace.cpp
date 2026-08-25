@@ -656,6 +656,151 @@ static void test_env_disable() {
   expect("enabled: stores forwarded", forward_stores_to_loads(g, {}) == 2 * L);
 }
 
+// normal_mixture_k's shape: per data point the vectorized lanes fill a
+// K-element scratch vector whole, then reduce it. `partial` leaves the
+// first element to an earlier write, which is what a real window store
+// looks like; `elsewhere` gives the stored value a second reader.
+static Graph build_full_store_chain(int L, int K, Fills& fills,
+                                    std::vector<int>& terms, int* vec_out,
+                                    bool partial = false,
+                                    bool elsewhere = false) {
+  Graph g;
+  const int p = g.add_slot(K, true);
+  const int c = g.add_slot(K, false);
+  fills.push_back({c, std::vector<double>((size_t)K, 0.5)});
+  const int vec = g.add_slot(K, false);
+  *vec_out = vec;
+  g.add_op(OP_ADD, {p, c}, vec);  // the scratch starts out defined
+  for (int l = 0; l < L; ++l) {
+    const int val = g.add_slot(partial ? K - 1 : K, false);
+    if (partial) {
+      const int w = g.add_slot(K - 1, false);
+      g.add_op(OP_SLICE, {p}, w, {1});
+      g.add_op(OP_EXPV, {w}, val);
+    } else {
+      g.add_op(OP_EXPV, {p}, val);
+    }
+    Op st;
+    st.opcode = OP_SET_SLICE_INPLACE;
+    st.n_in = 2;
+    st.in[0] = vec;
+    st.in[1] = val;
+    st.out = vec;
+    g.idata_pool.push_back({partial ? 1 : 0});
+    st.idata = g.idata_pool.back().data();
+    st.n_idata = 1;
+    g.ops.push_back(st);
+    const int lse = g.add_slot(1, false);
+    g.add_op(OP_LOG_SUM_EXP, {vec}, lse);
+    terms.push_back(lse);
+    if (elsewhere) {
+      const int s = g.add_slot(1, false);
+      g.add_op(OP_LOG_SUM_EXP, {val}, s);
+      terms.push_back(s);
+    }
+  }
+  return g;
+}
+
+static int count_opcode(const Graph& g, uint16_t oc) {
+  int n = 0;
+  for (const Op& op : g.ops) n += op.opcode == oc;
+  return n;
+}
+
+// The whole destination is overwritten every iteration, so every store is
+// a rename: the reduction reads the fused value itself.
+static void test_full_extent_stores_elided() {
+  const int L = 6, K = 5;
+  Fills fills;
+  std::vector<int> terms;
+  int vec = 0;
+  Graph g = build_full_store_chain(L, K, fills, terms, &vec);
+
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  expect("elided every full store", elide_full_extent_stores(g, {}) == L);
+  expect("no slice stores left", count_opcode(g, OP_SET_SLICE_INPLACE) == 0);
+  reduce_into_result(g, terms);
+  const std::vector<double> got = run_grad_twice(std::move(g), fills);
+  expect("elide sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect(("elide bitwise v" + std::to_string(i)).c_str(), got[i] == want[i]);
+}
+
+// A window store leaves elements the value does not supply: it stays.
+static void test_window_store_kept() {
+  const int L = 4, K = 5;
+  Fills fills;
+  std::vector<int> terms;
+  int vec = 0;
+  Graph g = build_full_store_chain(L, K, fills, terms, &vec, true);
+  expect("window store not elided", elide_full_extent_stores(g, {}) == 0);
+  expect("window stores intact", count_opcode(g, OP_SET_SLICE_INPLACE) == L);
+}
+
+// A second reader of the stored value would receive the destination's
+// adjoints in a different order, so the store stays.
+static void test_shared_value_kept() {
+  const int L = 4, K = 5;
+  Fills fills;
+  std::vector<int> terms;
+  int vec = 0;
+  Graph g = build_full_store_chain(L, K, fills, terms, &vec, false, true);
+  expect("shared value not elided", elide_full_extent_stores(g, {}) == 0);
+}
+
+// The destination is read from outside the graph: it must still be written.
+static void test_root_destination_kept() {
+  const int L = 3, K = 5;
+  Fills fills;
+  std::vector<int> terms;
+  int vec = 0;
+  Graph g = build_full_store_chain(L, K, fills, terms, &vec);
+  expect("root destination not elided",
+         elide_full_extent_stores(g, {vec}) == 0);
+}
+
+static void test_elide_env_disable() {
+  const int L = 3, K = 5;
+  Fills fills;
+  std::vector<int> terms;
+  int vec = 0;
+  Graph g = build_full_store_chain(L, K, fills, terms, &vec);
+  test_setenv("STANLI_NO_INPLACE", "1", 1);
+  expect("disabled: no stores elided", elide_full_extent_stores(g, {}) == 0);
+  test_unsetenv("STANLI_NO_INPLACE");
+}
+
+// The copying form covers its whole fresh output too: its readers want the
+// value it was handed, so the copy goes.
+static void test_copying_full_store_elided() {
+  const int K = 4;
+  Fills fills;
+  Graph g;
+  const int p = g.add_slot(K, true);
+  const int base = g.add_slot(K, false);
+  fills.push_back({base, std::vector<double>((size_t)K, 0.25)});
+  const int val = g.add_slot(K, false);
+  g.add_op(OP_EXPV, {p}, val);
+  const int copy = g.add_slot(K, false);
+  g.add_op(OP_SET_SLICE, {base, val}, copy, {0});
+  const int out = g.add_slot(1, false);
+  g.add_op(OP_LOG_SUM_EXP, {copy}, out);
+  g.result_slot = out;
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  expect("copying full store elided", elide_full_extent_stores(g, {}) == 1);
+  expect("copy gone", count_opcode(g, OP_SET_SLICE) == 0);
+  const std::vector<double> got = run_grad_twice(std::move(g), fills);
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect(("copying elide bitwise v" + std::to_string(i)).c_str(),
+           got[i] == want[i]);
+}
+
 int main() {
   test_chain_collapses();
   test_slice_chain(false);
@@ -673,6 +818,12 @@ int main() {
   test_bail_later_reader();
   test_bail_root();
   test_dead_slots_freed();
+  test_full_extent_stores_elided();
+  test_copying_full_store_elided();
+  test_window_store_kept();
+  test_shared_value_kept();
+  test_root_destination_kept();
+  test_elide_env_disable();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

@@ -311,4 +311,102 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
   return removed;
 }
 
+int elide_full_extent_stores(Graph& g, const std::vector<int>& roots) {
+  if (std::getenv("STANLI_NO_INPLACE")) return 0;
+
+  std::unordered_set<int> root_set(roots.begin(), roots.end());
+  if (g.result_slot >= 0) root_set.insert(g.result_slot);
+
+  const size_t n_ops = g.ops.size();
+  std::vector<std::vector<size_t>> readers(g.slots.size());
+  std::vector<std::vector<size_t>> writers(g.slots.size());
+  for (size_t i = 0; i < n_ops; ++i) {
+    const Op& op = g.ops[i];
+    for (int j = 0; j < op.n_in; ++j)
+      if (op.in[j] >= 0) readers[(size_t)op.in[j]].push_back(i);
+    if (op.out >= 0) writers[(size_t)op.out].push_back(i);
+    if (op.out2 >= 0) writers[(size_t)op.out2].push_back(i);
+  }
+
+  const auto covers_destination = [&g](const Op& op) {
+    const bool strided = op.opcode == OP_SET_SLICE_STRIDED ||
+                         op.opcode == OP_SET_SLICE_STRIDED_INPLACE;
+    if (op.opcode != OP_SET_SLICE && op.opcode != OP_SET_SLICE_INPLACE &&
+        !strided)
+      return false;
+    return op.n_in == 2 && op.out >= 0 && op.in[1] >= 0 && op.n_idata >= 1 &&
+           op.idata[0] == 0 && (!strided || op.idata[1] == 1) &&
+           g.slots[(size_t)op.in[1]].len == g.slots[(size_t)op.out].len;
+  };
+
+  std::vector<char> drop(n_ops, 0);
+  int removed = 0;
+  for (size_t i = 0; i < n_ops; ++i) {
+    const Op& op = g.ops[i];
+    if (!covers_destination(op)) continue;
+    const int dest = op.out, val = op.in[1];
+    if (dest == val) continue;
+    if (root_set.count(dest) || root_set.count(val)) continue;
+    if (g.slots[(size_t)dest].is_param || g.slots[(size_t)val].is_param)
+      continue;
+    // The destination's adjoints reach the value in one move today and one
+    // per reader afterwards. Those sums agree to the bit only while the
+    // value's own adjoint starts the region at zero, which a second reader
+    // would break.
+    const std::vector<size_t>& val_readers = readers[(size_t)val];
+    if (val_readers.size() != 1 || val_readers[0] != i) continue;
+    const std::vector<size_t>& val_writers = writers[(size_t)val];
+    if (!val_writers.empty() && val_writers.back() >= i) continue;
+
+    const std::vector<size_t>& dest_writers = writers[(size_t)dest];
+    size_t next_write = n_ops;
+    for (size_t w : dest_writers)
+      if (w > i) {
+        next_write = w;
+        break;
+      }
+    // Whoever writes the destination next must neither read what this store
+    // put there nor leave its adjoints for the reverse sweep to carry past
+    // this point. A covering destructive store does neither: it only writes
+    // forward, and it clears the range it owns in reverse.
+    if (next_write < n_ops &&
+        !((g.ops[next_write].opcode == OP_SET_SLICE_INPLACE ||
+           g.ops[next_write].opcode == OP_SET_SLICE_STRIDED_INPLACE) &&
+          g.ops[next_write].out == dest &&
+          covers_destination(g.ops[next_write])))
+      continue;
+
+    std::vector<size_t> window;
+    bool ok = true;
+    for (size_t r : readers[(size_t)dest]) {
+      if (r <= i || r >= next_write) continue;
+      // Island bodies name outer slots in a payload this rename cannot
+      // reach.
+      if (g.ops[r].opcode == OP_ISLAND) {
+        ok = false;
+        break;
+      }
+      window.push_back(r);
+    }
+    if (!ok) continue;
+
+    for (size_t r : window) {
+      Op& reader = g.ops[r];
+      for (int j = 0; j < reader.n_in; ++j)
+        if (reader.in[j] == dest) reader.in[j] = val;
+    }
+    drop[i] = 1;
+    ++removed;
+  }
+
+  if (removed) {
+    std::vector<Op> kept;
+    kept.reserve(n_ops - (size_t)removed);
+    for (size_t i = 0; i < n_ops; ++i)
+      if (!drop[i]) kept.push_back(g.ops[i]);
+    g.ops = std::move(kept);
+  }
+  return removed;
+}
+
 }  // namespace stanli

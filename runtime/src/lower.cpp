@@ -4987,6 +4987,13 @@ struct Lowering {
                post_partition_inplace_time, g, out.fills, target_terms.size(),
                out.views.size(), PrepTrace::Extra::Rewrites,
                post_partition_inplace);
+    // After every pass that emits a slice store, and before islands, whose
+    // bodies name outer slots in a payload this rename cannot reach.
+    const auto elide_time = prep.start();
+    const int elided = elide_full_extent_stores(g, post_partition_roots);
+    prep.graph(prep_graph, "elide_stores", elide_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
+               elided);
     // After reroll, whose lane matching needs the repeated ops it hoists to
     // still be there, and before islands, so they compile the smaller
     // residue.
