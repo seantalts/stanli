@@ -1314,6 +1314,59 @@ static void test_write_fusion_scalar_chain() {
                  want[i]);
 }
 
+// The dogs shape: per lane, two data exponents index a data vector and raise
+// a scalar parameter, and the product is the lane's target term. POW is
+// widened with a broadcast base and a per-lane exponent.
+static void test_pow_widens() {
+  const int L = 8;
+  Graph g;
+  Fills fills;
+  const int a = g.add_slot(1, true), b = g.add_slot(1, true);
+  const int shock = g.add_slot(L, false), avoid = g.add_slot(L, false);
+  std::vector<double> sv((size_t)L), av((size_t)L);
+  for (int l = 0; l < L; ++l) {
+    sv[(size_t)l] = (double)(l % 4);
+    av[(size_t)l] = (double)(l / 2);
+  }
+  fills.emplace_back(shock, sv);
+  fills.emplace_back(avoid, av);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int s = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {shock}, s, {l});
+    const int v = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {avoid}, v, {l});
+    const int pa = g.add_slot(1, false);
+    g.add_op(OP_POW, {a, s}, pa);
+    const int pb = g.add_slot(1, false);
+    g.add_op(OP_POW, {b, v}, pb);
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_MUL, {pa, pb}, t);
+    terms.push_back(t);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  RerollStats st = reroll(g, f2, tt, {});
+  expect("pow regions==1", st.regions == 1);
+  // The indexed constants become the lanes' exponent vectors, so the INDEX
+  // ops elide: 2 POW + MUL + SUM_VEC.
+  expect("pow ops==4", g.ops.size() == 4);
+  expect("pow one term", tt.size() == 1);
+  int widened = 0;
+  for (const Op& op : g.ops)
+    if (op.opcode == OP_POW) widened += g.slots[(size_t)op.out].len == L;
+  expect("both pows widened", widened == 2);
+  g.result_slot = tt[0];
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("pow sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("pow v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
 // ---- end to end through compile_model ------------------------------------
 
 static std::string slurp(const char* p) {
@@ -1511,6 +1564,7 @@ int main() {
   test_write_fusion_bails();
   test_post_reroll_slice_inplace();
   test_write_fusion_scalar_chain();
+  test_pow_widens();
   test_e2e_fixtures();
   if (failures) {
     std::printf("%d failures\n", failures);

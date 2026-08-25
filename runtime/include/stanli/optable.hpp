@@ -731,6 +731,7 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_SUB:
     case OP_MUL:
     case OP_DIV:
+    case OP_POW:
     case OP_FMA:
     case OP_NEG:
     case OP_EXPV:
