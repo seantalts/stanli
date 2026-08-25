@@ -1556,9 +1556,9 @@ Stanli has its own lowering and optimization passes that run in tens of millisec
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
 it works</a></p>
 <p><b>Not just faster to start up, but usually faster gradients and sampling??</b> Median
-<!--gen:corpus_median-->2.18x<!--/gen--> CmdStan across
+<!--gen:corpus_median-->2.17x<!--/gen--> CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
-<!--gen:corpus_at_par-->109<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
+<!--gen:corpus_at_par-->104<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
 <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.

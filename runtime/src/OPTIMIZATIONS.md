@@ -236,8 +236,8 @@ In a targeted 2026-08-24 Release A/B using seven matched-run medians,
 internally and 1.3998x CmdStan), while `grsm_latent_reg_irt` moved 0.9705208 ->
 0.4953192 ms/gradient (1.9594x internally and 1.5387x CmdStan). Time in their
 categorical opcode fell 4.45x and 5.00x respectively. These are targeted
-medians, not the full-corpus warmed means; `docs/corpus-bench.tsv` and the
-generated corpus table remain unchanged until the next refresh.
+medians, not the later full-corpus warmed means of 1.014034 ms (1.32x CmdStan)
+and 0.508863 ms (1.50x CmdStan) in `docs/corpus-bench.tsv`.
 
 ## Compiled scalar generated-quantities RNGs (`rng.cpp`, `wa_interp.cpp`)
 
@@ -704,8 +704,9 @@ medians) measured:
 The geometric-mean improvement is 1.13245x, or 38.5-39.3 ns saved per callback
 at the known callback counts. Three evaluation points produced bitwise-
 identical LP and gradient values for all 63/63 checked scalars. This dated
-targeted A/B isolates the direct-seeding change; it does not replace the
-retained full-corpus warmed means and CmdStan ratios in `docs/benchmarks.md`.
+targeted A/B isolates the direct-seeding change; the later full-corpus warmed
+means and CmdStan ratios remain the absolute source of truth in
+`docs/benchmarks.md`.
 
 The original RHS compiler, solve reuse, and mixed-activity work made the ODE
 models 29-39x faster; direct input seeding compounds that historical gain.
