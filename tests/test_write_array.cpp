@@ -18,8 +18,12 @@
 
 #include <stan/math.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -853,6 +857,1191 @@ void test_compiled_scalar_rng() {
   }
 }
 
+static uint64_t reduction_bits(double x) {
+  uint64_t out = 0;
+  std::memcpy(&out, &x, sizeof(out));
+  return out;
+}
+
+static stanli::DataMap reduction_data() {
+  stanli::DataMap data;
+  data.set_real_array("d", {0.5, -2.0, 4.0});
+  data.set_int_array("counts", {1, 2, 3});
+  return data;
+}
+
+static std::map<std::string, stanli::DataMap::Entry> reduction_base(
+    const stanli::DataMap& data) {
+  std::map<std::string, stanli::DataMap::Entry> base;
+  base["d"] = data.at("d");
+  base["counts"] = data.at("counts");
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    stanli::DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  return base;
+}
+
+void test_product_exact_grouping() {
+  using namespace stanli;
+  // Direct kernel calls need the one-time registration normally performed by
+  // Executor construction.
+  {
+    Graph graph;
+    const int in = graph.add_slot(1, true);
+    const int out = graph.add_slot(1, false);
+    graph.add_op(OP_EXP, {in}, out);
+    graph.result_slot = out;
+    Executor warm(std::move(graph));
+  }
+
+  const Kernel& product = kernel(OP_PROD_VEC);
+  if (product.backward != nullptr) {
+    ++failures;
+    std::printf("FAIL product kernel has a backward implementation\n");
+  }
+
+  const double denorm = std::numeric_limits<double>::denorm_min();
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  std::vector<std::vector<double>> cases = {
+      {0.5},
+      {-0.0},
+      {denorm},
+      {inf},
+      {nan},
+      {0.5, 0.5, 0.5},
+      {0.0, inf, 2.0},
+      {-0.0, inf, 2.0},
+      {inf, 0.0, -2.0},
+      {nan, 0.0, inf},
+      {1.0 + 0x1p-52, 1.0 - 0x1p-52, 1.0 + 0x1p-51},
+      {0.5, 0.5, 0.5, 0.5, 0.5},
+      {1e200, 1e200, 1e-200, 1e-200, 3.0},
+      {1e200, 1e-200, 1e200, 1e-200, 3.0},
+      {denorm, 2.0, 2.0, 2.0, 2.0},
+      {-0.0, -1.0, -1.0, 1.0, 1.0},
+      {inf, -0.0, nan, -inf, 1.0},
+  };
+
+  // Exercise every packet boundary on the build host.  Fixed lengths 1/3/5
+  // above pin the public contract; these sizes keep the same test meaningful
+  // when Eigen is compiled for SSE, AVX2, or AVX-512.
+  const int packet_width = std::max(
+      1, static_cast<int>(Eigen::internal::packet_traits<double>::size));
+  const int packet_lengths[] = {packet_width - 1, packet_width,
+                                packet_width + 1, 2 * packet_width + 1};
+  const int exponents[] = {500, -500, 400, -400, 300, -300, 0, 0};
+  for (int n : packet_lengths) {
+    if (n <= 0) continue;  // Scalar-only Eigen has packet width one.
+    std::vector<double> values(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+      const double mantissa =
+          1.0 + static_cast<double>((i * 5 + 1) % 7) * 0x1p-52;
+      values[static_cast<size_t>(i)] =
+          std::ldexp((i % 3 == 0) ? -mantissa : mantissa, exponents[i % 8]);
+    }
+    cases.push_back(std::move(values));
+  }
+
+  std::map<std::string, const mir::FunDef*> funs;
+  MirInterp<double> interp(funs, "product grouping test");
+  mir::Expr variable;
+  variable.kind = mir::Expr::Var;
+  variable.name = "x";
+  variable.type_ = "UVector";
+  variable.unsized.leaf = mir::UnsizedLeaf::Vector;
+  mir::Expr call;
+  call.kind = mir::Expr::FunApp;
+  call.name = "prod";
+  call.fn_lib = mir::Expr::Lib::StanLib;
+  call.type_ = "UReal";
+  call.unsized.leaf = mir::UnsizedLeaf::Real;
+  call.args = {variable};
+
+  for (size_t c = 0; c < cases.size(); ++c) {
+    const std::vector<double>& values = cases[c];
+    Eigen::VectorXd pinned(static_cast<Eigen::Index>(values.size()));
+    for (size_t i = 0; i < values.size(); ++i) pinned[i] = values[i];
+    const uint64_t want = reduction_bits(stan::math::prod(pinned));
+
+    DataMap::Entry entry;
+    entry.r = values;
+    entry.dims = {static_cast<int64_t>(values.size())};
+    interp.env()["x"] = std::move(entry);
+    const uint64_t interpreted = reduction_bits(interp.eval(call).r.at(0));
+    if (interpreted != want) {
+      ++failures;
+      std::printf("FAIL product interpreter case %zu: got %llx want %llx\n", c,
+                  static_cast<unsigned long long>(interpreted),
+                  static_cast<unsigned long long>(want));
+    }
+
+    // Pin the address-independence seam at every packet-relevant shift.  A
+    // direct Eigen::Map differs at odd shifts; OP_PROD_VEC must not.
+    for (int offset = 0; offset < packet_width; ++offset) {
+      Eigen::VectorXd storage(static_cast<Eigen::Index>(
+          values.size() + static_cast<size_t>(packet_width)));
+      storage.setZero();
+      std::copy(values.begin(), values.end(), storage.data() + offset);
+      double got = 0.0;
+      KernelCtx ctx;
+      ctx.n_in = 1;
+      ctx.in[0] =
+          Desc{storage.data() + offset, static_cast<int64_t>(values.size())};
+      ctx.out = Desc{&got, 1};
+      product.forward(ctx);
+      if (reduction_bits(got) != want) {
+        ++failures;
+        std::printf(
+            "FAIL product kernel case %zu offset %d: got %llx want "
+            "%llx\n",
+            c, offset, static_cast<unsigned long long>(reduction_bits(got)),
+            static_cast<unsigned long long>(want));
+      }
+    }
+  }
+
+  // This tranche changes only Eigen vector/row-vector products.  Stan arrays
+  // retain MirInterp's existing ascending scalar fold.
+  mir::Expr array_variable = variable;
+  array_variable.name = "a";
+  array_variable.type_ = "(UArray UReal)";
+  array_variable.unsized.leaf = mir::UnsizedLeaf::Real;
+  array_variable.unsized.depth = 1;
+  mir::Expr array_call = call;
+  array_call.args = {array_variable};
+  const std::vector<double> array_values = {1e200, 1e200, 1e-200, 1e-200, 3.0};
+  DataMap::Entry array_entry;
+  array_entry.r = array_values;
+  array_entry.dims = {static_cast<int64_t>(array_values.size())};
+  interp.env()["a"] = std::move(array_entry);
+  double array_want = 1.0;
+  for (double value : array_values) array_want *= value;
+  const double array_got = interp.eval(array_call).r.at(0);
+  if (reduction_bits(array_got) != reduction_bits(array_want)) {
+    ++failures;
+    std::printf("FAIL array product changed its scalar left fold\n");
+  }
+
+  // Pin the actual expression surfaces admitted by lower.cpp.  CmdStan
+  // gives Eigen the unevaluated CwiseBinary expression; stanli materializes
+  // subtraction into a graph slot before OP_PROD_VEC.  Basic subtraction is
+  // lane-bit-transparent, so the two product groupings must still agree.
+  const auto check_minus_surface = [&](int n, const char* label) {
+    std::vector<Eigen::VectorXd> indexed(2, Eigen::VectorXd(n));
+    const double xs[] = {0.5,  -0.25, 2.0, -1.0, std::nextafter(1.0, 0.0),
+                         -0.5, 0.25,  1.5};
+    for (int i = 0; i < n; ++i)
+      indexed[1][i] = xs[i % static_cast<int>(sizeof(xs) / sizeof(xs[0]))];
+
+    const uint64_t direct =
+        reduction_bits(stan::math::prod(Eigen::VectorXd::Ones(n) - indexed[1]));
+    const uint64_t indexed_transpose = reduction_bits(
+        stan::math::prod(Eigen::RowVectorXd::Ones(n) - indexed[1].transpose()));
+    if (direct != indexed_transpose) {
+      ++failures;
+      std::printf(
+          "FAIL %s pinned outer-minus surfaces disagree: %llx vs "
+          "%llx\n",
+          label, static_cast<unsigned long long>(direct),
+          static_cast<unsigned long long>(indexed_transpose));
+    }
+
+    std::vector<double> materialized(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      materialized[static_cast<size_t>(i)] = 1.0 - indexed[1][i];
+    for (int offset = 0; offset < packet_width; ++offset) {
+      Eigen::VectorXd storage(n + packet_width);
+      storage.setZero();
+      std::copy(materialized.begin(), materialized.end(),
+                storage.data() + offset);
+      double got = 0.0;
+      KernelCtx ctx;
+      ctx.n_in = 1;
+      ctx.in[0] = Desc{storage.data() + offset, n};
+      ctx.out = Desc{&got, 1};
+      product.forward(ctx);
+      const uint64_t bits = reduction_bits(got);
+      if (bits != direct || bits != indexed_transpose) {
+        ++failures;
+        std::printf("FAIL %s offset %d: got %llx want %llx\n", label, offset,
+                    static_cast<unsigned long long>(bits),
+                    static_cast<unsigned long long>(direct));
+      }
+    }
+  };
+  check_minus_surface(5, "len5 outer-minus product");
+  check_minus_surface(2 * packet_width + 1,
+                      "packet-boundary outer-minus product");
+
+  // The corpus surface indexes a row of a column-major matrix and transposes
+  // it.  That Eigen block remains strided, disables packet access on the
+  // outer subtraction, and makes prod reduce from coefficient zero in
+  // ascending scalar order.  Search deterministic valid probabilities for a
+  // case that distinguishes that order from the packet variant, then pin the
+  // raw-expression oracle and the materialized graph kernel to the scalar
+  // result.  Scalar-only Eigen builds have no distinct packet order.
+  const int matrix_n = 2 * packet_width + 1;
+  Eigen::MatrixXd matrix(2, matrix_n);
+  std::vector<double> factors(static_cast<size_t>(matrix_n));
+  bool distinguished = packet_width == 1;
+  uint64_t state = 0x4d4154524958524fULL;
+  for (int trial = 0; trial < 4096 && !distinguished; ++trial) {
+    for (int i = 0; i < matrix_n; ++i) {
+      state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+      const double p = 0.01 + 0.98 * static_cast<double>(state >> 11) /
+                                  static_cast<double>(uint64_t{1} << 53);
+      matrix(0, i) = 0.25;
+      matrix(1, i) = p;
+      factors[static_cast<size_t>(i)] = 1.0 - p;
+    }
+    double scalar = factors[0];
+    for (int i = 1; i < matrix_n; ++i)
+      scalar *= factors[static_cast<size_t>(i)];
+
+    double packet = 0.0;
+    KernelCtx packet_ctx;
+    packet_ctx.n_in = 1;
+    packet_ctx.in[0] = Desc{factors.data(), matrix_n};
+    packet_ctx.out = Desc{&packet, 1};
+    packet_ctx.variant = 0;
+    product.forward(packet_ctx);
+    if (reduction_bits(packet) == reduction_bits(scalar)) continue;
+
+    const double direct = stan::math::prod(Eigen::VectorXd::Ones(matrix_n) -
+                                           matrix.row(1).transpose());
+    double got = 0.0;
+    KernelCtx scalar_ctx = packet_ctx;
+    scalar_ctx.out = Desc{&got, 1};
+    scalar_ctx.variant = 1;
+    product.forward(scalar_ctx);
+    if (reduction_bits(direct) != reduction_bits(scalar) ||
+        reduction_bits(got) != reduction_bits(scalar)) {
+      ++failures;
+      std::printf("FAIL matrix-row product did not use scalar grouping\n");
+    }
+    distinguished = true;
+  }
+  if (!distinguished) {
+    ++failures;
+    std::printf("FAIL matrix-row oracle did not distinguish packet order\n");
+  }
+}
+
+void test_compiled_gq_reductions() {
+  using namespace stanli;
+  const std::string text = slurp("tests/fixtures/gq_reductions.tmir.sexp");
+  const DataMap data = reduction_data();
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL reductions fixture did not compile completely: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return;
+  }
+
+  // The same fixture pins both legacy seams in log_prob: data-only prod is
+  // folded rather than becoming the forward-only opcode, and pure-data int
+  // sum still compiles/evaluates outside the runtime GQ specialization.
+  int log_products = 0;
+  for (const Op& op : cm.graph.ops)
+    if (op.opcode == OP_PROD_VEC) ++log_products;
+  if (log_products != 0) {
+    ++failures;
+    std::printf("FAIL data-only log_prob prod used OP_PROD_VEC\n");
+  }
+  Executor log_ex(std::move(cm.graph));
+  cm.bind(log_ex);
+  log_ex.params_data()[0] = 0.25;
+  for (int i = 0; i < 5; ++i) log_ex.params_data()[1 + i] = 0.5;
+  if (!std::isfinite(log_ex.forward())) {
+    ++failures;
+    std::printf("FAIL legacy data prod/int sum log_prob evaluation\n");
+  }
+
+  int product_ops = 0, rng_ops = 0, sum_ops = 0;
+  for (const Op& op : cm.write_array->graph.ops) {
+    product_ops += op.opcode == OP_PROD_VEC;
+    rng_ops += op.opcode == OP_RNG;
+    sum_ops += op.opcode == OP_SUM_VEC;
+  }
+  if (product_ops != 1 || rng_ops != 2 || sum_ops != 1) {
+    ++failures;
+    std::printf("FAIL reductions op census: prod=%d rng=%d sum=%d\n",
+                product_ops, rng_ops, sum_ops);
+  }
+
+  Executor graph(std::move(cm.write_array->graph));
+  cm.write_array->bind(graph);
+  const Op* product_op = nullptr;
+  for (const Op& op : graph.graph().ops)
+    if (op.opcode == OP_PROD_VEC) product_op = &op;
+  if (!product_op || graph.graph().slots[product_op->in[0]].offset != 1) {
+    ++failures;
+    std::printf("FAIL reductions product input is not the pinned odd offset\n");
+  }
+  graph.params_data()[0] = 0.25;
+  for (int i = 0; i < 5; ++i) graph.params_data()[1 + i] = 0.5;
+  const auto graph_row = [&](WaRng& rng) {
+    graph.run_forward_only(EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& column : cm.write_array->columns) {
+      const double* values = graph.value_ptr(column.slot);
+      for (int64_t i = 0; i < column.len; ++i)
+        row.push_back(values[column.storage_index(i)]);
+    }
+    return row;
+  };
+
+  auto program =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  WaInterp interpreted(program, reduction_base(data));
+  std::map<std::string, DataMap::Entry> params;
+  params["pad"].r = {0.25};
+  params["x"].r = std::vector<double>(5, 0.5);
+  params["x"].dims = {5};
+
+  WaRng graph_rng(2026), interp_rng(2026);
+  const std::vector<double> got = graph_row(graph_rng);
+  const std::vector<double> want = interpreted.eval(params, interp_rng);
+  const auto graph_next = graph_rng.gen()();
+  const auto interp_next = interp_rng.gen()();
+  if (got != want || graph_next != interp_next) {
+    ++failures;
+    std::printf("FAIL reductions graph/interpreter row or next RNG state\n");
+  }
+  const std::vector<std::string> names =
+      CompiledModel::csv_names(cm.write_array->columns);
+  for (size_t i = 0; i < names.size(); ++i) {
+    if (names[i] == "pr" && reduction_bits(got[i]) != reduction_bits(0.03125)) {
+      ++failures;
+      std::printf("FAIL reductions product output\n");
+    }
+    if (names[i] == "total" && (got[i] < 1.0 || got[i] > 3.0)) {
+      ++failures;
+      std::printf("FAIL reductions integer sum output %.17g\n", got[i]);
+    }
+    if (names[i].rfind("partial_matrix.", 0) == 0) {
+      const double want =
+          names[i] == "partial_matrix.1.1"
+              ? 7.0
+              : static_cast<double>(std::numeric_limits<int>::min());
+      if (got[i] != want) {
+        ++failures;
+        std::printf("FAIL nested int-array sentinel for %s\n",
+                    names[i].c_str());
+      }
+    }
+  }
+
+  // Consecutive rows consume exactly the same stream on both paths too.
+  WaRng graph_stream(91), interp_stream(91);
+  const std::vector<double> g1 = graph_row(graph_stream);
+  const std::vector<double> i1 = interpreted.eval(params, interp_stream);
+  const std::vector<double> g2 = graph_row(graph_stream);
+  const std::vector<double> i2 = interpreted.eval(params, interp_stream);
+  if (g1 != i1 || g2 != i2) {
+    ++failures;
+    std::printf("FAIL reductions consecutive RNG stream rows\n");
+  }
+}
+
+static bool replace_reduction_after(std::string& text, size_t after,
+                                    const std::string& from,
+                                    const std::string& to, const char* what) {
+  const size_t at = text.find(from, after);
+  if (at == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reduction mutation cannot find %s\n", what);
+    return false;
+  }
+  text.replace(at, from.size(), to);
+  return true;
+}
+
+static void expect_reduction_interp(const std::string& text,
+                                    const std::string& reason, const char* what,
+                                    bool sum_prefix = false) {
+  using namespace stanli;
+  CompiledModel cm;
+  try {
+    cm = compile_model(text, reduction_data());
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
+                e.what());
+    return;
+  }
+  const bool fallback = cm.write_array && cm.write_array->interp &&
+                        (reason.empty() || cm.write_array->truncated.find(
+                                               reason) != std::string::npos);
+  if (!fallback) {
+    ++failures;
+    std::printf(
+        "FAIL %s: got %s\n", what,
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return;
+  }
+  if (sum_prefix) {
+    int sums = 0;
+    for (const Op& op : cm.write_array->graph.ops)
+      if (op.opcode == OP_SUM_VEC) ++sums;
+    if (sums != 1) {
+      ++failures;
+      std::printf("FAIL %s: runtime sum was not retained in graph prefix\n",
+                  what);
+    }
+  }
+}
+
+static std::vector<double> eval_reduction_interp(
+    const std::string& text, std::vector<std::string>* names) {
+  using namespace stanli;
+  const DataMap data = reduction_data();
+  auto program =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  WaInterp interp(program, reduction_base(data));
+  std::map<std::string, DataMap::Entry> params;
+  params["pad"].r = {0.25};
+  params["x"].r = std::vector<double>(5, 0.5);
+  params["x"].dims = {5};
+  WaRng rng(44);
+  std::vector<double> row = interp.eval(params, rng);
+  *names = CompiledModel::csv_names(interp.columns());
+  return row;
+}
+
+void test_gq_reduction_lowering_guards() {
+  using namespace stanli;
+  const std::string base = slurp("tests/fixtures/gq_reductions.tmir.sexp");
+
+  // Generated optimized MIR for the exact corpus surface:
+  // prod(rep_vector(1,T) - Transpose__(Indexed(Var p,i))).  Its matrix-row
+  // operand deliberately selects the scalar product variant.
+  const std::string udf_fixture = slurp("tests/fixtures/gq_prod_udf.tmir.sexp");
+  {
+    DataMap no_data;
+    CompiledModel surface = compile_model(udf_fixture, no_data);
+    int products = 0, packet_products = 0, scalar_products = 0;
+    if (surface.write_array)
+      for (const Op& op : surface.write_array->graph.ops) {
+        if (op.opcode != OP_PROD_VEC) continue;
+        ++products;
+        packet_products += op.variant == 0;
+        scalar_products += op.variant == 1;
+      }
+    if (!surface.write_array || surface.write_array->interp || products != 3 ||
+        packet_products != 2 || scalar_products != 1) {
+      ++failures;
+      std::printf(
+          "FAIL exact product surfaces did not select packet/scalar "
+          "variants\n");
+    } else {
+      // Execute all three admitted syntactic surfaces through both engines.
+      // In particular, `prod(1 - x')` must be classified Packet rather than
+      // silently emitted as variant 0 from a Legacy classifier result.
+      Executor graph(std::move(surface.write_array->graph));
+      surface.write_array->bind(graph);
+      const std::vector<double> x = {0.5, -0.25, 2.0, -1.0,
+                                     std::nextafter(1.0, 0.0)};
+      const std::vector<double> p = {0.25, 0.11, 0.25, 0.37, 0.25,
+                                     0.43, 0.25, 0.59, 0.25, 0.73};
+      std::copy(x.begin(), x.end(), graph.params_data());
+      std::copy(p.begin(), p.end(), graph.params_data() + x.size());
+      graph.run_forward_only();
+      std::vector<double> graph_row;
+      for (const auto& column : surface.write_array->columns) {
+        const double* values = graph.value_ptr(column.slot);
+        for (int64_t i = 0; i < column.len; ++i)
+          graph_row.push_back(values[column.storage_index(i)]);
+      }
+
+      auto program = std::make_shared<mir::Program>(
+          mir::read_program(sexp::parse(udf_fixture)));
+      std::map<std::string, DataMap::Entry> base_env;
+      for (const char* flag :
+           {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+        DataMap::Entry one;
+        one.is_int = true;
+        one.i = {1};
+        one.r = {1.0};
+        base_env[flag] = one;
+      }
+      WaInterp interp(program, std::move(base_env));
+      std::map<std::string, DataMap::Entry> params;
+      params["x"].r = x;
+      params["x"].dims = {5};
+      params["p"].r = p;
+      params["p"].dims = {2, 5};
+      WaRng rng(1234);
+      const std::vector<double> interp_row = interp.eval(params, rng);
+      if (graph_row.size() != interp_row.size()) {
+        ++failures;
+        std::printf("FAIL exact product surface row widths differ\n");
+      } else {
+        for (size_t i = 0; i < graph_row.size(); ++i)
+          if (reduction_bits(graph_row[i]) != reduction_bits(interp_row[i])) {
+            ++failures;
+            std::printf(
+                "FAIL exact product surface graph/interpreter bits at %zu\n",
+                i);
+            break;
+          }
+      }
+    }
+  }
+
+  // A row of a matrix-valued expression need not have the matrix variable's
+  // col-major stride (transpose(M) is the simplest counterexample).  Only an
+  // Indexed bare matrix variable belongs to the audited scalar surface.
+  std::string matrix_expression = udf_fixture;
+  const size_t matrix_wa =
+      matrix_expression.find("(Assignment ((LVariable target_surface)");
+  const std::string matrix_var = "(pattern (Var p))";
+  const std::string transposed_matrix =
+      "(pattern\n"
+      "                       (FunApp (StanLib Transpose__ FnPlain AoS)\n"
+      "                        (((pattern (Var p))\n"
+      "                          (meta ((type_ UMatrix) (loc <opaque>) "
+      "(adlevel DataOnly)))))))";
+  if (matrix_wa == std::string::npos ||
+      !replace_reduction_after(matrix_expression, matrix_wa, matrix_var,
+                               transposed_matrix,
+                               "matrix-expression product base")) {
+    ++failures;
+    std::printf("FAIL product fixture has no indexed matrix variable\n");
+  } else {
+    DataMap no_data;
+    CompiledModel cm = compile_model(matrix_expression, no_data);
+    if (!cm.write_array || !cm.write_array->interp ||
+        cm.write_array->truncated.find("expression surface") ==
+            std::string::npos) {
+      ++failures;
+      std::printf("FAIL matrix-expression product base did not fall back\n");
+    }
+  }
+
+  // O1 normally inlines generated-quantities UDF calls.  Restore the call
+  // at its retained function definition to pin the lower_call_udf guard: a
+  // formal vector may be bound to a shifted Eigen Block, so dynamic prod in
+  // a UDF must remain on WaInterp even when the caller's syntax is a Var.
+  std::string dynamic_udf = udf_fixture;
+  const size_t udf_wa = dynamic_udf.find("(generate_quantities");
+  const std::string stan_prod = "(FunApp (StanLib prod FnPlain AoS)";
+  const size_t inlined_prod = dynamic_udf.find(stan_prod, udf_wa);
+  if (udf_wa == std::string::npos || inlined_prod == std::string::npos) {
+    ++failures;
+    std::printf("FAIL generated UDF product fixture has no inlined call\n");
+  } else {
+    dynamic_udf.replace(inlined_prod, stan_prod.size(),
+                        "(FunApp (UserDefined vector_product FnPlain)");
+    expect_reduction_interp(dynamic_udf, "expression surface",
+                            "dynamic UDF product stays interpreted");
+  }
+
+  const size_t assignment = base.find("(Assignment ((LVariable pr)");
+  const size_t prod_call = base.find("(FunApp (StanLib prod", assignment);
+  const std::string vector_node =
+      "((pattern (Var x)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const std::string vector_meta =
+      "(meta ((type_ UVector) (loc <opaque>) (adlevel DataOnly)))";
+  if (assignment == std::string::npos || prod_call == std::string::npos ||
+      base.find(vector_node, prod_call) == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reductions guard fixture has no dynamic product\n");
+    return;
+  }
+
+  struct BadInput {
+    const char* type;
+    const char* label;
+  };
+  const BadInput bad_inputs[] = {
+      {"UReal", "scalar"},
+      {"UMatrix", "matrix"},
+      {"(UArray UReal)", "array"},
+      {"(UArray (UArray UReal))", "nested array"},
+  };
+  for (const BadInput& bad : bad_inputs) {
+    std::string mutated = base;
+    const std::string replacement = std::string("(meta ((type_ ") + bad.type +
+                                    ") (loc <opaque>) (adlevel DataOnly)))";
+    if (!replace_reduction_after(mutated, prod_call, vector_meta, replacement,
+                                 bad.label))
+      continue;
+    const std::string label =
+        std::string("product ") + bad.label + " input stays interpreted";
+    expect_reduction_interp(mutated, "vector or row-vector", label.c_str());
+  }
+
+  std::string container_result = base;
+  const std::string real_result =
+      "(meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))";
+  const std::string vector_result =
+      "(meta ((type_ UVector) (loc <opaque>) (adlevel DataOnly)))";
+  if (replace_reduction_after(container_result, prod_call, real_result,
+                              vector_result, "container product result"))
+    expect_reduction_interp(container_result, "scalar-real result",
+                            "product container result stays interpreted");
+
+  std::string two_args = base;
+  const size_t one_arg = two_args.find(vector_node, prod_call);
+  if (one_arg == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reduction mutation cannot find product arity\n");
+  } else {
+    two_args.insert(one_arg + vector_node.size(), " " + vector_node);
+    expect_reduction_interp(two_args, "scalar-real result",
+                            "two-argument product stays interpreted");
+  }
+
+  const std::string empty_vector =
+      "((pattern\n"
+      "            (FunApp (StanLib rep_vector FnPlain AoS)\n"
+      "             (((pattern (Var pad))\n"
+      "               (meta ((type_ UReal) (loc <opaque>) (adlevel "
+      "DataOnly))))\n"
+      "              ((pattern (Lit Int 0))\n"
+      "               (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly)))))))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string empty = base;
+  if (replace_reduction_after(empty, prod_call, vector_node, empty_vector,
+                              "empty product"))
+    expect_reduction_interp(empty, "expression surface",
+                            "empty dynamic product stays interpreted");
+
+  const std::string segment =
+      "((pattern\n"
+      "            (FunApp (StanLib segment FnPlain AoS)\n"
+      "             (((pattern (Var x))\n"
+      "               (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))\n"
+      "              ((pattern (Lit Int 2))\n"
+      "               (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly))))\n"
+      "              ((pattern (Lit Int 3))\n"
+      "               (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly)))))))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string direct_view = base;
+  if (replace_reduction_after(direct_view, prod_call, vector_node, segment,
+                              "segment product"))
+    expect_reduction_interp(direct_view, "expression surface",
+                            "segment product stays interpreted");
+
+  const std::string transposed_segment =
+      "((pattern\n"
+      "            (FunApp (StanLib Transpose__ FnPlain AoS)\n"
+      "             (" +
+      segment +
+      ")))\n"
+      "           (meta ((type_ URowVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string wrapped_view = base;
+  if (replace_reduction_after(wrapped_view, prod_call, vector_node,
+                              transposed_segment, "transposed segment product"))
+    expect_reduction_interp(wrapped_view, "expression surface",
+                            "transposed segment product stays interpreted");
+
+  // A transpose of a bare vector is an address-zero row-vector view in
+  // CmdStan and remains in scope for the native path.
+  const std::string transposed_bare =
+      "((pattern\n"
+      "            (FunApp (StanLib Transpose__ FnPlain AoS)\n"
+      "             (" +
+      vector_node +
+      ")))\n"
+      "           (meta ((type_ URowVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string row_vector = base;
+  if (replace_reduction_after(row_vector, prod_call, vector_node,
+                              transposed_bare, "row-vector product")) {
+    CompiledModel cm = compile_model(row_vector, reduction_data());
+    int products = 0;
+    if (cm.write_array)
+      for (const Op& op : cm.write_array->graph.ops)
+        products += op.opcode == OP_PROD_VEC;
+    if (!cm.write_array || cm.write_array->interp || products != 1) {
+      ++failures;
+      std::printf("FAIL bare row-vector product did not compile\n");
+    }
+  }
+
+  const std::string exp_vector =
+      "((pattern\n"
+      "            (FunApp (StanLib exp FnPlain AoS)\n"
+      "             (" +
+      vector_node +
+      ")))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string exp_product = base;
+  if (replace_reduction_after(exp_product, prod_call, vector_node, exp_vector,
+                              "exp product"))
+    expect_reduction_interp(exp_product, "expression surface",
+                            "prod(exp(x)) stays interpreted");
+
+  const std::string scalar_one =
+      "((pattern (Lit Real 1.0))\n"
+      "              (meta ((type_ UReal) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const std::string safe_minus =
+      "((pattern\n"
+      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
+      "             (" +
+      scalar_one + " " + vector_node +
+      ")))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string minus_product = base;
+  if (replace_reduction_after(minus_product, prod_call, vector_node, safe_minus,
+                              "audited subtraction product")) {
+    CompiledModel cm = compile_model(minus_product, reduction_data());
+    int products = 0;
+    if (cm.write_array)
+      for (const Op& op : cm.write_array->graph.ops)
+        products += op.opcode == OP_PROD_VEC;
+    if (!cm.write_array || cm.write_array->interp || products != 1) {
+      ++failures;
+      std::printf("FAIL audited outer-subtraction product did not compile\n");
+    }
+  }
+
+  // The same outer subtraction with a transpose-of-bare-vector operand is
+  // also packet-grouped.  This exact form previously passed the lowering
+  // whitelist while the shared classifier returned Legacy.
+  const std::string safe_transposed_minus =
+      "((pattern\n"
+      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
+      "             (" +
+      scalar_one + " " + transposed_bare +
+      ")))\n"
+      "           (meta ((type_ URowVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string transposed_minus_product = base;
+  if (replace_reduction_after(transposed_minus_product, prod_call, vector_node,
+                              safe_transposed_minus,
+                              "transposed subtraction product")) {
+    CompiledModel cm =
+        compile_model(transposed_minus_product, reduction_data());
+    int products = 0, packet_products = 0;
+    if (cm.write_array)
+      for (const Op& op : cm.write_array->graph.ops) {
+        if (op.opcode != OP_PROD_VEC) continue;
+        ++products;
+        packet_products += op.variant == 0;
+      }
+    if (!cm.write_array || cm.write_array->interp || products != 1 ||
+        packet_products != 1) {
+      ++failures;
+      std::printf(
+          "FAIL transposed outer-subtraction product did not compile as "
+          "packet\n");
+    }
+  }
+
+  // Eigen's IndexedView for a gather also clears PacketAccess.  It is outside
+  // this tranche's exact native grammar, so an outer subtraction containing
+  // one must stay on the interpreter rather than materialize then packetize.
+  const std::string gather_vector =
+      "((pattern\n"
+      "            (Indexed\n"
+      "             (" +
+      vector_node +
+      "\n"
+      "              (MultiIndex\n"
+      "               ((pattern (Var counts))\n"
+      "                (meta ((type_ (UArray UInt)) (loc <opaque>) "
+      "(adlevel DataOnly))))))))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const std::string gather_minus =
+      "((pattern\n"
+      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
+      "             (" +
+      scalar_one + " " + gather_vector +
+      ")))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string gathered_product = base;
+  if (replace_reduction_after(gathered_product, prod_call, vector_node,
+                              gather_minus, "gather product"))
+    expect_reduction_interp(gathered_product, "expression surface",
+                            "prod(1-x[idx]) stays interpreted");
+
+  const std::string unsafe_minus =
+      "((pattern\n"
+      "            (FunApp (StanLib Minus__ FnPlain AoS)\n"
+      "             (" +
+      scalar_one + " " + exp_vector +
+      ")))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string nested_math = base;
+  if (replace_reduction_after(nested_math, prod_call, vector_node, unsafe_minus,
+                              "nested vector math product"))
+    expect_reduction_interp(nested_math, "expression surface",
+                            "prod(1-exp(x)) stays interpreted");
+
+  // A dynamic product in log_prob must retain the old unsupported/fallback
+  // behavior; the forward-only opcode is never admitted to reverse mode.
+  std::string reverse = base;
+  const size_t log_prod = reverse.find("(FunApp (StanLib prod");
+  const std::string data_node =
+      "((pattern (Var d))\n"
+      "               (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const std::string active_node =
+      "((pattern (Var x))\n"
+      "               (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "AutoDiffable))))";
+  if (replace_reduction_after(reverse, log_prod, data_node, active_node,
+                              "reverse-mode product")) {
+    bool refused = false;
+    try {
+      (void)compile_model(reverse, reduction_data());
+    } catch (const CompileError& e) {
+      refused = std::string(e.what()).find("unsupported function prod") !=
+                std::string::npos;
+    }
+    if (!refused) {
+      ++failures;
+      std::printf("FAIL dynamic log_prob product was not refused\n");
+    }
+  }
+
+  const size_t sum_call = base.find("(FunApp (StanLib sum", prod_call);
+  const std::string sum_arg =
+      "((pattern (Var z))\n"
+      "           (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  if (sum_call == std::string::npos ||
+      base.find(sum_arg, sum_call) == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reductions guard fixture has no runtime int sum\n");
+    return;
+  }
+
+  std::string nested_sum = base;
+  const std::string nested_arg =
+      "((pattern (Var z))\n"
+      "           (meta ((type_ (UArray (UArray UInt))) (loc <opaque>) "
+      "(adlevel DataOnly))))";
+  if (replace_reduction_after(nested_sum, sum_call, sum_arg, nested_arg,
+                              "nested int sum"))
+    expect_reduction_interp(nested_sum, "", "nested int sum fallback");
+
+  std::string unproved = base;
+  const size_t first_runtime_rng =
+      unproved.find("(FunApp (StanLib bernoulli_rng", prod_call);
+  if (first_runtime_rng == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reductions guard fixture has no Bernoulli source\n");
+  } else {
+    unproved.replace(first_runtime_rng,
+                     std::string("(FunApp (StanLib bernoulli_rng").size(),
+                     "(FunApp (StanLib poisson_log_rng");
+    expect_reduction_interp(unproved, "unproved integral slot values",
+                            "unproved runtime int sum fallback");
+  }
+
+  std::string overflow = base;
+  const size_t first_z = overflow.find("((LVariable z)", prod_call);
+  const size_t index_one = overflow.find("(Lit Int 1)", first_z);
+  const size_t value_one = overflow.find("(Lit Int 1)", index_one + 1);
+  if (value_one == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reductions guard cannot find overflow literal\n");
+  } else {
+    overflow.replace(value_one, std::string("(Lit Int 1)").size(),
+                     "(Lit Int 2147483647)");
+    expect_reduction_interp(overflow, "overflow int32",
+                            "overflowing runtime int sum fallback");
+  }
+
+  // Default local ints are INT_MIN sentinels, not zero.  Re-target the z[3]
+  // write to z[2], leaving one element definitely uninitialized: a range hull
+  // over the written values alone must not authorize the sum.
+  std::string partial = base;
+  size_t z_assignment = partial.find("((LVariable z)", prod_call);
+  for (int occurrence = 1; occurrence < 3 && z_assignment != std::string::npos;
+       ++occurrence)
+    z_assignment = partial.find("((LVariable z)", z_assignment + 1);
+  const size_t index_three = partial.find("(Lit Int 3)", z_assignment);
+  if (z_assignment == std::string::npos || index_three == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reductions guard cannot find z[3] write\n");
+  } else {
+    partial.replace(index_three, std::string("(Lit Int 3)").size(),
+                    "(Lit Int 2)");
+    expect_reduction_interp(partial, "not definitely initialized",
+                            "partially initialized runtime int sum fallback");
+    std::vector<std::string> names;
+    const std::vector<double> row = eval_reduction_interp(partial, &names);
+    double z_sum = 0.0, total = 0.0;
+    bool found_uninitialized = false, found_total = false;
+    for (size_t i = 0; i < row.size(); ++i) {
+      if (names[i].rfind("z.", 0) == 0) z_sum += row[i];
+      if (names[i] == "z.3")
+        found_uninitialized =
+            row[i] == static_cast<double>(std::numeric_limits<int>::min());
+      if (names[i] == "total") {
+        found_total = true;
+        total = row[i];
+      }
+    }
+    if (!found_uninitialized || !found_total || total != z_sum) {
+      ++failures;
+      std::printf(
+          "FAIL partially initialized interpreter did not preserve the "
+          "INT_MIN sentinel\n");
+    }
+  }
+
+  const std::string empty_slice =
+      "((pattern\n"
+      "            (Indexed\n"
+      "             ((pattern (Var z))\n"
+      "              (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
+      "DataOnly))))\n"
+      "             ((Between\n"
+      "               ((pattern (Lit Int 1))\n"
+      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly))))\n"
+      "               ((pattern (Lit Int 0))\n"
+      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly))))))))\n"
+      "           (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string empty_sum = base;
+  if (replace_reduction_after(empty_sum, sum_call, sum_arg, empty_slice,
+                              "empty int sum"))
+    expect_reduction_interp(empty_sum, "", "empty direct int sum fallback");
+
+  // The generated fixture's reversed 10:0 write proves that arbitrary
+  // reversed ranges are harmless empty updates.  Mutate its later 4:5 write
+  // to pin both sides of the bounds check and a width mismatch; every case
+  // must fail closed to WaInterp, which then reports the same invalid write.
+  const size_t tail_range = base.rfind("((Between");
+  const size_t tail_lo = base.find("(Lit Int 4)", tail_range);
+  const size_t tail_hi = base.find("(Lit Int 5)", tail_lo);
+  if (tail_range == std::string::npos || tail_lo == std::string::npos ||
+      tail_hi == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reductions guard cannot find the 4:5 range write\n");
+  } else {
+    const auto expect_invalid_range = [&](long lo, long hi, const char* reason,
+                                          const char* what) {
+      std::string mutated = base;
+      mutated.replace(tail_hi, std::string("(Lit Int 5)").size(),
+                      "(Lit Int " + std::to_string(hi) + ")");
+      mutated.replace(tail_lo, std::string("(Lit Int 4)").size(),
+                      "(Lit Int " + std::to_string(lo) + ")");
+      expect_reduction_interp(mutated, reason, what);
+      try {
+        std::vector<std::string> names;
+        (void)eval_reduction_interp(mutated, &names);
+        ++failures;
+        std::printf("FAIL %s: interpreter accepted invalid range\n", what);
+      } catch (const std::exception&) {
+      }
+    };
+    expect_invalid_range(0, 1, "out of bounds", "low OOB range assignment");
+    expect_invalid_range(5, 6, "out of bounds", "high OOB range assignment");
+    expect_invalid_range(4, 4, "size mismatch",
+                         "range assignment RHS width mismatch");
+
+    // A single range index on a matrix denotes rows, not a contiguous flat
+    // slice.  This first tranche has no strided multi-row write opcode.
+    std::string matrix_rows = base;
+    const size_t lhs_z = matrix_rows.rfind("(LVariable z)", tail_range);
+    if (lhs_z == std::string::npos) {
+      ++failures;
+      std::printf("FAIL reductions guard cannot find range target\n");
+    } else {
+      matrix_rows.replace(lhs_z, std::string("(LVariable z)").size(),
+                          "(LVariable partial_matrix)");
+      expect_reduction_interp(matrix_rows, "one-dimensional flat value",
+                              "matrix row-range assignment stays interpreted");
+    }
+  }
+}
+
+void test_runtime_int_sum_is_not_compile_time() {
+  const std::string base = slurp("tests/fixtures/gq_reductions.tmir.sexp");
+  const size_t sum_call = base.find(
+      "(FunApp (StanLib sum", base.find("(Assignment ((LVariable total)"));
+  const size_t insertion = base.find("((pattern\n     (NRFunApp", sum_call);
+  if (sum_call == std::string::npos || insertion == std::string::npos) {
+    ++failures;
+    std::printf("FAIL reductions fixture has no post-sum insertion point\n");
+    return;
+  }
+
+  const std::string runtime_index =
+      "((pattern\n"
+      "     (Assignment ((LVariable pr) ()) UReal\n"
+      "      ((pattern\n"
+      "        (Indexed\n"
+      "         ((pattern (Var x))\n"
+      "          (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))\n"
+      "         ((Single\n"
+      "           ((pattern (Var total))\n"
+      "            (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly))))))))\n"
+      "       (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))))\n"
+      "    (meta <opaque>))\n   ";
+  std::string index = base;
+  index.insert(insertion, runtime_index);
+  expect_reduction_interp(index, "unknown int total",
+                          "runtime sum cannot provide an index", true);
+
+  const std::string runtime_shape =
+      "((pattern\n"
+      "     (Decl (decl_adtype DataOnly) (decl_id shaped)\n"
+      "      (decl_type\n"
+      "       (Sized\n"
+      "        (SVector AoS\n"
+      "         ((pattern (Var total))\n"
+      "          (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly)))))))\n"
+      "      (initialize Default)))\n"
+      "    (meta <opaque>))\n   ";
+  std::string shape = base;
+  shape.insert(insertion, runtime_shape);
+  expect_reduction_interp(shape, "unknown int total",
+                          "runtime sum cannot provide a shape", true);
+
+  const std::string runtime_loop =
+      "((pattern\n"
+      "     (For (loopvar i)\n"
+      "      (lower\n"
+      "       ((pattern (Lit Int 1))\n"
+      "        (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))\n"
+      "      (upper\n"
+      "       ((pattern (Var total))\n"
+      "        (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))\n"
+      "      (body\n"
+      "       ((pattern (Block (((pattern Skip) (meta <opaque>)))))\n"
+      "        (meta <opaque>)))))\n"
+      "    (meta <opaque>))\n   ";
+  std::string loop = base;
+  loop.insert(insertion, runtime_loop);
+  expect_reduction_interp(loop, "unknown int total",
+                          "runtime sum cannot provide a loop bound", true);
+
+  const std::string runtime_condition =
+      "((pattern\n"
+      "     (IfElse\n"
+      "      ((pattern (Var total))\n"
+      "       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))\n"
+      "      ((pattern (Block (((pattern Skip) (meta <opaque>)))))\n"
+      "       (meta <opaque>))\n"
+      "      ()))\n"
+      "    (meta <opaque>))\n   ";
+  std::string condition = base;
+  condition.insert(insertion, runtime_condition);
+  expect_reduction_interp(condition, "data-only condition is unavailable",
+                          "runtime sum cannot provide a condition", true);
+}
+
+void test_runtime_int_sum_redeclaration_shadowing() {
+  using namespace stanli;
+  const std::string base = slurp("tests/fixtures/gq_reductions.tmir.sexp");
+  const size_t sum = base.find("(FunApp (StanLib sum",
+                               base.find("(Assignment ((LVariable total)"));
+  const size_t insertion = base.find("((pattern\n     (NRFunApp", sum);
+  if (sum == std::string::npos || insertion == std::string::npos) {
+    ++failures;
+    std::printf(
+        "FAIL reductions fixture has no post-sum redeclaration "
+        "point\n");
+    return;
+  }
+
+  const std::string literal_decl =
+      "((pattern\n"
+      "     (Decl (decl_adtype DataOnly) (decl_id total)\n"
+      "      (decl_type (Sized SInt))\n"
+      "      (initialize\n"
+      "       (Assign\n"
+      "        ((pattern (Lit Int 2))\n"
+      "         (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly))))))))\n"
+      "    (meta <opaque>))\n   ";
+  std::string literal = base;
+  literal.insert(insertion, literal_decl);
+  CompiledModel cm = compile_model(literal, reduction_data());
+  if (!cm.write_array || cm.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL same-id literal int redeclaration did not compile: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  } else {
+    Executor graph(std::move(cm.write_array->graph));
+    cm.write_array->bind(graph);
+    graph.params_data()[0] = 0.25;
+    for (int i = 0; i < 5; ++i) graph.params_data()[1 + i] = 0.5;
+    WaRng rng(44);
+    graph.run_forward_only(EvalState{&rng});
+    const std::vector<std::string> names =
+        CompiledModel::csv_names(cm.write_array->columns);
+    bool found = false;
+    size_t at = 0;
+    for (const auto& column : cm.write_array->columns) {
+      const double* values = graph.value_ptr(column.slot);
+      for (int64_t i = 0; i < column.len; ++i, ++at) {
+        if (names[at] != "total") continue;
+        found = true;
+        if (reduction_bits(values[column.storage_index(i)]) !=
+            reduction_bits(2.0)) {
+          ++failures;
+          std::printf("FAIL stale runtime sum shadowed later literal int\n");
+        }
+      }
+    }
+    if (!found) {
+      ++failures;
+      std::printf("FAIL same-id literal test has no total column\n");
+    }
+  }
+
+  const std::string uninitialized_decl =
+      "((pattern\n"
+      "     (Decl (decl_adtype DataOnly) (decl_id total)\n"
+      "      (decl_type (Sized SInt)) (initialize Uninit)))\n"
+      "    (meta <opaque>))\n   ";
+  std::string uninitialized = base;
+  uninitialized.insert(insertion, uninitialized_decl);
+  expect_reduction_interp(uninitialized, "unknown variable total",
+                          "same-id uninitialized int fails closed", true);
+  std::vector<std::string> names;
+  const std::vector<double> row = eval_reduction_interp(uninitialized, &names);
+  bool found_sentinel = false;
+  for (size_t i = 0; i < row.size(); ++i)
+    if (names[i] == "total" &&
+        row[i] == static_cast<double>(std::numeric_limits<int>::min()))
+      found_sentinel = true;
+  if (!found_sentinel) {
+    ++failures;
+    std::printf(
+        "FAIL uninitialized scalar interpreter did not preserve the "
+        "INT_MIN sentinel\n");
+  }
+}
+
 int main() {
   test_naming_rules();
   test_wanames_pipeline();
@@ -863,6 +2052,11 @@ int main() {
   test_binomial_rng_helper_contract();
   test_binomial_rng_lowering_guards();
   test_compiled_scalar_rng();
+  test_product_exact_grouping();
+  test_compiled_gq_reductions();
+  test_gq_reduction_lowering_guards();
+  test_runtime_int_sum_is_not_compile_time();
+  test_runtime_int_sum_redeclaration_shadowing();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   if (failures == 0) std::printf("test_write_array OK\n");

@@ -118,7 +118,13 @@ class MirInterp {
   std::vector<T> call(const mir::FunDef& f,
                       const std::vector<std::vector<T>>& args,
                       const std::vector<std::vector<int>>& int_args) {
+    if (udf_depth_ > 64) fail("UDF recursion too deep");
     MirInterp sub(funs_, where_, hooks_);
+    // Positional calls are used by the ODE/RHS fallback, but their formals
+    // have the same unknown Eigen-view provenance as an ordinary UDF's.
+    // Keeping them below top-level depth prevents product lowering from
+    // assuming a formal is an owning, address-zero vector.
+    sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto_ctx_;
     size_t ai = 0, ii = 0;
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
@@ -244,17 +250,20 @@ class MirInterp {
           // uninitialized value: hmm_drive writes best_logp[1, K] where it
           // means best_logp[1, k], and its Viterbi only matches CmdStan's
           // because the never-written element loses every comparison.
-          if (e.is_int) e.i = {0};
-          e.r = {e.is_int ? T(0.0)
-                          : T(std::numeric_limits<double>::quiet_NaN())};
+          if (e.is_int) e.i = {std::numeric_limits<int>::min()};
+          e.r = {e.is_int
+                     ? T(static_cast<double>(std::numeric_limits<int>::min()))
+                     : T(std::numeric_limits<double>::quiet_NaN())};
         } else if (!st.decl_type.base.empty()) {
           // Bare sized decl: allocate so element writes work; real elements
           // are NaN until written (see the scalar case above).
           int64_t n = 1;
           for (int64_t d : declared_dims) n *= d;
-          e.r.assign(n, e.is_int ? T(0.0)
-                                 : T(std::numeric_limits<double>::quiet_NaN()));
-          if (e.is_int) e.i.assign(n, 0);
+          e.r.assign(
+              n, e.is_int
+                     ? T(static_cast<double>(std::numeric_limits<int>::min()))
+                     : T(std::numeric_limits<double>::quiet_NaN()));
+          if (e.is_int) e.i.assign(n, std::numeric_limits<int>::min());
           e.dims = declared_dims;
         }
         env_[st.decl_id] = std::move(e);
@@ -310,6 +319,27 @@ class MirInterp {
           }
           return;
         }
+        // Contiguous subrange write into a 1-D value: x[a:b] = rhs.
+        if (st.lhs_idx.size() == 1 && st.lhs_idx[0].name == "IndexBetween" &&
+            en->dims.size() == 1) {
+          const long a = as_int(st.lhs_idx[0].args[0]);
+          const long b = as_int(st.lhs_idx[0].args[1]);
+          const int64_t n = b >= a ? b - a + 1 : 0;
+          if (n > 0 && (a < 1 || b > en->dims[0] || b > (long)en->r.size()))
+            fail("range assignment index out of bounds", st.raw);
+          if ((int64_t)v.r.size() != n)
+            fail("range assignment size mismatch", st.raw);
+          for (int64_t k = 0; k < n; ++k) {
+            const size_t dst = static_cast<size_t>(a - 1 + k);
+            en->r.at(dst) = v.r.at(static_cast<size_t>(k));
+            if (en->is_int)
+              en->i.at(dst) =
+                  v.is_int && static_cast<size_t>(k) < v.i.size()
+                      ? v.i[static_cast<size_t>(k)]
+                      : static_cast<int>(val(v.r.at(static_cast<size_t>(k))));
+          }
+          return;
+        }
         // General all-Single N-D element write.
         if (st.lhs_idx.size() == en->dims.size()) {
           bool all_single = true;
@@ -343,8 +373,20 @@ class MirInterp {
           const long b = as_int(st.lhs_idx[0].args[1]);
           const long j = as_int(st.lhs_idx[1].args[0]);
           const int64_t R = en->dims[0];
-          for (long k = a; k <= b; ++k)
-            en->r.at((j - 1) * R + (k - 1)) = v.r.at((size_t)(k - a));
+          const int64_t n = b >= a ? b - a + 1 : 0;
+          if (j < 1 || j > en->dims[1] || (n > 0 && (a < 1 || b > R)))
+            fail("matrix range assignment index out of bounds", st.raw);
+          if ((int64_t)v.r.size() != n)
+            fail("matrix range assignment size mismatch", st.raw);
+          for (int64_t k = 0; k < n; ++k) {
+            const size_t dst = static_cast<size_t>((j - 1) * R + (a - 1) + k);
+            en->r.at(dst) = v.r.at(static_cast<size_t>(k));
+            if (en->is_int)
+              en->i.at(dst) =
+                  v.is_int && static_cast<size_t>(k) < v.i.size()
+                      ? v.i[static_cast<size_t>(k)]
+                      : static_cast<int>(val(v.r.at(static_cast<size_t>(k))));
+          }
           return;
         }
         {
@@ -1504,9 +1546,37 @@ class MirInterp {
     }
     if (e.name == "prod") {
       Value a = eval(e.args[0]);
-      T m = T(1.0);
-      for (const T& v : a.r) m *= v;
-      r.r = {m};
+      if (a.r.empty()) {
+        r.r = {T(1.0)};
+        return r;
+      }
+      const bool eigen_container =
+          e.args[0].unsized.depth == 0 &&
+          (e.args[0].unsized.leaf == mir::UnsizedLeaf::Vector ||
+           e.args[0].unsized.leaf == mir::UnsizedLeaf::RowVector);
+      const mir::ProdGrouping grouping = udf_depth_ == 0
+                                             ? mir::prod_grouping(e.args[0])
+                                             : mir::ProdGrouping::Legacy;
+      if (!eigen_container || grouping == mir::ProdGrouping::Legacy) {
+        T product = T(1.0);
+        for (const T& value : a.r) product *= value;
+        r.r = {product};
+        return r;
+      }
+      if (grouping == mir::ProdGrouping::Scalar) {
+        T product = a.r[0];
+        for (size_t i = 1; i < a.r.size(); ++i) product *= a.r[i];
+        r.r = {product};
+        return r;
+      }
+      // Match the address-independent packet grouping used by the compiled
+      // generated-quantities kernel.  A direct Map (including the Map used
+      // by stan::math::prod(std::vector)) can pick a different alignedStart
+      // when this vector's allocation is shifted under AVX.
+      using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+      const Eigen::Map<const Vec> input(a.r.data(), a.r.size());
+      r.r = {stan::math::prod(
+          input.unaryExpr(Eigen::internal::core_cast_op<T, T>()))};
       return r;
     }
     // Two arguments is the elementwise form, which Stan vectorizes over

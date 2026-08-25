@@ -371,10 +371,67 @@ static void test_rng_is_an_effect_barrier() {
   expect("RNG effect count/order preserved", rng_ops == 40);
 }
 
+static void test_product_is_forward_only_pass_barrier() {
+  Graph g;
+  Fills fills;
+  const int input = g.add_slot(5, true);
+  constexpr int kLanes = 20;
+  const int result = g.add_slot(kLanes, false);
+  fills.emplace_back(result, std::vector<double>(kLanes, 0.0));
+  // Each period contains a candidate element store, so reroll reaches
+  // ops_match and must reject PROD explicitly.  Without that vocabulary
+  // barrier the invariant product is eligible to hoist across all lanes.
+  for (int lane = 0; lane < kLanes; ++lane) {
+    const int output = g.add_slot(1, false);
+    g.add_op(OP_PROD_VEC, {input}, output);
+    g.add_op(OP_SET_INDEX_INPLACE, {result, output}, result, {lane});
+  }
+  const int final = g.add_slot(1, false);
+  g.add_op(OP_SUM_VEC, {result}, final);
+  g.result_slot = final;
+  std::vector<int> roots{final};
+  std::vector<int> terms;
+
+  const ConstFoldStats folded = const_fold(g, fills, roots);
+  const RerollStats rerolled = reroll(g, fills, terms, roots);
+  const int islands = carve_islands(g, fills, terms, roots);
+  int products = 0, stores = 0, island_ops = 0;
+  for (const Op& op : g.ops) {
+    products += op.opcode == OP_PROD_VEC;
+    stores += op.opcode == OP_SET_INDEX_INPLACE;
+    island_ops += op.opcode == OP_ISLAND;
+  }
+  expect("product has no backward kernel",
+         find_kernel(OP_PROD_VEC) != nullptr &&
+             kernel(OP_PROD_VEC).backward == nullptr);
+  expect("product is absent from value-free backward traits",
+         !backward_ignores_values(OP_PROD_VEC));
+  expect("product survives constfold with parameter input",
+         folded.ops_removed == 0);
+  expect("product is absent from reroll vocabulary", rerolled.regions == 0);
+  expect("product is absent from island CALL vocabulary", islands == 0);
+  expect("product remains a standalone forward op",
+         products == kLanes && stores == kLanes && island_ops == 0);
+
+  Executor ex(std::move(g));
+  const double values[] = {1e200, 1e200, 1e-200, 1e-200, 3.0};
+  for (int i = 0; i < 5; ++i) ex.params_data()[i] = values[i];
+  ex.run_forward_only();
+  Eigen::VectorXd pinned(5);
+  for (int i = 0; i < 5; ++i) pinned[i] = values[i];
+  const double want = stan::math::prod(pinned);
+  bool exact = true;
+  for (int lane = 0; lane < kLanes; ++lane)
+    exact &= ex.value_ptr(result)[lane] == want;
+  exact &= ex.value_ptr(final)[0] == static_cast<double>(kLanes) * want;
+  expect("standalone products keep pinned Stan Math grouping", exact);
+}
+
 int main() {
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);  // see the fuzz loop
   test_whitelist_backwards_ignore_values();
   test_rng_is_an_effect_barrier();
+  test_product_is_forward_only_pass_barrier();
   test_random_graphs_preserve_gradients();
   if (failures) {
     std::printf("%d failures\n", failures);

@@ -263,7 +263,7 @@ live exactly in one double slot only while used by ordinary graph arithmetic;
 integer division and other dynamic-integer operations still refuse lowering.
 
 An exact census of the 24 corpus models that previously used `WaInterp` moved
-12 to the graph: `GLMM1_model`, both `covid19imperial` models, both `dogs`
+12 to the graph in this tranche: `GLMM1_model`, both `covid19imperial` models, both `dogs`
 models, `hierarchical_gp`, `lotka_volterra`, `one_comp_mm_elim_abs`, `M0_model`,
 `Mb_model`, `Rate_4_model`, and `Rate_5_model`. The other 12 remained
 interpreted and all 24 retained complete rows. In targeted seven-batch C-ABI
@@ -280,6 +280,54 @@ Across 1,000 rows of each model, their aggregate time falls from 2.0438003 s to
 0.0270713 s (75.50x). Construction also improves in all four, so the change
 breaks even immediately. Graph and frozen-interpreter output was bitwise exact
 for all 28,926 compared values across six seeds and three sequential rows.
+
+## Compiled generated-quantities reductions (`elementwise.cpp`, `lower.cpp`)
+
+Four remaining capture-recapture models stopped at `prod` over a vector or
+row-vector and/or `sum` over an integer array assembled from scalar RNG draws.
+`OP_PROD_VEC` is a forward-only write-array opcode: it uses Stan Math's Eigen
+product grouping while hiding the graph arena's input alignment for
+materialized vectors, so an odd slot offset cannot change their packet
+boundary. A strided matrix-row operand instead records and preserves Stan
+Math's ascending scalar grouping before the expression is materialized.
+Lowering admits only a bare materialized vector/row-vector and the exact
+outer-subtraction surfaces used by these models. Shifted views, arbitrary
+nested expressions, UDF formals, empty containers, and any product that needs
+reverse mode remain on the existing fallback. The opcode is explicitly
+excluded from reroll matching and island CALLs because it deliberately has no
+backward kernel.
+
+Runtime integer `sum` reuses `OP_SUM_VEC` only after lowering proves that the
+one-dimensional array is completely initialized in ascending contiguous
+writes, every element is an exactly represented integer in a known interval,
+and every possible partial sum stays in 32-bit range. Under that proof, the
+ascending double additions are exact and equal Stan's integer accumulation.
+Uninitialized slots carry CmdStan's `INT_MIN` sentinel on both the graph and
+interpreter paths; gaps, strides, unknown RNG ranges, possible overflow, and
+using the result as dynamic control or geometry all fail closed.
+
+This completed `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`, moving the
+current 24-model write-array census from 12 graph / 12 interpreter to 16 / 8;
+all 119 compiling corpus models still produce complete rows. Targeted
+2026-08-24 C-ABI A/B medians (point 0, two warmups, seven matched batches) were:
+
+| model | interpreted us/row | compiled us/row | speedup |
+| --- | ---: | ---: | ---: |
+| `Mh_model` | 869.1794 | 12.4941 | 69.57x |
+| `Mt_model` | 20.8673 | 0.1266 | 164.83x |
+| `Mtbh_model` | 1046.4414 | 9.8556 | 106.18x |
+| `Mth_model` | 1098.8496 | 18.2054 | 60.36x |
+
+Across 1,000 rows of each model, aggregate row time fell from 3.035338 s to
+0.040682 s (74.61x). Including one construction per model, it fell from
+3.056579 s to 0.075491 s (40.49x); the aggregate setup delta amortizes after
+five rows per model. Within a 146,196-value comparison, all product-fed RNG
+outputs and final sums were bitwise identical to the frozen interpreter,
+including a fourth-row stream-continuation check. The two larger models expose a
+pre-existing write-array mode-boundary difference in deterministic transformed
+parameters: `Mtbh_model` is within two ULP and `Mth_model` within one, while the
+compiled graph is closer to live CmdStan at the shared point. These are
+targeted medians; the committed full-corpus timing table remains unchanged.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 

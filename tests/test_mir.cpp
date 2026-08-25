@@ -411,6 +411,39 @@ int main(int argc, char** argv) {
     check(scaled == std::vector<double>({6.0, 8.0}),
           "ODE call scalar formal broadcasts over vector");
 
+    // The same positional entry point can evaluate a fallback RHS/UDF with a
+    // product over a vector formal.  A formal can be bound to a shifted Eigen
+    // view, so it must retain MirInterp's legacy ascending fold rather than
+    // being classified as an owning top-level packet vector.  These factors
+    // distinguish the two groupings: ascending gives 3, while packet pairing
+    // forms inf*0 and produces NaN.
+    mir::FunDef reduce;
+    reduce.name = "reduce";
+    reduce.arg_names = {"x"};
+    reduce.arg_views = {{0, mir::UnsizedLeaf::Vector}};
+    reduce.arg_types = {"UVector"};
+    mir::Expr formal;
+    formal.kind = mir::Expr::Var;
+    formal.name = "x";
+    formal.type_ = "UVector";
+    formal.unsized.leaf = mir::UnsizedLeaf::Vector;
+    formal.data_only = true;
+    mir::Stmt reduced_return;
+    reduced_return.kind = mir::Stmt::Return;
+    reduced_return.has_init = true;
+    reduced_return.rhs.kind = mir::Expr::FunApp;
+    reduced_return.rhs.fn_lib = mir::Expr::Lib::StanLib;
+    reduced_return.rhs.name = "prod";
+    reduced_return.rhs.type_ = "UReal";
+    reduced_return.rhs.unsized.leaf = mir::UnsizedLeaf::Real;
+    reduced_return.rhs.data_only = true;
+    reduced_return.rhs.args = {formal};
+    reduce.body = {reduced_return};
+    const std::vector<double> reduced =
+        interp.call(reduce, {{1e200, 1e-200, 1e200, 1e-200, 3.0}}, {});
+    check(reduced == std::vector<double>{3.0},
+          "ODE call vector formal retains scalar product grouping");
+
     // stanc may reconstruct a scalar data declaration through a flat
     // FnReadData assignment. The declaration still owns scalar geometry;
     // treating its one value as vector[1] breaks later scalar broadcasts.

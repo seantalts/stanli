@@ -212,6 +212,15 @@ struct SlotInfo {
 };
 static_assert(sizeof(SlotInfo) == 24);
 
+// A proof that every definitely initialized value in a graph slot is an
+// integral double in this closed interval.  Coverage is tracked separately;
+// this is deliberately outside SlotInfo because logical shape and parameter
+// provenance survive much more broadly than the narrow write_array grammar.
+struct IntRange {
+  int32_t lo = 0;
+  int32_t hi = 0;
+};
+
 bool is_matrix(const SlotInfo& si) { return si.kind == ViewKind::Matrix; }
 bool is_vector(const SlotInfo& si) { return si.kind == ViewKind::Vector; }
 bool is_row_vector(const SlotInfo& si) {
@@ -350,6 +359,10 @@ struct Lowering {
   CompiledModel out;
   std::map<std::string, Val> scope;     // var -> value and logical view
   std::map<std::string, long> int_env;  // data int scalars
+  std::map<int, IntRange> int_ranges;   // runtime integral slot provenance
+  // Definite initialization proof for the target construction grammar.
+  // Writes must extend one contiguous prefix; gaps/strides fail closed.
+  std::map<int, int64_t> int_initialized_prefix;
   std::map<double, int> const_cache;
   struct ObservationKey {
     int slot;
@@ -483,6 +496,78 @@ struct Lowering {
     en.r = {v};
     observe(out, std::move(en));
     return out;
+  }
+
+  void set_int_range(const Val& v, int64_t lo, int64_t hi) {
+    int_initialized_prefix[v.slot] = g.slots[v.slot].len;
+    if (lo < std::numeric_limits<int32_t>::min() ||
+        hi > std::numeric_limits<int32_t>::max() || lo > hi) {
+      int_ranges.erase(v.slot);
+      return;
+    }
+    int_ranges[v.slot] =
+        IntRange{static_cast<int32_t>(lo), static_cast<int32_t>(hi)};
+  }
+
+  void set_int_initialized(const Val& v) {
+    int_initialized_prefix[v.slot] = g.slots[v.slot].len;
+    int_ranges.erase(v.slot);
+  }
+
+  void set_uninitialized_int_array(const Val& v) {
+    int_ranges.erase(v.slot);
+    int_initialized_prefix[v.slot] = 0;
+  }
+
+  // Target models build int arrays in ascending contiguous writes.  Track the
+  // initialized prefix in O(1) per immutable slot: overwrites inside it are
+  // safe, an adjacent write extends it, and any gap/stride fails closed.  The
+  // interval hull may retain overwritten values, conservatively widening the
+  // later overflow proof.
+  void propagate_int_update(const Val& out_v, const Val& base, const Val& rhs,
+                            int64_t start, int64_t stride) {
+    const auto base_prefix = int_initialized_prefix.find(base.slot);
+    const auto rhs_prefix = int_initialized_prefix.find(rhs.slot);
+    const int64_t rhs_len = g.slots[rhs.slot].len;
+    if (rhs_len == 0 && base_prefix != int_initialized_prefix.end() &&
+        g.slots[out_v.slot].len == g.slots[base.slot].len) {
+      int_initialized_prefix[out_v.slot] = base_prefix->second;
+      const auto base_range = int_ranges.find(base.slot);
+      if (base_range == int_ranges.end())
+        int_ranges.erase(out_v.slot);
+      else
+        int_ranges[out_v.slot] = base_range->second;
+      return;
+    }
+    if (base_prefix == int_initialized_prefix.end() ||
+        rhs_prefix == int_initialized_prefix.end() ||
+        rhs_prefix->second != rhs_len || stride != 1 || start < 0 ||
+        start > base_prefix->second || rhs_len < 0 ||
+        start > g.slots[out_v.slot].len - rhs_len ||
+        g.slots[out_v.slot].len != g.slots[base.slot].len) {
+      int_ranges.erase(out_v.slot);
+      int_initialized_prefix.erase(out_v.slot);
+      return;
+    }
+    int_initialized_prefix[out_v.slot] =
+        std::max(base_prefix->second, start + rhs_len);
+
+    const auto rhs_range = int_ranges.find(rhs.slot);
+    if (rhs_range == int_ranges.end()) {
+      int_ranges.erase(out_v.slot);
+      return;
+    }
+    IntRange range = rhs_range->second;
+    if (base_prefix->second > 0) {
+      const auto base_range = int_ranges.find(base.slot);
+      if (base_range == int_ranges.end()) {
+        int_ranges.erase(out_v.slot);
+        return;
+      }
+      range.lo = std::min(range.lo, base_range->second.lo);
+      range.hi = std::max(range.hi, base_range->second.hi);
+    }
+    int_ranges[out_v.slot] = range;
   }
 
   long eval_int(const mir::Expr& e) {
@@ -1406,8 +1491,11 @@ struct Lowering {
         }
         return emit_value(OP_INDEX, {base}, 1, view_of(e.type_), {(int)flat});
       }
-      case mir::Expr::LitInt:
-        return constant(static_cast<double>(e.lit_i));
+      case mir::Expr::LitInt: {
+        Val v = constant(static_cast<double>(e.lit_i));
+        set_int_range(v, e.lit_i, e.lit_i);
+        return v;
+      }
       case mir::Expr::LitReal:
         return constant(e.lit);
       case mir::Expr::FunApp:
@@ -2204,7 +2292,131 @@ struct Lowering {
     // mistaking a draw for data.
     draw.si.param_free = false;
     draw.autodiff = false;
+    if (scalar_rng_is_int(family)) set_int_initialized(draw);
+    if (family == ScalarRng::Bernoulli) set_int_range(draw, 0, 1);
     return draw;
+  }
+
+  static bool is_int_sum_surface(const mir::Expr& e) {
+    return e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
+           e.name == "sum" && e.args.size() == 1 && e.type_ == "UInt" &&
+           e.unsized.leaf == mir::UnsizedLeaf::Int && e.unsized.depth == 0 &&
+           e.args[0].unsized.leaf == mir::UnsizedLeaf::Int &&
+           e.args[0].unsized.depth == 1;
+  }
+
+  // Scalar int declarations normally stay in int_env.  A sum over an array
+  // assembled from runtime RNG draws must instead bind to a graph slot.  The
+  // named-value probe is intentionally non-lowering so ordinary compile-time
+  // sums retain the interpreter path they already had.  Range validity is
+  // checked by the guarded lowering, so an unknown runtime source fails
+  // closed instead of falling back through the legacy real-valued reduction.
+  bool runtime_int_sum_candidate(const mir::Expr& e) const {
+    if (!is_int_sum_surface(e) || e.args[0].kind != mir::Expr::Var)
+      return false;
+    const auto value = scope.find(e.args[0].name);
+    return value != scope.end() && !value->second.si.param_free;
+  }
+
+  bool runtime_int_binding(const mir::Expr& e) {
+    return expr_effectful(e) || runtime_int_sum_candidate(e);
+  }
+
+  static bool prod_transpose_of(const mir::Expr& e, mir::Expr::Kind kind) {
+    return e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
+           e.args.size() == 1 &&
+           (e.name == "Transpose__" || e.name == "transpose") &&
+           e.args[0].kind == kind;
+  }
+
+  bool prod_literal_length(const mir::Expr& e) const {
+    if (e.kind == mir::Expr::LitInt) return true;
+    return e.kind == mir::Expr::Var && int_env.count(e.name) != 0;
+  }
+
+  bool prod_minus_operand(const mir::Expr& e) const {
+    // Promotion is transparent in the reader, so a promoted scalar literal
+    // still has its LitInt/LitReal kind here.
+    if (e.unsized.depth == 0 &&
+        (e.kind == mir::Expr::LitInt || e.kind == mir::Expr::LitReal))
+      return true;
+    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
+        e.name == "rep_vector" && e.args.size() == 2 &&
+        (e.args[0].kind == mir::Expr::LitInt ||
+         e.args[0].kind == mir::Expr::LitReal) &&
+        prod_literal_length(e.args[1]))
+      return true;
+    const bool vector_leaf =
+        e.unsized.depth == 0 && (e.unsized.leaf == mir::UnsizedLeaf::Vector ||
+                                 e.unsized.leaf == mir::UnsizedLeaf::RowVector);
+    if (!vector_leaf) return false;
+    if (e.kind == mir::Expr::Var) return true;
+    if (e.kind == mir::Expr::Indexed) return mir::is_matrix_row_value(e);
+    if (prod_transpose_of(e, mir::Expr::Var)) return true;
+    return mir::is_matrix_row_value(e);
+  }
+
+  bool prod_native_surface(const mir::Expr& e) const {
+    if (e.kind == mir::Expr::Var || prod_transpose_of(e, mir::Expr::Var))
+      return true;
+    if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::StanLib ||
+        e.args.size() != 2 || e.name != "Minus__")
+      return false;
+    return prod_minus_operand(e.args[0]) && prod_minus_operand(e.args[1]);
+  }
+
+  Val lower_runtime_int_sum(const mir::Expr& e) {
+    if (!in_write_array)
+      fail("runtime integer sum is supported only in generated quantities",
+           e.raw);
+    if (!is_int_sum_surface(e))
+      fail(
+          "runtime integer sum needs one one-dimensional int-array argument "
+          "and a scalar int result",
+          e.raw);
+
+    Val a = lower_expr(e.args[0]);
+    if (!is_array(a.si))
+      fail("runtime integer sum argument is not an array", e.raw);
+    const ArrayShape& shape = array_shape(a.si);
+    const int64_t len = g.slots[a.slot].len;
+    if (shape.leaf != ViewKind::Flat || shape.dims.size() != 1)
+      fail("runtime integer sum needs a one-dimensional int array", e.raw);
+    if (len <= 0) fail("runtime integer sum needs a nonempty int array", e.raw);
+    if (a.si.param_free)
+      fail("runtime integer sum needs a runtime-produced int array", e.raw);
+
+    const auto initialized = int_initialized_prefix.find(a.slot);
+    if (initialized == int_initialized_prefix.end() ||
+        initialized->second != len)
+      fail("runtime integer sum array is not definitely initialized", e.raw);
+    const auto known = int_ranges.find(a.slot);
+    if (known == int_ranges.end())
+      fail("runtime integer sum has unproved integral slot values", e.raw);
+    const IntRange range = known->second;
+    const uint64_t n = static_cast<uint64_t>(len);
+    if (range.lo < 0) {
+      const uint64_t magnitude =
+          static_cast<uint64_t>(-static_cast<int64_t>(range.lo));
+      const uint64_t capacity = static_cast<uint64_t>(
+          -static_cast<int64_t>(std::numeric_limits<int32_t>::min()));
+      if (n > capacity / magnitude)
+        fail("runtime integer sum may overflow int32 in a partial sum", e.raw);
+    }
+    if (range.hi > 0 &&
+        n > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) /
+                static_cast<uint64_t>(range.hi))
+      fail("runtime integer sum may overflow int32 in a partial sum", e.raw);
+
+    Val result = emit_value(OP_SUM_VEC, {a}, 1, view_of("UInt"));
+    result.autodiff = false;
+    // A range is only a static proof; the source itself was required to be
+    // runtime-produced.  Keeping this result non-constant prevents later
+    // compile-time geometry/control from consuming it through Val metadata.
+    result.si.param_free = false;
+    set_int_range(result, static_cast<int64_t>(range.lo) * len,
+                  static_cast<int64_t>(range.hi) * len);
+    return result;
   }
 
   Val lower_funapp(const mir::Expr& e) {
@@ -2994,6 +3206,36 @@ struct Lowering {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_MEAN, {a}, 1);
     }
+    if (e.name == "prod" && in_write_array) {
+      // Preserve the pre-existing construction-time behavior for data-only
+      // products.  OP_PROD_VEC is only the dynamic write_array tranche.
+      if (auto v = fold_const(e)) return *v;
+      if (e.args.size() != 1 || e.type_ != "UReal" ||
+          e.unsized.leaf != mir::UnsizedLeaf::Real || e.unsized.depth != 0)
+        fail("prod needs exactly one scalar-real result", e.raw);
+      const mir::Expr& arg = e.args[0];
+      const bool vector_arg = arg.type_ == "UVector" &&
+                              arg.unsized.leaf == mir::UnsizedLeaf::Vector &&
+                              arg.unsized.depth == 0;
+      const bool row_vector_arg =
+          arg.type_ == "URowVector" &&
+          arg.unsized.leaf == mir::UnsizedLeaf::RowVector &&
+          arg.unsized.depth == 0;
+      if (!vector_arg && !row_vector_arg)
+        fail("prod needs one vector or row-vector argument", e.raw);
+      if (udf_depth != 0 || !prod_native_surface(arg))
+        fail("prod expression surface stays on WaInterp", e.raw);
+      Val a = lower_expr(arg);
+      if ((!is_vector(a.si) && !is_row_vector(a.si)) ||
+          g.slots[a.slot].len <= 0)
+        fail("prod needs a nonempty vector or row-vector argument", e.raw);
+      const mir::ProdGrouping grouping = mir::prod_grouping(arg);
+      if (grouping == mir::ProdGrouping::Legacy)
+        fail("prod expression grouping is not native", e.raw);
+      Val result = emit_value(OP_PROD_VEC, {a}, 1);
+      g.ops.back().variant = grouping == mir::ProdGrouping::Scalar ? 1u : 0u;
+      return result;
+    }
     if (e.name == "rep_vector") {
       Val a = lower_expr(e.args[0]);
       const long n = eval_int(e.args[1]);
@@ -3003,6 +3245,24 @@ struct Lowering {
       // One argument is the reduction; two is the elementwise form below.
       if (e.name == "log_sum_exp" && e.args.size() == 2)
         return lower_binary_mix(OP_LSE2, e);
+      const bool int_surface =
+          e.name == "sum" &&
+          (e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int ||
+           (!e.args.empty() &&
+            e.args[0].unsized.leaf == mir::UnsizedLeaf::Int));
+      if (int_surface && in_write_array) {
+        if (runtime_int_sum_candidate(e)) return lower_runtime_int_sum(e);
+        if (!is_int_sum_surface(e))
+          fail(
+              "runtime integer sum needs one one-dimensional int-array "
+              "argument and a scalar int result",
+              e.raw);
+        if (e.args[0].kind != mir::Expr::Var || expr_effectful(e))
+          fail("direct runtime integer sum stays on WaInterp", e.raw);
+        // A param-free named array retains the legacy OP_SUM_VEC/fold path.
+      }
+      if (e.args.size() != 1)
+        fail(e.name + ": reduction needs exactly one argument", e.raw);
       Val a = lower_expr(e.args[0]);
       return emit_value(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a}, 1);
     }
@@ -3751,6 +4011,7 @@ struct Lowering {
     int64_t len = 0;
     bool autodiff = false;
     SlotInfo si;
+    bool int_array = false;
   };
   // The only name-keyed declaration protocol. Runtime values carry the same
   // static scalar type and SlotInfo in `scope`; this registry is needed only
@@ -3763,7 +4024,7 @@ struct Lowering {
         if (s.read_transform) {
           lower_read_param(s);
         } else if (s.decl_type.base == "SInt") {
-          if (in_write_array && s.has_init && expr_effectful(s.init)) {
+          if (in_write_array && s.has_init && runtime_int_binding(s.init)) {
             Val v = lower_expr(s.init);
             SlotInfo expected = view_of(s.decl_type);
             require_binding(v, 1, expected, s.decl_id, s.raw);
@@ -3777,6 +4038,16 @@ struct Lowering {
             td.env().erase(s.decl_id);
             return;
           }
+          // A fresh scalar-int declaration shadows every representation of
+          // an earlier declaration with the same optimized MIR id.  In
+          // particular, a preceding runtime sum may have installed a graph
+          // value in scope/decls; leaving it there would make a later Var
+          // read win over the compile-time literal installed below.
+          scope.erase(s.decl_id);
+          decls.erase(s.decl_id);
+          td.env().erase(s.decl_id);
+          int_env.erase(s.decl_id);
+          int_locals.erase(s.decl_id);
           // Int locals are always data-only in Stan; keep them in int_env
           // so size expressions and indices resolve at compile time.
           int_locals.insert(s.decl_id);
@@ -3794,6 +4065,12 @@ struct Lowering {
           sh.len = sized_len(s.decl_type);
           sh.autodiff = !s.decl_data_only && scalar_autodiff();
           sh.si = view_of(s.decl_type);
+          // CmdStan fills every uninitialized integer container with the
+          // INT_MIN sentinel.  Runtime-sum provenance remains deliberately
+          // one-dimensional, but the value-level initialization contract is
+          // independent of rank.
+          sh.int_array =
+              s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt";
           if (s.has_init) {
             Val v = lower_expr(s.init);
             SlotInfo expected = view_of(s.decl_type, v.si.param_free);
@@ -3811,7 +4088,7 @@ struct Lowering {
         return;
       case mir::Stmt::Assignment: {
         if (s.lhs_idx.empty() && int_locals.count(s.lhs)) {
-          if (in_write_array && expr_effectful(s.rhs)) {
+          if (in_write_array && runtime_int_binding(s.rhs)) {
             Val rhs = lower_expr(s.rhs);
             SlotInfo expected = view_of("UInt");
             require_binding(rhs, 1, expected, s.lhs, s.raw);
@@ -3842,8 +4119,13 @@ struct Lowering {
             si.param_free = true;
             prev_v =
                 Val{add_slot(dl->second.len, false), dl->second.autodiff, si};
-            out.fills.emplace_back(prev_v.slot,
-                                   std::vector<double>(dl->second.len, 0.0));
+            const double initial =
+                dl->second.int_array
+                    ? static_cast<double>(std::numeric_limits<int>::min())
+                    : 0.0;
+            out.fills.emplace_back(
+                prev_v.slot, std::vector<double>(dl->second.len, initial));
+            if (dl->second.int_array) set_uninitialized_int_array(prev_v);
           }
           const int prev = prev_v.slot;
           bool all_single = true;
@@ -3866,18 +4148,32 @@ struct Lowering {
             Val nv = emit_value(OP_SET_SLICE_STRIDED, {prev_v, rhs_v},
                                 g.slots[prev].len, out_si,
                                 {(int)i, (int)prev_v.si.rows});
+            propagate_int_update(nv, prev_v, rhs_v, i, prev_v.si.rows);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
           }
           // Between write w[a:b] = rhs (contiguous on 1-D values).
           if (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexBetween") {
+            const bool flat_1d_array =
+                is_array(prev_v.si) &&
+                array_shape(prev_v.si).dims.size() == 1 &&
+                array_shape(prev_v.si).leaf == ViewKind::Flat;
+            if (!is_vector(prev_v.si) && !is_row_vector(prev_v.si) &&
+                !flat_1d_array)
+              fail("range assignment needs a one-dimensional flat value for " +
+                       s.lhs,
+                   s.raw);
             const int64_t lo = eval_int(s.lhs_idx[0].args[0]);
             const int64_t hi = eval_int(s.lhs_idx[0].args[1]);
-            if (g.slots[rhs].len != hi - lo + 1)
+            const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+            check_range(lo, hi, g.slots[prev].len, "range assignment", s.raw);
+            if (g.slots[rhs].len != len)
               fail("range assignment size mismatch for " + s.lhs);
+            const int64_t start = len == 0 ? 0 : lo - 1;
             Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
-                                g.slots[prev].len, out_si, {(int)(lo - 1)});
+                                g.slots[prev].len, out_si, {(int)start});
+            propagate_int_update(nv, prev_v, rhs_v, start, 1);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3893,6 +4189,7 @@ struct Lowering {
             Val nv =
                 emit_value(OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len,
                            out_si, {(int)(j * prev_v.si.rows)});
+            propagate_int_update(nv, prev_v, rhs_v, j * prev_v.si.rows, 1);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3904,11 +4201,16 @@ struct Lowering {
             const int64_t lo = eval_int(s.lhs_idx[0].args[0]);
             const int64_t hi = eval_int(s.lhs_idx[0].args[1]);
             const int64_t j = eval_int(s.lhs_idx[1].args[0]) - 1;
-            if (g.slots[rhs].len != hi - lo + 1)
+            if (j < 0 || j >= prev_v.si.cols)
+              fail("column assignment index out of bounds for " + s.lhs);
+            const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+            check_range(lo, hi, prev_v.si.rows, "row-range assignment", s.raw);
+            if (g.slots[rhs].len != len)
               fail("range assignment size mismatch for " + s.lhs);
-            Val nv =
-                emit_value(OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len,
-                           out_si, {(int)(j * prev_v.si.rows + lo - 1)});
+            const int64_t start = len == 0 ? 0 : j * prev_v.si.rows + lo - 1;
+            Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
+                                g.slots[prev].len, out_si, {(int)start});
+            propagate_int_update(nv, prev_v, rhs_v, start, 1);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3935,6 +4237,7 @@ struct Lowering {
                            : emit_value(OP_SET_SLICE, {prev_v, rhs_v},
                                         g.slots[prev].len, out_si,
                                         {(int)a.off}));
+            propagate_int_update(nv, prev_v, rhs_v, a.off, a.stride);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3954,6 +4257,7 @@ struct Lowering {
           }
           Val nv = emit_value(OP_SET_INDEX, {prev_v, rhs_v}, g.slots[prev].len,
                               out_si, {(int)flat});
+          propagate_int_update(nv, prev_v, rhs_v, flat, 1);
           scope[s.lhs] = nv;
           td.env().erase(s.lhs);
           return;

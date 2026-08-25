@@ -196,8 +196,8 @@ the top of the page, not replacements for the current corpus rows:
   `bernoulli`, `normal`, `lognormal`, and `binomial` draws.
   Unsupported/container RNGs and draws used as dynamic control, indices, or
   geometry still fail closed to the whole-section interpreter. In an exact
-  census of the 24 previously interpreted corpus models, 12 moved to the graph
-  and the other 12 kept the interpreter; all 24 still produced complete rows.
+  census of the 24 previously interpreted corpus models, this RNG tranche
+  moved 12 to the graph; all 24 still produced complete rows.
   A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched batch
   medians) measured:
 
@@ -225,6 +225,38 @@ the top of the page, not replacements for the current corpus rows:
   were bitwise identical for all 28,926 compared values. These are targeted
   write-array medians, not replacements for the sampling columns in the full
   corpus table.
+- **Compiled generated-quantities reductions** add an exact forward-only
+  product for the vector/row-vector surfaces used by the capture-recapture
+  models, plus integer sum only when a one-dimensional runtime array is proved
+  fully initialized, integral, and safe from 32-bit overflow. Product grouping
+  follows Stan Math's expression provenance: materialized vectors use its
+  address-independent packet grouping, while strided matrix-row expressions
+  retain ascending scalar grouping. Shifted views, arbitrary expressions,
+  reverse-mode products, and unproved integer arrays still fail closed to the
+  interpreter. This moved `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`
+  to the graph, taking the current 24-model census from 12 graph / 12
+  interpreter to 16 / 8, with all 119 compiling corpus models still producing
+  complete rows. A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven
+  matched batch medians) measured:
+
+  | model | interpreted row | compiled row | improvement |
+  | --- | ---: | ---: | ---: |
+  | `Mh_model` | 869.179 us | 12.494 us | 69.57x |
+  | `Mt_model` | 20.867 us | 0.127 us | 164.83x |
+  | `Mtbh_model` | 1.046 ms | 9.856 us | 106.18x |
+  | `Mth_model` | 1.099 ms | 18.205 us | 60.36x |
+
+  Across 1,000 rows of each model, aggregate row time fell from 3.035338 s to
+  0.040682 s (74.61x). Including one construction of each model, it fell from
+  3.056579 s to 0.075491 s (40.49x); the equal-mix aggregate setup cost breaks
+  even after five rows per model. Within a 146,196-value comparison, every
+  product-fed draw and final integer sum matched the frozen interpreter
+  bitwise, including a fourth-row stream-continuation check. `Mtbh_model` and
+  `Mth_model` also expose the pre-existing graph/interpreter boundary in
+  deterministic transformed parameters: their `p` columns differ by at most
+  two ULP, while the graph is closer to live CmdStan at the shared point. These
+  are targeted write-array medians; the full-corpus sampling table awaits the
+  next refresh.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven

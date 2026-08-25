@@ -2,6 +2,8 @@
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
+#include <stan/math/prim/fun/prod.hpp>
+
 #include <cassert>
 #include <cmath>
 
@@ -142,6 +144,31 @@ void sum_vec_bwd(KernelCtx& ctx) {
   if (ctx.in_adj[0].data)
     for (int64_t i = 0; i < ctx.in[0].len; ++i)
       ctx.in_adj[0].data[i] += ctx.out_adj;
+}
+
+// OP_PROD_VEC: generated-quantities-only product of a vector/row-vector.
+// Variant 1 preserves the ascending scalar reduction selected by Eigen when
+// the source expression contains a strided matrix row.  The lowering records
+// that fact before the expression is materialized into a contiguous slot.
+// Eigen's redux normally chooses its packet boundary from the input address.
+// Graph slots share one arena, so that would make the arithmetic grouping
+// depend on every slot laid out before this one.  The explicit same-type
+// CwiseUnary expression has no DirectAccessBit but retains packet access:
+// first_default_aligned is consequently lane zero, matching the Eigen value
+// CmdStan passes to stan::math::prod without allocating a copy here.
+void prod_vec_fwd(KernelCtx& ctx) {
+  assert(ctx.in[0].len > 0);
+  if (ctx.variant == 1) {
+    double product = ctx.in[0].data[0];
+    for (int64_t i = 1; i < ctx.in[0].len; ++i) product *= ctx.in[0].data[i];
+    ctx.out.data[0] = product;
+    return;
+  }
+  assert(ctx.variant == 0);
+  using Vec = Eigen::Matrix<double, Eigen::Dynamic, 1>;
+  const Eigen::Map<const Vec> input(ctx.in[0].data, ctx.in[0].len);
+  ctx.out.data[0] = stan::math::prod(
+      input.unaryExpr(Eigen::internal::core_cast_op<double, double>()));
 }
 
 // OP_INDEX: scalar out = in[flat], idata = {flat}. Backward scatters.
@@ -353,6 +380,7 @@ void register_elementwise_kernels() {
   register_kernel(OP_BCAST_FMA, Kernel{fma_fwd, fma_bwd, nullptr});
   register_kernel(OP_MATVEC, Kernel{matvec_fwd, matvec_bwd, nullptr});
   register_kernel(OP_SUM_VEC, Kernel{sum_vec_fwd, sum_vec_bwd, nullptr});
+  register_kernel(OP_PROD_VEC, Kernel{prod_vec_fwd, nullptr, nullptr});
   register_kernel(OP_INDEX, Kernel{index_fwd, index_bwd, nullptr});
   register_kernel(OP_SET_INDEX, Kernel{set_index_fwd, set_index_bwd, nullptr});
   register_kernel(OP_SET_INDEX_INPLACE, Kernel{set_index_inplace_fwd,

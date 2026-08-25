@@ -57,6 +57,73 @@ struct Expr {
   std::string raw;         // Unsupported diagnostics
 };
 
+// A matrix row is a non-contiguous Eigen block.  Transposing it changes the
+// logical orientation but not the stride, so an outer elementwise expression
+// containing it has no packet access and Stan Math's product reduces in
+// ascending scalar order.  Both write_array engines consult this syntactic
+// fact before materializing the expression, when the stride is still visible.
+inline bool is_matrix_row_value(const Expr& value) {
+  const Expr* indexed = &value;
+  if (value.kind == Expr::FunApp && value.fn_lib == Expr::Lib::StanLib &&
+      (value.name == "Transpose__" || value.name == "transpose") &&
+      value.args.size() == 1)
+    indexed = &value.args[0];
+  if (indexed->kind != Expr::Indexed ||
+      indexed->unsized.leaf != UnsizedLeaf::RowVector ||
+      indexed->args.empty() || indexed->args[0].kind != Expr::Var ||
+      indexed->args[0].unsized.depth != 0 ||
+      indexed->args[0].unsized.leaf != UnsizedLeaf::Matrix)
+    return false;
+  const bool implicit_all =
+      indexed->args.size() == 2 && indexed->args[1].name == "IndexSingle";
+  const bool explicit_all = indexed->args.size() == 3 &&
+                            indexed->args[1].name == "IndexSingle" &&
+                            indexed->args[2].name == "IndexAll";
+  return implicit_all || explicit_all;
+}
+
+enum class ProdGrouping : uint8_t { Legacy, Packet, Scalar };
+
+// Classify only the syntax whose Eigen evaluator provenance has been audited.
+// Legacy means "retain MirInterp's old scalar fold / refuse native lowering",
+// not a guess about an arbitrary expression's Eigen flags.
+inline ProdGrouping prod_grouping(const Expr& product_arg) {
+  if (is_matrix_row_value(product_arg)) return ProdGrouping::Scalar;
+  if (product_arg.kind == Expr::Var) return ProdGrouping::Packet;
+  if (product_arg.kind == Expr::FunApp &&
+      product_arg.fn_lib == Expr::Lib::StanLib &&
+      (product_arg.name == "Transpose__" || product_arg.name == "transpose") &&
+      product_arg.args.size() == 1 && product_arg.args[0].kind == Expr::Var)
+    return ProdGrouping::Packet;
+  if (product_arg.kind != Expr::FunApp ||
+      product_arg.fn_lib != Expr::Lib::StanLib ||
+      product_arg.name != "Minus__" || product_arg.args.size() != 2)
+    return ProdGrouping::Legacy;
+
+  bool scalar = false;
+  for (const Expr& operand : product_arg.args) {
+    if (is_matrix_row_value(operand)) {
+      scalar = true;
+      continue;
+    }
+    if (operand.unsized.depth == 0 &&
+        (operand.kind == Expr::LitInt || operand.kind == Expr::LitReal))
+      continue;
+    if (operand.kind == Expr::Var) continue;
+    if (operand.kind == Expr::FunApp && operand.fn_lib == Expr::Lib::StanLib &&
+        (operand.name == "Transpose__" || operand.name == "transpose") &&
+        operand.args.size() == 1 && operand.args[0].kind == Expr::Var)
+      continue;
+    if (operand.kind == Expr::FunApp && operand.fn_lib == Expr::Lib::StanLib &&
+        operand.name == "rep_vector" && operand.args.size() == 2 &&
+        (operand.args[0].kind == Expr::LitInt ||
+         operand.args[0].kind == Expr::LitReal))
+      continue;
+    return ProdGrouping::Legacy;
+  }
+  return scalar ? ProdGrouping::Scalar : ProdGrouping::Packet;
+}
+
 struct Transform {
   // The names are stanc3's own MIR tags, so a new transform in the
   // compiler is greppable here.
