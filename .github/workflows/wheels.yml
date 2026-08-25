@@ -583,13 +583,14 @@ jobs:
   # zero bytes after a 12-byte region, straight out of
   # poisson_log_glm_lpmf.
   #
-  # On pull requests, unlike the wasm job: the point of a sanitizer is to
-  # see the overflow before it merges. It runs ctest and nothing else --
-  # no corpus check, no conformance, no wheel -- because those are covered
+  # Post-submit only: a cold build runs close to the 90-minute ceiling,
+  # too long to gate merges on. It runs ctest and nothing else -- no
+  # corpus check, no conformance, no wheel -- because those are covered
   # by jobs that are not paying for instrumentation, and the 51 test
   # binaries are the target.
   asan:
     name: ctest under AddressSanitizer
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     # The first shipped configuration could not finish: gcc at
     # RelWithDebInfo (-O2 -g) with ASan took 8+ minutes per densities
