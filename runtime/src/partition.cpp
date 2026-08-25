@@ -24,6 +24,14 @@
 // position and the last lane's end. Ops only ever move EARLIER, so an
 // in-place store proven safe against a later reader stays safe, and a bucket
 // that trips the rule splits at the writer rather than declining.
+//
+// One arm rewrites a whole chain rather than widening it. A lane that reads
+// two scalars, multiplies them, subtracts a width-m vector, prepends a zero,
+// cumulatively sums and hands the result to a scalar-outcome categorical is
+// one row of a categorical_logit_glm_lpmf, because
+// cumsum([0, ta - b_1, ...])[j] = j*t*a - sum_{i<=j} b_i. Buckets refine on
+// the subtracted vector -- the item -- and the slope is whichever of the two
+// scalars that refinement holds still.
 #include <stanli/optable.hpp>
 #include <stanli/partition.hpp>
 
@@ -58,7 +66,13 @@ bool is_element_store(const Op& op) {
          op.n_in == 2 && op.n_idata == 1 && op.out == op.in[0];
 }
 
-bool is_blocked(const Op& op) {
+// OP_CATEGORICAL is on ops_match's blocklist because its spec pointer is not
+// comparable; here the spec's fields go into the key instead. It is admitted
+// only as a lane's delimiter, and only the GLM arm below has an emission for
+// it -- every other arm keys off a re-roll trait, which it has none of.
+bool is_blocked(const Op& op, bool is_delimiter) {
+  if (op.opcode == OP_CATEGORICAL)
+    return !is_delimiter || op.udata == nullptr || op.out2 >= 0;
   return is_effectful_op(op.opcode) || op.opcode == OP_PROD_VEC ||
          op.opcode == OP_EXTREMA_VEC || op.out2 >= 0 || op.udata != nullptr;
 }
@@ -153,6 +167,18 @@ struct Pos {
   int64_t rows = 1;      // kEltDensity: outcome elements reduced back per lane
   bool shared = false;   // one value stands for every lane
   int out = -1;          // filled during emission
+};
+
+// The IRT chain, by position within the lane. `sub` holds the OP_SUB
+// positions outermost first and `chain` every position the substitution
+// consumes; anything else in the lane has to be dead.
+struct Glm {
+  const CategoricalSpec* spec = nullptr;
+  std::vector<int> chain;
+  std::vector<int> sub;
+  std::vector<int> held;  // each SUB's subtrahend producer, -1 when external
+  int cat = -1, concat = -1, theta = -1, alpha = -1;
+  int64_t m = 0;
 };
 
 struct Key {
@@ -287,9 +313,16 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     for (size_t u = lane.begin; u < lane.end && ok; ++u) {
       ++st.fingerprint_steps;
       const Op& op = g.ops[u];
-      if (is_blocked(op)) {
+      if (is_blocked(op, u + 1 == lane.end)) {
         ok = false;
         break;
+      }
+      if (op.opcode == OP_CATEGORICAL) {
+        const auto& spec = *static_cast<const CategoricalSpec*>(op.udata);
+        key.w.push_back(spec.logit);
+        key.w.push_back(spec.scalar_outcome);
+        key.w.push_back(spec.arg_autodiff);
+        key.w.push_back(spec.propto);
       }
       key.w.push_back(op.opcode);
       key.w.push_back(op.variant);
@@ -331,6 +364,207 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
   std::vector<char> dropped(n_ops, 0);
   std::vector<int> emit_at(n_ops, -1);
   std::vector<std::vector<Op>> emitted;
+
+  const auto attach_idata = [&](Op& o, std::vector<int> v) {
+    g.idata_pool.push_back(std::move(v));
+    o.idata = g.idata_pool.back().data();
+    o.n_idata = (int64_t)g.idata_pool.back().size();
+  };
+  // Non-contiguous dead terms are what an interleaved bucket produces, so
+  // the replacement takes the first dead entry's position and the rest of
+  // the list closes up around it.
+  const auto retire_terms = [&](const std::unordered_set<int>& dead,
+                                int new_term) {
+    std::vector<int> next;
+    next.reserve(target_terms.size());
+    bool placed = false;
+    for (int s : target_terms) {
+      if (dead.count(s) == 0) {
+        next.push_back(s);
+      } else if (!placed) {
+        next.push_back(new_term);
+        placed = true;
+      }
+    }
+    target_terms = std::move(next);
+    for (int s : dead) term_set.erase(s);
+    term_set.insert(new_term);
+  };
+
+  // Everything an item's chain reads from outside has to hold still from its
+  // first lane to its last, which is the proof the buckets below also make.
+  const auto op_of = [&](int lane_id, int p) -> const Op& {
+    return g.ops[lanes[(size_t)lane_id].begin + (size_t)p];
+  };
+  const auto emit_glm_item = [&](const std::vector<int>& ids, const Glm& glm,
+                                 int x_at, int a_at) {
+    const int64_t n = (int64_t)ids.size();
+    const auto at = [&](int p, int64_t l) -> const Op& {
+      return op_of(ids[(size_t)l], p);
+    };
+    const size_t lo = lanes[(size_t)ids[0]].begin;
+    const size_t hi = lanes[(size_t)ids[(size_t)(n - 1)]].end;
+    const auto settled = [&](int s) {
+      if (s < 0 || (size_t)s >= n_slots) return false;
+      const auto it = first_at_or_after(writers[(size_t)s], lo);
+      return it == writers[(size_t)s].end() || *it >= hi;
+    };
+
+    const int x_base = at(x_at, 0).in[0];
+    const int64_t x_len = g.slots[(size_t)x_base].len;
+    std::vector<int> rows;
+    rows.reserve((size_t)(n + 2));
+    for (int64_t l = 0; l < n; ++l) {
+      const int idx = at(x_at, l).idata[0];
+      if (idx < 0 || idx >= x_len) return false;
+      rows.push_back(idx);
+    }
+    if (!settled(x_base) || !settled(at(a_at, 0).in[0])) return false;
+
+    // The outcome is a 1-based category, and the GLM reads it as an integer
+    // out of its own immediates rather than off a slot.
+    std::vector<int> outcomes;
+    outcomes.reserve((size_t)(n + 2));
+    for (int64_t l = 0; l < n; ++l) {
+      const auto y = const_val.find(at(glm.cat, l).in[0]);
+      if (y == const_val.end() ||
+          !writers[(size_t)at(glm.cat, l).in[0]].empty())
+        return false;
+      if (!(y->second >= 1.0 && y->second <= (double)(glm.m + 1))) return false;
+      const int c = (int)y->second;
+      if ((double)c != y->second) return false;
+      outcomes.push_back(c);
+    }
+
+    std::vector<Op> out_ops;
+    const auto add = [&](uint16_t opcode, std::initializer_list<int> ins,
+                         int64_t len) {
+      Op o;
+      o.opcode = opcode;
+      o.n_in = 0;
+      for (int s : ins) o.in[o.n_in++] = s;
+      o.out = g.add_slot(len, false);
+      out_ops.push_back(o);
+      return o.out;
+    };
+    const auto carry = [&](int p, int64_t len) {
+      Op o = at(p, 0);
+      o.out = g.add_slot(len, false);
+      out_ops.push_back(o);
+      return o.out;
+    };
+
+    // The thresholds this item subtracts, summed: the chain takes them off
+    // one at a time and cumsum is linear, so their sum is the segment.
+    int seg = -1;
+    for (size_t j = 0; j < glm.sub.size(); ++j) {
+      const int q = glm.held[j];
+      const int held = at(glm.sub[j], 0).in[1];
+      int s = held;
+      if (q >= 0) {
+        if (!settled(at(q, 0).in[0])) return false;
+        s = carry(q, g.slots[(size_t)held].len);
+      } else if (!settled(held)) {
+        return false;
+      }
+      if (seg < 0)
+        seg = s;
+      else if (g.slots[(size_t)s].len > g.slots[(size_t)seg].len)
+        seg = add(OP_ADD, {s, seg}, g.slots[(size_t)s].len);
+      else
+        seg = add(OP_ADD, {seg, s}, g.slots[(size_t)seg].len);
+    }
+    if (g.slots[(size_t)seg].len != glm.m) return false;
+
+    Op gather;
+    gather.opcode = OP_GATHER;
+    gather.n_in = 1;
+    gather.in[0] = x_base;
+    gather.out = g.add_slot(n, false);
+    attach_idata(gather, rows);
+    out_ops.push_back(gather);
+
+    const int slope = g.add_slot(glm.m + 1, false);
+    std::vector<double> steps((size_t)(glm.m + 1));
+    for (int64_t j = 0; j <= glm.m; ++j) steps[(size_t)j] = (double)j;
+    fills.emplace_back(slope, std::move(steps));
+    const int zero = g.add_slot(1, false);
+    fills.emplace_back(zero, std::vector<double>{0.0});
+
+    const int beta = add(OP_MUL, {slope, carry(a_at, 1)}, glm.m + 1);
+    const int cs = add(OP_CUMSUM, {seg}, glm.m);
+    const int alpha =
+        add(OP_CONCAT2, {zero, add(OP_NEG, {cs}, glm.m)}, glm.m + 1);
+
+    Op lp;
+    lp.opcode = OP_CATEGORICAL_LOGIT_GLM_LPMF;
+    lp.n_in = 3;
+    lp.in[0] = gather.out;
+    lp.in[1] = alpha;
+    lp.in[2] = beta;
+    lp.out = g.add_slot(1, false);
+    lp.variant = (uint8_t)((glm.spec->propto ? 0x80u : 0u) | 0x7u);
+    outcomes.push_back((int)n);
+    outcomes.push_back(1);
+    attach_idata(lp, std::move(outcomes));
+    out_ops.push_back(lp);
+
+    std::unordered_set<int> dead;
+    for (int64_t l = 0; l < n; ++l) {
+      dead.insert(at(glm.cat, l).out);
+      for (size_t u = lanes[(size_t)ids[(size_t)l]].begin;
+           u < lanes[(size_t)ids[(size_t)l]].end; ++u)
+        dropped[u] = 1;
+    }
+    retire_terms(dead, lp.out);
+    emit_at[lo] = (int)emitted.size();
+    emitted.push_back(std::move(out_ops));
+    ++st.groups;
+    st.lanes += (int)n;
+    return true;
+  };
+
+  // Persons are deliberately not part of the item key: they are what the
+  // design matrix gathers, repeats and all.
+  const auto emit_glm = [&](const std::vector<int>& ids, const Glm& glm) {
+    std::unordered_map<Key, int, KeyHash> item_of;
+    std::vector<std::vector<int>> items;
+    Key key;
+    for (int id : ids) {
+      key.w.clear();
+      for (size_t j = 0; j < glm.sub.size(); ++j) {
+        const int q = glm.held[j];
+        const int held = op_of(id, glm.sub[j]).in[1];
+        key.w.push_back(q >= 0 ? op_of(id, q).in[0] : held);
+        key.w.push_back(q >= 0 ? op_of(id, q).idata[0] : -1);
+        key.w.push_back(g.slots[(size_t)held].len);
+      }
+      const auto ins = item_of.emplace(key, (int)items.size());
+      if (ins.second) items.emplace_back();
+      items[(size_t)ins.first->second].push_back(id);
+    }
+    bool any = false;
+    for (const std::vector<int>& grp : items) {
+      if ((int64_t)grp.size() < kMinLanes) continue;
+      const auto held_still = [&](int p) {
+        for (size_t l = 1; l < grp.size(); ++l)
+          if (op_of(grp[l], p).in[0] != op_of(grp[0], p).in[0] ||
+              op_of(grp[l], p).idata[0] != op_of(grp[0], p).idata[0])
+            return false;
+        return true;
+      };
+      const bool a = held_still(glm.theta), b = held_still(glm.alpha);
+      if (a == b) continue;  // the slope is whichever one the item pins
+      const int a_at = a ? glm.theta : glm.alpha;
+      const int x_at = a ? glm.alpha : glm.theta;
+      bool one_base = true;
+      for (size_t l = 1; l < grp.size(); ++l)
+        one_base =
+            one_base && op_of(grp[l], x_at).in[0] == op_of(grp[0], x_at).in[0];
+      any = (one_base && emit_glm_item(grp, glm, x_at, a_at)) || any;
+    }
+    return any;
+  };
 
   // A worklist rather than a loop: a bucket whose base is written between two
   // of its lanes splits at that op and both halves are reconsidered, so an
@@ -387,6 +621,85 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
 
     pos_of.clear();
     for (int p = 0; p < k; ++p) pos_of[op_at(p, 0).out] = p;
+    const auto local_at = [&](int slot, int before) {
+      const auto it = pos_of.find(slot);
+      return it != pos_of.end() && it->second < before ? it->second : -1;
+    };
+
+    // ---- GLM synthesis --------------------------------------------------
+    Glm glm;
+    if (op_at(k - 1, 0).opcode == OP_CATEGORICAL) {
+      const Op& cat = op_at(k - 1, 0);
+      glm.spec = static_cast<const CategoricalSpec*>(cat.udata);
+      int at = local_at(cat.in[1], k - 1);
+      bool hit = glm.spec->scalar_outcome && glm.spec->arg_autodiff &&
+                 g.slots[(size_t)cat.in[0]].len == 1 &&
+                 local_at(cat.in[0], k - 1) < 0 && at >= 0;
+      glm.chain.push_back(k - 1);
+      const auto step = [&](uint16_t opcode) {
+        if (!hit) return;
+        const Op& o = op_at(at, 0);
+        glm.chain.push_back(at);
+        hit = o.opcode == opcode && o.n_in == 1 &&
+              (at = local_at(o.in[0], at)) >= 0;
+      };
+      if (hit && !glm.spec->logit) step(OP_SOFTMAX);
+      step(OP_CUMSUM);
+      if (hit) {
+        const Op& cc = op_at(at, 0);
+        glm.chain.push_back(at);
+        glm.concat = at;
+        const auto zero = const_val.find(cc.n_in == 2 ? cc.in[0] : -1);
+        hit = cc.opcode == OP_CONCAT2 && zero != const_val.end() &&
+              zero->second == 0.0 && writers[(size_t)cc.in[0]].empty() &&
+              (at = local_at(cc.in[1], at)) >= 0;
+      }
+      // The subtrahends peel off outermost first; what is left is the
+      // product. Their sum is the segment whose cumsum the intercepts are.
+      while (hit && op_at(at, 0).n_in == 2 && op_at(at, 0).opcode == OP_SUB &&
+             glm.sub.size() < 2) {
+        glm.sub.push_back(at);
+        glm.chain.push_back(at);
+        const int held = local_at(op_at(at, 0).in[1], at);
+        glm.held.push_back(held);
+        if (held >= 0) {
+          const Op& o = op_at(held, 0);
+          glm.chain.push_back(held);
+          hit = (o.opcode == OP_INDEX || o.opcode == OP_SLICE) && o.n_in == 1 &&
+                o.n_idata == 1 && local_at(o.in[0], held) < 0;
+        }
+        at = local_at(op_at(at, 0).in[0], at);
+        hit = hit && at >= 0;
+      }
+      if (hit && !glm.sub.empty()) {
+        const Op& mul = op_at(at, 0);
+        glm.chain.push_back(at);
+        glm.m = g.slots[(size_t)op_at(glm.sub[0], 0).out].len;
+        hit = mul.opcode == OP_MUL && mul.n_in == 2 &&
+              g.slots[(size_t)mul.out].len == 1 && glm.m > 0 &&
+              g.slots[(size_t)op_at(glm.concat, 0).out].len == glm.m + 1 &&
+              (glm.theta = local_at(mul.in[0], at)) >= 0 &&
+              (glm.alpha = local_at(mul.in[1], at)) >= 0 &&
+              glm.theta != glm.alpha;
+      } else {
+        hit = false;
+      }
+      for (int p : {glm.theta, glm.alpha}) {
+        if (!hit) break;
+        const Op& o = op_at(p, 0);
+        glm.chain.push_back(p);
+        hit = o.opcode == OP_INDEX && o.n_in == 1 && o.n_idata == 1 &&
+              g.slots[(size_t)o.out].len == 1 && local_at(o.in[0], p) < 0;
+      }
+      // Everything the substitution does not consume has to be dead: gpcm
+      // emits the same threshold slice three times per lane and reads one.
+      for (int p = 0; hit && p < k; ++p)
+        hit = std::find(glm.chain.begin(), glm.chain.end(), p) !=
+                  glm.chain.end() ||
+              uses[(size_t)op_at(p, 0).out].empty();
+      if (hit) glm.cat = k - 1;
+    }
+    if (glm.cat >= 0 && emit_glm(ids, glm)) continue;
 
     std::vector<Pos> pos((size_t)k);
     bool ok = true;
@@ -659,11 +972,6 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           break;
       }
     }
-    const auto attach_idata = [&](Op& o, std::vector<int> v) {
-      g.idata_pool.push_back(std::move(v));
-      o.idata = g.idata_pool.back().data();
-      o.n_idata = (int64_t)g.idata_pool.back().size();
-    };
     added += ops_out * kOpCost + (L - distinct) * lane_elems;
     if (distinct * (int64_t)k * kOpCost <= added + kPartitionMargin) {
       ++st.declined;
@@ -697,20 +1005,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     const auto swap_terms = [&](int p, int new_term) {
       std::unordered_set<int> dead;
       for (int64_t l = 0; l < L; ++l) dead.insert(op_at(p, l).out);
-      std::vector<int> next;
-      next.reserve(target_terms.size());
-      bool placed = false;
-      for (int s : target_terms) {
-        if (dead.count(s) == 0) {
-          next.push_back(s);
-        } else if (!placed) {
-          next.push_back(new_term);
-          placed = true;
-        }
-      }
-      target_terms = std::move(next);
-      for (int s : dead) term_set.erase(s);
-      term_set.insert(new_term);
+      retire_terms(dead, new_term);
     };
 
     for (int p = 0; p < k; ++p) {

@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -698,6 +699,192 @@ static void test_cost_declines() {
   expect("declined graph unchanged", g.ops.size() == before && tt == terms);
 }
 
+// gpcm_latent_reg_irt's per-response chain: theta[person] * alpha[item] minus
+// that item's threshold segment, run through a leading zero, a cumsum, a
+// softmax and a categorical. Items interleave, so the lanes are laid down
+// person-major and the item is a refinement of the bucket.
+struct Irt {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  int theta = -1, alpha = -1, beta = -1;
+};
+
+// item_m[i] thresholds for item i, laid end to end in one beta vector.
+static Irt build_irt(const std::vector<int>& item_m,
+                     const std::vector<int>& person, bool split_sub) {
+  Irt b;
+  const int n_items = (int)item_m.size();
+  int total = 0;
+  for (int m : item_m) total += m;
+  b.theta = b.g.add_slot((int64_t)person.size(), true);
+  b.alpha = b.g.add_slot(n_items, true);
+  b.beta = b.g.add_slot(split_sub ? n_items : total, true);
+  const int shared = split_sub ? b.g.add_slot(item_m[0], true) : -1;
+  int pos = 0;
+  std::vector<int> start((size_t)n_items);
+  for (int i = 0; i < n_items; ++i) {
+    start[(size_t)i] = pos;
+    pos += item_m[(size_t)i];
+  }
+  for (size_t l = 0; l < person.size(); ++l) {
+    for (int i = 0; i < n_items; ++i) {
+      const int m = item_m[(size_t)i];
+      const int th = b.g.add_slot(1, false);
+      b.g.add_op(OP_INDEX, {b.theta}, th, {person[l]});
+      const int al = b.g.add_slot(1, false);
+      b.g.add_op(OP_INDEX, {b.alpha}, al, {i});
+      const int mul = b.g.add_slot(1, false);
+      b.g.add_op(OP_MUL, {th, al}, mul);
+      int diff = -1;
+      if (split_sub) {
+        const int bi = b.g.add_slot(1, false);
+        b.g.add_op(OP_INDEX, {b.beta}, bi, {i});
+        const int d1 = b.g.add_slot(1, false);
+        b.g.add_op(OP_SUB, {mul, bi}, d1);
+        diff = b.g.add_slot(m, false);
+        b.g.add_op(OP_SUB, {d1, shared}, diff);
+      } else {
+        const int seg = b.g.add_slot(m, false);
+        b.g.add_op(OP_SLICE, {b.beta}, seg, {start[(size_t)i]});
+        diff = b.g.add_slot(m, false);
+        b.g.add_op(OP_SUB, {mul, seg}, diff);
+      }
+      const int zero = b.g.add_slot(1, false);
+      b.fills.emplace_back(zero, std::vector<double>{0.0});
+      const int cat_in = b.g.add_slot(m + 1, false);
+      b.g.add_op(OP_CONCAT2, {zero, diff}, cat_in);
+      const int cs = b.g.add_slot(m + 1, false);
+      b.g.add_op(OP_CUMSUM, {cat_in}, cs);
+      const int probs = b.g.add_slot(m + 1, false);
+      b.g.add_op(OP_SOFTMAX, {cs}, probs);
+      const int y = b.g.add_slot(1, false);
+      b.fills.emplace_back(
+          y, std::vector<double>{(double)(1 + ((int)l + i) % (m + 1))});
+      const int lp = b.g.add_slot(1, false);
+      b.g.add_op(OP_CATEGORICAL, {y, probs}, lp);
+      auto spec = std::make_shared<CategoricalSpec>();
+      spec->scalar_outcome = true;
+      spec->arg_autodiff = true;
+      b.g.ops.back().udata = spec.get();
+      b.g.udata_pool.push_back(std::move(spec));
+      b.terms.push_back(lp);
+    }
+  }
+  return b;
+}
+
+static void test_irt_glm_synthesis() {
+  const std::vector<int> item_m{1, 2};
+  const std::vector<int> person{0, 3, 1, 1, 4, 2, 5, 0};
+  Irt b = build_irt(item_m, person, false);
+  const std::vector<double> want = reference(b.g, b.fills, b.terms);
+
+  std::vector<int> tt = b.terms;
+  Fills f2 = b.fills;
+  const PartitionStats st = partition_lanes(b.g, f2, tt, {});
+  expect("irt two items", st.groups == 2 &&
+                              st.lanes == (int)(2 * person.size()) &&
+                              tt.size() == 2);
+  expect("irt one glm per item",
+         count_opcode(b.g, OP_CATEGORICAL_LOGIT_GLM_LPMF) == 2 &&
+             count_opcode(b.g, OP_CATEGORICAL) == 0);
+  expect("irt intercepts negate", count_opcode(b.g, OP_NEG) == 2 &&
+                                      count_opcode(b.g, OP_CUMSUM) == 2 &&
+                                      count_opcode(b.g, OP_SOFTMAX) == 0);
+  // Person indices in lane order, repeats and all; y then rows then cols.
+  bool layout = false;
+  for (const Op& op : b.g.ops) {
+    if (op.opcode != OP_GATHER) continue;
+    layout = op.n_idata == (int64_t)person.size() && op.idata[0] == person[0] &&
+             op.idata[3] == person[3];
+  }
+  expect("irt gathers in lane order", layout);
+  for (const Op& op : b.g.ops) {
+    if (op.opcode != OP_CATEGORICAL_LOGIT_GLM_LPMF) continue;
+    const int64_t rows = op.idata[op.n_idata - 2];
+    expect("irt glm idata", rows == (int64_t)person.size() &&
+                                op.idata[op.n_idata - 1] == 1 &&
+                                op.n_idata == rows + 2);
+  }
+  expect_same_grad("irt", std::move(b.g), f2, tt, want);
+}
+
+// grsm_latent_reg_irt's chain: the item's own difficulty comes off first as a
+// scalar, then a threshold vector every item shares. The segment the
+// intercepts cumsum is their sum.
+static void test_irt_split_subtrahend() {
+  const std::vector<int> item_m{3, 3};
+  const std::vector<int> person{2, 0, 1, 4, 4, 3};
+  Irt b = build_irt(item_m, person, true);
+  const std::vector<double> want = reference(b.g, b.fills, b.terms);
+
+  std::vector<int> tt = b.terms;
+  Fills f2 = b.fills;
+  const PartitionStats st = partition_lanes(b.g, f2, tt, {});
+  expect("irt split two items",
+         st.groups == 2 && st.lanes == (int)(2 * person.size()));
+  expect("irt split one glm per item",
+         count_opcode(b.g, OP_CATEGORICAL_LOGIT_GLM_LPMF) == 2 &&
+             count_opcode(b.g, OP_ADD) == 2);
+  expect_same_grad("irt split", std::move(b.g), f2, tt, want);
+}
+
+// The same chain without the leading zero, and with a leading constant that
+// is not zero. Either way the intercepts stop being -cumsum(segment) behind a
+// reference category, so the substitution does not hold.
+static void test_irt_refuse_near_miss(double lead, bool concat) {
+  const std::vector<int> person{0, 3, 1, 1, 4, 2, 5, 0};
+  const int M = 2;
+  Graph g;
+  Fills fills;
+  const int theta = g.add_slot(6, true);
+  const int alpha = g.add_slot(1, true);
+  const int beta = g.add_slot(M, true);
+  std::vector<int> terms;
+  for (size_t l = 0; l < person.size(); ++l) {
+    const int th = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {theta}, th, {person[l]});
+    const int al = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {alpha}, al, {0});
+    const int mul = g.add_slot(1, false);
+    g.add_op(OP_MUL, {th, al}, mul);
+    const int seg = g.add_slot(M, false);
+    g.add_op(OP_SLICE, {beta}, seg, {0});
+    const int diff = g.add_slot(M, false);
+    g.add_op(OP_SUB, {mul, seg}, diff);
+    int head = diff;
+    const int wide = concat ? M + 1 : M;
+    if (concat) {
+      const int c = g.add_slot(1, false);
+      fills.emplace_back(c, std::vector<double>{lead});
+      head = g.add_slot(wide, false);
+      g.add_op(OP_CONCAT2, {c, diff}, head);
+    }
+    const int cs = g.add_slot(wide, false);
+    g.add_op(OP_CUMSUM, {head}, cs);
+    const int probs = g.add_slot(wide, false);
+    g.add_op(OP_SOFTMAX, {cs}, probs);
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{(double)(1 + (int)l % wide)});
+    const int lp = g.add_slot(1, false);
+    g.add_op(OP_CATEGORICAL, {y, probs}, lp);
+    auto spec = std::make_shared<CategoricalSpec>();
+    spec->scalar_outcome = true;
+    spec->arg_autodiff = true;
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+    terms.push_back(lp);
+  }
+  const size_t before = g.ops.size();
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("irt near miss refuses",
+         st.groups == 0 && g.ops.size() == before && tt == terms);
+}
+
 // ---- cost -----------------------------------------------------------------
 
 static double peak_rss_mb() {
@@ -776,6 +963,10 @@ int main() {
   test_cross_bucket_read_after_write();
   test_kill_switch();
   test_state_space_shape();
+  test_irt_glm_synthesis();
+  test_irt_split_subtrahend();
+  test_irt_refuse_near_miss(0.0, false);
+  test_irt_refuse_near_miss(1.5, true);
   test_cost_declines();
   test_scaling();
   if (failures == 0) std::printf("test_partition OK\n");
