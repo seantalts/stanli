@@ -1,5 +1,6 @@
 #include <stanli/compile.hpp>
 #include <stanli/constfold.hpp>
+#include <stanli/cse.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/mir_prog.hpp>
 #include <stanli/mir.hpp>
@@ -4936,6 +4937,13 @@ struct Lowering {
     prep.graph(prep_graph, "post_reroll_inplace", post_reroll_inplace_time, g,
                out.fills, target_terms.size(), out.views.size(),
                PrepTrace::Extra::Rewrites, post_reroll_inplace);
+    // After reroll, whose lane matching needs the repeated ops it hoists to
+    // still be there, and before islands, so they compile the smaller
+    // residue.
+    const auto cse_time = prep.start();
+    const CseStats cse_st = cse(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "cse", cse_time, g, out.fills, target_terms.size(),
+               out.views.size(), PrepTrace::Extra::Removed, cse_st.ops_removed);
     // LAST, after every other pass has had first crack: compile whatever
     // scalar residue survives (recurrences the re-roll can never widen)
     // into island ops. Off under STANLI_NO_ISLAND.

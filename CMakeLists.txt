@@ -280,6 +280,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
+  runtime/src/cse.cpp
   runtime/src/data.cpp
   runtime/src/data_var_context.cpp)
 
@@ -536,7 +537,7 @@ set(STANLI_TESTS
   test_lower_view_contract test_lower_array_contract test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
   test_ode_prog test_mir_program_conformance test_mir_checks
-  test_structured_checks test_mir_unary_fallback test_constfold
+  test_structured_checks test_mir_unary_fallback test_constfold test_cse
   test_solve test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
