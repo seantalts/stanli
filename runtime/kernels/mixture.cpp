@@ -24,12 +24,12 @@ int64_t lse_scratch(const Op& op, const Slot* slots) {
   return slots[op.in[0]].len;
 }
 
-// Scalar libm, not Eigen packet math: a vectorized exp rounds a last bit
-// away from the var reference, whose value extraction blocks vectorization.
+// Packet exp rounds up to a last bit away from the scalar-libm var reference.
 double lse_fwd_partials(const double* data, int64_t len, double* partials) {
   const double value =
       stan::math::log_sum_exp(Eigen::Map<const Eigen::VectorXd>(data, len));
-  for (int64_t i = 0; i < len; ++i) partials[i] = std::exp(data[i] - value);
+  Eigen::Map<Eigen::ArrayXd>(partials, len) =
+      (Eigen::Map<const Eigen::ArrayXd>(data, len) - value).exp();
   return value;
 }
 

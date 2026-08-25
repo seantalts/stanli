@@ -289,7 +289,8 @@ static void check_row_edge(const std::string& tag,
   expect_eq(tag + " value", got.value, want.val());
   expect_eq(tag + " row value", got.out[0], want.val());
   for (int i = 0; i < (int)x.size(); ++i)
-    expect_eq(tag + " g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj());
+    expect_ulp(tag + " g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj(),
+               1);
   stan::math::recover_memory();
 }
 
@@ -336,7 +337,8 @@ static void check_rows() {
     expect_eq("rows out" + std::to_string(r), got.out[(size_t)r],
               row_lp[(size_t)r].val());
   for (int i = 0; i < (int)x.size(); ++i)
-    expect_eq("rows g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj());
+    expect_ulp("rows g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj(),
+               1);
   stan::math::recover_memory();
 
   // A nonuniform consumer verifies that backward uses each row's own output
@@ -353,8 +355,8 @@ static void check_rows() {
   }
   weighted_lp.grad();
   for (int i = 0; i < (int)x.size(); ++i)
-    expect_eq("weighted rows g" + std::to_string(i), weighted.grad[(size_t)i],
-              wx(i).adj());
+    expect_ulp("weighted rows g" + std::to_string(i), weighted.grad[(size_t)i],
+               wx(i).adj(), 1);
   stan::math::recover_memory();
 
   Graph shape;
@@ -404,7 +406,8 @@ static void check_rows() {
       expect_eq("rows9 out" + std::to_string(r), g9.out[(size_t)r],
                 rows9[(size_t)r].val());
     for (int i = 0; i < (int)many.size(); ++i)
-      expect_eq("rows9 g" + std::to_string(i), g9.grad[(size_t)i], xv(i).adj());
+      expect_ulp("rows9 g" + std::to_string(i), g9.grad[(size_t)i], xv(i).adj(),
+                 1);
     stan::math::recover_memory();
   }
 
