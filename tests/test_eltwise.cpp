@@ -3,6 +3,7 @@
 #include "graph_helpers.hpp"
 
 #include <stan/math.hpp>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -28,10 +29,22 @@ static VecV mkv(const std::vector<double>& v) {
   return x;
 }
 
+// OP_LOGV takes Eigen's packet log, a ulp off libm on some arguments. The
+// gradients are 1/x and stay bitwise; only lp carries the difference, and a
+// sum that cancels reports it as several ulps of the result.
+static void expect_near_ulp(const std::string& what, double got, double want,
+                            int budget) {
+  if (got == want) return;
+  const double u = std::nextafter(std::abs(want), 1e308) - std::abs(want);
+  if (std::abs(got - want) <= budget * u) return;
+  ++failures;
+  std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got, want);
+}
+
 template <typename F>
 static void check_case(const std::string& tag, uint16_t opcode, int64_t out_len,
-                       const std::vector<std::vector<double>>& vals,
-                       F&& ref_fn) {
+                       const std::vector<std::vector<double>>& vals, F&& ref_fn,
+                       int lp_ulp = 0) {
   auto r = stanli::testutil::run_op_sum(opcode, out_len, vals,
                                         std::vector<bool>(vals.size(), true));
   // Reference: promote all inputs to var, apply ref_fn, sum, grad.
@@ -39,7 +52,7 @@ static void check_case(const std::string& tag, uint16_t opcode, int64_t out_len,
   for (const auto& v : vals) vs.push_back(mkv(v));
   var lp = ref_fn(vs);
   lp.grad();
-  expect_eq(tag + " lp", r.value, lp.val());
+  expect_near_ulp(tag + " lp", r.value, lp.val(), lp_ulp);
   size_t gi = 0;
   for (auto& v : vs)
     for (int i = 0; i < v.size(); ++i)
@@ -145,8 +158,9 @@ int main() {
              [](auto& v) { return stan::math::sum(stan::math::exp(v[0])); });
   check_case("exp s", OP_EXPV, 1, {{S}},
              [](auto& v) { return stan::math::exp(v[0](0)); });
-  check_case("log v", OP_LOGV, N, {{1.5, 0.7, 0.4, 2.2}},
-             [](auto& v) { return stan::math::sum(stan::math::log(v[0])); });
+  check_case(
+      "log v", OP_LOGV, N, {{1.5, 0.7, 0.4, 2.2}},
+      [](auto& v) { return stan::math::sum(stan::math::log(v[0])); }, 16);
   check_case("inv_logit v", OP_INV_LOGIT, N, {A}, [](auto& v) {
     return stan::math::sum(stan::math::inv_logit(v[0]));
   });

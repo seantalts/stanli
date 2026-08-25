@@ -330,10 +330,9 @@ void cumsum_bwd(KernelCtx& ctx) {
   ctx.in_adj[0].data[0] += radj[0];
 }
 
-void logv_fwd(KernelCtx& ctx) {
-  for (int64_t i = 0; i < ctx.out.len; ++i)
-    ctx.out.data[i] = std::log(ctx.in[0].data[i]);
-}
+// Eigen's packet log, a ulp off libm on some arguments. The matching packet
+// exp is NOT taken: it puts kronecker_gp over its reference gate.
+void logv_fwd(KernelCtx& ctx) { out_a(ctx) = in_a(ctx, 0).log(); }
 void logv_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   if (ctx.out.len == 1)

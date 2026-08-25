@@ -396,9 +396,10 @@ void offset_mult_bwd(KernelCtx& ctx) {
       // lp term (sum(log(sigma))) before the value (fma), so the reverse
       // sweep contracts fma's contribution into sigma.adj first and the
       // jacobian's second -- and a += b += c does not round like a += (b + c).
-      for (int64_t i = 0; i < n; ++i) ctx.in_adj[2].data[i] += dout[i] * x[i];
-      for (int64_t i = 0; i < n; ++i)
+      for (int64_t i = 0; i < n; ++i) {
+        ctx.in_adj[2].data[i] += dout[i] * x[i];
         ctx.in_adj[2].data[i] += ctx.out2_adj / sg[i];
+      }
     } else {
       double s = 0.0;
       for (int64_t i = 0; i < n; ++i) s += dout[i] * x[i];
