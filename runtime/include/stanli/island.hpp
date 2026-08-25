@@ -62,6 +62,12 @@ struct IslandProg : Program {
   bool native_adj = false;
 };
 
+// Run compact_program (program.hpp) over the region's forward code, live-ins
+// included, before the adjoint generator reads it -- so the backward is
+// generated from the compacted program rather than remapped onto it.
+// STANLI_NO_ISLAND_COMPACT=1 disables this pass only.
+void compact_island(IslandProg& p);
+
 // Generate p.adj, appending checkpoint saves to p's forward code. False
 // leaves p untouched and keeps the replay.
 bool gen_adjoint(IslandProg& p);

@@ -258,6 +258,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/scalar_unary_ad.cpp
   runtime/kernels/ode.cpp
   runtime/src/ode_prog.cpp
+  runtime/src/program.cpp
   runtime/kernels/constrain.cpp
   runtime/kernels/eltwise_expr.cpp
   runtime/kernels/mixture.cpp

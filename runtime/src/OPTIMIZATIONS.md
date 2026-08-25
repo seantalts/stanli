@@ -718,6 +718,31 @@ parameter keeps the autodiff replay, because reversing a branch needs
 the nested if/else shape the flat instruction list has already thrown
 away.
 
+### Register-program compaction (`program.cpp`, disable: `STANLI_NO_ISLAND_COMPACT=1`)
+
+A region's instruction list arrives full of the MIR's declaration
+bookkeeping: a fill of the language-level default, then a copy of the real
+initializer, then more copies through return temporaries. Across the ten
+corpus models with a compiled region, 39% of the instructions were copies.
+The same pass that removed them from ODE right-hand sides
+(`compact_program`) now runs over islands too, before the adjoint generator
+reads the forward -- so the backward is generated from the compacted
+program rather than remapped onto it -- and it drops the registers that
+leaves unreferenced, which shrinks the value file the forward writes and
+the backward reads.
+
+The copy test is deliberately the same one `gen_adjoint` applies before
+letting two registers share an adjoint cell, and a copy this pass will not
+remove keeps the fill that made `gen_adjoint` refuse it. Both halves of
+that are what keeps the generated backward's arithmetic identical: the
+whole corpus is byte-for-byte unchanged with the switch on and off.
+
+Measured (Release, median of nine interleaved runs): `iohmm_reg` 40,968 ->
+31,968 forward instructions and 56,501 -> 43,488 registers, 1.040x;
+`hmm_example` 1.057x; `hmm_gaussian` 1.025x; `hmm_drive_0` 1.015x. `garch11`
+and both `accel_*` models are unchanged, their copies being the ones the
+rule declines.
+
 What is left for this class is the per-instruction cost itself. Both
 directions read one instruction at a time and decide what to do with it,
 where CmdStan's compiler has inlined the equivalent straight into the
@@ -946,7 +971,8 @@ silently. Three layers:
   models a change affects.
 
 The env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
-`STANLI_NO_CONSTFOLD`, `STANLI_NO_REROLL`, `STANLI_NO_ISLAND`) exist so a wrong
+`STANLI_NO_CONSTFOLD`, `STANLI_NO_REROLL`, `STANLI_NO_ISLAND`,
+`STANLI_NO_ISLAND_COMPACT`) exist so a wrong
 result can be attributed to one optimization quickly, and they are how each
 one is measured: every speed number is the same build with one variable set
 and unset.

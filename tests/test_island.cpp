@@ -167,6 +167,164 @@ static HmmGraph build_hmm(int T, int W = 2) {
   return h;
 }
 
+// compact_program (program.cpp) on programs small enough to write down.
+// The gradients the removals must not move are covered by every other case
+// in this file; these pin which instructions survive.
+static std::string opcodes(const Program& p) {
+  std::string out;
+  for (const auto& I : p.code) {
+    if (!out.empty()) out += ' ';
+    out += program_code_spec(I.code).name;
+  }
+  return out;
+}
+
+static void expect_eq(const std::string& what, const std::string& got,
+                      const std::string& want) {
+  if (got != want) {
+    ++failures;
+    std::printf("FAIL %s: got [%s] want [%s]\n", what.c_str(), got.c_str(),
+                want.c_str());
+  }
+}
+
+static void expect_eq(const std::string& what, int got, int want) {
+  if (got != want) {
+    ++failures;
+    std::printf("FAIL %s: got %d want %d\n", what.c_str(), got, want);
+  }
+}
+
+static void test_compact_copy_chain() {
+  Program p;
+  p.n_regs = 4;
+  p.pool = {2.0};
+  p.code = {
+      {Program::CONST, 1, 0}, {Program::MOV, 2, 1}, {Program::ADD, 3, 0, 2}};
+  p.out_regs = {3};
+  std::vector<std::pair<int, int>> seeded{{0, 1}};
+  compact_program(p, seeded);
+  expect_eq("copy chain code", opcodes(p), "CONST ADD");
+  expect_eq("copy chain regs", p.n_regs, 3);
+  expect_eq("copy chain add reads the source", p.code[1].b, 1);
+  expect_eq("copy chain live-out", p.out_regs[0], 2);
+}
+
+static void test_compact_dead_fill() {
+  Program p;
+  p.n_regs = 5;
+  p.pool = {0.0, 0.0};
+  p.code = {{Program::CONSTR, 2, 0, 0, 0, 2},
+            {Program::EXP_RANGE, 2, 0, 0, 0, 2},
+            {Program::DOT, 4, 2, 0, 0, 2}};
+  p.out_regs = {4};
+  std::vector<std::pair<int, int>> seeded{{0, 2}};
+  compact_program(p, seeded);
+  expect_eq("dead fill code", opcodes(p), "EXP_RANGE DOT");
+  expect_eq("dead fill regs", p.n_regs, 5);
+}
+
+static void test_compact_rewritten_source_kept() {
+  Program p;
+  p.n_regs = 4;
+  p.pool = {2.0, 3.0};
+  p.code = {{Program::CONST, 1, 0},
+            {Program::MOV, 2, 1},
+            {Program::CONST, 1, 1},
+            {Program::ADD, 3, 2, 1}};
+  p.out_regs = {3};
+  std::vector<std::pair<int, int>> seeded{{0, 1}};
+  compact_program(p, seeded);
+  expect_eq("rewritten source keeps the copy", opcodes(p),
+            "CONST MOV CONST ADD");
+}
+
+static void test_compact_second_writer_kept() {
+  Program p;
+  p.n_regs = 4;
+  p.pool = {2.0, 3.0};
+  p.code = {{Program::CONST, 1, 0},
+            {Program::MOV, 2, 1},
+            {Program::CONST, 2, 1},
+            {Program::ADD, 3, 2, 1}};
+  p.out_regs = {3};
+  std::vector<std::pair<int, int>> seeded{{0, 1}};
+  compact_program(p, seeded);
+  expect_eq("second writer keeps the copy", opcodes(p), "CONST MOV CONST ADD");
+}
+
+static void test_compact_range_copy() {
+  Program p;
+  p.n_regs = 10;
+  p.code = {{Program::MOVR, 4, 0, 0, 0, 4},
+            {Program::LSE_RANGE, 8, 4, 0, 0, 4}};
+  p.out_regs = {8};
+  std::vector<std::pair<int, int>> seeded{{0, 4}};
+  compact_program(p, seeded);
+  expect_eq("range copy code", opcodes(p), "LSE_RANGE");
+  expect_eq("range copy reads the source", p.code[0].a, 0);
+  expect_eq("range copy regs", p.n_regs, 5);
+}
+
+// A read that spans two copies must not be split across their sources.
+static void test_compact_straddling_range_kept() {
+  Program p;
+  p.n_regs = 12;
+  p.code = {{Program::MOVR, 4, 0, 0, 0, 2},
+            {Program::MOVR, 6, 2, 0, 0, 2},
+            {Program::LSE_RANGE, 8, 5, 0, 0, 2}};
+  p.out_regs = {8};
+  std::vector<std::pair<int, int>> seeded{{0, 4}};
+  compact_program(p, seeded);
+  expect_eq("straddling range keeps both copies", opcodes(p),
+            "MOVR MOVR LSE_RANGE");
+}
+
+static void test_compact_call_ranges() {
+  Program p;
+  p.n_regs = 8;
+  Program::Call c;
+  c.opcode = OP_ADD;
+  c.n_in = 1;
+  c.in[0] = 2;
+  c.in_len[0] = 2;
+  c.out = 4;
+  c.out_len = 1;
+  c.scratch = 5;
+  c.scratch_len = 2;
+  p.calls = {c};
+  p.code = {{Program::MOVR, 2, 0, 0, 0, 2},
+            {Program::CALL, 0, 0},
+            {Program::MOV, 7, 4}};
+  p.out_regs = {7};
+  std::vector<std::pair<int, int>> seeded{{0, 2}};
+  compact_program(p, seeded);
+  expect_eq("call input range keeps its copy", opcodes(p), "MOVR CALL");
+  expect_eq("call regs", p.n_regs, 7);
+  expect_eq("call live-out", p.out_regs[0], 4);
+}
+
+static size_t hmm_island_instrs(const char* what) {
+  HmmGraph h = build_hmm(8);
+  if (carve_islands(h.g, h.fills, h.terms, {}) != 1) {
+    ++failures;
+    std::printf("FAIL %s: no island carved\n", what);
+    return 0;
+  }
+  for (const Op& op : h.g.ops)
+    if (op.opcode == OP_ISLAND)
+      return static_cast<const IslandProg*>(op.udata)->code.size();
+  return 0;
+}
+
+static void test_compact_env_disable() {
+  test_setenv("STANLI_NO_ISLAND_COMPACT", "1", 1);
+  const size_t off = hmm_island_instrs("compaction off");
+  test_unsetenv("STANLI_NO_ISLAND_COMPACT");
+  const size_t on = hmm_island_instrs("compaction on");
+  expect("compaction shrinks the hmm island", on < off);
+}
+
 static void test_hmm_parity() {
   HmmGraph ref = build_hmm(8);  // 8*11 = 88 body ops, above threshold
   const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
@@ -325,7 +483,11 @@ static HmmGraph build_compact_cost_boundary() {
   return h;
 }
 
+// The adjoint file is what the boundary is about, so this runs with
+// compaction off: with it on the copies never reach gen_adjoint, and the
+// region clears the estimate by a margin instead of sitting on it.
 static void test_compact_adjoint_cost_boundary() {
+  test_setenv("STANLI_NO_ISLAND_COMPACT", "1", 1);
   HmmGraph forced = build_compact_cost_boundary();
   const int64_t graph_cost = 6 * (int64_t)forced.body_ops;
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
@@ -351,6 +513,11 @@ static void test_compact_adjoint_cost_boundary() {
   HmmGraph normal = build_compact_cost_boundary();
   expect("compact boundary default carve",
          carve_islands(normal.g, normal.fills, normal.terms, {}) == 1);
+  test_unsetenv("STANLI_NO_ISLAND_COMPACT");
+
+  HmmGraph compacted = build_compact_cost_boundary();
+  expect("compact boundary carves compacted too",
+         carve_islands(compacted.g, compacted.fills, compacted.terms, {}) == 1);
 }
 
 // The same recurrence on a two-element state: nothing is copied, so the
@@ -381,7 +548,8 @@ static void test_scalar_chain_carved() {
 // same graph uncarved: a CALL runs the identical kernel, so the graph
 // is the arbiter, not the var replay (which cannot execute a CALL and
 // never meets one).
-static void test_kernel_call_ops_carved() {
+static void test_kernel_call_ops_carved(bool compact) {
+  if (!compact) test_setenv("STANLI_NO_ISLAND_COMPACT", "1", 1);
   Graph g;
   Fills fills;
   const int p0 = g.add_slot(1, true);
@@ -460,11 +628,14 @@ static void test_kernel_call_ops_carved() {
       check_range(call.out, call.out_len);
     }
   }
-  expect("call range actually compacted", shifted_call_range);
+  // With compaction on, the copies gen_adjoint used to share a cell for are
+  // gone before it runs, so the mapping is an identity it never built.
+  if (!compact) expect("call range actually compacted", shifted_call_range);
   const std::vector<double> got = run_grad_twice(std::move(g), fills);
   expect("callops sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close("callops v" + std::to_string(i), got[i], want[i]);
+  if (!compact) test_unsetenv("STANLI_NO_ISLAND_COMPACT");
 }
 
 static void test_too_many_live_ins() {
@@ -689,6 +860,14 @@ int main() {
   // reason about. The cost estimate would refuse most of them -- it is
   // policy, tested separately below, and these are about correctness.
   test_branch_bound_live_out();
+  test_compact_copy_chain();
+  test_compact_dead_fill();
+  test_compact_rewritten_source_kept();
+  test_compact_second_writer_kept();
+  test_compact_range_copy();
+  test_compact_straddling_range_kept();
+  test_compact_call_ranges();
+  test_compact_env_disable();
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
   test_hmm_parity();
   test_env_disable();
@@ -700,7 +879,8 @@ int main() {
   test_too_many_live_ins();
   test_six_live_ins_ok();
   test_packed_live_ins();
-  test_kernel_call_ops_carved();
+  test_kernel_call_ops_carved(true);
+  test_kernel_call_ops_carved(false);
 
   test_unsetenv("STANLI_ISLAND_ALWAYS");
   test_wide_state_refused();

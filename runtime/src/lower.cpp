@@ -1767,6 +1767,7 @@ struct Lowering {
     // lost -- so this usually declines. It is asked anyway because a region
     // can reach here branch-free: a `~` refusal or an unknown name is not
     // the only way to end up compiled.
+    compact_island(*prog);
     prog->native_adj =
         gen_adjoint(*prog) && !std::getenv("STANLI_NO_NATIVE_ADJ");
     *prog_out = std::move(prog);

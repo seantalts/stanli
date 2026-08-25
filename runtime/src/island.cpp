@@ -444,6 +444,15 @@ struct Compiler {
 
 }  // namespace
 
+void compact_island(IslandProg& p) {
+  if (std::getenv("STANLI_NO_ISLAND_COMPACT")) return;
+  std::vector<std::pair<int, int>> seeded;
+  seeded.reserve(p.ins.size());
+  for (const auto& li : p.ins) seeded.emplace_back(li.reg, li.len);
+  compact_program(p, seeded);
+  for (size_t k = 0; k < p.ins.size(); ++k) p.ins[k].reg = seeded[k].first;
+}
+
 int carve_islands(Graph& g,
                   const std::vector<std::pair<int, std::vector<double>>>& fills,
                   const std::vector<int>& target_terms,
@@ -491,6 +500,41 @@ int carve_islands(Graph& g,
       cc.op_index = u;
       compiled = cc.compile(g.ops[u]) && cc.ok;
     }
+    // Live-outs: written in the region and visible after it, in first-write
+    // order for a deterministic packing. Settled before compaction, because
+    // the program's live-outs are registers and compaction renumbers them.
+    std::vector<int> live_outs;
+    std::unordered_set<int> in_set(cc.live_in_slots.begin(),
+                                   cc.live_in_slots.end());
+    if (compiled) {
+      std::unordered_set<int> seen;
+      for (size_t u = i; u < j; ++u) {
+        const int o = g.ops[u].out;
+        if (seen.count(o)) continue;
+        seen.insert(o);
+        auto lit = last_use.find(o);
+        const bool read_after = lit != last_use.end() && lit->second >= j;
+        if (read_after || root_set.count(o) || term_set.count(o))
+          live_outs.push_back(o);
+      }
+      // A slot that is BOTH a live-in and a live-out (an in-place chain
+      // whose template the region reads first and overwrites last) cannot
+      // keep its id on the output side: the island reads the arena buffer
+      // in the forward, and an extraction writing the same buffer would
+      // feed the NEXT gradient's forward its own previous output. The
+      // extraction gets a fresh slot and later references are renamed --
+      // unless the slot is read from outside the graph, where the id is
+      // the contract, and then the run stays as ops.
+      bool aliased_pinned = false;
+      for (int o : live_outs)
+        if (in_set.count(o) && pinned.count(o)) aliased_pinned = true;
+      if (live_outs.empty() || aliased_pinned) compiled = false;
+    }
+    if (compiled)
+      for (int o : live_outs)
+        for (int e = 0; e < (int)g.slots[o].len; ++e)
+          cc.prog.out_regs.push_back(cc.reg_of.at(o) + e);
+
     // Generate the backward before estimating, because generating it is
     // what the estimate is about: it appends the checkpoint saves the
     // adjoint needs, so both the register count and the instruction count
@@ -498,6 +542,7 @@ int carve_islands(Graph& g,
     // does not skip this -- it only stops the kernel USING the result, so
     // the two backwards can be compared over the same islands.
     if (compiled) {
+      compact_island(cc.prog);
       const bool gen = gen_adjoint(cc.prog);
       cc.prog.native_adj = gen && !std::getenv("STANLI_NO_NATIVE_ADJ");
       // The var replay cannot execute a CALL (kernels are double
@@ -565,100 +610,68 @@ int carve_islands(Graph& g,
       if (graph_cost < island_cost) compiled = false;
     }
     if (compiled) {
-      // Live-outs: written in the region and visible after it, in
-      // first-write order for a deterministic packing.
-      std::vector<int> live_outs;
-      std::unordered_set<int> seen;
-      for (size_t u = i; u < j; ++u) {
-        const int o = g.ops[u].out;
-        if (seen.count(o)) continue;
-        seen.insert(o);
-        auto lit = last_use.find(o);
-        const bool read_after = lit != last_use.end() && lit->second >= j;
-        if (read_after || root_set.count(o) || term_set.count(o))
-          live_outs.push_back(o);
-      }
-      // A slot that is BOTH a live-in and a live-out (an in-place chain
-      // whose template the region reads first and overwrites last) cannot
-      // keep its id on the output side: the island reads the arena buffer
-      // in the forward, and an extraction writing the same buffer would
-      // feed the NEXT gradient's forward its own previous output. The
-      // extraction gets a fresh slot and later references are renamed --
-      // unless the slot is read from outside the graph, where the id is
-      // the contract, and then the run stays as ops.
-      std::unordered_set<int> in_set(cc.live_in_slots.begin(),
-                                     cc.live_in_slots.end());
-      bool aliased_pinned = false;
-      for (int o : live_outs)
-        if (in_set.count(o) && pinned.count(o)) aliased_pinned = true;
-      if (!live_outs.empty() && !aliased_pinned) {
-        int64_t packed = 0;
-        for (int o : live_outs) {
-          for (int e = 0; e < (int)g.slots[o].len; ++e)
-            cc.prog.out_regs.push_back(cc.reg_of.at(o) + e);
-          packed += g.slots[o].len;
-        }
-        auto prog = std::make_shared<IslandProg>(std::move(cc.prog));
-        Op is;
-        is.opcode = OP_ISLAND;
-        is.n_in = (int)cc.live_in_slots.size();
-        for (int k = 0; k < is.n_in; ++k) is.in[k] = cc.live_in_slots[k];
-        is.out = g.add_slot(packed, false);
-        is.udata = prog.get();
-        g.udata_pool.push_back(std::move(prog));
-        result.push_back(is);
-        // Extractions write the ORIGINAL slot ids, so downstream readers,
-        // roots, and target terms are untouched -- except for the
-        // live-in/live-out slots above, which get a fresh slot and a
-        // rename of every later reference (read or write, as reroll's
-        // write fusion does, so the two stay consistent).
-        int64_t off = 0;
-        for (int o : live_outs) {
-          const int64_t len = g.slots[o].len;
-          int dst = o;
-          if (in_set.count(o)) {
-            dst = g.add_slot(len, false);
-            for (size_t u = j; u < g.ops.size(); ++u) {
-              for (int q = 0; q < g.ops[u].n_in; ++q)
-                if (g.ops[u].in[q] == o) g.ops[u].in[q] = dst;
-              if (g.ops[u].out == o) g.ops[u].out = dst;
-              if (g.ops[u].out2 == o) g.ops[u].out2 = dst;
-            }
+      int64_t packed = 0;
+      for (int o : live_outs) packed += g.slots[o].len;
+      auto prog = std::make_shared<IslandProg>(std::move(cc.prog));
+      Op is;
+      is.opcode = OP_ISLAND;
+      is.n_in = (int)cc.live_in_slots.size();
+      for (int k = 0; k < is.n_in; ++k) is.in[k] = cc.live_in_slots[k];
+      is.out = g.add_slot(packed, false);
+      is.udata = prog.get();
+      g.udata_pool.push_back(std::move(prog));
+      result.push_back(is);
+      // Extractions write the ORIGINAL slot ids, so downstream readers,
+      // roots, and target terms are untouched -- except for the
+      // live-in/live-out slots above, which get a fresh slot and a
+      // rename of every later reference (read or write, as reroll's
+      // write fusion does, so the two stay consistent).
+      int64_t off = 0;
+      for (int o : live_outs) {
+        const int64_t len = g.slots[o].len;
+        int dst = o;
+        if (in_set.count(o)) {
+          dst = g.add_slot(len, false);
+          for (size_t u = j; u < g.ops.size(); ++u) {
+            for (int q = 0; q < g.ops[u].n_in; ++q)
+              if (g.ops[u].in[q] == o) g.ops[u].in[q] = dst;
+            if (g.ops[u].out == o) g.ops[u].out = dst;
+            if (g.ops[u].out2 == o) g.ops[u].out2 = dst;
           }
-          Op ex;
-          ex.opcode = len == 1 ? OP_INDEX : OP_SLICE;
-          ex.n_in = 1;
-          ex.in[0] = is.out;
-          ex.out = dst;
-          g.idata_pool.push_back({(int)off});
-          ex.idata = g.idata_pool.back().data();
-          ex.n_idata = 1;
-          result.push_back(ex);
-          off += len;
         }
-        if (std::getenv("STANLI_DEBUG_ISLAND")) {
-          const IslandProg& p = *static_cast<const IslandProg*>(is.udata);
-          std::fprintf(stderr,
-                       "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu "
-                       "adj=%zu adj_regs=%d\n",
-                       j - i, p.code.size(), p.n_regs, p.ins.size(),
-                       p.out_regs.size(), p.adj.code.size(), p.adj.n_regs);
-          // Which instructions the region is made of, so a disagreement
-          // with the replay can be attributed to an opcode rather than
-          // guessed at.
-          std::vector<int> hist(64, 0);
-          for (const auto& I : p.code)
-            if ((int)I.code < 64) ++hist[(size_t)I.code];
-          std::fprintf(stderr, "island opcodes:");
-          for (int c = 0; c < 64; ++c)
-            if (hist[(size_t)c])
-              std::fprintf(stderr, " %d:%d", c, hist[(size_t)c]);
-          std::fprintf(stderr, "\n");
-        }
-        ++carved;
-        i = j;
-        continue;
+        Op ex;
+        ex.opcode = len == 1 ? OP_INDEX : OP_SLICE;
+        ex.n_in = 1;
+        ex.in[0] = is.out;
+        ex.out = dst;
+        g.idata_pool.push_back({(int)off});
+        ex.idata = g.idata_pool.back().data();
+        ex.n_idata = 1;
+        result.push_back(ex);
+        off += len;
       }
+      if (std::getenv("STANLI_DEBUG_ISLAND")) {
+        const IslandProg& p = *static_cast<const IslandProg*>(is.udata);
+        std::fprintf(stderr,
+                     "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu "
+                     "adj=%zu adj_regs=%d\n",
+                     j - i, p.code.size(), p.n_regs, p.ins.size(),
+                     p.out_regs.size(), p.adj.code.size(), p.adj.n_regs);
+        // Which instructions the region is made of, so a disagreement
+        // with the replay can be attributed to an opcode rather than
+        // guessed at.
+        std::vector<int> hist(64, 0);
+        for (const auto& I : p.code)
+          if ((int)I.code < 64) ++hist[(size_t)I.code];
+        std::fprintf(stderr, "island opcodes:");
+        for (int c = 0; c < 64; ++c)
+          if (hist[(size_t)c])
+            std::fprintf(stderr, " %d:%d", c, hist[(size_t)c]);
+        std::fprintf(stderr, "\n");
+      }
+      ++carved;
+      i = j;
+      continue;
     }
     // Compile failed or nothing escapes: leave the run as ops.
     while (i < j) result.push_back(g.ops[i++]);
