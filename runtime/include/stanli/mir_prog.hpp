@@ -7,10 +7,10 @@
 // at all: `if (theta > 0)` has no op-graph form, and until this existed
 // it was a compile error (lower.cpp).
 //
-// The shape of the problem is what keeps this small: every size, every
-// index and every integer is known at compile time -- loop bounds come
-// from data, array lengths from declarations -- so only the reals need
-// registers, and loops unroll as they compile.
+// The shape of the problem is what keeps this small: every size and loop
+// bound is known at compile time. Most indices and integers are too. The
+// one runtime-integer surface is a checked scalar read from a flat array;
+// generated-quantities Viterbi backtracking needs exactly that operation.
 //
 // Names the compiler does not know are the one thing that differs
 // between callers. The ODE side knows them all up front (t, y, theta,
@@ -45,6 +45,10 @@ struct Range {
   int64_t rows = 0;
   int64_t cols = 0;
   ViewKind kind = ViewKind::Flat;
+  // Complete logical extents for arrays. Scalar arrays are outer-major;
+  // arrays whose leaf is a vector append that vector width as the final
+  // extent, which has the same physical layout. Matrix leaves are refused.
+  std::vector<int64_t> dims;
 };
 
 // One UDF argument in source order. Compile-time integers live outside the
@@ -191,7 +195,7 @@ struct ProgramCompiler {
     if (a.kind == ViewKind::Flat) return a.len == 1 && b.len == 1;
     if (a.kind == ViewKind::Vector || a.kind == ViewKind::RowVector)
       return a.len == b.len;
-    if (a.kind == ViewKind::Array) return a.len == b.len;
+    if (a.kind == ViewKind::Array) return a.len == b.len && a.dims == b.dims;
     return a.rows == b.rows && a.cols == b.cols;
   }
 
@@ -216,11 +220,13 @@ struct ProgramCompiler {
 
   Range declared(Range r, const mir::SizedType& type) {
     if (type.base == "SArray") {
-      if (type.elem_base != "SReal" || type.dims.size() != 1)
+      if (type.elem_base != "SReal" && type.elem_base != "SInt")
         bail(
-            "only one-dimensional scalar-array declarations are supported by "
-            "the register program");
+            "only scalar-array declarations are supported by the register "
+            "program");
       r.kind = ViewKind::Array;
+      r.dims.clear();
+      for (const auto& d : type.dims) r.dims.push_back(cint(d));
       return r;
     }
     if (type.base == "SVector")
@@ -260,27 +266,77 @@ struct ProgramCompiler {
         bail("unknown variable " + e.name);
       }
       case mir::Expr::Indexed: {
-        // A single index into a matrix selects a row in Stan. Range carries
-        // only a flat width, so treating that index as one scalar silently
-        // changes the expression. Refuse until ProgValue carries shape; the
-        // MIR interpreter is the complete path for this operation.
-        if (e.args.size() == 2 && e.args[1].name == "IndexSingle" &&
-            e.args[0].type_ == "UMatrix")
-          bail("matrix row indexing is unsupported by the register program");
         const Range b = expr(e.args[0]);
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
-        if (e.args.size() != 2 || e.args[1].name != "IndexSingle")
-          bail("index form");
-        const bool scalar_result =
-            e.type_ == "UReal" || e.type_ == "UInt" || e.type_ == "UComplex";
-        if (!scalar_result)
-          bail("container element indexing requires a logical layout");
-        if (b.kind != ViewKind::Array && b.kind != ViewKind::Vector &&
-            b.kind != ViewKind::RowVector && b.kind != ViewKind::Flat)
+        for (size_t k = 1; k < e.args.size(); ++k)
+          if (e.args[k].name != "IndexSingle") bail("index form");
+
+        if (b.kind == ViewKind::Matrix) {
+          if (e.args.size() == 3) {
+            const long i = cint(e.args[1].args[0]);
+            const long j = cint(e.args[2].args[0]);
+            if (i < 1 || i > b.rows || j < 1 || j > b.cols)
+              bail("matrix index out of the declared range");
+            return {b.reg + (int)((j - 1) * b.rows + i - 1), 1};
+          }
+          // A direct matrix row is a strided Eigen view in generated C++.
+          // Materializing it here can change packet grouping in a following
+          // reduction, so this first runtime-control tranche accepts only
+          // explicit scalar matrix elements.
+          bail("matrix index form");
+        }
+
+        if (b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
+            b.kind == ViewKind::Flat) {
+          if (e.args.size() != 2) bail("one-dimensional index form");
+          long ix;
+          if (try_cint(e.args[1].args[0], &ix)) {
+            if (ix < 1 || ix > b.len) bail("index out of the declared range");
+            return {b.reg + (int)ix - 1, 1};
+          }
+          const Range iv = expr(e.args[1].args[0]);
+          if (!is_scalar(iv)) bail("runtime index is not scalar");
+          const int r = alloc(1);
+          p.code.push_back(
+              Program::Instr{Program::DYN_INDEX, r, b.reg, iv.reg, 0, b.len});
+          return {r, 1};
+        }
+
+        if (b.kind != ViewKind::Array)
           bail("indexing this logical view is unsupported");
-        const long ix = cint(e.args[1].args[0]);
-        if (ix < 1 || ix > b.len) bail("index out of the declared range");
-        return {b.reg + (int)ix - 1, 1};
+        const std::vector<int64_t> dims =
+            b.dims.empty() ? std::vector<int64_t>{b.len} : b.dims;
+        const size_t n_idx = e.args.size() - 1;
+        if (n_idx > dims.size()) bail("too many array indices");
+        int64_t off = 0;
+        for (size_t d = 0; d < n_idx; ++d) {
+          int64_t stride = 1;
+          for (size_t q = d + 1; q < dims.size(); ++q) stride *= dims[q];
+          long ix;
+          if (try_cint(e.args[d + 1].args[0], &ix)) {
+            if (ix < 1 || ix > dims[d])
+              bail("array index out of the declared range");
+            off += (ix - 1) * stride;
+            continue;
+          }
+          // The Viterbi surface: all prefix indices are static and the
+          // runtime index selects one scalar from the final extent.
+          if (d + 1 != n_idx || n_idx != dims.size() || stride != 1)
+            bail("runtime array index is not the final scalar index");
+          const Range iv = expr(e.args[d + 1].args[0]);
+          if (!is_scalar(iv)) bail("runtime array index is not scalar");
+          const int r = alloc(1);
+          p.code.push_back(Program::Instr{Program::DYN_INDEX, r, b.reg, iv.reg,
+                                          (int32_t)off, (int32_t)dims[d]});
+          return {r, 1};
+        }
+        int64_t len = 1;
+        for (size_t d = n_idx; d < dims.size(); ++d) len *= dims[d];
+        if (len == 1) return {b.reg + (int)off, 1};
+        Range out{b.reg + (int)off, (int)len};
+        out.kind = ViewKind::Array;
+        out.dims.assign(dims.begin() + (long)n_idx, dims.end());
+        return out;
       }
       case mir::Expr::TernaryIf: {
         long c;
@@ -391,6 +447,15 @@ struct ProgramCompiler {
         return out;
       }
       bail("internal function " + e.name);
+    }
+    if (e.args.empty() && e.name == "negative_infinity")
+      return {konst(-std::numeric_limits<double>::infinity()), 1};
+    if (e.args.size() == 1 && e.name == "max") {
+      const Range a = expr(e.args[0]);
+      const int r = alloc(1);
+      p.code.push_back(
+          Program::Instr{Program::MAX_RANGE, r, a.reg, 0, 0, a.len});
+      return {r, 1};
     }
     // Ahead of the arity-keyed blocks below: those end in a bail on an
     // unknown name, so while this table sat after them a two-argument
@@ -631,13 +696,11 @@ struct ProgramCompiler {
   void stmt(const mir::Stmt& s) {
     switch (s.kind) {
       case mir::Stmt::Decl: {
-        if (s.decl_type.base == "SInt" ||
-            (s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt")) {
+        if (s.decl_type.base == "SInt") {
           if (s.has_init) {
             ints[s.decl_id] = {cint(s.init)};
           } else {
-            ints[s.decl_id] =
-                std::vector<long>((size_t)sized_len(s.decl_type), 0);
+            ints[s.decl_id] = {std::numeric_limits<int>::min()};
           }
           return;
         }
@@ -656,8 +719,12 @@ struct ProgramCompiler {
             emit(Program::MOV, d.reg + k, v.reg + k);
         } else {
           Range view;
+          const double fill =
+              s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt"
+                  ? static_cast<double>(std::numeric_limits<int>::min())
+                  : std::numeric_limits<double>::quiet_NaN();
           declare(s.decl_id, (int)sized_len(s.decl_type),
-                  declared(view, s.decl_type));
+                  declared(view, s.decl_type), fill);
         }
         return;
       }
@@ -712,12 +779,38 @@ struct ProgramCompiler {
             emit(Program::MOV, dst.reg + k, v.reg + k);
           return;
         }
-        if (s.lhs_idx.size() != 1 || s.lhs_idx[0].name != "IndexSingle")
-          bail("assignment index form for " + s.lhs);
-        const long ix = cint(s.lhs_idx[0].args[0]);
-        if (ix < 1 || ix > dst.len) bail("assignment index range for " + s.lhs);
+        for (const auto& ix : s.lhs_idx)
+          if (ix.name != "IndexSingle")
+            bail("assignment index form for " + s.lhs);
         if (!is_scalar(v)) bail("element assignment from a container");
-        emit(Program::MOV, dst.reg + (int)ix - 1, v.reg);
+        int64_t flat = 0;
+        if (dst.kind == ViewKind::Array) {
+          const std::vector<int64_t> dims =
+              dst.dims.empty() ? std::vector<int64_t>{dst.len} : dst.dims;
+          if (s.lhs_idx.size() != dims.size())
+            bail("assignment needs every array index for " + s.lhs);
+          for (size_t d = 0; d < dims.size(); ++d) {
+            const long ix = cint(s.lhs_idx[d].args[0]);
+            if (ix < 1 || ix > dims[d])
+              bail("assignment index range for " + s.lhs);
+            flat = flat * dims[d] + ix - 1;
+          }
+        } else if (dst.kind == ViewKind::Matrix) {
+          if (s.lhs_idx.size() != 2)
+            bail("matrix assignment index form for " + s.lhs);
+          const long i = cint(s.lhs_idx[0].args[0]);
+          const long j = cint(s.lhs_idx[1].args[0]);
+          if (i < 1 || i > dst.rows || j < 1 || j > dst.cols)
+            bail("assignment index range for " + s.lhs);
+          flat = (j - 1) * dst.rows + i - 1;
+        } else {
+          if (s.lhs_idx.size() != 1) bail("assignment index form for " + s.lhs);
+          const long ix = cint(s.lhs_idx[0].args[0]);
+          if (ix < 1 || ix > dst.len)
+            bail("assignment index range for " + s.lhs);
+          flat = ix - 1;
+        }
+        emit(Program::MOV, dst.reg + (int)flat, v.reg);
         return;
       }
       case mir::Stmt::Return:
@@ -776,6 +869,7 @@ struct ProgramCompiler {
         return;
       }
       case mir::Stmt::NRFunApp:
+        if (s.fn_name == "FnValidateSize") return;
         bail("statement function " + s.fn_name +
              " requires the MIR interpreter");
       case mir::Stmt::Skip:

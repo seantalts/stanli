@@ -127,11 +127,11 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
 7. **Writing draws.** A second, forward-only graph lowers the MIR's
    `generate_quantities` section and produces every CSV column CmdStan
    would write, in CmdStan's order and under CmdStan's naming. Models
-   using unsupported/container-result RNGs (categorical's probability vector
-   is supported) or draw-dependent control and geometry
-   run through a per-draw interpreter instead
-   (`runtime/src/wa_interp.cpp`), so all 119 compiling corpus models
-   produce their full columns.
+   using unsupported/container-result RNGs or dynamic geometry still have a
+   per-draw interpreter fallback (`runtime/src/wa_interp.cpp`). Fixed-shape
+   draw-dependent branches, checked one-level runtime indexing, and Viterbi
+   backtracking now compile, so all 119 compiling corpus models have complete,
+   graph-backed write arrays.
 
 8. **Distribution.** Everything sits behind a C ABI
    (`runtime/include/stanli/capi.h`) in one shared library. Each binding

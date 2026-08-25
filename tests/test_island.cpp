@@ -523,6 +523,62 @@ static void test_six_live_ins_ok() {
     expect_close("livein6 v" + std::to_string(i), got[i], want[i]);
 }
 
+// Necessity-region lowering can need more logical live-ins than Op::in can
+// name.  It concatenates a leading group into one graph descriptor, while the
+// program retains the original register ranges and offsets.  Exercise both
+// backward implementations through that exact mapping: the CONCAT2 backward
+// must then distribute the packed adjoints to the original parameters.
+static Graph build_packed_live_ins(bool native) {
+  Graph g;
+  std::vector<int> params;
+  for (int k = 0; k < 7; ++k) params.push_back(g.add_slot(1, true));
+  const int packed = g.add_slot(2, false);
+  g.add_op(OP_CONCAT2, {params[0], params[1]}, packed);
+
+  auto p = std::make_shared<IslandProg>();
+  p->n_regs = 13;
+  p->ins.push_back(IslandProg::LiveIn{0, 1, 0, 0});
+  p->ins.push_back(IslandProg::LiveIn{1, 1, 0, 1});
+  for (int k = 2; k < 7; ++k)
+    p->ins.push_back(IslandProg::LiveIn{k, 1, k - 1, 0});
+  int acc = 0;
+  for (int k = 1; k < 7; ++k) {
+    const int dst = 6 + k;
+    p->code.push_back(Program::Instr{Program::ADD, dst, acc, k});
+    acc = dst;
+  }
+  p->out_regs = {acc};
+  expect("packed live-ins adjoint generated", gen_adjoint(*p));
+  p->native_adj = native;
+
+  Op island;
+  island.opcode = OP_ISLAND;
+  island.n_in = 6;
+  island.in[0] = packed;
+  for (int k = 1; k < 6; ++k) island.in[k] = params[k + 1];
+  island.out = g.add_slot(1, false);
+  island.udata = p.get();
+  g.udata_pool.push_back(p);
+  g.ops.push_back(island);
+  g.result_slot = island.out;
+  return g;
+}
+
+static void test_packed_live_ins() {
+  double want_lp = 0.0;
+  for (int k = 0; k < 7; ++k) want_lp += fill_at(k);
+  for (bool native : {false, true}) {
+    const std::vector<double> got = run_grad(build_packed_live_ins(native), {});
+    expect("packed live-ins result width", got.size() == 8);
+    if (got.size() != 8) continue;
+    expect_close(native ? "packed native value" : "packed replay value", got[0],
+                 want_lp);
+    for (int k = 0; k < 7; ++k)
+      expect_close(native ? "packed native gradient" : "packed replay gradient",
+                   got[(size_t)k + 1], 1.0);
+  }
+}
+
 // A slot PRODUCED BEFORE the region, then read and updated in place inside
 // it, and read again after: it is a live-in and a live-out at once. If the
 // island's extraction wrote that same slot, its adjoint buffer would hold
@@ -643,6 +699,7 @@ int main() {
   test_unsupported_op_splits();
   test_too_many_live_ins();
   test_six_live_ins_ok();
+  test_packed_live_ins();
   test_kernel_call_ops_carved();
 
   test_unsetenv("STANLI_ISLAND_ALWAYS");

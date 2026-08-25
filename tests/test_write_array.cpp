@@ -250,21 +250,33 @@ void test_wanames_interpreter_schema() {
   }
 }
 
-// Generated quantities the graph cannot express (per-draw control flow) run
-// through the interpreted fallback: same columns contract, per-draw
-// evaluation, seeded RNG stream.
+// WaInterp remains the independent oracle for caller-owned RNG and runtime
+// control now that the same section can also compile completely.
 void test_interpreted_gq() {
   using namespace stanli;
   DataMap data;
   data.set_int("N", 5);
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/gqrng.tmir.sexp"), data);
-  if (!cm.write_array || !cm.write_array->interp) {
+  const std::string text = slurp("tests/fixtures/gqrng.tmir.sexp");
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
     ++failures;
-    std::printf("FAIL gqrng: no interpreted write_array\n");
+    std::printf("FAIL gqrng: runtime branch did not compile completely\n");
     return;
   }
-  WaInterp& wi = *cm.write_array->interp;
+  auto program =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  std::map<std::string, DataMap::Entry> base;
+  base["N"] = data.at("N");
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
   sig.r = {1.7};
@@ -414,14 +426,19 @@ void test_caller_owned_rng() {
   using namespace stanli;
   DataMap data;
   data.set_int("N", 5);
-  CompiledModel cm =
-      compile_model(slurp("tests/fixtures/gqrng.tmir.sexp"), data);
-  if (!cm.write_array || !cm.write_array->interp) {
-    ++failures;
-    std::printf("FAIL caller-owned rng: no interpreted write_array\n");
-    return;
+  auto program = std::make_shared<mir::Program>(
+      mir::read_program(sexp::parse(slurp("tests/fixtures/gqrng.tmir.sexp"))));
+  std::map<std::string, DataMap::Entry> base;
+  base["N"] = data.at("N");
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
   }
-  WaInterp& wi = *cm.write_array->interp;
+  WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
   sig.r = {1.7};
@@ -1204,23 +1221,24 @@ void test_categorical_rng_empty_vector() {
   }
 }
 
-void test_categorical_rng_dynamic_index_fallback() {
+void test_categorical_rng_dynamic_index() {
   using namespace stanli;
   const std::string text =
       slurp("tests/fixtures/gq_categorical_dynamic.tmir.sexp");
   const DataMap data = categorical_data(3);
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || !cm.write_array->interp ||
-      cm.write_array->truncated.find("unknown int draw") == std::string::npos) {
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
     ++failures;
     std::printf(
-        "FAIL categorical dynamic index fallback: %s\n",
+        "FAIL categorical dynamic index lowering: %s\n",
         cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
     return;
   }
 
-  int categorical_ops = 0;
+  int categorical_ops = 0, dynamic_slices = 0;
   for (const Op& op : cm.write_array->graph.ops) {
+    dynamic_slices += op.opcode == OP_DYNAMIC_SLICE;
     if (op.opcode != OP_RNG || op.variant != kCategoricalRngVariant) continue;
     ++categorical_ops;
     if (op.n_in != 1 || cm.write_array->graph.slots[op.in[0]].len != 3 ||
@@ -1229,31 +1247,38 @@ void test_categorical_rng_dynamic_index_fallback() {
       std::printf("FAIL categorical dynamic prefix descriptor\n");
     }
   }
-  if (categorical_ops != 1) {
+  if (categorical_ops != 1 || dynamic_slices != 1) {
     ++failures;
-    std::printf("FAIL categorical dynamic prefix has %d categorical ops\n",
-                categorical_ops);
+    std::printf(
+        "FAIL categorical dynamic graph has %d categorical ops and %d "
+        "dynamic slices\n",
+        categorical_ops, dynamic_slices);
   }
 
   const std::vector<double> probabilities{0.25, 0.5, 0.25};
-  std::map<std::string, DataMap::Entry> params;
-  params["p"] = categorical_parameter(probabilities);
-  WaRng interp_rng(303), direct_rng(303);
-  const std::vector<double> got =
-      cm.write_array->interp->eval(params, interp_rng);
+  Executor graph(std::move(cm.write_array->graph));
+  cm.write_array->bind(graph);
+  std::copy(probabilities.begin(), probabilities.end(), graph.params_data());
+  WaRng graph_rng(303), direct_rng(303);
+  graph.run_forward_only(EvalState{&graph_rng});
+  std::vector<double> got;
+  for (const auto& column : cm.write_array->columns) {
+    const double* values = graph.value_ptr(column.slot);
+    for (int64_t i = 0; i < column.len; ++i)
+      got.push_back(values[column.storage_index(i)]);
+  }
   std::vector<double> want = probabilities;
   const int draw = stan::math::categorical_rng(categorical_theta(probabilities),
                                                direct_rng.gen());
   want.push_back(static_cast<double>(draw));
   want.push_back(probabilities[static_cast<size_t>(draw - 1)]);
-  const auto interp_next = interp_rng.gen()();
+  const auto graph_next = graph_rng.gen()();
   const auto direct_next = direct_rng.gen()();
-  expect_eq("categorical dynamic columns",
-            joined(cm.write_array->interp->columns()),
+  expect_eq("categorical dynamic columns", joined(cm.write_array->columns),
             "p.1,p.2,p.3,draw,picked");
-  if (got != want || interp_next != direct_next) {
+  if (got != want || graph_next != direct_next) {
     ++failures;
-    std::printf("FAIL categorical dynamic interpreter row/stream\n");
+    std::printf("FAIL categorical dynamic graph row/stream\n");
   }
 }
 
@@ -3325,8 +3350,18 @@ void test_runtime_int_sum_is_not_compile_time() {
       "    (meta <opaque>))\n   ";
   std::string index = base;
   index.insert(insertion, runtime_index);
-  expect_reduction_interp(index, "unknown int total",
-                          "runtime sum cannot provide an index", true);
+  {
+    const stanli::CompiledModel cm =
+        stanli::compile_model(index, reduction_data());
+    int dynamic_slices = 0;
+    if (cm.write_array)
+      for (const stanli::Op& op : cm.write_array->graph.ops)
+        dynamic_slices += op.opcode == stanli::OP_DYNAMIC_SLICE;
+    if (!cm.write_array || cm.write_array->interp || dynamic_slices != 1) {
+      ++failures;
+      std::printf("FAIL runtime sum did not provide a dynamic index\n");
+    }
+  }
 
   const std::string runtime_shape =
       "((pattern\n"
@@ -3373,7 +3408,8 @@ void test_runtime_int_sum_is_not_compile_time() {
       "    (meta <opaque>))\n   ";
   std::string condition = base;
   condition.insert(insertion, runtime_condition);
-  expect_reduction_interp(condition, "data-only condition is unavailable",
+  expect_reduction_interp(condition,
+                          "parameter-dependent region produces nothing",
                           "runtime sum cannot provide a condition", true);
 }
 
@@ -3462,6 +3498,150 @@ void test_runtime_int_sum_redeclaration_shadowing() {
   }
 }
 
+void test_runtime_control_write_array() {
+  using namespace stanli;
+
+  // The structural kernel selects fixed-width outer-array elements and
+  // scatters their adjoints back to the chosen block only.
+  {
+    const Kernel* k = find_kernel(OP_DYNAMIC_SLICE);
+    double base[6] = {10, 11, 20, 21, 30, 31};
+    double index = 2.0, out[2] = {0, 0};
+    double base_adj[6] = {0, 0, 0, 0, 0, 0};
+    double out_adj[2] = {3, 5};
+    const int idata[1] = {3};
+    KernelCtx ctx;
+    ctx.n_in = 2;
+    ctx.in[0] = Desc{base, 6};
+    ctx.in[1] = Desc{&index, 1};
+    ctx.out = Desc{out, 2};
+    ctx.idata = idata;
+    ctx.n_idata = 1;
+    k->forward(ctx);
+    if (out[0] != 20 || out[1] != 21) {
+      ++failures;
+      std::printf("FAIL dynamic slice selected the wrong block\n");
+    }
+    ctx.in_adj[0] = Desc{base_adj, 6};
+    ctx.out_adj_vec = Desc{out_adj, 2};
+    k->backward(ctx);
+    const double want_adj[6] = {0, 0, 3, 5, 0, 0};
+    if (!std::equal(std::begin(base_adj), std::end(base_adj), want_adj)) {
+      ++failures;
+      std::printf("FAIL dynamic slice scattered to the wrong block\n");
+    }
+    for (double bad :
+         {0.0, 1.5, 4.0, std::numeric_limits<double>::quiet_NaN()}) {
+      index = bad;
+      bool threw = false;
+      try {
+        k->forward(ctx);
+      } catch (const std::out_of_range&) {
+        threw = true;
+      }
+      if (!threw) {
+        ++failures;
+        std::printf("FAIL dynamic slice accepted invalid index %.17g\n", bad);
+      }
+    }
+    KernelCtx malformed = ctx;
+    malformed.in[0].len = 5;
+    bool malformed_threw = false;
+    try {
+      k->forward(malformed);
+    } catch (const std::logic_error&) {
+      malformed_threw = true;
+    }
+    if (!malformed_threw) {
+      ++failures;
+      std::printf("FAIL dynamic slice accepted malformed geometry\n");
+    }
+  }
+
+  const std::string text = slurp("tests/fixtures/gq_runtime_control.tmir.sexp");
+  CompiledModel cm = compile_model(text, DataMap{});
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL runtime-control write_array did not compile: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return;
+  }
+  int dynamic_slices = 0, control_regions = 0, concatenations = 0;
+  for (const Op& op : cm.write_array->graph.ops) {
+    dynamic_slices += op.opcode == OP_DYNAMIC_SLICE;
+    control_regions += op.opcode == OP_ISLAND;
+    concatenations += op.opcode == OP_CONCAT2;
+    if (op.opcode == OP_ISLAND && op.n_in != 6) {
+      ++failures;
+      std::printf("FAIL packed runtime-control island has %d inputs\n",
+                  op.n_in);
+    }
+  }
+  if (dynamic_slices != 2 || control_regions != 1 || concatenations != 2) {
+    ++failures;
+    std::printf(
+        "FAIL runtime-control op census: dynamic=%d regions=%d concat=%d\n",
+        dynamic_slices, control_regions, concatenations);
+  }
+
+  Executor graph(cm.write_array->graph);
+  cm.write_array->bind(graph);
+  Executor params(cm.graph);
+  cm.bind(params);
+  const std::vector<double> q = {
+      0.2,           -0.3,          0.1,  -0.2, 1.0,  2.0,  3.0,  4.0,
+      std::log(1.1), std::log(1.7), 0.25, -0.5, 0.75, -1.0, 1.25, -1.5};
+  if (graph.n_params() != (int64_t)q.size() ||
+      params.n_params() != (int64_t)q.size()) {
+    ++failures;
+    std::printf("FAIL runtime-control unconstrained width\n");
+    return;
+  }
+  std::copy(q.begin(), q.end(), graph.params_data());
+  std::copy(q.begin(), q.end(), params.params_data());
+  params.run_forward_only();
+
+  std::map<std::string, DataMap::Entry> base;
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  auto program =
+      std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+  WaInterp interpreted(program, std::move(base));
+  const auto env = cm.constrained_env(params);
+  const auto graph_row = [&](WaRng& rng) {
+    graph.run_forward_only(EvalState{&rng});
+    std::vector<double> row;
+    for (const auto& column : cm.write_array->columns) {
+      const double* values = graph.value_ptr(column.slot);
+      for (int64_t i = 0; i < column.len; ++i)
+        row.push_back(values[column.storage_index(i)]);
+    }
+    return row;
+  };
+
+  WaRng graph_rng(81), interp_rng(81);
+  const std::vector<double> graph_first = graph_row(graph_rng);
+  const std::vector<double> interp_first = interpreted.eval(env, interp_rng);
+  const std::vector<double> graph_second = graph_row(graph_rng);
+  const std::vector<double> interp_second = interpreted.eval(env, interp_rng);
+  const auto graph_next = graph_rng.gen()();
+  const auto interp_next = interp_rng.gen()();
+  if (!same_double_bytes(graph_first, interp_first) ||
+      !same_double_bytes(graph_second, interp_second) ||
+      graph_next != interp_next) {
+    ++failures;
+    std::printf("FAIL runtime-control row/stream parity\n");
+  }
+}
+
 int main() {
   test_naming_rules();
   test_wanames_pipeline();
@@ -3475,7 +3655,7 @@ int main() {
   test_categorical_rng_lowering_guards();
   test_compiled_categorical_rng();
   test_categorical_rng_empty_vector();
-  test_categorical_rng_dynamic_index_fallback();
+  test_categorical_rng_dynamic_index();
   test_multi_normal_rng_kernel_contract();
   test_multi_normal_rng_lowering_guards();
   test_compiled_multi_normal_rng();
@@ -3489,6 +3669,7 @@ int main() {
   test_gq_reduction_lowering_guards();
   test_runtime_int_sum_is_not_compile_time();
   test_runtime_int_sum_redeclaration_shadowing();
+  test_runtime_control_write_array();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   if (failures == 0) std::printf("test_write_array OK\n");

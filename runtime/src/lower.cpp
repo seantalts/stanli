@@ -1279,6 +1279,37 @@ struct Lowering {
         // All-Single indices with compile-time values -> element read.
         Val base = lower_expr(e.args[0]);
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return base;
+        if (in_write_array && e.args.size() == 2 &&
+            e.args[1].name == "IndexSingle" &&
+            runtime_int_value(e.args[1].args[0])) {
+          const Val index = lower_expr(e.args[1].args[0]);
+          if (!is_scalar(index)) fail("runtime index is not scalar", e.raw);
+          int64_t count = 0, width = 0;
+          if (is_array(base.si)) {
+            const ArrayShape& shape = array_shape(base.si);
+            const size_t outer =
+                shape.dims.size() - (size_t)leaf_rank(shape.leaf);
+            if (outer != 1 || shape.dims.empty() ||
+                shape.leaf == ViewKind::Matrix)
+              fail("runtime index needs one outer array dimension", e.raw);
+            count = shape.dims.front();
+            width = count == 0 ? 0 : g.slots[base.slot].len / count;
+          } else if (is_vector(base.si) || is_row_vector(base.si)) {
+            count = g.slots[base.slot].len;
+            width = 1;
+          } else {
+            fail("runtime index needs a vector or flat outer array", e.raw);
+          }
+          if (count <= 0 || width <= 0 ||
+              g.slots[base.slot].len != count * width)
+            fail("runtime index has an invalid base shape", e.raw);
+          SlotInfo si = indexed_view(base.si, 1, width, e.type_);
+          Val value =
+              emit_value(OP_DYNAMIC_SLICE, {base, index}, width, si,
+                         {checked_immediate(count, "runtime index extent")});
+          value.si.param_free = false;
+          return value;
+        }
         bool all_single = true;
         for (size_t k = 1; k < e.args.size(); ++k)
           if (e.args[k].name != "IndexSingle") all_single = false;
@@ -1561,6 +1592,39 @@ struct Lowering {
     return false;
   }
 
+  bool needs_runtime_control(const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::IfElse && s.cond.data_only &&
+        !try_eval_pure(s.cond))
+      return true;
+    if (s.kind == mir::Stmt::For) {
+      const long lo = eval_int(s.lower), hi = eval_int(s.upper);
+      if (lo > hi) return false;
+      const auto old = int_env.find(s.loopvar);
+      const bool had_old = old != int_env.end();
+      const long old_value = had_old ? old->second : 0;
+      bool found = false;
+      // Scan under the same compile-time loop bindings ordinary lowering
+      // will use. This keeps static conditions such as `if (t < N)` out of
+      // a region without overlooking an arm that exists only at a later t.
+      for (long v = lo; v <= hi && !found; ++v) {
+        int_env[s.loopvar] = v;
+        for (const auto& k : s.body)
+          if (needs_runtime_control(k)) {
+            found = true;
+            break;
+          }
+      }
+      if (had_old)
+        int_env[s.loopvar] = old_value;
+      else
+        int_env.erase(s.loopvar);
+      return found;
+    }
+    for (const auto& k : s.body)
+      if (needs_runtime_control(k)) return true;
+    return false;
+  }
+
   // Every name an Assignment targets anywhere in `s`, in first-seen order.
   void assigned_names(const mir::Stmt& s, std::vector<std::string>* out) {
     if (s.kind == mir::Stmt::Assignment &&
@@ -1578,18 +1642,14 @@ struct Lowering {
     // would replay them during reverse mode, so ProgramCompiler refuses them
     // until necessity islands have an execute-once effect path.
     for (const auto& [name, v] : int_env) c.ints[name] = {v};
+    std::set<std::string> outer_names;
+    for (const auto& [name, value] : scope) outer_names.insert(name);
+    for (const auto& [name, value] : decls) outer_names.insert(name);
     c.bind_extern = [&](const std::string& name, Range* r) {
       auto sc = scope.find(name);
       const int slot = sc != scope.end() ? sc->second.slot : env_slot(name);
       if (slot < 0) return false;
       const int64_t len = g.slots[slot].len;
-      // An op takes at most six inputs (graph.hpp), and each outside
-      // value the region reads is one of them.
-      if ((int)reg->in_slots.size() >= 6)
-        c.bail(
-            "a parameter-dependent region may read at most 6 values "
-            "from outside it; " +
-            name + " is one too many");
       r->reg = c.alloc((int)len);
       r->len = (int)len;
       const SlotInfo& si = scope.at(name).si;
@@ -1598,11 +1658,14 @@ struct Lowering {
       r->kind = si.kind;
       if (is_array(si)) {
         const ArrayShape& arr = array_shape(si);
-        if (arr.leaf != ViewKind::Flat || arr.dims.size() != 1)
-          c.bail("conditional arms of different logical views");
+        if (arr.leaf == ViewKind::Matrix)
+          c.bail("matrix-leaf arrays are unsupported by a runtime region");
+        r->dims = arr.dims;
       }
-      prog->ins.push_back(IslandProg::LiveIn{r->reg, (int)len});
-      reg->in_slots.push_back(slot);
+      if (len > 0) {
+        prog->ins.push_back(IslandProg::LiveIn{r->reg, (int)len});
+        reg->in_slots.push_back(slot);
+      }
       return true;
     };
     // `target +=` inside the region accumulates into a register of its
@@ -1635,13 +1698,19 @@ struct Lowering {
           view.rows = dl->second.si.rows;
           view.cols = dl->second.si.cols;
           view.kind = dl->second.si.kind;
-          c.declare(name, (int)dl->second.len, view,
-                    std::numeric_limits<double>::quiet_NaN());
+          if (is_array(dl->second.si))
+            view.dims = array_shape(dl->second.si).dims;
+          const double fill =
+              dl->second.int_array
+                  ? static_cast<double>(std::numeric_limits<int>::min())
+                  : std::numeric_limits<double>::quiet_NaN();
+          c.declare(name, (int)dl->second.len, view, fill);
         }
         c.stmt(*s);
         std::vector<std::string> assigned;
         assigned_names(*s, &assigned);
         for (const std::string& name : assigned) {
+          if (!outer_names.count(name)) continue;
           auto it = c.reals.find(name);
           if (it == c.reals.end()) continue;
           reg->out_names.push_back(name);
@@ -1682,8 +1751,39 @@ struct Lowering {
     for (int len : out_lens) packed += len;
     Op is;
     is.opcode = OP_ISLAND;
-    is.n_in = (int)reg.in_slots.size();
-    for (int k = 0; k < is.n_in; ++k) is.in[k] = reg.in_slots[k];
+    std::vector<int> inputs = reg.in_slots;
+    if (inputs.size() <= 6) {
+      for (size_t k = 0; k < prog->ins.size(); ++k) {
+        prog->ins[k].input = (int)k;
+        prog->ins[k].offset = 0;
+      }
+    } else {
+      // Op::in is deliberately compact. Pack just enough leading live-ins
+      // to leave five ordinary descriptors; the program's LiveIn records
+      // retain the individual register ranges and point into the packed one.
+      const size_t packed_count = inputs.size() - 5;
+      int packed = inputs[0];
+      int64_t packed_len = g.slots[packed].len;
+      for (size_t k = 1; k < packed_count; ++k) {
+        packed_len += g.slots[inputs[k]].len;
+        packed = emit_raw(OP_CONCAT2, {packed, inputs[k]}, packed_len, {}).slot;
+      }
+      int offset = 0;
+      for (size_t k = 0; k < packed_count; ++k) {
+        prog->ins[k].input = 0;
+        prog->ins[k].offset = offset;
+        offset += prog->ins[k].len;
+      }
+      std::vector<int> compact{packed};
+      for (size_t k = packed_count; k < inputs.size(); ++k) {
+        prog->ins[k].input = (int)compact.size();
+        prog->ins[k].offset = 0;
+        compact.push_back(inputs[k]);
+      }
+      inputs = std::move(compact);
+    }
+    is.n_in = (int)inputs.size();
+    for (int k = 0; k < is.n_in; ++k) is.in[k] = inputs[k];
     is.out = add_slot(packed, false);
     is.udata = prog.get();
     g.udata_pool.push_back(prog);
@@ -2384,6 +2484,22 @@ struct Lowering {
 
   bool runtime_int_binding(const mir::Expr& e) {
     return expr_effectful(e) || runtime_int_sum_candidate(e);
+  }
+
+  bool runtime_int_value(const mir::Expr& e) const {
+    if (e.type_ != "UInt" || e.unsized.leaf != mir::UnsizedLeaf::Int ||
+        e.unsized.depth != 0)
+      return false;
+    if (e.kind == mir::Expr::Var) {
+      auto it = scope.find(e.name);
+      return it != scope.end() && !it->second.si.param_free;
+    }
+    if (e.kind == mir::Expr::Indexed && !e.args.empty() &&
+        e.args[0].kind == mir::Expr::Var) {
+      auto it = scope.find(e.args[0].name);
+      return it != scope.end() && !it->second.si.param_free;
+    }
+    return false;
   }
 
   static bool prod_transpose_of(const mir::Expr& e, mir::Expr::Kind kind) {
@@ -4394,6 +4510,10 @@ struct Lowering {
       }
       case mir::Stmt::Block:
       case mir::Stmt::SList:
+        if (in_write_array && needs_runtime_control(s)) {
+          lower_param_ifelse(s);
+          return;
+        }
         for (const auto& k : s.body) lower_stmt(k);
         return;
       case mir::Stmt::Skip:
@@ -4635,6 +4755,10 @@ struct Lowering {
         if (known) {
           if (c && !s.body.empty()) lower_stmt(s.body[0]);
           if (!c && s.body.size() > 1) lower_stmt(s.body[1]);
+          return;
+        }
+        if (s.cond.data_only && in_write_array) {
+          lower_param_ifelse(s);
           return;
         }
         if (s.cond.data_only)

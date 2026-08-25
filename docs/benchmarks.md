@@ -239,8 +239,9 @@ the top of the page, not replacements for the current corpus rows:
   to the graph, taking the then-current 24-model census from 12 graph / 12
   interpreter to 16 / 8. The categorical tranche below subsequently advances
   that census to 17 / 7, the extrema tranche advances it to 18 / 6, and the
-  multivariate-normal tranche advances the current census to 19 / 5. All 119
-  compiling corpus models still produce complete rows. A targeted 2026-08-24
+  multivariate-normal tranche advanced it to 19 / 5, and the runtime-control
+  tranche below completes it at 24 / 0. All 119 compiling corpus models still
+  produce complete rows. A targeted 2026-08-24
   C-ABI A/B (point 0, two warmups, seven matched
   batch medians) measured:
 
@@ -277,8 +278,10 @@ the top of the page, not replacements for the current corpus rows:
   after 1.236 rows, or two whole rows. It was the only model to change in the
   exact 24-model write-array census, moving graph/interpreter coverage from
   16 / 8 to 17 / 7; all 24 census models and all 119 compiling corpus models
-  still produced complete rows. `iohmm_reg` remains interpreted at the later
-  dynamic-index barrier, `value must be known at compile time: hatz`.
+  still produced complete rows. At that stage, `iohmm_reg` remained
+  interpreted at the later dynamic-index barrier, `value must be known at
+  compile time: hatz`; the runtime-control tranche below now compiles that
+  index and its subsequent Viterbi decoder.
 
   The categorical draw `n` matched exactly in all 18/18 C-ABI comparisons:
   seeds 0, 1, 2, 7, 1234, and `UINT32_MAX`, each continued for three sequential
@@ -303,9 +306,10 @@ the top of the page, not replacements for the current corpus rows:
 
   `losscurve_sislob` was the only model to change in the exact 24-model
   census, moving graph/interpreter coverage from 17 / 7 to the then-current
-  18 / 6; the multivariate-normal tranche below advances the current census to
-  19 / 5. All 24 census models and all 119 compiling corpus models retained
-  complete rows. Its 1,218-op graph contains exactly one length-10 min opcode
+  18 / 6; the multivariate-normal tranche below advanced it to 19 / 5, and the
+  runtime-control tranche completes it at 24 / 0. All 24 census models and all
+  119 compiling corpus models retained complete rows. Its 1,218-op graph
+  contains exactly one length-10 min opcode
   and one length-10 max opcode, and writes 384 columns. Graph and `WaInterp` matched
   bitwise for all 1,536/1,536 compared values; the same-input pinned Stan Math
   check matched 8/8 cases.
@@ -327,9 +331,10 @@ the top of the page, not replacements for the current corpus rows:
   `multi_normal_cholesky_rng` remain on the whole-section interpreter.
 
   `multi_occupancy` was the only model to change in the exact 24-model census,
-  moving graph/interpreter coverage from 18 / 6 to the current 19 / 5. All 24
-  census models and all 119 compiling corpus models retained complete rows;
-  overall corpus coverage is now 114 graph and five interpreted models. Its
+  moving graph/interpreter coverage from 18 / 6 to the then-current 19 / 5.
+  The runtime-control tranche below subsequently completes the census at
+  24 / 0 and makes all 119 compiling corpus write arrays graph-backed. All
+  rows remain complete. Its
   graph and forced-interpreter rows were bitwise identical for all 5,616
   values from six seeds continued for three sequential rows.
 
@@ -339,6 +344,37 @@ the top of the page, not replacements for the current corpus rows:
   from 5864.792 to 5368.583 us, so there is no setup break-even penalty. These
   targeted results do not refresh `docs/corpus-bench.tsv` or the generated
   full-corpus table below.
+- **Compiled generated-quantities runtime control** completes the last five
+  interpreted write arrays: `hmm_drive_0`, `hmm_drive_1`, `hmm_example`,
+  `hmm_gaussian`, and `iohmm_reg`. Their shapes and loop bounds are static, but
+  their branches and Viterbi backtracking indices depend on the current draw.
+  Lowering now places each enclosing block in one structured register program,
+  with checked one-level dynamic indexing and packed live-ins when the block
+  needs more than six logical inputs. The historical 24-model census moves
+  from 19 graph / 5 interpreter to 24 / 0; all 119 compiling corpus models now
+  have complete, graph-backed write arrays.
+
+  A targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven batch
+  medians) measured:
+
+  | model | interpreted row | compiled row | improvement |
+  | --- | ---: | ---: | ---: |
+  | `hmm_drive_0` | 6.777 ms | 41.975 us | 161.45x |
+  | `hmm_drive_1` | 7.396 ms | 44.426 us | 166.48x |
+  | `hmm_example` | 1.388 ms | 9.718 us | 142.85x |
+  | `hmm_gaussian` | 37.366 ms | 649.125 us | 57.56x |
+  | `iohmm_reg` | 38.642 ms | 713.011 us | 54.20x |
+
+  Across 1,000 rows of each model, aggregate row time fell from 91.568918 s
+  to 1.458255 s (62.79x). Including one construction of each model, it fell
+  from 91.989657 s to 1.990729 s (46.21x); the aggregate setup increase pays
+  back after two whole rows per model. The four HMMs matched 51,696 checked
+  Viterbi outputs bitwise across four points, three seeds, and three sequential
+  rows. In `iohmm_reg`, all categorical and Viterbi states/scores matched; the
+  only differences were 2,945 continuous simulations inheriting the
+  pre-existing transformed-input boundary, bounded by 8.89e-16. Exact later
+  state draws confirm stream alignment. These targeted results do not refresh
+  `docs/corpus-bench.tsv` or the generated full-corpus table below.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven

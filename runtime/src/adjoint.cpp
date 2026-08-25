@@ -626,6 +626,8 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         adj[I.a] += t * part[0];
         break;
       }
+      case Program::DYN_INDEX:
+      case Program::MAX_RANGE:
       case Program::JZ:
       case Program::JMP:
         break;  // gen_adjoint refuses these; unreachable

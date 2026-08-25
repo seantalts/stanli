@@ -1,7 +1,6 @@
-// Generated quantities the graph cannot fully express: the per-draw sigma
-// branch is data-only in write_array's double instantiation but unavailable
-// while lowering. The interpreted write_array fallback runs the whole section,
-// including both graph-native RNG draws.
+// Generated quantities combining caller-owned RNG with a runtime branch.  The
+// branch is compiled as one structured program region, preserving the source
+// order of both draws and the condition.
 data {
   int<lower=1> N;
 }

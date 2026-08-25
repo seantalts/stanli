@@ -258,11 +258,11 @@ otherwise unused.
 
 The boundary is deliberately fail-closed. Apart from the audited categorical
 and covariance-form multivariate-normal extensions below, container-valued
-results or unsupported RNGs, and integer draws needed as a loop bound, index,
-shape, or branch condition, still select the whole-section interpreter. Scalar
-integer results live exactly in one double slot only while used by ordinary
-graph arithmetic; integer division and other dynamic-integer operations still
-refuse lowering.
+results or unsupported RNGs still select the whole-section interpreter. Scalar
+integer results live exactly in one double slot. The runtime-control tranche
+below admits that value only as a checked flat-array/vector index or a branch
+input inside a structured register program; loop bounds, shapes, integer
+division, and other dynamic-integer operations still refuse lowering.
 
 An exact census of the 24 corpus models that previously used `WaInterp` moved
 12 to the graph in this tranche: `GLMM1_model`, both `covid19imperial` models, both `dogs`
@@ -306,14 +306,17 @@ and every possible partial sum stays in 32-bit range. Under that proof, the
 ascending double additions are exact and equal Stan's integer accumulation.
 Uninitialized slots carry CmdStan's `INT_MIN` sentinel on both the graph and
 interpreter paths; gaps, strides, unknown RNG ranges, possible overflow, and
-using the result as dynamic control or geometry all fail closed.
+using the result as dynamic geometry all fail closed. A proved runtime sum may
+subsequently feed the checked index/control surfaces described below, but it is
+never treated as a compile-time integer.
 
 This completed `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`, moving the
 then-current 24-model write-array census from 12 graph / 12 interpreter to
 16 / 8. The categorical tranche below subsequently advances that census to
-17 / 7, the extrema tranche advances it to 18 / 6, and the covariance-form
-multivariate-normal tranche advances the current census to 19 / 5. All 119
-compiling corpus models still produce complete rows. Targeted
+17 / 7, the extrema tranche advances it to 18 / 6, the covariance-form
+multivariate-normal tranche advances it to 19 / 5, and runtime control below
+finishes the current census at 24 / 0. All 119 compiling corpus models still
+produce complete rows. Targeted
 2026-08-24 C-ABI A/B medians (point 0, two warmups, seven matched batches) were:
 
 | model | interpreted us/row | compiled us/row | speedup |
@@ -345,10 +348,11 @@ logical containers.
 
 The lowering gate is deliberately exact: write-array only, one `UVector`
 argument, and one `UInt` result. It marks the result initialized but does not
-infer the valid `[1, K]` interval, avoiding any expansion of runtime-integer
-reasoning. `Survey_model` therefore completes its graph, while `iohmm_reg`
-passes the categorical call and then still selects `WaInterp` at its dynamic
-index with `value must be known at compile time: hatz`.
+infer the valid `[1, K]` interval, avoiding any expansion of integer range
+proofs. `Survey_model` therefore completed its graph first; at that stage
+`iohmm_reg` passed the categorical call and still selected `WaInterp` at its
+dynamic index. The later checked-index surface below completes it without
+changing categorical lowering.
 
 Both execution modes call one helper that copies the already-materialized
 probabilities into the exact Eigen vector accepted by pinned Stan Math. Stan
@@ -392,8 +396,9 @@ place it in a reverse sweep.
 
 `losscurve_sislob` was the only model to change in the exact 24-model census,
 moving coverage from 17 graph / 7 interpreter to the then-current 18 / 6. The
-covariance-form multivariate-normal tranche below advances the current census
-to 19 / 5. All 24 census models and all 119 compiling corpus models retained
+covariance-form multivariate-normal tranche below advances the census to
+19 / 5, and runtime control finishes it at 24 / 0. All 24 census models and all
+119 compiling corpus models retained
 complete rows. Its 1,218-op graph contains exactly one length-10 min opcode and
 one length-10 max opcode, and writes 384 columns. Graph and `WaInterp` output
 was bitwise exact for all 1,536/1,536 compared values, and the same-input pinned
@@ -430,9 +435,9 @@ of constant folding, rerolling, and islands without another pass-specific
 exception.
 
 `multi_occupancy` was the only model to change in the exact 24-model census,
-moving coverage from 18 graph / 6 interpreter to the current 19 / 5. All 24
-census models and all 119 compiling corpus models retained complete rows;
-overall corpus coverage is 114 graph and five interpreted models. Graph and
+moving coverage from 18 graph / 6 interpreter to the then-current 19 / 5. The
+runtime-control tranche below subsequently completes those five, for 24 / 0
+and graph write arrays in all 119 compiling corpus models. Graph and
 forced-interpreter output was bitwise exact for all 5,616 values across seeds
 0, 1, 2, 7, 1234, and `UINT32_MAX`, each continued for three sequential rows.
 
@@ -441,6 +446,62 @@ medians), `multi_occupancy` moved from 298.9260 to 5.4898 us/row (54.4512x),
 saving 0.2934362 s per 1,000 rows. Construction also improved from 5864.792 to
 5368.583 us, so there is no setup break-even penalty. These targeted results
 do not refresh `docs/corpus-bench.tsv` or the generated full-corpus table.
+
+## Compiled generated-quantities runtime control (`mir_prog.hpp`, `lower.cpp`)
+
+The final five interpreted write arrays were four Viterbi decoders and
+`iohmm_reg`. Their shapes and loop bounds are compile-time values, but their
+branches and backtracking indices are known only for the current draw. Lowering
+now translates an enclosing generated-quantities block into one structured
+`IslandProg`: compile-time loops are still unrolled, while comparisons and
+jumps run inside the register program. Multidimensional scalar arrays retain
+their declared extents and CmdStan's `INT_MIN` default for integer cells. A
+runtime backpointer read uses the checked `Program::DYN_INDEX` instruction, and
+`max` over the final state row delegates to pinned Stan Math over an owning
+vector.
+
+`OP_DYNAMIC_SLICE` covers the graph-side companion operation: one 1-based
+runtime integer selects a fixed-width element from a vector or from one outer
+array dimension. Its backward scatters only to the selected block and rereads
+the protected index; malformed geometry and nonintegral/out-of-range indices
+throw. Shapes, loop bounds, matrix rows, nested outer dimensions, and other
+dynamic geometry remain outside this surface.
+
+An op has six input descriptors, while the largest Viterbi block reads more
+logical values. Lowering packs only the excess leading live-ins with
+`OP_CONCAT2`; each program live-in records its descriptor and offset. Both the
+generated adjoint and var replay scatter through the same map. A direct test
+pins values and all seven gradients in both modes, and the generated-quantities
+fixture forces eight logical live-ins through six descriptors.
+
+This moves `hmm_drive_0`, `hmm_drive_1`, `hmm_example`, `hmm_gaussian`, and
+`iohmm_reg` from the interpreter to the graph. The exact 24-model historical
+census is now 24 graph / 0 interpreter, and the full write-array census is 119
+of 119 graph-backed, with every row complete. Targeted 2026-08-25 C-ABI A/B
+medians (point 0, two warmups, seven batches) were:
+
+| model | interpreted us/row | compiled us/row | speedup |
+| --- | ---: | ---: | ---: |
+| `hmm_drive_0` | 6776.8490 | 41.9750 | 161.45x |
+| `hmm_drive_1` | 7396.1172 | 44.4255 | 166.48x |
+| `hmm_example` | 1388.2539 | 9.7183 | 142.85x |
+| `hmm_gaussian` | 37365.6562 | 649.1253 | 57.56x |
+| `iohmm_reg` | 38642.0417 | 713.0111 | 54.20x |
+
+Across 1,000 rows of each model, aggregate row time falls from 91.568918 s to
+1.458255 s (62.79x). Including one construction of each, it falls from
+91.989657 s to 1.990729 s (46.21x); the aggregate setup increase amortizes
+after 1.240 equal-mix cycles, or two whole rows per model.
+
+The two drive models and `hmm_example` matched the forced interpreter bitwise
+for every column at four test points. Across four points, three seeds, and
+three sequential rows, all 51,696 checked Viterbi outputs in the four HMMs
+matched bitwise. For `iohmm_reg`, all categorical states and Viterbi
+states/scores matched; 2,945 continuous simulated observations inherited the
+pre-existing graph/interpreter transformed-input difference, bounded by
+8.89e-16. Exact later state draws prove the shared RNG stream remained aligned.
+These targeted medians do not refresh `docs/corpus-bench.tsv` or the generated
+full-corpus table.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 

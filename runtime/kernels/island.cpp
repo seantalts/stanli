@@ -44,9 +44,12 @@ int64_t island_scratch(const Op& op, const Slot* slots) {
 void island_fwd(KernelCtx& ctx) {
   const auto& p = *static_cast<const IslandProg*>(ctx.udata);
   if (p.native_adj) {
-    for (int k = 0; k < ctx.n_in; ++k)
-      for (int64_t i = 0; i < ctx.in[k].len; ++i)
-        ctx.scratch[p.ins[(size_t)k].reg + i] = ctx.in[k].data[i];
+    for (size_t k = 0; k < p.ins.size(); ++k) {
+      const auto& li = p.ins[k];
+      const int input = li.input >= 0 ? li.input : (int)k;
+      for (int i = 0; i < li.len; ++i)
+        ctx.scratch[li.reg + i] = ctx.in[input].data[li.offset + i];
+    }
     run_program(p, ctx.scratch);
     for (size_t m = 0; m < p.out_regs.size(); ++m)
       ctx.out.data[m] = ctx.scratch[p.out_regs[m]];
@@ -76,11 +79,13 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += ctx.out_adj_vec.data[m];
   run_adjoint(p, p.adj, ctx.scratch, adj.data());
-  for (int k = 0; k < ctx.n_in; ++k) {
-    if (!ctx.in_adj[k].data) continue;
-    const auto& li = p.ins[(size_t)k];
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const auto& li = p.ins[k];
+    const int input = li.input >= 0 ? li.input : (int)k;
+    if (!ctx.in_adj[input].data) continue;
     for (int i = 0; i < li.len; ++i)
-      ctx.in_adj[k].data[i] += adj[(size_t)map[(size_t)(li.reg + i)]];
+      ctx.in_adj[input].data[li.offset + i] +=
+          adj[(size_t)map[(size_t)(li.reg + i)]];
   }
 }
 

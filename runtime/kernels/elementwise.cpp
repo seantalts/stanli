@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 namespace stanli {
 namespace {
@@ -248,6 +249,34 @@ void slice_bwd(KernelCtx& ctx) {
     ctx.in_adj[0].data[start + i] += ctx.out_adj_vec.data[i];
 }
 
+// OP_DYNAMIC_SLICE: the 1-based integer in[1] selects one fixed-width block
+// from in[0]. Generated quantities use this for an RNG-produced state index;
+// idata[0] is the number of blocks and out.len is their common width.
+int64_t dynamic_slice_start(const KernelCtx& ctx) {
+  if (ctx.n_in != 2 || ctx.n_idata != 1 || ctx.in[1].len != 1 ||
+      ctx.idata == nullptr || ctx.idata[0] <= 0 || ctx.out.len <= 0 ||
+      ctx.in[0].len % ctx.idata[0] != 0 ||
+      ctx.in[0].len / ctx.idata[0] != ctx.out.len)
+    throw std::logic_error("malformed dynamic slice descriptor");
+  const double raw = ctx.in[1].data[0];
+  const int64_t count = ctx.idata[0];
+  if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+      raw > static_cast<double>(count))
+    throw std::out_of_range("dynamic slice index out of range");
+  return (static_cast<int64_t>(raw) - 1) * ctx.out.len;
+}
+void dynamic_slice_fwd(KernelCtx& ctx) {
+  const int64_t start = dynamic_slice_start(ctx);
+  for (int64_t i = 0; i < ctx.out.len; ++i)
+    ctx.out.data[i] = ctx.in[0].data[start + i];
+}
+void dynamic_slice_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  const int64_t start = dynamic_slice_start(ctx);
+  for (int64_t i = 0; i < ctx.out.len; ++i)
+    ctx.in_adj[0].data[start + i] += ctx.out_adj_vec.data[i];
+}
+
 // OP_SLICE_STRIDED: out[i] = in[start + i*stride], idata = {start, stride}.
 // Row extraction from column-major data matrices.
 void slice_strided_fwd(KernelCtx& ctx) {
@@ -413,6 +442,8 @@ void register_elementwise_kernels() {
   register_kernel(OP_SET_INDEX_INPLACE, Kernel{set_index_inplace_fwd,
                                                set_index_inplace_bwd, nullptr});
   register_kernel(OP_SLICE, Kernel{slice_fwd, slice_bwd, nullptr});
+  register_kernel(OP_DYNAMIC_SLICE,
+                  Kernel{dynamic_slice_fwd, dynamic_slice_bwd, nullptr});
   register_kernel(OP_SET_SLICE, Kernel{set_slice_fwd, set_slice_bwd, nullptr});
   register_kernel(OP_SET_SLICE_INPLACE, Kernel{set_slice_inplace_fwd,
                                                set_slice_inplace_bwd, nullptr});

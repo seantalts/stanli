@@ -24,6 +24,7 @@
 
 #include <stan/math.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <type_traits>
@@ -80,6 +81,8 @@ enum ProgramOpFlag : uint16_t {
   X(LE, 0)                                                                \
   X(EQ, 0)                                                                \
   X(NE, 0)                                                                \
+  X(DYN_INDEX, kProgramNoAdjoint)                                         \
+  X(MAX_RANGE, kProgramRangeA | kProgramNoAdjoint)                        \
   X(JZ, kProgramNoAdjoint | kProgramNoOutput)                             \
   X(JMP, kProgramNoAdjoint | kProgramNoOutput)                            \
   X(LOG_RANGE, kProgramRangeA | kProgramSaveA | kProgramRangeOutput)      \
@@ -308,6 +311,21 @@ void run_program(const Program& p, T* reg) {
       case Program::NE:
         d() = T(stan::math::value_of(ra()) != stan::math::value_of(rb()));
         break;
+      case Program::DYN_INDEX: {
+        const double raw = stan::math::value_of(rb());
+        if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+            raw > static_cast<double>(I.len))
+          throw std::out_of_range("register-program index out of range");
+        d() = reg[(size_t)(I.a + I.c + static_cast<int32_t>(raw) - 1)];
+        break;
+      }
+      case Program::MAX_RANGE: {
+        std::vector<T> owning;
+        if (I.len > 0)
+          owning.assign(&reg[(size_t)I.a], &reg[(size_t)(I.a + I.len)]);
+        d() = stan::math::max(owning);
+        break;
+      }
       case Program::JZ:
         if (stan::math::value_of(ra()) == 0.0) pc = I.dst - 1;
         break;

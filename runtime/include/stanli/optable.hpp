@@ -150,7 +150,8 @@ namespace stanli {
   X(OP_PRINT)                       \
   X(OP_DIRICHLET_LPDF)              \
   X(OP_PROD_VEC)                    \
-  X(OP_EXTREMA_VEC)
+  X(OP_EXTREMA_VEC)                 \
+  X(OP_DYNAMIC_SLICE)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

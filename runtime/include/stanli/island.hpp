@@ -45,6 +45,11 @@ struct IslandProg : Program {
   struct LiveIn {
     int reg = 0;
     int len = 0;
+    // Normally live-in k reads ctx.in[k] at offset zero. Necessity regions
+    // with more graph values than Op::in can hold pack a leading group with
+    // OP_CONCAT2 and point several register ranges into that one descriptor.
+    int input = -1;
+    int offset = 0;
   };
   std::vector<LiveIn> ins;
   // The generated backward (adjoint.hpp), empty for a program the generator
@@ -68,9 +73,11 @@ template <typename T>
 void run_island(const IslandProg& p, const T* const* in, T* out) {
   static thread_local std::vector<T> reg;
   if ((int64_t)reg.size() < p.n_regs) reg.resize((size_t)p.n_regs);
-  for (size_t k = 0; k < p.ins.size(); ++k)
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const int input = p.ins[k].input >= 0 ? p.ins[k].input : (int)k;
     for (int i = 0; i < p.ins[k].len; ++i)
-      reg[(size_t)(p.ins[k].reg + i)] = in[k][i];
+      reg[(size_t)(p.ins[k].reg + i)] = in[input][p.ins[k].offset + i];
+  }
 
   run_program(p, reg);
 
