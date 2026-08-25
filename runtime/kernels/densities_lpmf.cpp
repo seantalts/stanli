@@ -138,6 +138,51 @@ void bernoulli_logit_vector_fwd(KernelCtx& ctx) {
   ctx.scratch[theta.len] = 1.0;
 }
 
+// The same expression with the reduction left off: out[i] is element i's lp.
+// The per-element arm of bernoulli_native_fwd calls Stan Math once per
+// element, which costs about four times as much per element as this does,
+// and a partitioned width-W lane presents thousands of them at once.
+void bernoulli_logit_elt_vector_fwd(KernelCtx& ctx) {
+  static constexpr const char* function = "bernoulli_logit_lpmf";
+  static constexpr double cutoff = 20.0;
+  const Desc& theta = ctx.in[0];
+  const Eigen::Index n = static_cast<Eigen::Index>(ctx.out.len);
+  const Eigen::Map<const Eigen::VectorXi> y(ctx.idata, n);
+  std::fill_n(ctx.scratch, static_cast<size_t>(2 * n), 0.0);
+  stan::math::check_bounded(function, "n", y, 0, 1);
+  Eigen::ArrayXd theta_val(n);
+  if (theta.len == 1)
+    theta_val.setConstant(theta.data[0]);
+  else
+    theta_val = Eigen::Map<const Eigen::ArrayXd>(theta.data, n);
+  stan::math::check_not_nan(function, "Logit transformed probability parameter",
+                            theta_val);
+  Eigen::Map<Eigen::ArrayXd> out(ctx.out.data, n);
+  if (bernoulli_drop_propto(ctx)) {
+    out.setZero();
+    return;
+  }
+
+  const auto& n_col = stan::math::as_column_vector_or_scalar(y);
+  const auto& n_double = stan::math::value_of_rec(n_col);
+  const Eigen::ArrayXd signs = 2 * stan::math::as_array_or_scalar(n_double) - 1;
+  const Eigen::ArrayXd ntheta = signs * theta_val;
+  const Eigen::ArrayXd exp_m_ntheta = stan::math::exp(-ntheta);
+  out = (ntheta > cutoff)
+            .select(-exp_m_ntheta,
+                    (ntheta < -cutoff)
+                        .select(ntheta, -stan::math::log1p(exp_m_ntheta)));
+  if (!bernoulli_arg_active(ctx)) return;
+  Eigen::Map<Eigen::ArrayXd>(ctx.scratch, n) =
+      (ntheta > cutoff)
+          .select(-exp_m_ntheta,
+                  (ntheta >= -cutoff)
+                      .select(stan::math::promote_scalar<double>(
+                                  signs * exp_m_ntheta / (exp_m_ntheta + 1)),
+                              stan::math::promote_scalar<double>(signs)));
+  Eigen::Map<Eigen::ArrayXd>(ctx.scratch + n, n).setConstant(1.0);
+}
+
 template <bool Logit>
 void bernoulli_native_fwd(KernelCtx& ctx) {
   const bool active = bernoulli_arg_active(ctx);
@@ -214,6 +259,10 @@ void bernoulli_logit_fwd(KernelCtx& ctx) {
   }
   if ((ctx.variant & 0x40u) == 0 && ctx.in[0].len > 1) {
     bernoulli_logit_vector_fwd(ctx);
+    return;
+  }
+  if ((ctx.variant & 0x40u) != 0 && ctx.out.len > 1) {
+    bernoulli_logit_elt_vector_fwd(ctx);
     return;
   }
   bernoulli_native_fwd<true>(ctx);

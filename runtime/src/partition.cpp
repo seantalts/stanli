@@ -16,13 +16,14 @@
 // a data condition share a bucket), and a bucket is rewritten in place of its
 // first lane.
 //
-// What a bucket's ops read is proven, not assumed: every slot the fused ops
-// read from outside must be finished before the first lane starts. That one
-// rule carries three of the soundness obligations at once -- no cross-lane
+// What a bucket's ops read is proven, not assumed: no slot the fused ops read
+// from outside may be written while the run is in flight. That one rule
+// carries three of the soundness obligations at once -- no cross-lane
 // recurrence, no mid-bucket writer, and no destructive in-place store between
-// the lanes -- because all three appear as a writer at or after the first
-// lane's position. Ops only ever move EARLIER, so an in-place store proven
-// safe against a later reader stays safe.
+// the lanes -- because all three appear as a writer between the first lane's
+// position and the last lane's end. Ops only ever move EARLIER, so an
+// in-place store proven safe against a later reader stays safe, and a bucket
+// that trips the rule splits at the writer rather than declining.
 #include <stanli/optable.hpp>
 #include <stanli/partition.hpp>
 
@@ -41,6 +42,14 @@ constexpr int64_t kMinLanes = 4;
 // churns the graph for nothing.
 constexpr int64_t kOpCost = 5;
 constexpr int64_t kPartitionMargin = 8 * kOpCost;
+// A density element costs about six op dispatches to evaluate. It is the
+// term that decides whether re-evaluating a lane the CSE pass would have
+// collapsed, or trading a vector density call for W elementwise ones, pays.
+constexpr int64_t kDensityElem = 6;
+// Splitting is bounded work, not a retry loop: each one costs a re-pass over
+// a bucket, and a graph that presents thousands of interleaved writers must
+// not turn that into a quadratic term.
+constexpr int64_t kMaxSplits = 32;
 
 using Fills = std::vector<std::pair<int, std::vector<double>>>;
 
@@ -63,6 +72,42 @@ bool idata_is_shape(uint16_t opcode) {
          opcode == OP_SET_INDEX_INPLACE || opcode == OP_SLICE ||
          opcode == OP_SLICE_STRIDED ||
          has_op_trait(opcode, op_trait::kRerollIdataDensity);
+}
+
+// densities_lpmf.cpp's with_int_group: these carry their outcomes as two
+// [len, vals...] groups, len == -1 marking a language-level scalar.
+// Everything else with kRerollIdataDensity carries one flat outcome array.
+bool has_int_groups(uint16_t opcode) {
+  return opcode == OP_BINOMIAL_LPMF || opcode == OP_BINOMIAL_LOGIT_LPMF ||
+         opcode == OP_BETA_BINOMIAL_LPMF;
+}
+
+int64_t group_len(const int* p) { return p[0] == -1 ? 2 : 1 + p[0]; }
+int group_elem(const int* p, int64_t e) { return p[0] == -1 ? p[1] : p[1 + e]; }
+
+// The bernoulli kernels evaluate one element at a time in their summed form
+// too (densities_lpmf.cpp), so widening a lane costs them nothing. Every
+// other density trades one vectorized call for W elementwise ones.
+bool elt_costs_per_element(uint16_t opcode) {
+  return opcode != OP_BERNOULLI_LPMF && opcode != OP_BERNOULLI_LOGIT_LPMF;
+}
+
+// Outcome elements per lane, or 0 when the immediates are not a layout this
+// pass knows how to concatenate. Groups may be scalar or exactly W wide.
+int64_t idata_width(const Op& op) {
+  if (!has_op_trait(op.opcode, op_trait::kRerollIdataDensity)) return 1;
+  if (!has_int_groups(op.opcode)) return op.n_idata;
+  int64_t w = 1, m = 0;
+  while (m < op.n_idata) {
+    const int64_t len = op.idata[m];
+    if (len != -1) {
+      if (len < 1 || m + 1 + len > op.n_idata) return 0;
+      if (w != 1 && w != len) return 0;
+      w = len;
+    }
+    m += group_len(op.idata + m);
+  }
+  return m == op.n_idata ? w : 0;
 }
 
 struct Lane {
@@ -88,13 +133,15 @@ enum class Emit {
   kEltDensity,   // density consumed in-lane: variant bit 6, out[l] is lane l
   kTermDensity,  // every lane's out is a term: one summed density
   kTermWiden,    // every lane's out is a term: widen, then reduce
+  kStore,        // the lane ends in an element store: one slice store
 };
 
 struct Pos {
   Emit emit = Emit::kShared;
   std::vector<PosIn> ins;
-  std::vector<int> idx;  // kSlice: {start}; kGather: L * width indices
+  std::vector<int> idx;  // kSlice/kStore: {start[, stride]}; kGather: indices
   int64_t width = 1;     // output elements per lane; ignored when kShared
+  int64_t rows = 1;      // kEltDensity: outcome elements reduced back per lane
   bool shared = false;   // one value stands for every lane
   int out = -1;          // filled during emission
 };
@@ -170,6 +217,16 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
   const auto any_at_or_after = [&](const std::vector<size_t>& v, size_t x) {
     return first_at_or_after(v, x) != v.end();
   };
+  // The first entry in [lo, hi) that is not one of `mine`, else n_ops.
+  const auto first_in_range_but = [&](const std::vector<size_t>& v, size_t lo,
+                                      size_t hi,
+                                      const std::unordered_set<size_t>& mine) {
+    for (auto it = first_at_or_after(v, lo); it != v.end() && *it < hi; ++it) {
+      ++st.list_steps;
+      if (mine.count(*it) == 0) return *it;
+    }
+    return n_ops;
+  };
 
   // ---- segmentation ---------------------------------------------------
   std::vector<Lane> lanes;
@@ -237,8 +294,18 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         key.w.push_back(it == pos_of.end() ? -1 : it->second);
       }
       key.w.push_back(op.n_idata);
-      if (!idata_is_shape(op.opcode))
+      if (!idata_is_shape(op.opcode)) {
         for (int64_t m = 0; m < op.n_idata; ++m) key.w.push_back(op.idata[m]);
+      } else if (has_int_groups(op.opcode)) {
+        // The group widths, not their values: a scalar group and a vector
+        // group concatenate differently and must not share a bucket.
+        for (int64_t m = 0; m < op.n_idata;) {
+          key.w.push_back(op.idata[m]);
+          const int64_t step = group_len(op.idata + m);
+          if (step < 2) break;
+          m += step;
+        }
+      }
       pos_of[op.out] = (int)(u - lane.begin);
     }
     if (!ok) continue;
@@ -256,7 +323,14 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
   std::vector<int> emit_at(n_ops, -1);
   std::vector<std::vector<Op>> emitted;
 
-  for (const std::vector<int>& ids : buckets) {
+  // A worklist rather than a loop: a bucket whose base is written between two
+  // of its lanes splits at that op and both halves are reconsidered, so an
+  // interleaved model still gets the lanes on either side. Splits are capped
+  // for the reason the per-period arrays in reroll.cpp are.
+  std::vector<std::vector<int>> work(buckets.begin(), buckets.end());
+  int64_t splits = 0;
+  for (size_t bi = 0; bi < work.size(); ++bi) {
+    const std::vector<int> ids = work[bi];
     const int64_t L = (int64_t)ids.size();
     if (L < kMinLanes) continue;
     const Lane& lane0 = lanes[(size_t)ids[0]];
@@ -265,14 +339,42 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     const auto op_at = [&](int p, int64_t l) -> const Op& {
       return g.ops[lanes[(size_t)ids[(size_t)l]].begin + (size_t)p];
     };
-    // Every slot the fused ops read from outside the bucket must be finished
-    // before the first lane: a later writer is a cross-lane recurrence, a
-    // mid-bucket store, or a destructive update, and the fused read happens
-    // at the first lane's position.
-    const auto settled = [&](int s) {
-      return s >= 0 && (size_t)s < n_slots &&
-             !any_at_or_after(writers[(size_t)s], first_begin);
+    // Split at the op that broke the run and requeue the halves. A lane
+    // straddling it belongs to neither.
+    size_t split_at = n_ops;
+    const auto split_here = [&]() {
+      if (split_at >= n_ops || splits >= kMaxSplits) return;
+      std::vector<int> lo, hi;
+      for (int id : ids) {
+        if (lanes[(size_t)id].end <= split_at)
+          lo.push_back(id);
+        else if (lanes[(size_t)id].begin > split_at)
+          hi.push_back(id);
+      }
+      if (lo.size() == ids.size() || hi.size() == ids.size()) return;
+      ++splits;
+      if ((int64_t)lo.size() >= kMinLanes) work.push_back(std::move(lo));
+      if ((int64_t)hi.size() >= kMinLanes) work.push_back(std::move(hi));
     };
+    // Every slot the fused ops read from outside the bucket must hold still
+    // for the length of the run: a writer between the lanes is a cross-lane
+    // recurrence, a mid-bucket store, or a destructive update, and the fused
+    // read happens at the first lane's position.
+    const size_t last_end = lanes[(size_t)ids[(size_t)(L - 1)]].end;
+    const auto settled = [&](int s) {
+      if (s < 0 || (size_t)s >= n_slots) return false;
+      const auto it = first_at_or_after(writers[(size_t)s], first_begin);
+      if (it == writers[(size_t)s].end() || *it >= last_end) return true;
+      split_at = std::min(split_at, *it);
+      return false;
+    };
+    // A store-delimited bucket owns its base: the base is the one slot the
+    // lanes write, so its proof runs against the whole run instead.
+    const bool store_delim = is_element_store(op_at(k - 1, 0));
+    std::unordered_set<size_t> delim_at;
+    if (store_delim)
+      for (int64_t l = 0; l < L; ++l)
+        delim_at.insert(lanes[(size_t)ids[(size_t)l]].end - 1);
 
     pos_of.clear();
     for (int p = 0; p < k; ++p) pos_of[op_at(p, 0).out] = p;
@@ -284,9 +386,9 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       Pos& ap = pos[(size_t)p];
       ap.ins.resize((size_t)t.n_in);
       const bool is_term = term_set.count(t.out) != 0;
-      bool all_shared = true;   // this op computes one value for every lane
-      int64_t width = 0;        // per-lane elements of the varying inputs
-      bool wide_shared = false; // a shared input the kernels cannot broadcast
+      bool all_shared = true;    // this op computes one value for every lane
+      int64_t width = 0;         // per-lane elements of the varying inputs
+      bool wide_shared = false;  // a shared input the kernels cannot broadcast
 
       for (int j = 0; j < t.n_in && ok; ++j) {
         PosIn& in = ap.ins[(size_t)j];
@@ -309,6 +411,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           invariant = op_at(p, l).in[j] == t.in[j];
         if (invariant) {
           in.kind = InKind::kInvariant;
+          if (store_delim && p == k - 1 && j == 0) continue;
           if (!settled(t.in[j])) ok = false;
           if (t.in[j] >= 0 && g.slots[(size_t)t.in[j]].len != 1)
             wide_shared = true;
@@ -346,24 +449,29 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       // Indexed reads of a base the whole bucket shares. These are the only
       // positions whose immediates may differ across lanes without the op
       // itself being lane-varying work.
+      const bool strided_read = t.opcode == OP_SLICE_STRIDED && t.n_idata == 2;
       const bool indexed_read =
-          (t.opcode == OP_INDEX || t.opcode == OP_SLICE) && t.n_in == 1 &&
-          t.n_idata == 1 && !is_term &&
-          ap.ins[0].kind == InKind::kInvariant && !idata_shared;
-      if (indexed_read) {
+          ((t.opcode == OP_INDEX || t.opcode == OP_SLICE) && t.n_idata == 1) ||
+          strided_read;
+      if (indexed_read && t.n_in == 1 && !is_term &&
+          ap.ins[0].kind == InKind::kInvariant && !idata_shared) {
         const int64_t blen = g.slots[(size_t)t.in[0]].len;
         const int64_t w = g.slots[(size_t)t.out].len;
+        const int64_t step = strided_read ? t.idata[1] : 1;
         ap.width = w;
         ap.idx.reserve((size_t)(L * w));
-        bool run = true;
+        bool run = step == 1;
         for (int64_t l = 0; l < L; ++l) {
-          const int64_t start = op_at(p, l).idata[0];
-          if (start < 0 || start + w > blen) {
+          const Op& o = op_at(p, l);
+          const int64_t start = o.idata[0];
+          if (start < 0 || step < 1 || start + (w - 1) * step >= blen ||
+              (strided_read && o.idata[1] != step)) {
             ok = false;
             break;
           }
           if (start != t.idata[0] + l * w) run = false;
-          for (int64_t e = 0; e < w; ++e) ap.idx.push_back((int)(start + e));
+          for (int64_t e = 0; e < w; ++e)
+            ap.idx.push_back((int)(start + e * step));
         }
         if (!ok) break;
         if (run && w == 1 && t.idata[0] == 0 && blen == L) {
@@ -374,6 +482,45 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         } else {
           ap.emit = Emit::kGather;
         }
+        continue;
+      }
+
+      // The lane ends by writing one element of a vector nothing else reads
+      // while the run is in flight (Survey_model's lp_parts accumulator).
+      // Indices that march by a constant stride become one slice store.
+      if (store_delim && p == k - 1) {
+        const int vec = t.in[0];
+        const int64_t blen = g.slots[(size_t)vec].len;
+        const int64_t start = t.idata[0];
+        const int64_t step = L >= 2 ? (int64_t)op_at(p, 1).idata[0] - start : 1;
+        ok = ap.ins[0].kind == InKind::kInvariant &&
+             (ap.ins[1].kind == InKind::kLaneLocal ||
+              ap.ins[1].kind == InKind::kConstLanes) &&
+             width == 1 && step >= 1 && start >= 0 &&
+             start + (L - 1) * step < blen && root_set.count(vec) == 0 &&
+             term_set.count(vec) == 0;
+        for (int64_t l = 1; l < L && ok; ++l)
+          ok = op_at(p, l).idata[0] == start + l * step;
+        // The whole run moves to the first lane's position, so nothing may
+        // read the vector half-written, and a writer after it would need the
+        // tail renaming this pass deliberately does not do.
+        if (ok) {
+          const size_t reader = first_in_range_but(
+              uses[(size_t)vec], first_begin, last_end, delim_at);
+          const size_t other = first_in_range_but(
+              writers[(size_t)vec], first_begin, last_end, delim_at);
+          if (reader < n_ops || other < n_ops) {
+            split_at = std::min(split_at, std::min(reader, other));
+            ok = false;
+          } else if (any_at_or_after(writers[(size_t)vec], last_end)) {
+            ok = false;
+          }
+        }
+        if (!ok) break;
+        ap.emit = Emit::kStore;
+        ap.width = 1;
+        ap.idx.assign(1, (int)start);
+        if (step != 1) ap.idx.push_back((int)step);
         continue;
       }
 
@@ -405,18 +552,17 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         continue;
       }
       if (has_op_trait(t.opcode, op_trait::kRerollAnyDensity)) {
-        // The idata densities carrying more than one immediate (the
-        // binomials' two integer groups) need the group concatenation that
-        // is not in this slice yet.
-        if (has_op_trait(t.opcode, op_trait::kRerollIdataDensity) &&
-            t.n_idata != 1) {
+        // A width-W outcome group is W lps per lane: the real arguments are
+        // W wide too, and a lane that consumes its density rather than
+        // ending at it needs them summed back per lane.
+        const int64_t dw = idata_width(t);
+        const int64_t w = all_shared ? dw : width;
+        if (dw < 1 || (dw != 1 && dw != w)) {
           ok = false;
           break;
         }
-        if (width != 1) {
-          ok = false;
-          break;
-        }
+        ap.width = 1;
+        ap.rows = w;
         ap.emit = is_term ? Emit::kTermDensity : Emit::kEltDensity;
         continue;
       }
@@ -430,40 +576,82 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       }
       ok = false;
     }
-    if (!ok) continue;
-    // Exactly one target term per lane, at the delimiter: any other
-    // disposition would leave the term list describing work that no longer
-    // happens.
+    if (!ok) {
+      split_here();
+      continue;
+    }
+    // Exactly one delimiter per lane, at its end: any other disposition
+    // would leave the term list -- or the vector the lane stores into --
+    // describing work that no longer happens.
     for (int p = 0; p < k && ok; ++p) {
-      const bool term = pos[(size_t)p].emit == Emit::kTermDensity ||
-                        pos[(size_t)p].emit == Emit::kTermWiden;
-      ok = term == (p == k - 1);
+      const Emit e = pos[(size_t)p].emit;
+      const bool delim =
+          e == Emit::kTermDensity || e == Emit::kTermWiden || e == Emit::kStore;
+      ok = delim == (p == k - 1);
     }
     if (!ok) continue;
 
-    int64_t added = 0, ops_out = 0;
-    for (const Pos& ap : pos) {
+    // Lanes identical down to their immediates and their external slots are
+    // one op once CSE runs, and the fused form evaluates all L of them. That
+    // is the whole cost of fusing a bucket the const pool already collapsed.
+    std::unordered_set<uint64_t> lane_hash;
+    for (int64_t l = 0; l < L; ++l) {
+      uint64_t h = 1469598103934665603ull;
+      const auto mix = [&h](int64_t v) {
+        h = (h ^ (uint64_t)v) * 1099511628211ull;
+      };
+      for (int p = 0; p < k; ++p) {
+        const Op& o = op_at(p, l);
+        const Pos& ap = pos[(size_t)p];
+        for (int j = 0; j < o.n_in; ++j)
+          mix(ap.ins[(size_t)j].kind == InKind::kLaneLocal ? -1 : o.in[j]);
+        for (int64_t m = 0; m < o.n_idata; ++m) mix(o.idata[m]);
+      }
+      lane_hash.insert(h);
+    }
+    const int64_t distinct = (int64_t)lane_hash.size();
+
+    int64_t added = 0, ops_out = 0, lane_elems = 0;
+    for (int p = 0; p < k; ++p) {
+      const Pos& ap = pos[(size_t)p];
       switch (ap.emit) {
         case Emit::kElide:
           break;
         case Emit::kSlice:
           ++ops_out;
           added += L * ap.width;  // contiguous: no index array, no scatter
+          lane_elems += 2 * ap.width;
           break;
         case Emit::kGather:
           ++ops_out;
           added += 2 * L * ap.width;  // gathered forward, scattered back
+          lane_elems += 2 * ap.width;
           break;
         case Emit::kTermWiden:
           ops_out += 2;
+          lane_elems += 2 * ap.width;
+          break;
+        case Emit::kShared:
+          ++ops_out;
+          break;
+        case Emit::kEltDensity:
+          ops_out += ap.rows > 1 ? 2 : 1;
+          lane_elems += ap.rows * kDensityElem;
+          if (ap.rows > 1 && elt_costs_per_element(op_at(p, 0).opcode))
+            added += L * ap.rows * kDensityElem;
+          break;
+        case Emit::kTermDensity:
+          ++ops_out;
+          lane_elems += ap.rows * kDensityElem;
           break;
         default:
           ++ops_out;
+          lane_elems += 2 * ap.width;
           break;
       }
     }
-    added += ops_out * kOpCost;
-    if (L * (int64_t)k * kOpCost <= added + kPartitionMargin) {
+    added += ops_out * kOpCost + (L - distinct) * lane_elems;
+    if (distinct * (int64_t)k * kOpCost <= added + kPartitionMargin) {
       ++st.declined;
       continue;
     }
@@ -476,13 +664,26 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       o.idata = g.idata_pool.back().data();
       o.n_idata = (int64_t)g.idata_pool.back().size();
     };
-    // The fused lpmf's outcome vector is the lanes' immediates.
-    const auto attach_outcomes = [&](Op& o, int p) {
+    // The fused lpmf's outcome vector is the lanes' immediates, laid out the
+    // way the kernel unpacks them: one flat array, or group by group with a
+    // [len, vals...] header each, every group widened to the fused length.
+    const auto attach_outcomes = [&](Op& o, int p, int64_t w) {
       if (!has_op_trait(o.opcode, op_trait::kRerollIdataDensity)) return;
-      std::vector<int> outcomes;
-      outcomes.reserve((size_t)L);
-      for (int64_t l = 0; l < L; ++l) outcomes.push_back(op_at(p, l).idata[0]);
-      attach_idata(o, std::move(outcomes));
+      const Op& t = op_at(p, 0);
+      std::vector<int> v;
+      if (!has_int_groups(o.opcode)) {
+        v.reserve((size_t)(L * w));
+        for (int64_t l = 0; l < L; ++l)
+          for (int64_t e = 0; e < w; ++e) v.push_back(op_at(p, l).idata[e]);
+      } else {
+        for (int64_t m = 0; m < t.n_idata; m += group_len(t.idata + m)) {
+          v.push_back((int)(L * w));
+          for (int64_t l = 0; l < L; ++l)
+            for (int64_t e = 0; e < w; ++e)
+              v.push_back(group_elem(op_at(p, l).idata + m, e));
+        }
+      }
+      attach_idata(o, std::move(v));
     };
     const auto swap_terms = [&](int p, int new_term) {
       std::unordered_set<int> dead;
@@ -545,19 +746,26 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         case Emit::kRowSum:
           op.opcode = OP_SUM_ROWS;
           op.out = g.add_slot(L, false);
-          attach_idata(op, std::vector<int>{
-                               (int)pos[(size_t)ap.ins[0].producer].width});
+          attach_idata(
+              op, std::vector<int>{(int)pos[(size_t)ap.ins[0].producer].width});
           ap.out = op.out;
           break;
         case Emit::kEltDensity:
           op.variant = (uint8_t)(op.variant | 0x40u);
-          op.out = g.add_slot(L, false);
-          attach_outcomes(op, p);
+          op.out = g.add_slot(L * ap.rows, false);
+          attach_outcomes(op, p, ap.rows);
           ap.out = op.out;
           break;
         case Emit::kTermDensity:
           op.out = g.add_slot(1, false);
-          attach_outcomes(op, p);
+          attach_outcomes(op, p, ap.rows);
+          ap.out = op.out;
+          break;
+        case Emit::kStore:
+          op.opcode = ap.idx.size() == 1 ? OP_SET_SLICE_INPLACE
+                                         : OP_SET_SLICE_STRIDED_INPLACE;
+          op.out = t.in[0];
+          attach_idata(op, std::move(ap.idx));
           ap.out = op.out;
           break;
         default:  // kWiden, kTermWiden
@@ -566,7 +774,16 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           break;
       }
       out_ops.push_back(op);
-      if (ap.emit == Emit::kTermDensity) {
+      if (ap.emit == Emit::kEltDensity && ap.rows > 1) {
+        Op rows;
+        rows.opcode = OP_SUM_ROWS;
+        rows.n_in = 1;
+        rows.in[0] = op.out;
+        rows.out = g.add_slot(L, false);
+        attach_idata(rows, std::vector<int>{(int)ap.rows});
+        out_ops.push_back(rows);
+        ap.out = rows.out;
+      } else if (ap.emit == Emit::kTermDensity) {
         swap_terms(p, op.out);
       } else if (ap.emit == Emit::kTermWiden) {
         Op sum;

@@ -153,8 +153,7 @@ static void test_interleaved_lanes() {
   expect("interleaved one group", st.groups == 1 && st.lanes == 8);
   expect("interleaved keeps the intruder", count_opcode(b.g, OP_EXP) == 1);
   expect("interleaved op count", b.g.ops.size() == 3);
-  expect("interleaved two terms",
-         tt.size() == 2 && tt[1] == foreign_term);
+  expect("interleaved two terms", tt.size() == 2 && tt[1] == foreign_term);
   expect_same_grad("interleaved", std::move(b.g), f2, tt, want);
 }
 
@@ -187,9 +186,9 @@ static void test_scattered_indices() {
   const PartitionStats st = partition_lanes(g, f2, tt, {});
   expect("scattered one group", st.groups == 1 && st.lanes == L);
   expect("scattered one gather", count_opcode(g, OP_GATHER) == 1);
-  expect("scattered lane order",
-         g.ops[0].n_idata == L && g.ops[0].idata[0] == pick[0] &&
-             g.ops[0].idata[3] == pick[3]);
+  expect("scattered lane order", g.ops[0].n_idata == L &&
+                                     g.ops[0].idata[0] == pick[0] &&
+                                     g.ops[0].idata[3] == pick[3]);
   expect_same_grad("scattered", std::move(g), f2, tt, want);
 }
 
@@ -290,8 +289,8 @@ static void test_refuse_identical_terms() {
 
 // The same shape with an integer outcome (multi_occupancy's detection terms):
 // here the lanes' immediates concatenate, so the one fused op does compute
-// eight lps and the fusion is the right answer.
-static void test_identical_idata_terms() {
+// L lps and the fusion is the right answer.
+static void test_idata_terms() {
   const int L = 16;  // one op per lane: below this the margin declines it
   Graph g;
   Fills fills;
@@ -299,7 +298,7 @@ static void test_identical_idata_terms() {
   std::vector<int> terms;
   for (int l = 0; l < L; ++l) {
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_BERNOULLI_LPMF, {theta}, lp, {1});
+    const int id = g.add_op(OP_POISSON_LPMF, {theta}, lp, {l});
     g.ops[(size_t)id].variant = 0x81;
     terms.push_back(lp);
   }
@@ -314,6 +313,248 @@ static void test_identical_idata_terms() {
   expect_same_grad("idata terms", std::move(g), f2, tt, want);
 }
 
+// The lanes above with the outcome held constant: byte-identical lanes are
+// one op once CSE runs, so fusing them evaluates the density L times where
+// the scalar graph evaluates it once.
+static void test_duplicate_lanes_decline() {
+  const int L = 16;
+  Graph g;
+  Fills fills;
+  const int theta = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BERNOULLI_LPMF, {theta}, lp, {1});
+    g.ops[(size_t)id].variant = 0x81;
+    terms.push_back(lp);
+  }
+  const size_t before = g.ops.size();
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("duplicate lanes decline", st.groups == 0 && st.declined == 1);
+  expect("duplicate graph unchanged", g.ops.size() == before && tt == terms);
+}
+
+// The capture-recapture shape: a density carrying two integer groups, one
+// varying per lane and one not. Fusing concatenates group by group, in the
+// [len, vals...] layout the kernels unpack.
+static void test_binomial_idata_groups() {
+  const int L = 8;
+  Graph g;
+  Fills fills;
+  const int theta = g.add_slot(1, true);
+  const int prior = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BINOMIAL_LPMF, {theta}, lp, {-1, l, -1, L});
+    g.ops[(size_t)id].variant = 0x01;
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_ADD, {prior, lp}, t);
+    terms.push_back(t);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("groups one group", st.groups == 1 && st.lanes == L);
+  expect("groups op count", g.ops.size() == 3 && tt.size() == 1);
+  bool layout = g.ops[0].n_idata == 2 * (L + 1);
+  if (layout) {
+    layout = g.ops[0].idata[0] == L && g.ops[0].idata[L + 1] == L;
+    for (int l = 0; l < L; ++l)
+      layout = layout && g.ops[0].idata[1 + l] == l &&
+               g.ops[0].idata[L + 2 + l] == L;
+  }
+  expect("groups concatenate per group", layout);
+  expect_same_grad("groups", std::move(g), f2, tt, want);
+}
+
+// A width-5 outcome group read through a strided window: the lanes' real
+// arguments become one gather and the lps come back per lane through
+// OP_SUM_ROWS, because the lane consumes its density rather than ending at it.
+static void test_width_w_outcome_group() {
+  const int L = 24, W = 5;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(L * W, true);
+  const int prior = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int win = g.add_slot(W, false);
+    g.add_op(OP_SLICE_STRIDED, {base}, win, {l, L});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {win}, lp,
+                            {l % 2, 1, 0, (l + 1) % 2, 1});
+    g.ops[(size_t)id].variant = 0x01;
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_ADD, {prior, lp}, t);
+    terms.push_back(t);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("width-w one group", st.groups == 1 && st.lanes == L);
+  expect("width-w op count", g.ops.size() == 5 && tt.size() == 1);
+  expect("width-w one gather",
+         count_opcode(g, OP_GATHER) == 1 && g.ops[0].n_idata == L * W);
+  expect("width-w row sum", count_opcode(g, OP_SUM_ROWS) == 1);
+  expect("width-w idata concatenates", g.ops[1].n_idata == L * W);
+  expect_same_grad("width-w", std::move(g), f2, tt, want);
+}
+
+// Survey_model's accumulator: lanes delimited by an element store rather
+// than a term, at indices that march by one. The run becomes a single slice
+// store, and the reduction that reads the whole vector afterwards is what
+// the values have to be right for.
+static void test_store_delimited_lanes() {
+  const int L = 16, N = 40, START = 4;
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int vec = g.add_slot(N, false);
+  std::vector<double> vals((size_t)N);
+  for (int i = 0; i < N; ++i) vals[(size_t)i] = -0.5 + 0.05 * i;
+  fills.emplace_back(vec, vals);
+  for (int l = 0; l < L; ++l) {
+    const int c = g.add_slot(1, false);
+    fills.emplace_back(c, std::vector<double>{0.3 + 0.1 * l});
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {p, c}, m);
+    g.add_op(OP_SET_INDEX_INPLACE, {vec, m}, vec, {START + l});
+  }
+  const int lse = g.add_slot(1, false);
+  g.add_op(OP_LOG_SUM_EXP, {vec}, lse);
+  const std::vector<int> terms{lse};
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("store one group", st.groups == 1 && st.lanes == L);
+  expect("store op count", g.ops.size() == 3 && tt == terms);
+  expect("store one slice store",
+         count_opcode(g, OP_SET_SLICE_INPLACE) == 1 &&
+             count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
+  expect("store start", g.ops[1].n_idata == 1 && g.ops[1].idata[0] == START);
+  expect_same_grad("store", std::move(g), f2, tt, want);
+}
+
+// multi_occupancy's branch structure: two templates chosen by a data
+// condition, alternating, the second a prefix-extension of the first. The
+// fingerprint separates them and each bucket is rewritten at its own first
+// lane.
+static void test_two_templates_interleaved() {
+  const int L = 12;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(2 * L, true);
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < 2 * L; ++l) {
+    const int idx = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {base}, idx, {l});
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{0.2 * l - 0.5});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_NORMAL_LPDF, {y, idx, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    if (l % 2 == 0) {
+      terms.push_back(lp);
+      continue;
+    }
+    const int mixed = g.add_slot(1, false);
+    g.add_op(OP_LSE2, {lp, sigma}, mixed);
+    terms.push_back(mixed);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("two templates two groups", st.groups == 2 && st.lanes == 2 * L);
+  expect("two templates op count", g.ops.size() == 6 && tt.size() == 2);
+  expect("two templates two gathers", count_opcode(g, OP_GATHER) == 2);
+  expect_same_grad("two templates", std::move(g), f2, tt, want);
+}
+
+// A write to the gathered base between lanes 7 and 8. The lanes on either
+// side read different contents, so the bucket splits at the writer instead of
+// declining -- and the split is what the gradient check is really testing.
+static void test_mid_bucket_writer_split() {
+  const int L = 16, N = 20;
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(N, true);
+  const int sigma = g.add_slot(1, true);
+  const int base = g.add_slot(N, false);
+  g.add_op(OP_EXPV, {p}, base);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    if (l == 8) g.add_op(OP_SET_INDEX_INPLACE, {base, sigma}, base, {3});
+    const int idx = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {base}, idx, {(3 * l) % N});
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{0.2 * l - 0.5});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_NORMAL_LPDF, {y, idx, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("split two groups", st.groups == 2 && st.lanes == L);
+  expect("split keeps the writer", count_opcode(g, OP_SET_INDEX_INPLACE) == 1);
+  expect("split two gathers", count_opcode(g, OP_GATHER) == 2);
+  expect_same_grad("split", std::move(g), f2, tt, want);
+}
+
+// The reader half of the same hazard: a second bucket's lanes read the vector
+// the first bucket's lanes store into. Nothing may read a vector while its
+// run is in flight, so the store bucket refuses and the readers still see
+// every element written.
+static void test_cross_bucket_read_after_write() {
+  const int L = 8, N = 24;
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int vec = g.add_slot(N, false);
+  std::vector<double> vals((size_t)N);
+  for (int i = 0; i < N; ++i) vals[(size_t)i] = 0.1 + 0.05 * i;
+  fills.emplace_back(vec, vals);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int c = g.add_slot(1, false);
+    fills.emplace_back(c, std::vector<double>{0.3 + 0.1 * l});
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {p, c}, m);
+    g.add_op(OP_SET_INDEX_INPLACE, {vec, m}, vec, {l});
+    const int r = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {vec}, r, {l});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_NORMAL_LPDF, {r, p, p}, lp);
+    g.ops[(size_t)id].variant = 0x07;
+    terms.push_back(lp);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("cross-bucket store refuses",
+         st.groups == 0 && count_opcode(g, OP_SET_INDEX_INPLACE) == L &&
+             count_opcode(g, OP_SET_SLICE_INPLACE) == 0);
+  expect_same_grad("cross-bucket", std::move(g), f2, tt, want);
+}
+
 static void test_kill_switch() {
   Lanes b = build_index_lanes(8);
   const size_t before = b.g.ops.size();
@@ -322,8 +563,8 @@ static void test_kill_switch() {
   test_setenv("STANLI_NO_PARTITION", "1", 1);
   const PartitionStats st = partition_lanes(b.g, f2, tt, {});
   test_unsetenv("STANLI_NO_PARTITION");
-  expect("kill switch", st.groups == 0 && b.g.ops.size() == before &&
-                            tt == b.terms);
+  expect("kill switch",
+         st.groups == 0 && b.g.ops.size() == before && tt == b.terms);
 }
 
 // state_space_stochastic_level_stochastic_seasonal, in miniature: a window-sum
@@ -461,8 +702,7 @@ static void test_scaling() {
       " n=16000 %.3f s / %lld segment / %lld list, peak RSS %.0f MB\n",
       small.sec, (long long)small.segment, (long long)small.list, big.sec,
       (long long)big.segment, (long long)big.list, rss);
-  expect("segmentation is exactly linear",
-         big.segment == 2 * small.segment);
+  expect("segmentation is exactly linear", big.segment == 2 * small.segment);
   expect("list reads stay near-linear", big.list < 3 * small.list);
   if (rss > 0.0) expect("partition space stays linear", rss < 1024.0);
 }
@@ -482,7 +722,14 @@ int main() {
   test_refuse_effectful();
   test_refuse_escaping_intermediate();
   test_refuse_identical_terms();
-  test_identical_idata_terms();
+  test_idata_terms();
+  test_duplicate_lanes_decline();
+  test_binomial_idata_groups();
+  test_width_w_outcome_group();
+  test_store_delimited_lanes();
+  test_two_templates_interleaved();
+  test_mid_bucket_writer_split();
+  test_cross_bucket_read_after_write();
   test_kill_switch();
   test_state_space_shape();
   test_cost_declines();
