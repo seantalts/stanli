@@ -3229,6 +3229,23 @@ struct Lowering {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_LOGIT, {a}, g.slots[a.slot].len, a.si);
     }
+    if ((e.name == "min" || e.name == "max") && in_write_array) {
+      // Preserve the construction-time path for well-formed data-only
+      // extrema, including the scalar two-argument overload.  Dynamic
+      // lowering is deliberately much narrower.
+      if (e.args.size() == 1 || e.args.size() == 2)
+        if (auto v = fold_const(e)) return *v;
+      const mir::ExtremaKind kind = mir::extrema_kind(e);
+      if (udf_depth != 0 || kind == mir::ExtremaKind::Legacy)
+        fail("min/max expression surface stays on WaInterp", e.raw);
+      Val a = lower_expr(e.args[0]);
+      if ((!is_vector(a.si) && !is_row_vector(a.si)) || g.slots[a.slot].len < 0)
+        fail("min/max needs one vector or row-vector argument", e.raw);
+      Val result = emit_value(OP_EXTREMA_VEC, {a}, 1);
+      result.autodiff = false;
+      g.ops.back().variant = kind == mir::ExtremaKind::Max ? 1u : 0u;
+      return result;
+    }
     if (e.name == "mean") {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_MEAN, {a}, 1);

@@ -104,6 +104,7 @@ bool callable(const Graph& g, const Op& op) {
     case OP_ODE:
     case OP_RNG:
     case OP_PROD_VEC:
+    case OP_EXTREMA_VEC:
     case OP_PRINT:
     case OP_REJECT:
       return false;

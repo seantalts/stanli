@@ -237,7 +237,8 @@ the top of the page, not replacements for the current corpus rows:
   interpreter. This moved `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`
   to the graph, taking the then-current 24-model census from 12 graph / 12
   interpreter to 16 / 8. The categorical tranche below subsequently advances
-  that census to 17 / 7. All 119 compiling corpus models still produce complete
+  that census to 17 / 7, and the extrema tranche after it advances the current
+  census to 18 / 6. All 119 compiling corpus models still produce complete
   rows. A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched
   batch medians) measured:
 
@@ -287,6 +288,32 @@ the top of the page, not replacements for the current corpus rows:
   direct pinned Stan Math call, then comparing the next engine state. These
   targeted results do not refresh `docs/corpus-bench.tsv` or the generated
   full-corpus table below.
+- **Compiled generated-quantities extrema** add the forward-only
+  `OP_EXTREMA_VEC` min/max variants. Lowering admits only a top-level
+  write-array call on a direct `UVector` or `URowVector` `Var` and evaluates
+  it with the same address-independent grouping that pinned Stan Math uses for
+  an owning Eigen value. Empty-real results are preserved: `min` is positive
+  infinity and `max` is negative infinity. Arrays, matrices, indexed views,
+  expressions, and UDF calls still select `WaInterp`; reverse-mode uses remain
+  refused.
+  The opcode is explicitly excluded from reroll matching and interpreter
+  islands because it has no reverse kernel.
+
+  `losscurve_sislob` was the only model to change in the exact 24-model
+  census, moving graph/interpreter coverage from 17 / 7 to the current 18 / 6;
+  all 24 census models and all 119 compiling corpus models retained complete
+  rows. Its 1,218-op graph contains exactly one length-10 min opcode and one
+  length-10 max opcode, and writes 384 columns. Graph and `WaInterp` matched
+  bitwise for all 1,536/1,536 compared values; the same-input pinned Stan Math
+  check matched 8/8 cases.
+  Against 1,200 stored CmdStan values, the worst difference was 4.44e-16, or
+  eight ULP.
+
+  In a targeted matched C-ABI A/B, `losscurve_sislob` moved from 329.9520 to
+  3.3704 us/row (97.8970x), saving 0.3265816 s per 1,000 rows. Construction
+  moved from 4107.375 to 5291.959 us, a 1184.584 us setup increase that
+  amortizes after 3.627 rows, or four whole rows. These targeted results do not
+  refresh `docs/corpus-bench.tsv` or the generated full-corpus table below.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven

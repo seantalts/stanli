@@ -1610,6 +1610,391 @@ void test_product_exact_grouping() {
   }
 }
 
+void test_extrema_exact_grouping() {
+  using namespace stanli;
+  const Kernel& extrema = kernel(OP_EXTREMA_VEC);
+  if (extrema.backward != nullptr || extrema.scratch_size != nullptr) {
+    ++failures;
+    std::printf("FAIL extrema kernel is not forward-only/no-scratch\n");
+  }
+
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  std::vector<std::vector<double>> cases = {
+      {},
+      {1.0},
+      {0.0, -0.0},
+      {-0.0, 0.0},
+      {inf, -inf, 3.0},
+      {-inf, inf, -3.0},
+      {2.0, 2.0, -4.0, -4.0, 2.0},
+      {nan, 1.0, -2.0},
+      {1.0, nan, -2.0},
+      {1.0, -2.0, nan},
+      {nan, nan, 0.0, -0.0},
+  };
+  const int packet_width = std::max(
+      1, static_cast<int>(Eigen::internal::packet_traits<double>::size));
+  for (int n : {packet_width - 1, packet_width, packet_width + 1,
+                2 * packet_width - 1, 2 * packet_width, 2 * packet_width + 1}) {
+    if (n < 0) continue;
+    std::vector<double> values(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+      const double magnitude =
+          std::ldexp(1.0 + static_cast<double>((i * 7 + 3) % 11) * 0x1p-52,
+                     (i % 7) * 137 - 411);
+      values[static_cast<size_t>(i)] = i % 2 == 0 ? magnitude : -magnitude;
+    }
+    if (n > 2) values[static_cast<size_t>(n - 1)] = values[1];
+    cases.push_back(std::move(values));
+  }
+
+  for (size_t c = 0; c < cases.size(); ++c) {
+    const std::vector<double>& values = cases[c];
+    Eigen::VectorXd pinned(static_cast<Eigen::Index>(values.size()));
+    std::copy(values.begin(), values.end(), pinned.data());
+    const double wants[] = {stan::math::min(pinned), stan::math::max(pinned)};
+    for (int variant = 0; variant < 2; ++variant) {
+      for (int offset = 0; offset < packet_width; ++offset) {
+        Eigen::VectorXd storage(static_cast<Eigen::Index>(
+            values.size() + static_cast<size_t>(packet_width)));
+        storage.setZero();
+        std::copy(values.begin(), values.end(), storage.data() + offset);
+        double got = 0.0;
+        KernelCtx ctx;
+        ctx.n_in = 1;
+        ctx.in[0] =
+            Desc{storage.data() + offset, static_cast<int64_t>(values.size())};
+        ctx.out = Desc{&got, 1};
+        ctx.variant = static_cast<uint8_t>(variant);
+        extrema.forward(ctx);
+        if (!same_reduction_value(got, wants[variant])) {
+          ++failures;
+          std::printf(
+              "FAIL extrema kernel case %zu variant %d offset %d: got %llx "
+              "want %llx\n",
+              c, variant, offset,
+              static_cast<unsigned long long>(reduction_bits(got)),
+              static_cast<unsigned long long>(reduction_bits(wants[variant])));
+        }
+      }
+    }
+  }
+
+  // The generic interpreter keeps scalar-fold behavior outside the audited
+  // direct write_array surface, except that Stan's defined empty-container
+  // results/errors must not become an out_of_range accident.
+  std::map<std::string, const mir::FunDef*> funs;
+  MirInterp<double> interp(funs, "empty extrema legacy test");
+  mir::Expr arg;
+  arg.kind = mir::Expr::Var;
+  arg.name = "a";
+  arg.type_ = "(UArray UReal)";
+  arg.unsized.leaf = mir::UnsizedLeaf::Real;
+  arg.unsized.depth = 1;
+  mir::Expr call;
+  call.kind = mir::Expr::FunApp;
+  call.name = "min";
+  call.fn_lib = mir::Expr::Lib::StanLib;
+  call.type_ = "UReal";
+  call.unsized.leaf = mir::UnsizedLeaf::Real;
+  call.args = {arg};
+  DataMap::Entry empty_real;
+  empty_real.dims = {0};
+  interp.env()["a"] = empty_real;
+  if (reduction_bits(interp.eval(call).r.at(0)) != reduction_bits(inf)) {
+    ++failures;
+    std::printf("FAIL empty real legacy min is not +infinity\n");
+  }
+  call.name = "max";
+  if (reduction_bits(interp.eval(call).r.at(0)) != reduction_bits(-inf)) {
+    ++failures;
+    std::printf("FAIL empty real legacy max is not -infinity\n");
+  }
+  arg.type_ = "(UArray UInt)";
+  arg.unsized.leaf = mir::UnsizedLeaf::Int;
+  call.args = {arg};
+  DataMap::Entry empty_int;
+  empty_int.is_int = true;
+  empty_int.dims = {0};
+  interp.env()["a"] = empty_int;
+  for (const char* name : {"min", "max"}) {
+    call.name = name;
+    bool invalid = false;
+    try {
+      (void)interp.eval(call);
+    } catch (const std::invalid_argument&) {
+      invalid = true;
+    }
+    if (!invalid) {
+      ++failures;
+      std::printf(
+          "FAIL empty int legacy %s did not preserve invalid_argument\n", name);
+    }
+  }
+}
+
+void test_compiled_gq_extrema() {
+  using namespace stanli;
+  const std::string text = slurp("tests/fixtures/gq_extrema.tmir.sexp");
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<std::vector<double>> cases = {
+      {},
+      {0.0},
+      {0.0, -0.0, 2.0, -3.0, 2.0},
+      {-0.0, 0.0, -4.0, 9.0, -4.0},
+      {nan, 1.0, -2.0, 8.0, -2.0},
+      {1.0, nan, -2.0, 8.0, -2.0},
+  };
+
+  for (size_t c = 0; c < cases.size(); ++c) {
+    const std::vector<double>& x = cases[c];
+    std::vector<double> xr(x.rbegin(), x.rend());
+    DataMap data;
+    data.set_int("N", static_cast<long>(x.size()));
+    data.set_real_array("d", x, {static_cast<int64_t>(x.size())});
+    CompiledModel cm = compile_model(text, data);
+    if (!cm.write_array || cm.write_array->interp ||
+        !cm.write_array->truncated.empty()) {
+      ++failures;
+      std::printf("FAIL extrema fixture case %zu did not compile: %s\n", c,
+                  cm.write_array ? cm.write_array->truncated.c_str()
+                                 : "no write_array");
+      continue;
+    }
+    int extrema_ops = 0, minima = 0, maxima = 0;
+    for (const Op& op : cm.write_array->graph.ops) {
+      if (op.opcode != OP_EXTREMA_VEC) continue;
+      ++extrema_ops;
+      minima += op.variant == 0;
+      maxima += op.variant == 1;
+    }
+    if (extrema_ops != 4 || minima != 2 || maxima != 2) {
+      ++failures;
+      std::printf(
+          "FAIL extrema fixture census case %zu: all=%d min=%d max=%d\n", c,
+          extrema_ops, minima, maxima);
+      continue;
+    }
+
+    Executor graph(std::move(cm.write_array->graph));
+    cm.write_array->bind(graph);
+    std::copy(x.begin(), x.end(), graph.params_data());
+    std::copy(xr.begin(), xr.end(), graph.params_data() + x.size());
+    graph.run_forward_only();
+    std::vector<double> graph_row;
+    for (const auto& column : cm.write_array->columns) {
+      const double* values = graph.value_ptr(column.slot);
+      for (int64_t i = 0; i < column.len; ++i)
+        graph_row.push_back(values[column.storage_index(i)]);
+    }
+
+    auto program =
+        std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
+    std::map<std::string, DataMap::Entry> base;
+    base["N"] = data.at("N");
+    base["d"] = data.at("d");
+    for (const char* flag :
+         {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+      DataMap::Entry one;
+      one.is_int = true;
+      one.i = {1};
+      one.r = {1.0};
+      base[flag] = one;
+    }
+    WaInterp interp(program, std::move(base));
+    std::map<std::string, DataMap::Entry> params;
+    params["x"].r = x;
+    params["x"].dims = {static_cast<int64_t>(x.size())};
+    params["xr"].r = xr;
+    params["xr"].dims = {static_cast<int64_t>(xr.size())};
+    WaRng rng(1234);
+    const std::vector<double> interp_row = interp.eval(params, rng);
+    if (graph_row.size() != interp_row.size()) {
+      ++failures;
+      std::printf("FAIL extrema fixture row width case %zu\n", c);
+      continue;
+    }
+    for (size_t i = 0; i < graph_row.size(); ++i) {
+      if (same_reduction_value(graph_row[i], interp_row[i])) continue;
+      ++failures;
+      std::printf("FAIL extrema graph/interpreter case %zu column %zu\n", c, i);
+      break;
+    }
+
+    if (x.empty()) {
+      const std::vector<std::string> names =
+          CompiledModel::csv_names(cm.write_array->columns);
+      for (size_t i = 0; i < names.size(); ++i) {
+        if ((names[i] == "x_min" || names[i] == "xr_min" ||
+             names[i] == "d_min") &&
+            reduction_bits(graph_row[i]) !=
+                reduction_bits(std::numeric_limits<double>::infinity())) {
+          ++failures;
+          std::printf("FAIL empty %s is not +infinity\n", names[i].c_str());
+        }
+        if ((names[i] == "x_max" || names[i] == "xr_max" ||
+             names[i] == "d_max") &&
+            reduction_bits(graph_row[i]) !=
+                reduction_bits(-std::numeric_limits<double>::infinity())) {
+          ++failures;
+          std::printf("FAIL empty %s is not -infinity\n", names[i].c_str());
+        }
+      }
+    }
+  }
+}
+
+static stanli::DataMap extrema_guard_data() {
+  stanli::DataMap data;
+  data.set_int("N", 5);
+  data.set_real_array("d", {1.0, -2.0, 3.0, -4.0, 5.0}, {5});
+  return data;
+}
+
+static void expect_extrema_interp(const std::string& text, const char* what) {
+  using namespace stanli;
+  try {
+    CompiledModel cm = compile_model(text, extrema_guard_data());
+    if (cm.write_array && cm.write_array->interp &&
+        cm.write_array->truncated.find("expression surface") !=
+            std::string::npos)
+      return;
+    ++failures;
+    std::printf(
+        "FAIL %s: got %s\n", what,
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
+                e.what());
+  }
+}
+
+void test_gq_extrema_lowering_guards() {
+  using namespace stanli;
+  const std::string base = slurp("tests/fixtures/gq_extrema.tmir.sexp");
+  const size_t wa = base.find("(generate_quantities");
+  const size_t min_call = base.find("(FunApp (StanLib min", wa);
+  const std::string vector_node =
+      "((pattern (Var x)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  const size_t arg_at = base.find(vector_node, min_call);
+  if (wa == std::string::npos || min_call == std::string::npos ||
+      arg_at == std::string::npos) {
+    ++failures;
+    std::printf("FAIL extrema guard fixture has no direct min call\n");
+    return;
+  }
+
+  struct BadType {
+    const char* type;
+    const char* label;
+  };
+  for (const BadType& bad :
+       {BadType{"UReal", "scalar"}, BadType{"UMatrix", "matrix"},
+        BadType{"(UArray UReal)", "array"}}) {
+    std::string mutated = base;
+    const std::string from = "type_ UVector";
+    const size_t at = mutated.find(from, arg_at);
+    if (at == std::string::npos) {
+      ++failures;
+      std::printf("FAIL extrema mutation cannot find %s type\n", bad.label);
+      continue;
+    }
+    mutated.replace(at, from.size(), std::string("type_ ") + bad.type);
+    expect_extrema_interp(mutated, (std::string("extrema ") + bad.label +
+                                    " argument stays interpreted")
+                                       .c_str());
+  }
+
+  const std::string exp_vector =
+      "((pattern\n"
+      "            (FunApp (StanLib exp FnPlain AoS)\n"
+      "             (" +
+      vector_node +
+      ")))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string expression = base;
+  expression.replace(arg_at, vector_node.size(), exp_vector);
+  expect_extrema_interp(expression, "min(exp(x)) stays interpreted");
+
+  const std::string indexed =
+      "((pattern\n"
+      "            (Indexed\n"
+      "             (" +
+      vector_node +
+      "\n"
+      "              ((Between\n"
+      "                ((pattern (Lit Int 1))\n"
+      "                 (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly))))\n"
+      "                ((pattern (Lit Int 3))\n"
+      "                 (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly)))))))))\n"
+      "           (meta ((type_ UVector) (loc <opaque>) (adlevel "
+      "DataOnly))))";
+  std::string view = base;
+  view.replace(arg_at, vector_node.size(), indexed);
+  expect_extrema_interp(view, "min(x[1:3]) stays interpreted");
+
+  std::string zero_args = base;
+  zero_args.erase(arg_at, vector_node.size());
+  expect_extrema_interp(zero_args, "zero-argument min stays interpreted");
+
+  std::string two_args = base;
+  two_args.insert(arg_at + vector_node.size(), " " + vector_node);
+  expect_extrema_interp(two_args, "two-argument dynamic min stays interpreted");
+
+  std::string container_result = base;
+  const std::string scalar_result =
+      "(meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))";
+  const size_t result_at = container_result.find(scalar_result, arg_at);
+  if (result_at == std::string::npos) {
+    ++failures;
+    std::printf("FAIL extrema mutation cannot find result metadata\n");
+  } else {
+    container_result.replace(
+        result_at, scalar_result.size(),
+        "(meta ((type_ UVector) (loc <opaque>) (adlevel DataOnly)))");
+    expect_extrema_interp(container_result,
+                          "container-result min stays interpreted");
+  }
+
+  // O1 normally inlines this UDF call.  Restore the retained call so the
+  // direct formal reaches lowering at udf_depth > 0 and cannot acquire an
+  // owning-vector provenance merely from its Var syntax.
+  std::string udf = slurp("tests/fixtures/gq_extrema_udf.tmir.sexp");
+  const size_t udf_wa = udf.find("(generate_quantities");
+  const std::string stan_min = "(FunApp (StanLib min FnPlain AoS)";
+  const size_t inlined = udf.find(stan_min, udf_wa);
+  if (udf_wa == std::string::npos || inlined == std::string::npos) {
+    ++failures;
+    std::printf("FAIL extrema UDF fixture has no inlined call\n");
+  } else {
+    udf.replace(inlined, stan_min.size(),
+                "(FunApp (UserDefined vector_min FnPlain)");
+    expect_extrema_interp(udf, "dynamic UDF extrema stays interpreted");
+  }
+
+  // The opcode is generated-quantities-only: an active log_prob reduction
+  // must still be refused rather than acquiring a forward-only reverse path.
+  bool reverse_refused = false;
+  try {
+    DataMap no_data;
+    (void)compile_model(slurp("tests/fixtures/gq_extrema_reverse.tmir.sexp"),
+                        no_data);
+  } catch (const CompileError& e) {
+    reverse_refused = std::string(e.what()).find("unsupported function min") !=
+                      std::string::npos;
+  }
+  if (!reverse_refused) {
+    ++failures;
+    std::printf("FAIL dynamic log_prob extrema was not refused\n");
+  }
+}
+
 void test_compiled_gq_reductions() {
   using namespace stanli;
   const std::string text = slurp("tests/fixtures/gq_reductions.tmir.sexp");
@@ -2535,6 +2920,9 @@ int main() {
   test_binomial_rng_lowering_guards();
   test_compiled_scalar_rng();
   test_product_exact_grouping();
+  test_extrema_exact_grouping();
+  test_compiled_gq_extrema();
+  test_gq_extrema_lowering_guards();
   test_compiled_gq_reductions();
   test_gq_reduction_lowering_guards();
   test_runtime_int_sum_is_not_compile_time();

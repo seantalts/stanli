@@ -1643,6 +1643,32 @@ class MirInterp {
     if (e.name == "PNot__")
       return un([](const T& x) { return T(val(x) == 0.0 ? 1.0 : 0.0); });
     if (e.name == "max" || e.name == "min") {
+      const bool owning_vector_context =
+          where_ == "write_array" || where_ == "prepare_data";
+      const mir::ExtremaKind native_kind =
+          owning_vector_context && udf_depth_ == 0 ? mir::extrema_kind(e)
+                                                   : mir::ExtremaKind::Legacy;
+      if (native_kind != mir::ExtremaKind::Legacy) {
+        Value a = eval(e.args[0]);
+        if (a.r.empty()) {
+          r.r = {native_kind == mir::ExtremaKind::Min
+                     ? T(std::numeric_limits<double>::infinity())
+                     : T(-std::numeric_limits<double>::infinity())};
+          return r;
+        }
+        // The std::vector backing an interpreted value has no aligned-owning
+        // address contract.  Clear DirectAccessBit but retain packet access,
+        // making lane zero Eigen's packet start just as for CmdStan's owning
+        // vector and the graph kernel.
+        using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+        const Eigen::Map<const Vec> input(a.r.data(), a.r.size());
+        const auto owning_grouping =
+            input.unaryExpr(Eigen::internal::core_cast_op<T, T>());
+        r.r = {native_kind == mir::ExtremaKind::Min
+                   ? stan::math::min(owning_grouping)
+                   : stan::math::max(owning_grouping)};
+        return r;
+      }
       // std::max/min semantics on values, not fmax/fmin: NaN handling and
       // tie selection must not change under the template.
       const auto vmax = [](const T& x, const T& y) {
@@ -1659,6 +1685,19 @@ class MirInterp {
         r.is_int = a.is_int && b.is_int;
         if (r.is_int) r.i = {(int)val(m)};
         r.r = {m};
+        return r;
+      }
+      if (a.r.empty()) {
+        if (a.is_int) {
+          // Preserve Stan Math's exception class and diagnostic for the
+          // excluded integer-container overload.
+          if (e.name == "min")
+            (void)stan::math::min(a.i);
+          else
+            (void)stan::math::max(a.i);
+        }
+        r.r = {e.name == "min" ? T(std::numeric_limits<double>::infinity())
+                               : T(-std::numeric_limits<double>::infinity())};
         return r;
       }
       T m = a.r.at(0);

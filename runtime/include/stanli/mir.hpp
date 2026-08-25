@@ -124,6 +124,32 @@ inline ProdGrouping prod_grouping(const Expr& product_arg) {
   return scalar ? ProdGrouping::Scalar : ProdGrouping::Packet;
 }
 
+// One-argument min/max is overloaded across scalars, arrays, matrices, and
+// Eigen expressions.  Only a named Eigen vector has the owning-storage
+// evaluator provenance audited by the generated-quantities extrema opcode.
+// Keeping the function kind in the classifier makes every excluded or
+// malformed call an explicit Legacy result instead of inferring semantics
+// from a loosely typed argument.
+enum class ExtremaKind : uint8_t { Legacy, Min, Max };
+
+inline ExtremaKind extrema_kind(const Expr& call) {
+  if (call.kind != Expr::FunApp || call.fn_lib != Expr::Lib::StanLib ||
+      call.args.size() != 1 || call.type_ != "UReal" ||
+      call.unsized.leaf != UnsizedLeaf::Real || call.unsized.depth != 0)
+    return ExtremaKind::Legacy;
+  const Expr& arg = call.args[0];
+  const bool vector_arg = arg.kind == Expr::Var && arg.type_ == "UVector" &&
+                          arg.unsized.leaf == UnsizedLeaf::Vector &&
+                          arg.unsized.depth == 0;
+  const bool row_vector_arg =
+      arg.kind == Expr::Var && arg.type_ == "URowVector" &&
+      arg.unsized.leaf == UnsizedLeaf::RowVector && arg.unsized.depth == 0;
+  if (!vector_arg && !row_vector_arg) return ExtremaKind::Legacy;
+  if (call.name == "min") return ExtremaKind::Min;
+  if (call.name == "max") return ExtremaKind::Max;
+  return ExtremaKind::Legacy;
+}
+
 struct Transform {
   // The names are stanc3's own MIR tags, so a new transform in the
   // compiler is greppable here.

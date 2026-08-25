@@ -452,11 +452,109 @@ static void test_product_is_forward_only_pass_barrier() {
   expect("standalone products keep pinned Stan Math grouping", exact);
 }
 
+static void test_extrema_is_forward_only_pass_barrier() {
+  Graph g;
+  Fills fills;
+  const int input = g.add_slot(7, true);
+  constexpr int kLanes = 40;
+  const int result = g.add_slot(kLanes, false);
+  fills.emplace_back(result, std::vector<double>(kLanes, 0.0));
+  // This is intentionally a real reroll candidate: with EXTREMA removed from
+  // ops_match's explicit refusal, the two-lane min/max period plus advancing
+  // stores forms a region.  Root only the downstream sum; rooting the vector
+  // being filled would itself make the element-store candidate ineligible.
+  for (int lane = 0; lane < kLanes; ++lane) {
+    const int output = g.add_slot(1, false);
+    g.add_op(OP_EXTREMA_VEC, {input}, output);
+    g.ops.back().variant = static_cast<uint8_t>(lane & 1);
+    g.add_op(OP_SET_INDEX_INPLACE, {result, output}, result, {lane});
+  }
+  const int final = g.add_slot(1, false);
+  g.add_op(OP_SUM_VEC, {result}, final);
+  g.result_slot = final;
+  std::vector<int> roots{final};
+  std::vector<int> terms;
+
+  const ConstFoldStats folded = const_fold(g, fills, roots);
+  const RerollStats rerolled = reroll(g, fills, terms, roots);
+  const int store_islands = carve_islands(g, fills, terms, roots);
+  int extrema_ops = 0, stores = 0, island_ops = 0;
+  for (const Op& op : g.ops) {
+    extrema_ops += op.opcode == OP_EXTREMA_VEC;
+    stores += op.opcode == OP_SET_INDEX_INPLACE;
+    island_ops += op.opcode == OP_ISLAND;
+  }
+  const Kernel* extrema = find_kernel(OP_EXTREMA_VEC);
+  expect("extrema has a forward-only no-scratch kernel",
+         extrema != nullptr && extrema->backward == nullptr &&
+             extrema->scratch_size == nullptr);
+  expect("extrema is absent from value-free backward traits",
+         !backward_ignores_values(OP_EXTREMA_VEC));
+  expect("extrema survives constfold with parameter input",
+         folded.ops_removed == 0);
+  expect("extrema is absent from reroll vocabulary", rerolled.regions == 0);
+  expect("vector-store graph does not form an island", store_islands == 0);
+  expect("extrema remains a standalone forward op",
+         extrema_ops == kLanes && stores == kLanes && island_ops == 0);
+
+  Executor ex(std::move(g));
+  const double values[] = {0.0, -0.0, 7.0, -11.0, 7.0, -3.0, -11.0};
+  for (int i = 0; i < 7; ++i) ex.params_data()[i] = values[i];
+  ex.run_forward_only();
+  Eigen::VectorXd pinned(7);
+  for (int i = 0; i < 7; ++i) pinned[i] = values[i];
+  const double wants[] = {stan::math::min(pinned), stan::math::max(pinned)};
+  bool exact = true;
+  for (int lane = 0; lane < kLanes; ++lane)
+    exact &= ex.value_ptr(result)[lane] == wants[lane & 1];
+  exact &= ex.value_ptr(final)[0] == (kLanes / 2) * (wants[0] + wants[1]);
+  expect("standalone extrema keep pinned Stan Math values", exact);
+
+  // A distinct all-scalar graph makes the island guard diagnostic.  With
+  // EXTREMA explicitly refused, each ADD run has length one and is below the
+  // carving threshold.  Removing only that refusal admits the whole 80-op
+  // chain and produces an island.
+  Graph island_graph;
+  const int island_input = island_graph.add_slot(7, true);
+  int accumulator = island_graph.add_slot(1, true);
+  for (int lane = 0; lane < kLanes; ++lane) {
+    const int extreme = island_graph.add_slot(1, false);
+    island_graph.add_op(OP_EXTREMA_VEC, {island_input}, extreme);
+    island_graph.ops.back().variant = static_cast<uint8_t>(lane & 1);
+    const int next = island_graph.add_slot(1, false);
+    island_graph.add_op(OP_ADD, {accumulator, extreme}, next);
+    accumulator = next;
+  }
+  island_graph.result_slot = accumulator;
+  Fills island_fills;
+  std::vector<int> island_terms;
+  std::vector<int> island_roots{accumulator};
+  const int scalar_islands =
+      carve_islands(island_graph, island_fills, island_terms, island_roots);
+  int scalar_extrema = 0, scalar_adds = 0;
+  for (const Op& op : island_graph.ops) {
+    scalar_extrema += op.opcode == OP_EXTREMA_VEC;
+    scalar_adds += op.opcode == OP_ADD;
+  }
+  expect(
+      "extrema splits otherwise island-eligible scalar chain",
+      scalar_islands == 0 && scalar_extrema == kLanes && scalar_adds == kLanes);
+
+  Executor island_ex(std::move(island_graph));
+  for (int i = 0; i < 7; ++i) island_ex.params_data()[i] = values[i];
+  island_ex.params_data()[7] = 0.25;
+  island_ex.run_forward_only();
+  expect("split scalar chain preserves extrema values",
+         island_ex.value_ptr(accumulator)[0] ==
+             0.25 + (kLanes / 2) * (wants[0] + wants[1]));
+}
+
 int main() {
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);  // see the fuzz loop
   test_whitelist_backwards_ignore_values();
   test_rng_is_an_effect_barrier();
   test_product_is_forward_only_pass_barrier();
+  test_extrema_is_forward_only_pass_barrier();
   test_random_graphs_preserve_gradients();
   if (failures) {
     std::printf("%d failures\n", failures);

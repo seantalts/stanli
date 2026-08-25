@@ -311,7 +311,8 @@ using the result as dynamic control or geometry all fail closed.
 This completed `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`, moving the
 then-current 24-model write-array census from 12 graph / 12 interpreter to
 16 / 8. The categorical tranche below subsequently advances that census to
-17 / 7. All 119 compiling corpus models still produce complete rows. Targeted
+17 / 7, and the extrema tranche after it advances the current census to 18 / 6.
+All 119 compiling corpus models still produce complete rows. Targeted
 2026-08-24 C-ABI A/B medians (point 0, two warmups, seven matched batches) were:
 
 | model | interpreted us/row | compiled us/row | speedup |
@@ -372,6 +373,38 @@ deterministic columns from the pre-existing graph/interpreter numerical
 boundary; those are not categorical or stream mismatches. These targeted
 results do not refresh `docs/corpus-bench.tsv` or the generated full-corpus
 table in `docs/benchmarks.md`.
+
+## Compiled generated-quantities extrema (`elementwise.cpp`, `lower.cpp`)
+
+`OP_EXTREMA_VEC` has forward-only variants for `min` and `max`. Its lowering
+gate is write-array only: a top-level call must consume a direct `UVector` or
+`URowVector` `Var`. The kernel uses the same address-independent grouping that
+the pinned Stan Math implementation applies to an owning Eigen value, while
+retaining its empty-real results: positive infinity for `min` and negative
+infinity for `max`. Arrays, matrices, indexed views, expressions, and UDF calls
+remain in `WaInterp`; reverse-mode uses remain refused.
+
+Because the opcode deliberately has no backward kernel, it is explicitly
+excluded from reroll matching and interpreter-island CALLs. This keeps the
+lowering gate forward-only rather than allowing a graph transformation to
+place it in a reverse sweep.
+
+`losscurve_sislob` was the only model to change in the exact 24-model census,
+moving coverage from 17 graph / 7 interpreter to the current 18 / 6. All 24
+census models and all 119 compiling corpus models retained complete rows. Its
+1,218-op graph contains exactly one length-10 min opcode and one length-10 max
+opcode, and writes 384 columns. Graph and `WaInterp` output was bitwise exact
+for all 1,536/1,536 compared values, and the same-input pinned Stan Math oracle
+matched 8/8 cases.
+Against 1,200 stored CmdStan values, the worst difference was 4.44e-16, or
+eight ULP.
+
+In a targeted matched C-ABI A/B, `losscurve_sislob` moved from 329.9520 to
+3.3704 us/row (97.8970x), saving 0.3265816 s per 1,000 rows. Construction moved
+from 4107.375 to 5291.959 us, a 1184.584 us setup increase that amortizes after
+3.627 rows, or four whole rows. These targeted results do not refresh
+`docs/corpus-bench.tsv` or the generated full-corpus table in
+`docs/benchmarks.md`.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
 

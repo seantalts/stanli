@@ -3,9 +3,12 @@
 #include <stanli/optable.hpp>
 
 #include <stan/math/prim/fun/prod.hpp>
+#include <stan/math/prim/fun/max.hpp>
+#include <stan/math/prim/fun/min.hpp>
 
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 namespace stanli {
 namespace {
@@ -169,6 +172,29 @@ void prod_vec_fwd(KernelCtx& ctx) {
   const Eigen::Map<const Vec> input(ctx.in[0].data, ctx.in[0].len);
   ctx.out.data[0] = stan::math::prod(
       input.unaryExpr(Eigen::internal::core_cast_op<double, double>()));
+}
+
+// OP_EXTREMA_VEC: generated-quantities-only min/max of a direct named
+// vector/row-vector (variant 0/1).  Stan Math defines extrema of an empty real
+// Eigen container as +/- infinity.  For nonempty inputs, the same-type unary
+// expression deliberately clears DirectAccessBit while retaining packet
+// access, so Eigen begins its packet reduction at lane zero just as it does
+// for CmdStan's aligned owning VectorXd.  A direct Map would instead make
+// signed-zero/NaN tie grouping depend on this slot's arena address.
+void extrema_vec_fwd(KernelCtx& ctx) {
+  assert(ctx.variant <= 1);
+  if (ctx.in[0].len == 0) {
+    ctx.out.data[0] = ctx.variant == 0
+                          ? std::numeric_limits<double>::infinity()
+                          : -std::numeric_limits<double>::infinity();
+    return;
+  }
+  using Vec = Eigen::Matrix<double, Eigen::Dynamic, 1>;
+  const Eigen::Map<const Vec> input(ctx.in[0].data, ctx.in[0].len);
+  const auto owning_grouping =
+      input.unaryExpr(Eigen::internal::core_cast_op<double, double>());
+  ctx.out.data[0] = ctx.variant == 0 ? stan::math::min(owning_grouping)
+                                     : stan::math::max(owning_grouping);
 }
 
 // OP_INDEX: scalar out = in[flat], idata = {flat}. Backward scatters.
@@ -381,6 +407,7 @@ void register_elementwise_kernels() {
   register_kernel(OP_MATVEC, Kernel{matvec_fwd, matvec_bwd, nullptr});
   register_kernel(OP_SUM_VEC, Kernel{sum_vec_fwd, sum_vec_bwd, nullptr});
   register_kernel(OP_PROD_VEC, Kernel{prod_vec_fwd, nullptr, nullptr});
+  register_kernel(OP_EXTREMA_VEC, Kernel{extrema_vec_fwd, nullptr, nullptr});
   register_kernel(OP_INDEX, Kernel{index_fwd, index_bwd, nullptr});
   register_kernel(OP_SET_INDEX, Kernel{set_index_fwd, set_index_bwd, nullptr});
   register_kernel(OP_SET_INDEX_INPLACE, Kernel{set_index_inplace_fwd,
