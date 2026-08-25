@@ -4321,7 +4321,7 @@ struct Lowering {
             const double initial =
                 dl->second.int_array
                     ? static_cast<double>(std::numeric_limits<int>::min())
-                    : 0.0;
+                    : std::numeric_limits<double>::quiet_NaN();
             out.fills.emplace_back(
                 prev_v.slot, std::vector<double>(dl->second.len, initial));
             if (dl->second.int_array) set_uninitialized_int_array(prev_v);

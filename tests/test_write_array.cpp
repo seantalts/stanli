@@ -250,6 +250,107 @@ void test_wanames_interpreter_schema() {
   }
 }
 
+// A bare real container is NaN in every element the block never assigns,
+// which is what CmdStan writes and what the interpreter already produced.
+void test_gq_bare_fill_is_nan() {
+  using namespace stanli;
+  DataMap data;
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/gqbarefill.tmir.sexp"), data);
+  if (!cm.write_array || cm.write_array->columns.empty()) {
+    ++failures;
+    std::printf("FAIL gqbarefill: no write_array\n");
+    return;
+  }
+  expect_eq("gqbarefill truncated", cm.write_array->truncated, "");
+  expect_eq("gqbarefill header", joined(cm.write_array->columns),
+            "mu,q.1,q.2,q.3");
+
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  wex.params_data()[0] = 0.375;
+  wex.run_forward_only();
+  std::vector<double> row;
+  for (const auto& c : cm.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    row.insert(row.end(), p, p + c.len);
+  }
+  expect_idx("gqbarefill row width", row.size(), 4);
+  if (row.size() != 4) return;
+  if (row[0] != 0.375 || row[1] != 5.0) {
+    ++failures;
+    std::printf("FAIL gqbarefill assigned elements: got %.17g %.17g\n", row[0],
+                row[1]);
+  }
+  for (size_t i = 2; i < 4; ++i)
+    if (!std::isnan(row[i])) {
+      ++failures;
+      std::printf("FAIL gqbarefill q.%zu: got %.17g want nan\n", i, row[i]);
+    }
+}
+
+// Generated quantities may reuse a model-block name at a different width.
+// The CSV carries the generated-quantities declaration only.
+void test_gq_name_shadowing() {
+  using namespace stanli;
+  DataMap data;
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/gqshadow.tmir.sexp"), data);
+  if (!cm.write_array || cm.write_array->columns.empty()) {
+    ++failures;
+    std::printf("FAIL gqshadow: no write_array\n");
+    return;
+  }
+  expect_eq("gqshadow truncated", cm.write_array->truncated, "");
+  expect_eq("gqshadow header", joined(cm.write_array->columns), "mu,x.1,x.2");
+
+  const std::vector<double> want{0.375, 3.75, 7.5};
+  auto expect_row = [&](const char* what, const std::vector<double>& got) {
+    if (got != want) {
+      ++failures;
+      std::printf("FAIL gqshadow %s row\n", what);
+      const size_t n = std::max(got.size(), want.size());
+      for (size_t i = 0; i < n; ++i)
+        std::printf("  [%zu] got %.17g want %.17g\n", i,
+                    i < got.size() ? got[i] : NAN,
+                    i < want.size() ? want[i] : NAN);
+    }
+  };
+
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  wex.params_data()[0] = 0.375;
+  wex.run_forward_only();
+  std::vector<double> row;
+  for (const auto& c : cm.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    row.insert(row.end(), p, p + c.len);
+  }
+  expect_row("compiled", row);
+
+  // A stale three-wide `x` in the base environment must not widen the row.
+  auto prog = std::make_shared<mir::Program>(mir::read_program(
+      sexp::parse(slurp("tests/fixtures/gqshadow.tmir.sexp"))));
+  std::map<std::string, DataMap::Entry> base;
+  for (const char* flag :
+       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
+    DataMap::Entry one;
+    one.is_int = true;
+    one.i = {1};
+    one.r = {1.0};
+    base[flag] = one;
+  }
+  base["x"].r = {1.0, 1.0, 1.0};
+  base["x"].dims = {3};
+  WaInterp interpreted(prog, std::move(base));
+  std::map<std::string, DataMap::Entry> params;
+  params["mu"].r = {0.375};
+  WaRng rng(1234);
+  expect_row("interpreted", interpreted.eval(params, rng));
+  expect_eq("gqshadow interpreted header", joined(interpreted.columns()),
+            "mu,x.1,x.2");
+}
+
 // WaInterp remains the independent oracle for caller-owned RNG and runtime
 // control now that the same section can also compile completely.
 void test_interpreted_gq() {
@@ -3647,6 +3748,8 @@ int main() {
   test_wanames_pipeline();
   test_wanames_interpreter_schema();
   test_array_of_matrix_columns();
+  test_gq_bare_fill_is_nan();
+  test_gq_name_shadowing();
   test_interpreted_gq();
   test_constant_folded_gq_column();
   test_binomial_rng_helper_contract();
