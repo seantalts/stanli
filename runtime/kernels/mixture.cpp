@@ -74,6 +74,34 @@ void lse_rows_bwd(KernelCtx& ctx) {
   }
 }
 
+// ---- plain sum over packed rows -------------------------------------------
+// The same packing, without the exponential: idata[0] = row width K, one
+// output per row. Each row accumulates ascending, so a row is bit-identical
+// to the OP_SUM_VEC a fused lane replaces.
+void sum_rows_fwd(KernelCtx& ctx) {
+  assert(ctx.n_idata == 1);
+  const int64_t K = ctx.idata[0];
+  assert(K > 0 && ctx.in[0].len == ctx.out.len * K);
+  for (int64_t r = 0; r < ctx.out.len; ++r) {
+    const double* row = ctx.in[0].data + r * K;
+    double acc = 0;
+    for (int64_t k = 0; k < K; ++k) acc += row[k];
+    ctx.out.data[r] = acc;
+  }
+}
+
+void sum_rows_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  assert(ctx.n_idata == 1);
+  const int64_t K = ctx.idata[0];
+  assert(K > 0 && ctx.in[0].len == ctx.out.len * K);
+  for (int64_t r = 0; r < ctx.out.len; ++r) {
+    double* row = ctx.in_adj[0].data + r * K;
+    const double scale = ctx.out_adj_vec.data[r];
+    for (int64_t k = 0; k < K; ++k) row[k] += scale;
+  }
+}
+
 // ---- log_sum_exp(a, b) / log_mix(theta, a, b) -----------------------------
 // Shape dispatch matches the elementwise binaries: each argument is len 1
 // (broadcast) or len N, out is len N, out[n] applies the scalar stan-math
@@ -171,6 +199,7 @@ void register_mixture_kernels() {
   register_kernel(OP_LOG_SUM_EXP, Kernel{lse_fwd, lse_bwd, lse_scratch});
   register_kernel(OP_LOG_SUM_EXP_ROWS,
                   Kernel{lse_rows_fwd, lse_rows_bwd, lse_scratch});
+  register_kernel(OP_SUM_ROWS, Kernel{sum_rows_fwd, sum_rows_bwd, nullptr});
   register_kernel(OP_LSE2, Kernel{lse2_fwd, mix_bwd<2>, mix_scratch<2>});
   register_kernel(OP_LOG_DIFF_EXP,
                   Kernel{log_diff_exp_fwd, mix_bwd<2>, mix_scratch<2>});

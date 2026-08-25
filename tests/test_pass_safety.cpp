@@ -20,6 +20,7 @@
 #include <stanli/inplace.hpp>
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/partition.hpp>
 #include <stanli/reroll.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -111,6 +112,7 @@ static std::vector<double> route_adjoints(uint16_t oc, bool poison) {
       out_len = 1;
       break;
     case OP_LOG_SUM_EXP_ROWS:
+    case OP_SUM_ROWS:
       idata = {3};  // two packed rows of width three
       out_len = 2;
       break;
@@ -317,6 +319,8 @@ static void test_random_graphs_preserve_gradients() {
     forward_stores_to_loads(g, {});
     reroll(g, f2, tt, {});
     make_inplace_updates(g, tt);  // slice stores reroll just created
+    partition_lanes(g, f2, tt, {});
+    make_inplace_updates(g, tt);
     // The whole pipeline, in order. Islands are forced on: these graphs
     // are small, so the pass's cost estimate would decline nearly all of
     // them, and it is the compiler that this test is for.

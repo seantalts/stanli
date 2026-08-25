@@ -419,6 +419,112 @@ static void check_rows() {
   check_row_edge("rows nan", {-1.0, nan, 2.0});
 }
 
+// ---- 4. Packed row-wise plain sum ------------------------------------------
+// The per-lane reduction a partitioned bucket needs: L lanes' width-W windows
+// arrive as one gathered vector, and this maps them back to one value per
+// lane. Row r must equal the OP_SUM_VEC it replaces, bit for bit.
+static RowsRun run_sum_rows(const std::vector<double>& x, int K,
+                            const std::vector<double>& weights = {}) {
+  const int64_t R = (int64_t)x.size() / K;
+  Graph g;
+  const int in = g.add_slot((int64_t)x.size(), true);
+  const int out = g.add_slot(R, false);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_SUM_ROWS, {in}, out, {K});
+  int weight_slot = -1;
+  if (weights.empty()) {
+    g.add_op(OP_SUM_VEC, {out}, lp);
+  } else {
+    weight_slot = g.add_slot(R, false);
+    g.add_op(OP_DOT, {out, weight_slot}, lp);
+  }
+  g.result_slot = lp;
+
+  Executor ex(std::move(g));
+  for (size_t i = 0; i < x.size(); ++i) ex.param_ptr(in)[i] = x[i];
+  for (size_t i = 0; i < weights.size(); ++i)
+    ex.value_ptr(weight_slot)[i] = weights[i];
+  RowsRun r;
+  r.grad.resize(x.size());
+  r.value = ex.gradient(r.grad.data());
+  r.out.assign(ex.value_ptr(out), ex.value_ptr(out) + R);
+  return r;
+}
+
+// One row through OP_SUM_VEC, which is the scalar op the fused form replaces.
+static double sum_vec_value(const std::vector<double>& row) {
+  Graph g;
+  const int in = g.add_slot((int64_t)row.size(), false);
+  const int out = g.add_slot(1, false);
+  g.add_op(OP_SUM_VEC, {in}, out);
+  g.result_slot = out;
+  Executor ex(std::move(g));
+  for (size_t i = 0; i < row.size(); ++i) ex.value_ptr(in)[i] = row[i];
+  return ex.forward();
+}
+
+static void check_sum_rows() {
+  const int K = 5;
+  const std::vector<double> x{-1.3,  0.4, 2.1,   -0.7, 0.2,   1e16, 1.0,
+                              -1e16, 0.5, 0.25,  -0.0, 0.0,   -3.0, 4.0,
+                              -5.5,  0.1, 0.125, 0.25, 0.375, 0.5};
+  const int R = (int)x.size() / K;
+  const RowsRun got = run_sum_rows(x, K);
+
+  double want_lp = 0.0;
+  for (int r = 0; r < R; ++r) {
+    const std::vector<double> row(x.begin() + r * K, x.begin() + (r + 1) * K);
+    const double want = sum_vec_value(row);
+    expect_eq("sum_rows out" + std::to_string(r), got.out[(size_t)r], want);
+    want_lp += want;
+  }
+  expect_eq("sum_rows lp", got.value, want_lp);
+  for (size_t i = 0; i < x.size(); ++i)
+    expect_eq("sum_rows g" + std::to_string(i), got.grad[i], 1.0);
+
+  // Each row's own output adjoint reaches its elements, rather than the rows
+  // being treated as one implicit sum.
+  const std::vector<double> weights{0.5, -1.25, 2.0, 0.0};
+  const RowsRun weighted = run_sum_rows(x, K, weights);
+  for (size_t i = 0; i < x.size(); ++i)
+    expect_eq("weighted sum_rows g" + std::to_string(i), weighted.grad[i],
+              weights[i / (size_t)K]);
+
+  Graph shape;
+  const int in = shape.add_slot((int64_t)x.size(), true);
+  const int out = shape.add_slot(R, false);
+  shape.add_op(OP_SUM_ROWS, {in}, out, {K});
+  const Kernel* kernel = find_kernel(OP_SUM_ROWS);
+  expect("sum_rows kernel registered", kernel != nullptr);
+  if (kernel)
+    expect("sum_rows needs no scratch", kernel->scratch_size == nullptr);
+  expect("sum_rows backward is value-free",
+         has_op_trait(OP_SUM_ROWS, op_trait::kBackwardValueFree));
+  expect("sum_rows opcode name",
+         std::string(opcode_name(OP_SUM_ROWS)) == "OP_SUM_ROWS");
+
+  // Widths either side of Eigen's packet boundary, and one row per element.
+  for (int width : {1, 7, 16}) {
+    std::vector<double> wide((size_t)width * 3);
+    for (size_t i = 0; i < wide.size(); ++i)
+      wide[i] = 0.37 * (double)i - 2.1 + 0.05 * (double)(i % 3);
+    const RowsRun w = run_sum_rows(wide, width);
+    for (int r = 0; r < 3; ++r) {
+      const std::vector<double> row(wide.begin() + r * width,
+                                    wide.begin() + (r + 1) * width);
+      expect_eq(
+          "sum_rows K=" + std::to_string(width) + " out" + std::to_string(r),
+          w.out[(size_t)r], sum_vec_value(row));
+    }
+  }
+
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const RowsRun edge = run_sum_rows({inf, -inf, 1.0, nan, 0.0, 2.0}, 3);
+  expect("sum_rows inf row", std::isnan(edge.out[0]));
+  expect("sum_rows nan row", std::isnan(edge.out[1]));
+}
+
 int main() {
   const int64_t N = 4;
 
@@ -485,6 +591,7 @@ int main() {
   check_bitwise("unroll lmix vvv", OP_LOG_MIX, N, {TH, A, B});
 
   check_rows();
+  check_sum_rows();
 
   if (failures) {
     std::printf("%d failures\n", failures);

@@ -34,16 +34,12 @@
 namespace stanli {
 namespace {
 
-// Effects are graph semantics: a merged print prints once, a merged check
-// throws once, a merged draw returns the same number twice. The set is the
-// union of constfold.cpp's and reroll's ops_match, plus the two opcodes
-// holding structure this pass cannot compare.
+// The shared effect blocklist, plus the opcodes holding structure this pass
+// cannot compare: a reduction whose variant selects its arithmetic grouping,
+// a compiled region, a solver.
 bool never_merge(uint16_t oc) {
-  return oc == OP_CHECK_STRUCTURED || oc == OP_CHECK_MATCHING_DIMS ||
-         oc == OP_CHECK_LOWER || oc == OP_CHECK_UPPER || oc == OP_CATEGORICAL ||
-         oc == OP_RNG || oc == OP_PRINT || oc == OP_REJECT ||
-         oc == OP_PROD_VEC || oc == OP_EXTREMA_VEC || oc == OP_ISLAND ||
-         oc == OP_ODE;
+  return is_effectful_op(oc) || oc == OP_PROD_VEC || oc == OP_EXTREMA_VEC ||
+         oc == OP_ISLAND || oc == OP_ODE;
 }
 
 struct Key {

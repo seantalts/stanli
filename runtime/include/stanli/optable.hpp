@@ -80,6 +80,7 @@ namespace stanli {
   X(OP_EIGENVECTORS_SYM)            \
   X(OP_LOG_SUM_EXP)                 \
   X(OP_LOG_SUM_EXP_ROWS)            \
+  X(OP_SUM_ROWS)                    \
   X(OP_LSE2)                        \
   X(OP_LOG_DIFF_EXP)                \
   X(OP_LOG_MIX)                     \
@@ -715,6 +716,12 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_POISSON_LPMF:
     case OP_POISSON_LOG_LPMF:
     case OP_NEG_BINOMIAL_2_LPMF:
+    // Two integer groups rather than one, so their lanes concatenate group by
+    // group. Only partition.cpp does that; legacy re-roll's one-immediate
+    // path refuses them.
+    case OP_BINOMIAL_LPMF:
+    case OP_BINOMIAL_LOGIT_LPMF:
+    case OP_BETA_BINOMIAL_LPMF:
 #define STANLI_INT_DENSITY_TRAIT(code, fn, nreal, tier) case code:
       STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TRAIT)
 #undef STANLI_INT_DENSITY_TRAIT
@@ -760,6 +767,7 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_SET_SLICE_STRIDED_INPLACE:
     case OP_LOG_SUM_EXP:
     case OP_LOG_SUM_EXP_ROWS:
+    case OP_SUM_ROWS:
       return op_trait::kBackwardValueFree;
     default:
       return 0;
@@ -768,6 +776,27 @@ constexpr uint8_t op_traits(uint16_t opcode) {
 
 constexpr bool has_op_trait(uint16_t opcode, uint8_t trait) {
   return (op_traits(opcode) & trait) != 0;
+}
+
+// Ops no rewrite may run a different number of times than the graph says.
+// Most are effects -- a merged print prints once, a hoisted draw returns the
+// same number twice, a folded check throws at compile time -- and
+// OP_CATEGORICAL rides along because its per-op spec payload is not
+// comparable, so two of them are never known to be the same computation.
+constexpr bool is_effectful_op(uint16_t opcode) {
+  switch (opcode) {
+    case OP_CHECK_STRUCTURED:
+    case OP_CHECK_MATCHING_DIMS:
+    case OP_CHECK_LOWER:
+    case OP_CHECK_UPPER:
+    case OP_CATEGORICAL:
+    case OP_RNG:
+    case OP_PRINT:
+    case OP_REJECT:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // "OP_NORMAL_LPDF" for a known opcode, "OP_?" otherwise. Diagnostics and

@@ -1410,9 +1410,13 @@ static void test_e2e_fixtures() {
   };
   for (const Case& c : cases) {
     size_t ops_unrolled = 0, ops_rerolled = 0;
+    // Both lane passes off: partition finds these same loops from their
+    // delimiters, so leaving it on would compare the fused graph with itself.
     test_setenv("STANLI_NO_REROLL", "1", 1);
+    test_setenv("STANLI_NO_PARTITION", "1", 1);
     const std::vector<double> want = e2e_grad(c.sexp, c.json, &ops_unrolled);
     test_unsetenv("STANLI_NO_REROLL");
+    test_unsetenv("STANLI_NO_PARTITION");
     const std::vector<double> got = e2e_grad(c.sexp, c.json, &ops_rerolled);
     expect((std::string(c.name) + " sizes").c_str(), got.size() == want.size());
     for (size_t i = 0; i < want.size() && i < got.size(); ++i)

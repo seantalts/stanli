@@ -8,6 +8,7 @@
 #include <stanli/ode.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/island.hpp>
+#include <stanli/partition.hpp>
 #include <stanli/reroll.hpp>
 #include <stanli/sexp.hpp>
 #include <stanli/structured_check.hpp>
@@ -48,6 +49,7 @@ struct PrepTrace {
     Removed,
     ConstFold,
     Reroll,
+    Partition,
     Regions,
     Truncated,
     MirBytes,
@@ -161,6 +163,12 @@ struct PrepTrace {
           field("row_steps", r.d);
           field("list_steps", r.b);
           field("candidate_steps", r.c);
+          break;
+        case Extra::Partition:
+          field("groups", r.a);
+          field("lanes", r.b);
+          field("declined", r.c);
+          field("list_steps", r.d);
           break;
         case Extra::Regions:
           field("regions", r.a);
@@ -4957,6 +4965,28 @@ struct Lowering {
     prep.graph(prep_graph, "post_reroll_inplace", post_reroll_inplace_time, g,
                out.fills, target_terms.size(), out.views.size(),
                PrepTrace::Extra::Rewrites, post_reroll_inplace);
+    // After re-roll, which keeps first crack at the contiguous shapes it
+    // already handles, and before CSE, which would merge ops shared between
+    // lanes and leave the lanes no longer whole.
+    const auto partition_time = prep.start();
+    const PartitionStats parted =
+        partition_lanes(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "partition", partition_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Partition, parted.groups, parted.lanes, false,
+               0, parted.declined, parted.list_steps);
+    // Same proof the slice stores re-roll makes get: rebuilt from the terms
+    // partition just replaced.
+    std::vector<int> post_partition_roots = roots;
+    post_partition_roots.insert(post_partition_roots.end(),
+                                target_terms.begin(), target_terms.end());
+    const auto post_partition_inplace_time = prep.start();
+    const int post_partition_inplace =
+        parted.groups ? make_inplace_updates(g, post_partition_roots) : 0;
+    prep.graph(prep_graph, "post_partition_inplace",
+               post_partition_inplace_time, g, out.fills, target_terms.size(),
+               out.views.size(), PrepTrace::Extra::Rewrites,
+               post_partition_inplace);
     // After reroll, whose lane matching needs the repeated ops it hoists to
     // still be there, and before islands, so they compile the smaller
     // residue.

@@ -87,10 +87,7 @@ bool is_element_store(const Op& op) {
 // OP_INDEX (checked as a progression during classification).
 bool ops_match(const Graph& g, const Op& a, const Op& b) {
   if (a.opcode != b.opcode || a.variant != b.variant || a.n_in != b.n_in ||
-      a.out2 >= 0 || b.out2 >= 0 || a.opcode == OP_CHECK_STRUCTURED ||
-      a.opcode == OP_CHECK_MATCHING_DIMS || a.opcode == OP_CHECK_LOWER ||
-      a.opcode == OP_CHECK_UPPER || a.opcode == OP_CATEGORICAL ||
-      a.opcode == OP_RNG || a.opcode == OP_PRINT || a.opcode == OP_REJECT ||
+      a.out2 >= 0 || b.out2 >= 0 || is_effectful_op(a.opcode) ||
       a.opcode == OP_PROD_VEC || a.opcode == OP_EXTREMA_VEC)
     return false;
   for (int j = 0; j < a.n_in; ++j)
@@ -868,8 +865,23 @@ RerollStats reroll(Graph& g,
                   prefix, std::min(br_internal, std::max(br_term, br_nonterm)));
             } else if (has_op_trait(t.opcode, op_trait::kRerollIdataDensity) &&
                        t.n_idata != 1) {
-              ok = false;
-              prefix = 0;  // already a vector op; nothing to fuse
+              // More than one immediate: either already a vector op, or one
+              // of the binomials, whose two integer groups only partition.cpp
+              // concatenates. One lane still stands for all of them when the
+              // real inputs and the immediates alike are lane-invariant.
+              int64_t br_iinv = Luse;
+              for (int64_t l = 1; l < Luse && br_iinv == Luse; ++l)
+                for (int64_t k = 0; k < t.n_idata; ++k)
+                  if (op_at(p, l).idata[k] != t.idata[k]) {
+                    br_iinv = l;
+                    break;
+                  }
+              if (!all_terms && all_inputs_invariant && br_iinv == Luse) {
+                ap.hoist = true;
+              } else {
+                ok = false;
+                prefix = 0;
+              }
             } else if (all_terms) {
               if (!uses[(size_t)t.out].empty()) {
                 ok = false;
