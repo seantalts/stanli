@@ -5,7 +5,7 @@ what, and recipes for the most common changes. It assumes you know
 Stan. It does not assume you have worked on a compiler or an
 interpreter; the handful of terms of art are explained as they come up.
 
-Three companion documents:
+Companion documents:
 
 - [`docs/how-it-works.md`](how-it-works.md) explains the design and why
   an interpreter can outrun a compiled model. If you are here for the
@@ -18,6 +18,9 @@ Three companion documents:
   three small models through every layer described here: the normal
   vectorized path, a parameter branch, and a recurrence with its
   generated backward.
+- [`TESTING.md`](../TESTING.md) is the inventory of every oracle: what
+  each one checks, what it gates, what it cannot see, and the known
+  limits. Read it before changing anything a gate depends on.
 
 ## The idea, and five words for it
 

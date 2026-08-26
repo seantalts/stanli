@@ -49,7 +49,8 @@ could not build one on their farm.
   densities, all 105 cdf/lcdf/lccdf, truncation, censoring, ordinal
   regression and the count GLMs, each verified against CmdStan; the table
   there regenerates from the nightly sweep.
-- How the numbers are guarded and coverage is measured: [TESTING.md](TESTING.md).
+- Why you can trust this: [TESTING.md](TESTING.md). Every oracle, what it
+  gates, what it cannot see, and the known limits.
 - Install size: one 29.7 MB shared library, a 10.8 MB wheel. Breakdown in
   [Binary size](#binary-size).
 - How this is possible, for statisticians:
