@@ -68,9 +68,12 @@ repeatedly below.
 ```
 model.stan + data.json
   |  stanc3, linked in-process (stanc_embed)
-  v  optimized MIR (--O1), as s-expressions
-mir_reader.cpp
-  |  parsed into mir::Stmt / mir::Expr structs
+  v  optimized typed MIR (--O1)
+portable_mir.ml
+  |  canonical portable MIR v1 JSON
+  v
+decode_program (portable JSON or legacy s-expression)
+  |  decoded into mir::Stmt / mir::Expr structs
   v
 lower.cpp
   |  MIR statements emitted as ops
@@ -92,13 +95,16 @@ Step by step:
    program) is linked into the stanli library and runs in-process
    ([`tools/stanc_embed/`](../tools/stanc_embed/)). Your model is
    parsed, typechecked, and optimized by exactly the code CmdStan uses.
-   But instead of asking it to generate C++, stanli asks it to print
-   its internal representation of the program, called MIR, as
-   s-expressions (parenthesized text, in the Lisp style).
+   But instead of asking it to generate C++, stanli receives the optimized
+   typed MIR value and encodes the runtime's consumed slice with
+   [`portable_mir.ml`](../tools/stanc_embed/portable_mir.ml).
 
-2. **[`mir_reader.cpp`](../runtime/src/mir_reader.cpp) parses that
-   text** into plain C++ structs (`mir::Stmt`, `mir::Expr`). Anything
-   it does not recognize is a loud error, never a guess.
+2. **[`mir_decode.cpp`](../runtime/src/mir_decode.cpp) selects a decoder.**
+   Native embedded compilation emits the stanli-owned portable JSON format;
+   browser and standalone compiler paths may still emit the legacy stanc3
+   s-expression. Both decode into the same plain C++ structs (`mir::Stmt`,
+   `mir::Expr`) and share name resolution and validation. Anything they do
+   not recognize is a loud error, never a guess.
 
 3. **[`lower.cpp`](../runtime/src/lower.cpp) turns MIR into the op
    graph.** Along the way: transformed data is evaluated once, at
@@ -139,8 +145,9 @@ ones through every stage, op list and register programs included.
 | Path | Owns |
 |---|---|
 | [`runtime/include/stanli/`](../runtime/include/stanli/) | Public headers. [`graph.hpp`](../runtime/include/stanli/graph.hpp) defines the IR: `Slot` and `Op` over flat arenas. |
+| [`compiler/portable_ir/SCHEMA.md`](../compiler/portable_ir/SCHEMA.md), [`tools/stanc_embed/portable_mir.ml`](../tools/stanc_embed/portable_mir.ml) | The stanli-owned portable MIR contract and its typed-OCaml encoder. |
 | [`runtime/src/lower.cpp`](../runtime/src/lower.cpp) | Lowering: transformed MIR in, op graph out. |
-| [`runtime/src/mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Parses stanc3's s-expressions into MIR structs. |
+| [`runtime/src/mir_decode.cpp`](../runtime/src/mir_decode.cpp), [`portable_mir_reader.cpp`](../runtime/src/portable_mir_reader.cpp), [`mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Dispatches portable JSON or legacy s-expressions into one MIR representation and runs their shared finalization. |
 | [`runtime/src/inplace.cpp`](../runtime/src/inplace.cpp), [`constfold.cpp`](../runtime/src/constfold.cpp), [`reroll.cpp`](../runtime/src/reroll.cpp), [`island.cpp`](../runtime/src/island.cpp) | The graph passes, in pipeline order. |
 | [`runtime/src/executor.cpp`](../runtime/src/executor.cpp) | Runs the op list. `STANLI_PROFILE=1` prints per-opcode time accounting. |
 | [`runtime/kernels/`](../runtime/kernels/) | The kernels: [`densities.cpp`](../runtime/kernels/densities.cpp), [`elementwise.cpp`](../runtime/kernels/elementwise.cpp), [`constrain.cpp`](../runtime/kernels/constrain.cpp), and friends. [`matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp) and [`legacy_fns.cpp`](../runtime/kernels/legacy_fns.cpp) wrap stan-math functions that have no native kernel yet. |

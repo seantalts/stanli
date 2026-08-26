@@ -1,8 +1,9 @@
 # Build the platform wheels, and publish them to PyPI on a version tag.
 #
-# The same job builds on every push and pull request, so the release path
-# is the path that has already been exercised hundreds of times by the
-# time a tag reaches it. Only the publish job is gated on the tag.
+# Pull requests build the representative manylinux target and run the full
+# runtime and corpus tests. Every release target also builds after merge,
+# nightly, and on version tags; publishing is gated on the tag and all of
+# those target builds.
 #
 # Not cibuildwheel: it exists to build one wheel per CPython version, and
 # stanli ships a ctypes-loaded shared library with no extension module, so
@@ -10,8 +11,9 @@
 #
 # Windows builds under mingw-w64 (stan-math does not build under MSVC,
 # which is why RStan ships through RTools), exports the C ABI through a
-# .def file, and bundles the release stanc.exe as a subprocess: the
-# embedded compiler waits on opam's native Windows support. That job
+# .def file, and bundles an exact-source stanc.exe as a subprocess. Keeping
+# the compiler in a separate process avoids introducing a Windows OCaml DLL
+# ABI and isolates compiler state from the sampler. That job
 # does not run on pull requests: mingw compiles the density kernels an
 # order of magnitude slower than every other platform (110 minutes for
 # that one translation unit against ~7 for the other 140 targets), so
@@ -50,8 +52,9 @@ concurrency:
 
 env:
   # Must match tools/dev_setup.sh. The embedded compiler cache is keyed on
-  # it, so bumping it there and here invalidates the cache exactly once.
-  STANC3_SRC_SHA: ac69570adecc41925b4ad72b6b2681c98c09c57d
+  # the commit, so bumping it there and here invalidates the cache once.
+  STANC3_SRC_REPO: https://github.com/seantalts/stanc3.git
+  STANC3_SRC_SHA: f453247eea74f5717ec488ab000783d4141c3bc9
   OCAML_VERSION: 5.5.0
   OPAM_VERSION: 2.5.2
   # Must match tools/dev_setup.sh; pins the corpus the reference check reads.
@@ -89,15 +92,18 @@ jobs:
       # 11 MB object, ~30 minutes to build. Keyed on the stanc3 commit,
       # the OCaml version, and the embed shim itself, so editing the shim
       # or its link flags rebuilds instead of reusing a stale object. A
-      # hit skips the entire opam path below. The caml/ headers ride along
-      # because the link needs them and a hit means no opam switch exists
-      # to take them from.
+      # hit skips the entire opam path below. The matching standalone compiler
+      # supports the producer-parity check; the caml/ headers ride along
+      # because a cache hit means no opam switch exists to provide them.
       - name: Restore the embedded stanc3 object
         id: stanc-cache
         uses: actions/cache@v4
         with:
           path: |
             deps/stanc3/stanc_embed.o
+            deps/stanc3/stanc_embed.o.stamp
+            deps/stanc3/stanc
+            deps/stanc3/stanc.src
             deps/ocaml-include
           key: stanc-embed-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('tools/stanc_embed/**') }}
 
@@ -157,8 +163,8 @@ jobs:
           python3 -m pip install "readme_renderer[md]"
 
 
-      # Everything fetch.sh pulls is pinned by SHA or by release asset, so
-      # the whole directory is a pure function of the script.
+      # Everything fetch.sh pulls is pinned by a git SHA, so the whole
+      # directory is a pure function of the script.
       - name: Restore the vendored dependencies
         id: deps-cache
         uses: actions/cache@v4
@@ -167,23 +173,36 @@ jobs:
           # above, and a copy riding in here restores over a fresh object
           # (and once satisfied dev_setup's presence check with a STALE
           # one, shipping a wheel whose embedded compiler lagged the
-          # shim). The -embed1 suffix retires the poisoned entries.
+          # shim). Standalone compiler products built later can also join
+          # this cache, so its key includes their source revision. The
+          # -embed2 suffix retires entries created before that was true.
           path: |
             deps/math
             deps/stan
             deps/stanc3
             !deps/stanc3/stanc_embed.o
-          key: deps-${{ matrix.plat }}-embed1-${{ hashFiles('deps/fetch.sh') }}
+            !deps/stanc3/stanc_embed.o.stamp
+            !deps/stanc3/stanc
+            !deps/stanc3/stanc.src
+          key: deps-${{ matrix.plat }}-embed2-${{ env.STANC3_SRC_SHA }}-${{ hashFiles('deps/fetch.sh') }}
 
       - name: Vendored dependencies
-        run: ./deps/fetch.sh
+        run: |
+          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
+                         tools/dev_setup.sh)
+          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
+                        tools/dev_setup.sh)
+          test "$setup_repo" = "$STANC3_SRC_REPO"
+          test "$setup_pin" = "$STANC3_SRC_SHA"
+          ./deps/fetch.sh
 
       - name: Build the embedded stanc3 object
         if: steps.stanc-cache.outputs.cache-hit != 'true'
         run: |
           # The stanc-embed cache missed, so any object on disk came from
           # another cache and is stale by definition.
-          rm -f deps/stanc3/stanc_embed.o
+          rm -f deps/stanc3/stanc_embed.o deps/stanc3/stanc_embed.o.stamp \
+            deps/stanc3/stanc deps/stanc3/stanc.src
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build
           mkdir -p deps/ocaml-include
@@ -346,6 +365,49 @@ jobs:
           # argument, two models through the one dlopen'd runtime library.
           /tmp/wheeltest/bin/python tests/test_bridgestan_embed.py
 
+      # Exercise the real OCaml producer against the exact-source legacy
+      # compiler, then compare the decoded program and the executable graph.
+      # The normal C++ test has a test-only writer so it can run without an
+      # OCaml toolchain; this closes the producer/schema drift gap in CI.
+      - name: Typed producer matches exact-source legacy MIR
+        if: matrix.runtime == 'linux-x86_64'
+        run: |
+          cp tests/fixtures/es.stan /tmp/stanli-portable-es.stan
+          cp tests/fixtures/view_udf_local_data_branch.stan \
+            /tmp/stanli-portable-nested-udf.stan
+          cp tests/stanc3/mother.stan /tmp/stanli-portable-mother.stan
+          deps/stanc3/stanc --O1 --debug-optimized-mir \
+            /tmp/stanli-portable-es.stan > /tmp/stanli-es.legacy-mir
+          deps/stanc3/stanc --O1 --debug-optimized-mir \
+            /tmp/stanli-portable-nested-udf.stan \
+            > /tmp/stanli-nested-udf.legacy-mir
+          deps/stanc3/stanc --O1 --debug-optimized-mir \
+            /tmp/stanli-portable-mother.stan \
+            > /tmp/stanli-mother.legacy-mir
+          /tmp/wheeltest/bin/python - <<'PY'
+          from pathlib import Path
+          import stanli
+
+          models = {
+              "es": Path("tests/fixtures/es.stan"),
+              "nested-udf": Path("tests/fixtures/view_udf_local_data_branch.stan"),
+              "mother": Path("tests/stanc3/mother.stan"),
+          }
+          for name, path in models.items():
+              portable = stanli.stan_to_mir(path.read_text())
+              assert portable.startswith('{"stanli_ir":1,"program":')
+              assert not portable.endswith(("\n", "\r"))
+              Path(f"/tmp/stanli-{name}.portable-mir").write_text(portable)
+          PY
+          build-rel/test_mir_decode \
+            /tmp/stanli-es.legacy-mir /tmp/stanli-es.portable-mir
+          build-rel/test_mir_decode --program-only \
+            /tmp/stanli-nested-udf.legacy-mir \
+            /tmp/stanli-nested-udf.portable-mir
+          build-rel/test_mir_decode --program-only \
+            /tmp/stanli-mother.legacy-mir \
+            /tmp/stanli-mother.portable-mir
+
       # The one check that a second implementation makes and stanli's own
       # tests cannot: the facade and its tests come from the same head, so
       # they can agree on a wrong reading of what a bs_ call means.
@@ -484,12 +546,66 @@ jobs:
           name: r-check-log
           path: r/stanli.Rcheck/
 
+  # The Windows wheel cannot embed the native compiler yet. Cross-build the
+  # executable from the same source revision the other wheels embed, using
+  # stanc3's own Linux-to-Windows recipe, then pass it to the Windows job as
+  # a same-run artifact. The adjacent .src file is checked before packaging.
+  stanc-windows:
+    name: cross-build Windows stanc
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 gcc-mingw-w64-i686
+
+      - name: OCaml ${{ env.OCAML_VERSION }} for Windows
+        uses: ocaml/setup-ocaml@v3
+        with:
+          cache-prefix: stanli-windows-${{ env.STANC3_SRC_SHA }}
+          dune-cache: true
+          ocaml-compiler: ocaml-windows64.${{ env.OCAML_VERSION }}
+          opam-repositories: |
+            windows: http://github.com/ocaml-cross/opam-cross-windows.git
+            default: https://github.com/ocaml/opam-repository.git
+
+      - name: Build the pinned compiler
+        run: |
+          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
+                         tools/dev_setup.sh)
+          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
+                        tools/dev_setup.sh)
+          test "$setup_repo" = "$STANC3_SRC_REPO"
+          test "$setup_pin" = "$STANC3_SRC_SHA"
+          git clone "$STANC3_SRC_REPO" deps/stanc3-src
+          git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
+          test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
+          (cd deps/stanc3-src &&
+           bash -x scripts/install_build_deps_windows.sh &&
+           opam exec -- dune subst &&
+           opam exec -- dune build -x windows --profile release)
+          mkdir -p windows-stanc
+          cp deps/stanc3-src/_build/default.windows/src/stanc/stanc.exe \
+             windows-stanc/stanc
+          printf '%s\n' "$STANC3_SRC_SHA" > windows-stanc/stanc.src
+          test "$(cat windows-stanc/stanc.src)" = "$STANC3_SRC_SHA"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-stanc
+          if-no-files-found: error
+          path: windows-stanc/
+
   # Everything except pull requests: main pushes, the nightly cron, and
   # release tags (the publish job needs this wheel, so a tag still waits
   # for it).
   windows:
     name: win_amd64
     if: github.event_name != 'pull_request'
+    needs: stanc-windows
     runs-on: windows-2022
     defaults:
       run:
@@ -522,6 +638,18 @@ jobs:
 
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
+
+      - name: Install the source-built stanc
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-stanc
+          path: deps/stanc3
+
+      - name: Check stanc provenance
+        run: |
+          test "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA"
+          chmod +x deps/stanc3/stanc
+          ./deps/stanc3/stanc --version
 
       - name: Configure, build, test
         run: |
@@ -847,7 +975,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: web/stancjs.bc.js
-          key: stancjs-release-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-jsoo6.4.1
+          key: stancjs-release-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-jsoo6.4.1-subst1
 
       - name: opam ${{ env.OPAM_VERSION }}
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
@@ -864,18 +992,29 @@ jobs:
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
         run: |
           opam switch create stancjs "ocaml-base-compiler.$OCAML_VERSION" -y
-          git clone https://github.com/stan-dev/stanc3.git deps/stanc3-src
-          git -C deps/stanc3-src checkout -q "$STANC3_SRC_SHA"
+          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
+                         tools/dev_setup.sh)
+          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
+                        tools/dev_setup.sh)
+          test "$setup_repo" = "$STANC3_SRC_REPO"
+          test "$setup_pin" = "$STANC3_SRC_SHA"
+          git clone "$STANC3_SRC_REPO" deps/stanc3-src
+          git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
+          test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
            opam install . --switch=stancjs --deps-only -y &&
            opam install --switch=stancjs -y \
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
              js_of_ocaml-ppx.6.4.1 &&
            eval "$(opam env --switch=stancjs)" &&
+           dune subst &&
            dune build --profile release src/stancjs/stancjs.bc.js)
           cp deps/stanc3-src/_build/default/src/stancjs/stancjs.bc.js web/
         env:
           OPAMYES: '1'
+
+      - name: Compile and sample through the browser compiler
+        run: node tests/test_wasm.cjs web/stanli.js web/stancjs.bc.js
 
       - name: Assemble the page and the npm package
         run: |
@@ -928,7 +1067,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: js/stancjs.bc.js
-          key: stancjs-release-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-jsoo6.4.1
+          key: stancjs-release-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-jsoo6.4.1-subst1
 
       - name: Build stancjs
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
@@ -939,14 +1078,22 @@ jobs:
           sudo install -m 755 /tmp/opam /usr/local/bin/opam
           opam init --bare --disable-sandboxing --no-setup -y
           opam switch create stancjs "ocaml-base-compiler.$OCAML_VERSION" -y
-          git clone https://github.com/stan-dev/stanc3.git deps/stanc3-src
-          git -C deps/stanc3-src checkout -q "$STANC3_SRC_SHA"
+          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
+                         tools/dev_setup.sh)
+          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
+                        tools/dev_setup.sh)
+          test "$setup_repo" = "$STANC3_SRC_REPO"
+          test "$setup_pin" = "$STANC3_SRC_SHA"
+          git clone "$STANC3_SRC_REPO" deps/stanc3-src
+          git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
+          test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
            opam install . --switch=stancjs --deps-only -y &&
            opam install --switch=stancjs -y \
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
              js_of_ocaml-ppx.6.4.1 &&
            eval "$(opam env --switch=stancjs)" &&
+           dune subst &&
            dune build --profile release src/stancjs/stancjs.bc.js)
           cp deps/stanc3-src/_build/default/src/stancjs/stancjs.bc.js js/
         env:
@@ -959,6 +1106,9 @@ jobs:
           pkg=$(python3 -c "import json; print(json.load(open('js/package.json'))['version'])")
           echo "tag $tag, package.json $pkg"
           [ "$tag" = "$pkg" ]
+
+      - name: Compile and sample through the packaged browser compiler
+        run: node tests/test_wasm.cjs js/stanli.js js/stancjs.bc.js
 
       # Deliberately no registry-url: setup-node writes an .npmrc with a
       # placeholder _authToken when it is given one, npm sees credentials

@@ -1,4 +1,7 @@
 #include <stanli/mir.hpp>
+#include <stanli/optable.hpp>
+
+#include "mir_reader_internal.hpp"
 
 #include <limits>
 #include <map>
@@ -9,6 +12,345 @@ namespace mir {
 namespace {
 
 using sexp::Node;
+
+[[noreturn]] void malformed(const std::string& what) {
+  throw std::runtime_error("mir: malformed " + what);
+}
+
+void require_arity(const Expr& e, size_t expected) {
+  if (e.args.size() != expected)
+    malformed(e.name + " call: expected " + std::to_string(expected) +
+              " argument(s), got " + std::to_string(e.args.size()));
+}
+
+void require_arity(const Expr& e, size_t first, size_t second) {
+  if (e.args.size() != first && e.args.size() != second)
+    malformed(e.name + " call: expected " + std::to_string(first) + " or " +
+              std::to_string(second) + " argument(s), got " +
+              std::to_string(e.args.size()));
+}
+
+bool named(const Expr& e, std::initializer_list<const char*> names) {
+  for (const char* name : names)
+    if (e.name == name) return true;
+  return false;
+}
+
+// Validate the arities that the lowering and interpreters use as structural
+// dispatch. Unknown functions are intentionally left to their normal
+// unsupported-function diagnostic, but a known function must never reach an
+// unchecked args[k] with a malformed argument vector.
+void validate_funapp_arity(const Expr& e) {
+  if (e.fn_lib == Expr::Lib::UserDefined) return;
+
+  if (named(e, {"IndexAll"})) {
+    require_arity(e, 0);
+    return;
+  }
+  if (named(e, {"IndexSingle", "IndexMulti", "IndexUpfrom"})) {
+    require_arity(e, 1);
+    return;
+  }
+  if (named(e, {"IndexBetween"})) {
+    require_arity(e, 2);
+    return;
+  }
+
+  if (e.fn_lib == Expr::Lib::Internal &&
+      (e.name == "FnReadData" || e.name == "FnLength")) {
+    require_arity(e, 1);
+    return;
+  }
+
+  if (named(e, {"pi", "e", "machine_precision", "negative_infinity",
+                "positive_infinity"})) {
+    require_arity(e, 0);
+    return;
+  }
+
+// Keep these generated checks tied to the same registries that dispatch the
+// native lowering and interpreter kernels.
+#define STANLI_VALIDATE_UNARY(code, fn, value, delta, topology) \
+  if (e.name == #fn) {                                          \
+    require_arity(e, 1);                                        \
+    return;                                                     \
+  }
+  STANLI_SCALAR_UNARY_LIST(STANLI_VALIDATE_UNARY)
+#undef STANLI_VALIDATE_UNARY
+
+#define STANLI_VALIDATE_BINARY(code, fn, impl) \
+  if (e.name == #fn) {                         \
+    require_arity(e, 2);                       \
+    return;                                    \
+  }
+  STANLI_SCALAR_BINARY_LIST(STANLI_VALIDATE_BINARY)
+  STANLI_SCALAR_BINARY_INT_FIRST_LIST(STANLI_VALIDATE_BINARY)
+  STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_VALIDATE_BINARY)
+#undef STANLI_VALIDATE_BINARY
+
+#define STANLI_VALIDATE_DENSITY(code, fn, arity, tier) \
+  if (e.name == #fn) {                                 \
+    require_arity(e, arity);                           \
+    return;                                            \
+  }
+  STANLI_SCALAR_DENSITY_LIST(STANLI_VALIDATE_DENSITY)
+  STANLI_SCALAR_CDF_LIST(STANLI_VALIDATE_DENSITY)
+  STANLI_TAIL_CDF_LIST(STANLI_VALIDATE_DENSITY)
+#undef STANLI_VALIDATE_DENSITY
+
+#define STANLI_VALIDATE_INT_DENSITY(code, fn, real_arity, tier) \
+  if (e.name == #fn) {                                          \
+    require_arity(e, (real_arity) + 1);                         \
+    return;                                                     \
+  }
+  STANLI_INT_DENSITY_LIST(STANLI_VALIDATE_INT_DENSITY)
+  STANLI_INT_CDF_LIST(STANLI_VALIDATE_INT_DENSITY)
+  STANLI_TAIL_INT_CDF_LIST(STANLI_VALIDATE_INT_DENSITY)
+  STANLI_ORDERED_DENSITY_LIST(STANLI_VALIDATE_INT_DENSITY)
+#undef STANLI_VALIDATE_INT_DENSITY
+
+#define STANLI_VALIDATE_TWO_INT_CDF(code, fn, real_arity, tier) \
+  if (e.name == #fn) {                                          \
+    require_arity(e, (real_arity) + 2);                         \
+    return;                                                     \
+  }
+  STANLI_TWO_INT_CDF_LIST(STANLI_VALIDATE_TWO_INT_CDF)
+#undef STANLI_VALIDATE_TWO_INT_CDF
+
+  if (named(e, {"Plus__",
+                "Minus__",
+                "Times__",
+                "LDivide__",
+                "Divide__",
+                "EltTimes__",
+                "EltDivide__",
+                "Pow__",
+                "pow",
+                "Modulo__",
+                "IntDivide__",
+                "Greater__",
+                "Geq__",
+                "Less__",
+                "Leq__",
+                "Equals__",
+                "NEquals__",
+                "add",
+                "subtract",
+                "multiply",
+                "divide",
+                "elt_multiply",
+                "elt_divide",
+                "multiply_log",
+                "binomial_coefficient_log",
+                "dot_product",
+                "squared_distance",
+                "diag_pre_multiply",
+                "diag_post_multiply",
+                "quad_form_diag",
+                "append_row",
+                "append_col",
+                "rep_vector",
+                "rep_row_vector",
+                "col",
+                "row",
+                "head",
+                "tail"})) {
+    require_arity(e, 2);
+    return;
+  }
+  if (named(e, {"PMinus__",
+                "PPlus__",
+                "PNot__",
+                "minus",
+                "plus",
+                "exp",
+                "log",
+                "sqrt",
+                "square",
+                "inv",
+                "fabs",
+                "inv_logit",
+                "logit",
+                "log1m",
+                "tanh",
+                "cumulative_sum",
+                "softmax",
+                "log_softmax",
+                "mean",
+                "sd",
+                "sum",
+                "prod",
+                "dot_self",
+                "Transpose__",
+                "transpose",
+                "to_vector",
+                "to_row_vector",
+                "to_array_1d",
+                "rows",
+                "cols",
+                "size",
+                "num_elements",
+                "dims",
+                "multiply_lower_tri_self_transpose",
+                "diag_matrix",
+                "cholesky_decompose",
+                "eigenvalues_sym",
+                "eigenvectors_sym",
+                "categorical_rng",
+                "poisson_log_rng",
+                "bernoulli_rng",
+                "std_normal_qf",
+                "trigamma",
+                "is_nan",
+                "tcrossprod"})) {
+    require_arity(e, 1);
+    return;
+  }
+  if (named(e, {"min", "max", "log_sum_exp"})) {
+    require_arity(e, 1, 2);
+    return;
+  }
+  if (e.name == "rep_matrix") {
+    require_arity(e, 2, 3);
+    return;
+  }
+  if (named(e, {"fma", "segment"})) {
+    require_arity(e, 3);
+    return;
+  }
+  if (e.name == "log_mix") {
+    require_arity(e, 2, 3);
+    return;
+  }
+  if (e.name == "gp_exp_quad_cov") {
+    require_arity(e, 3, 4);
+    return;
+  }
+  if (e.name == "to_matrix") {
+    if (e.args.size() != 1 && e.args.size() != 3 && e.args.size() != 4)
+      malformed("to_matrix call: expected 1, 3, or 4 argument(s), got " +
+                std::to_string(e.args.size()));
+    return;
+  }
+  if (e.name == "sub_col") {
+    require_arity(e, 4);
+    return;
+  }
+  if (e.name == "map_rect") {
+    require_arity(e, 5);
+    return;
+  }
+  if (e.name == "algebra_solver") {
+    require_arity(e, 5, 8);
+    return;
+  }
+  if (e.name == "log_diff_exp") {
+    require_arity(e, 2);
+    return;
+  }
+  if (named(e, {"multi_normal_rng", "uniform_rng", "normal_rng",
+                "lognormal_rng", "binomial_rng"})) {
+    require_arity(e, 2);
+    return;
+  }
+
+  struct NamedArity {
+    const char* name;
+    size_t arity;
+  };
+  static constexpr NamedArity kManual[] = {
+      {"bernoulli_lpmf", 2},
+      {"bernoulli_logit_lpmf", 2},
+      {"poisson_lpmf", 2},
+      {"poisson_log_lpmf", 2},
+      {"categorical_lpmf", 2},
+      {"categorical_logit_lpmf", 2},
+      {"dirichlet_lpdf", 2},
+      {"lkj_corr_lpdf", 2},
+      {"lkj_corr_cholesky_lpdf", 2},
+      {"multinomial_lpmf", 2},
+      {"multinomial_logit_lpmf", 2},
+      {"dirichlet_multinomial_lpmf", 2},
+      {"neg_binomial_2_lpmf", 3},
+      {"binomial_lpmf", 3},
+      {"binomial_logit_lpmf", 3},
+      {"multi_normal_lpdf", 3},
+      {"multi_normal_prec_lpdf", 3},
+      {"multi_normal_cholesky_lpdf", 3},
+      {"multi_gp_lpdf", 3},
+      {"multi_gp_cholesky_lpdf", 3},
+      {"ordered_probit_lpmf", 3},
+      {"wishart_lpdf", 3},
+      {"inv_wishart_lpdf", 3},
+      {"wishart_cholesky_lpdf", 3},
+      {"inv_wishart_cholesky_lpdf", 3},
+      {"beta_binomial_lpmf", 4},
+      {"poisson_log_glm_lpmf", 4},
+      {"bernoulli_logit_glm_lpmf", 4},
+      {"lkj_cov_lpdf", 4},
+      {"multi_student_t_lpdf", 4},
+      {"multi_student_t_cholesky_lpdf", 4},
+      {"categorical_logit_glm_lpmf", 4},
+      {"ordered_logistic_glm_lpmf", 4},
+      {"hypergeometric_lpmf", 4},
+      {"discrete_range_lpmf", 3},
+      {"neg_binomial_2_log_glm_lpmf", 5},
+      {"binomial_logit_glm_lpmf", 5},
+      {"normal_id_glm_lpdf", 5},
+      {"gaussian_dlm_obs_lpdf", 7},
+  };
+  for (const NamedArity& item : kManual)
+    if (e.name == item.name) {
+      require_arity(e, item.arity);
+      return;
+    }
+
+  // The language has both the original five-parameter Wiener density and
+  // its seven-parameter extension. The current execution kernels implement
+  // only the five-argument form, but decoding must preserve either valid MIR
+  // shape so the normal unsupported-function path can report that boundary.
+  if (e.name == "wiener_lpdf") {
+    require_arity(e, 5, 7);
+    return;
+  }
+
+  const auto validate_transform_call = [&](const char* stem, size_t arity) {
+    const std::string prefix(stem);
+    if (e.name.compare(0, prefix.size(), prefix) != 0) return false;
+    const std::string tail = e.name.substr(prefix.size());
+    if (tail != "constrain" && tail != "jacobian" && tail != "unconstrain")
+      return false;
+    require_arity(e, arity);
+    return true;
+  };
+  if (validate_transform_call("lower_bound_", 2) ||
+      validate_transform_call("upper_bound_", 2) ||
+      validate_transform_call("lower_upper_bound_", 3) ||
+      validate_transform_call("offset_multiplier_", 3))
+    return;
+
+  std::string ode_name = e.name;
+  bool ode_tolerance = false;
+  if (ode_name.size() > 4 &&
+      ode_name.compare(ode_name.size() - 4, 4, "_tol") == 0) {
+    ode_tolerance = true;
+    ode_name.erase(ode_name.size() - 4);
+  }
+  const bool modern_ode = ode_name == "ode_bdf" || ode_name == "ode_adams" ||
+                          ode_name == "ode_rk45" || ode_name == "ode_ckrk";
+  if (modern_ode) {
+    const size_t minimum = ode_tolerance ? 7 : 4;
+    if (e.args.size() < minimum)
+      malformed(e.name + " call: expected at least " + std::to_string(minimum) +
+                " argument(s), got " + std::to_string(e.args.size()));
+    return;
+  }
+  if (e.name.rfind("integrate_ode_", 0) == 0) {
+    if (e.args.size() != 7 && e.args.size() != 10)
+      malformed(e.name + " call: expected 7 or 10 argument(s), got " +
+                std::to_string(e.args.size()));
+  }
+}
 
 std::string dump(const Node& n, size_t budget = 240) {
   std::string out;
@@ -422,6 +764,257 @@ Stmt read_stmt(const Node& n) {
   return s;
 }
 
+void validate_expression_shape(const Expr& e);
+
+std::string unsized_spelling(const UnsizedView& view) {
+  std::string type;
+  switch (view.leaf) {
+    case UnsizedLeaf::Int:
+      type = "UInt";
+      break;
+    case UnsizedLeaf::Real:
+      type = "UReal";
+      break;
+    case UnsizedLeaf::Complex:
+      type = "UComplex";
+      break;
+    case UnsizedLeaf::Vector:
+      type = "UVector";
+      break;
+    case UnsizedLeaf::RowVector:
+      type = "URowVector";
+      break;
+    case UnsizedLeaf::Matrix:
+      type = "UMatrix";
+      break;
+    case UnsizedLeaf::Unknown:
+      return {};
+  }
+  for (uint8_t depth = 0; depth < view.depth; ++depth)
+    type = "(UArray " + type + ")";
+  return type;
+}
+
+bool parse_unsized_spelling(std::string_view text, UnsizedView* out) {
+  size_t depth = 0;
+  constexpr std::string_view prefix = "(UArray ";
+  while (text.size() > prefix.size() &&
+         text.substr(0, prefix.size()) == prefix && text.back() == ')') {
+    if (++depth > std::numeric_limits<uint8_t>::max()) return false;
+    text.remove_prefix(prefix.size());
+    text.remove_suffix(1);
+  }
+  UnsizedLeaf leaf = UnsizedLeaf::Unknown;
+  if (text == "UInt")
+    leaf = UnsizedLeaf::Int;
+  else if (text == "UReal")
+    leaf = UnsizedLeaf::Real;
+  else if (text == "UComplex")
+    leaf = UnsizedLeaf::Complex;
+  else if (text == "UVector")
+    leaf = UnsizedLeaf::Vector;
+  else if (text == "URowVector")
+    leaf = UnsizedLeaf::RowVector;
+  else if (text == "UMatrix")
+    leaf = UnsizedLeaf::Matrix;
+  else
+    return false;
+  *out = UnsizedView{static_cast<uint8_t>(depth), leaf};
+  return true;
+}
+
+void validate_expression_metadata(const Expr& e) {
+  if (e.unsized.leaf == UnsizedLeaf::Unknown) {
+    // Unknown upstream types use the raw/unsupported channel and clear the
+    // compact type spelling. A recognized compact spelling paired with an
+    // unknown structural view would let different consumers infer different
+    // shapes.
+    if (e.type_ == "UInt" || e.type_ == "UReal" || e.type_ == "UComplex" ||
+        e.type_ == "UVector" || e.type_ == "URowVector" ||
+        e.type_ == "UMatrix" || e.type_ == "UArray")
+      malformed("expression type metadata");
+    return;
+  }
+  const std::string expected = e.unsized.depth == 0
+                                   ? unsized_spelling(e.unsized)
+                                   : std::string("UArray");
+  if (e.type_ != expected) malformed("expression type metadata");
+}
+
+void validate_index_shape(const Expr& index) {
+  if (index.kind != Expr::FunApp || index.fn_lib != Expr::Lib::StanLib ||
+      !named(index, {"IndexAll", "IndexSingle", "IndexBetween", "IndexMulti",
+                     "IndexUpfrom"}))
+    malformed("index descriptor");
+  validate_expression_shape(index);
+}
+
+void validate_expression_shape(const Expr& e) {
+  validate_expression_metadata(e);
+  switch (e.kind) {
+    case Expr::Var:
+    case Expr::LitInt:
+    case Expr::LitReal:
+    case Expr::LitStr:
+    case Expr::Unsupported:
+      if (!e.args.empty()) malformed("leaf expression argument list");
+      break;
+    case Expr::Promotion:
+      if (e.args.size() != 1) malformed("Promotion expression arity");
+      break;
+    case Expr::Indexed:
+      // args[0] is the base. stanc can retain a no-op Indexed wrapper with no
+      // descriptors after transformations, so only the base is mandatory.
+      // Index consumers address each descriptor according to its synthetic
+      // name when descriptors are present.
+      if (e.args.empty()) malformed("Indexed expression arity");
+      validate_expression_shape(e.args[0]);
+      for (size_t i = 1; i < e.args.size(); ++i)
+        validate_index_shape(e.args[i]);
+      return;
+    case Expr::TernaryIf:
+      if (e.args.size() != 3) malformed("TernaryIf expression arity");
+      break;
+    case Expr::EOr:
+      if (e.args.size() != 2) malformed("EOr expression arity");
+      break;
+    case Expr::EAnd:
+      if (e.args.size() != 2) malformed("EAnd expression arity");
+      break;
+    case Expr::FunApp:
+      validate_funapp_arity(e);
+      break;
+  }
+  for (const Expr& arg : e.args) validate_expression_shape(arg);
+}
+
+void validate_transform_shape(const Transform& transform) {
+  size_t arity = 0;
+  switch (transform.kind) {
+    case Transform::Lower:
+    case Transform::Upper:
+    case Transform::Offset:
+    case Transform::Multiplier:
+      arity = 1;
+      break;
+    case Transform::LowerUpper:
+    case Transform::OffsetMultiplier:
+      arity = 2;
+      break;
+    case Transform::Identity:
+    case Transform::Simplex:
+    case Transform::Ordered:
+    case Transform::PositiveOrdered:
+    case Transform::CholeskyCorr:
+    case Transform::UnitVector:
+    case Transform::SumToZero:
+    case Transform::Correlation:
+    case Transform::Covariance:
+    case Transform::CholeskyCov:
+      break;
+    case Transform::Unsupported:
+      for (const Expr& arg : transform.args) validate_expression_shape(arg);
+      return;
+  }
+  if (transform.args.size() != arity)
+    malformed("transform arity: expected " + std::to_string(arity) +
+              " argument(s), got " + std::to_string(transform.args.size()));
+  for (const Expr& arg : transform.args) validate_expression_shape(arg);
+}
+
+void validate_sized_type_shape(const SizedType& type) {
+  size_t arity = 0;
+  bool exact = true;
+  if (type.base == "SVector" || type.base == "SRowVector") {
+    arity = 1;
+  } else if (type.base == "SMatrix") {
+    arity = 2;
+  } else if (type.base == "SArray") {
+    size_t leaf_rank = 0;
+    if (type.elem_base == "SVector" || type.elem_base == "SRowVector")
+      leaf_rank = 1;
+    else if (type.elem_base == "SMatrix")
+      leaf_rank = 2;
+    if (type.dims.size() <= leaf_rank)
+      malformed("SArray sized type dimensions");
+    exact = false;
+  } else if (type.base != "SInt" && type.base != "SReal" &&
+             type.base != "SComplex" && !type.base.empty()) {
+    // Unknown sized types remain on the existing Unsupported path. Their
+    // dimensions still contain expressions that must be structurally safe.
+    exact = false;
+  }
+  if (exact && type.dims.size() != arity)
+    malformed(type.base + " sized type dimensions: expected " +
+              std::to_string(arity) + ", got " +
+              std::to_string(type.dims.size()));
+  for (const Expr& dim : type.dims) validate_expression_shape(dim);
+}
+
+void validate_statement_shape(const Stmt& statement) {
+  validate_sized_type_shape(statement.decl_type);
+  for (const Expr* expression :
+       {&statement.init, &statement.rhs, &statement.target, &statement.lower,
+        &statement.upper, &statement.cond})
+    validate_expression_shape(*expression);
+  for (const std::vector<Expr>* expressions :
+       {&statement.read_dims, &statement.lhs_idx, &statement.fn_args})
+    for (const Expr& expression : *expressions)
+      validate_expression_shape(expression);
+  for (const Expr& index : statement.lhs_idx) validate_index_shape(index);
+  if (statement.read_transform)
+    validate_transform_shape(*statement.read_transform);
+  if (statement.check_transform)
+    validate_transform_shape(*statement.check_transform);
+
+  switch (statement.kind) {
+    case Stmt::For:
+      if (statement.body.size() != 1) malformed("For statement body arity");
+      break;
+    case Stmt::While:
+      if (statement.body.size() != 1) malformed("While statement body arity");
+      break;
+    case Stmt::IfElse:
+      if (statement.body.empty() || statement.body.size() > 2)
+        malformed("IfElse statement body arity");
+      break;
+    case Stmt::Block:
+    case Stmt::SList:
+      break;
+    default:
+      if (!statement.body.empty()) malformed("statement body");
+      break;
+  }
+  for (const Stmt& child : statement.body) validate_statement_shape(child);
+}
+
+void validate_program_shape(const Program& program) {
+  for (const auto& input : program.input_vars)
+    validate_sized_type_shape(input.second);
+  for (const std::vector<Stmt>* body :
+       {&program.prepare_data, &program.log_prob, &program.generate_quantities})
+    for (const Stmt& statement : *body) validate_statement_shape(statement);
+  for (const FunDef& function : program.fun_defs) {
+    const size_t arity = function.arg_names.size();
+    if (function.arg_types.size() != arity ||
+        function.arg_views.size() != arity ||
+        function.arg_data_only.size() != arity)
+      malformed("function argument field lengths disagree");
+    for (size_t i = 0; i < arity; ++i) {
+      UnsizedView parsed;
+      const bool recognized =
+          parse_unsized_spelling(function.arg_types[i], &parsed);
+      const UnsizedView& view = function.arg_views[i];
+      if ((recognized &&
+           (parsed.depth != view.depth || parsed.leaf != view.leaf)) ||
+          (!recognized && view.leaf != UnsizedLeaf::Unknown))
+        malformed("function argument type disagrees with its view");
+    }
+    for (const Stmt& statement : function.body)
+      validate_statement_shape(statement);
+  }
+}
+
 struct Binding {
   UnsizedView view;
   bool declared_data_only = false;
@@ -461,10 +1054,26 @@ UnsizedView declared_view(const SizedType& type) {
 }
 
 void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
-                       const Functions& functions);
+                       const Functions& functions,
+                       bool strict_variable_metadata);
 
 void validate_expression(const Expr& e, const Bindings& bindings,
-                         const Functions& functions) {
+                         const Functions& functions,
+                         bool strict_variable_metadata) {
+  if (strict_variable_metadata && e.kind == Expr::Var && !e.promoted) {
+    const auto binding = bindings.find(e.name);
+    if (binding != bindings.end() &&
+        binding->second.view.leaf != UnsizedLeaf::Unknown &&
+        (binding->second.view.depth != e.unsized.depth ||
+         binding->second.view.leaf != e.unsized.leaf))
+      throw std::runtime_error(
+          "mir: variable type disagrees with its binding for " + e.name);
+    // Do not equate data_only with the declaration here. In write_array,
+    // stanc intentionally marks constrained-parameter reads DataOnly even
+    // though the corresponding declaration was AutoDiffable. The narrower
+    // checks below retain the phase-sensitive adlevel invariants needed for
+    // categorical and data-only UDF arguments.
+  }
   if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::StanLib &&
       (e.name == "categorical_lpmf" || e.name == "categorical_logit_lpmf")) {
     if (e.args.size() != 2 || e.args[0].unsized.leaf != UnsizedLeaf::Int ||
@@ -517,23 +1126,25 @@ void validate_expression(const Expr& e, const Bindings& bindings,
             "mir: data-only function argument depends on a parameter");
     }
   }
-  for (const Expr& arg : e.args) validate_expression(arg, bindings, functions);
+  for (const Expr& arg : e.args)
+    validate_expression(arg, bindings, functions, strict_variable_metadata);
 }
 
 void validate_bindings(const Stmt& s, Bindings& bindings,
-                       const Functions& functions) {
+                       const Functions& functions,
+                       bool strict_variable_metadata) {
   for (const Expr* e :
        {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
-    validate_expression(*e, bindings, functions);
+    validate_expression(*e, bindings, functions, strict_variable_metadata);
   for (const auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
     for (const Expr& e : *expressions)
-      validate_expression(e, bindings, functions);
+      validate_expression(e, bindings, functions, strict_variable_metadata);
   for (const Transform* transform :
        {s.read_transform ? &*s.read_transform : nullptr,
         s.check_transform ? &*s.check_transform : nullptr})
     if (transform)
       for (const Expr& e : transform->args)
-        validate_expression(e, bindings, functions);
+        validate_expression(e, bindings, functions, strict_variable_metadata);
   if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
     if (!s.check_transform)
       throw std::runtime_error("mir: FnCheck has no transform");
@@ -576,23 +1187,25 @@ void validate_bindings(const Stmt& s, Bindings& bindings,
     bindings[s.decl_id] = Binding{declared_view(s.decl_type), s.decl_data_only};
   }
   if (s.kind == Stmt::SList) {
-    validate_bindings(s.body, bindings, functions);
+    validate_bindings(s.body, bindings, functions, strict_variable_metadata);
   } else if (s.kind == Stmt::IfElse) {
     for (const auto& child : s.body) {
       Bindings branch = bindings;
-      validate_bindings(child, branch, functions);
+      validate_bindings(child, branch, functions, strict_variable_metadata);
     }
   } else if (!s.body.empty()) {
     Bindings nested = bindings;
     if (s.kind == Stmt::For)
       nested[s.loopvar] = Binding{UnsizedView{0, UnsizedLeaf::Int}, true};
-    validate_bindings(s.body, nested, functions);
+    validate_bindings(s.body, nested, functions, strict_variable_metadata);
   }
 }
 
 void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
-                       const Functions& functions) {
-  for (const auto& s : body) validate_bindings(s, bindings, functions);
+                       const Functions& functions,
+                       bool strict_variable_metadata) {
+  for (const auto& s : body)
+    validate_bindings(s, bindings, functions, strict_variable_metadata);
 }
 
 // stanc3 keeps every overload of a user function under one fdname, and calls
@@ -712,6 +1325,39 @@ void resolve_overloads(Program& prog) {
 
 }  // namespace
 
+void detail::validate_portable_program(const Program& prog) {
+  validate_program_shape(prog);
+}
+
+void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
+  resolve_overloads(prog);
+  Functions functions;
+  for (const auto& f : prog.fun_defs) {
+    const auto inserted = functions.emplace(f.name, &f);
+    if (!inserted.second)
+      throw std::runtime_error(
+          "mir: duplicate function name after overload resolution: " + f.name);
+  }
+  Bindings inputs;
+  for (const auto& [name, type] : prog.input_vars)
+    inputs[name] = Binding{declared_view(type), true};
+  Bindings prepare_bindings = inputs;
+  validate_bindings(prog.prepare_data, prepare_bindings, functions,
+                    strict_variable_metadata);
+  Bindings log_prob_bindings = prepare_bindings;
+  validate_bindings(prog.log_prob, log_prob_bindings, functions,
+                    strict_variable_metadata);
+  Bindings gq_bindings = prepare_bindings;
+  validate_bindings(prog.generate_quantities, gq_bindings, functions,
+                    strict_variable_metadata);
+  for (const auto& f : prog.fun_defs) {
+    Bindings args;
+    for (size_t i = 0; i < f.arg_names.size(); ++i)
+      args[f.arg_names[i]] = Binding{f.arg_views[i], f.arg_data_only[i]};
+    validate_bindings(f.body, args, functions, strict_variable_metadata);
+  }
+}
+
 Program read_program(const sexp::Node& root) {
   Program prog;
   const Node* iv = field(root, "input_vars");
@@ -751,24 +1397,7 @@ Program read_program(const sexp::Node& root) {
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
     read_stmt_list((*gq)[1], prog.generate_quantities);
-  resolve_overloads(prog);
-  Functions functions;
-  for (const auto& f : prog.fun_defs) functions[f.name] = &f;
-  Bindings inputs;
-  for (const auto& [name, type] : prog.input_vars)
-    inputs[name] = Binding{declared_view(type), true};
-  Bindings prepare_bindings = inputs;
-  validate_bindings(prog.prepare_data, prepare_bindings, functions);
-  Bindings log_prob_bindings = prepare_bindings;
-  validate_bindings(prog.log_prob, log_prob_bindings, functions);
-  Bindings gq_bindings = prepare_bindings;
-  validate_bindings(prog.generate_quantities, gq_bindings, functions);
-  for (const auto& f : prog.fun_defs) {
-    Bindings args;
-    for (size_t i = 0; i < f.arg_names.size(); ++i)
-      args[f.arg_names[i]] = Binding{f.arg_views[i], f.arg_data_only[i]};
-    validate_bindings(f.body, args, functions);
-  }
+  detail::finalize_program(prog);
   if (const Node* ov = field(root, "output_vars")) {
     // ((name <opaque> (...)) ...): parameters, transformed parameters and
     // generated quantities in declaration order -- the order FnWriteParam

@@ -191,8 +191,9 @@ def stan_to_mir(stan_code: str) -> str:
 
     The first half of compiling a model, on its own. Useful when the MIR
     is what you want to keep -- to cache it, ship it, or hand it to
-    ``Model(mir=...)`` in another process. Falls back to the bundled stanc
-    binary on a build without the embedded compiler.
+    ``Model(mir=...)`` in another process. Embedded builds return stanli's
+    versioned portable format; the bundled-compiler fallback returns the
+    legacy stanc3 s-expression, which the runtime also accepts.
     """
     if not _lib.stanli_has_embedded_stanc():
         import tempfile

@@ -444,6 +444,27 @@ int main(int argc, char** argv) {
     check(scaled == std::vector<double>({6.0, 8.0}),
           "ODE call scalar formal broadcasts over vector");
 
+    // Positional routing is carried by the structural views. Type spellings
+    // are retained for diagnostics and must not be searched for type names.
+    mir::FunDef routed;
+    routed.name = "routed";
+    routed.arg_names = {"i", "x"};
+    routed.arg_views = {{0, mir::UnsizedLeaf::Int},
+                        {0, mir::UnsizedLeaf::Real}};
+    routed.arg_types = {"OpaqueInt", "OpaqueRealWithUIntAnnotation"};
+    mir::Stmt routed_return;
+    routed_return.kind = mir::Stmt::Return;
+    routed_return.has_init = true;
+    routed_return.rhs.kind = mir::Expr::FunApp;
+    routed_return.rhs.name = "Minus__";
+    routed_return.rhs.type_ = "UReal";
+    routed_return.rhs.args = {variable("i", "UInt"), variable("x", "UReal")};
+    routed.body = {routed_return};
+    const std::vector<double> routed_value =
+        interp.call(routed, {{2.5}}, {{4}});
+    check(routed_value == std::vector<double>({1.5}),
+          "ODE call routes integer arguments from structural views");
+
     // The same positional entry point can evaluate a fallback RHS/UDF with a
     // product over a vector formal.  A formal can be bound to a shifted Eigen
     // view, so it must retain MirInterp's legacy ascending fold rather than

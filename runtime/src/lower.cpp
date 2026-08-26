@@ -5,13 +5,13 @@
 #include <stanli/inplace.hpp>
 #include <stanli/mir_prog.hpp>
 #include <stanli/mir.hpp>
+#include <stanli/mir_decode.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/ode.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/island.hpp>
 #include <stanli/partition.hpp>
 #include <stanli/reroll.hpp>
-#include <stanli/sexp.hpp>
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -5368,7 +5368,7 @@ struct Lowering {
 
 }  // namespace
 
-CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
+CompiledModel compile_model(const std::string& mir_text, const DataMap& data) {
   const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
   PrepTrace prep(prep_env && prep_env[0] != '0');
   const auto compile_time = prep.start();
@@ -5376,10 +5376,9 @@ CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
   // keeps the generate_quantities statements and UDF bodies alive for the
   // model's whole life.
   const auto parse_time = prep.start();
-  auto prog =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(tmir_text)));
+  auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
-             static_cast<int64_t>(tmir_text.size()));
+             static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, "log_prob");
   CompiledModel cm = lo.run(*prog);
   if (!prog->generate_quantities.empty()) {

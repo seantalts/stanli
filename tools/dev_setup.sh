@@ -2,15 +2,15 @@
 # One-shot dev environment setup. Safe to re-run; every step is
 # idempotent and skipped once its output exists.
 #
-#   tools/dev_setup.sh               core: vendored deps + cmake builds + tests
-#   tools/dev_setup.sh --embed       + OCaml toolchain and in-process stanc3
-#   tools/dev_setup.sh --corpus      + posteriordb and the CmdStan verify rig
+#   tools/dev_setup.sh               core: headers + cmake builds/tests; no stanc
+#   tools/dev_setup.sh --embed       + pinned stanc3 and in-process compiler
+#   tools/dev_setup.sh --corpus      + pinned stanc3, posteriordb, CmdStan rig
 #   tools/dev_setup.sh --conformance + the Stan conformance reference stack
 #   tools/dev_setup.sh --all         everything
 #   tools/dev_setup.sh --no-build    stop before cmake (CI builds separately)
 #
 # Core needs: git, curl, cmake, a C++17 clang, python3.
-# --embed adds: opam (OCaml 5.5.0 switch built automatically).
+# --embed and --corpus add opam (OCaml 5.5.0 switch built automatically).
 # --corpus adds: ~2 GB of checkouts under deps/ and a CmdStan build.
 # --conformance adds: opam, the pinned CmdStan/BridgeStan pair, and a venv
 #   holding the version-pinned reference client. It reuses the same
@@ -21,11 +21,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
 
-STANC3_SRC_SHA=ac69570adecc41925b4ad72b6b2681c98c09c57d  # matches deps/stanc3/stanc
+STANC3_SRC_REPO=https://github.com/seantalts/stanc3.git
+STANC3_SRC_SHA=f453247eea74f5717ec488ab000783d4141c3bc9
 PDB_SHA=28f8d3d6e975315f42aa274a8399f21e07a43b30
 CMDSTAN_SHA=11cb052d3e1fc8c799e0fec559e2ee5452b38d27
 OPAM_SWITCH=stanc3-55
 OCAML_VERSION=5.5.0
+source tools/stanc_embed/provenance.sh
 
 WANT_EMBED=0
 WANT_CORPUS=0
@@ -60,7 +62,8 @@ step "checking prerequisites"
 missing=()
 for tool in git curl cmake python3; do have "$tool" || missing+=("$tool"); done
 if ! have clang++ && ! have g++; then missing+=("clang++ (Xcode CLT or clang)"); fi
-if [ "$WANT_EMBED" = 1 ] || [ "$WANT_CONFORMANCE" = 1 ]; then
+if [ "$WANT_EMBED" = 1 ] || [ "$WANT_CORPUS" = 1 ] ||
+   [ "$WANT_CONFORMANCE" = 1 ]; then
   have opam || missing+=(opam)
 fi
 if [ ${#missing[@]} -gt 0 ]; then
@@ -80,36 +83,44 @@ if [ ${#missing[@]} -gt 0 ]; then
 fi
 echo "ok: git curl cmake python3 and a C++ compiler present"
 
-# --- vendored headers + stanc binary ---------------------------------------
-step "fetching pinned deps (stan-math, stan, stanc3 binary)"
+# --- vendored headers -------------------------------------------------------
+step "fetching pinned deps (Stan Math and Stan)"
 ./deps/fetch.sh
+
+# --- source-pinned stanc3 (optional) ---------------------------------------
+# Corpus tools shell out to stanc; embedded builds also keep a standalone
+# compiler for local bisects. The conformance setup below invokes the same
+# builder itself, so it does not need this copy under deps/stanc3/stanc.
+if [ "$WANT_EMBED" = 1 ] || [ "$WANT_CORPUS" = 1 ]; then
+  step "stanc3 executable from source at $STANC3_SRC_SHA"
+  # build_stanc's output cache can outlive its source checkout. The embed
+  # build needs that checkout too, so force the centralized builder to
+  # recreate it when it is absent or points at a different revision.
+  if [ "$WANT_EMBED" = 1 ] &&
+     { [ "$(git -C deps/stanc3-src rev-parse HEAD 2>/dev/null || true)" != \
+         "$STANC3_SRC_SHA" ] ||
+       ! opam switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; }; then
+    rm -f deps/stanc3/stanc-pinned deps/stanc3/stanc-pinned.src
+  fi
+  ./harnesses/conformance/build_stanc.sh "$OPAM_SWITCH"
+  install -m 755 deps/stanc3/stanc-pinned deps/stanc3/stanc
+  cp deps/stanc3/stanc-pinned.src deps/stanc3/stanc.src
+  [ "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA" ] || {
+    echo "stanc3 provenance does not match STANC3_SRC_SHA" >&2
+    exit 1
+  }
+  ./deps/stanc3/stanc --version
+fi
 
 # --- embedded stanc3 (optional) --------------------------------------------
 if [ "$WANT_EMBED" = 1 ]; then
-  step "OCaml toolchain for the embedded stanc3"
-  if [ ! -d "$HOME/.opam" ]; then opam init -y --bare; fi
-  eval "$(opam env 2>/dev/null || true)"
-  if ! opam switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; then
-    # stanc3 pins its OCaml version exactly; other versions fail to solve.
-    opam switch create "$OPAM_SWITCH" "ocaml-base-compiler.$OCAML_VERSION" -y
-  fi
-
-  step "stanc3 source at $STANC3_SRC_SHA"
-  if [ ! -d deps/stanc3-src/.git ]; then
-    git clone https://github.com/stan-dev/stanc3.git deps/stanc3-src
-  fi
-  git -C deps/stanc3-src fetch -q origin "$STANC3_SRC_SHA"
-  git -C deps/stanc3-src checkout -q "$STANC3_SRC_SHA"
-
-  step "stanc3 OCaml dependencies (switch $OPAM_SWITCH)"
-  (cd deps/stanc3-src &&
-   opam install . --switch="$OPAM_SWITCH" --deps-only -y)
-
   step "building the embeddable stanc object"
-  if [ ! -f deps/stanc3/stanc_embed.o ]; then
-    tools/stanc_embed/build.sh deps/stanc3-src "$OPAM_SWITCH"
+  if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
+       "$STANC3_SRC_SHA"; then
+    echo "deps/stanc3/stanc_embed.o matches the source and producer inputs"
   else
-    echo "deps/stanc3/stanc_embed.o already present; delete it to rebuild"
+    echo "embedded object is absent or its provenance does not match; rebuilding"
+    tools/stanc_embed/build.sh deps/stanc3-src "$OPAM_SWITCH"
   fi
 fi
 
@@ -117,11 +128,14 @@ fi
 if [ "$WANT_BUILD" = 1 ]; then
   step "configuring and building (build/ dev, build-rel/ benchmarks)"
   EMBED_FLAGS=()
-  if [ -f deps/stanc3/stanc_embed.o ] && have opam; then
+  if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
+       "$STANC3_SRC_SHA" && have opam; then
     EMBED_FLAGS=(
       "-DSTANLI_STANC_EMBED_OBJ=$REPO/deps/stanc3/stanc_embed.o"
       "-DSTANLI_OCAML_STDLIB=$(opam var --switch="$OPAM_SWITCH" lib 2>/dev/null)/ocaml"
     )
+  elif [ -f deps/stanc3/stanc_embed.o ]; then
+    echo "ignoring embedded object with absent or mismatched provenance" >&2
   fi
   cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
@@ -214,7 +228,12 @@ echo "dev build:   build/            (tests: ctest --test-dir build)"
 echo "bench build: build-rel/        (tools/bench_grad.cpp)"
 echo "corpus:      python3 tools/corpus.py deps/posteriordb"
 echo "verify:      python3 tools/verify_sample.py deps/cmdstan deps/posteriordb MODEL..."
-echo "wheel:       tools/build_wheel.sh"
+if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
+     "$STANC3_SRC_SHA"; then
+  echo "wheel:       tools/build_wheel.sh"
+else
+  echo "wheel:       rerun with --embed, then tools/build_wheel.sh"
+fi
 if [ "$WANT_CONFORMANCE" = 1 ]; then
   # Run the driver under the venv interpreter, not the host's: the harness
   # needs tomllib, and --stanli-python then defaults to the same interpreter,

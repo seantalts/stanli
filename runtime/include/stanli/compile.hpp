@@ -1,6 +1,6 @@
-// The graph compiler: transformed-MIR sexp text -> executable graph, sized
-// against a concrete dataset. Scope: straight-line log_prob; unsupported
-// constructs raise CompileError naming the construct.
+// The graph compiler: portable or legacy transformed-MIR text -> executable
+// graph, sized against a concrete dataset. Scope: straight-line log_prob;
+// unsupported constructs raise CompileError naming the construct.
 //
 // Generated lower/upper checks keep their source phase: prepare_data checks
 // run at construction, while log_prob/write_array checks stay ordered graph
@@ -199,7 +199,7 @@ struct CompiledModel {
   std::optional<WriteArray> write_array;
 };
 
-CompiledModel compile_model(const std::string& tmir_text, const DataMap& data);
+CompiledModel compile_model(const std::string& mir_text, const DataMap& data);
 
 }  // namespace stanli
 

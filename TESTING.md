@@ -195,7 +195,9 @@ process.
 Fixture MIR is generated from checked-in .stan files with the pinned
 compiler: `./deps/stanc3/stanc --O1 --debug-optimized-mir tests/fixtures/X.stan
 > tests/fixtures/X.tmir.sexp` (then delete the `.hpp` stanc drops next to
-it).
+it). `tools/dev_setup.sh --embed` and `--corpus` build that executable from
+the exact configured stanc3 source revision; core setup intentionally omits a
+compiler.
 
 What this layer cannot see: a whole execution path computing something
 else. A kernel test exercises the kernel you thought to write it for.

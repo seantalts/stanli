@@ -2,7 +2,7 @@
 // schools from its pinned MIR fixture, evaluate a gradient, sample, and
 // check the posterior mean of mu. Mirrors the wheel smoke test.
 //
-//   node tests/test_wasm.cjs [path/to/stanli.js]
+//   node tests/test_wasm.cjs [path/to/stanli.js] [path/to/stancjs.bc.js]
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -10,6 +10,7 @@ const path = require("path");
 const modPath = path.resolve(
     process.argv[2] || path.join(__dirname, "..", "build-wasm", "stanli.js"));
 const createStanli = require(modPath);
+const stancjsPath = process.argv[3] && path.resolve(process.argv[3]);
 
 function fail(msg) {
   console.error("FAIL " + msg);
@@ -18,7 +19,22 @@ function fail(msg) {
 
 createStanli().then((M) => {
   const fixtures = path.join(__dirname, "fixtures");
-  const mir = fs.readFileSync(path.join(fixtures, "es.tmir.sexp"), "utf8");
+  let mir;
+  if (stancjsPath) {
+    const exported = require(stancjsPath);
+    const stanc = (exported && exported.stanc) || globalThis.stanc;
+    if (typeof stanc !== "function") fail("stancjs did not export stanc()");
+    const version = stanc("version-test", "", ["version"]);
+    if (version.errors || /%%(?:NAME|VERSION)%%/.test(String(version.result)))
+      fail("stancjs has unsubstituted version metadata");
+    const code = fs.readFileSync(path.join(fixtures, "es.stan"), "utf8");
+    const compiled = stanc("es_model", code, ["O1", "debug-optimized-mir"]);
+    if (compiled.errors)
+      fail("stancjs: " + Array.from(compiled.errors).join("\n"));
+    mir = String(compiled.result);
+  } else {
+    mir = fs.readFileSync(path.join(fixtures, "es.tmir.sexp"), "utf8");
+  }
   const data = fs.readFileSync(
       path.join(fixtures, "eight_schools.json"), "utf8");
 

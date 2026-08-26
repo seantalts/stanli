@@ -15,7 +15,7 @@
 
 extern "C" {
 
-// "OK<sexp>" or "ERR<message>"; caller frees with stanli_stanc_free.
+// "OK<MIR>" or "ERR<message>"; caller frees with stanli_stanc_free.
 char* stanli_stanc_tmir(const char* stan_code) {
   static std::once_flag once;
   std::call_once(once, [] {

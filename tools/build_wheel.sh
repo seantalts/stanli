@@ -6,6 +6,20 @@
 # would let the wheel install on machines it cannot run on).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source tools/stanc_embed/provenance.sh
+
+STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
+if [[ ! "$STANC3_SRC_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "could not read an exact STANC3_SRC_SHA from tools/dev_setup.sh" >&2
+  exit 1
+fi
+EMBED_OBJECT=deps/stanc3/stanc_embed.o
+if [ -f "$EMBED_OBJECT" ] &&
+   ! stanc_embed_artifact_matches "$EMBED_OBJECT" "$STANC3_SRC_SHA"; then
+  echo "$EMBED_OBJECT has absent or mismatched provenance" >&2
+  echo "run ./tools/dev_setup.sh --embed --no-build to rebuild it" >&2
+  exit 1
+fi
 
 cmake --build build-rel -j8 --target stanli_shared
 
@@ -35,7 +49,13 @@ strip -x "python/stanli/_bin/$(basename "$LIB")" 2>/dev/null || true
 cp THIRD_PARTY_LICENSES.md LICENSE python/stanli/
 
 # Without the embedded compiler the package needs the stanc binary instead.
-if [ ! -f deps/stanc3/stanc_embed.o ]; then
+if [ ! -f "$EMBED_OBJECT" ]; then
+  if [ ! -f deps/stanc3/stanc ] || [ ! -f deps/stanc3/stanc.src ] ||
+     [ "$(cat deps/stanc3/stanc.src 2>/dev/null || true)" != "$STANC3_SRC_SHA" ]; then
+    echo "wheel needs a compiler built from $STANC3_SRC_SHA" >&2
+    echo "run ./tools/dev_setup.sh --embed --no-build first" >&2
+    exit 1
+  fi
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) cp deps/stanc3/stanc python/stanli/_bin/stanc.exe ;;
     *) cp deps/stanc3/stanc python/stanli/_bin/stanc

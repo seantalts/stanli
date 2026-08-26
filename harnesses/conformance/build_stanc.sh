@@ -8,9 +8,9 @@
 # first cold cache after an upstream publish stranded the job with a
 # binary that no longer exists anywhere. A git SHA is fetchable forever.
 #
-# The pin is STANC3_SRC_SHA in tools/dev_setup.sh -- the same revision
-# the wheels embed -- so the conformance run exercises the frontend the
-# shipped runtime actually uses, not a nearby nightly.
+# The source is STANC3_SRC_REPO at STANC3_SRC_SHA in tools/dev_setup.sh --
+# the same revision the wheels embed -- so the conformance run exercises
+# the frontend the shipped runtime actually uses, not a nearby nightly.
 #
 # Output: deps/stanc3/stanc-pinned, with deps/stanc3/stanc-pinned.src
 # recording the revision it was built from. Rerunning with a matching
@@ -21,16 +21,17 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 
-# The pin, the switch, and the OCaml version all come from dev_setup.sh
-# so there is exactly one place a pin advance edits.
+# Local source builds read the repository, commit, switch, and OCaml version
+# from dev_setup.sh. CI mirrors the source pair and asserts that it matches.
 read_setup() {
   sed -n "s/^$1=\\([^ ]*\\).*/\\1/p" "$repo_root/tools/dev_setup.sh"
 }
 switch=${1:-$(read_setup OPAM_SWITCH)}
 ocaml_version=$(read_setup OCAML_VERSION)
 src_sha=$(read_setup STANC3_SRC_SHA)
-if [[ -z "$src_sha" ]]; then
-  echo "Could not read STANC3_SRC_SHA from tools/dev_setup.sh" >&2
+src_repo=$(read_setup STANC3_SRC_REPO)
+if [[ -z "$src_repo" || -z "$src_sha" ]]; then
+  echo "Could not read STANC3_SRC_REPO/STANC3_SRC_SHA from tools/dev_setup.sh" >&2
   exit 1
 fi
 
@@ -42,7 +43,9 @@ fi
 
 src_dir="$repo_root/deps/stanc3-src"
 if [[ ! -d "$src_dir/.git" ]]; then
-  git clone https://github.com/stan-dev/stanc3.git "$src_dir"
+  git clone "$src_repo" "$src_dir"
+else
+  git -C "$src_dir" remote set-url origin "$src_repo"
 fi
 git -C "$src_dir" fetch -q origin "$src_sha"
 # reset first: dune subst (below) edits tracked files, and a leftover

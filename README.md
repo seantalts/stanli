@@ -75,8 +75,11 @@ run by a small interpreter. There is no JIT and no C++ codegen;
 model.stan + data.json
   |  stanc3 (official OCaml compiler, linked into the library)
   v
-optimized MIR (--O1, s-expression)
-  |  lowering: runtime/src/lower.cpp
+optimized typed MIR (--O1)
+  |  stanli OCaml encoder
+  v
+portable MIR v1 (legacy s-expressions are also accepted)
+  |  decoder + lowering: runtime/src/lower.cpp
   v
 op graph + preallocated value/adjoint arenas
   |  executor: forward = log density, reverse = gradient
@@ -86,9 +89,10 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
 
 1. **stanc3, in process.** The official Stan compiler (OCaml) is built
    as a self-contained object and linked into the shared library. It
-   parses, typechecks, and optimizes the model; stanli consumes its
-   optimized MIR (--O1). Full language fidelity without a subprocess or a
-   reimplemented parser.
+   parses, typechecks, and optimizes the model. A stanli-owned OCaml module
+   encodes that typed MIR directly into the versioned portable format; the
+   runtime retains the legacy s-expression reader for compiler paths that
+   have not moved yet. Full language fidelity without a reimplemented parser.
 
 2. **Lowering** (`runtime/src/lower.cpp`). Transformed data is evaluated
    eagerly, loops with data-known bounds are unrolled, and the model
@@ -206,8 +210,8 @@ print(fit.diagnose())     # the convergence checks, in words
 
 Four chains by default, run in parallel. Threading does not change the
 answer: each chain owns its executor and its RNG stream, so the draws
-are byte-identical to a sequential run. Builds without the embedded
-stanc3 object fall back to running a bundled stanc binary as a
+are byte-identical to a sequential run. Shipped builds without the embedded
+stanc3 object fall back to running a source-pinned stanc binary as a
 subprocess.
 
 ## R
@@ -273,9 +277,9 @@ python3 -m http.server -d web     # then open http://localhost:8000
 One-shot setup (fetches pinned deps, builds, runs tests):
 
 ```
-./tools/dev_setup.sh               # core build + tests
-./tools/dev_setup.sh --embed       # + OCaml toolchain, in-process stanc3
-./tools/dev_setup.sh --corpus      # + posteriordb and the CmdStan verify rig
+./tools/dev_setup.sh               # core build + tests; no Stan compiler
+./tools/dev_setup.sh --embed       # + source-pinned stanc3, in-process compiler
+./tools/dev_setup.sh --corpus      # + source-pinned stanc3, posteriordb, CmdStan
 ./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
 ./tools/dev_setup.sh --all
 ```
@@ -296,13 +300,12 @@ ctest --test-dir build
 ## Releasing
 
 `.github/workflows/wheels.yml` builds all five wheels (macOS arm64 and
-x86_64, manylinux_2_28 x86_64 and aarch64, Windows x86_64). The first
-four run on every push and pull request; Windows runs after the merge
-and nightly, because mingw compiles the density kernels slowly enough to
-set the pace of every merge. A release tag runs all five, and the
-publish job waits for them. Each build links the cached embedded stanc3
-object, runs the test suite, checks the platform tag, and samples eight
-schools from the installed wheel in a clean venv.
+x86_64, manylinux_2_28 x86_64 and aarch64, Windows x86_64). Pull requests
+run the manylinux x86_64 build; all five run after merge, nightly, and on
+release tags. The four Unix wheels link the cached embedded compiler;
+Windows bundles a compiler executable built from the same exact source
+revision. Every wheel runs the test suite, checks its platform contract,
+and samples eight schools from a clean installed environment.
 
 To cut a release: bump the version in `python/stanli/__init__.py`,
 `js/package.json`, `r/DESCRIPTION`, and `r/R/install.R` (they move in

@@ -89,9 +89,10 @@ runtime embeds stanc3 (every release build but Windows), that path is
 used instead and V8 never loads; a native `stanc` in `STANLI_STANC` or
 beside the runtime also wins, because it is faster than either. The
 Windows runtime tarball carries `stanc.exe` next to the DLL for exactly
-that reason. `tests/test_stancjs.cjs` in the main repository checks
-that the JavaScript compiler emits the same MIR as the native binary,
-byte for byte.
+that reason. The bundled JavaScript compiler records its exact stanc3
+repository, revision, and content hash. CI verifies that provenance and
+compiles valid and invalid models through the file on Linux, macOS, and
+Windows.
 
 ## What is not here yet
 

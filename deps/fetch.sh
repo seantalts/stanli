@@ -21,21 +21,23 @@ fetch() { # name url sha sparse-paths...
 fetch math https://github.com/stan-dev/math.git "$MATH_SHA" stan lib
 fetch stan https://github.com/stan-dev/stan.git "$STAN_SHA" src/stan
 
-# stanc3 release binary (pinned nightly, stanc3 ac69570). Per-OS asset name.
-STANC_ASSET=mac-arm64-stanc
-case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) STANC_ASSET=mac-arm64-stanc ;;
-  Darwin-x86_64) STANC_ASSET=mac-stanc ;;
-  Linux-aarch64) STANC_ASSET=linux-arm64-stanc ;;
-  Linux-x86_64) STANC_ASSET=linux-stanc ;;
-  MINGW*|MSYS*|CYGWIN*) STANC_ASSET=windows-stanc ;;
-esac
-mkdir -p stanc3
-if [ ! -x stanc3/stanc ]; then
-  curl -sL -o stanc3/stanc \
-    "https://github.com/stan-dev/stanc3/releases/download/nightly/$STANC_ASSET"
-  chmod +x stanc3/stanc
+# Do not fetch stanc3's moving `nightly` release here. It is replaced in
+# place, so its URL cannot identify the compiler bytes a release used.
+# tools/dev_setup.sh builds the native compiler from STANC3_SRC_SHA when a
+# requested mode needs it; the wheel workflow does the corresponding source
+# build for Windows.
+STANC3_SRC_SHA=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
+                   ../tools/dev_setup.sh)
+if [ -z "$STANC3_SRC_SHA" ]; then
+  echo "could not read STANC3_SRC_SHA from tools/dev_setup.sh" >&2
+  exit 1
 fi
-./stanc3/stanc --version
+if [ -e stanc3/stanc ] &&
+   { [ ! -x stanc3/stanc ] ||
+     [ "$(cat stanc3/stanc.src 2>/dev/null || true)" != "$STANC3_SRC_SHA" ];
+   }; then
+  echo "discarding stanc without $STANC3_SRC_SHA provenance"
+  rm -f stanc3/stanc stanc3/stanc.src
+fi
 
 echo "deps ready: math@$MATH_SHA stan@$STAN_SHA"

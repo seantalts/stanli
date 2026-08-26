@@ -1,4 +1,4 @@
-/* stanli C ABI: the stable boundary language bindings speak to.
+/* stanli C ABI: the versioned boundary language bindings speak to.
  * Exception-free; every entry returns an error code or null on failure and
  * writes a message into the caller's buffer. One stanli_model per (model,
  * data) pair; not thread-safe per instance (use one per chain). */
@@ -30,11 +30,11 @@ typedef struct stanli_model stanli_model;
 #define STANLI_ABI_VERSION 1
 int stanli_abi_version(void);
 
-/* Compile MIR sexp text (from `stanc --O1 --debug-optimized-mir`; the
- * unoptimized --debug-transformed-mir form is the same format and also
- * accepted) against JSON data (CmdStan conventions). Returns null on
- * failure with a message in err. */
-stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
+/* Compile either stanli portable MIR or legacy MIR S-expression text (from
+ * `stanc --O1 --debug-optimized-mir`) against JSON data (CmdStan conventions).
+ * The unoptimized --debug-transformed-mir S-expression is also accepted.
+ * Returns null on failure with a message in err. */
+stanli_model* stanli_model_new(const char* mir_text, const char* data_json,
                                char* err, size_t err_len);
 
 /* Like stanli_model_new but takes Stan source code directly, compiled by the

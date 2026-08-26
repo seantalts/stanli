@@ -9,8 +9,9 @@
 # trick rstan uses to ship a Stan compiler on CRAN: js_of_ocaml turns the
 # OCaml into one 2.8 MB file with no toolchain and no platform binaries,
 # which is a thing CRAN can carry and a native `stanc` per platform is
-# not. tests/test_stancjs.cjs already checks that this build emits the
-# same MIR as the native binary, byte for byte.
+# not. CI checks that this generated file comes from the exact configured
+# stanc3 source revision, and the R tests compile both valid and invalid
+# models through it on every supported host.
 #
 # Under webR there is no V8 package and no process to run a binary in,
 # but the host already IS a JavaScript engine: the webr support

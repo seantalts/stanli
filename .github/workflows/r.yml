@@ -19,11 +19,15 @@ on:
     paths:
       - 'r/**'
       - 'runtime/include/stanli/capi.h'
+      - 'tools/dev_setup.sh'
+      - 'tools/stanc_embed/**'
       - '.github/workflows/r.yml'
   pull_request:
     paths:
       - 'r/**'
       - 'runtime/include/stanli/capi.h'
+      - 'tools/dev_setup.sh'
+      - 'tools/stanc_embed/**'
       - '.github/workflows/r.yml'
   workflow_dispatch:
 
@@ -54,6 +58,24 @@ jobs:
               r/src/bridge.c)
           echo "runtime ${rt:-<none>}, R bridge ${r:-<none>}"
           [ -n "$rt" ] && [ "$rt" = "$r" ]
+
+      - name: Verify the bundled JavaScript compiler source
+        run: |
+          expected_repo=$(sed -n \
+            's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' tools/dev_setup.sh)
+          expected_revision=$(sed -n \
+            's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' tools/dev_setup.sh)
+          artifact_repo=$(sed -n 's/^repository=//p' r/inst/js/stanc.js.src)
+          artifact_revision=$(sed -n 's/^revision=//p' r/inst/js/stanc.js.src)
+          artifact_sha=$(sed -n 's/^sha256=//p' r/inst/js/stanc.js.src)
+          actual_sha=$(sha256sum r/inst/js/stanc.js | cut -d' ' -f1)
+
+          [ -n "$expected_repo" ]
+          [ -n "$expected_revision" ]
+          [ "$artifact_repo" = "$expected_repo" ]
+          [ "$artifact_revision" = "$expected_revision" ]
+          [ "$artifact_sha" = "$actual_sha" ]
+          ! grep -a -F -e '%%NAME%%' -e '%%VERSION%%' r/inst/js/stanc.js
 
   check:
     name: ${{ matrix.os }} (${{ matrix.r }})

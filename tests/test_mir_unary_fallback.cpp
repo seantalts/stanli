@@ -430,6 +430,11 @@ void test_vector_jacobian() {
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
   f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
                  "(UArray UInt)"};
+  f.arg_views = {{0, UnsizedLeaf::Real},
+                 {0, UnsizedLeaf::Vector},
+                 {0, UnsizedLeaf::Vector},
+                 {1, UnsizedLeaf::Real},
+                 {1, UnsizedLeaf::Int}};
   f.body = {returning(call("sin", {variable("theta", "UVector")}, "UVector"))};
   const std::map<std::string, const FunDef*> defs{{f.name, &f}};
   stan::math::nested_rev_autodiff nested;

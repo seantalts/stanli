@@ -112,9 +112,9 @@ class MirInterp {
     fail("expected int scalar", e.raw);
   }
 
-  // Bind arguments positionally by declared type and evaluate the body to
-  // its return value. This is the ODE entry point: real-typed parameters
-  // consume `args` in order, int-typed ones consume `int_args`.
+  // Bind arguments positionally by their declared logical views and evaluate
+  // the body to its return value. This is the ODE entry point: real-typed
+  // parameters consume `args` in order, int-typed ones consume `int_args`.
   std::vector<T> call(const mir::FunDef& f,
                       const std::vector<std::vector<T>>& args,
                       const std::vector<std::vector<int>>& int_args) {
@@ -126,18 +126,22 @@ class MirInterp {
     // assuming a formal is an owning, address-zero vector.
     sub.udf_depth_ = udf_depth_ + 1;
     sub.propto_ctx_ = propto_ctx_;
+    if (f.arg_views.size() != f.arg_names.size())
+      fail("function has incomplete unsized argument metadata: " + f.name);
     size_t ai = 0, ii = 0;
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
-      const bool is_int = f.arg_types[k].find("UInt") != std::string::npos;
+      const mir::UnsizedView& view = f.arg_views[k];
+      const bool is_int = view.leaf == mir::UnsizedLeaf::Int;
       Value v;
       if (is_int && ii < int_args.size()) {
         v.is_int = true;
         v.i = int_args[ii++];
         v.r.assign(v.i.begin(), v.i.end());
-        if (f.arg_types[k] != "UInt") v.dims = {(int64_t)v.i.size()};
+        if (view.depth != 0) v.dims = {(int64_t)v.i.size()};
       } else if (ai < args.size()) {
         v.r = args[ai++];
-        if (f.arg_types[k] != "UReal") v.dims = {(int64_t)v.r.size()};
+        if (view.depth != 0 || view.leaf != mir::UnsizedLeaf::Real)
+          v.dims = {(int64_t)v.r.size()};
       }
       sub.env_[f.arg_names[k]] = std::move(v);
     }
@@ -2137,6 +2141,12 @@ class MirInterp {
         e.name == "poisson_log_lpmf" || e.name == "bernoulli_logit_lpmf" ||
         e.name == "binomial_logit_lpmf" || e.name == "hypergeometric_lpmf" ||
         e.name == "discrete_range_lpmf") {
+      if (shared_id >= 0 &&
+          e.args.size() != (size_t)program_density_arity(shared_id))
+        fail(e.name + " takes " +
+                 std::to_string(program_density_arity(shared_id)) +
+                 " arguments in the interpreter",
+             e.raw);
       std::vector<Value> av;
       for (const auto& a : e.args) av.push_back(eval(a));
       size_t n = 1;

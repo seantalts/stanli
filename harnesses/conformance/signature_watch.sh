@@ -22,24 +22,37 @@ upstream_ref=${1:-master}
 
 pinned_sha=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
              "$repo_root/tools/dev_setup.sh")
-if [[ -z "$pinned_sha" ]]; then
-  echo "Could not read STANC3_SRC_SHA from tools/dev_setup.sh" >&2
+pinned_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
+              "$repo_root/tools/dev_setup.sh")
+if [[ -z "$pinned_repo" || -z "$pinned_sha" ]]; then
+  echo "Could not read STANC3_SRC_REPO/STANC3_SRC_SHA from tools/dev_setup.sh" >&2
   exit 1
 fi
 
-raw=https://raw.githubusercontent.com/stan-dev/stanc3
+case "$pinned_repo" in
+  https://github.com/*.git)
+    pinned_slug=${pinned_repo#https://github.com/}
+    pinned_slug=${pinned_slug%.git}
+    ;;
+  *)
+    echo "STANC3_SRC_REPO must be an https://github.com/*.git URL" >&2
+    exit 1
+    ;;
+esac
+pinned_raw="https://raw.githubusercontent.com/$pinned_slug"
+upstream_raw=https://raw.githubusercontent.com/stan-dev/stanc3
 file=test/integration/signatures/stan_math_signatures.t
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # The cram file is the command plus its expected output; the signatures
 # are the two-space-indented lines. Everything else is header.
-fetch_signatures() { # ref outfile
-  curl -fsSL --retry 5 --retry-all-errors "$raw/$1/$file" |
-    sed -n 's/^  \([^$].*\)$/\1/p' | sort > "$2"
+fetch_signatures() { # raw-root ref outfile
+  curl -fsSL --retry 5 --retry-all-errors "$1/$2/$file" |
+    sed -n 's/^  \([^$].*\)$/\1/p' | sort > "$3"
 }
-fetch_signatures "$pinned_sha" "$work/pinned"
-fetch_signatures "$upstream_ref" "$work/upstream"
+fetch_signatures "$pinned_raw" "$pinned_sha" "$work/pinned"
+fetch_signatures "$upstream_raw" "$upstream_ref" "$work/upstream"
 
 added=$(comm -13 "$work/pinned" "$work/upstream")
 removed=$(comm -23 "$work/pinned" "$work/upstream")

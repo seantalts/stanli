@@ -275,6 +275,8 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/estimate.cpp
   runtime/src/pathfinder.cpp
   runtime/src/mir_reader.cpp
+  runtime/src/mir_decode.cpp
+  runtime/src/portable_mir_reader.cpp
   runtime/src/lower.cpp
   runtime/src/wa_interp.cpp
   runtime/src/message_sink.cpp
@@ -535,7 +537,8 @@ set(STANLI_TESTS
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
   test_mnc
   test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp
-  test_mir test_transforms test_eltwise test_scalar_binary test_lower
+  test_mir test_mir_decode test_transforms test_eltwise test_scalar_binary
+  test_lower
   test_lower_views
   test_lower_view_contract test_lower_array_contract test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
