@@ -21,11 +21,12 @@ different binding, so a model samples to the same draws from any of them.
 | | | |
 | --- | --- | --- |
 | **Python** | `pip install stanli` | [python/README.md](python/README.md), [PyPI](https://pypi.org/project/stanli/) |
-| **R** | `install.packages('stanli', repos = 'https://seantalts.r-universe.dev')` then `stanli_install()` | [r/README.md](r/README.md) |
+| **R** | `install.packages("stanli", repos = "https://seantalts.r-universe.dev")` then `stanli_install()` | [r/README.md](r/README.md) |
 | **Browser / Node** | `npm install @seantalts/stanli` | [js/README.md](js/README.md), [npm](https://www.npmjs.com/package/@seantalts/stanli) |
 
-The R package is not on CRAN yet; until it is, install it from this
-repository with `remotes::install_github()` or from a checkout (see
+The R package is not on CRAN yet; until it is,
+[R-universe](https://seantalts.r-universe.dev) serves prebuilt binaries,
+and `remotes::install_github()` or a checkout installs from source (see
 [R](#r) below). It downloads its runtime on first use
 rather than bundling it, because CRAN will not carry a 29 MB binary and
 could not build one on their farm.
