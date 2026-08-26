@@ -5,6 +5,8 @@
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
+#include <cstdio>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -29,6 +31,16 @@ inline std::vector<double> run_grad(Graph g, const Fills& fills,
   for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = fill_at(i);
   std::vector<double> out(1 + (size_t)ex.n_params());
   out[0] = ex.gradient(out.data() + 1);
+  // A second evaluation on the same executor must reproduce the first bit
+  // for bit. A pass that lets per-evaluation writes reach a bind-time
+  // buffer is correct on the first evaluation and wrong from the second,
+  // and every other gate in the project evaluates once per process.
+  std::vector<double> again(out.size());
+  again[0] = ex.gradient(again.data() + 1);
+  if (again != out) {
+    std::fprintf(stderr, "run_grad: second evaluation diverged\n");
+    std::abort();
+  }
   return out;
 }
 
