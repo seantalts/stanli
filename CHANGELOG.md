@@ -110,6 +110,17 @@ tail is the three ODE models, at 0.87x, 0.90x, and 0.90x. The tables in
 `docs/benchmarks.md` and the headline numbers in the READMEs and the demo
 page carry the new run.
 
+### Generated quantities use Stan's generator
+
+The caller-owned write-array stream still used `boost::ecuyer1988` after the
+sampler moved to Stan's `rng_t`. It now follows BridgeStan's public contract:
+Stan's current engine initialized with `create_rng(seed, 0)`. This changes the
+generated-quantities sequence produced by a fixed seed, while keeping streams
+reproducible and independent. The direct write-array oracle now compares RNG
+columns as well as deterministic columns. As before, stanli's postprocessed
+sampling rows use their own write-array stream; they do not preserve CmdStan's
+sampler RNG state across transitions.
+
 ### Compatibility
 
 Fusion and packet arithmetic change the order of some reductions, so

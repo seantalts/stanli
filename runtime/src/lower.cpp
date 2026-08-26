@@ -1,3 +1,4 @@
+#include <stanli/algebra.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/constfold.hpp>
 #include <stanli/cse.hpp>
@@ -2737,6 +2738,72 @@ struct Lowering {
     return result;
   }
 
+  // map_rect checks that the three job arrays have matching OUTER sizes and
+  // returns an empty vector before touching the shared parameters or the UDF
+  // when that size is zero.  This is the one map_rect case which needs no
+  // runtime callback at all (and is exercised by stanc3's mother model).
+  // Nonempty calls deliberately keep falling through to the unsupported
+  // function diagnostic.
+  std::optional<Val> lower_empty_map_rect(const mir::Expr& e) {
+    if (e.name != "map_rect") return std::nullopt;
+    if (e.args.size() != 5)
+      fail(
+          "map_rect: expected function, shared parameters, job parameters, "
+          "real data, and integer data",
+          e.raw);
+
+    // A non-variable shared-parameter expression still has to be evaluated
+    // before map_rect can take its empty-job return.  Plain zero-length
+    // locals have no materialized slot, so their declared view is enough.
+    SlotInfo shared_si;
+    if (e.args[1].kind == mir::Expr::Var) {
+      auto declared = decls.find(e.args[1].name);
+      if (declared != decls.end()) shared_si = declared->second.si;
+    }
+    if (!is_vector(shared_si)) shared_si = lower_expr(e.args[1]).si;
+    if (!is_vector(shared_si))
+      fail("map_rect: shared parameters are not a vector", e.raw);
+
+    // A default-initialized zero-length local has declaration geometry but
+    // no scope value: there are no elements to initialize or materialize.
+    // map_rect does not read it on this branch, so consult decls before
+    // asking lower_expr for a slot (mother's `tmp2` has exactly this form).
+    SlotInfo job_si;
+    if (e.args[2].kind == mir::Expr::Var) {
+      auto declared = decls.find(e.args[2].name);
+      if (declared != decls.end()) job_si = declared->second.si;
+    }
+    if (!is_array(job_si)) job_si = lower_expr(e.args[2]).si;
+    if (!is_array(job_si)) return std::nullopt;
+    const ArrayShape& job_shape = array_shape(job_si);
+    const size_t job_outer =
+        job_shape.dims.size() - (size_t)leaf_rank(job_shape.leaf);
+    if (job_shape.leaf != ViewKind::Vector || job_outer != 1 ||
+        job_shape.dims.front() != 0)
+      return std::nullopt;
+
+    Val real_data = lower_expr(e.args[3]);
+    Val int_data = lower_expr(e.args[4]);
+    if (!is_array(real_data.si) || !is_array(int_data.si))
+      fail("map_rect: job data arguments are not arrays", e.raw);
+    const ArrayShape& real_shape = array_shape(real_data.si);
+    const ArrayShape& int_shape = array_shape(int_data.si);
+    if (real_shape.leaf != ViewKind::Flat || int_shape.leaf != ViewKind::Flat ||
+        real_shape.dims.size() != 2 || int_shape.dims.size() != 2)
+      fail("map_rect: job data arguments do not have two array dimensions",
+           e.raw);
+    if (real_shape.dims.front() != 0 || int_shape.dims.front() != 0)
+      fail("map_rect: job parameters and job data sizes do not match", e.raw);
+    if (e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
+      fail("map_rect: result is not a vector", e.raw);
+
+    SlotInfo si = view_of(e.type_);
+    si.param_free = true;
+    const int slot = add_slot(0, false);
+    out.fills.emplace_back(slot, std::vector<double>{});
+    return Val{slot, false, si};
+  }
+
   Val lower_funapp(const mir::Expr& e) {
     if (e.fn_lib == mir::Expr::Lib::StanLib && e.name == "dims")
       return lower_dims(e);
@@ -2832,6 +2899,7 @@ struct Lowering {
       if (auto v = fold_const(e)) return *v;
       fail("unsupported function kind for " + e.name, e.raw);
     }
+    if (auto v = lower_empty_map_rect(e)) return *v;
     // The stan-library names split into disjoint groups; each helper owns
     // one and declines the rest.
     if (auto v = lower_multi_normal_rng(e)) return *v;
@@ -2841,6 +2909,7 @@ struct Lowering {
     if (auto v = lower_bound_transform(e)) return *v;
     if (auto v = lower_eltwise_fn(e)) return *v;
     if (auto v = lower_matrix_fn(e)) return *v;
+    if (auto v = lower_algebra_fn(e)) return *v;
     if (auto v = lower_ode_fn(e)) return *v;
     // A shape query in a REAL-valued expression. eval_int already answers
     // rows/cols/size from the slot or the data map, but only where an
@@ -3883,6 +3952,98 @@ struct Lowering {
       return emit_value(OP_SLICE, {a}, n, view_of(e.type_), {(int)off});
     }
     return std::nullopt;
+  }
+
+  // The deprecated Powell algebra_solver interface:
+  //
+  //   algebra_solver(f, x, y, x_r, x_i[, rel_tol, f_tol, max_steps])
+  //
+  // x is an initial guess.  It influences which root is selected but legacy
+  // Stan Math intentionally returns value_type_t<y>, so only y participates
+  // in autodiff.  Keep x as a graph input for values while stamping the op's
+  // activity and result scalar type from y alone.
+  std::optional<Val> lower_algebra_fn(const mir::Expr& e) {
+    if (e.name != "algebra_solver") return std::nullopt;
+    if (e.args.size() != 5 && e.args.size() != 8)
+      fail("algebra_solver: expected 5 or 8 arguments", e.raw);
+    if (e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
+      fail("algebra_solver: result must be a vector", e.raw);
+
+    auto fit = fun_defs.find(e.args[0].name);
+    if (fit == fun_defs.end())
+      fail("algebra_solver: unknown algebraic system " + e.args[0].name, e.raw);
+    const mir::FunDef& f = *fit->second;
+    if (f.arg_views.size() != 4 || f.arg_names.size() != 4 ||
+        f.arg_types.size() != 4 || f.arg_views[0].depth != 0 ||
+        f.arg_views[0].leaf != mir::UnsizedLeaf::Vector ||
+        f.arg_views[1].depth != 0 ||
+        f.arg_views[1].leaf != mir::UnsizedLeaf::Vector ||
+        f.arg_views[2].depth != 1 ||
+        f.arg_views[2].leaf != mir::UnsizedLeaf::Real ||
+        f.arg_views[3].depth != 1 ||
+        f.arg_views[3].leaf != mir::UnsizedLeaf::Int)
+      fail(
+          "algebra_solver: system must take (vector, vector, array[] real, "
+          "array[] int)",
+          e.raw);
+
+    auto spec = std::make_shared<AlgebraSpec>();
+    spec->adopt(fun_defs);
+    spec->system_name = e.args[0].name;
+    spec->x_r = const_values(e.args[3]);
+    spec->x_i = const_ints(e.args[4]);
+    if (e.args.size() == 8) {
+      spec->relative_tolerance = const_values(e.args[5]).at(0);
+      spec->function_tolerance = const_values(e.args[6]).at(0);
+      spec->max_num_steps = (int64_t)eval_int(e.args[7]);
+    }
+
+    Val x = lower_expr(e.args[1]);
+    Val y = lower_expr(e.args[2]);
+    if (!is_vector(x.si) || !is_vector(y.si))
+      fail("algebra_solver: initial guess and parameters must be vectors",
+           e.raw);
+    const int64_t n = g.slots[x.slot].len;
+    if (n > std::numeric_limits<int>::max() ||
+        g.slots[y.slot].len > std::numeric_limits<int>::max() ||
+        spec->x_r.size() > (size_t)std::numeric_limits<int>::max())
+      fail(
+          "algebra_solver: argument is too large for the callback register "
+          "program",
+          e.raw);
+
+    // compile_rhs_args already provides precisely the register convention
+    // the system needs after an unused leading scalar.  Add that formal to a
+    // temporary copy; the retained source definition remains the real
+    // four-argument function used by the interpreter fallback.
+    mir::FunDef adapted = *spec->system();
+    adapted.arg_names.insert(adapted.arg_names.begin(),
+                             "__stanli_algebra_unused_time");
+    adapted.arg_types.insert(adapted.arg_types.begin(), "UReal");
+    adapted.arg_views.insert(adapted.arg_views.begin(),
+                             mir::UnsizedView{0, mir::UnsizedLeaf::Real});
+    adapted.arg_data_only.insert(adapted.arg_data_only.begin(), true);
+    std::vector<RhsArg> args(3);
+    args[0].is_param = true;
+    args[0].len = (int)g.slots[y.slot].len;
+    args[1].len = (int)spec->x_r.size();
+    args[2].is_int = true;
+    args[2].ints = spec->x_i;
+    spec->prog = compile_rhs_args(adapted, *spec->funs(), (int)n, args);
+    if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ALGEBRA"))
+      std::fprintf(stderr,
+                   "stanli: algebraic system %s falls back to the "
+                   "interpreter: %s\n",
+                   spec->system_name.c_str(), spec->prog.why.c_str());
+
+    SlotInfo si = view_of(e.type_);
+    si.param_free = x.si.param_free && y.si.param_free;
+    Val result = emit_raw(OP_ALGEBRA_SOLVER, {x.slot, y.slot}, n, si, {}, -1,
+                          y.autodiff);
+    g.ops.back().variant = y.autodiff ? 0x1u : 0x0u;
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+    return result;
   }
 
   // stan-math's own defaults differ per solver: rk45 1e-6/1e-6/1e6 (the

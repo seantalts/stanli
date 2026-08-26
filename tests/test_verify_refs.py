@@ -25,7 +25,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
 from verify_refs import (POINTS, QUARANTINED, SCHEMA,  # noqa: E402
-                         check_model, load_refs, probe_point)
+                         check_model, load_refs, parse_status, probe_point)
+from verify_sample import evaluate, record_wa  # noqa: E402
 
 # A model that exists under tests/stanc3, so model_files resolves real
 # paths without unpacking a posteriordb dataset. The stub never reads
@@ -49,6 +50,25 @@ def stub(tmp, body):
     return path
 
 
+class StatusLineTest(unittest.TestCase):
+    """Machine results may follow output from transformed-data prints."""
+
+    def test_each_result_kind_is_found_after_printed_output(self):
+        for line in ("OK -3.5 1 -2", "COMPILE_FAIL no MIR",
+                     "EVAL_FAIL out of range"):
+            with self.subTest(line=line):
+                self.assertEqual(parse_status(f"mother = 1\n{line}\n"),
+                                 line.split())
+
+    def test_output_without_a_result_has_no_status(self):
+        self.assertEqual(parse_status("mother = 1\n"), [])
+
+    def test_a_printed_status_prefix_does_not_shadow_the_driver_result(self):
+        self.assertEqual(
+            parse_status("OK user text\nEVAL_FAIL out of range\n"),
+            ["EVAL_FAIL", "out", "of", "range"])
+
+
 class ProbePointTest(unittest.TestCase):
     """One run, one verdict. probe_point returns ("OK", "") or a failure."""
 
@@ -60,6 +80,10 @@ class ProbePointTest(unittest.TestCase):
 
     def test_finite_lp_and_gradients_pass(self):
         self.assertEqual(self.verdict('echo "OK -3.5 1 -2"')[0], "OK")
+
+    def test_printed_output_before_result_is_ignored(self):
+        self.assertEqual(self.verdict(
+            'echo "mother = 1"\necho "OK -3.5 1 -2"')[0], "OK")
 
     def test_signal_is_a_crash(self):
         status, detail = self.verdict("kill -SEGV $$")
@@ -109,6 +133,10 @@ class CheckModelPointsTest(unittest.TestCase):
 
     def test_agreeing_at_every_point_passes(self):
         self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1], "OK")
+
+    def test_printed_output_before_each_result_is_ignored(self):
+        self.assertEqual(self.run_check(
+            'echo "mother = $point"\necho "OK -3.5 1 -2"')[1], "OK")
 
     def test_crash_away_from_the_recorded_point_fails(self):
         # reductions_allowed in miniature: the recorded point matches the
@@ -173,6 +201,37 @@ class CheckModelPointsTest(unittest.TestCase):
                 'else echo "OK -3.5 1 -2"; fi')
         self.assertEqual(status, "OK")
         self.assertIn(f"QUARANTINE {MODEL} point 1: test", notes)
+
+
+class RecorderEvaluateTest(unittest.TestCase):
+    """The recorder extracts both engines' statuses from full stdout."""
+
+    def test_printed_output_before_results_is_ignored(self):
+        runs = [
+            unittest.mock.Mock(stdout="reference print\nOK -3.5 1 -2\n"),
+            unittest.mock.Mock(stdout="mother = 1\nOK -3.5 1 -2\n"),
+        ]
+        with unittest.mock.patch("verify_sample.subprocess.run",
+                                 side_effect=runs):
+            ref, ref_out, got, got_out = evaluate(
+                pathlib.Path("ref"), pathlib.Path("stanli_check"),
+                pathlib.Path("mother.stan"), pathlib.Path("mother.json"), 1)
+        self.assertEqual(ref, ["OK", "-3.5", "1", "-2"])
+        self.assertEqual(got, ref)
+        self.assertTrue(ref_out.startswith("reference print"))
+        self.assertTrue(got_out.startswith("mother = 1"))
+
+    def test_rng_write_array_values_are_recorded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stan = pathlib.Path(tmp) / "rng.stan"
+            stan.write_text("generated quantities { real x = normal_rng(0, 1); }")
+            point = {}
+            note = record_wa(
+                stan, point,
+                "WANAMES x\nWAVALS 0.125\n",
+                "WANAMES x\nWAVALS 0.125\n")
+        self.assertEqual(point["wa"], {"names": "x", "values": ["0.125"]})
+        self.assertIn("1 values recorded", note)
 
 
 class SchemaTest(unittest.TestCase):

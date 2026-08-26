@@ -200,6 +200,23 @@ def parse_wa(out):
     return (names, vals)
 
 
+def parse_status(out):
+    """Fields from the final machine-readable result line, or [].
+
+    Stan ``print`` statements in transformed data run before evaluation and
+    can therefore put ordinary output ahead of stanli_check's result.  Keep
+    the three result spellings in one parser so recording and replay do not
+    accidentally treat that output as the result line.
+    """
+    # The driver writes its result after model output.  Walking backwards
+    # also prevents a user `print("OK ...")` from shadowing the real status.
+    for line in reversed(out.splitlines()):
+        fields = line.split()
+        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL"):
+            return fields
+    return []
+
+
 def corpus_models(pdb, wanted=(), contains="", excluded=()):
     """Unique (model, data-name) pairs, in posteriordb order."""
     wanted, excluded, seen = set(wanted), set(excluded), set()
@@ -362,8 +379,7 @@ def probe_point(model, stan, dj, check_bin, point, timeout):
             capture_output=True, text=True, cwd=REPO, timeout=timeout)
     except subprocess.TimeoutExpired:
         return ("POINT_TIMEOUT", "")
-    lines = proc.stdout.splitlines()
-    got = lines[0].split() if lines else []
+    got = parse_status(proc.stdout)
     kind = got[0] if got else ""
     if kind == "EVAL_FAIL":
         return ("OK", "")
@@ -415,8 +431,7 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                               timeout=timeout)
     except subprocess.TimeoutExpired:
         return ("TIMEOUT", 0.0, 0, 0, f"point {point}")
-    lines = proc.stdout.splitlines()
-    got = lines[0].split() if lines else []
+    got = parse_status(proc.stdout)
     kind = got[0] if got else ""
     if "values" not in pt:
         if kind == "EVAL_FAIL":
@@ -564,12 +579,12 @@ def check_wa_coverage(pdb, check_bin, models, contains, timeout, excluded=()):
                 proc = subprocess.run(
                     [str(check_bin), str(stan), str(data), "--point", point],
                     capture_output=True, text=True, timeout=timeout, cwd=REPO)
-                if proc.stdout.startswith("OK"):
+                if parse_status(proc.stdout)[:1] == ["OK"]:
                     break
         except subprocess.TimeoutExpired:
             rows.append((model, "TIMEOUT", ""))
             continue
-        if not proc.stdout.startswith("OK"):
+        if parse_status(proc.stdout)[:1] != ["OK"]:
             continue
         wa_lines = [line[3:] for line in proc.stderr.splitlines()
                     if line.startswith("WA ")]

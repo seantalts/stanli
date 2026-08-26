@@ -41,7 +41,8 @@ from cmdstan_ref import compile_cmd
 # script, not here, so a change to either cannot land in the recorder
 # without landing in the CI gate.
 from verify_refs import (POINTS, REFS_PATH, SCHEMA, default_check_bin,
-                         load_refs, model_files, pair_dev, parse_wa)
+                         load_refs, model_files, pair_dev, parse_status,
+                         parse_wa)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # Everything the recorded numbers depend on, by revision. Read from the
@@ -186,12 +187,12 @@ def evaluate(exe, check_bin, stan, dj, point, timeout=600):
     ref_out = subprocess.run([str(exe), str(dj), str(point)],
                              capture_output=True, text=True,
                              timeout=timeout).stdout
-    ref = (ref_out.splitlines() or [""])[0].split()
+    ref = parse_status(ref_out)
     got_out = subprocess.run(
         [str(check_bin), str(stan), str(dj), "--point", str(point),
          "--wa-values"], capture_output=True, text=True, cwd=REPO,
         timeout=timeout).stdout
-    got = (got_out.splitlines() or [""])[0].split()
+    got = parse_status(got_out)
     return ref, ref_out, got, got_out
 
 
@@ -216,18 +217,17 @@ def compare(ref, got):
             len(rv))
 
 
-def record_wa(stan, point_entry, ref_out, got_out):
+def record_wa(_stan, point_entry, ref_out, got_out):
     """CmdStan's write_array row, when stanli reproduces it. Returns a note.
 
-    Recorded whenever the row is deterministic (no _rng anywhere), so the
-    values are a property of the draw and not of anyone's RNG stream. A
-    generated quantities block is not required -- the parameter columns
-    are the row too, and the order they come out in is exactly what a
-    transposed array of matrices got wrong while every gradient stayed
-    right.
+    Both drivers start Stan's RNG stream from the same seed and chain, so RNG
+    values are part of the oracle too. A generated quantities block is not
+    required -- the parameter columns are the row too, and the order they
+    come out in is exactly what a transposed array of matrices got wrong while
+    every gradient stayed right.
     """
     wa, got_wa = parse_wa(ref_out), parse_wa(got_out)
-    if "_rng" in stan.read_text() or not wa:
+    if not wa:
         return ""
     if not got_wa:
         return "; WA not recorded (stanli produced none)"

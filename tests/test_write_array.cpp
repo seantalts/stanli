@@ -573,6 +573,30 @@ void test_caller_owned_rng() {
   }
 }
 
+// WaRng is the BridgeStan-compatible public stream: it must track Stan's
+// current rng_t and its create_rng(seed, chain=0) seeding convention. This
+// catches the historical drift where sampling moved to mixmax but generated
+// quantities silently stayed on ecuyer1988.
+void test_stan_rng_stream_contract() {
+  using namespace stanli;
+  constexpr unsigned seed = 1234;
+  WaRng got(seed);
+  stan::rng_t want = stan::services::util::create_rng(seed, 0);
+  for (int i = 0; i < 32; ++i) {
+    if (got.gen()() != want()) {
+      ++failures;
+      std::printf("FAIL WaRng does not match Stan rng_t at draw %d\n", i);
+      return;
+    }
+  }
+  got.seed(seed);
+  want = stan::services::util::create_rng(seed, 0);
+  if (got.gen()() != want()) {
+    ++failures;
+    std::printf("FAIL WaRng reseed does not match Stan create_rng\n");
+  }
+}
+
 void test_transformed_parameter_checks() {
   using namespace stanli;
   const std::string mir = slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
@@ -3813,6 +3837,7 @@ int main() {
   test_runtime_int_sum_is_not_compile_time();
   test_runtime_int_sum_redeclaration_shadowing();
   test_runtime_control_write_array();
+  test_stan_rng_stream_contract();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   if (failures == 0) std::printf("test_write_array OK\n");

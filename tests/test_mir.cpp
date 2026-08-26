@@ -97,6 +97,39 @@ int main(int argc, char** argv) {
   for (const auto& s : p.log_prob) swalk(s);
   check(n_propto == 4, "4 propto lpdf calls");
 
+  // stanc3 prints the open-ended `x[4:]` index as Upfrom. Keep that node
+  // intact for the interpreter rather than turning the whole expression
+  // into Unsupported in the MIR reader.
+  {
+    const std::string upfrom_text = R"sexp(
+((input_vars ())
+ (log_prob
+  (((pattern
+     (Assignment ((LVariable y) ()) (UArray UReal)
+      ((pattern
+        (Indexed
+         ((pattern (Var x))
+          (meta ((type_ (UArray UReal)) (loc <opaque>) (adlevel DataOnly))))
+         ((Upfrom
+           ((pattern (Lit Int 4))
+            (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
+       (meta ((type_ (UArray UReal)) (loc <opaque>) (adlevel DataOnly))))))
+    (meta <opaque>)))))
+)sexp";
+    const mir::Program upfrom_program =
+        mir::read_program(sexp::parse(upfrom_text));
+    const mir::Expr* parsed = upfrom_program.log_prob.size() == 1
+                                  ? &upfrom_program.log_prob[0].rhs
+                                  : nullptr;
+    check(parsed && parsed->kind == mir::Expr::Indexed &&
+              parsed->args.size() == 2 &&
+              parsed->args[1].name == "IndexUpfrom" &&
+              parsed->args[1].args.size() == 1 &&
+              parsed->args[1].args[0].kind == mir::Expr::LitInt &&
+              parsed->args[1].args[0].lit_i == 4,
+          "MIR reader preserves an Upfrom index");
+  }
+
   // A scalar broadcasts over the container's logical geometry, including a
   // zero-width vector. Flat width alone cannot identify the scalar when the
   // vector has zero or one element.
@@ -471,6 +504,332 @@ int main(int argc, char** argv) {
     read_interp.run({scale_decl, scale_read});
     check(read_interp.env().at("scale_data").dims.empty(),
           "flat data read preserves declared scalar geometry");
+  }
+
+  // A partial list of leading scalar indices removes exactly those array
+  // dimensions and keeps the remaining container geometry.  `mother.stan`
+  // reaches the two-index case as `array[4,5] matrix[2,3] x; x[i,j]`.
+  // Storage is first-index-fast over all four dimensions, including the
+  // matrix's column-major row/column pair.
+  {
+    std::map<std::string, const mir::FunDef*> functions;
+    MirInterp<double> interp(functions, "leading index slice test");
+    DataMap::Entry x;
+    x.dims = {4, 5, 2, 3};
+    for (int col = 1; col <= 3; ++col)
+      for (int row = 1; row <= 2; ++row)
+        for (int b = 1; b <= 5; ++b)
+          for (int a = 1; a <= 4; ++a)
+            x.r.push_back(1000.0 * a + 100.0 * b + 10.0 * row + col);
+    interp.env()["x"] = std::move(x);
+
+    auto indexed = [](const std::vector<long>& indices, const std::string& type,
+                      mir::UnsizedView view) {
+      mir::Expr base;
+      base.kind = mir::Expr::Var;
+      base.name = "x";
+      base.type_ = "(UArray (UArray UMatrix))";
+      base.unsized = {2, mir::UnsizedLeaf::Matrix};
+      base.data_only = true;
+
+      mir::Expr e;
+      e.kind = mir::Expr::Indexed;
+      e.args.push_back(std::move(base));
+      for (long value : indices) {
+        mir::Expr literal;
+        literal.kind = mir::Expr::LitInt;
+        literal.lit_i = value;
+        literal.type_ = "UInt";
+        literal.unsized.leaf = mir::UnsizedLeaf::Int;
+        literal.data_only = true;
+        mir::Expr index;
+        index.kind = mir::Expr::FunApp;
+        index.name = "IndexSingle";
+        index.args.push_back(std::move(literal));
+        e.args.push_back(std::move(index));
+      }
+      e.type_ = type;
+      e.unsized = view;
+      e.data_only = true;
+      return e;
+    };
+
+    const DataMap::Entry outer = interp.eval(
+        indexed({2}, "(UArray UMatrix)", {1, mir::UnsizedLeaf::Matrix}));
+    std::vector<double> outer_values;
+    for (int col = 1; col <= 3; ++col)
+      for (int row = 1; row <= 2; ++row)
+        for (int b = 1; b <= 5; ++b)
+          outer_values.push_back(2000.0 + 100.0 * b + 10.0 * row + col);
+    check(outer.dims == std::vector<int64_t>({5, 2, 3}) &&
+              outer.r == outer_values,
+          "one leading index preserves array[5] matrix[2,3]");
+
+    const DataMap::Entry matrix =
+        interp.eval(indexed({2, 3}, "UMatrix", {0, mir::UnsizedLeaf::Matrix}));
+    check(matrix.dims == std::vector<int64_t>({2, 3}) &&
+              matrix.r ==
+                  std::vector<double>({2311, 2321, 2312, 2322, 2313, 2323}),
+          "two leading indices return the selected matrix column-major");
+
+    auto integer = [](long value) {
+      mir::Expr e;
+      e.kind = mir::Expr::LitInt;
+      e.lit_i = value;
+      e.type_ = "UInt";
+      e.unsized.leaf = mir::UnsizedLeaf::Int;
+      e.data_only = true;
+      return e;
+    };
+    auto single = [&](long value) {
+      mir::Expr e;
+      e.kind = mir::Expr::FunApp;
+      e.name = "IndexSingle";
+      e.args = {integer(value)};
+      return e;
+    };
+    auto between = [&](long lo, long hi) {
+      mir::Expr e;
+      e.kind = mir::Expr::FunApp;
+      e.name = "IndexBetween";
+      e.args = {integer(lo), integer(hi)};
+      return e;
+    };
+    auto all = [] {
+      mir::Expr e;
+      e.kind = mir::Expr::FunApp;
+      e.name = "IndexAll";
+      return e;
+    };
+    auto multi = [](const std::string& name) {
+      mir::Expr positions;
+      positions.kind = mir::Expr::Var;
+      positions.name = name;
+      positions.type_ = "(UArray UInt)";
+      positions.unsized = {1, mir::UnsizedLeaf::Int};
+      positions.data_only = true;
+      mir::Expr e;
+      e.kind = mir::Expr::FunApp;
+      e.name = "IndexMulti";
+      e.args = {std::move(positions)};
+      return e;
+    };
+    auto upfrom = [&](long lo) {
+      mir::Expr e;
+      e.kind = mir::Expr::FunApp;
+      e.name = "IndexUpfrom";
+      e.args = {integer(lo)};
+      return e;
+    };
+
+    // These are the five mixed-index reads in mother.stan's optimized
+    // generated-quantities MIR. The runtime value has one unified
+    // first-index-fast layout: outer array, matrix row, matrix column.
+    DataMap::Entry indexing;
+    indexing.dims = {5, 3, 4};
+    for (int col = 1; col <= 4; ++col)
+      for (int row = 1; row <= 3; ++row)
+        for (int outer_ix = 1; outer_ix <= 5; ++outer_ix)
+          indexing.r.push_back(100.0 * outer_ix + 10.0 * row + col);
+    interp.env()["indexing"] = std::move(indexing);
+    DataMap::Entry gather_indices;
+    gather_indices.is_int = true;
+    gather_indices.dims = {3};
+    gather_indices.i = {2, 3, 1};
+    gather_indices.r.assign(gather_indices.i.begin(), gather_indices.i.end());
+    interp.env()["gather_indices"] = std::move(gather_indices);
+    auto mixed = [](std::vector<mir::Expr> indices) {
+      mir::Expr base;
+      base.kind = mir::Expr::Var;
+      base.name = "indexing";
+      base.type_ = "(UArray UMatrix)";
+      base.unsized = {1, mir::UnsizedLeaf::Matrix};
+      base.data_only = true;
+      mir::Expr e;
+      e.kind = mir::Expr::Indexed;
+      e.args.push_back(std::move(base));
+      for (auto& index : indices) e.args.push_back(std::move(index));
+      e.data_only = true;
+      return e;
+    };
+    const auto cell = [](int outer_ix, int row, int col) {
+      return 100.0 * outer_ix + 10.0 * row + col;
+    };
+
+    const DataMap::Entry gathered =
+        interp.eval(mixed({multi("gather_indices"), multi("gather_indices")}));
+    std::vector<double> gathered_want;
+    for (int col = 1; col <= 4; ++col)
+      for (int row : {2, 3, 1})
+        for (int outer_ix : {2, 3, 1})
+          gathered_want.push_back(cell(outer_ix, row, col));
+    check(gathered.dims == std::vector<int64_t>({3, 3, 4}) &&
+              gathered.r == gathered_want,
+          "N-D Multi/Multi read preserves gather order and matrix columns");
+
+    const DataMap::Entry all_gathered =
+        interp.eval(mixed({all(), multi("gather_indices")}));
+    std::vector<double> all_gathered_want;
+    for (int col = 1; col <= 4; ++col)
+      for (int row : {2, 3, 1})
+        for (int outer_ix = 1; outer_ix <= 5; ++outer_ix)
+          all_gathered_want.push_back(cell(outer_ix, row, col));
+    check(all_gathered.dims == std::vector<int64_t>({5, 3, 4}) &&
+              all_gathered.r == all_gathered_want,
+          "N-D All/Multi read keeps the outer array extent");
+
+    const DataMap::Entry gathered_all_gathered = interp.eval(
+        mixed({multi("gather_indices"), all(), multi("gather_indices")}));
+    std::vector<double> gathered_all_gathered_want;
+    for (int col : {2, 3, 1})
+      for (int row = 1; row <= 3; ++row)
+        for (int outer_ix : {2, 3, 1})
+          gathered_all_gathered_want.push_back(cell(outer_ix, row, col));
+    check(gathered_all_gathered.dims == std::vector<int64_t>({3, 3, 3}) &&
+              gathered_all_gathered.r == gathered_all_gathered_want,
+          "N-D Multi/All/Multi read gathers nonadjacent dimensions");
+
+    const DataMap::Entry ranged =
+        interp.eval(mixed({between(1, 3), single(1)}));
+    std::vector<double> ranged_want;
+    for (int col = 1; col <= 4; ++col)
+      for (int outer_ix = 1; outer_ix <= 3; ++outer_ix)
+        ranged_want.push_back(cell(outer_ix, 1, col));
+    check(
+        ranged.dims == std::vector<int64_t>({3, 4}) && ranged.r == ranged_want,
+        "N-D Between/Single read leaves the trailing row-vector axis");
+
+    const DataMap::Entry tail =
+        interp.eval(mixed({upfrom(4), between(2, 3), single(1)}));
+    std::vector<double> tail_want;
+    for (int row = 2; row <= 3; ++row)
+      for (int outer_ix = 4; outer_ix <= 5; ++outer_ix)
+        tail_want.push_back(cell(outer_ix, row, 1));
+    check(tail.dims == std::vector<int64_t>({2, 2}) && tail.r == tail_want,
+          "N-D Upfrom/Between/Single read drops the scalar column axis");
+
+    // mother builds its loop reference results as idx_res[i,j] = row. A
+    // partial list of leading scalar LHS indices therefore replaces the
+    // complete trailing container at a first-index-fast stride. Exercise an
+    // integer value so both storage mirrors must move together.
+    DataMap::Entry partial_ints;
+    partial_ints.is_int = true;
+    partial_ints.dims = {3, 2, 4};
+    for (int value = 1; value <= 24; ++value) partial_ints.i.push_back(value);
+    partial_ints.r.assign(partial_ints.i.begin(), partial_ints.i.end());
+    interp.env()["partial_ints"] = std::move(partial_ints);
+    DataMap::Entry partial_replacement;
+    partial_replacement.is_int = true;
+    partial_replacement.dims = {4};
+    partial_replacement.i = {901, 902, 903, 904};
+    partial_replacement.r.assign(partial_replacement.i.begin(),
+                                 partial_replacement.i.end());
+    interp.env()["partial_replacement"] = std::move(partial_replacement);
+    mir::Stmt partial_write;
+    partial_write.kind = mir::Stmt::Assignment;
+    partial_write.lhs = "partial_ints";
+    partial_write.lhs_idx = {single(2), single(1)};
+    partial_write.rhs.kind = mir::Expr::Var;
+    partial_write.rhs.name = "partial_replacement";
+    partial_write.rhs.type_ = "(UArray UInt)";
+    partial_write.rhs.unsized = {1, mir::UnsizedLeaf::Int};
+    partial_write.rhs.data_only = true;
+    interp.run({partial_write});
+    std::vector<int> partial_want;
+    for (int value = 1; value <= 24; ++value) partial_want.push_back(value);
+    for (size_t k = 0; k < 4; ++k) partial_want[1 + 6 * k] = 901 + (int)k;
+    const DataMap::Entry& partial_written = interp.env().at("partial_ints");
+    check(
+        partial_written.dims == std::vector<int64_t>({3, 2, 4}) &&
+            partial_written.i == partial_want &&
+            partial_written.r ==
+                std::vector<double>(partial_want.begin(), partial_want.end()),
+        "partial leading-Single assignment writes the trailing int container");
+
+    auto assignment_refused = [&](const mir::Stmt& assignment) {
+      try {
+        interp.run({assignment});
+      } catch (const std::exception&) {
+        return true;
+      }
+      return false;
+    };
+    mir::Stmt out_of_bounds = partial_write;
+    out_of_bounds.lhs_idx = {single(4), single(1)};
+    check(assignment_refused(out_of_bounds),
+          "partial leading-Single assignment checks each fixed index");
+    DataMap::Entry short_replacement;
+    short_replacement.is_int = true;
+    short_replacement.dims = {3};
+    short_replacement.i = {7, 8, 9};
+    short_replacement.r.assign(short_replacement.i.begin(),
+                               short_replacement.i.end());
+    interp.env()["short_replacement"] = std::move(short_replacement);
+    mir::Stmt wrong_size = partial_write;
+    wrong_size.rhs.name = "short_replacement";
+    check(assignment_refused(wrong_size),
+          "partial leading-Single assignment checks trailing size");
+
+    // Row-range assignment is strided in the same first-index-fast storage.
+    // Pin both the real mirror and the integer payload: later integer reads
+    // prefer `i`, so changing only `r` would appear to work until one of
+    // those reads consumed the stale values.
+    DataMap::Entry ints;
+    ints.is_int = true;
+    ints.dims = {2, 3};
+    ints.i = {1, 4, 2, 5, 3, 6};
+    ints.r.assign(ints.i.begin(), ints.i.end());
+    interp.env()["ints"] = std::move(ints);
+    DataMap::Entry replacement;
+    replacement.is_int = true;
+    replacement.dims = {2};
+    replacement.i = {9, 8};
+    replacement.r.assign(replacement.i.begin(), replacement.i.end());
+    interp.env()["replacement"] = std::move(replacement);
+    mir::Stmt row_write;
+    row_write.kind = mir::Stmt::Assignment;
+    row_write.lhs = "ints";
+    row_write.lhs_idx = {single(1), between(1, 2)};
+    row_write.rhs.kind = mir::Expr::Var;
+    row_write.rhs.name = "replacement";
+    row_write.rhs.type_ = "(UArray UInt)";
+    row_write.rhs.unsized = {1, mir::UnsizedLeaf::Int};
+    row_write.rhs.data_only = true;
+    interp.run({row_write});
+    const DataMap::Entry& written = interp.env().at("ints");
+    check(written.dims == std::vector<int64_t>({2, 3}) &&
+              written.i == std::vector<int>({9, 4, 8, 5, 3, 6}) &&
+              written.r == std::vector<double>({9, 4, 8, 5, 3, 6}),
+          "int array row-range assignment writes strided cells");
+
+    // stanc spells elementwise power as EltPow__.  Both operand orders
+    // broadcast a scalar without losing the container's geometry.
+    DataMap::Entry powers;
+    powers.dims = {3};
+    powers.r = {2, 3, 4};
+    interp.env()["powers"] = std::move(powers);
+    mir::Expr power_values;
+    power_values.kind = mir::Expr::Var;
+    power_values.name = "powers";
+    power_values.type_ = "UVector";
+    power_values.unsized.leaf = mir::UnsizedLeaf::Vector;
+    power_values.data_only = true;
+    mir::Expr elt_pow;
+    elt_pow.kind = mir::Expr::FunApp;
+    elt_pow.name = "EltPow__";
+    elt_pow.type_ = "UVector";
+    elt_pow.unsized.leaf = mir::UnsizedLeaf::Vector;
+    elt_pow.data_only = true;
+    elt_pow.args = {power_values, integer(2)};
+    const DataMap::Entry bases = interp.eval(elt_pow);
+    elt_pow.args = {integer(2), power_values};
+    const DataMap::Entry exponents = interp.eval(elt_pow);
+    check(bases.dims == std::vector<int64_t>({3}) &&
+              bases.r == std::vector<double>({4, 9, 16}),
+          "EltPow__ broadcasts a scalar exponent over a container");
+    check(exponents.dims == std::vector<int64_t>({3}) &&
+              exponents.r == std::vector<double>({4, 8, 16}),
+          "EltPow__ broadcasts a scalar base over a container");
   }
 
   // rows()/cols() answer from the MIR type, not from the storage rank.

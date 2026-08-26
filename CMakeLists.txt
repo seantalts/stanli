@@ -256,6 +256,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/matrix_fns.cpp
   runtime/kernels/scalar_binary.cpp
   runtime/kernels/scalar_unary_ad.cpp
+  runtime/kernels/algebra.cpp
   runtime/kernels/ode.cpp
   runtime/src/ode_prog.cpp
   runtime/src/program.cpp
@@ -544,7 +545,8 @@ set(STANLI_TESTS
   test_solve test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
-  test_odevariadic test_estimate test_brmsmono test_structured_arrays test_pathfinder)
+  test_odevariadic test_algebra test_estimate test_brmsmono
+  test_structured_arrays test_pathfinder)
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()

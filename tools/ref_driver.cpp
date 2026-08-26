@@ -9,6 +9,7 @@
 // there; the recorder then skips the model's wa reference.
 #include <stan/io/json/json_data.hpp>
 #include <stan/model/model_base.hpp>
+#include <stan/services/util/create_rng.hpp>
 #include <stan/math.hpp>
 
 #include <cstdio>
@@ -56,15 +57,15 @@ int main(int argc, char** argv) {
   std::printf("\n");
 
   // write_array at the same point: every CSV column (constrained params,
-  // transformed parameters, generated quantities). The RNG seed matches
-  // stanli_check --wa-values; only deterministic models get recorded, so
-  // the seed exists to satisfy the signature.
+  // transformed parameters, generated quantities). The RNG stream matches
+  // stanli_check --wa-values and BridgeStan's public RNG contract exactly:
+  // Stan's current engine, seeded through create_rng(seed, chain=0).
   try {
     std::vector<std::string> names;
     model.constrained_param_names(names, true, true);
     Eigen::VectorXd qd(n);
     for (int64_t i = 0; i < n; ++i) qd(i) = eval_point(i, variant);
-    stan::rng_t rng(1234);
+    stan::rng_t rng = stan::services::util::create_rng(1234, 0);
     Eigen::VectorXd vars;
     model.write_array(rng, qd, vars, true, true, &std::cerr);
     std::string joined;

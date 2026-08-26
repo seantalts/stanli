@@ -33,7 +33,7 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
                        WaRng& rng) {
   if (nargs != scalar_rng_arity(family) || (nargs != 0 && args == nullptr))
     throw std::logic_error("malformed scalar RNG arguments");
-  boost::ecuyer1988& g = rng.gen();
+  stan::rng_t& g = rng.gen();
   switch (family) {
     case ScalarRng::PoissonLog:
       return static_cast<double>(stan::math::poisson_log_rng(args[0], g));
@@ -133,7 +133,8 @@ std::vector<double> WaInterp::eval(
     return false;
   };
   h.fun = [this, &cur, &rng](const mir::Expr& e, DataMap::Entry* out) {
-    return rng_fun(*cur, e, out, rng) || ode_fun(*cur, e, out);
+    return rng_fun(*cur, e, out, rng) || ode_fun(*cur, e, out) ||
+           algebra_fun(*cur, e, out);
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
   cur = &in;
@@ -259,6 +260,38 @@ struct InterpRhs {
   }
 };
 
+// The algebraic system handed to stan-math's legacy Powell solver.  As with
+// InterpRhs, the apparently double-only write_array path still needs a
+// templated callback: stan-math differentiates the system with respect to
+// the unknown vector internally to form the Newton step.
+struct InterpAlgebraSystem {
+  const std::map<std::string, const mir::FunDef*>* funs;
+  const mir::FunDef* system;
+
+  template <typename T_x, typename T_y>
+  Eigen::Matrix<stan::return_type_t<typename T_x::Scalar, typename T_y::Scalar>,
+                Eigen::Dynamic, 1>
+  operator()(const T_x& x, const T_y& y, const std::vector<double>& x_r,
+             const std::vector<int>& x_i, std::ostream* = nullptr) const {
+    using T = stan::return_type_t<typename T_x::Scalar, typename T_y::Scalar>;
+    std::vector<std::vector<T>> reals(3);
+    reals[0].reserve(static_cast<size_t>(x.size()));
+    reals[1].reserve(static_cast<size_t>(y.size()));
+    reals[2].reserve(x_r.size());
+    for (Eigen::Index i = 0; i < x.size(); ++i) reals[0].push_back(T(x(i)));
+    for (Eigen::Index i = 0; i < y.size(); ++i) reals[1].push_back(T(y(i)));
+    for (double value : x_r) reals[2].push_back(T(value));
+
+    MirInterp<T> ev(*funs, "algebraic system");
+    const std::vector<T> result = ev.call(*system, reals, {x_i});
+    Eigen::Matrix<T, Eigen::Dynamic, 1> out(
+        static_cast<Eigen::Index>(result.size()));
+    for (size_t i = 0; i < result.size(); ++i)
+      out(static_cast<Eigen::Index>(i)) = result[i];
+    return out;
+  }
+};
+
 }  // namespace
 
 bool WaInterp::ode_fun(MirInterp<double>& in, const mir::Expr& e,
@@ -307,9 +340,59 @@ bool WaInterp::ode_fun(MirInterp<double>& in, const mir::Expr& e,
   return true;
 }
 
+bool WaInterp::algebra_fun(MirInterp<double>& in, const mir::Expr& e,
+                           DataMap::Entry* out) {
+  if (e.name != "algebra_solver") return false;
+  if (e.args.size() != 5 && e.args.size() != 8)
+    throw CompileError("stanli write_array: algebra_solver arity");
+  const auto fit = funs_.find(e.args[0].name);
+  if (fit == funs_.end())
+    throw CompileError("stanli write_array: unknown algebraic system " +
+                       e.args[0].name);
+
+  const auto vec = [&](size_t k) { return in.eval(e.args[k]).r; };
+  const std::vector<double> xv = vec(1);
+  const std::vector<double> yv = vec(2);
+  const std::vector<double> x_r = vec(3);
+  DataMap::Entry xie = in.eval(e.args[4]);
+  std::vector<int> x_i = xie.i;
+  if (x_i.empty())
+    for (double value : xie.r) x_i.push_back(static_cast<int>(value));
+
+  // These are the legacy algebra_solver defaults, matching AlgebraSpec and
+  // stan-math's generated-model interface.  The eight-argument overload
+  // supplies relative tolerance, function tolerance, and step limit.
+  double relative_tolerance = 1e-10;
+  double function_tolerance = 1e-6;
+  int64_t max_num_steps = 1000;
+  if (e.args.size() == 8) {
+    relative_tolerance = vec(5).at(0);
+    function_tolerance = vec(6).at(0);
+    max_num_steps = static_cast<int64_t>(vec(7).at(0));
+  }
+
+  Eigen::VectorXd x(static_cast<Eigen::Index>(xv.size()));
+  Eigen::VectorXd y(static_cast<Eigen::Index>(yv.size()));
+  for (size_t i = 0; i < xv.size(); ++i)
+    x(static_cast<Eigen::Index>(i)) = xv[i];
+  for (size_t i = 0; i < yv.size(); ++i)
+    y(static_cast<Eigen::Index>(i)) = yv[i];
+
+  const Eigen::VectorXd solved = stan::math::algebra_solver(
+      InterpAlgebraSystem{&funs_, fit->second}, x, y, x_r, x_i, nullptr,
+      relative_tolerance, function_tolerance, max_num_steps);
+  out->is_int = false;
+  out->i.clear();
+  out->dims = {static_cast<int64_t>(solved.size())};
+  out->r.resize(static_cast<size_t>(solved.size()));
+  for (Eigen::Index i = 0; i < solved.size(); ++i)
+    out->r[static_cast<size_t>(i)] = solved(i);
+  return true;
+}
+
 bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
                        DataMap::Entry* out, WaRng& rng) {
-  boost::ecuyer1988& g = rng.gen();
+  stan::rng_t& g = rng.gen();
   const std::string& f = e.name;
   if (f.size() < 5 || f.compare(f.size() - 4, 4, "_rng") != 0) return false;
   const std::string base = f.substr(0, f.size() - 4);

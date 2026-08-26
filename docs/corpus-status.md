@@ -128,7 +128,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 
 ## write_array references
 
-For models whose generated quantities are deterministic (no `_rng`), the oracle also records CmdStan's write_array at the same point: every CSV column (constrained parameters, transformed parameters, generated quantities). tools/verify_refs.py replays them in CI with the column names matched exactly and the values sharing the model's gate. For models with RNG draws, `tools/verify_refs.py --wa-report` reports structural coverage instead, since their values are a property of the RNG stream.
+The oracle also records CmdStan's write_array at the same point: every CSV column (constrained parameters, transformed parameters, generated quantities). Both direct-write-array drivers use Stan's RNG with the same seed and chain 0, so generated-quantity draws are compared too. tools/verify_refs.py replays the rows in CI with column names matched exactly and values sharing the model's gate.
 
 | model | write_array values compared |
 | --- | ---: |

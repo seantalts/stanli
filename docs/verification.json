@@ -573,6 +573,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "mother": {
+  "max_rel": 5.905638507675446e-16,
+  "max_ulp": 5,
+  "n_values": 197,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "multi_occupancy": {
   "max_rel": 4.833372437940825e-15,
   "max_ulp": 29,

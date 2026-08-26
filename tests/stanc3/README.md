@@ -7,10 +7,11 @@ language never appear in it. Nothing in posteriordb declares
 `offset`/`multiplier`, a `cholesky_factor_cov`, a user-defined `_lupdf`,
 or an integer modulus.
 
-These models fill that in. They are lifted unchanged from stanc3's
+These models fill that in. They are lifted from stanc3's
 `test/integration/good` (commit `ac69570`), where they exist to be
-compiled and never to be run, and they go through the same oracle as the
-corpus: CmdStan's recorded log density and full gradient in
+compiled and never to be run. Source is unchanged except for the runnable
+adaptations documented below. They go through the same oracle as the corpus:
+CmdStan's recorded log density and full gradient in
 `docs/corpus-refs.json.gz`, replayed by `tools/verify_refs.py` in CI on
 every push. `tools/verify_refs.py` finds a model here by name before it
 looks in posteriordb, so nothing about the CI step changed.
@@ -21,6 +22,7 @@ looks in posteriordb, so nothing about the CI step changed.
 | `declare-define-multi` | (top level) | multi-declarations with initializers in every block; `array[3,2] vector[5]` and `array[3,2] matrix[5,4]` data |
 | `lupdf-inlining` | `compiler-optimizations/` | user `_lpdf`/`_lpmf` functions whose bodies call `_lupdf`/`_lupmf` |
 | `multidim_var_param_ar45_mat23` | `parser-generator/` | `array[4,5] matrix<lower,upper>[2,3]`: 120 bounded parameters four levels deep |
+| `mother` | `code-gen/` | the compiler kitchen sink: partial indexing of matrix arrays, range assignment, container elementwise power, legacy `algebra_solver`, and an empty `map_rect` |
 | `operators` | `code-gen/expressions/` | integer `%`, unary `+`/`-`, comparison to a real, `rv / A` and `A \ v` |
 | `sum_to_zero` | `code-gen/` | `sum_to_zero_vector[10]` and `sum_to_zero_matrix[4,5]`, plain and in `array[2,3]`, in every block |
 | `reductions_allowed` | `compiler-optimizations/mem_patterns/` | parameter-dependent conditionals selecting whole matrices; matrix-valued UDFs |
@@ -78,6 +80,19 @@ own small divergence: constraints on transformed data go unchecked.
 `sum_to_zero.stan` needed one edit for the same reason, noted at the top
 of the file: two of its transformed data declarations are assigned from
 the data block rather than left uninitialized.
+
+`mother.stan` is stanc3's compile-only stress model. Its transformed-data
+vectors `x` and `y` are never initialized upstream, so CmdStan rejects every
+evaluation when the first `algebra_solver` reads them. This copy assigns
+`[0, 0]'` and `[1, 1]'`, the same initialization used by the runnable
+`stan-dev/example-models` descendant. To keep its otherwise enormous data
+fixture reviewable, `mother.json` was generated with temporary declarations
+fixing `N`, `M`, `K`, and `d_int` to one; the committed model retains the
+upstream declarations and accepts those values normally.
+The corpus recorder also compares its complete write-array row, including RNG
+draws. Both direct-write-array drivers use Stan's current generator with the
+same seed and chain 0, so the transformed-parameter and generated-quantities
+paths are reproducible rather than structural-only coverage.
 
 ## What these found
 

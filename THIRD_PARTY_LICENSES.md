@@ -34,6 +34,6 @@ Notes on the two that carry conditions beyond attribution:
   obligation attaches to the stanli binary.
 
 Not in the binary, but in the repository: `tests/stanc3/` holds Stan
-models copied unchanged from stanc3's test suite (BSD 3-Clause, the same
-license as this repository), used as test inputs. Provenance per file is
-in `tests/stanc3/README.md`.
+models copied from stanc3's test suite (BSD 3-Clause, the same license as
+this repository), used as test inputs. Provenance and the few documented
+runnable adaptations are in `tests/stanc3/README.md`.

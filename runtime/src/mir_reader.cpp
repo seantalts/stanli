@@ -72,6 +72,10 @@ Expr read_index(const Node& ix_n) {
     ix.name = "IndexBetween";
     ix.args.push_back(read_expr(ix_n[1]));
     ix.args.push_back(read_expr(ix_n[2]));
+  } else if (!ix_n.is_atom() && ix_n.head_is("Upfrom")) {
+    ix.kind = Expr::FunApp;
+    ix.name = "IndexUpfrom";
+    ix.args.push_back(read_expr(ix_n[1]));
   } else if (!ix_n.is_atom() && ix_n.head_is("MultiIndex")) {
     ix.kind = Expr::FunApp;
     ix.name = "IndexMulti";
