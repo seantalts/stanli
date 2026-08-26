@@ -84,13 +84,16 @@ static void test_refuses_midchain_reader() {
   Graph g;
   Fills fills;
   const int p = g.add_slot(1, true);
-  const int v = g.add_slot(2, false);
-  fills.emplace_back(v, std::vector<double>{0.0, 0.0});
+  const int v0 = g.add_slot(2, false);
+  fills.emplace_back(v0, std::vector<double>{0.0, 0.0});
   const int c1 = g.add_slot(1, false), c2 = g.add_slot(1, false);
   fills.emplace_back(c1, std::vector<double>{4.0});
   fills.emplace_back(c2, std::vector<double>{9.0});
-  // write v[0] = 4 (constant, in place)
-  g.add_op(OP_SET_INDEX_INPLACE, {v, c1}, v, {0});
+  // write v[0] = 4 into a fresh copy of the base, as lowering's chain
+  // heads do; writing in place into the fill itself would leak state
+  // into the next evaluation
+  const int v = g.add_slot(2, false);
+  g.add_op(OP_SET_INDEX, {v0, c1}, v, {0});
   // a PARAMETER op reads v now: v = [4, 0]
   const int d = g.add_slot(2, false);
   g.add_op(OP_MUL, {p, v}, d);
