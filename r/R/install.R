@@ -41,8 +41,8 @@ runtime_arch <- function() {
   a
 }
 
-runtime_asset <- function() {
-  sprintf("stanli-runtime-%s-%s.tar.gz", runtime_os(), runtime_arch())
+runtime_asset <- function(os = runtime_os(), arch = runtime_arch()) {
+  sprintf("stanli-runtime-%s-%s.tar.gz", os, arch)
 }
 
 #' Where the stanli runtime lives

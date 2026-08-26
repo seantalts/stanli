@@ -39,15 +39,18 @@ test_that("a model that does not typecheck is an error, not empty MIR", {
     "stanc")
 })
 
-test_that("the runtime asset name is one of the five that get published", {
-  # r/R/install.R builds this from R's own spelling of the platform, and
-  # the release workflow builds the tarball names from a matrix. They are
-  # two lists that have to stay equal, and only one of them is checked by
-  # a compiler.
+test_that("runtime asset names match the five published targets", {
+  # r/R/install.R and the release workflow build these names independently.
+  # Check the supported targets directly: R CMD check may itself run on an
+  # unsupported host, such as Windows arm64.
   published <- c("stanli-runtime-darwin-arm64.tar.gz",
                  "stanli-runtime-darwin-x86_64.tar.gz",
                  "stanli-runtime-linux-x86_64.tar.gz",
                  "stanli-runtime-linux-arm64.tar.gz",
                  "stanli-runtime-windows-x86_64.tar.gz")
-  expect_true(stanli:::runtime_asset() %in% published)
+  os <- c("darwin", "darwin", "linux", "linux", "windows")
+  arch <- c("arm64", "x86_64", "x86_64", "arm64", "x86_64")
+  actual <- mapply(stanli:::runtime_asset, os, arch, USE.NAMES = FALSE)
+
+  expect_equal(actual, published)
 })
