@@ -106,8 +106,7 @@ void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {
   // DYN_INDEX's `c` is an offset into a run rather than a register.
   for (const auto& I : p.code) {
     if (I.code == Program::DYN_INDEX) return;
-    if (I.code == Program::CALL &&
-        (I.a < 0 || (size_t)I.a >= p.calls.size()))
+    if (I.code == Program::CALL && (I.a < 0 || (size_t)I.a >= p.calls.size()))
       return;
   }
 
@@ -254,7 +253,8 @@ void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {
 
   std::vector<char> used((size_t)n_regs, 0);
   auto use = [&](Span s) {
-    for (int k = 0; k < s.len; ++k) used[(size_t)alias[(size_t)(s.reg + k)]] = 1;
+    for (int k = 0; k < s.len; ++k)
+      used[(size_t)alias[(size_t)(s.reg + k)]] = 1;
   };
   bool contiguous = true;
   auto check = [&](Span s) {
