@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.9.2
+
+### The runtime the R package binds exists again
+
+0.9.1's notes described per-chain write-array streams, but the C-ABI
+half (`stanli_wa_seed_chain`, #207) merged after the tag. Builds of the
+R package from main -- which is what R-universe serves -- paired a
+bridge that binds the new symbol with the pinned v0.9.1 runtime and
+failed to load with `missing symbol in stanli library:
+stanli_wa_seed_chain`. The symbol ships in this release's runtime and
+the pin moves with it. Reported by @StaffanBetner, who also moved the
+install docs to lead with R-universe (#204).
+
+### More of the language lowers
+
+A batch of syntax-coverage fixes from @andrjohns (#205), joining
+0.9.1's conditional container sizes (#185) and transformed-data
+`diag_matrix` (#186): `tcrossprod`, `rep_row_vector`, `while` loops
+(bounded by data, unrolled like `for`), UDF locals whose writes are all
+skipped at runtime, row-range reads `A[i, lo:hi]`, assignment through
+an index vector `x[idx] = rhs` and through row/column index pairs
+`M[I, J] = rhs` (repeats resolve last-wins, as CmdStan's assign does),
+and unfoldable data-only conditions compile to islands instead of
+failing. Landing the batch against the pinned stanc3, which inlines
+user functions itself, also taught size expressions to evaluate `sum()`
+over an int local built by element writes: an indexed write of an
+observed value into an observed container propagates the observation,
+and a materialized fill observes the values the slot really holds.
+
+### Islands, continued
+
+Two follow-ups to 0.9.1's island passes. Island register programs are
+compacted before the adjoint generates -- dead initializer fills, copy
+aliasing, and renumbering away unreferenced registers, table-driven
+over the whole instruction set, deleting the ODE-specific version of
+the pass. And the generated island adjoint no longer accumulates
+partials into data arguments (47% of density arguments across the five
+affected islands), a purely backward win with structural value
+identity.
+
+### Fixes
+
+The legacy Powell `algebra_solver` (added for the mother model in
+\#207) kept its system functor in a temporary while Stan's adapter
+defers a reverse-pass callback that references it; the system now
+outlives the complete Jacobian sweep (#209).
+
+### Build
+
+The stanc3 compiler is built from a pinned source SHA instead of
+fetched from the nightly release (#208), which is replaced in place and
+so cannot identify the compiler bytes a release used.
+
 ## 0.9.1
 
 ### A pass for the lanes re-rolling cannot see

@@ -17,7 +17,7 @@
 # pinned binding with a runtime that has moved. The release workflow
 # asserts this equals the tag being cut, so bumping one without the
 # other fails there rather than at a user's install.
-stanli_runtime_release <- "v0.9.1"
+stanli_runtime_release <- "v0.9.2"
 
 runtime_filename <- function() {
   switch(Sys.info()[["sysname"]],

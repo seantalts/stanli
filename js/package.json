@@ -1,6 +1,6 @@
 {
   "name": "@seantalts/stanli",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Full Stan in the browser: stanc3 compiles the model in JS, a WASM runtime lowers it to an op graph and runs NUTS. No server, no C++ toolchain.",
   "type": "module",
   "main": "index.mjs",
