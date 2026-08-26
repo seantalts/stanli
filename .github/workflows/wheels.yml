@@ -53,8 +53,8 @@ concurrency:
 env:
   # Must match tools/dev_setup.sh. The embedded compiler cache is keyed on
   # the commit, so bumping it there and here invalidates the cache once.
-  STANC3_SRC_REPO: https://github.com/seantalts/stanc3.git
-  STANC3_SRC_SHA: f453247eea74f5717ec488ab000783d4141c3bc9
+  STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
+  STANC3_SRC_SHA: 5b824ee48c590fa229dcebf6b57457b2fd212aa8
   OCAML_VERSION: 5.5.0
   OPAM_VERSION: 2.5.2
   # Must match tools/dev_setup.sh; pins the corpus the reference check reads.
@@ -122,7 +122,9 @@ jobs:
       - name: System packages (manylinux)
         if: matrix.container != ''
         run: |
-          dnf install -y unzip which diffutils patch rsync
+          # OCaml's complete-object mode uses `ld -r`, which resolves its C
+          # runtime dependencies from static archives during the partial link.
+          dnf install -y unzip which diffutils patch rsync glibc-static
           dnf install -y epel-release && dnf install -y ccache time
           # The manylinux image keeps its interpreters out of PATH; pick one
           # explicitly rather than inheriting AlmaLinux's system python3.

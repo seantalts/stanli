@@ -21,8 +21,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
 
-STANC3_SRC_REPO=https://github.com/seantalts/stanc3.git
-STANC3_SRC_SHA=f453247eea74f5717ec488ab000783d4141c3bc9
+STANC3_SRC_REPO=https://github.com/stan-dev/stanc3.git
+STANC3_SRC_SHA=5b824ee48c590fa229dcebf6b57457b2fd212aa8
 PDB_SHA=28f8d3d6e975315f42aa274a8399f21e07a43b30
 CMDSTAN_SHA=11cb052d3e1fc8c799e0fec559e2ee5452b38d27
 OPAM_SWITCH=stanc3-55

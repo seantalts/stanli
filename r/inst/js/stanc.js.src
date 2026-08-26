@@ -1,3 +1,3 @@
-repository=https://github.com/seantalts/stanc3.git
-revision=f453247eea74f5717ec488ab000783d4141c3bc9
-sha256=10d9dbda454e3bd407cd3c86a3e2979c74ebe07697d4791ab596ecc2d22bdfe3
+repository=https://github.com/stan-dev/stanc3.git
+revision=5b824ee48c590fa229dcebf6b57457b2fd212aa8
+sha256=3062061ad17abe39037ad7ce9a3ca52a701fa503460fc4b9ca84dec154b9affc
