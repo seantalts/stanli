@@ -855,6 +855,64 @@ static void test_inplace_slice_cost_refuses_wide_state() {
   expect("wide inplace slice graph unchanged", g.ops.size() == before);
 }
 
+// The hmm region's densities are `normal_lpdf(y | mu, sigma)` with y a fill
+// slot and mu/sigma parameters, so the generated adjoint should ask
+// stan-math for two partials out of three.
+static std::vector<uint8_t> hmm_density_masks(Graph& g, const Fills& fills,
+                                              const std::vector<int>& terms) {
+  std::vector<uint8_t> masks;
+  if (carve_islands(g, fills, terms, {}) != 1) return masks;
+  for (const Op& op : g.ops) {
+    if (op.opcode != OP_ISLAND) continue;
+    for (const AdjInstr& I : static_cast<const IslandProg*>(op.udata)->adj.code)
+      if (I.code == Program::DENSITY) masks.push_back(I.mask);
+  }
+  return masks;
+}
+
+static void test_density_mask_data_argument() {
+  HmmGraph h = build_hmm(8);
+  const std::vector<uint8_t> masks = hmm_density_masks(h.g, h.fills, h.terms);
+  expect_eq("mask: densities differentiated", (int)masks.size(), 16);
+  int wrong = 0;
+  for (uint8_t m : masks)
+    if (m != 0x6) ++wrong;
+  expect_eq("mask: data outcome dropped", wrong, 0);
+}
+
+// STANLI_NO_DENSITY_MASK restores the all-active binding. ab_corpus.py's A
+// side is built out of switches like this one.
+static void test_density_mask_env_disable() {
+  test_setenv("STANLI_NO_DENSITY_MASK", "1", 1);
+  HmmGraph h = build_hmm(8);
+  const std::vector<uint8_t> masks = hmm_density_masks(h.g, h.fills, h.terms);
+  test_unsetenv("STANLI_NO_DENSITY_MASK");
+  expect_eq("mask off: densities differentiated", (int)masks.size(), 16);
+  int masked = 0;
+  for (uint8_t m : masks)
+    if (m != 0xf) ++masked;
+  expect_eq("mask off: nothing dropped", masked, 0);
+}
+
+// The masks remove partials the executor discards, so lp and every gradient
+// must come out to the bit -- not close, identical.
+static void test_density_mask_gradient_identical() {
+  HmmGraph on = build_hmm(8);
+  expect("mask: carved", carve_islands(on.g, on.fills, on.terms, {}) == 1);
+  const std::vector<double> got = run_grad(std::move(on.g), on.fills);
+  test_setenv("STANLI_NO_DENSITY_MASK", "1", 1);
+  HmmGraph off = build_hmm(8);
+  expect("mask off: carved",
+         carve_islands(off.g, off.fills, off.terms, {}) == 1);
+  const std::vector<double> want = run_grad(std::move(off.g), off.fills);
+  test_unsetenv("STANLI_NO_DENSITY_MASK");
+  expect("mask: sizes", got.size() == want.size());
+  int wrong = 0;
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    if (got[i] != want[i]) ++wrong;
+  expect_eq("mask: bitwise identical", wrong, 0);
+}
+
 int main() {
   // What the compiler does with a region, on graphs small enough to
   // reason about. The cost estimate would refuse most of them -- it is
@@ -881,6 +939,9 @@ int main() {
   test_packed_live_ins();
   test_kernel_call_ops_carved(true);
   test_kernel_call_ops_carved(false);
+  test_density_mask_data_argument();
+  test_density_mask_env_disable();
+  test_density_mask_gradient_identical();
 
   test_unsetenv("STANLI_ISLAND_ALWAYS");
   test_wide_state_refused();

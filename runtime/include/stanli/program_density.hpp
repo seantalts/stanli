@@ -66,7 +66,17 @@ extern template stan::math::var program_density<stan::math::var>(
 // Returns whether Stan Math built a dependency edge. A constant early return
 // fills zero partials and returns false so reverse mode can skip, rather than
 // form an indeterminate infinite-adjoint-times-zero product.
-bool program_density_partials(int id, const double* args, double* partials);
+//
+// Bit k of `mask` says argument k needs a partial; a clear bit binds it as a
+// plain double, which is what makes stan-math drop that argument's partial
+// expression, and leaves partials[k] untouched. The value is not affected --
+// propto is off and this function's value is discarded anyway, the forward
+// having computed it -- so a mask only removes arithmetic whose result the
+// caller discards. Masks are dispatched for the densities whose tier carries
+// STANLI_DENSITY_FULL_MASKS (optable.hpp) and ignored for the rest, the same
+// trade the graph's density kernels make.
+bool program_density_partials(int id, unsigned mask, const double* args,
+                              double* partials);
 
 }  // namespace stanli
 

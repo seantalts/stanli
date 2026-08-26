@@ -15,6 +15,8 @@
 
 #include <stan/math.hpp>
 
+#include <type_traits>
+
 namespace stanli {
 namespace {
 
@@ -56,18 +58,68 @@ auto call_with(F&& f, const T* a) {
   }
 }
 
-// The same, promoting doubles to the recording scalar on the way in.
-template <int Arity, typename F>
+// The same, promoting the arguments Mask names to the recording scalar and
+// leaving the rest as doubles. A double argument selects stan-math's
+// arithmetic edge, which computes no partial.
+template <unsigned Mask, int K>
+auto bind_arg(const double* a) {
+  if constexpr ((Mask >> K) & 1u) {
+    return rvar(a[K]);
+  } else {
+    return a[K];
+  }
+}
+
+template <int Arity, unsigned Mask, typename F>
 auto call_rvar(F&& f, const double* a) {
   static_assert(Arity >= 1 && Arity <= 4, "density arity out of range");
   if constexpr (Arity == 1) {
-    return f(rvar(a[0]));
+    return f(bind_arg<Mask, 0>(a));
   } else if constexpr (Arity == 2) {
-    return f(rvar(a[0]), rvar(a[1]));
+    return f(bind_arg<Mask, 0>(a), bind_arg<Mask, 1>(a));
   } else if constexpr (Arity == 3) {
-    return f(rvar(a[0]), rvar(a[1]), rvar(a[2]));
+    return f(bind_arg<Mask, 0>(a), bind_arg<Mask, 1>(a), bind_arg<Mask, 2>(a));
   } else {
-    return f(rvar(a[0]), rvar(a[1]), rvar(a[2]), rvar(a[3]));
+    return f(bind_arg<Mask, 0>(a), bind_arg<Mask, 1>(a), bind_arg<Mask, 2>(a),
+             bind_arg<Mask, 3>(a));
+  }
+}
+
+// Run `f` with the mask as a constant. Densities whose tier does not carry
+// STANLI_DENSITY_FULL_MASKS get one all-active binding instead of 2^arity of
+// them: the value is the same either way, and the instantiations are what a
+// density costs to compile.
+template <int Arity, int Tier, typename F>
+void with_mask(unsigned mask, F&& f) {
+  constexpr unsigned kAll = (1u << Arity) - 1u;
+  if constexpr ((Tier & STANLI_DENSITY_FULL_MASKS) == 0) {
+    f(std::integral_constant<unsigned, kAll>{});
+  } else {
+    switch (mask & kAll) {
+#define STANLI_PD_MASK_CASE(k)                            \
+  case (unsigned)k:                                       \
+    if constexpr ((unsigned)k <= kAll)                    \
+      f(std::integral_constant<unsigned, (unsigned)k>{}); \
+    break;
+      STANLI_PD_MASK_CASE(1)
+      STANLI_PD_MASK_CASE(2)
+      STANLI_PD_MASK_CASE(3)
+      STANLI_PD_MASK_CASE(4)
+      STANLI_PD_MASK_CASE(5)
+      STANLI_PD_MASK_CASE(6)
+      STANLI_PD_MASK_CASE(7)
+      STANLI_PD_MASK_CASE(8)
+      STANLI_PD_MASK_CASE(9)
+      STANLI_PD_MASK_CASE(10)
+      STANLI_PD_MASK_CASE(11)
+      STANLI_PD_MASK_CASE(12)
+      STANLI_PD_MASK_CASE(13)
+      STANLI_PD_MASK_CASE(14)
+      STANLI_PD_MASK_CASE(15)
+#undef STANLI_PD_MASK_CASE
+      default:  // no argument wants a partial; the caller skips the call
+        break;
+    }
   }
 }
 
@@ -113,21 +165,25 @@ template double program_density<double>(int, const double*);
 template stan::math::var program_density<stan::math::var>(
     int, const stan::math::var*);
 
-bool program_density_partials(int id, const double* args, double* partials) {
+bool program_density_partials(int id, unsigned mask, const double* args,
+                              double* partials) {
   const int n = program_density_arity(id);
   sink s;
   for (int k = 0; k < n; ++k) {
-    s.buf[k] = &partials[k];
+    s.buf[k] = (mask >> k) & 1u ? &partials[k] : nullptr;
     s.len[k] = 1;
   }
   sink_scope active(s);
   switch (id) {
-#define STANLI_PD_PARTIALS(opc, fn, arity, tier)                               \
-  case kId_##fn:                                                               \
-    record_probability_call([&] {                                              \
-      return call_rvar<arity>(                                                 \
-          [](const auto&... x) { return stan::math::fn<false>(x...); }, args); \
-    });                                                                        \
+#define STANLI_PD_PARTIALS(opc, fn, arity, tier)                          \
+  case kId_##fn:                                                          \
+    with_mask<arity, density_tier(tier)>(mask, [&](auto m) {              \
+      record_probability_call([&] {                                       \
+        return call_rvar<arity, m.value>(                                 \
+            [](const auto&... x) { return stan::math::fn<false>(x...); }, \
+            args);                                                        \
+      });                                                                 \
+    });                                                                   \
     break;
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_PARTIALS)
 #undef STANLI_PD_PARTIALS

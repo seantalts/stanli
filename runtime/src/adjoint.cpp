@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 
@@ -142,6 +143,62 @@ bool gen_adjoint(IslandProg& p) {
                                    !(coincident_range && I.dst == I.b))))
       return false;
   }
+
+  // Which registers carry a parameter: seeded from the live-ins the carver
+  // marked active, grown forwards. A density argument outside that set gets
+  // no partial (program_density.hpp) -- its adjoint cell reaches nothing the
+  // executor reads. Read at the density rather than after the sweep, because
+  // registers are cells: one holding data here may hold a parameter later.
+  std::vector<uint8_t> dmask(orig.size(), 0xf);
+  {
+    std::vector<char> active((size_t)n0, 0);
+    for (const auto& li : p.ins)
+      if (li.active)
+        for (int k = 0; k < li.len; ++k) active[(size_t)(li.reg + k)] = 1;
+    bool any = false;
+    auto read = [&](int r, int len) {
+      for (int k = 0; k < len && !any; ++k)
+        if (active[(size_t)(r + k)]) any = true;
+    };
+    auto write = [&](int r, int len) {
+      for (int k = 0; k < len; ++k) active[(size_t)(r + k)] = 1;
+    };
+    for (size_t i = 0; i < orig.size(); ++i) {
+      const Program::Instr& I = orig[i];
+      any = false;
+      if (I.code == Program::CALL) {
+        const Program::Call& call = fwd.calls[(size_t)I.a];
+        for (int j = 0; j < call.n_in; ++j) read(call.in[j], call.in_len[j]);
+        if (!any) continue;
+        write(call.out, call.out_len);
+        write(call.scratch, call.scratch_len);
+        continue;
+      }
+      const ProgramOpSpec& spec = program_code_spec(I.code);
+      if (spec.has(kProgramNoInputs)) continue;
+      if (I.code == Program::DENSITY) {
+        const int ar = program_density_arity(I.len);
+        unsigned m = 0;
+        for (int k = 0; k < ar; ++k) {
+          const int r =
+              ar > 3 ? I.a + k : (k == 0 ? I.a : (k == 1 ? I.b : I.c));
+          if (active[(size_t)r]) m |= 1u << k;
+        }
+        dmask[i] = (uint8_t)m;
+        any = m != 0;
+      } else {
+        read(I.a, spec.has(kProgramRangeA) ? I.len : 1);
+        if (spec.has(kProgramReadB))
+          read(I.b, spec.has(kProgramRangeB) ? I.len : 1);
+        if (spec.has(kProgramReadC)) read(I.c, 1);
+      }
+      if (any) write(I.dst, program_output_len(I));
+    }
+  }
+  // STANLI_NO_DENSITY_MASK=1 binds every density argument as a recorder
+  // scalar again, which is the comparison the masks have to survive.
+  if (std::getenv("STANLI_NO_DENSITY_MASK"))
+    std::fill(dmask.begin(), dmask.end(), (uint8_t)0xf);
 
   std::vector<Program::Instr> ncode;
   ncode.reserve(orig.size());
@@ -262,6 +319,7 @@ bool gen_adjoint(IslandProg& p) {
     }
     AdjInstr A;
     A.code = I.code;
+    A.mask = dmask[(size_t)i];
     A.dst = I.dst;
     A.a = I.a;
     A.b = I.b;
@@ -636,18 +694,20 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         // register, and then it is the difference between matching the
         // replay and nearly matching it.
         adj[I.dst] = 0.0;
+        if (I.mask == 0) break;
         const int ar = program_density_arity(I.len);
         double part[kMaxDensityArgs] = {0, 0, 0, 0};
         if (ar > 3) {
-          if (program_density_partials(I.len, val + I.va, part))
-            for (int k = ar; k-- > 0;) adj[I.a + k] += t * part[k];
+          if (program_density_partials(I.len, I.mask, val + I.va, part))
+            for (int k = ar; k-- > 0;)
+              if ((I.mask >> k) & 1u) adj[I.a + k] += t * part[k];
           break;
         }
         const double args[3] = {val[I.va], val[I.vb], val[I.vc]};
-        if (!program_density_partials(I.len, args, part)) break;
-        if (ar > 2) adj[I.c] += t * part[2];
-        if (ar > 1) adj[I.b] += t * part[1];
-        adj[I.a] += t * part[0];
+        if (!program_density_partials(I.len, I.mask, args, part)) break;
+        if (ar > 2 && (I.mask & 4u)) adj[I.c] += t * part[2];
+        if (ar > 1 && (I.mask & 2u)) adj[I.b] += t * part[1];
+        if (I.mask & 1u) adj[I.a] += t * part[0];
         break;
       }
       case Program::DYN_INDEX:

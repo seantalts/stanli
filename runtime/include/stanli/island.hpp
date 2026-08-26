@@ -23,10 +23,11 @@
 // exists for its adjoints.
 //
 // Densities appear only in propto-OFF form (the carver refuses propto):
-// with no term-dropping, the instantiation is type-uniform and one
-// templated call serves both passes. Propto term-dropping depends on
-// argument TYPES (see legacy_fns.cpp's dirichlet note), which would need
-// per-mask binding -- out of scope until islands absorb target terms.
+// with no term-dropping, the forward is type-uniform and one templated
+// call serves both passes. The backward does bind per mask, to skip the
+// partials of data arguments, but propto term-dropping needs the same
+// masks on the VALUE (see legacy_fns.cpp's dirichlet note) -- out of
+// scope until islands absorb target terms.
 #ifndef STANLI_ISLAND_HPP
 #define STANLI_ISLAND_HPP
 
@@ -50,6 +51,11 @@ struct IslandProg : Program {
     // OP_CONCAT2 and point several register ranges into that one descriptor.
     int input = -1;
     int offset = 0;
+    // Whether the slot it seeds is downstream of a parameter. The carver
+    // knows; the adjoint generator propagates it to reach the densities.
+    // True where nobody says otherwise, which is the all-active binding
+    // this was before.
+    bool active = true;
   };
   std::vector<LiveIn> ins;
   // The generated backward (adjoint.hpp), empty for a program the generator

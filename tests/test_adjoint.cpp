@@ -579,7 +579,7 @@ static void test_densities() {
       try {
         double probe[kMaxDensityArgs] = {0, 0, 0, 0};
         const double v = program_density<double>(id, args.data());
-        program_density_partials(id, args.data(), probe);
+        program_density_partials(id, 0xf, args.data(), probe);
         usable = std::isfinite(v);
         for (int k = 0; k < arity; ++k)
           if (!std::isfinite(probe[k])) usable = false;
@@ -602,6 +602,63 @@ static void test_densities() {
   }
 }
 
+// Dropping a data argument's partial must not move the partials that are
+// kept. Bitwise, every density, every mask: an argument bound as a double
+// takes a different stan-math instantiation, and a reassociated intermediate
+// there would show up as a last-bit gradient difference in a model nobody
+// would think to attribute to activity.
+static void test_density_masked_partials() {
+  static const double kPoints[][kMaxDensityArgs] = {
+      {0.63, 0.4, 1.7, 0.5}, {0.63, 1.4, 2.2, 0.25}, {2.5, 3.0, 1.0, 0.75},
+      {0.35, 2.0, 0.8, 0.5}, {1.25, 0.7, 1.3, 0.9},  {0.5, 4.0, 0.25, 0.5},
+  };
+  const int n_points = (int)(sizeof(kPoints) / sizeof(kPoints[0]));
+  for (int id = 0; id < program_density_count(); ++id) {
+    const int arity = program_density_arity(id);
+    const std::string name = program_density_name(id);
+    const unsigned all = (1u << arity) - 1u;
+    bool tested = false;
+    for (int pt = 0; pt < n_points && !tested; ++pt) {
+      const double* args = kPoints[pt];
+      double full[kMaxDensityArgs] = {0, 0, 0, 0};
+      try {
+        if (!std::isfinite(program_density<double>(id, args))) continue;
+        if (!program_density_partials(id, all, args, full)) continue;
+      } catch (const std::exception&) {
+        continue;
+      }
+      bool finite = true;
+      for (int k = 0; k < arity; ++k)
+        if (!std::isfinite(full[k])) finite = false;
+      if (!finite) continue;
+      tested = true;
+      for (unsigned mask = 1; mask <= all; ++mask) {
+        double part[kMaxDensityArgs] = {-1, -1, -1, -1};
+        const bool built = program_density_partials(id, mask, args, part);
+        expect((name + " mask connected").c_str(), built);
+        for (int k = 0; k < arity; ++k) {
+          const bool want = (mask >> k) & 1u;
+          const std::string what = name + " mask " + std::to_string(mask) +
+                                   " arg " + std::to_string(k);
+          if (want && part[k] != full[k]) {
+            ++failures;
+            std::printf("FAIL %s: got %.17g want %.17g\n", what.c_str(),
+                        part[k], full[k]);
+          }
+          if (!want && part[k] != -1.0) {
+            ++failures;
+            std::printf("FAIL %s: masked-off partial written\n", what.c_str());
+          }
+        }
+      }
+    }
+    if (!tested) {
+      ++failures;
+      std::printf("FAIL density %s: no masked probe point\n", name.c_str());
+    }
+  }
+}
+
 // Stan Math can return a constant support value before constructing its
 // partials propagator. The register-program API promises to fill every
 // partial, so it must write zeros rather than leave the caller's old values.
@@ -613,7 +670,7 @@ static void test_density_early_return_partials() {
                                       -std::numeric_limits<double>::infinity());
   double partials[3] = {4.0, 5.0, 6.0};
   expect("inv_gamma early disconnected",
-         !program_density_partials(id, args, partials));
+         !program_density_partials(id, 0xf, args, partials));
   for (double partial : partials)
     expect("inv_gamma early partial", partial == 0.0);
 
@@ -639,7 +696,7 @@ static void test_density_early_return_partials() {
   const double bad_domain[3] = {1.0, -2.0, 3.0};
   bool threw = false;
   try {
-    program_density_partials(id, bad_domain, partials);
+    program_density_partials(id, 0xf, bad_domain, partials);
   } catch (const std::domain_error&) {
     threw = true;
   }
@@ -860,6 +917,7 @@ int main() {
   test_nan_operands();
   test_reductions();
   test_densities();
+  test_density_masked_partials();
   test_density_early_return_partials();
   test_recurrence();
   test_two_gradients();

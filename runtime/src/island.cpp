@@ -477,6 +477,21 @@ int carve_islands(Graph& g,
   for (const auto& f : fills)
     if (!written.count(f.first)) const_slots[f.first] = &f.second;
 
+  // Which slots carry a parameter. The adjoint generator turns this into
+  // per-argument masks on the densities it differentiates; slots added
+  // below are active until something says otherwise.
+  std::vector<char> slot_active(g.slots.size(), 0);
+  for (size_t s = 0; s < g.slots.size(); ++s)
+    slot_active[s] = g.slots[s].is_param ? 1 : 0;
+  for (const Op& op : g.ops) {
+    bool any = false;
+    for (int j = 0; j < op.n_in && !any; ++j)
+      if (op.in[j] >= 0 && slot_active[(size_t)op.in[j]]) any = true;
+    if (!any) continue;
+    if (op.out >= 0) slot_active[(size_t)op.out] = 1;
+    if (op.out2 >= 0) slot_active[(size_t)op.out2] = 1;
+  }
+
   std::vector<Op> result;
   result.reserve(g.ops.size());
   int carved = 0;
@@ -542,6 +557,8 @@ int carve_islands(Graph& g,
     // does not skip this -- it only stops the kernel USING the result, so
     // the two backwards can be compared over the same islands.
     if (compiled) {
+      for (size_t k = 0; k < cc.prog.ins.size(); ++k)
+        cc.prog.ins[k].active = slot_active[(size_t)cc.live_in_slots[k]] != 0;
       compact_island(cc.prog);
       const bool gen = gen_adjoint(cc.prog);
       cc.prog.native_adj = gen && !std::getenv("STANLI_NO_NATIVE_ADJ");
@@ -618,6 +635,7 @@ int carve_islands(Graph& g,
       is.n_in = (int)cc.live_in_slots.size();
       for (int k = 0; k < is.n_in; ++k) is.in[k] = cc.live_in_slots[k];
       is.out = g.add_slot(packed, false);
+      slot_active.resize(g.slots.size(), 1);
       is.udata = prog.get();
       g.udata_pool.push_back(std::move(prog));
       result.push_back(is);
@@ -632,6 +650,8 @@ int carve_islands(Graph& g,
         int dst = o;
         if (in_set.count(o)) {
           dst = g.add_slot(len, false);
+          slot_active.resize(g.slots.size(), 1);
+          slot_active[(size_t)dst] = slot_active[(size_t)o];
           for (size_t u = j; u < g.ops.size(); ++u) {
             for (int q = 0; q < g.ops[u].n_in; ++q)
               if (g.ops[u].in[q] == o) g.ops[u].in[q] = dst;

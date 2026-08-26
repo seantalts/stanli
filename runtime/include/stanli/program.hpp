@@ -130,8 +130,9 @@ struct Program {
     // propto-OFF only (the island carver refuses propto). With no
     // term-dropping the value does not depend on which arguments are
     // autodiff, so binding all of them as T reproduces the scalar op's
-    // value exactly; the extra partials computed for data arguments are
-    // discarded when the executor hands the island a null adjoint.
+    // value exactly. The backward is where activity matters, and it is
+    // the generated adjoint that carries the per-argument mask
+    // (adjoint.hpp).
     // Any graph kernel, by opcode: the payload is calls[a]. This is the
     // union point with the graph executor -- one instruction gives the
     // register machine the graph's whole vocabulary, and its derivative
