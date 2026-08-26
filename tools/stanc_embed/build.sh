@@ -23,6 +23,21 @@ mkdir -p "$SRC/src/stanc_embed"
 cp tools/stanc_embed/*.ml tools/stanc_embed/*.mli tools/stanc_embed/dune \
   "$SRC/src/stanc_embed/"
 eval "$(opam env --switch="$SWITCH")"
+
+# OCaml's complete-object mode calls `ld -r` directly. The manylinux toolchain
+# does not give that partial linker the system archive directory that `cc`
+# normally supplies, so locate the static librt archive through the compiler
+# and pass its directory through dune's link flags.
+if [ "$(uname -s)" = Linux ]; then
+  LIBRT_PATH=$(cc -print-file-name=librt.a)
+  if [ "$LIBRT_PATH" = librt.a ] || [ ! -f "$LIBRT_PATH" ]; then
+    echo "could not locate the static librt.a needed by OCaml's partial linker" >&2
+    exit 1
+  fi
+  STANLI_OCAML_SYSTEM_LIBDIR=$(dirname "$LIBRT_PATH")
+  export STANLI_OCAML_SYSTEM_LIBDIR
+fi
+
 # Release profile: dune's dev profile links the inline-test and expect-test
 # runners into every library, which ride into the shipped binary for no
 # reason. Worth 364 KB of the final shared library.

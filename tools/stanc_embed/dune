@@ -8,4 +8,5 @@
  ; relocations, which the linker rejects inside a shared object on Linux.
  ; macOS is PIC everywhere, so this changes nothing there.
  (link_flags
-  (-runtime-variant _pic -output-complete-obj)))
+  (-runtime-variant _pic -output-complete-obj -cclib
+   -L%{env:STANLI_OCAML_SYSTEM_LIBDIR=.})))
