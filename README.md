@@ -21,7 +21,7 @@ different binding, so a model samples to the same draws from any of them.
 | | | |
 | --- | --- | --- |
 | **Python** | `pip install stanli` | [python/README.md](python/README.md), [PyPI](https://pypi.org/project/stanli/) |
-| **R** | `remotes::install_github("seantalts/stanli", subdir = "r")` then `stanli_install()` | [r/README.md](r/README.md) |
+| **R** | `install.packages('stanli', repos = 'https://seantalts.r-universe.dev')` then `stanli_install()` | [r/README.md](r/README.md) |
 | **Browser / Node** | `npm install @seantalts/stanli` | [js/README.md](js/README.md), [npm](https://www.npmjs.com/package/@seantalts/stanli) |
 
 The R package is not on CRAN yet; until it is, install it from this
