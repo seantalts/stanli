@@ -14,9 +14,9 @@ pip install stanli
 
 That is the whole install. No compiler, no `make`, no CmdStan checkout,
 no multi-minute first-run build. One wheel, one shared library, under
-eight megabytes. Model preparation takes milliseconds, so the first
-draw arrives about 20x sooner than a toolchain that compiles C++ per
-model.
+eight megabytes. In the current Eight Schools benchmark, a first complete
+1,000-warmup, 1,000-draw run takes 0.03 s in stanli versus 3.4 s to build and
+run the model with CmdStan - roughly 100x faster from source to CSV.
 
 ```python
 import stanli
@@ -128,31 +128,23 @@ Per-gradient latency against CmdStan, same models, same evaluation
 point, both sides `-O3` with FP contraction pinned off:
 
 <!--gen:bench_table_us-->
-| model | params | stanli | CmdStan | speedup |
-| --- | ---: | ---: | ---: | ---: |
-| `radon_pooled` | 3 | 45.4 us | 320.9 us | **7.1x** |
-| `arK` | 7 | 1.7 us | 12.5 us | **7.1x** |
-| `radon_hierarchical_intercept_centered` | 391 | 97.1 us | 569.1 us | **5.9x** |
-| `radon_county_intercept` | 388 | 81.6 us | 431.6 us | **5.3x** |
-| `nes` | 10 | 16.1 us | 69.3 us | **4.3x** |
-| `eight_schools_noncentered` | 10 | 0.23 us | 0.74 us | **3.2x** |
-| `election88_full` | 90 | 256.1 us | 902.0 us | **3.5x** |
-| `bym2_offset_only` | 3845 | 39.9 us | 114.6 us | **2.9x** |
-| `dogs` | 3 | 7.1 us | 63.7 us | **8.9x** |
-| `kidscore_momiq` | 3 | 1.6 us | 4.9 us | **3.1x** |
-| `lsat_model` | 1006 | 37.9 us | 91.2 us | **2.4x** |
-| `state_space_stochastic_level_stochastic_seasonal` | 389 | 6.7 us | 26.3 us | **4.0x** |
-| `hmm_example` | 4 | 17.5 us | 27.1 us | **1.6x** |
-| `garch11` | 4 | 7.0 us | 9.7 us | **1.4x** |
-| `hmm_drive_0` | 6 | 110.8 us | 132.8 us | **1.2x** |
-| `normal_mixture` | 3 | 41.8 us | 88.2 us | **2.1x** |
-| `low_dim_gauss_mix` | 5 | 48.2 us | 98.3 us | **2.0x** |
-| `wells_dist100ars_model` | 3 | 17.2 us | 19.0 us | **1.1x** |
-| `iohmm_reg` | 29 | 227.2 us | 320.3 us | **1.4x** |
-| `radon_county` | 389 | 73.6 us | 82.1 us | **1.1x** |
-| `arma11` | 4 | 4.5 us | 6.2 us | **1.4x** |
-| `diamonds` | 26 | 31.1 us | 31.5 us | **1.0x** |
-| `ldaK2` | 7 | 48.2 us | 104.1 us | **2.2x** |
+| model | stanli | CmdStan | speedup |
+| --- | ---: | ---: | ---: |
+| `gpcm_latent_reg_irt` | 121.1 us | 1337.7 us | **11.0x** |
+| `dogs` | 7.1 us | 63.7 us | **8.9x** |
+| `radon_pooled` | 45.4 us | 320.9 us | **7.1x** |
+| `GLM_Poisson_model` | 0.39 us | 2.0 us | **5.2x** |
+| `state_space_stochastic_level_stochastic_seasonal` | 6.7 us | 26.3 us | **3.9x** |
+| `eight_schools_noncentered` | 0.23 us | 0.74 us | **3.2x** |
+| `logistic_regression_rhs` | 40.8 us | 113.1 us | **2.8x** |
+| `normal_mixture` | 41.8 us | 88.2 us | **2.1x** |
+| `hierarchical_gp` | 29.9 us | 47.6 us | **1.6x** |
+| `hmm_example` | 17.5 us | 27.1 us | **1.6x** |
+| `garch11` | 7.0 us | 9.7 us | **1.4x** |
+| `diamonds` | 31.1 us | 31.5 us | **1.0x** |
+| `one_comp_mm_elim_abs` | 522.9 us | 470.7 us | 0.90x |
+| `soil_incubation` | 67.8 us | 60.9 us | 0.90x |
+| `lotka_volterra` | 47.6 us | 41.3 us | 0.87x |
 <!--/gen-->
 
 The wins come from op granularity. CmdStan's var tape allocates, walks,
@@ -163,18 +155,11 @@ median is <!--gen:corpus_median-->2.91x<!--/gen--> and
 <!--gen:corpus_at_par-->116<!--/gen--> of
 <!--gen:corpus_n_grad-->119<!--/gen--> models are at or above CmdStan.
 
-The former worst class -- recurrences -- mostly crossed parity when the
-runtime started compiling them. The `hmm_*` models and `garch11` step
-through time with each step reading the last one's parameter-dependent
-result, which nothing can vectorize, so each model now compiles its
-recurrence into a register program with a generated derivative program
-alongside. Native runtime control now puts `iohmm_reg` at 1.31x too. The
-largest current losses are ODE models at 0.59-0.76x, whose right-hand side
-runs through the register machine where CmdStan runs native code;
-`multi_occupancy` and `dogs_nonhierarchical` follow at 0.78x. The smaller
-gaps are `Mh_model` at 0.88x and `Mb_model` at 0.93x. Packed categorical and
-row reductions now put both latent-regression IRT shapes and both LDA mixture
-widths at or above parity.
+Repeated independent work produces the largest wins. Dense kernels and serial
+recurrences land closer to parity because there is less work to fuse, though
+the measured HMM, ARMA, and GARCH gradients are now all at least as fast as
+CmdStan. The only gradient losses are the three ODE models at 0.87-0.90x;
+their first complete runs still win once CmdStan's model build is included.
 
 Method and full table:
 [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)

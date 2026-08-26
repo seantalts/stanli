@@ -701,10 +701,10 @@ identical either way. Every island listing above was produced with
 `STANLI_ISLAND_ALWAYS=1`, the switch whose purpose is asking "what
 would you have built, and why did you decline?" Scale the same shape
 up -- more steps, a wider state, HMM emissions -- and the ratio
-flips: the sequential models in [benchmarks.md](benchmarks.md) carve
-regions of tens of thousands of ops down to a dozen instructions,
-run 1.4-4.7x faster than they do with islands off, and cross parity
-with CmdStan's compiled code.
+flips: the sequential models in the tape-island section of
+[`OPTIMIZATIONS.md`](../runtime/src/OPTIMIZATIONS.md) carve regions of tens of
+thousands of ops down to a dozen instructions, run 1.4-4.7x faster than they
+do with islands off, and cross parity with CmdStan's compiled code.
 
 ### The receipts
 

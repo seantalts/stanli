@@ -3,11 +3,12 @@
 embeds.
 
 Two tables. The first is every model both engines measured end to end,
-sorted by per-gradient speedup: CmdStan's absolute times and stanli's
-ratio against them, since the ratio is what the table is read for and
-stanli's own numbers are the ratio times the CmdStan column. The second
-is the models the run could not complete, with what stopped it -- they
-sort to the bottom because a missing number is not a slow number.
+sorted by per-gradient speedup. It shows both engines' absolute gradient
+times and the wall time from Stan source to a completed 1,000-warmup,
+1,000-draw run. stanli_sample_s already includes the whole stanli process;
+CmdStan's equivalent first-run time is its separately measured build plus
+run. The second table holds models the run could not complete, with what
+stopped them. Missing numbers sort to the bottom because missing is not slow.
 
 Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
 Prints markdown to stdout; benchmarks.md is edited by hand around it.
@@ -30,7 +31,23 @@ WHY = {
 
 
 def fmt_ns(v):
-    return f"{int(float(v)):,}" if v else "-"
+    if not v:
+        return "-"
+    ns = float(v)
+    if ns < 1_000:
+        return f"{ns:.0f} ns"
+    if ns < 1_000_000:
+        return f"{ns / 1_000:.3f} us"
+    return f"{ns / 1_000_000:.3f} ms"
+
+
+def fmt_s(v):
+    return f"{float(v):.2f} s" if v else "-"
+
+
+def fmt_cmdstan_s(v):
+    """CmdStan build inputs are recorded to 0.1 s, so totals are too."""
+    return f"{float(v):.1f} s" if v else "-"
 
 
 def ratio(a, b):
@@ -38,6 +55,26 @@ def ratio(a, b):
     if not a or not b:
         return "-"
     return f"{float(b) / float(a):.2f}x"
+
+
+def first_run_ratio(r, col):
+    stanli = col(r, "stanli_sample_s")
+    build = col(r, "cmdstan_build_s")
+    sample = col(r, "cmdstan_sample_s")
+    if not stanli or not build or not sample:
+        return None
+    return (float(build) + float(sample)) / float(stanli)
+
+
+def fmt_first_run_ratio(value):
+    """Do not imply more precision than the 0.01/0.1 s source cells."""
+    if value < 1:
+        return f"~{value:.2f}x"
+    if value < 10:
+        return f"~{value:.1f}x"
+    if value < 100:
+        return f"~{value:.0f}x"
+    return f"~{round(value, -1):.0f}x"
 
 
 def main():
@@ -72,32 +109,46 @@ def main():
     done.sort(key=grad_ratio, reverse=True)
     stuck.sort(key=grad_ratio, reverse=True)
 
-    print("| model | params | CmdStan ns/grad | grad speedup |"
-          " CmdStan sample | sample speedup |")
-    print("| --- | ---: | ---: | ---: | ---: | ---: |")
+    print("| model | stanli gradient | CmdStan gradient | gradient speedup |"
+          " stanli source-to-CSV | CmdStan build | CmdStan build + run |"
+          " approx. first-run speedup |")
+    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for r in done:
-        cs = col(r, "cmdstan_sample_s")
-        print(f"| `{col(r, 'model')}` | {col(r, 'params')} "
+        cs_total = (float(col(r, "cmdstan_build_s"))
+                    + float(col(r, "cmdstan_sample_s")))
+        print(f"| `{col(r, 'model')}` "
+              f"| {fmt_ns(col(r, 'stanli_ns_grad'))} "
               f"| {fmt_ns(col(r, 'cmdstan_ns_grad'))} "
               f"| {ratio(col(r, 'stanli_ns_grad'), col(r, 'cmdstan_ns_grad'))} "
-              f"| {cs + ' s' if cs else '-'} "
-              f"| {ratio(col(r, 'stanli_sample_s'), cs)} |")
+              f"| {fmt_s(col(r, 'stanli_sample_s'))} "
+              f"| {fmt_cmdstan_s(col(r, 'cmdstan_build_s'))} "
+              f"| {fmt_cmdstan_s(cs_total)} "
+              f"| {fmt_first_run_ratio(first_run_ratio(r, col))} |")
 
     ratios = sorted(g for g in (grad_ratio(r) for r in rows) if g > 0)
     at_par = sum(1 for g in ratios if g >= 1.0)
     med = ratios[len(ratios) // 2] if ratios else 0
+    first_runs = sorted(x for x in (first_run_ratio(r, col) for r in rows)
+                        if x is not None)
+    first_at_par = sum(1 for x in first_runs if x >= 1.0)
+    first_med = first_runs[len(first_runs) // 2] if first_runs else 0
     print()
     print(f"{len(rows)} models; {len(ratios)} with both gradients; median "
           f"per-gradient speedup {med:.2f}x; {at_par}/{len(ratios)} at or "
           f"above CmdStan.")
+    print(f"{len(first_runs)} completed first runs; median source-to-CSV "
+          f"speedup about {first_med:.1f}x; {first_at_par}/{len(first_runs)} at or "
+          f"above CmdStan including its model build.")
 
     if not stuck:
         return
     print()
-    print("| model | params | CmdStan ns/grad | grad speedup | what stopped it |")
+    print("| model | stanli gradient | CmdStan gradient | gradient speedup |"
+          " what stopped it |")
     print("| --- | ---: | ---: | ---: | --- |")
     for r in stuck:
-        print(f"| `{col(r, 'model')}` | {col(r, 'params')} "
+        print(f"| `{col(r, 'model')}` "
+              f"| {fmt_ns(col(r, 'stanli_ns_grad'))} "
               f"| {fmt_ns(col(r, 'cmdstan_ns_grad'))} "
               f"| {ratio(col(r, 'stanli_ns_grad'), col(r, 'cmdstan_ns_grad'))} "
               f"| {why(r)} |")

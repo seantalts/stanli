@@ -56,12 +56,13 @@ type a new formula. Two things make this more than a toy:
 - **The kernels are the real kernels.** The precompiled operations are
   stan-math, the same library CmdStan calls, compiled with the same
   floating point settings. That is why stanli agrees with CmdStan to
-  the last bit on 45 of the 120 posteriordb test models, and to within
+  the last bit on 41 of the 120 posteriordb test models, and to within
   2.6e-12 relative on the worst.
 
 Because nothing is compiled at model load, "compiling" takes
-milliseconds, and the time from `model.stan` to a first draw is about
-twenty times shorter than CmdStan's.
+milliseconds. In the current Eight Schools measurement, the complete first
+1,000-warmup, 1,000-draw run takes 0.03 s from source to CSV, versus 3.4 s to
+build and run with CmdStan.
 
 ## Gradients without code generation
 
@@ -196,16 +197,17 @@ from the compiler's tree to the generated backward.
 
 ## Where the compiled model still wins
 
-ODE models run at about 0.6x: the right-hand side must stay callable
+ODE models run at 0.87-0.90x: the right-hand side must stay callable
 at solver-chosen times, and stanli runs it through the register
 machine where CmdStan runs native code. Sequential models used to
 lose the same way, until the islands' backward stopped replaying under
-CmdStan-style autodiff and became a generated program: the HMM family
-now measures 1.4-1.6x against islands off, and `iohmm_reg` 4.7x
-(docs/benchmarks.md has the table). What remains for both classes is
-the per-instruction cost of interpreting at all, which is the
-difference between a nanosecond of dispatch and code the C++ compiler
-inlined into the model binary.
+CmdStan-style autodiff and became a generated program: the measured HMM
+gradients now run 1.20-1.55x faster than CmdStan. The targeted before/after
+results are in the tape-island section of
+[`OPTIMIZATIONS.md`](../runtime/src/OPTIMIZATIONS.md). What remains for both
+classes is the per-instruction cost of interpreting at all, which is the
+difference between a nanosecond of dispatch and code the C++ compiler inlined
+into the model binary.
 
 The other cost is size, the deliberate trade at the center of the
 design: the wheel is 10.8 MB because it carries the entire Stan compiler

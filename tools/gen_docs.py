@@ -2,11 +2,12 @@
 """Stamp the measured numbers into the docs, so they cannot go stale.
 
 Every headline number in README.md, python/README.md and the demo page
-counts, bitwise counts, worst deviation, benchmark span, the PyPI page's
-benchmark table) is derived from two artifacts:
+(counts, bitwise counts, worst deviation, benchmark span, the PyPI page's
+benchmark table) is derived from three artifacts:
 
   docs/verification.json   written by tools/verify_sample.py
-  docs/benchmarks.md       per-gradient table, written when benchmarks run
+  docs/corpus-bench.tsv    written by harnesses/corpus_bench.py
+  docs/benchmarks.md       chooses the representative benchmark rows
 
 The docs carry <!--gen:key-->...<!--/gen--> markers; this script replaces
 the marked spans with values computed from the artifacts.
@@ -17,9 +18,11 @@ the marked spans with values computed from the artifacts.
 
 The prose around the markers is hand-written; only the numbers move.
 """
+import csv
 import json
 import pathlib
 import re
+import subprocess
 import sys
 import warnings
 
@@ -31,19 +34,16 @@ TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 
-def num(cell):
-    """A table cell as a number. Thousands separators are for readers."""
-    return float(cell.replace(",", "").rstrip("x"))
-
-
 def bench_rows():
-    """(model, params, stanli_ns, cmdstan_ns, speedup) from benchmarks.md."""
+    """Representative (model, stanli_ns, cmdstan_ns, speedup)."""
+    with (REPO / "docs" / "corpus-bench.tsv").open(newline="") as f:
+        corpus = {row["model"]: row for row in csv.DictReader(f, delimiter="\t")}
     text = (REPO / "docs" / "benchmarks.md").read_text()
-    section = text.split("## Per-gradient latency")[1]
+    section = text.split("## Representative models", 1)[1]
     rows = []
-    # Only the first table in the section: stop at the first non-table
-    # line after rows begin (the ODE section further down has its own
-    # before/after table this must not swallow).
+    # Only the first table in the section. The benchmark page owns the
+    # editorial choice of representative models; the TSV owns every measured
+    # value.
     for line in section.splitlines():
         if not line.startswith("|"):
             if rows:
@@ -52,8 +52,13 @@ def bench_rows():
         if not line.startswith("| `"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        rows.append((cells[0].strip("`"), int(num(cells[1])), num(cells[2]),
-                     num(cells[3]), num(cells[4])))
+        model = cells[0].strip("`")
+        if model not in corpus:
+            raise SystemExit(f"representative benchmark missing from TSV: {model}")
+        measured = corpus[model]
+        stanli_ns = float(measured["stanli_ns_grad"])
+        cmdstan_ns = float(measured["cmdstan_ns_grad"])
+        rows.append((model, stanli_ns, cmdstan_ns, cmdstan_ns / stanli_ns))
     if not rows:
         raise SystemExit("no benchmark table found in docs/benchmarks.md")
     return rows
@@ -102,19 +107,19 @@ def compute():
     rows = bench_rows()
     # A model counts as a win when its speedup rounds to at least 1.0x,
     # matching how the table has always been summarized.
-    wins = [r for r in rows if round(r[4], 1) >= 1.0]
-    losses = [r for r in rows if round(r[4], 1) < 1.0]
-    span = (f"{min(round(r[4], 1) for r in wins):.1f}x-"
-            f"{max(round(r[4], 1) for r in wins):.1f}x")
-    loss_strs = [f"{r[4]:.2f}x" for r in sorted(losses, key=lambda r: -r[4])]
+    wins = [r for r in rows if round(r[3], 1) >= 1.0]
+    losses = [r for r in rows if round(r[3], 1) < 1.0]
+    span = (f"{min(round(r[3], 1) for r in rows):.1f}x-"
+            f"{max(round(r[3], 1) for r in rows):.1f}x")
+    loss_strs = [f"{r[3]:.2f}x" for r in sorted(losses, key=lambda r: -r[3])]
     loss_text = (" and ".join(loss_strs) if len(loss_strs) <= 2
                  else ", ".join(loss_strs[:-1]) + ", and " + loss_strs[-1])
 
-    table = ["| model | params | stanli | CmdStan | speedup |",
-             "| --- | ---: | ---: | ---: | ---: |"]
-    for name, p, sns, cns, sp in rows:
+    table = ["| model | stanli | CmdStan | speedup |",
+             "| --- | ---: | ---: | ---: |"]
+    for name, sns, cns, sp in rows:
         spd = f"**{sp:.1f}x**" if round(sp, 1) >= 1.0 else f"{sp:.2f}x"
-        table.append(f"| `{name}` | {p} | {us(sns)} | {us(cns)} | {spd} |")
+        table.append(f"| `{name}` | {us(sns)} | {us(cns)} | {spd} |")
 
     return {
         "corpus_verified": f"{len(verified)}/{n_total}",
@@ -172,6 +177,56 @@ def render_problems(path):
             f"literal pipes)"]
 
 
+def benchmark_table_problems():
+    """Require the hand-edited benchmark tables to match their generator."""
+    page = (REPO / "docs" / "benchmarks.md").read_text()
+    generated = subprocess.check_output(
+        [sys.executable, str(REPO / "tools" / "corpus_table.py"),
+         str(REPO / "docs" / "corpus-bench.tsv")], text=True)
+
+    def first_table(section):
+        table = []
+        for line in section.splitlines():
+            if line.startswith("|"):
+                table.append(line)
+            elif table:
+                break
+        return table
+
+    generated_main = first_table(generated)
+    generated_stuck = first_table(generated.split(
+        "| model | stanli gradient | CmdStan gradient | gradient speedup | "
+        "what stopped it |", 1)[1])
+    generated_stuck.insert(
+        0, "| model | stanli gradient | CmdStan gradient | gradient speedup | "
+           "what stopped it |")
+
+    full = page.split("## Full corpus", 1)[1].split(
+        "### Runs that did not complete", 1)[0]
+    stuck = page.split("### Runs that did not complete", 1)[1].split(
+        "## Benchmark method", 1)[0]
+    problems = []
+    if first_table(full) != generated_main:
+        problems.append("docs/benchmarks.md: full corpus table is stale")
+    if first_table(stuck) != generated_stuck:
+        problems.append("docs/benchmarks.md: incomplete-runs table is stale")
+
+    representative = first_table(page.split("## Representative models", 1)[1])
+    generated_by_model = {
+        line.split("|")[1].strip(): [c.strip() for c in line.strip("|").split("|")]
+        for line in generated_main if line.startswith("| `")
+    }
+    for line in representative[2:]:
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        source = generated_by_model.get(cells[0])
+        expected = ([source[i] for i in (0, 1, 2, 3, 4, 6, 7)]
+                    if source else None)
+        if cells != expected:
+            problems.append(
+                f"docs/benchmarks.md: representative row {cells[0]} is stale")
+    return problems
+
+
 def main():
     check = "--check" in sys.argv
     stats = compute()
@@ -205,6 +260,13 @@ def main():
     if broken:
         print("the rendered page would be wrong:")
         for b in broken:
+            print(" ", b)
+        return 1
+    benchmark_broken = benchmark_table_problems()
+    if benchmark_broken:
+        print("benchmark tables disagree with docs/corpus-bench.tsv "
+              "(run tools/corpus_table.py):")
+        for b in benchmark_broken:
             print(" ", b)
         return 1
     if check and stale:

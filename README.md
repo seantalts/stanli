@@ -34,8 +34,8 @@ could not build one on their farm.
   Median gradient <!--gen:corpus_median-->2.91x<!--/gen--> across
   <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models,
   <!--gen:corpus_at_par-->116<!--/gen--> of them at or above CmdStan;
-  <!--gen:bench_span-->1.0x-8.9x<!--/gen--> on vectorized shapes;
-  time-to-first-draw about 20x faster.
+  <!--gen:bench_span-->0.9x-11.0x<!--/gen--> across the representative slice;
+  the first Eight Schools run from source to CSV is roughly 100x faster.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models
   verified against CmdStan's log density and full gradient,

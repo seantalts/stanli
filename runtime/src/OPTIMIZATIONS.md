@@ -3,7 +3,9 @@
 What stanli does to a model's op graph before running it, written for
 people who have not worked on compilers. Each section says what the
 problem is, what the pass does, and how to turn it off when debugging.
-Measurements are in [`docs/benchmarks.md`](../../docs/benchmarks.md).
+Targeted measurements are included where available. Current absolute results
+across the model corpus are in
+[`docs/benchmarks.md`](../../docs/benchmarks.md).
 
 ## Data input preload (`lower.cpp`, disable: `STANLI_NO_DATA_PRELOAD=1`)
 
@@ -343,8 +345,9 @@ In a targeted 2026-08-24 Release A/B using seven matched-run medians,
 internally and 1.3998x CmdStan), while `grsm_latent_reg_irt` moved 0.9705208 ->
 0.4953192 ms/gradient (1.9594x internally and 1.5387x CmdStan). Time in their
 categorical opcode fell 4.45x and 5.00x respectively. These are targeted
-medians, not the later full-corpus warmed means of 1.014034 ms (1.32x CmdStan)
-and 0.508863 ms (1.50x CmdStan) in `docs/corpus-bench.tsv`.
+medians, not the later full-corpus warmed means of 0.121131 ms (11.04x CmdStan)
+and 0.070870 ms (10.75x CmdStan) after lane partitioning in
+`docs/corpus-bench.tsv`.
 
 ## Compiled scalar generated-quantities RNGs (`rng.cpp`, `wa_interp.cpp`)
 
@@ -976,3 +979,517 @@ The env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
 result can be attributed to one optimization quickly, and they are how each
 one is measured: every speed number is the same build with one variable set
 and unset.
+
+## Historical targeted measurements
+
+This appendix preserves the optimization-specific material that originally
+lived in `docs/benchmarks.md`. These are dated, targeted A/B medians used to
+attribute a change to one mechanism; they are not replacements for the current
+absolute corpus results in [`docs/benchmarks.md`](../../docs/benchmarks.md).
+Some results repeat measurements alongside the implementation sections above
+so that none of the historical performance record is lost.
+
+### Kernel-tail attribution
+
+A profile of the models that were below parity at the time
+(`STANLI_PROFILE=1`) showed that the tail was mostly not a graph problem: in
+seven of them, one precompiled kernel accounted for half to nine-tenths of the
+gradient. `diamonds` was the extreme, with 90.9% in one GLM kernel that rebuilt
+a var tape in both sweeps. Differentiating once and stashing the partials took
+it from 0.48x to 0.89x CmdStan in the targeted A/B; its current warmed mean is
+1.01x. `prophet` spent 82% in `OP_MATVEC` with one serial accumulation chain.
+Four independent accumulators moved it from 0.67x to 1.23x in the targeted
+A/B, bitwise unchanged; its current corpus result is 1.28x.
+
+### Where the wins came from
+
+The interpreter's cost is per op, not per element: ~17-20 ns for a
+scalar density op forward + backward, against ~0.9 ns for the actual
+math (`tools/bench_opcost.cpp`). A vectorized statement over N elements
+amortizes that to nothing and runs precompiled stan-math on contiguous
+doubles, while CmdStan pays its var-tape cost per scalar per
+evaluation. Vectorized models therefore win, and models stuck as
+unrolled scalar loops used to lose (0.4-0.9x) until the graph passes
+closed the gap. The passes themselves are described above; the
+headline historical measurements follow:
+
+- **Re-rolling** (scalar loops back to vector ops): `radon_pooled`
+  27,670 ops -> 8 (0.91x -> 6.18x), `arK` 3,164 -> 21 (0.40x -> 4.83x).
+- **In-place updates + store-to-load forwarding** (the element-write
+  idiom): `radon_county_intercept` went from 90.5 ms per gradient in
+  2.58 GB of arena (207x slower than CmdStan) to 92 us in 42 MB, 77,960
+  ops -> 9. Seven radon-family models and `rats_model` collapse the
+  same way.
+- **Write-side fusion** (loops that fill a vector something else
+  reads): `radon_county` 25,152 ops -> 10 (0.36x -> 0.98x),
+  `election88_full` 289,165 -> 65 (0.39x -> 2.97x). Strided-run and
+  integer-outcome fusion closed the `dogs` family (0.65x -> 2.8x).
+  57 of the 120 corpus models change under the passes, against 28
+  before write-side fusion.
+- **Lane partitioning and CSE** (repeated work re-rolling cannot reach):
+  segmenting the graph at target terms and element stores finds lanes that are
+  neither adjacent nor in phase, and value numbering removes the terms an
+  unrolled model emits twice.
+  `state_space_stochastic_level_stochastic_seasonal` goes 1,375 ops -> 19
+  (2.29x), `Mth_model` 1,563 -> 35 (1.63x), `Mh_model` 1,542 -> 18 (1.53x),
+  `Survey_model` 1,427 -> 9, and `Mt_model` 1,062 -> 70 under CSE alone
+  (16.1x). The IRT arm rewrites `gpcm_latent_reg_irt`'s per-item chain as
+  `categorical_logit_glm_lpmf`, 34,634 ops -> 91 (6.5x internally).
+- **Post-reroll in-place slices** (chained partial matrix fills):
+  `Mtbh_model` keeps the same 1,585-op graph, but 146 stores now move four
+  values rather than copying a 730-value matrix. Median gradient latency
+  falls 106.5 -> 47.4 us (2.24x); direct replay remains within 3.61e-15 of
+  the CmdStan references across 465 values.
+- **Native Bernoulli forwards** (recorder-bound scalar and short-vector
+  calls): both Bernoulli parameterizations have one real argument and one
+  analytic partial, so they write that column directly into the density
+  scratch instead of constructing the generic recorder edge. Summed vector
+  logits preserve Eigen's packet `exp`, select, and reduction order while
+  reusing the partial column as their `ntheta` workspace. `Mt_model` falls
+  30.6 -> 19.2 us, `Mth_model` 113.2 -> 57.3 us, and `Mtbh_model` 47.4 ->
+  26.8 us after the slice fix. The combined `Mtbh_model` improvement is
+  106.5 -> 26.8 us (3.98x). Common-subexpression elimination and lane
+  partitioning have since taken the same three models further: their
+  warmed-mean rows are now 4.47, 23.4, and 12.9 us/gradient, or 4.47x, 4.01x,
+  and 3.32x CmdStan.
+- **Native scalar probability categorical** removes the nested autodiff replay
+  only when one categorical outcome selects from an active probability vector.
+  Stan Math's double overload still computes the value and performs every
+  check; reverse adds the incoming seed divided by the selected probability to
+  that probability's adjoint. Array outcomes retain replay to preserve their
+  repeated-selection accumulation topology, and categorical-logit calls retain
+  replay for their dense pullback. The graph is unchanged. In a targeted
+  2026-08-24 Release A/B (seven matched-run medians),
+  `gpcm_latent_reg_irt` moved 1.741465 -> 0.955609 ms/gradient (1.8224x
+  internally, 1.3998x CmdStan at that point), and `grsm_latent_reg_irt` moved
+  0.9705208 -> 0.4953192 ms/gradient (1.9594x internally, 1.5387x
+  CmdStan). Their categorical opcode time fell 4.45x and 5.00x respectively;
+  the categorical-logit RBM controls were unchanged. Lane partitioning later
+  replaced those per-item categorical calls with one
+  `categorical_logit_glm_lpmf` each, so the current full-corpus warmed means in
+  [`docs/benchmarks.md`](../../docs/benchmarks.md) are 121.1 us (11.0x CmdStan)
+  and 70.9 us (10.8x).
+- **Compiled scalar generated-quantities RNGs** keep caller-owned chain state
+  on the forward-only write-array graph for scalar `poisson_log`, `uniform`,
+  `bernoulli`, `normal`, `lognormal`, and `binomial` draws.
+  Apart from the audited categorical and multivariate-normal extensions below,
+  other RNGs, container-valued results, and draws used as dynamic control,
+  indices, or geometry still fail closed to the whole-section interpreter. In
+  an exact census of the 24 previously
+  interpreted corpus models, this RNG tranche moved 12 to the graph; all 24
+  still produced complete rows.
+  A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched batch
+  medians) measured:
+
+  | model | interpreted row | compiled row | improvement |
+  | --- | ---: | ---: | ---: |
+  | `covid19imperial_v2` | 156.239 ms | 2.089 ms | 74.81x |
+  | `covid19imperial_v3` | 157.176 ms | 2.077 ms | 75.69x |
+  | `dogs_hierarchical` | 1.929 ms | 24.105 us | 80.02x |
+  | `dogs_nonhierarchical` | 2.078 ms | 32.317 us | 64.29x |
+  | `GLMM1_model` | 75.541 us | 2.176 us | 34.72x |
+  | `hierarchical_gp` | 2.291 ms | 46.301 us | 49.47x |
+  | `lotka_volterra` | 1.797 ms | 31.434 us | 57.16x |
+  | `one_comp_mm_elim_abs` | 5.123 ms | 139.431 us | 36.74x |
+  | `M0_model` | 15.378 us | 0.119 us | 129.55x |
+  | `Mb_model` | 2.020 ms | 26.703 us | 75.65x |
+  | `Rate_4_model` | 4.007 us | 0.126 us | 31.93x |
+  | `Rate_5_model` | 4.311 us | 0.124 us | 34.82x |
+
+  The largest setup tradeoff is the two Covid graphs: C-API model
+  construction rises from about 0.239 s to 2.20-2.21 s, but the 154 ms saved
+  per row repays it after roughly 13 draws. For the four added scalar-binomial
+  models, across 1,000 rows of each model their aggregate time falls from
+  2.0438 s to 0.0271 s (75.50x), and construction also gets faster in every
+  case, so break-even is immediate. Their graph and frozen-interpreter rows
+  were bitwise identical for all 28,926 compared values. These are targeted
+  write-array medians, not replacements for the sampling columns in the full
+  corpus table.
+- **Compiled generated-quantities reductions** add an exact forward-only
+  product for the vector/row-vector surfaces used by the capture-recapture
+  models, plus integer sum only when a one-dimensional runtime array is proved
+  fully initialized, integral, and safe from 32-bit overflow. Product grouping
+  follows Stan Math's expression provenance: materialized vectors use its
+  address-independent packet grouping, while strided matrix-row expressions
+  retain ascending scalar grouping. Shifted views, arbitrary expressions,
+  reverse-mode products, and unproved integer arrays still fail closed to the
+  interpreter. This moved `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`
+  to the graph, taking the then-current 24-model census from 12 graph / 12
+  interpreter to 16 / 8. The categorical tranche below subsequently advances
+  that census to 17 / 7, the extrema tranche advances it to 18 / 6, and the
+  multivariate-normal tranche advanced it to 19 / 5, and the runtime-control
+  tranche below completes it at 24 / 0. All 119 compiling corpus models still
+  produce complete rows. A targeted 2026-08-24
+  C-ABI A/B (point 0, two warmups, seven matched
+  batch medians) measured:
+
+  | model | interpreted row | compiled row | improvement |
+  | --- | ---: | ---: | ---: |
+  | `Mh_model` | 869.179 us | 12.494 us | 69.57x |
+  | `Mt_model` | 20.867 us | 0.127 us | 164.83x |
+  | `Mtbh_model` | 1.046 ms | 9.856 us | 106.18x |
+  | `Mth_model` | 1.099 ms | 18.205 us | 60.36x |
+
+  Across 1,000 rows of each model, aggregate row time fell from 3.035338 s to
+  0.040682 s (74.61x). Including one construction of each model, it fell from
+  3.056579 s to 0.075491 s (40.49x); the equal-mix aggregate setup cost breaks
+  even after five rows per model. Within a 146,196-value comparison, every
+  product-fed draw and final integer sum matched the frozen interpreter
+  bitwise, including a fourth-row stream-continuation check. `Mtbh_model` and
+  `Mth_model` also expose the pre-existing graph/interpreter boundary in
+  deterministic transformed parameters: their `p` columns differ by at most
+  two ULP, while the graph is closer to live CmdStan at the shared point. These
+  are targeted write-array medians; the full-corpus sampling table awaited the
+  next refresh.
+- **Compiled categorical generated-quantities RNGs** extend the same
+  scalar-result `OP_RNG` path to `categorical_rng(vector)`. The graph and
+  `WaInterp` each copy their materialized probability vector into one shared
+  helper and call the pinned Stan Math implementation, preserving its simplex
+  validation order, one-based int result, and exact caller-owned stream
+  consumption. Lowering marks the int initialized but deliberately does not
+  infer a `[1, K]` range, so a later dynamic index still selects the
+  whole-section interpreter.
+
+  In a targeted matched C-ABI A/B, `Survey_model` moved from 1011.4736 to
+  60.3127 us/row (16.7705x), saving 0.9511609 s per 1,000 rows. Construction
+  moved from 4231.333 to 5406.709 us, so the 1175.376 us setup delta amortizes
+  after 1.236 rows, or two whole rows. It was the only model to change in the
+  exact 24-model write-array census, moving graph/interpreter coverage from
+  16 / 8 to 17 / 7; all 24 census models and all 119 compiling corpus models
+  still produced complete rows. At that stage, `iohmm_reg` remained
+  interpreted at the later dynamic-index barrier, `value must be known at
+  compile time: hatz`; the runtime-control tranche below now compiles that
+  index and its subsequent Viterbi decoder.
+
+  The categorical draw `n` matched exactly in all 18/18 C-ABI comparisons:
+  seeds 0, 1, 2, 7, 1234, and `UINT32_MAX`, each continued for three sequential
+  rows.
+  The same full-row comparison recorded 8,532 expected bit differences in
+  deterministic columns from the pre-existing graph/interpreter numerical
+  boundary; they are not RNG mismatches. Focused tests avoid that boundary by
+  routing the identical probability vector through the shared helper and the
+  direct pinned Stan Math call, then comparing the next engine state. These
+  targeted results do not refresh `docs/corpus-bench.tsv` or the current
+  [full-corpus table](../../docs/benchmarks.md#full-corpus).
+- **Compiled generated-quantities extrema** add the forward-only
+  `OP_EXTREMA_VEC` min/max variants. Lowering admits only a top-level
+  write-array call on a direct `UVector` or `URowVector` `Var` and evaluates
+  it with the same address-independent grouping that pinned Stan Math uses for
+  an owning Eigen value. Empty-real results are preserved: `min` is positive
+  infinity and `max` is negative infinity. Arrays, matrices, indexed views,
+  expressions, and UDF calls still select `WaInterp`; reverse-mode uses remain
+  refused.
+  The opcode is explicitly excluded from reroll matching and interpreter
+  islands because it has no reverse kernel.
+
+  `losscurve_sislob` was the only model to change in the exact 24-model
+  census, moving graph/interpreter coverage from 17 / 7 to the then-current
+  18 / 6; the multivariate-normal tranche below advanced it to 19 / 5, and the
+  runtime-control tranche completes it at 24 / 0. All 24 census models and all
+  119 compiling corpus models retained complete rows. Its 1,218-op graph
+  contains exactly one length-10 min opcode
+  and one length-10 max opcode, and writes 384 columns. Graph and `WaInterp` matched
+  bitwise for all 1,536/1,536 compared values; the same-input pinned Stan Math
+  check matched 8/8 cases.
+  Against 1,200 stored CmdStan values, the worst difference was 4.44e-16, or
+  eight ULP.
+
+  In a targeted matched C-ABI A/B, `losscurve_sislob` moved from 329.9520 to
+  3.3704 us/row (97.8970x), saving 0.3265816 s per 1,000 rows. Construction
+  moved from 4107.375 to 5291.959 us, a 1184.584 us setup increase that
+  amortizes after 3.627 rows, or four whole rows. These targeted results do not
+  refresh `docs/corpus-bench.tsv` or the current
+  [full-corpus table](../../docs/benchmarks.md#full-corpus).
+- **Compiled covariance-form multivariate-normal RNGs** extend `OP_RNG` to
+  the audited `multi_normal_rng(vector, matrix) -> vector` write-array surface.
+  The mean length and square covariance shape are fixed by lowering, and both
+  the graph and `WaInterp` copy their column-major inputs into the same owning
+  Eigen values before calling pinned Stan Math. This preserves its finite,
+  symmetry, and positive-definiteness validation order and its exact normal
+  draw schedule. Array overloads, non-square or mismatched shapes, and
+  `multi_normal_cholesky_rng` remain on the whole-section interpreter.
+
+  `multi_occupancy` was the only model to change in the exact 24-model census,
+  moving graph/interpreter coverage from 18 / 6 to the then-current 19 / 5.
+  The runtime-control tranche below subsequently completes the census at
+  24 / 0 and makes all 119 compiling corpus write arrays graph-backed. All
+  rows remain complete. Its
+  graph and forced-interpreter rows were bitwise identical for all 5,616
+  values from six seeds continued for three sequential rows.
+
+  In a targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven
+  batch medians), `multi_occupancy` moved from 298.9260 to 5.4898 us/row
+  (54.4512x), saving 0.2934362 s per 1,000 rows. Construction also improved,
+  from 5864.792 to 5368.583 us, so there is no setup break-even penalty. These
+  targeted results do not refresh `docs/corpus-bench.tsv` or the current
+  [full-corpus table](../../docs/benchmarks.md#full-corpus).
+- **Compiled generated-quantities runtime control** completes the last five
+  interpreted write arrays: `hmm_drive_0`, `hmm_drive_1`, `hmm_example`,
+  `hmm_gaussian`, and `iohmm_reg`. Their shapes and loop bounds are static, but
+  their branches and Viterbi backtracking indices depend on the current draw.
+  Lowering now places each enclosing block in one structured register program,
+  with checked one-level dynamic indexing and packed live-ins when the block
+  needs more than six logical inputs. The historical 24-model census moves
+  from 19 graph / 5 interpreter to 24 / 0; all 119 compiling corpus models now
+  have complete, graph-backed write arrays.
+
+  A targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven batch
+  medians) measured:
+
+  | model | interpreted row | compiled row | improvement |
+  | --- | ---: | ---: | ---: |
+  | `hmm_drive_0` | 6.777 ms | 41.975 us | 161.45x |
+  | `hmm_drive_1` | 7.396 ms | 44.426 us | 166.48x |
+  | `hmm_example` | 1.388 ms | 9.718 us | 142.85x |
+  | `hmm_gaussian` | 37.366 ms | 649.125 us | 57.56x |
+  | `iohmm_reg` | 38.642 ms | 713.011 us | 54.20x |
+
+  Across 1,000 rows of each model, aggregate row time fell from 91.568918 s
+  to 1.458255 s (62.79x). Including one construction of each model, it fell
+  from 91.989657 s to 1.990729 s (46.21x); the aggregate setup increase pays
+  back after two whole rows per model. The four HMMs matched 51,696 checked
+  Viterbi outputs bitwise across four points, three seeds, and three sequential
+  rows. In `iohmm_reg`, all categorical and Viterbi states/scores matched; the
+  only differences were 2,945 continuous simulations inheriting the
+  pre-existing transformed-input boundary, bounded by 8.89e-16. Exact later
+  state draws confirm stream alignment. These targeted results do not refresh
+  `docs/corpus-bench.tsv` or the current
+  [full-corpus table](../../docs/benchmarks.md#full-corpus).
+- **Allocation-free ODE right-hand-side input seeding** removes the promoted
+  `y` and `theta` staging vectors built on every solver callback and seeds the
+  reusable register file directly. A targeted 2026-08-24 Release A/B (seven
+  alternating matched-batch medians) measured:
+
+  | model | staged inputs | direct register seeding | improvement |
+  | --- | ---: | ---: | ---: |
+  | `lotka_volterra` | 78.6216 us | 68.6068 us | 1.14597x |
+  | `soil_incubation` | 102.1527 us | 89.5593 us | 1.14062x |
+  | `one_comp_mm_elim_abs` | 643.1571 us | 578.8621 us | 1.11107x |
+
+  The geometric-mean improvement is 1.13245x, and the known callback counts
+  put the saving at a consistent 38.5-39.3 ns/callback. LP and gradient
+  results were bitwise identical for all 63/63 checked scalars across three
+  points. This targeted A/B attributes the direct-seeding change; the current
+  corpus rows in [`docs/benchmarks.md`](../../docs/benchmarks.md) are the later
+  end-to-end refresh.
+- **Direct ODE Jacobian-row harvest plus scalar RHS cleanup.** Stan Math's ODE
+  outputs are already precomputed-gradient nodes directly connected to active
+  inputs, so the kernel now chains the selected output instead of running a
+  nested reverse sweep across every sibling output for each Jacobian row, and
+  clears only that output and its inputs between rows. A conservative
+  load-time pass also removes overwritten scalar initializer
+  constants and aliases stable single-definition copies; any range-reading,
+  dynamic, density, or kernel instruction leaves the RHS program unchanged. A
+  targeted 2026-08-25 three-binary A/B (seven rotating matched-batch medians)
+  measured:
+
+  | model | parent | direct node only | full change | improvement |
+  | --- | ---: | ---: | ---: | ---: |
+  | `lotka_volterra` | 78.5160 us | 70.3923 us | 60.8881 us | 1.28951x |
+  | `soil_incubation` | 101.3979 us | 88.5437 us | 82.0553 us | 1.23573x |
+  | `one_comp_mm_elim_abs` | 663.9302 us | 665.3790 us | 629.7752 us | 1.05423x |
+
+  The full change improves the geometric mean by 1.18876x. Fresh parent and
+  patched checkers were byte-identical for all 63/63 LP-and-gradient scalars
+  over three evaluation points. These targeted medians isolate the mechanism;
+  they do not refresh the full-corpus table or its retained CmdStan columns.
+- **Packed row-wise reductions** (the LDA inner loop): targeted medians fall
+  from 154 to 94 us for `ldaK2` and 6.82 to 3.70 ms for `ldaK5`, while their
+  graphs collapse from 15,854 to 22 and 434,126 to 156 ops. With the mixture
+  kernels' analytic partials on top, the full warmed-mean rows are 48.2 us
+  (2.16x) and 2.36 ms (2.36x).
+- **Native symmetric-eigen pullbacks** remove reverse-time eigensolves from
+  `kronecker_gp`: the targeted median falls 289.0 -> 185.7 us/gradient. Its
+  current warmed mean is 183.3 us, 1.19x CmdStan.
+- **Native Cholesky-density partials** cover the exact single-observation,
+  Cholesky-factor-active `multi_normal_cholesky` shape in `gp_regr`: the
+  targeted median falls 6.05 -> 4.20 us/gradient. Its current warmed mean is
+  4.04 us, 1.16x CmdStan.
+- **Elementwise-lp fusion** (the mixture idiom): `low_dim_gauss_mix`
+  7,208 ops -> 16, crossing parity (0.78x -> 1.07x) at the time;
+  `normal_mixture` 13 ops. Analytic mixture partials took both further, to
+  2.04x and 2.11x in the current run.
+
+### Tape islands, measured
+
+The island pass compiles irreducible scalar residue (recurrences) into
+one register-machine op. For most of this pass's life the op collapse was
+dramatic on every model with such a region and the time followed on
+exactly one, because the backward re-executed the whole program under
+`stan::math::var`: a vari allocated per operation, a virtual `chain()`
+per operation, a nested tape built and torn down per call. That is
+correct by construction and it costs what CmdStan costs, so the island
+bought data movement and nothing else -- `iohmm_reg`, whose steps copy a
+1,500-element state vector, won 2.5x, and the estimate refused nearly
+everything else.
+
+`gen_adjoint` (`runtime/src/adjoint.cpp`) generates the backward instead:
+reverse-mode source transformation over the ~35 opcodes of `Program`,
+producing a second pass over doubles with no vari, no nested tape and no
+allocation. Measured with `STANLI_NO_ISLAND=1` as the baseline, same
+build, same point, on all twenty-one corpus models that compile a
+region (`harnesses/island_ab.py`, min of three runs each -- the sweep
+bypasses the carve estimate so the regions it declines are measured
+too, which is how the table can hold rows the default build refuses):
+
+| model | ops off -> on | ns/grad off | replayed | generated | generated speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `iohmm_reg` | 53,456 -> 27 | 1,428,776 | 574,888 (2.49x) | 301,629 | **4.74x** |
+| `hmm_gaussian` | 42,926 -> 11 | 365,750 | 398,088 (0.92x) | 228,638 | **1.60x** |
+| `hmm_example` | 3,483 -> 13 | 32,292 | 36,465 (0.89x) | 20,766 | **1.56x** |
+| `hmm_drive_1` | 19,540 -> 24 | 171,084 | 199,678 (0.86x) | 121,344 | **1.41x** |
+| `hmm_drive_0` | 19,540 -> 24 | 162,653 | 195,899 (0.83x) | 117,285 | **1.39x** |
+| `garch11` | 1,797 -> 8 | 10,996 | 14,777 (0.74x) | 8,109 | **1.36x** |
+| `Mb_model` | 7,035 -> 1,646 | 72,289 | 71,934 (1.00x) | 65,250 | **1.11x** |
+| `arma11` | 1,205 -> 9 | 6,774 | 10,526 (0.64x) | 6,544 | 1.04x |
+| `accel_gp` | 461 -> 64 | 7,233 | 8,170 (0.89x) | 7,041 | 1.03x |
+| `losscurve_sislob` | 316 -> 26 | 2,340 | 3,165 (0.74x) | 2,281 | 1.03x |
+| `multi_occupancy` | 4,006 -> 3,659 | 68,098 | 70,760 (0.96x) | 68,097 | 1.00x |
+| `hier_2pl` | 349 -> 97 | 301,507 | 302,117 (1.00x) | 301,792 | 1.00x |
+| `soil_incubation` | 129 -> 32 | 96,445 | 96,704 (1.00x) | 96,903 | 1.00x |
+| `kronecker_gp` | 254 -> 166 | 302,779 | 315,098 (0.96x) | 306,665 | 0.99x |
+| `accel_splines` | 425 -> 28 | 7,745 | 8,963 (0.86x) | 7,882 | 0.98x |
+| `hierarchical_gp` | 165 -> 84 | 30,448 | 35,607 (0.86x) | 31,041 | 0.98x |
+| `covid19imperial_v3` | 21,526 -> 19,995 | 308,879 | 439,340 (0.70x) | 316,736 | 0.98x |
+| `covid19imperial_v2` | 21,526 -> 19,995 | 305,642 | 442,001 (0.69x) | 315,311 | 0.97x |
+| `Survey_model` | 1,427 -> 5 | 61,524 | 62,030 (0.99x) | 65,039 | 0.95x |
+| `dugongs_model` | 120 -> 12 | 768 | 766 (1.00x) | 1,168 | 0.66x |
+| `bones_model` | 7,528 -> 4,955 | 52,335 | 988,998 (0.05x) | 207,721 | 0.25x |
+
+Three of the twenty-one exist because the machine's vocabulary stopped
+being a subset of the graph's: any scalar-out op it has no instruction
+for now compiles as a CALL to the graph's own kernel -- the identical
+code, partials, and backward the op would have run -- so one such op no
+longer ends a run (`POW` used to split regions in half). A CALL buys
+continuity, never speed, and the estimate charges it the graph's own
+per-op tax; without that charge the first sweep carved `dugongs_model`
+at a measured 0.66x and `Survey_model` at 0.95x, and with it both are
+refused on the default path while every previously carved verdict is
+unchanged. `losscurve_sislob` is the payoff shape: its residue drops
+88 -> 26 ops because the cdfs inside it stopped ending the run.
+
+Every region is faster generated than replayed, and the class changed
+rather than improved: op collapse is now worth roughly what the op counts
+always suggested it should be. `hmm_gaussian` collapses 42,926 ops to 11
+and measured 0.92x replayed against 1.60x generated. The ceiling is
+parity-plus and not more, as predicted before measuring -- CmdStan's
+generated code is inlined compiled C++ and the adjoint program still pays
+interpreted dispatch per instruction -- and `iohmm_reg` beats it only
+because the registers also make its vector copies disappear.
+
+The estimate changed with it. It weighed the register file 4x because the
+file was built as vars, and that term is what refused thirteen of the
+fourteen regions it could compile. A value register is a memory cost again:
+one forward write and one backward read. The adjoint file is a separate
+cost, however. Checkpoints hold values only, and registers made equivalent
+by a copy already share an adjoint cell to reproduce stan-math's tape order.
+Those equivalence classes are now packed densely, so the runtime zeroes one
+cell per distinct class rather than one per value or checkpoint register.
+The estimate mirrors the storage exactly: two passes over value and
+checkpoint registers other than CALL scratch, one pass over the compact
+adjoint file, both instruction streams, and the existing neutral charge for
+CALLs.
+
+What an island buys is still mostly the per-op tax the graph pays -- a
+dispatch, a context load and a scratch-partials backward, ~5 ns against
+~1 ns for an island instruction (`kOpCost = 5`). Without it a region like
+`garch11`, whose scalar ops barely move more elements than there are ops,
+reads as a wash. The 2026-08-24 structural census reran default, disabled,
+and forced islands on all 21 corpus models with compilable regions. Compact
+accounting changed exactly one decision, `iohmm_reg`, and preserved every
+previous selection and refusal, including the measured loss guards
+`bones_model`, `dugongs_model`, `Survey_model`, and both `covid19imperial`
+models. `STANLI_ISLAND_ALWAYS=1` skips the estimate, which is how to ask why
+a region was left alone.
+
+In the targeted Release A/B from that census, `iohmm_reg`'s 95,424 forward
+register ids reduce to 39,000 distinct adjoint cells; 4,488 additional
+checkpoint registers remain value-only. Its estimated island cost falls
+from 389,640 to 328,728 against the graph's 361,045, so the default path now
+collapses 53,456 ops to 27. Seven clean, interleaved runs moved the median
+from 498.612 to 241.453 us/gradient (2.065x internally), within 0.3% of the
+forced-island path and 1.33x faster than the retained 320.335 us CmdStan
+reference. This is a targeted A/B; at the time, the warmed corpus table was the
+last full-corpus run pending the next benchmark refresh. The current absolute
+corpus result remains in [`docs/benchmarks.md`](../../docs/benchmarks.md).
+
+`STANLI_NO_NATIVE_ADJ=1` restores the replay. It changes nothing else --
+the adjoint is still generated, the estimate still assumes it, and the
+forward program is identical -- so the two backwards are compared over
+the same islands, which is what the "replayed" column above is.
+
+Fifteen of the eighteen agree with the replay **bitwise**; each rule is
+the corresponding stan-math rev expression transcribed, grouping
+included. The other three reassociate one sum: a var copy shares a vari,
+so from the copy onward both registers accumulate into one adjoint, and
+`gen_adjoint` shares an adjoint cell to match -- but a cell is shared for
+the whole program where a vari is shared only until the destination is
+next written. Where they differ the arbiter is the op graph the island
+replaced, not the replay, and the generated adjoint is closer to it in
+all three: `Mb_model` reproduces the op graph exactly where the replay
+was 1.07e-14 away, and `iohmm_reg` is 3.46e-13 against the replay's
+6.01e-13.
+
+Beyond the estimate, islands still refuse propto densities (their
+term-dropping depends on argument types, which the island's uniform
+binding cannot reproduce), runs under 32 ops, and regions producing
+target terms. `gen_adjoint` additionally refuses jumps, so the regions
+lowering emits for parameter-dependent control flow keep the replay:
+reversing control flow wants the structured form the flat instruction
+list has already lost.
+
+### ODE models and preparation
+
+The before/after numbers in this section are targeted historical A/B medians;
+the current warmed-mean corpus rows are called out separately.
+
+Every user function is inlined at lowering time except an ODE
+right-hand side, which the integrator calls at times of its choosing.
+It used to be evaluated by a tree-walking interpreter: 5.8 us per call,
+~500 calls per gradient, 97% of the model's gradient time, and the
+system was solved twice per gradient (values, then derivatives). Both
+are gone: the right-hand side compiles once into a flat register
+machine, and the forward sweep keeps the sensitivities it already
+computes, so the backward is a matrix-vector product.
+
+| model | before | after | speedup | vs CmdStan |
+| --- | ---: | ---: | ---: | ---: |
+| `lotka_volterra` | 2,790,941 ns | 71,704 ns | 38.9x | 0.015x -> 0.58x |
+| `soil_incubation` | 3,389,538 ns | 96,362 ns | 35.2x | 0.018x -> 0.63x |
+| `one_comp_mm_elim_abs` | 18,873,857 ns | 653,181 ns | 28.9x | 0.025x -> 0.74x |
+
+Gradients are unchanged to the bit where they were before, and
+`lotka_volterra` moved from 4 ULP to bitwise identical to CmdStan:
+reading the jacobian out of the same solve that produced the values
+removes a second, independently stepped solve. Anything the compiler
+cannot express keeps the interpreter, so coverage never shrinks;
+`STANLI_DEBUG_ODE=1` reports when that happens.
+
+A later mixed-activity specialization also preserves Stan Math's separate
+scalar types for the initial state and parameters. Previously either active
+input promoted both to reverse mode and integrated sensitivities for both.
+On `one_comp_mm_elim_abs` the initial state is data, so the sensitivity width
+falls from four to three and median latency from 699 to 639 us/gradient. The
+fully active `lotka_volterra` and `soil_incubation` shapes take the same path
+as before and remain flat within measurement noise. After the callback and
+Jacobian-harvest work described earlier in this appendix, the full-corpus
+warmed means were 523 us for `one_comp_mm_elim_abs`, 47.6 us for
+`lotka_volterra`, and 67.8 us for `soil_incubation`, or 0.90x, 0.87x, and
+0.90x CmdStan. Current absolute values remain in
+[`docs/benchmarks.md`](../../docs/benchmarks.md).
+
+Preparation scales too: the largest corpus model (`nn_rbm1bJ100`, MNIST,
+60,000 rows, 79,411 parameters) lowers to a 132,024-op graph. Its old 23.80 s
+compile was almost entirely stanc's generated loop reconstructing the
+47-million-element input matrix after `DataMap` had already parsed it. Direct
+typed input preload removes that loop; an indexed reroll candidate scan removes
+another empty 0.13 s pass over the resulting graph. Together they reduce graph
+compilation to 0.23 s (103x), and the full MIR/data-to-bound-executor path from
+26.33 s to 2.76 s (9.5x); JSON parsing is now the largest preparation stage.
+The same profiled A/B removes 1.34 GB of peak RSS. The log density and all
+79,411 gradient components remain within the existing CmdStan oracle
+tolerance. Overall, graph
+compilation is 4-400 ms against a 6.2-7.6 s CmdStan compile (warm precompiled
+header, after a multi-minute one-time `make build`); that gap is what
+time-to-first-draw is made of. The current corpus run records 2.832 s for the
+same `nn_rbm1bJ100` MIR/data-to-bound-executor path.

@@ -1,951 +1,300 @@
-# Benchmarks vs CmdStan
+# How much faster is stanli?
 
-2026-08-25, Apple M3 Ultra (macOS arm64), Apple clang 21, both sides `-O3`
-and `-ffp-contract=off`, single-threaded. The stanli columns were refreshed as
-one 120-model run after the optimization stack landed. The CmdStan columns are
-unaffected by those stanli changes and carry over from the 2026-08-06 run on
-the same host. Both engines evaluate the sampling gradient (propto + jacobian)
-at the same deterministic unconstrained point. stanli runs
-`tools/bench_grad.cpp`; CmdStan runs `tools/bench_cmdstan_grad.cpp`, looping the
-same fresh-vars + grad + recover_memory cycle
-`stan::model::gradient` performs per leapfrog step. Reproduce the stanli side
-by passing `--stanli-only` to `harnesses/corpus_bench.py`. To remeasure both
-sides, omit the flag and write to a new output path; an existing TSV is treated
-as resumable completed work.
+Across 119 posteriordb models, stanli evaluates a gradient **2.91x faster
+than CmdStan at the median**. It is at least as fast on 116 of the 119 models.
+Because stanli does not build a native C++ binary for each model, the first
+complete run is typically faster by more than the gradient ratio alone
+suggests.
 
-The gradient cells in this corpus snapshot are warmed arithmetic means from
-one timed loop per model. Preparation is measured separately with
-`bench_grad --prep`: optimized MIR and JSON read/parse, graph compile, executor
-construction, and binding, with no stanc time, gradient warmup, or evaluation.
-Optimization-specific sections later on this page preserve targeted
-before/after medians from their original A/B runs. Those historical medians
-explain attribution; the current corpus rows below are the source of truth for
-absolute performance.
+## Eight Schools: 3.2x faster gradients, roughly 100x faster to draws
 
-## Per-gradient latency
+The non-centered Eight Schools model is a useful first result because it is
+small: there is little work over which either engine can hide overhead.
 
-A representative slice; the complete 120-model table is at the bottom of
-this page.
+| measurement | stanli | CmdStan | speedup |
+| --- | ---: | ---: | ---: |
+| one gradient at the same point | 234 ns | 745 ns | **3.18x** |
+| first 1,000 warmup + 1,000 draw run | 0.03 s | 3.4 s | **roughly 100x** |
 
-| model | unconstrained params | stanli ns/grad | CmdStan ns/grad | speedup | stanli prep |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `radon_pooled` | 3 | 45,378 | 320,938 | 7.07x | 0.015 s |
-| `arK` | 7 | 1,748 | 12,459 | 7.13x | 0.002 s |
-| `radon_hierarchical_intercept_centered` | 391 | 97,078 | 569,143 | 5.86x | 0.042 s |
-| `radon_county_intercept` | 388 | 81,602 | 431,614 | 5.29x | 0.025 s |
-| `nes` | 10 | 16,100 | 69,324 | 4.31x | 0.004 s |
-| `eight_schools_noncentered` | 10 | 234 | 745 | 3.18x | 0.000 s |
-| `election88_full` | 90 | 256,087 | 901,961 | 3.52x | 0.123 s |
-| `bym2_offset_only` | 3845 | 39,938 | 114,620 | 2.87x | 0.002 s |
-| `dogs` | 3 | 7,130 | 63,747 | 8.94x | 0.010 s |
-| `kidscore_momiq` | 3 | 1,576 | 4,861 | 3.08x | 0.001 s |
-| `lsat_model` | 1006 | 37,934 | 91,173 | 2.40x | 0.003 s |
-| `state_space_stochastic_level_stochastic_seasonal` | 389 | 6,667 | 26,320 | 3.95x | 0.002 s |
-| `hmm_example` | 4 | 17,462 | 27,145 | 1.55x | 0.009 s |
-| `garch11` | 4 | 7,004 | 9,664 | 1.38x | 0.002 s |
-| `hmm_drive_0` | 6 | 110,835 | 132,850 | 1.20x | 0.040 s |
-| `normal_mixture` | 3 | 41,809 | 88,239 | 2.11x | 0.003 s |
-| `low_dim_gauss_mix` | 5 | 48,184 | 98,315 | 2.04x | 0.003 s |
-| `wells_dist100ars_model` | 3 | 17,171 | 18,997 | 1.11x | 0.002 s |
-| `iohmm_reg` | 29 | 227,247 | 320,335 | 1.41x | 0.276 s |
-| `radon_county` | 389 | 73,628 | 82,076 | 1.11x | 0.011 s |
-| `arma11` | 4 | 4,494 | 6,158 | 1.37x | 0.002 s |
-| `diamonds` | 26 | 31,110 | 31,497 | 1.01x | 0.021 s |
-| `ldaK2` | 7 | 48,159 | 104,059 | 2.16x | 0.006 s |
+The stanli run is the whole command, from Stan source through model loading,
+sampling, and CSV output. The CmdStan total is its 3.2 s model build plus its
+0.20 s run. The source timings are recorded to only two or one decimal places,
+so the headline and the first-run table columns deliberately use approximate
+ratios.
 
-Generated adjoints and native runtime control put every sequential model in
-this slice at parity or better: `arma11` and `garch11` are 1.37-1.38x, the
-fixed-state HMM rows are 1.20-1.55x, and `iohmm_reg` is now 1.41x. Lane
-partitioning is what moved `state_space_stochastic_level_stochastic_seasonal`
-to 3.95x, by fusing a random walk whose period scan re-rolling could never
-phase correctly. The island section below preserves the targeted per-region
-A/B that isolates what generated adjoints bought independently of absolute
-run noise.
+The gradient row is the controlled comparison: both engines evaluate the same
+sampling gradient at the same deterministic unconstrained point. The complete
+run is what a user waits for, but it is indicative rather than controlled
+because small numerical differences can send NUTS down different adaptation
+and leapfrog trajectories.
 
-## Which models are faster, which are slower, and why
+## Representative models
 
-Across the full corpus (`docs/corpus-bench.tsv`, 119 models with both
-gradients) the median per-gradient speedup is 2.91x and 116 of 119
-models are at or above parity. The ratio is predicted almost entirely
-by the model's *shape*, not its size.
+Here is a deliberately mixed slice of the corpus, sorted from the largest
+gradient win to the losses. It includes IRT, regression, hierarchical,
+mixture, Gaussian-process, state-space, HMM, GARCH, and ODE models. Lower times
+are better; higher speedups are better.
 
-**Faster (most of the corpus, typically 1.5-11x):**
+| model | stanli gradient | CmdStan gradient | gradient speedup | stanli source-to-CSV | CmdStan build + run | approx. first-run speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `gpcm_latent_reg_irt` | 121.131 us | 1.338 ms | 11.04x | 9.84 s | 166.9 s | ~17x |
+| `dogs` | 7.130 us | 63.747 us | 8.94x | 0.56 s | 5.9 s | ~11x |
+| `radon_pooled` | 45.378 us | 320.938 us | 7.07x | 0.59 s | 6.4 s | ~11x |
+| `GLM_Poisson_model` | 386 ns | 2.008 us | 5.20x | 0.06 s | 3.4 s | ~57x |
+| `state_space_stochastic_level_stochastic_seasonal` | 6.667 us | 26.320 us | 3.95x | 18.51 s | 44.4 s | ~2.4x |
+| `eight_schools_noncentered` | 234 ns | 745 ns | 3.18x | 0.03 s | 3.4 s | ~110x |
+| `logistic_regression_rhs` | 40.816 us | 113.106 us | 2.77x | 12.05 s | 20.8 s | ~1.7x |
+| `normal_mixture` | 41.809 us | 88.239 us | 2.11x | 0.44 s | 3.6 s | ~8.2x |
+| `hierarchical_gp` | 29.875 us | 47.565 us | 1.59x | 14.33 s | 25.8 s | ~1.8x |
+| `hmm_example` | 17.462 us | 27.145 us | 1.55x | 0.51 s | 5.0 s | ~9.8x |
+| `garch11` | 7.004 us | 9.664 us | 1.38x | 0.23 s | 3.2 s | ~14x |
+| `diamonds` | 31.110 us | 31.497 us | 1.01x | 51.55 s | 51.9 s | ~1.0x |
+| `one_comp_mm_elim_abs` | 522.915 us | 470.681 us | 0.90x | 10.55 s | 14.5 s | ~1.4x |
+| `soil_incubation` | 67.783 us | 60.871 us | 0.90x | 11.94 s | 16.1 s | ~1.4x |
+| `lotka_volterra` | 47.622 us | 41.313 us | 0.87x | 5.59 s | 10.3 s | ~1.8x |
 
-- **Vectorized-statement models.** A `y ~ normal(X * beta, sigma)` over
-  N observations is a handful of ops here; CmdStan builds and walks N
-  var-tape nodes per statement per leapfrog step. The gap grows with N.
-  This class is regressions, GLMs, and most hierarchical models.
-- **Scalar loops the passes can vectorize.** The hierarchical indexing
-  idiom (`y[n] ~ normal(mu[county[n]], sigma)` and loops that fill a
-  vector element by element) arrives unrolled and is re-rolled back
-  into the class above: the radon family up to 7.1x, `election88_full`
-  3.5x, `dogs` 8.9x.
-- **Nested fixed-width mixtures.** LDA's per-document `gamma[K]` construction
-  and row `log_sum_exp` become two packed gathers, vector arithmetic, and one
-  row-reduction op, and the mixture kernels now differentiate in closed form
-  instead of building a tape per element. In the current corpus run, `ldaK2`
-  is 48.2 us/gradient (2.16x CmdStan) and `ldaK5` is 2.36 ms/gradient (2.36x).
-- **Repeated per-observation terms, adjacent or not.** The
-  capture-recapture family arrives as one Bernoulli term per occasion per
-  individual, most of them bit-identical. Re-rolling turns `Mtbh_model`'s 584
-  element writes into 146 destructive strided stores, common-subexpression
-  elimination removes the repeated terms, and lane partitioning fuses the
-  remainder across lanes that are neither adjacent nor in phase. The family
-  runs 2.57x (`Mh_model`) to 4.47x (`Mt_model`), with `Mth_model` 4.01x,
-  `M0_model` 3.55x, and `Mtbh_model` 3.32x. `Mb_model`, whose behavioral
-  recurrence stays scalar, is 1.19x.
-- **Ordinal IRT loops.** `gpcm_latent_reg_irt` and `grsm_latent_reg_irt` build
-  each item's category logits with a scalar product, a threshold subtraction,
-  and a cumulative sum feeding one categorical draw. That whole chain lowers
-  to one `categorical_logit_glm_lpmf` per item, and the two models are 11.0x
-  and 10.8x.
-- **Everything, on preparation.** The MIR/data-to-bound-executor path has a
-  2 ms median; 75 of 119 measured models prepare in at most 5 ms. The largest
-  JSON input, `nn_rbm1bJ100`, takes 2.832 s and `ldaK5` takes 0.276 s, against
-  carried-over CmdStan builds of 5.2 s and 3.5 s respectively.
+Across all 117 models that completed a full run in both engines, the median
+source-to-CSV speedup is **about 6.8x**, including CmdStan's model build. 115 of 117
+finish at least as fast in stanli. As above, gradient speed is the controlled
+result; full-run speed also reflects the trajectory taken by each sampler.
+## What tends to win, and where it does not
 
-**Near parity (roughly 1.0-1.6x), two shapes:**
+**The largest wins are models with repeated independent work.** Regressions,
+GLMs, IRT models, and many hierarchical models spend most of their time doing
+the same operation for many observations. stanli executes those regions as a
+few vector operations and reuses the resulting autodiff graph. CmdStan builds
+and tears down scalar autodiff tape nodes on every gradient evaluation.
 
-- **Models dominated by one large dense operation** (a Cholesky, a
-  big matrix product, the GP models). Both engines spend their time
-  inside the same stan-math kernel; interpreter overhead is noise on
-  top.
-- **Sequential models.** HMM recursions and ARMA/GARCH updates read the
-  previous step's parameter-dependent result, so
-  re-rolling correctly refuses (vectorizing a recurrence would change
-  the math). This is the class the island pass is for, and it sat at
-  0.6-0.9x until the island backward stopped being a var replay and
-  became a generated adjoint program: `hmm_example` is now 1.55x,
-  `garch11` 1.38x, `hmm_gaussian` 1.43x, and the two `hmm_drive` models
-  1.20-1.27x against CmdStan. What keeps them at parity-plus rather than
-  higher is per-op dispatch against CmdStan's inlined scalar code, one
-  interpreted instruction at a time in each direction (the island section
-  below has the targeted per-region numbers). Native runtime control now puts
-  `iohmm_reg` at 1.41x as well.
-  `state_space_stochastic_level_stochastic_seasonal` read as this class until
-  lane partitioning found the random walk hiding behind a mis-phased period
-  scan; it is 3.95x.
+**Dense kernels and sequential models land closer to parity.** If most of a
+gradient is one large matrix operation, both engines spend their time in the
+same stan-math kernel. HMM, ARMA, and GARCH recurrences depend on the previous
+step, so they cannot become independent vector lanes. stanli still wins on the
+measured examples, but by less.
 
-**Slower (three models):**
+**The only gradient losses are three ODE models.** `one_comp_mm_elim_abs`,
+`soil_incubation`, and `lotka_volterra` run at 0.87-0.90x CmdStan. Both engines
+use the same Stan Math integrators; stanli still dispatches the compiled
+right-hand side on each solver callback, while CmdStan has that model-specific
+code inlined into its native binary. All three nevertheless finish the first
+complete run faster once CmdStan's model build is included.
 
-- **ODE models**: `lotka_volterra`, `soil_incubation`, and
-  `one_comp_mm_elim_abs` are 0.87x, 0.90x, and 0.90x, and they are the whole
-  sub-parity tail.
-  The remaining gap is our per-call dispatch of the compiled right-hand side
-  against CmdStan's native C++ right-hand side inside the same underlying Stan
-  Math integrator. (They were 0.015-0.025x before the right-hand side compiled;
-  see below.)
+## Parallel chains
 
-The two shapes that used to sit beside them have moved: `multi_occupancy` is
-2.65x on single-tape multi-normal partials and its share of the partition
-pass, and `dogs_nonhierarchical` is 2.09x once `pow` joined re-rolling's
-widenable set.
+Chains run concurrently by default, with one executor and RNG stream per
+chain. On an intentionally sequential 200-step ordered-logistic model, eight
+chains scaled like this:
 
-A profile of the models that were sub-parity (`STANLI_PROFILE=1`) said the
-tail was mostly not a graph problem: in seven of them a single precompiled
-kernel was half to nine-tenths of the gradient.
-`diamonds` was the extreme, 90.9% in one GLM kernel that rebuilt a var
-tape in both sweeps; differentiating once and stashing the partials took it
-0.48x -> 0.89x in that targeted A/B; the current warmed mean is 1.01x.
-`prophet` was 82% in `OP_MATVEC` with one serial accumulation chain; four
-independent accumulators took it 0.67x -> 1.23x in the targeted A/B and it is
-1.28x in the current corpus run, bitwise unchanged.
-
-## Where the wins come from
-
-The interpreter's cost is per op, not per element: ~17-20 ns for a
-scalar density op forward + backward, against ~0.9 ns for the actual
-math (`tools/bench_opcost.cpp`). A vectorized statement over N elements
-amortizes that to nothing and runs precompiled stan-math on contiguous
-doubles, while CmdStan pays its var-tape cost per scalar per
-evaluation. Vectorized models therefore win, and models stuck as
-unrolled scalar loops used to lose (0.4-0.9x) until the graph passes
-closed the gap. The passes themselves are described in
-[runtime/src/OPTIMIZATIONS.md](../runtime/src/OPTIMIZATIONS.md); the
-headline measurements follow. These are the historical targeted medians described at
-the top of the page, not replacements for the current corpus rows:
-
-- **Re-rolling** (scalar loops back to vector ops): `radon_pooled`
-  27,670 ops -> 8 (0.91x -> 6.18x), `arK` 3,164 -> 21 (0.40x -> 4.83x).
-- **In-place updates + store-to-load forwarding** (the element-write
-  idiom): `radon_county_intercept` went from 90.5 ms per gradient in
-  2.58 GB of arena (207x slower than CmdStan) to 92 us in 42 MB, 77,960
-  ops -> 9. Seven radon-family models and `rats_model` collapse the
-  same way.
-- **Write-side fusion** (loops that fill a vector something else
-  reads): `radon_county` 25,152 ops -> 10 (0.36x -> 0.98x),
-  `election88_full` 289,165 -> 65 (0.39x -> 2.97x). Strided-run and
-  integer-outcome fusion closed the `dogs` family (0.65x -> 2.8x).
-  57 of the 120 corpus models change under the passes, against 28
-  before write-side fusion.
-- **Lane partitioning and CSE** (repeated work re-rolling cannot reach):
-  segmenting the graph at target terms and element stores finds lanes that are
-  neither adjacent nor in phase, and value numbering removes the terms an
-  unrolled model emits twice.
-  `state_space_stochastic_level_stochastic_seasonal` goes 1,375 ops -> 19
-  (2.29x), `Mth_model` 1,563 -> 35 (1.63x), `Mh_model` 1,542 -> 18 (1.53x),
-  `Survey_model` 1,427 -> 9, and `Mt_model` 1,062 -> 70 under CSE alone
-  (16.1x). The IRT arm rewrites `gpcm_latent_reg_irt`'s per-item chain as
-  `categorical_logit_glm_lpmf`, 34,634 ops -> 91 (6.5x internally).
-- **Post-reroll in-place slices** (chained partial matrix fills):
-  `Mtbh_model` keeps the same 1,585-op graph, but 146 stores now move four
-  values rather than copying a 730-value matrix. Median gradient latency
-  falls 106.5 -> 47.4 us (2.24x); direct replay remains within 3.61e-15 of
-  the CmdStan references across 465 values.
-- **Native Bernoulli forwards** (recorder-bound scalar and short-vector
-  calls): both Bernoulli parameterizations have one real argument and one
-  analytic partial, so they write that column directly into the density
-  scratch instead of constructing the generic recorder edge. Summed vector
-  logits preserve Eigen's packet `exp`, select, and reduction order while
-  reusing the partial column as their `ntheta` workspace. `Mt_model` falls
-  30.6 -> 19.2 us, `Mth_model` 113.2 -> 57.3 us, and `Mtbh_model` 47.4 ->
-  26.8 us after the slice fix. The combined `Mtbh_model` improvement is
-  106.5 -> 26.8 us (3.98x). Common-subexpression elimination and lane
-  partitioning have since taken the same three models further: their
-  warmed-mean rows are now 4.47, 23.4, and 12.9 us/gradient, or 4.47x, 4.01x,
-  and 3.32x CmdStan.
-- **Native scalar probability categorical** removes the nested autodiff replay
-  only when one categorical outcome selects from an active probability vector.
-  Stan Math's double overload still computes the value and performs every
-  check; reverse adds the incoming seed divided by the selected probability to
-  that probability's adjoint. Array outcomes retain replay to preserve their
-  repeated-selection accumulation topology, and categorical-logit calls retain
-  replay for their dense pullback. The graph is unchanged. In a targeted
-  2026-08-24 Release A/B (seven matched-run medians),
-  `gpcm_latent_reg_irt` moved 1.741465 -> 0.955609 ms/gradient (1.8224x
-  internally, 1.3998x CmdStan at that point), and `grsm_latent_reg_irt` moved
-  0.9705208 -> 0.4953192 ms/gradient (1.9594x internally, 1.5387x
-  CmdStan). Their categorical opcode time fell 4.45x and 5.00x respectively;
-  the categorical-logit RBM controls were unchanged. Lane partitioning later
-  replaced those per-item categorical calls with one
-  `categorical_logit_glm_lpmf` each, so the current full-corpus warmed means
-  in the table below are 121.1 us (11.0x CmdStan) and 70.9 us (10.8x).
-- **Compiled scalar generated-quantities RNGs** keep caller-owned chain state
-  on the forward-only write-array graph for scalar `poisson_log`, `uniform`,
-  `bernoulli`, `normal`, `lognormal`, and `binomial` draws.
-  Apart from the audited categorical and multivariate-normal extensions below,
-  other RNGs, container-valued results, and draws used as dynamic control,
-  indices, or geometry still fail closed to the whole-section interpreter. In
-  an exact census of the 24 previously
-  interpreted corpus models, this RNG tranche moved 12 to the graph; all 24
-  still produced complete rows.
-  A targeted 2026-08-24 C-ABI A/B (point 0, two warmups, seven matched batch
-  medians) measured:
-
-  | model | interpreted row | compiled row | improvement |
-  | --- | ---: | ---: | ---: |
-  | `covid19imperial_v2` | 156.239 ms | 2.089 ms | 74.81x |
-  | `covid19imperial_v3` | 157.176 ms | 2.077 ms | 75.69x |
-  | `dogs_hierarchical` | 1.929 ms | 24.105 us | 80.02x |
-  | `dogs_nonhierarchical` | 2.078 ms | 32.317 us | 64.29x |
-  | `GLMM1_model` | 75.541 us | 2.176 us | 34.72x |
-  | `hierarchical_gp` | 2.291 ms | 46.301 us | 49.47x |
-  | `lotka_volterra` | 1.797 ms | 31.434 us | 57.16x |
-  | `one_comp_mm_elim_abs` | 5.123 ms | 139.431 us | 36.74x |
-  | `M0_model` | 15.378 us | 0.119 us | 129.55x |
-  | `Mb_model` | 2.020 ms | 26.703 us | 75.65x |
-  | `Rate_4_model` | 4.007 us | 0.126 us | 31.93x |
-  | `Rate_5_model` | 4.311 us | 0.124 us | 34.82x |
-
-  The largest setup tradeoff is the two Covid graphs: C-API model
-  construction rises from about 0.239 s to 2.20-2.21 s, but the 154 ms saved
-  per row repays it after roughly 13 draws. For the four added scalar-binomial
-  models, across 1,000 rows of each model their aggregate time falls from
-  2.0438 s to 0.0271 s (75.50x), and construction also gets faster in every
-  case, so break-even is immediate. Their graph and frozen-interpreter rows
-  were bitwise identical for all 28,926 compared values. These are targeted
-  write-array medians, not replacements for the sampling columns in the full
-  corpus table.
-- **Compiled generated-quantities reductions** add an exact forward-only
-  product for the vector/row-vector surfaces used by the capture-recapture
-  models, plus integer sum only when a one-dimensional runtime array is proved
-  fully initialized, integral, and safe from 32-bit overflow. Product grouping
-  follows Stan Math's expression provenance: materialized vectors use its
-  address-independent packet grouping, while strided matrix-row expressions
-  retain ascending scalar grouping. Shifted views, arbitrary expressions,
-  reverse-mode products, and unproved integer arrays still fail closed to the
-  interpreter. This moved `Mh_model`, `Mt_model`, `Mtbh_model`, and `Mth_model`
-  to the graph, taking the then-current 24-model census from 12 graph / 12
-  interpreter to 16 / 8. The categorical tranche below subsequently advances
-  that census to 17 / 7, the extrema tranche advances it to 18 / 6, and the
-  multivariate-normal tranche advanced it to 19 / 5, and the runtime-control
-  tranche below completes it at 24 / 0. All 119 compiling corpus models still
-  produce complete rows. A targeted 2026-08-24
-  C-ABI A/B (point 0, two warmups, seven matched
-  batch medians) measured:
-
-  | model | interpreted row | compiled row | improvement |
-  | --- | ---: | ---: | ---: |
-  | `Mh_model` | 869.179 us | 12.494 us | 69.57x |
-  | `Mt_model` | 20.867 us | 0.127 us | 164.83x |
-  | `Mtbh_model` | 1.046 ms | 9.856 us | 106.18x |
-  | `Mth_model` | 1.099 ms | 18.205 us | 60.36x |
-
-  Across 1,000 rows of each model, aggregate row time fell from 3.035338 s to
-  0.040682 s (74.61x). Including one construction of each model, it fell from
-  3.056579 s to 0.075491 s (40.49x); the equal-mix aggregate setup cost breaks
-  even after five rows per model. Within a 146,196-value comparison, every
-  product-fed draw and final integer sum matched the frozen interpreter
-  bitwise, including a fourth-row stream-continuation check. `Mtbh_model` and
-  `Mth_model` also expose the pre-existing graph/interpreter boundary in
-  deterministic transformed parameters: their `p` columns differ by at most
-  two ULP, while the graph is closer to live CmdStan at the shared point. These
-  are targeted write-array medians; the full-corpus sampling table awaits the
-  next refresh.
-- **Compiled categorical generated-quantities RNGs** extend the same
-  scalar-result `OP_RNG` path to `categorical_rng(vector)`. The graph and
-  `WaInterp` each copy their materialized probability vector into one shared
-  helper and call the pinned Stan Math implementation, preserving its simplex
-  validation order, one-based int result, and exact caller-owned stream
-  consumption. Lowering marks the int initialized but deliberately does not
-  infer a `[1, K]` range, so a later dynamic index still selects the
-  whole-section interpreter.
-
-  In a targeted matched C-ABI A/B, `Survey_model` moved from 1011.4736 to
-  60.3127 us/row (16.7705x), saving 0.9511609 s per 1,000 rows. Construction
-  moved from 4231.333 to 5406.709 us, so the 1175.376 us setup delta amortizes
-  after 1.236 rows, or two whole rows. It was the only model to change in the
-  exact 24-model write-array census, moving graph/interpreter coverage from
-  16 / 8 to 17 / 7; all 24 census models and all 119 compiling corpus models
-  still produced complete rows. At that stage, `iohmm_reg` remained
-  interpreted at the later dynamic-index barrier, `value must be known at
-  compile time: hatz`; the runtime-control tranche below now compiles that
-  index and its subsequent Viterbi decoder.
-
-  The categorical draw `n` matched exactly in all 18/18 C-ABI comparisons:
-  seeds 0, 1, 2, 7, 1234, and `UINT32_MAX`, each continued for three sequential
-  rows.
-  The same full-row comparison recorded 8,532 expected bit differences in
-  deterministic columns from the pre-existing graph/interpreter numerical
-  boundary; they are not RNG mismatches. Focused tests avoid that boundary by
-  routing the identical probability vector through the shared helper and the
-  direct pinned Stan Math call, then comparing the next engine state. These
-  targeted results do not refresh `docs/corpus-bench.tsv` or the generated
-  full-corpus table below.
-- **Compiled generated-quantities extrema** add the forward-only
-  `OP_EXTREMA_VEC` min/max variants. Lowering admits only a top-level
-  write-array call on a direct `UVector` or `URowVector` `Var` and evaluates
-  it with the same address-independent grouping that pinned Stan Math uses for
-  an owning Eigen value. Empty-real results are preserved: `min` is positive
-  infinity and `max` is negative infinity. Arrays, matrices, indexed views,
-  expressions, and UDF calls still select `WaInterp`; reverse-mode uses remain
-  refused.
-  The opcode is explicitly excluded from reroll matching and interpreter
-  islands because it has no reverse kernel.
-
-  `losscurve_sislob` was the only model to change in the exact 24-model
-  census, moving graph/interpreter coverage from 17 / 7 to the then-current
-  18 / 6; the multivariate-normal tranche below advanced it to 19 / 5, and the
-  runtime-control tranche completes it at 24 / 0. All 24 census models and all
-  119 compiling corpus models retained complete rows. Its 1,218-op graph
-  contains exactly one length-10 min opcode
-  and one length-10 max opcode, and writes 384 columns. Graph and `WaInterp` matched
-  bitwise for all 1,536/1,536 compared values; the same-input pinned Stan Math
-  check matched 8/8 cases.
-  Against 1,200 stored CmdStan values, the worst difference was 4.44e-16, or
-  eight ULP.
-
-  In a targeted matched C-ABI A/B, `losscurve_sislob` moved from 329.9520 to
-  3.3704 us/row (97.8970x), saving 0.3265816 s per 1,000 rows. Construction
-  moved from 4107.375 to 5291.959 us, a 1184.584 us setup increase that
-  amortizes after 3.627 rows, or four whole rows. These targeted results do not
-  refresh `docs/corpus-bench.tsv` or the generated full-corpus table below.
-- **Compiled covariance-form multivariate-normal RNGs** extend `OP_RNG` to
-  the audited `multi_normal_rng(vector, matrix) -> vector` write-array surface.
-  The mean length and square covariance shape are fixed by lowering, and both
-  the graph and `WaInterp` copy their column-major inputs into the same owning
-  Eigen values before calling pinned Stan Math. This preserves its finite,
-  symmetry, and positive-definiteness validation order and its exact normal
-  draw schedule. Array overloads, non-square or mismatched shapes, and
-  `multi_normal_cholesky_rng` remain on the whole-section interpreter.
-
-  `multi_occupancy` was the only model to change in the exact 24-model census,
-  moving graph/interpreter coverage from 18 / 6 to the then-current 19 / 5.
-  The runtime-control tranche below subsequently completes the census at
-  24 / 0 and makes all 119 compiling corpus write arrays graph-backed. All
-  rows remain complete. Its
-  graph and forced-interpreter rows were bitwise identical for all 5,616
-  values from six seeds continued for three sequential rows.
-
-  In a targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven
-  batch medians), `multi_occupancy` moved from 298.9260 to 5.4898 us/row
-  (54.4512x), saving 0.2934362 s per 1,000 rows. Construction also improved,
-  from 5864.792 to 5368.583 us, so there is no setup break-even penalty. These
-  targeted results do not refresh `docs/corpus-bench.tsv` or the generated
-  full-corpus table below.
-- **Compiled generated-quantities runtime control** completes the last five
-  interpreted write arrays: `hmm_drive_0`, `hmm_drive_1`, `hmm_example`,
-  `hmm_gaussian`, and `iohmm_reg`. Their shapes and loop bounds are static, but
-  their branches and Viterbi backtracking indices depend on the current draw.
-  Lowering now places each enclosing block in one structured register program,
-  with checked one-level dynamic indexing and packed live-ins when the block
-  needs more than six logical inputs. The historical 24-model census moves
-  from 19 graph / 5 interpreter to 24 / 0; all 119 compiling corpus models now
-  have complete, graph-backed write arrays.
-
-  A targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven batch
-  medians) measured:
-
-  | model | interpreted row | compiled row | improvement |
-  | --- | ---: | ---: | ---: |
-  | `hmm_drive_0` | 6.777 ms | 41.975 us | 161.45x |
-  | `hmm_drive_1` | 7.396 ms | 44.426 us | 166.48x |
-  | `hmm_example` | 1.388 ms | 9.718 us | 142.85x |
-  | `hmm_gaussian` | 37.366 ms | 649.125 us | 57.56x |
-  | `iohmm_reg` | 38.642 ms | 713.011 us | 54.20x |
-
-  Across 1,000 rows of each model, aggregate row time fell from 91.568918 s
-  to 1.458255 s (62.79x). Including one construction of each model, it fell
-  from 91.989657 s to 1.990729 s (46.21x); the aggregate setup increase pays
-  back after two whole rows per model. The four HMMs matched 51,696 checked
-  Viterbi outputs bitwise across four points, three seeds, and three sequential
-  rows. In `iohmm_reg`, all categorical and Viterbi states/scores matched; the
-  only differences were 2,945 continuous simulations inheriting the
-  pre-existing transformed-input boundary, bounded by 8.89e-16. Exact later
-  state draws confirm stream alignment. These targeted results do not refresh
-  `docs/corpus-bench.tsv` or the generated full-corpus table below.
-- **Allocation-free ODE right-hand-side input seeding** removes the promoted
-  `y` and `theta` staging vectors built on every solver callback and seeds the
-  reusable register file directly. A targeted 2026-08-24 Release A/B (seven
-  alternating matched-batch medians) measured:
-
-  | model | staged inputs | direct register seeding | improvement |
-  | --- | ---: | ---: | ---: |
-  | `lotka_volterra` | 78.6216 us | 68.6068 us | 1.14597x |
-  | `soil_incubation` | 102.1527 us | 89.5593 us | 1.14062x |
-  | `one_comp_mm_elim_abs` | 643.1571 us | 578.8621 us | 1.11107x |
-
-  The geometric-mean improvement is 1.13245x, and the known callback counts
-  put the saving at a consistent 38.5-39.3 ns/callback. LP and gradient
-  results were bitwise identical for all 63/63 checked scalars across three
-  points. This targeted A/B attributes the direct-seeding change; the current
-  corpus rows above and in the table below are the later end-to-end refresh.
-- **Direct ODE Jacobian-row harvest plus scalar RHS cleanup.** Stan Math's ODE
-  outputs are already precomputed-gradient nodes directly connected to active
-  inputs, so the kernel now chains the selected output instead of running a
-  nested reverse sweep across every sibling output for each Jacobian row, and
-  clears only that output and its inputs between rows. A conservative
-  load-time pass also removes overwritten scalar initializer
-  constants and aliases stable single-definition copies; any range-reading,
-  dynamic, density, or kernel instruction leaves the RHS program unchanged. A
-  targeted 2026-08-25 three-binary A/B (seven rotating matched-batch medians)
-  measured:
-
-  | model | parent | direct node only | full change | improvement |
-  | --- | ---: | ---: | ---: | ---: |
-  | `lotka_volterra` | 78.5160 us | 70.3923 us | 60.8881 us | 1.28951x |
-  | `soil_incubation` | 101.3979 us | 88.5437 us | 82.0553 us | 1.23573x |
-  | `one_comp_mm_elim_abs` | 663.9302 us | 665.3790 us | 629.7752 us | 1.05423x |
-
-  The full change improves the geometric mean by 1.18876x. Fresh parent and
-  patched checkers were byte-identical for all 63/63 LP-and-gradient scalars
-  over three evaluation points. These targeted medians isolate the mechanism;
-  they do not refresh the full-corpus table or its retained CmdStan columns.
-- **Packed row-wise reductions** (the LDA inner loop): targeted medians fall
-  from 154 to 94 us for `ldaK2` and 6.82 to 3.70 ms for `ldaK5`, while their
-  graphs collapse from 15,854 to 22 and 434,126 to 156 ops. With the mixture
-  kernels' analytic partials on top, the full warmed-mean rows are 48.2 us
-  (2.16x) and 2.36 ms (2.36x).
-- **Native symmetric-eigen pullbacks** remove reverse-time eigensolves from
-  `kronecker_gp`: the targeted median falls 289.0 -> 185.7 us/gradient. Its
-  current warmed mean is 183.3 us, 1.19x CmdStan.
-- **Native Cholesky-density partials** cover the exact single-observation,
-  Cholesky-factor-active `multi_normal_cholesky` shape in `gp_regr`: the
-  targeted median falls 6.05 -> 4.20 us/gradient. Its current warmed mean is
-  4.04 us, 1.16x CmdStan.
-- **Elementwise-lp fusion** (the mixture idiom): `low_dim_gauss_mix`
-  7,208 ops -> 16, crossing parity (0.78x -> 1.07x) at the time;
-  `normal_mixture` 13 ops. Analytic mixture partials took both further, to
-  2.04x and 2.11x in the current run.
-
-## Tape islands, measured
-
-The island pass compiles irreducible scalar residue (recurrences) into
-one register-machine op. For most of this pass's life the op collapse was
-dramatic on every model with such a region and the time followed on
-exactly one, because the backward re-executed the whole program under
-`stan::math::var`: a vari allocated per operation, a virtual `chain()`
-per operation, a nested tape built and torn down per call. That is
-correct by construction and it costs what CmdStan costs, so the island
-bought data movement and nothing else -- `iohmm_reg`, whose steps copy a
-1,500-element state vector, won 2.5x, and the estimate refused nearly
-everything else.
-
-`gen_adjoint` (`runtime/src/adjoint.cpp`) generates the backward instead:
-reverse-mode source transformation over the ~35 opcodes of `Program`,
-producing a second pass over doubles with no vari, no nested tape and no
-allocation. Measured with `STANLI_NO_ISLAND=1` as the baseline, same
-build, same point, on all twenty-one corpus models that compile a
-region (`harnesses/island_ab.py`, min of three runs each -- the sweep
-bypasses the carve estimate so the regions it declines are measured
-too, which is how the table can hold rows the default build refuses):
-
-| model | ops off -> on | ns/grad off | replayed | generated | |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `iohmm_reg` | 53,456 -> 27 | 1,428,776 | 574,888 (2.49x) | 301,629 | **4.74x** |
-| `hmm_gaussian` | 42,926 -> 11 | 365,750 | 398,088 (0.92x) | 228,638 | **1.60x** |
-| `hmm_example` | 3,483 -> 13 | 32,292 | 36,465 (0.89x) | 20,766 | **1.56x** |
-| `hmm_drive_1` | 19,540 -> 24 | 171,084 | 199,678 (0.86x) | 121,344 | **1.41x** |
-| `hmm_drive_0` | 19,540 -> 24 | 162,653 | 195,899 (0.83x) | 117,285 | **1.39x** |
-| `garch11` | 1,797 -> 8 | 10,996 | 14,777 (0.74x) | 8,109 | **1.36x** |
-| `Mb_model` | 7,035 -> 1,646 | 72,289 | 71,934 (1.00x) | 65,250 | **1.11x** |
-| `arma11` | 1,205 -> 9 | 6,774 | 10,526 (0.64x) | 6,544 | 1.04x |
-| `accel_gp` | 461 -> 64 | 7,233 | 8,170 (0.89x) | 7,041 | 1.03x |
-| `losscurve_sislob` | 316 -> 26 | 2,340 | 3,165 (0.74x) | 2,281 | 1.03x |
-| `multi_occupancy` | 4,006 -> 3,659 | 68,098 | 70,760 (0.96x) | 68,097 | 1.00x |
-| `hier_2pl` | 349 -> 97 | 301,507 | 302,117 (1.00x) | 301,792 | 1.00x |
-| `soil_incubation` | 129 -> 32 | 96,445 | 96,704 (1.00x) | 96,903 | 1.00x |
-| `kronecker_gp` | 254 -> 166 | 302,779 | 315,098 (0.96x) | 306,665 | 0.99x |
-| `accel_splines` | 425 -> 28 | 7,745 | 8,963 (0.86x) | 7,882 | 0.98x |
-| `hierarchical_gp` | 165 -> 84 | 30,448 | 35,607 (0.86x) | 31,041 | 0.98x |
-| `covid19imperial_v3` | 21,526 -> 19,995 | 308,879 | 439,340 (0.70x) | 316,736 | 0.98x |
-| `covid19imperial_v2` | 21,526 -> 19,995 | 305,642 | 442,001 (0.69x) | 315,311 | 0.97x |
-| `Survey_model` | 1,427 -> 5 | 61,524 | 62,030 (0.99x) | 65,039 | 0.95x |
-| `dugongs_model` | 120 -> 12 | 768 | 766 (1.00x) | 1,168 | 0.66x |
-| `bones_model` | 7,528 -> 4,955 | 52,335 | 988,998 (0.05x) | 207,721 | 0.25x |
-
-Three of the twenty-one exist because the machine's vocabulary stopped
-being a subset of the graph's: any scalar-out op it has no instruction
-for now compiles as a CALL to the graph's own kernel -- the identical
-code, partials, and backward the op would have run -- so one such op no
-longer ends a run (`POW` used to split regions in half). A CALL buys
-continuity, never speed, and the estimate charges it the graph's own
-per-op tax; without that charge the first sweep carved `dugongs_model`
-at a measured 0.66x and `Survey_model` at 0.95x, and with it both are
-refused on the default path while every previously carved verdict is
-unchanged. `losscurve_sislob` is the payoff shape: its residue drops
-88 -> 26 ops because the cdfs inside it stopped ending the run.
-
-Every region is faster generated than replayed, and the class changed
-rather than improved: op collapse is now worth roughly what the op counts
-always suggested it should be. `hmm_gaussian` collapses 42,926 ops to 11
-and measured 0.92x replayed against 1.60x generated. The ceiling is
-parity-plus and not more, as predicted before measuring -- CmdStan's
-generated code is inlined compiled C++ and the adjoint program still pays
-interpreted dispatch per instruction -- and `iohmm_reg` beats it only
-because the registers also make its vector copies disappear.
-
-The estimate changed with it. It weighed the register file 4x because the
-file was built as vars, and that term is what refused thirteen of the
-fourteen regions it could compile. A value register is a memory cost again:
-one forward write and one backward read. The adjoint file is a separate
-cost, however. Checkpoints hold values only, and registers made equivalent
-by a copy already share an adjoint cell to reproduce stan-math's tape order.
-Those equivalence classes are now packed densely, so the runtime zeroes one
-cell per distinct class rather than one per value or checkpoint register.
-The estimate mirrors the storage exactly: two passes over value and
-checkpoint registers other than CALL scratch, one pass over the compact
-adjoint file, both instruction streams, and the existing neutral charge for
-CALLs.
-
-What an island buys is still mostly the per-op tax the graph pays -- a
-dispatch, a context load and a scratch-partials backward, ~5 ns against
-~1 ns for an island instruction (`kOpCost = 5`). Without it a region like
-`garch11`, whose scalar ops barely move more elements than there are ops,
-reads as a wash. The 2026-08-24 structural census reran default, disabled,
-and forced islands on all 21 corpus models with compilable regions. Compact
-accounting changed exactly one decision, `iohmm_reg`, and preserved every
-previous selection and refusal, including the measured loss guards
-`bones_model`, `dugongs_model`, `Survey_model`, and both `covid19imperial`
-models. `STANLI_ISLAND_ALWAYS=1` skips the estimate, which is how to ask why
-a region was left alone.
-
-In the targeted Release A/B from that census, `iohmm_reg`'s 95,424 forward
-register ids reduce to 39,000 distinct adjoint cells; 4,488 additional
-checkpoint registers remain value-only. Its estimated island cost falls
-from 389,640 to 328,728 against the graph's 361,045, so the default path now
-collapses 53,456 ops to 27. Seven clean, interleaved runs moved the median
-from 498.612 to 241.453 us/gradient (2.065x internally), within 0.3% of the
-forced-island path and 1.33x faster than the retained 320.335 us CmdStan
-reference. This is a targeted A/B; the warmed corpus table above remains the
-last full-corpus run until the next benchmark refresh.
-
-`STANLI_NO_NATIVE_ADJ=1` restores the replay. It changes nothing else --
-the adjoint is still generated, the estimate still assumes it, and the
-forward program is identical -- so the two backwards are compared over
-the same islands, which is what the "replayed" column above is.
-
-Fifteen of the eighteen agree with the replay **bitwise**; each rule is
-the corresponding stan-math rev expression transcribed, grouping
-included. The other three reassociate one sum: a var copy shares a vari,
-so from the copy onward both registers accumulate into one adjoint, and
-`gen_adjoint` shares an adjoint cell to match -- but a cell is shared for
-the whole program where a vari is shared only until the destination is
-next written. Where they differ the arbiter is the op graph the island
-replaced, not the replay, and the generated adjoint is closer to it in
-all three: `Mb_model` reproduces the op graph exactly where the replay
-was 1.07e-14 away, and `iohmm_reg` is 3.46e-13 against the replay's
-6.01e-13.
-
-Beyond the estimate, islands still refuse propto densities (their
-term-dropping depends on argument types, which the island's uniform
-binding cannot reproduce), runs under 32 ops, and regions producing
-target terms. `gen_adjoint` additionally refuses jumps, so the regions
-lowering emits for parameter-dependent control flow keep the replay:
-reversing control flow wants the structured form the flat instruction
-list has already lost.
-
-## ODE models
-
-The before/after numbers in this section are targeted historical A/B medians;
-the current warmed-mean corpus rows are called out separately.
-
-Every user function is inlined at lowering time except an ODE
-right-hand side, which the integrator calls at times of its choosing.
-It used to be evaluated by a tree-walking interpreter: 5.8 us per call,
-~500 calls per gradient, 97% of the model's gradient time, and the
-system was solved twice per gradient (values, then derivatives). Both
-are gone: the right-hand side compiles once into a flat register
-machine, and the forward sweep keeps the sensitivities it already
-computes, so the backward is a matrix-vector product.
-
-| model | before | after | speedup | vs CmdStan |
+| worker threads | 1 | 2 | 4 | 8 |
 | --- | ---: | ---: | ---: | ---: |
-| `lotka_volterra` | 2,790,941 ns | 71,704 ns | 38.9x | 0.015x -> 0.58x |
-| `soil_incubation` | 3,389,538 ns | 96,362 ns | 35.2x | 0.018x -> 0.63x |
-| `one_comp_mm_elim_abs` | 18,873,857 ns | 653,181 ns | 28.9x | 0.025x -> 0.74x |
+| eight chains, wall time | 2.89 s | 1.59 s | 0.86 s | 0.49 s |
 
-Gradients are unchanged to the bit where they were before, and
-`lotka_volterra` moved from 4 ULP to bitwise identical to CmdStan:
-reading the jacobian out of the same solve that produced the values
-removes a second, independently stepped solve. Anything the compiler
-cannot express keeps the interpreter, so coverage never shrinks;
-`STANLI_DEBUG_ODE=1` reports when that happens.
+Parallelism does not change the draws: an eight-chain run is byte-identical to
+the same chains run sequentially. This is checked across four models and
+asserted in `tests/test_multichain.cpp` and `tests/test_python.py`.
 
-A later mixed-activity specialization also preserves Stan Math's separate
-scalar types for the initial state and parameters. Previously either active
-input promoted both to reverse mode and integrated sensitivities for both.
-On `one_comp_mm_elim_abs` the initial state is data, so the sensitivity width
-falls from four to three and median latency from 699 to 639 us/gradient. The
-fully active `lotka_volterra` and `soil_incubation` shapes take the same path
-as before and remain flat within measurement noise. After the callback and
-Jacobian-harvest work below, the current full-corpus warmed means are 523 us
-for `one_comp_mm_elim_abs`, 47.6 us for `lotka_volterra`, and 67.8 us for
-`soil_incubation`, or 0.90x, 0.87x, and 0.90x CmdStan.
+## Numerical agreement
 
-Preparation scales too: the largest corpus model (`nn_rbm1bJ100`, MNIST,
-60,000 rows, 79,411 parameters) lowers to a 132,024-op graph. Its old 23.80 s
-compile was almost entirely stanc's generated loop reconstructing the
-47-million-element input matrix after `DataMap` had already parsed it. Direct
-typed input preload removes that loop; an indexed reroll candidate scan removes
-another empty 0.13 s pass over the resulting graph. Together they reduce graph
-compilation to 0.23 s (103x), and the full MIR/data-to-bound-executor path from
-26.33 s to 2.76 s (9.5x); JSON parsing is now the largest preparation stage.
-The same profiled A/B removes 1.34 GB of peak RSS. The log density and all
-79,411 gradient components remain within the existing CmdStan oracle
-tolerance. Overall, graph
-compilation is 4-400 ms against a 6.2-7.6 s CmdStan compile (warm precompiled
-header, after a multi-minute one-time `make build`); that gap is what
-time-to-first-draw is made of. The current corpus run records 2.832 s for the
-same `nn_rbm1bJ100` MIR/data-to-bound-executor path.
-
-## End to end: eight schools, 1000 warmup + 1000 draws
-
-| engine | stage | time |
-| --- | --- | --- |
-| stanli | stanc + graph compile + bind | 0.014 s |
-| stanli | NUTS 1000+1000 (incl. constraining draws) | 0.020 s |
-| stanli | CLI total (`stanli_run`, process start to CSV) | 0.24 s |
-| CmdStan | model build (stanc + clang, warm PCH) | 4.62 s |
-| CmdStan | NUTS 1000+1000 (self-reported total) | 0.044 s |
-| CmdStan | build + run wall time | ~4.98 s |
-
-Time-to-first-draw is ~20x faster (0.24 s vs ~4.98 s). Treat sampling
-times as indicative rather than controlled: adaptation trajectories
-legitimately differ between engines at matched seeds, so they measure
-the whole run, not the gradient. (An earlier revision of the sampling
-numbers was measured with a defective max tree depth of 5; the columns
-in `docs/corpus-bench.tsv` and the table below have been re-measured at
-the correct depth.)
-
-## Parallel chains, and what STAN_THREADS costs
-
-Chains run in threads, one executor each. The tax worth measuring:
-stan-math's autodiff stack becomes thread-local under `STAN_THREADS`,
-and that indirection lands on every var operation, so the model to
-worry about is one dominated by the nested-tape path.
-
-| model | plain | `STAN_THREADS` |
-| --- | ---: | ---: |
-| 200-step `ordered_logistic` recurrence (72% in a legacy op) | 44,695 ns | 44,370 ns |
-| `es` (eight schools, native kernels) | 221.4 ns | 223.0 ns |
-| `ar1` | 228.9 ns | 224.1 ns |
-| `conj` | 142.2 ns | 141.1 ns |
-
-The tax is noise, in both directions, including on the model built to
-expose it. Against that, eight chains of that model:
-
-| threads | 1 | 2 | 4 | 8 |
-| --- | ---: | ---: | ---: | ---: |
-| 8 chains, wall clock | 2.89 s | 1.59 s | 0.86 s | 0.49 s |
-
-So it is on by default for native builds, and off under Emscripten
-(wasm threads need a cross-origin-isolated page; the browser runs one
-chain per worker instead).
-
-**Threading does not change the answer.** Each chain owns its executor
-and its RNG stream, so a parallel run is byte-identical to a sequential
-one. Checked as a CSV `cmp` across four models at 8 chains x 300 draws,
-and asserted in `tests/test_multichain.cpp` and `tests/test_python.py`.
-
-One trap, worth naming because it is invisible from the outside:
-stan-math's AD stack pointer is thread-local under `STAN_THREADS` and
-starts **null** in every new thread. CmdStan never has to handle this
-because TBB's scheduler hook instantiates a `ChainableStack` per
-worker; this build stubs TBB out, so raw `std::thread`s must do it
-themselves or segfault on the first legacy op.
-
-## Numerical parity
-
-Every model in the passing set is differentially verified against
-CmdStan's `log_prob_propto_jacobian` and full gradient at the shared
-point: 118/120 verified, 41 of them bitwise identical, worst relative
-deviation 2.6e-12 (`tools/verify_sample.py`,
-`docs/corpus-status.md`). For the 20 models whose generated quantities
-are deterministic, the same oracle also replays CmdStan's write_array
-values (every CSV column at the same point); recording those caught two
-interpreter bugs invisible to structural coverage checks.
-
-Transformed models change summation order relative to CmdStan's scalar
-loop, so they verify at tolerance rather than bitwise: the passes change
-at least 65 corpus models (a census taken before the partition pass), and
-the worst gradient deviation any of them introduces vs the untransformed
-graph is 5.99e-13 relative, measured on the A/B for the IRT GLM synthesis
-arm. Before that arm the worst was 3.5e-13 -- `iohmm_reg`,
-whose entire forward algorithm runs as one island. That was 6.0e-13 while
-the island replayed under `var`: generating the backward moved it closer
-to the graph it replaced rather than further, and `hmm_gaussian`, which
-islands its whole forward algorithm too, now reproduces the untransformed
-graph exactly. (`harnesses/ab_corpus.py` compares every model passes-on
-vs passes-off and flags any divergence.) That harness caught an in-place
-rule that made eight models silently wrong by up to 1.7e+05 relative with
-their op counts unchanged; the six models most affected by the passes
-were then also re-run through the CmdStan rig directly, and all six
-verify (e.g. `radon_pooled` 2.1e-14, `arK` 9.6e-16, `rats_model`
-2.4e-16).
+The performance results sit behind a differential oracle, not a separate
+approximation. 118 of 120 posteriordb models are verified against CmdStan's
+log density and complete gradient; 41 agree bitwise, and the worst relative
+deviation is 2.6e-12. See [the per-model accuracy table](corpus-status.md) for
+the two documented exceptions and every model's error bound.
 
 ## Full corpus
 
-Every posteriordb model, sorted by per-gradient speedup. The columns are
-CmdStan's absolute numbers and stanli's ratio against them. The stanli
-gradient and sampling columns are the 2026-08-25 refresh; the unchanged
-CmdStan columns carry over from the earlier run on the same host.
+Every completed posteriordb model is below, in the same high-to-low gradient
+order as the representative slice. `stanli source-to-CSV` times the complete
+`stanli_run` process. `CmdStan build + run` adds the separately measured model
+build and sampling command. Both runs use 1,000 warmup iterations, 1,000 draws,
+and seed 1.
 
-Sampling is 1000 warmup + 1000 draws at matched seeds and is indicative
-rather than controlled. Tiny numerical differences can send NUTS down
-different trajectories, and matched seeds do not guarantee matched modes.
-Across the 117 rows completed by both engines, the median end-to-end
-speedup is 2.57x and 114 finish at or above CmdStan's time for this seed.
-For example, CmdStan's `hmm_gaussian` run at this seed has every post-warmup
-draw divergent, so its 18.75 s is not a useful sampler comparison. Read the
-gradient column as controlled fixed-point throughput and the sampling column
-as end-to-end behavior for this one seed. Regenerate both tables with
-`python3 tools/corpus_table.py docs/corpus-bench.tsv`.
+| model | stanli gradient | CmdStan gradient | gradient speedup | stanli source-to-CSV | CmdStan build | CmdStan build + run | approx. first-run speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `gpcm_latent_reg_irt` | 121.131 us | 1.338 ms | 11.04x | 9.84 s | 5.0 s | 166.9 s | ~17x |
+| `grsm_latent_reg_irt` | 70.870 us | 762.133 us | 10.75x | 3.99 s | 4.9 s | 71.8 s | ~18x |
+| `dogs` | 7.130 us | 63.747 us | 8.94x | 0.56 s | 3.5 s | 5.9 s | ~11x |
+| `arK` | 1.748 us | 12.459 us | 7.13x | 0.16 s | 2.8 s | 3.8 s | ~24x |
+| `radon_pooled` | 45.378 us | 320.938 us | 7.07x | 0.59 s | 2.6 s | 6.4 s | ~11x |
+| `logmesquite_logvash` | 433 ns | 2.841 us | 6.56x | 0.10 s | 3.2 s | 3.6 s | ~36x |
+| `logmesquite_logvas` | 486 ns | 3.130 us | 6.44x | 0.11 s | 3.2 s | 3.6 s | ~33x |
+| `mesquite` | 478 ns | 3.055 us | 6.39x | 0.19 s | 2.9 s | 3.5 s | ~18x |
+| `rats_model` | 1.067 us | 6.475 us | 6.07x | 0.16 s | 2.9 s | 3.4 s | ~21x |
+| `logmesquite` | 484 ns | 2.902 us | 6.00x | 0.07 s | 3.0 s | 3.3 s | ~48x |
+| `radon_hierarchical_intercept_centered` | 97.078 us | 569.143 us | 5.86x | 6.57 s | 3.2 s | 47.9 s | ~7.3x |
+| `radon_hierarchical_intercept_noncentered` | 97.652 us | 570.300 us | 5.84x | 11.23 s | 3.3 s | 59.3 s | ~5.3x |
+| `logmesquite_logva` | 358 ns | 2.070 us | 5.78x | 0.07 s | 3.0 s | 3.3 s | ~47x |
+| `radon_county_intercept` | 81.602 us | 431.614 us | 5.29x | 5.77 s | 2.9 s | 30.3 s | ~5.2x |
+| `radon_variable_intercept_noncentered` | 81.960 us | 430.721 us | 5.26x | 7.86 s | 3.1 s | 36.9 s | ~4.7x |
+| `radon_variable_intercept_centered` | 81.803 us | 427.262 us | 5.22x | 4.98 s | 2.9 s | 25.9 s | ~5.2x |
+| `GLM_Poisson_model` | 386 ns | 2.008 us | 5.20x | 0.06 s | 3.2 s | 3.4 s | ~57x |
+| `dogs_log` | 8.133 us | 41.387 us | 5.09x | 0.47 s | 3.2 s | 4.2 s | ~9.0x |
+| `radon_variable_slope_noncentered` | 83.421 us | 422.894 us | 5.07x | 10.56 s | 3.1 s | 55.0 s | ~5.2x |
+| `radon_variable_slope_centered` | 83.519 us | 420.987 us | 5.04x | 5.12 s | 2.9 s | 26.6 s | ~5.2x |
+| `logmesquite_logvolume` | 272 ns | 1.304 us | 4.79x | 0.03 s | 2.9 s | 3.1 s | ~100x |
+| `Rate_2_model` | 118 ns | 561 ns | 4.75x | 0.02 s | 2.5 s | 2.7 s | ~140x |
+| `kilpisjarvi` | 336 ns | 1.532 us | 4.56x | 0.82 s | 2.7 s | 4.3 s | ~5.2x |
+| `Mt_model` | 4.466 us | 19.984 us | 4.47x | 0.08 s | 3.4 s | 3.9 s | ~48x |
+| `nes` | 16.100 us | 69.324 us | 4.31x | 1.87 s | 3.1 s | 9.8 s | ~5.2x |
+| `kidscore_interaction_c` | 2.489 us | 10.333 us | 4.15x | 0.09 s | 2.9 s | 3.3 s | ~37x |
+| `Rate_1_model` | 63 ns | 260 ns | 4.13x | 0.02 s | 2.3 s | 2.4 s | ~120x |
+| `radon_partially_pooled_centered` | 66.311 us | 272.243 us | 4.11x | 3.81 s | 2.9 s | 16.9 s | ~4.4x |
+| `radon_partially_pooled_noncentered` | 67.072 us | 273.685 us | 4.08x | 5.24 s | 3.1 s | 23.2 s | ~4.4x |
+| `Mth_model` | 23.405 us | 93.922 us | 4.01x | 2.41 s | 4.2 s | 9.6 s | ~4.0x |
+| `kidscore_interaction_c2` | 2.487 us | 9.901 us | 3.98x | 0.11 s | 2.8 s | 3.2 s | ~29x |
+| `kidscore_interaction_z` | 2.518 us | 10.013 us | 3.98x | 0.12 s | 2.9 s | 3.4 s | ~28x |
+| `kidscore_mom_work` | 2.505 us | 9.959 us | 3.98x | 0.14 s | 2.8 s | 3.4 s | ~25x |
+| `state_space_stochastic_level_stochastic_seasonal` | 6.667 us | 26.320 us | 3.95x | 18.51 s | 4.6 s | 44.4 s | ~2.4x |
+| `sesame_one_pred_a` | 875 ns | 3.440 us | 3.93x | 0.04 s | 2.7 s | 2.9 s | ~73x |
+| `kidscore_interaction` | 2.555 us | 9.927 us | 3.89x | 0.69 s | 2.9 s | 4.8 s | ~7.0x |
+| `radon_variable_intercept_slope_noncentered` | 120.376 us | 441.463 us | 3.67x | 17.51 s | 3.3 s | 61.9 s | ~3.5x |
+| `radon_variable_intercept_slope_centered` | 119.490 us | 437.889 us | 3.66x | 9.52 s | 3.1 s | 30.3 s | ~3.2x |
+| `seeds_centered_model` | 737 ns | 2.650 us | 3.60x | 0.08 s | 3.7 s | 4.0 s | ~50x |
+| `M0_model` | 4.394 us | 15.595 us | 3.55x | 0.06 s | 2.7 s | 3.1 s | ~51x |
+| `logearn_interaction_z` | 7.465 us | 26.484 us | 3.55x | 0.24 s | 3.0 s | 3.8 s | ~16x |
+| `election88_full` | 256.087 us | 901.961 us | 3.52x | 123.34 s | 3.9 s | 472.0 s | ~3.8x |
+| `kidscore_momhsiq` | 2.032 us | 7.145 us | 3.52x | 0.29 s | 2.8 s | 3.6 s | ~13x |
+| `GLMM_Poisson_model` | 696 ns | 2.412 us | 3.47x | 0.16 s | 3.7 s | 4.4 s | ~27x |
+| `logearn_interaction` | 7.536 us | 26.051 us | 3.46x | 3.09 s | 2.8 s | 11.3 s | ~3.7x |
+| `GLMM1_model` | 10.394 us | 35.558 us | 3.42x | 1.06 s | 3.2 s | 4.9 s | ~4.6x |
+| `dogs_hierarchical` | 10.251 us | 34.053 us | 3.32x | 0.23 s | 2.7 s | 3.4 s | ~15x |
+| `Mtbh_model` | 12.895 us | 42.791 us | 3.32x | 1.08 s | 4.9 s | 7.3 s | ~6.7x |
+| `Rate_4_model` | 94 ns | 311 ns | 3.31x | 0.02 s | 2.4 s | 2.6 s | ~130x |
+| `seeds_stanified_model` | 714 ns | 2.341 us | 3.28x | 0.08 s | 3.4 s | 3.7 s | ~46x |
+| `blr` | 536 ns | 1.728 us | 3.22x | 0.05 s | 3.1 s | 3.3 s | ~66x |
+| `logearn_height_male` | 5.949 us | 19.147 us | 3.22x | 1.55 s | 2.8 s | 6.6 s | ~4.2x |
+| `Rate_5_model` | 82 ns | 262 ns | 3.20x | 0.02 s | 2.4 s | 2.6 s | ~130x |
+| `surgical_model` | 528 ns | 1.684 us | 3.19x | 0.05 s | 3.3 s | 3.5 s | ~71x |
+| `eight_schools_noncentered` | 234 ns | 745 ns | 3.18x | 0.03 s | 3.2 s | 3.4 s | ~110x |
+| `logearn_logheight_male` | 5.882 us | 18.697 us | 3.18x | 4.88 s | 2.8 s | 16.2 s | ~3.3x |
+| `Rate_3_model` | 85 ns | 268 ns | 3.15x | 0.02 s | 2.4 s | 2.6 s | ~130x |
+| `dugongs_model` | 529 ns | 1.653 us | 3.12x | 0.05 s | 3.0 s | 3.2 s | ~65x |
+| `kidscore_momiq` | 1.576 us | 4.861 us | 3.08x | 0.16 s | 2.7 s | 3.1 s | ~20x |
+| `seeds_model` | 733 ns | 2.130 us | 2.91x | 0.09 s | 3.5 s | 3.8 s | ~42x |
+| `kidscore_momhs` | 1.555 us | 4.483 us | 2.88x | 0.07 s | 2.7 s | 3.0 s | ~43x |
+| `bym2_offset_only` | 39.938 us | 114.620 us | 2.87x | 16.70 s | 4.1 s | 27.5 s | ~1.6x |
+| `logistic_regression_rhs` | 40.816 us | 113.106 us | 2.77x | 12.05 s | 4.6 s | 20.8 s | ~1.7x |
+| `log10earn_height` | 4.200 us | 11.560 us | 2.75x | 0.98 s | 2.7 s | 4.5 s | ~4.5x |
+| `multi_occupancy` | 22.267 us | 58.996 us | 2.65x | 2.48 s | 5.7 s | 13.0 s | ~5.3x |
+| `earn_height` | 4.143 us | 10.866 us | 2.62x | 0.81 s | 2.7 s | 4.6 s | ~5.6x |
+| `Mh_model` | 15.184 us | 38.956 us | 2.57x | 1.42 s | 3.2 s | 5.9 s | ~4.1x |
+| `pilots` | 734 ns | 1.878 us | 2.56x | 0.66 s | 3.2 s | 4.5 s | ~6.8x |
+| `logearn_height` | 4.427 us | 11.162 us | 2.52x | 0.85 s | 2.7 s | 4.4 s | ~5.2x |
+| `losscurve_sislob` | 1.378 us | 3.450 us | 2.50x | 0.17 s | 4.1 s | 4.4 s | ~26x |
+| `lsat_model` | 37.934 us | 91.173 us | 2.40x | 2.59 s | 3.6 s | 8.3 s | ~3.2x |
+| `irt_2pl` | 16.456 us | 37.468 us | 2.28x | 1.32 s | 3.9 s | 6.1 s | ~4.6x |
+| `GLM_Binomial_model` | 832 ns | 1.809 us | 2.17x | 0.06 s | 3.2 s | 3.4 s | ~57x |
+| `ldaK2` | 48.159 us | 104.059 us | 2.16x | 1.29 s | 3.6 s | 6.8 s | ~5.3x |
+| `normal_mixture` | 41.809 us | 88.239 us | 2.11x | 0.44 s | 2.5 s | 3.6 s | ~8.2x |
+| `dogs_nonhierarchical` | 19.442 us | 40.588 us | 2.09x | 1.13 s | 6.8 s | 9.7 s | ~8.5x |
+| `low_dim_gauss_mix_collapse` | 46.143 us | 95.373 us | 2.07x | 2.21 s | 3.0 s | 7.5 s | ~3.4x |
+| `low_dim_gauss_mix` | 48.184 us | 98.315 us | 2.04x | 0.82 s | 3.0 s | 5.0 s | ~6.1x |
+| `wells_dist` | 21.031 us | 39.202 us | 1.86x | 0.68 s | 2.8 s | 4.2 s | ~6.2x |
+| `normal_mixture_k` | 192.792 us | 357.439 us | 1.85x | 60.79 s | 3.3 s | 104.9 s | ~1.7x |
+| `2pl_latent_reg_irt` | 82.828 us | 134.556 us | 1.62x | 6.43 s | 5.3 s | 13.2 s | ~2.1x |
+| `hierarchical_gp` | 29.875 us | 47.565 us | 1.59x | 14.33 s | 8.6 s | 25.8 s | ~1.8x |
+| `hmm_example` | 17.462 us | 27.145 us | 1.55x | 0.51 s | 4.0 s | 5.0 s | ~9.8x |
+| `covid19imperial_v2` | 237.159 us | 345.937 us | 1.46x | 105.88 s | 6.7 s | 182.7 s | ~1.7x |
+| `covid19imperial_v3` | 235.122 us | 342.943 us | 1.46x | 105.25 s | 6.7 s | 182.4 s | ~1.7x |
+| `accel_splines` | 7.333 us | 10.584 us | 1.44x | 16.40 s | 4.3 s | 24.0 s | ~1.5x |
+| `hmm_gaussian` | 184.527 us | 263.917 us | 1.43x | 276.77 s | 4.6 s | 23.4 s | ~0.08x |
+| `hier_2pl` | 279.152 us | 397.603 us | 1.42x | 17.37 s | 6.5 s | 33.3 s | ~1.9x |
+| `accel_gp` | 6.700 us | 9.532 us | 1.42x | 12.77 s | 5.3 s | 22.3 s | ~1.7x |
+| `iohmm_reg` | 227.247 us | 320.335 us | 1.41x | 107.91 s | 5.7 s | 186.9 s | ~1.7x |
+| `garch11` | 7.004 us | 9.664 us | 1.38x | 0.23 s | 2.8 s | 3.2 s | ~14x |
+| `arma11` | 4.494 us | 6.158 us | 1.37x | 0.11 s | 2.9 s | 3.2 s | ~29x |
+| `prophet` | 54.585 us | 69.789 us | 1.28x | 92.72 s | 4.7 s | 122.4 s | ~1.3x |
+| `hmm_drive_1` | 116.620 us | 147.829 us | 1.27x | 4.43 s | 4.7 s | 11.6 s | ~2.6x |
+| `nes_logit_model` | 6.119 us | 7.653 us | 1.25x | 0.15 s | 3.0 s | 3.4 s | ~23x |
+| `eight_schools_centered` | 256 ns | 314 ns | 1.23x | 0.04 s | 2.9 s | 3.1 s | ~77x |
+| `hmm_drive_0` | 110.835 us | 132.850 us | 1.20x | 2.99 s | 4.5 s | 8.2 s | ~2.7x |
+| `Mb_model` | 41.691 us | 49.570 us | 1.19x | 1.06 s | 3.2 s | 4.3 s | ~4.1x |
+| `kronecker_gp` | 183.343 us | 217.990 us | 1.19x | 369.81 s | 8.0 s | 459.1 s | ~1.2x |
+| `gp_regr` | 4.040 us | 4.698 us | 1.16x | 0.07 s | 5.2 s | 5.4 s | ~78x |
+| `Survey_model` | 53.752 us | 61.578 us | 1.15x | 1.12 s | 2.9 s | 4.0 s | ~3.6x |
+| `bones_model` | 45.786 us | 51.501 us | 1.12x | 0.76 s | 3.4 s | 4.7 s | ~6.2x |
+| `radon_county` | 73.628 us | 82.076 us | 1.11x | 4.04 s | 3.0 s | 7.5 s | ~1.9x |
+| `wells_dist100_model` | 15.526 us | 17.195 us | 1.11x | 0.25 s | 3.0 s | 3.5 s | ~14x |
+| `wells_dist100ars_model` | 17.171 us | 18.997 us | 1.11x | 0.40 s | 3.0 s | 3.6 s | ~9.0x |
+| `wells_dae_inter_model` | 19.619 us | 21.310 us | 1.09x | 0.31 s | 3.2 s | 3.8 s | ~12x |
+| `wells_dae_c_model` | 17.808 us | 19.308 us | 1.08x | 0.38 s | 3.2 s | 3.8 s | ~10.0x |
+| `wells_dae_model` | 18.820 us | 20.356 us | 1.08x | 0.55 s | 3.1 s | 3.9 s | ~7.0x |
+| `wells_interaction_model` | 18.880 us | 20.402 us | 1.08x | 0.69 s | 3.1 s | 4.0 s | ~5.9x |
+| `nn_rbm1bJ10` | 172.408 us | 185.731 us | 1.08x | 490.01 s | 5.2 s | 462.0 s | ~0.94x |
+| `wells_daae_c_model` | 19.439 us | 20.885 us | 1.07x | 0.50 s | 3.2 s | 3.8 s | ~7.7x |
+| `wells_interaction_c_model` | 18.924 us | 20.272 us | 1.07x | 0.26 s | 3.1 s | 3.6 s | ~14x |
+| `gp_pois_regr` | 3.785 us | 3.935 us | 1.04x | 1.30 s | 5.4 s | 6.9 s | ~5.3x |
+| `diamonds` | 31.110 us | 31.497 us | 1.01x | 51.55 s | 3.4 s | 51.9 s | ~1.0x |
+| `one_comp_mm_elim_abs` | 522.915 us | 470.681 us | 0.90x | 10.55 s | 3.3 s | 14.5 s | ~1.4x |
+| `soil_incubation` | 67.783 us | 60.871 us | 0.90x | 11.94 s | 3.3 s | 16.1 s | ~1.4x |
+| `lotka_volterra` | 47.622 us | 41.313 us | 0.87x | 5.59 s | 4.1 s | 10.3 s | ~1.8x |
 
-| model | params | CmdStan ns/grad | grad speedup | CmdStan sample | sample speedup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `gpcm_latent_reg_irt` | 530 | 1,337,651 | 11.04x | 161.93 s | 16.46x |
-| `grsm_latent_reg_irt` | 408 | 762,133 | 10.75x | 66.92 s | 16.77x |
-| `dogs` | 3 | 63,747 | 8.94x | 2.39 s | 4.27x |
-| `arK` | 7 | 12,459 | 7.13x | 0.97 s | 6.06x |
-| `radon_pooled` | 3 | 320,938 | 7.07x | 3.78 s | 6.41x |
-| `logmesquite_logvash` | 7 | 2,841 | 6.56x | 0.39 s | 3.90x |
-| `logmesquite_logvas` | 8 | 3,130 | 6.44x | 0.42 s | 3.82x |
-| `mesquite` | 8 | 3,055 | 6.39x | 0.57 s | 3.00x |
-| `rats_model` | 65 | 6,475 | 6.07x | 0.52 s | 3.25x |
-| `logmesquite` | 8 | 2,902 | 6.00x | 0.33 s | 4.71x |
-| `radon_hierarchical_intercept_centered` | 391 | 569,143 | 5.86x | 44.69 s | 6.80x |
-| `radon_hierarchical_intercept_noncentered` | 391 | 570,300 | 5.84x | 56.03 s | 4.99x |
-| `logmesquite_logva` | 5 | 2,070 | 5.78x | 0.29 s | 4.14x |
-| `radon_county_intercept` | 388 | 431,614 | 5.29x | 27.37 s | 4.74x |
-| `radon_variable_intercept_noncentered` | 390 | 430,721 | 5.26x | 33.78 s | 4.30x |
-| `radon_variable_intercept_centered` | 390 | 427,262 | 5.22x | 23.02 s | 4.62x |
-| `GLM_Poisson_model` | 4 | 2,008 | 5.20x | 0.24 s | 4.00x |
-| `dogs_log` | 2 | 41,387 | 5.09x | 1.01 s | 2.15x |
-| `radon_variable_slope_noncentered` | 390 | 422,894 | 5.07x | 51.94 s | 4.92x |
-| `radon_variable_slope_centered` | 390 | 420,987 | 5.04x | 23.66 s | 4.62x |
-| `logmesquite_logvolume` | 3 | 1,304 | 4.79x | 0.20 s | 6.67x |
-| `Rate_2_model` | 2 | 561 | 4.75x | 0.23 s | 11.50x |
-| `kilpisjarvi` | 3 | 1,532 | 4.56x | 1.60 s | 1.95x |
-| `Mt_model` | 4 | 19,984 | 4.47x | 0.48 s | 6.00x |
-| `nes` | 10 | 69,324 | 4.31x | 6.70 s | 3.58x |
-| `kidscore_interaction_c` | 5 | 10,333 | 4.15x | 0.39 s | 4.33x |
-| `Rate_1_model` | 1 | 260 | 4.13x | 0.15 s | 7.50x |
-| `radon_partially_pooled_centered` | 389 | 272,243 | 4.11x | 13.96 s | 3.66x |
-| `radon_partially_pooled_noncentered` | 389 | 273,685 | 4.08x | 20.11 s | 3.84x |
-| `Mth_model` | 394 | 93,922 | 4.01x | 5.43 s | 2.25x |
-| `kidscore_interaction_c2` | 5 | 9,901 | 3.98x | 0.40 s | 3.64x |
-| `kidscore_interaction_z` | 5 | 10,013 | 3.98x | 0.47 s | 3.92x |
-| `kidscore_mom_work` | 5 | 9,959 | 3.98x | 0.64 s | 4.57x |
-| `state_space_stochastic_level_stochastic_seasonal` | 389 | 26,320 | 3.95x | 39.76 s | 2.15x |
-| `sesame_one_pred_a` | 3 | 3,440 | 3.93x | 0.23 s | 5.75x |
-| `kidscore_interaction` | 5 | 9,927 | 3.89x | 1.90 s | 2.75x |
-| `radon_variable_intercept_slope_noncentered` | 777 | 441,463 | 3.67x | 58.56 s | 3.34x |
-| `radon_variable_intercept_slope_centered` | 777 | 437,889 | 3.66x | 27.23 s | 2.86x |
-| `seeds_centered_model` | 26 | 2,650 | 3.60x | 0.28 s | 3.50x |
-| `M0_model` | 2 | 15,595 | 3.55x | 0.37 s | 6.17x |
-| `logearn_interaction_z` | 5 | 26,484 | 3.55x | 0.84 s | 3.50x |
-| `election88_full` | 90 | 901,961 | 3.52x | 468.15 s | 3.80x |
-| `kidscore_momhsiq` | 4 | 7,145 | 3.52x | 0.84 s | 2.90x |
-| `GLMM_Poisson_model` | 45 | 2,412 | 3.47x | 0.69 s | 4.31x |
-| `logearn_interaction` | 5 | 26,051 | 3.46x | 8.49 s | 2.75x |
-| `GLMM1_model` | 237 | 35,558 | 3.42x | 1.68 s | 1.58x |
-| `dogs_hierarchical` | 2 | 34,053 | 3.32x | 0.68 s | 2.96x |
-| `Mtbh_model` | 154 | 42,791 | 3.32x | 2.38 s | 2.20x |
-| `Rate_4_model` | 2 | 311 | 3.31x | 0.17 s | 8.50x |
-| `seeds_stanified_model` | 26 | 2,341 | 3.28x | 0.30 s | 3.75x |
-| `blr` | 6 | 1,728 | 3.22x | 0.21 s | 4.20x |
-| `logearn_height_male` | 4 | 19,147 | 3.22x | 3.77 s | 2.43x |
-| `Rate_5_model` | 1 | 262 | 3.20x | 0.19 s | 9.50x |
-| `surgical_model` | 14 | 1,684 | 3.19x | 0.23 s | 4.60x |
-| `eight_schools_noncentered` | 10 | 745 | 3.18x | 0.20 s | 6.67x |
-| `logearn_logheight_male` | 4 | 18,697 | 3.18x | 13.41 s | 2.75x |
-| `Rate_3_model` | 1 | 268 | 3.15x | 0.18 s | 9.00x |
-| `dugongs_model` | 4 | 1,653 | 3.12x | 0.25 s | 5.00x |
-| `kidscore_momiq` | 3 | 4,861 | 3.08x | 0.42 s | 2.62x |
-| `seeds_model` | 26 | 2,130 | 2.91x | 0.29 s | 3.22x |
-| `kidscore_momhs` | 3 | 4,483 | 2.88x | 0.30 s | 4.29x |
-| `bym2_offset_only` | 3845 | 114,620 | 2.87x | 23.40 s | 1.40x |
-| `logistic_regression_rhs` | 3075 | 113,106 | 2.77x | 16.23 s | 1.35x |
-| `log10earn_height` | 3 | 11,560 | 2.75x | 1.75 s | 1.79x |
-| `multi_occupancy` | 106 | 58,996 | 2.65x | 7.34 s | 2.96x |
-| `earn_height` | 3 | 10,866 | 2.62x | 1.86 s | 2.30x |
-| `Mh_model` | 388 | 38,956 | 2.57x | 2.66 s | 1.87x |
-| `pilots` | 18 | 1,878 | 2.56x | 1.29 s | 1.95x |
-| `logearn_height` | 3 | 11,162 | 2.52x | 1.71 s | 2.01x |
-| `losscurve_sislob` | 15 | 3,450 | 2.50x | 0.31 s | 1.82x |
-| `lsat_model` | 1006 | 91,173 | 2.40x | 4.66 s | 1.80x |
-| `irt_2pl` | 144 | 37,468 | 2.28x | 2.17 s | 1.64x |
-| `GLM_Binomial_model` | 3 | 1,809 | 2.17x | 0.21 s | 3.50x |
-| `ldaK2` | 7 | 104,059 | 2.16x | 3.19 s | 2.47x |
-| `normal_mixture` | 3 | 88,239 | 2.11x | 1.13 s | 2.57x |
-| `dogs_nonhierarchical` | 65 | 40,588 | 2.09x | 2.86 s | 2.53x |
-| `low_dim_gauss_mix_collapse` | 5 | 95,373 | 2.07x | 4.45 s | 2.01x |
-| `low_dim_gauss_mix` | 5 | 98,315 | 2.04x | 1.98 s | 2.41x |
-| `wells_dist` | 2 | 39,202 | 1.86x | 1.44 s | 2.12x |
-| `normal_mixture_k` | 14 | 357,439 | 1.85x | 101.61 s | 1.67x |
-| `2pl_latent_reg_irt` | 531 | 134,556 | 1.62x | 7.94 s | 1.23x |
-| `hierarchical_gp` | 933 | 47,565 | 1.59x | 17.20 s | 1.20x |
-| `hmm_example` | 4 | 27,145 | 1.55x | 1.00 s | 1.96x |
-| `covid19imperial_v2` | 51 | 345,937 | 1.46x | 176.00 s | 1.66x |
-| `covid19imperial_v3` | 51 | 342,943 | 1.46x | 175.70 s | 1.67x |
-| `accel_splines` | 82 | 10,584 | 1.44x | 19.74 s | 1.20x |
-| `hmm_gaussian` | 14 | 263,917 | 1.43x | 18.75 s | 0.07x |
-| `hier_2pl` | 669 | 397,603 | 1.42x | 26.82 s | 1.54x |
-| `accel_gp` | 66 | 9,532 | 1.42x | 16.99 s | 1.33x |
-| `iohmm_reg` | 29 | 320,335 | 1.41x | 181.23 s | 1.68x |
-| `garch11` | 4 | 9,664 | 1.38x | 0.43 s | 1.87x |
-| `arma11` | 4 | 6,158 | 1.37x | 0.26 s | 2.36x |
-| `prophet` | 62 | 69,789 | 1.28x | 117.68 s | 1.27x |
-| `hmm_drive_1` | 6 | 147,829 | 1.27x | 6.94 s | 1.57x |
-| `nes_logit_model` | 2 | 7,653 | 1.25x | 0.38 s | 2.53x |
-| `eight_schools_centered` | 10 | 314 | 1.23x | 0.19 s | 4.75x |
-| `hmm_drive_0` | 6 | 132,850 | 1.20x | 3.65 s | 1.22x |
-| `Mb_model` | 3 | 49,570 | 1.19x | 1.15 s | 1.08x |
-| `kronecker_gp` | 438 | 217,990 | 1.19x | 451.09 s | 1.22x |
-| `gp_regr` | 3 | 4,698 | 1.16x | 0.23 s | 3.29x |
-| `Survey_model` | 1 | 61,578 | 1.15x | 1.14 s | 1.02x |
-| `bones_model` | 13 | 51,501 | 1.12x | 1.31 s | 1.72x |
-| `radon_county` | 389 | 82,076 | 1.11x | 4.49 s | 1.11x |
-| `wells_dist100_model` | 2 | 17,195 | 1.11x | 0.47 s | 1.88x |
-| `wells_dist100ars_model` | 3 | 18,997 | 1.11x | 0.62 s | 1.55x |
-| `wells_dae_inter_model` | 7 | 21,310 | 1.09x | 0.55 s | 1.77x |
-| `wells_dae_c_model` | 5 | 19,308 | 1.08x | 0.59 s | 1.55x |
-| `wells_dae_model` | 4 | 20,356 | 1.08x | 0.76 s | 1.38x |
-| `wells_interaction_model` | 4 | 20,402 | 1.08x | 0.94 s | 1.36x |
-| `nn_rbm1bJ10` | 7951 | 185,731 | 1.08x | 456.82 s | 0.93x |
-| `wells_daae_c_model` | 6 | 20,885 | 1.07x | 0.63 s | 1.26x |
-| `wells_interaction_c_model` | 4 | 20,272 | 1.07x | 0.49 s | 1.88x |
-| `gp_pois_regr` | 13 | 3,935 | 1.04x | 1.47 s | 1.13x |
-| `diamonds` | 26 | 31,497 | 1.01x | 48.55 s | 0.94x |
-| `one_comp_mm_elim_abs` | 4 | 470,681 | 0.90x | 11.23 s | 1.06x |
-| `soil_incubation` | 6 | 60,871 | 0.90x | 12.84 s | 1.08x |
-| `lotka_volterra` | 8 | 41,313 | 0.87x | 6.24 s | 1.12x |
+120 models; 119 with both gradients; median per-gradient speedup 2.91x; 116/119
+at or above CmdStan. 117 completed first runs; median source-to-CSV speedup
+about 6.8x; 115/117 at or above CmdStan including its model build.
 
-120 models; 119 with both gradients; median per-gradient speedup 2.91x; 116/119 at or above CmdStan.
+The extreme `hmm_gaussian` first-run result is not a useful speed comparison:
+every post-warmup draw in CmdStan's retained seed-1 run was divergent, so the
+two engines did radically different sampling work. Its controlled gradient
+row, 1.43x in stanli's favor, is the meaningful result.
 
-### The models the run could not complete
+### Runs that did not complete
 
-A missing sampling number is not a missing gradient. These rows sort below the
-complete table, and measured gradient ratios still stand.
+A missing run time is not a missing gradient. These rows sort below the
+complete table, and their measured gradient ratios still stand.
 
-| model | params | CmdStan ns/grad | grad speedup | what stopped it |
+| model | stanli gradient | CmdStan gradient | gradient speedup | what stopped it |
 | --- | ---: | ---: | ---: | --- |
-| `ldaK5` | 7714 | 5,580,314 | 2.36x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
-| `nn_rbm1bJ100` | 79411 | 434,981,254 | 1.06x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
-| `sir` |  | - | - | stanli's gradient probe threw at the benchmark point; no stanli gradient |
+| `ldaK5` | 2.360 ms | 5.580 ms | 2.36x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
+| `nn_rbm1bJ100` | 411.222 ms | 434.981 ms | 1.06x | stanli sampling hit the 900 s cap; CmdStan sampling hit the 900 s cap |
+| `sir` | - | - | - | stanli's gradient probe threw at the benchmark point; no stanli gradient |
 
-`ldaK5` and `nn_rbm1bJ100` are the two preparation outliers; both per-gradient
-measurements completed even though both samplers hit the 900 s cap. `sir` has
-no gradient number because the fixed probe point makes its ODE solution dip
-to -4.4e-10 and `poisson_lpmf` rejects the negative rate; the model itself
-samples successfully.
+`sir` has no gradient number because the fixed probe point makes its ODE
+solution dip to -4.4e-10 and `poisson_lpmf` rejects the negative rate. The
+model itself samples successfully. `ldaK5` and `nn_rbm1bJ100` completed both
+gradient probes before both sampling commands reached the 900 s cap.
 
-## The browser build
+## Benchmark method
 
-Different compiler, different libm, so none of the numbers above carry
-over. `tools/bench_wasm.cjs` measures it under Node against the same
-MIR fixtures the tests use; `--mir`/`--data` point it at a bigger
-model. Measure under Node, never in an automated browser tab: attaching
-chrome.debugger keeps V8 on its baseline tier and costs about 4x.
+Measured 2026-08-25 on an Apple M3 Ultra (macOS arm64) with Apple clang 21,
+single-threaded, with both engines built at `-O3` and
+`-ffp-contract=off`. The stanli columns are one refreshed 120-model run. The
+CmdStan columns carry over from a 2026-08-06 run on the same host because no
+stanli change can affect them. CmdStan's one-time `make build` setup was
+already complete, so its per-model build column uses the warm precompiled
+header path and does not include that earlier setup cost.
 
-### What the browser costs you
+For gradients, both engines evaluate the sampling log density (proportional
+terms plus Jacobian) at the same deterministic unconstrained point. stanli
+runs `tools/bench_grad.cpp`; CmdStan runs `tools/bench_cmdstan_grad.cpp` over
+the stanc-generated model. Both loop the same fresh-vars, gradient, and memory
+recovery cycle that a leapfrog step performs. The reported cells are warmed
+arithmetic means from one timed loop per model.
 
-Both builds from the same commit, same MIR and data, min of three runs,
-macOS arm64. This is the number the demo page's footer cites, and the
-reason it tells people to install the wheel for real work.
+For complete runs, `stanli_sample_s` in
+[`corpus-bench.tsv`](corpus-bench.tsv) measures the entire `stanli_run`
+process from Stan source to CSV. CmdStan's build and execution are timed
+separately, so the displayed total adds `cmdstan_build_s` and
+`cmdstan_sample_s`. The sampler rows are real wall-clock observations, not a
+fixed-work microbenchmark; use the gradient rows when comparing engine
+throughput independent of a particular NUTS trajectory.
 
-| model | native | wasm | wasm/native |
-|---|---:|---:|---:|
-| `eight_schools_noncentered` | 269 ns | 534 ns | 1.98x |
-| `radon_pooled` | 54.3 us | 106.6 us | 1.96x |
-| `low_dim_gauss_mix` | 93.2 us | 168.4 us | 1.81x |
-| `hmm_example` | 33.8 us | 58.6 us | 1.73x |
-| `arK` | 2.32 us | 3.75 us | 1.62x |
-| `lotka_volterra` | 74.6 us | 110.6 us | 1.48x |
-| `diamonds` | 36.3 us | 52.2 us | 1.44x |
-| geometric mean | | | **1.71x** |
+## For developers
 
-The gap is gradient throughput, which is what dominates once sampling
-starts. It is not model preparation: stanc3 compiled by js_of_ocaml
-compiles eight schools in 3 ms warm, against 13 ms for the native
-binary including process spawn.
-
-### SIMD
-
-SIMD128 is on. The A/B that decided it (macOS arm64, emsdk 6.0.6, on
-the tree as it stood then; sizes have grown since as the density
-surface roughly doubled):
-
-| | scalar | +SIMD128 |
-|---|---:|---:|
-| fixtures, geomean | 457 ns | **449 ns** |
-| `radon_pooled` (919 obs, vectorized normal) | 107.9 us | **105.7 us** |
-| `nes` (matrix-heavy) | 29.1 us | **25.9 us** |
-| `stanli.wasm` gzipped | 1.02 MB | 1.05 MB |
-
-2% on most shapes and 11% on the matrix-heavy one for 0.03 MB, and
-(the part that made it an easy call) every corpus model's gradients are
-**bitwise identical** to the scalar build. With `-ffp-contract=off` in
-force the vectorization Eigen takes is elementwise, and elementwise is
-order-preserving; a vectorized reduction would have shown up as a
-deviation immediately.
-
-Two related results, measured: `-ffp-contract=fast` produces a
-byte-identical `stanli.wasm`, because baseline WebAssembly has no FMA
-instruction to contract to, so fast-math is not a lever on this target.
-And splitting the densities into a lazily-loaded pack is viable but
-blocked by one emscripten limitation; the measurements and traps are in
-[docs/density-pack.md](density-pack.md).
+The implementation story is intentionally elsewhere. For a conceptual
+overview, read [How stanli works](how-it-works.md). For graph re-rolling, lane
+partitioning, generated adjoints, tape islands, the compiled ODE right-hand
+side, and their targeted A/B measurements, read
+[Graph optimizations and performance work](../runtime/src/OPTIMIZATIONS.md).
 
 ## Reproducing
 
-```
+```sh
 ./tools/dev_setup.sh --corpus          # deps, build, posteriordb, CmdStan
 cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
 cmake --build build-rel -j
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   docs/corpus-bench.tsv --stanli-only --timeout 900
 # To remeasure both sides, omit --stanli-only and use a new output TSV.
-python3 harnesses/ab_corpus.py deps/posteriordb   # passes A/B over the corpus
+python3 tools/corpus_table.py docs/corpus-bench.tsv
+python3 harnesses/ab_corpus.py deps/posteriordb
 ```
