@@ -4,12 +4,15 @@ Compile and sample Stan models without a C++ toolchain.
 
 ## Install
 
-Not on CRAN yet. Until it is, install from GitHub; the package lives in
+Not on CRAN yet. Until it is, install from R-universe or GitHub; the package lives in
 the `r/` subdirectory of the repository:
 
 ```r
+# precompiled binaries from r-universe (recommended)
+install.packages('stanli', repos = 'https://seantalts.r-universe.dev')
+# or directly from source
 # install.packages("remotes")
-remotes::install_github("seantalts/stanli", subdir = "r")
+# remotes::install_github("seantalts/stanli", subdir = "r")
 
 # or from a checkout
 # R CMD INSTALL r
