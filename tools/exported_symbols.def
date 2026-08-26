@@ -29,6 +29,7 @@ EXPORTS
   stanli_wa_n_columns
   stanli_wa_column_name
   stanli_wa_seed
+  stanli_wa_seed_chain
   stanli_wa_row
   stanli_sample_opts_init
   stanli_n_stored_draws

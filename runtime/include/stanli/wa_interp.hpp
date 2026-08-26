@@ -42,9 +42,11 @@ namespace stanli {
 // thread, which is also what BridgeStan's bs_rng asks of its callers.
 class WaRng {
  public:
-  explicit WaRng(unsigned seed)
-      : gen_(stan::services::util::create_rng(seed, 0)) {}
-  void seed(unsigned s) { gen_ = stan::services::util::create_rng(s, 0); }
+  explicit WaRng(unsigned seed, unsigned chain = 0)
+      : gen_(stan::services::util::create_rng(seed, chain)) {}
+  void seed(unsigned s, unsigned chain = 0) {
+    gen_ = stan::services::util::create_rng(s, chain);
+  }
   stan::rng_t& gen() { return gen_; }
 
  private:

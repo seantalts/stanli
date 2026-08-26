@@ -121,6 +121,8 @@ def _load_lib():
     lib.stanli_wa_column_name.restype = ctypes.c_char_p
     lib.stanli_wa_column_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_wa_seed.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    lib.stanli_wa_seed_chain.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                                         ctypes.c_uint32]
     lib.stanli_wa_row.restype = ctypes.c_int
     lib.stanli_wa_row.argtypes = [ctypes.c_void_p,
                                   ctypes.POINTER(ctypes.c_double),
@@ -735,12 +737,14 @@ class Model:
         names, have_wa = self._column_names()
         out = np.empty((opts.chains, n_stored, len(names)))
         row = np.empty(len(names))
+        first_chain = opts.chain_id if opts.chain_id > 0 else 1
         for c in range(opts.chains):
             if have_wa:
                 # Generated quantities draw from an RNG stream; give each
                 # chain its own, or every chain would produce identical
                 # posterior-predictive draws from its own parameters.
-                _lib.stanli_wa_seed(self._m, (seed + c) & 0xFFFFFFFF)
+                _lib.stanli_wa_seed_chain(
+                    self._m, seed & 0xFFFFFFFF, first_chain + c)
             for s in range(n_stored):
                 q = np.ascontiguousarray(raw[c, s])
                 if have_wa:

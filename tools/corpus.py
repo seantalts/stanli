@@ -17,8 +17,8 @@ import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from verify_refs import (REFS_PATH, default_check_bin,  # noqa: E402
-                         load_refs)
+from verify_refs import (REFS_PATH, default_check_bin, load_refs,  # noqa: E402
+                         parse_status)
 
 CHECK = default_check_bin()
 
@@ -81,16 +81,18 @@ def main():
                 out = subprocess.run(
                     [str(CHECK), str(stan), str(dj), "--point", point],
                     capture_output=True,
-                    text=True, timeout=120, cwd=REPO).stdout.strip()
-                if out.startswith("OK"):
+                    text=True, timeout=120, cwd=REPO).stdout
+                status_fields = parse_status(out)
+                if status_fields[:1] == ["OK"]:
                     break
         except subprocess.TimeoutExpired:
             out = "EVAL_FAIL timeout"
-        if out.startswith("OK"):
+            status_fields = ["EVAL_FAIL", "timeout"]
+        if status_fields[:1] == ["OK"]:
             results[model] = ("OK", "")
         else:
-            first = out.split("\n")[0]
-            status, _, msg = first.partition(" ")
+            status = status_fields[0] if status_fields else "CRASH"
+            msg = " ".join(status_fields[1:]) if status_fields else out.strip()
             results[model] = (status, msg)
             # Classify by the interesting token.
             key = msg

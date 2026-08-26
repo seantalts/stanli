@@ -124,7 +124,7 @@ static int64_t (*p_diagnose_text)(const double*, int64_t, int64_t, int64_t,
                                   size_t);
 static int64_t (*p_wa_n_columns)(const void*);
 static const char* (*p_wa_column_name)(const void*, int64_t);
-static void (*p_wa_seed)(void*, uint32_t);
+static void (*p_wa_seed_chain)(void*, uint32_t, uint32_t);
 static int (*p_wa_row)(void*, const double*, double*);
 static void (*p_optimize_opts_init)(stanli_optimize_opts*);
 static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
@@ -191,7 +191,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_diagnose_text", p_diagnose_text);
   BIND("stanli_wa_n_columns", p_wa_n_columns);
   BIND("stanli_wa_column_name", p_wa_column_name);
-  BIND("stanli_wa_seed", p_wa_seed);
+  BIND("stanli_wa_seed_chain", p_wa_seed_chain);
   BIND("stanli_wa_row", p_wa_row);
   BIND("stanli_optimize_opts_init", p_optimize_opts_init);
   BIND("stanli_optimize", p_optimize);
@@ -355,8 +355,9 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits) {
   double* vp = REAL(vals);
   double* rp = REAL(raw);
   double* row = (double*)R_alloc((size_t)ncol, sizeof(double));
+  const uint32_t first_chain = (uint32_t)(o.chain_id > 0 ? o.chain_id : 1);
   for (int64_t c = 0; c < nchain; ++c) {
-    if (wa) p_wa_seed(mm, (uint32_t)(o.seed + c));
+    if (wa) p_wa_seed_chain(mm, o.seed, first_chain + (uint32_t)c);
     for (int64_t i = 0; i < rows; ++i) {
       const double* q = rp + (c * rows + i) * n;
       const int rc = wa ? p_wa_row(mm, q, row) : p_constrain(mm, q, row);

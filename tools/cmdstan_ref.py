@@ -51,6 +51,15 @@ def _plain(cmd):
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def _result_line(out):
+    """Final machine result, after any Stan print output."""
+    for line in reversed(out.splitlines()):
+        fields = line.split()
+        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL"):
+            return fields
+    return []
+
+
 def build_reference(cs, workdir, stan, driver, stanc, name="ref", opt="-O1",
                     sundials=True, run=_plain, trim=90):
     """stanc + compile in workdir; returns (exe, None) or (None, reason)."""
@@ -84,16 +93,18 @@ def compare_points(ref_exe, check_bin, stan, data, metric, stanc, n=3,
         ref = run([str(ref_exe), str(data), str(point)])
         got = run([str(check_bin), str(stan), str(data), "--stanc",
                    str(stanc), "--point", str(point)])
-        rf = [l for l in ref.stdout.splitlines() if l.startswith("OK")]
-        gf = [l for l in got.stdout.splitlines() if l.startswith("OK")]
-        if rf and all(x != x for x in (float(v) for v in rf[0].split()[1:])):
+        rf = _result_line(ref.stdout)
+        gf = _result_line(got.stdout)
+        if rf[:1] == ["OK"] and all(x != x for x in
+                                    (float(v) for v in rf[1:])):
             rf = []
-        if not rf or not gf:
-            if bool(rf) != bool(gf):
+        ref_ok, got_ok = rf[:1] == ["OK"], gf[:1] == ["OK"]
+        if not ref_ok or not got_ok:
+            if ref_ok != got_ok:
                 return worst, n_cmp, ("one_side_threw", f"point {point}")
             continue
-        a = [float(x) for x in rf[0].split()[1:]]
-        b = [float(x) for x in gf[0].split()[1:]]
+        a = [float(x) for x in rf[1:]]
+        b = [float(x) for x in gf[1:]]
         if len(a) != len(b):
             return (worst, n_cmp,
                     ("shape_mismatch", f"cmdstan {len(a)}, stanli {len(b)}"))

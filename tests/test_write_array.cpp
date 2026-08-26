@@ -580,20 +580,26 @@ void test_caller_owned_rng() {
 void test_stan_rng_stream_contract() {
   using namespace stanli;
   constexpr unsigned seed = 1234;
-  WaRng got(seed);
-  stan::rng_t want = stan::services::util::create_rng(seed, 0);
-  for (int i = 0; i < 32; ++i) {
+  for (const unsigned chain : {0u, 1u, 17u}) {
+    WaRng got(seed, chain);
+    stan::rng_t want = stan::services::util::create_rng(seed, chain);
+    for (int i = 0; i < 32; ++i) {
+      if (got.gen()() != want()) {
+        ++failures;
+        std::printf(
+            "FAIL WaRng does not match Stan rng_t at chain %u draw %d\n", chain,
+            i);
+        return;
+      }
+    }
+    got.seed(seed, chain);
+    want = stan::services::util::create_rng(seed, chain);
     if (got.gen()() != want()) {
       ++failures;
-      std::printf("FAIL WaRng does not match Stan rng_t at draw %d\n", i);
-      return;
+      std::printf(
+          "FAIL WaRng reseed does not match Stan create_rng at chain %u\n",
+          chain);
     }
-  }
-  got.seed(seed);
-  want = stan::services::util::create_rng(seed, 0);
-  if (got.gen()() != want()) {
-    ++failures;
-    std::printf("FAIL WaRng reseed does not match Stan create_rng\n");
   }
 }
 

@@ -345,15 +345,19 @@ void expect_compiled_scalar_rng() {
     return;
   }
   const double q[1] = {0.25};
-  std::vector<double> first((size_t)n), second((size_t)n), reseeded((size_t)n);
+  std::vector<double> first((size_t)n), second((size_t)n), reseeded((size_t)n),
+      other_chain((size_t)n);
   stanli_wa_seed(model, 77);
   const int r1 = stanli_wa_row(model, q, first.data());
   const int r2 = stanli_wa_row(model, q, second.data());
   stanli_wa_seed(model, 77);
   const int r3 = stanli_wa_row(model, q, reseeded.data());
-  if (r1 != 0 || r2 != 0 || r3 != 0 || first != reseeded || first == second) {
+  stanli_wa_seed_chain(model, 77, 9);
+  const int r4 = stanli_wa_row(model, q, other_chain.data());
+  if (r1 != 0 || r2 != 0 || r3 != 0 || r4 != 0 || first != reseeded ||
+      first == second || first == other_chain) {
     ++failures;
-    std::printf("FAIL C API scalar RNG stream/reseed ownership\n");
+    std::printf("FAIL C API scalar RNG stream/reseed/chain ownership\n");
   }
   stanli_model_free(model);
 }

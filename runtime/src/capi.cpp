@@ -571,6 +571,10 @@ const char* stanli_wa_column_name(const stanli_model* m, int64_t i) {
 
 void stanli_wa_seed(stanli_model* m, uint32_t seed) { m->wa_rng.seed(seed); }
 
+void stanli_wa_seed_chain(stanli_model* m, uint32_t seed, uint32_t chain) {
+  m->wa_rng.seed(seed, chain);
+}
+
 int stanli_wa_row(stanli_model* m, const double* q, double* out) {
   try {
     if (m->wa_interp) {

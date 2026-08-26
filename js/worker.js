@@ -174,7 +174,7 @@ onmessage = async (e) => {
       names.push(M.UTF8ToString(
           useWa ? M._stanli_wa_column_name(model, BigInt(i))
                 : M._stanli_constrained_name(model, BigInt(i))));
-    if (useWa) M._stanli_wa_seed(model, req.seed >>> 0);
+    if (useWa) M._stanli_wa_seed_chain(model, req.seed >>> 0, 1);
     const cols = new Float64Array(nCon * samples);
     const rowPtr = M._malloc(8 * nCon);
     for (let s = 0; s < samples; ++s) {

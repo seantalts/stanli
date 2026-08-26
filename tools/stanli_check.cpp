@@ -235,9 +235,6 @@ int main(int argc, char** argv) {
     if (!std::isfinite(lp) || n_bad > 0)
       std::fprintf(stderr, "stanli_check: nonfinite lp=%d gradients=%d\n",
                    std::isfinite(lp) ? 0 : 1, n_bad);
-    std::printf("OK %.17g", lp);
-    for (double g : grad) std::printf(" %.17g", g);
-    std::printf("\n");
     if (prof_env && prof_env[0] != '0')
       std::fprintf(stderr, "%s", ex.profile_report().c_str());
 
@@ -249,8 +246,9 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "WA none\n");
     } else if (cm.write_array->interp) {
       // The graph could not express the whole section; the per-draw
-      // interpreter runs all of it. Failures stay on stderr: stdout's
-      // machine-readable contract is already written.
+      // interpreter runs all of it. Failures stay on stderr; the final
+      // machine-readable status is emitted after this section so a Stan
+      // print whose text begins with OK/EVAL_FAIL cannot shadow it.
       try {
         stanli::WaInterp& wi = *cm.write_array->interp;
         stanli::WaRng rng(1234);
@@ -322,6 +320,9 @@ int main(int argc, char** argv) {
     if (wa_values && (!cm.write_array || (!cm.write_array->interp &&
                                           cm.write_array->columns.empty())))
       std::printf("WANAMES FAIL no write_array\nWAVALS FAIL\n");
+    std::printf("OK %.17g", lp);
+    for (double g : grad) std::printf(" %.17g", g);
+    std::printf("\n");
   } catch (const std::exception& e) {
     std::printf("EVAL_FAIL %s\n", e.what());
     return 1;

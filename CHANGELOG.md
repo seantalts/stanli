@@ -117,9 +117,21 @@ sampler moved to Stan's `rng_t`. It now follows BridgeStan's public contract:
 Stan's current engine initialized with `create_rng(seed, 0)`. This changes the
 generated-quantities sequence produced by a fixed seed, while keeping streams
 reproducible and independent. The direct write-array oracle now compares RNG
-columns as well as deterministic columns. As before, stanli's postprocessed
-sampling rows use their own write-array stream; they do not preserve CmdStan's
-sampler RNG state across transitions.
+columns as well as deterministic columns. Sampling frontends give each chain
+a fresh `create_rng(seed, chain_id)` write-array stream, so a later chain no
+longer depends on how many rows an earlier chain produced. As before, these
+postprocessed rows do not preserve CmdStan's already-advanced sampler RNG state
+across transitions.
+
+### The stanc3 mother model runs
+
+The 826-line compiler stress model now joins the language oracle, with the two
+uninitialized solver inputs in its compile-only upstream source assigned so it
+can execute. Supporting it adds the legacy Powell `algebra_solver`, the
+semantically empty zero-job `map_rect` case, and mixed multidimensional reads
+and partial writes. All three deterministic points compare the log density,
+196 gradients, and all 899 write-array values with CmdStan, including its 60
+generated-quantities draws.
 
 ### Compatibility
 

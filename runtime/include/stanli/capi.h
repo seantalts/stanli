@@ -302,11 +302,14 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
  * in CmdStan's column order. n_columns is 0 when the model has no
  * generate_quantities section (use stanli_constrain then). RNG calls in
  * generated quantities draw from one stream; seed it per chain with
- * stanli_wa_seed before the first row. wa_row evaluates at unconstrained
- * q and writes n_columns doubles; returns 0 on success. */
+ * stanli_wa_seed_chain before the first row. stanli_wa_seed is the
+ * backward-compatible direct-write-array convention with chain 0. wa_row
+ * evaluates at unconstrained q and writes n_columns doubles; returns 0 on
+ * success. */
 int64_t stanli_wa_n_columns(const stanli_model* m);
 const char* stanli_wa_column_name(const stanli_model* m, int64_t i);
 void stanli_wa_seed(stanli_model* m, uint32_t seed);
+void stanli_wa_seed_chain(stanli_model* m, uint32_t seed, uint32_t chain);
 int stanli_wa_row(stanli_model* m, const double* q, double* out);
 
 #ifdef __cplusplus

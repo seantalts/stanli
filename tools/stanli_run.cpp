@@ -228,14 +228,16 @@ int main(int argc, char** argv) {
     }
 
     // Interpreted rows are computed up front: the header needs the first
-    // evaluation's column discovery, and the RNG stream runs across draws.
+    // evaluation's column discovery. Each chain gets the same
+    // create_rng(seed, chain_id) stream identity as its sampler; this is a
+    // fresh write-array stream, not the sampler's already-advanced state.
     const auto constrained_by_name = [&](const std::vector<double>& q) {
       for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i];
       ex.run_forward_only();
       return cm.constrained_env(ex);
     };
     std::vector<std::vector<double>> irows;
-    stanli::WaRng wa_rng(cfg.seed);
+    stanli::WaRng wa_rng(cfg.seed, (unsigned int)cfg.chain_id);
     if (wi) {
       irows.reserve(draws.size());
       // A draw whose generated quantities cannot be evaluated is written
@@ -246,7 +248,11 @@ int main(int argc, char** argv) {
       // CSV.
       size_t n_bad = 0;
       std::string first_bad;
-      for (const auto& q : draws) {
+      for (size_t d = 0; d < draws.size(); ++d) {
+        if (per_chain > 0 && d % (size_t)per_chain == 0)
+          wa_rng.seed(cfg.seed,
+                      (unsigned int)(cfg.chain_id + d / (size_t)per_chain));
+        const auto& q = draws[d];
         try {
           irows.push_back(wi->eval(constrained_by_name(q), wa_rng));
         } catch (const std::domain_error& e) {
@@ -297,6 +303,9 @@ int main(int argc, char** argv) {
       if (wi) {
         row = irows[d];
       } else {
+        if (per_chain > 0 && d % (size_t)per_chain == 0)
+          wa_rng.seed(cfg.seed,
+                      (unsigned int)(cfg.chain_id + d / (size_t)per_chain));
         const auto& q = draws[d];
         for (size_t i = 0; i < q.size(); ++i) out.params_data()[i] = q[i];
         try {

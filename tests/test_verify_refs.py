@@ -26,6 +26,7 @@ sys.path.insert(0, str(REPO / "tools"))
 
 from verify_refs import (POINTS, QUARANTINED, SCHEMA,  # noqa: E402
                          check_model, load_refs, parse_status, probe_point)
+from cmdstan_ref import _result_line  # noqa: E402
 from verify_sample import evaluate, record_wa  # noqa: E402
 
 # A model that exists under tests/stanc3, so model_files resolves real
@@ -67,6 +68,12 @@ class StatusLineTest(unittest.TestCase):
         self.assertEqual(
             parse_status("OK user text\nEVAL_FAIL out of range\n"),
             ["EVAL_FAIL", "out", "of", "range"])
+
+    def test_generated_quantities_print_precedes_final_numeric_result(self):
+        out = "OK generated quantity text\nOK -3.5 1 -2\n"
+        want = ["OK", "-3.5", "1", "-2"]
+        self.assertEqual(parse_status(out), want)
+        self.assertEqual(_result_line(out), want)
 
 
 class ProbePointTest(unittest.TestCase):
