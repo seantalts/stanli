@@ -93,12 +93,15 @@ void algebra_fwd(KernelCtx& ctx) {
   Eigen::Map<const Eigen::VectorXd> y(ctx.in[1].data, ctx.in[1].len);
   Eigen::VectorXd solved;
   Eigen::MatrixXd jacobian;
+  // Stan's adapter retains a reference to the system for its deferred
+  // reverse-pass callback, so it must outlive the complete Jacobian sweep.
+  const MirSystem system{&spec};
   stan::math::jacobian(
       [&](const auto& y_var) {
-        return stan::math::algebra_solver(
-            MirSystem{&spec}, x, y_var, spec.x_r, spec.x_i, nullptr,
-            spec.relative_tolerance, spec.function_tolerance,
-            spec.max_num_steps);
+        return stan::math::algebra_solver(system, x, y_var, spec.x_r, spec.x_i,
+                                          nullptr, spec.relative_tolerance,
+                                          spec.function_tolerance,
+                                          spec.max_num_steps);
       },
       y, solved, jacobian);
   if (solved.size() != ctx.out.len || jacobian.rows() != ctx.out.len ||
