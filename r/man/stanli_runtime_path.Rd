@@ -13,5 +13,7 @@ A file path, which may not exist yet.
 The path is taken from `STANLI_RUNTIME` when that is set (which is how
 a development build is used), then from a runtime bundled into the
 package (wasm builds bundle one at build time, since a browser cannot
-download it), and from the user cache directory otherwise.
+download it), and from the user cache directory otherwise. The cache
+path includes the release the package pins, so a runtime downloaded by
+an older version of the package is never picked up by a newer one.
 }

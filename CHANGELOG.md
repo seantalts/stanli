@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### The R runtime cache is keyed by release
+
+A runtime downloaded by an older version of the R package survived a
+package upgrade and kept being loaded until a symbol went missing, with
+nothing saying an update was due (#220). The cache path now includes
+the release the package pins, so an upgraded package misses the old
+cache and the ordinary "run `stanli_install()`" message takes over.
+`stanli_install()` prunes runtimes nothing looks for anymore, and its
+`version = "latest"` escape is gone: a runtime outside the pinned
+directory cannot be found, so fetching one only makes sense together
+with `STANLI_RUNTIME`. Reported by @StaffanBetner.
+
 ## 0.9.2
 
 ### The runtime the R package binds exists again

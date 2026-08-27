@@ -13,8 +13,9 @@ stanli_install(
 \arguments{
 \item{version}{Release tag to fetch. Defaults to the release this
 version of the package was built against, which is the pairing its
-ABI check will accept; `"latest"` takes whatever the newest release
-is instead.}
+ABI check will accept. Only that release's runtime is found by
+[stanli_runtime_path()]; to run a different build, set
+`STANLI_RUNTIME`.}
 
 \item{quiet}{Passed to [utils::download.file()].}
 

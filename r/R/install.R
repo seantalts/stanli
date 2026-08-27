@@ -45,12 +45,22 @@ runtime_asset <- function(os = runtime_os(), arch = runtime_arch()) {
   sprintf("stanli-runtime-%s-%s.tar.gz", os, arch)
 }
 
+# The cache is keyed by release so a package upgrade cannot keep loading
+# the runtime a previous version downloaded (#220): the new pin names a
+# directory that does not exist yet, stanli_available() turns FALSE, and
+# every entry point already answers that with "run stanli_install()".
+runtime_cache_dir <- function(version = stanli_runtime_release) {
+  file.path(tools::R_user_dir("stanli", "cache"), version)
+}
+
 #' Where the stanli runtime lives
 #'
 #' The path is taken from `STANLI_RUNTIME` when that is set (which is how
 #' a development build is used), then from a runtime bundled into the
 #' package (wasm builds bundle one at build time, since a browser cannot
-#' download it), and from the user cache directory otherwise.
+#' download it), and from the user cache directory otherwise. The cache
+#' path includes the release the package pins, so a runtime downloaded by
+#' an older version of the package is never picked up by a newer one.
 #'
 #' @return A file path, which may not exist yet.
 #' @export
@@ -59,7 +69,7 @@ stanli_runtime_path <- function() {
   if (nzchar(from_env)) return(from_env)
   bundled <- system.file("runtime", runtime_filename(), package = "stanli")
   if (nzchar(bundled)) return(bundled)
-  file.path(tools::R_user_dir("stanli", "cache"), runtime_filename())
+  file.path(runtime_cache_dir(), runtime_filename())
 }
 
 #' Is the stanli runtime available?
@@ -76,8 +86,9 @@ stanli_available <- function() {
 #'
 #' @param version Release tag to fetch. Defaults to the release this
 #'   version of the package was built against, which is the pairing its
-#'   ABI check will accept; `"latest"` takes whatever the newest release
-#'   is instead.
+#'   ABI check will accept. Only that release's runtime is found by
+#'   [stanli_runtime_path()]; to run a different build, set
+#'   `STANLI_RUNTIME`.
 #' @param quiet Passed to [utils::download.file()].
 #' @param overwrite Re-download even if the runtime is already present.
 #' @return The path it was installed to, invisibly.
@@ -89,7 +100,12 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
     if (!quiet) message("this build bundles its runtime at ", bundled)
     return(invisible(bundled))
   }
-  dest_dir <- tools::R_user_dir("stanli", "cache")
+  if (identical(version, "latest"))
+    stop("this package pairs with the ", stanli_runtime_release,
+         " runtime and looks for no other; pass a release tag to fetch ",
+         "one anyway, and point STANLI_RUNTIME at it to use it.",
+         call. = FALSE)
+  dest_dir <- runtime_cache_dir(version)
   dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
   dest <- file.path(dest_dir, runtime_filename())
   if (file.exists(dest) && !overwrite) {
@@ -98,11 +114,7 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
   }
   asset <- runtime_asset()
   base <- "https://github.com/seantalts/stanli/releases"
-  url <- if (identical(version, "latest")) {
-    file.path(base, "latest", "download", asset)
-  } else {
-    file.path(base, "download", version, asset)
-  }
+  url <- file.path(base, "download", version, asset)
   tmp <- tempfile(fileext = ".tar.gz")
   on.exit(unlink(tmp), add = TRUE)
   tryCatch(
@@ -125,8 +137,20 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
   if (!file.exists(dest))
     stop("the downloaded archive did not contain ", runtime_filename(),
          call. = FALSE)
+  # Runtimes for other releases, and the unversioned file that packages
+  # before 0.9.3 wrote, are ~16 MB each of cache nothing looks for now.
+  root <- tools::R_user_dir("stanli", "cache")
+  unlink(file.path(root, runtime_filename()))
+  stale <- setdiff(list.dirs(root, recursive = FALSE),
+                   c(dest_dir, runtime_cache_dir()))
+  unlink(stale, recursive = TRUE)
   if (!quiet) message("stanli runtime installed to ", dest)
-  load_runtime()
+  if (identical(dest, stanli_runtime_path())) {
+    load_runtime()
+  } else if (!quiet) {
+    message("this package loads the ", stanli_runtime_release,
+            " runtime; set STANLI_RUNTIME to use the one just installed")
+  }
   invisible(dest)
 }
 

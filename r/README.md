@@ -32,10 +32,10 @@ stanli_install()
 ```
 
 That downloads the ~9-12 MB runtime for your platform into
-`tools::R_user_dir("stanli", "cache")`. Nothing is fetched without it.
-It takes the release the package was built against rather than
-whichever is newest, so the binding and the library always agree; pass
-`version = "latest"` to override, and set `STANLI_RUNTIME` to use a
+`tools::R_user_dir("stanli", "cache")`, under the release the package
+was built against, so the binding and the library always agree: after a
+package upgrade the old runtime is simply not found and this step runs
+once more. Nothing is fetched without it. Set `STANLI_RUNTIME` to use a
 library you built yourself.
 
 ## Use
