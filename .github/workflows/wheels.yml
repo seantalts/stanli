@@ -1138,6 +1138,21 @@ jobs:
           npm install webr@0.6.0
           node tests/test_webr.mjs build-wasm-side/libstanli.so \
             browser-compilers/stanli-compiler.js
+
+      # Not a gate: webR releases on its own schedule. The module loads
+      # across Emscripten majors (measured both directions on 4.0.8 and
+      # 5.0.7), so this failing means a webR release finally broke the
+      # dylink ABI -- caught here, that is a pin bump and a release cut
+      # before any user sees it.
+      - name: Load it into the newest released webR
+        run: |
+          npm install webr@latest
+          ver=$(node -p "require('webr/package.json').version")
+          if node tests/test_webr.mjs build-wasm-side/libstanli.so; then
+            echo "canary: loads in webr@$ver"
+          else
+            echo "::warning title=webR canary::the side module does not load in webr@$ver; bump the emsdk pin and cut a release"
+          fi
       - name: Runtime tarball
         run: |
           mkdir -p runtime-dist
