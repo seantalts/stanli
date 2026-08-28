@@ -41,15 +41,15 @@ fi
 # Release profile: dune's dev profile links the inline-test and expect-test
 # runners into every library, which ride into the shipped binary for no
 # reason. Worth 364 KB of the final shared library.
-(cd "$SRC" && dune runtest --jobs "$BUILD_JOBS" --profile release \
+(cd "$SRC" && dune runtest -j "$BUILD_JOBS" --profile release \
    src/stanc_embed)
-if ! (cd "$SRC" && dune build --jobs "$BUILD_JOBS" --profile release \
+if ! (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
       src/stanc_embed/stanc_embed.exe.o 2>&1 | tail -5); then
-  (cd "$SRC" && dune build --jobs "$BUILD_JOBS" --profile release \
+  (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
     src/stanc_embed 2>&1 | tail -5)
 fi
 (cd "$SRC" &&
- dune build --jobs "$BUILD_JOBS" --profile release \
+ dune build -j "$BUILD_JOBS" --profile release \
    src/stanc_embed/stanli_vectorize_probe.exe)
 OBJ=$(find "$SRC/_build" -path '*/src/stanc_embed/stanc_embed*.o' | head -1)
 [ -n "$OBJ" ] && [ -f "$OBJ" ] || {

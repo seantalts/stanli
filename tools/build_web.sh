@@ -81,7 +81,7 @@ else
     cd "$STANCJS_WORKTREE"
     eval "$(opam env --switch="$OPAM_SWITCH")"
     dune subst
-    dune build --jobs "$BUILD_JOBS" --profile release \
+    dune build -j "$BUILD_JOBS" --profile release \
       src/stancjs/stancjs.bc.js
   )
   mkdir -p deps/stanc3
@@ -91,7 +91,7 @@ else
   (
     cd "$STANCJS_WORKTREE"
     eval "$(opam env --switch="$OPAM_SWITCH")"
-    dune build --jobs "$BUILD_JOBS" --profile release \
+    dune build -j "$BUILD_JOBS" --profile release \
       src/stanli_stancjs/stanli_stancjs.bc.js \
       src/stanli_stancjs/stanli_compiler_cli.exe
   )

@@ -67,7 +67,7 @@ eval "$(opam env --switch="$switch" --set-switch)"
 # pipeline would; without this every source build answers --version
 # identically and conformance reports cannot tell two pins apart.
 (cd "$src_dir" && dune subst)
-(cd "$src_dir" && dune build --jobs "$BUILD_JOBS" --profile release \
+(cd "$src_dir" && dune build -j "$BUILD_JOBS" --profile release \
   src/stanc/stanc.exe)
 
 mkdir -p "$repo_root/deps/stanc3"
