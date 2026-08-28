@@ -576,8 +576,10 @@ instrumented build can approach the workflow's 90-minute limit. Locally it
 is enabled with one CMake option:
 
 ```sh
+asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
 cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address
-cmake --build build-asan -j8 && ctest --test-dir build-asan
+cmake --build build-asan --parallel "$asan_jobs" && \
+  ctest --test-dir build-asan --parallel "$asan_jobs"
 ```
 
 CI uses AddressSanitizer alone. `STANLI_SANITIZE=address,undefined` is also
@@ -589,7 +591,8 @@ repeat-evaluation tests are needed for that case.
 
 ## Checks run before and after merge
 
-The pull-request workflows require the following checks, as defined in
+The full source-change path in the pull-request workflows requires the
+following checks, as defined in
 [`.github/workflows/wheels.yml`](.github/workflows/wheels.yml) and
 [`.github/workflows/lint.yml`](.github/workflows/lint.yml):
 
@@ -618,11 +621,17 @@ The pull-request workflows require the following checks, as defined in
   dependencies and third-party code. The formatter version is pinned because
   output can differ across major versions.
 
-Pull requests run the Linux x86_64 wheel job and the Windows compiler-only
-gate. The other three wheel platforms (macOS arm64, macOS x86_64, and
-manylinux aarch64), the full Windows C++ matrix, the ASan job, the WebAssembly
-build with its eight-schools sampling test under Node, and the webR side-module
-load test run on every push to `main`, nightly, and on release tags. The full
+Pull requests whose changes are limited to allowlisted Markdown/license files
+or `web/index.html` instead run the generated-document checks and JavaScript
+syntax checks. The required `manylinux_2_28_x86_64` gate remains present; an
+unknown path fails closed onto the full source-change path.
+
+Source-changing pull requests run the Linux x86_64 wheel job and the Windows
+compiler-only gate. The other three wheel platforms (macOS arm64, macOS
+x86_64, and manylinux aarch64), the full Windows C++ matrix, the ASan job, the
+WebAssembly build with its eight-schools sampling test under Node, and the
+webR side-module load test run on every push to `main`, nightly, and on
+release tags. The full
 Windows job builds the runtime and CTest suite, packages `stanli.dll`,
 `stanli-compile.exe`, and pristine `stanc.exe`, then runs the installed-wheel
 Python tests through source compilation, errors, lowering, gradients, sampling,
@@ -724,7 +733,7 @@ script also prepares CmdStan because the recording and sampler tools use it:
 ./tools/dev_setup.sh --corpus     # native build, posteriordb, and CmdStan
 python3 tools/verify_refs.py deps/posteriordb \
   --check build/stanli_check --jobs 8
-ctest --test-dir build -j4
+ctest --test-dir build --parallel "$(tools/build_jobs.sh)"
 ```
 
 The A/B and cross-path commands below use release-build tools that are not
@@ -732,7 +741,8 @@ built by the setup script's default release target list:
 
 ```sh
 ./tools/dev_setup.sh --conformance   # the reference stack for the sweep
-cmake --build build-rel -j8 --target stanli_check dump_ops
+cmake --build build-rel --parallel "$(tools/build_jobs.sh)" \
+  --target stanli_check dump_ops
 python3 harnesses/ab_corpus.py deps/posteriordb            # pass A/B
 build-rel/stanli_check model.stan data.json --cross        # cross-path
 python3 tools/verify_refs.py deps/posteriordb --wa-report  # GQ coverage

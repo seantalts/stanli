@@ -192,6 +192,15 @@ if(EMSCRIPTEN)
     __linux__=1 TBB_USE_GCC_BUILTINS=1)
 endif()
 
+# A webR side module needs relocatable code in every object that reaches the
+# final wasm dylib. Make the mode self-contained instead of relying on callers
+# to remember a second CMake flag; the ordinary browser build stays non-PIC.
+option(STANLI_WASM_SIDE
+  "Build libstanli.so as an Emscripten side module for webR" OFF)
+if(EMSCRIPTEN AND STANLI_WASM_SIDE)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # The distributable shared library: C ABI + all kernels, TBB stubbed
 # (single-threaded until the payload ships real TBB).
 # SUNDIALS (CVODES) for the ODE integrators: the same translation units
@@ -238,8 +247,18 @@ if(STANLI_THREADS)
   string(APPEND STANLI_BUILD_ID "-threads")
 endif()
 
-# One runtime source inventory, compiled separately for the shared and static
-# targets so each keeps its own flags and link behavior.
+# Only this tiny translation unit reads the build id. Keeping this definition
+# source-scoped is important: the id contains the git SHA, so placing it on a
+# runtime target invalidates every stan-math-heavy object on every commit even
+# when none of those sources or headers changed.
+set_source_files_properties(runtime/src/build_id.cpp PROPERTIES
+  COMPILE_DEFINITIONS STANLI_BUILD_ID="${STANLI_BUILD_ID}")
+
+# One runtime source inventory. The implementation is compiled once as a PIC
+# object library and reused by the shared library and the test/static library.
+# These targets intentionally keep separate link behavior; recompiling every
+# stan-math-heavy translation unit merely to change the final archive kind
+# used to make a clean native build do the expensive half of its work twice.
 set(STANLI_RUNTIME_SOURCES
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
@@ -291,14 +310,40 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/program_softmax.cpp)
 
 if(NOT EMSCRIPTEN)
+  list(APPEND STANLI_RUNTIME_SOURCES runtime/src/bridgestan_abi.cpp)
+endif()
+
+add_library(stanli_runtime_objects OBJECT ${STANLI_RUNTIME_SOURCES})
+target_include_directories(stanli_runtime_objects PRIVATE runtime/include)
+target_link_libraries(stanli_runtime_objects PRIVATE stanmath)
+if(NOT EMSCRIPTEN)
+  # Preserve Threads::Threads' compile requirements (notably -pthread on
+  # Linux) now that these sources are compiled outside their final targets.
+  target_link_libraries(stanli_runtime_objects PRIVATE Threads::Threads)
+endif()
+# Native objects also land in stanli_shared. Emscripten's browser build should
+# remain non-PIC, while the webR configuration opts into PIC globally.
+if(NOT EMSCRIPTEN)
+  set_target_properties(stanli_runtime_objects PROPERTIES
+                        POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# This tiny compatibility definition used to be compiled into every test and
+# tool separately (more than sixty times). An object library retains the
+# required per-executable symbol while compiling its source only once.
+add_library(stanli_tbb_stub OBJECT tests/tbb_stub.cpp)
+if(NOT EMSCRIPTEN)
+  set_target_properties(stanli_tbb_stub PROPERTIES
+                        POSITION_INDEPENDENT_CODE ON)
+endif()
+
+if(NOT EMSCRIPTEN)
 add_library(stanli_shared SHARED
   runtime/src/capi.cpp
-  runtime/src/bridgestan_abi.cpp
-  ${STANLI_RUNTIME_SOURCES}
-  tests/tbb_stub.cpp)
+  runtime/src/build_id.cpp
+  $<TARGET_OBJECTS:stanli_runtime_objects>
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_include_directories(stanli_shared PUBLIC runtime/include)
-target_compile_definitions(stanli_shared
-                           PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 # ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr to find its own path.
 target_link_libraries(stanli_shared
                       PUBLIC stanmath sundials Threads::Threads ${CMAKE_DL_LIBS})
@@ -369,7 +414,9 @@ if(STANLI_SANITIZE)
 else()
   set(_stanli_kind STATIC)
 endif()
-add_library(stanli ${_stanli_kind} ${STANLI_RUNTIME_SOURCES})
+add_library(stanli ${_stanli_kind}
+  runtime/src/build_id.cpp
+  $<TARGET_OBJECTS:stanli_runtime_objects>)
 if(STANLI_SANITIZE)
   # Not libstanli: stanli_shared already owns that name -- it is the
   # file the wheel ships -- and two targets writing one .dylib means the
@@ -386,13 +433,11 @@ if(STANLI_SANITIZE)
   endif()
 endif()
 target_include_directories(stanli PUBLIC runtime/include)
-target_compile_definitions(stanli PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
 # The BridgeStan facade is native-only: it finds its own sidecar manifest
 # with dladdr, and a browser has neither dlopen nor a second process to
 # load the pair. Nothing under wasm references a bs_ symbol, so this only
 # saves compiling it.
 if(NOT EMSCRIPTEN)
-  target_sources(stanli PRIVATE runtime/src/bridgestan_abi.cpp)
   # PUBLIC, so anything linking the runtime sees the same decoration the
   # definitions were compiled with. Without it the reference header's
   # BS_PUBLIC is __declspec(dllimport) on Windows, and a test linking the
@@ -427,9 +472,8 @@ if(EMSCRIPTEN)
   endforeach()
   list(REMOVE_DUPLICATES _capi_names)
   list(JOIN _capi_names "," STANLI_CAPI_EXPORTS)
-  add_executable(stanli_wasm runtime/src/capi.cpp tests/tbb_stub.cpp)
-  target_compile_definitions(stanli_wasm
-                             PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
+  add_executable(stanli_wasm runtime/src/capi.cpp
+    $<TARGET_OBJECTS:stanli_tbb_stub>)
   target_link_libraries(stanli_wasm PRIVATE stanli)
   set_target_properties(stanli_wasm PROPERTIES OUTPUT_NAME stanli)
   target_link_options(stanli_wasm PRIVATE
@@ -453,17 +497,17 @@ if(EMSCRIPTEN)
 # the browser build. The emsdk version must match the webR release the
 # artifact is for -- side modules are not binary compatible across
 # webR's Emscripten bumps.
-option(STANLI_WASM_SIDE
-  "Build libstanli.so as an Emscripten side module for webR" OFF)
 if(STANLI_WASM_SIDE)
   # add_executable, not add_library: Emscripten's CMake platform archives
   # a SHARED library instead of linking it, so the side module is spelled
   # as an "executable" whose output name and SIDE_MODULE flag make emcc
   # emit a relocatable wasm dylib.
-  add_executable(stanli_webr runtime/src/capi.cpp tests/tbb_stub.cpp)
-  target_compile_definitions(stanli_webr
-                             PRIVATE STANLI_BUILD_ID="${STANLI_BUILD_ID}")
+  add_executable(stanli_webr runtime/src/capi.cpp
+    $<TARGET_OBJECTS:stanli_tbb_stub>)
   target_link_libraries(stanli_webr PRIVATE stanli)
+  # POSITION_INDEPENDENT_CODE initializes libraries, but an executable source
+  # is otherwise compiled as PIE/non-PIC. capi.cpp belongs in the side module.
+  target_compile_options(stanli_webr PRIVATE -fPIC)
   set_target_properties(stanli_webr PROPERTIES
     OUTPUT_NAME libstanli
     SUFFIX ".so")
@@ -478,7 +522,8 @@ if(NOT EMSCRIPTEN)
 enable_testing()
 # Single-threaded tests stub the one TBB symbol stan-math's rev core needs.
 function(stanli_add_test NAME)
-  add_executable(${NAME} tests/${NAME}.cpp tests/tbb_stub.cpp)
+  add_executable(${NAME} tests/${NAME}.cpp
+    $<TARGET_OBJECTS:stanli_tbb_stub>)
   target_link_libraries(${NAME} PRIVATE stanli)
   # Tests run from the repo root so fixture paths are stable.
   add_test(NAME ${NAME} COMMAND ${NAME}
@@ -489,10 +534,12 @@ endfunction()
 # binary -- .stan in, CmdStan-shaped CSV out, no toolchain and no separate
 # stanc to find -- which is the whole point of an interpreter for a
 # language whose reference implementation compiles C++ per model.
-add_executable(stanli_run tools/stanli_run.cpp tests/tbb_stub.cpp)
+add_executable(stanli_run tools/stanli_run.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_run PRIVATE stanli)
 stanli_embed_stanc(stanli_run)
-add_executable(stanli_check tools/stanli_check.cpp tests/tbb_stub.cpp)
+add_executable(stanli_check tools/stanli_check.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_check PRIVATE stanli)
 add_test(NAME test_check_precompiled_mir
          COMMAND stanli_check tests/fixtures/ar1.stan tests/fixtures/ar1.json
@@ -505,9 +552,11 @@ add_test(NAME test_check_precompiled_mir_conflict
                  -DSTANLI_CHECK=$<TARGET_FILE:stanli_check>
                  -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mir_conflict.cmake)
-add_executable(bench_grad tools/bench_grad.cpp tests/tbb_stub.cpp)
+add_executable(bench_grad tools/bench_grad.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_grad PRIVATE stanli)
-add_executable(bench_mir_decode tools/bench_mir_decode.cpp tests/tbb_stub.cpp)
+add_executable(bench_mir_decode tools/bench_mir_decode.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_mir_decode PRIVATE stanli)
 add_test(NAME test_prep_only
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
@@ -533,12 +582,15 @@ set_tests_properties(test_prep_profile_reroll_dispositions PROPERTIES
   ENVIRONMENT "STANLI_PROFILE_PREP=1"
   PASS_REGULAR_EXPRESSION
     "packed_rows=[0-9]+ term_density=[0-9]+ element_density=[0-9]+ term_widen=[0-9]+ element_store=[0-9]+")
-add_executable(bench_opcost tools/bench_opcost.cpp tests/tbb_stub.cpp)
+add_executable(bench_opcost tools/bench_opcost.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_dispatch tools/bench_dispatch.cpp)
-add_executable(dump_ops tools/dump_ops.cpp tests/tbb_stub.cpp)
+add_executable(dump_ops tools/dump_ops.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)
-add_executable(dump_islands tools/dump_islands.cpp tests/tbb_stub.cpp)
+add_executable(dump_islands tools/dump_islands.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_islands PRIVATE stanli)
 
 # Installable: the native sampler, the parity checker, the shared

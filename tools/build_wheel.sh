@@ -7,6 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source tools/stanc_embed/provenance.sh
+source tools/build_jobs.sh
+BUILD_JOBS=$(stanli_detect_build_jobs)
 
 STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
 STANC3_SRC_REPO=$(stanc_embed_read_setup STANC3_SRC_REPO)
@@ -26,7 +28,7 @@ if [ -f "$EMBED_OBJECT" ] &&
   exit 1
 fi
 
-cmake --build build-rel -j8 --target stanli_shared
+cmake --build build-rel --parallel "$BUILD_JOBS" --target stanli_shared
 
 mkdir -p python/stanli/_bin
 rm -f python/stanli/_bin/*

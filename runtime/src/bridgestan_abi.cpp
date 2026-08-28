@@ -45,6 +45,8 @@
 #include <stanli/optable.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "build_id.hpp"
+
 #include "../third_party/nlohmann_json.hpp"
 
 #include <boost/random/uniform_real_distribution.hpp>
@@ -59,14 +61,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-// Identifies this runtime binary. Read from the compile definition rather
-// than through stanli_build_id(), because capi.cpp is not part of the
-// static library this file also lands in; both targets set the macro from
-// the same CMake variable, so the two answers are the same string.
-#ifndef STANLI_BUILD_ID
-#define STANLI_BUILD_ID "unknown"
-#endif
 
 // The version of the reference header vendored in runtime/third_party.
 #define STANLI_BS_VERSION_STR "2.9.0"
@@ -259,7 +253,7 @@ class bs_rng {
 
 namespace stanli {
 
-const char* bs_build_id() { return STANLI_BUILD_ID; }
+const char* bs_build_id() { return runtime_build_id(); }
 
 bool bs_read_manifest(const std::string& text, BsManifest* out,
                       std::string* err) {
@@ -384,7 +378,8 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
       for (const auto& p : m->cm.unc_params) append_unc_names(p, flat);
       m->unc_names = join_csv(flat);
     }
-    m->info = "stanli runtime (build id " + std::string(STANLI_BUILD_ID) +
+    m->info = "stanli runtime (build id " +
+              std::string(stanli::runtime_build_id()) +
               ") implementing the BridgeStan C ABI " STANLI_BS_VERSION_STR
               "; model \"" +
               m->name + "\"; " + std::to_string(m->cm.n_unconstrained) +

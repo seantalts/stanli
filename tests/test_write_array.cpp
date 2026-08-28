@@ -12,6 +12,7 @@
 //     header was taken verbatim from a CmdStan run of the same model.
 #include <stanli/compile.hpp>
 #include <stanli/mir.hpp>
+#include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/sexp.hpp>
 #include <stanli/wa_interp.hpp>

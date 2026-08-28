@@ -481,7 +481,9 @@ Everything else takes four steps:
 ## Verifying a change
 
 ```
-cmake --build build-rel -j8 && (cd build-rel && ctest)
+build_jobs=$(tools/build_jobs.sh)
+cmake --build build-rel --parallel "$build_jobs" && \
+  ctest --test-dir build-rel --parallel "$build_jobs"
 python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 8
 ```
 
@@ -498,12 +500,14 @@ should leave the replay's worst-deviation line exactly as it found it.
 
 If the change touches raw pointers, an `Eigen::Map` over a buffer
 somebody else sized, or the island register file, run the suite with
-AddressSanitizer as well. CI does this on every pull request, and it is
-one flag locally:
+AddressSanitizer as well. CI does this after merges and nightly, and it is
+one flag locally. Its compiler uses much more memory than Release:
 
 ```
+asan_jobs=$(STANLI_JOB_MEMORY_GIB=12 tools/build_jobs.sh)
 cmake -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTANLI_SANITIZE=address
-cmake --build build-asan -j8 && ctest --test-dir build-asan
+cmake --build build-asan --parallel "$asan_jobs" && \
+  ctest --test-dir build-asan --parallel "$asan_jobs"
 ```
 
 `address,undefined` also passes clean. What ASan cannot see is a stale
@@ -518,7 +522,8 @@ it, because that would mean a second full stan-math compile:
 
 ```
 cmake -B build-lite -DCMAKE_BUILD_TYPE=Release -DSTANLI_LITE_LP=ON
-cmake --build build-lite --target stanli_check -j8
+cmake --build build-lite --parallel "$(tools/build_jobs.sh)" \
+  --target stanli_check
 python3 tools/verify_lite.py deps/posteriordb
 python3 tools/verify_refs.py deps/posteriordb --check build-lite/stanli_check --no-lp
 ```

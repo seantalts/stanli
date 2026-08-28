@@ -28,6 +28,8 @@ CMDSTAN_SHA=11cb052d3e1fc8c799e0fec559e2ee5452b38d27
 OPAM_SWITCH=stanc3-55
 OCAML_VERSION=5.5.0
 source tools/stanc_embed/provenance.sh
+source tools/build_jobs.sh
+BUILD_JOBS=$(stanli_detect_build_jobs)
 
 WANT_EMBED=0
 WANT_CORPUS=0
@@ -129,7 +131,7 @@ fi
 
 # --- cmake builds ----------------------------------------------------------
 if [ "$WANT_BUILD" = 1 ]; then
-  step "configuring and building (build/ dev, build-rel/ benchmarks)"
+  step "configuring and building with $BUILD_JOBS jobs (build/ dev, build-rel/ benchmarks)"
   EMBED_FLAGS=()
   if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
        "$STANC3_SRC_SHA" && have opam; then
@@ -142,12 +144,13 @@ if [ "$WANT_BUILD" = 1 ]; then
   fi
   cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
-  cmake --build build -j8
+  cmake --build build --parallel "$BUILD_JOBS"
   cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
-  cmake --build build-rel -j8 --target bench_grad stanli_run
+  cmake --build build-rel --parallel "$BUILD_JOBS" \
+    --target bench_grad stanli_run
 
   step "running tests"
-  ctest --test-dir build --output-on-failure
+  ctest --test-dir build --parallel "$BUILD_JOBS" --output-on-failure
 else
   step "--no-build: skipping cmake and tests"
 fi
@@ -172,7 +175,7 @@ if [ "$WANT_CORPUS" = 1 ]; then
   if [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/libtbb.dylib ] &&
      [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/libtbb.so.2 ]; then
     step "building CmdStan (one-time; provides TBB + the bench comparator)"
-    make -C deps/cmdstan -j8 build
+    make -C deps/cmdstan -j"$BUILD_JOBS" build
   else
     echo "CmdStan already built"
   fi
@@ -207,7 +210,7 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
   # library from before it.
   if [ "$WANT_BUILD" = 1 ]; then
     step "staging the runtime the harness drives (python/stanli/_bin)"
-    cmake --build build-rel -j8 --target stanli_shared
+    cmake --build build-rel --parallel "$BUILD_JOBS" --target stanli_shared
     LIB=""
     for candidate in build-rel/libstanli.dylib build-rel/libstanli.so \
                      build-rel/stanli.dll; do

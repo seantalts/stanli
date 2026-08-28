@@ -20,6 +20,9 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
+source "$repo_root/tools/build_jobs.sh"
+BUILD_JOBS=$(stanli_detect_build_jobs)
+export OPAMJOBS=$BUILD_JOBS
 
 # Local source builds read the repository, commit, switch, and OCaml version
 # from dev_setup.sh. CI mirrors the source pair and asserts that it matches.
@@ -64,7 +67,8 @@ eval "$(opam env --switch="$switch" --set-switch)"
 # pipeline would; without this every source build answers --version
 # identically and conformance reports cannot tell two pins apart.
 (cd "$src_dir" && dune subst)
-(cd "$src_dir" && dune build --profile release src/stanc/stanc.exe)
+(cd "$src_dir" && dune build --jobs "$BUILD_JOBS" --profile release \
+  src/stanc/stanc.exe)
 
 mkdir -p "$repo_root/deps/stanc3"
 install -m 755 "$src_dir/_build/default/src/stanc/stanc.exe" "$out"

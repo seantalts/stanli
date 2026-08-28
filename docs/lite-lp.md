@@ -66,8 +66,9 @@ the two things the flag promises:
 ```
 cmake -B build     -DCMAKE_BUILD_TYPE=Release
 cmake -B build-lite -DCMAKE_BUILD_TYPE=Release -DSTANLI_LITE_LP=ON
-cmake --build build --target stanli_check -j8
-cmake --build build-lite --target stanli_check -j8
+build_jobs=$(tools/build_jobs.sh)
+cmake --build build --parallel "$build_jobs" --target stanli_check
+cmake --build build-lite --parallel "$build_jobs" --target stanli_check
 python3 tools/verify_lite.py deps/posteriordb
 ```
 

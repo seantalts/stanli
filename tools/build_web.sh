@@ -6,6 +6,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source tools/stanc_embed/provenance.sh
+source tools/build_jobs.sh
+BUILD_JOBS=$(stanli_detect_build_jobs)
 
 STANC3_SRC_REPO=$(stanc_embed_read_setup STANC3_SRC_REPO)
 STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
@@ -18,7 +20,7 @@ fi
 
 source deps/emsdk/emsdk_env.sh >/dev/null 2>&1
 emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release >/dev/null
-cmake --build build-wasm -j8 --target stanli_wasm
+cmake --build build-wasm --parallel "$BUILD_JOBS" --target stanli_wasm
 
 # Keep the browser compiler in a separately stamped artifact. Build it in a
 # temporary worktree so dune subst never modifies the source checkout shared
@@ -79,7 +81,8 @@ else
     cd "$STANCJS_WORKTREE"
     eval "$(opam env --switch="$OPAM_SWITCH")"
     dune subst
-    dune build --profile release src/stancjs/stancjs.bc.js
+    dune build --jobs "$BUILD_JOBS" --profile release \
+      src/stancjs/stancjs.bc.js
   )
   mkdir -p deps/stanc3
   cp "$STANCJS_WORKTREE/_build/default/src/stancjs/stancjs.bc.js" \
@@ -88,7 +91,7 @@ else
   (
     cd "$STANCJS_WORKTREE"
     eval "$(opam env --switch="$OPAM_SWITCH")"
-    dune build --profile release \
+    dune build --jobs "$BUILD_JOBS" --profile release \
       src/stanli_stancjs/stanli_stancjs.bc.js \
       src/stanli_stancjs/stanli_compiler_cli.exe
   )

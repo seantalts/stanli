@@ -61,8 +61,90 @@ env:
   PDB_SHA: 28f8d3d6e975315f42aa274a8399f21e07a43b30
 
 jobs:
+  # Keep the required workflow present on every PR, but distinguish changes
+  # whose only meaningful validation is the generated-document check. This is
+  # deliberately an allowlist: an unfamiliar path gets the full build.
+  changes:
+    name: classify changed files
+    runs-on: ubuntu-latest
+    outputs:
+      heavy: ${{ steps.scope.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the validation scope
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          heavy=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            changed_files="$RUNNER_TEMP/stanli-changed-files"
+            git diff --no-renames --name-only "$BASE_SHA" HEAD \
+              > "$changed_files"
+            heavy=false
+            while IFS= read -r path; do
+              case "$path" in
+                README.md|TESTING.md|CHANGELOG.md|THIRD_PARTY_LICENSES.md|LICENSE|docs/*.md|web/index.html)
+                  ;;
+                *)
+                  heavy=true
+                  ;;
+              esac
+            done < "$changed_files"
+          fi
+          echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
+
+  # This is intentionally independent of the compiled runtime. In particular,
+  # generated prose and the web index should not need a 30-minute C++ build to
+  # prove that their measured tables and markers are current.
+  static_checks:
+    name: static project checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: python3 -m pip install --disable-pip-version-check 'readme_renderer[md]'
+      - run: python3 tools/gen_docs.py --check
+      - name: Check static packaging inputs
+        run: test -s LICENSE && test -s THIRD_PARTY_LICENSES.md
+      - name: Check portable build parallelism
+        shell: bash
+        run: |
+          source tools/build_jobs.sh
+          test "$(_stanli_cap_jobs_by_memory 32 103079215104 4294967296)" = 24
+          test "$(_stanli_cap_jobs_by_memory 32 17179869184 6442450944)" = 2
+          test "$(_stanli_cap_jobs_by_memory 32 8589934592 6442450944)" = 1
+          test "$(_stanli_cap_jobs_by_memory 2 103079215104 4294967296)" = 2
+          test "$(_stanli_cap_jobs_by_memory 32 34359738368 12884901888)" = 2
+          test "$(_stanli_smaller_memory_limit \
+            17179869184 18446744073709551615)" = 17179869184
+          detected_jobs=$(tools/build_jobs.sh)
+          test "$detected_jobs" -ge 1
+          test "$detected_jobs" -le "$(getconf _NPROCESSORS_ONLN)"
+          echo "selected $detected_jobs jobs on this Linux runner"
+      - name: Check the browser modules' syntax
+        shell: bash
+        run: |
+          inline="$RUNNER_TEMP/stanli-index-inline.mjs"
+          sed -n '/^<script type="module">$/,/^<\/script>$/p' \
+            web/index.html | sed '1d;$d' > "$inline"
+          test -s "$inline"
+          node --check "$inline"
+          node --check web/index.mjs
+
   build:
-    name: ${{ matrix.plat }}
+    name: build (${{ matrix.plat }})
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     env:
@@ -89,17 +171,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The compiled objects from the last run on main. stan-math heavy
-      # translation units dominate the wall clock, and most pushes touch a
-      # handful of files, so a warm ccache turns an hour of compiling into
-      # minutes of cache hits. Keyed on the commit so every run saves a
-      # fresh cache; the prefix restore pulls the newest previous one.
+      - name: Fingerprint the C++ compiler
+        id: toolchain
+        shell: bash
+        run: |
+          if command -v sha256sum >/dev/null; then
+            fingerprint=$(c++ --version | sha256sum | cut -d' ' -f1)
+          else
+            fingerprint=$(c++ --version | shasum -a 256 | cut -d' ' -f1)
+          fi
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      # The compiled objects from the last compatible build. stan-math-heavy
+      # translation units dominate the wall clock. Keying on compile inputs
+      # instead of the commit lets a docs-only PR exact-hit main's cache and
+      # avoids writing another ~500 MB archive to the PR-only cache scope.
       - name: Restore the compiler cache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-${{ matrix.plat }}-${{ github.sha }}
-          restore-keys: ccache-${{ matrix.plat }}-
+          key: >-
+            ccache-${{ matrix.plat }}-release-v4-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+          restore-keys: ccache-${{ matrix.plat }}-release-v4-${{ steps.toolchain.outputs.id }}-
 
       - name: System packages (manylinux)
         if: matrix.container != ''
@@ -125,26 +218,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      # The pinned release binary, not install.sh: the installer prompts for
-      # its target directory and takes no positional argument, so it is not
-      # usable unattended. Same binary on all four platforms.
-      - name: opam ${{ env.OPAM_VERSION }}
-        run: |
-          url=https://github.com/ocaml/opam/releases/download
-          curl -fsSL -o /tmp/opam \
-            "$url/$OPAM_VERSION/opam-$OPAM_VERSION-${{ matrix.opam_arch }}"
-          chmod +x /tmp/opam
-          sudo install -m 755 /tmp/opam /usr/local/bin/opam 2>/dev/null ||
-            install -m 755 /tmp/opam /usr/local/bin/opam
-          opam --version
-
       - name: Build tooling
-        # readme_renderer is what PyPI itself renders the long
-        # description with, and tools/gen_docs.py --check uses it to
-        # prove the page's tables still come out as tables.
-        run: |
-          python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m pip install "readme_renderer[md]"
+        run: python3 -m pip install --upgrade pip setuptools wheel
 
 
       # Everything fetch.sh pulls is pinned by a git SHA, so these two source
@@ -159,7 +234,7 @@ jobs:
           path: |
             deps/math
             deps/stan
-          key: deps-${{ matrix.plat }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
 
       - name: Vendored dependencies
         run: |
@@ -189,6 +264,20 @@ jobs:
             deps/ocaml-include
           key: >-
             stanc-embed-v2-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+
+      # The pinned release binary, not install.sh: the installer prompts for
+      # its target directory and takes no positional argument, so it is not
+      # usable unattended. A warm artifact cache does not need opam at all.
+      - name: opam ${{ env.OPAM_VERSION }}
+        if: steps.stanc-cache.outputs.cache-hit != 'true'
+        run: |
+          url=https://github.com/ocaml/opam/releases/download
+          curl -fsSL -o /tmp/opam \
+            "$url/$OPAM_VERSION/opam-$OPAM_VERSION-${{ matrix.opam_arch }}"
+          chmod +x /tmp/opam
+          sudo install -m 755 /tmp/opam /usr/local/bin/opam 2>/dev/null ||
+            install -m 755 /tmp/opam /usr/local/bin/opam
+          opam --version
 
       - name: Build the embedded stanc3 object
         if: steps.stanc-cache.outputs.cache-hit != 'true'
@@ -233,6 +322,7 @@ jobs:
           # $PWD, not github.workspace: inside the manylinux containers the
           # workspace mounts at a different path than the expression gives.
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          ccache -z
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -261,7 +351,11 @@ jobs:
             # any. Qualify the number with the miss count so nobody
             # raises -j off a run that never ran the compiler.
             kb=$(awk '/[Mm]aximum resident/ {print $NF}' /tmp/build.err)
-            miss=$(ccache -s | awk '/^ *Misses:/ {print $2; exit}')
+            miss=$(ccache -s | awk '
+              tolower($0) ~ /misses:|cache miss/ {
+                for (i = 1; i <= NF; ++i)
+                  if ($i ~ /^[0-9]+$/) { print $i; exit }
+              }')
             echo "peak RSS $(( kb / 1024 )) MB on the largest single" \
                  "compile, over ${miss:-?} ccache misses" \
                  "$([ "${miss:-0}" -lt 20 ] && echo '(cached build:' \
@@ -272,7 +366,9 @@ jobs:
           ccache -s
 
       - name: Tests
-        run: ctest --test-dir build-rel --output-on-failure
+        run: >-
+          ctest --test-dir build-rel
+          --parallel ${{ matrix.build_jobs }} --output-on-failure
 
       # The models and data the corpus check reads: ~24 MB out of
       # posteriordb's 2 GB, via sparse checkout, cached on the pinned SHA.
@@ -354,10 +450,6 @@ jobs:
           name: mir-vectorization-measurements
           if-no-files-found: error
           path: build-rel/vectorize-ab
-
-      # The headline numbers in both READMEs are derived, not typed.
-      - name: Docs match the measured artifacts
-        run: python3 tools/gen_docs.py --check
 
       - name: Wheel
         run: ./tools/build_wheel.sh
@@ -720,6 +812,10 @@ jobs:
   # Linux-to-Windows recipe. Their provenance is checked before packaging.
   stanc-windows:
     name: cross-build Windows compilers
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -901,12 +997,19 @@ jobs:
             unzip
             curl
 
+      - name: Fingerprint the C++ compiler
+        id: toolchain
+        run: |
+          fingerprint=$(c++ --version | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
       - name: Restore the compiler cache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-win_amd64-${{ github.sha }}
-          restore-keys: ccache-win_amd64-
+          key: >-
+            ccache-win_amd64-ucrt64-release-v2-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+          restore-keys: ccache-win_amd64-ucrt64-release-v2-${{ steps.toolchain.outputs.id }}-
 
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
@@ -938,12 +1041,13 @@ jobs:
       - name: Configure, build, test
         run: |
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
           ccache -s
-          (cd build-rel && ctest --output-on-failure)
+          ctest --test-dir build-rel --parallel 4 --output-on-failure
 
       - name: Build the wheel
         run: |
@@ -1025,14 +1129,21 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Fingerprint the C++ compiler
+        id: toolchain
+        run: |
+          fingerprint=$(c++ --version | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
       - name: Restore the compiler cache
+        id: asan-cache
         uses: actions/cache/restore@v4
         with:
           # Its own key: these objects carry -fsanitize=address and must
           # never be handed to, or taken from, the wheel build's cache.
           path: .ccache
-          key: ccache-asan-${{ github.sha }}
-          restore-keys: ccache-asan-
+          key: >-
+            ccache-asan-gcc-o1-g1-v2-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+          restore-keys: ccache-asan-gcc-o1-g1-v2-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
       # Both fatal runs of this job died at the same place -- the density
@@ -1061,9 +1172,11 @@ jobs:
           sudo swapon /mnt/swapfile-asan
           swapon --show && free -h
       - name: Build with -fsanitize=address
+        id: asan_build
         run: |
           which ccache || sudo apt-get install -y ccache
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          ccache -z
           # -O1 -g1, and every number here was read off a failed run's
           # log rather than guessed. -O1: ASan's checks do not depend on
           # the optimizer, and gcc compiles the density shards several
@@ -1098,7 +1211,11 @@ jobs:
               du -sh /mnt/swapfile-asan /home/runner/work 2>/dev/null
               exit 1; }
           kb=$(awk '/[Mm]aximum resident/ {print $NF}' /tmp/build.err)
-          miss=$(ccache -s | awk '/^ *Misses:/ {print $2; exit}')
+          miss=$(ccache -s | awk '
+            tolower($0) ~ /misses:|cache miss/ {
+              for (i = 1; i <= NF; ++i)
+                if ($i ~ /^[0-9]+$/) { print $i; exit }
+            }')
           echo "ASan peak RSS $(( kb / 1024 )) MB on the largest single" \
                "compile, over ${miss:-?} ccache misses" \
                "$([ "${miss:-0}" -lt 20 ] && echo '(cached build:' \
@@ -1106,15 +1223,30 @@ jobs:
           free -h && swapon --show && df -h / /mnt
           du -sh build-asan
           ccache -s
-      # Save even when the build or tests fail: the cache is compile
-      # artifacts, not results, and the original save-on-success rule
-      # meant one reclaimed runner kept every later run cold forever.
-      - name: Save the compiler cache
-        if: always()
+      # A completed compile owns the canonical immutable key. Saving an
+      # interrupted cache there would freeze it as an exact hit forever.
+      - name: Save the complete compiler cache
+        if: >-
+          always() &&
+          steps.asan_build.outcome == 'success' &&
+          steps.asan-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: ccache-asan-${{ github.sha }}
+          key: ${{ steps.asan-cache.outputs.cache-primary-key }}
+      # Preserve partial progress under a unique fallback key. The next run
+      # restores it through restore-keys and, once complete, promotes its
+      # contents by saving the canonical key above.
+      - name: Save partial compiler progress
+        if: >-
+          always() &&
+          steps.asan_build.outcome == 'failure' &&
+          steps.asan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: >-
+            ${{ steps.asan-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
       - name: ctest
         run: ctest --test-dir build-asan --output-on-failure
         env:
@@ -1135,24 +1267,39 @@ jobs:
   # the Pages and release jobs below.
   wasm:
     name: wasm (browser build)
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: 6.0.6
+      - name: Fingerprint the Emscripten compiler
+        id: toolchain
+        run: |
+          fingerprint=$(em++ --version | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
       - name: Restore the compiler cache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-wasm-${{ github.sha }}
-          restore-keys: ccache-wasm-
+          # Keep this prefix disjoint from ccache-wasm-webr below. The old
+          # `ccache-wasm-` restore prefix also matched the newer webR cache,
+          # whose -fPIC objects cannot satisfy this browser build; after every
+          # main run a PR therefore restored the wrong ~500 MB cache first.
+          key: >-
+            ccache-wasm-browser-emsdk6.0.6-v2-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/tbb_stub.cpp', 'deps/fetch.sh') }}
+          restore-keys: ccache-wasm-browser-emsdk6.0.6-v2-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
       - name: Build stanli for WebAssembly
         run: |
           which ccache || sudo apt-get install -y ccache
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          ccache -z
           emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
@@ -1196,18 +1343,25 @@ jobs:
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: 4.0.8
+      - name: Fingerprint the Emscripten compiler
+        id: toolchain
+        run: |
+          fingerprint=$(em++ --version | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
       - name: Restore the compiler cache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-wasm-webr-${{ github.sha }}
-          restore-keys: ccache-wasm-webr-
+          key: >-
+            ccache-wasm-webr-emsdk4.0.8-side-v2-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/tbb_stub.cpp', 'deps/fetch.sh') }}
+          restore-keys: ccache-wasm-webr-emsdk4.0.8-side-v2-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
       - name: Build the side module
         run: |
           which ccache || sudo apt-get install -y ccache
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          ccache -z
           emcmake cmake -B build-wasm-side -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_WASM_SIDE=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -1252,6 +1406,10 @@ jobs:
   # stock stancjs is retained in the artifact as the legacy rollback path.
   browser-compiler:
     name: portable browser compiler
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1372,13 +1530,38 @@ jobs:
           name: browser-compiler-measurements
           path: /tmp/portable-mir-browser-measurements.txt
 
+  # Branch protection requires this exact check name. It follows the heavy
+  # manylinux build for source PRs and succeeds after the static checks for a
+  # docs-only PR; a failed or unexpectedly skipped heavy build still fails.
+  pr-gate:
+    name: manylinux_2_28_x86_64
+    if: always() && github.event_name == 'pull_request'
+    needs: [changes, static_checks, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the required validation path
+        env:
+          CHANGE_RESULT: ${{ needs.changes.result }}
+          STATIC_RESULT: ${{ needs.static_checks.result }}
+          HEAVY: ${{ needs.changes.outputs.heavy }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          test "$CHANGE_RESULT" = success
+          test "$STATIC_RESULT" = success
+          if [ "$HEAVY" = true ]; then
+            test "$BUILD_RESULT" = success
+          else
+            test "$HEAVY" = false
+            test "$BUILD_RESULT" = skipped
+          fi
+
   # The public demo: web/ plus the runtime and compiler artifacts, deployed
   # to GitHub Pages on every main push. The stanli compiler emits portable
   # MIR; stock stancjs remains beside it as the legacy rollback path.
   pages:
     name: deploy the browser demo
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [wasm, browser-compiler]
+    needs: [static_checks, wasm, browser-compiler]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1460,7 +1643,7 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       startsWith(github.ref, 'refs/tags/npm-v')
-    needs: [wasm, browser-compiler]
+    needs: [static_checks, wasm, browser-compiler]
     runs-on: ubuntu-latest
     environment: npm
     permissions:
@@ -1528,7 +1711,7 @@ jobs:
   # source R-universe follows.
   runtime-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, windows, wasm-webr]
+    needs: [static_checks, build, windows, wasm-webr]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # create the release and attach assets to it
@@ -1586,7 +1769,7 @@ jobs:
     # Tags only. PyPI versions can never be reused, so this must not fire
     # on a branch push.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, windows]
+    needs: [static_checks, build, windows]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

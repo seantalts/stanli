@@ -319,18 +319,32 @@ Or manually:
 
 ```
 ./deps/fetch.sh
+build_jobs=$(tools/build_jobs.sh)
 cmake -B build
-cmake --build build -j
-ctest --test-dir build
+cmake --build build --parallel "$build_jobs"
+ctest --test-dir build --parallel "$build_jobs"
 ```
+
+The helper caps parallelism by both CPU count and usable RAM. It budgets 4 GiB
+per concurrent Stan Math compile on macOS/Windows and 6 GiB elsewhere; Linux
+needs the wider margin for GCC's largest shards and honors container limits.
+Override the result with `STANLI_JOBS=12 ./tools/dev_setup.sh`, or raise the
+per-job budget for a heavier toolchain with `STANLI_JOB_MEMORY_GIB` (the local
+AddressSanitizer recipe uses 12 GiB).
+The measured scaling curve and CI baseline are in
+[docs/build-performance.md](docs/build-performance.md).
 
 ## Releasing
 
 `.github/workflows/wheels.yml` builds all five wheels (macOS arm64 and
 x86_64, manylinux_2_28 x86_64 and aarch64, Windows x86_64). Pull requests
-run the manylinux x86_64 build plus a compiler-only Windows gate that
+with source-affecting changes run the manylinux x86_64 build plus a
+compiler-only Windows gate that
 cross-builds and executes both compiler artifacts and byte-compares the
-portable producer with the JavaScript producer. All five full C++ platform
+portable producer with the JavaScript producer. Prose-only changes and the
+generated browser page take a static generated-document/JavaScript syntax
+path; the allowlist fails closed, so every unfamiliar path gets the full
+build. All five full C++ platform
 builds run after merge, nightly, and on release tags. The four Unix wheels
 link the cached embedded compiler; Windows packages `stanli-compile.exe` and
 the pristine `stanc.exe` rollback beside `stanli.dll`. Every wheel runs the

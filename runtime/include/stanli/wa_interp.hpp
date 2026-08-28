@@ -22,7 +22,6 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/mir.hpp>
-#include <stanli/mir_interp.hpp>
 
 #include <stan/services/util/create_rng.hpp>
 
@@ -34,6 +33,9 @@
 #include <vector>
 
 namespace stanli {
+
+template <typename T>
+class MirInterp;
 
 // The generated-quantities RNG stream. The CALLER owns it, because a
 // stream belongs to whoever is drawing rather than to the model: two

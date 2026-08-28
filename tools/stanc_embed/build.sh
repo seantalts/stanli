@@ -6,6 +6,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 source tools/stanc_embed/provenance.sh
+source tools/build_jobs.sh
+BUILD_JOBS=$(stanli_detect_build_jobs)
 SRC=${1:?stanc3 source dir}
 SWITCH=${2:-stanc3-55}
 STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
@@ -39,12 +41,16 @@ fi
 # Release profile: dune's dev profile links the inline-test and expect-test
 # runners into every library, which ride into the shipped binary for no
 # reason. Worth 364 KB of the final shared library.
-(cd "$SRC" && dune runtest --profile release src/stanc_embed)
-(cd "$SRC" && dune build --profile release src/stanc_embed/stanc_embed.exe.o \
-   2>&1 | tail -5 ||
- dune build --profile release src/stanc_embed 2>&1 | tail -5)
+(cd "$SRC" && dune runtest --jobs "$BUILD_JOBS" --profile release \
+   src/stanc_embed)
+if ! (cd "$SRC" && dune build --jobs "$BUILD_JOBS" --profile release \
+      src/stanc_embed/stanc_embed.exe.o 2>&1 | tail -5); then
+  (cd "$SRC" && dune build --jobs "$BUILD_JOBS" --profile release \
+    src/stanc_embed 2>&1 | tail -5)
+fi
 (cd "$SRC" &&
- dune build --profile release src/stanc_embed/stanli_vectorize_probe.exe)
+ dune build --jobs "$BUILD_JOBS" --profile release \
+   src/stanc_embed/stanli_vectorize_probe.exe)
 OBJ=$(find "$SRC/_build" -path '*/src/stanc_embed/stanc_embed*.o' | head -1)
 [ -n "$OBJ" ] && [ -f "$OBJ" ] || {
   echo "dune did not produce the embedded stanc object" >&2

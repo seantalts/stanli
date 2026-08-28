@@ -5,8 +5,11 @@
 #include <stanli/estimate.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/nuts.hpp>
+#include <stanli/optable.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
+
+#include "build_id.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -165,12 +168,7 @@ char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len) {
 
 void stanli_string_free(char* p) { std::free(p); }
 
-#ifndef STANLI_BUILD_ID
-// A build that did not go through this project's CMake still answers,
-// so a caller never has to special-case a missing id.
-#define STANLI_BUILD_ID "unknown"
-#endif
-const char* stanli_build_id(void) { return STANLI_BUILD_ID; }
+const char* stanli_build_id(void) { return stanli::runtime_build_id(); }
 
 int stanli_abi_version(void) { return STANLI_ABI_VERSION; }
 

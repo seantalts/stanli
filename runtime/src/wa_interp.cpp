@@ -1,5 +1,7 @@
 #include <stanli/wa_interp.hpp>
 
+#include <stanli/mir_interp.hpp>
+
 #include <stan/math.hpp>
 
 #include <Eigen/Dense>
