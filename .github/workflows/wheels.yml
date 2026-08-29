@@ -1476,8 +1476,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # setup-emsdk re-downloads the whole SDK on every run (measured 39-40 s
+      # in both Emscripten jobs). Its actions-cache-folder input only chooses
+      # WHERE the download lands -- nothing persists that folder on its own,
+      # so the action logged "No cached files found at path .../emsdk-cache"
+      # every time. This is the step that makes the input mean something.
+      #
+      # Worth knowing for anyone touching the ccache below: this also has the
+      # side effect of pinning WHERE emsdk is unpacked. Without it the SDK
+      # lands in $RUNNER_TEMP/<uuid>/emsdk-main, a fresh uuid per run, and
+      # emcc bakes that path into the -isystem flags of every compile.
+      - name: Cache the emsdk download
+        uses: actions/cache@v4
+        with:
+          path: emsdk-cache
+          key: emsdk-${{ runner.os }}-${{ runner.arch }}-6.0.6-v1
       - uses: mymindstorm/setup-emsdk@v14
         with:
+          actions-cache-folder: emsdk-cache
           version: 6.0.6
       - name: Fingerprint the Emscripten compiler
         id: toolchain
@@ -1542,8 +1558,24 @@ jobs:
         with:
           name: browser-compilers
           path: browser-compilers
+      # setup-emsdk re-downloads the whole SDK on every run (measured 39-40 s
+      # in both Emscripten jobs). Its actions-cache-folder input only chooses
+      # WHERE the download lands -- nothing persists that folder on its own,
+      # so the action logged "No cached files found at path .../emsdk-cache"
+      # every time. This is the step that makes the input mean something.
+      #
+      # Worth knowing for anyone touching the ccache below: this also has the
+      # side effect of pinning WHERE emsdk is unpacked. Without it the SDK
+      # lands in $RUNNER_TEMP/<uuid>/emsdk-main, a fresh uuid per run, and
+      # emcc bakes that path into the -isystem flags of every compile.
+      - name: Cache the emsdk download
+        uses: actions/cache@v4
+        with:
+          path: emsdk-cache
+          key: emsdk-${{ runner.os }}-${{ runner.arch }}-4.0.8-v1
       - uses: mymindstorm/setup-emsdk@v14
         with:
+          actions-cache-folder: emsdk-cache
           version: 4.0.8
       - name: Fingerprint the Emscripten compiler
         id: toolchain
