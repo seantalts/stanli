@@ -1,198 +1,363 @@
-# Distribution coverage
+# Probability-function coverage
 
-What stanli lowers, what it does not, and why. Counts are against
-`stanc --dump-stan-math-signatures`, so they track what the Stan
-language actually offers; `harnesses/fn_sweep.py` checks each function
-against CmdStan with a generated single-function model.
+## Abstract
 
-| family | supported |
-|---|---|
-| densities (`_lpdf`, `_lpmf`) | 71 / 72 |
-| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 105 / 105 |
-| scalar math (all-real signature) | 94 / 100 |
+stanli implements most Stan probability functions, common scalar math
+functions, and the parameter transforms listed below, but not every Stan Math
+overload.
 
-All three rows come from the same place and mean the same thing: a
-function name counts as supported when the nightly conformance sweep
-reports no `unexpected_unsupported` row for it, over the whole signature
-space rather than one probe per name. The scalar-math family is the
-distinct names in `stanc --dump-stan-math-signatures` whose arguments and
-result are all `real` and whose name carries no distribution suffix.
+In the pinned stanc inventory, 71 of 72 density names, all 105
+`_cdf`/`_lcdf`/`_lccdf` names, and 94 of 100 scalar-math names have no
+`unexpected_unsupported` signature. These are name-level regression counts,
+not counts of fully implemented functions. The classic five-argument
+`wiener_lpdf` is implemented, for example, but its extended overloads are not.
+`gaussian_dlm_obs_lpdf` has no verified overload, yet does not reduce the 71/72
+count because its cases remain generator gaps.
 
-This used to be three numbers from two different tools with the
-definition living in whoever last measured it -- the scalar-math row read
-`47 / 129` against no invocation that reproduced either half. It is worth
-regenerating them from a green nightly rather than trusting them:
+stanli refuses unsupported forms rather than substituting an approximation.
+For applicable generated cases, the conformance harness compares the log
+density and full unconstrained gradient with CmdStan at three deterministic
+parameter points. The usual limit is 10 units in the last place (ULP).
+Documented exceptions use a function-specific absolute or relative tolerance.
 
-```sh
-python3 - <<'EOF'
-import json, re, collections
-r = json.load(open("conformance-aggregate/conformance.json"))
-seen = collections.defaultdict(set)
-for row in r["results"]:
-    m = re.match(r"signature:([A-Za-z_0-9]+)\(", row["case_id"])
-    if m:
-        seen[m.group(1)].add(row["status"])
-def tally(pred):
-    names = [n for n in seen if pred(n)]
-    return sum("unexpected_unsupported" not in seen[n] for n in names), len(names)
-print(tally(lambda n: n.endswith(("_lpdf", "_lpmf"))))
-EOF
-```
+This page covers probability functions, real-valued scalar math, parameter
+transforms, truncation, censored likelihood terms, `print`, and `reject`. It is
+not a complete language-coverage table. See [model coverage](corpus-status.md),
+[language-construct coverage](../tests/stanc3/README.md), and
+[the test-oracle description](../TESTING.md) for those scopes.
 
-What is left in scalar math is six names: `hypergeometric_1F0`,
-`hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`, and the two
-`wiener_*_unnorm` forms.
+## Coverage at a glance
 
-Every supported density's **gradients** match CmdStan bitwise, at three
-evaluation points. That is the standard here: a density whose gradients
-merely agree to 1e-12 is a bug report, not a feature.
+The checked-in classification baseline was produced with
+`stanc3 v2.39.0-76-gac69570 (Unix)`. The current embedded-compiler pin is a
+newer revision (`5b824ee`), but its signature dump has the same hash: 24,246
+Stan Math signatures. The baseline also contains 31 language-construct cases.
+A new full run is still needed to refresh the compiler metadata recorded in the
+baseline.
 
-`lp__` is bitwise too for everything models commonly use. It is not for
-the multivariate and multinomial tail, which is built the compact way:
-one instantiation instead of `2^N`, so `lp__` comes out a per-model
-constant higher while every gradient stays exact. See
-[docs/compact-densities.md](compact-densities.md).
+| family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| densities (`_lpdf`, `_lpmf`) | 71 / 72 | 3,852 | 6 | 170 | 9 |
+| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 105 / 105 | 8,068 | 0 | 0 | 24 |
+| scalar math | 94 / 100 | 89 | 6 | 0 | 5 |
 
-Adding a function is one line in an X-macro list in
-`runtime/include/stanli/optable.hpp`; see `docs/hacking.md`.
+The name metric counts names with no `unexpected_unsupported` signature; the
+four status columns count signatures. For densities and distribution
+functions, those columns cover every inventory signature. For scalar math,
+they cover only the 100 qualifying all-real signatures. The scalar name metric
+still checks every inventory signature attached to each qualifying name.
 
-## Three ways in, cheapest first
+The scalar-math row counts a name if it has a signature with one to five
+`real` arguments and a `real` result. It excludes densities, distribution
+functions, RNGs, and quantiles (`_qf` and `_log_qf`). The six missing names
+are listed under [known unsupported forms](#known-unsupported-forms).
+`student_t_qf` is also not implemented, but quantiles are outside this metric.
 
-Not every density needs a kernel.
+### How to read the classifications
 
-**1. Rewrite, when the rewrite is exact.** A rewrite must preserve checks as
-well as the returned value. In particular, CmdStan checks an all-data
-`foo_lpdf<propto=true>` call before dropping its constant term. Stanli
-therefore refuses the propto forms of `hypergeometric` and
-`discrete_range` until it can execute their support checks; their normalized,
-all-data function calls can still constant-fold exactly. A rewrite that
-changes arithmetic does not belong here: `multi_normal_prec(y | mu, P)` equals
-`multi_normal(y | mu, inverse(P))` mathematically, but the inverse
-costs K^3 per evaluation and stops matching CmdStan bitwise. The kernel
-was fifteen lines.
+A name may have many signatures for scalar, vector, array, and matrix argument
+shapes. Each signature receives one status:
 
-**2. Clone, when a signature already exists.** `multi_normal_prec`
-takes the same argument shapes as `multi_normal`; `lkj_corr` the same
-as `lkj_corr_cholesky`. Both were one template parameter on an existing
-kernel. The remaining pairs (`wishart`/`inv_wishart`,
-`multi_gp`/`multi_gp_cholesky`, `multi_student_t`/its cholesky form)
-are clones of each other, so the first of each pair pays for two.
+| status | meaning |
+| --- | --- |
+| `verified` | CmdStan and stanli evaluated the generated case and passed its numerical gate. |
+| `unexpected_unsupported` | CmdStan accepted the case and stanli rejected it; this is an implementation backlog item. |
+| `generator_gap` | The harness cannot yet generate a valid differential case; this is not evidence of support. |
+| `inapplicable` | The harness has no unconstrained real input to vary, or the function has a zero Stan gradient. |
+| `expected_unsupported` | A reviewed boundary, currently complex values and tuple-valued results. |
 
-**3. Write the kernel.** The var-tape-replay pattern is correct by
-construction and needs no hand-written derivative: build a nested tape,
-call stan-math, `grad()` it. Only the shape plumbing is bespoke, and
-the shared helpers (`tail_m`, `tail_v`, `tail_scatter_*` in
-`runtime/kernels/matrix_fns.cpp`) reduce each kernel to about twenty
-lines. Unlike the recorder, this tier has no restriction on what the
-density does with its scalar type: `ordered_probit` and `wiener` use
-operators `rvar` deliberately lacks, and both work on a var tape. So do
-the five distribution functions that build their result with arithmetic
-on the scalar -- `von_mises_cdf`, `von_mises_lcdf`, `von_mises_lccdf`
-(`res *= 0.0`) and `neg_binomial_2_lcdf`, `neg_binomial_2_lccdf`
-(`phi / (phi + mu)`). Whether a distribution function needs this tier is
-mechanical rather than a judgement: `grep -c operands_and_partials` on
-its prim header is 2 for everything the recorder takes and 0 for these
-five. The price is a nested tape per gradient call, so they are slower
-than a listed cdf by roughly the cost of building and sweeping that
-tape. These
-kernels are **compact** (one instantiation, every argument bound as
-autodiff), so `lp__` carries a per-model constant while gradients stay
-exact; [docs/compact-densities.md](compact-densities.md) is the
-contract.
+A name fails the name-level metric only when at least one signature is
+`unexpected_unsupported`. Generator gaps and inapplicable signatures do not
+reduce the count. The metric detects regressions against the baseline, but the
+unsupported list below is needed to interpret it.
 
-## What is left
+## Numerical agreement
 
-**`hypergeometric` and `discrete_range` propto forms.** Their values are
-constant zero, but Stan Math performs support checks first. Until Stanli has
-an exact checked implementation, lowering refuses rather than silently
-accepting invalid data.
+The nightly conformance run provides the broadest numerical check. For each
+applicable generated signature, it builds equivalent CmdStan and stanli models,
+evaluates three deterministic parameter points, and compares:
 
-**`discrete_range`'s three.** Integers all the way down, so there is no
-real edge for a kernel to differentiate and no layout for one yet.
+- the log density;
+- every component of the unconstrained gradient;
+- whether either implementation rejects the point.
 
-**`gaussian_dlm_obs`.** It is unsupported for a structural reason: it takes
-seven arguments and `Op::in` holds six. Raising the limit would grow every
-`Op` and `KernelCtx` in every model for one density, so the lowering refuses
-and says why.
+The default gate is 10 ULP. Function-specific policies apply when ULP is the
+wrong scale. For example, the Wiener first-passage density allows `1e-12`
+relative error for near-zero gradient components that vary with container
+instantiation and compiler optimization. The focused `fn_sweep.py` developer
+check uses a 2 ULP limit. Some unit tests require exact equality when both
+sides intentionally use the same Stan Math path, but exact equality is not the
+general coverage criterion.
 
-**Vector `alpha` in the GLMs.** `bernoulli_logit_glm`,
-`poisson_log_glm` and `neg_binomial_2_log_glm` take the intercept as a
-scalar; stan-math also allows a per-row vector, and the kernels refuse
-that form by name.
+Most common densities use the same activity mask as generated Stan, so both
+retain or remove the same log-density constants. Some less common densities
+use a compact kernel that treats every argument as active. For these kernels,
+gradient agreement is the primary contract, and `lp__` may differ by a
+parameter-independent offset. The offset may have either sign and matters when
+an absolute log density is required. It does not affect Hamiltonian dynamics
+or Metropolis acceptance ratios within one model. See
+[compact densities](compact-densities.md).
 
-**A scalar outcome in those same three GLMs.** `y ~ poisson_log_glm(x, ...)`
-wants one outcome per row of `x`; stan-math also accepts a single `int` and
-broadcasts it, and the lowering refuses that form by name. The three share
-one integer-group layout and one length check, so they are refused together,
-and `poisson_log_glm` is why the check is a refusal rather than a
-replication: its non-`propto` form subtracts `lgamma(y + 1)` once for a
-scalar and once per row for an array -- on four rows of `y = 3`, -4.98
-against -10.36, with identical gradients -- so replicating would buy the
-right gradient and an lp a constant off CmdStan's. `bernoulli_logit_glm` and
-`neg_binomial_2_log_glm` were measured and do not have that problem; they are
-refused for uniformity, and either could be replicated if a model wanted it.
-`binomial_logit_glm` and `categorical_logit_glm` do replicate, and are
-checked to: for those two the scalar and array calls agree bitwise in both
-`propto` forms.
+## Known unsupported forms
+
+The headline ratios hide several important gaps:
+
+- **Extended `wiener_lpdf`:** the classic five-argument form is implemented;
+  six- through nine-argument forms are refused. The kernel and lowering layout
+  have five inputs. The pinned inventory contains six unexpected-unsupported
+  extended signatures and two generator gaps.
+- **`gaussian_dlm_obs_lpdf`:** all calls are refused. The function takes seven
+  arguments, but each graph operation stores at most six input slots. Its two
+  inventory rows are generator gaps, so the 71/72 metric does not show this
+  gap.
+- **`discrete_range_cdf`, `discrete_range_lcdf`, and
+  `discrete_range_lccdf`:** these are not lowered onto the log-density graph.
+  All inputs are integers, so the probability-kernel layout has no
+  differentiable real edge. The harness marks all 24 signatures inapplicable,
+  not unsupported.
+- **All-data `propto=true` forms of `hypergeometric_lpmf` and
+  `discrete_range_lpmf`:** these are refused. Their normalized all-data calls
+  can run once during model preparation. Stan Math checks support before
+  dropping the constant value; returning zero without those checks would
+  accept invalid data.
+- **Missing scalar math:** all-real scalar calls to `hypergeometric_1F0`,
+  `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`,
+  `wiener_lcdf_unnorm`, and `wiener_lccdf_unnorm` are refused because no graph
+  operation is registered.
+- **`student_t_qf`:** this quantile is refused and lies outside the scalar-math
+  count. It has no graph operation.
+- **Complex values:** complex arguments or results are refused by policy. The
+  graph represents real and integer values, not complex values.
+- **Tuple results:** tuple-valued results are refused by policy. The graph
+  cannot yet represent or destructure tuples.
+
+### GLM argument-shape gaps
+
+Three GLMs share two argument-shape restrictions:
+
+- `bernoulli_logit_glm_lpmf`, `poisson_log_glm_lpmf`, and
+  `neg_binomial_2_log_glm_lpmf` accept a scalar intercept `alpha`, but not a
+  per-row vector intercept.
+- The same three functions require one outcome per row of the design matrix.
+  They refuse Stan Math's scalar-outcome broadcast.
+
+Copying a scalar outcome into an array is not always equivalent. For four rows
+with `y = 3`, the normalized scalar and replicated-array forms of
+`poisson_log_glm_lpmf` have identical gradients but differ by
+
+\[
+3\,\log\Gamma(4) = 5.375278407684165.
+\]
+
+The difference is parameter-independent, but the absolute log density would no
+longer match generated Stan. stanli therefore refuses this form.
+`binomial_logit_glm_lpmf` and `categorical_logit_glm_lpmf` use separate
+layouts and are not covered by the refusal.
 
 ## Parameter transforms
 
-All of them, every one bitwise against CmdStan:
+The runtime supports the parameter declarations below. Here, `n` is the number
+of scalar elements before any structure-specific reduction.
 
-| transform | unconstrained size |
-|---|---|
-| `lower`, `upper`, `lower, upper` | n |
-| `offset`, `multiplier`, `offset, multiplier` | n |
-| `simplex[K]` | K-1 |
-| `sum_to_zero_vector[K]` | K-1 |
-| `unit_vector[K]` | K |
-| `ordered[K]`, `positive_ordered[K]` | K |
-| `corr_matrix[K]` | K(K-1)/2 |
-| `cov_matrix[K]` | K(K+1)/2 |
-| `cholesky_factor_corr[K]` | K(K-1)/2 |
-| `cholesky_factor_cov[M, N]` | N(N+1)/2 + (M-N)N |
+| declaration or transform | unconstrained size per value |
+| --- | ---: |
+| unconstrained scalar, vector, row vector, or matrix | `n` |
+| `lower`, `upper`, or `lower, upper` | `n` |
+| `offset`, `multiplier`, or both | `n` |
+| `simplex[K]` | `K - 1` |
+| `sum_to_zero_vector[K]` | `K - 1` |
+| `sum_to_zero_matrix[M, N]` | `(M - 1)(N - 1)` |
+| `unit_vector[K]` | `K` |
+| `ordered[K]`, `positive_ordered[K]` | `K` |
+| `corr_matrix[K]` | `K(K - 1) / 2` |
+| `cov_matrix[K]` | `K(K + 1) / 2` |
+| `cholesky_factor_corr[K]` | `K(K - 1) / 2` |
+| `cholesky_factor_cov[M, N]` | `N(N + 1) / 2 + (M - N)N` |
 
-`offset`/`multiplier` matters most in practice: it is how a modern
-model writes a non-centered parameterization, and its offset and
-multiplier may themselves be parameters, scalar or per-element.
-`corr_matrix` and `cholesky_factor_cov` are what let `lkj_corr` and the
-wisharts be *declared* rather than reached through a transformed
-parameter.
+Arrays of structured parameters are supported. Multiply the per-value size by
+the number of array elements. Compatible offset and multiplier expressions may
+be data or parameters, and may be scalar or per-element containers.
 
-`harnesses/transform_sweep.py deps/cmdstan` is the oracle: one model
-per transform against a CmdStan build at three deterministic points. It
-needs a CmdStan checkout, so CI runs `tests/test_newtrans.cpp` instead,
-which checks the unconstrained size, the gradient against central
-finite differences, and each transform's defining property.
+`harnesses/transform_sweep.py` covers 30 representative declarations. Its
+generated target reads every constrained component. At three attempted points,
+the sweep compares the unconstrained size, total log density (including the
+target expression and declaration Jacobian), full gradient, and mutual
+rejection with CmdStan. Numeric comparisons use a 2 ULP gate. CI separately
+checks representative sizes, central finite-difference gradients, and selected
+constraint properties. This is not an inventory of every legal array shape or
+dimension expression.
 
-## reject and print
+## Truncation and censored likelihoods
 
-Both supported, in both places they can appear
-(`tests/test_rejectprint.cpp`). `reject` throws `std::domain_error`,
-the same exception CmdStan's generated code throws, so the sampler
-counts a rejected proposal rather than a failed run; `print` writes to
-stdout. In `transformed data` the statement runs at lowering time, so a
-taken `reject` fails the compile, which is CmdStan failing to construct
-the model. In the model block it lowers to an op and throws during the
-forward sweep.
+Stan's `T[lower, upper]` syntax means truncation, not censoring. Stanc rewrites
+a two-sided truncated sampling statement as a proportional density, a
+normalization term, and support checks on the variate. For a continuous
+distribution, the main target contribution is:
 
-Still missing: `reject` under a condition on a *parameter*, because
-`lower.cpp` refuses boolean operators on parameters. That is the same
-gap as parameter-dependent control flow generally; the register program
-already has the branch instructions.
-
-## Truncation and censoring
-
-Supported. `y ~ foo(...) T[l, u]` is rewritten by stanc3 into the
-density minus `log_diff_exp` of the bounds' `lcdf`s, and both pieces
-are in. Gradients are bitwise against CmdStan; `lp__` is 1 ULP off
-because the rewrite accumulates in a different order than CmdStan's
-`lp_accum__`. `tests/fixtures/trunc.stan` guards this in CI.
-
-## Checking this yourself
-
+```stan
+target += normal_lupdf(y | mu, sigma);
+target -= log_diff_exp(normal_lcdf(upper | mu, sigma),
+                       normal_lcdf(lower | mu, sigma));
 ```
-harnesses/fn_sweep.py deps/cmdstan            # what we claim, bitwise
-harnesses/fn_sweep.py deps/cmdstan --missing  # and the gap
-harnesses/fn_sweep.py deps/cmdstan --from-stanc   # every scalar signature stanc knows
+
+stanli supports the scalar and vectorized normal-truncation forms in
+`tests/fixtures/trunc.stan` and `tests/fixtures/truncvec.stan`. CI compares
+them with an in-process Stan Math reverse-mode reference. The focused tests
+require exact gradients and allow a small log-density rounding tolerance. A
+manual CmdStan comparison found a 1 ULP log-density difference for the scalar
+fixture and no difference for the vector fixture.
+
+Truncation coverage is not complete. In the nightly case where the truncated
+variate is a parameter, stanli reaches an unsupported parameter-dependent
+support check. The case is `unexpected_unsupported`.
+
+Censoring is written explicitly in Stan. These are the usual contributions:
+
+```stan
+target += normal_lcdf(limit | mu, sigma);   // left-censored
+target += normal_lccdf(limit | mu, sigma);  // right-censored
+target += log_diff_exp(normal_lcdf(upper | mu, sigma),
+                       normal_lcdf(lower | mu, sigma));  // interval-censored
 ```
+
+These terms work when stanli supports the CDF functions and surrounding
+control flow. The runtime has no separate censoring operator.
+
+## `print`, `reject`, and parameter-dependent control
+
+`print` and `reject` work in transformed data and ordinary graph-lowered model
+statements, within the current message-layout limits.
+
+- Transformed-data statements run during model preparation. A taken `reject`
+  prevents the model from being constructed.
+- Model-block statements run during evaluation. `reject` throws
+  `std::domain_error`, which the sampler treats as a rejected proposal.
+- `print` sends one rendered line to a configurable message sink. The default
+  sink writes to standard output.
+
+Graph-lowered messages support at most six interpolated values. Focused tests
+cover scalar and flat-vector formatting; nested-container and matrix formatting
+is not yet equivalent to CmdStan.
+
+Runtime regions implement parameter-dependent `if` and ternary expressions.
+`for` loops with load-time bounds are unrolled; `break` and `continue` inside
+parameter-dependent branches become runtime jumps. A `while` loop works only
+when its condition can be evaluated during region construction on every
+iteration. Sampling syntax (`~`) and vectorized density calls inside a
+parameter-dependent region are refused; explicit scalar
+`target += foo_lpdf(...)` calls work when the function is in the region's
+supported instruction set.
+
+stanli also refuses a `print` or `reject` inside a replayed
+parameter-dependent region because reverse-mode replay could execute it twice.
+Broad conformance cases for parameter-dependent control and effects remain
+`unexpected_unsupported`; focused fixtures cover the implemented forms.
+
+## Appendix: how functions enter the runtime
+
+There are three main implementation paths:
+
+1. **Exact decomposition.** Lower the call to existing graph operations only
+   when the decomposition preserves the returned value, validation checks, and
+   Stan's `propto` behavior.
+2. **Existing kernel layout.** Reuse an argument and derivative layout when the
+   new function has the same shapes and activity rules as an implemented one.
+3. **Precompiled Stan Math kernel.** Call the original Stan Math template from
+   a runtime operation. Common functions can record their partial derivatives
+   into operation scratch space. Functions that do arithmetic on autodiff
+   scalars may use a nested Stan Math tape inside the operation.
+
+The third path preserves coverage but retains some dynamic allocation and tape
+cost. Adding a function is one X-macro entry only when an existing layout fits;
+novel argument layouts, matrix-valued arguments, unusual validation, or nested
+autodiff may require explicit lowering and kernel code. See
+[the contributor guide](hacking.md) for the source-level details.
+
+## Reproduce the coverage summary
+
+The checked-in baseline records each pinned signature's classification, but
+not the numerical deviations from the run that produced it. This script
+reproduces the three name-level rows above:
+
+```sh
+python3 - <<'PY'
+import collections
+import gzip
+import json
+import re
+
+with gzip.open("docs/conformance-baseline.json.gz", "rt") as handle:
+    rows = json.load(handle)["classifications"]
+
+by_name = collections.defaultdict(list)
+for signature, result in rows.items():
+    name = signature.split("(", 1)[0]
+    by_name[name].append((signature, result["status"]))
+
+def tally(names):
+    names = sorted(names)
+    covered = sum(
+        all(status != "unexpected_unsupported" for _, status in by_name[name])
+        for name in names
+    )
+    return covered, len(names)
+
+densities = {
+    name for name in by_name if name.endswith(("_lpdf", "_lpmf"))
+}
+cdfs = {
+    name for name in by_name if name.endswith(("_cdf", "_lcdf", "_lccdf"))
+}
+
+excluded = (
+    "_lpdf", "_lpmf", "_rng", "_cdf", "_lcdf", "_lccdf", "_qf", "_log_qf"
+)
+scalar_math = set()
+pattern = re.compile(r"^([A-Za-z_][A-Za-z_0-9]*)\((.*?)\)=>(.*)$")
+for signature in rows:
+    match = pattern.match(signature)
+    if not match:
+        continue
+    name, arguments, result = match.groups()
+    argument_types = arguments.split(",") if arguments else []
+    if (
+        result == "real"
+        and 1 <= len(argument_types) <= 5
+        and all(argument == "real" for argument in argument_types)
+        and not name.endswith(excluded)
+    ):
+        scalar_math.add(name)
+
+print("densities", tally(densities))
+print("distribution functions", tally(cdfs))
+print("scalar math", tally(scalar_math))
+PY
+```
+
+Expected output for the current baseline:
+
+```text
+densities (71, 72)
+distribution functions (105, 105)
+scalar math (94, 100)
+```
+
+The full differential run is `harnesses/stan_conformance.py`; setup, slicing,
+artifact layout, gates, and snapshot updates are documented in
+[the conformance harness README](../harnesses/conformance/README.md). For a
+smaller developer check:
+
+```sh
+python3 harnesses/fn_sweep.py deps/cmdstan
+python3 harnesses/fn_sweep.py deps/cmdstan --from-stanc
+python3 harnesses/transform_sweep.py deps/cmdstan
+```
+
+- The first command runs a curated scalar probability-function smoke test.
+- The second selects one all-real scalar signature per eligible stanc name,
+  with at most five arguments. It includes quantiles: 103 names in the current
+  inventory, rather than the 100-name scalar-math set above. It is not an
+  overload-complete sweep.
+- The third runs the representative parameter-transform sweep described above.
+
+The first two commands use a 2 ULP limit.
