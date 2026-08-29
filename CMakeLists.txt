@@ -520,20 +520,20 @@ endif()
 
 if(NOT EMSCRIPTEN)
 enable_testing()
-# Test translation units compile at -O0. They are assertion scaffolding, not
-# shipped code: the runtime they exercise is still the -O3 library, and only
-# the test's own driver code and the stan-math reference expressions inlined
-# beside it change. Results do not: -ffp-contract=off is pinned above, nothing
-# here enables fast-math, and IEEE semantics are the same at every -O level --
-# which the suite verifies for itself, since its assertions are bitwise.
+# One precompiled header for the test targets, built once and reused.
 #
 # The reason to care is CI, not this machine. ccache carries a 92-100% hit
 # rate on an ordinary pull request, so CI compiles almost nothing and the
-# build step costs 20 s. The expensive case is a change to a widely included
-# header: stanli/graph.hpp reaches 99 of the 154 objects and turns the step
-# into a 21-minute cold build, of which the test translation units are about
-# 37%. Measured at -O3 against -O0: test_lower 30.2 s -> 13.1 s,
-# test_densities 9.7 s -> 5.8 s.
+# build step costs 20 s -- configure, 154 cache hits and all 67 links
+# together. The expensive case is a change to a widely included header:
+# stanli/graph.hpp reaches 99 of the 154 objects and turns that step into a
+# 21-minute near-cold build, of which the test translation units are about
+# 37%. Roughly 3.6 s of every test TU is re-reading <stan/math.hpp>, 56
+# times over, and this is what stops paying for that 56 times.
+#
+# Measured on a clean Release build at -j24: test-side compile 366.5 ->
+# 299.8 CPU-seconds, whole build 996 -> 885.
+#
 # One precompiled header, built once and reused by every test target.
 # Per-target is what CMake does by default and it is a LOSS: 56 targets each
 # built their own copy for 280 CPU-seconds to save about 1.4 s per test, so
@@ -549,25 +549,15 @@ enable_testing()
 set(STANLI_TEST_PCH <stanli/recorder.hpp> <stan/math.hpp>)
 
 function(stanli_test_tu_optimization NAME)
-  target_compile_options(${NAME} PRIVATE -O0)
   target_precompile_headers(${NAME} REUSE_FROM stanli_test_pch)
 endfunction()
 
-# test_capi gets the -O0 half and NOT the precompiled header. It is the one
-# test that does not include stan-math -- it goes through the C ABI, and
-# linking against libstanli.dylib without the TBB stub is the point -- so
-# force-including <stan/math.hpp> pulls in TBB's task_scheduler_observer and
-# the link fails on symbols the shipped library correctly does not export.
-function(stanli_test_tu_optimization_no_pch NAME)
-  target_compile_options(${NAME} PRIVATE -O0)
-endfunction()
 
 # The target that owns the shared precompiled header. It exists only to
 # produce the .pch; REUSE_FROM requires a real target with the same compile
-# flags as its consumers, which is why it links stanli and takes -O0 too.
+# flags as its consumers, which is why it links stanli the way they do.
 add_library(stanli_test_pch OBJECT tests/pch_anchor.cpp)
 target_link_libraries(stanli_test_pch PRIVATE stanli)
-target_compile_options(stanli_test_pch PRIVATE -O0)
 target_precompile_headers(stanli_test_pch PRIVATE ${STANLI_TEST_PCH})
 
 # Single-threaded tests stub the one TBB symbol stan-math's rev core needs.
@@ -681,9 +671,14 @@ endforeach()
 
 # The C ABI lives only in the shared library. Test it through that shipped
 # boundary rather than compiling capi.cpp into the C++ unit-test library.
+# Deliberately without the shared precompiled header. test_capi is the one
+# test that does not include stan-math: it goes through the C ABI and links
+# libstanli without the TBB stub, which is the point of testing that
+# boundary. Force-including <stan/math.hpp> pulls in TBB's
+# task_scheduler_observer and the link fails on symbols the shipped library
+# correctly does not export.
 add_executable(test_capi tests/test_capi.cpp)
 target_link_libraries(test_capi PRIVATE stanli_shared)
-stanli_test_tu_optimization_no_pch(test_capi)
 add_test(NAME test_capi COMMAND test_capi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
