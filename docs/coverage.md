@@ -30,10 +30,11 @@ not a complete language-coverage table. See [model coverage](corpus-status.md),
 
 The checked-in classification baseline was produced with
 `stanc3 v2.39.0-76-gac69570 (Unix)`. The current embedded-compiler pin is a
-newer revision (`5b824ee`), but its signature dump has the same hash: 24,246
-Stan Math signatures. The baseline also contains 31 language-construct cases.
-A new full run is still needed to refresh the compiler metadata recorded in the
-baseline.
+newer revision (`5b824ee`), but its signature dump has the same SHA-256
+(`7ae665c2d1ea5f49084cb3d4b5eff41791d4a465cedd5728519c9782d2fe77a1`)
+and contains the same 24,246 Stan Math signatures. The baseline also contains
+31 language-construct cases. A new full run is still needed to refresh the
+compiler metadata recorded in the baseline.
 
 | family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -63,8 +64,11 @@ shapes. Each signature receives one status:
 | `verified` | CmdStan and stanli evaluated the generated case and passed its numerical gate. |
 | `unexpected_unsupported` | CmdStan accepted the case and stanli rejected it; this is an implementation backlog item. |
 | `generator_gap` | The harness cannot yet generate a valid differential case; this is not evidence of support. |
-| `inapplicable` | The harness has no unconstrained real input to vary, or the function has a zero Stan gradient. |
+| `inapplicable` | No gradient comparison applies, for example because a case is RNG-only, has no real input or result, or has a zero Stan gradient. |
 | `expected_unsupported` | A reviewed boundary, currently complex values and tuple-valued results. |
+| `mismatch` | Both implementations answered, but their results failed the numerical or semantic gate. |
+| `crashed` | The stanli worker died before returning a result. |
+| `harness_error` | The harness could not construct or compare the case. |
 
 A name fails the name-level metric only when at least one signature is
 `unexpected_unsupported`. Generator gaps and inapplicable signatures do not
@@ -82,12 +86,12 @@ evaluates three deterministic parameter points, and compares:
 - whether either implementation rejects the point.
 
 The default gate is 10 ULP. Function-specific policies apply when ULP is the
-wrong scale. For example, the Wiener first-passage density allows `1e-12`
-relative error for near-zero gradient components that vary with container
-instantiation and compiler optimization. The focused `fn_sweep.py` developer
-check uses a 2 ULP limit. Some unit tests require exact equality when both
-sides intentionally use the same Stan Math path, but exact equality is not the
-general coverage criterion.
+wrong scale. For `wiener_lpdf`, a name-wide `1e-12` relative gate applies to
+the log density and every gradient component. It was introduced for near-zero
+gradient lanes that vary with container instantiation and compiler
+optimization. The focused `fn_sweep.py` developer check uses a 2 ULP limit.
+Some unit tests require exact equality when both sides intentionally use the
+same Stan Math path, but exact equality is not the general coverage criterion.
 
 Most common densities use the same activity mask as generated Stan, so both
 retain or remove the same log-density constants. Some less common densities
@@ -344,20 +348,18 @@ scalar math (94, 100)
 
 The full differential run is `harnesses/stan_conformance.py`; setup, slicing,
 artifact layout, gates, and snapshot updates are documented in
-[the conformance harness README](../harnesses/conformance/README.md). For a
-smaller developer check:
+[the conformance harness README](../harnesses/conformance/README.md). After
+`tools/dev_setup.sh --conformance`, run a smaller slice with the same harness:
 
 ```sh
-python3 harnesses/fn_sweep.py deps/cmdstan
-python3 harnesses/fn_sweep.py deps/cmdstan --from-stanc
-python3 harnesses/transform_sweep.py deps/cmdstan
+.venv-conformance/bin/python harnesses/stan_conformance.py \
+  --stanc deps/stanc3/stanc-pinned \
+  --cmdstan deps/cmdstan \
+  --build build-rel \
+  --stanli-pythonpath python \
+  --filter normal_lpdf
 ```
 
-- The first command runs a curated scalar probability-function smoke test.
-- The second selects one all-real scalar signature per eligible stanc name,
-  with at most five arguments. It includes quantiles: 103 names in the current
-  inventory, rather than the 100-name scalar-math set above. It is not an
-  overload-complete sweep.
-- The third runs the representative parameter-transform sweep described above.
-
-The first two commands use a 2 ULP limit.
+`--filter` selects every canonical signature containing the supplied text,
+case-insensitively. A sliced run reports `partial_run`; that warning describes
+its requested scope rather than a conformance failure.
