@@ -18,6 +18,7 @@
 #include <cstring>
 #include <limits>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -888,6 +889,11 @@ int main() {
         DataMap::from_json(slurp("tests/fixtures/whileloop.json"));
     CompiledModel lm =
         compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
+    size_t structured_whiles = 0;
+    for (const Op& op : lm.graph.ops)
+      if (op.opcode == OP_ISLAND) ++structured_whiles;
+    check(structured_whiles == 3,
+          "while loops lower as three structured control islands");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.1;
@@ -895,11 +901,26 @@ int main() {
     const double lp = lex.gradient(&grad);
     // N = 4 iterations in the integer loop, then ceil(N / 2) iterations in
     // the real loop whose data-only update controls its next condition. The
+    // Integer division truncates 5 to 2 and then 1 in the third loop. The
     // final four terms come from gathering two rows with an integer array
     // populated by indexed assignments.
-    const double sum = 1 + 2 + 3 + 4 + 2 + 4;
-    expect_eq("while lp", lp, -0.5 * 0.1 * 0.1 + sum * 0.1);
+    const double sum = 1 + 2 + 3 + 4 + 2 + 2 + 1 + 4;
+    expect_ulp("while lp", lp, -0.5 * 0.1 * 0.1 + sum * 0.1);
     expect_eq("while grad", grad, -0.1 + sum);
+
+    // Building a graph must not execute or replicate a data-controlled
+    // while.  This trip count is just beyond the old lowering-time cap; the
+    // model is intentionally not run, because this assertion is about the
+    // finite program representation rather than a million-step evaluation.
+    DataMap long_d;
+    long_d.set_int("N", 1000001);
+    CompiledModel long_loop =
+        compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), long_d);
+    size_t long_structured_whiles = 0;
+    for (const Op& op : long_loop.graph.ops)
+      if (op.opcode == OP_ISLAND) ++long_structured_whiles;
+    check(long_structured_whiles == 3,
+          "long while lowers without a compile-time iteration cap");
   }
 
   // An integer local can be assigned a comparison of data-only real locals.
@@ -917,6 +938,72 @@ int main() {
     const double lp = lex.gradient(&grad);
     expect_eq("int real compare lp", lp, -0.5 * 0.1 * 0.1 + 0.1);
     expect_eq("int real compare grad", grad, -0.1 + 1.0);
+  }
+
+  // The matrix vocabulary used by ctsem remains inside a genuinely runtime
+  // while: no compile-time unroll participates in either the value or the
+  // reverse pass.  Pin the shared register-program implementation against
+  // the same Stan Math calls, and exercise it again through write_array.
+  {
+    CompiledModel cm = compile_model(
+        slurp("tests/fixtures/structured_matrix_ops.tmir.sexp"), DataMap());
+    const double point[5] = {0.5, 0.2, -0.1, 0.3, 0.4};
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    for (int i = 0; i < 5; ++i) ex.params_data()[i] = point[i];
+    double gradient[5] = {};
+    const double lp = ex.gradient(gradient);
+
+    using stan::math::var;
+    var theta = point[0];
+    Eigen::Matrix<var, -1, -1> x(2, 2);
+    for (int i = 0; i < 4; ++i) x.data()[i] = point[i + 1];
+    const Eigen::Matrix<var, -1, -1> a =
+        stan::math::add_diag(stan::math::crossprod(x), 2.0);
+    Eigen::RowVector2d diagonal;
+    diagonal << 2.0, 3.0;
+    const Eigen::Matrix<var, -1, -1> row_diag =
+        stan::math::add_diag(stan::math::crossprod(x), diagonal);
+    const Eigen::Matrix<var, -1, -1> e = stan::math::matrix_exp(-a);
+    const Eigen::Matrix<var, -1, -1> solved = stan::math::mdivide_left(a, x);
+    const Eigen::Matrix<var, -1, -1> right_spd =
+        stan::math::mdivide_right_spd(x, a);
+    const Eigen::Matrix<var, -1, -1> q = stan::math::quad_form_sym(a, x);
+    const Eigen::Matrix<var, -1, -1> tc = stan::math::tcrossprod(x);
+    var score = e(0, 0) - 0.7 * e(1, 0) + 1.3 * solved(0, 1) +
+                0.6 * right_spd(1, 0) + 0.4 * q(1, 1) - 0.2 * tc(0, 1) +
+                0.05 * row_diag(1, 1);
+    var reference = theta + score;
+    reference.grad();
+    expect_ulp("structured matrix ops lp", lp, reference.val());
+    expect_eq("structured matrix ops theta gradient", gradient[0], 1.0);
+    for (int i = 0; i < 4; ++i)
+      expect_ulp("structured matrix ops gradient " + std::to_string(i),
+                 gradient[i + 1], x.data()[i].adj());
+    stan::math::recover_memory();
+
+    double repeated[5] = {};
+    expect_eq("structured matrix ops repeated lp", ex.gradient(repeated), lp);
+    for (int i = 0; i < 5; ++i)
+      expect_eq("structured matrix ops repeated gradient " + std::to_string(i),
+                repeated[i], gradient[i]);
+
+    check(cm.write_array && cm.write_array->truncated.empty(),
+          "structured matrix ops write_array compiled");
+    if (cm.write_array && cm.write_array->truncated.empty()) {
+      Executor wex(std::move(cm.write_array->graph));
+      cm.write_array->bind(wex);
+      for (int i = 0; i < 5; ++i) wex.params_data()[i] = point[i];
+      wex.run_forward_only();
+      bool found = false;
+      for (const auto& column : cm.write_array->columns) {
+        if (column.name != "score") continue;
+        found = true;
+        expect_ulp("structured matrix ops write_array score",
+                   wex.value_ptr(column.slot)[0], lp - point[0]);
+      }
+      check(found, "structured matrix ops has score column");
+    }
   }
 
   // x[idx] = rhs with a repeated index: the last write to a position wins,
@@ -1050,6 +1137,81 @@ int main() {
     for (int i = 0; i < 3; ++i)
       expect_eq("udflp gd" + std::to_string(i), grad[1 + i], dv(i).adj());
     stan::math::recover_memory();
+  }
+
+  // A write-array UDF may derive a local integer extent from the logical
+  // shape of a parameter argument before using it in loop bounds and local
+  // declarations.  The speculative runtime-control scan must follow those
+  // scalar-int bindings in statement order instead of looking through the
+  // whole block with an empty local environment.
+  {
+    DataMap d;
+    d.set_int("D", 2);
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/udf_local_shape.tmir.sexp"), d);
+    check(lm.write_array && lm.write_array->truncated.empty(),
+          "UDF local shape write_array compiled");
+    if (lm.write_array && lm.write_array->truncated.empty()) {
+      Executor wex(std::move(lm.write_array->graph));
+      lm.write_array->bind(wex);
+      const double q[4] = {0.25, -0.5, 0.75, -0.2};
+      for (int i = 0; i < 4; ++i) wex.params_data()[i] = q[i];
+      wex.run_forward_only();
+      const double expected[4] = {1.25, -0.5, 0.75, -0.2};
+      bool found = false;
+      for (const auto& column : lm.write_array->columns) {
+        if (column.name != "copied") continue;
+        found = true;
+        check(column.len == 4, "UDF local shape copied matrix width");
+        const double* value = wex.value_ptr(column.slot);
+        for (int i = 0; i < 4; ++i)
+          expect_eq("UDF local shape write_array " + std::to_string(i),
+                    value[i], expected[i]);
+      }
+      check(found, "UDF local shape has copied matrix");
+    }
+  }
+
+  // Both arms of a runtime UDF condition return, and one arm mutates a local
+  // before returning it.  Lower the arm effects and the returned value as
+  // separate structured joins so value, gradients, and write_array all take
+  // the same path as the generated C++.
+  {
+    CompiledModel cm = compile_model(
+        slurp("tests/fixtures/udf_conditional_return.tmir.sexp"), DataMap());
+    const double points[2][2] = {{0.5, -0.2}, {-0.5, -0.2}};
+    const double want_lp[2] = {1.3, -0.7};
+    const double want_grad[2][2] = {{3.0, 1.0}, {1.0, 1.0}};
+    for (int point = 0; point < 2; ++point) {
+      Executor ex(cm.graph);
+      cm.bind(ex);
+      for (int i = 0; i < 2; ++i) ex.params_data()[i] = points[point][i];
+      double gradient[2] = {};
+      expect_eq("conditional UDF return lp " + std::to_string(point),
+                ex.gradient(gradient), want_lp[point]);
+      for (int i = 0; i < 2; ++i)
+        expect_eq("conditional UDF return gradient " + std::to_string(point) +
+                      "." + std::to_string(i),
+                  gradient[i], want_grad[point][i]);
+    }
+    check(cm.write_array && cm.write_array->truncated.empty(),
+          "conditional UDF return write_array compiled");
+    if (cm.write_array && cm.write_array->truncated.empty()) {
+      Executor wex(std::move(cm.write_array->graph));
+      cm.write_array->bind(wex);
+      wex.params_data()[0] = points[0][0];
+      wex.params_data()[1] = points[0][1];
+      wex.run_forward_only();
+      bool found = false;
+      for (const auto& column : cm.write_array->columns) {
+        if (column.name != "chosen") continue;
+        found = true;
+        const double* value = wex.value_ptr(column.slot);
+        expect_eq("conditional UDF return write_array 0", value[0], 1.0);
+        expect_eq("conditional UDF return write_array 1", value[1], 0.3);
+      }
+      check(found, "conditional UDF return has chosen vector");
+    }
   }
 
   // Overloaded user functions (issue #125): stanc3 keeps every overload of
@@ -2728,21 +2890,22 @@ int main() {
     expect_eq("parameter-condition int no-break grad", grad, 6.0);
   }
 
-  // The same integer where the assignment may not run: refused by name.
-  // Before the check it was folded anyway -- every later read in the
-  // region saw 2 on both paths -- while the lowering outside kept its own
-  // 1, so the answer matched neither branch.
+  // The same integer where the assignment may not run. It becomes a runtime
+  // scalar live-out: the taken arm writes 2, while the untaken arm preserves
+  // the pre-region 1 for the target statement that follows.
   {
-    bool threw = false;
-    try {
-      compile_model(slurp("tests/fixtures/paramcond_intbranch.tmir.sexp"),
-                    DataMap());
-    } catch (const CompileError& e) {
-      threw = std::string(e.what()).find(
-                  "integer n assigned inside data-dependent control flow") !=
-              std::string::npos;
-    }
-    check(threw, "integer assigned under a parameter condition refused");
+    CompiledModel cm = compile_model(
+        slurp("tests/fixtures/paramcond_intbranch.tmir.sexp"), DataMap());
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    double grad = 0.0;
+    ex.params_data()[0] = 0.5;
+    expect_eq("conditional integer live-out taken lp", ex.gradient(&grad), 3.5);
+    expect_eq("conditional integer live-out taken grad", grad, 7.0);
+    ex.params_data()[0] = -0.5;
+    expect_eq("conditional integer live-out untaken lp", ex.gradient(&grad),
+              -0.5);
+    expect_eq("conditional integer live-out untaken grad", grad, 1.0);
   }
 
   // The comparisons and the logical operators as compile-time integers:
@@ -2784,10 +2947,11 @@ int main() {
     cm.bind(ex);
     double grad = 0.0;
     // Rows 1 and 3 match on the second column, contributing 1 + 3; the
-    // literal array adds size 3 and its second element 5.
+    // literal array contributes 8, row two contributes 2 + 7, and the
+    // strided row replacement contributes 9 + 8.
     ex.params_data()[0] = 0.5;
-    expect_eq("parameter-condition int array lp", ex.gradient(&grad), 6.0);
-    expect_eq("parameter-condition int array grad", grad, 12.0);
+    expect_eq("parameter-condition int array lp", ex.gradient(&grad), 323992.0);
+    expect_eq("parameter-condition int array grad", grad, 647984.0);
     ex.params_data()[0] = -0.5;
     expect_eq("parameter-condition int array else lp", ex.gradient(&grad),
               -0.5);
@@ -2818,6 +2982,77 @@ int main() {
       expect_eq(tag + "else lp", ex.gradient(&grad), -0.5);
       expect_eq(tag + "else grad", grad, 1.0);
     }
+  }
+
+  // A data-only UDF returns an integer array whose size depends on the
+  // values, not only on the argument's declared extent.  The structured
+  // while keeps its runtime trip count, while the MIR interpreter supplies
+  // the constant array value and shape at the region boundary. Exercise the
+  // same result through generated quantities for multiple and empty matches.
+  {
+    const auto check_case = [&](const std::string& tag, const DataMap& d,
+                                const std::vector<int>& selected,
+                                double positive_lp, double positive_grad) {
+      CompiledModel cm = compile_model(
+          slurp("tests/fixtures/runtime_int_array_udf.tmir.sexp"), d);
+      Executor ex(cm.graph);
+      cm.bind(ex);
+      double grad = 0.0;
+      ex.params_data()[0] = 0.5;
+      expect_eq(tag + " lp", ex.gradient(&grad), positive_lp);
+      expect_eq(tag + " grad", grad, positive_grad);
+      ex.params_data()[0] = -0.5;
+      expect_eq(tag + " no-loop lp", ex.gradient(&grad), -0.5);
+      expect_eq(tag + " no-loop grad", grad, 1.0);
+
+      check(cm.write_array && cm.write_array->truncated.empty(),
+            tag + " write_array compiled");
+      if (!cm.write_array || !cm.write_array->truncated.empty()) return;
+      Executor wex(std::move(cm.write_array->graph));
+      cm.write_array->bind(wex);
+      wex.params_data()[0] = 0.5;
+      wex.run_forward_only();
+      std::map<std::string, double> got;
+      bool found_selected = false;
+      for (const auto& column : cm.write_array->columns) {
+        if (column.name == "selected") {
+          found_selected = true;
+          check(column.len == (int64_t)selected.size(),
+                tag + " write_array selected extent");
+          const double* value = wex.value_ptr(column.slot);
+          for (size_t k = 0; k < selected.size(); ++k)
+            expect_eq(tag + " write_array selected " + std::to_string(k),
+                      value[k], selected[k]);
+        } else {
+          got[column.name] = wex.value_ptr(column.slot)[0];
+        }
+      }
+      check(found_selected, tag + " write_array has selected");
+      const auto expect_column = [&](const std::string& name, double want) {
+        const auto it = got.find(name);
+        check(it != got.end(), tag + " write_array has " + name);
+        if (it != got.end())
+          expect_eq(tag + " write_array " + name, it->second, want);
+      };
+      expect_column("selected_count", selected.size());
+      double sum = 0;
+      for (int value : selected) sum += value;
+      expect_column("selected_sum", sum);
+    };
+
+    check_case(
+        "runtime int-array UDF",
+        DataMap::from_json(slurp("tests/fixtures/runtime_int_array_udf.json")),
+        {1, 3}, 3.5, 7.0);
+    DataMap multiple;
+    multiple.set_int("N", 5);
+    multiple.set_int_array("x", {1, 0, 1, 1, 0});
+    check_case("runtime int-array UDF multiple", multiple, {1, 3, 4}, 6.0,
+               12.0);
+    DataMap empty;
+    empty.set_int("N", 0);
+    empty.set_int_array("x", {});
+    check_case("runtime int-array UDF empty", empty, {}, 0.5, 1.0);
   }
 
   // rep_vector inside a region: a run the compiler fills, at an extent it
@@ -3065,6 +3300,39 @@ int main() {
     const double looping_lp = ex.gradient(&grad);
     expect_eq("parameter-condition no-break lp", looping_lp, 3.0 * -0.4);
     expect_eq("parameter-condition no-break grad", grad, 3.0);
+  }
+
+  // The scan that decides whether a data-bounded for loop must share a
+  // structured region with a runtime-selected break evaluates data-only
+  // conditions under each loop-variable binding. In particular, a zero-trip
+  // loop must never inspect idx[ri], and a later iteration can be the first
+  // one that contains the runtime break.
+  {
+    const std::string mir =
+        slurp("tests/fixtures/runtime_break_data_loop.tmir.sexp");
+    DataMap empty;
+    empty.set_int("N", 0);
+    empty.set_int_array("idx", {});
+    CompiledModel em = compile_model(mir, empty);
+    Executor eex(std::move(em.graph));
+    em.bind(eex);
+    eex.params_data()[0] = 0.4;
+    double gradient = -1.0;
+    expect_eq("zero-trip runtime-break scan lp", eex.gradient(&gradient), 0.0);
+    expect_eq("zero-trip runtime-break scan grad", gradient, 0.0);
+
+    DataMap two;
+    two.set_int("N", 2);
+    two.set_int_array("idx", {0, 1});
+    CompiledModel tm = compile_model(mir, two);
+    Executor tex(std::move(tm.graph));
+    tm.bind(tex);
+    tex.params_data()[0] = 0.4;
+    expect_eq("later runtime break lp", tex.gradient(&gradient), 0.4);
+    expect_eq("later runtime break grad", gradient, 1.0);
+    tex.params_data()[0] = -0.4;
+    expect_eq("later runtime no-break lp", tex.gradient(&gradient), -0.8);
+    expect_eq("later runtime no-break grad", gradient, 2.0);
   }
 
   // The same region written with `~`: refused, by name, with the fix in
@@ -4483,6 +4751,66 @@ int main() {
       expect_ulp("tcrossprod: g" + std::to_string(i), gradient[i], a(i).adj());
   }
 
+  // crossprod(A) is A' * A. As with tcrossprod, the shared matrix reaches
+  // both the original density and the Gram matrix, which pins accumulated
+  // gradients as well as the 3 x 3 column-major result layout.
+  {
+    DataMap d;
+    const double observed[6] = {0.6, -0.2, 0.4, 0.9, -0.5, 0.3};
+    d.set_real_array("d", std::vector<double>(observed, observed + 6), {2, 3});
+    CompiledModel cm =
+        compile_model(slurp("tests/fixtures/crossprod.tmir.sexp"), d);
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    const double q[6] = {0.2, -0.4, 0.7, 0.1, -0.3, 0.8};
+    for (int i = 0; i < 6; ++i) ex.params_data()[i] = q[i];
+    double gradient[6] = {};
+    const double lp = ex.gradient(gradient);
+    double repeated_gradient[6] = {};
+    const double repeated_lp = ex.gradient(repeated_gradient);
+    expect_eq("crossprod: repeated lp", repeated_lp, lp);
+    for (int i = 0; i < 6; ++i)
+      expect_eq("crossprod: repeated g" + std::to_string(i),
+                repeated_gradient[i], gradient[i]);
+
+    using stan::math::var;
+    Eigen::Matrix<var, -1, -1> a(2, 3);
+    for (int i = 0; i < 6; ++i) a(i) = q[i];
+    Eigen::Matrix<var, -1, -1> gram = stan::math::crossprod(a);
+    Eigen::Matrix<double, -1, -1> data_matrix(2, 3);
+    for (int i = 0; i < 6; ++i) data_matrix(i) = observed[i];
+    Eigen::Matrix<double, -1, -1> data_gram =
+        stan::math::crossprod(data_matrix);
+    var reference_lp =
+        stan::math::normal_lpdf<true>(stan::math::to_vector(a), 0, 1) +
+        stan::math::normal_lpdf<true>(stan::math::to_vector(gram),
+                                      stan::math::to_vector(data_gram), 1);
+    reference_lp.grad();
+    expect_ulp("crossprod: lp", lp, reference_lp.val());
+    for (int i = 0; i < 6; ++i)
+      expect_ulp("crossprod: g" + std::to_string(i), gradient[i], a(i).adj());
+
+    check(cm.write_array && cm.write_array->truncated.empty(),
+          "crossprod: write_array compiled");
+    if (cm.write_array && cm.write_array->truncated.empty()) {
+      Executor wex(std::move(cm.write_array->graph));
+      cm.write_array->bind(wex);
+      for (int i = 0; i < 6; ++i) wex.params_data()[i] = q[i];
+      wex.run_forward_only();
+      bool found = false;
+      for (const auto& column : cm.write_array->columns) {
+        if (column.name != "gq_gram") continue;
+        found = true;
+        const double* value = wex.value_ptr(column.slot);
+        for (int i = 0; i < 9; ++i)
+          expect_ulp("crossprod: write_array " + std::to_string(i), value[i],
+                     gram(i).val());
+      }
+      check(found, "crossprod: write_array has gq_gram");
+    }
+    stan::math::recover_memory();
+  }
+
   // Two dimension-preserving selectors on a matrix form their Cartesian
   // submatrix. Different reordered Multi lists pin column-major gather order,
   // Between/Between covers matrix ranges, and the mixed Multi/Single and
@@ -5726,6 +6054,30 @@ int main() {
       expect_eq("matrix exp gradient " + std::to_string(i), gradient[i],
                 a.data()[i].adj());
     stan::math::recover_memory();
+  }
+
+  // add_diag preserves the matrix layout while adding a scalar to every
+  // diagonal entry.  This is the scalar overload used by ctsem; the matrix
+  // input remains active so the graph path also pins its reverse pullback.
+  {
+    DataMap d;
+    CompiledModel am =
+        compile_model(slurp("tests/fixtures/add_diag.tmir.sexp"), d);
+    check(count_opcode(am, OP_ADD_DIAG) == 1,
+          "add_diag lowers to its native matrix kernel");
+    Executor aex(std::move(am.graph));
+    am.bind(aex);
+    const double q[4] = {0.2, -0.4, 0.7, -0.1};
+    for (int i = 0; i < 4; ++i) aex.params_data()[i] = q[i];
+    double gradient[4] = {};
+    const double lp = aex.gradient(gradient);
+
+    const double want[4] = {1.0, -0.7, 1.3, 0.4};
+    const double want_lp =
+        q[0] + 0.5 - 0.7 * q[1] + 1.3 * q[2] + 0.4 * (q[3] + 0.5);
+    expect_eq("add_diag lp", lp, want_lp);
+    for (int i = 0; i < 4; ++i)
+      expect_eq("add_diag gradient " + std::to_string(i), gradient[i], want[i]);
   }
 
   // Transformed data and write_array recovery run MirInterp rather than the

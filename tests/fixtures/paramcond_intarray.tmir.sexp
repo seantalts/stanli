@@ -1,4 +1,16 @@
-((functions_block ())
+((functions_block
+  (((fdrt (ReturnType (UArray (UArray UInt)))) (fdname echo_int_matrix)
+    (fdsuffix FnPlain) (fdargs ((AutoDiffable x (UArray (UArray UInt)))))
+    (fdbody
+     (((pattern
+        (Block
+         (((pattern
+            (Return
+             (((pattern (Var x))
+               (meta ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly)))))))
+           (meta <opaque>)))))
+       (meta <opaque>))))
+    (fdloc <opaque>))))
  (input_vars
   ((idx <opaque>
     (SArray
@@ -8,7 +20,7 @@
  (prepare_data
   (((pattern
      (Decl (decl_adtype DataOnly) (decl_id pos__) (decl_type (Sized SInt))
-      (initialize Uninit)))
+      (initialize Default)))
     (meta <opaque>))
    ((pattern
      (Assignment ((LVariable pos__) ()) UInt
@@ -126,7 +138,7 @@
             (Block
              (((pattern
                 (Decl (decl_adtype AutoDiffable) (decl_id total) (decl_type (Sized SInt))
-                 (initialize Uninit)))
+                 (initialize Default)))
                (meta <opaque>))
               ((pattern
                 (Assignment ((LVariable total) ()) UInt
@@ -179,7 +191,7 @@
                                       (Indexed
                                        ((pattern (Var idx))
                                         (meta
-                                         ((type_ (UArray (UArray UInt))) 
+                                         ((type_ (UArray (UArray UInt)))
                                           (loc <opaque>) (adlevel DataOnly))))
                                        ((Single
                                          ((pattern (Var r))
@@ -202,7 +214,7 @@
                (meta <opaque>))
               ((pattern
                 (Decl (decl_adtype AutoDiffable) (decl_id m) (decl_type (Sized SInt))
-                 (initialize Uninit)))
+                 (initialize Default)))
                (meta <opaque>))
               ((pattern
                 (Assignment ((LVariable m) ()) UInt
@@ -239,6 +251,106 @@
                   (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
                (meta <opaque>))
               ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id row)
+                 (decl_type
+                  (Sized
+                   (SArray SInt
+                    ((pattern (Lit Int 2))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                 (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable row) ()) (UArray UInt)
+                 ((pattern
+                   (Indexed
+                    ((pattern (Var idx))
+                     (meta
+                      ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly))))
+                    ((Single
+                      ((pattern (Lit Int 2))
+                       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
+                     (Between
+                      ((pattern (Lit Int 1))
+                       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                      ((pattern (Lit Int 2))
+                       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
+                  (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id copied)
+                 (decl_type
+                  (Sized
+                   (SArray
+                    (SArray SInt
+                     ((pattern (Lit Int 2))
+                      (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
+                    ((pattern (Lit Int 3))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                 (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable copied) ()) (UArray (UArray UInt))
+                 ((pattern (Var idx))
+                  (meta
+                   ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Assignment
+                 ((LVariable copied)
+                  ((Single
+                    ((pattern (Lit Int 2))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
+                   (Between
+                    ((pattern (Lit Int 1))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                    ((pattern (Lit Int 2))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                 (UArray (UArray UInt))
+                 ((pattern
+                   (FunApp (CompilerInternal FnMakeArray)
+                    (((pattern (Lit Int 9))
+                      (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                     ((pattern (Lit Int 8))
+                      (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                  (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id echoed_rows)
+                 (decl_type (Sized SInt)) (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable echoed_rows) ()) UInt
+                 ((pattern
+                   (FunApp (StanLib size FnPlain AoS)
+                    (((pattern
+                       (FunApp (UserDefined echo_int_matrix FnPlain)
+                        (((pattern (Var copied))
+                          (meta
+                           ((type_ (UArray (UArray UInt))) (loc <opaque>)
+                            (adlevel DataOnly)))))))
+                      (meta
+                       ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly)))))))
+                  (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id echoed_cells)
+                 (decl_type (Sized SInt)) (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable echoed_cells) ()) UInt
+                 ((pattern
+                   (FunApp (StanLib num_elements FnPlain AoS)
+                    (((pattern
+                       (FunApp (UserDefined echo_int_matrix FnPlain)
+                        (((pattern (Var copied))
+                          (meta
+                           ((type_ (UArray (UArray UInt))) (loc <opaque>)
+                            (adlevel DataOnly)))))))
+                      (meta
+                       ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly)))))))
+                  (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
                 (TargetPE
                  ((pattern
                    (FunApp (StanLib Times__ FnPlain AoS)
@@ -246,9 +358,107 @@
                        (Promotion
                         ((pattern
                           (FunApp (StanLib Plus__ FnPlain AoS)
-                           (((pattern (Var total))
+                           (((pattern
+                              (FunApp (StanLib Plus__ FnPlain AoS)
+                               (((pattern
+                                  (FunApp (StanLib Plus__ FnPlain AoS)
+                                   (((pattern
+                                      (FunApp (StanLib Plus__ FnPlain AoS)
+                                       (((pattern
+                                          (FunApp (StanLib Plus__ FnPlain AoS)
+                                           (((pattern (Var total))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly))))
+                                            ((pattern
+                                              (FunApp (StanLib Times__ FnPlain AoS)
+                                               (((pattern (Lit Int 10))
+                                                 (meta
+                                                  ((type_ UInt) (loc <opaque>)
+                                                   (adlevel DataOnly))))
+                                                ((pattern (Var m))
+                                                 (meta
+                                                  ((type_ UInt) (loc <opaque>)
+                                                   (adlevel DataOnly)))))))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly)))))))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly))))
+                                        ((pattern
+                                          (FunApp (StanLib Times__ FnPlain AoS)
+                                           (((pattern (Lit Int 100))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly))))
+                                            ((pattern
+                                              (FunApp (StanLib sum FnPlain AoS)
+                                               (((pattern (Var row))
+                                                 (meta
+                                                  ((type_ (UArray UInt))
+                                                   (loc <opaque>) (adlevel DataOnly)))))))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly)))))))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly)))))))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                    ((pattern
+                                      (FunApp (StanLib Times__ FnPlain AoS)
+                                       (((pattern (Lit Int 1000))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly))))
+                                        ((pattern
+                                          (FunApp (StanLib sum FnPlain AoS)
+                                           (((pattern
+                                              (Indexed
+                                               ((pattern (Var copied))
+                                                (meta
+                                                 ((type_ (UArray (UArray UInt)))
+                                                  (loc <opaque>) (adlevel DataOnly))))
+                                               ((Single
+                                                 ((pattern (Lit Int 2))
+                                                  (meta
+                                                   ((type_ UInt) (loc <opaque>)
+                                                    (adlevel DataOnly)))))
+                                                (Between
+                                                 ((pattern (Lit Int 1))
+                                                  (meta
+                                                   ((type_ UInt) (loc <opaque>)
+                                                    (adlevel DataOnly))))
+                                                 ((pattern (Lit Int 2))
+                                                  (meta
+                                                   ((type_ UInt) (loc <opaque>)
+                                                    (adlevel DataOnly))))))))
+                                             (meta
+                                              ((type_ (UArray UInt))
+                                               (loc <opaque>) (adlevel DataOnly)))))))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly)))))))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                ((pattern
+                                  (FunApp (StanLib Times__ FnPlain AoS)
+                                   (((pattern (Lit Int 10000))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                    ((pattern (Var echoed_rows))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
                              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
-                            ((pattern (Var m))
+                            ((pattern
+                              (FunApp (StanLib Times__ FnPlain AoS)
+                               (((pattern (Lit Int 100000))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                ((pattern (Var echoed_cells))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
                              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
                          (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
                         UReal DataOnly))
@@ -276,7 +486,7 @@
         ((pattern
           (FunApp
            (CompilerInternal
-            (FnReadParam (constrain Identity) (dims ()) (mem_pattern SoA)))
+            (FnReadParam (constrain Identity) (dims ()) (mem_pattern AoS)))
            ()))
          (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))))))
     (meta <opaque>))
@@ -285,7 +495,7 @@
       (((pattern
          (IfElse
           ((pattern
-            (FunApp (StanLib Greater__ FnPlain SoA)
+            (FunApp (StanLib Greater__ FnPlain AoS)
              (((pattern (Var theta))
                (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))
               ((pattern (Lit Int 0))
@@ -295,7 +505,7 @@
             (Block
              (((pattern
                 (Decl (decl_adtype AutoDiffable) (decl_id total) (decl_type (Sized SInt))
-                 (initialize Uninit)))
+                 (initialize Default)))
                (meta <opaque>))
               ((pattern
                 (Assignment ((LVariable total) ()) UInt
@@ -316,7 +526,7 @@
                      (((pattern
                         (IfElse
                          ((pattern
-                           (FunApp (StanLib Equals__ FnPlain SoA)
+                           (FunApp (StanLib Equals__ FnPlain AoS)
                             (((pattern
                                (Indexed
                                 ((pattern (Var idx))
@@ -340,7 +550,7 @@
                             (((pattern
                                (Assignment ((LVariable total) ()) UInt
                                 ((pattern
-                                  (FunApp (StanLib Plus__ FnPlain SoA)
+                                  (FunApp (StanLib Plus__ FnPlain AoS)
                                    (((pattern (Var total))
                                      (meta
                                       ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
@@ -348,7 +558,7 @@
                                       (Indexed
                                        ((pattern (Var idx))
                                         (meta
-                                         ((type_ (UArray (UArray UInt))) 
+                                         ((type_ (UArray (UArray UInt)))
                                           (loc <opaque>) (adlevel DataOnly))))
                                        ((Single
                                          ((pattern (Var r))
@@ -371,14 +581,14 @@
                (meta <opaque>))
               ((pattern
                 (Decl (decl_adtype AutoDiffable) (decl_id m) (decl_type (Sized SInt))
-                 (initialize Uninit)))
+                 (initialize Default)))
                (meta <opaque>))
               ((pattern
                 (Assignment ((LVariable m) ()) UInt
                  ((pattern
-                   (FunApp (StanLib Plus__ FnPlain SoA)
+                   (FunApp (StanLib Plus__ FnPlain AoS)
                     (((pattern
-                       (FunApp (StanLib size FnPlain SoA)
+                       (FunApp (StanLib size FnPlain AoS)
                         (((pattern
                            (FunApp (CompilerInternal FnMakeArray)
                             (((pattern (Lit Int 4))
@@ -408,16 +618,214 @@
                   (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
                (meta <opaque>))
               ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id row)
+                 (decl_type
+                  (Sized
+                   (SArray SInt
+                    ((pattern (Lit Int 2))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                 (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable row) ()) (UArray UInt)
+                 ((pattern
+                   (Indexed
+                    ((pattern (Var idx))
+                     (meta
+                      ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly))))
+                    ((Single
+                      ((pattern (Lit Int 2))
+                       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
+                     (Between
+                      ((pattern (Lit Int 1))
+                       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                      ((pattern (Lit Int 2))
+                       (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
+                  (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id copied)
+                 (decl_type
+                  (Sized
+                   (SArray
+                    (SArray SInt
+                     ((pattern (Lit Int 2))
+                      (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
+                    ((pattern (Lit Int 3))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                 (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable copied) ()) (UArray (UArray UInt))
+                 ((pattern (Var idx))
+                  (meta
+                   ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Assignment
+                 ((LVariable copied)
+                  ((Single
+                    ((pattern (Lit Int 2))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))
+                   (Between
+                    ((pattern (Lit Int 1))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                    ((pattern (Lit Int 2))
+                     (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                 (UArray (UArray UInt))
+                 ((pattern
+                   (FunApp (CompilerInternal FnMakeArray)
+                    (((pattern (Lit Int 9))
+                      (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                     ((pattern (Lit Int 8))
+                      (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                  (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id echoed_rows)
+                 (decl_type (Sized SInt)) (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable echoed_rows) ()) UInt
+                 ((pattern
+                   (FunApp (StanLib size FnPlain AoS)
+                    (((pattern
+                       (FunApp (UserDefined echo_int_matrix FnPlain)
+                        (((pattern (Var copied))
+                          (meta
+                           ((type_ (UArray (UArray UInt))) (loc <opaque>)
+                            (adlevel DataOnly)))))))
+                      (meta
+                       ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly)))))))
+                  (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
+                (Decl (decl_adtype AutoDiffable) (decl_id echoed_cells)
+                 (decl_type (Sized SInt)) (initialize Default)))
+               (meta <opaque>))
+              ((pattern
+                (Assignment ((LVariable echoed_cells) ()) UInt
+                 ((pattern
+                   (FunApp (StanLib num_elements FnPlain AoS)
+                    (((pattern
+                       (FunApp (UserDefined echo_int_matrix FnPlain)
+                        (((pattern (Var copied))
+                          (meta
+                           ((type_ (UArray (UArray UInt))) (loc <opaque>)
+                            (adlevel DataOnly)))))))
+                      (meta
+                       ((type_ (UArray (UArray UInt))) (loc <opaque>) (adlevel DataOnly)))))))
+                  (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
+               (meta <opaque>))
+              ((pattern
                 (TargetPE
                  ((pattern
-                   (FunApp (StanLib Times__ FnPlain SoA)
+                   (FunApp (StanLib Times__ FnPlain AoS)
                     (((pattern
                        (Promotion
                         ((pattern
-                          (FunApp (StanLib Plus__ FnPlain SoA)
-                           (((pattern (Var total))
+                          (FunApp (StanLib Plus__ FnPlain AoS)
+                           (((pattern
+                              (FunApp (StanLib Plus__ FnPlain AoS)
+                               (((pattern
+                                  (FunApp (StanLib Plus__ FnPlain AoS)
+                                   (((pattern
+                                      (FunApp (StanLib Plus__ FnPlain AoS)
+                                       (((pattern
+                                          (FunApp (StanLib Plus__ FnPlain AoS)
+                                           (((pattern (Var total))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly))))
+                                            ((pattern
+                                              (FunApp (StanLib Times__ FnPlain AoS)
+                                               (((pattern (Lit Int 10))
+                                                 (meta
+                                                  ((type_ UInt) (loc <opaque>)
+                                                   (adlevel DataOnly))))
+                                                ((pattern (Var m))
+                                                 (meta
+                                                  ((type_ UInt) (loc <opaque>)
+                                                   (adlevel DataOnly)))))))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly)))))))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly))))
+                                        ((pattern
+                                          (FunApp (StanLib Times__ FnPlain AoS)
+                                           (((pattern (Lit Int 100))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly))))
+                                            ((pattern
+                                              (FunApp (StanLib sum FnPlain AoS)
+                                               (((pattern (Var row))
+                                                 (meta
+                                                  ((type_ (UArray UInt))
+                                                   (loc <opaque>) (adlevel DataOnly)))))))
+                                             (meta
+                                              ((type_ UInt) (loc <opaque>)
+                                               (adlevel DataOnly)))))))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly)))))))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                    ((pattern
+                                      (FunApp (StanLib Times__ FnPlain AoS)
+                                       (((pattern (Lit Int 1000))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly))))
+                                        ((pattern
+                                          (FunApp (StanLib sum FnPlain AoS)
+                                           (((pattern
+                                              (Indexed
+                                               ((pattern (Var copied))
+                                                (meta
+                                                 ((type_ (UArray (UArray UInt)))
+                                                  (loc <opaque>) (adlevel DataOnly))))
+                                               ((Single
+                                                 ((pattern (Lit Int 2))
+                                                  (meta
+                                                   ((type_ UInt) (loc <opaque>)
+                                                    (adlevel DataOnly)))))
+                                                (Between
+                                                 ((pattern (Lit Int 1))
+                                                  (meta
+                                                   ((type_ UInt) (loc <opaque>)
+                                                    (adlevel DataOnly))))
+                                                 ((pattern (Lit Int 2))
+                                                  (meta
+                                                   ((type_ UInt) (loc <opaque>)
+                                                    (adlevel DataOnly))))))))
+                                             (meta
+                                              ((type_ (UArray UInt))
+                                               (loc <opaque>) (adlevel DataOnly)))))))
+                                         (meta
+                                          ((type_ UInt) (loc <opaque>)
+                                           (adlevel DataOnly)))))))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                ((pattern
+                                  (FunApp (StanLib Times__ FnPlain AoS)
+                                   (((pattern (Lit Int 10000))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                    ((pattern (Var echoed_rows))
+                                     (meta
+                                      ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
                              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
-                            ((pattern (Var m))
+                            ((pattern
+                              (FunApp (StanLib Times__ FnPlain AoS)
+                               (((pattern (Lit Int 100000))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
+                                ((pattern (Var echoed_cells))
+                                 (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
                              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
                          (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
                         UReal DataOnly))
@@ -483,7 +891,7 @@
  (transform_inits
   (((pattern
      (Decl (decl_adtype AutoDiffable) (decl_id theta) (decl_type (Sized SReal))
-      (initialize Uninit)))
+      (initialize Default)))
     (meta <opaque>))
    ((pattern
      (Assignment ((LVariable theta) ()) UReal
@@ -510,7 +918,7 @@
  (unconstrain_array
   (((pattern
      (Decl (decl_adtype AutoDiffable) (decl_id theta) (decl_type (Sized SReal))
-      (initialize Uninit)))
+      (initialize Default)))
     (meta <opaque>))
    ((pattern
      (Assignment ((LVariable theta) ()) UReal

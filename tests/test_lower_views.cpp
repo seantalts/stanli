@@ -296,20 +296,25 @@ void test_write_array_receives_data_views() {
   }
 }
 
-void test_island_matrix_times_refuses() {
+void test_island_matrix_times() {
   using namespace stanli;
-  bool refused = false;
   try {
     DataMap data;
-    (void)compile_model(
+    CompiledModel model = compile_model(
         slurp("tests/fixtures/view_island_matrix_times.tmir.sexp"), data);
+    Executor ex(std::move(model.graph));
+    model.bind(ex);
+    double grad = 0.0;
+    ex.params_data()[0] = 2.0;
+    expect_eq("matrix Times__ island positive lp", ex.gradient(&grad), 23.0);
+    expect_eq("matrix Times__ island positive grad", grad, 0.0);
+    ex.params_data()[0] = -2.0;
+    expect_eq("matrix Times__ island negative lp", ex.gradient(&grad), -9.0);
+    expect_eq("matrix Times__ island negative grad", grad, 7.0);
   } catch (const std::exception& e) {
-    refused = true;
-    check(std::string(e.what()).find("matrix multiplication") !=
-              std::string::npos,
-          "matrix island refusal names matrix multiplication");
+    ++failures;
+    std::printf("FAIL matrix Times__ island compile: %s\n", e.what());
   }
-  check(refused, "matrix Times__ in register island refuses");
 }
 
 void test_island_flat_container_refuses() {
@@ -447,7 +452,7 @@ int main() {
   test_nested_udf_int_real_frames();
   test_scalar_array_data_layout();
   test_write_array_receives_data_views();
-  test_island_matrix_times_refuses();
+  test_island_matrix_times();
   test_island_flat_container_refuses();
   test_row_vector_matrix_product();
   test_udf_local_data_branch();

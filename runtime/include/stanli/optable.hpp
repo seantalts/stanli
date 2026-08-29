@@ -166,7 +166,8 @@ namespace stanli {
   X(OP_INVERSE_SPD)                 \
   X(OP_LOG_DETERMINANT)             \
   X(OP_QUAD_FORM)                   \
-  X(OP_ADD_DIAG)
+  X(OP_ADD_DIAG)                    \
+  X(OP_CROSSPROD)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

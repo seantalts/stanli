@@ -694,13 +694,23 @@ struct Lowering {
                                  ? td.find(e.args[0].name)
                                  : nullptr;
         if (en && en->is_int && e.args.size() == 2 &&
-            e.args[1].name == "IndexSingle")
-          return en->i.at(eval_int(e.args[1].args[0]) - 1);
+            e.args[1].name == "IndexSingle") {
+          const long index = eval_int(e.args[1].args[0]);
+          if (index < 1 || (size_t)index > en->i.size())
+            fail("integer index " + std::to_string(index) +
+                     " out of bounds for size " + std::to_string(en->i.size()),
+                 e.raw);
+          return en->i[(size_t)index - 1];
+        }
         if (en && en->is_int && e.args.size() == 3 &&
             e.args[1].name == "IndexSingle" &&
-            e.args[2].name == "IndexSingle" && en->dims.size() == 2)
-          return en->i.at((eval_int(e.args[2].args[0]) - 1) * en->dims[0] +
-                          (eval_int(e.args[1].args[0]) - 1));
+            e.args[2].name == "IndexSingle" && en->dims.size() == 2) {
+          const long row = eval_int(e.args[1].args[0]);
+          const long col = eval_int(e.args[2].args[0]);
+          if (row < 1 || row > en->dims[0] || col < 1 || col > en->dims[1])
+            fail("integer matrix index out of bounds", e.raw);
+          return en->i[(size_t)((col - 1) * en->dims[0] + row - 1)];
+        }
         // dims(x)[k] and friends: evaluate the base as a compile-time
         // sequence, then index it.
         {
@@ -1859,6 +1869,11 @@ struct Lowering {
   struct IslandRegion {
     std::vector<int> in_slots;
     std::vector<std::string> out_names;
+    // Scalar integer locals normally live only in int_env.  A structured
+    // while mutates them in the register program, so they leave as ordinary
+    // scalar slots and subsequent lowering must stop treating them as folded
+    // compile-time values.
+    std::vector<bool> out_is_int;
     // The register view of each live-out as the region compiler left it:
     // the authority on shape when the outside declaration was the --O1
     // inliner's zero-length sentinel and the region's assignment sized it.
@@ -1875,6 +1890,43 @@ struct Lowering {
   }
 
   bool needs_runtime_control(const mir::Stmt& s) {
+    // A structured while owns every runtime decision in its body.  Promoting
+    // its enclosing block would absorb UDF-local declarations and returns,
+    // which are not live-outs of that outer region.
+    if (s.kind == mir::Stmt::While) return false;
+    if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList) {
+      // This scan runs before the block is lowered, but loop bounds later in
+      // the block can depend on scalar-int locals established by earlier
+      // statements.  Mirror just that compile-time environment in statement
+      // order.  In particular, stanc spells `int d = rows(x)` as a default
+      // declaration followed by an assignment, and UDFs commonly use d to
+      // size locals and loops.  Looking through the whole block without this
+      // lexical state rejects an otherwise static write-array UDF.
+      const auto saved = int_env;
+      std::set<std::string> local_ints;
+      bool found = false;
+      try {
+        for (const auto& child : s.body) {
+          if (needs_runtime_control(child)) {
+            found = true;
+            break;
+          }
+          if (child.kind == mir::Stmt::Decl && child.decl_type.base == "SInt") {
+            local_ints.insert(child.decl_id);
+            int_env.erase(child.decl_id);
+            if (child.has_init) int_env[child.decl_id] = eval_int(child.init);
+          } else if (child.kind == mir::Stmt::Assignment &&
+                     child.lhs_idx.empty() && local_ints.count(child.lhs)) {
+            int_env[child.lhs] = eval_int(child.rhs);
+          }
+        }
+      } catch (...) {
+        int_env = saved;
+        throw;
+      }
+      int_env = saved;
+      return found;
+    }
     if (s.kind == mir::Stmt::IfElse) {
       // This is a speculative write_array scan, so follow an already-known
       // arm exactly as ordinary lowering will.  Besides avoiding needless
@@ -1949,6 +2001,25 @@ struct Lowering {
     for (const auto& k : s.body) assigned_names(k, out);
   }
 
+  // Remove a return at the lexical end of a statement arm, preserving every
+  // statement that precedes it.  This is the structured form used by UDFs
+  // such as ctsem's mcalc: each arm returns, but one arm first updates a local
+  // matrix.  The updates can lower as an ordinary statement island and the
+  // two returned expressions can then join through a ternary value island.
+  static bool peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
+    if (s->kind == mir::Stmt::Return) {
+      if (!s->has_init) return false;
+      *value = s->rhs;
+      s->kind = mir::Stmt::Skip;
+      s->body.clear();
+      return true;
+    }
+    if ((s->kind == mir::Stmt::Block || s->kind == mir::Stmt::SList) &&
+        !s->body.empty())
+      return peel_terminal_return(&s->body.back(), value);
+    return false;
+  }
+
   // Compile `s` (a statement region) or `e` (a ternary) into a program.
   void lower_island(const mir::Stmt* s, const mir::Expr* e, IslandRegion* reg,
                     Range* expr_out, std::shared_ptr<IslandProg>* prog_out) {
@@ -1970,9 +2041,23 @@ struct Lowering {
       *out = evaluated->i[0];
       return true;
     };
+    c.extern_ints = [&](const mir::Expr& x, std::vector<long>* values,
+                        std::vector<int64_t>* dims) {
+      if (!x.data_only || x.unsized.depth == 0 ||
+          x.unsized.leaf != mir::UnsizedLeaf::Int)
+        return false;
+      auto evaluated = try_eval_pure(x);
+      if (!evaluated || !evaluated->is_int ||
+          evaluated->i.size() != evaluated->r.size())
+        return false;
+      values->assign(evaluated->i.begin(), evaluated->i.end());
+      *dims = evaluated->dims;
+      return true;
+    };
     std::set<std::string> outer_names;
     for (const auto& [name, value] : scope) outer_names.insert(name);
     for (const auto& [name, value] : decls) outer_names.insert(name);
+    const std::set<std::string> outer_int_names = int_locals;
     c.bind_extern = [&](const std::string& name, Range* r) {
       auto sc = scope.find(name);
       int slot = sc != scope.end() ? sc->second.slot : env_slot(name);
@@ -2039,10 +2124,12 @@ struct Lowering {
         std::vector<std::string> assigned;
         assigned_names(*s, &assigned);
         for (const std::string& name : assigned) {
-          if (!outer_names.count(name)) continue;
+          const bool is_outer_int = outer_int_names.count(name) != 0;
+          if (!outer_names.count(name) && !is_outer_int) continue;
           auto it = c.reals.find(name);
           if (it == c.reals.end()) continue;
           reg->out_names.push_back(name);
+          reg->out_is_int.push_back(is_outer_int);
           reg->out_views.push_back(it->second);
           for (int k = 0; k < it->second.len; ++k)
             prog->out_regs.push_back(it->second.reg + k);
@@ -2087,7 +2174,26 @@ struct Lowering {
     // lost -- so this usually declines. It is asked anyway because a region
     // can reach here branch-free: a `~` refusal or an unknown name is not
     // the only way to end up compiled.
-    compact_island(*prog);
+    // The register compactor's liveness analysis is straight-line (with
+    // forward branches as barriers).  A while adds a back edge, so retaining
+    // the uncompact program is the correctness-first choice: a state register
+    // written in one iteration is necessarily live at the next head.
+    bool has_back_edge = false;
+    bool has_unmodelled_ranges = false;
+    for (size_t pc = 0; pc < prog->code.size(); ++pc) {
+      const Program::Instr& instr = prog->code[pc];
+      if (program_code_spec(instr.code).has(kProgramNoAdjoint))
+        has_unmodelled_ranges = true;
+      if ((instr.code == Program::JZ || instr.code == Program::JMP) &&
+          instr.dst <= static_cast<int>(pc)) {
+        has_back_edge = true;
+      }
+    }
+    // The straight-line compactor derives every range width from Instr::len.
+    // Structured matrix calls use that field for the result width while
+    // their operands can have different widths, so retain the original
+    // register numbering until those instructions carry explicit spans.
+    if (!has_back_edge && !has_unmodelled_ranges) compact_island(*prog);
     prog->native_adj =
         gen_adjoint(*prog) && !std::getenv("STANLI_NO_NATIVE_ADJ");
     *prog_out = std::move(prog);
@@ -2179,6 +2285,20 @@ struct Lowering {
     for (size_t k = 0; k < reg.out_names.size(); ++k) {
       const std::string& name = reg.out_names[k];
       SlotInfo si;
+      if (reg.out_is_int[k]) {
+        // This local was an SInt before the loop.  Its loop-carried value is
+        // now a register-program result; retain the UInt type but make it a
+        // graph-local runtime value so later branches and scalar reads use
+        // the value the loop actually produced.
+        si = view_of("UInt");
+        si.param_free = false;
+        scope[name] = Val{out_slots[k], false, si};
+        decls[name] = DeclView{1, false, si};
+        int_env.erase(name);
+        int_locals.erase(name);
+        td.env().erase(name);
+        continue;
+      }
       bool shaped_outside = false;
       auto old = scope.find(name);
       if (old != scope.end()) {
@@ -2681,8 +2801,7 @@ struct Lowering {
   }
 
   std::optional<Val> fold_const(const mir::Expr& e) {
-    if (!e.data_only || e.fn_propto || expr_effectful(e) || e.unsized.depth)
-      return std::nullopt;
+    if (!e.data_only || e.fn_propto || expr_effectful(e)) return std::nullopt;
     auto evaluated = try_eval_pure(e);
     if (!evaluated) return std::nullopt;
     DataMap::Entry en = std::move(*evaluated);
@@ -2691,10 +2810,25 @@ struct Lowering {
       return constant(en.r[0]);
     SlotInfo si;
     si.param_free = true;
-    stamp_kind(&si, e.type_);
+    if (e.unsized.depth != 0) {
+      ViewKind leaf = ViewKind::Flat;
+      if (e.unsized.leaf == mir::UnsizedLeaf::Vector)
+        leaf = ViewKind::Vector;
+      else if (e.unsized.leaf == mir::UnsizedLeaf::RowVector)
+        leaf = ViewKind::RowVector;
+      else if (e.unsized.leaf == mir::UnsizedLeaf::Matrix)
+        leaf = ViewKind::Matrix;
+      if (en.dims.empty()) en.dims = {(int64_t)en.r.size()};
+      si = array_view(en.dims, leaf, true);
+    } else {
+      stamp_kind(&si, e.type_);
+    }
     if (e.type_ == "UMatrix" && en.dims.size() == 2)
       si = matrix_view(en.dims[0], en.dims[1], true);
-    std::vector<double> vals = graph_order(en, e.type_ == "UMatrix", false);
+    const bool nested_matrix =
+        e.unsized.depth != 0 && e.unsized.leaf == mir::UnsizedLeaf::Matrix;
+    std::vector<double> vals =
+        graph_order(en, e.type_ == "UMatrix", nested_matrix);
     const int s = add_slot((int64_t)vals.size(), false);
     out.fills.emplace_back(s, vals);
     Val v{s, false, si};
@@ -4413,6 +4547,16 @@ struct Lowering {
       return emit_value(OP_GEMM, {a, transpose}, a.si.rows * a.si.rows, si,
                         {(int)a.si.rows, (int)a.si.cols, (int)a.si.rows});
     }
+    if (e.name == "crossprod" && e.args.size() == 1) {
+      Val a = lower_expr(e.args[0]);
+      if (!is_matrix(a.si)) fail("crossprod: needs a matrix", e.raw);
+      SlotInfo si = matrix_view(a.si.cols, a.si.cols, a.si.param_free);
+      Val v = emit_value(OP_CROSSPROD, {a}, a.si.cols * a.si.cols, si,
+                         {checked_immediate(a.si.rows, "crossprod rows"),
+                          checked_immediate(a.si.cols, "crossprod cols")});
+      g.ops.back().variant = v.autodiff ? 1u : 0u;
+      return v;
+    }
     if ((e.name == "diag_pre_multiply" || e.name == "diag_post_multiply") &&
         e.args.size() == 2) {
       // diag_pre_multiply(v, M) = diag_matrix(v) * M (and the mirror);
@@ -5952,14 +6096,43 @@ struct Lowering {
         }
         fail("unsupported statement function " + s.fn_name);
       case mir::Stmt::For: {
-        for (const auto& child : s.body)
-          if (runtime_loop_control(child)) {
-            lower_runtime_ifelse(s);
-            return;
-          }
         const long lo = eval_int(s.lower), hi = eval_int(s.upper);
         if (lo > hi) {
           int_env.erase(s.loopvar);
+          return;
+        }
+        // runtime_loop_control evaluates data-only conditions while looking
+        // for a parameter-selected break/continue. Scan under the same loop
+        // binding that ordinary unrolling will use: without it, an indexed
+        // condition such as idx[ri] is either treated as spuriously dynamic
+        // or can escape static-shape specialization as an unknown variable.
+        // The bounds come first so a zero-trip loop never evaluates its body.
+        const auto old = int_env.find(s.loopvar);
+        const bool had_old = old != int_env.end();
+        const long old_value = had_old ? old->second : 0;
+        bool has_runtime_loop_control = false;
+        try {
+          for (long v = lo; v <= hi && !has_runtime_loop_control; ++v) {
+            int_env[s.loopvar] = v;
+            for (const auto& child : s.body)
+              if (runtime_loop_control(child)) {
+                has_runtime_loop_control = true;
+                break;
+              }
+          }
+        } catch (...) {
+          if (had_old)
+            int_env[s.loopvar] = old_value;
+          else
+            int_env.erase(s.loopvar);
+          throw;
+        }
+        if (had_old)
+          int_env[s.loopvar] = old_value;
+        else
+          int_env.erase(s.loopvar);
+        if (has_runtime_loop_control) {
+          lower_runtime_ifelse(s);
           return;
         }
         if (lo != hi && repeatable_target_body(s)) {
@@ -5992,26 +6165,14 @@ struct Lowering {
         return;
       }
       case mir::Stmt::While: {
-        for (const auto& child : s.body)
-          if (runtime_loop_control(child)) {
-            lower_runtime_ifelse(s);
-            return;
-          }
-        // Unrolled like For. The bound only turns a nonterminating unroll
-        // into an error instead of an out-of-memory kill.
-        for (int64_t guard = 0;; ++guard) {
-          auto c = try_eval_pure(s.cond);
-          if (!c) fail("while condition is not data", s.raw);
-          if (c->r.at(0) == 0.0) return;
-          if (guard > 1000000) fail("while loop did not terminate", s.raw);
-          try {
-            for (const auto& k : s.body) lower_stmt(k);
-          } catch (LoopContinue&) {
-            continue;
-          } catch (LoopBreak&) {
-            return;
-          }
-        }
+        // Unlike `for`, a `while` has no statically supplied trip count.
+        // Compile it as one structured register-program island, which
+        // rechecks its guard at execution time and replays the executed
+        // iterations under autodiff.  This deliberately has no lowering-time
+        // iteration cap: nontermination is the model's runtime behaviour,
+        // not a reason to silently truncate or reject a finite long loop.
+        lower_runtime_ifelse(s);
+        return;
       }
       case mir::Stmt::IfElse: {
         // The guards are data-only and fold away below (both flags are
@@ -6038,6 +6199,28 @@ struct Lowering {
           if (c && !s.body.empty()) lower_stmt(s.body[0]);
           if (!c && s.body.size() > 1) lower_stmt(s.body[1]);
           return;
+        }
+        if (udf_depth > 0 && s.body.size() == 2) {
+          mir::Stmt effects = s;
+          mir::Expr then_value, else_value;
+          if (peel_terminal_return(&effects.body[0], &then_value) &&
+              peel_terminal_return(&effects.body[1], &else_value)) {
+            std::vector<std::string> assigned;
+            assigned_names(effects, &assigned);
+            if (!assigned.empty() || has_target_pe(effects) ||
+                stmt_effectful(effects))
+              lower_runtime_ifelse(effects);
+
+            mir::Expr choice;
+            choice.kind = mir::Expr::TernaryIf;
+            choice.args = {s.cond, then_value, else_value};
+            choice.type_ = then_value.type_;
+            choice.unsized = then_value.unsized;
+            choice.data_only = s.cond.data_only && then_value.data_only &&
+                               else_value.data_only;
+            choice.raw = s.raw;
+            throw LpReturn{lower_expr(choice)};
+          }
         }
         // Data-only or not, an unfoldable condition compiles to an island.
         // Data-only says the MIR adlevel is DataOnly, not that the values are

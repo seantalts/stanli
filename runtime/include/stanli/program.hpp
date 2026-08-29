@@ -69,6 +69,7 @@ enum ProgramOpFlag : uint16_t {
   X(SUB, kProgramReadB)                                                      \
   X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
   X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
+  X(IDIV, kProgramReadB | kProgramNoAdjoint)                                 \
   X(POW, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)    \
   X(FMAX, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
   X(FMIN, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
@@ -105,6 +106,13 @@ enum ProgramOpFlag : uint16_t {
   X(FMA, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB)      \
   X(DIAG_PRE_MULTIPLY, kProgramReadB | kProgramNoAdjoint)                    \
   X(DIAG_POST_MULTIPLY, kProgramReadB | kProgramNoAdjoint)                   \
+  X(MATRIX_EXP, kProgramRangeA | kProgramRangeOutput | kProgramNoAdjoint)    \
+  X(MDIVIDE_LEFT, kProgramRangeA | kProgramRangeB | kProgramReadB |          \
+                      kProgramRangeOutput | kProgramNoAdjoint)               \
+  X(MDIVIDE_RIGHT_SPD, kProgramRangeA | kProgramRangeB | kProgramReadB |     \
+                           kProgramRangeOutput | kProgramNoAdjoint)          \
+  X(QUAD_FORM_SYM, kProgramRangeA | kProgramRangeB | kProgramReadB |         \
+                       kProgramRangeOutput | kProgramNoAdjoint)              \
   X(DENSITY, 0)                                                              \
   X(CALL, 0)
 
@@ -284,6 +292,11 @@ void run_program(const Program& p, T* reg) {
       case Program::DIV:
         d() = ra() / rb();
         break;
+      case Program::IDIV:
+        d() =
+            T(stan::math::divide(static_cast<int>(stan::math::value_of(ra())),
+                                 static_cast<int>(stan::math::value_of(rb()))));
+        break;
       case Program::POW:
         d() = stan::math::pow(ra(), rb());
         break;
@@ -419,6 +432,71 @@ void run_program(const Program& p, T* reg) {
           out = stan::math::diag_pre_multiply(v, m);
         else
           out = stan::math::diag_post_multiply(m, v);
+        break;
+      }
+      case Program::MATRIX_EXP: {
+        using MatT = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+        const int32_t rows = I.b, cols = I.c;
+        if (rows == 0 || cols == 0) break;
+        Eigen::Map<const MatT> input(reg + I.a, rows, cols);
+        Eigen::Map<MatT> output(reg + I.dst, rows, cols);
+        output = stan::math::matrix_exp(input);
+        break;
+      }
+      case Program::MDIVIDE_LEFT: {
+        using MatT = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+        using VecT2 = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+        const int32_t nrow = std::abs(I.c);
+        if (nrow == 0 || I.len == 0) break;
+        Eigen::Map<const MatT> divisor(reg + I.a, nrow, nrow);
+        if (I.c < 0) {
+          Eigen::Map<const VecT2> rhs(reg + I.b, nrow);
+          Eigen::Map<VecT2> output(reg + I.dst, nrow);
+          output = stan::math::mdivide_left(divisor, rhs);
+        } else {
+          const int32_t ncol = nrow == 0 ? 0 : I.len / nrow;
+          Eigen::Map<const MatT> rhs(reg + I.b, nrow, ncol);
+          Eigen::Map<MatT> output(reg + I.dst, nrow, ncol);
+          output = stan::math::mdivide_left(divisor, rhs);
+        }
+        break;
+      }
+      case Program::MDIVIDE_RIGHT_SPD: {
+        using MatT = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+        using RowT = Eigen::Matrix<T, 1, Eigen::Dynamic>;
+        const int32_t ncol = std::abs(I.c);
+        if (ncol == 0 || I.len == 0) break;
+        Eigen::Map<const MatT> divisor(reg + I.a, ncol, ncol);
+        if (I.c < 0) {
+          Eigen::Map<const RowT> lhs(reg + I.b, ncol);
+          Eigen::Map<RowT> output(reg + I.dst, ncol);
+          output = stan::math::mdivide_right_spd(lhs, divisor);
+        } else {
+          const int32_t nrow = ncol == 0 ? 0 : I.len / ncol;
+          Eigen::Map<const MatT> lhs(reg + I.b, nrow, ncol);
+          Eigen::Map<MatT> output(reg + I.dst, nrow, ncol);
+          output = stan::math::mdivide_right_spd(lhs, divisor);
+        }
+        break;
+      }
+      case Program::QUAD_FORM_SYM: {
+        using MatT = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+        using VecT2 = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+        const int32_t nrow = std::abs(I.c);
+        if (nrow == 0) {
+          for (int32_t k = 0; k < I.len; ++k) reg[I.dst + k] = T(0.0);
+          break;
+        }
+        Eigen::Map<const MatT> a(reg + I.a, nrow, nrow);
+        if (I.c < 0) {
+          Eigen::Map<const VecT2> b(reg + I.b, nrow);
+          reg[(size_t)I.dst] = stan::math::quad_form_sym(a, b);
+        } else {
+          const int32_t ncol = static_cast<int32_t>(std::sqrt(I.len));
+          Eigen::Map<const MatT> b(reg + I.b, nrow, ncol);
+          Eigen::Map<MatT> output(reg + I.dst, ncol, ncol);
+          output = stan::math::quad_form_sym(a, b);
+        }
         break;
       }
         // One call for every scalar continuous density the runtime has;

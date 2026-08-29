@@ -408,6 +408,79 @@ class MirInterp {
           }
           return;
         }
+        // General scatter write with at least one integer-array selector.
+        // MirInterp storage is first-index-fast, so enumerate the last axis
+        // outside and the first axis inside, matching eval_indexed and the
+        // RHS's logical order. Repeated indices deliberately retain Stan's
+        // last-write-wins behavior. Validate the complete selection before
+        // mutating the destination so a malformed index remains atomic.
+        bool has_multi = false;
+        for (const auto& index : st.lhs_idx)
+          has_multi = has_multi || index.name == "IndexMulti";
+        if (has_multi && st.lhs_idx.size() <= en->dims.size()) {
+          std::vector<std::vector<int64_t>> selected(en->dims.size());
+          std::vector<int64_t> out_dims;
+          for (size_t d = 0; d < en->dims.size(); ++d) {
+            const int64_t extent = en->dims[d];
+            const mir::Expr* index =
+                d < st.lhs_idx.size() ? &st.lhs_idx[d] : nullptr;
+            if (!index || index->name == "IndexAll") {
+              selected[d].reserve((size_t)extent);
+              for (int64_t k = 0; k < extent; ++k) selected[d].push_back(k);
+              out_dims.push_back(extent);
+            } else if (index->name == "IndexSingle") {
+              const long one = as_int(index->args[0]);
+              if (one < 1 || one > extent)
+                fail("multi-index assignment index out of bounds", st.raw);
+              selected[d].push_back(one - 1);
+            } else if (index->name == "IndexBetween") {
+              const long lo = as_int(index->args[0]);
+              const long hi = as_int(index->args[1]);
+              if (hi >= lo && (lo < 1 || hi > extent))
+                fail("multi-index assignment range out of bounds", st.raw);
+              for (long k = lo; k <= hi; ++k) selected[d].push_back(k - 1);
+              out_dims.push_back(hi >= lo ? hi - lo + 1 : 0);
+            } else if (index->name == "IndexMulti") {
+              const Value positions = eval(index->args[0]);
+              if (!positions.is_int)
+                fail("multi-index assignment needs an int index array", st.raw);
+              selected[d].reserve(positions.i.size());
+              for (int one : positions.i) {
+                if (one < 1 || one > extent)
+                  fail("multi-index assignment index out of bounds", st.raw);
+                selected[d].push_back(one - 1);
+              }
+              out_dims.push_back((int64_t)positions.i.size());
+            } else {
+              fail("unsupported multi-index assignment selector", st.raw);
+            }
+          }
+          std::vector<int64_t> stride(en->dims.size(), 1);
+          for (size_t d = 1; d < en->dims.size(); ++d)
+            stride[d] = stride[d - 1] * en->dims[d - 1];
+          std::vector<size_t> destinations;
+          std::function<void(int64_t, int64_t)> gather = [&](int64_t d,
+                                                             int64_t offset) {
+            if (d < 0) {
+              destinations.push_back((size_t)offset);
+              return;
+            }
+            for (int64_t position : selected[(size_t)d])
+              gather(d - 1, offset + position * stride[(size_t)d]);
+          };
+          gather((int64_t)en->dims.size() - 1, 0);
+          if (v.r.size() != destinations.size() ||
+              (!out_dims.empty() && v.dims != out_dims))
+            fail("multi-index assignment size mismatch", st.raw);
+          for (size_t k = 0; k < destinations.size(); ++k) {
+            const size_t dst = destinations[k];
+            en->r.at(dst) = v.r[k];
+            if (en->is_int)
+              en->i.at(dst) =
+                  v.is_int && k < v.i.size() ? v.i[k] : (int)val(v.r[k]);
+          }
+          return;
+        }
         // General all-Single N-D element write.
         if (st.lhs_idx.size() == en->dims.size()) {
           bool all_single = true;
@@ -425,6 +498,25 @@ class MirInterp {
                   v.is_int && !v.i.empty() ? v.i[0] : (int)val(v.r.at(0));
             return;
           }
+        }
+        // Explicit row write X[i, :] = row_vector / array.
+        if (st.lhs_idx.size() == 2 && st.lhs_idx[0].name == "IndexSingle" &&
+            st.lhs_idx[1].name == "IndexAll" && en->dims.size() == 2) {
+          const long i = as_int(st.lhs_idx[0].args[0]);
+          const int64_t R = en->dims[0], C = en->dims[1];
+          if (i < 1 || i > R)
+            fail("matrix row assignment index out of bounds", st.raw);
+          if ((int64_t)v.r.size() != C)
+            fail("matrix row assignment size mismatch", st.raw);
+          for (int64_t j = 0; j < C; ++j) {
+            const size_t dst = (size_t)(j * R + i - 1);
+            en->r.at(dst) = v.r.at((size_t)j);
+            if (en->is_int)
+              en->i.at(dst) = v.is_int && (size_t)j < v.i.size()
+                                  ? v.i[(size_t)j]
+                                  : (int)val(v.r.at((size_t)j));
+          }
+          return;
         }
         // Column write Xc[:, j] = vector.
         if (st.lhs_idx.size() == 2 && st.lhs_idx[0].name == "IndexAll" &&
@@ -1942,6 +2034,27 @@ class MirInterp {
         }
       return r;
     }
+    if (e.name == "crossprod" && e.args.size() == 1) {
+      using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+      Value a = eval(e.args[0]);
+      if (a.dims.size() != 2) fail("crossprod: needs a matrix", e.raw);
+      const int64_t rows = a.dims[0], cols = a.dims[1];
+      if (rows < 0 || cols < 0 ||
+          (rows != 0 && cols > std::numeric_limits<int64_t>::max() / rows) ||
+          rows * cols != static_cast<int64_t>(a.r.size()))
+        fail("crossprod: matrix shape does not match storage", e.raw);
+      Mat matrix(rows, cols);
+      for (int64_t j = 0; j < cols; ++j)
+        for (int64_t i = 0; i < rows; ++i)
+          matrix(i, j) = a.r[(size_t)(j * rows + i)];
+      const Mat product = stan::math::crossprod(matrix);
+      r.dims = {cols, cols};
+      r.r.resize((size_t)(cols * cols));
+      for (int64_t j = 0; j < cols; ++j)
+        for (int64_t i = 0; i < cols; ++i)
+          r.r[(size_t)(j * cols + i)] = product(i, j);
+      return r;
+    }
     if (e.name == "diag_matrix" && e.args.size() == 1) {
       Value diagonal = eval(e.args[0]);
       const int64_t n = (int64_t)diagonal.r.size();
@@ -2091,6 +2204,15 @@ class MirInterp {
       return cmp([](double x, double y) { return x <= y; });
     if (e.name == "PNot__")
       return un([](const T& x) { return T(val(x) == 0.0 ? 1.0 : 0.0); });
+    if (e.name == "is_nan") {
+      Value a = eval(e.args[0]);
+      if (a.r.size() != 1) fail("is_nan: needs a scalar", e.raw);
+      const int answer = std::isnan(val(a.r[0])) ? 1 : 0;
+      r.is_int = true;
+      r.i = {answer};
+      r.r = {T((double)answer)};
+      return r;
+    }
     if (e.name == "max" || e.name == "min") {
       const bool owning_vector_context =
           where_ == "write_array" || where_ == "prepare_data";
@@ -2169,8 +2291,11 @@ class MirInterp {
           rows_mode = true;
           row_len = (int64_t)v2.r.size();
           elem_dims = v2.dims;
-          o.is_int = false;
           o.r.insert(o.r.end(), v2.r.begin(), v2.r.end());
+          if (o.is_int && v2.is_int && v2.i.size() == v2.r.size())
+            o.i.insert(o.i.end(), v2.i.begin(), v2.i.end());
+          else
+            o.is_int = false;
           continue;
         }
         o.r.push_back(v2.r.at(0));
@@ -2190,6 +2315,13 @@ class MirInterp {
         for (int64_t i = 0; i < R; ++i)
           for (int64_t j = 0; j < C; ++j) cm[j * R + i] = o.r[i * C + j];
         o.r = std::move(cm);
+        if (o.is_int) {
+          std::vector<int> cm_i(R * C);
+          for (int64_t i = 0; i < R; ++i)
+            for (int64_t j = 0; j < C; ++j)
+              cm_i[j * R + i] = o.i[(size_t)(i * C + j)];
+          o.i = std::move(cm_i);
+        }
       }
       if (rows_mode) {
         // Keep the element's own extents instead of collapsing them into
@@ -2392,6 +2524,95 @@ class MirInterp {
                       : stan::math::categorical_lpmf<false>(n, arg);
       };
       r.r = {scalar ? density(outcomes[0]) : density(outcomes)};
+      return r;
+    }
+
+    // A multivariate density consumes its vector and matrix arguments as
+    // whole containers, so the scalar-density broadcaster below cannot
+    // represent it.  ctsem uses both a single vector and array[N] vector[K]
+    // observations, with shared or vectorized locations and one Cholesky
+    // factor. Interpreter storage is first-index-fast: the N array elements
+    // are the fast axis and each observation must therefore be gathered with
+    // stride N before it is handed to Stan Math.
+    if (e.name == "multi_normal_cholesky_lpdf" && e.args.size() == 3) {
+      Value y = eval(e.args[0]), mu_value = eval(e.args[1]),
+            factor = eval(e.args[2]);
+      const auto vector_shape = [&](const mir::Expr& expression,
+                                    const Value& value, const char* role) {
+        const bool vector_leaf =
+            expression.unsized.leaf == mir::UnsizedLeaf::Vector ||
+            expression.unsized.leaf == mir::UnsizedLeaf::RowVector;
+        const size_t rank = (size_t)expression.unsized.depth + 1;
+        if (!vector_leaf || value.dims.size() != rank)
+          fail(e.name + ": " + role + " is not a vector or array of vectors",
+               e.raw);
+        int64_t repetitions = 1;
+        for (size_t d = 0; d < expression.unsized.depth; ++d) {
+          if (value.dims[d] < 0 ||
+              (value.dims[d] != 0 &&
+               repetitions >
+                   std::numeric_limits<int64_t>::max() / value.dims[d]))
+            fail(e.name + ": invalid or overflowing array extent", e.raw);
+          repetitions *= value.dims[d];
+        }
+        const int64_t width = value.dims.back();
+        if (width < 0 ||
+            (repetitions != 0 &&
+             width > std::numeric_limits<int64_t>::max() / repetitions) ||
+            repetitions * width != (int64_t)value.r.size())
+          fail(e.name + ": malformed " + role + " shape", e.raw);
+        return std::pair<int64_t, int64_t>{repetitions, width};
+      };
+      const auto [observations, width] =
+          vector_shape(e.args[0], y, "random variable");
+      const auto [locations, location_width] =
+          vector_shape(e.args[1], mu_value, "location");
+      if (location_width != width)
+        fail(e.name + ": random variable and location sizes differ", e.raw);
+      if (observations != locations && observations != 1 && locations != 1)
+        fail(e.name + ": vectorized argument sizes differ", e.raw);
+      if (e.args[2].unsized.depth != 0 ||
+          e.args[2].unsized.leaf != mir::UnsizedLeaf::Matrix ||
+          factor.dims.size() != 2)
+        fail(e.name + ": Cholesky factor is not a matrix", e.raw);
+      if (width != 0 && width > std::numeric_limits<int64_t>::max() / width)
+        fail(e.name + ": Cholesky factor extent overflows", e.raw);
+      const int64_t factor_size = width * width;
+      if (factor.dims[0] != width || factor.dims[1] != width ||
+          (int64_t)factor.r.size() != factor_size)
+        fail(e.name + ": Cholesky factor has the wrong shape", e.raw);
+
+      using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+      using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+      std::vector<Vec> ys((size_t)observations, Vec((Eigen::Index)width));
+      for (int64_t k = 0; k < observations; ++k)
+        for (int64_t i = 0; i < width; ++i)
+          ys[(size_t)k]((Eigen::Index)i) =
+              y.r.at((size_t)(i * observations + k));
+      std::vector<Vec> mus((size_t)locations, Vec((Eigen::Index)width));
+      for (int64_t k = 0; k < locations; ++k)
+        for (int64_t i = 0; i < width; ++i)
+          mus[(size_t)k]((Eigen::Index)i) =
+              mu_value.r.at((size_t)(i * locations + k));
+      Mat L((Eigen::Index)width, (Eigen::Index)width);
+      for (int64_t j = 0; j < width; ++j)
+        for (int64_t i = 0; i < width; ++i)
+          L((Eigen::Index)i, (Eigen::Index)j) =
+              factor.r[(size_t)(j * width + i)];
+      const bool propto = e.fn_propto && propto_ctx_;
+      const auto density = [&](const auto& yy, const auto& mm) -> T {
+        return propto
+                   ? stan::math::multi_normal_cholesky_lpdf<true>(yy, mm, L)
+                   : stan::math::multi_normal_cholesky_lpdf<false>(yy, mm, L);
+      };
+      if (observations == 1 && locations == 1)
+        r.r = {density(ys[0], mus[0])};
+      else if (locations == 1)
+        r.r = {density(ys, mus[0])};
+      else if (observations == 1)
+        r.r = {density(ys[0], mus)};
+      else
+        r.r = {density(ys, mus)};
       return r;
     }
 

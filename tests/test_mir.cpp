@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -645,6 +646,27 @@ int main(int argc, char** argv) {
       return e;
     };
 
+    auto int_array = [&](std::vector<mir::Expr> values, uint8_t depth) {
+      mir::Expr e;
+      e.kind = mir::Expr::FunApp;
+      e.fn_lib = mir::Expr::Lib::Internal;
+      e.name = "FnMakeArray";
+      e.type_ = "UArray";
+      e.unsized = {depth, mir::UnsizedLeaf::Int};
+      e.data_only = true;
+      e.args = std::move(values);
+      return e;
+    };
+    const DataMap::Entry nested_int_literal =
+        interp.eval(int_array({int_array({integer(1), integer(2)}, 1),
+                               int_array({integer(3), integer(4)}, 1)},
+                              2));
+    check(nested_int_literal.is_int &&
+              nested_int_literal.dims == std::vector<int64_t>({2, 2}) &&
+              nested_int_literal.i == std::vector<int>({1, 3, 2, 4}) &&
+              nested_int_literal.r == std::vector<double>({1, 3, 2, 4}),
+          "nested integer literals retain shape and integer provenance");
+
     // These are the five mixed-index reads in mother.stan's optimized
     // generated-quantities MIR. The runtime value has one unified
     // first-index-fast layout: outer array, matrix row, matrix column.
@@ -919,6 +941,155 @@ int main(int argc, char** argv) {
               written.i == std::vector<int>({9, 4, 8, 5, 3, 6}) &&
               written.r == std::vector<double>({9, 4, 8, 5, 3, 6}),
           "int array row-range assignment writes strided cells");
+    DataMap::Entry full_row;
+    full_row.is_int = true;
+    full_row.dims = {3};
+    full_row.i = {7, 8, 9};
+    full_row.r.assign(full_row.i.begin(), full_row.i.end());
+    interp.env()["full_row"] = std::move(full_row);
+    mir::Stmt row_all_write = row_write;
+    row_all_write.lhs_idx = {single(2), all()};
+    row_all_write.rhs.name = "full_row";
+    interp.run({row_all_write});
+    const DataMap::Entry& row_all = interp.env().at("ints");
+    check(row_all.i == std::vector<int>({9, 7, 8, 8, 3, 9}) &&
+              row_all.r == std::vector<double>({9, 7, 8, 8, 3, 9}),
+          "explicit row-All assignment writes strided cells");
+
+    // Multi-index assignment is a scatter in index order.  In particular,
+    // repeated indices are not deduplicated: the final RHS element wins, as
+    // in the graph lowering and CmdStan's assignment semantics.
+    DataMap::Entry scatter_target;
+    scatter_target.dims = {5};
+    scatter_target.r = {10, 20, 30, 40, 50};
+    interp.env()["scatter_target"] = std::move(scatter_target);
+    DataMap::Entry scatter_indices;
+    scatter_indices.is_int = true;
+    scatter_indices.dims = {3};
+    scatter_indices.i = {4, 1, 4};
+    scatter_indices.r.assign(scatter_indices.i.begin(),
+                             scatter_indices.i.end());
+    interp.env()["scatter_indices"] = std::move(scatter_indices);
+    DataMap::Entry scatter_rhs;
+    scatter_rhs.dims = {3};
+    scatter_rhs.r = {7, 8, 9};
+    interp.env()["scatter_rhs"] = std::move(scatter_rhs);
+    mir::Stmt scatter_write;
+    scatter_write.kind = mir::Stmt::Assignment;
+    scatter_write.lhs = "scatter_target";
+    scatter_write.lhs_idx = {multi("scatter_indices")};
+    scatter_write.rhs.kind = mir::Expr::Var;
+    scatter_write.rhs.name = "scatter_rhs";
+    scatter_write.rhs.type_ = "UVector";
+    scatter_write.rhs.unsized = {0, mir::UnsizedLeaf::Vector};
+    scatter_write.rhs.data_only = true;
+    interp.run({scatter_write});
+    check(interp.env().at("scatter_target").dims == std::vector<int64_t>({5}) &&
+              interp.env().at("scatter_target").r ==
+                  std::vector<double>({8, 20, 30, 9, 50}),
+          "multi-index assignment scatters in order with last duplicate win");
+
+    DataMap::Entry int_scatter_target;
+    int_scatter_target.is_int = true;
+    int_scatter_target.dims = {5};
+    int_scatter_target.i = {10, 20, 30, 40, 50};
+    int_scatter_target.r.assign(int_scatter_target.i.begin(),
+                                int_scatter_target.i.end());
+    interp.env()["int_scatter_target"] = std::move(int_scatter_target);
+    DataMap::Entry int_scatter_rhs;
+    int_scatter_rhs.is_int = true;
+    int_scatter_rhs.dims = {3};
+    int_scatter_rhs.i = {7, 8, 9};
+    int_scatter_rhs.r.assign(int_scatter_rhs.i.begin(),
+                             int_scatter_rhs.i.end());
+    interp.env()["int_scatter_rhs"] = std::move(int_scatter_rhs);
+    mir::Stmt int_scatter_write = scatter_write;
+    int_scatter_write.lhs = "int_scatter_target";
+    int_scatter_write.lhs_idx = {multi("scatter_indices")};
+    int_scatter_write.rhs.name = "int_scatter_rhs";
+    int_scatter_write.rhs.type_ = "(UArray UInt)";
+    int_scatter_write.rhs.unsized = {1, mir::UnsizedLeaf::Int};
+    interp.run({int_scatter_write});
+    const DataMap::Entry& int_scattered = interp.env().at("int_scatter_target");
+    check(int_scattered.i == std::vector<int>({8, 20, 30, 9, 50}) &&
+              int_scattered.r == std::vector<double>({8, 20, 30, 9, 50}),
+          "multi-index assignment keeps integer destination mirrors aligned");
+
+    DataMap::Entry matrix_scatter_target;
+    matrix_scatter_target.is_int = true;
+    matrix_scatter_target.dims = {3, 2};
+    matrix_scatter_target.i = {11, 21, 31, 12, 22, 32};
+    matrix_scatter_target.r.assign(matrix_scatter_target.i.begin(),
+                                   matrix_scatter_target.i.end());
+    interp.env()["matrix_scatter_target"] = std::move(matrix_scatter_target);
+    DataMap::Entry matrix_scatter_indices;
+    matrix_scatter_indices.is_int = true;
+    matrix_scatter_indices.dims = {2};
+    matrix_scatter_indices.i = {3, 1};
+    matrix_scatter_indices.r.assign(matrix_scatter_indices.i.begin(),
+                                    matrix_scatter_indices.i.end());
+    interp.env()["matrix_scatter_indices"] = std::move(matrix_scatter_indices);
+    DataMap::Entry matrix_scatter_rhs;
+    matrix_scatter_rhs.is_int = true;
+    matrix_scatter_rhs.dims = {2, 2};
+    matrix_scatter_rhs.i = {90, 80, 70, 60};
+    matrix_scatter_rhs.r.assign(matrix_scatter_rhs.i.begin(),
+                                matrix_scatter_rhs.i.end());
+    interp.env()["matrix_scatter_rhs"] = std::move(matrix_scatter_rhs);
+    mir::Stmt matrix_scatter_write = scatter_write;
+    matrix_scatter_write.lhs = "matrix_scatter_target";
+    matrix_scatter_write.lhs_idx = {multi("matrix_scatter_indices"),
+                                    between(1, 2)};
+    matrix_scatter_write.rhs.name = "matrix_scatter_rhs";
+    matrix_scatter_write.rhs.type_ = "(UArray (UArray UInt))";
+    matrix_scatter_write.rhs.unsized = {2, mir::UnsizedLeaf::Int};
+    interp.run({matrix_scatter_write});
+    const DataMap::Entry& matrix_scattered =
+        interp.env().at("matrix_scatter_target");
+    check(
+        matrix_scattered.i == std::vector<int>({80, 21, 90, 60, 22, 70}) &&
+            matrix_scattered.r == std::vector<double>({80, 21, 90, 60, 22, 70}),
+        "multi-index assignment preserves multidimensional layout");
+
+    // A multi-index selection preserves its one-dimensional container shape:
+    // the RHS must be a one-dimensional value with one element per selected
+    // position.  Scalars are not implicitly broadcast.
+    DataMap::Entry short_scatter_rhs;
+    short_scatter_rhs.dims = {2};
+    short_scatter_rhs.r = {1, 2};
+    interp.env()["short_scatter_rhs"] = std::move(short_scatter_rhs);
+    mir::Stmt short_scatter = scatter_write;
+    short_scatter.rhs.name = "short_scatter_rhs";
+    check(assignment_refused(short_scatter),
+          "multi-index assignment checks RHS cardinality");
+    DataMap::Entry scalar_scatter_rhs;
+    scalar_scatter_rhs.r = {6};
+    interp.env()["scalar_scatter_rhs"] = std::move(scalar_scatter_rhs);
+    mir::Stmt scalar_scatter = scatter_write;
+    scalar_scatter.rhs.name = "scalar_scatter_rhs";
+    check(assignment_refused(scalar_scatter),
+          "multi-index assignment rejects scalar RHS");
+
+    mir::Expr nan_value;
+    nan_value.kind = mir::Expr::LitReal;
+    nan_value.lit = std::numeric_limits<double>::quiet_NaN();
+    nan_value.type_ = "UReal";
+    nan_value.unsized = {0, mir::UnsizedLeaf::Real};
+    nan_value.data_only = true;
+    mir::Expr is_nan;
+    is_nan.kind = mir::Expr::FunApp;
+    is_nan.fn_lib = mir::Expr::Lib::StanLib;
+    is_nan.name = "is_nan";
+    is_nan.type_ = "UInt";
+    is_nan.unsized = {0, mir::UnsizedLeaf::Int};
+    is_nan.data_only = true;
+    is_nan.args = {nan_value};
+    const DataMap::Entry nan_result = interp.eval(is_nan);
+    is_nan.args[0].lit = 1.0;
+    const DataMap::Entry finite_result = interp.eval(is_nan);
+    check(nan_result.is_int && nan_result.i == std::vector<int>({1}) &&
+              finite_result.is_int && finite_result.i == std::vector<int>({0}),
+          "is_nan interpreter semantics");
 
     // stanc spells elementwise power as EltPow__.  Both operand orders
     // broadcast a scalar without losing the container's geometry.
@@ -948,6 +1119,139 @@ int main(int argc, char** argv) {
     check(exponents.dims == std::vector<int64_t>({3}) &&
               exponents.r == std::vector<double>({4, 8, 16}),
           "EltPow__ broadcasts a scalar base over a container");
+  }
+
+  // The write-array fallback evaluates ctsem's likelihood contribution in
+  // MIR rather than through the graph.  Pin both the single-container
+  // semantics and the first-index-fast layout of array[N] vector[K]: the
+  // logical observations below are {1,2} and {3,4}, not {1,3} and {2,4}.
+  {
+    auto variable = [](const std::string& name, const std::string& type,
+                       uint8_t depth, mir::UnsizedLeaf leaf) {
+      mir::Expr expression;
+      expression.kind = mir::Expr::Var;
+      expression.name = name;
+      expression.type_ = type;
+      expression.unsized = {depth, leaf};
+      return expression;
+    };
+    mir::Expr density;
+    density.kind = mir::Expr::FunApp;
+    density.fn_lib = mir::Expr::Lib::StanLib;
+    density.name = "multi_normal_cholesky_lpdf";
+    density.type_ = "UReal";
+    density.unsized = {0, mir::UnsizedLeaf::Real};
+    density.args = {
+        variable("y", "(UArray UVector)", 1, mir::UnsizedLeaf::Vector),
+        variable("mu", "UVector", 0, mir::UnsizedLeaf::Vector),
+        variable("L", "UMatrix", 0, mir::UnsizedLeaf::Matrix)};
+
+    std::vector<Eigen::VectorXd> ys(2, Eigen::VectorXd(2));
+    ys[0] << 1.0, 2.0;
+    ys[1] << 3.0, 4.0;
+    Eigen::VectorXd mu(2);
+    mu << 0.4, -0.7;
+    std::vector<Eigen::VectorXd> mus(2, Eigen::VectorXd(2));
+    mus[0] << 0.4, -0.7;
+    mus[1] << -0.2, 0.9;
+    Eigen::MatrixXd L(2, 2);
+    L << 1.4, 0.0, 0.3, 0.8;
+    const double want =
+        stan::math::multi_normal_cholesky_lpdf<false>(ys, mu, L);
+
+    std::map<std::string, const mir::FunDef*> functions;
+    MirInterp<double> interp(functions, "multi-normal Cholesky value test");
+    DataMap::Entry y;
+    y.dims = {2, 2};
+    y.r = {1.0, 3.0, 2.0, 4.0};
+    interp.env()["y"] = y;
+    DataMap::Entry location;
+    location.dims = {2};
+    location.r = {0.4, -0.7};
+    interp.env()["mu"] = location;
+    DataMap::Entry factor;
+    factor.dims = {2, 2};
+    factor.r = {1.4, 0.3, 0.0, 0.8};
+    interp.env()["L"] = factor;
+    const DataMap::Entry got = interp.eval(density);
+    check(got.r.size() == 1 && got.r[0] == want,
+          "multi-normal Cholesky interpreter value and array layout");
+    density.fn_propto = true;
+    const DataMap::Entry got_propto = interp.eval(density);
+    const double want_propto =
+        stan::math::multi_normal_cholesky_lpdf<true>(ys, mu, L);
+    check(got_propto.r.size() == 1 && got_propto.r[0] == want_propto,
+          "multi-normal Cholesky interpreter propto value");
+    density.fn_propto = false;
+
+    mir::Expr vectorized_density = density;
+    vectorized_density.args[1] =
+        variable("mu_many", "(UArray UVector)", 1, mir::UnsizedLeaf::Vector);
+    DataMap::Entry locations;
+    locations.dims = {2, 2};
+    locations.r = {0.4, -0.2, -0.7, 0.9};
+    interp.env()["mu_many"] = locations;
+    const DataMap::Entry vectorized = interp.eval(vectorized_density);
+    const double vectorized_want =
+        stan::math::multi_normal_cholesky_lpdf<false>(ys, mus, L);
+    check(vectorized.r.size() == 1 && vectorized.r[0] == vectorized_want,
+          "multi-normal Cholesky vectorized locations");
+
+    DataMap::Entry empty_y;
+    empty_y.dims = {0, 2};
+    interp.env()["y"] = empty_y;
+    const DataMap::Entry empty_result = interp.eval(density);
+    check(empty_result.r.size() == 1 && empty_result.r[0] == 0.0,
+          "multi-normal Cholesky empty observation array");
+    interp.env()["y"] = y;
+
+    using stan::math::var;
+    stan::math::nested_rev_autodiff nested;
+    MirInterp<var> rev(functions, "multi-normal Cholesky gradient test");
+    MirVal<var> yv;
+    yv.dims = {2, 2};
+    for (double v : y.r) yv.r.emplace_back(v);
+    rev.env()["y"] = yv;
+    MirVal<var> muv;
+    muv.dims = {2, 2};
+    for (double v : locations.r) muv.r.emplace_back(v);
+    rev.env()["mu_many"] = muv;
+    MirVal<var> Lv;
+    Lv.dims = {2, 2};
+    for (double v : factor.r) Lv.r.emplace_back(v);
+    rev.env()["L"] = Lv;
+    MirVal<var> rev_got = rev.eval(vectorized_density);
+    rev_got.r[0].grad();
+    std::vector<double> got_adj;
+    for (const var& v : rev.env().at("y").r) got_adj.push_back(v.adj());
+    for (const var& v : rev.env().at("mu_many").r) got_adj.push_back(v.adj());
+    for (const var& v : rev.env().at("L").r) got_adj.push_back(v.adj());
+
+    std::vector<var> yr, mur, Lr;
+    for (double v : y.r) yr.emplace_back(v);
+    for (double v : locations.r) mur.emplace_back(v);
+    for (double v : factor.r) Lr.emplace_back(v);
+    std::vector<Eigen::Matrix<var, Eigen::Dynamic, 1>> yref(
+        2, Eigen::Matrix<var, Eigen::Dynamic, 1>(2));
+    for (int k = 0; k < 2; ++k)
+      for (int i = 0; i < 2; ++i) yref[k](i) = yr[(size_t)(i * 2 + k)];
+    std::vector<Eigen::Matrix<var, Eigen::Dynamic, 1>> muref(
+        2, Eigen::Matrix<var, Eigen::Dynamic, 1>(2));
+    for (int k = 0; k < 2; ++k)
+      for (int i = 0; i < 2; ++i) muref[k](i) = mur[(size_t)(i * 2 + k)];
+    Eigen::Matrix<var, Eigen::Dynamic, Eigen::Dynamic> Lref(2, 2);
+    for (int j = 0; j < 2; ++j)
+      for (int i = 0; i < 2; ++i) Lref(i, j) = Lr[(size_t)(j * 2 + i)];
+    var rev_want =
+        stan::math::multi_normal_cholesky_lpdf<false>(yref, muref, Lref);
+    stan::math::set_zero_all_adjoints();
+    rev_want.grad();
+    std::vector<double> want_adj;
+    for (const var& v : yr) want_adj.push_back(v.adj());
+    for (const var& v : mur) want_adj.push_back(v.adj());
+    for (const var& v : Lr) want_adj.push_back(v.adj());
+    check(rev_got.r[0].val() == rev_want.val() && got_adj == want_adj,
+          "multi-normal Cholesky interpreter gradients");
   }
 
   // rows()/cols() answer from the MIR type, not from the storage rank.

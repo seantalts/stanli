@@ -649,6 +649,28 @@ void gemm_bwd(KernelCtx& ctx) {
     MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * dO;
 }
 
+// ---- crossprod(A): out = A' * A ------------------------------------------
+// idata = {rows, cols}; variant bit 0 records an autodiff result. Stan Math's
+// double overload uses a symmetric rank update, while its reverse-mode
+// overload computes the value as a general matrix product. Both groupings are
+// observable, so forward-only evaluation takes the former and a gradient
+// evaluation takes the latter, matching the overload CmdStan instantiates.
+void crossprod_fwd(KernelCtx& ctx) {
+  const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
+  const CMapM a(ctx.in[0].data, rows, cols);
+  if ((ctx.variant & 1u) && !values_only())
+    MapM(ctx.out.data, cols, cols) = a.transpose() * a;
+  else
+    MapM(ctx.out.data, cols, cols) = stan::math::crossprod(a);
+}
+void crossprod_bwd(KernelCtx& ctx) {
+  const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
+  nary_bwd(ctx, [rows, cols](std::vector<VarV>& xs) {
+    Eigen::Map<VarM> a(xs[0].data(), rows, cols);
+    return stan::math::crossprod(a);
+  });
+}
+
 // ---- matrix solves: `A \ B` and `B / A` -----------------------------------
 // Argument order is the operator's, so in = {A, B} for the left solve and
 // {B, A} for the right one; idata = {n, k} with n the divisor's order and k
@@ -1437,6 +1459,7 @@ void register_matrix_kernels() {
   register_kernel(OP_MULTI_NORMAL_PREC_LPDF,
                   Kernel{mnprec_fwd, mnprec_bwd, nullptr});
   register_kernel(OP_GEMM, Kernel{gemm_fwd, gemm_bwd, nullptr});
+  register_kernel(OP_CROSSPROD, Kernel{crossprod_fwd, crossprod_bwd, nullptr});
   register_kernel(OP_MDIVIDE_LEFT,
                   Kernel{solve_fwd<true>, solve_bwd<true>, nullptr});
   register_kernel(OP_MDIVIDE_RIGHT,

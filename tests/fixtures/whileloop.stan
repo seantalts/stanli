@@ -6,6 +6,7 @@ parameters {
 }
 model {
   int i = 1;
+  int halves = 5;
   array[2] int idx;
   real acc = 0;
   real position = 0;
@@ -18,6 +19,10 @@ model {
   while (position < 1) {
     acc += theta;
     position += step;
+  }
+  while (halves > 1) {
+    halves = halves %/% 2;
+    acc += halves * theta;
   }
   for (k in 1:2) {
     idx[k] = k + 1;

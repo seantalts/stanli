@@ -718,11 +718,16 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         break;
       }
       case Program::DYN_INDEX:
+      case Program::IDIV:
       case Program::MAX_RANGE:
       case Program::JZ:
       case Program::JMP:
       case Program::DIAG_PRE_MULTIPLY:
       case Program::DIAG_POST_MULTIPLY:
+      case Program::MATRIX_EXP:
+      case Program::MDIVIDE_LEFT:
+      case Program::MDIVIDE_RIGHT_SPD:
+      case Program::QUAD_FORM_SYM:
         break;  // gen_adjoint refuses these; unreachable
       case Program::CALL:
         break;  // handled before this switch

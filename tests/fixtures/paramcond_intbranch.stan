@@ -1,7 +1,6 @@
-// The same integer, assigned where the assignment may not run. Folding it
-// would apply to every later read, including on the path that skipped it,
-// and no register can carry an integer back to the lowering instead --
-// which held its own pre-region copy. Refused, by name.
+// The same integer, assigned where the assignment may not run. The region
+// carries it back as a runtime scalar: the taken path writes 2 and the
+// untaken path preserves the pre-region value 1.
 parameters {
   real theta;
 }

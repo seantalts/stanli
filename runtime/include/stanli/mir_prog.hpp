@@ -60,6 +60,7 @@ struct Range {
 struct InlineArg {
   Range real;
   std::vector<long> ints;
+  std::vector<int64_t> int_dims;
   bool is_const_int = false;
 };
 
@@ -78,6 +79,7 @@ struct ProgramCompiler {
   // view: stanc's O1 lowering spells `for (i in {2, 3})` as an unsized array
   // temporary, a whole-array assignment, then scalar indexed reads.
   std::map<std::string, std::vector<long>> known_int_arrays;
+  std::map<std::string, std::vector<int64_t>> known_int_array_dims;
   std::set<std::string> int_array_names;
   // Optimizer temporaries declared with an Unsized container acquire their
   // complete Range from the first whole-variable assignment.  A zero-width
@@ -96,10 +98,19 @@ struct ProgramCompiler {
   // being in `reals` only says the region has read one as a value.
   std::set<std::string> extern_bound;
   int branch_depth = 0;  // inside a branch on a runtime value
+  // A while is a genuinely runtime loop: its condition and state must be
+  // evaluated again on every trip, rather than folded once while the program
+  // is being built.  Scalar integers written by such a loop consequently
+  // live in ordinary double registers (their producers still preserve Stan's
+  // integer-valued operations where they are supported below).
+  int structured_while_depth = 0;
+  bool structured_while_seen = false;
   int inline_depth = 0;
+  std::vector<std::string> inline_stack;
   struct LoopFrame {
     std::vector<int> breaks;
     std::vector<int> continues;
+    bool structured = false;
   };
   std::vector<LoopFrame> loops;
   // A name that is neither a local nor a compile-time integer. The ODE
@@ -115,6 +126,14 @@ struct ProgramCompiler {
   // the caller has never heard of. Lowering installs this; the ODE caller
   // leaves it empty, and cint then refuses as before.
   std::function<bool(const mir::Expr&, long*)> extern_int;
+  // The container counterpart to extern_int.  A data-only UDF can produce
+  // an integer array whose extent depends on its values (for example
+  // `whichequals(x, 1, 1)`).  The host's MIR interpreter already owns those
+  // semantics, so let it provide both values and complete logical extents
+  // without turning the surrounding structured region into an unroll.
+  std::function<bool(const mir::Expr&, std::vector<long>*,
+                     std::vector<int64_t>*)>
+      extern_ints;
   // Where `target +=` accumulates, or -1 when the region may not have
   // one. Set by the caller, which also seeds it to zero.
   int target_reg = -1;
@@ -124,6 +143,47 @@ struct ProgramCompiler {
   // contract run_program states (program.hpp): every register is written
   // before it is read.
   std::vector<std::pair<int, int>> late_bound;
+  // Scalar integers are discovered as runtime values while compiling a
+  // branch body, after its JZ is already in the stream. Their old value must
+  // nevertheless be initialized before control reaches that jump so the
+  // untaken path preserves it.
+  std::vector<Program::Instr> hoisted_int_initializers;
+
+  static void assigned_names(const mir::Stmt& s, std::set<std::string>* names) {
+    if (s.kind == mir::Stmt::Assignment) names->insert(s.lhs);
+    for (const auto& child : s.body) assigned_names(child, names);
+  }
+
+  static bool peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
+    if (s->kind == mir::Stmt::Return) {
+      if (!s->has_init) return false;
+      *value = s->rhs;
+      s->kind = mir::Stmt::Skip;
+      s->body.clear();
+      return true;
+    }
+    if ((s->kind == mir::Stmt::Block || s->kind == mir::Stmt::SList) &&
+        !s->body.empty())
+      return peel_terminal_return(&s->body.back(), value);
+    return false;
+  }
+
+  // Move an already-declared scalar integer into a register before compiling
+  // a structured while which writes it.  Keeping it in `ints` would fold the
+  // first assignment into every later use and turn a runtime recurrence back
+  // into a compile-time unroll.
+  void reify_written_int(const std::string& name) {
+    auto it = ints.find(name);
+    if (it == ints.end()) return;
+    if (it->second.size() != 1)
+      bail("structured while writes an integer array: " + name);
+    const int r = alloc(1);
+    const double value = static_cast<double>(it->second[0]);
+    hoisted_int_initializers.push_back(const_instr(r, &value, 1));
+    reals[name] = Range{r, 1};
+    ints.erase(it);
+    int_decl_at.erase(name);
+  }
 
   // Registers are never recycled. Right-hand sides are a few lines over a
   // handful of states, so the count stays in the dozens; the cap is a
@@ -134,7 +194,7 @@ struct ProgramCompiler {
   [[noreturn]] void bail(const std::string& why) { throw Bail{why}; }
 
   int alloc(int n) {
-    if (p.n_regs + n > kMaxRegs)
+    if (n < 0 || n > kMaxRegs - p.n_regs)
       bail("right-hand side needs too many registers");
     const int r = p.n_regs;
     p.n_regs += n;
@@ -209,6 +269,115 @@ struct ProgramCompiler {
     return v.len;
   }
 
+  int64_t checked_shape_product(const std::vector<int64_t>& dims,
+                                const std::string& what) {
+    int64_t product = 1;
+    for (int64_t extent : dims) {
+      if (extent < 0) bail(what + " has a negative logical extent");
+      if (product != 0 && extent != 0 && product > (int64_t)kMaxRegs / extent)
+        bail(what + " has too many logical elements");
+      product *= extent;
+    }
+    return product;
+  }
+
+  std::vector<int64_t> validated_int_array_dims(const std::vector<long>& values,
+                                                std::vector<int64_t> dims,
+                                                const std::string& what) {
+    if (values.size() > (size_t)kMaxRegs)
+      bail(what + " has too many stored elements");
+    if (dims.empty()) dims = {(int64_t)values.size()};
+    if (checked_shape_product(dims, what) != (int64_t)values.size())
+      bail(what + " storage and logical shape disagree");
+    return dims;
+  }
+
+  mir::Expr int_array_literal(const std::vector<long>& values,
+                              const std::vector<int64_t>& dims) {
+    const std::vector<int64_t> shape =
+        validated_int_array_dims(values, dims, "integer array literal");
+    std::vector<int64_t> stride(shape.size(), 1);
+    for (size_t d = 1; d < shape.size(); ++d)
+      stride[d] = stride[d - 1] * shape[d - 1];
+    std::function<mir::Expr(size_t, int64_t)> make = [&](size_t d,
+                                                         int64_t offset) {
+      if (d == shape.size()) {
+        mir::Expr cell;
+        cell.kind = mir::Expr::LitInt;
+        cell.lit_i = values.at((size_t)offset);
+        cell.type_ = "UInt";
+        cell.unsized = {0, mir::UnsizedLeaf::Int};
+        cell.data_only = true;
+        return cell;
+      }
+      mir::Expr literal;
+      literal.kind = mir::Expr::FunApp;
+      literal.fn_lib = mir::Expr::Lib::Internal;
+      literal.name = "FnMakeArray";
+      literal.type_ = "UArray";
+      literal.unsized = {static_cast<uint8_t>(shape.size() - d),
+                         mir::UnsizedLeaf::Int};
+      literal.data_only = true;
+      literal.args.reserve((size_t)shape[d]);
+      for (int64_t k = 0; k < shape[d]; ++k)
+        literal.args.push_back(make(d + 1, offset + k * stride[d]));
+      return literal;
+    };
+    return make(0, 0);
+  }
+
+  void literalize_external_ints(mir::Expr* e) {
+    if (e->kind == mir::Expr::Var) {
+      auto scalar = ints.find(e->name);
+      if (scalar != ints.end() && scalar->second.size() == 1) {
+        const long value = scalar->second[0];
+        *e = mir::Expr{};
+        e->kind = mir::Expr::LitInt;
+        e->lit_i = value;
+        e->type_ = "UInt";
+        e->unsized = {0, mir::UnsizedLeaf::Int};
+        e->data_only = true;
+        return;
+      }
+      auto array = known_int_arrays.find(e->name);
+      auto dims = known_int_array_dims.find(e->name);
+      if (array != known_int_arrays.end()) {
+        *e = int_array_literal(
+            array->second,
+            dims == known_int_array_dims.end()
+                ? std::vector<int64_t>{(int64_t)array->second.size()}
+                : dims->second);
+        return;
+      }
+    }
+    for (mir::Expr& arg : e->args) literalize_external_ints(&arg);
+  }
+
+  bool external_int_array(const mir::Expr& e, std::vector<long>* values,
+                          std::vector<int64_t>* dims) {
+    if (!extern_ints) return false;
+    if (e.kind == mir::Expr::Var) {
+      auto known = known_int_arrays.find(e.name);
+      if (known != known_int_arrays.end()) {
+        auto shape = known_int_array_dims.find(e.name);
+        *values = known->second;
+        *dims = validated_int_array_dims(
+            *values,
+            shape == known_int_array_dims.end()
+                ? std::vector<int64_t>{(int64_t)values->size()}
+                : shape->second,
+            "external integer array " + e.name);
+        return true;
+      }
+    }
+    mir::Expr literal = e;
+    literalize_external_ints(&literal);
+    if (!extern_ints(literal, values, dims)) return false;
+    *dims = validated_int_array_dims(*values, std::move(*dims),
+                                     "external integer array expression");
+    return true;
+  }
+
   // The view of a named value, without building it: a shape query in an
   // integer position (a declared extent, a loop bound, an index) may not
   // emit, because try_cint swallows a Bail and a half-built branch would
@@ -216,6 +385,18 @@ struct ProgramCompiler {
   // `rows`, `cols` and `dims` of the result mean anything; `reg` is not a
   // register, because no value was built.
   bool static_view(const mir::Expr& e, Range* out) {
+    if (e.data_only && e.unsized.depth != 0 &&
+        e.unsized.leaf == mir::UnsizedLeaf::Int && extern_ints) {
+      std::vector<long> values;
+      std::vector<int64_t> dims;
+      if (external_int_array(e, &values, &dims)) {
+        Range r{0, (int)values.size()};
+        r.kind = ViewKind::Array;
+        r.dims = std::move(dims);
+        *out = std::move(r);
+        return true;
+      }
+    }
     // A literal array, which stanc's inliner substitutes for an argument:
     // `size(when)` inside an inlined function arrives as `size({0})`.
     if (e.kind == mir::Expr::FunApp &&
@@ -245,6 +426,16 @@ struct ProgramCompiler {
     auto rt = reals.find(e.name);
     if (rt != reals.end()) {
       *out = rt->second;
+      return true;
+    }
+    auto known = known_int_arrays.find(e.name);
+    if (known != known_int_arrays.end()) {
+      Range r{0, (int)known->second.size()};
+      r.kind = ViewKind::Array;
+      auto dims = known_int_array_dims.find(e.name);
+      r.dims = dims == known_int_array_dims.end() ? std::vector<int64_t>{r.len}
+                                                  : dims->second;
+      *out = r;
       return true;
     }
     auto ii = ints.find(e.name);
@@ -306,11 +497,30 @@ struct ProgramCompiler {
             bail("integer index form");
         auto known = known_int_arrays.find(e.args[0].name);
         if (known != known_int_arrays.end()) {
-          if (e.args.size() != 2) bail("integer index form");
-          const long ix = cint(e.args[1].args[0]);
-          if (ix < 1 || (size_t)ix > known->second.size())
-            bail("integer index range");
-          return known->second[(size_t)ix - 1];
+          auto shape = known_int_array_dims.find(e.args[0].name);
+          const std::vector<int64_t> dims =
+              shape == known_int_array_dims.end()
+                  ? std::vector<int64_t>{(int64_t)known->second.size()}
+                  : shape->second;
+          if (e.args.size() - 1 != dims.size()) bail("integer index form");
+          int64_t flat = 0;
+          int64_t stride = 1;
+          for (size_t d = 0; d < dims.size(); ++d) {
+            const long ix = cint(e.args[d + 1].args[0]);
+            if (ix < 1 || ix > dims[d]) bail("integer index range");
+            if (ix - 1 != 0 && stride > kMaxRegs / (ix - 1))
+              bail("integer index offset overflow");
+            const int64_t term = (ix - 1) * stride;
+            if (flat > kMaxRegs - term) bail("integer index offset overflow");
+            flat += term;
+            if (d + 1 != dims.size() && dims[d] != 0 &&
+                stride > kMaxRegs / dims[d])
+              bail("integer index stride overflow");
+            stride *= dims[d];
+          }
+          if (flat < 0 || (size_t)flat >= known->second.size())
+            bail("integer index storage range");
+          return known->second[(size_t)flat];
         }
         auto it = ints.find(e.args[0].name);
         if (it != ints.end()) {
@@ -342,6 +552,12 @@ struct ProgramCompiler {
         }
         bail("integer array " + e.args[0].name);
       }
+      case mir::Expr::Promotion:
+        if (e.args.size() != 1) bail("integer promotion form");
+        return cint(e.args[0]);
+      case mir::Expr::TernaryIf:
+        if (e.args.size() != 3) bail("integer conditional form");
+        return cint(e.args[cint(e.args[0]) != 0 ? 1 : 2]);
       case mir::Expr::EAnd:
       case mir::Expr::EOr: {
         // Stan short-circuits these, and so does this: the second operand
@@ -395,9 +611,22 @@ struct ProgramCompiler {
           Range v;
           if (static_view(e.args[0], &v)) return shape_query(e.name, v);
         }
-        bail("integer function " + e.name);
+        if (e.args.size() == 1 && e.name == "sum" &&
+            e.args[0].unsized.leaf == mir::UnsizedLeaf::Int) {
+          long total = 0;
+          for (long value : cints(e.args[0])) total += value;
+          return total;
+        }
+        bail("integer function " + e.name +
+             (e.args.empty()
+                  ? std::string()
+                  : " arg-kind=" + std::to_string((int)e.args[0].kind) +
+                        " arg-name=" + e.args[0].name +
+                        " arg-type=" + e.args[0].type_));
       default:
-        bail("integer expression");
+        bail("integer expression kind=" +
+             std::to_string(static_cast<int>(e.kind)) + " name=" + e.name +
+             " type=" + e.type_);
     }
   }
 
@@ -416,6 +645,12 @@ struct ProgramCompiler {
   // read one scalar at a time through extern_int, the callback that already
   // owns their storage-order semantics.
   std::vector<long> cints(const mir::Expr& e) {
+    if (e.data_only && e.unsized.depth != 0 &&
+        e.unsized.leaf == mir::UnsizedLeaf::Int && extern_ints) {
+      std::vector<long> values;
+      std::vector<int64_t> dims;
+      if (external_int_array(e, &values, &dims)) return values;
+    }
     if (e.kind == mir::Expr::Var) {
       auto known = known_int_arrays.find(e.name);
       if (known != known_int_arrays.end()) return known->second;
@@ -427,28 +662,39 @@ struct ProgramCompiler {
           view.len >= 0) {
         std::vector<long> values;
         values.reserve((size_t)view.len);
-        for (int k = 0; k < view.len; ++k) {
-          mir::Expr literal;
-          literal.kind = mir::Expr::LitInt;
-          literal.lit_i = k + 1;
-          literal.type_ = "UInt";
-          literal.unsized = {0, mir::UnsizedLeaf::Int};
-          literal.data_only = true;
-
-          mir::Expr single;
-          single.kind = mir::Expr::FunApp;
-          single.name = "IndexSingle";
-          single.args.push_back(std::move(literal));
-
+        const std::vector<int64_t> dims =
+            view.dims.empty() ? std::vector<int64_t>{view.len} : view.dims;
+        std::vector<int64_t> chosen(dims.size());
+        std::function<void(size_t)> gather = [&](size_t d) {
+          if (d != dims.size()) {
+            for (int64_t i = 1; i <= dims[d]; ++i) {
+              chosen[d] = i;
+              gather(d + 1);
+            }
+            return;
+          }
           mir::Expr indexed;
           indexed.kind = mir::Expr::Indexed;
           indexed.type_ = "UInt";
           indexed.unsized = {0, mir::UnsizedLeaf::Int};
           indexed.data_only = true;
           indexed.args.push_back(e);
-          indexed.args.push_back(std::move(single));
+          for (int64_t position : chosen) {
+            mir::Expr literal;
+            literal.kind = mir::Expr::LitInt;
+            literal.lit_i = position;
+            literal.type_ = "UInt";
+            literal.unsized = {0, mir::UnsizedLeaf::Int};
+            literal.data_only = true;
+            mir::Expr single;
+            single.kind = mir::Expr::FunApp;
+            single.name = "IndexSingle";
+            single.args.push_back(std::move(literal));
+            indexed.args.push_back(std::move(single));
+          }
           values.push_back(cint(indexed));
-        }
+        };
+        gather(0);
         return values;
       }
       bail("integer array " + e.name + " is not known at compile time");
@@ -466,7 +712,61 @@ struct ProgramCompiler {
       values.insert(values.end(), tail.begin(), tail.end());
       return values;
     }
-    bail("integer gather selector is not known at compile time");
+    if (e.kind == mir::Expr::Indexed && !e.args.empty() &&
+        e.args[0].kind == mir::Expr::Var) {
+      Range base;
+      if (!static_view(e.args[0], &base) || base.kind != ViewKind::Array)
+        bail("integer indexed selector has no static array view");
+      const std::vector<int64_t> dims =
+          base.dims.empty() ? std::vector<int64_t>{base.len} : base.dims;
+      if (e.args.size() - 1 != dims.size())
+        bail("integer indexed selector needs every array dimension");
+      std::vector<std::vector<int64_t>> positions;
+      positions.reserve(dims.size());
+      for (size_t d = 0; d < dims.size(); ++d)
+        positions.push_back(
+            matrix_positions(e.args[d + 1], dims[d], "array selector"));
+
+      std::vector<long> values;
+      std::vector<int64_t> chosen(dims.size());
+      std::function<void(int)> gather = [&](int d) {
+        if (d >= 0) {
+          for (int64_t position : positions[(size_t)d]) {
+            chosen[(size_t)d] = position + 1;
+            gather(d - 1);
+          }
+          return;
+        }
+        mir::Expr scalar;
+        scalar.kind = mir::Expr::Indexed;
+        scalar.type_ = "UInt";
+        scalar.unsized = {0, mir::UnsizedLeaf::Int};
+        scalar.data_only = true;
+        scalar.args.push_back(e.args[0]);
+        for (int64_t position : chosen) {
+          mir::Expr literal;
+          literal.kind = mir::Expr::LitInt;
+          literal.lit_i = position;
+          literal.type_ = "UInt";
+          literal.unsized = {0, mir::UnsizedLeaf::Int};
+          literal.data_only = true;
+          mir::Expr single;
+          single.kind = mir::Expr::FunApp;
+          single.name = "IndexSingle";
+          single.args.push_back(std::move(literal));
+          scalar.args.push_back(std::move(single));
+        }
+        values.push_back(cint(scalar));
+      };
+      gather((int)dims.size() - 1);
+      return values;
+    }
+    std::string detail =
+        "integer gather selector is not known at compile time: kind=" +
+        std::to_string(static_cast<int>(e.kind)) + " name=" + e.name +
+        " type=" + e.type_ + " args=" + std::to_string(e.args.size());
+    for (const auto& arg : e.args) detail += " [" + arg.name + "]";
+    bail(detail);
   }
 
   bool try_cints(const mir::Expr& e, std::vector<long>* out) {
@@ -478,20 +778,140 @@ struct ProgramCompiler {
     }
   }
 
-  std::vector<int64_t> matrix_gather_positions(const mir::Expr& index,
-                                               int64_t extent,
-                                               const std::string& axis) {
-    if (index.name != "IndexMulti" || index.args.size() != 1)
-      bail("matrix " + axis + " gather index form");
-    const std::vector<long> values = cints(index.args[0]);
+  std::vector<int64_t> matrix_positions(const mir::Expr& index, int64_t extent,
+                                        const std::string& axis) {
+    if (extent < 0 || extent > kMaxRegs)
+      bail("matrix " + axis + " has an invalid extent");
+    std::vector<long> values;
+    if (index.name == "IndexAll") {
+      values.reserve((size_t)extent);
+      for (int64_t i = 1; i <= extent; ++i) values.push_back((long)i);
+    } else if (index.name == "IndexSingle" && index.args.size() == 1) {
+      values.push_back(cint(index.args[0]));
+    } else if (index.name == "IndexBetween" && index.args.size() == 2) {
+      const long lo = cint(index.args[0]), hi = cint(index.args[1]);
+      if (hi >= lo) {
+        if (lo < 1 || hi > extent)
+          bail("matrix " + axis + " range is outside its extent");
+        const uint64_t count = (uint64_t)hi - (uint64_t)lo + 1;
+        if (count > (uint64_t)kMaxRegs)
+          bail("matrix " + axis + " range is too large");
+        values.reserve((size_t)count);
+        for (long i = lo; i <= hi; ++i) values.push_back(i);
+      }
+    } else if (index.name == "IndexMulti" && index.args.size() == 1) {
+      values = cints(index.args[0]);
+    } else {
+      bail("matrix " + axis + " index form");
+    }
     std::vector<int64_t> positions;
     positions.reserve(values.size());
     for (long value : values) {
-      if (value < 1 || value > extent)
-        bail("matrix " + axis + " gather out of the declared range");
+      if (value < 1 || value > extent) {
+        std::string detail = "matrix " + axis + " gather index " +
+                             std::to_string(value) +
+                             " is outside 1:" + std::to_string(extent);
+        for (const auto& [name, held] : ints)
+          if (held.size() == 1)
+            detail += " " + name + "=" + std::to_string(held[0]);
+        bail(detail);
+      }
       positions.push_back((int64_t)value - 1);
     }
     return positions;
+  }
+
+  std::vector<int64_t> graph_array_offsets(
+      const std::vector<int64_t>& dims, ViewKind leaf,
+      const std::vector<std::vector<int64_t>>& positions) {
+    const size_t leaf_dims =
+        leaf == ViewKind::Matrix
+            ? 2
+            : (leaf == ViewKind::Vector || leaf == ViewKind::RowVector ? 1 : 0);
+    if (dims.size() < leaf_dims || positions.size() != dims.size())
+      bail("array selection has inconsistent logical extents");
+    checked_shape_product(dims, "array selection");
+    const size_t n_array = dims.size() - leaf_dims;
+    int64_t leaf_width = 1;
+    for (size_t d = n_array; d < dims.size(); ++d) leaf_width *= dims[d];
+    std::vector<int64_t> outer_stride(n_array, leaf_width);
+    for (size_t d = n_array; d-- > 1;)
+      outer_stride[d - 1] = outer_stride[d] * dims[d];
+
+    std::vector<int64_t> offsets;
+    std::function<void(size_t, int64_t)> arrays = [&](size_t d, int64_t off) {
+      if (d != n_array) {
+        for (int64_t position : positions[d])
+          arrays(d + 1, off + position * outer_stride[d]);
+        return;
+      }
+      if (leaf == ViewKind::Matrix) {
+        const int64_t rows = dims[n_array];
+        for (int64_t col : positions[n_array + 1])
+          for (int64_t row : positions[n_array])
+            offsets.push_back(off + col * rows + row);
+      } else if (leaf == ViewKind::Vector || leaf == ViewKind::RowVector) {
+        for (int64_t cell : positions[n_array]) offsets.push_back(off + cell);
+      } else {
+        offsets.push_back(off);
+      }
+    };
+    arrays(0, 0);
+    return offsets;
+  }
+
+  std::vector<int64_t> first_fast_array_offsets(
+      const std::vector<int64_t>& dims,
+      const std::vector<std::vector<int64_t>>& positions) {
+    if (positions.size() != dims.size())
+      bail("integer array selection has inconsistent logical extents");
+    checked_shape_product(dims, "integer array selection");
+    std::vector<int64_t> stride(dims.size(), 1);
+    for (size_t d = 1; d < dims.size(); ++d)
+      stride[d] = stride[d - 1] * dims[d - 1];
+    std::vector<int64_t> offsets;
+    std::function<void(int, int64_t)> gather = [&](int d, int64_t off) {
+      if (d < 0) {
+        offsets.push_back(off);
+        return;
+      }
+      for (int64_t position : positions[(size_t)d])
+        gather(d - 1, off + position * stride[(size_t)d]);
+    };
+    gather((int)dims.size() - 1, 0);
+    return offsets;
+  }
+
+  std::vector<double> int_array_graph_values(const std::vector<long>& values,
+                                             const std::vector<int64_t>& dims) {
+    validated_int_array_dims(values, dims, "integer array graph value");
+    if (values.empty()) return {};
+    std::vector<std::vector<int64_t>> positions;
+    positions.reserve(dims.size());
+    for (int64_t extent : dims) {
+      positions.emplace_back();
+      positions.back().reserve((size_t)extent);
+      for (int64_t k = 0; k < extent; ++k) positions.back().push_back(k);
+    }
+    // Scalar integer arrays have no container leaf, so graph_array_offsets
+    // enumerates their cells outer-major.  Each returned coordinate's source
+    // address is first-index-fast; reconstruct it while walking that order.
+    std::vector<double> out;
+    out.reserve(values.size());
+    std::vector<int64_t> source_stride(dims.size(), 1);
+    for (size_t d = 1; d < dims.size(); ++d)
+      source_stride[d] = source_stride[d - 1] * dims[d - 1];
+    std::function<void(size_t, int64_t)> gather = [&](size_t d,
+                                                      int64_t source) {
+      if (d == dims.size()) {
+        out.push_back((double)values.at((size_t)source));
+        return;
+      }
+      for (int64_t position : positions[d])
+        gather(d + 1, source + position * source_stride[d]);
+    };
+    gather(0, 0);
+    return out;
   }
 
   static bool same_view(const Range& a, const Range& b) {
@@ -617,6 +1037,22 @@ struct ProgramCompiler {
           bail("unsized local read before its first assignment: " + e.name);
         auto it = reals.find(e.name);
         if (it != reals.end()) return it->second;
+        auto known = known_int_arrays.find(e.name);
+        if (known != known_int_arrays.end()) {
+          auto dims = known_int_array_dims.find(e.name);
+          const std::vector<int64_t> logical_dims =
+              dims == known_int_array_dims.end()
+                  ? std::vector<int64_t>{(int64_t)known->second.size()}
+                  : dims->second;
+          const std::vector<double> vals =
+              int_array_graph_values(known->second, logical_dims);
+          const int r = alloc((int)vals.size());
+          emit_const(r, vals.data(), (int)vals.size());
+          Range out{r, (int)vals.size()};
+          out.kind = ViewKind::Array;
+          out.dims = logical_dims;
+          return out;
+        }
         auto ii = ints.find(e.name);
         if (ii != ints.end()) {
           const std::vector<double> vals(ii->second.begin(), ii->second.end());
@@ -654,28 +1090,36 @@ struct ProgramCompiler {
         if (e.args.empty()) bail("index form");
         const Range b = expr(e.args[0]);
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
-        // Two IndexMulti axes select their Cartesian submatrix.  Matrix
-        // registers are column-major, so selected columns are the outer loop
-        // and selected rows the inner loop; this preserves selector order and
-        // duplicates exactly as the graph lowerer does.
-        if (b.kind == ViewKind::Matrix && e.args.size() == 3 &&
-            e.args[1].name == "IndexMulti" && e.args[2].name == "IndexMulti") {
+        // General compile-time matrix selection. Registers are column-major,
+        // so selected columns are outer and rows inner; this covers All,
+        // Single, Between, and Multi in any pair while preserving selector
+        // order and duplicate gather indices.
+        if (b.kind == ViewKind::Matrix && e.args.size() == 3) {
           const std::vector<int64_t> rows =
-              matrix_gather_positions(e.args[1], b.rows, "row");
-          const std::vector<int64_t> cols =
-              matrix_gather_positions(e.args[2], b.cols, "column");
+              matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name);
+          const std::vector<int64_t> cols = matrix_positions(
+              e.args[2], b.cols, "column of " + e.args[0].name);
           if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
-            bail("matrix gather needs too many registers");
+            bail("matrix selection needs too many registers");
           const size_t width = rows.size() * cols.size();
+          if (width == 1 && e.type_ != "UMatrix" && e.type_ != "UVector" &&
+              e.type_ != "URowVector")
+            return {b.reg + (int)(cols[0] * b.rows + rows[0]), 1};
           const int r = alloc((int)width);
           int at = 0;
           for (int64_t j : cols)
             for (int64_t i : rows)
               emit(Program::MOV, r + at++, b.reg + (int)(j * b.rows + i));
           Range out{r, (int)width};
-          out.kind = ViewKind::Matrix;
-          out.rows = (int64_t)rows.size();
-          out.cols = (int64_t)cols.size();
+          if (e.type_ == "UVector") {
+            out.kind = ViewKind::Vector;
+          } else if (e.type_ == "URowVector") {
+            out.kind = ViewKind::RowVector;
+          } else {
+            out.kind = ViewKind::Matrix;
+            out.rows = (int64_t)rows.size();
+            out.cols = (int64_t)cols.size();
+          }
           return out;
         }
         // A matrix row, `m[i]` or `m[i, ]`. Ahead of the all-single check
@@ -685,9 +1129,28 @@ struct ProgramCompiler {
             (e.args.size() == 2 ||
              (e.args.size() == 3 && e.args[2].name == "IndexAll")))
           return matrix_row(b, cint(e.args[1].args[0]));
-        for (size_t k = 1; k < e.args.size(); ++k)
-          if (e.args[k].name != "IndexSingle") bail("index form");
-
+        if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
+             b.kind == ViewKind::Flat) &&
+            e.args.size() == 2 && e.args[1].name == "IndexBetween") {
+          const long lo = cint(e.args[1].args[0]);
+          const long hi = cint(e.args[1].args[1]);
+          if (hi < lo) return typed(Range{b.reg, 0}, e.type_);
+          if (lo < 1 || hi > b.len)
+            bail("range index out of the declared range");
+          return typed(Range{b.reg + (int)lo - 1, (int)(hi - lo + 1)}, e.type_);
+        }
+        if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
+             b.kind == ViewKind::Flat) &&
+            e.args.size() == 2 && e.args[1].name == "IndexMulti") {
+          const std::vector<long> indices = cints(e.args[1].args[0]);
+          const int r = alloc((int)indices.size());
+          for (size_t k = 0; k < indices.size(); ++k) {
+            if (indices[k] < 1 || indices[k] > b.len)
+              bail("gather index out of the declared range");
+            emit(Program::MOV, r + (int)k, b.reg + (int)indices[k] - 1);
+          }
+          return typed(Range{r, (int)indices.size()}, e.type_);
+        }
         if (b.kind == ViewKind::Matrix) {
           if (e.args.size() == 3) {
             const long i = cint(e.args[1].args[0]);
@@ -724,47 +1187,94 @@ struct ProgramCompiler {
             b.dims.empty() ? std::vector<int64_t>{b.len} : b.dims;
         const size_t n_idx = e.args.size() - 1;
         if (n_idx > dims.size()) bail("too many array indices");
-        int64_t off = 0;
+
+        // Arrays use Stan's first-index-fastest storage order.  A selection
+        // can therefore be strided even when it fixes a leading index, so
+        // gather the complete result rather than pretending it is a
+        // contiguous suffix.  This also covers array slices such as
+        // `whichobs[row, 1:n]` and selections which continue into a
+        // vector/matrix leaf.
+        std::vector<std::vector<int64_t>> positions;
+        std::vector<bool> drops;
+        positions.reserve(dims.size());
+        drops.reserve(dims.size());
+        bool all_static = true;
+        size_t runtime_dim = dims.size();
         for (size_t d = 0; d < n_idx; ++d) {
-          int64_t stride = 1;
-          for (size_t q = d + 1; q < dims.size(); ++q) stride *= dims[q];
-          long ix;
-          if (try_cint(e.args[d + 1].args[0], &ix)) {
-            if (ix < 1 || ix > dims[d])
-              bail("array index out of the declared range");
-            off += (ix - 1) * stride;
-            continue;
+          const mir::Expr& index = e.args[d + 1];
+          if (index.name == "IndexSingle" && index.args.size() == 1) {
+            long ignored;
+            if (!try_cint(index.args[0], &ignored)) {
+              all_static = false;
+              runtime_dim = d;
+              break;
+            }
           }
-          // The Viterbi surface: all prefix indices are static and the
-          // runtime index selects one scalar from the final extent.
-          if (d + 1 != n_idx || n_idx != dims.size() || stride != 1)
-            bail("runtime array index is not the final scalar index");
-          const Range iv = expr(e.args[d + 1].args[0]);
+          positions.push_back(matrix_positions(index, dims[d], "array"));
+          drops.push_back(index.name == "IndexSingle");
+        }
+        if (!all_static) {
+          if (b.leaf != ViewKind::Flat || n_idx != dims.size() ||
+              runtime_dim + 1 != dims.size() ||
+              e.args[runtime_dim + 1].name != "IndexSingle" ||
+              e.args[runtime_dim + 1].args.size() != 1)
+            bail("runtime array index must be the final scalar index");
+          positions.push_back({0});
+          const std::vector<int64_t> base_offsets =
+              graph_array_offsets(dims, b.leaf, positions);
+          if (base_offsets.size() != 1)
+            bail("runtime array index has an ambiguous base");
+          const Range iv = expr(e.args[runtime_dim + 1].args[0]);
           if (!is_scalar(iv)) bail("runtime array index is not scalar");
           const int r = alloc(1);
           p.code.push_back(Program::Instr{Program::DYN_INDEX, r, b.reg, iv.reg,
-                                          (int32_t)off, (int32_t)dims[d]});
+                                          (int32_t)base_offsets[0],
+                                          (int32_t)dims[runtime_dim]});
           return {r, 1};
         }
-        int64_t len = 1;
-        for (size_t d = n_idx; d < dims.size(); ++d) len *= dims[d];
-        if (len == 1 && (e.type_ == "UReal" || e.type_ == "UInt"))
-          return {b.reg + (int)off, 1};
-        Range out{b.reg + (int)off, (int)len};
+        for (size_t d = n_idx; d < dims.size(); ++d) {
+          if (dims[d] < 0 || dims[d] > kMaxRegs)
+            bail("array selection has an invalid omitted extent");
+          positions.emplace_back();
+          positions.back().reserve((size_t)dims[d]);
+          for (int64_t k = 0; k < dims[d]; ++k) positions.back().push_back(k);
+          drops.push_back(false);
+        }
+        int64_t width = 1;
+        std::vector<int64_t> out_dims;
+        for (size_t d = 0; d < positions.size(); ++d) {
+          if (!positions[d].empty() &&
+              width > kMaxRegs / (int64_t)positions[d].size())
+            bail("array selection needs too many registers");
+          width *= (int64_t)positions[d].size();
+          if (!drops[d]) out_dims.push_back((int64_t)positions[d].size());
+        }
+        const int r = alloc((int)width);
+        const std::vector<int64_t> offsets =
+            graph_array_offsets(dims, b.leaf, positions);
+        for (size_t k = 0; k < offsets.size(); ++k)
+          emit(Program::MOV, r + (int)k, b.reg + (int)offsets[k]);
+        if (width == 1 && (e.type_ == "UReal" || e.type_ == "UInt"))
+          return {r, 1};
+        Range out{r, (int)width};
         if (e.type_ == "UVector") {
           out.kind = ViewKind::Vector;
         } else if (e.type_ == "URowVector") {
           out.kind = ViewKind::RowVector;
         } else if (e.type_ == "UMatrix") {
-          if (b.leaf != ViewKind::Matrix || dims.size() - n_idx != 2)
-            bail("matrix index form");
+          if (out_dims.size() != 2) bail("matrix index form");
           out.kind = ViewKind::Matrix;
-          out.rows = dims[n_idx];
-          out.cols = dims[n_idx + 1];
+          out.rows = out_dims[0];
+          out.cols = out_dims[1];
         } else {
           out.kind = ViewKind::Array;
-          out.leaf = b.leaf;
-          out.dims.assign(dims.begin() + (long)n_idx, dims.end());
+          out.leaf =
+              e.unsized.leaf == mir::UnsizedLeaf::Matrix   ? ViewKind::Matrix
+              : e.unsized.leaf == mir::UnsizedLeaf::Vector ? ViewKind::Vector
+              : e.unsized.leaf == mir::UnsizedLeaf::RowVector
+                  ? ViewKind::RowVector
+                  : ViewKind::Flat;
+          out.dims = std::move(out_dims);
         }
         return out;
       }
@@ -863,6 +1373,45 @@ struct ProgramCompiler {
     return out;
   }
 
+  Range matrix_gram(const Range& m, bool transpose_first) {
+    if (m.kind != ViewKind::Matrix)
+      bail(std::string(transpose_first ? "crossprod" : "tcrossprod") +
+           " requires a matrix");
+    const int64_t outer = transpose_first ? m.cols : m.rows;
+    const int64_t inner = transpose_first ? m.rows : m.cols;
+    if (outer != 0 && outer > kMaxRegs / outer)
+      bail("matrix Gram product needs too many registers");
+    const int r = alloc((int)(outer * outer));
+    const auto at = [&](int64_t row, int64_t col) {
+      return m.reg + (int)(col * m.rows + row);
+    };
+    for (int64_t j = 0; j < outer; ++j)
+      for (int64_t i = 0; i < outer; ++i) {
+        const int dst = r + (int)(j * outer + i);
+        if (inner == 0) {
+          const double zero = 0.0;
+          emit_const(dst, &zero, 1);
+          continue;
+        }
+        const auto lhs = [&](int64_t k) {
+          return transpose_first ? at(k, i) : at(i, k);
+        };
+        const auto rhs = [&](int64_t k) {
+          return transpose_first ? at(k, j) : at(j, k);
+        };
+        emit(Program::MUL, dst, lhs(0), rhs(0));
+        for (int64_t k = 1; k < inner; ++k) {
+          const int term = alloc(1);
+          emit(Program::MUL, term, lhs(k), rhs(k));
+          emit(Program::ADD, dst, dst, term);
+        }
+      }
+    Range out{r, (int)(outer * outer)};
+    out.kind = ViewKind::Matrix;
+    out.rows = out.cols = outer;
+    return out;
+  }
+
   Range fun(const mir::Expr& e) {
     // A shape query is a constant whatever surrounds it. Ahead of every
     // other case because `FnLength` is an internal function and the rest
@@ -873,6 +1422,157 @@ struct ProgramCompiler {
       Range v;
       if (!static_view(e.args[0], &v)) v = expr(e.args[0]);
       return {konst((double)shape_query(e.name, v)), 1};
+    }
+    if (e.data_only && e.unsized.depth != 0 &&
+        e.unsized.leaf == mir::UnsizedLeaf::Int) {
+      std::vector<long> values;
+      std::vector<int64_t> dims;
+      if (external_int_array(e, &values, &dims)) {
+        if (values.size() > (size_t)kMaxRegs)
+          bail("integer array constant needs too many registers");
+        const std::vector<int64_t> logical_dims =
+            dims.empty() ? std::vector<int64_t>{(int64_t)values.size()} : dims;
+        const std::vector<double> real_values =
+            int_array_graph_values(values, logical_dims);
+        const int r = alloc((int)values.size());
+        emit_const(r, real_values.data(), (int)real_values.size());
+        Range out{r, (int)values.size()};
+        out.kind = ViewKind::Array;
+        out.dims = logical_dims;
+        return out;
+      }
+    }
+    if ((e.name == "Transpose__" || e.name == "transpose") &&
+        e.args.size() == 1) {
+      Range value = expr(e.args[0]);
+      if (value.kind == ViewKind::Vector) {
+        value.kind = ViewKind::RowVector;
+        return value;
+      }
+      if (value.kind == ViewKind::RowVector) {
+        value.kind = ViewKind::Vector;
+        return value;
+      }
+      if (value.kind != ViewKind::Matrix)
+        bail("transpose needs a vector, row vector, or matrix");
+      const int r = alloc(value.len);
+      for (int64_t j = 0; j < value.cols; ++j)
+        for (int64_t i = 0; i < value.rows; ++i)
+          emit(Program::MOV, r + (int)(i * value.cols + j),
+               value.reg + (int)(j * value.rows + i));
+      Range out{r, value.len};
+      out.kind = ViewKind::Matrix;
+      out.rows = value.cols;
+      out.cols = value.rows;
+      return out;
+    }
+    if (e.name == "tcrossprod" && e.args.size() == 1)
+      return matrix_gram(expr(e.args[0]), false);
+    if (e.name == "crossprod" && e.args.size() == 1)
+      return matrix_gram(expr(e.args[0]), true);
+    if (e.name == "add_diag" && e.args.size() == 2) {
+      const Range input = expr(e.args[0]);
+      const Range diagonal = expr(e.args[1]);
+      if (input.kind != ViewKind::Matrix)
+        bail("add_diag requires a matrix first argument");
+      const int64_t n = std::min(input.rows, input.cols);
+      if (!is_scalar(diagonal) && ((diagonal.kind != ViewKind::Vector &&
+                                    diagonal.kind != ViewKind::RowVector) ||
+                                   diagonal.len != n))
+        bail("add_diag diagonal size mismatch");
+      const int r = alloc(input.len);
+      for (int k = 0; k < input.len; ++k)
+        emit(Program::MOV, r + k, input.reg + k);
+      for (int64_t k = 0; k < n; ++k)
+        emit(Program::ADD, r + (int)(k * (input.rows + 1)),
+             r + (int)(k * (input.rows + 1)),
+             diagonal.reg + (is_scalar(diagonal) ? 0 : (int)k));
+      Range out = input;
+      out.reg = r;
+      return out;
+    }
+    if (e.name == "matrix_exp" && e.args.size() == 1) {
+      const Range input = expr(e.args[0]);
+      if (input.kind != ViewKind::Matrix || input.rows != input.cols)
+        bail("matrix_exp requires a square matrix");
+      const int r = alloc(input.len);
+      if (input.len != 0)
+        p.code.push_back(Program::Instr{Program::MATRIX_EXP, r, input.reg,
+                                        (int32_t)input.rows,
+                                        (int32_t)input.cols, input.len});
+      Range out = input;
+      out.reg = r;
+      return out;
+    }
+    if ((e.name == "LDivide__" || e.name == "mdivide_left") &&
+        e.args.size() == 2) {
+      const Range divisor = expr(e.args[0]);
+      const Range rhs = expr(e.args[1]);
+      if (divisor.kind != ViewKind::Matrix || divisor.rows != divisor.cols)
+        bail("mdivide_left requires a square matrix divisor");
+      if ((rhs.kind != ViewKind::Matrix && rhs.kind != ViewKind::Vector) ||
+          (rhs.kind == ViewKind::Matrix && rhs.rows != divisor.rows) ||
+          (rhs.kind == ViewKind::Vector && rhs.len != divisor.rows))
+        bail("mdivide_left right-hand side size mismatch");
+      const int r = alloc(rhs.len);
+      const int32_t encoded_rows = rhs.kind == ViewKind::Vector
+                                       ? -(int32_t)divisor.rows
+                                       : (int32_t)divisor.rows;
+      if (rhs.len != 0)
+        p.code.push_back(Program::Instr{Program::MDIVIDE_LEFT, r, divisor.reg,
+                                        rhs.reg, encoded_rows, rhs.len});
+      Range out = rhs;
+      out.reg = r;
+      return out;
+    }
+    if (e.name == "mdivide_right_spd" && e.args.size() == 2) {
+      const Range lhs = expr(e.args[0]);
+      const Range divisor = expr(e.args[1]);
+      if (divisor.kind != ViewKind::Matrix || divisor.rows != divisor.cols)
+        bail("mdivide_right_spd requires a square matrix divisor");
+      if ((lhs.kind != ViewKind::Matrix && lhs.kind != ViewKind::RowVector) ||
+          (lhs.kind == ViewKind::Matrix && lhs.cols != divisor.cols) ||
+          (lhs.kind == ViewKind::RowVector && lhs.len != divisor.cols))
+        bail("mdivide_right_spd left-hand side size mismatch");
+      const int r = alloc(lhs.len);
+      const int32_t encoded_cols = lhs.kind == ViewKind::RowVector
+                                       ? -(int32_t)divisor.cols
+                                       : (int32_t)divisor.cols;
+      if (lhs.len != 0)
+        p.code.push_back(Program::Instr{Program::MDIVIDE_RIGHT_SPD, r,
+                                        divisor.reg, lhs.reg, encoded_cols,
+                                        lhs.len});
+      Range out = lhs;
+      out.reg = r;
+      return out;
+    }
+    if (e.name == "quad_form_sym" && e.args.size() == 2) {
+      const Range a = expr(e.args[0]);
+      const Range b = expr(e.args[1]);
+      if (a.kind != ViewKind::Matrix || a.rows != a.cols)
+        bail("quad_form_sym requires a square first matrix");
+      if ((b.kind != ViewKind::Matrix && b.kind != ViewKind::Vector) ||
+          (b.kind == ViewKind::Matrix && b.rows != a.rows) ||
+          (b.kind == ViewKind::Vector && b.len != a.rows))
+        bail("quad_form_sym second argument size mismatch");
+      const int64_t ncol = b.kind == ViewKind::Vector ? 1 : b.cols;
+      const int64_t width = ncol * ncol;
+      if (width > kMaxRegs) bail("quad_form_sym result is too large");
+      const int r = alloc((int)width);
+      const int32_t encoded_rows =
+          b.kind == ViewKind::Vector ? -(int32_t)a.rows : (int32_t)a.rows;
+      if (a.rows == 0) {
+        const std::vector<double> zero((size_t)width, 0.0);
+        emit_const(r, zero.data(), (int)width);
+      } else {
+        p.code.push_back(Program::Instr{Program::QUAD_FORM_SYM, r, a.reg, b.reg,
+                                        encoded_rows, (int32_t)width});
+      }
+      if (b.kind == ViewKind::Vector) return {r, 1};
+      Range out{r, (int)width};
+      out.kind = ViewKind::Matrix;
+      out.rows = out.cols = ncol;
+      return out;
     }
     if (e.fn_lib == mir::Expr::Lib::UserDefined) {
       auto it = funs.find(e.name);
@@ -885,7 +1585,7 @@ struct ProgramCompiler {
         if (a.type_ == "UInt" && try_cint(a, &v)) {
           arg.is_const_int = true;
           arg.ints = {v};
-        } else if (a.unsized.depth == 1 &&
+        } else if (a.unsized.depth != 0 &&
                    a.unsized.leaf == mir::UnsizedLeaf::Int &&
                    try_cints(a, &arg.ints)) {
           // Function arguments are rebound in a fresh compiler scope. Carry
@@ -893,6 +1593,11 @@ struct ProgramCompiler {
           // so the callee (and a nested inline call) can still use it in
           // IndexMulti or a compile-time scalar indexed read.
           arg.is_const_int = true;
+          Range view;
+          if (!static_view(a, &view) || view.kind != ViewKind::Array)
+            bail("integer function argument has no static array view");
+          arg.int_dims =
+              view.dims.empty() ? std::vector<int64_t>{view.len} : view.dims;
         } else {
           arg.real = expr(a);
         }
@@ -1030,6 +1735,29 @@ struct ProgramCompiler {
         bail("diagonal requires a matrix logical view");
       return matrix_diagonal(a);
     }
+    if (e.args.size() == 1 && e.name == "diag_matrix") {
+      const Range diagonal = expr(e.args[0]);
+      if (diagonal.kind != ViewKind::Vector &&
+          diagonal.kind != ViewKind::RowVector)
+        bail("diag_matrix requires a vector");
+      if (diagonal.len != 0 && diagonal.len > kMaxRegs / diagonal.len)
+        bail("diag_matrix result is too large");
+      const int n = diagonal.len;
+      const int r = alloc(n * n);
+      const double zero = 0.0;
+      for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i) {
+          const int dst = r + j * n + i;
+          if (i == j)
+            emit(Program::MOV, dst, diagonal.reg + i);
+          else
+            emit_const(dst, &zero, 1);
+        }
+      Range out{r, n * n};
+      out.kind = ViewKind::Matrix;
+      out.rows = out.cols = n;
+      return out;
+    }
     if (e.args.size() == 2 && e.name == "rep_vector") {
       // The register file is a flat run of doubles, so a vector of one
       // repeated value is a run the compiler fills -- the same fill a
@@ -1060,6 +1788,49 @@ struct ProgramCompiler {
       if (!is_scalar(v)) bail("rep_vector of a container");
       out.reg = alloc((int)n);
       for (long k = 0; k < n; ++k) emit(Program::MOV, out.reg + (int)k, v.reg);
+      return out;
+    }
+    if (e.args.size() == 2 && e.name == "rep_row_vector") {
+      const long n = cint(e.args[1]);
+      if (n < 0) bail("rep_row_vector of a negative length");
+      const Range value = expr(e.args[0]);
+      if (!is_scalar(value)) bail("rep_row_vector of a container");
+      const int r = alloc((int)n);
+      for (long i = 0; i < n; ++i) emit(Program::MOV, r + (int)i, value.reg);
+      Range out{r, (int)n};
+      out.kind = ViewKind::RowVector;
+      return out;
+    }
+    if (e.name == "rep_matrix" && (e.args.size() == 2 || e.args.size() == 3)) {
+      const Range value = expr(e.args[0]);
+      int64_t rows = 0, cols = 0;
+      if (e.args.size() == 3) {
+        if (!is_scalar(value)) bail("three-argument rep_matrix needs a scalar");
+        rows = cint(e.args[1]);
+        cols = cint(e.args[2]);
+      } else if (value.kind == ViewKind::Vector) {
+        rows = value.len;
+        cols = cint(e.args[1]);
+      } else if (value.kind == ViewKind::RowVector) {
+        rows = cint(e.args[1]);
+        cols = value.len;
+      } else {
+        bail("two-argument rep_matrix needs a vector or row vector");
+      }
+      if (rows < 0 || cols < 0 || (rows != 0 && cols > kMaxRegs / rows))
+        bail("rep_matrix has an invalid or excessive size");
+      const int r = alloc((int)(rows * cols));
+      for (int64_t j = 0; j < cols; ++j)
+        for (int64_t i = 0; i < rows; ++i) {
+          int source = value.reg;
+          if (value.kind == ViewKind::Vector) source += (int)i;
+          if (value.kind == ViewKind::RowVector) source += (int)j;
+          emit(Program::MOV, r + (int)(j * rows + i), source);
+        }
+      Range out{r, (int)(rows * cols)};
+      out.kind = ViewKind::Matrix;
+      out.rows = rows;
+      out.cols = cols;
       return out;
     }
     if (e.args.size() == 1 && e.name == "max") {
@@ -1182,17 +1953,85 @@ struct ProgramCompiler {
       const bool b_scalar = is_scalar(b);
       if (a.kind == ViewKind::Array || b.kind == ViewKind::Array)
         bail("array arithmetic is unsupported by the register program");
+      if ((e.name == "Times__" || e.name == "multiply") && !a_scalar &&
+          !b_scalar) {
+        int64_t rows = 0, inner = 0, cols = 0;
+        ViewKind result_kind = ViewKind::Flat;
+        if (a.kind == ViewKind::Matrix && b.kind == ViewKind::Matrix) {
+          rows = a.rows;
+          inner = a.cols;
+          cols = b.cols;
+          if (inner != b.rows) bail("matrix multiplication size mismatch");
+          result_kind = ViewKind::Matrix;
+        } else if (a.kind == ViewKind::Matrix && b.kind == ViewKind::Vector) {
+          rows = a.rows;
+          inner = a.cols;
+          cols = 1;
+          if (inner != b.len) bail("matrix-vector size mismatch");
+          result_kind = ViewKind::Vector;
+        } else if (a.kind == ViewKind::RowVector &&
+                   b.kind == ViewKind::Matrix) {
+          rows = 1;
+          inner = a.len;
+          cols = b.cols;
+          if (inner != b.rows) bail("row-vector matrix size mismatch");
+          result_kind = ViewKind::RowVector;
+        } else if (a.kind == ViewKind::RowVector &&
+                   b.kind == ViewKind::Vector) {
+          rows = cols = 1;
+          inner = a.len;
+          if (inner != b.len) bail("dot-product size mismatch");
+        } else if (a.kind == ViewKind::Vector &&
+                   b.kind == ViewKind::RowVector) {
+          rows = a.len;
+          inner = 1;
+          cols = b.len;
+          result_kind = ViewKind::Matrix;
+        } else {
+          bail(
+              "container multiplication is unsupported by the register "
+              "program");
+        }
+
+        const int64_t width = rows * cols;
+        if (width > kMaxRegs) bail("matrix product needs too many registers");
+        const int r = alloc((int)width);
+        const auto left = [&](int64_t i, int64_t k) {
+          if (a.kind == ViewKind::Matrix) return a.reg + (int)(k * a.rows + i);
+          return a.reg + (int)(a.kind == ViewKind::Vector ? i : k);
+        };
+        const auto right = [&](int64_t k, int64_t j) {
+          if (b.kind == ViewKind::Matrix) return b.reg + (int)(j * b.rows + k);
+          return b.reg + (int)(b.kind == ViewKind::Vector ? k : j);
+        };
+        for (int64_t j = 0; j < cols; ++j)
+          for (int64_t i = 0; i < rows; ++i) {
+            const int dst = r + (int)(j * rows + i);
+            if (inner == 0) {
+              const double zero = 0.0;
+              emit_const(dst, &zero, 1);
+              continue;
+            }
+            emit(Program::MUL, dst, left(i, 0), right(0, j));
+            for (int64_t k = 1; k < inner; ++k) {
+              const int term = alloc(1);
+              emit(Program::MUL, term, left(i, k), right(k, j));
+              emit(Program::ADD, dst, dst, term);
+            }
+          }
+        Range out{r, (int)width};
+        out.kind = result_kind;
+        if (result_kind == ViewKind::Matrix) {
+          out.rows = rows;
+          out.cols = cols;
+        }
+        return typed(out, e.type_);
+      }
       if (!a_scalar && !b_scalar && !same_view(a, b))
         bail("binary " + e.name + " on different logical views");
       // `multiply` rides with `Times__` here for the same reason it does
       // in the graph lowering: on two containers it is linear algebra,
       // not the elementwise MUL the register file would emit.
-      if ((e.name == "Times__" || e.name == "multiply") && !a_scalar &&
-          !b_scalar) {
-        if (a.kind == ViewKind::Matrix || b.kind == ViewKind::Matrix)
-          bail("matrix multiplication is unsupported by the register program");
-        bail("container multiplication is unsupported by the register program");
-      }
       const int n = a_scalar ? b.len : (b_scalar ? a.len : a.len);
       Program::Code c;
       // The named spellings of the operators, on the same opcodes: a
@@ -1206,9 +2045,10 @@ struct ProgramCompiler {
       else if (e.name == "Times__" || e.name == "EltTimes__" ||
                e.name == "multiply" || e.name == "elt_multiply")
         c = Program::MUL;
-      else if (e.name == "Divide__" || e.name == "EltDivide__" ||
-               e.name == "divide" || e.name == "elt_divide")
-        c = Program::DIV;
+      else if (e.name == "IntDivide__" || e.name == "Divide__" ||
+               e.name == "EltDivide__" || e.name == "divide" ||
+               e.name == "elt_divide")
+        c = e.type_ == "UInt" ? Program::IDIV : Program::DIV;
       else if (e.name == "Pow__" || e.name == "pow")
         c = Program::POW;
       else if (e.name == "fmax")
@@ -1306,7 +2146,12 @@ struct ProgramCompiler {
 
   int64_t sized_len(const mir::SizedType& t) {
     int64_t n = 1;
-    for (const auto& d : t.dims) n *= cint(d);
+    for (const auto& d : t.dims) {
+      const int64_t extent = cint(d);
+      if (extent < 0 || (n != 0 && extent != 0 && n > kMaxRegs / extent))
+        bail("declaration has an invalid or oversized shape");
+      n *= extent;
+    }
     return n;
   }
 
@@ -1333,8 +2178,8 @@ struct ProgramCompiler {
   // compiled, and the jumps are the only instructions that name a code
   // position (CONST/CONSTR's `a` is a pool index, CALL's is a call index).
   void finish() {
-    if (late_bound.empty()) return;
-    std::vector<Program::Instr> prologue;
+    if (late_bound.empty() && hoisted_int_initializers.empty()) return;
+    std::vector<Program::Instr> prologue = std::move(hoisted_int_initializers);
     for (const auto& [reg, len] : late_bound) {
       const std::vector<double> nan((size_t)len,
                                     std::numeric_limits<double>::quiet_NaN());
@@ -1355,6 +2200,7 @@ struct ProgramCompiler {
         // earlier optimized symbol with the same name.
         deferred_shapes.erase(s.decl_id);
         known_int_arrays.erase(s.decl_id);
+        known_int_array_dims.erase(s.decl_id);
         int_array_names.erase(s.decl_id);
         int_decl_at.erase(s.decl_id);
         if (s.decl_type.base.empty() &&
@@ -1394,8 +2240,10 @@ struct ProgramCompiler {
             emit(Program::MOV, d.reg + k, v.reg + k);
           if (int_array_names.count(s.decl_id)) {
             std::vector<long> values;
-            if (try_cints(s.init, &values) && values.size() == (size_t)v.len)
+            if (try_cints(s.init, &values) && values.size() == (size_t)v.len) {
               known_int_arrays[s.decl_id] = std::move(values);
+              known_int_array_dims[s.decl_id] = v.dims;
+            }
           }
           return;
         }
@@ -1405,10 +2253,26 @@ struct ProgramCompiler {
         if (s.decl_type.base == "SInt") {
           int_decl_at[s.decl_id] = {branch_depth, loops.size()};
           if (s.has_init) {
-            ints[s.decl_id] = {cint(s.init)};
-          } else {
-            ints[s.decl_id] = {std::numeric_limits<int>::min()};
+            long folded;
+            if (try_cint(s.init, &folded)) {
+              ints[s.decl_id] = {folded};
+              return;
+            }
+            // A declaration after or inside a structured loop may read
+            // loop-carried state (for example `int any = hits != 0`). Only
+            // that genuinely runtime initializer needs a register. Keeping
+            // foldable locals as ints is essential for foreach indices used
+            // in later matrix subscripts inside ctsem's integration loop.
+            Range view;
+            const Range d =
+                declare(s.decl_id, 1, view,
+                        static_cast<double>(std::numeric_limits<int>::min()));
+            const Range v = expr(s.init);
+            if (!is_scalar(v)) bail("integer declaration is not scalar");
+            emit(Program::MOV, d.reg, v.reg);
+            return;
           }
+          ints[s.decl_id] = {std::numeric_limits<int>::min()};
           return;
         }
         const bool int_array =
@@ -1432,8 +2296,10 @@ struct ProgramCompiler {
             emit(Program::MOV, d.reg + k, v.reg + k);
           if (int_array) {
             std::vector<long> values;
-            if (try_cints(s.init, &values) && values.size() == (size_t)want)
+            if (try_cints(s.init, &values) && values.size() == (size_t)want) {
               known_int_arrays[s.decl_id] = std::move(values);
+              known_int_array_dims[s.decl_id] = expected.dims;
+            }
           }
         } else {
           Range view;
@@ -1441,12 +2307,14 @@ struct ProgramCompiler {
               s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt"
                   ? static_cast<double>(std::numeric_limits<int>::min())
                   : std::numeric_limits<double>::quiet_NaN();
-          declare(s.decl_id, (int)sized_len(s.decl_type),
-                  declared(view, s.decl_type), fill);
-          if (int_array)
+          const Range expected = declared(view, s.decl_type);
+          declare(s.decl_id, (int)sized_len(s.decl_type), expected, fill);
+          if (int_array) {
             known_int_arrays[s.decl_id] =
                 std::vector<long>((size_t)sized_len(s.decl_type),
                                   std::numeric_limits<int>::min());
+            known_int_array_dims[s.decl_id] = expected.dims;
+          }
         }
         return;
       }
@@ -1476,25 +2344,31 @@ struct ProgramCompiler {
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
             if (fold_is_certain(s.lhs) && try_cints(s.rhs, &values) &&
-                values.size() == (size_t)v.len)
+                values.size() == (size_t)v.len) {
               known_int_arrays[s.lhs] = std::move(values);
-            else
+              known_int_array_dims[s.lhs] = adopted.dims;
+            } else {
               known_int_arrays.erase(s.lhs);
+              known_int_array_dims.erase(s.lhs);
+            }
           }
           return;
         }
         if (ints.count(s.lhs) && s.lhs_idx.empty()) {
-          // An integer is a compile-time value here: folding this
-          // assignment rewrites every later read of the name, so a path
-          // that skips the assignment and reaches a read would see the
-          // assigned value anyway. Registers hold doubles and cannot carry
-          // an integer instead, so this is refused rather than lowered.
-          // (Before the check, `if (theta > 0) n = 2;` inside a region
-          // took effect on both paths -- and the caller kept its own
-          // pre-region value, so a read after the region saw neither.)
-          if (!fold_is_certain(s.lhs))
-            bail("integer " + s.lhs +
-                 " assigned inside data-dependent control flow");
+          long ignored;
+          // A conditional write must preserve the old value on the untaken
+          // path, so it cannot be folded into the single compile-time copy.
+          // Likewise, an unconditional assignment after a structured while
+          // may read loop-carried state that now lives in registers.  The
+          // lowering can export scalar-int live-outs, so reify both cases
+          // instead of refusing a representable integer recurrence.
+          if (!fold_is_certain(s.lhs) ||
+              (structured_while_seen && !try_cint(s.rhs, &ignored)))
+            reify_written_int(s.lhs);
+        }
+        if (ints.count(s.lhs) && s.lhs_idx.empty()) {
+          // This assignment is certain and its RHS stayed a compile-time
+          // integer, so subsequent reads may use the folded value directly.
           ints[s.lhs] = {cint(s.rhs)};
           return;
         }
@@ -1541,10 +2415,13 @@ struct ProgramCompiler {
             for (int k = 0; k < v.len; ++k)
               emit(Program::MOV, nd.reg + k, v.reg + k);
             it->second = nd;
-            if (have_folded_ints)
+            if (have_folded_ints) {
               known_int_arrays[s.lhs] = std::move(folded_ints);
-            else if (int_array_names.count(s.lhs))
+              known_int_array_dims[s.lhs] = nd.dims;
+            } else if (int_array_names.count(s.lhs)) {
               known_int_arrays.erase(s.lhs);
+              known_int_array_dims.erase(s.lhs);
+            }
             return;
           }
           if (v.len != dst.len) bail("assignment width mismatch for " + s.lhs);
@@ -1552,10 +2429,13 @@ struct ProgramCompiler {
             bail("assignment logical view mismatch for " + s.lhs);
           for (int k = 0; k < v.len; ++k)
             emit(Program::MOV, dst.reg + k, v.reg + k);
-          if (have_folded_ints)
+          if (have_folded_ints) {
             known_int_arrays[s.lhs] = std::move(folded_ints);
-          else if (int_array_names.count(s.lhs))
+            known_int_array_dims[s.lhs] = dst.dims;
+          } else if (int_array_names.count(s.lhs)) {
             known_int_arrays.erase(s.lhs);
+            known_int_array_dims.erase(s.lhs);
+          }
           return;
         }
         // A single All is the complete destination view. This is reachable
@@ -1574,11 +2454,101 @@ struct ProgramCompiler {
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
             if (fold_is_certain(s.lhs) && try_cints(s.rhs, &values) &&
-                values.size() == (size_t)v.len)
+                values.size() == (size_t)v.len) {
               known_int_arrays[s.lhs] = std::move(values);
-            else
+              known_int_array_dims[s.lhs] = dst.dims;
+            } else {
               known_int_arrays.erase(s.lhs);
+              known_int_array_dims.erase(s.lhs);
+            }
           }
+          return;
+        }
+        if (dst.kind == ViewKind::Matrix && s.lhs_idx.size() == 2) {
+          const std::vector<int64_t> rows = matrix_positions(
+              s.lhs_idx[0], dst.rows, "assignment row of " + s.lhs);
+          const std::vector<int64_t> cols = matrix_positions(
+              s.lhs_idx[1], dst.cols, "assignment column of " + s.lhs);
+          if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
+            bail("matrix assignment selection is too large");
+          const size_t width = rows.size() * cols.size();
+          if (v.len != static_cast<int>(width))
+            bail("matrix assignment width mismatch for " + s.lhs);
+          int at = 0;
+          for (int64_t j : cols)
+            for (int64_t i : rows)
+              emit(Program::MOV, dst.reg + (int)(j * dst.rows + i),
+                   v.reg + at++);
+          return;
+        }
+        if (dst.kind == ViewKind::Array) {
+          const std::vector<int64_t> dims =
+              dst.dims.empty() ? std::vector<int64_t>{dst.len} : dst.dims;
+          if (s.lhs_idx.size() > dims.size())
+            bail("too many assignment indices for " + s.lhs);
+          std::vector<std::vector<int64_t>> positions;
+          positions.reserve(dims.size());
+          for (size_t d = 0; d < dims.size(); ++d) {
+            if (d < s.lhs_idx.size()) {
+              positions.push_back(matrix_positions(
+                  s.lhs_idx[d], dims[d], "assignment array of " + s.lhs));
+            } else {
+              if (dims[d] < 0 || dims[d] > kMaxRegs)
+                bail("array assignment has an invalid omitted extent");
+              positions.emplace_back();
+              positions.back().reserve((size_t)dims[d]);
+              for (int64_t k = 0; k < dims[d]; ++k)
+                positions.back().push_back(k);
+            }
+          }
+          size_t width = 1;
+          for (const auto& axis : positions) {
+            if (!axis.empty() && width > (size_t)kMaxRegs / axis.size())
+              bail("array assignment selection is too large");
+            width *= axis.size();
+          }
+          if (v.len != (int)width)
+            bail("array assignment width mismatch for " + s.lhs);
+          const std::vector<int64_t> offsets =
+              graph_array_offsets(dims, dst.leaf, positions);
+          for (size_t k = 0; k < offsets.size(); ++k)
+            emit(Program::MOV, dst.reg + (int)offsets[k], v.reg + (int)k);
+          if (int_array_names.count(s.lhs)) {
+            std::vector<long> values;
+            auto known = known_int_arrays.find(s.lhs);
+            bool folded = false;
+            if (offsets.size() == 1) {
+              long value = 0;
+              if (try_cint(s.rhs, &value)) {
+                values = {value};
+                folded = true;
+              }
+            } else {
+              folded = try_cints(s.rhs, &values);
+            }
+            if (fold_is_certain(s.lhs) && folded &&
+                values.size() == offsets.size() &&
+                known != known_int_arrays.end()) {
+              const std::vector<int64_t> known_offsets =
+                  first_fast_array_offsets(dims, positions);
+              for (size_t k = 0; k < known_offsets.size(); ++k)
+                known->second[(size_t)known_offsets[k]] = values[k];
+            } else {
+              known_int_arrays.erase(s.lhs);
+              known_int_array_dims.erase(s.lhs);
+            }
+          }
+          return;
+        }
+        if ((dst.kind == ViewKind::Vector || dst.kind == ViewKind::RowVector ||
+             dst.kind == ViewKind::Flat) &&
+            s.lhs_idx.size() == 1) {
+          const std::vector<int64_t> positions =
+              matrix_positions(s.lhs_idx[0], dst.len, "assignment vector");
+          if (v.len != static_cast<int>(positions.size()))
+            bail("vector assignment width mismatch for " + s.lhs);
+          for (size_t k = 0; k < positions.size(); ++k)
+            emit(Program::MOV, dst.reg + (int)positions[k], v.reg + (int)k);
           return;
         }
         for (const auto& ix : s.lhs_idx)
@@ -1586,18 +2556,7 @@ struct ProgramCompiler {
             bail("assignment index form for " + s.lhs);
         if (!is_scalar(v)) bail("element assignment from a container");
         int64_t flat = 0;
-        if (dst.kind == ViewKind::Array) {
-          const std::vector<int64_t> dims =
-              dst.dims.empty() ? std::vector<int64_t>{dst.len} : dst.dims;
-          if (s.lhs_idx.size() != dims.size())
-            bail("assignment needs every array index for " + s.lhs);
-          for (size_t d = 0; d < dims.size(); ++d) {
-            const long ix = cint(s.lhs_idx[d].args[0]);
-            if (ix < 1 || ix > dims[d])
-              bail("assignment index range for " + s.lhs);
-            flat = flat * dims[d] + ix - 1;
-          }
-        } else if (dst.kind == ViewKind::Matrix) {
+        if (dst.kind == ViewKind::Matrix) {
           if (s.lhs_idx.size() != 2)
             bail("matrix assignment index form for " + s.lhs);
           const long i = cint(s.lhs_idx[0].args[0]);
@@ -1628,18 +2587,21 @@ struct ProgramCompiler {
       case mir::Stmt::Return:
         // A return under a runtime branch is a control-flow join this flat
         // program has no way to express; the interpreter still handles it.
-        if (branch_depth) bail("return inside a data-dependent branch");
+        if (branch_depth)
+          bail("return inside a data-dependent branch" +
+               (inline_stack.empty() ? std::string()
+                                     : " in " + inline_stack.back()));
         throw Returned{s.has_init ? expr(s.rhs) : Range{0, 0}};
       case mir::Stmt::Break:
         if (loops.empty()) bail("break outside a loop");
-        if (branch_depth) {
+        if (branch_depth || loops.back().structured) {
           loops.back().breaks.push_back(emit(Program::JMP, 0));
           return;
         }
         throw CompileBreak{};
       case mir::Stmt::Continue:
         if (loops.empty()) bail("continue outside a loop");
-        if (branch_depth) {
+        if (branch_depth || loops.back().structured) {
           loops.back().continues.push_back(emit(Program::JMP, 0));
           return;
         }
@@ -1670,25 +2632,27 @@ struct ProgramCompiler {
         return;
       }
       case mir::Stmt::While: {
+        // The register program already has JZ/JMP and is replayed under
+        // autodiff for an island.  Use those instructions directly so a
+        // finite data loop and a parameter-sensitive recurrence have their
+        // actual trip count, with no arbitrary lowering-time cap.
+        std::set<std::string> written;
+        for (const auto& child : s.body) assigned_names(child, &written);
+        for (const std::string& name : written) reify_written_int(name);
+
+        const int head = (int)p.code.size();
+        const Range cv = expr(s.cond);
+        if (!is_scalar(cv)) bail("while condition on a container");
+        const int exit = emit(Program::JZ, 0, cv.reg);
         loops.push_back({});
-        bool broken = false;
-        for (int64_t guard = 0;; ++guard) {
-          long condition;
-          if (!try_cint(s.cond, &condition))
-            bail("while condition is not known at compile time");
-          if (!condition) break;
-          if (guard > 1000000) bail("while loop did not terminate");
-          try {
-            for (const auto& k : s.body) stmt(k);
-          } catch (CompileContinue&) {
-          } catch (CompileBreak&) {
-            broken = true;
-          }
-          for (int jump : loops.back().continues)
-            p.code[(size_t)jump].dst = (int)p.code.size();
-          loops.back().continues.clear();
-          if (broken) break;
-        }
+        loops.back().structured = true;
+        structured_while_seen = true;
+        ++structured_while_depth;
+        for (const auto& k : s.body) stmt(k);
+        --structured_while_depth;
+        for (int jump : loops.back().continues) p.code[(size_t)jump].dst = head;
+        emit(Program::JMP, head);
+        p.code[(size_t)exit].dst = (int)p.code.size();
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.pop_back();
@@ -1700,6 +2664,36 @@ struct ProgramCompiler {
           if (c != 0 && !s.body.empty()) stmt(s.body[0]);
           if (c == 0 && s.body.size() > 1) stmt(s.body[1]);
           return;
+        }
+        if (s.body.size() == 2) {
+          mir::Stmt then_effects = s.body[0];
+          mir::Stmt else_effects = s.body[1];
+          mir::Expr then_value, else_value;
+          if (peel_terminal_return(&then_effects, &then_value) &&
+              peel_terminal_return(&else_effects, &else_value)) {
+            const Range cv = expr(s.cond);
+            if (!is_scalar(cv)) bail("branch on a container");
+            ++branch_depth;
+            const int jz = emit(Program::JZ, 0, cv.reg);
+            stmt(then_effects);
+            const Range tv = expr(then_value);
+            const int dst = alloc(tv.len);
+            for (int k = 0; k < tv.len; ++k)
+              emit(Program::MOV, dst + k, tv.reg + k);
+            const int jmp = emit(Program::JMP, 0);
+            p.code[(size_t)jz].dst = (int)p.code.size();
+            stmt(else_effects);
+            const Range ev = expr(else_value);
+            if (!same_view(tv, ev))
+              bail("conditional returns have different logical views");
+            for (int k = 0; k < ev.len; ++k)
+              emit(Program::MOV, dst + k, ev.reg + k);
+            p.code[(size_t)jmp].dst = (int)p.code.size();
+            --branch_depth;
+            Range out = tv;
+            out.reg = dst;
+            throw Returned{out};
+          }
         }
         const Range cv = expr(s.cond);
         if (!is_scalar(cv)) bail("branch on a container");
@@ -1757,6 +2751,7 @@ struct ProgramCompiler {
     auto saved_reals = reals;
     auto saved_ints = ints;
     auto saved_known_int_arrays = known_int_arrays;
+    auto saved_known_int_array_dims = known_int_array_dims;
     auto saved_int_array_names = int_array_names;
     auto saved_deferred_shapes = deferred_shapes;
     auto saved_int_decl_at = int_decl_at;
@@ -1765,14 +2760,22 @@ struct ProgramCompiler {
     reals.clear();
     ints.clear();
     known_int_arrays.clear();
+    known_int_array_dims.clear();
     int_array_names.clear();
     deferred_shapes.clear();
     int_decl_at.clear();
     extern_bound.clear();
     branch_depth = 0;
+    inline_stack.push_back(f.name);
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
       if (args[k].is_const_int) {
-        ints[f.arg_names[k]] = args[k].ints;
+        if (args[k].int_dims.empty()) {
+          ints[f.arg_names[k]] = args[k].ints;
+        } else {
+          known_int_arrays[f.arg_names[k]] = args[k].ints;
+          known_int_array_dims[f.arg_names[k]] = args[k].int_dims;
+          int_array_names.insert(f.arg_names[k]);
+        }
         // The body starts here, inside whatever loop the call sits in.
         int_decl_at[f.arg_names[k]] = {0, loops.size()};
       } else {
@@ -1786,9 +2789,11 @@ struct ProgramCompiler {
     } catch (Returned& r) {
       out = r.r;
     } catch (...) {
+      inline_stack.pop_back();
       reals = std::move(saved_reals);
       ints = std::move(saved_ints);
       known_int_arrays = std::move(saved_known_int_arrays);
+      known_int_array_dims = std::move(saved_known_int_array_dims);
       int_array_names = std::move(saved_int_array_names);
       deferred_shapes = std::move(saved_deferred_shapes);
       int_decl_at = std::move(saved_int_decl_at);
@@ -1797,9 +2802,11 @@ struct ProgramCompiler {
       --inline_depth;
       throw;
     }
+    inline_stack.pop_back();
     reals = std::move(saved_reals);
     ints = std::move(saved_ints);
     known_int_arrays = std::move(saved_known_int_arrays);
+    known_int_array_dims = std::move(saved_known_int_array_dims);
     int_array_names = std::move(saved_int_array_names);
     deferred_shapes = std::move(saved_deferred_shapes);
     int_decl_at = std::move(saved_int_decl_at);

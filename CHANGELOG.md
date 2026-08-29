@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### ctsem's structured-control vocabulary lowers
+
+`crossprod`, `tcrossprod`, scalar/vector `add_diag`, `matrix_exp`,
+`mdivide_left`, `mdivide_right_spd`, and `quad_form_sym` now have the native
+and structured-region semantics needed by ctsem, with Stan Math value and
+gradient references and generated-quantities coverage. Parameter-sensitive
+`while` statements compile to runtime jumps with loop-carried integer state
+and autodiff replay rather than a fixed compile-time unroll.
+
+Data-only integer-array UDF results now retain their value-dependent extents,
+including empty results and multiple matches, and work in log density and
+write-array lowering. Multidimensional integer arrays preserve their logical
+shape when moving between interpreter and graph layouts, and `append_array`,
+`sum`, static selections, and conditional UDF returns consume those values
+inside structured regions.
+
+Indexed assignment support now includes `IndexMulti` scatter writes in the
+MIR interpreter and write-array path, including multidimensional selections
+and repeated-index last-write-wins behavior.
+
+The MIR-interpreter write-array fallback now evaluates
+`multi_normal_cholesky_lpdf`, including `array[N] vector[K]` observations with
+first-index-fast storage.
+
 ### Loop-invariant target terms do not unroll
 
 A `for` loop whose body only adds iterator-independent terms to `target` now
