@@ -565,7 +565,7 @@ endfunction()
 # The target that owns the shared precompiled header. It exists only to
 # produce the .pch; REUSE_FROM requires a real target with the same compile
 # flags as its consumers, which is why it links stanli and takes -O0 too.
-add_library(stanli_test_pch OBJECT tests/tbb_stub.cpp)
+add_library(stanli_test_pch OBJECT tests/pch_anchor.cpp)
 target_link_libraries(stanli_test_pch PRIVATE stanli)
 target_compile_options(stanli_test_pch PRIVATE -O0)
 target_precompile_headers(stanli_test_pch PRIVATE ${STANLI_TEST_PCH})
