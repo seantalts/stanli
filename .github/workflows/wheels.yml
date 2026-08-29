@@ -322,6 +322,12 @@ jobs:
           # $PWD, not github.workspace: inside the manylinux containers the
           # workspace mounts at a different path than the expression gives.
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          # The test targets share one precompiled header. Without this,
+          # ccache refuses to cache any compile that consumes a .pch and
+          # the hit rate on the 56 test translation units drops to zero --
+          # which would make an ordinary pull request BUILD them all
+          # instead of restoring them, turning a 20 s step into minutes.
+          export CCACHE_SLOPPINESS=pch_defines,time_macros
           ccache -z
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -1041,6 +1047,12 @@ jobs:
       - name: Configure, build, test
         run: |
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          # The test targets share one precompiled header. Without this,
+          # ccache refuses to cache any compile that consumes a .pch and
+          # the hit rate on the 56 test translation units drops to zero --
+          # which would make an ordinary pull request BUILD them all
+          # instead of restoring them, turning a 20 s step into minutes.
+          export CCACHE_SLOPPINESS=pch_defines,time_macros
           ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -1176,6 +1188,12 @@ jobs:
         run: |
           which ccache || sudo apt-get install -y ccache
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          # The test targets share one precompiled header. Without this,
+          # ccache refuses to cache any compile that consumes a .pch and
+          # the hit rate on the 56 test translation units drops to zero --
+          # which would make an ordinary pull request BUILD them all
+          # instead of restoring them, turning a 20 s step into minutes.
+          export CCACHE_SLOPPINESS=pch_defines,time_macros
           ccache -z
           # -O1 -g1, and every number here was read off a failed run's
           # log rather than guessed. -O1: ASan's checks do not depend on
@@ -1299,6 +1317,12 @@ jobs:
         run: |
           which ccache || sudo apt-get install -y ccache
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          # The test targets share one precompiled header. Without this,
+          # ccache refuses to cache any compile that consumes a .pch and
+          # the hit rate on the 56 test translation units drops to zero --
+          # which would make an ordinary pull request BUILD them all
+          # instead of restoring them, turning a 20 s step into minutes.
+          export CCACHE_SLOPPINESS=pch_defines,time_macros
           ccache -z
           emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -1361,6 +1385,12 @@ jobs:
         run: |
           which ccache || sudo apt-get install -y ccache
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          # The test targets share one precompiled header. Without this,
+          # ccache refuses to cache any compile that consumes a .pch and
+          # the hit rate on the 56 test translation units drops to zero --
+          # which would make an ordinary pull request BUILD them all
+          # instead of restoring them, turning a 20 s step into minutes.
+          export CCACHE_SLOPPINESS=pch_defines,time_macros
           ccache -z
           emcmake cmake -B build-wasm-side -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_WASM_SIDE=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
