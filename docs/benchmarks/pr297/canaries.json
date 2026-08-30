@@ -1,0 +1,6 @@
+[
+  {"name":"canary_pr236_island","group":"generic_canary","stan":"tests/fixtures/pr236_island.stan","data":"tests/fixtures/paramcond.json","optimization":"--O1"},
+  {"name":"canary_cfg_native_large_structured","group":"generic_canary","stan":"tests/fixtures/cfg_native_large_structured.stan","data":"tests/fixtures/cfg_native_large_structured.json","optimization":"--O1"},
+  {"name":"canary_scan_prepared_solve_retention","group":"generic_canary","stan":"tests/fixtures/scan_prepared_solve_retention.stan","data":"tests/fixtures/scan_prepared_solve_retention.json","optimization":"--O0"},
+  {"name":"canary_state_space","group":"generic_canary","stan":"tests/fixtures/scan_state_space_generic.stan","data":"docs/benchmarks/pr297/state-space-data.json","optimization":"--O1"}
+]

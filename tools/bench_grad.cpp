@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
   if (argc < 4) {
     std::fprintf(stderr,
                  "usage: bench_grad mir.sexp data.json N|--prep "
-                 "[--set-param INDEX VALUE]...\n");
+                 "[--point 0|1|2] [--set-param INDEX VALUE]...\n");
     return 2;
   }
   const bool prep_only = std::string(argv[3]) == "--prep";
@@ -45,7 +45,24 @@ int main(int argc, char** argv) {
   }
   std::vector<std::pair<int64_t, double>> param_overrides;
   std::unordered_set<int64_t> overridden;
+  int point = 0;
+  bool point_set = false;
   for (int arg = 4; arg < argc;) {
+    if (std::string(argv[arg]) == "--point") {
+      if (prep_only || point_set || arg + 1 >= argc ||
+          (std::string(argv[arg + 1]) != "0" &&
+           std::string(argv[arg + 1]) != "1" &&
+           std::string(argv[arg + 1]) != "2")) {
+        std::fprintf(stderr,
+                     "bench_grad: --point requires one of 0, 1, 2 and "
+                     "may appear once in evaluation mode\n");
+        return 2;
+      }
+      point = argv[arg + 1][0] - '0';
+      point_set = true;
+      arg += 2;
+      continue;
+    }
     if (std::string(argv[arg]) != "--set-param") {
       std::fprintf(stderr, "bench_grad: unknown argument: %s\n", argv[arg]);
       return 2;
@@ -171,8 +188,13 @@ int main(int argc, char** argv) {
   const char* prof_env = std::getenv("STANLI_PROFILE");
   const bool profile = prof_env && prof_env[0] != '0';
   const int64_t n = ex.n_params();
-  for (int64_t i = 0; i < n; ++i)
-    ex.params_data()[i] = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
+  // Same point ladder as stanli_check and ref_driver. The corpus harness
+  // chooses a single jointly valid point, never a different point per build.
+  for (int64_t i = 0; i < n; ++i) {
+    ex.params_data()[i] = point == 2   ? 0.0
+                          : point == 1 ? 0.02 * static_cast<double>((i % 5) - 2)
+                                       : 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
+  }
   for (const auto& override : param_overrides) {
     if (override.first >= n) {
       std::fprintf(stderr,
