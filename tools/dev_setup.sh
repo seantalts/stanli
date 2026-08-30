@@ -2,17 +2,17 @@
 # One-shot dev environment setup. Safe to re-run; every step is
 # idempotent and skipped once its output exists.
 #
-#   tools/dev_setup.sh               core: headers + cmake builds/tests; no stanc
-#   tools/dev_setup.sh --embed       + pinned stanc3 and in-process compiler
-#   tools/dev_setup.sh --corpus      + pinned stanc3, posteriordb, CmdStan rig
+#   tools/dev_setup.sh               core: pinned stanc + cmake builds/tests
+#   tools/dev_setup.sh --embed       + in-process compiler
+#   tools/dev_setup.sh --corpus      + posteriordb and CmdStan rig
 #   tools/dev_setup.sh --conformance + the Stan conformance reference stack
 #   tools/dev_setup.sh --all         everything
 #   tools/dev_setup.sh --no-build    stop before cmake (CI builds separately)
 #
-# Core needs: git, curl, cmake, C++17 clang and clang++, python3.
-# --embed and --corpus add opam (OCaml 5.5.0 switch built automatically).
+# Core needs: git, curl, cmake, C++17 clang and clang++, python3, and opam
+# (the OCaml 5.5.0 switch for the pinned stanc is built automatically).
 # --corpus adds: ~2 GB of checkouts under deps/ and a CmdStan build.
-# --conformance adds: opam, the pinned CmdStan/BridgeStan pair, and a venv
+# --conformance adds: the pinned CmdStan/BridgeStan pair and a venv
 #   holding the version-pinned reference client. It reuses the same
 #   deps/cmdstan checkout as --corpus and the same stanc3 source tree and
 #   opam switch as --embed, so with either of those already done most of
@@ -85,10 +85,7 @@ for tool in git curl cmake python3; do
 done
 is_clang "$CLANG_C" || missing+=("$CLANG_C (Clang C compiler)")
 is_clang "$CLANG_CXX" || missing+=("$CLANG_CXX (Clang C++ compiler)")
-if [ "$WANT_EMBED" = 1 ] || [ "$WANT_CORPUS" = 1 ] ||
-   [ "$WANT_CONFORMANCE" = 1 ]; then
-  have opam || missing+=(opam)
-fi
+have opam || missing+=(opam)
 if [ ${#missing[@]} -gt 0 ]; then
   if have brew; then
     echo "installing via homebrew: ${missing[*]}"
@@ -108,36 +105,33 @@ if ! is_clang "$CLANG_C" || ! is_clang "$CLANG_CXX"; then
   echo "clang and clang++ are required for stanli C/C++ builds" >&2
   exit 1
 fi
-echo "ok: git curl cmake python3 and Clang C/C++ compilers present"
+echo "ok: git curl cmake python3 opam and Clang C/C++ compilers present"
 
 # --- vendored headers -------------------------------------------------------
 step "fetching pinned deps (Stan Math and Stan)"
 ./deps/fetch.sh
 
-# --- source-pinned stanc3 (optional) ---------------------------------------
-# Corpus tools shell out to stanc; embedded builds also keep a standalone
-# compiler for local bisects. The conformance setup below invokes the same
-# builder itself, so it does not need this copy under deps/stanc3/stanc.
-if [ "$WANT_EMBED" = 1 ] || [ "$WANT_CORPUS" = 1 ]; then
-  step "stanc3 executable from source at $STANC3_SRC_SHA"
-  # build_stanc's output cache can outlive its source checkout. The embed
-  # build needs that checkout too, so force the centralized builder to
-  # recreate it when it is absent or points at a different revision.
-  if [ "$WANT_EMBED" = 1 ] &&
-     { [ "$(git -C deps/stanc3-src rev-parse HEAD 2>/dev/null || true)" != \
-         "$STANC3_SRC_SHA" ] ||
-       ! opam switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; }; then
-    rm -f deps/stanc3/stanc-pinned deps/stanc3/stanc-pinned.src
-  fi
-  ./harnesses/conformance/build_stanc.sh "$OPAM_SWITCH"
-  install -m 755 deps/stanc3/stanc-pinned deps/stanc3/stanc
-  cp deps/stanc3/stanc-pinned.src deps/stanc3/stanc.src
-  [ "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA" ] || {
-    echo "stanc3 provenance does not match STANC3_SRC_SHA" >&2
-    exit 1
-  }
-  ./deps/stanc3/stanc --version
+# --- source-pinned stanc3 --------------------------------------------------
+# Source-level lit tests are part of the ordinary CTest suite, so their
+# compiler is part of the core setup rather than an optional corpus tool.
+# build_stanc caches by source revision; after the first build this is a no-op.
+step "stanc3 executable from source at $STANC3_SRC_SHA"
+# The embed build needs the source checkout too. Force the centralized builder
+# to recreate a cached output when that checkout or its opam switch is absent.
+if [ "$WANT_EMBED" = 1 ] &&
+   { [ "$(git -C deps/stanc3-src rev-parse HEAD 2>/dev/null || true)" != \
+       "$STANC3_SRC_SHA" ] ||
+     ! opam switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; }; then
+  rm -f deps/stanc3/stanc-pinned deps/stanc3/stanc-pinned.src
 fi
+./harnesses/conformance/build_stanc.sh "$OPAM_SWITCH"
+install -m 755 deps/stanc3/stanc-pinned deps/stanc3/stanc
+cp deps/stanc3/stanc-pinned.src deps/stanc3/stanc.src
+[ "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA" ] || {
+  echo "stanc3 provenance does not match STANC3_SRC_SHA" >&2
+  exit 1
+}
+./deps/stanc3/stanc --version
 
 # --- embedded stanc3 (optional) --------------------------------------------
 if [ "$WANT_EMBED" = 1 ]; then

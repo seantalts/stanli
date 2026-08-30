@@ -59,7 +59,6 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("case", type=pathlib.Path)
     parser.add_argument("stanli_check", type=pathlib.Path)
-    parser.add_argument("stanc", type=pathlib.Path)
     parser.add_argument("--discover", action="store_true")
     args = parser.parse_args()
 
@@ -78,11 +77,9 @@ def main() -> int:
         print(f"FAIL {args.case}: {error}")
         return 1
 
-    # Parse directives even in the compiler-free core setup. A malformed new
-    # case is a test failure, not something that should hide behind a skip.
-    if not args.stanli_check.is_file() or not args.stanc.is_file():
-        print("SKIP lit test needs stanli_check and the pinned stanc")
-        return 77
+    if not args.stanli_check.is_file():
+        print(f"FAIL missing stanli_check executable: {args.stanli_check}")
+        return 1
 
     # stanc writes a sibling .hpp even when MIR goes to stdout.  Compile a
     # temporary copy so source-only lit runs never dirty the checkout.
@@ -98,8 +95,6 @@ def main() -> int:
                     str(args.stanli_check),
                     str(source),
                     str(data_path),
-                    "--stanc",
-                    str(args.stanc),
                 ],
                 text=True,
                 stdout=subprocess.PIPE,

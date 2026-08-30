@@ -23,10 +23,12 @@ also how a silently accepted invalid model is recorded: `XFAIL` plus `OK`.
 XFAIL cases also carry the CTest label `broken`, so the known-gap inventory is
 directly runnable with `ctest --test-dir build -L broken`.
 
-The runner copies each source into a temporary directory before invoking the
-pinned stanc, because stanc writes a sibling `.hpp` even when MIR is sent to
-stdout. If the core developer setup has no stanc, the cases report a CTest
-skip. Compiler-bearing CI runs all of them.
+The runner copies each source into a temporary directory before invoking
+`stanli_check`, because its pinned stanc writes a sibling `.hpp` even when MIR
+is sent to stdout. The ordinary developer setup provisions that compiler. A
+missing compiler is a test failure, not a skip, and no generated MIR is checked
+into this directory. `stanli_check` uses `deps/stanc3/stanc` by default; set the
+`STANC` environment variable to test another compiler explicitly.
 
 After configuring the ordinary native build, run the complete source-lit
 suite with the local build target:
@@ -49,8 +51,8 @@ result without enforcing the checked-in expectation:
 
 ```sh
 tests/lit/run.py tests/lit/issue_257/to_array_1d.stan \
-  build/stanli_check deps/stanc3/stanc
+  build/stanli_check
 
 tests/lit/run.py --discover tests/lit/issue_257/to_array_1d.stan \
-  build/stanli_check deps/stanc3/stanc
+  build/stanli_check
 ```

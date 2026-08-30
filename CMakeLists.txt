@@ -759,8 +759,9 @@ if(Python3_Interpreter_FOUND)
   # Source-level lit cases are one marked .stan file each. CMake discovers
   # both the dedicated tests/lit tree and existing fixtures that opt in, then
   # gives every case its own CTest entry. Adding coverage needs no build-system
-  # edit and no new C++ target. The core developer setup deliberately has no
-  # stanc, so these skip there, while compiler-bearing CI runs them all.
+  # edit and no new C++ target. The runner invokes stanli_check, whose compiler
+  # is provisioned by the ordinary developer setup; a missing compiler is a
+  # test failure rather than a skip.
   file(GLOB_RECURSE STANLI_LIT_CANDIDATES CONFIGURE_DEPENDS
        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.stan")
   # The PASS/XFAIL marker controls the broken label below, so changing a
@@ -780,26 +781,17 @@ if(Python3_Interpreter_FOUND)
       string(REGEX REPLACE "[^A-Za-z0-9_]" "_" STANLI_LIT_NAME
              "${STANLI_LIT_NAME}")
       set(STANLI_LIT_TEST "lit_${STANLI_LIT_NAME}")
-      if(WIN32)
-        set(STANLI_LIT_STANC
-            ${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanc.exe)
-      else()
-        set(STANLI_LIT_STANC
-            ${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanc)
-      endif()
       add_test(NAME ${STANLI_LIT_TEST}
                COMMAND ${Python3_EXECUTABLE} tests/lit/run.py
                        ${STANLI_LIT_CASE}
                        $<TARGET_FILE:stanli_check>
-                       ${STANLI_LIT_STANC}
                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
       set(STANLI_LIT_LABELS lit)
       if(STANLI_LIT_MARKER MATCHES "XFAIL$")
         list(APPEND STANLI_LIT_LABELS broken)
       endif()
       set_tests_properties(${STANLI_LIT_TEST} PROPERTIES
-        LABELS "${STANLI_LIT_LABELS}"
-        SKIP_RETURN_CODE 77)
+        LABELS "${STANLI_LIT_LABELS}")
     endif()
   endforeach()
   # Friendly local entry points. These deliberately invoke CTest rather than
