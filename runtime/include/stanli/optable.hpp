@@ -715,21 +715,15 @@ constexpr uint8_t kBackwardValueFree = 1 << 3;
 
 constexpr uint8_t op_traits(uint16_t opcode) {
   switch (opcode) {
-    // Real-argument lpdfs whose vector kernel returns a summed lp with
-    // per-element partials. The long-tail density kernels deliberately do
-    // not opt in until their vectorized path is supported by re-roll.
-    case OP_NORMAL_LPDF:
-    case OP_CAUCHY_LPDF:
-    case OP_STUDENT_T_LPDF:
-    case OP_GAMMA_LPDF:
-    case OP_BETA_LPDF:
-    case OP_LOGNORMAL_LPDF:
-    case OP_UNIFORM_LPDF:
-    case OP_DOUBLE_EXP_LPDF:
-    case OP_EXPONENTIAL_LPDF:
-    case OP_INV_GAMMA_LPDF:
-    case OP_STD_NORMAL_LPDF:
-      return op_trait::kRerollDensity;
+    // Every real-argument lpdf in the scalar list has the same summed and
+    // elementwise density_fwd_v contract. Generate the rewrite trait from
+    // that list too, so adding a scalar kernel cannot leave re-roll and
+    // partition silently narrower. Ordered/vector-argument and special
+    // density shapes live outside this list and remain excluded.
+#define STANLI_SCALAR_DENSITY_TRAIT(code, fn, arity, tier) case code:
+    STANLI_SCALAR_DENSITY_LIST(STANLI_SCALAR_DENSITY_TRAIT)
+#undef STANLI_SCALAR_DENSITY_TRAIT
+    return op_trait::kRerollDensity;
 
     // Integer-outcome lpmfs whose scalar-lane idata can be concatenated.
     // Ordered densities are intentionally absent: their cutpoint vector is

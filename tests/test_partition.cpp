@@ -85,7 +85,7 @@ struct Lanes {
   int base = -1, sigma = -1;
 };
 
-static Lanes build_index_lanes(int L) {
+static Lanes build_index_lanes(int L, uint16_t density = OP_NORMAL_LPDF) {
   Lanes b;
   b.base = b.g.add_slot(L, true);
   b.sigma = b.g.add_slot(1, true);
@@ -95,11 +95,32 @@ static Lanes build_index_lanes(int L) {
     const int idx = b.g.add_slot(1, false);
     b.g.add_op(OP_INDEX, {b.base}, idx, {l});
     const int lp = b.g.add_slot(1, false);
-    const int id = b.g.add_op(OP_NORMAL_LPDF, {y, idx, b.sigma}, lp);
+    const int id = b.g.add_op(density, {y, idx, b.sigma}, lp);
     b.g.ops[(size_t)id].variant = 0x06;
     b.terms.push_back(lp);
   }
   return b;
+}
+
+// A scalar-list density that the old hand-written trait omitted. Direct
+// target terms use the summed vector kernel: bit 6 must stay clear while the
+// lane lps and their gradients collapse into one logistic operation.
+static void test_logistic_direct_terms() {
+  const int L = 8;
+  Lanes b = build_index_lanes(L, OP_LOGISTIC_LPDF);
+  const std::vector<double> want = reference(b.g, b.fills, b.terms);
+
+  std::vector<int> tt = b.terms;
+  Fills f2 = b.fills;
+  const PartitionStats st = partition_lanes(b.g, f2, tt, {});
+  expect("logistic terms one group", st.groups == 1 && st.lanes == L);
+  expect("logistic terms summed", b.g.ops.size() == 1 && tt.size() == 1 &&
+                                      b.g.ops[0].opcode == OP_LOGISTIC_LPDF &&
+                                      (b.g.ops[0].variant & 0x40u) == 0);
+  expect("logistic terms vector input",
+         b.g.slots[(size_t)b.g.ops[0].in[0]].len == L &&
+             b.g.slots[(size_t)b.g.ops[0].in[1]].len == L);
+  expect_same_grad("logistic terms", std::move(b.g), f2, tt, want);
 }
 
 static void test_contiguous_bucket() {
@@ -947,6 +968,7 @@ int main() {
     (void)warm.n_params();
   }
   test_contiguous_bucket();
+  test_logistic_direct_terms();
   test_interleaved_lanes();
   test_scattered_indices();
   test_refuse_effectful();

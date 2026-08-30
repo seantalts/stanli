@@ -49,6 +49,23 @@ static std::vector<double> run_grad(Graph g, const Fills& fills) {
   return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
+// Scalar LPDF kernels all use density_fwd_v, so their re-roll eligibility is
+// generated from the same list. Shapes with a distinct contract must remain
+// fail-closed rather than inheriting the trait by looking density-like.
+static void test_scalar_density_traits() {
+#define EXPECT_REROLL_TRAIT(code, fn, arity, tier) \
+  expect(#code " has scalar-density trait",        \
+         has_op_trait(code, op_trait::kRerollDensity));
+  STANLI_SCALAR_DENSITY_LIST(EXPECT_REROLL_TRAIT)
+#undef EXPECT_REROLL_TRAIT
+  expect("ordered density stays excluded",
+         !has_op_trait(OP_ORDERED_LOGISTIC_LPMF, op_trait::kRerollDensity));
+  expect("matrix density stays excluded",
+         !has_op_trait(OP_MULTI_NORMAL_LPDF, op_trait::kRerollDensity));
+  expect("unrelated opcode stays excluded",
+         !has_op_trait(OP_EXP, op_trait::kRerollDensity));
+}
+
 // radon shape: mu = vector intermediate written by an op; per lane
 // {INDEX(mu,n); NORMAL(y_const_n, idx, sigma)}, lp -> target term.
 // y consts deliberately share slots (dedup pool) between lanes 1 and 5.
@@ -240,6 +257,56 @@ static void test_gauss_mix_shape() {
   expect("gmix sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close(("gmix v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
+// Logistic was historically omitted from the hand-maintained density
+// allowlist even though it has the same density_fwd_v elementwise kernel as
+// normal. Its lane-local lps must fuse behind bit 6, not merely acquire a
+// trait that no behavioral test exercises.
+static void test_logistic_elt_shape() {
+  const int L = 6;
+  Graph g;
+  Fills fills;
+  const int mu = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  auto cslot = [&](double v) {
+    const int s = g.add_slot(1, false);
+    fills.emplace_back(s, std::vector<double>{v});
+    return s;
+  };
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int lp = g.add_slot(1, false);
+    const int id =
+        g.add_op(OP_LOGISTIC_LPDF, {cslot(0.35 * l - 0.8), mu, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    const int term = g.add_slot(1, false);
+    g.add_op(OP_ADD, {lp, cslot(0.1 * l - 0.25)}, term);
+    terms.push_back(term);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const detail::ProfiledRerollStats profiled =
+      detail::reroll_profiled(g, f2, tt, {});
+  expect("logistic elt regions==1", profiled.work.regions == 1);
+  expect("logistic elt density disposition",
+         profiled.dispositions.element_density == 1);
+  expect("logistic elt term disposition",
+         profiled.dispositions.term_widen == 1);
+  expect("logistic elt ops==3", g.ops.size() == 3 && tt.size() == 1);
+  expect("logistic elt opcode", g.ops[0].opcode == OP_LOGISTIC_LPDF &&
+                                    (g.ops[0].variant & 0x40u) != 0 &&
+                                    g.slots[(size_t)g.ops[0].out].len == L);
+  g.result_slot = tt[0];
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("logistic elt sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("logistic elt v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
 }
 
 // (b2) idata-outcome lpmf feeding an in-lane op: the elementwise lpmf
@@ -1567,10 +1634,12 @@ static void test_bail_message_ops() {
 }
 
 int main() {
+  test_scalar_density_traits();
   test_radon_shape();
   test_ark_shape();
   test_bail_recurrence();
   test_gauss_mix_shape();
+  test_logistic_elt_shape();
   test_elt_lpmf_shape();
   test_elt_scalar_density_hoists();
   test_bail_cross_lane_density();
