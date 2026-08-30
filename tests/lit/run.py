@@ -59,6 +59,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("case", type=pathlib.Path)
     parser.add_argument("stanli_check", type=pathlib.Path)
+    parser.add_argument("stanc", type=pathlib.Path)
     parser.add_argument("--discover", action="store_true")
     args = parser.parse_args()
 
@@ -77,29 +78,28 @@ def main() -> int:
         print(f"FAIL {args.case}: {error}")
         return 1
 
-    mir_path = args.case.with_suffix(".tmir.sexp")
-    if not args.stanli_check.is_file():
-        print(f"FAIL missing stanli_check executable: {args.stanli_check}")
-        return 1
-    if not mir_path.is_file():
-        print(f"FAIL missing checked-in MIR fixture: {mir_path}")
-        return 1
+    # Parse directives even in the compiler-free core setup. A malformed new
+    # case is a test failure, not something that should hide behind a skip.
+    if not args.stanli_check.is_file() or not args.stanc.is_file():
+        print("SKIP lit test needs stanli_check and the pinned stanc")
+        return 77
 
-    # The model source remains the human-readable test identity while
-    # stanli_check consumes the reproducible MIR fixture. The compiler-bearing
-    # CI job regenerates these fixtures with the repository's pinned stanc.
+    # stanc writes a sibling .hpp even when MIR goes to stdout.  Compile a
+    # temporary copy so source-only lit runs never dirty the checkout.
     with tempfile.TemporaryDirectory(prefix="stanli-lit-") as tmp:
         root = pathlib.Path(tmp)
+        source = root / args.case.name
         data_path = root / f"{args.case.stem}.json"
+        source.write_text(source_text, encoding="utf-8")
         data_path.write_text(json.dumps(data), encoding="utf-8")
         try:
             completed = subprocess.run(
                 [
                     str(args.stanli_check),
-                    str(args.case),
+                    str(source),
                     str(data_path),
-                    "--mir",
-                    str(mir_path),
+                    "--stanc",
+                    str(args.stanc),
                 ],
                 text=True,
                 stdout=subprocess.PIPE,

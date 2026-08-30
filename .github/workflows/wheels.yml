@@ -344,11 +344,9 @@ jobs:
         shell: bash
         run: |
           cp -a tests/fixtures "$RUNNER_TEMP/fixtures-before"
-          cp -a tests/lit "$RUNNER_TEMP/lit-before"
           ./tools/gen_fixtures.sh
-          if ! diff -rq "$RUNNER_TEMP/fixtures-before" tests/fixtures ||
-             ! diff -rq "$RUNNER_TEMP/lit-before" tests/lit; then
-            echo "checked-in MIR is stale against deps/stanc3/stanc." >&2
+          if ! diff -rq "$RUNNER_TEMP/fixtures-before" tests/fixtures; then
+            echo "tests/fixtures is stale against deps/stanc3/stanc." >&2
             echo "Run tools/gen_fixtures.sh and commit the result." >&2
             exit 1
           fi
