@@ -199,7 +199,8 @@ class Executor {
 
  private:
   void bind_();
-  KernelCtx make_ctx_(const Op& op, const std::vector<char>& written,
+  KernelCtx make_ctx_(const Op& op, int64_t scratch_offset,
+                      const std::vector<char>& written,
                       const std::vector<int64_t>& adjoint_offsets);
 
   struct ProfEntry {

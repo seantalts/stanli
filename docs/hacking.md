@@ -238,13 +238,37 @@ deliberately small:
 - `Op`: an opcode, up to six input slots, one output (occasionally
   two: a constraint transform also produces its Jacobian term),
   integer immediates (`idata`: index arrays, dimensions, outcome
-  counts), an opaque payload (`udata`: today only ODE specifications),
-  and a scratch window.
+  counts), and an opaque payload (`udata`: e.g. ODE specifications).
+  Scratch offsets exist only while binding; the bound `KernelCtx` retains
+  the scratch pointer, so graphs and executor copies do not store offsets.
 - `Graph`: the slots, the ops, and the pools that own the
   `idata`/`udata` arrays.
 - `KernelCtx`: what a kernel sees at run time. A raw `double*` and a
   length for each input, the output, and each adjoint, plus scratch.
   Assembled once at bind, never rebuilt.
+
+For metadata changes, build `bench_executor_clone` explicitly in separate
+baseline and candidate Release build directories. Keep the baseline binary
+unchanged, and clean-build the candidate after changing a layout header.
+The model-independent scalar ADD chain reports graph construction, binding,
+clone and gradient times, exact `Op` storage, and current/peak RSS in MiB.
+Each clone is checked against an exact value and gradient before timing.
+
+```sh
+cmake --build build-base --target bench_executor_clone -j4
+cmake --build build-candidate --target bench_executor_clone -j4
+python3 tools/bench_executor_clone.py \
+  build-base/bench_executor_clone build-candidate/bench_executor_clone \
+  --ops 25000 --executors 1 8 32 --samples 12 --reps 20 \
+  --json build-candidate/clone-layout.json
+```
+
+The driver alternates fresh processes and reports medians and interquartile
+ranges. RSS is descriptive: allocator retention and page rounding can mask
+small live-storage savings. The ADD chain is a metadata stress case, not a
+prediction of model-wide speedups; also run `bench_opcost` for density kernels
+and `bench_grad` for a compiled-model canary. Timing runs should not overlap
+builds or other benchmarks.
 
 ### The variant byte
 

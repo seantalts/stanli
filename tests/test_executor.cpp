@@ -127,6 +127,57 @@ int main() {
   assigned_ex.value_ptr(0)[1] = 11.0;
   expect_eq("assigned idata value", assigned_ex.forward(), 11.0);
 
+  // A mixed scalar/vector density graph needs differently sized scratch
+  // windows, including across an intervening scratch-free op. Check the
+  // complete lifecycle without inspecting any context or arena pointers.
+  std::unique_ptr<Executor> density_copy;
+  double density_value = 0.0;
+  {
+    Graph density;
+    const int mu = density.add_slot(1, true);
+    const int sigma = density.add_slot(1, true);
+    const int scalar_y = density.add_slot(1, false);
+    const int vector_y = density.add_slot(3, false);
+    const int zero = density.add_slot(1, false);
+    const int scalar_lp = density.add_slot(1, false);
+    const int shifted_lp = density.add_slot(1, false);
+    const int vector_lp = density.add_slot(1, false);
+    const int total_lp = density.add_slot(1, false);
+    density.add_op(OP_NORMAL_LPDF, {scalar_y, mu, sigma}, scalar_lp);
+    density.ops.back().variant = 0x06;  // mu and sigma active
+    density.add_op(OP_ADD, {scalar_lp, zero}, shifted_lp);
+    density.add_op(OP_NORMAL_LPDF, {vector_y, mu, sigma}, vector_lp);
+    density.ops.back().variant = 0x06;
+    density.add_op(OP_ADD_N, {shifted_lp, vector_lp}, total_lp);
+    density.result_slot = total_lp;
+    Executor source(std::move(density));
+    source.params_data()[0] = 0.0;
+    source.params_data()[1] = 1.0;
+    *source.value_ptr(scalar_y) = 2.0;
+    source.value_ptr(vector_y)[0] = 1.0;
+    source.value_ptr(vector_y)[1] = 3.0;
+    source.value_ptr(vector_y)[2] = -1.0;
+    double density_grad[2];
+    density_value = source.gradient(density_grad);
+    expect_eq("density dmu", density_grad[0], 5.0);
+    expect_eq("density dsigma", density_grad[1], 11.0);
+    density_copy = std::make_unique<Executor>(source);
+  }
+  for (int repeat = 0; repeat < 8; ++repeat) {
+    density_copy->forward_value_only();
+    double density_grad[2];
+    expect_eq("copied density", density_copy->gradient(density_grad),
+              density_value);
+    expect_eq("copied density dmu", density_grad[0], 5.0);
+    expect_eq("copied density dsigma", density_grad[1], 11.0);
+  }
+  density_copy->params_data()[0] = 1.0;
+  density_copy->params_data()[1] = 2.0;
+  double changed_density_grad[2];
+  density_copy->gradient(changed_density_grad);
+  expect_eq("changed density dmu", changed_density_grad[0], 0.25);
+  expect_eq("changed density dsigma", changed_density_grad[1], -0.875);
+
   // BCAST_FMA forward: out[i] = a + b * x[i].
   Graph g2;
   const int s_a = g2.add_slot(1, true);

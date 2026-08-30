@@ -46,8 +46,6 @@ struct Op {
   // Opaque per-op payload for kernels that need compile-time structure the
   // integer immediates cannot carry (ODEs, messages, declaration checks).
   const void* udata = nullptr;
-  int64_t scratch_off = 0;  // into the scratch arena (filled at bind)
-  int64_t scratch_len = 0;
 };
 
 // Per-call view handed to kernels. Assembled by the executor; kernels never

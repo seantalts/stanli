@@ -225,7 +225,11 @@ void Executor::bind_() {
   }
 
   int64_t scratch = 0;
-  for (auto& op : graph_.ops) {
+  // Scratch layout is binding state, not graph structure. Only the bound
+  // context pointers survive this function; copies compute their own layout.
+  std::vector<int64_t> scratch_offsets;
+  scratch_offsets.reserve(graph_.ops.size());
+  for (const auto& op : graph_.ops) {
     const Kernel& k = kernel(op.opcode);
     if (op.opcode == OP_NONE_ || k.forward == nullptr)
       // Name it. A browser build can be missing a kernel because its
@@ -233,10 +237,8 @@ void Executor::bind_() {
       // to do from this string.
       throw std::runtime_error(std::string("opcode not registered: ") +
                                opcode_name(op.opcode));
-    op.scratch_off = scratch;
-    op.scratch_len =
-        k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0;
-    scratch += op.scratch_len;
+    scratch_offsets.push_back(scratch);
+    scratch += k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0;
   }
   scratch_.assign(scratch, 0.0);
 
@@ -248,7 +250,8 @@ void Executor::bind_() {
   ctx_.resize(graph_.ops.size());
   out2_adj_ptr_.assign(graph_.ops.size(), nullptr);
   for (size_t i = 0; i < graph_.ops.size(); ++i) {
-    ctx_[i] = make_ctx_(graph_.ops[i], written, adjoint_offsets);
+    ctx_[i] =
+        make_ctx_(graph_.ops[i], scratch_offsets[i], written, adjoint_offsets);
     const int o2 = graph_.ops[i].out2;
     if (o2 >= 0) {
       assert(adjoint_offsets[o2] >= 0);
@@ -268,7 +271,8 @@ void Executor::bind_() {
   }
 }
 
-KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written,
+KernelCtx Executor::make_ctx_(const Op& op, int64_t scratch_offset,
+                              const std::vector<char>& written,
                               const std::vector<int64_t>& adjoint_offsets) {
   KernelCtx ctx;
   ctx.n_in = op.n_in;
@@ -283,7 +287,7 @@ KernelCtx Executor::make_ctx_(const Op& op, const std::vector<char>& written,
     ctx.out2 = Desc{values_.data() + s2.offset, s2.len};
   }
   ctx.variant = op.variant;
-  ctx.scratch = scratch_.data() + op.scratch_off;
+  ctx.scratch = scratch_.empty() ? nullptr : scratch_.data() + scratch_offset;
   ctx.idata = op.idata;
   ctx.udata = op.udata;
   ctx.eval_state = &eval_state_;

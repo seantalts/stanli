@@ -741,6 +741,11 @@ target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_program_call EXCLUDE_FROM_ALL
   tools/bench_program_call.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_program_call PRIVATE stanli)
+# Developer-only Executor metadata/clone evaluator. Fresh baseline/candidate
+# processes make its peak-RSS output comparable across layout changes.
+add_executable(bench_executor_clone EXCLUDE_FROM_ALL
+  tools/bench_executor_clone.cpp tests/tbb_stub.cpp)
+target_link_libraries(bench_executor_clone PRIVATE stanli)
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
