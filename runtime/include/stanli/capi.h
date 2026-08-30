@@ -353,6 +353,10 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
  * evaluates at unconstrained q and writes n_columns doubles; returns 0 on
  * success. */
 int64_t stanli_wa_n_columns(const stanli_model* m);
+/* Index of the first generated-quantity column in the write_array output.
+ * It equals n_columns when there are no generated quantities in that output.
+ * Returns 0 when write_array is unavailable. */
+int64_t stanli_wa_n_generated_start(const stanli_model* m);
 const char* stanli_wa_column_name(const stanli_model* m, int64_t i);
 void stanli_wa_seed(stanli_model* m, uint32_t seed);
 void stanli_wa_seed_chain(stanli_model* m, uint32_t seed, uint32_t chain);

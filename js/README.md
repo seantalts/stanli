@@ -23,11 +23,13 @@ const fit = await sample({
 
 fit.columns["mu"];     // Float64Array, one entry per draw
 fit.names;             // every CSV column CmdStan would write
+fit.generatedStart;    // index where generated-quantity columns begin
 fit.ms;                // {stanc, lower, sample, total} in milliseconds
 ```
 
 Columns cover the full CmdStan CSV: constrained parameters, transformed
 parameters, and generated quantities (RNG draws stream from `seed`).
+When there are no generated quantities, `generatedStart === fit.names.length`.
 The heavy work runs in a worker the package owns, so the page never
 blocks; calls queue and run one at a time.
 

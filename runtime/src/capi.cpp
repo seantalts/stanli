@@ -28,6 +28,15 @@ void put_err(char* err, size_t err_len, const char* what) {
   err[err_len - 1] = '\0';
 }
 
+int64_t scalar_column_start(
+    const std::vector<stanli::CompiledModel::ParamView>& columns,
+    size_t view_start) {
+  int64_t start = 0;
+  for (size_t i = 0; i < view_start && i < columns.size(); ++i)
+    start += columns[i].len;
+  return start;
+}
+
 }  // namespace
 
 struct stanli_model {
@@ -42,6 +51,7 @@ struct stanli_model {
   std::shared_ptr<stanli::WaInterp> wa_interp;
   std::vector<std::string> wa_names;  // CSV order, flattened
   int64_t wa_n = 0;
+  int64_t wa_gq_start = 0;
   // The stream stanli_wa_seed sets and stanli_wa_row draws from. This ABI
   // names one stream per model, so the model holds it; callers wanting a
   // stream per thread use WaInterp::eval directly with their own WaRng.
@@ -96,6 +106,8 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
             m->wa_n = (int64_t)row.size();
             m->wa_names =
                 stanli::CompiledModel::csv_names(m->wa_interp->columns());
+            m->wa_gq_start = scalar_column_start(m->wa_interp->columns(),
+                                                 m->wa_interp->n_gq_start());
             found = true;
           } catch (const std::exception&) {
           }
@@ -107,6 +119,7 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
         m->wa_cols = wa.columns;
         m->wa_names = stanli::CompiledModel::csv_names(wa.columns);
         for (const auto& c : wa.columns) m->wa_n += c.len;
+        m->wa_gq_start = scalar_column_start(wa.columns, wa.n_gq_start);
       }
     }
     return m.release();
@@ -640,6 +653,10 @@ const char* stanli_constrained_name(const stanli_model* m, int64_t i) {
 }
 
 int64_t stanli_wa_n_columns(const stanli_model* m) { return m->wa_n; }
+
+int64_t stanli_wa_n_generated_start(const stanli_model* m) {
+  return m->wa_n > 0 ? m->wa_gq_start : 0;
+}
 
 const char* stanli_wa_column_name(const stanli_model* m, int64_t i) {
   if (i < 0 || i >= (int64_t)m->wa_names.size()) return "";

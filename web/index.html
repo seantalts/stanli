@@ -57,6 +57,9 @@
   .plots canvas { border: 1px solid #8883; border-radius: 6px;
                   max-width: 100%; }
   .times { font-size: .8rem; opacity: .7; margin-top: .5rem; }
+  .gq { margin-top: .8rem; }
+  .gq summary { cursor: pointer; font-weight: 600; }
+  .gq table { margin-top: .4rem; }
   #note { font-size: .82rem; opacity: .75; margin: -.4rem 0 .6rem;
           max-width: 62rem; }
   #note b { font-weight: 600; }
@@ -502,7 +505,8 @@ $("sampler").onchange = () => {
 };
 
 // ---- run -------------------------------------------------------------------
-// fit = {names, samples, chains: [{name: Float64Array} per chain]}
+// fit = {names, samples, generatedStart,
+//        chains: [{name: Float64Array} per chain]}
 // Single-sampler runs keep one fit; a comparison run keeps one per
 // sampler so both stay inspectable (and downloadable) side by side.
 let fit = null;
@@ -529,6 +533,7 @@ async function runChains(sampler, opts, nChains, seed, onLive) {
     for (const k of ["lower", "sample"]) ms[k] += r.ms[k];
   return {
     fit: { names: results[0].names, samples: results[0].samples,
+           generatedStart: results[0].generatedStart,
            chains: results.map((r) => r.columns) },
     // Pathfinder only: which iterate of each path the ELBO chose.
     selected: results.map((r) => (r.pathfinder ? r.pathfinder.selectedIter
@@ -754,6 +759,7 @@ async function runCompare(opts, nChains, seed, compiled, tWall) {
     for (const r of rs)
       for (const k of ["lower", "sample"]) ms[k] += r.ms[k];
     return { fit: { names: rs[0].names, samples: rs[0].samples,
+                    generatedStart: rs[0].generatedStart,
                     chains: rs.map((r) => r.columns) }, ms };
   };
   const rn = collect("nuts"), rw = collect("walnuts");
@@ -796,6 +802,18 @@ async function runCompare(opts, nChains, seed, compiled, tWall) {
   cmpSelect(cmpFits.nuts.names[0]);
 }
 
+// Reveal a selected row's section and, when plots are parked below it, the
+// plots too. Scrolling only the parameter row leaves the graph below the
+// viewport when the selected row is near the bottom of the page.
+function revealResultRow(tr) {
+  if (!tr) return;
+  const details = tr.closest("details");
+  if (details) details.open = true;
+  const next = tr.nextElementSibling;
+  const target = next && next.classList.contains("plotrow") ? next : tr;
+  target.scrollIntoView({ block: "nearest" });
+}
+
 // Arrow keys step the selected parameter in every finished result view,
 // unless focus is in a form control (the model picker owns its own arrows).
 let cmpSelName = null;
@@ -820,8 +838,8 @@ document.addEventListener("keydown", (e) => {
         `tr[data-n="${CSS.escape(names[next])}"]`);
     if (tr) showPlots(tr, singleMode, false);
   }
-  $("out").querySelector(`tr[data-n="${CSS.escape(names[next])}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+  revealResultRow($("out").querySelector(
+      `tr[data-n="${CSS.escape(names[next])}"]`));
 });
 
 function cmpSelect(name) {
@@ -861,6 +879,8 @@ function placeComparisonPlots(col, name) {
   const tr = Array.from(col.querySelectorAll("tr[data-n]"))
       .find((row) => row.dataset.n === name);
   if (!plots || !tr) return;
+  const details = tr.closest("details");
+  if (details) details.open = true;
   col.querySelector("tr.plotrow")?.remove();
   const row = document.createElement("tr");
   row.className = "plotrow";
@@ -947,7 +967,14 @@ function fitMoments(f) {
 // One row per parameter, both methods on it, plus the discrepancy that
 // says whether the difference matters: how far apart the means are in
 // units of NUTS's own sd.
-function pfTable(names) {
+function resultSectionStart(f) {
+  const start = Number(f.generatedStart);
+  return Number.isFinite(start)
+      ? Math.min(f.names.length, Math.max(0, Math.trunc(start)))
+      : f.names.length;
+}
+
+function pfTablePart(names) {
   let html = "<table><tr><th>parameter</th><th>NUTS mean</th><th>NUTS sd</th>" +
              "<th>PF mean</th><th>PF sd</th>" +
              "<th>|&Delta;mean| / NUTS sd</th></tr>";
@@ -956,6 +983,15 @@ function pfTable(names) {
             `<td class="nsd"></td><td class="pm"></td><td class="psd"></td>` +
             `<td class="ds"></td></tr>`;
   return html + "</table>";
+}
+function pfTable(f) {
+  const start = resultSectionStart(f);
+  let html = pfTablePart(f.names.slice(0, start));
+  if (start < f.names.length)
+    html += `<details class="gq"><summary>Generated quantities ` +
+            `(${f.names.length - start})</summary>` +
+            pfTablePart(f.names.slice(start)) + "</details>";
+  return html;
 }
 const pfFmt = (x) => (x == null || !Number.isFinite(x) ? "-"
     : Math.abs(x) >= 1000 ? x.toFixed(0) : x.toPrecision(4));
@@ -985,8 +1021,14 @@ function pfPaint() {
                          : liveColumn(v.live, cmpSelName);
   const pf = v.pfFit && cmpSelName in v.pfFit.chains[0]
       ? allDraws(v.pfFit, cmpSelName) : null;
-  for (const tr of v.sum.querySelectorAll("tr[data-n]"))
-    tr.classList.toggle("selected", tr.dataset.n === cmpSelName);
+  for (const tr of v.sum.querySelectorAll("tr[data-n]")) {
+    const selected = tr.dataset.n === cmpSelName;
+    tr.classList.toggle("selected", selected);
+    if (selected) {
+      const details = tr.closest("details");
+      if (details) details.open = true;
+    }
+  }
   pfTableUpdate(v.sum, v.nutsFit ? fitMoments(v.nutsFit) : liveMoments(v.live),
                 v.pfMoments);
   if (v.nutsFit && cmpSelName in v.nutsFit.chains[0])
@@ -1084,9 +1126,10 @@ async function runNutsPathfinder(opts, nChains, seed, compiled, tWall) {
   const pfJob = await jobs[0];
   v.pf = pfJob.r.pathfinder;
   v.pfFit = { names: pfJob.r.names, samples: pfJob.r.samples,
+              generatedStart: pfJob.r.generatedStart,
               chains: [pfJob.r.columns] };
   v.pfMoments = fitMoments(v.pfFit);
-  sum.innerHTML = pfTable(v.pfFit.names);
+  sum.innerHTML = pfTable(v.pfFit);
   for (const tr of sum.querySelectorAll("tr[data-n]"))
     tr.onclick = () => cmpSelect(tr.dataset.n);
   if (!cmpSelName || !v.pfFit.names.includes(cmpSelName))
@@ -1115,6 +1158,7 @@ async function runNutsPathfinder(opts, nChains, seed, compiled, tWall) {
   for (const r of rs)
     for (const key of ["lower", "sample"]) ms[key] += r.ms[key];
   v.nutsFit = { names: rs[0].names, samples: rs[0].samples,
+                generatedStart: rs[0].generatedStart,
                 chains: rs.map((r) => r.columns) };
   cmpFits = { nuts: v.nutsFit, pathfinder: v.pfFit };
   const wall = performance.now() - tWall;
@@ -1205,12 +1249,12 @@ function colStats(f, name) {
            q5: q(0.05), q50: q(0.5), q95: q(0.95), ...rhatEss(f, name) };
 }
 
-function summaryTable(f) {
+function summaryTablePart(f, names) {
   const fmt = (x) => (Math.abs(x) >= 1000 ? x.toFixed(0) : x.toPrecision(4));
   let html = "<table><tr><th>parameter</th><th>mean</th><th>sd</th>" +
              "<th>5%</th><th>50%</th><th>95%</th><th>R&#770;</th>" +
              "<th>ESS</th></tr>";
-  f.names.forEach((n) => {
+  names.forEach((n) => {
     const st = colStats(f, n);
     const badR = st.rhat > 1.01 ? ' class="bad"' : "";
     html += `<tr data-n="${n}"><td>${n}</td><td>${fmt(st.mean)}</td>` +
@@ -1220,6 +1264,15 @@ function summaryTable(f) {
             `<td>${st.ess.toFixed(0)}</td></tr>`;
   });
   return html + "</table>";
+}
+function summaryTable(f) {
+  const start = resultSectionStart(f);
+  let html = summaryTablePart(f, f.names.slice(0, start));
+  if (start < f.names.length)
+    html += `<details class="gq"><summary>Generated quantities ` +
+            `(${f.names.length - start})</summary>` +
+            summaryTablePart(f, f.names.slice(start)) + "</details>";
+  return html;
 }
 
 function render(ms, nChains, mode) {

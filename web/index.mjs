@@ -123,7 +123,7 @@ export function compile(opts) {
  *   a transferred ArrayBuffer of constrained draws, nCon wide.
  *   Pathfinder streams {live: {phase: "path", iter, lp}} instead, one
  *   message per L-BFGS iterate.
- * @returns {Promise<{names: string[], samples: number,
+ * @returns {Promise<{names: string[], samples: number, generatedStart: number,
  *                    columns: Object<string, Float64Array>,
  *                    exactLp: boolean,
  *                    pathfinder?: {path: {iter, lp}[], khat: number,
@@ -152,12 +152,12 @@ export function sample(opts) {
         ? opts.sampler : "nuts",
     maxError: opts.maxError == null ? 0 : opts.maxError,
   }, opts).then((done) => {
-    const { names, samples, ms, exactLp, pathfinder } = done;
+    const { names, samples, generatedStart, ms, exactLp, pathfinder } = done;
     const flat = new Float64Array(done.columns);
     const columns = {};
     names.forEach((name, i) => {
       columns[name] = flat.subarray(i * samples, (i + 1) * samples);
     });
-    return { names, samples, columns, ms, exactLp, pathfinder };
+    return { names, samples, generatedStart, columns, ms, exactLp, pathfinder };
   });
 }

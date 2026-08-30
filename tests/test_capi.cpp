@@ -70,7 +70,8 @@ void expect_values(const std::string& what, const std::vector<double>& got,
 void expect_names(const char* fixture, const std::string& data,
                   const std::vector<std::string>& expected,
                   const std::vector<double>& q = {},
-                  const std::vector<double>& expected_values = {}) {
+                  const std::vector<double>& expected_values = {},
+                  int64_t expected_wa_gq_start = -1) {
   const std::string mir = slurp(fixture);
   char err[8192]{};
   stanli_model* model =
@@ -92,6 +93,14 @@ void expect_names(const char* fixture, const std::string& data,
     expect_eq((std::string(fixture) + " constrained name " + std::to_string(i))
                   .c_str(),
               name == nullptr ? "<null>" : name, expected[(size_t)i]);
+  }
+  if (expected_wa_gq_start >= 0 &&
+      stanli_wa_n_generated_start(model) != expected_wa_gq_start) {
+    ++failures;
+    std::printf("FAIL generated-quantity start for %s: got %lld want %lld\n",
+                fixture,
+                static_cast<long long>(stanli_wa_n_generated_start(model)),
+                static_cast<long long>(expected_wa_gq_start));
   }
   if (!q.empty()) {
     std::vector<double> values((size_t)n);
@@ -700,7 +709,8 @@ int main() {
                    "M.2.2",
                    "M.1.3",
                    "M.2.3",
-               });
+               },
+               {}, {}, 8);
 
   // Arrays are outer-major, while each matrix element is column-major.
   // This is the shape a flat "name.1 ... name.N" policy cannot represent.

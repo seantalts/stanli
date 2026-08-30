@@ -188,6 +188,8 @@ onmessage = async (e) => {
     const nWa = Number(M._stanli_wa_n_columns(model));
     const useWa = nWa > 0;
     const nCon = useWa ? nWa : Number(M._stanli_n_constrained(model));
+    const generatedStart = useWa
+        ? Number(M._stanli_wa_n_generated_start(model)) : nCon;
     const names = [];
     for (let i = 0; i < nCon; ++i)
       names.push(M.UTF8ToString(
@@ -213,7 +215,7 @@ onmessage = async (e) => {
 
     postMessage({
       done: {
-        names, samples, pathfinder: pf,
+        names, samples, generatedStart, pathfinder: pf,
         // True unless the runtime was built with STANLI_LITE_LP, which
         // drops stan-math's propto instantiations and shifts lp__ by a
         // per-model constant. The shipped browser build does not, so this
