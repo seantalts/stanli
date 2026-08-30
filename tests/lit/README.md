@@ -1,8 +1,9 @@
-# Stan source lit tests
+# Stan model lit tests
 
-Every marked `.stan` file below `tests/` becomes its own CTest automatically.
-New standalone cases live below this directory; existing fixture sources can
-opt in where they already are. No CMake edit or C++ test target is needed.
+Every marked `.stan` file below `tests/` and its adjacent checked-in
+`.tmir.sexp` fixture become one CTest automatically. New standalone cases live
+below this directory; existing fixture sources can opt in where they already
+are. No CMake edit or C++ test target is needed.
 
 Each file has two required directives and one optional data directive:
 
@@ -23,12 +24,17 @@ also how a silently accepted invalid model is recorded: `XFAIL` plus `OK`.
 XFAIL cases also carry the CTest label `broken`, so the known-gap inventory is
 directly runnable with `ctest --test-dir build -L broken`.
 
-The runner copies each source into a temporary directory before invoking the
-pinned stanc, because stanc writes a sibling `.hpp` even when MIR is sent to
-stdout. If the core developer setup has no stanc, the cases report a CTest
-skip. Compiler-bearing CI runs all of them.
+The ordinary suite runs each fixture through `stanli_check --mir`. It therefore
+does not need the optional stanc executable and never converts a missing
+compiler into a skipped test. Compiler-bearing CI regenerates the MIR with the
+repository's pinned stanc and rejects stale fixtures. To refresh them locally,
+point `STANC` at that compiler:
 
-After configuring the ordinary native build, run the complete source-lit
+```sh
+STANC=deps/stanc3/stanc tools/gen_fixtures.sh
+```
+
+After configuring the ordinary native build, run the complete model-lit
 suite with the local build target:
 
 ```sh
@@ -49,8 +55,8 @@ result without enforcing the checked-in expectation:
 
 ```sh
 tests/lit/run.py tests/lit/issue_257/to_array_1d.stan \
-  build/stanli_check deps/stanc3/stanc
+  build/stanli_check
 
 tests/lit/run.py --discover tests/lit/issue_257/to_array_1d.stan \
-  build/stanli_check deps/stanc3/stanc
+  build/stanli_check
 ```

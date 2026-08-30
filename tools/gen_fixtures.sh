@@ -8,9 +8,9 @@ stanc=${STANC:-./deps/stanc3/stanc}
 # transformed O0 MIR reproducible through the same generator and CI check.
 o0_fixtures=' paramcond_intarray runtime_int_array_udf structured_matrix_ops udf_conditional_return udf_local_shape whileloop '
 
-# stanc does not terminate its last line, so add the newline here and keep
-# every fixture reproducible byte for byte.
-for f in tests/fixtures/*.stan; do
+generate_fixture() {
+  local f=$1
+  local name out
   name=$(basename "$f" .stan)
   out=${f%.stan}.tmir.sexp
   if [[ "$o0_fixtures" == *" $name "* ]]; then
@@ -25,6 +25,21 @@ for f in tests/fixtures/*.stan; do
     { "$stanc" --O1 --debug-optimized-mir "$f"; echo; } \
       > "$out"
   fi
+  # stanc also emits C++ next to the model; fixtures only keep the MIR.
+  rm -f "${f%.stan}.hpp"
+}
+
+# stanc does not terminate its last line, so add the newline here and keep
+# every fixture reproducible byte for byte.
+for f in tests/fixtures/*.stan; do
+  generate_fixture "$f"
 done
-# stanc also emits C++ next to the model; fixtures only keep the MIR.
-rm -f tests/fixtures/*.hpp
+
+# Standalone lit cases use the same checked-in MIR contract as the older
+# fixture corpus. Only marked sources participate, so helper .stan files can
+# live below tests/lit without acquiring an accidental fixture.
+while IFS= read -r -d '' f; do
+  if grep -q '^// STANLI-LIT: ' "$f"; then
+    generate_fixture "$f"
+  fi
+done < <(find tests/lit -type f -name '*.stan' -print0)

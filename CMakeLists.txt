@@ -756,11 +756,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_vectorize_ab
            COMMAND ${Python3_EXECUTABLE} tests/test_vectorize_ab.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  # Source-level lit cases are one marked .stan file each. CMake discovers
-  # both the dedicated tests/lit tree and existing fixtures that opt in, then
-  # gives every case its own CTest entry. Adding coverage needs no build-system
-  # edit and no new C++ target. The core developer setup deliberately has no
-  # stanc, so these skip there, while compiler-bearing CI runs them all.
+  # Stan lit cases are one marked .stan file plus its checked-in MIR fixture.
+  # CMake discovers both the dedicated tests/lit tree and existing fixtures
+  # that opt in, then gives every case its own CTest entry. The ordinary test
+  # suite needs only stanli_check; compiler-bearing CI verifies that the MIR
+  # fixtures still match the pinned stanc.
   file(GLOB_RECURSE STANLI_LIT_CANDIDATES CONFIGURE_DEPENDS
        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.stan")
   # The PASS/XFAIL marker controls the broken label below, so changing a
@@ -780,26 +780,24 @@ if(Python3_Interpreter_FOUND)
       string(REGEX REPLACE "[^A-Za-z0-9_]" "_" STANLI_LIT_NAME
              "${STANLI_LIT_NAME}")
       set(STANLI_LIT_TEST "lit_${STANLI_LIT_NAME}")
-      if(WIN32)
-        set(STANLI_LIT_STANC
-            ${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanc.exe)
-      else()
-        set(STANLI_LIT_STANC
-            ${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanc)
+      string(REGEX REPLACE "\\.stan$" ".tmir.sexp" STANLI_LIT_MIR
+             "${STANLI_LIT_CASE}")
+      if(NOT EXISTS "${STANLI_LIT_MIR}")
+        message(FATAL_ERROR
+          "lit case ${STANLI_LIT_REL} has no checked-in MIR fixture; "
+          "run tools/gen_fixtures.sh with the pinned stanc")
       endif()
       add_test(NAME ${STANLI_LIT_TEST}
                COMMAND ${Python3_EXECUTABLE} tests/lit/run.py
                        ${STANLI_LIT_CASE}
                        $<TARGET_FILE:stanli_check>
-                       ${STANLI_LIT_STANC}
                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
       set(STANLI_LIT_LABELS lit)
       if(STANLI_LIT_MARKER MATCHES "XFAIL$")
         list(APPEND STANLI_LIT_LABELS broken)
       endif()
       set_tests_properties(${STANLI_LIT_TEST} PROPERTIES
-        LABELS "${STANLI_LIT_LABELS}"
-        SKIP_RETURN_CODE 77)
+        LABELS "${STANLI_LIT_LABELS}")
     endif()
   endforeach()
   # Friendly local entry points. These deliberately invoke CTest rather than
