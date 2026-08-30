@@ -119,11 +119,9 @@ Mat dense_seed(int n, int variant) {
   Mat seed(n, n);
   for (int c = 0; c < n; ++c)
     for (int r = 0; r < n; ++r)
-      seed(r, c) =
-          variant == 0
-              ? 0.4 * std::cos(0.19 * (1 + 2 * r + 5 * c))
-              : 0.3 * std::sin(0.41 * (2 + 7 * r + 3 * c)) +
-                    (r == c ? 0.2 : 0.0);
+      seed(r, c) = variant == 0 ? 0.4 * std::cos(0.19 * (1 + 2 * r + 5 * c))
+                                : 0.3 * std::sin(0.41 * (2 + 7 * r + 3 * c)) +
+                                      (r == c ? 0.2 : 0.0);
   return seed;
 }
 
@@ -146,8 +144,8 @@ void check_numeric_case(const char* name, const Mat& a) {
       const double actual = got.gradient.data()[i] - initial_adj;
       const double wanted = reference.gradient.data()[i];
       const double absolute = std::abs(actual - wanted);
-      const double scale = std::max({std::abs(actual), std::abs(wanted),
-                                     1e-300});
+      const double scale =
+          std::max({std::abs(actual), std::abs(wanted), 1e-300});
       largest_abs = std::max(largest_abs, absolute);
       largest_rel = std::max(largest_rel, absolute / scale);
       expect(std::string(name) + " Stan active gradient " +
@@ -155,8 +153,7 @@ void check_numeric_case(const char* name, const Mat& a) {
              absolute <= 2e-12 + 2e-12 * scale);
       expect(std::string(name) + " explicit block orientation " +
                  std::to_string(seed_variant) + ":" + std::to_string(i),
-             same_bits(got.gradient.data()[i],
-                       initial_adj + block.data()[i]));
+             same_bits(got.gradient.data()[i], initial_adj + block.data()[i]));
     }
 
     Mat direction(n, n);
@@ -164,10 +161,9 @@ void check_numeric_case(const char* name, const Mat& a) {
       for (int r = 0; r < n; ++r)
         direction(r, c) = std::sin(0.31 * (1 + r + 7 * c));
     constexpr double epsilon = 1e-6;
-    const double finite =
-        (objective(a + epsilon * direction, seed) -
-         objective(a - epsilon * direction, seed)) /
-        (2.0 * epsilon);
+    const double finite = (objective(a + epsilon * direction, seed) -
+                           objective(a - epsilon * direction, seed)) /
+                          (2.0 * epsilon);
     const double analytic = (block.array() * direction.array()).sum();
     expect(std::string(name) + " finite difference " +
                std::to_string(seed_variant),
@@ -233,8 +229,7 @@ IslandProg cfg_matrix_exp(int n) {
   return p;
 }
 
-void expect_structure(const char* name, const IslandProg& p,
-                      uint16_t opcode) {
+void expect_structure(const char* name, const IslandProg& p, uint16_t opcode) {
   expect(std::string(name) + " generated", !p.adj.code.empty());
   expect(std::string(name) + " one synthetic call", p.calls.size() == 1);
   if (p.calls.size() != 1) return;
@@ -255,10 +250,8 @@ void expect_structure(const char* name, const IslandProg& p,
 
 void check_force_seam() {
   constexpr const char* flag = "STANLI_CFG_MATRIX_EXP_BLOCK_FRECHET";
-  constexpr const char* minimum =
-      "STANLI_CFG_MATRIX_EXP_BLOCK_FRECHET_MIN_N";
-  constexpr const char* escape =
-      "STANLI_NO_CFG_MATRIX_EXP_BLOCK_FRECHET";
+  constexpr const char* minimum = "STANLI_CFG_MATRIX_EXP_BLOCK_FRECHET_MIN_N";
+  constexpr const char* escape = "STANLI_NO_CFG_MATRIX_EXP_BLOCK_FRECHET";
   test_unsetenv(flag);
   test_unsetenv(minimum);
   test_unsetenv(escape);
@@ -270,8 +263,7 @@ void check_force_seam() {
                    stanli::OP_MATRIX_EXP_BLOCK_FRECHET);
 
   IslandProg default_small = cfg_matrix_exp(5);
-  expect("small default cfg generated",
-         stanli::gen_cfg_adjoint(default_small));
+  expect("small default cfg generated", stanli::gen_cfg_adjoint(default_small));
   expect_structure("production rejects n5", default_small,
                    stanli::OP_MATRIX_EXP);
 
@@ -305,8 +297,7 @@ void check_force_seam() {
   expect("threshold-only cfg generated",
          stanli::gen_cfg_adjoint(threshold_only));
   expect_structure("threshold alone preserves production default",
-                   threshold_only,
-                   stanli::OP_MATRIX_EXP_BLOCK_FRECHET);
+                   threshold_only, stanli::OP_MATRIX_EXP_BLOCK_FRECHET);
 
   test_setenv(escape, "1");
   IslandProg escaped = cfg_matrix_exp(10);

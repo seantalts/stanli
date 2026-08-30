@@ -67,10 +67,10 @@ static std::string slurp(const std::string& path) {
 // so lowering tests can prove that control availability is not inferred from
 // an AD-lane label.
 static int relabel_fun_result_adlevel(std::string* mir,
-                                     const std::string& function_name,
-                                     const std::string& required_body_text,
-                                     const std::string& from,
-                                     const std::string& to) {
+                                      const std::string& function_name,
+                                      const std::string& required_body_text,
+                                      const std::string& from,
+                                      const std::string& to) {
   int changed = 0;
   size_t search = 0;
   const std::string needle = "(FunApp (StanLib " + function_name;
@@ -164,11 +164,11 @@ static int count_island_instruction(const stanli::CompiledModel& cm,
   for (const stanli::Op& op : cm.graph.ops) {
     if (op.opcode != stanli::OP_ISLAND || op.udata == nullptr) continue;
     const auto& island = *static_cast<const stanli::IslandProg*>(op.udata);
-    count += static_cast<int>(std::count_if(
-        island.code.begin(), island.code.end(),
-        [=](const stanli::Program::Instr& instruction) {
-          return instruction.code == code;
-        }));
+    count += static_cast<int>(
+        std::count_if(island.code.begin(), island.code.end(),
+                      [=](const stanli::Program::Instr& instruction) {
+                        return instruction.code == code;
+                      }));
   }
   return count;
 }
@@ -211,9 +211,8 @@ static bool same_fill_contents(const stanli::CompiledModel& a,
         a.fills[i].second.size() != b.fills[i].second.size())
       return false;
     const size_t bytes = a.fills[i].second.size() * sizeof(double);
-    if (bytes != 0 &&
-        std::memcmp(a.fills[i].second.data(), b.fills[i].second.data(), bytes) !=
-            0)
+    if (bytes != 0 && std::memcmp(a.fills[i].second.data(),
+                                  b.fills[i].second.data(), bytes) != 0)
       return false;
   }
   return true;
@@ -1035,48 +1034,45 @@ int main() {
     // data comparison can be conservatively labeled AutoDiffable. Scheduling
     // must make the same decision from successful pure evaluation and retain
     // unresolved runtime control in both cases.
-    const auto check_condition_label_variant =
-        [&](const std::string& variant, const std::string& label) {
-          CompiledModel scheduled =
-              compile_without_graph_passes(variant, scheduled_data(40));
-          test_setenv("STANLI_NO_SCAN", "1", 1);
-          CompiledModel ordinary;
-          try {
-            ordinary =
-                compile_without_graph_passes(variant, scheduled_data(40));
-          } catch (...) {
-            test_unsetenv("STANLI_NO_SCAN");
-            throw;
-          }
-          test_unsetenv("STANLI_NO_SCAN");
-          const ScanSpec* variant_spec = nullptr;
-          for (const Op& op : scheduled.graph.ops)
-            if (op.opcode == OP_SCAN)
-              variant_spec = static_cast<const ScanSpec*>(op.udata);
-          check(variant_spec != nullptr &&
-                    variant_spec->templates.size() == 2,
-                label + " retains the scheduled control plan");
+    const auto check_condition_label_variant = [&](const std::string& variant,
+                                                   const std::string& label) {
+      CompiledModel scheduled =
+          compile_without_graph_passes(variant, scheduled_data(40));
+      test_setenv("STANLI_NO_SCAN", "1", 1);
+      CompiledModel ordinary;
+      try {
+        ordinary = compile_without_graph_passes(variant, scheduled_data(40));
+      } catch (...) {
+        test_unsetenv("STANLI_NO_SCAN");
+        throw;
+      }
+      test_unsetenv("STANLI_NO_SCAN");
+      const ScanSpec* variant_spec = nullptr;
+      for (const Op& op : scheduled.graph.ops)
+        if (op.opcode == OP_SCAN)
+          variant_spec = static_cast<const ScanSpec*>(op.udata);
+      check(variant_spec != nullptr && variant_spec->templates.size() == 2,
+            label + " retains the scheduled control plan");
 
-          Executor scheduled_executor(std::move(scheduled.graph));
-          scheduled.bind(scheduled_executor);
-          Executor ordinary_executor(std::move(ordinary.graph));
-          ordinary.bind(ordinary_executor);
-          for (double theta_sign : {1.0, -1.0}) {
-            for (size_t k = 0; k < q.size(); ++k) {
-              const double value = k == 6 ? theta_sign * std::abs(q[k]) : q[k];
-              scheduled_executor.params_data()[k] = value;
-              ordinary_executor.params_data()[k] = value;
-            }
-            std::vector<double> got_gradient(q.size()), want_gradient(q.size());
-            const double got =
-                scheduled_executor.gradient(got_gradient.data());
-            const double want = ordinary_executor.gradient(want_gradient.data());
-            expect_ulp(label + " lp", got, want);
-            for (size_t k = 0; k < q.size(); ++k)
-              expect_ulp(label + " g" + std::to_string(k), got_gradient[k],
-                         want_gradient[k]);
-          }
-        };
+      Executor scheduled_executor(std::move(scheduled.graph));
+      scheduled.bind(scheduled_executor);
+      Executor ordinary_executor(std::move(ordinary.graph));
+      ordinary.bind(ordinary_executor);
+      for (double theta_sign : {1.0, -1.0}) {
+        for (size_t k = 0; k < q.size(); ++k) {
+          const double value = k == 6 ? theta_sign * std::abs(q[k]) : q[k];
+          scheduled_executor.params_data()[k] = value;
+          ordinary_executor.params_data()[k] = value;
+        }
+        std::vector<double> got_gradient(q.size()), want_gradient(q.size());
+        const double got = scheduled_executor.gradient(got_gradient.data());
+        const double want = ordinary_executor.gradient(want_gradient.data());
+        expect_ulp(label + " lp", got, want);
+        for (size_t k = 0; k < q.size(); ++k)
+          expect_ulp(label + " g" + std::to_string(k), got_gradient[k],
+                     want_gradient[k]);
+      }
+    };
     std::string parameter_condition_labeled_data = mir;
     const int relabeled_parameter_conditions = relabel_fun_result_adlevel(
         &parameter_condition_labeled_data, "Greater__", "(Var theta)",
@@ -1299,9 +1295,9 @@ int main() {
     const std::string mir =
         slurp("tests/fixtures/scan_nested_one_trip.tmir.sexp");
     std::string alpha_mir = mir;
-    for (const std::string& name : {"cursor_a", "cursor_b", "cursor_c",
-                                    "cursor_d", "cursor_e", "found_a",
-                                    "found_b", "found_c"}) {
+    for (const std::string& name :
+         {"cursor_a", "cursor_b", "cursor_c", "cursor_d", "cursor_e", "found_a",
+          "found_b", "found_c"}) {
       const std::string renamed = "renamed_" + name;
       for (size_t at = 0; (at = alpha_mir.find(name, at)) != std::string::npos;
            at += renamed.size())
@@ -1421,8 +1417,7 @@ int main() {
         expect_ulp(tag + " gradient", scan_result.gradient,
                    unrolled_result.gradient);
         if (variant == 0) {
-          CompiledModel alpha =
-              compile_without_graph_passes(alpha_mir, data);
+          CompiledModel alpha = compile_without_graph_passes(alpha_mir, data);
           const ScanSpec* alpha_spec = find_scan(alpha);
           check(alpha_spec != nullptr,
                 "alpha-renamed bounded loops retain scheduled scan");
@@ -1447,8 +1442,8 @@ int main() {
   // still match the unrolled oracle at the existing ULP budget.
   {
     constexpr int N = 40;
-    const std::string mir = slurp(
-        "tests/fixtures/scan_scheduled_data_if_near_miss.tmir.sexp");
+    const std::string mir =
+        slurp("tests/fixtures/scan_scheduled_data_if_near_miss.tmir.sexp");
     const auto near_miss_data = [=] {
       std::ostringstream json;
       json << "{\"N\":" << N << ",\"new_subject\":[";
@@ -1490,9 +1485,9 @@ int main() {
     if (near_schedule)
       for (size_t row = 0; row < near_spec->template_for_iteration.size();
            ++row)
-        near_schedule = near_schedule &&
-                        near_spec->template_for_iteration[row] ==
-                            expected_cycle[row % 6];
+        near_schedule =
+            near_schedule &&
+            near_spec->template_for_iteration[row] == expected_cycle[row % 6];
     check(near_schedule,
           "nested row-varying data If records its four-template schedule");
 
@@ -1512,8 +1507,7 @@ int main() {
     near_miss.bind(near_miss_ex);
     Executor unrolled_ex(std::move(unrolled.graph));
     unrolled.bind(unrolled_ex);
-    const double values[8] = {0.4,  0.03,  -0.02, 0.35,
-                              0.08, -0.05, 0.2,   0.55};
+    const double values[8] = {0.4, 0.03, -0.02, 0.35, 0.08, -0.05, 0.2, 0.55};
     check(near_miss_ex.n_params() == 8 && unrolled_ex.n_params() == 8,
           "near-miss parameter count");
     for (size_t i = 0; i < 8; ++i)
@@ -1559,7 +1553,8 @@ int main() {
           "                        (FunApp (CompilerInternal FnLength)\n"
           "                         (((pattern (Var sym1__))\n"
           "                           (meta ((type_ (UArray UInt))\n"
-          "                                  (loc <opaque>) (adlevel DataOnly)))))))\n"
+          "                                  (loc <opaque>) (adlevel "
+          "DataOnly)))))))\n"
           "                       (meta ((type_ UInt) (loc <opaque>)\n"
           "                              (adlevel DataOnly)))))\n"
           "                     (body\n"
@@ -1630,15 +1625,14 @@ int main() {
       // The final scheduled row is a continuation. Enlarging only its span
       // makes its exact data-only loop require two iterations.
       if (two_trip_row > 1)
-        time[(size_t)two_trip_row - 1] =
-            time[(size_t)two_trip_row - 2] + 0.04;
+        time[(size_t)two_trip_row - 1] = time[(size_t)two_trip_row - 2] + 0.04;
       data.set_int_array(name("restart", "boundary"), std::move(reset));
       data.set_int_array(name("enabled", "usable"), std::move(enabled));
       data.set_int_array(name("cohort", "membership"), std::move(group));
       data.set_real_array(name("timestamps", "moments"), std::move(time));
       data.set_real(name("max_step", "slice_limit"), 0.025);
-      data.set_real_array(name("predictors", "design"),
-                          std::move(predictor), {kGroups, 1});
+      data.set_real_array(name("predictors", "design"), std::move(predictor),
+                          {kGroups, 1});
       data.set_real_array(name("observed", "measurement"),
                           std::move(observation));
       data.set_int(name("indexed_effects", "choose_indexed"),
@@ -1693,16 +1687,15 @@ int main() {
       const std::string census =
           program_census(candidate->templates[template_index].step);
       const size_t marker = census.rfind(";b=");
-      return marker == std::string::npos
-                 ? 0
-                 : std::stoi(census.substr(marker + 3));
+      return marker == std::string::npos ? 0
+                                         : std::stoi(census.substr(marker + 3));
     };
     const auto scan_census = [&](const ScanSpec* spec) {
       if (spec == nullptr) return std::string("no-scan");
       std::ostringstream out;
       out << "n=" << spec->count << ";k=" << spec->templates.size()
-          << ";carry=" << spec->carry_cells
-          << ";output=" << spec->output_cells << ";schedule=";
+          << ";carry=" << spec->carry_cells << ";output=" << spec->output_cells
+          << ";schedule=";
       for (uint32_t id : spec->template_for_iteration) out << id << ',';
       for (size_t template_index = 0; template_index < spec->templates.size();
            ++template_index) {
@@ -1740,7 +1733,7 @@ int main() {
       double lp = 0.0;
       std::vector<double> gradient;
     };
-    const std::vector<double> q = {0.17, -0.08, 0.23, -0.2, 0.01, -0.02,
+    const std::vector<double> q = {0.17, -0.08, 0.23, -0.2,  0.01, -0.02,
                                    0.03, -0.04, 0.05, -0.06, 0.07};
     const auto evaluate = [&](CompiledModel* compiled) {
       Executor executor(std::move(compiled->graph));
@@ -1822,8 +1815,8 @@ int main() {
         reset_carry =
             reset_carry || (carry.entry_reg < 0 && carry.exit_reg >= 0);
       for (const ScanSpec::CarryBinding& carry : spec->templates[1].carry)
-        continuation_carry = continuation_carry ||
-                             (carry.entry_reg >= 0 && carry.exit_reg >= 0);
+        continuation_carry =
+            continuation_carry || (carry.entry_reg >= 0 && carry.exit_reg >= 0);
     }
     check(streamed_numeric_alias && reset_carry && continuation_carry,
           "scan streams aliased numeric data and distinguishes reset carries");
@@ -1859,7 +1852,8 @@ int main() {
                                             int special_row,
                                             const std::string& label) {
       const ScanSpec* candidate_spec = find_scan(candidate);
-      check(count_opcode(candidate, OP_SCAN) == 1 && candidate_spec != nullptr &&
+      check(count_opcode(candidate, OP_SCAN) == 1 &&
+                candidate_spec != nullptr &&
                 candidate_spec->count == kRows - 1 &&
                 candidate_spec->templates.size() == 3 &&
                 candidate_spec->template_for_iteration.size() ==
@@ -1896,12 +1890,11 @@ int main() {
       for (const ScanSpec::Template& tm : active_spec->templates)
         for (const ScanSpec::InputBinding& input : tm.inputs)
           streams_active_rows = streams_active_rows ||
-                                (input.active &&
-                                 input.iteration_stride > 0);
+                                (input.active && input.iteration_stride > 0);
     check(count_opcode(unsafe, OP_SCAN) == 1 && streams_active_rows,
           "a local data alias streams parameter-selected row values");
-    CompiledModel unsafe_unrolled = compile_unrolled(
-        mir, state_space_data(false, -1, -1, -1, true));
+    CompiledModel unsafe_unrolled =
+        compile_unrolled(mir, state_space_data(false, -1, -1, -1, true));
     expect_evaluation_ulp("active parameter row feed", evaluate(&unsafe),
                           evaluate(&unsafe_unrolled));
   }
@@ -1969,8 +1962,7 @@ int main() {
       return result;
     };
     for (double theta : {0.35, -0.35}) {
-      CompiledModel fallback =
-          compile_without_graph_passes(mir, data);
+      CompiledModel fallback = compile_without_graph_passes(mir, data);
       CompiledModel oracle = compile_unrolled(data);
       const Evaluation got = evaluate(&fallback, theta);
       const Evaluation want = evaluate(&oracle, theta);
@@ -2014,8 +2006,7 @@ int main() {
       data.set_int_array(name("restart", "renewal"), std::move(reset));
       data.set_real_array(name("clock", "instants"), std::move(time));
       data.set_real_array(name("input", "forcing"), std::move(input));
-      data.set_real_array(name("observed", "response"),
-                          std::move(observation));
+      data.set_real_array(name("observed", "response"), std::move(observation));
       return data;
     };
     const auto find_scan = [](const CompiledModel& compiled) {
@@ -2037,8 +2028,8 @@ int main() {
         std::vector<std::tuple<int64_t, int64_t, bool>> inputs;
         std::vector<std::tuple<int64_t, bool, bool>> carries;
         for (const ScanSpec::InputBinding& input_binding : tm.inputs)
-          inputs.emplace_back(input_binding.iteration_stride,
-                              input_binding.len, input_binding.active);
+          inputs.emplace_back(input_binding.iteration_stride, input_binding.len,
+                              input_binding.active);
         for (const ScanSpec::CarryBinding& carry : tm.carry)
           carries.emplace_back(carry.len, carry.entry_reg >= 0,
                                carry.exit_reg >= 0);
@@ -2047,8 +2038,8 @@ int main() {
         out << ";in";
         for (const auto& input_binding : inputs)
           out << '[' << std::get<0>(input_binding) << ','
-              << std::get<1>(input_binding) << ','
-              << std::get<2>(input_binding) << ']';
+              << std::get<1>(input_binding) << ',' << std::get<2>(input_binding)
+              << ']';
         out << ";carry";
         for (const auto& carry : carries)
           out << '[' << std::get<0>(carry) << ',' << std::get<1>(carry) << ','
@@ -2119,15 +2110,14 @@ int main() {
     const auto unrolled_result = evaluate(&unrolled);
     const auto alpha_result = evaluate(&alpha_scan);
     const auto alpha_unrolled_result = evaluate(&alpha_unrolled);
-    expect_ulp("generic adapter lp", scan_result.first,
-               unrolled_result.first);
+    expect_ulp("generic adapter lp", scan_result.first, unrolled_result.first);
     expect_ulp("generic adapter alpha lp", alpha_result.first,
                alpha_unrolled_result.first);
     expect_eq("generic adapter rename lp", alpha_result.first,
               scan_result.first);
     for (size_t k = 0; k < q.size(); ++k) {
-      expect_ulp("generic adapter g" + std::to_string(k),
-                 scan_result.second[k], unrolled_result.second[k]);
+      expect_ulp("generic adapter g" + std::to_string(k), scan_result.second[k],
+                 unrolled_result.second[k]);
       expect_ulp("generic adapter alpha g" + std::to_string(k),
                  alpha_result.second[k], alpha_unrolled_result.second[k]);
       expect_eq("generic adapter rename g" + std::to_string(k),
@@ -4374,13 +4364,12 @@ int main() {
         slurp("tests/fixtures/runtime_data_liveout_glm.tmir.sexp");
     const std::string begin =
         "((pattern\n         (Assignment ((LVariable z) ()) UMatrix";
-    const std::string end =
-        "       ((pattern\n         (While";
+    const std::string end = "       ((pattern\n         (While";
     const size_t first = base.find(begin);
     const size_t last = base.find(end, first);
-    check(first != std::string::npos && last != std::string::npos &&
-              first < last,
-          "find GLM live-out assignment for provenance variants");
+    check(
+        first != std::string::npos && last != std::string::npos && first < last,
+        "find GLM live-out assignment for provenance variants");
     if (first != std::string::npos && last != std::string::npos &&
         first < last) {
       const std::string assignment = base.substr(first, last - first);
@@ -4397,8 +4386,8 @@ int main() {
                 condition_stop != std::string::npos &&
                 condition_at < condition_stop,
             "find parameter condition for provenance variants");
-      std::string condition = condition_fixture.substr(
-          condition_at, condition_stop - condition_at);
+      std::string condition =
+          condition_fixture.substr(condition_at, condition_stop - condition_at);
       size_t theta_at = condition.find("theta");
       while (theta_at != std::string::npos) {
         condition.replace(theta_at, 5, "alpha");
@@ -4408,9 +4397,8 @@ int main() {
         return "((pattern (Block (" + value + "))) (meta <opaque>))";
       };
       const auto branch = [&](const std::string& value) {
-        return "((pattern\n (IfElse\n" + condition + "\n" +
-               block(value) + "\n(" + block(value) + ")" +
-               "))\n (meta <opaque>))\n";
+        return "((pattern\n (IfElse\n" + condition + "\n" + block(value) +
+               "\n(" + block(value) + ")" + "))\n (meta <opaque>))\n";
       };
       const std::string identical =
           base.substr(0, first) + branch(assignment) + base.substr(last);
@@ -4441,10 +4429,10 @@ int main() {
         const std::string data_value =
             "((pattern (Var x)) (meta ((type_ UMatrix) (loc <opaque>) "
             "(adlevel AutoDiffable))))";
-        const std::string ternary =
-            "((pattern (TernaryIf\n" + condition + "\n" + data_value +
-            "\n" + data_value + ")\n (meta ((type_ UMatrix) "
-            "(loc <opaque>) (adlevel AutoDiffable)))))";
+        const std::string ternary = "((pattern (TernaryIf\n" + condition +
+                                    "\n" + data_value + "\n" + data_value +
+                                    ")\n (meta ((type_ UMatrix) "
+                                    "(loc <opaque>) (adlevel AutoDiffable)))))";
         std::string ternary_assignment = assignment;
         ternary_assignment.replace(source_at, source_size, ternary);
         const std::string ternary_mir =
@@ -4457,9 +4445,10 @@ int main() {
           ternary_accepted = false;
           ternary_error = e.what();
         }
-        check(ternary_accepted,
-              "identical data-valued parameter ternary remains GLM-compatible: " +
-                  ternary_error);
+        check(
+            ternary_accepted,
+            "identical data-valued parameter ternary remains GLM-compatible: " +
+                ternary_error);
 
         const std::string doubled = R"MIR(((pattern
           (FunApp (StanLib Plus__ FnPlain AoS)
@@ -4471,11 +4460,9 @@ int main() {
         std::string differing = assignment;
         differing.replace(source_at, source_size, doubled);
         const std::string differing_mir =
-            base.substr(0, first) +
-            "((pattern\n (IfElse\n" + condition + "\n" +
+            base.substr(0, first) + "((pattern\n (IfElse\n" + condition + "\n" +
             block(assignment) + "\n(" + block(differing) + ")" +
-            "))\n (meta <opaque>))\n" +
-            base.substr(last);
+            "))\n (meta <opaque>))\n" + base.substr(last);
         const std::string differing_error =
             lower_error(differing_mir, d, false);
         check(differing_error.find("normal_id_glm: X must be a data matrix") !=
@@ -4714,8 +4701,7 @@ int main() {
     for (const Op& op : cm.graph.ops)
       if (op.opcode == OP_ISLAND)
         region = static_cast<const IslandProg*>(op.udata);
-    check(region != nullptr && region->ins.size() == 1 &&
-              region->ins[0].active,
+    check(region != nullptr && region->ins.size() == 1 && region->ins[0].active,
           "nested indexed parameter shape island binds only theta");
 
     Executor ex(std::move(cm.graph));
@@ -4725,8 +4711,7 @@ int main() {
     for (double theta : {0.5, -0.5}) {
       ex.params_data()[6] = theta;
       if (theta < 0)
-        for (int i = 0; i < 6; ++i)
-          ex.params_data()[i] = -17.0 + 3.25 * i;
+        for (int i = 0; i < 6; ++i) ex.params_data()[i] = -17.0 + 3.25 * i;
       const std::string tag = std::string("nested indexed shape ") +
                               (theta > 0 ? "positive" : "negative");
       const double scale = theta > 0 ? 1.0 : 3.0;
@@ -4742,7 +4727,8 @@ int main() {
     bool threw = false;
     try {
       (void)compile_model(
-          slurp("tests/fixtures/parameter_nested_indexed_shape_guard.tmir.sexp"),
+          slurp(
+              "tests/fixtures/parameter_nested_indexed_shape_guard.tmir.sexp"),
           bad);
     } catch (const CompileError& e) {
       threw = std::string(e.what()).find("out of bounds") != std::string::npos;
@@ -4820,9 +4806,8 @@ int main() {
       ex.params_data()[0] = theta;
       expect_eq("runtime declaration NaN index lp " + std::to_string(theta),
                 ex.gradient(grad), theta);
-      expect_eq(
-          "runtime declaration NaN index grad " + std::to_string(theta),
-          grad[0], 1.0);
+      expect_eq("runtime declaration NaN index grad " + std::to_string(theta),
+                grad[0], 1.0);
     }
   }
 

@@ -399,8 +399,7 @@ struct ProgramCompiler {
   // leave an unpatched jump in the program behind it. Only `len`, `kind`,
   // `rows`, `cols` and `dims` of the result mean anything; `reg` is not a
   // register, because no value was built.
-  bool static_view(const mir::Expr& e, Range* out,
-                   bool allow_indexed = false) {
+  bool static_view(const mir::Expr& e, Range* out, bool allow_indexed = false) {
     if (e.data_only && e.unsized.depth != 0 &&
         e.unsized.leaf == mir::UnsizedLeaf::Int && extern_ints) {
       std::vector<long> values;
@@ -437,11 +436,9 @@ struct ProgramCompiler {
       *out = Range{0, 1};
       return true;
     }
-    if (allow_indexed && e.kind == mir::Expr::Promotion &&
-        e.args.size() == 1)
+    if (allow_indexed && e.kind == mir::Expr::Promotion && e.args.size() == 1)
       return static_view(e.args[0], out, true);
-    if (allow_indexed && e.kind == mir::Expr::FunApp &&
-        e.args.size() == 1 &&
+    if (allow_indexed && e.kind == mir::Expr::FunApp && e.args.size() == 1 &&
         (e.name == "Transpose__" || e.name == "transpose")) {
       Range value;
       if (!static_view(e.args[0], &value, true)) return false;
@@ -457,11 +454,10 @@ struct ProgramCompiler {
       *out = std::move(value);
       return true;
     }
-    if (allow_indexed && e.kind == mir::Expr::FunApp &&
-        e.args.size() == 2 &&
-        (e.name == "Plus__" || e.name == "Minus__" ||
-         e.name == "EltTimes__" || e.name == "EltDivide__" ||
-         e.name == "Times__" || e.name == "Divide__")) {
+    if (allow_indexed && e.kind == mir::Expr::FunApp && e.args.size() == 2 &&
+        (e.name == "Plus__" || e.name == "Minus__" || e.name == "EltTimes__" ||
+         e.name == "EltDivide__" || e.name == "Times__" ||
+         e.name == "Divide__")) {
       Range lhs;
       Range rhs;
       if (!static_view(e.args[0], &lhs, true) ||
@@ -484,9 +480,9 @@ struct ProgramCompiler {
         *out = lhs_scalar ? rhs : lhs;
         return true;
       }
-      if (e.name != "Times__" && lhs.len == rhs.len &&
-          lhs.kind == rhs.kind && lhs.rows == rhs.rows &&
-          lhs.cols == rhs.cols && lhs.dims == rhs.dims) {
+      if (e.name != "Times__" && lhs.len == rhs.len && lhs.kind == rhs.kind &&
+          lhs.rows == rhs.rows && lhs.cols == rhs.cols &&
+          lhs.dims == rhs.dims) {
         *out = lhs;
         return true;
       }
@@ -533,8 +529,7 @@ struct ProgramCompiler {
         } else if (e.type_ == "UVector") {
           selected.kind = ViewKind::Vector;
         } else if (e.type_ == "URowVector" ||
-                   (e.args.size() == 2 &&
-                    e.args[1].name == "IndexSingle")) {
+                   (e.args.size() == 2 && e.args[1].name == "IndexSingle")) {
           selected.kind = ViewKind::RowVector;
         } else if (selected.len != 1) {
           return false;
@@ -542,8 +537,7 @@ struct ProgramCompiler {
         *out = std::move(selected);
         return true;
       }
-      if ((base.kind == ViewKind::Vector ||
-           base.kind == ViewKind::RowVector ||
+      if ((base.kind == ViewKind::Vector || base.kind == ViewKind::RowVector ||
            base.kind == ViewKind::Flat) &&
           e.args.size() == 2) {
         const std::vector<int64_t> positions =
@@ -627,9 +621,9 @@ struct ProgramCompiler {
     if (e->kind == mir::Expr::Var) {
       const auto known = declaration_nan_cells.find(e->name);
       const auto view = reals.find(e->name);
-      return known != declaration_nan_cells.end() &&
-             view != reals.end() && view->second.len == 1 &&
-             known->second.size() == 1 && known->second[0] != 0;
+      return known != declaration_nan_cells.end() && view != reals.end() &&
+             view->second.len == 1 && known->second.size() == 1 &&
+             known->second[0] != 0;
     }
     if (e->kind != mir::Expr::Indexed || e->args.empty() ||
         e->args[0].kind != mir::Expr::Var)
@@ -643,10 +637,8 @@ struct ProgramCompiler {
     const Range& base = view->second;
     int64_t offset = -1;
     if (base.kind == ViewKind::Matrix && e->args.size() == 3) {
-      if (e->args[1].name != "IndexSingle" ||
-          e->args[1].args.size() != 1 ||
-          e->args[2].name != "IndexSingle" ||
-          e->args[2].args.size() != 1)
+      if (e->args[1].name != "IndexSingle" || e->args[1].args.size() != 1 ||
+          e->args[2].name != "IndexSingle" || e->args[2].args.size() != 1)
         return false;
       const long row = cint(e->args[1].args[0]);
       const long col = cint(e->args[2].args[0]);
@@ -656,8 +648,7 @@ struct ProgramCompiler {
     } else if ((base.kind == ViewKind::Vector ||
                 base.kind == ViewKind::RowVector ||
                 base.kind == ViewKind::Flat) &&
-               e->args.size() == 2 &&
-               e->args[1].name == "IndexSingle" &&
+               e->args.size() == 2 && e->args[1].name == "IndexSingle" &&
                e->args[1].args.size() == 1) {
       const long index = cint(e->args[1].args[0]);
       if (index < 1 || index > base.len) return false;
@@ -667,8 +658,8 @@ struct ProgramCompiler {
            known->second[static_cast<size_t>(offset)] != 0;
   }
 
-  void mark_declaration_cells_written(
-      const std::string& name, const std::vector<int64_t>& offsets) {
+  void mark_declaration_cells_written(const std::string& name,
+                                      const std::vector<int64_t>& offsets) {
     auto known = declaration_nan_cells.find(name);
     if (known == declaration_nan_cells.end()) return;
     for (int64_t offset : offsets) {

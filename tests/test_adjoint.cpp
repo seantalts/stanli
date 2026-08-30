@@ -486,8 +486,7 @@ static bool check_cfg(const std::string& name, Case c,
   std::vector<double> want_v, got_v;
   const std::vector<double> want =
       replay_adjoints(replay, c.in, c.seed, &want_v);
-  const std::vector<double> got =
-      native_adjoints(c.p, c.in, c.seed, &got_v);
+  const std::vector<double> got = native_adjoints(c.p, c.in, c.seed, &got_v);
   bool passed = true;
   for (size_t m = 0; m < want_v.size(); ++m)
     if (ulps(want_v[m], got_v[m]) != 0) {
@@ -1305,8 +1304,7 @@ static Case inplace_pair_cfg_case(double condition) {
 
 static size_t adj_pair_count(const IslandProg& p) {
   return static_cast<size_t>(std::count_if(
-      p.adj.code.begin(), p.adj.code.end(),
-      [](const AdjInstr& instruction) {
+      p.adj.code.begin(), p.adj.code.end(), [](const AdjInstr& instruction) {
         return instruction.pair != AdjPair::None;
       }));
 }
@@ -1339,8 +1337,8 @@ static void test_cfg_trace_blocks() {
   }
 
   test_setenv("STANLI_CFG_ADJ_TRACE_BLOCKS", "1", 1);
-  for (const auto& path : {std::pair<double, double>{1.0, 1.0},
-                           {1.0, 0.0}, {0.0, 1.0}}) {
+  for (const auto& path :
+       {std::pair<double, double>{1.0, 1.0}, {1.0, 0.0}, {0.0, 1.0}}) {
     Case c = nested_cfg_case(path.first, path.second);
     const IslandProg replay = c.p;
     expect("cfg trace block generation succeeds", gen_cfg_adjoint(c.p));
@@ -1378,9 +1376,9 @@ static void test_cfg_trace_blocks() {
     expect("cfg trace malformed base generation succeeds",
            gen_cfg_adjoint(c.p));
     IslandProg bad_forward = c.p;
-    auto mapped = std::find_if(bad_forward.trace_pc.begin(),
-                               bad_forward.trace_pc.end(),
-                               [](int32_t pc) { return pc >= 0; });
+    auto mapped =
+        std::find_if(bad_forward.trace_pc.begin(), bad_forward.trace_pc.end(),
+                     [](int32_t pc) { return pc >= 0; });
     expect("cfg trace malformed has mapped forward",
            mapped != bad_forward.trace_pc.end());
     if (mapped != bad_forward.trace_pc.end()) *mapped = -1;
@@ -1395,12 +1393,11 @@ static void test_cfg_trace_blocks() {
                bad_reverse.adj.trace_blocks.empty());
 
     IslandProg backedge = c.p;
-    auto branch = std::find_if(
-        backedge.code.begin(), backedge.code.end(),
-        [](const Program::Instr& instruction) {
-          return instruction.code == Program::JZ ||
-                 instruction.code == Program::JMP;
-        });
+    auto branch = std::find_if(backedge.code.begin(), backedge.code.end(),
+                               [](const Program::Instr& instruction) {
+                                 return instruction.code == Program::JZ ||
+                                        instruction.code == Program::JMP;
+                               });
     expect("cfg trace malformed has final branch",
            branch != backedge.code.end());
     if (branch != backedge.code.end()) branch->dst = 0;
@@ -1427,9 +1424,9 @@ static void test_cfg_trace_blocks() {
         if (instruction.pair == AdjPair::None) continue;
         expect("cfg pair remains inside one trace block", pc + 1 < block.end);
         if (pc + 1 < block.end)
-          expect("cfg pair second entry is never a pair head",
-                 c.p.adj.code[static_cast<size_t>(pc + 1)].pair ==
-                     AdjPair::None);
+          expect(
+              "cfg pair second entry is never a pair head",
+              c.p.adj.code[static_cast<size_t>(pc + 1)].pair == AdjPair::None);
       }
       begin = block.end;
     }
@@ -1478,9 +1475,9 @@ static void test_cfg_trace_blocks() {
     test_setenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS", "1", 1);
     expect("cfg pair trace escape recompilation succeeds",
            gen_cfg_adjoint(c.p));
-    expect("cfg pair trace escape fails closed",
-           c.p.adj.trace_blocks.empty() && !c.p.adj.has_pairs &&
-               adj_pair_count(c.p) == 0);
+    expect("cfg pair trace escape fails closed", c.p.adj.trace_blocks.empty() &&
+                                                     !c.p.adj.has_pairs &&
+                                                     adj_pair_count(c.p) == 0);
     test_unsetenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS");
   }
 
@@ -1491,15 +1488,14 @@ static void test_cfg_trace_blocks() {
     test_unsetenv("STANLI_CFG_ADJ_SUPERINSTRUCTIONS");
     test_setenv("STANLI_CFG_ADJ_TRACE_BLOCKS", "1", 1);
     Case c = scalar_pair_cfg_case(1.0);
-    expect("cfg pair malformed base generation succeeds",
-           gen_cfg_adjoint(c.p));
+    expect("cfg pair malformed base generation succeeds", gen_cfg_adjoint(c.p));
     expect("cfg pair malformed base has multiple blocks",
            c.p.adj.trace_blocks.size() > 1);
     if (c.p.adj.trace_blocks.size() > 1)
       c.p.adj.trace_blocks.front().end = c.p.adj.trace_blocks[1].end;
     expect("cfg pair malformed partition fails transactionally",
-           !prepare_cfg_adjoint_superinstructions(c.p) &&
-               !c.p.adj.has_pairs && adj_pair_count(c.p) == 0);
+           !prepare_cfg_adjoint_superinstructions(c.p) && !c.p.adj.has_pairs &&
+               adj_pair_count(c.p) == 0);
   }
   test_unsetenv("STANLI_CFG_ADJ_TRACE_BLOCKS");
   test_unsetenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS");
@@ -1512,7 +1508,7 @@ static void test_cfg_trace_blocks() {
 // path.  Unique scalar destinations avoid checkpoints, keeping the count
 // transparent.  `cold_skip` adds a path that jumps over the whole body.
 static IslandProg structured_profitability_case(size_t structured_work,
-                                                 bool cold_skip) {
+                                                bool cold_skip) {
   IslandProg p;
   p.n_regs = 4;
   p.ins = {{0, 4}};  // condition, scalar chain input, 1x1 diagonal and matrix
@@ -1524,8 +1520,7 @@ static IslandProg structured_profitability_case(size_t structured_work,
   }
 
   const int structured_out = p.n_regs++;
-  p.code.push_back(
-      {Program::DIAG_PRE_MULTIPLY, structured_out, 2, 3, 1, 1});
+  p.code.push_back({Program::DIAG_PRE_MULTIPLY, structured_out, 2, 3, 1, 1});
   int chain = 1;
   for (size_t k = 1; k < structured_work; ++k) {
     const int next = p.n_regs++;
@@ -1555,8 +1550,7 @@ static void test_cfg_adjoint() {
 
   {
     Case scalar = nested_cfg_case(1.0, 0.0);
-    expect("scalar cfg generated for profitability",
-           gen_cfg_adjoint(scalar.p));
+    expect("scalar cfg generated for profitability", gen_cfg_adjoint(scalar.p));
     expect("scalar cfg remains production-profitable",
            cfg_native_profitable(scalar.p));
 
@@ -1566,9 +1560,9 @@ static void test_cfg_adjoint() {
            !cfg_native_profitable(bad_reverse));
 
     IslandProg bad_forward = scalar.p;
-    auto mapped = std::find_if(
-        bad_forward.trace_pc.begin(), bad_forward.trace_pc.end(),
-        [](int32_t pc) { return pc >= 0; });
+    auto mapped =
+        std::find_if(bad_forward.trace_pc.begin(), bad_forward.trace_pc.end(),
+                     [](int32_t pc) { return pc >= 0; });
     expect("cfg test has a mapped forward pc",
            mapped != bad_forward.trace_pc.end());
     if (mapped != bad_forward.trace_pc.end()) *mapped = -1;
@@ -1605,9 +1599,8 @@ static void test_cfg_adjoint() {
     call.scratch_len = 3;
     expect("CFG CALL binds kernel", bind_call(call));
     cfg.calls = {call};
-    cfg.code = {{Program::MOV, 2, 1},
-                {Program::JZ, 3, 0},
-                {Program::CALL, 2, 0}};
+    cfg.code = {
+        {Program::MOV, 2, 1}, {Program::JZ, 3, 0}, {Program::CALL, 2, 0}};
     cfg.out_regs = {2};
 
     // The registered test CALL computes square.  Replacing it with the
@@ -1692,8 +1685,7 @@ static void test_cfg_structured_calls() {
                   {Program::JZ, 3, 0},
                   {Program::DIAG_PRE_MULTIPLY, out, 1, 3, 2, 2}};
       check_cfg(condition ? "cfg diag_pre taken" : "cfg diag_pre skipped",
-                b.done({out, out + 1, out + 2, out + 3},
-                       {0.2, -0.4, 0.7, 1.1}),
+                b.done({out, out + 1, out + 2, out + 3}, {0.2, -0.4, 0.7, 1.1}),
                 false);
     }
     {
@@ -1702,11 +1694,11 @@ static void test_cfg_structured_calls() {
       b.p.code = {{Program::MOVR, out, 1, 0, 0, 4},
                   {Program::JZ, 3, 0},
                   {Program::MATRIX_EXP, out, 1, 2, 2, 4}};
-      Case c = b.done({out, out + 1, out + 2, out + 3},
-                      {0.2, -0.4, 0.7, 1.1});
+      Case c = b.done({out, out + 1, out + 2, out + 3}, {0.2, -0.4, 0.7, 1.1});
       const IslandProg replay = c.p;
       const std::vector<double> want_double = direct_values(replay, c.in);
-      expect(condition ? "cfg matrix_exp generated" : "cfg matrix_exp skip generated",
+      expect(condition ? "cfg matrix_exp generated"
+                       : "cfg matrix_exp skip generated",
              gen_cfg_adjoint(c.p));
       expect("cfg matrix_exp keeps direct forward and kernel backward",
              std::count_if(c.p.code.begin(), c.p.code.end(),
@@ -1717,8 +1709,7 @@ static void test_cfg_structured_calls() {
                               [](const Program::Instr& instruction) {
                                 return instruction.code == Program::CALL;
                               }) &&
-                 c.p.calls.size() == 1 &&
-                 c.p.calls[0].opcode == OP_MATRIX_EXP);
+                 c.p.calls.size() == 1 && c.p.calls[0].opcode == OP_MATRIX_EXP);
       expect("cfg matrix_exp is generated but fails closed",
              !cfg_native_profitable(c.p));
       std::vector<double> want_v, got_v;
@@ -1743,8 +1734,7 @@ static void test_cfg_structured_calls() {
       const std::vector<double> want_double = direct_values(replay, c.in);
       expect("cfg mdivide_left generated", gen_cfg_adjoint(c.p));
       expect("cfg mdivide_left attaches active vector backward",
-                 c.p.calls.size() == 1 &&
-                 c.p.calls[0].opcode == OP_MDIVIDE_LEFT &&
+             c.p.calls.size() == 1 && c.p.calls[0].opcode == OP_MDIVIDE_LEFT &&
                  c.p.calls[0].variant == 15u);
       std::vector<double> want_v, got_v;
       const std::vector<double> want =
@@ -1763,14 +1753,12 @@ static void test_cfg_structured_calls() {
       b.p.code = {{Program::MOVR, out, 5, 0, 0, 4},
                   {Program::JZ, 3, 0},
                   {Program::QUAD_FORM_SYM, out, 1, 5, 2, 4}};
-      Case c = b.done({out, out + 1, out + 2, out + 3},
-                      {0.2, -0.4, 0.7, 1.1});
+      Case c = b.done({out, out + 1, out + 2, out + 3}, {0.2, -0.4, 0.7, 1.1});
       const IslandProg replay = c.p;
       const std::vector<double> want_double = direct_values(replay, c.in);
       expect("cfg quad_form_sym generated", gen_cfg_adjoint(c.p));
       expect("cfg quad_form_sym attaches active matrix backward",
-             c.p.calls.size() == 1 &&
-                 c.p.calls[0].opcode == OP_QUAD_FORM_SYM &&
+             c.p.calls.size() == 1 && c.p.calls[0].opcode == OP_QUAD_FORM_SYM &&
                  c.p.calls[0].variant == 2u);
       std::vector<double> want_v, got_v;
       const std::vector<double> want =
@@ -1792,19 +1780,15 @@ static void test_selector_adjoint_recognition() {
   selector.ins = {{0, 1}, {1, 1}, {2, 1}};
   selector.pool = {0.4};
   selector.code = {
-      {Program::CONST, 3, 0},
-      {Program::GT, 4, 0, 3},
-      {Program::JZ, 5, 4},
-      {Program::MOV, 1, 2},
-      {Program::JMP, 5},
+      {Program::CONST, 3, 0}, {Program::GT, 4, 0, 3}, {Program::JZ, 5, 4},
+      {Program::MOV, 1, 2},   {Program::JMP, 5},
   };
   selector.out_regs = {1};
   expect("pure selector recognized", supports_selector_adjoint(selector));
 
   IslandProg arithmetic = selector;
   arithmetic.code[3] = {Program::ADD, 1, 1, 2};
-  expect("arithmetic selector refused",
-         !supports_selector_adjoint(arithmetic));
+  expect("arithmetic selector refused", !supports_selector_adjoint(arithmetic));
 
   IslandProg backedge = selector;
   backedge.code.back().dst = 1;
@@ -1812,8 +1796,7 @@ static void test_selector_adjoint_recognition() {
 
   IslandProg bad_pool = selector;
   bad_pool.pool.clear();
-  expect("selector bad constant refused",
-         !supports_selector_adjoint(bad_pool));
+  expect("selector bad constant refused", !supports_selector_adjoint(bad_pool));
 }
 
 static void test_reductions() {

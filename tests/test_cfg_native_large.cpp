@@ -66,9 +66,11 @@ Canary compile_canary() {
 }
 
 size_t count_forward(const IslandProg& program, Program::Code code) {
-  return static_cast<size_t>(std::count_if(
-      program.code.begin(), program.code.end(),
-      [&](const Program::Instr& instruction) { return instruction.code == code; }));
+  return static_cast<size_t>(
+      std::count_if(program.code.begin(), program.code.end(),
+                    [&](const Program::Instr& instruction) {
+                      return instruction.code == code;
+                    }));
 }
 
 size_t count_reverse(const IslandProg& program, Program::Code code) {
@@ -78,11 +80,11 @@ size_t count_reverse(const IslandProg& program, Program::Code code) {
 }
 
 size_t count_pairs(const IslandProg& program) {
-  return static_cast<size_t>(std::count_if(
-      program.adj.code.begin(), program.adj.code.end(),
-      [](const AdjInstr& instruction) {
-        return instruction.pair != AdjPair::None;
-      }));
+  return static_cast<size_t>(
+      std::count_if(program.adj.code.begin(), program.adj.code.end(),
+                    [](const AdjInstr& instruction) {
+                      return instruction.pair != AdjPair::None;
+                    }));
 }
 
 size_t count_call_opcode(const IslandProg& program, uint16_t opcode) {
@@ -110,9 +112,8 @@ void expect_close(double native, double replay, const std::string& message,
 void parity_at(Executor* executor, IslandProg* program, double condition,
                const char* label) {
   for (int64_t k = 0; k < executor->n_params(); ++k)
-    executor->params_data()[k] =
-        0.1 + 0.05 * static_cast<double>(k % 7) -
-        0.15 * static_cast<double>(k % 3);
+    executor->params_data()[k] = 0.1 + 0.05 * static_cast<double>(k % 7) -
+                                 0.15 * static_cast<double>(k % 3);
   // theta is deliberately the first declared parameter.
   executor->params_data()[0] = condition;
 
@@ -132,8 +133,8 @@ void parity_at(Executor* executor, IslandProg* program, double condition,
     expect_close(native[k], replay[k],
                  std::string(label) + " gradient " + std::to_string(k),
                  &max_abs, &max_rel);
-  std::printf("cfg large parity %s max_abs=%.3g max_rel=%.3g\n", label,
-              max_abs, max_rel);
+  std::printf("cfg large parity %s max_abs=%.3g max_rel=%.3g\n", label, max_abs,
+              max_rel);
 }
 
 void test_large_structured_cfg() {
@@ -190,17 +191,16 @@ void test_large_structured_cfg() {
   expect(count_call_opcode(program, OP_MDIVIDE_LEFT) == 0 &&
              count_call_opcode(program, OP_MATRIX_EXP) == 0,
          "large CFG has no ordinary structured backward payloads");
-  expect(std::count_if(
-             program.calls.begin(), program.calls.end(),
-             [](const Program::Call& call) {
-               return call.opcode == OP_MDIVIDE_LEFT_PREPARED_PRIM_LU &&
-                      call.scratch_len == 55 * 55 + 55 + 1;
-             }) == 2,
-         "large CFG retains exact n55 prim-LU scratch twice");
   expect(std::count_if(program.calls.begin(), program.calls.end(),
                        [](const Program::Call& call) {
                          return call.opcode ==
-                                    OP_MATRIX_EXP_BLOCK_FRECHET &&
+                                    OP_MDIVIDE_LEFT_PREPARED_PRIM_LU &&
+                                call.scratch_len == 55 * 55 + 55 + 1;
+                       }) == 2,
+         "large CFG retains exact n55 prim-LU scratch twice");
+  expect(std::count_if(program.calls.begin(), program.calls.end(),
+                       [](const Program::Call& call) {
+                         return call.opcode == OP_MATRIX_EXP_BLOCK_FRECHET &&
                                 call.scratch_len == 0;
                        }) == 1,
          "large CFG block-Frechet remains backward-only metadata");
@@ -210,10 +210,10 @@ void test_large_structured_cfg() {
   for (const AdjTraceBlock& block : program.adj.trace_blocks) {
     for (int32_t pc = block_begin; pc < block.end; ++pc)
       if (program.adj.code[static_cast<size_t>(pc)].code == Program::CALL)
-        expect(block.end == block_begin + 1 &&
-                   program.adj.code[static_cast<size_t>(pc)].pair ==
-                       AdjPair::None,
-               "large CFG keeps every reverse CALL singleton and unpaired");
+        expect(
+            block.end == block_begin + 1 &&
+                program.adj.code[static_cast<size_t>(pc)].pair == AdjPair::None,
+            "large CFG keeps every reverse CALL singleton and unpaired");
     block_begin = block.end;
   }
   for (size_t pc = 0; pc < program.code.size(); ++pc) {

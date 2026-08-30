@@ -218,32 +218,31 @@ static void summarize_scan(const stanli::ScanSpec& scan) {
         ++island_calls;
         const auto* nested = static_cast<const stanli::IslandProg*>(call.udata);
         if (nested != nullptr) {
-          active_island_calls += std::any_of(
-              nested->ins.begin(), nested->ins.end(),
-              [](const stanli::IslandProg::LiveIn& input) {
-                return input.active;
-              });
+          active_island_calls +=
+              std::any_of(nested->ins.begin(), nested->ins.end(),
+                          [](const stanli::IslandProg::LiveIn& input) {
+                            return input.active;
+                          });
           native_island_calls += nested->native_adj || nested->selector_adj;
           island_code += static_cast<int64_t>(nested->code.size());
           island_adj_code += static_cast<int64_t>(nested->adj.code.size());
-          const int64_t nested_jz = std::count_if(
-              nested->code.begin(), nested->code.end(),
-              [](const stanli::Program::Instr& instruction) {
-                return instruction.code == stanli::Program::JZ;
-              });
-          const int64_t nested_jmp = std::count_if(
-              nested->code.begin(), nested->code.end(),
-              [](const stanli::Program::Instr& instruction) {
-                return instruction.code == stanli::Program::JMP;
-              });
+          const int64_t nested_jz =
+              std::count_if(nested->code.begin(), nested->code.end(),
+                            [](const stanli::Program::Instr& instruction) {
+                              return instruction.code == stanli::Program::JZ;
+                            });
+          const int64_t nested_jmp =
+              std::count_if(nested->code.begin(), nested->code.end(),
+                            [](const stanli::Program::Instr& instruction) {
+                              return instruction.code == stanli::Program::JMP;
+                            });
           const int64_t nested_inputs = std::accumulate(
               nested->ins.begin(), nested->ins.end(), int64_t{0},
               [](int64_t total, const stanli::IslandProg::LiveIn& input) {
                 return total + input.len;
               });
           island_census.push_back(
-              {call_index,
-               static_cast<int64_t>(nested->code.size()),
+              {call_index, static_cast<int64_t>(nested->code.size()),
                static_cast<int64_t>(nested->adj.code.size()), nested->n_regs,
                nested->adj.n_regs, nested_jz, nested_jmp,
                std::any_of(nested->ins.begin(), nested->ins.end(),
@@ -266,8 +265,8 @@ static void summarize_scan(const stanli::ScanSpec& scan) {
         tm.step.adj.code.size(), tm.step.calls.size(), (long long)call_output,
         (long long)call_scratch, (long long)island_calls,
         (long long)active_island_calls, (long long)native_island_calls,
-        (long long)island_code, (long long)island_adj_code,
-        (long long)step_jz, (long long)step_jmp, tm.invariant_calls.size(),
+        (long long)island_code, (long long)island_adj_code, (long long)step_jz,
+        (long long)step_jmp, tm.invariant_calls.size(),
         (long long)tm.invariant_cache_cells, tm.repeated_code.size(),
         (long long)template_hits[i], (long long)reverse_value_cells(tm.step),
         tm.step.ins.size(), tm.carry.size(), tm.inputs.size(), tm.sinks.size());
@@ -292,7 +291,8 @@ static void summarize_scan(const stanli::ScanSpec& scan) {
     for (size_t k = 0; k < call_census.size() && k < 10; ++k) {
       const auto& item = call_census[k];
       std::printf(
-          "          call %-20s total=%lld repeated=%lld out=%lld scratch=%lld\n",
+          "          call %-20s total=%lld repeated=%lld out=%lld "
+          "scratch=%lld\n",
           shortname(item.opcode), (long long)item.total,
           (long long)item.repeated, (long long)item.output,
           (long long)item.scratch);
@@ -305,7 +305,8 @@ static void summarize_scan(const stanli::ScanSpec& scan) {
     for (size_t k = 0; k < island_census.size() && k < 10; ++k) {
       const auto& item = island_census[k];
       std::printf(
-          "          island call=%zu code=%lld adj=%lld regs=%lld adj_regs=%lld "
+          "          island call=%zu code=%lld adj=%lld regs=%lld "
+          "adj_regs=%lld "
           "jz=%lld jmp=%lld inputs=%lld active=%d native=%d invariant=%d\n",
           item.call, (long long)item.code, (long long)item.adj_code,
           (long long)item.regs, (long long)item.adj_regs, (long long)item.jz,

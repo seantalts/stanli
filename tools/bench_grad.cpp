@@ -51,8 +51,7 @@ int main(int argc, char** argv) {
       return 2;
     }
     if (prep_only) {
-      std::fprintf(stderr,
-                   "bench_grad: --set-param is invalid with --prep\n");
+      std::fprintf(stderr, "bench_grad: --set-param is invalid with --prep\n");
       return 2;
     }
     if (arg + 2 >= argc) {
@@ -62,8 +61,7 @@ int main(int argc, char** argv) {
     }
     errno = 0;
     char* index_end = nullptr;
-    const long long parsed_index =
-        std::strtoll(argv[arg + 1], &index_end, 10);
+    const long long parsed_index = std::strtoll(argv[arg + 1], &index_end, 10);
     if (errno != 0 || index_end == argv[arg + 1] || *index_end != '\0' ||
         parsed_index < 0) {
       std::fprintf(stderr,
@@ -77,8 +75,7 @@ int main(int argc, char** argv) {
     const double value = std::strtod(argv[arg + 2], &value_end);
     if (errno != 0 || value_end == argv[arg + 2] || *value_end != '\0' ||
         !std::isfinite(value)) {
-      std::fprintf(stderr,
-                   "bench_grad: parameter value must be finite: %s\n",
+      std::fprintf(stderr, "bench_grad: parameter value must be finite: %s\n",
                    argv[arg + 2]);
       return 2;
     }
@@ -181,7 +178,7 @@ int main(int argc, char** argv) {
       std::fprintf(stderr,
                    "bench_grad: parameter index %lld is out of range for "
                    "%lld parameters\n",
-                   (long long)override.first, (long long)n);
+                   (long long) override.first, (long long)n);
       return 2;
     }
     ex.params_data()[override.first] = override.second;

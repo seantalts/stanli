@@ -32,9 +32,8 @@ int64_t choose_scan_checkpoint_block(int64_t count, int64_t carry_cells,
     const int64_t boundary_count = count + 1;
     const int64_t budget_cells =
         full_boundary_budget_bytes / static_cast<int64_t>(sizeof(double));
-    full_boundaries_fit =
-        boundary_count <= budget_cells &&
-        carry_cells <= budget_cells / boundary_count;
+    full_boundaries_fit = boundary_count <= budget_cells &&
+                          carry_cells <= budget_cells / boundary_count;
   }
   if (full_boundaries_fit) return 1;
   return std::max<int64_t>(1, static_cast<int64_t>(std::sqrt(double(count))));
@@ -416,8 +415,7 @@ bool analyze_prepared_retention(const ScanSpec& s,
   if (result == nullptr || s.count < 0 || s.templates.empty()) return false;
   if (s.template_for_iteration.empty()) {
     if (s.templates.size() != 1) return false;
-  } else if (static_cast<int64_t>(s.template_for_iteration.size()) !=
-             s.count) {
+  } else if (static_cast<int64_t>(s.template_for_iteration.size()) != s.count) {
     return false;
   }
   if (static_cast<uint64_t>(s.count) + 1 >
@@ -457,8 +455,7 @@ bool analyze_prepared_retention(const ScanSpec& s,
           !program_range(outer_program, outer.scratch, outer.scratch_len))
         return false;
 
-      const auto& inner_program =
-          *static_cast<const IslandProg*>(outer.udata);
+      const auto& inner_program = *static_cast<const IslandProg*>(outer.udata);
       if (!inner_program.native_adj || inner_program.adj.trace_bits <= 0 ||
           inner_program.trace_pc.size() != inner_program.code.size())
         continue;
@@ -488,8 +485,7 @@ bool analyze_prepared_retention(const ScanSpec& s,
             inner.idata[1] <= 0)
           return false;
         const int64_t n = inner.idata[0], k = inner.idata[1];
-        if (n > (std::numeric_limits<int64_t>::max() - n - 1) / n)
-          return false;
+        if (n > (std::numeric_limits<int64_t>::max() - n - 1) / n) return false;
         const int64_t expected_scratch = n * n + n + 1;
         if (n > std::numeric_limits<int32_t>::max() / k) return false;
         const int64_t expected_output = (inner.variant & 2u) ? n : n * k;
@@ -514,22 +510,22 @@ bool analyze_prepared_retention(const ScanSpec& s,
               inner_program.trace_pc[pc + 1] != -1)
             return false;
         }
-        const auto target =
-            std::make_pair(static_cast<const Program*>(&inner_program),
-                           inner_instruction.a);
+        const auto target = std::make_pair(
+            static_cast<const Program*>(&inner_program), inner_instruction.a);
         if (std::find(targets.begin(), targets.end(), target) != targets.end())
           return false;
         targets.push_back(target);
         const int64_t width =
-            checked_add(1, checked_add(inner.out_len, inner.scratch_len,
-                                       "scan retention record overflow"),
+            checked_add(1,
+                        checked_add(inner.out_len, inner.scratch_len,
+                                    "scan retention record overflow"),
                         "scan retention record overflow");
         candidate.plans[template_index].push_back(
             ScanSpec::Template::PreparedSolveRetention{
                 instruction.a, inner_instruction.a, trace_bit, record_cells,
                 inner.out_len, inner.scratch_len});
-        record_cells = checked_add(record_cells, width,
-                                   "scan retention record overflow");
+        record_cells =
+            checked_add(record_cells, width, "scan retention record overflow");
         ++candidate.calls;
       }
     }
@@ -537,17 +533,20 @@ bool analyze_prepared_retention(const ScanSpec& s,
 
   candidate.iteration_offsets.resize(static_cast<size_t>(s.count) + 1, 0);
   for (int64_t t = 0; t < s.count; ++t) {
-    const uint32_t index = s.template_for_iteration.empty()
-                               ? 0
-                               : s.template_for_iteration[static_cast<size_t>(t)];
+    const uint32_t index =
+        s.template_for_iteration.empty()
+            ? 0
+            : s.template_for_iteration[static_cast<size_t>(t)];
     if (static_cast<size_t>(index) >= s.templates.size()) return false;
     int64_t width = 0;
     for (const auto& plan : candidate.plans[static_cast<size_t>(index)])
-      width = checked_add(
-          width, checked_add(1, checked_add(plan.output_len, plan.scratch_len,
-                                            "scan retention size overflow"),
-                             "scan retention size overflow"),
-          "scan retention size overflow");
+      width =
+          checked_add(width,
+                      checked_add(1,
+                                  checked_add(plan.output_len, plan.scratch_len,
+                                              "scan retention size overflow"),
+                                  "scan retention size overflow"),
+                      "scan retention size overflow");
     candidate.cells =
         checked_add(candidate.cells, width, "scan retention size overflow");
     candidate.iteration_offsets[static_cast<size_t>(t) + 1] = candidate.cells;
@@ -556,14 +555,13 @@ bool analyze_prepared_retention(const ScanSpec& s,
   return true;
 }
 
-bool same_retention_plan(
-    const ScanSpec::Template::PreparedSolveRetention& a,
-    const ScanSpec::Template::PreparedSolveRetention& b) {
+bool same_retention_plan(const ScanSpec::Template::PreparedSolveRetention& a,
+                         const ScanSpec::Template::PreparedSolveRetention& b) {
   return a.outer_call_index == b.outer_call_index &&
          a.inner_call_index == b.inner_call_index &&
          a.inner_trace_bit == b.inner_trace_bit &&
-         a.record_offset == b.record_offset &&
-         a.output_len == b.output_len && a.scratch_len == b.scratch_len;
+         a.record_offset == b.record_offset && a.output_len == b.output_len &&
+         a.scratch_len == b.scratch_len;
 }
 
 void require_reg_range(const IslandProg& p, int32_t reg, int64_t len,
@@ -757,8 +755,7 @@ Layout validate_and_layout(const Op& op, const Slot* slots) {
     PreparedRetentionAnalysis expected;
     if (!analyze_prepared_retention(s, &expected) || expected.calls == 0 ||
         expected.cells != s.prepared_retention_cells ||
-        expected.iteration_offsets !=
-            s.prepared_retention_iteration_offsets ||
+        expected.iteration_offsets != s.prepared_retention_iteration_offsets ||
         expected.plans.size() != s.templates.size())
       throw std::invalid_argument("scan prepared retention plan is stale");
     for (size_t i = 0; i < s.templates.size(); ++i) {
@@ -777,8 +774,7 @@ Layout validate_and_layout(const Op& op, const Slot* slots) {
           plans.size() != tm.prepared_solve_retention.size())
         throw std::invalid_argument("scan prepared retention plan is stale");
       for (size_t k = 0; k < plans.size(); ++k)
-        if (!same_retention_plan(plans[k],
-                                 tm.prepared_solve_retention[k]))
+        if (!same_retention_plan(plans[k], tm.prepared_solve_retention[k]))
           throw std::invalid_argument("scan prepared retention plan is stale");
     }
   }
@@ -874,8 +870,7 @@ void capture_prepared_retention(const ScanSpec::Template& tm,
     saved[0] = 0.0;
     const Program::Call& outer =
         tm.step.calls[static_cast<size_t>(plan.outer_call_index)];
-    const auto& inner_program =
-        *static_cast<const IslandProg*>(outer.udata);
+    const auto& inner_program = *static_cast<const IslandProg*>(outer.udata);
     const uint8_t* const trace = reinterpret_cast<const uint8_t*>(
         values + outer.scratch + inner_program.n_regs);
     if ((trace[static_cast<size_t>(plan.inner_trace_bit) >> 3] &
@@ -901,8 +896,8 @@ bool restore_prepared_retention(void* opaque, const Program& program,
                                 int32_t call_index, double* reg) {
   const auto& replay = *static_cast<const PreparedRetentionReplay*>(opaque);
   for (const auto& plan : replay.tm->prepared_solve_retention) {
-    const Program::Call& outer = replay.tm->step.calls[
-        static_cast<size_t>(plan.outer_call_index)];
+    const Program::Call& outer =
+        replay.tm->step.calls[static_cast<size_t>(plan.outer_call_index)];
     const auto* const inner_program =
         static_cast<const IslandProg*>(outer.udata);
     if (static_cast<const Program*>(inner_program) != &program ||
@@ -913,8 +908,7 @@ bool restore_prepared_retention(void* opaque, const Program& program,
     // replay reaches it after all, run the ordinary kernel and let the scan's
     // carry/hash parity checks diagnose the changed control flow.
     if (saved[0] != 1.0) return false;
-    const Program::Call& call =
-        program.calls[static_cast<size_t>(call_index)];
+    const Program::Call& call = program.calls[static_cast<size_t>(call_index)];
     std::memcpy(reg + call.out, saved + 1,
                 static_cast<size_t>(plan.output_len) * sizeof(double));
     std::memcpy(reg + call.scratch, saved + 1 + plan.output_len,
@@ -943,8 +937,7 @@ void scan_fwd(KernelCtx& ctx) {
   double* const block_hashes = ctx.scratch + l.block_hashes_off;
   double* const invariant_cache = ctx.scratch + l.invariant_cache_off;
   double* const invariant_valid = ctx.scratch + l.invariant_valid_off;
-  double* const prepared_retention =
-      ctx.scratch + l.prepared_retention_off;
+  double* const prepared_retention = ctx.scratch + l.prepared_retention_off;
 
   std::fill(ctx.out.data, ctx.out.data + ctx.out.len, 0.0);
   std::fill(invariant_valid, invariant_valid + l.invariant_valid, 0.0);
@@ -1040,14 +1033,13 @@ void scan_bwd(KernelCtx& ctx) {
   // row.  The one full clear here establishes the invariant for row one.
   std::fill(adj, adj + l.adjoints, 0.0);
   int64_t carry_at = 0;
-  for (size_t carry_index = 0;
-       carry_index < s.templates.front().carry.size(); ++carry_index) {
+  for (size_t carry_index = 0; carry_index < s.templates.front().carry.size();
+       ++carry_index) {
     const auto& c = s.templates.front().carry[carry_index];
-    const bool any_active =
-        std::any_of(s.templates.begin(), s.templates.end(),
-                    [&](const ScanSpec::Template& tm) {
-                      return tm.carry[carry_index].active;
-                    });
+    const bool any_active = std::any_of(s.templates.begin(), s.templates.end(),
+                                        [&](const ScanSpec::Template& tm) {
+                                          return tm.carry[carry_index].active;
+                                        });
     if (any_active)
       for (int64_t k = 0; k < c.len; ++k)
         carry_adj[carry_at + k] = ctx.out_adj_vec.data[c.output_offset + k];
@@ -1098,18 +1090,16 @@ void scan_bwd(KernelCtx& ctx) {
         const double* const retained_record =
             tm.prepared_solve_retention.empty()
                 ? nullptr
-                : prepared_retention +
-                      s.prepared_retention_iteration_offsets[
-                          static_cast<size_t>(t)];
+                : prepared_retention + s.prepared_retention_iteration_offsets
+                                           [static_cast<size_t>(t)];
         PreparedRetentionReplay retained{&tm, retained_record};
-        ProgramCallHook retention_hook{&retained,
-                                       restore_prepared_retention};
+        ProgramCallHook retention_hook{&retained, restore_prepared_retention};
         const ProgramCallHook* const hook =
             tm.prepared_solve_retention.empty() ? nullptr : &retention_hook;
-        const uint64_t row_hash = run_step(
-            tm, ctx, t, temporary + r * s.carry_cells,
-            temporary + (r + 1) * s.carry_cells, values, tm_cache, tm_valid,
-            nullptr, hook);
+        const uint64_t row_hash =
+            run_step(tm, ctx, t, temporary + r * s.carry_cells,
+                     temporary + (r + 1) * s.carry_cells, values, tm_cache,
+                     tm_valid, nullptr, hook);
         store_hash(temporary_hashes + r, row_hash);
         replay_hash = mix(replay_hash, row_hash);
       }
@@ -1144,8 +1134,8 @@ void scan_bwd(KernelCtx& ctx) {
           tm.prepared_solve_retention.empty()
               ? nullptr
               : prepared_retention +
-                    s.prepared_retention_iteration_offsets[
-                        static_cast<size_t>(t)];
+                    s.prepared_retention_iteration_offsets[static_cast<size_t>(
+                        t)];
       PreparedRetentionReplay retained{&tm, retained_record};
       ProgramCallHook retention_hook{&retained, restore_prepared_retention};
       const ProgramCallHook* const hook =
@@ -1163,8 +1153,7 @@ void scan_bwd(KernelCtx& ctx) {
       if (profile)
         row_replay_ns += Nanoseconds(Clock::now() - replay_start).count();
 
-      const auto full_zero_start =
-          profile ? Clock::now() : Clock::time_point{};
+      const auto full_zero_start = profile ? Clock::now() : Clock::time_point{};
       if (!sparse_adj_reset) {
         std::fill(adj, adj + tm.step.adj.n_regs, 0.0);
         if (profile)
@@ -1238,20 +1227,18 @@ void scan_bwd(KernelCtx& ctx) {
         for (const auto& b : tm.sinks) clear_mapped(b.step_reg, b.len);
         clear_mapped(tm.target_reg, tm.target_reg < 0 ? 0 : 1);
       }
-      if (profile)
-        zero_ns += Nanoseconds(Clock::now() - zero_start).count();
+      if (profile) zero_ns += Nanoseconds(Clock::now() - zero_start).count();
     }
   }
 
   carry_at = 0;
-  for (size_t carry_index = 0;
-       carry_index < s.templates.front().carry.size(); ++carry_index) {
+  for (size_t carry_index = 0; carry_index < s.templates.front().carry.size();
+       ++carry_index) {
     const auto& c = s.templates.front().carry[carry_index];
-    const bool any_active =
-        std::any_of(s.templates.begin(), s.templates.end(),
-                    [&](const ScanSpec::Template& tm) {
-                      return tm.carry[carry_index].active;
-                    });
+    const bool any_active = std::any_of(s.templates.begin(), s.templates.end(),
+                                        [&](const ScanSpec::Template& tm) {
+                                          return tm.carry[carry_index].active;
+                                        });
     if (any_active && ctx.in_adj[c.op_input].data != nullptr)
       for (int64_t k = 0; k < c.len; ++k)
         ctx.in_adj[c.op_input].data[c.input_offset + k] +=
@@ -1285,14 +1272,12 @@ void scan_bwd(KernelCtx& ctx) {
                            : std::count(s.template_for_iteration.begin(),
                                         s.template_for_iteration.end(),
                                         static_cast<uint32_t>(i))),
-                   s.templates[i].step.n_regs,
-                   s.templates[i].step.adj.n_regs,
+                   s.templates[i].step.n_regs, s.templates[i].step.adj.n_regs,
                    s.templates[i].step.adj.code.size(),
                    s.templates[i].repeated_code.empty()
                        ? s.templates[i].step.code.size()
                        : s.templates[i].repeated_code.size(),
-                   static_cast<long long>(
-                       s.templates[i].invariant_cache_cells),
+                   static_cast<long long>(s.templates[i].invariant_cache_cells),
                    s.templates[i].prepared_solve_retention.size(),
                    static_cast<long long>(
                        s.templates[i].prepared_retention_record_cells));
@@ -1326,19 +1311,17 @@ size_t prepare_scan_prepared_retention(ScanSpec* spec) {
   spec->prepared_retention_iteration_offsets.clear();
   spec->prepared_retention_cells = 0;
 
-  const char* const escape =
-      std::getenv("STANLI_NO_SCAN_PREPARED_RETENTION");
+  const char* const escape = std::getenv("STANLI_NO_SCAN_PREPARED_RETENTION");
   if (escape != nullptr && escape[0] != '0') return 0;
   const char* const force = std::getenv("STANLI_SCAN_PREPARED_RETENTION");
   if (force == nullptr || force[0] == '0') return 0;
 
   PreparedRetentionAnalysis analysis;
   try {
-    if (!analyze_prepared_retention(*spec, &analysis) ||
-        analysis.calls == 0 || analysis.cells <= 0 ||
-        analysis.cells >
-            kScanPreparedRetentionBudgetBytes /
-                static_cast<int64_t>(sizeof(double)))
+    if (!analyze_prepared_retention(*spec, &analysis) || analysis.calls == 0 ||
+        analysis.cells <= 0 ||
+        analysis.cells > kScanPreparedRetentionBudgetBytes /
+                             static_cast<int64_t>(sizeof(double)))
       return 0;
   } catch (const std::exception&) {
     return 0;

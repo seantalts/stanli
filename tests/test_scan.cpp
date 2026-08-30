@@ -250,8 +250,7 @@ static void run_recycled_adjoint_case() {
   for (int which = 0; which < 2; ++which) {
     ScanSpec::Template tm;
     tm.step.n_regs = 3;
-    tm.step.ins = {{0, 1, 0, 0, which == 1},
-                   {1, 1, 1, 0, which == 0}};
+    tm.step.ins = {{0, 1, 0, 0, which == 1}, {1, 1, 1, 0, which == 0}};
     tm.step.code.push_back({Program::MUL, 2, 0, 1});
     tm.step.out_regs = {2};
     expect("recycled adjoint generated", gen_adjoint(tm.step));
@@ -282,8 +281,7 @@ static void run_recycled_adjoint_case() {
   double gradient = 0.0;
   expect_exact("recycled adjoint value", ex.gradient(&gradient), 12.0);
   expect_exact("recycled adjoint gradient", gradient, 6.0);
-  expect_exact("recycled adjoint repeated value", ex.gradient(&gradient),
-               12.0);
+  expect_exact("recycled adjoint repeated value", ex.gradient(&gradient), 12.0);
   expect_exact("recycled adjoint repeated gradient", gradient, 6.0);
 }
 
@@ -412,8 +410,7 @@ static void run_mixed_carry_activity_case(int64_t checkpoint_block,
   {
     ScanSpec::Template tm;
     tm.step.n_regs = 5;
-    tm.step.ins = {{0, 1, 0, 0, true}, {1, 1, 1, 0, true},
-                   {2, 1, 2, 0, false}};
+    tm.step.ins = {{0, 1, 0, 0, true}, {1, 1, 1, 0, true}, {2, 1, 2, 0, false}};
     tm.step.code.push_back({Program::ADD, 3, 0, 1, 0, 1});
     tm.step.code.push_back({Program::ADD, 4, 3, 2, 0, 1});
     tm.step.out_regs = {4};
@@ -482,8 +479,7 @@ static void run_mixed_carry_activity_case(int64_t checkpoint_block,
       " count=" + std::to_string(n);
   expect_exact(tag + " value", ex.gradient(&gradient), expected_value);
   expect_exact(tag + " gradient", gradient, expected_gradient);
-  expect_exact(tag + " repeated value", ex.gradient(&gradient),
-               expected_value);
+  expect_exact(tag + " repeated value", ex.gradient(&gradient), expected_value);
   expect_exact(tag + " repeated gradient", gradient, expected_gradient);
   Executor copied(ex);
   expect_exact(tag + " copied value", copied.gradient(&gradient),
@@ -1060,8 +1056,8 @@ static void bind_invariant_call_case(Executor& ex, const InvariantCallCase& c,
 
 static void run_invariant_call_case() {
   constexpr int64_t count = 7;
-  InvariantCallCase scan_case = make_invariant_call_scan(
-      count, choose_scan_checkpoint_block(count, 1));
+  InvariantCallCase scan_case =
+      make_invariant_call_scan(count, choose_scan_checkpoint_block(count, 1));
   InvariantCallCase blocked_case = make_invariant_call_scan(
       count, choose_scan_checkpoint_block(count, 1, 0));
   InvariantCallCase unrolled_case = make_invariant_call_unrolled(count);
@@ -1106,8 +1102,8 @@ static void run_invariant_call_case() {
   Executor exact_scan(std::move(exact_scan_case.graph));
   Executor exact_unrolled(std::move(exact_unrolled_case.graph));
   bind_invariant_call_case(exact_scan, exact_scan_case, 0.4, 0.2, {0.1}, 0.7);
-  bind_invariant_call_case(exact_unrolled, exact_unrolled_case, 0.4, 0.2,
-                           {0.1}, 0.7);
+  bind_invariant_call_case(exact_unrolled, exact_unrolled_case, 0.4, 0.2, {0.1},
+                           0.7);
   double exact_scan_grad = 0.0;
   double exact_unrolled_grad = 0.0;
   expect_exact("scan/unrolled exact value",
@@ -1157,7 +1153,7 @@ static void reject_unsound_invariant_call_plans() {
 //   OP_SCAN step -> OP_ISLAND -> traced native CFG -> prepared prim-LU CALL
 //
 // The solve result is copied to the island output and then overwritten. This
-  // deliberately forces bwd_value_out != out and pins the immediate generated
+// deliberately forces bwd_value_out != out and pins the immediate generated
 // checkpoint that retained replay must repopulate after restoring call.out.
 struct PreparedRetentionCase {
   Graph graph;
@@ -1180,8 +1176,7 @@ static std::shared_ptr<IslandProg> make_prepared_retention_inner() {
   test_setenv("STANLI_CFG_PREPARED_MDIVIDE_LEFT_PRIM_LU", "1", 1);
   auto inner = std::make_shared<IslandProg>();
   inner->n_regs = 13;
-  inner->ins = {{0, 4, 0, 0, true}, {4, 2, 1, 0, true},
-                {6, 1, 2, 0, false}};
+  inner->ins = {{0, 4, 0, 0, true}, {4, 2, 1, 0, true}, {6, 1, 2, 0, false}};
   inner->pool = {0.0};
   inner->code = {
       {Program::MOVR, 11, 4, 0, 0, 2},
@@ -1219,15 +1214,15 @@ static std::shared_ptr<IslandProg> make_prepared_retention_inner() {
     expect("retention solve has exact scratch", call.scratch_len == 7);
     expect("retention solve output is checkpointed",
            call.bwd_value_out != call.out);
-    expect("retention solve checkpoint follows CALL",
-           static_cast<size_t>(prepared_pc + 1) < inner->code.size() &&
-               inner->code[static_cast<size_t>(prepared_pc + 1)].code ==
-                   Program::MOVR &&
-               inner->code[static_cast<size_t>(prepared_pc + 1)].dst ==
-                   call.bwd_value_out &&
-               inner->code[static_cast<size_t>(prepared_pc + 1)].a ==
-                   call.out &&
-               inner->trace_pc[static_cast<size_t>(prepared_pc + 1)] == -1);
+    expect(
+        "retention solve checkpoint follows CALL",
+        static_cast<size_t>(prepared_pc + 1) < inner->code.size() &&
+            inner->code[static_cast<size_t>(prepared_pc + 1)].code ==
+                Program::MOVR &&
+            inner->code[static_cast<size_t>(prepared_pc + 1)].dst ==
+                call.bwd_value_out &&
+            inner->code[static_cast<size_t>(prepared_pc + 1)].a == call.out &&
+            inner->trace_pc[static_cast<size_t>(prepared_pc + 1)] == -1);
   }
   return inner;
 }
@@ -1241,8 +1236,7 @@ static std::shared_ptr<ScanSpec> make_prepared_retention_spec(
       inner->n_regs + (inner->adj.trace_bits + 63) / 64;
   const int32_t target_reg = 9 + island_scratch;
   step.n_regs = target_reg + 1;
-  step.ins = {{0, 4, 0, 0, true}, {4, 2, 1, 0, true},
-              {6, 1, 2, 0, false}};
+  step.ins = {{0, 4, 0, 0, true}, {4, 2, 1, 0, true}, {6, 1, 2, 0, false}};
   Program::Call outer;
   outer.opcode = OP_ISLAND;
   outer.n_in = 3;
@@ -1282,7 +1276,7 @@ static std::shared_ptr<ScanSpec> make_prepared_retention_spec(
 }
 
 static PreparedRetentionCase make_prepared_retention_case(int64_t block,
-                                                           bool retain) {
+                                                          bool retain) {
   constexpr int64_t count = 3;
   PreparedRetentionCase out;
   out.spec = make_prepared_retention_spec(count, block, &out.inner);
@@ -1355,13 +1349,12 @@ static PreparedRetentionResult prepared_retention_oracle() {
   for (int i = 0; i < 4; ++i) matrix.data()[i] = matrix_value[i];
   for (int i = 0; i < 2; ++i) rhs.data()[i] = rhs_value[i];
   const auto solved = stan::math::mdivide_left(matrix, rhs);
-  stan::math::var target =
-      2.0 * (solved(0) + solved(1)) + rhs(0) + rhs(1);
+  stan::math::var target = 2.0 * (solved(0) + solved(1)) + rhs(0) + rhs(1);
   stan::math::grad(target.vi_);
   PreparedRetentionResult out;
   out.value = target.val();
-  for (int i = 0; i < 4; ++i) out.gradient[static_cast<size_t>(i)] =
-      matrix.data()[i].adj();
+  for (int i = 0; i < 4; ++i)
+    out.gradient[static_cast<size_t>(i)] = matrix.data()[i].adj();
   for (int i = 0; i < 2; ++i)
     out.gradient[static_cast<size_t>(4 + i)] = rhs.data()[i].adj();
   return out;
@@ -1392,8 +1385,7 @@ static void check_prepared_retention_record_validity() {
   const double* const retained =
       scratch.data() + scratch_cells - c.spec->prepared_retention_cells;
   for (size_t row = 0; row < gates.size(); ++row) {
-    const int64_t offset =
-        c.spec->prepared_retention_iteration_offsets[row];
+    const int64_t offset = c.spec->prepared_retention_iteration_offsets[row];
     expect_exact("retention row " + std::to_string(row) + " validity",
                  retained[offset], gates[row] > 0.0 ? 1.0 : 0.0);
   }
@@ -1440,8 +1432,7 @@ static void check_prepared_retention_preparation() {
   auto& inner = *static_cast<IslandProg*>(
       const_cast<void*>(malformed->templates[0].step.calls[0].udata));
   for (Program::Call& call : inner.calls)
-    if (call.opcode == OP_MDIVIDE_LEFT_PREPARED_PRIM_LU)
-      --call.scratch_len;
+    if (call.opcode == OP_MDIVIDE_LEFT_PREPARED_PRIM_LU) --call.scratch_len;
   test_setenv("STANLI_SCAN_PREPARED_RETENTION", "1", 1);
   expect("malformed prepared scratch fails closed",
          prepare_scan_prepared_retention(malformed.get()) == 0 &&

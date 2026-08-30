@@ -19,8 +19,7 @@ namespace stanli {
 // block-replay sweep during reverse mode. Larger scans keep square-root
 // blocking and its bounded-memory behavior.
 inline constexpr int64_t kScanFullBoundaryBudgetBytes = 64LL * 1024 * 1024;
-inline constexpr int64_t kScanPreparedRetentionBudgetBytes =
-    64LL * 1024 * 1024;
+inline constexpr int64_t kScanPreparedRetentionBudgetBytes = 64LL * 1024 * 1024;
 
 int64_t choose_scan_checkpoint_block(
     int64_t count, int64_t carry_cells,

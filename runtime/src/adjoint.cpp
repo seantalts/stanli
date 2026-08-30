@@ -67,8 +67,7 @@ bool supports_selector_adjoint(const IslandProg& p) {
     const Program::Instr& instruction = p.code[pc];
     switch (instruction.code) {
       case Program::CONST:
-        if (!range(instruction.dst, 1) ||
-            !pool_range(instruction.a, 1))
+        if (!range(instruction.dst, 1) || !pool_range(instruction.a, 1))
           return false;
         break;
       case Program::CONSTR:
@@ -179,8 +178,7 @@ int make_structured_call(const Program::Instr& instruction,
                          Program::Call* call) {
   const auto set = [&](uint16_t opcode, uint8_t variant,
                        std::initializer_list<std::pair<int, int>> inputs,
-                       int out, int out_len,
-                       std::initializer_list<int> idata) {
+                       int out, int out_len, std::initializer_list<int> idata) {
     *call = Program::Call{};
     call->opcode = opcode;
     call->variant = variant;
@@ -207,9 +205,8 @@ int make_structured_call(const Program::Instr& instruction,
       if (n < 0 || instruction.c != n || width > INT32_MAX ||
           instruction.len != width)
         return -1;
-      set(cfg_matrix_exp_block_frechet_enabled(n)
-              ? OP_MATRIX_EXP_BLOCK_FRECHET
-              : OP_MATRIX_EXP,
+      set(cfg_matrix_exp_block_frechet_enabled(n) ? OP_MATRIX_EXP_BLOCK_FRECHET
+                                                  : OP_MATRIX_EXP,
           0, {{instruction.a, static_cast<int>(width)}}, instruction.dst,
           static_cast<int>(width), {n});
       return 1;
@@ -229,8 +226,7 @@ int make_structured_call(const Program::Instr& instruction,
                                 : prepared_cfg_mdivide_left_enabled(n)
                                     ? OP_MDIVIDE_LEFT_PREPARED
                                     : OP_MDIVIDE_LEFT;
-        set(opcode,
-            vector ? uint8_t{2} : uint8_t{0},
+        set(opcode, vector ? uint8_t{2} : uint8_t{0},
             {{instruction.a, n * n}, {instruction.b, instruction.len}},
             instruction.dst, instruction.len, {n, k});
       } else {
@@ -262,8 +258,7 @@ void prepare_sparse_adj_clear(IslandProg& p) {
   std::vector<int32_t> cells;
   for (const auto& input : p.ins)
     for (int k = 0; k < input.len; ++k)
-      cells.push_back(
-          p.adj.adj_reg[static_cast<size_t>(input.reg + k)]);
+      cells.push_back(p.adj.adj_reg[static_cast<size_t>(input.reg + k)]);
   for (int output : p.out_regs)
     cells.push_back(p.adj.adj_reg[static_cast<size_t>(output)]);
   std::sort(cells.begin(), cells.end());
@@ -316,8 +311,7 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
       if (call.idata.size() != 2 || call.idata[0] < 0) return false;
       const int64_t n = call.idata[0];
       const int64_t scratch_len =
-          n * n + n +
-          (call.opcode == OP_MDIVIDE_LEFT_PREPARED_PRIM_LU ? 1 : 0);
+          n * n + n + (call.opcode == OP_MDIVIDE_LEFT_PREPARED_PRIM_LU ? 1 : 0);
       if (scratch_len > INT32_MAX ||
           static_cast<int64_t>(fwd.n_regs) + scratch_len > INT32_MAX)
         return false;
@@ -327,12 +321,9 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
     }
   }
   const auto call_index_at = [&](size_t pc) -> int32_t {
-    return orig[pc].code == Program::CALL ? orig[pc].a
-                                          : structured_call[pc];
+    return orig[pc].code == Program::CALL ? orig[pc].a : structured_call[pc];
   };
-  const auto has_call_at = [&](size_t pc) {
-    return call_index_at(pc) >= 0;
-  };
+  const auto has_call_at = [&](size_t pc) { return call_index_at(pc) >= 0; };
   const int n0 = fwd.n_regs;
   std::vector<Program::Call> bound_calls;
   bound_calls.reserve(fwd.calls.size());
@@ -465,8 +456,7 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
         I.code == Program::DIAG_POST_MULTIPLY) {
       const int rows = I.c, cols = I.len;
       const int64_t matrix_len = static_cast<int64_t>(rows) * cols;
-      const int vector_len =
-          I.code == Program::DIAG_PRE_MULTIPLY ? rows : cols;
+      const int vector_len = I.code == Program::DIAG_PRE_MULTIPLY ? rows : cols;
       if (rows < 0 || cols < 0 || matrix_len > INT32_MAX ||
           !in_range(I.a, vector_len) ||
           !in_range(I.b, static_cast<int>(matrix_len)) ||
@@ -531,8 +521,7 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
       const Program::Instr& I = orig[i];
       any = false;
       if (has_call_at(i)) {
-        const Program::Call& call =
-            fwd.calls[(size_t)call_index_at(i)];
+        const Program::Call& call = fwd.calls[(size_t)call_index_at(i)];
         for (int j = 0; j < call.n_in; ++j) {
           bool input_active = false;
           for (int k = 0; k < call.in_len[j]; ++k)
@@ -673,8 +662,7 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
   for (size_t i = 0; i < orig.size(); ++i) {
     const Program::Instr& I = orig[i];
     if (has_call_at(i)) {
-      const Program::Call& call =
-          fwd.calls[(size_t)call_index_at(i)];
+      const Program::Call& call = fwd.calls[(size_t)call_index_at(i)];
       for (int j = 0; j < call.n_in; ++j)
         mark_range(forward_read, call.in[j], call.in_len[j]);
       mark_range(adjoint_output, call.out, call.out_len);
@@ -712,10 +700,8 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
   if (n0 > 0) {
     for (size_t i = 0; i < orig.size(); ++i) {
       if (!has_call_at(i)) continue;
-      const Program::Call& call =
-          fwd.calls[(size_t)call_index_at(i)];
-      if (!elide_inactive_calls &&
-          call.opcode != OP_MDIVIDE_LEFT_PREPARED &&
+      const Program::Call& call = fwd.calls[(size_t)call_index_at(i)];
+      if (!elide_inactive_calls && call.opcode != OP_MDIVIDE_LEFT_PREPARED &&
           call.opcode != OP_MDIVIDE_LEFT_PREPARED_PRIM_LU)
         continue;
       for (int k = 0; k < call.scratch_len; ++k) {
@@ -896,8 +882,7 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
     const ProgramOpSpec& spec = program_code_spec(I.code);
     if (I.code == Program::DIAG_PRE_MULTIPLY ||
         I.code == Program::DIAG_POST_MULTIPLY) {
-      const int vector_len =
-          I.code == Program::DIAG_PRE_MULTIPLY ? I.c : I.len;
+      const int vector_len = I.code == Program::DIAG_PRE_MULTIPLY ? I.c : I.len;
       A.va = save_before(I.a, vector_len);
       A.vb = save_before(I.b, I.c * I.len);
     } else if (I.code == Program::DENSITY) {
@@ -931,8 +916,7 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
     if (I.code == Program::DIAG_PRE_MULTIPLY ||
         I.code == Program::DIAG_POST_MULTIPLY) {
       A.dst = mapn(I.dst, I.c * I.len);
-      A.a = mapn(I.a,
-                 I.code == Program::DIAG_PRE_MULTIPLY ? I.c : I.len);
+      A.a = mapn(I.a, I.code == Program::DIAG_PRE_MULTIPLY ? I.c : I.len);
       A.b = mapn(I.b, I.c * I.len);
     } else if (I.code == Program::DENSITY) {
       const int ar = program_density_arity(I.len);
@@ -956,7 +940,8 @@ bool gen_adjoint_impl(IslandProg& p, bool cfg_mode) {
     original_boundary[orig.size()] = (int32_t)ncode.size();
     for (const auto& branch : cfg_branches) {
       if (branch.first < 0 || (size_t)branch.first >= ncode.size() ||
-          branch.second < 0 || (size_t)branch.second >= original_boundary.size())
+          branch.second < 0 ||
+          (size_t)branch.second >= original_boundary.size())
         return false;
       const int32_t target = original_boundary[(size_t)branch.second];
       if (target < 0) return false;
@@ -1026,8 +1011,7 @@ bool prepare_cfg_trace_blocks(IslandProg& p) {
   for (size_t pc = 0; pc < final_size; ++pc) {
     const int32_t original = p.trace_pc[pc];
     if (original == -1) {
-      if (p.code[pc].code != Program::MOV &&
-          p.code[pc].code != Program::MOVR)
+      if (p.code[pc].code != Program::MOV && p.code[pc].code != Program::MOVR)
         return false;
       continue;
     }
@@ -1045,8 +1029,8 @@ bool prepare_cfg_trace_blocks(IslandProg& p) {
   std::vector<int32_t> next_mapped(final_size + 1,
                                    static_cast<int32_t>(canonical_size));
   for (size_t pc = final_size; pc-- > 0;) {
-    next_mapped[pc] = p.trace_pc[pc] >= 0 ? p.trace_pc[pc]
-                                           : next_mapped[pc + 1];
+    next_mapped[pc] =
+        p.trace_pc[pc] >= 0 ? p.trace_pc[pc] : next_mapped[pc + 1];
   }
 
   std::vector<uint8_t> leader(final_size, 0);
@@ -1058,7 +1042,8 @@ bool prepare_cfg_trace_blocks(IslandProg& p) {
     const int32_t original = p.trace_pc[pc];
     if (original < 0 || static_cast<size_t>(original) >= canonical_size)
       return false;
-    const Program::Instr& source = canonical.code[static_cast<size_t>(original)];
+    const Program::Instr& source =
+        canonical.code[static_cast<size_t>(original)];
     if (source.code != instruction.code ||
         instruction.dst <= static_cast<int>(pc) ||
         instruction.dst > static_cast<int>(final_size))
@@ -1097,8 +1082,7 @@ bool prepare_cfg_trace_blocks(IslandProg& p) {
   int32_t previous_fwd_pc = std::numeric_limits<int32_t>::max();
   for (size_t pc = 0; pc < p.adj.code.size(); ++pc) {
     const AdjInstr& instruction = p.adj.code[pc];
-    if (instruction.fwd_pc < 0 ||
-        instruction.fwd_pc >= p.adj.trace_bits ||
+    if (instruction.fwd_pc < 0 || instruction.fwd_pc >= p.adj.trace_bits ||
         instruction.fwd_pc >= previous_fwd_pc ||
         instruction.code == Program::JZ || instruction.code == Program::JMP)
       return false;
@@ -1112,14 +1096,12 @@ bool prepare_cfg_trace_blocks(IslandProg& p) {
     if (instruction_block > previous_block) return false;
     previous_block = instruction_block;
 
-    const bool split =
-        pc > begin &&
-        (instruction_block != current_block ||
-         instruction.code == Program::CALL ||
-         p.adj.code[pc - 1].code == Program::CALL);
+    const bool split = pc > begin && (instruction_block != current_block ||
+                                      instruction.code == Program::CALL ||
+                                      p.adj.code[pc - 1].code == Program::CALL);
     if (split) {
-      plan.push_back(AdjTraceBlock{static_cast<int32_t>(pc),
-                                   p.adj.code[begin].fwd_pc});
+      plan.push_back(
+          AdjTraceBlock{static_cast<int32_t>(pc), p.adj.code[begin].fwd_pc});
       begin = pc;
     }
     current_block = instruction_block;
@@ -1136,8 +1118,7 @@ bool prepare_cfg_trace_blocks(IslandProg& p) {
     begin_check = range.end;
   }
   if (begin_check != static_cast<int32_t>(p.adj.code.size())) return false;
-  for (AdjInstr& instruction : p.adj.code)
-    instruction.pair = AdjPair::None;
+  for (AdjInstr& instruction : p.adj.code) instruction.pair = AdjPair::None;
   p.adj.has_pairs = false;
   p.adj.trace_blocks = std::move(plan);
   return true;
@@ -1155,31 +1136,23 @@ bool prepare_cfg_adjoint_superinstructions(IslandProg& p) {
     return false;
   for (size_t i = 0; i < p.adj.trace_blocks.size(); ++i) {
     if (verified.adj.trace_blocks[i].end != p.adj.trace_blocks[i].end ||
-        verified.adj.trace_blocks[i].trace_pc !=
-            p.adj.trace_blocks[i].trace_pc)
+        verified.adj.trace_blocks[i].trace_pc != p.adj.trace_blocks[i].trace_pc)
       return false;
   }
 
   const auto pair_for = [](Program::Code first,
                            Program::Code second) -> AdjPair {
-    if (first == Program::MOV && second == Program::MOV)
-      return AdjPair::MovMov;
+    if (first == Program::MOV && second == Program::MOV) return AdjPair::MovMov;
     if (first == Program::MOV && second == Program::CONST)
       return AdjPair::MovConst;
-    if (first == Program::NEG && second == Program::NEG)
-      return AdjPair::NegNeg;
+    if (first == Program::NEG && second == Program::NEG) return AdjPair::NegNeg;
     if (first == Program::CONST && second == Program::MOV)
       return AdjPair::ConstMov;
-    if (first == Program::MUL && second == Program::ADD)
-      return AdjPair::MulAdd;
-    if (first == Program::ADD && second == Program::MUL)
-      return AdjPair::AddMul;
-    if (first == Program::MUL && second == Program::MUL)
-      return AdjPair::MulMul;
-    if (first == Program::ADD && second == Program::ADD)
-      return AdjPair::AddAdd;
-    if (first == Program::SUB && second == Program::SUB)
-      return AdjPair::SubSub;
+    if (first == Program::MUL && second == Program::ADD) return AdjPair::MulAdd;
+    if (first == Program::ADD && second == Program::MUL) return AdjPair::AddMul;
+    if (first == Program::MUL && second == Program::MUL) return AdjPair::MulMul;
+    if (first == Program::ADD && second == Program::ADD) return AdjPair::AddAdd;
+    if (first == Program::SUB && second == Program::SUB) return AdjPair::SubSub;
     return AdjPair::None;
   };
 
@@ -1198,8 +1171,7 @@ bool prepare_cfg_adjoint_superinstructions(IslandProg& p) {
       // check so a malformed or future ranged encoding fails closed rather
       // than silently acquiring pair semantics.
       const AdjPair pair =
-          first.len >= 0 && first.len <= 1 && second.len >= 0 &&
-                  second.len <= 1
+          first.len >= 0 && first.len <= 1 && second.len >= 0 && second.len <= 1
               ? pair_for(first.code, second.code)
               : AdjPair::None;
       if (pair == AdjPair::None) {
@@ -1270,8 +1242,7 @@ bool cfg_native_profitable(const IslandProg& p) {
 
   std::vector<size_t> reverse_work(n, 0);
   for (const AdjInstr& instruction : p.adj.code) {
-    if (instruction.fwd_pc < 0 ||
-        static_cast<size_t>(instruction.fwd_pc) >= n)
+    if (instruction.fwd_pc < 0 || static_cast<size_t>(instruction.fwd_pc) >= n)
       return false;
     ++reverse_work[static_cast<size_t>(instruction.fwd_pc)];
   }
@@ -1338,8 +1309,7 @@ bool cfg_native_profitable(const IslandProg& p) {
     } else if (instruction.code == Program::JZ) {
       const size_t dst = static_cast<size_t>(instruction.dst);
       any_tail = std::min(any_tail, min_any[dst]);
-      structured_tail =
-          std::min(structured_tail, min_with_structured[dst]);
+      structured_tail = std::min(structured_tail, min_with_structured[dst]);
       zero_tail = zero_tail || zero_structured_path[dst] != 0;
     }
 
@@ -1361,8 +1331,7 @@ bool cfg_native_profitable(const IslandProg& p) {
   // entry to reject untaken PCs. The measured 24,470-entry canary wins on
   // that path, but cap the exemption so an arbitrarily large cold arm fails
   // closed.
-  if (zero_structured_path[0] &&
-      p.adj.code.size() > kMaxZeroStructuredScan)
+  if (zero_structured_path[0] && p.adj.code.size() > kMaxZeroStructuredScan)
     return false;
   return true;
 }
@@ -1531,8 +1500,8 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
                          call.in_len[k]};
         ctx.in_adj[k] = Desc{adj + call.bwd_adj_in[k], call.in_len[k]};
       }
-      ctx.out = Desc{const_cast<double*>(val) + call.bwd_value_out,
-                     call.out_len};
+      ctx.out =
+          Desc{const_cast<double*>(val) + call.bwd_value_out, call.out_len};
       ctx.out_adj_vec = Desc{adj + call.bwd_adj_out, call.out_len};
       ctx.out_adj = call.out_len == 1 ? adj[call.bwd_adj_out] : 0.0;
       ctx.variant = call.variant;
@@ -1542,8 +1511,7 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
       ctx.udata = call.udata;
       ctx.program_call_hook = nullptr;
       call.backward(ctx);
-      for (int j = 0; j < call.out_len; ++j)
-        adj[call.bwd_adj_out + j] = 0.0;
+      for (int j = 0; j < call.out_len; ++j) adj[call.bwd_adj_out + j] = 0.0;
       continue;
     }
     if (I.code == Program::DIAG_PRE_MULTIPLY ||
@@ -1552,14 +1520,12 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
       using VarVec = Eigen::Matrix<var, Eigen::Dynamic, 1>;
       using VarMat = Eigen::Matrix<var, Eigen::Dynamic, Eigen::Dynamic>;
       const int rows = I.c, cols = I.len;
-      const int vector_len =
-          I.code == Program::DIAG_PRE_MULTIPLY ? rows : cols;
+      const int vector_len = I.code == Program::DIAG_PRE_MULTIPLY ? rows : cols;
       stan::math::nested_rev_autodiff nested;
       VarVec vector(vector_len);
       VarMat matrix(rows, cols);
       for (int k = 0; k < vector_len; ++k) vector(k) = val[I.va + k];
-      for (int k = 0; k < rows * cols; ++k)
-        matrix.data()[k] = val[I.vb + k];
+      for (int k = 0; k < rows * cols; ++k) matrix.data()[k] = val[I.vb + k];
       VarMat output(rows, cols);
       if (I.code == Program::DIAG_PRE_MULTIPLY)
         output = stan::math::diag_pre_multiply(vector, matrix);
@@ -1573,8 +1539,7 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
         adj[I.dst + k] = 0.0;
         adj[I.b + k] += matrix.data()[k].adj();
       }
-      for (int k = 0; k < vector_len; ++k)
-        adj[I.a + k] += vector(k).adj();
+      for (int k = 0; k < vector_len; ++k) adj[I.a + k] += vector(k).adj();
       continue;
     }
     // Every instruction consumes its output's adjoint and clears it: the

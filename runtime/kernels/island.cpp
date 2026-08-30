@@ -150,12 +150,12 @@ void island_bwd_selector(const IslandProg& p, KernelCtx& ctx) {
               origin[static_cast<size_t>(instruction.a + i)];
         }
         break;
-#define STANLI_SELECTOR_COMPARE(code, op)                                  \
-  case Program::code:                                                     \
-    value[static_cast<size_t>(instruction.dst)] =                         \
-        value[static_cast<size_t>(instruction.a)]                         \
-            op value[static_cast<size_t>(instruction.b)];                 \
-    origin[static_cast<size_t>(instruction.dst)] = -1;                    \
+#define STANLI_SELECTOR_COMPARE(code, op)              \
+  case Program::code:                                  \
+    value[static_cast<size_t>(instruction.dst)] =      \
+        value[static_cast<size_t>(instruction.a)] op   \
+            value[static_cast<size_t>(instruction.b)]; \
+    origin[static_cast<size_t>(instruction.dst)] = -1; \
     break
         STANLI_SELECTOR_COMPARE(GT, >);
         STANLI_SELECTOR_COMPARE(GE, >=);
@@ -245,8 +245,7 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
   if ((int64_t)workspace.adj.size() < p.adj.n_regs)
     workspace.adj.resize((size_t)p.adj.n_regs);
   if (!managed_reset)
-    std::fill(workspace.adj.begin(),
-              workspace.adj.begin() + p.adj.n_regs, 0.0);
+    std::fill(workspace.adj.begin(), workspace.adj.begin() + p.adj.n_regs, 0.0);
   workspace.dirty = true;
   std::vector<double>& adj = workspace.adj;
   // Through the sharing map, since a live-out register need not own its

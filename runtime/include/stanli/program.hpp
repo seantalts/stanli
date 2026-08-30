@@ -294,11 +294,11 @@ struct ProgramCallCtx<true> {
 };
 
 template <bool ReuseCallCtx, typename T>
-void run_program_impl(const Program& p, T* reg,
-                      const std::vector<Program::Instr>* code_override = nullptr,
-                      uint8_t* executed = nullptr,
-                      const int32_t* trace_pc = nullptr,
-                      const ProgramCallHook* call_hook = nullptr) {
+void run_program_impl(
+    const Program& p, T* reg,
+    const std::vector<Program::Instr>* code_override = nullptr,
+    uint8_t* executed = nullptr, const int32_t* trace_pc = nullptr,
+    const ProgramCallHook* call_hook = nullptr) {
   using VecT = Eigen::Matrix<T, Eigen::Dynamic, 1>;
   ProgramCallCtx<ReuseCallCtx> call_ctx;
   const auto& code = code_override == nullptr ? p.code : *code_override;
@@ -306,9 +306,8 @@ void run_program_impl(const Program& p, T* reg,
   for (int64_t pc = 0; pc < n; ++pc) {
     const Program::Instr& I = code[(size_t)pc];
     if (executed != nullptr) {
-      const int32_t original = trace_pc == nullptr
-                                   ? static_cast<int32_t>(pc)
-                                   : trace_pc[(size_t)pc];
+      const int32_t original =
+          trace_pc == nullptr ? static_cast<int32_t>(pc) : trace_pc[(size_t)pc];
       if (original >= 0)
         executed[(size_t)original >> 3] |=
             static_cast<uint8_t>(1u << (original & 7));
@@ -565,10 +564,9 @@ void run_program_impl(const Program& p, T* reg,
       // program.
       case Program::CALL:
         if constexpr (std::is_same_v<T, double>) {
-          const bool restored = call_hook != nullptr &&
-                                call_hook->restore != nullptr &&
-                                call_hook->restore(call_hook->state, p, I.a,
-                                                   reg);
+          const bool restored =
+              call_hook != nullptr && call_hook->restore != nullptr &&
+              call_hook->restore(call_hook->state, p, I.a, reg);
           if (!restored) {
             if constexpr (ReuseCallCtx)
               run_call(p.calls[(size_t)I.a], reg, call_ctx.ctx, call_hook);

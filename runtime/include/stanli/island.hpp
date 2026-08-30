@@ -178,8 +178,8 @@ std::shared_ptr<const Program> specialize_softmax3(const IslandProg& p,
 // between calls. Not reentrant; islands cannot contain islands.
 template <typename T>
 void run_island(const IslandProg& p, const T* const* in, T* out) {
-  const Program& execution = p.var_replay ? *p.var_replay
-                                          : static_cast<const Program&>(p);
+  const Program& execution =
+      p.var_replay ? *p.var_replay : static_cast<const Program&>(p);
   static thread_local std::vector<T> reg;
   if ((int64_t)reg.size() < execution.n_regs)
     reg.resize((size_t)execution.n_regs);

@@ -922,8 +922,7 @@ void prepared_mdivide_left_active_bwd(KernelCtx& ctx) {
   CMapM qr(ctx.scratch, n, n);
   CMapV h(ctx.scratch + n * n, n);
   const auto q = Eigen::householderSequence(qr, h.conjugate());
-  const auto rt =
-      qr.template triangularView<Eigen::Upper>().transpose();
+  const auto rt = qr.template triangularView<Eigen::Upper>().transpose();
 
   if constexpr (Vec) {
     CMapV seed(ctx.out_adj_vec.data, n);
@@ -933,8 +932,7 @@ void prepared_mdivide_left_active_bwd(KernelCtx& ctx) {
       VecD adj_b = q * rt.solve(seed);
       if (ctx.in_adj[0].data)
         MapM(ctx.in_adj[0].data, n, n) -= adj_b * result.transpose();
-      if (ctx.in_adj[1].data)
-        Eigen::Map<VecD>(ctx.in_adj[1].data, n) += adj_b;
+      if (ctx.in_adj[1].data) Eigen::Map<VecD>(ctx.in_adj[1].data, n) += adj_b;
     } else if (dividend_active) {
       // dv branch: retaining the direct expression also retains Eigen's
       // evaluation and accumulation order.
@@ -942,8 +940,7 @@ void prepared_mdivide_left_active_bwd(KernelCtx& ctx) {
         Eigen::Map<VecD>(ctx.in_adj[1].data, n) += q * rt.solve(seed);
     } else if (ctx.in_adj[0].data) {
       // vd branch.
-      MapM(ctx.in_adj[0].data, n, n) -=
-          q * rt.solve(seed) * result.transpose();
+      MapM(ctx.in_adj[0].data, n, n) -= q * rt.solve(seed) * result.transpose();
     }
   } else {
     CMapM seed(ctx.out_adj_vec.data, n, k);
@@ -952,14 +949,12 @@ void prepared_mdivide_left_active_bwd(KernelCtx& ctx) {
       MatD adj_b = q * rt.solve(seed);
       if (ctx.in_adj[0].data)
         MapM(ctx.in_adj[0].data, n, n) -= adj_b * result.transpose();
-      if (ctx.in_adj[1].data)
-        MapM(ctx.in_adj[1].data, n, k) += adj_b;
+      if (ctx.in_adj[1].data) MapM(ctx.in_adj[1].data, n, k) += adj_b;
     } else if (dividend_active) {
       if (ctx.in_adj[1].data)
         MapM(ctx.in_adj[1].data, n, k) += q * rt.solve(seed);
     } else if (ctx.in_adj[0].data) {
-      MapM(ctx.in_adj[0].data, n, n) -=
-          q * rt.solve(seed) * result.transpose();
+      MapM(ctx.in_adj[0].data, n, n) -= q * rt.solve(seed) * result.transpose();
     }
   }
 }
@@ -1012,11 +1007,10 @@ void prepared_mdivide_left_prim_lu_fwd_t(KernelCtx& ctx) {
     finite_nonzero_diagonal =
         std::isfinite(lu.matrixLU()(i, i)) && lu.matrixLU()(i, i) != 0.0;
   const double rcond = finite_nonzero_diagonal ? lu.rcond() : 0.0;
-  ctx.scratch[n * n + n] =
-      finite_nonzero_diagonal && std::isfinite(rcond) &&
-              rcond >= kPreparedPrimLuMinRcond
-          ? rcond
-          : -1.0;
+  ctx.scratch[n * n + n] = finite_nonzero_diagonal && std::isfinite(rcond) &&
+                                   rcond >= kPreparedPrimLuMinRcond
+                               ? rcond
+                               : -1.0;
 }
 
 void prepared_mdivide_left_prim_lu_fwd(KernelCtx& ctx) {
@@ -1024,16 +1018,15 @@ void prepared_mdivide_left_prim_lu_fwd(KernelCtx& ctx) {
                      : prepared_mdivide_left_prim_lu_fwd_t<false>(ctx);
 }
 
-bool prepared_prim_lu_permutation(const KernelCtx& ctx, int64_t n,
-                                  Eigen::PermutationMatrix<Eigen::Dynamic,
-                                                           Eigen::Dynamic,
-                                                           int>* permutation) {
+bool prepared_prim_lu_permutation(
+    const KernelCtx& ctx, int64_t n,
+    Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, int>*
+        permutation) {
   permutation->resize(n);
   std::vector<uint8_t> seen(static_cast<size_t>(n), 0);
   for (int64_t i = 0; i < n; ++i) {
     const double raw = ctx.scratch[n * n + i];
-    if (!std::isfinite(raw) || raw < 0.0 || raw >= n ||
-        raw != std::floor(raw))
+    if (!std::isfinite(raw) || raw < 0.0 || raw >= n || raw != std::floor(raw))
       return false;
     const int index = static_cast<int>(raw);
     if (seen[static_cast<size_t>(index)] != 0) return false;
@@ -1067,9 +1060,8 @@ void prepared_mdivide_left_prim_lu_bwd_t(KernelCtx& ctx) {
     CMapV seed(ctx.out_adj_vec.data, n);
     VecD adj_b =
         lu.template triangularView<Eigen::Upper>().transpose().solve(seed);
-    lu.template triangularView<Eigen::UnitLower>()
-        .transpose()
-        .solveInPlace(adj_b);
+    lu.template triangularView<Eigen::UnitLower>().transpose().solveInPlace(
+        adj_b);
     adj_b = permutation.transpose() * adj_b;
     if (divisor_active && ctx.in_adj[0].data)
       MapM(ctx.in_adj[0].data, n, n) -=
@@ -1080,9 +1072,8 @@ void prepared_mdivide_left_prim_lu_bwd_t(KernelCtx& ctx) {
     CMapM seed(ctx.out_adj_vec.data, n, k);
     MatD adj_b =
         lu.template triangularView<Eigen::Upper>().transpose().solve(seed);
-    lu.template triangularView<Eigen::UnitLower>()
-        .transpose()
-        .solveInPlace(adj_b);
+    lu.template triangularView<Eigen::UnitLower>().transpose().solveInPlace(
+        adj_b);
     adj_b = permutation.transpose() * adj_b;
     if (divisor_active && ctx.in_adj[0].data)
       MapM(ctx.in_adj[0].data, n, n) -=
@@ -1103,8 +1094,8 @@ int64_t prepared_mdivide_left_prim_lu_scratch(const Op& op, const Slot*) {
       op.idata[0] < 0 || op.idata[1] < 0)
     return 0;
   const int64_t n = op.idata[0];
-  if (n > (std::numeric_limits<int64_t>::max() - n - 1) /
-              std::max<int64_t>(n, 1))
+  if (n >
+      (std::numeric_limits<int64_t>::max() - n - 1) / std::max<int64_t>(n, 1))
     throw std::overflow_error("prepared prim-LU mdivide_left scratch overflow");
   return n * n + n + 1;
 }
@@ -1708,9 +1699,9 @@ void register_matrix_kernels() {
   register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, nullptr});
   register_kernel(OP_MATRIX_EXP,
                   Kernel{matrix_exp_fwd, matrix_exp_bwd, nullptr});
-  register_kernel(OP_MATRIX_EXP_BLOCK_FRECHET,
-                  Kernel{matrix_exp_fwd, matrix_exp_block_frechet_bwd,
-                         nullptr});
+  register_kernel(
+      OP_MATRIX_EXP_BLOCK_FRECHET,
+      Kernel{matrix_exp_fwd, matrix_exp_block_frechet_bwd, nullptr});
   register_kernel(OP_INVERSE, Kernel{inverse_fwd, inverse_bwd, nullptr});
   register_kernel(OP_INVERSE_SPD,
                   Kernel{inverse_spd_fwd, inverse_spd_bwd, nullptr});
@@ -1730,8 +1721,7 @@ void register_matrix_kernels() {
   register_kernel(OP_MDIVIDE_LEFT,
                   Kernel{solve_fwd<true>, solve_bwd<true>, nullptr});
   register_kernel(OP_MDIVIDE_LEFT_PREPARED,
-                  Kernel{prepared_mdivide_left_fwd,
-                         prepared_mdivide_left_bwd,
+                  Kernel{prepared_mdivide_left_fwd, prepared_mdivide_left_bwd,
                          prepared_mdivide_left_scratch});
   register_kernel(OP_MDIVIDE_LEFT_PREPARED_PRIM_LU,
                   Kernel{prepared_mdivide_left_prim_lu_fwd,

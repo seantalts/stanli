@@ -72,9 +72,8 @@ void expect_exact(double got, double want, const std::string& message) {
 void parity_at(Executor* executor, IslandProg* program, int condition_param,
                double condition, const char* label) {
   for (int64_t k = 0; k < executor->n_params(); ++k)
-    executor->params_data()[k] =
-        0.1 + 0.05 * static_cast<double>(k % 7) -
-        0.15 * static_cast<double>(k % 3);
+    executor->params_data()[k] = 0.1 + 0.05 * static_cast<double>(k % 7) -
+                                 0.15 * static_cast<double>(k % 3);
   executor->params_data()[condition_param] = condition;
 
   std::vector<double> native(static_cast<size_t>(executor->n_params()));
@@ -137,10 +136,9 @@ void test_structured_diag_cfg_canary() {
                          });
   };
   const auto count_reverse = [&](Program::Code code) {
-    return std::count_if(program.adj.code.begin(), program.adj.code.end(),
-                         [&](const AdjInstr& instruction) {
-                           return instruction.code == code;
-                         });
+    return std::count_if(
+        program.adj.code.begin(), program.adj.code.end(),
+        [&](const AdjInstr& instruction) { return instruction.code == code; });
   };
   expect(count_forward(Program::DIAG_PRE_MULTIPLY) == 1,
          "diag CFG retains one DIAG_PRE_MULTIPLY");

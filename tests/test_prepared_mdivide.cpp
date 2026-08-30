@@ -78,15 +78,13 @@ Result stan_reference(const std::vector<double>& a_value,
       result.value[i] = out.data()[i].val();
       seed_matrix.data()[i] = seed[i];
     }
-    stan::math::var objective = stan::math::sum(
-        stan::math::elt_multiply(out, seed_matrix));
+    stan::math::var objective =
+        stan::math::sum(stan::math::elt_multiply(out, seed_matrix));
     stan::math::grad(objective.vi_);
     if (a)
-      for (int i = 0; i < n * n; ++i)
-        result.a_adj[i] = a->data()[i].adj();
+      for (int i = 0; i < n * n; ++i) result.a_adj[i] = a->data()[i].adj();
     if (b)
-      for (int i = 0; i < n * k; ++i)
-        result.b_adj[i] = b->data()[i].adj();
+      for (int i = 0; i < n * k; ++i) result.b_adj[i] = b->data()[i].adj();
   };
 
   if constexpr (Detail == 3u) {
@@ -154,8 +152,7 @@ template <bool Vec, unsigned Detail>
 void check_kernel_case(const char* name) {
   constexpr int n = 3;
   const int k = Vec ? 1 : 2;
-  const std::vector<double> a{1.3, -0.2, 0.4, 0.1, 1.7,
-                              -0.3, 0.2, 0.5, 1.1};
+  const std::vector<double> a{1.3, -0.2, 0.4, 0.1, 1.7, -0.3, 0.2, 0.5, 1.1};
   const std::vector<double> b =
       Vec ? std::vector<double>{0.7, -1.2, 0.3}
           : std::vector<double>{0.7, -1.2, 0.3, 0.2, 0.9, -0.4};
@@ -178,8 +175,7 @@ void check_kernel_case(const char* name) {
 IslandProg cfg_solve() {
   IslandProg p;
   p.n_regs = 9;
-  p.ins = {{0, 1, -1, 0, false}, {1, 4, -1, 0, true},
-           {5, 2, -1, 0, true}};
+  p.ins = {{0, 1, -1, 0, false}, {1, 4, -1, 0, true}, {5, 2, -1, 0, true}};
   p.out_regs = {7, 8};
   p.code = {{Program::MOVR, 7, 5, 0, 0, 2},
             {Program::JZ, 3, 0},
@@ -190,8 +186,10 @@ IslandProg cfg_solve() {
 IslandProg cfg_two_solves() {
   IslandProg p;
   p.n_regs = 24;
-  p.ins = {{0, 1, -1, 0, false}, {1, 4, -1, 0, true},
-           {5, 2, -1, 0, true},  {7, 9, -1, 0, true},
+  p.ins = {{0, 1, -1, 0, false},
+           {1, 4, -1, 0, true},
+           {5, 2, -1, 0, true},
+           {7, 9, -1, 0, true},
            {16, 3, -1, 0, true}};
   p.out_regs = {19, 20, 21, 22, 23};
   p.code = {{Program::JZ, 3, 0},
@@ -201,48 +199,44 @@ IslandProg cfg_two_solves() {
 }
 
 void expect_two_solve_structure(const char* name, const IslandProg& p,
-                                uint16_t small_opcode,
-                                uint16_t large_opcode, int small_scratch,
-                                int large_scratch, Program::Code small_code,
+                                uint16_t small_opcode, uint16_t large_opcode,
+                                int small_scratch, int large_scratch,
+                                Program::Code small_code,
                                 Program::Code large_code, int n_regs) {
   expect(std::string(name) + " generated", !p.adj.code.empty());
   expect(std::string(name) + " exact calls", p.calls.size() == 2);
   if (p.calls.size() != 2) return;
   const auto& small = p.calls[0];
   const auto& large = p.calls[1];
-  expect(std::string(name) + " small opcode",
-         small.opcode == small_opcode);
-  expect(std::string(name) + " large opcode",
-         large.opcode == large_opcode);
+  expect(std::string(name) + " small opcode", small.opcode == small_opcode);
+  expect(std::string(name) + " large opcode", large.opcode == large_opcode);
   expect(std::string(name) + " small scratch",
          small.scratch_len == small_scratch);
   expect(std::string(name) + " large scratch",
          large.scratch_len == large_scratch);
   expect(std::string(name) + " exact small call",
          small.variant == 15 && small.n_in == 2 && small.in[0] == 1 &&
-             small.in_len[0] == 4 && small.in[1] == 5 &&
-             small.in_len[1] == 2 && small.out == 19 &&
-             small.out_len == 2 && small.idata.size() == 2 &&
+             small.in_len[0] == 4 && small.in[1] == 5 && small.in_len[1] == 2 &&
+             small.out == 19 && small.out_len == 2 && small.idata.size() == 2 &&
              small.idata[0] == 2 && small.idata[1] == 1);
   expect(std::string(name) + " exact large call",
          large.variant == 15 && large.n_in == 2 && large.in[0] == 7 &&
              large.in_len[0] == 9 && large.in[1] == 16 &&
-             large.in_len[1] == 3 && large.out == 21 &&
-             large.out_len == 3 && large.idata.size() == 2 &&
-             large.idata[0] == 3 && large.idata[1] == 1);
+             large.in_len[1] == 3 && large.out == 21 && large.out_len == 3 &&
+             large.idata.size() == 2 && large.idata[0] == 3 &&
+             large.idata[1] == 1);
   expect(std::string(name) + " instruction spellings",
          p.code.size() == 3 && p.code[1].code == small_code &&
              p.code[2].code == large_code);
   const int forward_calls = static_cast<int>(std::count_if(
-      p.code.begin(), p.code.end(),
-      [](const Program::Instr& instruction) {
+      p.code.begin(), p.code.end(), [](const Program::Instr& instruction) {
         return instruction.code == Program::CALL;
       }));
-  const int backward_calls = static_cast<int>(std::count_if(
-      p.adj.code.begin(), p.adj.code.end(),
-      [](const stanli::AdjInstr& instruction) {
-        return instruction.code == Program::CALL;
-      }));
+  const int backward_calls =
+      static_cast<int>(std::count_if(p.adj.code.begin(), p.adj.code.end(),
+                                     [](const stanli::AdjInstr& instruction) {
+                                       return instruction.code == Program::CALL;
+                                     }));
   expect(std::string(name) + " forward call count",
          forward_calls == (small_scratch != 0) + (large_scratch != 0));
   expect(std::string(name) + " backward call count", backward_calls == 2);
@@ -252,19 +246,19 @@ void expect_two_solve_structure(const char* name, const IslandProg& p,
            small.scratch == 24 &&
                small.scratch + small.scratch_len <=
                    static_cast<int>(p.adj.adj_reg.size()) &&
-               std::all_of(p.adj.adj_reg.begin() + small.scratch,
-                           p.adj.adj_reg.begin() + small.scratch +
-                               small.scratch_len,
-                           [](int32_t reg) { return reg == 0; }));
+               std::all_of(
+                   p.adj.adj_reg.begin() + small.scratch,
+                   p.adj.adj_reg.begin() + small.scratch + small.scratch_len,
+                   [](int32_t reg) { return reg == 0; }));
   if (large_scratch != 0)
     expect(std::string(name) + " large private scratch",
            large.scratch == 24 + small_scratch &&
                large.scratch + large.scratch_len <=
                    static_cast<int>(p.adj.adj_reg.size()) &&
-               std::all_of(p.adj.adj_reg.begin() + large.scratch,
-                           p.adj.adj_reg.begin() + large.scratch +
-                               large.scratch_len,
-                           [](int32_t reg) { return reg == 0; }));
+               std::all_of(
+                   p.adj.adj_reg.begin() + large.scratch,
+                   p.adj.adj_reg.begin() + large.scratch + large.scratch_len,
+                   [](int32_t reg) { return reg == 0; }));
 }
 
 void check_force_seam() {
@@ -283,17 +277,16 @@ void check_force_seam() {
   expect("prepared cfg generated", stanli::gen_cfg_adjoint(prepared));
   expect("prepared exact producer CALL",
          prepared.calls.size() == 1 &&
-             prepared.calls[0].opcode ==
-                 stanli::OP_MDIVIDE_LEFT_PREPARED &&
+             prepared.calls[0].opcode == stanli::OP_MDIVIDE_LEFT_PREPARED &&
              prepared.calls[0].scratch_len == 6 &&
              prepared.code[2].code == Program::CALL);
   if (!prepared.calls.empty()) {
     const auto& call = prepared.calls[0];
-    bool value_only = call.scratch >= 0 &&
-                      call.scratch + call.scratch_len <= prepared.n_regs;
+    bool value_only =
+        call.scratch >= 0 && call.scratch + call.scratch_len <= prepared.n_regs;
     for (int i = 0; i < call.scratch_len && value_only; ++i)
-      value_only = prepared.adj.adj_reg[call.scratch + i] ==
-                   prepared.adj.adj_reg[0];
+      value_only =
+          prepared.adj.adj_reg[call.scratch + i] == prepared.adj.adj_reg[0];
     expect("prepared scratch private value-only", value_only);
   }
 
@@ -307,46 +300,44 @@ void check_force_seam() {
 
   IslandProg all = cfg_two_solves();
   expect("all-solves cfg generated", stanli::gen_cfg_adjoint(all));
-  expect_two_solve_structure(
-      "all-solves", all, stanli::OP_MDIVIDE_LEFT_PREPARED,
-      stanli::OP_MDIVIDE_LEFT_PREPARED, 6, 12, Program::CALL, Program::CALL,
-      42);
+  expect_two_solve_structure("all-solves", all,
+                             stanli::OP_MDIVIDE_LEFT_PREPARED,
+                             stanli::OP_MDIVIDE_LEFT_PREPARED, 6, 12,
+                             Program::CALL, Program::CALL, 42);
 
   test_setenv("STANLI_CFG_PREPARED_MDIVIDE_LEFT_MIN_N", "3");
   IslandProg threshold = cfg_two_solves();
   expect("threshold cfg generated", stanli::gen_cfg_adjoint(threshold));
-  expect_two_solve_structure(
-      "threshold", threshold, stanli::OP_MDIVIDE_LEFT,
-      stanli::OP_MDIVIDE_LEFT_PREPARED, 0, 12, Program::MDIVIDE_LEFT,
-      Program::CALL, 36);
+  expect_two_solve_structure("threshold", threshold, stanli::OP_MDIVIDE_LEFT,
+                             stanli::OP_MDIVIDE_LEFT_PREPARED, 0, 12,
+                             Program::MDIVIDE_LEFT, Program::CALL, 36);
 
   test_setenv("STANLI_CFG_PREPARED_MDIVIDE_LEFT_MIN_N", "2");
   IslandProg inclusive = cfg_two_solves();
   expect("inclusive threshold cfg generated",
          stanli::gen_cfg_adjoint(inclusive));
-  expect_two_solve_structure(
-      "inclusive threshold", inclusive,
-      stanli::OP_MDIVIDE_LEFT_PREPARED,
-      stanli::OP_MDIVIDE_LEFT_PREPARED, 6, 12, Program::CALL, Program::CALL,
-      42);
+  expect_two_solve_structure("inclusive threshold", inclusive,
+                             stanli::OP_MDIVIDE_LEFT_PREPARED,
+                             stanli::OP_MDIVIDE_LEFT_PREPARED, 6, 12,
+                             Program::CALL, Program::CALL, 42);
 
   test_setenv("STANLI_CFG_PREPARED_MDIVIDE_LEFT_MIN_N", "invalid");
   IslandProg invalid = cfg_two_solves();
   expect("invalid threshold cfg generated", stanli::gen_cfg_adjoint(invalid));
-  expect_two_solve_structure(
-      "invalid threshold", invalid, stanli::OP_MDIVIDE_LEFT,
-      stanli::OP_MDIVIDE_LEFT, 0, 0, Program::MDIVIDE_LEFT,
-      Program::MDIVIDE_LEFT, 24);
+  expect_two_solve_structure("invalid threshold", invalid,
+                             stanli::OP_MDIVIDE_LEFT, stanli::OP_MDIVIDE_LEFT,
+                             0, 0, Program::MDIVIDE_LEFT, Program::MDIVIDE_LEFT,
+                             24);
 
   test_unsetenv("STANLI_CFG_PREPARED_MDIVIDE_LEFT");
   test_setenv("STANLI_CFG_PREPARED_MDIVIDE_LEFT_MIN_N", "2");
   IslandProg threshold_only = cfg_two_solves();
   expect("threshold-only cfg generated",
          stanli::gen_cfg_adjoint(threshold_only));
-  expect_two_solve_structure(
-      "threshold-only production-off", threshold_only,
-      stanli::OP_MDIVIDE_LEFT, stanli::OP_MDIVIDE_LEFT, 0, 0,
-      Program::MDIVIDE_LEFT, Program::MDIVIDE_LEFT, 24);
+  expect_two_solve_structure("threshold-only production-off", threshold_only,
+                             stanli::OP_MDIVIDE_LEFT, stanli::OP_MDIVIDE_LEFT,
+                             0, 0, Program::MDIVIDE_LEFT, Program::MDIVIDE_LEFT,
+                             24);
   test_unsetenv("STANLI_CFG_PREPARED_MDIVIDE_LEFT_MIN_N");
 }
 

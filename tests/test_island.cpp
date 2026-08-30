@@ -40,8 +40,7 @@ static void expect_close(const std::string& what, double got, double want) {
 static void expect_bitwise(const std::string& what, double got, double want) {
   if (std::memcmp(&got, &want, sizeof(double)) != 0) {
     ++failures;
-    std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got,
-                want);
+    std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got, want);
   }
 }
 
@@ -1116,11 +1115,8 @@ static Graph build_selector_island(double threshold) {
   selector->ins = {{0, 1}, {1, 1}, {2, 1}};
   selector->pool = {threshold};
   selector->code = {
-      {Program::CONST, 3, 0},
-      {Program::GT, 4, 0, 3},
-      {Program::JZ, 5, 4},
-      {Program::MOV, 1, 2},
-      {Program::JMP, 5},
+      {Program::CONST, 3, 0}, {Program::GT, 4, 0, 3}, {Program::JZ, 5, 4},
+      {Program::MOV, 1, 2},   {Program::JMP, 5},
   };
   selector->out_regs = {1};
   expect("selector island recognized", supports_selector_adjoint(*selector));
@@ -1173,15 +1169,9 @@ static Graph build_cfg_island(double threshold) {
   program->ins = {{0, 1}, {1, 1}, {2, 1}};
   program->pool = {threshold};
   program->code = {
-      {Program::CONST, 3, 0},
-      {Program::GT, 4, 0, 3},
-      {Program::JZ, 6, 4},
-      {Program::MUL, 5, 1, 2},
-      {Program::MOV, 6, 5},
-      {Program::JMP, 8},
-      {Program::SQUARE, 5, 1},
-      {Program::MOV, 6, 5},
-      {Program::ADD, 6, 6, 2},
+      {Program::CONST, 3, 0},  {Program::GT, 4, 0, 3}, {Program::JZ, 6, 4},
+      {Program::MUL, 5, 1, 2}, {Program::MOV, 6, 5},   {Program::JMP, 8},
+      {Program::SQUARE, 5, 1}, {Program::MOV, 6, 5},   {Program::ADD, 6, 6, 2},
   };
   program->out_regs = {6};
   expect("cfg island adjoint generated", gen_cfg_adjoint(*program));
@@ -1313,8 +1303,7 @@ static SparseIslandGraph build_sparse_alias_island(int chain) {
   return built;
 }
 
-static SparseIslandGraph build_sparse_cfg_island(double threshold,
-                                                  int chain) {
+static SparseIslandGraph build_sparse_cfg_island(double threshold, int chain) {
   SparseIslandGraph built;
   Graph& g = built.graph;
   const int condition = g.add_slot(1, true);
@@ -1323,12 +1312,9 @@ static SparseIslandGraph build_sparse_cfg_island(double threshold,
   auto program = std::make_shared<IslandProg>();
   program->ins = {{0, 1}, {1, 1}, {2, 1}};
   program->pool = {threshold};
-  program->code = {{Program::CONST, 3, 0},
-                   {Program::GT, 4, 0, 3},
-                   {Program::JZ, 5, 4},
-                   {Program::MUL, 5, 1, 2},
-                   {Program::JMP, 6},
-                   {Program::SQUARE, 5, 1},
+  program->code = {{Program::CONST, 3, 0}, {Program::GT, 4, 0, 3},
+                   {Program::JZ, 5, 4},    {Program::MUL, 5, 1, 2},
+                   {Program::JMP, 6},      {Program::SQUARE, 5, 1},
                    {Program::ADD, 6, 5, 2}};
   int previous = 6;
   for (int i = 0; i < chain; ++i) {
@@ -1418,10 +1404,8 @@ static void test_sparse_native_reset() {
       run_grad(build_sparse_cfg_island(0.2, 320).graph, {});
   const std::vector<double> large_second =
       run_grad(build_sparse_alias_island(640).graph, {});
-  expect_bitwise_vector("sparse alternating large", large_second,
-                        large_first);
-  expect_close("sparse alternating small value", small[0],
-               0.45 * 0.60 + 0.60);
+  expect_bitwise_vector("sparse alternating large", large_second, large_first);
+  expect_close("sparse alternating small value", small[0], 0.45 * 0.60 + 0.60);
 
   // Executor copies share immutable island payloads but own their arenas;
   // their native adjoint workspaces must remain independent TLS state.
@@ -1470,10 +1454,8 @@ static void sparse_test_call_fwd(KernelCtx& ctx) {
 static void sparse_test_call_bwd(KernelCtx& ctx) {
   if (sparse_test_throw_backward)
     throw std::runtime_error("injected sparse island backward failure");
-  if (ctx.in_adj[0].data)
-    ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[0];
-  if (ctx.in_adj[1].data)
-    ctx.in_adj[1].data[0] += ctx.out_adj_vec.data[0];
+  if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[0];
+  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += ctx.out_adj_vec.data[0];
 }
 
 static SparseIslandGraph build_sparse_throw_island(int chain) {
@@ -1916,7 +1898,8 @@ static void test_explicit_fragment_nested_payload_owner() {
   // the inner native island backward, exercising nested workspace depth and
   // ensuring the outer adjoint allocation remains intact while the inner
   // sweep runs.
-  auto outer_payload = std::make_shared<IslandProg>(std::move(fragment.program));
+  auto outer_payload =
+      std::make_shared<IslandProg>(std::move(fragment.program));
   Graph outer_graph;
   const int outer_input = outer_graph.add_slot(1, true);
   const int outer_output = outer_graph.add_slot(1, false);

@@ -505,7 +505,8 @@ struct Lowering {
     std::map<std::string, std::optional<DataMap::Entry>> td_bindings;
     std::set<std::string> td_keys;
     std::set<std::string> scheduled_runtime_ints;
-    const std::map<const mir::Stmt*, bool>* scheduled_one_trip_sources = nullptr;
+    const std::map<const mir::Stmt*, bool>* scheduled_one_trip_sources =
+        nullptr;
     int udf_depth = 0;
     bool in_write_array = false;
     std::optional<size_t> n_tp_start, n_gq_start;
@@ -2375,8 +2376,7 @@ struct Lowering {
     for (const auto& k : s.body) assigned_names(k, out);
   }
 
-  static void declared_names(const mir::Stmt& s,
-                             std::set<std::string>* out) {
+  static void declared_names(const mir::Stmt& s, std::set<std::string>* out) {
     if (s.kind == mir::Stmt::Decl) out->insert(s.decl_id);
     for (const mir::Stmt& child : s.body) declared_names(child, out);
   }
@@ -2611,15 +2611,13 @@ struct Lowering {
     // programs, whose scratch has its own layout, on the legacy path.
     const bool generated =
         gen_adjoint(*prog) ||
-        (!std::getenv("STANLI_NO_CFG_NATIVE_ADJ") &&
-         gen_cfg_adjoint(*prog));
+        (!std::getenv("STANLI_NO_CFG_NATIVE_ADJ") && gen_cfg_adjoint(*prog));
     const bool native_enabled = !std::getenv("STANLI_NO_NATIVE_ADJ");
     prog->native_adj =
         generated && native_enabled && cfg_native_profitable(*prog);
-    prog->selector_adj =
-        !generated && native_enabled &&
-        !std::getenv("STANLI_NO_SELECTOR_ADJ") &&
-        supports_selector_adjoint(*prog);
+    prog->selector_adj = !generated && native_enabled &&
+                         !std::getenv("STANLI_NO_SELECTOR_ADJ") &&
+                         supports_selector_adjoint(*prog);
     *prog_out = std::move(prog);
   }
 
@@ -2654,8 +2652,7 @@ struct Lowering {
       return e.data_only;
     }
     if (e.kind == mir::Expr::FunApp &&
-        (e.name == "FnReadParam" ||
-         e.fn_lib == mir::Expr::Lib::UserDefined))
+        (e.name == "FnReadParam" || e.fn_lib == mir::Expr::Lib::UserDefined))
       return false;
     for (const mir::Expr& arg : e.args)
       if (!proven_param_free_expr(arg)) return false;
@@ -2678,8 +2675,7 @@ struct Lowering {
       return false;
     const mir::Stmt* assignments[2] = {sole_statement(statement.body[0]),
                                        sole_statement(statement.body[1])};
-    if (assignments[0] == nullptr || assignments[1] == nullptr)
-      return false;
+    if (assignments[0] == nullptr || assignments[1] == nullptr) return false;
     for (const mir::Stmt* assignment : assignments) {
       if (assignment->kind != mir::Stmt::Assignment ||
           assignment->lhs != name || !assignment->lhs_idx.empty() ||
@@ -2960,8 +2956,7 @@ struct Lowering {
     auto ai = a.begin();
     auto bi = b.begin();
     for (; ai != a.end(); ++ai, ++bi)
-      if (ai->first != bi->first ||
-          ai->second.is_int != bi->second.is_int ||
+      if (ai->first != bi->first || ai->second.is_int != bi->second.is_int ||
           ai->second.r != bi->second.r || ai->second.i != bi->second.i ||
           ai->second.dims != bi->second.dims)
         return false;
@@ -3015,14 +3010,14 @@ struct Lowering {
     return values;
   }
 
-  static bool same_scheduled_data_bindings(
-      const ScheduledDataBindings& a, const ScheduledDataBindings& b) {
+  static bool same_scheduled_data_bindings(const ScheduledDataBindings& a,
+                                           const ScheduledDataBindings& b) {
     if (a.size() != b.size()) return false;
     auto ai = a.begin();
     auto bi = b.begin();
     for (; ai != a.end(); ++ai, ++bi) {
-      if (ai->first != bi->first || ai->second.has_value() !=
-                                          bi->second.has_value())
+      if (ai->first != bi->first ||
+          ai->second.has_value() != bi->second.has_value())
         return false;
       if (!ai->second) continue;
       const DataMap::Entry& x = *ai->second;
@@ -3031,8 +3026,7 @@ struct Lowering {
           x.r.size() != y.r.size())
         return false;
       if (!x.r.empty() &&
-          std::memcmp(x.r.data(), y.r.data(), x.r.size() * sizeof(double)) !=
-              0)
+          std::memcmp(x.r.data(), y.r.data(), x.r.size() * sizeof(double)) != 0)
         return false;
     }
     return true;
@@ -3073,8 +3067,7 @@ struct Lowering {
     try {
       for (const mir::Expr& argument : index.args) {
         auto value = try_eval_scheduled_pure(argument);
-        if (!value || !value->is_int ||
-            value->i.size() != value->r.size()) {
+        if (!value || !value->is_int || value->i.size() != value->r.size()) {
           const bool runtime_owned = std::any_of(
               scheduled_runtime_ints.begin(), scheduled_runtime_ints.end(),
               [&](const std::string& name) {
@@ -3082,8 +3075,7 @@ struct Lowering {
               });
           if (runtime_owned) return true;
           if (std::getenv("STANLI_DEBUG_SCAN"))
-            std::fprintf(stderr,
-                         "scheduled row index value unavailable: %s\n",
+            std::fprintf(stderr, "scheduled row index value unavailable: %s\n",
                          index.name.c_str());
           return false;
         }
@@ -3132,9 +3124,8 @@ struct Lowering {
   bool fingerprint_scheduled_geometry(const mir::Stmt& statement,
                                       const std::string& loopvar,
                                       std::string* fingerprint) {
-    if ((statement.has_init &&
-         !fingerprint_scheduled_geometry(statement.init, loopvar,
-                                         fingerprint)) ||
+    if ((statement.has_init && !fingerprint_scheduled_geometry(
+                                   statement.init, loopvar, fingerprint)) ||
         !fingerprint_scheduled_geometry(statement.rhs, loopvar, fingerprint) ||
         !fingerprint_scheduled_geometry(statement.target, loopvar,
                                         fingerprint) ||
@@ -3233,11 +3224,10 @@ struct Lowering {
   // from disjoint columns of one packed row feed. Keeping one graph input for
   // all row data is important for real generated models, which routinely read
   // several arrays while Op itself has only six input fields.
-  bool rewrite_scheduled_expr(mir::Expr* e,
-                              const std::vector<std::string>& row_names,
-                              std::vector<ScheduledFeed>* feeds,
-                              const std::set<std::string>* forbidden_names =
-                                  nullptr) {
+  bool rewrite_scheduled_expr(
+      mir::Expr* e, const std::vector<std::string>& row_names,
+      std::vector<ScheduledFeed>* feeds,
+      const std::set<std::string>* forbidden_names = nullptr) {
     if (e->kind == mir::Expr::Var) {
       const auto known = int_env.find(e->name);
       if (known != int_env.end() && !scheduled_runtime_ints.count(e->name) &&
@@ -3286,8 +3276,7 @@ struct Lowering {
         }
         return true;
       }
-      if (value->r.empty())
-        return true;
+      if (value->r.empty()) return true;
       auto base = scope.find(e->args[0].name);
       if ((base == scope.end() && known_data == td.env().end()) ||
           (base != scope.end() && !base->second.si.param_free)) {
@@ -3326,9 +3315,9 @@ struct Lowering {
                          candidate.synthetic_name.c_str());
           return false;
         }
-      candidate.len = (int64_t)value->r.size();
-      candidate.si = si;
-      candidate.active = false;
+        candidate.len = (int64_t)value->r.size();
+        candidate.si = si;
+        candidate.active = false;
         candidate.placeholder_slot = add_slot(candidate.len, false);
         feeds->push_back(std::move(candidate));
         feed = &feeds->back();
@@ -3363,9 +3352,8 @@ struct Lowering {
          e->name == "IndexBetween" || e->name == "IndexUpfrom" ||
          e->name == "IndexMulti");
     const bool active_candidate =
-        !std::getenv("STANLI_NO_SCHEDULED_ACTIVE_FEEDS") &&
-        !index_descriptor && !e->data_only &&
-        scan_references_any(*e, row_names) &&
+        !std::getenv("STANLI_NO_SCHEDULED_ACTIVE_FEEDS") && !index_descriptor &&
+        !e->data_only && scan_references_any(*e, row_names) &&
         repeatable_target_expr(*e, std::string{}) &&
         !scan_references_forbidden(*e, forbidden_names);
     const mir::Expr active_source = active_candidate ? *e : mir::Expr{};
@@ -3449,8 +3437,7 @@ struct Lowering {
         ScheduledFeed candidate;
         candidate.source = active_source;
         candidate.synthetic_name =
-            "__stanli_scan_active_feed_" + std::to_string(feeds->size()) +
-            "__";
+            "__stanli_scan_active_feed_" + std::to_string(feeds->size()) + "__";
         if (scope.count(candidate.synthetic_name)) return false;
         candidate.placeholder_slot = value.slot;
         candidate.len = g.slots[(size_t)value.slot].len;
@@ -3471,8 +3458,7 @@ struct Lowering {
       }
       restore_trial();
       if (std::getenv("STANLI_DEBUG_SCAN"))
-        std::fprintf(stderr,
-                     "scheduled active feed has no active value: %s\n",
+        std::fprintf(stderr, "scheduled active feed has no active value: %s\n",
                      active_source.name.c_str());
     }
     return true;
@@ -3498,12 +3484,10 @@ struct Lowering {
          e->name == "IndexBetween" || e->name == "IndexUpfrom" ||
          e->name == "IndexMulti");
     const bool repeatable = repeatable_target_expr(*e, std::string{});
-    const bool forbidden =
-        scan_references_forbidden(*e, forbidden_names);
+    const bool forbidden = scan_references_forbidden(*e, forbidden_names);
     if (row_varying && !descriptor && e->kind != mir::Expr::Var && repeatable &&
         !forbidden) {
-      const std::optional<DataMap::Entry> value =
-          try_eval_scheduled_pure(*e);
+      const std::optional<DataMap::Entry> value = try_eval_scheduled_pure(*e);
       // UInt is also Stan's scalar condition representation. Requiring an
       // exact 0/1 integer prevents an arbitrary integer row value from being
       // hoisted merely because it is truthy.
@@ -3524,9 +3508,8 @@ struct Lowering {
         if (feed == nullptr) {
           ScheduledFeed candidate;
           candidate.source = source;
-          candidate.synthetic_name =
-              "__stanli_scan_control_feed_" +
-              std::to_string(feeds->size()) + "__";
+          candidate.synthetic_name = "__stanli_scan_control_feed_" +
+                                     std::to_string(feeds->size()) + "__";
           if (scope.count(candidate.synthetic_name)) return false;
           candidate.len = 1;
           candidate.si = view_of(e->type_);
@@ -3554,8 +3537,7 @@ struct Lowering {
                      "type=%s value=%d int=%d r=%zu i=%zu\n",
                      (int)e->kind, e->name.c_str(), e->type_.c_str(),
                      value.has_value(), value ? value->is_int : 0,
-                     value ? value->r.size() : 0,
-                     value ? value->i.size() : 0);
+                     value ? value->r.size() : 0, value ? value->i.size() : 0);
     } else if (row_varying && std::getenv("STANLI_DEBUG_SCAN")) {
       std::fprintf(stderr,
                    "scheduled control feed ineligible: kind=%d name=%s "
@@ -3584,9 +3566,9 @@ struct Lowering {
                                           necessarily_evaluated))
         return false;
       return rewrite_scheduled_control_expr(&e->args[1], row_names, feeds,
-                                             forbidden_names, false) &&
+                                            forbidden_names, false) &&
              rewrite_scheduled_control_expr(&e->args[2], row_names, feeds,
-                                             forbidden_names, false);
+                                            forbidden_names, false);
     }
     if (!necessarily_evaluated) return true;
     return rewrite_scheduled_expr(e, row_names, feeds, forbidden_names);
@@ -3595,16 +3577,14 @@ struct Lowering {
   // Fold every condition the concrete data can answer. An unresolved
   // parameter condition remains structured and is lowered through the normal
   // necessity-island path. Any unresolved iterator use refuses.
-  bool specialize_scheduled_stmt(const mir::Stmt& s,
-                                 const std::vector<std::string>& row_names,
-                                 std::vector<ScheduledFeed>* feeds,
-                                 mir::Stmt* out_stmt,
-                                 const std::set<std::string>* forbidden_names =
-                                     nullptr) {
+  bool specialize_scheduled_stmt(
+      const mir::Stmt& s, const std::vector<std::string>& row_names,
+      std::vector<ScheduledFeed>* feeds, mir::Stmt* out_stmt,
+      const std::set<std::string>* forbidden_names = nullptr) {
     const auto refuse = [&](const char* why, const std::string& name = {}) {
       if (std::getenv("STANLI_DEBUG_SCAN"))
-        std::fprintf(stderr, "scheduled specialization refused: %s%s%s\n",
-                     why, name.empty() ? "" : " ", name.c_str());
+        std::fprintf(stderr, "scheduled specialization refused: %s%s%s\n", why,
+                     name.empty() ? "" : " ", name.c_str());
       return false;
     };
     switch (s.kind) {
@@ -3628,8 +3608,8 @@ struct Lowering {
         };
         for (const mir::Stmt& child : s.body) {
           mir::Stmt specialized;
-          if (!specialize_scheduled_stmt(child, row_names, feeds,
-                                         &specialized, forbidden_names)) {
+          if (!specialize_scheduled_stmt(child, row_names, feeds, &specialized,
+                                         forbidden_names)) {
             restore_locals();
             return false;
           }
@@ -3673,8 +3653,7 @@ struct Lowering {
             std::fprintf(stderr, "scheduled runtime condition refs:");
             for (const std::string& name : refs)
               std::fprintf(stderr, " %s", name.c_str());
-            std::fprintf(stderr, " kind=%d name=%s\n",
-                         (int)out_stmt->cond.kind,
+            std::fprintf(stderr, " kind=%d name=%s\n", (int)out_stmt->cond.kind,
                          out_stmt->cond.name.c_str());
           }
           return refuse("runtime row condition");
@@ -3713,8 +3692,8 @@ struct Lowering {
         }
         if (!std::all_of(arm_data.begin(), arm_data.end(),
                          [&](const auto& exit_data) {
-                           return same_scheduled_data_bindings(
-                               arm_data.front(), exit_data);
+                           return same_scheduled_data_bindings(arm_data.front(),
+                                                               exit_data);
                          })) {
           restore_scheduled_data_bindings(entry_data);
           int_env = entry_ints;
@@ -3755,8 +3734,7 @@ struct Lowering {
           return true;
         }
         if (!scheduled_runtime_ints.count(s.lhs) && s.lhs_idx.empty() &&
-            s.rhs.data_only &&
-            s.rhs.type_ == "UInt" && int_env.count(s.lhs)) {
+            s.rhs.data_only && s.rhs.type_ == "UInt" && int_env.count(s.lhs)) {
           try {
             const long value = eval_int(s.rhs);
             int_env[s.lhs] = value;
@@ -3843,10 +3821,9 @@ struct Lowering {
         return true;
       case mir::Stmt::For:
       case mir::Stmt::While: {
-        const bool proven_one_trip =
-            s.kind == mir::Stmt::While &&
-            scheduled_one_trip_sources != nullptr &&
-            scheduled_one_trip_sources->count(&s) != 0;
+        const bool proven_one_trip = s.kind == mir::Stmt::While &&
+                                     scheduled_one_trip_sources != nullptr &&
+                                     scheduled_one_trip_sources->count(&s) != 0;
         const bool exactly_one_trip =
             proven_one_trip && scheduled_one_trip_sources->at(&s);
         if (!stmt_effectful(s)) {
@@ -3978,8 +3955,7 @@ struct Lowering {
         // therefore do not belong to the numerical template or its feeds.
         if (s.fn_name == "FnValidateSize") return true;
         for (mir::Expr& arg : out_stmt->fn_args) {
-          if (!rewrite_scheduled_expr(&arg, row_names, feeds,
-                                      forbidden_names))
+          if (!rewrite_scheduled_expr(&arg, row_names, feeds, forbidden_names))
             return refuse("call feed", s.fn_name);
           if (scan_has_numerical_row_reference(arg, row_names))
             return refuse("call row reference", s.fn_name);
@@ -4314,8 +4290,7 @@ struct Lowering {
         if (scheduled_int_container_decl(statement)) {
           if (!initialize_scheduled_int_container(statement)) {
             td.env().erase(statement.decl_id);
-            return refuse("integer container declaration",
-                          statement.decl_id);
+            return refuse("integer container declaration", statement.decl_id);
           }
           return true;
         }
@@ -4363,8 +4338,7 @@ struct Lowering {
           int_env.erase(statement.lhs);
           return true;
         }
-        if (int_env.count(statement.lhs) == 0)
-          return true;
+        if (int_env.count(statement.lhs) == 0) return true;
         try {
           int_env[statement.lhs] = eval_int(statement.rhs);
         } catch (const CompileError&) {
@@ -4382,8 +4356,7 @@ struct Lowering {
           }
           return refuse("integer assignment", statement.lhs);
         }
-        *fingerprint += "S=" +
-                        std::to_string(int_env[statement.lhs]) + ";";
+        *fingerprint += "S=" + std::to_string(int_env[statement.lhs]) + ";";
         return true;
       case mir::Stmt::IfElse: {
         std::optional<DataMap::Entry> selected;
@@ -4530,11 +4503,10 @@ struct Lowering {
           const auto id = condition_ids.find(&statement);
           if (id == condition_ids.end()) return refuse("loop id");
           *fingerprint += "L" + std::to_string(id->second) + "=" +
-                          std::to_string(lower) + "," +
-                          std::to_string(upper) + ";";
+                          std::to_string(lower) + "," + std::to_string(upper) +
+                          ";";
         }
-        if (upper >= lower &&
-            (uint64_t)upper - (uint64_t)lower >= 4096)
+        if (upper >= lower && (uint64_t)upper - (uint64_t)lower >= 4096)
           return refuse("numerical loop too large", statement.loopvar);
         // This loop remains in the runtime template. Visiting one abstract
         // iteration is enough to discover outer-row data control: values it
@@ -4686,8 +4658,7 @@ struct Lowering {
     return e;
   }
 
-  static void rewrite_scan_sink_expr(mir::Expr* e,
-                                     const std::string& loopvar,
+  static void rewrite_scan_sink_expr(mir::Expr* e, const std::string& loopvar,
                                      const std::string& row_alias,
                                      const std::string& previous_alias,
                                      const std::string& sink,
@@ -4716,21 +4687,22 @@ struct Lowering {
                              row_sink, rewrite_aliases);
   }
 
-  static void rewrite_scan_sink_stmt(
-      mir::Stmt* s, const std::string& loopvar,
-      const std::string& row_alias, const std::string& previous_alias,
-      const std::string& sink, const std::string& row_sink,
-      bool rewrite_aliases, int* sink_updates) {
+  static void rewrite_scan_sink_stmt(mir::Stmt* s, const std::string& loopvar,
+                                     const std::string& row_alias,
+                                     const std::string& previous_alias,
+                                     const std::string& sink,
+                                     const std::string& row_sink,
+                                     bool rewrite_aliases, int* sink_updates) {
     if (s->has_init)
-      rewrite_scan_sink_expr(&s->init, loopvar, row_alias, previous_alias,
-                             sink, row_sink, rewrite_aliases);
+      rewrite_scan_sink_expr(&s->init, loopvar, row_alias, previous_alias, sink,
+                             row_sink, rewrite_aliases);
     for (mir::Expr& dim : s->decl_type.dims)
       rewrite_scan_sink_expr(&dim, loopvar, row_alias, previous_alias, sink,
                              row_sink, rewrite_aliases);
     rewrite_scan_sink_expr(&s->rhs, loopvar, row_alias, previous_alias, sink,
                            row_sink, rewrite_aliases);
-    rewrite_scan_sink_expr(&s->target, loopvar, row_alias, previous_alias,
-                           sink, row_sink, rewrite_aliases);
+    rewrite_scan_sink_expr(&s->target, loopvar, row_alias, previous_alias, sink,
+                           row_sink, rewrite_aliases);
     rewrite_scan_sink_expr(&s->lower, loopvar, row_alias, previous_alias, sink,
                            row_sink, rewrite_aliases);
     rewrite_scan_sink_expr(&s->upper, loopvar, row_alias, previous_alias, sink,
@@ -4767,8 +4739,8 @@ struct Lowering {
 
   enum class ScheduledOpeningSinkResult { Safe, Writes, Unknown };
 
-  static bool scheduled_stmt_expression_reads_name(
-      const mir::Stmt& statement, const std::string& name) {
+  static bool scheduled_stmt_expression_reads_name(const mir::Stmt& statement,
+                                                   const std::string& name) {
     if ((statement.has_init && expr_references(statement.init, name)) ||
         expr_references(statement.rhs, name) ||
         expr_references(statement.target, name) ||
@@ -4786,8 +4758,7 @@ struct Lowering {
   }
 
   static bool scheduled_expr_references_any(
-      const mir::Expr& expression,
-      const std::set<std::string>& invalid_names) {
+      const mir::Expr& expression, const std::set<std::string>& invalid_names) {
     for (const std::string& name : invalid_names)
       if (expr_references(expression, name)) return true;
     return false;
@@ -4798,8 +4769,7 @@ struct Lowering {
   // data-only left leaf fixes the result, so probing the whole expression
   // would unnecessarily (and incorrectly) require the parameter RHS.
   std::optional<bool> try_eval_scheduled_opening_bool(
-      const mir::Expr& expression,
-      const std::set<std::string>& invalid_names) {
+      const mir::Expr& expression, const std::set<std::string>& invalid_names) {
     const mir::Expr* e = scan_unpromoted(&expression);
     if (e->kind == mir::Expr::EOr || e->kind == mir::Expr::EAnd) {
       if (e->args.size() != 2) return std::nullopt;
@@ -4925,8 +4895,7 @@ struct Lowering {
         for (const mir::Stmt& arm : statement.body)
           if (scan_stmt_defines_name(arm, sink))
             return ScheduledOpeningSinkResult::Unknown;
-        for (const mir::Stmt& arm : statement.body)
-          invalidate_assignments(arm);
+        for (const mir::Stmt& arm : statement.body) invalidate_assignments(arm);
         return ScheduledOpeningSinkResult::Safe;
       }
       case mir::Stmt::For:
@@ -5004,8 +4973,7 @@ struct Lowering {
         const mir::Stmt& assignment = statement->body[k + 1];
         if (assignment.kind == mir::Stmt::Assignment &&
             assignment.lhs_idx.empty() &&
-            assignment.lhs == declaration.decl_id &&
-            assignment.rhs.data_only) {
+            assignment.lhs == declaration.decl_id && assignment.rhs.data_only) {
           replacement = &assignment.rhs;
           first_use = k + 2;
         }
@@ -5013,8 +4981,8 @@ struct Lowering {
       if (replacement == nullptr) continue;
       bool redefined = false;
       for (size_t u = first_use; u < statement->body.size(); ++u)
-        redefined = redefined || scan_stmt_defines_name(
-                                     statement->body[u], declaration.decl_id);
+        redefined = redefined || scan_stmt_defines_name(statement->body[u],
+                                                        declaration.decl_id);
       if (redefined) continue;
       const mir::Expr value = *replacement;
       for (size_t u = first_use; u < statement->body.size(); ++u)
@@ -5032,8 +5000,7 @@ struct Lowering {
   }
 
   static void number_scheduled_whiles(
-      const mir::Stmt& statement,
-      std::map<const mir::Stmt*, int>* while_ids,
+      const mir::Stmt& statement, std::map<const mir::Stmt*, int>* while_ids,
       std::vector<const mir::Stmt*>* whiles) {
     if (statement.kind == mir::Stmt::While) {
       while_ids->emplace(&statement, (int)whiles->size());
@@ -5090,8 +5057,7 @@ struct Lowering {
   }
 
   static bool scheduled_condition_update_inputs_stable(
-      const mir::Stmt& statement,
-      const std::vector<const mir::Stmt*>& updates,
+      const mir::Stmt& statement, const std::vector<const mir::Stmt*>& updates,
       const std::set<std::string>& dependencies) {
     std::set<std::string> reads;
     for (const mir::Stmt* update : updates)
@@ -5153,12 +5119,12 @@ struct Lowering {
     return value->r[0] != 0.0;
   }
 
-  bool scheduled_one_trip_guard_safe(
-      const mir::Expr& expression, const std::set<std::string>& updated) {
-    const bool changes = std::any_of(
-        updated.begin(), updated.end(), [&](const std::string& name) {
-          return expr_references(expression, name);
-        });
+  bool scheduled_one_trip_guard_safe(const mir::Expr& expression,
+                                     const std::set<std::string>& updated) {
+    const bool changes = std::any_of(updated.begin(), updated.end(),
+                                     [&](const std::string& name) {
+                                       return expr_references(expression, name);
+                                     });
     if (!changes) {
       const auto value = try_eval_scheduled_pure(expression);
       return value && value->r.size() == 1;
@@ -5174,15 +5140,15 @@ struct Lowering {
         (expression.name == "Equals__" || expression.name == "NEquals__" ||
          expression.name == "Less__" || expression.name == "Leq__" ||
          expression.name == "Greater__" || expression.name == "Geq__");
-    const bool logical = expression.kind == mir::Expr::EAnd ||
-                         expression.kind == mir::Expr::EOr;
+    const bool logical =
+        expression.kind == mir::Expr::EAnd || expression.kind == mir::Expr::EOr;
     if (((comparison || logical) && expression.args.size() == 2) ||
         (expression.kind == mir::Expr::Promotion &&
          expression.args.size() == 1))
       return std::all_of(expression.args.begin(), expression.args.end(),
                          [&](const mir::Expr& argument) {
                            return scheduled_one_trip_guard_safe(argument,
-                                                                 updated);
+                                                                updated);
                          });
     return false;
   }
@@ -5190,26 +5156,25 @@ struct Lowering {
   bool trace_scheduled_one_trip(
       const mir::Stmt& statement,
       const std::map<const mir::Stmt*, ScheduledOneTripInfo>& while_info,
-      const ScheduledTraceNode* plan,
-      bool descend_fixed_for, bool stop_after_exact,
-      std::vector<int>* reached_whiles,
+      const ScheduledTraceNode* plan, bool descend_fixed_for,
+      bool stop_after_exact, std::vector<int>* reached_whiles,
       std::vector<ScheduledOneTripVisit>* exact_whiles) {
     switch (statement.kind) {
       case mir::Stmt::Block:
       case mir::Stmt::SList: {
         if (plan != nullptr) {
           for (const ScheduledTraceNode& child : plan->body)
-            if (!trace_scheduled_one_trip(
-                    *child.statement, while_info, &child, descend_fixed_for,
-                    stop_after_exact, reached_whiles, exact_whiles))
+            if (!trace_scheduled_one_trip(*child.statement, while_info, &child,
+                                          descend_fixed_for, stop_after_exact,
+                                          reached_whiles, exact_whiles))
               return false;
             else if (stop_after_exact && !exact_whiles->empty())
               return true;
         } else {
           for (const mir::Stmt& child : statement.body)
-            if (!trace_scheduled_one_trip(
-                    child, while_info, nullptr, descend_fixed_for,
-                    stop_after_exact, reached_whiles, exact_whiles))
+            if (!trace_scheduled_one_trip(child, while_info, nullptr,
+                                          descend_fixed_for, stop_after_exact,
+                                          reached_whiles, exact_whiles))
               return false;
             else if (stop_after_exact && !exact_whiles->empty())
               return true;
@@ -5252,13 +5217,12 @@ struct Lowering {
               restore_scheduled_data_bindings(entry_data);
               int_env = entry_ints;
               const ScheduledTraceNode* arm_plan =
-                  plan != nullptr && arm < plan->body.size()
-                      ? &plan->body[arm]
-                      : nullptr;
-              if (!trace_scheduled_one_trip(
-                      statement.body[arm], while_info, arm_plan,
-                      descend_fixed_for, stop_after_exact, reached_whiles,
-                      exact_whiles)) {
+                  plan != nullptr && arm < plan->body.size() ? &plan->body[arm]
+                                                             : nullptr;
+              if (!trace_scheduled_one_trip(statement.body[arm], while_info,
+                                            arm_plan, descend_fixed_for,
+                                            stop_after_exact, reached_whiles,
+                                            exact_whiles)) {
                 restore_scheduled_data_bindings(entry_data);
                 int_env = entry_ints;
                 return false;
@@ -5278,7 +5242,7 @@ struct Lowering {
         if (arm >= statement.body.size()) return true;
         const ScheduledTraceNode* arm_plan =
             plan != nullptr && arm < plan->body.size() ? &plan->body[arm]
-                                                      : nullptr;
+                                                       : nullptr;
         return trace_scheduled_one_trip(
             statement.body[arm], while_info, arm_plan, descend_fixed_for,
             stop_after_exact, reached_whiles, exact_whiles);
@@ -5292,7 +5256,8 @@ struct Lowering {
             capture_scheduled_data_bindings(info.update_names);
         const auto fail_closed = [&](const char* why) {
           if (std::getenv("STANLI_DEBUG_SCAN")) {
-            std::fprintf(stderr, "scheduled one-trip while %d unavailable: %s\n",
+            std::fprintf(stderr,
+                         "scheduled one-trip while %d unavailable: %s\n",
                          info.id, why);
           }
           restore_scheduled_data_bindings(entry_data);
@@ -5319,8 +5284,7 @@ struct Lowering {
             scheduled_one_trip_guard_safe(statement.cond, info.update_names);
         const auto before = try_eval_scheduled_pure(statement.cond);
         const bool entered = before && before->r.size() == 1 &&
-                             std::isfinite(before->r[0]) &&
-                             before->r[0] != 0.0;
+                             std::isfinite(before->r[0]) && before->r[0] != 0.0;
         if (!partial_guard) {
           if (!entered) return fail_closed("condition before");
           for (const std::string& dependency : info.dependencies) {
@@ -5436,9 +5400,9 @@ struct Lowering {
               }
           } else {
             for (const mir::Stmt& child : statement.body)
-              if (!trace_scheduled_one_trip(
-                      child, while_info, nullptr, descend_fixed_for,
-                      stop_after_exact, reached_whiles, exact_whiles)) {
+              if (!trace_scheduled_one_trip(child, while_info, nullptr,
+                                            descend_fixed_for, stop_after_exact,
+                                            reached_whiles, exact_whiles)) {
                 restore_scoped();
                 return false;
               }
@@ -5488,10 +5452,9 @@ struct Lowering {
       for (const mir::Stmt& child : statement->body)
         scheduled_condition_updates(child, info.dependencies, &info.updates,
                                     &unsafe);
-      info.schema_safe =
-          !unsafe && !info.updates.empty() &&
-          scheduled_condition_update_inputs_stable(*statement, info.updates,
-                                                    info.dependencies);
+      info.schema_safe = !unsafe && !info.updates.empty() &&
+                         scheduled_condition_update_inputs_stable(
+                             *statement, info.updates, info.dependencies);
       for (const mir::Stmt* update : info.updates)
         info.update_names.insert(update->lhs);
       assigned_names(*statement, &info.assigned);
@@ -5513,10 +5476,10 @@ struct Lowering {
 
     const auto original_ints = int_env;
     const auto prove_pass = [&](const ScheduledTraceNode* plan,
-                                bool descend_fixed_for,
-                                bool stop_after_exact,
+                                bool descend_fixed_for, bool stop_after_exact,
                                 bool row_independent) {
-      std::vector<std::optional<std::map<int, bool>>> candidates(template_count);
+      std::vector<std::optional<std::map<int, bool>>> candidates(
+          template_count);
       const size_t row_count = row_independent ? 1 : schedule.size();
       for (size_t row = 0; row < row_count; ++row) {
         restore_locals();
@@ -5537,9 +5500,9 @@ struct Lowering {
         std::vector<ScheduledOneTripVisit> exact;
         bool traced = false;
         try {
-          traced = trace_scheduled_one_trip(
-              stable, while_info, plan, descend_fixed_for, stop_after_exact,
-              &reached, &exact);
+          traced = trace_scheduled_one_trip(stable, while_info, plan,
+                                            descend_fixed_for, stop_after_exact,
+                                            &reached, &exact);
         } catch (const std::exception& error) {
           if (std::getenv("STANLI_DEBUG_SCAN") && row < 3)
             std::fprintf(stderr, "scheduled one-trip trace error: %s\n",
@@ -5611,11 +5574,11 @@ struct Lowering {
       scan_indexed_assignment_names(child, names);
   }
 
-  static bool collect_scheduled_sink_expr(
-      const mir::Expr& expression, const std::string& sink,
-      std::vector<mir::Expr>* indices, bool* read) {
-    if (expression.kind == mir::Expr::Indexed &&
-        !expression.args.empty() &&
+  static bool collect_scheduled_sink_expr(const mir::Expr& expression,
+                                          const std::string& sink,
+                                          std::vector<mir::Expr>* indices,
+                                          bool* read) {
+    if (expression.kind == mir::Expr::Indexed && !expression.args.empty() &&
         expression.args[0].kind == mir::Expr::Var &&
         expression.args[0].name == sink) {
       if (expression.args.size() != 2 ||
@@ -5640,11 +5603,11 @@ struct Lowering {
   // control path, and all reads/writes must use one scalar cell whose index is
   // bijective across scheduled rows. Neighboring/range/whole-value accesses
   // therefore fail before rewrite_scan_sink_stmt can erase their geometry.
-  static bool collect_scheduled_sink_accesses(
-      const mir::Stmt& statement, const std::string& sink,
-      std::vector<mir::Expr>* indices, bool* definitely_written) {
-    const auto read_expression = [&](const mir::Expr& expression,
-                                     bool* read) {
+  static bool collect_scheduled_sink_accesses(const mir::Stmt& statement,
+                                              const std::string& sink,
+                                              std::vector<mir::Expr>* indices,
+                                              bool* definitely_written) {
+    const auto read_expression = [&](const mir::Expr& expression, bool* read) {
       return collect_scheduled_sink_expr(expression, sink, indices, read);
     };
     bool read = false;
@@ -5683,8 +5646,7 @@ struct Lowering {
       bool joined_written = true;
       for (const mir::Stmt& arm : statement.body) {
         bool arm_written = entry_written;
-        if (!collect_scheduled_sink_accesses(arm, sink, indices,
-                                             &arm_written))
+        if (!collect_scheduled_sink_accesses(arm, sink, indices, &arm_written))
           return false;
         joined_written = joined_written && arm_written;
       }
@@ -5712,11 +5674,13 @@ struct Lowering {
     return true;
   }
 
-  bool scheduled_sink_is_bijective(
-      const mir::Stmt& stable, const std::string& sink,
-      const std::string& loopvar, const std::string& row_alias,
-      const mir::Expr& row_value, const std::string& previous_alias,
-      long lo, int64_t count, int64_t extent) {
+  bool scheduled_sink_is_bijective(const mir::Stmt& stable,
+                                   const std::string& sink,
+                                   const std::string& loopvar,
+                                   const std::string& row_alias,
+                                   const mir::Expr& row_value,
+                                   const std::string& previous_alias, long lo,
+                                   int64_t count, int64_t extent) {
     std::vector<mir::Expr> indices;
     bool definitely_written = false;
     const auto bound = scope.find(sink);
@@ -5790,8 +5754,7 @@ struct Lowering {
   }
 
   bool normalize_scheduled_loop(const mir::Stmt& s, long lo, long hi,
-                                mir::Stmt* normalized,
-                                std::string* source_sink,
+                                mir::Stmt* normalized, std::string* source_sink,
                                 std::string* synthetic_sink) {
     const auto refuse = [&](const char* why) {
       if (std::getenv("STANLI_DEBUG_SCAN"))
@@ -5799,8 +5762,7 @@ struct Lowering {
                      "scheduled normalization refused: %s loop=%s rows=%lld"
                      " body=%zu block_kind=%d block_body=%zu\n",
                      why, s.loopvar.c_str(), (long long)(hi - lo),
-                     s.body.size(),
-                     s.body.empty() ? -1 : (int)s.body[0].kind,
+                     s.body.size(), s.body.empty() ? -1 : (int)s.body[0].kind,
                      s.body.empty() ? 0 : s.body[0].body.size());
       return false;
     };
@@ -5841,8 +5803,7 @@ struct Lowering {
         }
       }
     }
-    if (gate_index == block.body.size())
-      return refuse("first-row guard");
+    if (gate_index == block.body.size()) return refuse("first-row guard");
     const mir::Stmt& gate = block.body[gate_index];
 
     const mir::Stmt* row_decl = nullptr;
@@ -5853,8 +5814,7 @@ struct Lowering {
       if (declaration.kind == mir::Stmt::Decl &&
           declaration.decl_type.base == "SInt" &&
           assignment.kind == mir::Stmt::Assignment &&
-          assignment.lhs_idx.empty() &&
-          assignment.lhs == declaration.decl_id &&
+          assignment.lhs_idx.empty() && assignment.lhs == declaration.decl_id &&
           assignment.rhs.data_only &&
           expr_references(assignment.rhs, s.loopvar)) {
         if (row_decl != nullptr) return refuse("multiple row aliases");
@@ -5877,8 +5837,7 @@ struct Lowering {
         return refuse("multiple previous-row aliases");
       previous_assignment = &assignment;
     }
-    if (previous_assignment == nullptr)
-      return refuse("previous-row alias");
+    if (previous_assignment == nullptr) return refuse("previous-row alias");
 
     const int64_t count = static_cast<int64_t>(hi) - lo;
 
@@ -5907,17 +5866,17 @@ struct Lowering {
     std::vector<std::string> sink_candidates;
     scan_indexed_assignment_names(gate.body[0], &sink_candidates);
     sink_candidates.erase(
-        std::remove_if(sink_candidates.begin(), sink_candidates.end(),
-                       [&](const std::string& name) {
-                         const auto found = scope.find(name);
-                         return found == scope.end() ||
-                                g.slots[(size_t)found->second.slot].len != count ||
-                                !scheduled_sink_is_bijective(
-                                    gate.body[0], name, s.loopvar,
-                                    row_decl->decl_id, row_assignment->rhs,
-                                    previous_assignment->lhs, lo, count,
-                                    g.slots[(size_t)found->second.slot].len);
-                       }),
+        std::remove_if(
+            sink_candidates.begin(), sink_candidates.end(),
+            [&](const std::string& name) {
+              const auto found = scope.find(name);
+              return found == scope.end() ||
+                     g.slots[(size_t)found->second.slot].len != count ||
+                     !scheduled_sink_is_bijective(
+                         gate.body[0], name, s.loopvar, row_decl->decl_id,
+                         row_assignment->rhs, previous_assignment->lhs, lo,
+                         count, g.slots[(size_t)found->second.slot].len);
+            }),
         sink_candidates.end());
     if (sink_candidates.size() != 1) return refuse("sink discovery");
     *source_sink = sink_candidates.front();
@@ -6170,9 +6129,8 @@ struct Lowering {
         int_env = original_ints;
       }};
       try {
-      int_env[s.loopvar] = lo;
-      const long first_sink_index =
-          eval_int(sink_stmt.lhs_idx[0].args[0]);
+        int_env[s.loopvar] = lo;
+        const long first_sink_index = eval_int(sink_stmt.lhs_idx[0].args[0]);
 
         std::map<std::string, uint32_t> fingerprints;
         for (int64_t t = 0; t < count; ++t) {
@@ -6263,8 +6221,7 @@ struct Lowering {
       one_trip_whiles.assign(template_count, {});
     } else {
       prove_scheduled_one_trip(stable_source, s.loopvar, lo, schedule,
-                               template_count, trace_plan,
-                               &one_trip_whiles);
+                               template_count, trace_plan, &one_trip_whiles);
     }
     prep.plain(prep_graph, "scheduled_one_trip", one_trip_time);
     if (debug_scan) {
@@ -6279,12 +6236,11 @@ struct Lowering {
     assigned_names(stable_source, &carry_names);
     std::set<std::string> row_local_names;
     declared_names(stable_source, &row_local_names);
-    carry_names.erase(
-        std::remove_if(carry_names.begin(), carry_names.end(),
-                       [&](const std::string& name) {
-                         return row_local_names.count(name) != 0;
-                       }),
-        carry_names.end());
+    carry_names.erase(std::remove_if(carry_names.begin(), carry_names.end(),
+                                     [&](const std::string& name) {
+                                       return row_local_names.count(name) != 0;
+                                     }),
+                      carry_names.end());
 
     const LoweringSnapshot before = capture_lowering_state(&s);
     bool committed = false;
@@ -6312,10 +6268,8 @@ struct Lowering {
                                 scope.find(name) == scope.end();
                        }),
         carry_names.end());
-    if (carry_names.empty())
-      return debug_refusal("carry name discovery");
-    const LoweringSnapshot post_peel =
-        capture_lowering_state(&stable_source);
+    if (carry_names.empty()) return debug_refusal("carry name discovery");
+    const LoweringSnapshot post_peel = capture_lowering_state(&stable_source);
     auto sink_binding = scope.find(sink_stmt.lhs);
     if (sink_binding == scope.end() ||
         g.slots[(size_t)sink_binding->second.slot].len != count + 1)
@@ -6376,8 +6330,7 @@ struct Lowering {
         return debug_refusal("template specialization");
       }
       mir::Expr sink_rhs = sink_stmt.rhs;
-      if (!rewrite_scheduled_expr(&sink_rhs, row_names,
-                                  &drafts[which].feeds,
+      if (!rewrite_scheduled_expr(&sink_rhs, row_names, &drafts[which].feeds,
                                   &forbidden_feed_names) ||
           expr_references(sink_rhs, s.loopvar) || drafts[which].feeds.empty())
         return debug_refusal("sink feed rewrite");
@@ -6417,30 +6370,30 @@ struct Lowering {
                   exit == scope.end() ? -1 : exit->second.slot);
             if (debug_scan && entry != post_peel.scope.end() &&
                 exit != scope.end())
-              std::fprintf(stderr,
-                           "scheduled carry schema: entry_len=%lld "
-                           "exit_len=%lld entry_kind=%d exit_kind=%d "
-                           "entry_shape=%u exit_shape=%u entry_matrix=%lldx%lld "
-                           "exit_matrix=%lldx%lld\n",
-                           (long long)g.slots[(size_t)entry->second.slot].len,
-                           (long long)g.slots[(size_t)exit->second.slot].len,
-                           (int)entry->second.si.kind,
-                           (int)exit->second.si.kind,
-                           (unsigned)entry->second.si.shape,
-                           (unsigned)exit->second.si.shape,
-                           (long long)entry->second.si.rows,
-                           (long long)entry->second.si.cols,
-                           (long long)exit->second.si.rows,
-                           (long long)exit->second.si.cols);
+              std::fprintf(
+                  stderr,
+                  "scheduled carry schema: entry_len=%lld "
+                  "exit_len=%lld entry_kind=%d exit_kind=%d "
+                  "entry_shape=%u exit_shape=%u entry_matrix=%lldx%lld "
+                  "exit_matrix=%lldx%lld\n",
+                  (long long)g.slots[(size_t)entry->second.slot].len,
+                  (long long)g.slots[(size_t)exit->second.slot].len,
+                  (int)entry->second.si.kind, (int)exit->second.si.kind,
+                  (unsigned)entry->second.si.shape,
+                  (unsigned)exit->second.si.shape,
+                  (long long)entry->second.si.rows,
+                  (long long)entry->second.si.cols,
+                  (long long)exit->second.si.rows,
+                  (long long)exit->second.si.cols);
             return debug_refusal("template carry binding");
           }
           if (exit->second.slot !=
                   drafts[which].carry_entry_slots[carry_index] &&
               exit->second.slot < (int)slot_begin) {
             const int64_t len = g.slots[(size_t)exit->second.slot].len;
-            scope[name] = emit_raw(len == 1 ? OP_INDEX : OP_SLICE,
-                                   {exit->second.slot}, len, exit->second.si,
-                                   {0}, -1, exit->second.autodiff);
+            scope[name] =
+                emit_raw(len == 1 ? OP_INDEX : OP_SLICE, {exit->second.slot},
+                         len, exit->second.si, {0}, -1, exit->second.autodiff);
             exit = scope.find(name);
           }
           drafts[which].carry_lens.push_back(
@@ -6468,9 +6421,9 @@ struct Lowering {
         }
         Val distinct_sink = sink;
         if (!live_out_slots.insert(distinct_sink.slot).second)
-          distinct_sink = emit_raw(OP_INDEX, {distinct_sink.slot}, 1,
-                                   distinct_sink.si, {0}, -1,
-                                   distinct_sink.autodiff);
+          distinct_sink =
+              emit_raw(OP_INDEX, {distinct_sink.slot}, 1, distinct_sink.si, {0},
+                       -1, distinct_sink.autodiff);
         live_outs.push_back(distinct_sink.slot);
 
         std::set<int> definitions;
@@ -6532,8 +6485,7 @@ struct Lowering {
         const bool compiled = compile_graph_fragment(
             g, op_begin, g.ops.size(), live_outs, out.fills, active,
             &drafts[which].fragment, &diagnostic);
-        if ((!compiled ||
-             drafts[which].fragment.program.adj.adj_reg.empty()) &&
+        if ((!compiled || drafts[which].fragment.program.adj.adj_reg.empty()) &&
             debug_scan)
           std::fprintf(stderr, "scheduled fragment refused: %s\n",
                        diagnostic.c_str());
@@ -6605,8 +6557,7 @@ struct Lowering {
     std::vector<uint8_t> carry_any_active(carry_names.size(), 0);
     for (const Draft& draft : drafts)
       for (size_t k = 0; k < carry_names.size(); ++k)
-        carry_any_active[k] =
-            carry_any_active[k] || draft.carry_active[k] != 0;
+        carry_any_active[k] = carry_any_active[k] || draft.carry_active[k] != 0;
     for (Draft& draft : drafts)
       for (size_t k = 0; k < carry_names.size(); ++k)
         if (draft.carry_changed[k] == 0)
@@ -6636,8 +6587,7 @@ struct Lowering {
                 (int)drafts[0].carry_changed[k],
                 (int)drafts[which].carry_changed[k],
                 drafts[0].carry_entry_regs[k],
-                drafts[which].carry_entry_regs[k],
-                drafts[0].carry_exit_regs[k],
+                drafts[which].carry_entry_regs[k], drafts[0].carry_exit_regs[k],
                 drafts[which].carry_exit_regs[k],
                 (int)drafts[0].carry_views[k].kind,
                 (int)drafts[which].carry_views[k].kind,
@@ -6678,11 +6628,10 @@ struct Lowering {
       }
     if (inactive_row_width < 0 ||
         (count != 0 &&
-         inactive_row_width >
-             std::numeric_limits<int64_t>::max() / count))
+         inactive_row_width > std::numeric_limits<int64_t>::max() / count))
       return debug_refusal("row feed size overflow");
-    std::vector<double> inactive_values(
-        (size_t)(count * inactive_row_width), 0.0);
+    std::vector<double> inactive_values((size_t)(count * inactive_row_width),
+                                        0.0);
     std::vector<int> packed_feed_slots(all_feeds.size(), -1);
     std::vector<int64_t> packed_feed_offsets(all_feeds.size(), 0);
     std::vector<int64_t> packed_feed_strides(all_feeds.size(), 0);
@@ -6712,14 +6661,13 @@ struct Lowering {
           if (!value || (int64_t)value->r.size() != feed.len)
             return debug_refusal("packing data row feed");
           if (feed.control &&
-              !std::all_of(value->r.begin(), value->r.end(), [](double x) {
-                return x == 0.0 || x == 1.0;
-              }))
+              !std::all_of(value->r.begin(), value->r.end(),
+                           [](double x) { return x == 0.0 || x == 1.0; }))
             return debug_refusal("packing control row feed");
           if (!feed.control && scan_semantic_integer(feed.source, *value) &&
               (value->i.size() != value->r.size() ||
-               !std::equal(value->i.begin(), value->i.end(),
-                           value->r.begin(), [](int integer, double numeric) {
+               !std::equal(value->i.begin(), value->i.end(), value->r.begin(),
+                           [](int integer, double numeric) {
                              return numeric == static_cast<double>(integer);
                            })))
             return debug_refusal("packing integer row feed");
@@ -6744,8 +6692,8 @@ struct Lowering {
         if (offset > std::numeric_limits<int>::max())
           return debug_refusal("active row feed offset overflow");
         Op store;
-        store.opcode = feed.len == 1 ? OP_SET_INDEX_INPLACE
-                                     : OP_SET_SLICE_INPLACE;
+        store.opcode =
+            feed.len == 1 ? OP_SET_INDEX_INPLACE : OP_SET_SLICE_INPLACE;
         store.n_in = 2;
         store.in[0] = active_slot;
         store.in[1] = row_value.slot;
@@ -6858,8 +6806,8 @@ struct Lowering {
         std::fprintf(stderr, "scheduled template %zu feeds=%zu carries=", which,
                      drafts[which].feeds.size());
         for (const ScanSpec::CarryBinding& carry : tm.carry)
-          std::fprintf(stderr, " (%d,%d,%lld)", carry.entry_reg,
-                       carry.exit_reg, (long long)carry.len);
+          std::fprintf(stderr, " (%d,%d,%lld)", carry.entry_reg, carry.exit_reg,
+                       (long long)carry.len);
         std::fprintf(stderr, "\n");
       }
     }
@@ -6884,16 +6832,16 @@ struct Lowering {
       };
       for (const ScanSpec::Template& tm : spec->templates) {
         for (size_t k = 0; k < tm.carry.size(); ++k)
-          if (!mark_class(tm.carry[k].op_input,
-                          carry_any_active[k] ? InputClass::Active
-                                              : InputClass::Inactive))
+          if (!mark_class(tm.carry[k].op_input, carry_any_active[k]
+                                                    ? InputClass::Active
+                                                    : InputClass::Inactive))
             return debug_refusal("mixed carry input activity");
         for (const ScanSpec::InputBinding& input : tm.inputs) {
           const InputClass classification =
-              input.active ? InputClass::Active
-                           : (input.iteration_stride > 0
-                                  ? InputClass::RowFeed
-                                  : InputClass::Inactive);
+              input.active
+                  ? InputClass::Active
+                  : (input.iteration_stride > 0 ? InputClass::RowFeed
+                                                : InputClass::Inactive);
           if ((classification == InputClass::RowFeed && input.active) ||
               !mark_class(input.op_input, classification))
             return debug_refusal("mixed invariant input activity");
@@ -7022,16 +6970,15 @@ struct Lowering {
   // and at most six immutable graph inputs, the main graph is untouched and
   // ordinary unrolling remains the fallback.
   static bool scheduled_scan_syntax_candidate(const mir::Stmt& s) {
-    if (s.body.size() != 1 ||
-        (s.body[0].kind != mir::Stmt::Block &&
-         s.body[0].kind != mir::Stmt::SList))
+    if (s.body.size() != 1 || (s.body[0].kind != mir::Stmt::Block &&
+                               s.body[0].kind != mir::Stmt::SList))
       return false;
     const mir::Stmt* block = &s.body[0];
-    while ((block->kind == mir::Stmt::Block ||
-            block->kind == mir::Stmt::SList) &&
-           block->body.size() == 1 &&
-           (block->body[0].kind == mir::Stmt::Block ||
-            block->body[0].kind == mir::Stmt::SList))
+    while (
+        (block->kind == mir::Stmt::Block || block->kind == mir::Stmt::SList) &&
+        block->body.size() == 1 &&
+        (block->body[0].kind == mir::Stmt::Block ||
+         block->body[0].kind == mir::Stmt::SList))
       block = &block->body[0];
 
     // The direct scheduled form is a peeled IfElse followed by one disjoint
@@ -7042,13 +6989,12 @@ struct Lowering {
       return block->body[0].kind == mir::Stmt::IfElse &&
              block->body[1].kind == mir::Stmt::Assignment;
     if (block->body.size() < 3) return false;
-    return std::any_of(block->body.begin(), block->body.end(),
-                       [](const mir::Stmt& child) {
-                         return child.kind == mir::Stmt::IfElse &&
-                                child.body.size() == 1 &&
-                                child.cond.kind == mir::Expr::EOr &&
-                                child.cond.args.size() == 2;
-                       });
+    return std::any_of(
+        block->body.begin(), block->body.end(), [](const mir::Stmt& child) {
+          return child.kind == mir::Stmt::IfElse && child.body.size() == 1 &&
+                 child.cond.kind == mir::Expr::EOr &&
+                 child.cond.args.size() == 2;
+        });
   }
 
   bool lower_fixed_scan(const mir::Stmt& s, long lo, long hi) {
@@ -7058,11 +7004,9 @@ struct Lowering {
       return false;
 
     const bool scheduled_candidate = scheduled_scan_syntax_candidate(s);
-    const bool fixed_candidate =
-        std::all_of(s.body.begin(), s.body.end(),
-                    [&](const mir::Stmt& child) {
-                      return scan_source_safe(child);
-                    });
+    const bool fixed_candidate = std::all_of(
+        s.body.begin(), s.body.end(),
+        [&](const mir::Stmt& child) { return scan_source_safe(child); });
     if (!scheduled_candidate && !fixed_candidate) return false;
 
     // One transaction covers scheduled recognition and the fixed-template
@@ -7312,8 +7256,7 @@ struct Lowering {
         // graph-local runtime value so later branches and scalar reads use
         // the value the loop actually produced.
         si = view_of("UInt");
-        si.param_free =
-            region_free || identical_data_if_output(s, name);
+        si.param_free = region_free || identical_data_if_output(s, name);
         scope[name] = Val{out_slots[k], false, si};
         decls[name] = DeclView{1, false, si};
         int_env.erase(name);
