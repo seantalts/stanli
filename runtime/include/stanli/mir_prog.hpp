@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <map>
@@ -81,6 +82,14 @@ struct ProgramCompiler {
   std::map<std::string, std::vector<long>> known_int_arrays;
   std::map<std::string, std::vector<int64_t>> known_int_array_dims;
   std::set<std::string> int_array_names;
+  // Cells which are still provably the NaN installed by their uninitialized
+  // local declaration. This is deliberately a value-state proof, not an
+  // activity proof: a UInt predicate such as is_nan(parameter_cell) has no
+  // adjoint lane but still depends on the parameter value. Any possible
+  // assignment clears the selected cells, irrespective of RHS provenance.
+  std::map<std::string, std::vector<uint8_t>> declaration_nan_cells;
+  bool declaration_nan_fold_enabled =
+      std::getenv("STANLI_NO_DECLARATION_NAN_FOLD") == nullptr;
   // Optimizer temporaries declared with an Unsized container acquire their
   // complete Range from the first whole-variable assignment.  A zero-width
   // sized declaration is not the same thing, so keep the protocol explicit
@@ -119,6 +128,12 @@ struct ProgramCompiler {
   // backing the name and records it as a live-in. Returning false means
   // "no such value", and the compile bails.
   std::function<bool(const std::string&, Range*)> bind_extern;
+  // Logical geometry for an outside name without binding its value. Shape
+  // queries use this first so `rows(parameter_matrix)` remains a constant
+  // rather than making the whole matrix an active program live-in. Ordinary
+  // value reads still go through bind_extern. ODE compilation leaves this
+  // empty because all of its arguments are already bound in `reals`.
+  std::function<bool(const std::string&, Range*)> extern_view;
   // One compile-time integer the region cannot reach on its own: a read
   // from a data array. The caller has the data interpreter that answers
   // sizes outside the region, and cint hands it a read whose indices are
@@ -384,7 +399,8 @@ struct ProgramCompiler {
   // leave an unpatched jump in the program behind it. Only `len`, `kind`,
   // `rows`, `cols` and `dims` of the result mean anything; `reg` is not a
   // register, because no value was built.
-  bool static_view(const mir::Expr& e, Range* out) {
+  bool static_view(const mir::Expr& e, Range* out,
+                   bool allow_indexed = false) {
     if (e.data_only && e.unsized.depth != 0 &&
         e.unsized.leaf == mir::UnsizedLeaf::Int && extern_ints) {
       std::vector<long> values;
@@ -421,6 +437,129 @@ struct ProgramCompiler {
       *out = Range{0, 1};
       return true;
     }
+    if (allow_indexed && e.kind == mir::Expr::Promotion &&
+        e.args.size() == 1)
+      return static_view(e.args[0], out, true);
+    if (allow_indexed && e.kind == mir::Expr::FunApp &&
+        e.args.size() == 1 &&
+        (e.name == "Transpose__" || e.name == "transpose")) {
+      Range value;
+      if (!static_view(e.args[0], &value, true)) return false;
+      if (value.kind == ViewKind::Matrix) {
+        std::swap(value.rows, value.cols);
+      } else if (value.kind == ViewKind::Vector) {
+        value.kind = ViewKind::RowVector;
+      } else if (value.kind == ViewKind::RowVector) {
+        value.kind = ViewKind::Vector;
+      } else {
+        return false;
+      }
+      *out = std::move(value);
+      return true;
+    }
+    if (allow_indexed && e.kind == mir::Expr::FunApp &&
+        e.args.size() == 2 &&
+        (e.name == "Plus__" || e.name == "Minus__" ||
+         e.name == "EltTimes__" || e.name == "EltDivide__" ||
+         e.name == "Times__" || e.name == "Divide__")) {
+      Range lhs;
+      Range rhs;
+      if (!static_view(e.args[0], &lhs, true) ||
+          !static_view(e.args[1], &rhs, true))
+        return false;
+      const bool lhs_scalar = lhs.len == 1 && lhs.kind == ViewKind::Flat;
+      const bool rhs_scalar = rhs.len == 1 && rhs.kind == ViewKind::Flat;
+      // Division is shape-preserving only for value/scalar. In particular,
+      // matrix right-division is not elementwise and must execute normally so
+      // its dimension validation cannot be hidden by a shape-only query.
+      if (e.name == "Divide__") {
+        if (!rhs_scalar) return false;
+        *out = lhs;
+        return true;
+      }
+      // Scalar broadcasting preserves the other operand's logical view.
+      // Matrix-matrix Times__ is deliberately excluded: its result geometry
+      // is not elementwise.
+      if (lhs_scalar != rhs_scalar) {
+        *out = lhs_scalar ? rhs : lhs;
+        return true;
+      }
+      if (e.name != "Times__" && lhs.len == rhs.len &&
+          lhs.kind == rhs.kind && lhs.rows == rhs.rows &&
+          lhs.cols == rhs.cols && lhs.dims == rhs.dims) {
+        *out = lhs;
+        return true;
+      }
+      return false;
+    }
+    if (allow_indexed && e.kind == mir::Expr::Indexed && !e.args.empty()) {
+      // Shape-only indexed views must resolve selectors without binding the
+      // base's storage.  This is the region-level analogue of lowering's
+      // static shape probe: a parameter matrix contributes geometry here,
+      // but it becomes a live-in only if a selected value is actually read.
+      if (e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
+        mir::Expr composed = e.args[0];
+        composed.type_ = e.type_;
+        composed.unsized = e.unsized;
+        composed.data_only = e.data_only;
+        composed.promoted = e.promoted;
+        composed.raw = e.raw;
+        return static_view(composed, out, true);
+      }
+      Range base;
+      if (!static_view(e.args[0], &base, true)) return false;
+      if (e.args.size() == 2 && e.args[1].name == "IndexAll") {
+        *out = base;
+        return true;
+      }
+      if (base.kind == ViewKind::Matrix && e.args.size() >= 2 &&
+          e.args.size() <= 3) {
+        const std::vector<int64_t> rows =
+            matrix_positions(e.args[1], base.rows, "shape row");
+        std::vector<int64_t> cols;
+        if (e.args.size() == 2) {
+          cols.reserve((size_t)base.cols);
+          for (int64_t col = 0; col < base.cols; ++col) cols.push_back(col);
+        } else {
+          cols = matrix_positions(e.args[2], base.cols, "shape column");
+        }
+        if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
+          bail("matrix shape selection needs too many cells");
+        Range selected{0, (int)(rows.size() * cols.size())};
+        if (e.type_ == "UMatrix") {
+          selected.kind = ViewKind::Matrix;
+          selected.rows = (int64_t)rows.size();
+          selected.cols = (int64_t)cols.size();
+        } else if (e.type_ == "UVector") {
+          selected.kind = ViewKind::Vector;
+        } else if (e.type_ == "URowVector" ||
+                   (e.args.size() == 2 &&
+                    e.args[1].name == "IndexSingle")) {
+          selected.kind = ViewKind::RowVector;
+        } else if (selected.len != 1) {
+          return false;
+        }
+        *out = std::move(selected);
+        return true;
+      }
+      if ((base.kind == ViewKind::Vector ||
+           base.kind == ViewKind::RowVector ||
+           base.kind == ViewKind::Flat) &&
+          e.args.size() == 2) {
+        const std::vector<int64_t> positions =
+            matrix_positions(e.args[1], base.len, "shape vector");
+        Range selected{0, (int)positions.size()};
+        if (e.type_ == "UVector")
+          selected.kind = ViewKind::Vector;
+        else if (e.type_ == "URowVector")
+          selected.kind = ViewKind::RowVector;
+        else if (selected.len != 1)
+          return false;
+        *out = std::move(selected);
+        return true;
+      }
+      return false;
+    }
     if (e.kind != mir::Expr::Var) return false;
     if (deferred_shapes.count(e.name)) return false;
     auto rt = reals.find(e.name);
@@ -448,9 +587,16 @@ struct ProgramCompiler {
       *out = r;
       return true;
     }
-    // An outside name: bind it the way expr() would. The binding is one
-    // live-in whether it is the shape that is wanted or the value.
+    // An outside name may expose geometry without exposing storage. Do not
+    // cache that view in `reals`: a later ordinary value read must still bind
+    // the actual registers through bind_extern.
     Range ext;
+    if (extern_view && extern_view(e.name, &ext)) {
+      *out = ext;
+      return true;
+    }
+    // Callers without a geometry hook retain the legacy fallback. This is
+    // also the value-binding path when the outside name is genuinely read.
     if (bind_extern && bind_extern(e.name, &ext)) {
       reals[e.name] = ext;
       extern_bound.insert(e.name);
@@ -467,6 +613,71 @@ struct ProgramCompiler {
   // would make it false. The operands have to be integers themselves.
   static bool int_operand(const mir::Expr& e) {
     return e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int;
+  }
+
+  bool is_declaration_nan_cell(const mir::Expr& expression) {
+    // A structured while emits its body once and replays that code for every
+    // runtime trip. A cell which is untouched on the first trip may have been
+    // written by the next, so this one-pass state cannot justify a fold there.
+    if (!declaration_nan_fold_enabled || structured_while_depth != 0)
+      return false;
+    const mir::Expr* e = &expression;
+    while (e->kind == mir::Expr::Promotion && e->args.size() == 1)
+      e = &e->args[0];
+    if (e->kind == mir::Expr::Var) {
+      const auto known = declaration_nan_cells.find(e->name);
+      const auto view = reals.find(e->name);
+      return known != declaration_nan_cells.end() &&
+             view != reals.end() && view->second.len == 1 &&
+             known->second.size() == 1 && known->second[0] != 0;
+    }
+    if (e->kind != mir::Expr::Indexed || e->args.empty() ||
+        e->args[0].kind != mir::Expr::Var)
+      return false;
+    const std::string& name = e->args[0].name;
+    const auto known = declaration_nan_cells.find(name);
+    const auto view = reals.find(name);
+    if (known == declaration_nan_cells.end() || view == reals.end() ||
+        known->second.size() != static_cast<size_t>(view->second.len))
+      return false;
+    const Range& base = view->second;
+    int64_t offset = -1;
+    if (base.kind == ViewKind::Matrix && e->args.size() == 3) {
+      if (e->args[1].name != "IndexSingle" ||
+          e->args[1].args.size() != 1 ||
+          e->args[2].name != "IndexSingle" ||
+          e->args[2].args.size() != 1)
+        return false;
+      const long row = cint(e->args[1].args[0]);
+      const long col = cint(e->args[2].args[0]);
+      if (row < 1 || row > base.rows || col < 1 || col > base.cols)
+        return false;
+      offset = (col - 1) * base.rows + row - 1;
+    } else if ((base.kind == ViewKind::Vector ||
+                base.kind == ViewKind::RowVector ||
+                base.kind == ViewKind::Flat) &&
+               e->args.size() == 2 &&
+               e->args[1].name == "IndexSingle" &&
+               e->args[1].args.size() == 1) {
+      const long index = cint(e->args[1].args[0]);
+      if (index < 1 || index > base.len) return false;
+      offset = index - 1;
+    }
+    return offset >= 0 && static_cast<size_t>(offset) < known->second.size() &&
+           known->second[static_cast<size_t>(offset)] != 0;
+  }
+
+  void mark_declaration_cells_written(
+      const std::string& name, const std::vector<int64_t>& offsets) {
+    auto known = declaration_nan_cells.find(name);
+    if (known == declaration_nan_cells.end()) return;
+    for (int64_t offset : offsets) {
+      if (offset < 0 || static_cast<size_t>(offset) >= known->second.size()) {
+        declaration_nan_cells.erase(known);
+        return;
+      }
+      known->second[static_cast<size_t>(offset)] = 0;
+    }
   }
 
   long cint(const mir::Expr& e) {
@@ -572,6 +783,13 @@ struct ProgramCompiler {
         return cint(e.args[1]) != 0;
       }
       case mir::Expr::FunApp:
+        // This folds only an exact cell which no possible assignment has
+        // touched since its NaN declaration fill. The predicate's UInt MIR
+        // type is not evidence: is_nan of an assigned parameter cell must be
+        // compiled as runtime control.
+        if (e.args.size() == 1 && e.name == "is_nan" &&
+            is_declaration_nan_cell(e.args[0]))
+          return 1;
         if (e.args.size() == 2) {
           // Each operator with the named spelling beside it: on ints the
           // alias is the operator, down to `divide`'s truncation.
@@ -609,7 +827,7 @@ struct ProgramCompiler {
         // answered, and these were refused as unknown integer functions.
         if (is_shape_query(e)) {
           Range v;
-          if (static_view(e.args[0], &v)) return shape_query(e.name, v);
+          if (static_view(e.args[0], &v, true)) return shape_query(e.name, v);
         }
         if (e.args.size() == 1 && e.name == "sum" &&
             e.args[0].unsized.leaf == mir::UnsizedLeaf::Int) {
@@ -799,10 +1017,16 @@ struct ProgramCompiler {
         values.reserve((size_t)count);
         for (long i = lo; i <= hi; ++i) values.push_back(i);
       }
+    } else if (index.name == "IndexUpfrom" && index.args.size() == 1) {
+      const long lo = cint(index.args[0]);
+      if (lo < 1 || lo > extent + 1)
+        bail("matrix " + axis + " up-from index is outside its extent");
+      values.reserve((size_t)(extent - lo + 1));
+      for (long i = lo; i <= extent; ++i) values.push_back(i);
     } else if (index.name == "IndexMulti" && index.args.size() == 1) {
       values = cints(index.args[0]);
     } else {
-      bail("matrix " + axis + " index form");
+      bail("matrix " + axis + " index form " + index.name);
     }
     std::vector<int64_t> positions;
     positions.reserve(values.size());
@@ -1094,11 +1318,18 @@ struct ProgramCompiler {
         // so selected columns are outer and rows inner; this covers All,
         // Single, Between, and Multi in any pair while preserving selector
         // order and duplicate gather indices.
-        if (b.kind == ViewKind::Matrix && e.args.size() == 3) {
+        if (b.kind == ViewKind::Matrix && e.args.size() >= 2 &&
+            e.args.size() <= 3) {
           const std::vector<int64_t> rows =
               matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name);
-          const std::vector<int64_t> cols = matrix_positions(
-              e.args[2], b.cols, "column of " + e.args[0].name);
+          std::vector<int64_t> cols;
+          if (e.args.size() == 2) {
+            cols.reserve((size_t)b.cols);
+            for (int64_t col = 0; col < b.cols; ++col) cols.push_back(col);
+          } else {
+            cols = matrix_positions(e.args[2], b.cols,
+                                    "column of " + e.args[0].name);
+          }
           if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
             bail("matrix selection needs too many registers");
           const size_t width = rows.size() * cols.size();
@@ -1420,7 +1651,7 @@ struct ProgramCompiler {
     // of the value the argument builds.
     if (is_shape_query(e)) {
       Range v;
-      if (!static_view(e.args[0], &v)) v = expr(e.args[0]);
+      if (!static_view(e.args[0], &v, true)) v = expr(e.args[0]);
       return {konst((double)shape_query(e.name, v)), 1};
     }
     if (e.data_only && e.unsized.depth != 0 &&
@@ -2227,6 +2458,7 @@ struct ProgramCompiler {
         known_int_arrays.erase(s.decl_id);
         known_int_array_dims.erase(s.decl_id);
         int_array_names.erase(s.decl_id);
+        declaration_nan_cells.erase(s.decl_id);
         int_decl_at.erase(s.decl_id);
         if (s.decl_type.base.empty() &&
             s.decl_type.unsized.leaf != mir::UnsizedLeaf::Unknown) {
@@ -2287,7 +2519,7 @@ struct ProgramCompiler {
             // loop-carried state (for example `int any = hits != 0`). Only
             // that genuinely runtime initializer needs a register. Keeping
             // foldable locals as ints is essential for foreach indices used
-            // in later matrix subscripts inside ctsem's integration loop.
+            // in later matrix subscripts inside structured integration loops.
             Range view;
             const Range d =
                 declare(s.decl_id, 1, view,
@@ -2333,7 +2565,11 @@ struct ProgramCompiler {
                   ? static_cast<double>(std::numeric_limits<int>::min())
                   : std::numeric_limits<double>::quiet_NaN();
           const Range expected = declared(view, s.decl_type);
-          declare(s.decl_id, (int)sized_len(s.decl_type), expected, fill);
+          const Range declared =
+              declare(s.decl_id, (int)sized_len(s.decl_type), expected, fill);
+          if (!int_array)
+            declaration_nan_cells[s.decl_id] =
+                std::vector<uint8_t>(static_cast<size_t>(declared.len), 1);
           if (int_array) {
             known_int_arrays[s.decl_id] =
                 std::vector<long>((size_t)sized_len(s.decl_type),
@@ -2454,6 +2690,7 @@ struct ProgramCompiler {
             bail("assignment logical view mismatch for " + s.lhs);
           for (int k = 0; k < v.len; ++k)
             emit(Program::MOV, dst.reg + k, v.reg + k);
+          declaration_nan_cells.erase(s.lhs);
           if (have_folded_ints) {
             known_int_arrays[s.lhs] = std::move(folded_ints);
             known_int_array_dims[s.lhs] = dst.dims;
@@ -2476,6 +2713,7 @@ struct ProgramCompiler {
             bail("full-span assignment logical view mismatch for " + s.lhs);
           for (int k = 0; k < v.len; ++k)
             emit(Program::MOV, dst.reg + k, v.reg + k);
+          declaration_nan_cells.erase(s.lhs);
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
             if (fold_is_certain(s.lhs) && try_cints(s.rhs, &values) &&
@@ -2500,10 +2738,15 @@ struct ProgramCompiler {
           if (v.len != static_cast<int>(width))
             bail("matrix assignment width mismatch for " + s.lhs);
           int at = 0;
+          std::vector<int64_t> written;
+          written.reserve(width);
           for (int64_t j : cols)
-            for (int64_t i : rows)
+            for (int64_t i : rows) {
               emit(Program::MOV, dst.reg + (int)(j * dst.rows + i),
                    v.reg + at++);
+              written.push_back(j * dst.rows + i);
+            }
+          mark_declaration_cells_written(s.lhs, written);
           return;
         }
         if (dst.kind == ViewKind::Array) {
@@ -2538,6 +2781,7 @@ struct ProgramCompiler {
               graph_array_offsets(dims, dst.leaf, positions);
           for (size_t k = 0; k < offsets.size(); ++k)
             emit(Program::MOV, dst.reg + (int)offsets[k], v.reg + (int)k);
+          mark_declaration_cells_written(s.lhs, offsets);
           if (int_array_names.count(s.lhs)) {
             std::vector<long> values;
             auto known = known_int_arrays.find(s.lhs);
@@ -2574,6 +2818,7 @@ struct ProgramCompiler {
             bail("vector assignment width mismatch for " + s.lhs);
           for (size_t k = 0; k < positions.size(); ++k)
             emit(Program::MOV, dst.reg + (int)positions[k], v.reg + (int)k);
+          mark_declaration_cells_written(s.lhs, positions);
           return;
         }
         for (const auto& ix : s.lhs_idx)
@@ -2597,6 +2842,7 @@ struct ProgramCompiler {
           flat = ix - 1;
         }
         emit(Program::MOV, dst.reg + (int)flat, v.reg);
+        mark_declaration_cells_written(s.lhs, std::vector<int64_t>{flat});
         if (int_array_names.count(s.lhs)) {
           long value = 0;
           auto known = known_int_arrays.find(s.lhs);
@@ -2778,6 +3024,7 @@ struct ProgramCompiler {
     auto saved_known_int_arrays = known_int_arrays;
     auto saved_known_int_array_dims = known_int_array_dims;
     auto saved_int_array_names = int_array_names;
+    auto saved_declaration_nan_cells = declaration_nan_cells;
     auto saved_deferred_shapes = deferred_shapes;
     auto saved_int_decl_at = int_decl_at;
     auto saved_extern_bound = extern_bound;
@@ -2787,6 +3034,7 @@ struct ProgramCompiler {
     known_int_arrays.clear();
     known_int_array_dims.clear();
     int_array_names.clear();
+    declaration_nan_cells.clear();
     deferred_shapes.clear();
     int_decl_at.clear();
     extern_bound.clear();
@@ -2820,6 +3068,7 @@ struct ProgramCompiler {
       known_int_arrays = std::move(saved_known_int_arrays);
       known_int_array_dims = std::move(saved_known_int_array_dims);
       int_array_names = std::move(saved_int_array_names);
+      declaration_nan_cells = std::move(saved_declaration_nan_cells);
       deferred_shapes = std::move(saved_deferred_shapes);
       int_decl_at = std::move(saved_int_decl_at);
       extern_bound = std::move(saved_extern_bound);
@@ -2833,6 +3082,7 @@ struct ProgramCompiler {
     known_int_arrays = std::move(saved_known_int_arrays);
     known_int_array_dims = std::move(saved_known_int_array_dims);
     int_array_names = std::move(saved_int_array_names);
+    declaration_nan_cells = std::move(saved_declaration_nan_cells);
     deferred_shapes = std::move(saved_deferred_shapes);
     int_decl_at = std::move(saved_int_decl_at);
     extern_bound = std::move(saved_extern_bound);

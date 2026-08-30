@@ -14,6 +14,8 @@
 
 #include <stan/math.hpp>
 
+#include <limits>
+#include <stdexcept>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -143,6 +145,28 @@ void matrix_exp_bwd(KernelCtx& ctx) {
     Eigen::Map<VarM> a(xs[0].data(), n, n);
     return stan::math::matrix_exp(a);
   });
+}
+
+// Dimension-gated structured-CFG pullback. For Y = exp(A) and output seed G,
+// the Frobenius-adjoint Frechet derivative is the upper-right block of
+//
+//       exp([ A' G ])
+//           [ 0  A'].
+//
+// This remains a distinct opcode because its floating-point grouping is not
+// bitwise-identical to replaying Stan Math's elementwise var Pade program.
+// The ordinary OP_MATRIX_EXP opcode retains that exact replay oracle; the
+// block-Frechet kernel is selected only by the dimension-gated structured-CFG
+// path in the generated adjoint.
+void matrix_exp_block_frechet_bwd(KernelCtx& ctx) {
+  if (ctx.in_adj[0].data == nullptr) return;
+  const int64_t n = ctx.idata[0];
+  MatD block = MatD::Zero(2 * n, 2 * n);
+  block.topLeftCorner(n, n) = CMapM(ctx.in[0].data, n, n).transpose();
+  block.bottomRightCorner(n, n) = block.topLeftCorner(n, n);
+  block.topRightCorner(n, n) = CMapM(ctx.out_adj_vec.data, n, n);
+  const MatD exponential = stan::math::matrix_exp(block);
+  MapM(ctx.in_adj[0].data, n, n) += exponential.topRightCorner(n, n);
 }
 
 // ---- inverse / inverse_spd / log_determinant -----------------------------
@@ -679,7 +703,7 @@ void crossprod_bwd(KernelCtx& ctx) {
 // Both operand types are part of the answer here, not just of the speed,
 // because stan-math solves through whatever it is handed:
 //
-//   * scalar type. mdivide_left at double is prim, a FullPivLU solve; at var
+//   * scalar type. mdivide_left at double is prim, a PartialPivLU solve; at var
 //     it is the hand-written rev overload, whose value is a HouseholderQR
 //     solve instead. mdivide_right has no rev overload at all, so the prim
 //     template runs at whatever scalar type reaches it. Variant bit 0 says
@@ -815,7 +839,7 @@ void solve_fwd(KernelCtx& ctx) {
   // forward_value_only() is CmdStan's log_prob<double> path. Even when the
   // same graph carries adjoints for gradient(), it must take the prim solve:
   // mdivide_left's active overload uses HouseholderQR while its double
-  // overload uses FullPivLU, and those are observably different answers on
+  // overload uses PartialPivLU, and those are observably different answers on
   // ill-conditioned inputs.
   if ((ctx.variant & 1u) && !values_only()) {
     solve_active_fwd<Left, Kind>(ctx, vec);
@@ -843,6 +867,246 @@ void solve_bwd(KernelCtx& ctx) {
           : solve_var<Left, Kind, true, true, false, true>(ctx);
       return;
   }
+}
+
+// Force-only native experiment for an active plain left solve.  The ordinary
+// OP_MDIVIDE_LEFT contract stays untouched: CFG lowering normally keeps its
+// primitive PartialPivLU Program forward and uses the graph kernel only as a
+// backward replay.  A prepared Program CALL instead runs the exact value
+// half of stan-math's active overload, retains its HouseholderQR in scratch,
+// and transcribes that overload's reverse callback below.  This makes the
+// producer of the retained factors explicit; a synthetic backward-only CALL
+// has no forward scratch and must never select this opcode.
+template <bool Vec>
+void prepared_mdivide_left_active_fwd(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  if (n == 0) return;
+  MatD a = CMapM(ctx.in[0].data, n, n);
+  auto hqr = a.householderQr();
+  if constexpr (Vec) {
+    CMapV b(ctx.in[1].data, n);
+    Eigen::Map<VecD>(ctx.out.data, n) = hqr.solve(b);
+  } else {
+    CMapM b(ctx.in[1].data, n, k);
+    MapM(ctx.out.data, n, k) = hqr.solve(b);
+  }
+  MapM(ctx.scratch, n, n) = hqr.matrixQR();
+  Eigen::Map<VecD>(ctx.scratch + n * n, n) = hqr.hCoeffs();
+}
+
+void prepared_mdivide_left_fwd(KernelCtx& ctx) {
+  const bool vec = (ctx.variant & 2u) != 0;
+  // The force seam emits this opcode only for an active gradient Program.
+  // Keep a defensive primitive route for a hand-authored/value-only call so
+  // log_prob<double> never changes from Stan's PartialPivLU overload.
+  if ((ctx.variant & 1u) == 0 || values_only()) {
+    vec ? solve_double<true, SolveKind::Plain, true>(ctx)
+        : solve_double<true, SolveKind::Plain, false>(ctx);
+    return;
+  }
+  vec ? prepared_mdivide_left_active_fwd<true>(ctx)
+      : prepared_mdivide_left_active_fwd<false>(ctx);
+}
+
+template <bool Vec>
+void prepared_mdivide_left_active_bwd(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  if (n == 0) return;
+  const unsigned detail = (ctx.variant >> 2u) & 3u;
+  const bool divisor_active = detail == 0u || (detail & 1u) != 0;
+  const bool dividend_active = detail == 0u || (detail & 2u) != 0;
+  if ((!divisor_active || ctx.in_adj[0].data == nullptr) &&
+      (!dividend_active || ctx.in_adj[1].data == nullptr))
+    return;
+
+  CMapM qr(ctx.scratch, n, n);
+  CMapV h(ctx.scratch + n * n, n);
+  const auto q = Eigen::householderSequence(qr, h.conjugate());
+  const auto rt =
+      qr.template triangularView<Eigen::Upper>().transpose();
+
+  if constexpr (Vec) {
+    CMapV seed(ctx.out_adj_vec.data, n);
+    CMapV result(ctx.out.data, n);
+    if (divisor_active && dividend_active) {
+      // rev/fun/mdivide_left.hpp vv branch, expression for expression.
+      VecD adj_b = q * rt.solve(seed);
+      if (ctx.in_adj[0].data)
+        MapM(ctx.in_adj[0].data, n, n) -= adj_b * result.transpose();
+      if (ctx.in_adj[1].data)
+        Eigen::Map<VecD>(ctx.in_adj[1].data, n) += adj_b;
+    } else if (dividend_active) {
+      // dv branch: retaining the direct expression also retains Eigen's
+      // evaluation and accumulation order.
+      if (ctx.in_adj[1].data)
+        Eigen::Map<VecD>(ctx.in_adj[1].data, n) += q * rt.solve(seed);
+    } else if (ctx.in_adj[0].data) {
+      // vd branch.
+      MapM(ctx.in_adj[0].data, n, n) -=
+          q * rt.solve(seed) * result.transpose();
+    }
+  } else {
+    CMapM seed(ctx.out_adj_vec.data, n, k);
+    CMapM result(ctx.out.data, n, k);
+    if (divisor_active && dividend_active) {
+      MatD adj_b = q * rt.solve(seed);
+      if (ctx.in_adj[0].data)
+        MapM(ctx.in_adj[0].data, n, n) -= adj_b * result.transpose();
+      if (ctx.in_adj[1].data)
+        MapM(ctx.in_adj[1].data, n, k) += adj_b;
+    } else if (dividend_active) {
+      if (ctx.in_adj[1].data)
+        MapM(ctx.in_adj[1].data, n, k) += q * rt.solve(seed);
+    } else if (ctx.in_adj[0].data) {
+      MapM(ctx.in_adj[0].data, n, n) -=
+          q * rt.solve(seed) * result.transpose();
+    }
+  }
+}
+
+void prepared_mdivide_left_bwd(KernelCtx& ctx) {
+  if ((ctx.variant & 1u) == 0) return;
+  (ctx.variant & 2u) ? prepared_mdivide_left_active_bwd<true>(ctx)
+                     : prepared_mdivide_left_active_bwd<false>(ctx);
+}
+
+int64_t prepared_mdivide_left_scratch(const Op& op, const Slot*) {
+  if ((op.variant & 1u) == 0 || op.idata == nullptr || op.n_idata != 2 ||
+      op.idata[0] < 0 || op.idata[1] < 0)
+    return 0;
+  const int64_t n = op.idata[0];
+  if (n > (std::numeric_limits<int64_t>::max() - n) / std::max<int64_t>(n, 1))
+    throw std::overflow_error("prepared mdivide_left scratch overflow");
+  return n * n + n;
+}
+
+// Dimension-gated exact-prim path. Stan's arithmetic mdivide_left spells
+// its forward as Matrix(A).lu().solve(Matrix(B)); in this Eigen version lu()
+// is PartialPivLU. Retain that same factorization and row permutation so a
+// well-conditioned backward can solve A^T z = seed without constructing a
+// nested QR var tape. Poor/rank-deficient systems deliberately fall back to
+// the ordinary active Stan callback in solve_bwd.
+constexpr double kPreparedPrimLuMinRcond = 1e-8;
+
+template <bool Vec>
+void prepared_mdivide_left_prim_lu_fwd_t(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  if (n == 0) return;
+  MatD a = CMapM(ctx.in[0].data, n, n);
+  const auto lu = a.lu();
+  if constexpr (Vec) {
+    const VecD b = CMapV(ctx.in[1].data, n);
+    Eigen::Map<VecD>(ctx.out.data, n) = lu.solve(b);
+  } else {
+    const MatD b = CMapM(ctx.in[1].data, n, k);
+    MapM(ctx.out.data, n, k) = lu.solve(b);
+  }
+
+  MapM(ctx.scratch, n, n) = lu.matrixLU();
+  for (int64_t i = 0; i < n; ++i)
+    ctx.scratch[n * n + i] =
+        static_cast<double>(lu.permutationP().indices()(i));
+  const bool finite_factors = lu.matrixLU().allFinite();
+  bool finite_nonzero_diagonal = finite_factors;
+  for (int64_t i = 0; i < n && finite_nonzero_diagonal; ++i)
+    finite_nonzero_diagonal =
+        std::isfinite(lu.matrixLU()(i, i)) && lu.matrixLU()(i, i) != 0.0;
+  const double rcond = finite_nonzero_diagonal ? lu.rcond() : 0.0;
+  ctx.scratch[n * n + n] =
+      finite_nonzero_diagonal && std::isfinite(rcond) &&
+              rcond >= kPreparedPrimLuMinRcond
+          ? rcond
+          : -1.0;
+}
+
+void prepared_mdivide_left_prim_lu_fwd(KernelCtx& ctx) {
+  (ctx.variant & 2u) ? prepared_mdivide_left_prim_lu_fwd_t<true>(ctx)
+                     : prepared_mdivide_left_prim_lu_fwd_t<false>(ctx);
+}
+
+bool prepared_prim_lu_permutation(const KernelCtx& ctx, int64_t n,
+                                  Eigen::PermutationMatrix<Eigen::Dynamic,
+                                                           Eigen::Dynamic,
+                                                           int>* permutation) {
+  permutation->resize(n);
+  std::vector<uint8_t> seen(static_cast<size_t>(n), 0);
+  for (int64_t i = 0; i < n; ++i) {
+    const double raw = ctx.scratch[n * n + i];
+    if (!std::isfinite(raw) || raw < 0.0 || raw >= n ||
+        raw != std::floor(raw))
+      return false;
+    const int index = static_cast<int>(raw);
+    if (seen[static_cast<size_t>(index)] != 0) return false;
+    seen[static_cast<size_t>(index)] = 1;
+    permutation->indices()(i) = index;
+  }
+  return true;
+}
+
+template <bool Vec>
+void prepared_mdivide_left_prim_lu_bwd_t(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  if (n == 0) return;
+  const unsigned detail = (ctx.variant >> 2u) & 3u;
+  const bool divisor_active = detail == 0u || (detail & 1u) != 0;
+  const bool dividend_active = detail == 0u || (detail & 2u) != 0;
+  if ((!divisor_active || ctx.in_adj[0].data == nullptr) &&
+      (!dividend_active || ctx.in_adj[1].data == nullptr))
+    return;
+
+  const double rcond = ctx.scratch[n * n + n];
+  Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, int> permutation;
+  if (!std::isfinite(rcond) || rcond < kPreparedPrimLuMinRcond ||
+      !prepared_prim_lu_permutation(ctx, n, &permutation)) {
+    solve_bwd<true>(ctx);
+    return;
+  }
+
+  const CMapM lu(ctx.scratch, n, n);
+  if constexpr (Vec) {
+    CMapV seed(ctx.out_adj_vec.data, n);
+    VecD adj_b =
+        lu.template triangularView<Eigen::Upper>().transpose().solve(seed);
+    lu.template triangularView<Eigen::UnitLower>()
+        .transpose()
+        .solveInPlace(adj_b);
+    adj_b = permutation.transpose() * adj_b;
+    if (divisor_active && ctx.in_adj[0].data)
+      MapM(ctx.in_adj[0].data, n, n) -=
+          adj_b * CMapV(ctx.out.data, n).transpose();
+    if (dividend_active && ctx.in_adj[1].data)
+      Eigen::Map<VecD>(ctx.in_adj[1].data, n) += adj_b;
+  } else {
+    CMapM seed(ctx.out_adj_vec.data, n, k);
+    MatD adj_b =
+        lu.template triangularView<Eigen::Upper>().transpose().solve(seed);
+    lu.template triangularView<Eigen::UnitLower>()
+        .transpose()
+        .solveInPlace(adj_b);
+    adj_b = permutation.transpose() * adj_b;
+    if (divisor_active && ctx.in_adj[0].data)
+      MapM(ctx.in_adj[0].data, n, n) -=
+          adj_b * CMapM(ctx.out.data, n, k).transpose();
+    if (dividend_active && ctx.in_adj[1].data)
+      MapM(ctx.in_adj[1].data, n, k) += adj_b;
+  }
+}
+
+void prepared_mdivide_left_prim_lu_bwd(KernelCtx& ctx) {
+  if ((ctx.variant & 1u) == 0) return;
+  (ctx.variant & 2u) ? prepared_mdivide_left_prim_lu_bwd_t<true>(ctx)
+                     : prepared_mdivide_left_prim_lu_bwd_t<false>(ctx);
+}
+
+int64_t prepared_mdivide_left_prim_lu_scratch(const Op& op, const Slot*) {
+  if ((op.variant & 1u) == 0 || op.idata == nullptr || op.n_idata != 2 ||
+      op.idata[0] < 0 || op.idata[1] < 0)
+    return 0;
+  const int64_t n = op.idata[0];
+  if (n > (std::numeric_limits<int64_t>::max() - n - 1) /
+              std::max<int64_t>(n, 1))
+    throw std::overflow_error("prepared prim-LU mdivide_left scratch overflow");
+  return n * n + n + 1;
 }
 
 // ---- lkj_corr_cholesky_lpdf(L | eta) --------------------------------------
@@ -1444,6 +1708,9 @@ void register_matrix_kernels() {
   register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, nullptr});
   register_kernel(OP_MATRIX_EXP,
                   Kernel{matrix_exp_fwd, matrix_exp_bwd, nullptr});
+  register_kernel(OP_MATRIX_EXP_BLOCK_FRECHET,
+                  Kernel{matrix_exp_fwd, matrix_exp_block_frechet_bwd,
+                         nullptr});
   register_kernel(OP_INVERSE, Kernel{inverse_fwd, inverse_bwd, nullptr});
   register_kernel(OP_INVERSE_SPD,
                   Kernel{inverse_spd_fwd, inverse_spd_bwd, nullptr});
@@ -1462,6 +1729,14 @@ void register_matrix_kernels() {
   register_kernel(OP_CROSSPROD, Kernel{crossprod_fwd, crossprod_bwd, nullptr});
   register_kernel(OP_MDIVIDE_LEFT,
                   Kernel{solve_fwd<true>, solve_bwd<true>, nullptr});
+  register_kernel(OP_MDIVIDE_LEFT_PREPARED,
+                  Kernel{prepared_mdivide_left_fwd,
+                         prepared_mdivide_left_bwd,
+                         prepared_mdivide_left_scratch});
+  register_kernel(OP_MDIVIDE_LEFT_PREPARED_PRIM_LU,
+                  Kernel{prepared_mdivide_left_prim_lu_fwd,
+                         prepared_mdivide_left_prim_lu_bwd,
+                         prepared_mdivide_left_prim_lu_scratch});
   register_kernel(OP_MDIVIDE_RIGHT,
                   Kernel{solve_fwd<false>, solve_bwd<false>, nullptr});
   register_kernel(OP_MDIVIDE_LEFT_SPD,

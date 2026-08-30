@@ -12,7 +12,9 @@
 #include <stanli/optable.hpp>
 #include <stanli/island.hpp>
 #include <stanli/partition.hpp>
+#include <stanli/program_density.hpp>
 #include <stanli/reroll.hpp>
+#include <stanli/scan.hpp>
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -23,6 +25,7 @@
 #include <cstdlib>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -369,6 +372,14 @@ struct Lowering {
   };
   static_assert(sizeof(Val) == 32);
 
+  struct DeclView {
+    int64_t len = 0;
+    bool autodiff = false;
+    SlotInfo si;
+    bool int_array = false;
+    bool deferred_shape = false;
+  };
+
   const DataMap& data;
   std::shared_ptr<ShapeInterner> shape_pool;
   PrepTrace& prep;
@@ -390,7 +401,11 @@ struct Lowering {
                }}};
   Graph g;
   CompiledModel out;
-  std::map<std::string, Val> scope;     // var -> value and logical view
+  std::map<std::string, Val> scope;  // var -> value and logical view
+  // The only name-keyed declaration protocol. Runtime values carry the same
+  // static scalar type and SlotInfo in `scope`; this registry is needed only
+  // before first binding.
+  std::map<std::string, DeclView> decls;
   std::map<std::string, long> int_env;  // data int scalars
   std::map<int, IntRange> int_ranges;   // runtime integral slot provenance
   // Definite initialization proof for the target construction grammar.
@@ -408,6 +423,24 @@ struct Lowering {
   // Interpreter-native semantic values. Graph fills use a different physical
   // order for arrays, so compile-time observation must never reuse them.
   std::map<ObservationKey, DataMap::Entry> observations;
+  struct ScopedEnvBindings {
+    std::map<std::string, DataMap::Entry>& env;
+    std::vector<std::string> names;
+    explicit ScopedEnvBindings(std::map<std::string, DataMap::Entry>& e,
+                               size_t n)
+        : env(e) {
+      names.reserve(n);
+    }
+    ScopedEnvBindings(const ScopedEnvBindings&) = delete;
+    ScopedEnvBindings& operator=(const ScopedEnvBindings&) = delete;
+    void bind(std::string name, const DataMap::Entry& value) {
+      names.push_back(std::move(name));
+      env.emplace(names.back(), value);
+    }
+    ~ScopedEnvBindings() {
+      for (const std::string& name : names) env.erase(name);
+    }
+  };
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
   std::map<std::string, const mir::FunDef*> fun_defs;
@@ -439,6 +472,164 @@ struct Lowering {
   // OR of the actual real/container scalar types for the current inlined
   // UDF. Generic AutoDiffable locals and returns instantiate to this type.
   bool udf_autodiff_ctx = false;
+  // Integer values invalidated by a retained scheduled loop belong to its
+  // runtime program. They must not be literalized while specializing the loop
+  // body once as a template.
+  std::set<std::string> scheduled_runtime_ints;
+  // Source statements whose bounded-trip proof holds for every row assigned
+  // to the template currently being specialized.
+  // The bool distinguishes exactly one iteration from zero-or-one. Both
+  // remove the backedge; only the former may remove the entry guard.
+  const std::map<const mir::Stmt*, bool>* scheduled_one_trip_sources = nullptr;
+
+  struct LoweringSnapshot {
+    size_t slots = 0, ops = 0, idata = 0, udata = 0;
+    int result_slot = -1;
+    size_t fills = 0, param_names = 0, views = 0, unc_params = 0;
+    int64_t n_unconstrained = 0;
+    size_t target_terms = 0, jac_slots = 0, shape_count = 0;
+    std::map<std::string, Val> scope;
+    std::map<std::string, DeclView> decls;
+    std::map<std::string, long> int_env;
+    std::map<int, IntRange> int_ranges;
+    std::map<int, int64_t> int_initialized_prefix;
+    std::map<double, int> const_cache;
+    std::map<ObservationKey, DataMap::Entry> observations;
+    std::map<std::string, bool> udf_formal_autodiff;
+    std::map<std::string, bool> effectful_cache;
+    std::set<std::string> effectful_visiting;
+    std::set<std::string> int_locals;
+    std::map<std::string, long> int_env_data;
+    bool partial_td_env = false;
+    std::map<std::string, DataMap::Entry> td_env;
+    std::map<std::string, std::optional<DataMap::Entry>> td_bindings;
+    std::set<std::string> td_keys;
+    std::set<std::string> scheduled_runtime_ints;
+    const std::map<const mir::Stmt*, bool>* scheduled_one_trip_sources = nullptr;
+    int udf_depth = 0;
+    bool in_write_array = false;
+    std::optional<size_t> n_tp_start, n_gq_start;
+    bool propto_ctx = true;
+    double target_scale = 1.0;
+    bool udf_autodiff_ctx = false;
+  };
+
+  LoweringSnapshot capture_lowering_state(
+      const mir::Stmt* mutation_scope = nullptr) {
+    LoweringSnapshot x;
+    x.slots = g.slots.size();
+    x.ops = g.ops.size();
+    x.idata = g.idata_pool.size();
+    x.udata = g.udata_pool.size();
+    x.result_slot = g.result_slot;
+    x.fills = out.fills.size();
+    x.param_names = out.param_names.size();
+    x.views = out.views.size();
+    x.unc_params = out.unc_params.size();
+    x.n_unconstrained = out.n_unconstrained;
+    x.target_terms = target_terms.size();
+    x.jac_slots = jac_slots.size();
+    x.shape_count = shape_pool->shapes.size();
+    x.scope = scope;
+    x.decls = decls;
+    x.int_env = int_env;
+    x.int_ranges = int_ranges;
+    x.int_initialized_prefix = int_initialized_prefix;
+    x.const_cache = const_cache;
+    x.observations = observations;
+    x.udf_formal_autodiff = udf_formal_autodiff;
+    x.effectful_cache = effectful_cache;
+    x.effectful_visiting = effectful_visiting;
+    x.int_locals = int_locals;
+    x.int_env_data = int_env_data;
+    if (mutation_scope == nullptr) {
+      x.td_env = td.env();
+    } else {
+      x.partial_td_env = true;
+      for (const auto& binding : td.env()) x.td_keys.insert(binding.first);
+      std::set<std::string> names;
+      declared_names(*mutation_scope, &names);
+      std::vector<std::string> assigned;
+      assigned_names(*mutation_scope, &assigned);
+      names.insert(assigned.begin(), assigned.end());
+      for (const std::string& name : names) {
+        const auto found = td.env().find(name);
+        x.td_bindings.emplace(
+            name, found == td.env().end()
+                      ? std::optional<DataMap::Entry>{}
+                      : std::optional<DataMap::Entry>{found->second});
+      }
+    }
+    x.scheduled_runtime_ints = scheduled_runtime_ints;
+    x.scheduled_one_trip_sources = scheduled_one_trip_sources;
+    x.udf_depth = udf_depth;
+    x.in_write_array = in_write_array;
+    x.n_tp_start = n_tp_start;
+    x.n_gq_start = n_gq_start;
+    x.propto_ctx = propto_ctx;
+    x.target_scale = target_scale;
+    x.udf_autodiff_ctx = udf_autodiff_ctx;
+    return x;
+  }
+
+  void restore_lowering_state(const LoweringSnapshot& x) {
+    g.ops.resize(x.ops);
+    g.slots.resize(x.slots);
+    g.idata_pool.resize(x.idata);
+    g.udata_pool.resize(x.udata);
+    g.result_slot = x.result_slot;
+    out.fills.resize(x.fills);
+    out.param_names.resize(x.param_names);
+    out.views.resize(x.views);
+    out.unc_params.resize(x.unc_params);
+    out.n_unconstrained = x.n_unconstrained;
+    target_terms.resize(x.target_terms);
+    jac_slots.resize(x.jac_slots);
+    while (shape_pool->shapes.size() > x.shape_count) {
+      const ArrayShape& shape = shape_pool->shapes.back();
+      shape_pool->ids.erase({shape.dims, shape.leaf});
+      shape_pool->shapes.pop_back();
+    }
+    scope = x.scope;
+    decls = x.decls;
+    int_env = x.int_env;
+    int_ranges = x.int_ranges;
+    int_initialized_prefix = x.int_initialized_prefix;
+    const_cache = x.const_cache;
+    observations = x.observations;
+    udf_formal_autodiff = x.udf_formal_autodiff;
+    effectful_cache = x.effectful_cache;
+    effectful_visiting = x.effectful_visiting;
+    int_locals = x.int_locals;
+    int_env_data = x.int_env_data;
+    if (!x.partial_td_env) {
+      td.env() = x.td_env;
+    } else {
+      auto& env = td.env();
+      for (auto it = env.begin(); it != env.end();) {
+        if (x.td_keys.count(it->first) == 0)
+          it = env.erase(it);
+        else
+          ++it;
+      }
+      for (const auto& [name, value] : x.td_bindings) {
+        if (value)
+          env[name] = *value;
+        else
+          env.erase(name);
+      }
+    }
+    scheduled_runtime_ints = x.scheduled_runtime_ints;
+    scheduled_one_trip_sources = x.scheduled_one_trip_sources;
+    udf_depth = x.udf_depth;
+    in_write_array = x.in_write_array;
+    n_tp_start = x.n_tp_start;
+    n_gq_start = x.n_gq_start;
+    propto_ctx = x.propto_ctx;
+    target_scale = x.target_scale;
+    udf_autodiff_ctx = x.udf_autodiff_ctx;
+  }
+
   bool scalar_autodiff() const {
     return udf_depth == 0 ? !in_write_array : udf_autodiff_ctx;
   }
@@ -691,12 +882,19 @@ struct Lowering {
         fail("size expression needs unknown int " + e.name);
       }
       case mir::Expr::Indexed: {
+        std::optional<DataMap::Entry> evaluated_base;
         // O1 can leave an empty Indexed wrapper around a fully composed
         // integer access, just as it does for real-valued expressions.
         if (e.args.size() == 1) return eval_int(e.args[0]);
         DataMap::Entry* en = e.args[0].kind == mir::Expr::Var
                                  ? td.find(e.args[0].name)
                                  : nullptr;
+        if (en == nullptr) {
+          evaluated_base = try_eval_scheduled_pure(e.args[0]);
+          if (evaluated_base && evaluated_base->is_int &&
+              evaluated_base->i.size() == evaluated_base->r.size())
+            en = &*evaluated_base;
+        }
         if (en && en->is_int && e.args.size() == 2 &&
             e.args[1].name == "IndexSingle") {
           const long index = eval_int(e.args[1].args[0]);
@@ -715,16 +913,34 @@ struct Lowering {
             fail("integer matrix index out of bounds", e.raw);
           return en->i[(size_t)((col - 1) * en->dims[0] + row - 1)];
         }
-        // dims(x)[k] and friends: evaluate the base as a compile-time
-        // sequence, then index it.
-        {
+        // dims(x)[k]: evaluate the geometry vector, then index it. Keep this
+        // narrow so an otherwise unsupported dynamic integer-array index
+        // cannot emit graph work while eval_int is only probing a bound.
+        if (e.args[0].kind == mir::Expr::FunApp && e.args[0].name == "dims") {
           std::vector<int> vals = const_ints(e.args[0]);
           if (e.args.size() == 2 && e.args[1].name == "IndexSingle") {
             const long ix = eval_int(e.args[1].args[0]);
             if (ix >= 1 && (size_t)ix <= vals.size()) return vals[ix - 1];
           }
         }
-        fail("unsupported int index expression", e.raw);
+        const std::function<std::string(const mir::Expr&, int)> describe =
+            [&](const mir::Expr& expression, int depth) -> std::string {
+          if (depth == 0) return "...";
+          if (expression.kind == mir::Expr::Var) return expression.name;
+          if (expression.kind == mir::Expr::LitInt)
+            return std::to_string(expression.lit_i);
+          std::string result = expression.name.empty()
+                                   ? std::to_string((int)expression.kind)
+                                   : expression.name;
+          result += "(";
+          for (size_t k = 0; k < expression.args.size(); ++k) {
+            if (k != 0) result += ",";
+            result += describe(expression.args[k], depth - 1);
+          }
+          result += ")";
+          return result;
+        };
+        fail("unsupported int index expression: " + describe(e, 4), e.raw);
       }
       case mir::Expr::TernaryIf: {
         if (e.args.size() != 3)
@@ -800,7 +1016,8 @@ struct Lowering {
               if (e.name == "num_elements") return len;
               fail(e.name + " is undefined for an array value", e.raw);
             }
-            const LogicalDims dims = logical_dims(si, len, e.name);
+            const LogicalDims dims =
+                logical_dims(si, len, e.name + "(" + e.args[0].name + ")");
             if (e.name == "rows") return dims.rows;
             if (e.name == "cols") return dims.cols;
             return len;
@@ -815,7 +1032,8 @@ struct Lowering {
               if (e.name == "num_elements") return sh.len;
               fail(e.name + " is undefined for an array declaration", e.raw);
             }
-            const LogicalDims dims = logical_dims(sh.si, sh.len, e.name);
+            const LogicalDims dims = logical_dims(
+                sh.si, sh.len, e.name + "(" + e.args[0].name + ")");
             if (e.name == "rows") return dims.rows;
             if (e.name == "cols") return dims.cols;
             return sh.len;
@@ -1890,6 +2108,12 @@ struct Lowering {
   // does not run has to leave the old value in place.
   struct IslandRegion {
     std::vector<int> in_slots;
+    std::vector<std::string> in_names;
+    // Dependency provenance for the matching program live-in. A runtime
+    // region is not inherently parameter-dependent: its control may be
+    // unavailable to the data interpreter while every value it reads is
+    // nevertheless parameter-free.
+    std::vector<bool> in_param_free;
     std::vector<std::string> out_names;
     // Scalar integer locals normally live only in int_env.  A structured
     // while mutates them in the register program, so they leave as ordinary
@@ -1902,6 +2126,120 @@ struct Lowering {
     std::vector<Range> out_views;
     bool has_target = false;  // the region contributed to the target
   };
+
+  // A fixed scan reuses one program after its first iteration, so a carry
+  // that starts as data can become parameter-active on a later row. Seed the
+  // exact outer-slot provenance, propagate it through the straight-line step,
+  // and close that dependency relation over carry exits and entries. This
+  // retains active carry adjoints without turning unrelated data invariants
+  // or genuinely data-only carries into parameter inputs.
+  static bool configure_fixed_scan_activity(IslandProg* prog,
+                                            const IslandRegion& reg) {
+    if (prog == nullptr || prog->ins.size() != reg.in_param_free.size() ||
+        prog->ins.size() != reg.in_names.size() || prog->n_regs < 0)
+      return false;
+    for (size_t k = 0; k < prog->ins.size(); ++k)
+      prog->ins[k].active = !reg.in_param_free[k];
+
+    struct CarryDependency {
+      size_t input = 0;
+      size_t output_begin = 0;
+      size_t len = 0;
+    };
+    std::vector<CarryDependency> carry;
+    size_t output_begin = 0;
+    for (size_t k = 0; k < reg.out_names.size(); ++k) {
+      if (k >= reg.out_views.size() || reg.out_views[k].len < 0) return false;
+      const auto input =
+          std::find(reg.in_names.begin(), reg.in_names.end(), reg.out_names[k]);
+      if (input != reg.in_names.end())
+        carry.push_back(CarryDependency{
+            static_cast<size_t>(input - reg.in_names.begin()), output_begin,
+            static_cast<size_t>(reg.out_views[k].len)});
+      output_begin += static_cast<size_t>(reg.out_views[k].len);
+      if (output_begin > prog->out_regs.size()) return false;
+    }
+
+    const auto range_active = [](const std::vector<uint8_t>& active, int reg,
+                                 int len, bool* any) {
+      if (reg < 0 || len < 0 || static_cast<size_t>(reg) + len > active.size())
+        return false;
+      for (int j = 0; j < len; ++j)
+        *any = *any || active[static_cast<size_t>(reg + j)] != 0;
+      return true;
+    };
+    const auto set_range = [](std::vector<uint8_t>* active, int reg, int len,
+                              bool value) {
+      if (reg < 0 || len < 0 || static_cast<size_t>(reg) + len > active->size())
+        return false;
+      std::fill(active->begin() + reg, active->begin() + reg + len,
+                value ? 1 : 0);
+      return true;
+    };
+    const auto propagate = [&]() -> std::optional<std::vector<uint8_t>> {
+      std::vector<uint8_t> active(static_cast<size_t>(prog->n_regs), 0);
+      for (const IslandProg::LiveIn& input : prog->ins)
+        if (input.active && !set_range(&active, input.reg, input.len, true))
+          return std::nullopt;
+      for (const Program::Instr& instr : prog->code) {
+        if (instr.code == Program::CALL ||
+            program_code_spec(instr.code).has(kProgramNoAdjoint))
+          return std::nullopt;
+        const ProgramOpSpec& op = program_code_spec(instr.code);
+        bool any = false;
+        if (!op.has(kProgramNoInputs)) {
+          if (instr.code == Program::DENSITY) {
+            const int arity = program_density_arity(instr.len);
+            if (arity > 3) {
+              if (!range_active(active, instr.a, arity, &any))
+                return std::nullopt;
+            } else {
+              if (!range_active(active, instr.a, 1, &any) ||
+                  (arity > 1 && !range_active(active, instr.b, 1, &any)) ||
+                  (arity > 2 && !range_active(active, instr.c, 1, &any)))
+                return std::nullopt;
+            }
+          } else if (!range_active(active, instr.a,
+                                   op.has(kProgramRangeA) ? instr.len : 1,
+                                   &any) ||
+                     (op.has(kProgramReadB) &&
+                      !range_active(active, instr.b,
+                                    op.has(kProgramRangeB) ? instr.len : 1,
+                                    &any)) ||
+                     (op.has(kProgramReadC) &&
+                      !range_active(active, instr.c, 1, &any))) {
+            return std::nullopt;
+          }
+        }
+        if (!set_range(&active, instr.dst, program_output_len(instr), any))
+          return std::nullopt;
+      }
+      return active;
+    };
+
+    for (size_t pass = 0; pass <= carry.size(); ++pass) {
+      const auto active = propagate();
+      if (!active) return false;
+      bool changed = false;
+      for (const CarryDependency& c : carry) {
+        if (c.output_begin + c.len > prog->out_regs.size()) return false;
+        bool output_active = false;
+        for (size_t j = 0; j < c.len; ++j) {
+          const int output = prog->out_regs[c.output_begin + j];
+          if (output < 0 || static_cast<size_t>(output) >= active->size())
+            return false;
+          output_active =
+              output_active || (*active)[static_cast<size_t>(output)];
+        }
+        if (output_active && !prog->ins[c.input].active) {
+          prog->ins[c.input].active = true;
+          changed = true;
+        }
+      }
+      if (!changed) return true;
+    }
+    return false;
+  }
 
   // Does `s` increment the target anywhere?
   static bool has_target_pe(const mir::Stmt& s) {
@@ -2015,6 +2353,20 @@ struct Lowering {
     return false;
   }
 
+  // Does this statement contain a break/continue owned by the surrounding
+  // loop? Nested loops own their control statements, matching
+  // runtime_loop_control's stopping rule. Most numerical loops have no loop
+  // control at all; avoid evaluating every data condition at every iteration
+  // merely to rediscover that lexical fact.
+  static bool has_owned_loop_control(const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::Break || s.kind == mir::Stmt::Continue)
+      return true;
+    if (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) return false;
+    for (const auto& child : s.body)
+      if (has_owned_loop_control(child)) return true;
+    return false;
+  }
+
   // Every name an Assignment targets anywhere in `s`, in first-seen order.
   void assigned_names(const mir::Stmt& s, std::vector<std::string>* out) {
     if (s.kind == mir::Stmt::Assignment &&
@@ -2023,11 +2375,17 @@ struct Lowering {
     for (const auto& k : s.body) assigned_names(k, out);
   }
 
+  static void declared_names(const mir::Stmt& s,
+                             std::set<std::string>* out) {
+    if (s.kind == mir::Stmt::Decl) out->insert(s.decl_id);
+    for (const mir::Stmt& child : s.body) declared_names(child, out);
+  }
+
   // Remove a return at the lexical end of a statement arm, preserving every
   // statement that precedes it.  This is the structured form used by UDFs
-  // such as ctsem's mcalc: each arm returns, but one arm first updates a local
-  // matrix.  The updates can lower as an ordinary statement island and the
-  // two returned expressions can then join through a ternary value island.
+  // in generated matrix helpers: each arm returns, but one arm first updates a
+  // local matrix.  The updates can lower as an ordinary statement island and
+  // the two returned expressions can then join through a ternary value island.
   static bool peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
     if (s->kind == mir::Stmt::Return) {
       if (!s->has_init) return false;
@@ -2044,7 +2402,8 @@ struct Lowering {
 
   // Compile `s` (a statement region) or `e` (a ternary) into a program.
   void lower_island(const mir::Stmt* s, const mir::Expr* e, IslandRegion* reg,
-                    Range* expr_out, std::shared_ptr<IslandProg>* prog_out) {
+                    Range* expr_out, std::shared_ptr<IslandProg>* prog_out,
+                    bool fixed_scan_activity = false) {
     auto prog = std::make_shared<IslandProg>();
     ProgramCompiler c{*prog, fun_defs};
     // Non-returning statement calls may print or reject. A register program
@@ -2054,9 +2413,13 @@ struct Lowering {
     // Data the region reads as a compile-time integer, answered by the
     // same interpreter that answers a size expression. The region has
     // already resolved the indices, so what arrives is a literal read of a
-    // data-only value -- nothing here depends on the region's own scope.
+    // value -- nothing here depends on the region's own scope. Do not use the
+    // enclosing MIR adlevel as the proof: an index into a parameter container
+    // can be labelled active even when the integer selector itself is fully
+    // determined by data or static geometry. Successful pure evaluation is
+    // the stronger value-dependence test; a parameter-valued selector cannot
+    // pass it.
     c.extern_int = [&](const mir::Expr& x, long* out) {
-      if (!x.data_only) return false;
       auto evaluated = try_eval_pure(x);
       if (!evaluated || !evaluated->is_int || evaluated->i.size() != 1)
         return false;
@@ -2065,8 +2428,7 @@ struct Lowering {
     };
     c.extern_ints = [&](const mir::Expr& x, std::vector<long>* values,
                         std::vector<int64_t>* dims) {
-      if (!x.data_only || x.unsized.depth == 0 ||
-          x.unsized.leaf != mir::UnsizedLeaf::Int)
+      if (x.unsized.depth == 0 || x.unsized.leaf != mir::UnsizedLeaf::Int)
         return false;
       auto evaluated = try_eval_pure(x);
       if (!evaluated || !evaluated->is_int ||
@@ -2080,27 +2442,47 @@ struct Lowering {
     for (const auto& [name, value] : scope) outer_names.insert(name);
     for (const auto& [name, value] : decls) outer_names.insert(name);
     const std::set<std::string> outer_int_names = int_locals;
+    const auto set_external_view = [&](const SlotInfo& si, int64_t len,
+                                       Range* r) {
+      *r = Range{};
+      r->len = static_cast<int>(len);
+      r->rows = si.rows;
+      r->cols = si.cols;
+      r->kind = si.kind;
+      if (is_array(si)) {
+        const ArrayShape& arr = array_shape(si);
+        r->dims = arr.dims;
+        r->leaf = arr.leaf;
+      }
+    };
+    c.extern_view = [&](const std::string& name, Range* r) {
+      auto value = scope.find(name);
+      if (value != scope.end()) {
+        set_external_view(value->second.si, g.slots[value->second.slot].len, r);
+        return true;
+      }
+      auto declaration = decls.find(name);
+      if (declaration == decls.end() || declaration->second.deferred_shape)
+        return false;
+      set_external_view(declaration->second.si, declaration->second.len, r);
+      return true;
+    };
     c.bind_extern = [&](const std::string& name, Range* r) {
       auto sc = scope.find(name);
       int slot = sc != scope.end() ? sc->second.slot : env_slot(name);
       if (slot < 0) slot = uninitialized_decl_slot(name);
       if (slot < 0) return false;
       const int64_t len = g.slots[slot].len;
-      r->reg = c.alloc((int)len);
-      r->len = (int)len;
       const SlotInfo& si = scope.at(name).si;
-      r->rows = si.rows;
-      r->cols = si.cols;
-      r->kind = si.kind;
-      if (is_array(si)) {
-        const ArrayShape& arr = array_shape(si);
-        if (arr.leaf == ViewKind::Matrix)
-          c.bail("matrix-leaf arrays are unsupported by a runtime region");
-        r->dims = arr.dims;
-      }
+      if (is_array(si) && array_shape(si).leaf == ViewKind::Matrix)
+        c.bail("matrix-leaf arrays are unsupported by a runtime region");
+      set_external_view(si, len, r);
+      r->reg = c.alloc((int)len);
       if (len > 0) {
         prog->ins.push_back(IslandProg::LiveIn{r->reg, (int)len});
         reg->in_slots.push_back(slot);
+        reg->in_names.push_back(name);
+        reg->in_param_free.push_back(si.param_free);
       }
       return true;
     };
@@ -2216,9 +2598,103 @@ struct Lowering {
     // their operands can have different widths, so retain the original
     // register numbering until those instructions carry explicit spans.
     if (!has_back_edge && !has_unmodelled_ranges) compact_island(*prog);
+    // Adjoint generation uses LiveIn::active to build density masks.  Set
+    // dependency activity before asking it to generate the reverse program;
+    // doing this afterwards would make every data-only input look active.
+    for (size_t k = 0; k < prog->ins.size(); ++k)
+      prog->ins[k].active = !reg->in_param_free[k];
+    if (fixed_scan_activity && !configure_fixed_scan_activity(prog.get(), *reg))
+      for (IslandProg::LiveIn& input : prog->ins) input.active = true;
+    // The legacy generator also handles a terminal if without a trace.  A
+    // general forward-only CFG falls back to the traced generator; backedges
+    // still replay under var.  This explicit seam keeps reusable scan-step
+    // programs, whose scratch has its own layout, on the legacy path.
+    const bool generated =
+        gen_adjoint(*prog) ||
+        (!std::getenv("STANLI_NO_CFG_NATIVE_ADJ") &&
+         gen_cfg_adjoint(*prog));
+    const bool native_enabled = !std::getenv("STANLI_NO_NATIVE_ADJ");
     prog->native_adj =
-        gen_adjoint(*prog) && !std::getenv("STANLI_NO_NATIVE_ADJ");
+        generated && native_enabled && cfg_native_profitable(*prog);
+    prog->selector_adj =
+        !generated && native_enabled &&
+        !std::getenv("STANLI_NO_SELECTOR_ADJ") &&
+        supports_selector_adjoint(*prog);
     *prog_out = std::move(prog);
+  }
+
+  static bool region_param_free(const IslandRegion& reg) {
+    return std::all_of(reg.in_param_free.begin(), reg.in_param_free.end(),
+                       [](bool free) { return free; });
+  }
+
+  // Prove only the narrow case where a parameter-controlled branch produces
+  // the same data value on both arms.  Region-wide input provenance is too
+  // coarse for this: a parameter may select the arm while the selected value
+  // itself is independent of every parameter.  Keep this structural and
+  // fail-closed; in particular, do not infer equality from shape alone.
+  bool proven_param_free_expr(const mir::Expr& e) {
+    if (e.kind == mir::Expr::Unsupported) return false;
+    // Equal source text does not make an RNG or an opaque user function's
+    // result equal: only one arm executes, and either may observe hidden
+    // state.  Keep this proof about values, not merely parameter reachability.
+    if (expr_effectful(e)) return false;
+    if (is_shape_query(e))
+      return try_static_shape_query(e).state == StaticProbeState::Known;
+    if (e.kind == mir::Expr::FunApp && e.args.size() == 1 &&
+        (e.name == "FnLength" || e.name == "dims"))
+      return try_static_view(e.args[0]).state == StaticProbeState::Known;
+    if (e.kind == mir::Expr::Var) {
+      auto value = scope.find(e.name);
+      if (value != scope.end()) return value->second.si.param_free;
+      auto declaration = decls.find(e.name);
+      if (declaration != decls.end())
+        return !declaration->second.deferred_shape &&
+               declaration->second.si.param_free;
+      return e.data_only;
+    }
+    if (e.kind == mir::Expr::FunApp &&
+        (e.name == "FnReadParam" ||
+         e.fn_lib == mir::Expr::Lib::UserDefined))
+      return false;
+    for (const mir::Expr& arg : e.args)
+      if (!proven_param_free_expr(arg)) return false;
+    return true;
+  }
+
+  static const mir::Stmt* sole_statement(const mir::Stmt& arm) {
+    const mir::Stmt* current = &arm;
+    while (current->kind == mir::Stmt::Block ||
+           current->kind == mir::Stmt::SList) {
+      if (current->body.size() != 1) return nullptr;
+      current = &current->body[0];
+    }
+    return current;
+  }
+
+  bool identical_data_if_output(const mir::Stmt& statement,
+                                const std::string& name) {
+    if (statement.kind != mir::Stmt::IfElse || statement.body.size() != 2)
+      return false;
+    const mir::Stmt* assignments[2] = {sole_statement(statement.body[0]),
+                                       sole_statement(statement.body[1])};
+    if (assignments[0] == nullptr || assignments[1] == nullptr)
+      return false;
+    for (const mir::Stmt* assignment : assignments) {
+      if (assignment->kind != mir::Stmt::Assignment ||
+          assignment->lhs != name || !assignment->lhs_idx.empty() ||
+          !proven_param_free_expr(assignment->rhs))
+        return false;
+    }
+    return scan_same_expr(assignments[0]->rhs, assignments[1]->rhs);
+  }
+
+  bool identical_data_ternary(const mir::Expr& expression) {
+    return expression.kind == mir::Expr::TernaryIf &&
+           expression.args.size() == 3 &&
+           proven_param_free_expr(expression.args[1]) &&
+           proven_param_free_expr(expression.args[2]) &&
+           scan_same_expr(expression.args[1], expression.args[2]);
   }
 
   // The OP_ISLAND for a compiled region, plus one extraction per live-out.
@@ -2284,6 +2760,4523 @@ struct Lowering {
     target_terms.push_back(slot);
   }
 
+  // Phase-one structured-loop lowering is intentionally a narrow proof, not
+  // a heuristic. The first iteration is emitted through the ordinary graph
+  // path; the remaining rows may share one register-program template only
+  // when every use of the iterator disappeared after folding an exact
+  // `i == first` (or `i != first`) guard. Fixed row indices therefore refuse
+  // instead of accidentally reusing the second row's constants for all rows.
+  static const mir::Expr* scan_unpromoted(const mir::Expr* e) {
+    while (e->kind == mir::Expr::Promotion && e->args.size() == 1)
+      e = &e->args[0];
+    return e;
+  }
+
+  bool scan_first_guard(const mir::Expr& condition, const std::string& loopvar,
+                        long first, bool* stable_value) {
+    const mir::Expr* e = scan_unpromoted(&condition);
+    if (e->kind != mir::Expr::FunApp || e->args.size() != 2 ||
+        (e->name != "Equals__" && e->name != "NEquals__"))
+      return false;
+    const mir::Expr* a = scan_unpromoted(&e->args[0]);
+    const mir::Expr* b = scan_unpromoted(&e->args[1]);
+    const mir::Expr* other = nullptr;
+    if (a->kind == mir::Expr::Var && a->name == loopvar)
+      other = b;
+    else if (b->kind == mir::Expr::Var && b->name == loopvar)
+      other = a;
+    if (other == nullptr || expr_references(*other, loopvar)) return false;
+    auto value = try_eval_pure(*other);
+    if (!value || value->r.size() != 1 || value->r[0] != (double)first)
+      return false;
+    // Equals is true only on the peeled row; NEquals is false only there.
+    *stable_value = e->name == "NEquals__";
+    return true;
+  }
+
+  bool scan_stmt_directly_references(const mir::Stmt& s,
+                                     const std::string& loopvar) {
+    if (s.has_init && expr_references(s.init, loopvar)) return true;
+    if (expr_references(s.rhs, loopvar) || expr_references(s.target, loopvar) ||
+        expr_references(s.lower, loopvar) ||
+        expr_references(s.upper, loopvar) || expr_references(s.cond, loopvar))
+      return true;
+    for (const auto& e : s.fn_args)
+      if (expr_references(e, loopvar)) return true;
+    for (const auto& e : s.lhs_idx)
+      if (expr_references(e, loopvar)) return true;
+    return false;
+  }
+
+  // Inspect every source arm, including the peeled-only arm. Specialization
+  // deliberately drops dead/stable-opposite arms, but the prefix executes
+  // one of them through ordinary lowering; a break there must not escape the
+  // enclosing For after this helper has taken over its control flow.
+  bool scan_source_safe(const mir::Stmt& s) {
+    switch (s.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+      case mir::Stmt::IfElse:
+        for (const auto& child : s.body)
+          if (!scan_source_safe(child)) return false;
+        return true;
+      case mir::Stmt::Decl:
+      case mir::Stmt::TargetPE:
+      case mir::Stmt::Skip:
+        return true;
+      case mir::Stmt::Assignment:
+        return s.lhs_idx.empty();
+      case mir::Stmt::For:
+      case mir::Stmt::While:
+      case mir::Stmt::NRFunApp:
+      case mir::Stmt::Return:
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+      case mir::Stmt::Unsupported:
+        return false;
+    }
+    return false;
+  }
+
+  // Produce the one statement which every row after the peeled prefix runs.
+  // Runtime control, nested loops, indexed writes, and effects stay on the
+  // established unrolled/island paths. Data conditionals are folded here so
+  // a first-row initialization arm can differ without entering the template.
+  bool specialize_scan_stmt(const mir::Stmt& s, const std::string& loopvar,
+                            long first, mir::Stmt* out,
+                            bool* peeled_exception) {
+    if (stmt_effectful(s)) return false;
+    switch (s.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList: {
+        *out = s;
+        out->body.clear();
+        for (const auto& child : s.body) {
+          mir::Stmt specialized;
+          if (!specialize_scan_stmt(child, loopvar, first, &specialized,
+                                    peeled_exception))
+            return false;
+          out->body.push_back(std::move(specialized));
+        }
+        return true;
+      }
+      case mir::Stmt::IfElse: {
+        bool take = false;
+        if (expr_references(s.cond, loopvar)) {
+          if (!scan_first_guard(s.cond, loopvar, first, &take)) return false;
+          *peeled_exception = true;
+        } else {
+          auto value = try_eval_pure(s.cond);
+          if (!value || value->r.size() != 1) return false;
+          take = value->r[0] != 0.0;
+        }
+        const size_t arm = take ? 0 : 1;
+        if (arm >= s.body.size()) {
+          *out = mir::Stmt{};
+          out->kind = mir::Stmt::Skip;
+          return true;
+        }
+        return specialize_scan_stmt(s.body[arm], loopvar, first, out,
+                                    peeled_exception);
+      }
+      case mir::Stmt::Decl:
+      case mir::Stmt::TargetPE:
+      case mir::Stmt::Skip:
+        if (scan_stmt_directly_references(s, loopvar)) return false;
+        *out = s;
+        return true;
+      case mir::Stmt::Assignment:
+        if (!s.lhs_idx.empty() || scan_stmt_directly_references(s, loopvar))
+          return false;
+        *out = s;
+        return true;
+      case mir::Stmt::For:
+      case mir::Stmt::While:
+      case mir::Stmt::NRFunApp:
+      case mir::Stmt::Return:
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+      case mir::Stmt::Unsupported:
+        return false;
+    }
+    return false;
+  }
+
+  struct ScheduledFeed {
+    mir::Expr source;
+    std::string base_name;
+    std::string synthetic_name;
+    int placeholder_slot = -1;
+    int64_t len = 0;
+    SlotInfo si;
+    bool active = false;
+    bool control = false;
+  };
+
+  static bool scan_same_expr(const mir::Expr& a, const mir::Expr& b) {
+    if (a.kind != b.kind || a.name != b.name || a.type_ != b.type_ ||
+        a.lit_i != b.lit_i || a.lit != b.lit || a.args.size() != b.args.size())
+      return false;
+    for (size_t k = 0; k < a.args.size(); ++k)
+      if (!scan_same_expr(a.args[k], b.args[k])) return false;
+    return true;
+  }
+
+  static bool scan_references_any(const mir::Expr& e,
+                                  const std::vector<std::string>& row_names) {
+    return std::any_of(
+        row_names.begin(), row_names.end(),
+        [&](const std::string& name) { return expr_references(e, name); });
+  }
+
+  void bind_known_ints(mir::Expr* expression) const {
+    if (expression->kind == mir::Expr::Var) {
+      const auto known = int_env.find(expression->name);
+      if (known != int_env.end()) {
+        expression->kind = mir::Expr::LitInt;
+        expression->name.clear();
+        expression->args.clear();
+        expression->lit_i = known->second;
+        expression->lit = static_cast<double>(known->second);
+        expression->type_ = "UInt";
+        expression->unsized = {0, mir::UnsizedLeaf::Int};
+        expression->data_only = true;
+        return;
+      }
+    }
+    for (mir::Expr& argument : expression->args) bind_known_ints(&argument);
+  }
+
+  std::optional<DataMap::Entry> try_eval_scheduled_pure(const mir::Expr& e) {
+    mir::Expr resolved = e;
+    bind_known_ints(&resolved);
+    return try_eval_pure(resolved);
+  }
+
+  static bool same_scheduled_data_env(
+      const std::map<std::string, DataMap::Entry>& a,
+      const std::map<std::string, DataMap::Entry>& b) {
+    if (a.size() != b.size()) return false;
+    auto ai = a.begin();
+    auto bi = b.begin();
+    for (; ai != a.end(); ++ai, ++bi)
+      if (ai->first != bi->first ||
+          ai->second.is_int != bi->second.is_int ||
+          ai->second.r != bi->second.r || ai->second.i != bi->second.i ||
+          ai->second.dims != bi->second.dims)
+        return false;
+    return true;
+  }
+
+  using ScheduledDataBindings =
+      std::map<std::string, std::optional<DataMap::Entry>>;
+
+  ScheduledDataBindings capture_scheduled_data_bindings(
+      const mir::Stmt& statement) {
+    std::set<std::string> names;
+    declared_names(statement, &names);
+    std::vector<std::string> assigned;
+    assigned_names(statement, &assigned);
+    names.insert(assigned.begin(), assigned.end());
+    return capture_scheduled_data_bindings(names);
+  }
+
+  ScheduledDataBindings capture_scheduled_data_bindings(
+      const std::set<std::string>& names) {
+    ScheduledDataBindings saved;
+    for (const std::string& name : names) {
+      const auto found = td.env().find(name);
+      saved.emplace(name, found == td.env().end()
+                              ? std::optional<DataMap::Entry>{}
+                              : std::optional<DataMap::Entry>{found->second});
+    }
+    return saved;
+  }
+
+  void restore_scheduled_data_bindings(const ScheduledDataBindings& saved) {
+    for (const auto& [name, value] : saved) {
+      if (value)
+        td.env()[name] = *value;
+      else
+        td.env().erase(name);
+    }
+  }
+
+  ScheduledDataBindings read_scheduled_data_bindings(
+      const ScheduledDataBindings& schema) {
+    ScheduledDataBindings values;
+    for (const auto& [name, ignored] : schema) {
+      (void)ignored;
+      const auto found = td.env().find(name);
+      values.emplace(name, found == td.env().end()
+                               ? std::optional<DataMap::Entry>{}
+                               : std::optional<DataMap::Entry>{found->second});
+    }
+    return values;
+  }
+
+  static bool same_scheduled_data_bindings(
+      const ScheduledDataBindings& a, const ScheduledDataBindings& b) {
+    if (a.size() != b.size()) return false;
+    auto ai = a.begin();
+    auto bi = b.begin();
+    for (; ai != a.end(); ++ai, ++bi) {
+      if (ai->first != bi->first || ai->second.has_value() !=
+                                          bi->second.has_value())
+        return false;
+      if (!ai->second) continue;
+      const DataMap::Entry& x = *ai->second;
+      const DataMap::Entry& y = *bi->second;
+      if (x.is_int != y.is_int || x.i != y.i || x.dims != y.dims ||
+          x.r.size() != y.r.size())
+        return false;
+      if (!x.r.empty() &&
+          std::memcmp(x.r.data(), y.r.data(), x.r.size() * sizeof(double)) !=
+              0)
+        return false;
+    }
+    return true;
+  }
+
+  // A row iterator retained only inside a data-only index descriptor is
+  // compile-time template geometry, not a numerical row dependency. The
+  // descriptor's exact value is fingerprinted separately for every row.
+  static bool scan_has_numerical_row_reference(
+      const mir::Expr& e, const std::vector<std::string>& row_names) {
+    if (e.kind == mir::Expr::Indexed && !e.args.empty()) {
+      if (scan_has_numerical_row_reference(e.args[0], row_names)) return true;
+      for (size_t k = 1; k < e.args.size(); ++k) {
+        const mir::Expr& index = e.args[k];
+        if (scan_references_any(index, row_names)) {
+          continue;
+        }
+        if (scan_has_numerical_row_reference(index, row_names)) return true;
+      }
+      return false;
+    }
+    for (const mir::Expr& arg : e.args)
+      if (scan_has_numerical_row_reference(arg, row_names)) return true;
+    return e.kind == mir::Expr::Var && scan_references_any(e, row_names);
+  }
+
+  bool fingerprint_scheduled_index(const mir::Expr& index,
+                                   const std::string& loopvar,
+                                   std::string* fingerprint) {
+    // A selector which directly names the outer row is streamed with its
+    // selected numerical feed. A selector built through row-local integer
+    // state no longer names that iterator; fingerprint its exact value so a
+    // representative cannot freeze a transitive row dependency.
+    if (expr_references(index, loopvar)) return true;
+    *fingerprint += "X";
+    *fingerprint += index.name;
+    *fingerprint += '=';
+    try {
+      for (const mir::Expr& argument : index.args) {
+        auto value = try_eval_scheduled_pure(argument);
+        if (!value || !value->is_int ||
+            value->i.size() != value->r.size()) {
+          const bool runtime_owned = std::any_of(
+              scheduled_runtime_ints.begin(), scheduled_runtime_ints.end(),
+              [&](const std::string& name) {
+                return expr_references(argument, name);
+              });
+          if (runtime_owned) return true;
+          if (std::getenv("STANLI_DEBUG_SCAN"))
+            std::fprintf(stderr,
+                         "scheduled row index value unavailable: %s\n",
+                         index.name.c_str());
+          return false;
+        }
+        *fingerprint += '[';
+        for (int64_t dim : value->dims) {
+          *fingerprint += std::to_string(dim);
+          *fingerprint += ',';
+        }
+        *fingerprint += "]";
+        for (int cell : value->i) {
+          *fingerprint += std::to_string(cell);
+          *fingerprint += ',';
+        }
+        *fingerprint += ';';
+      }
+    } catch (const CompileError&) {
+      return false;
+    }
+    return true;
+  }
+
+  bool fingerprint_scheduled_geometry(const mir::Expr& expression,
+                                      const std::string& loopvar,
+                                      std::string* fingerprint) {
+    if (expression.kind == mir::Expr::Indexed && !expression.args.empty()) {
+      // A data-only indexed value either becomes a packed numerical row feed
+      // or is consumed while evaluating a later data condition/index. Its raw
+      // source row number is not template geometry; the resulting value (and
+      // any feed schema) is checked at the consumer instead.
+      if (expression.data_only) return true;
+      if (!fingerprint_scheduled_geometry(expression.args[0], loopvar,
+                                          fingerprint))
+        return false;
+      for (size_t k = 1; k < expression.args.size(); ++k)
+        if (!fingerprint_scheduled_index(expression.args[k], loopvar,
+                                         fingerprint))
+          return false;
+      return true;
+    }
+    for (const mir::Expr& argument : expression.args)
+      if (!fingerprint_scheduled_geometry(argument, loopvar, fingerprint))
+        return false;
+    return true;
+  }
+
+  bool fingerprint_scheduled_geometry(const mir::Stmt& statement,
+                                      const std::string& loopvar,
+                                      std::string* fingerprint) {
+    if ((statement.has_init &&
+         !fingerprint_scheduled_geometry(statement.init, loopvar,
+                                         fingerprint)) ||
+        !fingerprint_scheduled_geometry(statement.rhs, loopvar, fingerprint) ||
+        !fingerprint_scheduled_geometry(statement.target, loopvar,
+                                        fingerprint) ||
+        !fingerprint_scheduled_geometry(statement.lower, loopvar,
+                                        fingerprint) ||
+        !fingerprint_scheduled_geometry(statement.upper, loopvar,
+                                        fingerprint) ||
+        !fingerprint_scheduled_geometry(statement.cond, loopvar, fingerprint))
+      return false;
+    for (const mir::Expr& dimension : statement.decl_type.dims)
+      if (!fingerprint_scheduled_geometry(dimension, loopvar, fingerprint))
+        return false;
+    for (const mir::Expr& argument : statement.fn_args)
+      if (!fingerprint_scheduled_geometry(argument, loopvar, fingerprint))
+        return false;
+    for (const mir::Expr& index : statement.lhs_idx)
+      if (!fingerprint_scheduled_index(index, loopvar, fingerprint))
+        return false;
+    return true;
+  }
+
+  static bool scan_semantic_integer(const mir::Expr& e,
+                                    const DataMap::Entry& value) {
+    if (e.unsized.leaf == mir::UnsizedLeaf::Int || e.type_ == "UInt")
+      return true;
+    // Portable MIR always carries the structural view. Retain a fail-closed
+    // fallback for hand-authored legacy fixtures whose type metadata predates
+    // UnsizedView; do not let JSON's all-integer spelling reclassify a known
+    // real/vector/matrix expression as schedule geometry.
+    return e.unsized.leaf == mir::UnsizedLeaf::Unknown && e.type_.empty() &&
+           value.is_int;
+  }
+
+  static bool scan_references_forbidden(
+      const mir::Expr& expression,
+      const std::set<std::string>* forbidden_names) {
+    if (forbidden_names == nullptr) return false;
+    for (const std::string& name : *forbidden_names)
+      if (expr_references(expression, name)) return true;
+    return false;
+  }
+
+  static bool scheduled_int_container_decl(const mir::Stmt& declaration) {
+    if (declaration.kind != mir::Stmt::Decl) return false;
+    const bool sized_int_array = declaration.decl_type.base == "SArray" &&
+                                 declaration.decl_type.elem_base == "SInt";
+    const bool unsized_int_array =
+        declaration.decl_type.unsized.depth > 0 &&
+        declaration.decl_type.unsized.leaf == mir::UnsizedLeaf::Int;
+    return sized_int_array || unsized_int_array;
+  }
+
+  bool initialize_scheduled_int_container(const mir::Stmt& declaration) {
+    if (!scheduled_int_container_decl(declaration)) return false;
+    if (declaration.has_init) {
+      const auto value = try_eval_scheduled_pure(declaration.init);
+      if (!value || !value->is_int || value->i.size() != value->r.size())
+        return false;
+      td.env()[declaration.decl_id] = *value;
+      return true;
+    }
+    // An unsized scratch array has no geometry until its first whole-value
+    // assignment.  Do not manufacture a one-cell sentinel: the scheduled
+    // interpreter will install the real value when it reaches that assignment.
+    if (declaration.decl_type.dims.empty() &&
+        declaration.decl_type.unsized.depth > 0) {
+      td.env().erase(declaration.decl_id);
+      return true;
+    }
+    DataMap::Entry value;
+    value.is_int = true;
+    int64_t cells = 1;
+    try {
+      for (const mir::Expr& dimension : declaration.decl_type.dims) {
+        const long extent = eval_int(dimension);
+        if (extent < 0 ||
+            (extent != 0 &&
+             cells > std::numeric_limits<int64_t>::max() / extent))
+          return false;
+        value.dims.push_back(extent);
+        cells *= extent;
+      }
+    } catch (const CompileError&) {
+      return false;
+    }
+    if (cells < 0 || cells > 1000000) return false;
+    value.i.assign((size_t)cells, std::numeric_limits<int>::min());
+    value.r.assign(value.i.begin(), value.i.end());
+    td.env()[declaration.decl_id] = std::move(value);
+    return true;
+  }
+
+  // Lift each distinct outer-array element selected by the loop iterator.
+  // The concrete data are observed while proving a representative, but no
+  // fill is installed: the fragment sees live-ins which OP_SCAN later binds
+  // from disjoint columns of one packed row feed. Keeping one graph input for
+  // all row data is important for real generated models, which routinely read
+  // several arrays while Op itself has only six input fields.
+  bool rewrite_scheduled_expr(mir::Expr* e,
+                              const std::vector<std::string>& row_names,
+                              std::vector<ScheduledFeed>* feeds,
+                              const std::set<std::string>* forbidden_names =
+                                  nullptr) {
+    if (e->kind == mir::Expr::Var) {
+      const auto known = int_env.find(e->name);
+      if (known != int_env.end() && !scheduled_runtime_ints.count(e->name) &&
+          std::find(row_names.begin(), row_names.end(), e->name) ==
+              row_names.end()) {
+        e->kind = mir::Expr::LitInt;
+        e->name.clear();
+        e->args.clear();
+        e->lit_i = known->second;
+        e->lit = static_cast<double>(known->second);
+        e->type_ = "UInt";
+        e->unsized = {0, mir::UnsizedLeaf::Int};
+        e->data_only = true;
+        return true;
+      }
+    }
+    bool row_selected = false;
+    if (e->kind == mir::Expr::Indexed && e->args.size() >= 2)
+      for (size_t k = 1; k < e->args.size(); ++k)
+        row_selected =
+            row_selected || scan_references_any(e->args[k], row_names);
+    if (row_selected && e->data_only && e->args[0].kind == mir::Expr::Var) {
+      auto known_data = td.env().find(e->args[0].name);
+      const mir::Expr& source = *e;
+      std::optional<DataMap::Entry> value = try_eval_scheduled_pure(*e);
+      // Integer selectors and zero-width values remain compile-time schedule
+      // geometry. Numeric row payloads are the values the scan streams.
+      if (!value) {
+        if (std::getenv("STANLI_DEBUG_SCAN"))
+          std::fprintf(stderr, "scheduled feed value unavailable: %s\n",
+                       e->args[0].name.c_str());
+        return known_data != td.env().end();
+      }
+      if (scan_semantic_integer(source, *value)) {
+        if (value->i.size() == 1) {
+          mir::Expr literal = *e;
+          literal.kind = mir::Expr::LitInt;
+          literal.name.clear();
+          literal.args.clear();
+          literal.lit_i = value->i[0];
+          literal.lit = static_cast<double>(value->i[0]);
+          literal.type_ = "UInt";
+          literal.unsized = {0, mir::UnsizedLeaf::Int};
+          literal.data_only = true;
+          *e = std::move(literal);
+        }
+        return true;
+      }
+      if (value->r.empty())
+        return true;
+      auto base = scope.find(e->args[0].name);
+      if ((base == scope.end() && known_data == td.env().end()) ||
+          (base != scope.end() && !base->second.si.param_free)) {
+        if (std::getenv("STANLI_DEBUG_SCAN"))
+          std::fprintf(stderr, "scheduled feed base unavailable: %s\n",
+                       e->args[0].name.c_str());
+        return false;
+      }
+      SlotInfo si = view_of(e->type_);
+      si.param_free = true;
+      if (is_matrix(si)) {
+        if (value->dims.size() != 2) {
+          if (std::getenv("STANLI_DEBUG_SCAN"))
+            std::fprintf(stderr,
+                         "scheduled feed matrix shape unavailable: %s\n",
+                         e->args[0].name.c_str());
+          return false;
+        }
+        si = matrix_view(value->dims[0], value->dims[1], true);
+      }
+      ScheduledFeed* feed = nullptr;
+      for (ScheduledFeed& candidate : *feeds)
+        if (scan_same_expr(candidate.source, source)) {
+          feed = &candidate;
+          break;
+        }
+      if (feed == nullptr) {
+        ScheduledFeed candidate;
+        candidate.source = source;
+        candidate.base_name = e->args[0].name;
+        candidate.synthetic_name =
+            "__stanli_scan_row_feed_" + std::to_string(feeds->size()) + "__";
+        if (scope.count(candidate.synthetic_name)) {
+          if (std::getenv("STANLI_DEBUG_SCAN"))
+            std::fprintf(stderr, "scheduled feed name collision: %s\n",
+                         candidate.synthetic_name.c_str());
+          return false;
+        }
+      candidate.len = (int64_t)value->r.size();
+      candidate.si = si;
+      candidate.active = false;
+        candidate.placeholder_slot = add_slot(candidate.len, false);
+        feeds->push_back(std::move(candidate));
+        feed = &feeds->back();
+        Val placeholder{feed->placeholder_slot, false, feed->si};
+        observe(placeholder, *value);
+        scope[feed->synthetic_name] = placeholder;
+        td.env()[feed->synthetic_name] = *value;
+      }
+      if (feed->base_name != e->args[0].name ||
+          feed->len != (int64_t)value->r.size() ||
+          !same_view(feed->si, feed->len, si, (int64_t)value->r.size())) {
+        if (std::getenv("STANLI_DEBUG_SCAN"))
+          std::fprintf(stderr, "scheduled feed schema mismatch: %s\n",
+                       e->args[0].name.c_str());
+        return false;
+      }
+      mir::Expr replacement = *e;
+      replacement.kind = mir::Expr::Var;
+      replacement.name = feed->synthetic_name;
+      replacement.args.clear();
+      *e = std::move(replacement);
+      return true;
+    }
+    // A pure parameter-valued expression whose only loop mutation is the row
+    // iterator can be computed once per row outside the recurrence and
+    // streamed as an active scan input. This is deliberately broader than a
+    // view-only gather, but still refuses any expression that reads a carry or
+    // another name assigned by the stable transition.
+    const bool index_descriptor =
+        e->kind == mir::Expr::FunApp &&
+        (e->name == "IndexAll" || e->name == "IndexSingle" ||
+         e->name == "IndexBetween" || e->name == "IndexUpfrom" ||
+         e->name == "IndexMulti");
+    const bool active_candidate =
+        !std::getenv("STANLI_NO_SCHEDULED_ACTIVE_FEEDS") &&
+        !index_descriptor && !e->data_only &&
+        scan_references_any(*e, row_names) &&
+        repeatable_target_expr(*e, std::string{}) &&
+        !scan_references_forbidden(*e, forbidden_names);
+    const mir::Expr active_source = active_candidate ? *e : mir::Expr{};
+    const size_t feeds_before_children = feeds->size();
+    if (!active_candidate && !index_descriptor && !e->data_only &&
+        scan_references_any(*e, row_names) &&
+        std::getenv("STANLI_DEBUG_SCAN")) {
+      std::fprintf(stderr,
+                   "scheduled active feed ineligible: %s effectful=%d "
+                   "forbidden=%d\n",
+                   e->name.c_str(), expr_effectful(*e),
+                   scan_references_forbidden(*e, forbidden_names));
+      if (forbidden_names != nullptr)
+        for (const std::string& name : *forbidden_names)
+          if (expr_references(*e, name))
+            std::fprintf(stderr, "scheduled active feed forbidden ref: %s\n",
+                         name.c_str());
+    }
+    for (mir::Expr& arg : e->args)
+      if (!rewrite_scheduled_expr(&arg, row_names, feeds, forbidden_names)) {
+        if (std::getenv("STANLI_DEBUG_SCAN"))
+          std::fprintf(stderr,
+                       "scheduled feed child refused parent=%s child=%s"
+                       " kind=%d\n",
+                       e->name.c_str(), arg.name.c_str(), (int)arg.kind);
+        return false;
+      }
+    // Lower a whole active row expression only after its selector/data
+    // children have been specialized. If a child already became a feed, the
+    // rewritten parent can stay in the step and consume it; otherwise stream
+    // the original expression, whose outer-row selector is reevaluated while
+    // packing every iteration.
+    if (active_candidate && feeds->size() == feeds_before_children) {
+      const size_t saved_ops = g.ops.size();
+      const size_t saved_slots = g.slots.size();
+      const size_t saved_idata = g.idata_pool.size();
+      const size_t saved_udata = g.udata_pool.size();
+      const size_t saved_fills = out.fills.size();
+      const size_t saved_shapes = shape_pool->shapes.size();
+      const int saved_result = g.result_slot;
+      const size_t saved_terms = target_terms.size();
+      const size_t saved_jacobians = jac_slots.size();
+      const auto saved_scope = scope;
+      const auto saved_decls = decls;
+      const auto saved_constants = const_cache;
+      const auto saved_observations = observations;
+      const auto restore_trial = [&]() {
+        g.ops.resize(saved_ops);
+        g.slots.resize(saved_slots);
+        g.idata_pool.resize(saved_idata);
+        g.udata_pool.resize(saved_udata);
+        g.result_slot = saved_result;
+        out.fills.resize(saved_fills);
+        target_terms.resize(saved_terms);
+        jac_slots.resize(saved_jacobians);
+        while (shape_pool->shapes.size() > saved_shapes) {
+          const ArrayShape& shape = shape_pool->shapes.back();
+          shape_pool->ids.erase({shape.dims, shape.leaf});
+          shape_pool->shapes.pop_back();
+        }
+        scope = saved_scope;
+        decls = saved_decls;
+        const_cache = saved_constants;
+        observations = saved_observations;
+      };
+      Val value;
+      try {
+        value = lower_expr(*e);
+      } catch (const CompileError&) {
+        restore_trial();
+        if (std::getenv("STANLI_DEBUG_SCAN"))
+          std::fprintf(stderr,
+                       "scheduled active feed lowering failed: %s kind=%d"
+                       " type=%s args=%zu numerical_row=%d\n",
+                       active_source.name.c_str(), (int)active_source.kind,
+                       active_source.type_.c_str(), active_source.args.size(),
+                       (int)scan_has_numerical_row_reference(*e, row_names));
+        return !scan_has_numerical_row_reference(*e, row_names);
+      }
+      if (!value.si.param_free && g.slots[(size_t)value.slot].len > 0) {
+        ScheduledFeed candidate;
+        candidate.source = active_source;
+        candidate.synthetic_name =
+            "__stanli_scan_active_feed_" + std::to_string(feeds->size()) +
+            "__";
+        if (scope.count(candidate.synthetic_name)) return false;
+        candidate.placeholder_slot = value.slot;
+        candidate.len = g.slots[(size_t)value.slot].len;
+        candidate.si = value.si;
+        candidate.si.param_free = false;
+        candidate.active = true;
+        feeds->push_back(std::move(candidate));
+        ScheduledFeed& feed = feeds->back();
+        value.si = feed.si;
+        scope[feed.synthetic_name] = value;
+        td.env().erase(feed.synthetic_name);
+        mir::Expr replacement = *e;
+        replacement.kind = mir::Expr::Var;
+        replacement.name = feed.synthetic_name;
+        replacement.args.clear();
+        *e = std::move(replacement);
+        return true;
+      }
+      restore_trial();
+      if (std::getenv("STANLI_DEBUG_SCAN"))
+        std::fprintf(stderr,
+                     "scheduled active feed has no active value: %s\n",
+                     active_source.name.c_str());
+    }
+    return true;
+  }
+
+  // Rewrite an unresolved runtime condition without changing its
+  // short-circuit behavior. A maximal, necessarily evaluated predicate which
+  // the pure interpreter can answer for the representative row is streamed as
+  // one inactive scalar feed and re-evaluated while packing every row. This
+  // preserves the row's actual truth value instead of freezing its operands.
+  // The right side of &&/|| and the value arms of ?: are deliberately not
+  // visited: evaluating either eagerly could expose an error or read which the
+  // source program short-circuits away.
+  bool rewrite_scheduled_control_expr(
+      mir::Expr* e, const std::vector<std::string>& row_names,
+      std::vector<ScheduledFeed>* feeds,
+      const std::set<std::string>* forbidden_names,
+      bool necessarily_evaluated = true) {
+    const bool row_varying = scan_references_any(*e, row_names);
+    const bool descriptor =
+        e->kind == mir::Expr::Unsupported &&
+        (e->name == "IndexAll" || e->name == "IndexSingle" ||
+         e->name == "IndexBetween" || e->name == "IndexUpfrom" ||
+         e->name == "IndexMulti");
+    const bool repeatable = repeatable_target_expr(*e, std::string{});
+    const bool forbidden =
+        scan_references_forbidden(*e, forbidden_names);
+    if (row_varying && !descriptor && e->kind != mir::Expr::Var && repeatable &&
+        !forbidden) {
+      const std::optional<DataMap::Entry> value =
+          try_eval_scheduled_pure(*e);
+      // UInt is also Stan's scalar condition representation. Requiring an
+      // exact 0/1 integer prevents an arbitrary integer row value from being
+      // hoisted merely because it is truthy.
+      const bool condition_type =
+          e->type_ == "UInt" || e->unsized.leaf == mir::UnsizedLeaf::Int;
+      if (value && condition_type && value->r.size() == 1 &&
+          (value->r[0] == 0.0 || value->r[0] == 1.0) &&
+          (value->i.empty() ||
+           (value->i.size() == 1 &&
+            value->r[0] == static_cast<double>(value->i[0])))) {
+        const mir::Expr source = *e;
+        ScheduledFeed* feed = nullptr;
+        for (ScheduledFeed& candidate : *feeds)
+          if (scan_same_expr(candidate.source, source)) {
+            feed = &candidate;
+            break;
+          }
+        if (feed == nullptr) {
+          ScheduledFeed candidate;
+          candidate.source = source;
+          candidate.synthetic_name =
+              "__stanli_scan_control_feed_" +
+              std::to_string(feeds->size()) + "__";
+          if (scope.count(candidate.synthetic_name)) return false;
+          candidate.len = 1;
+          candidate.si = view_of(e->type_);
+          candidate.si.param_free = true;
+          candidate.active = false;
+          candidate.control = true;
+          candidate.placeholder_slot = add_slot(1, false);
+          feeds->push_back(std::move(candidate));
+          feed = &feeds->back();
+          Val placeholder{feed->placeholder_slot, false, feed->si};
+          observe(placeholder, *value);
+          scope[feed->synthetic_name] = placeholder;
+          td.env()[feed->synthetic_name] = *value;
+        }
+        mir::Expr replacement = *e;
+        replacement.kind = mir::Expr::Var;
+        replacement.name = feed->synthetic_name;
+        replacement.args.clear();
+        *e = std::move(replacement);
+        return true;
+      }
+      if (std::getenv("STANLI_DEBUG_SCAN"))
+        std::fprintf(stderr,
+                     "scheduled control feed unavailable: kind=%d name=%s "
+                     "type=%s value=%d int=%d r=%zu i=%zu\n",
+                     (int)e->kind, e->name.c_str(), e->type_.c_str(),
+                     value.has_value(), value ? value->is_int : 0,
+                     value ? value->r.size() : 0,
+                     value ? value->i.size() : 0);
+    } else if (row_varying && std::getenv("STANLI_DEBUG_SCAN")) {
+      std::fprintf(stderr,
+                   "scheduled control feed ineligible: kind=%d name=%s "
+                   "descriptor=%d var=%d repeatable=%d forbidden=%d\n",
+                   (int)e->kind, e->name.c_str(), descriptor,
+                   e->kind == mir::Expr::Var, repeatable, forbidden);
+    }
+
+    if ((e->kind == mir::Expr::EOr || e->kind == mir::Expr::EAnd) &&
+        e->args.size() == 2) {
+      if (!rewrite_scheduled_control_expr(&e->args[0], row_names, feeds,
+                                          forbidden_names,
+                                          necessarily_evaluated))
+        return false;
+      // A pure predicate may also be streamed from the conditional side: the
+      // later all-row packing pass proves it is total for the concrete data,
+      // and otherwise rolls the optimization back without exposing an error.
+      // Active/effectful expressions remain in place and therefore refuse if
+      // they retain the outer row.
+      return rewrite_scheduled_control_expr(&e->args[1], row_names, feeds,
+                                            forbidden_names, false);
+    }
+    if (e->kind == mir::Expr::TernaryIf && e->args.size() == 3) {
+      if (!rewrite_scheduled_control_expr(&e->args[0], row_names, feeds,
+                                          forbidden_names,
+                                          necessarily_evaluated))
+        return false;
+      return rewrite_scheduled_control_expr(&e->args[1], row_names, feeds,
+                                             forbidden_names, false) &&
+             rewrite_scheduled_control_expr(&e->args[2], row_names, feeds,
+                                             forbidden_names, false);
+    }
+    if (!necessarily_evaluated) return true;
+    return rewrite_scheduled_expr(e, row_names, feeds, forbidden_names);
+  }
+
+  // Fold every condition the concrete data can answer. An unresolved
+  // parameter condition remains structured and is lowered through the normal
+  // necessity-island path. Any unresolved iterator use refuses.
+  bool specialize_scheduled_stmt(const mir::Stmt& s,
+                                 const std::vector<std::string>& row_names,
+                                 std::vector<ScheduledFeed>* feeds,
+                                 mir::Stmt* out_stmt,
+                                 const std::set<std::string>* forbidden_names =
+                                     nullptr) {
+    const auto refuse = [&](const char* why, const std::string& name = {}) {
+      if (std::getenv("STANLI_DEBUG_SCAN"))
+        std::fprintf(stderr, "scheduled specialization refused: %s%s%s\n",
+                     why, name.empty() ? "" : " ", name.c_str());
+      return false;
+    };
+    switch (s.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList: {
+        *out_stmt = s;
+        out_stmt->body.clear();
+        const auto entry_ints = int_env;
+        std::vector<std::string> local_int_names;
+        for (const mir::Stmt& child : s.body)
+          if (child.kind == mir::Stmt::Decl)
+            local_int_names.push_back(child.decl_id);
+        const auto restore_locals = [&] {
+          for (const std::string& name : local_int_names) {
+            const auto entry = entry_ints.find(name);
+            if (entry == entry_ints.end())
+              int_env.erase(name);
+            else
+              int_env[name] = entry->second;
+          }
+        };
+        for (const mir::Stmt& child : s.body) {
+          mir::Stmt specialized;
+          if (!specialize_scheduled_stmt(child, row_names, feeds,
+                                         &specialized, forbidden_names)) {
+            restore_locals();
+            return false;
+          }
+          out_stmt->body.push_back(std::move(specialized));
+        }
+        restore_locals();
+        return true;
+      }
+      case mir::Stmt::IfElse: {
+        if (auto condition = try_eval_scheduled_pure(s.cond)) {
+          if (condition->r.size() != 1) return refuse("condition width");
+          const size_t arm = condition->r[0] != 0.0 ? 0 : 1;
+          if (arm >= s.body.size()) {
+            *out_stmt = mir::Stmt{};
+            out_stmt->kind = mir::Stmt::Skip;
+            return true;
+          }
+          return specialize_scheduled_stmt(s.body[arm], row_names, feeds,
+                                           out_stmt, forbidden_names);
+        }
+        // AD-level metadata describes the result lane, not whether the
+        // condition is available to the schedule interpreter.  Any condition
+        // which did not evaluate above remains runtime control.  Rewrite its
+        // row inputs into feeds, retain both arms, and merge compile-time
+        // integer geometry conservatively regardless of the metadata label.
+        *out_stmt = s;
+        if (!rewrite_scheduled_control_expr(&out_stmt->cond, row_names, feeds,
+                                            forbidden_names))
+          return refuse("runtime condition feed");
+        if (scan_references_any(out_stmt->cond, row_names)) {
+          if (std::getenv("STANLI_DEBUG_SCAN")) {
+            std::set<std::string> refs;
+            std::function<void(const mir::Expr&)> collect =
+                [&](const mir::Expr& expression) {
+                  if (expression.kind == mir::Expr::Var)
+                    refs.insert(expression.name);
+                  for (const mir::Expr& argument : expression.args)
+                    collect(argument);
+                };
+            collect(out_stmt->cond);
+            std::fprintf(stderr, "scheduled runtime condition refs:");
+            for (const std::string& name : refs)
+              std::fprintf(stderr, " %s", name.c_str());
+            std::fprintf(stderr, " kind=%d name=%s\n",
+                         (int)out_stmt->cond.kind,
+                         out_stmt->cond.name.c_str());
+          }
+          return refuse("runtime row condition");
+        }
+        out_stmt->body.clear();
+        const auto entry_ints = int_env;
+        const ScheduledDataBindings entry_data =
+            capture_scheduled_data_bindings(s);
+        std::vector<std::map<std::string, long>> arm_ints;
+        std::vector<ScheduledDataBindings> arm_data;
+        for (const mir::Stmt& arm : s.body) {
+          // A runtime condition may select either arm.  Specialize
+          // each from the same integer environment so a representative-row
+          // fold in one arm cannot leak into another arm or into following
+          // statements.
+          int_env = entry_ints;
+          restore_scheduled_data_bindings(entry_data);
+          mir::Stmt specialized;
+          if (!specialize_scheduled_stmt(arm, row_names, feeds, &specialized,
+                                         forbidden_names)) {
+            restore_scheduled_data_bindings(entry_data);
+            return false;
+          }
+          out_stmt->body.push_back(std::move(specialized));
+          arm_ints.push_back(int_env);
+          arm_data.push_back(read_scheduled_data_bindings(entry_data));
+        }
+        // A missing else arm leaves every integer unchanged.
+        if (s.body.size() < 2) {
+          arm_ints.push_back(entry_ints);
+          arm_data.push_back(entry_data);
+        }
+        if (arm_data.empty()) {
+          arm_ints.push_back(entry_ints);
+          arm_data.push_back(entry_data);
+        }
+        if (!std::all_of(arm_data.begin(), arm_data.end(),
+                         [&](const auto& exit_data) {
+                           return same_scheduled_data_bindings(
+                               arm_data.front(), exit_data);
+                         })) {
+          restore_scheduled_data_bindings(entry_data);
+          int_env = entry_ints;
+          return refuse("parameter-dependent integer geometry");
+        }
+        restore_scheduled_data_bindings(arm_data.front());
+        int_env = entry_ints;
+        for (auto it = int_env.begin(); it != int_env.end();) {
+          const auto same_in_every_arm = std::all_of(
+              arm_ints.begin(), arm_ints.end(), [&](const auto& exit_ints) {
+                const auto exit = exit_ints.find(it->first);
+                return exit != exit_ints.end() && exit->second == it->second;
+              });
+          if (same_in_every_arm)
+            ++it;
+          else
+            it = int_env.erase(it);
+        }
+        return true;
+      }
+      case mir::Stmt::Assignment:
+        if (!scheduled_runtime_ints.count(s.lhs) && s.rhs.data_only &&
+            ((s.lhs_idx.empty() && s.rhs.unsized.depth > 0 &&
+              s.rhs.unsized.leaf == mir::UnsizedLeaf::Int) ||
+             (!s.lhs_idx.empty() && td.find(s.lhs) != nullptr &&
+              td.find(s.lhs)->is_int))) {
+          // A row-local integer container is compile-time schedule geometry,
+          // not a numerical step value. Interpret its construction for this
+          // representative; later selectors and data conditions can then be
+          // specialized from td.env without retaining the row iterator.
+          try {
+            td.exec(s);
+          } catch (...) {
+            return refuse("integer container assignment", s.lhs);
+          }
+          *out_stmt = mir::Stmt{};
+          out_stmt->kind = mir::Stmt::Skip;
+          return true;
+        }
+        if (!scheduled_runtime_ints.count(s.lhs) && s.lhs_idx.empty() &&
+            s.rhs.data_only &&
+            s.rhs.type_ == "UInt" && int_env.count(s.lhs)) {
+          try {
+            const long value = eval_int(s.rhs);
+            int_env[s.lhs] = value;
+            *out_stmt = s;
+            out_stmt->rhs = scan_literal(value);
+            return true;
+          } catch (const CompileError&) {
+            // An integer local updated from a retained inner-loop iterator is
+            // a register-program value, not failed outer-row specialization.
+            // Drop the stale compile-time binding and keep the assignment.
+            if (scan_references_any(s.rhs, row_names))
+              return refuse("integer assignment", s.lhs);
+            int_env.erase(s.lhs);
+          }
+        }
+        *out_stmt = s;
+        if (!rewrite_scheduled_expr(&out_stmt->rhs, row_names, feeds,
+                                    forbidden_names))
+          return refuse("assignment feed", s.lhs);
+        if (scan_has_numerical_row_reference(out_stmt->rhs, row_names)) {
+          if (std::getenv("STANLI_DEBUG_SCAN")) {
+            std::function<void(const mir::Expr&, std::string)> locate =
+                [&](const mir::Expr& expression, std::string path) {
+                  path += '/';
+                  path += expression.name.empty() ? "expr" : expression.name;
+                  if (expression.kind == mir::Expr::Var &&
+                      scan_references_any(expression, row_names))
+                    std::fprintf(stderr, "scheduled numerical row path:%s\n",
+                                 path.c_str());
+                  for (const mir::Expr& argument : expression.args)
+                    locate(argument, path);
+                };
+            locate(out_stmt->rhs, {});
+          }
+          return refuse("assignment row reference", s.lhs);
+        }
+        return true;
+      case mir::Stmt::Decl:
+        *out_stmt = s;
+        int_env.erase(s.decl_id);
+        if (scheduled_int_container_decl(s)) {
+          if (scheduled_runtime_ints.count(s.decl_id)) {
+            td.env().erase(s.decl_id);
+            if (!s.has_init) return true;
+            if (!rewrite_scheduled_expr(&out_stmt->init, row_names, feeds,
+                                        forbidden_names))
+              return refuse("runtime integer declaration feed", s.decl_id);
+            return !scan_has_numerical_row_reference(out_stmt->init, row_names);
+          }
+          if (!initialize_scheduled_int_container(s)) {
+            td.env().erase(s.decl_id);
+            return refuse("integer container declaration", s.decl_id);
+          }
+          *out_stmt = mir::Stmt{};
+          out_stmt->kind = mir::Stmt::Skip;
+          return true;
+        }
+        if (s.decl_type.base == "SInt" &&
+            !scheduled_runtime_ints.count(s.decl_id)) {
+          if (!s.has_init) {
+            int_env[s.decl_id] = 0;
+          } else {
+            try {
+              int_env[s.decl_id] = eval_int(s.init);
+            } catch (const CompileError&) {
+              return refuse("integer declaration", s.decl_id);
+            }
+          }
+        }
+        if (!s.has_init) return true;
+        if (!rewrite_scheduled_expr(&out_stmt->init, row_names, feeds,
+                                    forbidden_names))
+          return refuse("declaration feed", s.decl_id);
+        if (scan_has_numerical_row_reference(out_stmt->init, row_names))
+          return refuse("declaration row reference", s.decl_id);
+        return true;
+      case mir::Stmt::TargetPE:
+        *out_stmt = s;
+        if (!rewrite_scheduled_expr(&out_stmt->target, row_names, feeds,
+                                    forbidden_names))
+          return refuse("target feed");
+        if (scan_has_numerical_row_reference(out_stmt->target, row_names))
+          return refuse("target row reference");
+        return true;
+      case mir::Stmt::For:
+      case mir::Stmt::While: {
+        const bool proven_one_trip =
+            s.kind == mir::Stmt::While &&
+            scheduled_one_trip_sources != nullptr &&
+            scheduled_one_trip_sources->count(&s) != 0;
+        const bool exactly_one_trip =
+            proven_one_trip && scheduled_one_trip_sources->at(&s);
+        if (!stmt_effectful(s)) {
+          const ScheduledDataBindings saved_data =
+              capture_scheduled_data_bindings(s);
+          const auto saved_ints = int_env;
+          try {
+            td.exec(s);
+            *out_stmt = mir::Stmt{};
+            out_stmt->kind = mir::Stmt::Skip;
+            return true;
+          } catch (const std::exception&) {
+            restore_scheduled_data_bindings(saved_data);
+            int_env = saved_ints;
+          } catch (...) {
+            restore_scheduled_data_bindings(saved_data);
+            int_env = saved_ints;
+          }
+        }
+        // Keep effectful loop/control semantics in ProgramCompiler. Visiting
+        // a retained body once is analysis, not execution: every value the
+        // loop can write is unknown at runtime and must not be literalized
+        // from that single visit. Lexically scoped declarations and the loop
+        // iterator regain any shadowed outer binding afterward; externally
+        // assigned names deliberately remain unknown after the loop.
+        std::vector<std::string> assigned;
+        assigned_names(s, &assigned);
+        std::set<std::string> declared;
+        declared_names(s, &declared);
+        std::set<std::string> scoped = declared;
+        if (s.kind == mir::Stmt::For) scoped.insert(s.loopvar);
+        std::map<std::string, std::optional<long>> scoped_ints;
+        std::map<std::string, std::optional<DataMap::Entry>> scoped_data;
+        for (const std::string& name : scoped) {
+          const auto known_int = int_env.find(name);
+          scoped_ints[name] = known_int == int_env.end()
+                                  ? std::optional<long>{}
+                                  : std::optional<long>{known_int->second};
+          const auto known_data = td.env().find(name);
+          scoped_data[name] =
+              known_data == td.env().end()
+                  ? std::optional<DataMap::Entry>{}
+                  : std::optional<DataMap::Entry>{known_data->second};
+        }
+        const auto prior_runtime_ints = scheduled_runtime_ints;
+        const auto invalidate = [&](const std::string& name) {
+          int_env.erase(name);
+          td.env().erase(name);
+          scheduled_runtime_ints.insert(name);
+        };
+        for (const std::string& name : assigned)
+          if (declared.count(name) == 0) invalidate(name);
+        for (const std::string& name : declared) {
+          int_env.erase(name);
+          td.env().erase(name);
+        }
+        if (s.kind == mir::Stmt::For) invalidate(s.loopvar);
+        const auto finish = [&] {
+          scheduled_runtime_ints = prior_runtime_ints;
+          for (const std::string& name : scoped) {
+            if (scoped_ints.at(name))
+              int_env[name] = *scoped_ints.at(name);
+            else
+              int_env.erase(name);
+            if (scoped_data.at(name))
+              td.env()[name] = *scoped_data.at(name);
+            else
+              td.env().erase(name);
+          }
+        };
+        *out_stmt = s;
+        if (s.kind == mir::Stmt::For &&
+            (scan_references_any(out_stmt->lower, row_names) ||
+             scan_references_any(out_stmt->upper, row_names))) {
+          try {
+            const long lower = eval_int(out_stmt->lower);
+            const long upper = eval_int(out_stmt->upper);
+            out_stmt->lower = scan_literal(lower);
+            out_stmt->upper = scan_literal(upper);
+          } catch (const CompileError&) {
+            finish();
+            return refuse("runtime loop bound row reference", s.loopvar);
+          }
+        }
+        if (s.kind == mir::Stmt::While && !exactly_one_trip) {
+          if (!rewrite_scheduled_control_expr(&out_stmt->cond, row_names, feeds,
+                                              forbidden_names) ||
+              scan_references_any(out_stmt->cond, row_names)) {
+            finish();
+            return refuse("runtime loop condition row reference");
+          }
+        }
+        out_stmt->body.clear();
+        for (const mir::Stmt& child : s.body) {
+          mir::Stmt specialized;
+          if (!specialize_scheduled_stmt(child, row_names, feeds, &specialized,
+                                         forbidden_names)) {
+            finish();
+            return false;
+          }
+          out_stmt->body.push_back(std::move(specialized));
+        }
+        finish();
+        if (proven_one_trip) {
+          if (exactly_one_trip) {
+            mir::Stmt replacement;
+            if (out_stmt->body.size() == 1)
+              replacement = std::move(out_stmt->body[0]);
+            else {
+              replacement.kind = mir::Stmt::Block;
+              replacement.body = std::move(out_stmt->body);
+            }
+            *out_stmt = std::move(replacement);
+          } else {
+            // Preserve zero-trip behavior and entry reads. Only the
+            // backedge test has been proven redundant.
+            out_stmt->kind = mir::Stmt::IfElse;
+          }
+          out_stmt->force_runtime_region = true;
+        }
+        return true;
+      }
+      case mir::Stmt::NRFunApp:
+        if (stmt_effectful(s) && s.fn_name != "FnValidateSize")
+          return refuse("effectful call", s.fn_name);
+        *out_stmt = s;
+        // Ordinary lowering and ProgramCompiler both treat this compiler
+        // bookkeeping check as a no-op; its row-indexed diagnostic arguments
+        // therefore do not belong to the numerical template or its feeds.
+        if (s.fn_name == "FnValidateSize") return true;
+        for (mir::Expr& arg : out_stmt->fn_args) {
+          if (!rewrite_scheduled_expr(&arg, row_names, feeds,
+                                      forbidden_names))
+            return refuse("call feed", s.fn_name);
+          if (scan_has_numerical_row_reference(arg, row_names))
+            return refuse("call row reference", s.fn_name);
+        }
+        return true;
+      case mir::Stmt::Skip:
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+        *out_stmt = s;
+        return true;
+      case mir::Stmt::Return:
+      case mir::Stmt::Unsupported:
+        return refuse("control statement");
+    }
+    return refuse("unknown statement");
+  }
+
+  static bool scan_stmt_reads_name(const mir::Stmt& s,
+                                   const std::string& name) {
+    if ((s.has_init && expr_references(s.init, name)) ||
+        expr_references(s.rhs, name) || expr_references(s.target, name) ||
+        expr_references(s.lower, name) || expr_references(s.upper, name) ||
+        expr_references(s.cond, name))
+      return true;
+    for (const mir::Expr& e : s.fn_args)
+      if (expr_references(e, name)) return true;
+    for (const mir::Stmt& child : s.body)
+      if (scan_stmt_reads_name(child, name)) return true;
+    return false;
+  }
+
+  struct ScheduledTraceNode {
+    const mir::Stmt* statement = nullptr;
+    std::vector<ScheduledTraceNode> body;
+    std::vector<std::string> local_int_names;
+    std::vector<std::string> assigned;
+    std::set<std::string> declared;
+    std::set<std::string> scoped;
+    std::set<std::string> data_binding_names;
+    std::set<std::string> int_binding_names;
+    bool geometry_relevant = false;
+    bool try_interpret = false;
+    bool cache_interpret_failure = false;
+    bool interpretation_failed = false;
+    bool cache_condition = false;
+    bool cache_condition_failure = false;
+    bool condition_cached = false;
+    std::optional<DataMap::Entry> condition_value;
+    uint64_t visits = 0;
+    uint64_t condition_evaluations = 0;
+    uint64_t condition_cache_hits = 0;
+    uint64_t condition_unknowns = 0;
+  };
+
+  static bool scheduled_trace_geometry_relevant(const mir::Expr& expression,
+                                                const std::string& loopvar) {
+    if (expression.kind == mir::Expr::Indexed && !expression.args.empty()) {
+      if (expression.data_only) return false;
+      if (scheduled_trace_geometry_relevant(expression.args[0], loopvar))
+        return true;
+      for (size_t k = 1; k < expression.args.size(); ++k)
+        if (!expr_references(expression.args[k], loopvar) ||
+            scheduled_trace_geometry_relevant(expression.args[k], loopvar))
+          return true;
+      return false;
+    }
+    for (const mir::Expr& argument : expression.args)
+      if (scheduled_trace_geometry_relevant(argument, loopvar)) return true;
+    return false;
+  }
+
+  static bool scheduled_trace_geometry_relevant(const mir::Stmt& statement,
+                                                const std::string& loopvar) {
+    if ((statement.has_init &&
+         scheduled_trace_geometry_relevant(statement.init, loopvar)) ||
+        scheduled_trace_geometry_relevant(statement.rhs, loopvar) ||
+        scheduled_trace_geometry_relevant(statement.target, loopvar) ||
+        scheduled_trace_geometry_relevant(statement.lower, loopvar) ||
+        scheduled_trace_geometry_relevant(statement.upper, loopvar) ||
+        scheduled_trace_geometry_relevant(statement.cond, loopvar))
+      return true;
+    for (const mir::Expr& dimension : statement.decl_type.dims)
+      if (scheduled_trace_geometry_relevant(dimension, loopvar)) return true;
+    for (const mir::Expr& argument : statement.fn_args)
+      if (scheduled_trace_geometry_relevant(argument, loopvar)) return true;
+    for (const mir::Expr& index : statement.lhs_idx)
+      if (!expr_references(index, loopvar) ||
+          scheduled_trace_geometry_relevant(index, loopvar))
+        return true;
+    return false;
+  }
+
+  static void scheduled_data_definable_names(const mir::Stmt& statement,
+                                             std::set<std::string>* names) {
+    if (statement.kind == mir::Stmt::Decl &&
+        (statement.decl_type.base == "SInt" ||
+         scheduled_int_container_decl(statement) ||
+         (statement.has_init && statement.init.data_only)))
+      names->insert(statement.decl_id);
+    if (statement.kind == mir::Stmt::Assignment && statement.rhs.data_only)
+      names->insert(statement.lhs);
+    if (statement.kind == mir::Stmt::For) names->insert(statement.loopvar);
+    for (const mir::Stmt& child : statement.body)
+      scheduled_data_definable_names(child, names);
+  }
+
+  static void scheduled_stmt_expr_names(const mir::Stmt& statement,
+                                        std::set<std::string>* names) {
+    if (statement.has_init) scheduled_expr_names(statement.init, names);
+    scheduled_expr_names(statement.rhs, names);
+    scheduled_expr_names(statement.target, names);
+    scheduled_expr_names(statement.lower, names);
+    scheduled_expr_names(statement.upper, names);
+    scheduled_expr_names(statement.cond, names);
+    for (const mir::Expr& dimension : statement.decl_type.dims)
+      scheduled_expr_names(dimension, names);
+    for (const mir::Expr& argument : statement.fn_args)
+      scheduled_expr_names(argument, names);
+    for (const mir::Expr& index : statement.lhs_idx)
+      scheduled_expr_names(index, names);
+    for (const mir::Stmt& child : statement.body)
+      scheduled_stmt_expr_names(child, names);
+  }
+
+  bool make_scheduled_trace_plan(const mir::Stmt& statement,
+                                 const std::string& loopvar,
+                                 const std::set<std::string>& mutable_names,
+                                 const std::set<std::string>& data_definable,
+                                 ScheduledTraceNode* plan) {
+    plan->statement = &statement;
+    plan->body.clear();
+    plan->local_int_names.clear();
+    plan->assigned.clear();
+    plan->declared.clear();
+    plan->scoped.clear();
+    plan->data_binding_names.clear();
+    plan->int_binding_names.clear();
+    plan->geometry_relevant = false;
+    plan->try_interpret = false;
+    plan->cache_interpret_failure = false;
+    plan->interpretation_failed = false;
+    plan->cache_condition = false;
+    plan->cache_condition_failure = false;
+    plan->condition_cached = false;
+    plan->condition_value.reset();
+    plan->visits = 0;
+    plan->condition_evaluations = 0;
+    plan->condition_cache_hits = 0;
+    plan->condition_unknowns = 0;
+    const bool geometry = scheduled_trace_geometry_relevant(statement, loopvar);
+    plan->geometry_relevant = geometry;
+    switch (statement.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        for (const mir::Stmt& child : statement.body) {
+          ScheduledTraceNode child_plan;
+          if (make_scheduled_trace_plan(child, loopvar, mutable_names,
+                                        data_definable, &child_plan)) {
+            if (child.kind == mir::Stmt::Decl)
+              plan->local_int_names.push_back(child.decl_id);
+            plan->data_binding_names.insert(
+                child_plan.data_binding_names.begin(),
+                child_plan.data_binding_names.end());
+            plan->int_binding_names.insert(child_plan.int_binding_names.begin(),
+                                           child_plan.int_binding_names.end());
+            plan->body.push_back(std::move(child_plan));
+          }
+        }
+        for (const std::string& name : plan->local_int_names)
+          plan->int_binding_names.erase(name);
+        return geometry || !plan->body.empty();
+      case mir::Stmt::IfElse:
+        plan->cache_condition =
+            std::none_of(mutable_names.begin(), mutable_names.end(),
+                         [&](const std::string& name) {
+                           return expr_references(statement.cond, name);
+                         });
+        {
+          std::set<std::string> condition_names;
+          scheduled_expr_names(statement.cond, &condition_names);
+          plan->cache_condition_failure = std::any_of(
+              condition_names.begin(), condition_names.end(),
+              [&](const std::string& name) {
+                return int_env.count(name) == 0 && td.env().count(name) == 0 &&
+                       data_definable.count(name) == 0;
+              });
+        }
+        [[fallthrough]];
+      case mir::Stmt::For:
+      case mir::Stmt::While:
+        // Preserve source arm/body positions even when a child has no
+        // relevant descendants. Branch selection and lexical restoration
+        // depend on this correspondence with statement.body.
+        for (const mir::Stmt& child : statement.body) {
+          ScheduledTraceNode child_plan;
+          (void)make_scheduled_trace_plan(child, loopvar, mutable_names,
+                                          data_definable, &child_plan);
+          plan->data_binding_names.insert(child_plan.data_binding_names.begin(),
+                                          child_plan.data_binding_names.end());
+          plan->int_binding_names.insert(child_plan.int_binding_names.begin(),
+                                         child_plan.int_binding_names.end());
+          plan->body.push_back(std::move(child_plan));
+        }
+        if (statement.kind == mir::Stmt::For ||
+            statement.kind == mir::Stmt::While) {
+          assigned_names(statement, &plan->assigned);
+          declared_names(statement, &plan->declared);
+          plan->scoped = plan->declared;
+          plan->data_binding_names.insert(plan->assigned.begin(),
+                                          plan->assigned.end());
+          plan->data_binding_names.insert(plan->declared.begin(),
+                                          plan->declared.end());
+          if (statement.kind == mir::Stmt::For) {
+            plan->scoped.insert(statement.loopvar);
+            plan->data_binding_names.insert(statement.loopvar);
+          }
+          for (const std::string& name : plan->scoped)
+            plan->int_binding_names.erase(name);
+          for (const std::string& name : plan->assigned)
+            if (plan->declared.count(name) == 0)
+              plan->int_binding_names.insert(name);
+          if (statement.kind == mir::Stmt::For) {
+            plan->try_interpret = !stmt_effectful(statement);
+            std::set<std::string> referenced_names;
+            scheduled_stmt_expr_names(statement, &referenced_names);
+            plan->cache_interpret_failure =
+                std::any_of(referenced_names.begin(), referenced_names.end(),
+                            [&](const std::string& name) {
+                              return int_env.count(name) == 0 &&
+                                     td.env().count(name) == 0 &&
+                                     data_definable.count(name) == 0;
+                            });
+          }
+        }
+        return true;
+      case mir::Stmt::Decl:
+        // A declaration can shadow a known integer even when its own type is
+        // not integer, so retain the lexical invalidation.
+        if (scheduled_int_container_decl(statement))
+          plan->data_binding_names.insert(statement.decl_id);
+        plan->int_binding_names.insert(statement.decl_id);
+        return statement.decl_type.base == "SInt" ||
+               scheduled_int_container_decl(statement) || geometry ||
+               int_env.count(statement.decl_id) != 0;
+      case mir::Stmt::Assignment: {
+        // Data-only assignments may update interpreter or scalar-integer
+        // state when their semantic leaf is integer. Real-valued data
+        // arithmetic does not affect schedule discovery. Active assignments
+        // matter here only when their index geometry needs an exact row
+        // fingerprint.
+        const bool integer_container_update =
+            statement.rhs.data_only &&
+            (!statement.lhs_idx.empty() ||
+             (statement.rhs.unsized.depth > 0 &&
+              statement.rhs.unsized.leaf == mir::UnsizedLeaf::Int));
+        if (integer_container_update)
+          plan->data_binding_names.insert(statement.lhs);
+        if (statement.rhs.type_ == "UInt" ||
+            statement.rhs.unsized.leaf == mir::UnsizedLeaf::Int)
+          plan->int_binding_names.insert(statement.lhs);
+        return geometry || statement.rhs.type_ == "UInt" ||
+               statement.rhs.unsized.leaf == mir::UnsizedLeaf::Int;
+      }
+      case mir::Stmt::Return:
+      case mir::Stmt::Unsupported:
+        return true;
+      case mir::Stmt::TargetPE:
+      case mir::Stmt::NRFunApp:
+      case mir::Stmt::Skip:
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+        return geometry;
+    }
+    return true;
+  }
+
+  static void number_scheduled_conditions(
+      const ScheduledTraceNode& node,
+      std::map<const mir::Stmt*, int>* condition_ids) {
+    const mir::Stmt& statement = *node.statement;
+    if (statement.kind == mir::Stmt::IfElse || statement.kind == mir::Stmt::For)
+      condition_ids->emplace(&statement, (int)condition_ids->size());
+    for (const ScheduledTraceNode& child : node.body)
+      number_scheduled_conditions(child, condition_ids);
+  }
+
+  bool trace_scheduled_data_control(
+      ScheduledTraceNode& node,
+      const std::map<const mir::Stmt*, int>& condition_ids,
+      const std::string& loopvar, std::string* fingerprint) {
+    ++node.visits;
+    const mir::Stmt& statement = *node.statement;
+    const auto refuse = [&](const char* why, const std::string& name = {}) {
+      if (std::getenv("STANLI_DEBUG_SCAN"))
+        std::fprintf(stderr, "scheduled data trace refused: %s%s%s\n", why,
+                     name.empty() ? "" : " ", name.c_str());
+      return false;
+    };
+    if (node.geometry_relevant &&
+        !fingerprint_scheduled_geometry(statement, loopvar, fingerprint))
+      return refuse("row geometry");
+    switch (statement.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList: {
+        std::vector<std::optional<long>> entry_local_ints;
+        entry_local_ints.reserve(node.local_int_names.size());
+        for (const std::string& name : node.local_int_names) {
+          const auto entry = int_env.find(name);
+          entry_local_ints.push_back(entry == int_env.end()
+                                         ? std::optional<long>{}
+                                         : std::optional<long>{entry->second});
+        }
+        const auto restore_locals = [&] {
+          for (size_t k = 0; k < node.local_int_names.size(); ++k) {
+            if (entry_local_ints[k])
+              int_env[node.local_int_names[k]] = *entry_local_ints[k];
+            else
+              int_env.erase(node.local_int_names[k]);
+          }
+        };
+        for (ScheduledTraceNode& child : node.body)
+          if (!trace_scheduled_data_control(child, condition_ids, loopvar,
+                                            fingerprint)) {
+            restore_locals();
+            return false;
+          }
+        restore_locals();
+        return true;
+      }
+      case mir::Stmt::Decl:
+        int_env.erase(statement.decl_id);
+        if (scheduled_int_container_decl(statement)) {
+          if (!initialize_scheduled_int_container(statement)) {
+            td.env().erase(statement.decl_id);
+            return refuse("integer container declaration",
+                          statement.decl_id);
+          }
+          return true;
+        }
+        if (statement.decl_type.base == "SInt") {
+          if (!statement.has_init) {
+            int_env[statement.decl_id] = 0;
+          } else {
+            try {
+              int_env[statement.decl_id] = eval_int(statement.init);
+            } catch (const CompileError&) {
+              return refuse("integer declaration", statement.decl_id);
+            }
+          }
+        }
+        return true;
+      case mir::Stmt::Assignment:
+        if (!statement.lhs_idx.empty() || !statement.rhs.data_only)
+          if (statement.lhs_idx.empty() || !statement.rhs.data_only ||
+              td.find(statement.lhs) == nullptr ||
+              !td.find(statement.lhs)->is_int)
+            return true;
+        if ((statement.lhs_idx.empty() && statement.rhs.unsized.depth > 0 &&
+             statement.rhs.unsized.leaf == mir::UnsizedLeaf::Int) ||
+            !statement.lhs_idx.empty()) {
+          try {
+            td.exec(statement);
+          } catch (...) {
+            td.env().erase(statement.lhs);
+            return refuse("integer container assignment", statement.lhs);
+          }
+          const DataMap::Entry* value = td.find(statement.lhs);
+          if (value == nullptr || !value->is_int ||
+              value->i.size() != value->r.size())
+            return refuse("integer container value", statement.lhs);
+          // Retain the exact container in the interpreter, but do not make
+          // every local construction a template discriminator. If it later
+          // controls a branch or an indexed active view, that consumer adds
+          // the required value/geometry fingerprint. Intermediate integer
+          // arrays are otherwise ordinary row-local computation.
+          return true;
+        }
+        // Only scalar integer locals belong in int_env.  An int container
+        // has the same leaf type but its value is not a compile-time scalar.
+        if (statement.rhs.type_ != "UInt") {
+          int_env.erase(statement.lhs);
+          return true;
+        }
+        if (int_env.count(statement.lhs) == 0)
+          return true;
+        try {
+          int_env[statement.lhs] = eval_int(statement.rhs);
+        } catch (const CompileError&) {
+          const bool runtime_owned =
+              scheduled_runtime_ints.count(statement.lhs) != 0 ||
+              std::any_of(scheduled_runtime_ints.begin(),
+                          scheduled_runtime_ints.end(),
+                          [&](const std::string& name) {
+                            return expr_references(statement.rhs, name);
+                          });
+          if (runtime_owned) {
+            int_env.erase(statement.lhs);
+            scheduled_runtime_ints.insert(statement.lhs);
+            return true;
+          }
+          return refuse("integer assignment", statement.lhs);
+        }
+        *fingerprint += "S=" +
+                        std::to_string(int_env[statement.lhs]) + ";";
+        return true;
+      case mir::Stmt::IfElse: {
+        std::optional<DataMap::Entry> selected;
+        if ((node.cache_condition || node.cache_condition_failure) &&
+            node.condition_cached) {
+          ++node.condition_cache_hits;
+          selected = node.condition_value;
+        } else {
+          ++node.condition_evaluations;
+          selected = try_eval_scheduled_pure(statement.cond);
+          if (node.cache_condition ||
+              (node.cache_condition_failure && !selected)) {
+            node.condition_cached = true;
+            node.condition_value = selected;
+          }
+        }
+        if (!selected) {
+          ++node.condition_unknowns;
+          // This runtime condition is not known while discovering the row
+          // schedule, so trace every possible arm. Any evaluable condition in
+          // an arm becomes part of the fingerprint; this prevents a
+          // representative-row value from being frozen into a template reused
+          // for a row where that arm would choose differently. AD metadata is
+          // deliberately irrelevant to this availability decision.
+          std::vector<std::optional<long>> entry_ints;
+          entry_ints.reserve(node.int_binding_names.size());
+          for (const std::string& name : node.int_binding_names) {
+            const auto entry = int_env.find(name);
+            entry_ints.push_back(entry == int_env.end()
+                                     ? std::optional<long>{}
+                                     : std::optional<long>{entry->second});
+          }
+          const auto restore_ints = [&](const auto& values) {
+            size_t k = 0;
+            for (const std::string& name : node.int_binding_names) {
+              if (values[k])
+                int_env[name] = *values[k];
+              else
+                int_env.erase(name);
+              ++k;
+            }
+          };
+          const ScheduledDataBindings entry_data =
+              capture_scheduled_data_bindings(node.data_binding_names);
+          std::vector<std::vector<std::optional<long>>> arm_ints;
+          std::vector<ScheduledDataBindings> arm_data;
+          for (ScheduledTraceNode& arm : node.body) {
+            restore_ints(entry_ints);
+            restore_scheduled_data_bindings(entry_data);
+            if (!trace_scheduled_data_control(arm, condition_ids, loopvar,
+                                              fingerprint)) {
+              restore_ints(entry_ints);
+              restore_scheduled_data_bindings(entry_data);
+              return refuse("parameter arm");
+            }
+            std::vector<std::optional<long>> exit_ints;
+            exit_ints.reserve(node.int_binding_names.size());
+            for (const std::string& name : node.int_binding_names) {
+              const auto exit = int_env.find(name);
+              exit_ints.push_back(exit == int_env.end()
+                                      ? std::optional<long>{}
+                                      : std::optional<long>{exit->second});
+            }
+            arm_ints.push_back(std::move(exit_ints));
+            arm_data.push_back(read_scheduled_data_bindings(entry_data));
+          }
+          if (node.body.size() < 2) {
+            arm_ints.push_back(entry_ints);
+            arm_data.push_back(entry_data);
+          }
+          if (arm_data.empty()) {
+            arm_ints.push_back(entry_ints);
+            arm_data.push_back(entry_data);
+          }
+          if (!std::all_of(arm_data.begin(), arm_data.end(),
+                           [&](const auto& exit_data) {
+                             return same_scheduled_data_bindings(
+                                 arm_data.front(), exit_data);
+                           })) {
+            restore_ints(entry_ints);
+            restore_scheduled_data_bindings(entry_data);
+            return refuse("parameter-dependent integer geometry");
+          }
+          restore_scheduled_data_bindings(arm_data.front());
+          restore_ints(entry_ints);
+          size_t binding = 0;
+          for (const std::string& name : node.int_binding_names) {
+            const bool same_in_every_arm =
+                entry_ints[binding] &&
+                std::all_of(arm_ints.begin(), arm_ints.end(),
+                            [&](const auto& exit_ints) {
+                              return exit_ints[binding] == entry_ints[binding];
+                            });
+            if (!same_in_every_arm) int_env.erase(name);
+            ++binding;
+          }
+          return true;
+        }
+        if (selected->r.size() != 1) return refuse("condition width");
+        const size_t arm = selected->r[0] != 0.0 ? 0 : 1;
+        const auto id = condition_ids.find(&statement);
+        if (id == condition_ids.end()) return refuse("condition id");
+        *fingerprint += std::to_string(id->second);
+        *fingerprint += arm == 0 ? "T;" : "F;";
+        return arm >= node.body.size() ||
+               trace_scheduled_data_control(node.body[arm], condition_ids,
+                                            loopvar, fingerprint);
+      }
+      case mir::Stmt::For: {
+        if (node.try_interpret && !node.interpretation_failed) {
+          const ScheduledDataBindings saved_data =
+              capture_scheduled_data_bindings(node.data_binding_names);
+          try {
+            td.exec(statement);
+            return true;
+          } catch (const std::exception&) {
+            restore_scheduled_data_bindings(saved_data);
+            if (node.cache_interpret_failure) node.interpretation_failed = true;
+          } catch (...) {
+            restore_scheduled_data_bindings(saved_data);
+            if (node.cache_interpret_failure) node.interpretation_failed = true;
+          }
+        }
+        long lower = 0;
+        long upper = -1;
+        bool bounds_known = true;
+        try {
+          lower = eval_int(statement.lower);
+          upper = eval_int(statement.upper);
+        } catch (const CompileError&) {
+          const bool runtime_owned = std::any_of(
+              scheduled_runtime_ints.begin(), scheduled_runtime_ints.end(),
+              [&](const std::string& name) {
+                return expr_references(statement.lower, name) ||
+                       expr_references(statement.upper, name);
+              });
+          if (!runtime_owned)
+            return refuse("numerical loop bounds", statement.loopvar);
+          bounds_known = false;
+          lower = 0;
+          upper = -1;
+        }
+        if (bounds_known) {
+          const auto id = condition_ids.find(&statement);
+          if (id == condition_ids.end()) return refuse("loop id");
+          *fingerprint += "L" + std::to_string(id->second) + "=" +
+                          std::to_string(lower) + "," +
+                          std::to_string(upper) + ";";
+        }
+        if (upper >= lower &&
+            (uint64_t)upper - (uint64_t)lower >= 4096)
+          return refuse("numerical loop too large", statement.loopvar);
+        // This loop remains in the runtime template. Visiting one abstract
+        // iteration is enough to discover outer-row data control: values it
+        // writes are unknown, not the result of whichever concrete iteration
+        // happened to be visited by the compiler.
+        std::map<std::string, std::optional<long>> scoped_ints;
+        std::map<std::string, std::optional<DataMap::Entry>> scoped_data;
+        for (const std::string& name : node.scoped) {
+          const auto known_int = int_env.find(name);
+          scoped_ints[name] = known_int == int_env.end()
+                                  ? std::optional<long>{}
+                                  : std::optional<long>{known_int->second};
+          const auto known_data = td.env().find(name);
+          scoped_data[name] =
+              known_data == td.env().end()
+                  ? std::optional<DataMap::Entry>{}
+                  : std::optional<DataMap::Entry>{known_data->second};
+        }
+        for (const std::string& name : node.assigned)
+          if (node.declared.count(name) == 0) {
+            int_env.erase(name);
+            td.env().erase(name);
+          }
+        const auto prior_runtime_ints = scheduled_runtime_ints;
+        for (const std::string& name : node.assigned)
+          if (node.declared.count(name) == 0)
+            scheduled_runtime_ints.insert(name);
+        scheduled_runtime_ints.insert(statement.loopvar);
+        for (const std::string& name : node.declared) {
+          int_env.erase(name);
+          td.env().erase(name);
+        }
+        int_env.erase(statement.loopvar);
+        td.env().erase(statement.loopvar);
+        const auto restore_scoped = [&] {
+          scheduled_runtime_ints = prior_runtime_ints;
+          for (const std::string& name : node.scoped) {
+            if (scoped_ints.at(name))
+              int_env[name] = *scoped_ints.at(name);
+            else
+              int_env.erase(name);
+            if (scoped_data.at(name))
+              td.env()[name] = *scoped_data.at(name);
+            else
+              td.env().erase(name);
+          }
+        };
+        for (ScheduledTraceNode& child : node.body)
+          if (!trace_scheduled_data_control(child, condition_ids, loopvar,
+                                            fingerprint)) {
+            restore_scoped();
+            return false;
+          }
+        restore_scoped();
+        return true;
+      }
+      case mir::Stmt::While: {
+        // A retained while is safe only if the later exact-trip proof rewrites
+        // it away. Trace the reached body once now so row-varying data control
+        // inside that body still participates in template selection. The
+        // proof is checked for every row of every template after discovery,
+        // so no representative condition value is assumed here.
+        *fingerprint += "W;";
+        std::map<std::string, std::optional<long>> scoped_ints;
+        std::map<std::string, std::optional<DataMap::Entry>> scoped_data;
+        for (const std::string& name : node.scoped) {
+          const auto known_int = int_env.find(name);
+          scoped_ints[name] = known_int == int_env.end()
+                                  ? std::optional<long>{}
+                                  : std::optional<long>{known_int->second};
+          const auto known_data = td.env().find(name);
+          scoped_data[name] =
+              known_data == td.env().end()
+                  ? std::optional<DataMap::Entry>{}
+                  : std::optional<DataMap::Entry>{known_data->second};
+        }
+        for (const std::string& name : node.assigned)
+          if (node.declared.count(name) == 0) {
+            int_env.erase(name);
+            td.env().erase(name);
+          }
+        const auto prior_runtime_ints = scheduled_runtime_ints;
+        for (const std::string& name : node.assigned)
+          if (node.declared.count(name) == 0)
+            scheduled_runtime_ints.insert(name);
+        for (const std::string& name : node.declared) {
+          int_env.erase(name);
+          td.env().erase(name);
+        }
+        const auto restore_scoped = [&] {
+          scheduled_runtime_ints = prior_runtime_ints;
+          for (const std::string& name : node.scoped) {
+            if (scoped_ints.at(name))
+              int_env[name] = *scoped_ints.at(name);
+            else
+              int_env.erase(name);
+            if (scoped_data.at(name))
+              td.env()[name] = *scoped_data.at(name);
+            else
+              td.env().erase(name);
+          }
+        };
+        for (ScheduledTraceNode& child : node.body)
+          if (!trace_scheduled_data_control(child, condition_ids, loopvar,
+                                            fingerprint)) {
+            restore_scoped();
+            return false;
+          }
+        restore_scoped();
+        return true;
+      }
+      case mir::Stmt::TargetPE:
+      case mir::Stmt::NRFunApp:
+      case mir::Stmt::Skip:
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+        return true;
+      case mir::Stmt::Return:
+      case mir::Stmt::Unsupported:
+        return refuse("control statement");
+    }
+    return refuse("unknown statement");
+  }
+
+  static mir::Expr scan_literal(long value, bool real = false) {
+    mir::Expr e;
+    e.kind = real ? mir::Expr::LitReal : mir::Expr::LitInt;
+    e.lit_i = value;
+    e.lit = static_cast<double>(value);
+    e.type_ = real ? "UReal" : "UInt";
+    e.unsized.leaf = real ? mir::UnsizedLeaf::Real : mir::UnsizedLeaf::Int;
+    e.data_only = true;
+    return e;
+  }
+
+  static mir::Expr scan_var(const std::string& name, bool real = false) {
+    mir::Expr e = scan_literal(0, real);
+    e.kind = mir::Expr::Var;
+    e.name = name;
+    return e;
+  }
+
+  static mir::Expr scan_binary(const std::string& name, mir::Expr a,
+                               mir::Expr b) {
+    mir::Expr e = scan_literal(0);
+    e.kind = mir::Expr::FunApp;
+    e.name = name;
+    e.args = {std::move(a), std::move(b)};
+    return e;
+  }
+
+  static void rewrite_scan_sink_expr(mir::Expr* e,
+                                     const std::string& loopvar,
+                                     const std::string& row_alias,
+                                     const std::string& previous_alias,
+                                     const std::string& sink,
+                                     const std::string& row_sink,
+                                     bool rewrite_aliases) {
+    if (e->kind == mir::Expr::Indexed && !e->args.empty() &&
+        e->args[0].kind == mir::Expr::Var && e->args[0].name == sink) {
+      mir::Expr replacement = *e;
+      replacement.kind = mir::Expr::Var;
+      replacement.name = row_sink;
+      replacement.args.clear();
+      *e = std::move(replacement);
+      return;
+    }
+    if (rewrite_aliases && e->kind == mir::Expr::Var && e->name == row_alias) {
+      *e = scan_var(loopvar);
+      return;
+    }
+    if (rewrite_aliases && e->kind == mir::Expr::Var &&
+        e->name == previous_alias) {
+      *e = scan_binary("Minus__", scan_var(loopvar), scan_literal(1));
+      return;
+    }
+    for (mir::Expr& arg : e->args)
+      rewrite_scan_sink_expr(&arg, loopvar, row_alias, previous_alias, sink,
+                             row_sink, rewrite_aliases);
+  }
+
+  static void rewrite_scan_sink_stmt(
+      mir::Stmt* s, const std::string& loopvar,
+      const std::string& row_alias, const std::string& previous_alias,
+      const std::string& sink, const std::string& row_sink,
+      bool rewrite_aliases, int* sink_updates) {
+    if (s->has_init)
+      rewrite_scan_sink_expr(&s->init, loopvar, row_alias, previous_alias,
+                             sink, row_sink, rewrite_aliases);
+    for (mir::Expr& dim : s->decl_type.dims)
+      rewrite_scan_sink_expr(&dim, loopvar, row_alias, previous_alias, sink,
+                             row_sink, rewrite_aliases);
+    rewrite_scan_sink_expr(&s->rhs, loopvar, row_alias, previous_alias, sink,
+                           row_sink, rewrite_aliases);
+    rewrite_scan_sink_expr(&s->target, loopvar, row_alias, previous_alias,
+                           sink, row_sink, rewrite_aliases);
+    rewrite_scan_sink_expr(&s->lower, loopvar, row_alias, previous_alias, sink,
+                           row_sink, rewrite_aliases);
+    rewrite_scan_sink_expr(&s->upper, loopvar, row_alias, previous_alias, sink,
+                           row_sink, rewrite_aliases);
+    rewrite_scan_sink_expr(&s->cond, loopvar, row_alias, previous_alias, sink,
+                           row_sink, rewrite_aliases);
+    for (mir::Expr& arg : s->fn_args)
+      rewrite_scan_sink_expr(&arg, loopvar, row_alias, previous_alias, sink,
+                             row_sink, rewrite_aliases);
+    for (mir::Expr& index : s->lhs_idx)
+      rewrite_scan_sink_expr(&index, loopvar, row_alias, previous_alias, sink,
+                             row_sink, rewrite_aliases);
+    if (s->kind == mir::Stmt::Assignment && s->lhs == sink &&
+        !s->lhs_idx.empty()) {
+      s->lhs = row_sink;
+      s->lhs_idx.clear();
+      ++*sink_updates;
+    }
+    for (mir::Stmt& child : s->body)
+      rewrite_scan_sink_stmt(&child, loopvar, row_alias, previous_alias, sink,
+                             row_sink, rewrite_aliases, sink_updates);
+  }
+
+  static bool scan_stmt_defines_name(const mir::Stmt& s,
+                                     const std::string& name) {
+    if ((s.kind == mir::Stmt::Decl && s.decl_id == name) ||
+        (s.kind == mir::Stmt::Assignment && s.lhs == name) ||
+        (s.kind == mir::Stmt::For && s.loopvar == name))
+      return true;
+    for (const mir::Stmt& child : s.body)
+      if (scan_stmt_defines_name(child, name)) return true;
+    return false;
+  }
+
+  enum class ScheduledOpeningSinkResult { Safe, Writes, Unknown };
+
+  static bool scheduled_stmt_expression_reads_name(
+      const mir::Stmt& statement, const std::string& name) {
+    if ((statement.has_init && expr_references(statement.init, name)) ||
+        expr_references(statement.rhs, name) ||
+        expr_references(statement.target, name) ||
+        expr_references(statement.lower, name) ||
+        expr_references(statement.upper, name) ||
+        expr_references(statement.cond, name))
+      return true;
+    for (const mir::Expr& dimension : statement.decl_type.dims)
+      if (expr_references(dimension, name)) return true;
+    for (const mir::Expr& argument : statement.fn_args)
+      if (expr_references(argument, name)) return true;
+    for (const mir::Expr& index : statement.lhs_idx)
+      if (expr_references(index, name)) return true;
+    return false;
+  }
+
+  static bool scheduled_expr_references_any(
+      const mir::Expr& expression,
+      const std::set<std::string>& invalid_names) {
+    for (const std::string& name : invalid_names)
+      if (expr_references(expression, name)) return true;
+    return false;
+  }
+
+  // Evaluate only the leaves which Stan's short-circuit semantics reach.
+  // A composite condition may be parameter-dependent even though its opening
+  // data-only left leaf fixes the result, so probing the whole expression
+  // would unnecessarily (and incorrectly) require the parameter RHS.
+  std::optional<bool> try_eval_scheduled_opening_bool(
+      const mir::Expr& expression,
+      const std::set<std::string>& invalid_names) {
+    const mir::Expr* e = scan_unpromoted(&expression);
+    if (e->kind == mir::Expr::EOr || e->kind == mir::Expr::EAnd) {
+      if (e->args.size() != 2) return std::nullopt;
+      const auto lhs =
+          try_eval_scheduled_opening_bool(e->args[0], invalid_names);
+      if (!lhs) return std::nullopt;
+      if (e->kind == mir::Expr::EOr && *lhs) return true;
+      if (e->kind == mir::Expr::EAnd && !*lhs) return false;
+      return try_eval_scheduled_opening_bool(e->args[1], invalid_names);
+    }
+    if (!e->data_only || scheduled_expr_references_any(*e, invalid_names))
+      return std::nullopt;
+    try {
+      return eval_int(*e) != 0;
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+
+  // Follow only the concrete, data-controlled opening path. This proof is
+  // deliberately read-only with respect to graph construction: row-indexed
+  // numeric expressions are never rewritten into feeds. Scalar data aliases
+  // are interpreted only so their later conditions can be selected exactly.
+  ScheduledOpeningSinkResult trace_scheduled_opening_sink(
+      const mir::Stmt& statement, const std::string& sink,
+      std::set<std::string>* invalid_names,
+      std::map<std::string, std::optional<DataMap::Entry>>* saved_bindings) {
+    if (scheduled_stmt_expression_reads_name(statement, sink))
+      return ScheduledOpeningSinkResult::Unknown;
+    const auto invalidate = [&](const std::string& name) {
+      int_env.erase(name);
+      invalid_names->insert(name);
+    };
+    const auto bind_real = [&](const std::string& name,
+                               const DataMap::Entry& value) {
+      if (saved_bindings->count(name) == 0) {
+        const auto found = td.env().find(name);
+        if (found == td.env().end())
+          saved_bindings->emplace(name, std::nullopt);
+        else
+          saved_bindings->emplace(name, found->second);
+      }
+      td.env()[name] = value;
+      int_env.erase(name);
+      invalid_names->erase(name);
+    };
+    const auto bind_scalar = [&](const std::string& name,
+                                 const mir::Expr& expression) {
+      if (scheduled_expr_references_any(expression, *invalid_names)) {
+        invalidate(name);
+        return;
+      }
+      const bool integer = expression.type_ == "UInt" ||
+                           expression.unsized.leaf == mir::UnsizedLeaf::Int ||
+                           int_env.count(name) != 0;
+      if (integer) {
+        try {
+          int_env[name] = eval_int(expression);
+          invalid_names->erase(name);
+          return;
+        } catch (...) {
+          invalidate(name);
+          return;
+        }
+      }
+      const auto value = try_eval_pure(expression);
+      if (value && !value->is_int && value->r.size() == 1) {
+        bind_real(name, *value);
+      } else if (value && value->is_int && value->i.size() == 1) {
+        int_env[name] = value->i[0];
+        invalid_names->erase(name);
+      } else {
+        invalidate(name);
+      }
+    };
+    const auto invalidate_assignments = [&](const mir::Stmt& nested) {
+      std::vector<std::string> assigned;
+      assigned_names(nested, &assigned);
+      for (const std::string& name : assigned) invalidate(name);
+    };
+
+    switch (statement.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        for (const mir::Stmt& child : statement.body) {
+          const ScheduledOpeningSinkResult result =
+              trace_scheduled_opening_sink(child, sink, invalid_names,
+                                           saved_bindings);
+          if (result != ScheduledOpeningSinkResult::Safe) return result;
+        }
+        return ScheduledOpeningSinkResult::Safe;
+      case mir::Stmt::Decl:
+        if (statement.decl_type.base == "SInt" ||
+            statement.decl_type.base == "SReal") {
+          if (statement.has_init && statement.init.data_only)
+            bind_scalar(statement.decl_id, statement.init);
+          else
+            invalidate(statement.decl_id);
+        }
+        return ScheduledOpeningSinkResult::Safe;
+      case mir::Stmt::Assignment:
+        if (statement.lhs == sink) return ScheduledOpeningSinkResult::Writes;
+        if (statement.lhs_idx.empty()) {
+          if (statement.rhs.data_only)
+            bind_scalar(statement.lhs, statement.rhs);
+          else
+            invalidate(statement.lhs);
+        } else {
+          invalidate(statement.lhs);
+        }
+        return ScheduledOpeningSinkResult::Safe;
+      case mir::Stmt::IfElse: {
+        const auto selected =
+            try_eval_scheduled_opening_bool(statement.cond, *invalid_names);
+        if (selected) {
+          const size_t arm = *selected ? 0 : 1;
+          return arm >= statement.body.size()
+                     ? ScheduledOpeningSinkResult::Safe
+                     : trace_scheduled_opening_sink(statement.body[arm], sink,
+                                                    invalid_names,
+                                                    saved_bindings);
+        }
+        for (const mir::Stmt& arm : statement.body)
+          if (scan_stmt_defines_name(arm, sink))
+            return ScheduledOpeningSinkResult::Unknown;
+        for (const mir::Stmt& arm : statement.body)
+          invalidate_assignments(arm);
+        return ScheduledOpeningSinkResult::Safe;
+      }
+      case mir::Stmt::For:
+      case mir::Stmt::While:
+        if (scan_stmt_defines_name(statement, sink))
+          return ScheduledOpeningSinkResult::Unknown;
+        invalidate_assignments(statement);
+        return ScheduledOpeningSinkResult::Safe;
+      case mir::Stmt::TargetPE:
+      case mir::Stmt::NRFunApp:
+      case mir::Stmt::Skip:
+        return ScheduledOpeningSinkResult::Safe;
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+      case mir::Stmt::Return:
+      case mir::Stmt::Unsupported:
+        return ScheduledOpeningSinkResult::Unknown;
+    }
+    return ScheduledOpeningSinkResult::Unknown;
+  }
+
+  static void substitute_scan_var(mir::Expr* e, const std::string& name,
+                                  const mir::Expr& replacement) {
+    if (e->kind == mir::Expr::Var && e->name == name) {
+      *e = replacement;
+      return;
+    }
+    for (mir::Expr& arg : e->args) substitute_scan_var(&arg, name, replacement);
+  }
+
+  static void substitute_scan_var(mir::Stmt* s, const std::string& name,
+                                  const mir::Expr& replacement) {
+    if (s->has_init) substitute_scan_var(&s->init, name, replacement);
+    for (mir::Expr& dim : s->decl_type.dims)
+      substitute_scan_var(&dim, name, replacement);
+    substitute_scan_var(&s->rhs, name, replacement);
+    substitute_scan_var(&s->target, name, replacement);
+    substitute_scan_var(&s->lower, name, replacement);
+    substitute_scan_var(&s->upper, name, replacement);
+    substitute_scan_var(&s->cond, name, replacement);
+    for (mir::Expr& arg : s->fn_args)
+      substitute_scan_var(&arg, name, replacement);
+    for (mir::Expr& index : s->lhs_idx)
+      substitute_scan_var(&index, name, replacement);
+    for (mir::Stmt& child : s->body)
+      substitute_scan_var(&child, name, replacement);
+  }
+
+  // Substitute lexically immutable, data-only integer aliases. This makes
+  // row-selected schedule geometry explicit without depending on source
+  // spelling or integer-container rank. Numerical aliases remain available
+  // to the row-feed analysis. A shadow or later write leaves the alias intact
+  // and the scheduled proof subsequently fails closed.
+  static void inline_scheduled_data_aliases(mir::Stmt* statement) {
+    if (statement->kind != mir::Stmt::Block &&
+        statement->kind != mir::Stmt::SList) {
+      for (mir::Stmt& child : statement->body)
+        inline_scheduled_data_aliases(&child);
+      return;
+    }
+    for (size_t k = 0; k < statement->body.size(); ++k) {
+      mir::Stmt& declaration = statement->body[k];
+      if (declaration.kind != mir::Stmt::Decl ||
+          (declaration.decl_type.base != "SInt" &&
+           !(declaration.decl_type.base == "SArray" &&
+             declaration.decl_type.elem_base == "SInt"))) {
+        inline_scheduled_data_aliases(&declaration);
+        continue;
+      }
+      const mir::Expr* replacement = nullptr;
+      size_t first_use = k + 1;
+      if (declaration.has_init && declaration.init.data_only) {
+        replacement = &declaration.init;
+      } else if (k + 1 < statement->body.size()) {
+        const mir::Stmt& assignment = statement->body[k + 1];
+        if (assignment.kind == mir::Stmt::Assignment &&
+            assignment.lhs_idx.empty() &&
+            assignment.lhs == declaration.decl_id &&
+            assignment.rhs.data_only) {
+          replacement = &assignment.rhs;
+          first_use = k + 2;
+        }
+      }
+      if (replacement == nullptr) continue;
+      bool redefined = false;
+      for (size_t u = first_use; u < statement->body.size(); ++u)
+        redefined = redefined || scan_stmt_defines_name(
+                                     statement->body[u], declaration.decl_id);
+      if (redefined) continue;
+      const mir::Expr value = *replacement;
+      for (size_t u = first_use; u < statement->body.size(); ++u)
+        substitute_scan_var(&statement->body[u], declaration.decl_id, value);
+      declaration = mir::Stmt{};
+      declaration.kind = mir::Stmt::Skip;
+      if (first_use == k + 2) {
+        statement->body[k + 1] = mir::Stmt{};
+        statement->body[k + 1].kind = mir::Stmt::Skip;
+        ++k;
+      }
+    }
+    for (mir::Stmt& child : statement->body)
+      inline_scheduled_data_aliases(&child);
+  }
+
+  static void number_scheduled_whiles(
+      const mir::Stmt& statement,
+      std::map<const mir::Stmt*, int>* while_ids,
+      std::vector<const mir::Stmt*>* whiles) {
+    if (statement.kind == mir::Stmt::While) {
+      while_ids->emplace(&statement, (int)whiles->size());
+      whiles->push_back(&statement);
+    }
+    for (const mir::Stmt& child : statement.body)
+      number_scheduled_whiles(child, while_ids, whiles);
+  }
+
+  static void scheduled_expr_names(const mir::Expr& expression,
+                                   std::set<std::string>* names) {
+    if (expression.kind == mir::Expr::Var) names->insert(expression.name);
+    for (const mir::Expr& argument : expression.args)
+      scheduled_expr_names(argument, names);
+  }
+
+  static void scheduled_condition_updates(
+      const mir::Stmt& statement, const std::set<std::string>& dependencies,
+      std::vector<const mir::Stmt*>* updates, bool* unsafe) {
+    if (statement.kind == mir::Stmt::Break ||
+        statement.kind == mir::Stmt::Continue ||
+        statement.kind == mir::Stmt::Return ||
+        statement.kind == mir::Stmt::Unsupported) {
+      *unsafe = true;
+      return;
+    }
+    if (statement.kind == mir::Stmt::Assignment &&
+        dependencies.count(statement.lhs)) {
+      if (!statement.lhs_idx.empty())
+        *unsafe = true;
+      else
+        updates->push_back(&statement);
+    }
+    if (statement.kind == mir::Stmt::IfElse ||
+        statement.kind == mir::Stmt::For ||
+        statement.kind == mir::Stmt::While) {
+      std::vector<std::string> assigned;
+      for (const mir::Stmt& child : statement.body) {
+        std::function<void(const mir::Stmt&)> collect =
+            [&](const mir::Stmt& nested) {
+              if (nested.kind == mir::Stmt::Assignment)
+                assigned.push_back(nested.lhs);
+              for (const mir::Stmt& grandchild : nested.body)
+                collect(grandchild);
+            };
+        collect(child);
+      }
+      for (const std::string& name : assigned)
+        if (dependencies.count(name)) *unsafe = true;
+      return;
+    }
+    for (const mir::Stmt& child : statement.body)
+      scheduled_condition_updates(child, dependencies, updates, unsafe);
+  }
+
+  static bool scheduled_condition_update_inputs_stable(
+      const mir::Stmt& statement,
+      const std::vector<const mir::Stmt*>& updates,
+      const std::set<std::string>& dependencies) {
+    std::set<std::string> reads;
+    for (const mir::Stmt* update : updates)
+      scheduled_expr_names(update->rhs, &reads);
+    std::set<const mir::Stmt*> update_set(updates.begin(), updates.end());
+    std::function<bool(const mir::Stmt&)> stable = [&](const mir::Stmt& s) {
+      if (s.kind == mir::Stmt::Break || s.kind == mir::Stmt::Continue ||
+          s.kind == mir::Stmt::Return || s.kind == mir::Stmt::Unsupported)
+        return false;
+      if (s.kind == mir::Stmt::Decl &&
+          (reads.count(s.decl_id) != 0 || dependencies.count(s.decl_id) != 0))
+        return false;
+      if (s.kind == mir::Stmt::For &&
+          (reads.count(s.loopvar) != 0 || dependencies.count(s.loopvar) != 0))
+        return false;
+      if (s.kind == mir::Stmt::Assignment && reads.count(s.lhs) != 0 &&
+          update_set.count(&s) == 0)
+        return false;
+      for (const mir::Stmt& child : s.body)
+        if (!stable(child)) return false;
+      return true;
+    };
+    return stable(statement);
+  }
+
+  struct ScheduledOneTripInfo {
+    int id = -1;
+    std::set<std::string> dependencies;
+    std::vector<const mir::Stmt*> updates;
+    std::set<std::string> update_names;
+    std::vector<std::string> assigned;
+    bool schema_safe = false;
+  };
+
+  struct ScheduledOneTripVisit {
+    int id = -1;
+    bool entered = false;
+  };
+
+  // A guard can have a known truth value even when one scalar operand is
+  // unknown. This is used only after separately proving that every erased
+  // guard read is safe: truth independence alone does not permit removing
+  // a possibly throwing indexed read or user call.
+  std::optional<bool> scheduled_one_trip_truth(const mir::Expr& expression) {
+    if (expression.kind == mir::Expr::EAnd ||
+        expression.kind == mir::Expr::EOr) {
+      if (expression.args.size() != 2) return std::nullopt;
+      const auto left = scheduled_one_trip_truth(expression.args[0]);
+      const auto right = scheduled_one_trip_truth(expression.args[1]);
+      const bool is_and = expression.kind == mir::Expr::EAnd;
+      if ((left && *left != is_and) || (right && *right != is_and))
+        return !is_and;
+      if (left && right) return is_and;
+      return std::nullopt;
+    }
+    const auto value = try_eval_scheduled_pure(expression);
+    if (!value || value->r.size() != 1 || !std::isfinite(value->r[0]))
+      return std::nullopt;
+    return value->r[0] != 0.0;
+  }
+
+  bool scheduled_one_trip_guard_safe(
+      const mir::Expr& expression, const std::set<std::string>& updated) {
+    const bool changes = std::any_of(
+        updated.begin(), updated.end(), [&](const std::string& name) {
+          return expr_references(expression, name);
+        });
+    if (!changes) {
+      const auto value = try_eval_scheduled_pure(expression);
+      return value && value->r.size() == 1;
+    }
+    if (expression.kind == mir::Expr::Var) {
+      // An updated scalar is definitely assigned by the straight-line body
+      // before the eliminated backedge test, even if its value is unknown.
+      return expression.type_ == "UInt" || expression.type_ == "UReal";
+    }
+    const bool comparison =
+        expression.kind == mir::Expr::FunApp &&
+        expression.fn_lib == mir::Expr::Lib::StanLib &&
+        (expression.name == "Equals__" || expression.name == "NEquals__" ||
+         expression.name == "Less__" || expression.name == "Leq__" ||
+         expression.name == "Greater__" || expression.name == "Geq__");
+    const bool logical = expression.kind == mir::Expr::EAnd ||
+                         expression.kind == mir::Expr::EOr;
+    if (((comparison || logical) && expression.args.size() == 2) ||
+        (expression.kind == mir::Expr::Promotion &&
+         expression.args.size() == 1))
+      return std::all_of(expression.args.begin(), expression.args.end(),
+                         [&](const mir::Expr& argument) {
+                           return scheduled_one_trip_guard_safe(argument,
+                                                                 updated);
+                         });
+    return false;
+  }
+
+  bool trace_scheduled_one_trip(
+      const mir::Stmt& statement,
+      const std::map<const mir::Stmt*, ScheduledOneTripInfo>& while_info,
+      const ScheduledTraceNode* plan,
+      bool descend_fixed_for, bool stop_after_exact,
+      std::vector<int>* reached_whiles,
+      std::vector<ScheduledOneTripVisit>* exact_whiles) {
+    switch (statement.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList: {
+        if (plan != nullptr) {
+          for (const ScheduledTraceNode& child : plan->body)
+            if (!trace_scheduled_one_trip(
+                    *child.statement, while_info, &child, descend_fixed_for,
+                    stop_after_exact, reached_whiles, exact_whiles))
+              return false;
+            else if (stop_after_exact && !exact_whiles->empty())
+              return true;
+        } else {
+          for (const mir::Stmt& child : statement.body)
+            if (!trace_scheduled_one_trip(
+                    child, while_info, nullptr, descend_fixed_for,
+                    stop_after_exact, reached_whiles, exact_whiles))
+              return false;
+            else if (stop_after_exact && !exact_whiles->empty())
+              return true;
+        }
+        return true;
+      }
+      case mir::Stmt::Decl:
+        int_env.erase(statement.decl_id);
+        td.env().erase(statement.decl_id);
+        if ((statement.decl_type.base == "SInt" ||
+             statement.decl_type.base == "SReal") &&
+            statement.has_init)
+          if (const auto value = try_eval_scheduled_pure(statement.init))
+            td.env()[statement.decl_id] = *value;
+        return true;
+      case mir::Stmt::Assignment:
+        if (statement.lhs_idx.empty()) {
+          const auto value = try_eval_scheduled_pure(statement.rhs);
+          int_env.erase(statement.lhs);
+          if (value)
+            td.env()[statement.lhs] = *value;
+          else
+            td.env().erase(statement.lhs);
+        } else {
+          // This abstract pass does not execute indexed updates. Never let
+          // a later guard observe the pre-write container as a known value.
+          int_env.erase(statement.lhs);
+          td.env().erase(statement.lhs);
+        }
+        return true;
+      case mir::Stmt::IfElse: {
+        const auto selected = try_eval_scheduled_pure(statement.cond);
+        if (!selected) {
+          std::vector<std::string> assigned;
+          assigned_names(statement, &assigned);
+          if (descend_fixed_for) {
+            const auto entry_data = capture_scheduled_data_bindings(statement);
+            const auto entry_ints = int_env;
+            for (size_t arm = 0; arm < statement.body.size(); ++arm) {
+              restore_scheduled_data_bindings(entry_data);
+              int_env = entry_ints;
+              const ScheduledTraceNode* arm_plan =
+                  plan != nullptr && arm < plan->body.size()
+                      ? &plan->body[arm]
+                      : nullptr;
+              if (!trace_scheduled_one_trip(
+                      statement.body[arm], while_info, arm_plan,
+                      descend_fixed_for, stop_after_exact, reached_whiles,
+                      exact_whiles)) {
+                restore_scheduled_data_bindings(entry_data);
+                int_env = entry_ints;
+                return false;
+              }
+            }
+            restore_scheduled_data_bindings(entry_data);
+            int_env = entry_ints;
+          }
+          for (const std::string& name : assigned) {
+            td.env().erase(name);
+            int_env.erase(name);
+          }
+          return true;
+        }
+        if (selected->r.size() != 1) return false;
+        const size_t arm = selected->r[0] != 0.0 ? 0 : 1;
+        if (arm >= statement.body.size()) return true;
+        const ScheduledTraceNode* arm_plan =
+            plan != nullptr && arm < plan->body.size() ? &plan->body[arm]
+                                                      : nullptr;
+        return trace_scheduled_one_trip(
+            statement.body[arm], while_info, arm_plan, descend_fixed_for,
+            stop_after_exact, reached_whiles, exact_whiles);
+      }
+      case mir::Stmt::While: {
+        const auto found_info = while_info.find(&statement);
+        if (found_info == while_info.end()) return false;
+        const ScheduledOneTripInfo& info = found_info->second;
+        reached_whiles->push_back(info.id);
+        const ScheduledDataBindings entry_data =
+            capture_scheduled_data_bindings(info.update_names);
+        const auto fail_closed = [&](const char* why) {
+          if (std::getenv("STANLI_DEBUG_SCAN")) {
+            std::fprintf(stderr, "scheduled one-trip while %d unavailable: %s\n",
+                         info.id, why);
+          }
+          restore_scheduled_data_bindings(entry_data);
+          for (const std::string& name : info.assigned) {
+            td.env().erase(name);
+            int_env.erase(name);
+          }
+          return true;
+        };
+        if (!info.schema_safe) {
+          if (std::getenv("STANLI_DEBUG_SCAN")) {
+            std::fprintf(stderr,
+                         "scheduled one-trip update schema: updates=%zu "
+                         "dependencies=",
+                         info.updates.size());
+            for (const std::string& name : info.dependencies)
+              std::fprintf(stderr, "%s,", name.c_str());
+            std::fprintf(stderr, "\n");
+          }
+          return fail_closed("condition update correspondence");
+        }
+        const bool partial_guard =
+            descend_fixed_for &&
+            scheduled_one_trip_guard_safe(statement.cond, info.update_names);
+        const auto before = try_eval_scheduled_pure(statement.cond);
+        const bool entered = before && before->r.size() == 1 &&
+                             std::isfinite(before->r[0]) &&
+                             before->r[0] != 0.0;
+        if (!partial_guard) {
+          if (!entered) return fail_closed("condition before");
+          for (const std::string& dependency : info.dependencies) {
+            if (int_env.count(dependency) != 0) continue;
+            const DataMap::Entry* value = td.find(dependency);
+            if (value == nullptr || value->r.empty() ||
+                !std::all_of(value->r.begin(), value->r.end(),
+                             [](double x) { return std::isfinite(x); }))
+              return fail_closed("condition dependency before");
+          }
+        }
+        for (const mir::Stmt* update : info.updates) {
+          const auto value = try_eval_scheduled_pure(update->rhs);
+          int_env.erase(update->lhs);
+          if (value) {
+            td.env()[update->lhs] = *value;
+          } else {
+            if (!partial_guard)
+              return fail_closed("condition update evaluation");
+            td.env().erase(update->lhs);
+          }
+        }
+        if (partial_guard) {
+          const auto after = scheduled_one_trip_truth(statement.cond);
+          if (!after || *after) return fail_closed("more than one trip");
+          exact_whiles->push_back({info.id, entered});
+          restore_scheduled_data_bindings(entry_data);
+          for (const std::string& name : info.assigned) {
+            td.env().erase(name);
+            int_env.erase(name);
+          }
+          return true;
+        }
+        for (const std::string& dependency : info.dependencies) {
+          if (int_env.count(dependency) != 0) continue;
+          const DataMap::Entry* value = td.find(dependency);
+          if (value == nullptr || value->r.empty() ||
+              !std::all_of(value->r.begin(), value->r.end(),
+                           [](double x) { return std::isfinite(x); }))
+            return fail_closed("condition dependency after");
+        }
+        DataMap::Entry after;
+        try {
+          const auto evaluated = try_eval_scheduled_pure(statement.cond);
+          if (!evaluated) return fail_closed("condition after");
+          after = *evaluated;
+        } catch (...) {
+          return fail_closed("condition after");
+        }
+        if (after.r.size() != 1 || after.r[0] != 0.0)
+          return fail_closed("more than one trip");
+        exact_whiles->push_back({info.id, true});
+        restore_scheduled_data_bindings(entry_data);
+        for (const std::string& name : info.assigned) {
+          td.env().erase(name);
+          int_env.erase(name);
+        }
+        return true;
+      }
+      case mir::Stmt::For: {
+        if (!descend_fixed_for) {
+          std::vector<std::string> assigned;
+          assigned_names(statement, &assigned);
+          for (const std::string& name : assigned) {
+            td.env().erase(name);
+            int_env.erase(name);
+          }
+          return true;
+        }
+        // Prove the body for an arbitrary iteration, not one representative
+        // iterator value. Every loop-carried write is unknown at entry. Local
+        // initializers can still establish exact one-trip guard values, while
+        // iterator-dependent conditions conservatively visit both arms.
+        std::vector<std::string> assigned;
+        assigned_names(statement, &assigned);
+        std::set<std::string> declared;
+        declared_names(statement, &declared);
+        declared.insert(statement.loopvar);
+        const ScheduledDataBindings saved_data =
+            capture_scheduled_data_bindings(declared);
+        std::map<std::string, std::optional<long>> saved_ints;
+        for (const std::string& name : declared) {
+          const auto found = int_env.find(name);
+          saved_ints[name] = found == int_env.end()
+                                 ? std::optional<long>{}
+                                 : std::optional<long>{found->second};
+        }
+        const auto restore_scoped = [&]() {
+          restore_scheduled_data_bindings(saved_data);
+          for (const auto& [name, value] : saved_ints) {
+            if (value)
+              int_env[name] = *value;
+            else
+              int_env.erase(name);
+          }
+        };
+        for (const std::string& name : assigned) {
+          int_env.erase(name);
+          td.env().erase(name);
+        }
+        for (const std::string& name : declared) {
+          int_env.erase(name);
+          td.env().erase(name);
+        }
+        {
+          if (plan != nullptr) {
+            for (const ScheduledTraceNode& child : plan->body)
+              if (!trace_scheduled_one_trip(
+                      *child.statement, while_info, &child, descend_fixed_for,
+                      stop_after_exact, reached_whiles, exact_whiles)) {
+                restore_scoped();
+                return false;
+              }
+          } else {
+            for (const mir::Stmt& child : statement.body)
+              if (!trace_scheduled_one_trip(
+                      child, while_info, nullptr, descend_fixed_for,
+                      stop_after_exact, reached_whiles, exact_whiles)) {
+                restore_scoped();
+                return false;
+              }
+          }
+        }
+        restore_scoped();
+        for (const std::string& name : assigned)
+          if (declared.count(name) == 0) {
+            int_env.erase(name);
+            td.env().erase(name);
+          }
+        return true;
+      }
+      case mir::Stmt::TargetPE:
+      case mir::Stmt::NRFunApp:
+      case mir::Stmt::Skip:
+        return true;
+      case mir::Stmt::Break:
+      case mir::Stmt::Continue:
+        // Outside the candidate while, early loop exit only removes paths.
+        // The abstract pass may visit that unreachable suffix; enclosing
+        // loops invalidate all their writes before and after the visit.
+        return descend_fixed_for;
+      case mir::Stmt::Return:
+      case mir::Stmt::Unsupported:
+        return false;
+    }
+    return false;
+  }
+
+  void prove_scheduled_one_trip(
+      const mir::Stmt& stable, const std::string& loopvar, long lo,
+      const std::vector<uint32_t>& schedule, size_t template_count,
+      const ScheduledTraceNode& nested_plan,
+      std::vector<std::map<const mir::Stmt*, bool>>* proven_whiles) {
+    proven_whiles->assign(template_count, {});
+    std::map<const mir::Stmt*, int> while_ids;
+    std::vector<const mir::Stmt*> whiles;
+    number_scheduled_whiles(stable, &while_ids, &whiles);
+    if (whiles.empty()) return;
+    std::map<const mir::Stmt*, ScheduledOneTripInfo> while_info;
+    for (const mir::Stmt* statement : whiles) {
+      ScheduledOneTripInfo info;
+      info.id = while_ids.at(statement);
+      scheduled_expr_names(statement->cond, &info.dependencies);
+      bool unsafe = false;
+      for (const mir::Stmt& child : statement->body)
+        scheduled_condition_updates(child, info.dependencies, &info.updates,
+                                    &unsafe);
+      info.schema_safe =
+          !unsafe && !info.updates.empty() &&
+          scheduled_condition_update_inputs_stable(*statement, info.updates,
+                                                    info.dependencies);
+      for (const mir::Stmt* update : info.updates)
+        info.update_names.insert(update->lhs);
+      assigned_names(*statement, &info.assigned);
+      while_info.emplace(statement, std::move(info));
+    }
+    if (std::getenv("STANLI_DEBUG_SCAN"))
+      std::fprintf(stderr, "scheduled one-trip while candidates=%zu\n",
+                   whiles.size());
+    std::set<std::string> local_names;
+    declared_names(stable, &local_names);
+    std::vector<std::string> assigned;
+    assigned_names(stable, &assigned);
+    local_names.insert(assigned.begin(), assigned.end());
+    local_names.insert(loopvar);
+    const auto saved = capture_scheduled_data_bindings(local_names);
+    const auto restore_locals = [&]() {
+      restore_scheduled_data_bindings(saved);
+    };
+
+    const auto original_ints = int_env;
+    const auto prove_pass = [&](const ScheduledTraceNode* plan,
+                                bool descend_fixed_for,
+                                bool stop_after_exact,
+                                bool row_independent) {
+      std::vector<std::optional<std::map<int, bool>>> candidates(template_count);
+      const size_t row_count = row_independent ? 1 : schedule.size();
+      for (size_t row = 0; row < row_count; ++row) {
+        restore_locals();
+        int_env = original_ints;
+        // The peeled row's values are not facts about an arbitrary later
+        // row. Both passes must derive mutable values from this row's own
+        // initializers/assignments, not inherit a concrete incoming carry.
+        for (const std::string& name : local_names) {
+          int_env.erase(name);
+          td.env().erase(name);
+        }
+        // The row-independent pass also leaves the iterator unknown, so
+        // its proof is shared by every scheduled template.
+        if (!row_independent) {
+          int_env[loopvar] = lo + 1 + (long)row;
+        }
+        std::vector<int> reached;
+        std::vector<ScheduledOneTripVisit> exact;
+        bool traced = false;
+        try {
+          traced = trace_scheduled_one_trip(
+              stable, while_info, plan, descend_fixed_for, stop_after_exact,
+              &reached, &exact);
+        } catch (const std::exception& error) {
+          if (std::getenv("STANLI_DEBUG_SCAN") && row < 3)
+            std::fprintf(stderr, "scheduled one-trip trace error: %s\n",
+                         error.what());
+          traced = false;
+        } catch (...) {
+          if (std::getenv("STANLI_DEBUG_SCAN") && row < 3)
+            std::fprintf(stderr, "scheduled one-trip trace error: unknown\n");
+          traced = false;
+        }
+        std::map<int, size_t> reached_counts;
+        std::map<int, size_t> exact_counts;
+        std::map<int, size_t> entered_counts;
+        for (int id : reached) ++reached_counts[id];
+        for (const ScheduledOneTripVisit& visit : exact) {
+          ++exact_counts[visit.id];
+          if (visit.entered) ++entered_counts[visit.id];
+        }
+        std::map<int, bool> row_proven;
+        if (traced)
+          for (const auto& [id, count] : reached_counts)
+            if (count > 0 && exact_counts[id] == count)
+              row_proven[id] = entered_counts[id] == count;
+        const size_t which = row_independent ? 0 : (size_t)schedule[row];
+        if (which >= candidates.size()) {
+          for (auto& candidate : candidates) candidate = std::map<int, bool>{};
+          break;
+        }
+        auto& candidate = candidates[which];
+        if (!candidate) {
+          candidate = std::move(row_proven);
+        } else {
+          for (auto it = candidate->begin(); it != candidate->end();) {
+            const auto row_value = row_proven.find(it->first);
+            if (row_value == row_proven.end()) {
+              it = candidate->erase(it);
+            } else {
+              it->second = it->second && row_value->second;
+              ++it;
+            }
+          }
+        }
+      }
+      restore_locals();
+      int_env = original_ints;
+      return candidates;
+    };
+    const auto top_level = prove_pass(nullptr, false, true, false);
+    const auto nested = prove_pass(&nested_plan, true, false, true);
+    for (size_t which = 0; which < template_count; ++which) {
+      const auto publish = [&](const auto& candidates, size_t candidate_row) {
+        if (!candidates[candidate_row]) return;
+        for (const auto& [id, entered] : *candidates[candidate_row])
+          if (id >= 0 && (size_t)id < whiles.size())
+            (*proven_whiles)[which][whiles[(size_t)id]] |= entered;
+      };
+      publish(top_level, which);
+      publish(nested, 0);
+    }
+  }
+
+  static void scan_indexed_assignment_names(const mir::Stmt& statement,
+                                            std::vector<std::string>* names) {
+    if (statement.kind == mir::Stmt::Assignment &&
+        statement.lhs_idx.size() == 1 &&
+        std::find(names->begin(), names->end(), statement.lhs) == names->end())
+      names->push_back(statement.lhs);
+    for (const mir::Stmt& child : statement.body)
+      scan_indexed_assignment_names(child, names);
+  }
+
+  static bool collect_scheduled_sink_expr(
+      const mir::Expr& expression, const std::string& sink,
+      std::vector<mir::Expr>* indices, bool* read) {
+    if (expression.kind == mir::Expr::Indexed &&
+        !expression.args.empty() &&
+        expression.args[0].kind == mir::Expr::Var &&
+        expression.args[0].name == sink) {
+      if (expression.args.size() != 2 ||
+          expression.args[1].name != "IndexSingle" ||
+          expression.args[1].args.size() != 1)
+        return false;
+      indices->push_back(expression.args[1].args[0]);
+      *read = true;
+      return collect_scheduled_sink_expr(expression.args[1].args[0], sink,
+                                         indices, read);
+    }
+    if (expression.kind == mir::Expr::Var && expression.name == sink)
+      return false;
+    for (const mir::Expr& argument : expression.args)
+      if (!collect_scheduled_sink_expr(argument, sink, indices, read))
+        return false;
+    return true;
+  }
+
+  // Prove that replacing an array cell by the synthetic row scalar preserves
+  // every reached access. All reads must follow a definite write on every
+  // control path, and all reads/writes must use one scalar cell whose index is
+  // bijective across scheduled rows. Neighboring/range/whole-value accesses
+  // therefore fail before rewrite_scan_sink_stmt can erase their geometry.
+  static bool collect_scheduled_sink_accesses(
+      const mir::Stmt& statement, const std::string& sink,
+      std::vector<mir::Expr>* indices, bool* definitely_written) {
+    const auto read_expression = [&](const mir::Expr& expression,
+                                     bool* read) {
+      return collect_scheduled_sink_expr(expression, sink, indices, read);
+    };
+    bool read = false;
+    if ((statement.has_init && !read_expression(statement.init, &read)) ||
+        !read_expression(statement.rhs, &read) ||
+        !read_expression(statement.target, &read) ||
+        !read_expression(statement.lower, &read) ||
+        !read_expression(statement.upper, &read) ||
+        !read_expression(statement.cond, &read))
+      return false;
+    for (const mir::Expr& argument : statement.fn_args)
+      if (!read_expression(argument, &read)) return false;
+    if (read && !*definitely_written) return false;
+
+    if (statement.kind == mir::Stmt::Assignment && statement.lhs == sink) {
+      if (statement.lhs_idx.size() != 1 ||
+          statement.lhs_idx[0].name != "IndexSingle" ||
+          statement.lhs_idx[0].args.size() != 1)
+        return false;
+      bool index_read = false;
+      if (!read_expression(statement.lhs_idx[0].args[0], &index_read) ||
+          index_read)
+        return false;
+      indices->push_back(statement.lhs_idx[0].args[0]);
+      *definitely_written = true;
+    } else {
+      for (const mir::Expr& index : statement.lhs_idx) {
+        bool index_read = false;
+        if (!read_expression(index, &index_read) || index_read) return false;
+      }
+    }
+
+    if (statement.kind == mir::Stmt::IfElse) {
+      if (statement.body.empty() || statement.body.size() > 2) return false;
+      const bool entry_written = *definitely_written;
+      bool joined_written = true;
+      for (const mir::Stmt& arm : statement.body) {
+        bool arm_written = entry_written;
+        if (!collect_scheduled_sink_accesses(arm, sink, indices,
+                                             &arm_written))
+          return false;
+        joined_written = joined_written && arm_written;
+      }
+      if (statement.body.size() == 1)
+        joined_written = joined_written && entry_written;
+      *definitely_written = joined_written;
+      return true;
+    }
+    if (statement.kind == mir::Stmt::For ||
+        statement.kind == mir::Stmt::While) {
+      for (const mir::Stmt& child : statement.body) {
+        bool loop_written = false;
+        std::vector<mir::Expr> loop_indices;
+        if (!collect_scheduled_sink_accesses(child, sink, &loop_indices,
+                                             &loop_written) ||
+            !loop_indices.empty())
+          return false;
+      }
+      return true;
+    }
+    for (const mir::Stmt& child : statement.body)
+      if (!collect_scheduled_sink_accesses(child, sink, indices,
+                                           definitely_written))
+        return false;
+    return true;
+  }
+
+  bool scheduled_sink_is_bijective(
+      const mir::Stmt& stable, const std::string& sink,
+      const std::string& loopvar, const std::string& row_alias,
+      const mir::Expr& row_value, const std::string& previous_alias,
+      long lo, int64_t count, int64_t extent) {
+    std::vector<mir::Expr> indices;
+    bool definitely_written = false;
+    const auto bound = scope.find(sink);
+    const DataMap::Entry* initial =
+        bound == scope.end() ? nullptr : observation(bound->second);
+    if (initial == nullptr) {
+      const auto interpreted = td.env().find(sink);
+      if (interpreted != td.env().end()) initial = &interpreted->second;
+    }
+    if (initial == nullptr && std::getenv("STANLI_DEBUG_SCAN"))
+      std::fprintf(stderr,
+                   "scheduled sink has no exact initial observation: %s\n",
+                   sink.c_str());
+    if (initial != nullptr && (int64_t)initial->r.size() == extent)
+      definitely_written = std::all_of(
+          initial->r.begin(), initial->r.end(),
+          [](double value) { return value == 0.0 && !std::signbit(value); });
+    if (!collect_scheduled_sink_accesses(stable, sink, &indices,
+                                         &definitely_written) ||
+        !definitely_written || indices.empty()) {
+      if (std::getenv("STANLI_DEBUG_SCAN"))
+        std::fprintf(stderr,
+                     "scheduled sink access proof failed: %s initial=%d "
+                     "final=%d accesses=%zu\n",
+                     sink.c_str(), initial != nullptr, definitely_written,
+                     indices.size());
+      return false;
+    }
+    const auto saved_int_env = int_env;
+    long first_index = 0;
+    try {
+      for (int64_t row = 0; row < count; ++row) {
+        const long iteration = lo + 1 + (long)row;
+        int_env[loopvar] = iteration;
+        int_env[row_alias] = eval_int(row_value);
+        int_env[previous_alias] = iteration - 1;
+        long current_index = 0;
+        for (size_t access = 0; access < indices.size(); ++access) {
+          const long index = eval_int(indices[access]);
+          if (access == 0)
+            current_index = index;
+          else if (index != current_index) {
+            if (std::getenv("STANLI_DEBUG_SCAN"))
+              std::fprintf(stderr,
+                           "scheduled sink cell mismatch: %s row=%lld "
+                           "first=%ld other=%ld\n",
+                           sink.c_str(), (long long)row, current_index, index);
+            int_env = saved_int_env;
+            return false;
+          }
+        }
+        if (current_index < 1 || current_index > extent ||
+            (row > 0 && current_index != first_index + row)) {
+          if (std::getenv("STANLI_DEBUG_SCAN"))
+            std::fprintf(stderr,
+                         "scheduled sink index is not bijective: %s row=%lld "
+                         "index=%ld first=%ld extent=%lld\n",
+                         sink.c_str(), (long long)row, current_index,
+                         first_index, (long long)extent);
+          int_env = saved_int_env;
+          return false;
+        }
+        if (row == 0) first_index = current_index;
+      }
+    } catch (const CompileError&) {
+      int_env = saved_int_env;
+      return false;
+    }
+    int_env = saved_int_env;
+    return true;
+  }
+
+  bool normalize_scheduled_loop(const mir::Stmt& s, long lo, long hi,
+                                mir::Stmt* normalized,
+                                std::string* source_sink,
+                                std::string* synthetic_sink) {
+    const auto refuse = [&](const char* why) {
+      if (std::getenv("STANLI_DEBUG_SCAN"))
+        std::fprintf(stderr,
+                     "scheduled normalization refused: %s loop=%s rows=%lld"
+                     " body=%zu block_kind=%d block_body=%zu\n",
+                     why, s.loopvar.c_str(), (long long)(hi - lo),
+                     s.body.size(),
+                     s.body.empty() ? -1 : (int)s.body[0].kind,
+                     s.body.empty() ? 0 : s.body[0].body.size());
+      return false;
+    };
+    if (hi <= lo || s.body.size() != 1 ||
+        (s.body[0].kind != mir::Stmt::Block &&
+         s.body[0].kind != mir::Stmt::SList))
+      return refuse("outer structure");
+    // O1 inlining can retain one or more scope-only singleton blocks around
+    // a loop body. They carry no control or effects, so unwrap them before
+    // recognizing the generic opening/steady-state recurrence shape.
+    const mir::Stmt* block_ptr = &s.body[0];
+    while ((block_ptr->kind == mir::Stmt::Block ||
+            block_ptr->kind == mir::Stmt::SList) &&
+           block_ptr->body.size() == 1 &&
+           (block_ptr->body[0].kind == mir::Stmt::Block ||
+            block_ptr->body[0].kind == mir::Stmt::SList))
+      block_ptr = &block_ptr->body[0];
+    if (block_ptr->body.size() < 3) return refuse("outer structure");
+    const mir::Stmt& block = *block_ptr;
+
+    size_t gate_index = block.body.size();
+    size_t first_guard_arg = 0;
+    bool stable_value = false;
+    for (size_t k = 0; k < block.body.size(); ++k) {
+      const mir::Stmt& candidate = block.body[k];
+      if (candidate.kind != mir::Stmt::IfElse || candidate.body.size() != 1 ||
+          candidate.cond.kind != mir::Expr::EOr ||
+          candidate.cond.args.size() != 2)
+        continue;
+      for (size_t arg = 0; arg < 2; ++arg) {
+        bool value = false;
+        if (scan_first_guard(candidate.cond.args[arg], s.loopvar, lo, &value) &&
+            !value) {
+          if (gate_index != block.body.size())
+            return refuse("multiple opening guards");
+          gate_index = k;
+          first_guard_arg = arg;
+        }
+      }
+    }
+    if (gate_index == block.body.size())
+      return refuse("first-row guard");
+    const mir::Stmt& gate = block.body[gate_index];
+
+    const mir::Stmt* row_decl = nullptr;
+    const mir::Stmt* row_assignment = nullptr;
+    for (size_t k = 0; k + 1 < gate_index; ++k) {
+      const mir::Stmt& declaration = block.body[k];
+      const mir::Stmt& assignment = block.body[k + 1];
+      if (declaration.kind == mir::Stmt::Decl &&
+          declaration.decl_type.base == "SInt" &&
+          assignment.kind == mir::Stmt::Assignment &&
+          assignment.lhs_idx.empty() &&
+          assignment.lhs == declaration.decl_id &&
+          assignment.rhs.data_only &&
+          expr_references(assignment.rhs, s.loopvar)) {
+        if (row_decl != nullptr) return refuse("multiple row aliases");
+        row_decl = &declaration;
+        row_assignment = &assignment;
+      }
+    }
+    if (row_decl == nullptr || row_assignment == nullptr)
+      return refuse("row alias");
+
+    const mir::Stmt* previous_assignment = nullptr;
+    for (size_t k = gate_index + 1; k < block.body.size(); ++k) {
+      const mir::Stmt& assignment = block.body[k];
+      if (assignment.kind != mir::Stmt::Assignment ||
+          !assignment.lhs_idx.empty() ||
+          assignment.rhs.kind != mir::Expr::Var ||
+          assignment.rhs.name != s.loopvar)
+        return refuse("post-gate effect");
+      if (previous_assignment != nullptr)
+        return refuse("multiple previous-row aliases");
+      previous_assignment = &assignment;
+    }
+    if (previous_assignment == nullptr)
+      return refuse("previous-row alias");
+
+    const int64_t count = static_cast<int64_t>(hi) - lo;
+
+    // Evaluate the complete non-opening arm for every suffix row. Prefix
+    // aliases are data-only and rebound exactly; no particular selector or
+    // source spelling participates in the proof.
+    const auto saved_int_env = int_env;
+    bool every_stable_gate = true;
+    try {
+      for (int64_t k = 0; k < count && every_stable_gate; ++k) {
+        int_env[s.loopvar] = lo + 1 + static_cast<long>(k);
+        const long row = eval_int(row_assignment->rhs);
+        int_env[row_decl->decl_id] = row;
+        const auto selected =
+            try_eval_pure(gate.cond.args[first_guard_arg ^ 1u]);
+        every_stable_gate =
+            selected && selected->r.size() == 1 && selected->r[0] != 0.0;
+      }
+    } catch (...) {
+      int_env = saved_int_env;
+      throw;
+    }
+    int_env = saved_int_env;
+    if (!every_stable_gate) return refuse("stable row gate");
+
+    std::vector<std::string> sink_candidates;
+    scan_indexed_assignment_names(gate.body[0], &sink_candidates);
+    sink_candidates.erase(
+        std::remove_if(sink_candidates.begin(), sink_candidates.end(),
+                       [&](const std::string& name) {
+                         const auto found = scope.find(name);
+                         return found == scope.end() ||
+                                g.slots[(size_t)found->second.slot].len != count ||
+                                !scheduled_sink_is_bijective(
+                                    gate.body[0], name, s.loopvar,
+                                    row_decl->decl_id, row_assignment->rhs,
+                                    previous_assignment->lhs, lo, count,
+                                    g.slots[(size_t)found->second.slot].len);
+                       }),
+        sink_candidates.end());
+    if (sink_candidates.size() != 1) return refuse("sink discovery");
+    *source_sink = sink_candidates.front();
+
+    // The normalized scan discards its synthetic opening cell. Prove at the
+    // concrete lower bound that the original opening path cannot update the
+    // source sink before making that representation change.
+    const auto opening_int_env = int_env;
+    std::set<std::string> invalid_opening_names;
+    std::map<std::string, std::optional<DataMap::Entry>> opening_bindings;
+    ScheduledOpeningSinkResult opening_result =
+        ScheduledOpeningSinkResult::Unknown;
+    try {
+      int_env[s.loopvar] = lo;
+      opening_result = trace_scheduled_opening_sink(
+          block, *source_sink, &invalid_opening_names, &opening_bindings);
+    } catch (...) {
+      opening_result = ScheduledOpeningSinkResult::Unknown;
+    }
+    for (const auto& [name, value] : opening_bindings) {
+      if (value)
+        td.env()[name] = *value;
+      else
+        td.env().erase(name);
+    }
+    int_env = opening_int_env;
+    if (opening_result != ScheduledOpeningSinkResult::Safe)
+      return refuse(opening_result == ScheduledOpeningSinkResult::Writes
+                        ? "opening sink update"
+                        : "opening specialization");
+
+    const std::string row_sink =
+        "__stanli_scheduled_row_sink_" + std::to_string(g.slots.size()) + "__";
+    *synthetic_sink =
+        "__stanli_scheduled_sink_" + std::to_string(g.slots.size()) + "__";
+    if (scope.count(*synthetic_sink) || scope.count(row_sink) ||
+        scope.count(*source_sink) == 0)
+      return refuse("sink scope");
+
+    mir::Stmt peeled = block;
+    int peeled_updates = 0;
+    rewrite_scan_sink_stmt(&peeled, s.loopvar, row_decl->decl_id,
+                           previous_assignment->lhs, *source_sink, row_sink,
+                           false, &peeled_updates);
+    mir::Stmt stable = gate.body[0];
+    int stable_updates = 0;
+    rewrite_scan_sink_stmt(&stable, s.loopvar, row_decl->decl_id,
+                           previous_assignment->lhs, *source_sink, row_sink,
+                           true, &stable_updates);
+    if (stable_updates < 1) return refuse("stable sink updates");
+    inline_scheduled_data_aliases(&stable);
+
+    mir::Stmt sink_decl;
+    sink_decl.kind = mir::Stmt::Decl;
+    sink_decl.decl_id = *synthetic_sink;
+    sink_decl.decl_type.base = "SArray";
+    sink_decl.decl_type.elem_base = "SReal";
+    sink_decl.decl_type.dims = {scan_literal(count + 1)};
+
+    mir::Stmt row_lp_decl;
+    row_lp_decl.kind = mir::Stmt::Decl;
+    row_lp_decl.decl_id = row_sink;
+    row_lp_decl.decl_type.base = "SReal";
+    row_lp_decl.has_init = true;
+    row_lp_decl.init = scan_literal(0, true);
+
+    mir::Stmt peeled_arm;
+    peeled_arm.kind = mir::Stmt::Block;
+    peeled_arm.body = {sink_decl, row_lp_decl, std::move(peeled)};
+    mir::Stmt stable_arm;
+    stable_arm.kind = mir::Stmt::Block;
+    stable_arm.body = {row_lp_decl, std::move(stable)};
+
+    mir::Stmt first_if;
+    first_if.kind = mir::Stmt::IfElse;
+    first_if.cond = gate.cond.args[first_guard_arg];
+    first_if.body = {std::move(peeled_arm), std::move(stable_arm)};
+
+    mir::Expr index;
+    index.kind = mir::Expr::Unsupported;
+    index.name = "IndexSingle";
+    index.args = {scan_binary("Plus__", scan_var(s.loopvar), scan_literal(1))};
+    mir::Stmt sink_stmt;
+    sink_stmt.kind = mir::Stmt::Assignment;
+    sink_stmt.lhs = *synthetic_sink;
+    sink_stmt.lhs_idx = {std::move(index)};
+    sink_stmt.rhs = scan_var(row_sink, true);
+
+    *normalized = s;
+    normalized->body.clear();
+    mir::Stmt normalized_block;
+    normalized_block.kind = mir::Stmt::Block;
+    normalized_block.body = {std::move(first_if), std::move(sink_stmt)};
+    normalized->body.push_back(std::move(normalized_block));
+    return true;
+  }
+
+  bool rewrite_scheduled_stmt(mir::Stmt* s,
+                              const std::vector<std::string>& row_names,
+                              std::vector<ScheduledFeed>* feeds) {
+    if (s->has_init && !rewrite_scheduled_expr(&s->init, row_names, feeds))
+      return false;
+    if (!rewrite_scheduled_expr(&s->rhs, row_names, feeds) ||
+        !rewrite_scheduled_expr(&s->target, row_names, feeds) ||
+        !rewrite_scheduled_expr(&s->lower, row_names, feeds) ||
+        !rewrite_scheduled_expr(&s->upper, row_names, feeds) ||
+        !rewrite_scheduled_expr(&s->cond, row_names, feeds))
+      return false;
+    for (mir::Expr& arg : s->fn_args)
+      if (!rewrite_scheduled_expr(&arg, row_names, feeds)) return false;
+    for (mir::Stmt& child : s->body)
+      if (!rewrite_scheduled_stmt(&child, row_names, feeds)) return false;
+    return true;
+  }
+
+  // First scheduled-scan tranche. It recognizes a peeled initialization arm,
+  // one data-selected stable branch, whole-value carries, one disjoint scalar
+  // sink, one fixed-width data-row feed, and arbitrary parameter conditionals
+  // already supported by necessity islands. Every mutation is guarded by a
+  // complete lowering snapshot; a refusal is observationally identical to
+  // never attempting the optimization.
+  bool lower_scheduled_scan(const mir::Stmt& s, long lo, long hi) {
+    constexpr int64_t kMinScheduledRows = 32;
+    mir::Stmt normalized;
+    std::string source_sink;
+    std::string normalized_sink;
+    if (!in_write_array && !std::getenv("STANLI_NO_SCAN") &&
+        normalize_scheduled_loop(s, lo, hi, &normalized, &source_sink,
+                                 &normalized_sink)) {
+      const Val original_sink = scope.at(source_sink);
+      if (!lower_scheduled_scan(normalized, lo, hi)) return false;
+      auto joined = scope.find(normalized_sink);
+      const int64_t count = static_cast<int64_t>(hi) - lo;
+      if (joined == scope.end() ||
+          g.slots[(size_t)joined->second.slot].len != count + 1)
+        return false;
+      SlotInfo sink_view = original_sink.si;
+      sink_view.param_free = false;
+      Val suffix = emit_raw(OP_SLICE, {joined->second.slot}, count, sink_view,
+                            {1}, -1, original_sink.autodiff);
+      suffix.autodiff = original_sink.autodiff;
+      scope[source_sink] = suffix;
+      td.env().erase(source_sink);
+      auto declaration = decls.find(source_sink);
+      if (declaration != decls.end()) {
+        declaration->second.len = count;
+        declaration->second.si = sink_view;
+      }
+      scope.erase(normalized_sink);
+      return true;
+    }
+    const bool debug_scan = std::getenv("STANLI_DEBUG_SCAN") != nullptr;
+    const auto debug_refusal = [&](const char* why) {
+      if (debug_scan && std::string(why) != "opening shape gate")
+        std::fprintf(stderr, "scheduled scan refused %s: %s\n",
+                     s.loopvar.c_str(), why);
+      return false;
+    };
+    const std::vector<std::string> row_names{s.loopvar};
+    if (in_write_array || std::getenv("STANLI_NO_SCAN") || hi <= lo ||
+        (int64_t)hi - (int64_t)lo < kMinScheduledRows || s.body.size() != 1 ||
+        (s.body[0].kind != mir::Stmt::Block &&
+         s.body[0].kind != mir::Stmt::SList) ||
+        s.body[0].body.size() != 2)
+      return debug_refusal("opening shape gate");
+
+    const mir::Stmt& first_if = s.body[0].body[0];
+    const mir::Stmt& sink_stmt = s.body[0].body[1];
+    bool stable_condition = false;
+    if (first_if.kind != mir::Stmt::IfElse || first_if.body.size() != 2 ||
+        !scan_first_guard(first_if.cond, s.loopvar, lo, &stable_condition) ||
+        sink_stmt.kind != mir::Stmt::Assignment ||
+        sink_stmt.lhs_idx.size() != 1 ||
+        sink_stmt.lhs_idx[0].name != "IndexSingle" ||
+        sink_stmt.lhs_idx[0].args.size() != 1 ||
+        expr_references(sink_stmt.rhs, sink_stmt.lhs))
+      return debug_refusal("peeled guard or sink shape");
+    const size_t stable_arm = stable_condition ? 0 : 1;
+    mir::Stmt prepared_stable = first_if.body[stable_arm];
+    inline_scheduled_data_aliases(&prepared_stable);
+    const mir::Stmt& stable_source = prepared_stable;
+    if (scan_stmt_reads_name(stable_source, sink_stmt.lhs))
+      return debug_refusal("stable arm reads sink");
+
+    const int64_t count = (int64_t)hi - (int64_t)lo;
+    std::vector<uint32_t> schedule((size_t)count);
+    std::vector<long> representatives;
+    std::vector<decltype(int_env)> representative_ints;
+    const auto original_ints = int_env;
+    std::vector<std::string> assigned_trace_names;
+    assigned_names(stable_source, &assigned_trace_names);
+    std::set<std::string> mutable_trace_names(assigned_trace_names.begin(),
+                                              assigned_trace_names.end());
+    declared_names(stable_source, &mutable_trace_names);
+    mutable_trace_names.insert(s.loopvar);
+    std::set<std::string> data_definable_trace_names;
+    scheduled_data_definable_names(stable_source, &data_definable_trace_names);
+    data_definable_trace_names.insert(s.loopvar);
+    ScheduledTraceNode trace_plan;
+    if (!make_scheduled_trace_plan(stable_source, s.loopvar,
+                                   mutable_trace_names,
+                                   data_definable_trace_names, &trace_plan))
+      return debug_refusal("empty schedule trace plan");
+    if (debug_scan) {
+      size_t trace_nodes = 0;
+      size_t trace_conditions = 0;
+      size_t trace_loops = 0;
+      size_t trace_binding_names = 0;
+      size_t trace_binding_cells = 0;
+      size_t trace_cached_conditions = 0;
+      size_t trace_cached_failures = 0;
+      std::function<void(const ScheduledTraceNode&)> count_trace_plan =
+          [&](const ScheduledTraceNode& node) {
+            ++trace_nodes;
+            if (node.statement->kind == mir::Stmt::IfElse) ++trace_conditions;
+            trace_cached_conditions += node.cache_condition;
+            trace_cached_failures += node.cache_condition_failure;
+            if (node.statement->kind == mir::Stmt::For ||
+                node.statement->kind == mir::Stmt::While)
+              ++trace_loops;
+            trace_binding_names += node.data_binding_names.size();
+            for (const std::string& name : node.data_binding_names) {
+              const auto found = td.env().find(name);
+              if (found != td.env().end())
+                trace_binding_cells += found->second.r.size();
+            }
+            for (const ScheduledTraceNode& child : node.body)
+              count_trace_plan(child);
+          };
+      count_trace_plan(trace_plan);
+      std::fprintf(stderr,
+                   "scheduled trace plan nodes=%zu conditions=%zu loops=%zu "
+                   "binding_refs=%zu binding_cells=%zu root_bindings=%zu "
+                   "cache_conditions=%zu cache_failures=%zu\n",
+                   trace_nodes, trace_conditions, trace_loops,
+                   trace_binding_names, trace_binding_cells,
+                   trace_plan.data_binding_names.size(),
+                   trace_cached_conditions, trace_cached_failures);
+    }
+    const ScheduledDataBindings original_schedule_data =
+        capture_scheduled_data_bindings(trace_plan.data_binding_names);
+    std::map<const mir::Stmt*, int> condition_ids;
+    number_scheduled_conditions(trace_plan, &condition_ids);
+    {
+      struct RestoreScheduleState {
+        std::function<void()> restore;
+        ~RestoreScheduleState() { restore(); }
+      } restore_schedule_state{[&] {
+        restore_scheduled_data_bindings(original_schedule_data);
+        int_env = original_ints;
+      }};
+      try {
+      int_env[s.loopvar] = lo;
+      const long first_sink_index =
+          eval_int(sink_stmt.lhs_idx[0].args[0]);
+
+        std::map<std::string, uint32_t> fingerprints;
+        for (int64_t t = 0; t < count; ++t) {
+          restore_scheduled_data_bindings(original_schedule_data);
+          const long iteration = lo + 1 + (long)t;
+          int_env[s.loopvar] = iteration;
+          const auto entry_ints = int_env;
+          std::string fingerprint;
+          if (!trace_scheduled_data_control(trace_plan, condition_ids,
+                                            s.loopvar, &fingerprint))
+            return debug_refusal("schedule data-control trace");
+          auto inserted = fingerprints.emplace(
+              fingerprint, static_cast<uint32_t>(fingerprints.size()));
+          // ScanSpec and the executor are template-count agnostic. Keep a
+          // modest lowering-time/code-size cap so highly irregular data control
+          // still falls back to ordinary lowering instead of compiling one
+          // fragment per row pattern.
+          constexpr size_t kMaxScheduledTemplates = 8;
+          if (fingerprints.size() > kMaxScheduledTemplates)
+            return debug_refusal("too many scheduled templates");
+          const uint32_t which = inserted.first->second;
+          schedule[(size_t)t] = which;
+          if (inserted.second) {
+            representatives.push_back(iteration);
+            representative_ints.push_back(entry_ints);
+          }
+          const long sink_index = eval_int(sink_stmt.lhs_idx[0].args[0]);
+          if (sink_index != first_sink_index + t + 1)
+            return debug_refusal("sink index schedule");
+        }
+      } catch (const CompileError&) {
+        int_env = original_ints;
+        return debug_refusal("schedule evaluation exception");
+      }
+    }
+    if (debug_scan) {
+      uint64_t trace_visits = 0;
+      uint64_t trace_condition_evaluations = 0;
+      uint64_t trace_condition_cache_hits = 0;
+      uint64_t trace_condition_unknowns = 0;
+      uint64_t trace_unknown_binding_refs = 0;
+      uint64_t trace_unknown_binding_cells = 0;
+      uint64_t trace_for_visits = 0;
+      uint64_t trace_while_visits = 0;
+      std::function<void(const ScheduledTraceNode&)> count_trace_visits =
+          [&](const ScheduledTraceNode& node) {
+            trace_visits += node.visits;
+            trace_condition_evaluations += node.condition_evaluations;
+            trace_condition_cache_hits += node.condition_cache_hits;
+            trace_condition_unknowns += node.condition_unknowns;
+            trace_unknown_binding_refs +=
+                node.condition_unknowns * node.data_binding_names.size();
+            for (const std::string& name : node.data_binding_names) {
+              const auto found = td.env().find(name);
+              if (found != td.env().end())
+                trace_unknown_binding_cells +=
+                    node.condition_unknowns * found->second.r.size();
+            }
+            if (node.statement->kind == mir::Stmt::For)
+              trace_for_visits += node.visits;
+            if (node.statement->kind == mir::Stmt::While)
+              trace_while_visits += node.visits;
+            for (const ScheduledTraceNode& child : node.body)
+              count_trace_visits(child);
+          };
+      count_trace_visits(trace_plan);
+      std::fprintf(stderr,
+                   "scheduled trace visits=%llu condition_evaluations=%llu "
+                   "condition_cache_hits=%llu condition_unknowns=%llu "
+                   "unknown_binding_refs=%llu unknown_binding_cells=%llu "
+                   "for_visits=%llu while_visits=%llu\n",
+                   (unsigned long long)trace_visits,
+                   (unsigned long long)trace_condition_evaluations,
+                   (unsigned long long)trace_condition_cache_hits,
+                   (unsigned long long)trace_condition_unknowns,
+                   (unsigned long long)trace_unknown_binding_refs,
+                   (unsigned long long)trace_unknown_binding_cells,
+                   (unsigned long long)trace_for_visits,
+                   (unsigned long long)trace_while_visits);
+    }
+    int_env = original_ints;
+    const size_t template_count = representatives.size();
+    if (template_count == 0 || template_count != representative_ints.size())
+      return debug_refusal("missing scheduled template");
+    std::vector<std::map<const mir::Stmt*, bool>> one_trip_whiles;
+    const auto one_trip_time = prep.start();
+    if (std::getenv("STANLI_NO_SCHEDULED_ONE_TRIP")) {
+      one_trip_whiles.assign(template_count, {});
+    } else {
+      prove_scheduled_one_trip(stable_source, s.loopvar, lo, schedule,
+                               template_count, trace_plan,
+                               &one_trip_whiles);
+    }
+    prep.plain(prep_graph, "scheduled_one_trip", one_trip_time);
+    if (debug_scan) {
+      std::fprintf(stderr, "scheduled one-trip proofs=");
+      for (size_t which = 0; which < template_count; ++which)
+        std::fprintf(stderr, "%s%zu", which == 0 ? "" : ",",
+                     one_trip_whiles[which].size());
+      std::fprintf(stderr, "\n");
+    }
+
+    std::vector<std::string> carry_names;
+    assigned_names(stable_source, &carry_names);
+    std::set<std::string> row_local_names;
+    declared_names(stable_source, &row_local_names);
+    carry_names.erase(
+        std::remove_if(carry_names.begin(), carry_names.end(),
+                       [&](const std::string& name) {
+                         return row_local_names.count(name) != 0;
+                       }),
+        carry_names.end());
+
+    const LoweringSnapshot before = capture_lowering_state(&s);
+    bool committed = false;
+    const auto rollback = [&]() {
+      if (!committed) restore_lowering_state(before);
+    };
+    struct Rollback {
+      std::function<void()> fn;
+      ~Rollback() { fn(); }
+    } rollback_guard{rollback};
+
+    try {
+      int_env[s.loopvar] = lo;
+      for (const mir::Stmt& child : s.body) lower_stmt(child);
+      int_env = before.int_env;
+    } catch (const CompileError&) {
+      return debug_refusal("peeled row lowering");
+    }
+    carry_names.erase(
+        std::remove_if(carry_names.begin(), carry_names.end(),
+                       [&](const std::string& name) {
+                         return name == sink_stmt.lhs ||
+                                (sink_stmt.rhs.kind == mir::Expr::Var &&
+                                 name == sink_stmt.rhs.name) ||
+                                scope.find(name) == scope.end();
+                       }),
+        carry_names.end());
+    if (carry_names.empty())
+      return debug_refusal("carry name discovery");
+    const LoweringSnapshot post_peel =
+        capture_lowering_state(&stable_source);
+    auto sink_binding = scope.find(sink_stmt.lhs);
+    if (sink_binding == scope.end() ||
+        g.slots[(size_t)sink_binding->second.slot].len != count + 1)
+      return debug_refusal("peeled sink binding");
+
+    struct Draft {
+      GraphFragmentProgram fragment;
+      std::vector<ScheduledFeed> feeds;
+      std::vector<int> carry_entry_slots;
+      std::vector<int> carry_entry_regs;
+      std::vector<int> carry_exit_regs;
+      std::vector<int64_t> carry_lens;
+      std::vector<SlotInfo> carry_views;
+      std::vector<uint8_t> carry_changed;
+      std::vector<uint8_t> carry_active;
+      int sink_reg = -1;
+    };
+    std::vector<Draft> drafts(template_count);
+    const std::set<std::string> forbidden_feed_names(carry_names.begin(),
+                                                     carry_names.end());
+
+    for (size_t which = 0; which < template_count; ++which) {
+      restore_lowering_state(post_peel);
+      int_env = representative_ints[which];
+      int_env[s.loopvar] = representatives[which];
+      // Distinct unproduced graph slots represent logical carry live-ins.
+      // A peeled carry may physically alias a differently named invariant;
+      // keeping their fragment registers distinct lets the scan bind the old
+      // carry and the invariant value independently without a graph identity
+      // op (and its changed reverse accumulation order).
+      for (const std::string& name : carry_names) {
+        const Val& entry = post_peel.scope.at(name);
+        bool aliases_reached_invariant = false;
+        for (const auto& binding : post_peel.scope)
+          if (binding.first != name && binding.second.slot == entry.slot &&
+              scan_stmt_reads_name(stable_source, binding.first)) {
+            aliases_reached_invariant = true;
+            break;
+          }
+        if (aliases_reached_invariant) {
+          const int64_t len = g.slots[(size_t)entry.slot].len;
+          const int placeholder =
+              add_slot(len, g.slots[(size_t)entry.slot].is_param);
+          drafts[which].carry_entry_slots.push_back(placeholder);
+          scope[name] = Val{placeholder, entry.autodiff, entry.si};
+        } else {
+          drafts[which].carry_entry_slots.push_back(entry.slot);
+          scope[name] = entry;
+        }
+      }
+      mir::Stmt specialized;
+      scheduled_one_trip_sources = &one_trip_whiles[which];
+      const bool specialized_ok = specialize_scheduled_stmt(
+          stable_source, row_names, &drafts[which].feeds, &specialized,
+          &forbidden_feed_names);
+      scheduled_one_trip_sources = nullptr;
+      if (!specialized_ok) {
+        return debug_refusal("template specialization");
+      }
+      mir::Expr sink_rhs = sink_stmt.rhs;
+      if (!rewrite_scheduled_expr(&sink_rhs, row_names,
+                                  &drafts[which].feeds,
+                                  &forbidden_feed_names) ||
+          expr_references(sink_rhs, s.loopvar) || drafts[which].feeds.empty())
+        return debug_refusal("sink feed rewrite");
+      // Active feed expressions were deliberately emitted outside the step.
+      // Their result slots and the carry placeholders below this boundary are
+      // fragment live-ins; only the specialized transition belongs to the
+      // reusable program.
+      const size_t op_begin = g.ops.size();
+      const size_t slot_begin = g.slots.size();
+      const size_t terms_begin = target_terms.size();
+      const size_t jac_begin = jac_slots.size();
+      try {
+        lower_stmt(specialized);
+        const Val sink = lower_expr(sink_rhs);
+        if (!is_scalar(sink) || target_terms.size() != terms_begin ||
+            jac_slots.size() != jac_begin)
+          return debug_refusal("template sink lowering");
+
+        std::vector<int> live_outs;
+        std::set<int> live_out_slots;
+        for (size_t carry_index = 0; carry_index < carry_names.size();
+             ++carry_index) {
+          const std::string& name = carry_names[carry_index];
+          auto entry = post_peel.scope.find(name);
+          auto exit = scope.find(name);
+          if (entry == post_peel.scope.end() || exit == scope.end() ||
+              g.slots[(size_t)entry->second.slot].len !=
+                  g.slots[(size_t)exit->second.slot].len ||
+              !same_view(
+                  entry->second.si, g.slots[(size_t)entry->second.slot].len,
+                  exit->second.si, g.slots[(size_t)exit->second.slot].len)) {
+            if (debug_scan)
+              std::fprintf(
+                  stderr, "scheduled carry unavailable: %s entry=%d exit=%d\n",
+                  name.c_str(),
+                  entry == post_peel.scope.end() ? -1 : entry->second.slot,
+                  exit == scope.end() ? -1 : exit->second.slot);
+            if (debug_scan && entry != post_peel.scope.end() &&
+                exit != scope.end())
+              std::fprintf(stderr,
+                           "scheduled carry schema: entry_len=%lld "
+                           "exit_len=%lld entry_kind=%d exit_kind=%d "
+                           "entry_shape=%u exit_shape=%u entry_matrix=%lldx%lld "
+                           "exit_matrix=%lldx%lld\n",
+                           (long long)g.slots[(size_t)entry->second.slot].len,
+                           (long long)g.slots[(size_t)exit->second.slot].len,
+                           (int)entry->second.si.kind,
+                           (int)exit->second.si.kind,
+                           (unsigned)entry->second.si.shape,
+                           (unsigned)exit->second.si.shape,
+                           (long long)entry->second.si.rows,
+                           (long long)entry->second.si.cols,
+                           (long long)exit->second.si.rows,
+                           (long long)exit->second.si.cols);
+            return debug_refusal("template carry binding");
+          }
+          if (exit->second.slot !=
+                  drafts[which].carry_entry_slots[carry_index] &&
+              exit->second.slot < (int)slot_begin) {
+            const int64_t len = g.slots[(size_t)exit->second.slot].len;
+            scope[name] = emit_raw(len == 1 ? OP_INDEX : OP_SLICE,
+                                   {exit->second.slot}, len, exit->second.si,
+                                   {0}, -1, exit->second.autodiff);
+            exit = scope.find(name);
+          }
+          drafts[which].carry_lens.push_back(
+              g.slots[(size_t)entry->second.slot].len);
+          drafts[which].carry_views.push_back(entry->second.si);
+          const bool changed =
+              g.slots[(size_t)entry->second.slot].len > 0 &&
+              drafts[which].carry_entry_slots[carry_index] != exit->second.slot;
+          drafts[which].carry_changed.push_back(changed ? 1 : 0);
+          if (changed) {
+            // Two logical carries may intentionally alias the same computed
+            // value. Give each published carry a distinct SSA output so the
+            // fragment schema remains unambiguous; reverse mode then sums the
+            // two logical adjoints through the identity copies.
+            if (!live_out_slots.insert(exit->second.slot).second) {
+              const int64_t len = g.slots[(size_t)exit->second.slot].len;
+              scope[name] = emit_raw(len == 1 ? OP_INDEX : OP_SLICE,
+                                     {exit->second.slot}, len, exit->second.si,
+                                     {0}, -1, exit->second.autodiff);
+              exit = scope.find(name);
+              live_out_slots.insert(exit->second.slot);
+            }
+            live_outs.push_back(exit->second.slot);
+          }
+        }
+        Val distinct_sink = sink;
+        if (!live_out_slots.insert(distinct_sink.slot).second)
+          distinct_sink = emit_raw(OP_INDEX, {distinct_sink.slot}, 1,
+                                   distinct_sink.si, {0}, -1,
+                                   distinct_sink.autodiff);
+        live_outs.push_back(distinct_sink.slot);
+
+        std::set<int> definitions;
+        for (size_t u = op_begin; u < g.ops.size(); ++u) {
+          const Op& op = g.ops[u];
+          if (op.out < (int)slot_begin || op.out2 >= 0 ||
+              !definitions.insert(op.out).second)
+            return debug_refusal("template graph is not SSA");
+          for (int k = 0; k < op.n_in; ++k)
+            if (op.in[k] == op.out)
+              return debug_refusal("template graph has in-place op");
+        }
+
+        std::vector<uint8_t> active(g.slots.size(), 0);
+        for (size_t k = 0; k < g.slots.size(); ++k)
+          active[k] = g.slots[k].is_param ? 1 : 0;
+        for (const Op& op : g.ops) {
+          bool any = false;
+          for (int k = 0; k < op.n_in; ++k)
+            any = any || active[(size_t)op.in[k]] != 0;
+          if (op.out >= 0) active[(size_t)op.out] = any ? 1 : 0;
+        }
+        // A carry that is data-only at the peeled boundary can become active
+        // after a different scheduled template.  Compile every carry live-in
+        // as potentially active and re-run activity over this fragment so
+        // CALL variants and native adjoints remain valid for that later row.
+        // This is a structural capability label, not a claim that the peeled
+        // value itself depends on a parameter.
+        for (int slot : drafts[which].carry_entry_slots)
+          active[(size_t)slot] = 1;
+        for (size_t u = op_begin; u < g.ops.size(); ++u) {
+          const Op& op = g.ops[u];
+          bool any = false;
+          for (int k = 0; k < op.n_in; ++k)
+            any = any || active[(size_t)op.in[k]] != 0;
+          if (op.out >= 0) active[(size_t)op.out] = any ? 1 : 0;
+        }
+        // This first tranche publishes every final carry and the reassembled
+        // sink as parameter-dependent. Prove that label from graph flow: the
+        // peeled cell and each template transition must actually retain a
+        // path from a parameter. Refuse data-only/mixed schedules until the
+        // scan contract carries per-output dependency provenance.
+        if (active[(size_t)sink.slot] == 0) {
+          if (debug_scan)
+            std::fprintf(stderr,
+                         "scheduled sink activity template=%d "
+                         "template_slot=%d\n",
+                         (int)active[(size_t)sink.slot], sink.slot);
+          return debug_refusal("template data-only sink");
+        }
+        for (size_t carry_index = 0; carry_index < carry_names.size();
+             ++carry_index) {
+          const std::string& name = carry_names[carry_index];
+          const int entry = post_peel.scope.at(name).slot;
+          const int exit = scope.at(name).slot;
+          drafts[which].carry_active.push_back(active[(size_t)exit]);
+        }
+        std::string diagnostic;
+        const bool compiled = compile_graph_fragment(
+            g, op_begin, g.ops.size(), live_outs, out.fills, active,
+            &drafts[which].fragment, &diagnostic);
+        if ((!compiled ||
+             drafts[which].fragment.program.adj.adj_reg.empty()) &&
+            debug_scan)
+          std::fprintf(stderr, "scheduled fragment refused: %s\n",
+                       diagnostic.c_str());
+        if (!compiled || drafts[which].fragment.program.adj.adj_reg.empty())
+          return debug_refusal("graph fragment compilation");
+
+        size_t cursor = 0;
+        for (size_t ci = 0; ci < drafts[which].carry_lens.size(); ++ci) {
+          const int64_t len = drafts[which].carry_lens[ci];
+          if (drafts[which].carry_changed[ci] == 0) {
+            drafts[which].carry_exit_regs.push_back(-1);
+            drafts[which].carry_entry_regs.push_back(-1);
+            continue;
+          }
+          if (cursor + (size_t)len >
+              drafts[which].fragment.program.out_regs.size())
+            return debug_refusal("fragment carry output width");
+          const int reg = drafts[which].fragment.program.out_regs[cursor];
+          for (int64_t k = 1; k < len; ++k)
+            if (drafts[which].fragment.program.out_regs[cursor + (size_t)k] !=
+                reg + k)
+              return debug_refusal("fragment carry output contiguity");
+          drafts[which].carry_exit_regs.push_back(reg);
+          // A reset-boundary template can replace this carry without reading
+          // its prior value. Keep that absence explicit so reverse mode
+          // severs the prior iteration's adjoint path.
+          drafts[which].carry_entry_regs.push_back(-1);
+          cursor += (size_t)len;
+        }
+        if (cursor + 1 != drafts[which].fragment.program.out_regs.size())
+          return debug_refusal("fragment sink output layout");
+        drafts[which].sink_reg =
+            drafts[which].fragment.program.out_regs[cursor];
+        for (size_t k = 0; k < drafts[which].fragment.live_in_slots.size();
+             ++k) {
+          const int slot = drafts[which].fragment.live_in_slots[k];
+          auto carry = std::find(drafts[which].carry_entry_slots.begin(),
+                                 drafts[which].carry_entry_slots.end(), slot);
+          if (carry != drafts[which].carry_entry_slots.end()) {
+            const size_t ci =
+                (size_t)(carry - drafts[which].carry_entry_slots.begin());
+            drafts[which].carry_entry_regs[ci] =
+                drafts[which].fragment.program.ins[k].reg;
+            continue;
+          }
+          if (slot >= (int)post_peel.slots) {
+            const bool row_feed = std::any_of(
+                drafts[which].feeds.begin(), drafts[which].feeds.end(),
+                [&](const ScheduledFeed& feed) {
+                  return feed.placeholder_slot == slot;
+                });
+            if (!row_feed) return debug_refusal("unexpected local live-in");
+          }
+        }
+      } catch (const CompileError& error) {
+        if (debug_scan)
+          std::fprintf(stderr, "scheduled template lowering error: %s\n",
+                       error.what());
+        return debug_refusal("template lowering exception");
+      }
+    }
+
+    // Activity computed from a template fragment describes values created by
+    // that fragment.  An unchanged carry has no fragment output, but its
+    // transition is the identity: once any template can make the logical
+    // carry active, every unchanged template must preserve that adjoint path.
+    // Keep changed data-only resets distinct; the current scan contract still
+    // refuses schedules whose real carry transitions disagree on activity.
+    std::vector<uint8_t> carry_any_active(carry_names.size(), 0);
+    for (const Draft& draft : drafts)
+      for (size_t k = 0; k < carry_names.size(); ++k)
+        carry_any_active[k] =
+            carry_any_active[k] || draft.carry_active[k] != 0;
+    for (Draft& draft : drafts)
+      for (size_t k = 0; k < carry_names.size(); ++k)
+        if (draft.carry_changed[k] == 0)
+          draft.carry_active[k] = carry_any_active[k];
+
+    const bool experimental_mixed_carry_activity =
+        std::getenv("STANLI_EXPERIMENTAL_MIXED_CARRY_ACTIVITY") != nullptr;
+    for (size_t which = 1; which < template_count; ++which)
+      for (size_t k = 0; k < carry_names.size(); ++k)
+        if (drafts[0].carry_lens[k] != drafts[which].carry_lens[k] ||
+            (!experimental_mixed_carry_activity &&
+             drafts[0].carry_active[k] != drafts[which].carry_active[k]) ||
+            !same_view(drafts[0].carry_views[k], drafts[0].carry_lens[k],
+                       drafts[which].carry_views[k],
+                       drafts[which].carry_lens[k])) {
+          if (debug_scan)
+            std::fprintf(
+                stderr,
+                "scheduled carry schema mismatch template=%zu carry=%zu "
+                "len=%lld/%lld active=%d/%d changed=%d/%d "
+                "entry=%d/%d exit=%d/%d kind=%d/%d shape=%u/%u "
+                "matrix=%lldx%lld/%lldx%lld\n",
+                which, k, (long long)drafts[0].carry_lens[k],
+                (long long)drafts[which].carry_lens[k],
+                (int)drafts[0].carry_active[k],
+                (int)drafts[which].carry_active[k],
+                (int)drafts[0].carry_changed[k],
+                (int)drafts[which].carry_changed[k],
+                drafts[0].carry_entry_regs[k],
+                drafts[which].carry_entry_regs[k],
+                drafts[0].carry_exit_regs[k],
+                drafts[which].carry_exit_regs[k],
+                (int)drafts[0].carry_views[k].kind,
+                (int)drafts[which].carry_views[k].kind,
+                (unsigned)drafts[0].carry_views[k].shape,
+                (unsigned)drafts[which].carry_views[k].shape,
+                (long long)drafts[0].carry_views[k].rows,
+                (long long)drafts[0].carry_views[k].cols,
+                (long long)drafts[which].carry_views[k].rows,
+                (long long)drafts[which].carry_views[k].cols);
+          return debug_refusal("template carry schema");
+        }
+    std::vector<ScheduledFeed> all_feeds = drafts[0].feeds;
+    for (size_t which = 1; which < template_count; ++which) {
+      for (const ScheduledFeed& candidate : drafts[which].feeds) {
+        const auto present = std::find_if(
+            all_feeds.begin(), all_feeds.end(), [&](const ScheduledFeed& feed) {
+              return scan_same_expr(feed.source, candidate.source);
+            });
+        if (present == all_feeds.end()) {
+          all_feeds.push_back(candidate);
+        } else if (present->len != candidate.len ||
+                   present->active != candidate.active ||
+                   present->control != candidate.control ||
+                   present->base_name != candidate.base_name ||
+                   !same_view(present->si, present->len, candidate.si,
+                              candidate.len)) {
+          return debug_refusal("template feed schema");
+        }
+      }
+    }
+    restore_lowering_state(post_peel);
+    int64_t inactive_row_width = 0;
+    std::vector<int64_t> inactive_offsets(all_feeds.size(), -1);
+    for (size_t k = 0; k < all_feeds.size(); ++k)
+      if (!all_feeds[k].active) {
+        inactive_offsets[k] = inactive_row_width;
+        inactive_row_width += all_feeds[k].len;
+      }
+    if (inactive_row_width < 0 ||
+        (count != 0 &&
+         inactive_row_width >
+             std::numeric_limits<int64_t>::max() / count))
+      return debug_refusal("row feed size overflow");
+    std::vector<double> inactive_values(
+        (size_t)(count * inactive_row_width), 0.0);
+    std::vector<int> packed_feed_slots(all_feeds.size(), -1);
+    std::vector<int64_t> packed_feed_offsets(all_feeds.size(), 0);
+    std::vector<int64_t> packed_feed_strides(all_feeds.size(), 0);
+    for (size_t feed_index = 0; feed_index < all_feeds.size(); ++feed_index) {
+      const ScheduledFeed& feed = all_feeds[feed_index];
+      int active_slot = -1;
+      if (feed.active) {
+        const int64_t cells = count * feed.len;
+        active_slot = add_slot(cells, false);
+        out.fills.emplace_back(active_slot,
+                               std::vector<double>((size_t)cells, 0.0));
+      }
+      for (int64_t t = 0; t < count; ++t) {
+        int_env[s.loopvar] = lo + 1 + (long)t;
+        const std::vector<ScheduledFeed>& template_feeds =
+            drafts[schedule[(size_t)t]].feeds;
+        const bool used =
+            std::any_of(template_feeds.begin(), template_feeds.end(),
+                        [&](const ScheduledFeed& candidate) {
+                          return scan_same_expr(candidate.source, feed.source);
+                        });
+        // A template-specific expression can be undefined on another path;
+        // no binding in that template can observe the zero padding.
+        if (!used) continue;
+        if (!feed.active) {
+          auto value = try_eval_scheduled_pure(feed.source);
+          if (!value || (int64_t)value->r.size() != feed.len)
+            return debug_refusal("packing data row feed");
+          if (feed.control &&
+              !std::all_of(value->r.begin(), value->r.end(), [](double x) {
+                return x == 0.0 || x == 1.0;
+              }))
+            return debug_refusal("packing control row feed");
+          if (!feed.control && scan_semantic_integer(feed.source, *value) &&
+              (value->i.size() != value->r.size() ||
+               !std::equal(value->i.begin(), value->i.end(),
+                           value->r.begin(), [](int integer, double numeric) {
+                             return numeric == static_cast<double>(integer);
+                           })))
+            return debug_refusal("packing integer row feed");
+          const int64_t offset =
+              t * inactive_row_width + inactive_offsets[feed_index];
+          std::copy(value->r.begin(), value->r.end(),
+                    inactive_values.begin() + offset);
+          continue;
+        }
+
+        Val row_value;
+        try {
+          row_value = lower_expr(feed.source);
+        } catch (const CompileError&) {
+          return debug_refusal("packing active row feed");
+        }
+        if (g.slots[(size_t)row_value.slot].len != feed.len ||
+            row_value.si.param_free ||
+            !same_view(row_value.si, feed.len, feed.si, feed.len))
+          return debug_refusal("active row feed schema");
+        const int64_t offset = t * feed.len;
+        if (offset > std::numeric_limits<int>::max())
+          return debug_refusal("active row feed offset overflow");
+        Op store;
+        store.opcode = feed.len == 1 ? OP_SET_INDEX_INPLACE
+                                     : OP_SET_SLICE_INPLACE;
+        store.n_in = 2;
+        store.in[0] = active_slot;
+        store.in[1] = row_value.slot;
+        store.out = active_slot;
+        g.idata_pool.push_back({(int)offset});
+        store.idata = g.idata_pool.back().data();
+        store.n_idata = 1;
+        g.ops.push_back(store);
+      }
+      if (feed.active) {
+        packed_feed_slots[feed_index] = active_slot;
+        packed_feed_strides[feed_index] = feed.len;
+      }
+    }
+    if (inactive_row_width > 0) {
+      const int inactive_slot =
+          add_slot((int64_t)inactive_values.size(), false);
+      out.fills.emplace_back(inactive_slot, std::move(inactive_values));
+      for (size_t k = 0; k < all_feeds.size(); ++k)
+        if (!all_feeds[k].active) {
+          packed_feed_slots[k] = inactive_slot;
+          packed_feed_offsets[k] = inactive_offsets[k];
+          packed_feed_strides[k] = inactive_row_width;
+        }
+    }
+    int_env = post_peel.int_env;
+
+    std::vector<int> op_slots;
+    auto op_input = [&](int slot) {
+      auto found = std::find(op_slots.begin(), op_slots.end(), slot);
+      if (found != op_slots.end()) return (int)(found - op_slots.begin());
+      op_slots.push_back(slot);
+      return (int)op_slots.size() - 1;
+    };
+    std::vector<int> carry_inputs;
+    int64_t carry_cells = 0;
+    for (size_t k = 0; k < carry_names.size(); ++k) {
+      const int slot = scope.at(carry_names[k]).slot;
+      carry_inputs.push_back(op_input(slot));
+      carry_cells += drafts[0].carry_lens[k];
+    }
+    std::vector<int> feed_inputs;
+    feed_inputs.reserve(packed_feed_slots.size());
+    for (int slot : packed_feed_slots) feed_inputs.push_back(op_input(slot));
+
+    auto spec = std::make_shared<ScanSpec>();
+    spec->first = lo + 1;
+    spec->count = count;
+    spec->template_for_iteration = schedule;
+    spec->carry_cells = carry_cells;
+    spec->output_cells = carry_cells + count + 1;
+    spec->checkpoint_block =
+        choose_scan_checkpoint_block(count, spec->carry_cells);
+    spec->templates.resize(template_count);
+
+    for (size_t which = 0; which < template_count; ++which) {
+      ScanSpec::Template& tm = spec->templates[(size_t)which];
+      tm.step = std::move(drafts[which].fragment.program);
+      tm.udata_pool = std::move(drafts[which].fragment.udata_owners);
+      int64_t output_offset = 0;
+      for (size_t k = 0; k < carry_names.size(); ++k) {
+        tm.carry.push_back(ScanSpec::CarryBinding{
+            carry_inputs[k], 0, drafts[which].carry_entry_regs[k],
+            drafts[which].carry_exit_regs[k], drafts[which].carry_lens[k],
+            output_offset, drafts[which].carry_active[k] != 0});
+        output_offset += drafts[which].carry_lens[k];
+      }
+      for (size_t k = 0; k < drafts[which].fragment.live_in_slots.size(); ++k) {
+        const int slot = drafts[which].fragment.live_in_slots[k];
+        const auto carry_entry =
+            std::find(drafts[which].carry_entry_slots.begin(),
+                      drafts[which].carry_entry_slots.end(), slot);
+        if (carry_entry != drafts[which].carry_entry_slots.end()) {
+          const size_t ci = static_cast<size_t>(
+              carry_entry - drafts[which].carry_entry_slots.begin());
+          if (drafts[which].carry_entry_regs[ci] >= 0) continue;
+        }
+        const IslandProg::LiveIn& input = tm.step.ins[k];
+        const auto feed =
+            std::find_if(drafts[which].feeds.begin(), drafts[which].feeds.end(),
+                         [&](const ScheduledFeed& candidate) {
+                           return candidate.placeholder_slot == slot;
+                         });
+        if (feed != drafts[which].feeds.end()) {
+          const auto packed = std::find_if(
+              all_feeds.begin(), all_feeds.end(),
+              [&](const ScheduledFeed& candidate) {
+                return scan_same_expr(candidate.source, feed->source);
+              });
+          if (packed == all_feeds.end())
+            return debug_refusal("missing packed template feed");
+          const size_t feed_index =
+              static_cast<size_t>(packed - all_feeds.begin());
+          tm.inputs.push_back(ScanSpec::InputBinding{
+              feed_inputs[feed_index], packed_feed_offsets[feed_index],
+              packed_feed_strides[feed_index], input.reg, input.len,
+              packed->active});
+        } else {
+          if (slot < 0 || slot >= (int)post_peel.slots)
+            return debug_refusal("template invariant live-in");
+          const int oi = op_input(slot);
+          tm.inputs.push_back(ScanSpec::InputBinding{oi, 0, 0, input.reg,
+                                                     input.len, input.active});
+        }
+      }
+      tm.sinks.push_back(
+          ScanSpec::SinkBinding{drafts[which].sink_reg, carry_cells, 1, 1});
+      tm.target_reg = -1;
+      if (debug_scan) {
+        std::fprintf(stderr, "scheduled template %zu feeds=%zu carries=", which,
+                     drafts[which].feeds.size());
+        for (const ScanSpec::CarryBinding& carry : tm.carry)
+          std::fprintf(stderr, " (%d,%d,%lld)", carry.entry_reg,
+                       carry.exit_reg, (long long)carry.len);
+        std::fprintf(stderr, "\n");
+      }
+    }
+    // Op has six physical descriptors, but a real transition can have many
+    // logical carries and invariants.  Pack logical inputs by dependency
+    // class and retain each binding's offset into its class pack.  Active and
+    // inactive values must never share a pack: InputBinding::active is the
+    // scan adjoint's routing proof, while the graph only sees the packed
+    // descriptor.  Combining the classes would let an inactive shape/data
+    // value inherit parameter provenance from an unrelated invariant.
+    if (op_slots.size() > 6) {
+      enum class InputClass : uint8_t { Unused, Active, Inactive, RowFeed };
+      std::vector<InputClass> classes(op_slots.size(), InputClass::Unused);
+      const auto mark_class = [&](int input, InputClass classification) {
+        if (input < 0 || (size_t)input >= classes.size()) return false;
+        InputClass& prior = classes[(size_t)input];
+        if (prior == InputClass::Unused) {
+          prior = classification;
+          return true;
+        }
+        return prior == classification;
+      };
+      for (const ScanSpec::Template& tm : spec->templates) {
+        for (size_t k = 0; k < tm.carry.size(); ++k)
+          if (!mark_class(tm.carry[k].op_input,
+                          carry_any_active[k] ? InputClass::Active
+                                              : InputClass::Inactive))
+            return debug_refusal("mixed carry input activity");
+        for (const ScanSpec::InputBinding& input : tm.inputs) {
+          const InputClass classification =
+              input.active ? InputClass::Active
+                           : (input.iteration_stride > 0
+                                  ? InputClass::RowFeed
+                                  : InputClass::Inactive);
+          if ((classification == InputClass::RowFeed && input.active) ||
+              !mark_class(input.op_input, classification))
+            return debug_refusal("mixed invariant input activity");
+        }
+      }
+      if (std::find(classes.begin(), classes.end(), InputClass::Unused) !=
+          classes.end())
+        return debug_refusal("unclassified scheduled input");
+
+      struct PackedInput {
+        int op_input = -1;
+        int64_t offset = 0;
+      };
+      std::vector<PackedInput> packed_inputs(op_slots.size());
+      std::vector<int> compact_slots;
+      const auto pack_class = [&](InputClass classification) {
+        int packed_slot = -1;
+        int64_t packed_len = 0;
+        std::vector<size_t> members;
+        for (size_t k = 0; k < classes.size(); ++k) {
+          if (classes[k] != classification) continue;
+          const int64_t len = g.slots[(size_t)op_slots[k]].len;
+          if (len < 0 || len > std::numeric_limits<int64_t>::max() - packed_len)
+            return false;
+          members.push_back(k);
+          packed_inputs[k].offset = packed_len;
+          if (packed_slot < 0) {
+            packed_slot = op_slots[k];
+            packed_len = len;
+          } else {
+            packed_len += len;
+            packed_slot =
+                emit_raw(OP_CONCAT2, {packed_slot, op_slots[k]}, packed_len, {})
+                    .slot;
+          }
+        }
+        if (members.empty()) return true;
+        const int compact_input = (int)compact_slots.size();
+        compact_slots.push_back(packed_slot);
+        for (size_t member : members)
+          packed_inputs[member].op_input = compact_input;
+        return true;
+      };
+      if (!pack_class(InputClass::Active) ||
+          !pack_class(InputClass::Inactive) || !pack_class(InputClass::RowFeed))
+        return debug_refusal("scheduled input pack overflow");
+
+      const auto rebind = [&](int* input, int64_t* offset) {
+        if (*input < 0 || (size_t)*input >= packed_inputs.size()) return false;
+        const PackedInput& packed = packed_inputs[(size_t)*input];
+        if (packed.op_input < 0 || *offset < 0 ||
+            packed.offset > std::numeric_limits<int64_t>::max() - *offset)
+          return false;
+        *input = packed.op_input;
+        *offset += packed.offset;
+        return true;
+      };
+      for (ScanSpec::Template& tm : spec->templates) {
+        for (ScanSpec::CarryBinding& carry : tm.carry)
+          if (!rebind(&carry.op_input, &carry.input_offset))
+            return debug_refusal("scheduled carry pack binding");
+        for (ScanSpec::InputBinding& input : tm.inputs)
+          if (!rebind(&input.op_input, &input.input_offset))
+            return debug_refusal("scheduled invariant pack binding");
+      }
+      op_slots = std::move(compact_slots);
+    }
+    if (op_slots.size() > 6)
+      return debug_refusal("more than six packed op inputs");
+
+    // Final bindings are now in their published form. Cache only CALLs whose
+    // conservative scan analysis proves independent of row feeds and carry;
+    // the opt-out keeps a direct correctness/performance oracle available.
+    if (!std::getenv("STANLI_NO_SCAN_INVARIANT_CACHE"))
+      for (ScanSpec::Template& tm : spec->templates)
+        (void)prepare_scan_invariants(&tm);
+    // Capture force-only replay retention before the graph binds OP_SCAN
+    // scratch. Re-reading the environment in scan_fwd could enable a larger
+    // layout after Executor construction; this immutable compile-time plan
+    // keeps scratch sizing stable for the original and copied Executors.
+    (void)prepare_scan_prepared_retention(spec.get());
+
+    Op scan;
+    scan.opcode = OP_SCAN;
+    scan.n_in = (int)op_slots.size();
+    for (int k = 0; k < scan.n_in; ++k) scan.in[k] = op_slots[(size_t)k];
+    scan.out = add_slot(spec->output_cells, false);
+    scan.udata = spec.get();
+    g.udata_pool.push_back(spec);
+    g.ops.push_back(scan);
+
+    int64_t output_offset = 0;
+    for (size_t k = 0; k < carry_names.size(); ++k) {
+      const int64_t len = drafts[0].carry_lens[k];
+      Val value = emit_raw(len == 1 ? OP_INDEX : OP_SLICE, {scan.out}, len,
+                           drafts[0].carry_views[k], {(int)output_offset});
+      value.autodiff = scope.at(carry_names[k]).autodiff;
+      value.si.param_free = carry_any_active[k] == 0;
+      scope[carry_names[k]] = value;
+      td.env().erase(carry_names[k]);
+      output_offset += len;
+    }
+
+    const Val peeled_sink = scope.at(sink_stmt.lhs);
+    Val first_sink =
+        emit_value(OP_INDEX, {peeled_sink}, 1, view_of("UReal"), {0});
+    Val suffix =
+        emit_raw(OP_SLICE, {scan.out}, count,
+                 array_view({count}, ViewKind::Flat), {(int)carry_cells});
+    SlotInfo sink_view = peeled_sink.si;
+    sink_view.param_free = false;
+    Val joined =
+        emit_value(OP_CONCAT2, {first_sink, suffix}, count + 1, sink_view);
+    joined.autodiff = peeled_sink.autodiff;
+    scope[sink_stmt.lhs] = joined;
+    td.env().erase(sink_stmt.lhs);
+
+    int_env = before.int_env;
+    committed = true;
+    return true;
+  }
+
+  // Try to replace the stable suffix of a fixed-trip recurrence with one
+  // OP_SCAN. All proof work happens against a private IslandProg. Until it
+  // has a generated adjoint, a target, a complete whole-value carry schema,
+  // and at most six immutable graph inputs, the main graph is untouched and
+  // ordinary unrolling remains the fallback.
+  static bool scheduled_scan_syntax_candidate(const mir::Stmt& s) {
+    if (s.body.size() != 1 ||
+        (s.body[0].kind != mir::Stmt::Block &&
+         s.body[0].kind != mir::Stmt::SList))
+      return false;
+    const mir::Stmt* block = &s.body[0];
+    while ((block->kind == mir::Stmt::Block ||
+            block->kind == mir::Stmt::SList) &&
+           block->body.size() == 1 &&
+           (block->body[0].kind == mir::Stmt::Block ||
+            block->body[0].kind == mir::Stmt::SList))
+      block = &block->body[0];
+
+    // The direct scheduled form is a peeled IfElse followed by one disjoint
+    // sink assignment. The normalization path starts from a larger block and
+    // necessarily contains an EOr opening gate. These are only cheap syntax
+    // prerequisites; the existing semantic proofs remain authoritative.
+    if (block->body.size() == 2)
+      return block->body[0].kind == mir::Stmt::IfElse &&
+             block->body[1].kind == mir::Stmt::Assignment;
+    if (block->body.size() < 3) return false;
+    return std::any_of(block->body.begin(), block->body.end(),
+                       [](const mir::Stmt& child) {
+                         return child.kind == mir::Stmt::IfElse &&
+                                child.body.size() == 1 &&
+                                child.cond.kind == mir::Expr::EOr &&
+                                child.cond.args.size() == 2;
+                       });
+  }
+
+  bool lower_fixed_scan(const mir::Stmt& s, long lo, long hi) {
+    constexpr int64_t kMinScanRows = 32;
+    if (in_write_array || std::getenv("STANLI_NO_SCAN") || hi <= lo ||
+        (int64_t)hi - (int64_t)lo < kMinScanRows)
+      return false;
+
+    const bool scheduled_candidate = scheduled_scan_syntax_candidate(s);
+    const bool fixed_candidate =
+        std::all_of(s.body.begin(), s.body.end(),
+                    [&](const mir::Stmt& child) {
+                      return scan_source_safe(child);
+                    });
+    if (!scheduled_candidate && !fixed_candidate) return false;
+
+    // One transaction covers scheduled recognition and the fixed-template
+    // fallback. In addition to guarding lower_island's extern binding, this
+    // restores any future schedule-discovery mutation before the fixed proof
+    // sees it and makes a total refusal identical to never trying a scan.
+    const LoweringSnapshot before = capture_lowering_state(&s);
+    bool committed = false;
+    struct Rollback {
+      std::function<void()> fn;
+      ~Rollback() { fn(); }
+    } rollback_guard{[&] {
+      if (!committed) restore_lowering_state(before);
+    }};
+    if (scheduled_candidate && lower_scheduled_scan(s, lo, hi)) {
+      committed = true;
+      return true;
+    }
+    restore_lowering_state(before);
+
+    if (!fixed_candidate) return false;
+
+    mir::Stmt stable;
+    stable.kind = mir::Stmt::SList;
+    bool peeled_exception = false;
+    for (const auto& child : s.body) {
+      mir::Stmt specialized;
+      if (!specialize_scan_stmt(child, s.loopvar, lo, &specialized,
+                                &peeled_exception))
+        return false;
+      stable.body.push_back(std::move(specialized));
+    }
+
+    // An integer mutated anywhere in the source loop is compile-time state,
+    // not a double carry. The initial release declines it even if the stable
+    // arm no longer contains the assignment.
+    std::vector<std::string> all_assigned;
+    assigned_names(s, &all_assigned);
+    for (const std::string& name : all_assigned)
+      if (int_locals.count(name)) return false;
+
+    const auto saved_ints = int_env;
+    IslandRegion reg;
+    Range ignored;
+    std::shared_ptr<IslandProg> prog;
+    try {
+      int_env[s.loopvar] = lo + 1;
+      lower_island(&stable, nullptr, &reg, &ignored, &prog,
+                   /*fixed_scan_activity=*/true);
+    } catch (const CompileError&) {
+      int_env = saved_ints;
+      return false;
+    }
+    int_env = saved_ints;
+
+    if (!reg.has_target || reg.out_names.empty() || prog->adj.empty() ||
+        !prog->calls.empty() || prog->ins.size() != reg.in_slots.size() ||
+        reg.out_names.size() != reg.out_views.size() ||
+        reg.out_names.size() != reg.out_is_int.size())
+      return false;
+    for (bool is_int : reg.out_is_int)
+      if (is_int) return false;
+
+    // Give every program live-in one unambiguous source name. This is what
+    // lets the already-proved template be rebound after the peeled iteration
+    // updates the carry slots.
+    std::map<int, std::string> slot_name;
+    std::set<int> ambiguous;
+    for (const auto& [name, value] : scope) {
+      auto [it, inserted] = slot_name.emplace(value.slot, name);
+      if (!inserted && it->second != name) ambiguous.insert(value.slot);
+    }
+    std::vector<std::string> input_names;
+    input_names.reserve(reg.in_slots.size());
+    for (int slot : reg.in_slots) {
+      auto it = slot_name.find(slot);
+      if (it == slot_name.end() || ambiguous.count(slot)) return false;
+      input_names.push_back(it->second);
+    }
+    if (std::set<int>(reg.in_slots.begin(), reg.in_slots.end()).size() !=
+            reg.in_slots.size() ||
+        reg.in_slots.size() > 6)
+      return false;
+
+    std::vector<size_t> carry_inputs;
+    carry_inputs.reserve(reg.out_names.size());
+    for (size_t k = 0; k < reg.out_names.size(); ++k) {
+      auto found =
+          std::find(input_names.begin(), input_names.end(), reg.out_names[k]);
+      if (found == input_names.end() || reg.out_views[k].len <= 0) return false;
+      carry_inputs.push_back((size_t)(found - input_names.begin()));
+    }
+    // Every source-level outer assignment must be represented in the stable
+    // carry. In particular, a first-row-only state update cannot disappear
+    // into an invariant binding whose rebinding was never proved.
+    for (const std::string& name : all_assigned) {
+      if (!scope.count(name)) continue;
+      if (std::find(reg.out_names.begin(), reg.out_names.end(), name) ==
+          reg.out_names.end())
+        return false;
+    }
+
+    int64_t carry_cells = 0;
+    size_t out_cursor = 0;
+    for (const Range& view : reg.out_views) {
+      if (view.len > std::numeric_limits<int64_t>::max() - carry_cells)
+        return false;
+      carry_cells += view.len;
+      if (out_cursor + (size_t)view.len > prog->out_regs.size()) return false;
+      const int first_reg = prog->out_regs[out_cursor];
+      for (int j = 1; j < view.len; ++j)
+        if (prog->out_regs[out_cursor + (size_t)j] != first_reg + j)
+          return false;
+      out_cursor += (size_t)view.len;
+    }
+    if (out_cursor >= prog->out_regs.size() ||
+        prog->out_regs.size() != out_cursor + 1)
+      return false;
+
+    // The proof is now complete. Peel through the ordinary path so checks,
+    // constants, and source-order target accumulation keep their established
+    // semantics. No scan construction below can fail.
+    int_env[s.loopvar] = lo;
+    for (const auto& child : s.body) lower_stmt(child);
+    int_env = saved_ints;
+
+    std::vector<int> op_slots;
+    std::vector<int> input_op(reg.in_slots.size(), -1);
+    for (size_t k = 0; k < input_names.size(); ++k) {
+      auto current = scope.find(input_names[k]);
+      // Assignments replace a binding but never erase its name. This lookup
+      // was proved before the peel, so failure here is an internal invariant,
+      // not an optimization refusal after observable graph emission.
+      if (current == scope.end())
+        fail("scan peel lost a proved live-in " + input_names[k], s.raw);
+      const int slot = current->second.slot;
+      auto found = std::find(op_slots.begin(), op_slots.end(), slot);
+      if (found == op_slots.end()) {
+        input_op[k] = (int)op_slots.size();
+        op_slots.push_back(slot);
+      } else {
+        input_op[k] = (int)(found - op_slots.begin());
+      }
+    }
+
+    auto spec = std::make_shared<ScanSpec>();
+    spec->first = lo + 1;
+    spec->count = (int64_t)hi - (int64_t)lo;
+    spec->carry_cells = carry_cells;
+    spec->output_cells = carry_cells + 1;
+    spec->checkpoint_block =
+        choose_scan_checkpoint_block(spec->count, spec->carry_cells);
+    spec->templates.emplace_back();
+    ScanSpec::Template& tm = spec->templates.back();
+    tm.step = *prog;
+
+    std::set<size_t> carried(carry_inputs.begin(), carry_inputs.end());
+    for (size_t k = 0; k < prog->ins.size(); ++k) {
+      if (carried.count(k)) continue;
+      tm.inputs.push_back(
+          ScanSpec::InputBinding{input_op[k], 0, 0, prog->ins[k].reg,
+                                 prog->ins[k].len, prog->ins[k].active});
+    }
+    int64_t output_offset = 0;
+    out_cursor = 0;
+    for (size_t k = 0; k < reg.out_names.size(); ++k) {
+      const size_t input = carry_inputs[k];
+      const int len = reg.out_views[k].len;
+      tm.carry.push_back(ScanSpec::CarryBinding{
+          input_op[input], 0, prog->ins[input].reg, prog->out_regs[out_cursor],
+          len, output_offset});
+      output_offset += len;
+      out_cursor += (size_t)len;
+    }
+    tm.target_reg = prog->out_regs.back();
+
+    // Normally empty: fixed-scan construction currently refuses CALLs. Keep
+    // the preparation at both publication sites so that future supported
+    // nested steps cannot bypass the immutable scratch-sizing contract.
+    (void)prepare_scan_prepared_retention(spec.get());
+
+    Op op;
+    op.opcode = OP_SCAN;
+    op.n_in = (int)op_slots.size();
+    for (int k = 0; k < op.n_in; ++k) op.in[k] = op_slots[(size_t)k];
+    op.out = add_slot(spec->output_cells, false);
+    op.udata = spec.get();
+    g.udata_pool.push_back(spec);
+    g.ops.push_back(op);
+
+    output_offset = 0;
+    for (size_t k = 0; k < reg.out_names.size(); ++k) {
+      const int len = reg.out_views[k].len;
+      Val value = emit_raw(len == 1 ? OP_INDEX : OP_SLICE, {op.out}, len, {},
+                           {(int)output_offset});
+      SlotInfo si = scope.at(reg.out_names[k]).si;
+      si.param_free = !prog->ins[carry_inputs[k]].active;
+      value.si = si;
+      value.autodiff = scope.at(reg.out_names[k]).autodiff;
+      scope[reg.out_names[k]] = value;
+      // The peeled iteration may have left an interpreter observation for
+      // this name. The scan now owns the loop-final value, so a later data
+      // condition must not fold from that stale prefix state.
+      td.env().erase(reg.out_names[k]);
+      output_offset += len;
+    }
+    const Val target =
+        emit_raw(OP_INDEX, {op.out}, 1, {}, {(int)(spec->output_cells - 1)});
+    push_target_term(target.slot);
+    (void)peeled_exception;  // retained for proof diagnostics/telemetry later
+    committed = true;
+    return true;
+  }
+
   // `if (<not known while building the graph>) ... else ...`
   void lower_runtime_ifelse(const mir::Stmt& s) {
     IslandRegion reg;
@@ -2303,9 +7296,15 @@ struct Lowering {
     if (prog->out_regs.empty()) return;
     std::vector<int> out_slots;
     emit_island(prog, reg, out_lens, &out_slots);
+    const bool region_free = region_param_free(reg);
     // Later statements read the island's results, not the old values.
     for (size_t k = 0; k < reg.out_names.size(); ++k) {
       const std::string& name = reg.out_names[k];
+      // The interpreter may still hold the data value from before this
+      // runtime region. Once the region writes the name, that copy is stale:
+      // a later condition must read the graph live-out instead of folding an
+      // arm from the pre-region value.
+      td.env().erase(name);
       SlotInfo si;
       if (reg.out_is_int[k]) {
         // This local was an SInt before the loop.  Its loop-carried value is
@@ -2313,12 +7312,12 @@ struct Lowering {
         // graph-local runtime value so later branches and scalar reads use
         // the value the loop actually produced.
         si = view_of("UInt");
-        si.param_free = false;
+        si.param_free =
+            region_free || identical_data_if_output(s, name);
         scope[name] = Val{out_slots[k], false, si};
         decls[name] = DeclView{1, false, si};
         int_env.erase(name);
         int_locals.erase(name);
-        td.env().erase(name);
         continue;
       }
       bool shaped_outside = false;
@@ -2336,20 +7335,26 @@ struct Lowering {
       if (!shaped_outside) {
         // The outside declaration was the inliner's zero-length sentinel;
         // the region's registers carry the real shape.
-        si = SlotInfo{};
-        si.rows = reg.out_views[k].rows;
-        si.cols = reg.out_views[k].cols;
-        si.kind = reg.out_views[k].kind;
+        const Range& out_view = reg.out_views[k];
+        if (out_view.kind == ViewKind::Array) {
+          si = array_view(out_view.dims, out_view.leaf, region_free);
+        } else {
+          si = SlotInfo{};
+          si.rows = out_view.rows;
+          si.cols = out_view.cols;
+          si.kind = out_view.kind;
+          si.param_free = region_free;
+        }
         auto dl = decls.find(name);
         if (dl != decls.end()) {
-          dl->second.len = reg.out_views[k].len;
+          dl->second.len = out_view.len;
           dl->second.si = si;
         }
       }
-      // Runtime regions conservatively return parameter-dependent live-outs;
-      // treating one as data without a per-output dependency proof would
-      // select kernels that deliberately omit adjoints for that input.
-      si.param_free = false;
+      // A mixed region remains conservative except for the deliberately
+      // narrow proof that both parameter-controlled arms assign this output
+      // the same parameter-free value.
+      si.param_free = region_free || identical_data_if_output(s, name);
       scope[name] = Val{out_slots[k], scalar_autodiff(), si};
     }
     if (reg.has_target) push_target_term(out_slots.back());
@@ -2367,6 +7372,7 @@ struct Lowering {
     si.rows = value.rows;
     si.cols = value.cols;
     si.kind = value.kind;
+    si.param_free = region_param_free(reg) || identical_data_ternary(e);
     return {out_slots[0], scalar_autodiff(), si};
   }
 
@@ -2668,29 +7674,80 @@ struct Lowering {
   }
 
   // Logical geometry only: this probe must never materialize a data value or
-  // emit a graph op.  The first tranche deliberately handles the expression
-  // forms responsible for the ctsem false island -- named values and matrix
-  // subviews selected by compile-time integer data.  Everything else declines
-  // to the existing runtime-control path.
+  // emit a graph op. The first tranche handles named values, logical
+  // transposes, and subviews selected by compile-time integer data. Everything
+  // else declines to the existing runtime-control path.
   StaticProbe<StaticView> try_static_view(const mir::Expr& e) {
     if (e.kind == mir::Expr::Var) {
+      auto declaration = decls.find(e.name);
+      if (declaration != decls.end() && declaration->second.deferred_shape)
+        return {};
       auto value = scope.find(e.name);
       if (value != scope.end())
         return {StaticProbeState::Known,
                 {g.slots[value->second.slot].len, value->second.si},
                 {}};
-      auto declaration = decls.find(e.name);
       if (declaration != decls.end())
         return {StaticProbeState::Known,
                 {declaration->second.len, declaration->second.si},
                 {}};
       return {};
     }
-    if (e.kind != mir::Expr::Indexed || e.args.size() < 2 || e.args.size() > 3)
-      return {};
+    if (e.kind == mir::Expr::FunApp && e.args.size() == 1 &&
+        (e.name == "Transpose__" || e.name == "transpose")) {
+      const auto base = try_static_view(e.args[0]);
+      if (base.state != StaticProbeState::Known)
+        return {base.state, {}, base.error};
+      StaticView out = base.value;
+      if (is_matrix(base.value.si)) {
+        if (e.type_ != "UMatrix")
+          return {StaticProbeState::Invalid,
+                  {},
+                  "static matrix transpose has an inconsistent result type"};
+        out.si = matrix_view(base.value.si.cols, base.value.si.rows,
+                             base.value.si.param_free);
+      } else if (is_vector(base.value.si) && e.type_ == "URowVector") {
+        out.si = view_of("URowVector");
+        out.si.param_free = base.value.si.param_free;
+      } else if (is_row_vector(base.value.si) && e.type_ == "UVector") {
+        out.si = view_of("UVector");
+        out.si.param_free = base.value.si.param_free;
+      } else {
+        return {StaticProbeState::Invalid,
+                {},
+                "static transpose has an inconsistent operand or result type"};
+      }
+      return {StaticProbeState::Known, out, {}};
+    }
+    if (e.kind != mir::Expr::Indexed || e.args.size() < 2) return {};
     const auto base = try_static_view(e.args[0]);
     if (base.state != StaticProbeState::Known)
       return {base.state, {}, base.error};
+
+    if (is_array(base.value.si)) {
+      const ArrayShape& shape = array_shape(base.value.si);
+      const size_t outer =
+          shape.dims.size() - static_cast<size_t>(leaf_rank(shape.leaf));
+      const size_t n_idx = e.args.size() - 1;
+      // Only outer-dimension Single indices have a representation-independent
+      // flat suffix.  This is enough to recover the declared leaf geometry
+      // even when that leaf has zero storage (for example array[2] vector[0]).
+      if (n_idx > outer) return {};
+      for (size_t d = 0; d < n_idx; ++d) {
+        if (e.args[d + 1].name != "IndexSingle") return {};
+        const auto index = try_static_selector(e.args[d + 1], shape.dims[d]);
+        if (index.state != StaticProbeState::Known)
+          return {index.state, {}, index.error};
+      }
+      const std::vector<int64_t> suffix(shape.dims.begin() + n_idx,
+                                        shape.dims.end());
+      StaticView out;
+      out.len = checked_product(suffix, "static array subview");
+      out.si = indexed_view(base.value.si, n_idx, out.len, e.type_);
+      return {StaticProbeState::Known, out, {}};
+    }
+
+    if (e.args.size() > 3) return {};
     if (!is_matrix(base.value.si)) return {};
 
     const auto rows = try_static_selector(e.args[1], base.value.si.rows);
@@ -2741,6 +7798,35 @@ struct Lowering {
     return {StaticProbeState::Known, out, {}};
   }
 
+  StaticProbe<int64_t> try_static_dims_index(const mir::Expr& e) {
+    if (e.kind != mir::Expr::Indexed || e.args.size() != 2 ||
+        e.args[0].kind != mir::Expr::FunApp || e.args[0].name != "dims" ||
+        e.args[0].args.size() != 1 || e.args[1].name != "IndexSingle" ||
+        e.args[1].args.size() != 1)
+      return {};
+    const auto view = try_static_view(e.args[0].args[0]);
+    if (view.state != StaticProbeState::Known)
+      return {view.state, 0, view.error};
+    std::vector<int64_t> dims;
+    if (is_array(view.value.si))
+      dims = array_shape(view.value.si).dims;
+    else if (is_matrix(view.value.si))
+      dims = {view.value.si.rows, view.value.si.cols};
+    else if (is_vector(view.value.si) || is_row_vector(view.value.si))
+      dims = {view.value.len};
+    else
+      return {StaticProbeState::Invalid, 0,
+              "dims is unsupported for a scalar value"};
+    const auto index = try_static_int(e.args[1].args[0]);
+    if (index.state != StaticProbeState::Known)
+      return {index.state, 0, index.error};
+    if (index.value < 1 || index.value > static_cast<long>(dims.size()))
+      return {StaticProbeState::Invalid, 0, "static dims index out of bounds"};
+    return {StaticProbeState::Known,
+            dims[static_cast<size_t>(index.value - 1)],
+            {}};
+  }
+
   StaticProbe<int64_t> try_static_shape_query(const mir::Expr& e) {
     if (!is_shape_query(e)) return {};
     const auto view = try_static_view(e.args[0]);
@@ -2786,6 +7872,23 @@ struct Lowering {
       changed |= specialize_static_shapes(&e->args[arm]);
       return changed;
     }
+    const auto dims_index = try_static_dims_index(*e);
+    if (dims_index.state == StaticProbeState::Invalid)
+      fail(dims_index.error, e->raw);
+    if (dims_index.state == StaticProbeState::Known) {
+      if (dims_index.value < std::numeric_limits<int>::min() ||
+          dims_index.value > std::numeric_limits<int>::max())
+        fail("static dims value exceeds the Stan integer range", e->raw);
+      mir::Expr literal;
+      literal.kind = mir::Expr::LitInt;
+      literal.lit_i = static_cast<long>(dims_index.value);
+      literal.type_ = "UInt";
+      literal.unsized = {0, mir::UnsizedLeaf::Int};
+      literal.data_only = true;
+      literal.raw = e->raw;
+      *e = std::move(literal);
+      return true;
+    }
     if (is_shape_query(*e)) {
       const auto value = try_static_shape_query(*e);
       if (value.state == StaticProbeState::Invalid) fail(value.error, e->raw);
@@ -2810,10 +7913,43 @@ struct Lowering {
 
   std::optional<DataMap::Entry> try_eval_pure(const mir::Expr& e) {
     if (expr_effectful(e)) return std::nullopt;
-    if (auto evaluated = try_eval_interpreter(e)) return evaluated;
+    // The transformed-data interpreter does not know the lowerer's current
+    // unrolled-loop bindings. It can also retain an earlier value for a
+    // lexically scoped iterator after a speculative interpreter pass. Make
+    // the authoritative int_env values explicit before asking it to fold a
+    // condition or data expression, matching eval_int's precedence.
     mir::Expr specialized = e;
+    bind_known_ints(&specialized);
+    if (auto evaluated = try_eval_interpreter(specialized)) return evaluated;
     if (!specialize_static_shapes(&specialized)) return std::nullopt;
     return try_eval_interpreter(specialized);
+  }
+
+  // A pure expression can become evaluable only after lowering has exposed
+  // an exact observation for one of its graph-local leaves.  This happens in
+  // particular for an indexed view passed to a data-only UDF: the ordinary
+  // interpreter cannot see the caller's SSA slot, while lowering can prove
+  // the slot's complete value.  Temporarily make only those exact values
+  // visible to the interpreter.  Parameter-active and merely shape-known
+  // values have no observation and therefore still fail closed.
+  std::optional<DataMap::Entry> try_eval_observed(const mir::Expr& e) {
+    if (expr_effectful(e)) return std::nullopt;
+    std::set<std::string> vars;
+    std::function<void(const mir::Expr&)> collect = [&](const mir::Expr& x) {
+      if (x.kind == mir::Expr::Var) vars.insert(x.name);
+      for (const mir::Expr& arg : x.args) collect(arg);
+    };
+    collect(e);
+
+    ScopedEnvBindings inserted(td.env(), vars.size());
+    for (const std::string& name : vars) {
+      const auto value = scope.find(name);
+      if (value == scope.end() || td.find(name) != nullptr) continue;
+      const DataMap::Entry* exact = observation(value->second);
+      if (exact == nullptr) return std::nullopt;
+      inserted.bind(name, *exact);
+    }
+    return try_eval_pure(e);
   }
 
   DataMap::Entry eval_pure(const mir::Expr& e, const std::string& use) {
@@ -3117,7 +8253,7 @@ struct Lowering {
           binds[i].data = *en;
       }
       if (!binds[i].data) {
-        if (auto evaluated = try_eval_pure(a)) {
+        if (auto evaluated = try_eval_observed(a)) {
           binds[i].data = std::move(*evaluated);
           if (!binds[i].is_int && binds[i].v.slot >= 0)
             observe(binds[i].v, *binds[i].data);
@@ -3127,6 +8263,30 @@ struct Lowering {
       if (!in_write_array && formal_data && !binds[i].is_int &&
           (binds[i].v.autodiff || !binds[i].v.si.param_free))
         fail(e.name + ": data-only argument depends on a parameter", e.raw);
+    }
+
+    // The first fold attempt in lower_funapp runs before graph-local argument
+    // observations exist.  Once every formal has an exact value, retry the
+    // same pure/data-only fold against synthetic variables.  The temporary
+    // names cannot collide with Stan identifiers; remove them on every exit
+    // so nested UDF lowering sees precisely its caller's interpreter frame.
+    if (e.data_only && !e.fn_propto && !expr_effectful(e) &&
+        std::all_of(binds.begin(), binds.end(),
+                    [](const Binding& b) { return b.data.has_value(); })) {
+      mir::Expr bound = e;
+      ScopedEnvBindings inserted(td.env(), binds.size());
+      for (size_t i = 0; i < binds.size(); ++i) {
+        std::string name = "$stanli_udf_arg_" + std::to_string(udf_depth) +
+                           "_" + std::to_string(i);
+        while (td.find(name) != nullptr) name.push_back('_');
+        mir::Expr var = e.args[i];
+        var.kind = mir::Expr::Var;
+        var.name = name;
+        var.args.clear();
+        bound.args[i] = std::move(var);
+        inserted.bind(std::move(name), *binds[i].data);
+      }
+      if (auto folded = fold_const(bound)) return *folded;
     }
     if (++udf_depth > 64) {
       --udf_depth;
@@ -5651,19 +10811,17 @@ struct Lowering {
       out.views.push_back(parameter_view(s, con.slot, con_len));
   }
 
-  struct DeclView {
-    int64_t len = 0;
-    bool autodiff = false;
-    SlotInfo si;
-    bool int_array = false;
-    bool deferred_shape = false;
-  };
-  // The only name-keyed declaration protocol. Runtime values carry the same
-  // static scalar type and SlotInfo in `scope`; this registry is needed only
-  // before first binding.
-  std::map<std::string, DeclView> decls;
-
   void lower_stmt(const mir::Stmt& s) {
+    if (s.force_runtime_region) {
+      // Ordinary unrolling may later resolve an abstract zero-or-one guard
+      // to false (for example at one fixed inner iterator). Preserve the
+      // ordinary dead-arm fold instead of requesting an empty island.
+      if (s.kind == mir::Stmt::IfElse)
+        if (const auto condition = try_eval_pure(s.cond))
+          if (condition->r.size() == 1 && condition->r[0] == 0.0) return;
+      lower_runtime_ifelse(s);
+      return;
+    }
     switch (s.kind) {
       case mir::Stmt::Decl:
         if (s.read_transform) {
@@ -6305,9 +11463,13 @@ struct Lowering {
         const auto old = int_env.find(s.loopvar);
         const bool had_old = old != int_env.end();
         const long old_value = had_old ? old->second : 0;
+        const bool may_have_loop_control =
+            std::any_of(s.body.begin(), s.body.end(), has_owned_loop_control);
         bool has_runtime_loop_control = false;
         try {
-          for (long v = lo; v <= hi && !has_runtime_loop_control; ++v) {
+          for (long v = lo;
+               may_have_loop_control && v <= hi && !has_runtime_loop_control;
+               ++v) {
             int_env[s.loopvar] = v;
             for (const auto& child : s.body)
               if (runtime_loop_control(child)) {
@@ -6330,6 +11492,7 @@ struct Lowering {
           lower_runtime_ifelse(s);
           return;
         }
+        if (lower_fixed_scan(s, lo, hi)) return;
         if (lo != hi && repeatable_target_body(s)) {
           const double old_scale = target_scale;
           target_scale *=

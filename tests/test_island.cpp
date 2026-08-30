@@ -8,7 +8,9 @@
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -16,6 +18,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -32,6 +35,13 @@ static void expect_close(const std::string& what, double got, double want) {
     ++failures;
     std::printf("FAIL %-24s got %.17g want %.17g rel %.2e\n", what.c_str(), got,
                 want, rel);
+  }
+}
+static void expect_bitwise(const std::string& what, double got, double want) {
+  if (std::memcmp(&got, &want, sizeof(double)) != 0) {
+    ++failures;
+    std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got,
+                want);
   }
 }
 
@@ -1095,6 +1105,461 @@ static void test_packed_live_ins() {
   }
 }
 
+static Graph build_selector_island(double threshold) {
+  Graph g;
+  const int condition = g.add_slot(1, true);
+  const int left = g.add_slot(1, true);
+  const int right = g.add_slot(1, true);
+
+  auto selector = std::make_shared<IslandProg>();
+  selector->n_regs = 5;
+  selector->ins = {{0, 1}, {1, 1}, {2, 1}};
+  selector->pool = {threshold};
+  selector->code = {
+      {Program::CONST, 3, 0},
+      {Program::GT, 4, 0, 3},
+      {Program::JZ, 5, 4},
+      {Program::MOV, 1, 2},
+      {Program::JMP, 5},
+  };
+  selector->out_regs = {1};
+  expect("selector island recognized", supports_selector_adjoint(*selector));
+  selector->selector_adj = true;
+
+  Op island;
+  island.opcode = OP_ISLAND;
+  island.n_in = 3;
+  island.in[0] = condition;
+  island.in[1] = left;
+  island.in[2] = right;
+  island.out = g.add_slot(1, false);
+  island.udata = selector.get();
+  g.udata_pool.push_back(selector);
+  g.ops.push_back(island);
+  g.result_slot = island.out;
+  return g;
+}
+
+static void test_selector_island_backward() {
+  // Parameters are 0.30, 0.45, 0.60. The comparison itself has zero
+  // derivative; the chosen value receives the live-out seed exactly once.
+  const std::vector<double> skipped = run_grad(build_selector_island(0.4), {});
+  expect("selector skipped result width", skipped.size() == 4);
+  if (skipped.size() == 4) {
+    expect_close("selector skipped value", skipped[0], 0.45);
+    expect_close("selector skipped condition adj", skipped[1], 0.0);
+    expect_close("selector skipped left adj", skipped[2], 1.0);
+    expect_close("selector skipped right adj", skipped[3], 0.0);
+  }
+
+  const std::vector<double> taken = run_grad(build_selector_island(0.2), {});
+  expect("selector taken result width", taken.size() == 4);
+  if (taken.size() == 4) {
+    expect_close("selector taken value", taken[0], 0.60);
+    expect_close("selector taken condition adj", taken[1], 0.0);
+    expect_close("selector taken left adj", taken[2], 0.0);
+    expect_close("selector taken right adj", taken[3], 1.0);
+  }
+}
+
+static Graph build_cfg_island(double threshold) {
+  Graph g;
+  const int condition = g.add_slot(1, true);
+  const int x = g.add_slot(1, true);
+  const int y = g.add_slot(1, true);
+
+  auto program = std::make_shared<IslandProg>();
+  program->n_regs = 7;
+  program->ins = {{0, 1}, {1, 1}, {2, 1}};
+  program->pool = {threshold};
+  program->code = {
+      {Program::CONST, 3, 0},
+      {Program::GT, 4, 0, 3},
+      {Program::JZ, 6, 4},
+      {Program::MUL, 5, 1, 2},
+      {Program::MOV, 6, 5},
+      {Program::JMP, 8},
+      {Program::SQUARE, 5, 1},
+      {Program::MOV, 6, 5},
+      {Program::ADD, 6, 6, 2},
+  };
+  program->out_regs = {6};
+  expect("cfg island adjoint generated", gen_cfg_adjoint(*program));
+  program->native_adj = true;
+
+  Op island;
+  island.opcode = OP_ISLAND;
+  island.n_in = 3;
+  island.in[0] = condition;
+  island.in[1] = x;
+  island.in[2] = y;
+  island.out = g.add_slot(1, false);
+  island.udata = program.get();
+  g.udata_pool.push_back(program);
+  g.ops.push_back(island);
+  g.result_slot = island.out;
+  return g;
+}
+
+static void test_cfg_island_backward() {
+  // run_grad seeds the three parameters as 0.30, 0.45, 0.60.  These two
+  // thresholds execute opposite paths through the same packed-trace kernel.
+  const std::vector<double> taken = run_grad(build_cfg_island(0.2), {});
+  expect("cfg island taken result width", taken.size() == 4);
+  if (taken.size() == 4) {
+    expect_close("cfg island taken value", taken[0], 0.45 * 0.60 + 0.60);
+    expect_close("cfg island taken condition adj", taken[1], 0.0);
+    expect_close("cfg island taken x adj", taken[2], 0.60);
+    expect_close("cfg island taken y adj", taken[3], 1.45);
+  }
+
+  const std::vector<double> skipped = run_grad(build_cfg_island(0.4), {});
+  expect("cfg island skipped result width", skipped.size() == 4);
+  if (skipped.size() == 4) {
+    expect_close("cfg island skipped value", skipped[0], 0.45 * 0.45 + 0.60);
+    expect_close("cfg island skipped condition adj", skipped[1], 0.0);
+    expect_close("cfg island skipped x adj", skipped[2], 0.90);
+    expect_close("cfg island skipped y adj", skipped[3], 1.0);
+  }
+}
+
+static Graph build_cfg_matrix_island(bool native, double threshold) {
+  Graph g;
+  const int condition = g.add_slot(1, true);
+  const int matrix = g.add_slot(4, true);
+  auto program = std::make_shared<IslandProg>();
+  program->n_regs = 11;
+  program->ins = {{0, 1}, {1, 4}};
+  program->pool = {threshold};
+  program->code = {{Program::CONST, 5, 0},
+                   {Program::GT, 6, 0, 5},
+                   {Program::MOVR, 7, 1, 0, 0, 4},
+                   {Program::JZ, 5, 6},
+                   {Program::MATRIX_EXP, 7, 1, 2, 2, 4}};
+  program->out_regs = {7, 8, 9, 10};
+  expect("cfg matrix island adjoint generated", gen_cfg_adjoint(*program));
+  expect("cfg matrix island retains canonical replay",
+         program->var_replay && program->var_replay->calls.empty() &&
+             program->var_replay->code.back().code == Program::MATRIX_EXP);
+  program->native_adj = native;
+
+  Op island;
+  island.opcode = OP_ISLAND;
+  island.n_in = 2;
+  island.in[0] = condition;
+  island.in[1] = matrix;
+  island.out = g.add_slot(4, false);
+  island.udata = program.get();
+  g.udata_pool.push_back(program);
+  g.ops.push_back(island);
+  const int result = g.add_slot(1, false);
+  g.add_op(OP_SUM_VEC, {island.out}, result);
+  g.result_slot = result;
+  return g;
+}
+
+static void test_cfg_matrix_replay_oracle() {
+  for (double threshold : {0.2, 0.4}) {
+    const std::vector<double> native =
+        run_grad(build_cfg_matrix_island(true, threshold), {});
+    const std::vector<double> replay =
+        run_grad(build_cfg_matrix_island(false, threshold), {});
+    expect("cfg structured native/replay result width",
+           native.size() == replay.size());
+    for (size_t k = 0; k < native.size() && k < replay.size(); ++k)
+      expect("cfg structured native/replay bitwise", native[k] == replay[k]);
+  }
+}
+
+struct SparseIslandGraph {
+  Graph graph;
+  std::shared_ptr<IslandProg> program;
+};
+
+static SparseIslandGraph build_sparse_alias_island(int chain) {
+  SparseIslandGraph built;
+  Graph& g = built.graph;
+  const int input = g.add_slot(1, true);
+  auto program = std::make_shared<IslandProg>();
+  program->ins = {{0, 1}};
+  int previous = 0;
+  for (int i = 0; i < chain; ++i) {
+    const int destination = i + 1;
+    program->code.push_back({Program::NEG, destination, previous});
+    previous = destination;
+  }
+  const int copy = chain + 1;
+  program->code.push_back({Program::MOV, copy, previous});
+  program->n_regs = copy + 1;
+  // All three outputs share one compact cell: the MOV aliases its source and
+  // the repeated output names it twice. Descending seeding must still sum all
+  // three before the reverse sweep, while the clear plan names the cell once.
+  program->out_regs = {previous, copy, copy};
+  expect("sparse alias adjoint generated", gen_adjoint(*program));
+  program->native_adj = true;
+
+  Op island;
+  island.opcode = OP_ISLAND;
+  island.n_in = 1;
+  island.in[0] = input;
+  island.out = g.add_slot(3, false);
+  island.udata = program.get();
+  g.ops.push_back(island);
+  g.udata_pool.push_back(program);
+  const int result = g.add_slot(1, false);
+  g.add_op(OP_SUM_VEC, {island.out}, result);
+  g.result_slot = result;
+  built.program = std::move(program);
+  return built;
+}
+
+static SparseIslandGraph build_sparse_cfg_island(double threshold,
+                                                  int chain) {
+  SparseIslandGraph built;
+  Graph& g = built.graph;
+  const int condition = g.add_slot(1, true);
+  const int x = g.add_slot(1, true);
+  const int y = g.add_slot(1, true);
+  auto program = std::make_shared<IslandProg>();
+  program->ins = {{0, 1}, {1, 1}, {2, 1}};
+  program->pool = {threshold};
+  program->code = {{Program::CONST, 3, 0},
+                   {Program::GT, 4, 0, 3},
+                   {Program::JZ, 5, 4},
+                   {Program::MUL, 5, 1, 2},
+                   {Program::JMP, 6},
+                   {Program::SQUARE, 5, 1},
+                   {Program::ADD, 6, 5, 2}};
+  int previous = 6;
+  for (int i = 0; i < chain; ++i) {
+    const int destination = 7 + i;
+    program->code.push_back({Program::NEG, destination, previous});
+    previous = destination;
+  }
+  program->n_regs = previous + 1;
+  program->out_regs = {previous};
+  expect("sparse cfg adjoint generated", gen_cfg_adjoint(*program));
+  program->native_adj = true;
+
+  Op island;
+  island.opcode = OP_ISLAND;
+  island.n_in = 3;
+  island.in[0] = condition;
+  island.in[1] = x;
+  island.in[2] = y;
+  island.out = g.add_slot(1, false);
+  island.udata = program.get();
+  g.ops.push_back(island);
+  g.udata_pool.push_back(program);
+  g.result_slot = island.out;
+  built.program = std::move(program);
+  return built;
+}
+
+static void expect_bitwise_vector(const char* what,
+                                  const std::vector<double>& got,
+                                  const std::vector<double>& want) {
+  expect(what, got.size() == want.size());
+  for (size_t i = 0; i < got.size() && i < want.size(); ++i)
+    expect_bitwise(std::string(what) + " v" + std::to_string(i), got[i],
+                   want[i]);
+}
+
+static std::vector<double> gradient_at(Executor& executor, double parameter) {
+  executor.params_data()[0] = parameter;
+  std::vector<double> result(2);
+  result[0] = executor.gradient(result.data() + 1);
+  return result;
+}
+
+static void test_sparse_native_reset() {
+  test_setenv("STANLI_ISLAND_SPARSE_ADJ_RESET", "1", 1);
+
+  SparseIslandGraph alias = build_sparse_alias_island(320);
+  expect("sparse alias plan sorted",
+         std::is_sorted(alias.program->sparse_adj_clear_cells.begin(),
+                        alias.program->sparse_adj_clear_cells.end()));
+  expect("sparse alias plan deduplicated",
+         alias.program->sparse_adj_clear_cells.size() == 2);
+  expect("sparse alias density admitted",
+         alias.program->sparse_adj_clear_eligible);
+
+  test_setenv("STANLI_NO_ISLAND_SPARSE_ADJ_RESET", "1", 1);
+  const std::vector<double> full_alias =
+      run_grad(build_sparse_alias_island(320).graph, {});
+  test_unsetenv("STANLI_NO_ISLAND_SPARSE_ADJ_RESET");
+  const std::vector<double> sparse_alias =
+      run_grad_twice(std::move(alias.graph), {});
+  expect_bitwise_vector("sparse alias/full", sparse_alias, full_alias);
+  expect_close("sparse duplicate output value", sparse_alias[0], 0.9);
+  expect_close("sparse duplicate output adjoint", sparse_alias[1], 3.0);
+
+  // The same large forward-only CFG executes opposite traced paths. It also
+  // writes register 5 on both arms, exercising repeated destinations.
+  for (double threshold : {0.2, 0.4}) {
+    SparseIslandGraph sparse = build_sparse_cfg_island(threshold, 320);
+    expect("sparse cfg density admitted",
+           sparse.program->sparse_adj_clear_eligible);
+    expect("sparse cfg clear plan width",
+           sparse.program->sparse_adj_clear_cells.size() == 4);
+    test_setenv("STANLI_NO_ISLAND_SPARSE_ADJ_RESET", "1", 1);
+    const std::vector<double> full =
+        run_grad(build_sparse_cfg_island(threshold, 320).graph, {});
+    test_unsetenv("STANLI_NO_ISLAND_SPARSE_ADJ_RESET");
+    const std::vector<double> got = run_grad(std::move(sparse.graph), {});
+    expect_bitwise_vector("sparse cfg/full", got, full);
+  }
+
+  // Alternate differently sized programs on one OS thread. A reset bounded
+  // by the current smaller program would leave the larger TLS tail stale.
+  const std::vector<double> large_first =
+      run_grad(build_sparse_alias_island(640).graph, {});
+  const std::vector<double> small =
+      run_grad(build_sparse_cfg_island(0.2, 320).graph, {});
+  const std::vector<double> large_second =
+      run_grad(build_sparse_alias_island(640).graph, {});
+  expect_bitwise_vector("sparse alternating large", large_second,
+                        large_first);
+  expect_close("sparse alternating small value", small[0],
+               0.45 * 0.60 + 0.60);
+
+  // Executor copies share immutable island payloads but own their arenas;
+  // their native adjoint workspaces must remain independent TLS state.
+  SparseIslandGraph threaded = build_sparse_alias_island(320);
+  Executor base(std::move(threaded.graph));
+  Executor left(base);
+  Executor right(base);
+  std::vector<double> left_result, right_result;
+  bool left_ok = true, right_ok = true;
+  std::thread left_thread([&] {
+    try {
+      left_result = gradient_at(left, 0.25);
+    } catch (...) {
+      left_ok = false;
+    }
+  });
+  std::thread right_thread([&] {
+    try {
+      right_result = gradient_at(right, 0.5);
+    } catch (...) {
+      right_ok = false;
+    }
+  });
+  left_thread.join();
+  right_thread.join();
+  expect("sparse copied executor left", left_ok && left_result.size() == 2);
+  expect("sparse copied executor right", right_ok && right_result.size() == 2);
+  if (left_result.size() == 2) {
+    expect_close("sparse thread left value", left_result[0], 0.75);
+    expect_close("sparse thread left adjoint", left_result[1], 3.0);
+  }
+  if (right_result.size() == 2) {
+    expect_close("sparse thread right value", right_result[0], 1.5);
+    expect_close("sparse thread right adjoint", right_result[1], 3.0);
+  }
+
+  test_unsetenv("STANLI_ISLAND_SPARSE_ADJ_RESET");
+}
+
+static thread_local bool sparse_test_throw_backward = false;
+
+static void sparse_test_call_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = ctx.in[0].data[0] + ctx.in[1].data[0];
+}
+
+static void sparse_test_call_bwd(KernelCtx& ctx) {
+  if (sparse_test_throw_backward)
+    throw std::runtime_error("injected sparse island backward failure");
+  if (ctx.in_adj[0].data)
+    ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[0];
+  if (ctx.in_adj[1].data)
+    ctx.in_adj[1].data[0] += ctx.out_adj_vec.data[0];
+}
+
+static SparseIslandGraph build_sparse_throw_island(int chain) {
+  SparseIslandGraph built;
+  Graph& g = built.graph;
+  const int left = g.add_slot(1, true);
+  const int right = g.add_slot(1, true);
+  auto program = std::make_shared<IslandProg>();
+  program->ins = {{0, 1}, {1, 1}};
+  Program::Call call;
+  call.opcode = OP_NONE_;
+  call.n_in = 2;
+  call.in[0] = call.bwd_value_in[0] = 0;
+  call.in[1] = call.bwd_value_in[1] = 1;
+  call.in_len[0] = call.in_len[1] = 1;
+  call.out = call.bwd_value_out = 2;
+  call.out_len = 1;
+  if (!bind_call(call)) {
+    ++failures;
+    std::printf("FAIL sparse CALL binds kernel\n");
+  }
+  program->calls.push_back(call);
+  program->code.push_back({Program::CALL, 0, 0});
+  int previous = 2;
+  for (int i = 0; i < chain; ++i) {
+    const int destination = 3 + i;
+    program->code.push_back({Program::NEG, destination, previous});
+    previous = destination;
+  }
+  program->n_regs = previous + 1;
+  program->out_regs = {previous};
+  expect("sparse throw adjoint generated", gen_adjoint(*program));
+  program->native_adj = true;
+
+  Op island;
+  island.opcode = OP_ISLAND;
+  island.n_in = 2;
+  island.in[0] = left;
+  island.in[1] = right;
+  island.out = g.add_slot(1, false);
+  island.udata = program.get();
+  g.ops.push_back(island);
+  g.udata_pool.push_back(program);
+  g.result_slot = island.out;
+  built.program = std::move(program);
+  return built;
+}
+
+static void test_sparse_native_reset_exception_recovery() {
+  (void)find_kernel(OP_ISLAND);  // Ensure the built-in table is initialized.
+  const Kernel original = kernel(OP_NONE_);
+  struct RestoreKernel {
+    Kernel original;
+    ~RestoreKernel() { register_kernel(OP_NONE_, original); }
+  } restore{original};
+  register_kernel(OP_NONE_,
+                  Kernel{sparse_test_call_fwd, sparse_test_call_bwd, nullptr});
+  test_setenv("STANLI_ISLAND_SPARSE_ADJ_RESET", "1", 1);
+
+  SparseIslandGraph failing = build_sparse_throw_island(640);
+  expect("sparse throw density admitted",
+         failing.program->sparse_adj_clear_eligible);
+  sparse_test_throw_backward = true;
+  bool threw = false;
+  try {
+    (void)run_grad(std::move(failing.graph), {});
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  sparse_test_throw_backward = false;
+  expect("sparse backward exception observed", threw);
+
+  // Recovery must clear the whole prior allocation, even though this next
+  // program is smaller; growing back afterward checks the old tail as well.
+  const std::vector<double> recovered =
+      run_grad(build_sparse_throw_island(320).graph, {});
+  expect_close("sparse exception recovered value", recovered[0], 0.75);
+  expect_close("sparse exception recovered left", recovered[1], 1.0);
+  expect_close("sparse exception recovered right", recovered[2], 1.0);
+  const std::vector<double> grown =
+      run_grad(build_sparse_throw_island(640).graph, {});
+  expect_bitwise_vector("sparse exception regrow", grown, recovered);
+
+  test_unsetenv("STANLI_ISLAND_SPARSE_ADJ_RESET");
+}
+
 // A slot PRODUCED BEFORE the region, then read and updated in place inside
 // it, and read again after: it is a live-in and a live-out at once. If the
 // island's extraction wrote that same slot, its adjoint buffer would hold
@@ -1258,6 +1723,263 @@ static void test_density_mask_gradient_identical() {
   expect_eq("mask: bitwise identical", wrong, 0);
 }
 
+static void test_explicit_graph_fragment() {
+  Graph g;
+  const int x = g.add_slot(1, true);
+  const int c = g.add_slot(1, false);
+  const int sum = g.add_slot(1, false);
+  g.add_op(OP_ADD, {x, c}, sum);
+  const int square = g.add_slot(1, false);
+  g.add_op(OP_SQUARE, {sum}, square);
+  Fills fills{{c, {2.0}}};
+  std::vector<uint8_t> active(g.slots.size(), 0);
+  active[(size_t)x] = 1;
+  active[(size_t)sum] = 1;
+  active[(size_t)square] = 1;
+
+  GraphFragmentProgram fragment;
+  std::string why;
+  expect("explicit fragment compiles",
+         compile_graph_fragment(g, 0, 2, {square, sum}, fills, active,
+                                &fragment, &why));
+  expect("explicit fragment bypasses minimum",
+         fragment.program.code.size() > 0);
+  expect("explicit fragment absorbs fill",
+         fragment.live_in_slots == std::vector<int>{x} &&
+             fragment.program.pool.size() == 1);
+  expect("explicit fragment applies activity",
+         fragment.program.ins.size() == 1 && fragment.program.ins[0].active);
+  expect("explicit fragment orders live-outs",
+         fragment.program.out_regs.size() == 2);
+  const double xv = 3.0;
+  const double* inputs[] = {&xv};
+  double outputs[2] = {0.0, 0.0};
+  run_island<double>(fragment.program, inputs, outputs);
+  expect_close("explicit fragment square", outputs[0], 25.0);
+  expect_close("explicit fragment sum", outputs[1], 5.0);
+}
+
+static void test_explicit_fragment_many_live_ins() {
+  Graph g;
+  std::vector<int> inputs;
+  for (int k = 0; k < 7; ++k) inputs.push_back(g.add_slot(1, true));
+  int sum = inputs[0];
+  for (int k = 1; k < 7; ++k) {
+    const int next = g.add_slot(1, false);
+    g.add_op(OP_ADD, {sum, inputs[(size_t)k]}, next);
+    sum = next;
+  }
+  std::vector<uint8_t> active(g.slots.size(), 1);
+  GraphFragmentProgram fragment;
+  expect(
+      "explicit fragment permits seven live-ins",
+      compile_graph_fragment(g, 0, g.ops.size(), {sum}, {}, active, &fragment));
+  expect_eq("explicit fragment seven live-in count",
+            (int)fragment.live_in_slots.size(), 7);
+}
+
+static void test_explicit_fragment_container_calls() {
+  Graph g;
+  const int seed = g.add_slot(1, true);
+  const int vector = g.add_slot(4, false);
+  g.add_op(OP_REP_VEC, {seed}, vector);
+  const int matrix = g.add_slot(6, false);
+  g.add_op(OP_REP_MAT, {seed}, matrix, {2, 3, 0});
+  std::vector<uint8_t> active(g.slots.size(), 0);
+  active[(size_t)seed] = 1;
+
+  GraphFragmentProgram fragment;
+  expect(
+      "container CALL fragment compiles",
+      compile_graph_fragment(g, 0, 2, {matrix, vector}, {}, active, &fragment));
+  expect("container CALL widths retained",
+         fragment.program.calls.size() == 2 &&
+             fragment.program.calls[0].out_len == 4 &&
+             fragment.program.calls[1].out_len == 6 &&
+             fragment.program.out_regs.size() == 10);
+  expect("container CALL adjoint generated", !fragment.program.adj.empty());
+  const double seed_value = 1.25;
+  const double* inputs[] = {&seed_value};
+  double outputs[10] = {};
+  run_island<double>(fragment.program, inputs, outputs);
+  int wrong = 0;
+  for (double value : outputs)
+    if (value != seed_value) ++wrong;
+  expect_eq("container CALL values", wrong, 0);
+}
+
+static void test_explicit_fragment_shaped_direct_call() {
+  Graph g;
+  const int vector = g.add_slot(3, true);
+  const int scalar = g.add_slot(1, true);
+  const int sum = g.add_slot(3, false);
+  g.add_op(OP_ADD, {vector, scalar}, sum);
+  std::vector<uint8_t> active(g.slots.size(), 0);
+  active[(size_t)vector] = 1;
+  active[(size_t)scalar] = 1;
+
+  GraphFragmentProgram fragment;
+  expect("shaped direct op compiles as explicit CALL",
+         compile_graph_fragment(g, 0, 1, {sum}, {}, active, &fragment));
+  expect("shaped direct op preserves kernel widths",
+         fragment.program.calls.size() == 1 &&
+             fragment.program.calls[0].opcode == OP_ADD &&
+             fragment.program.calls[0].in_len[0] == 3 &&
+             fragment.program.calls[0].in_len[1] == 1 &&
+             fragment.program.calls[0].out_len == 3);
+  expect("shaped direct CALL adjoint generated", !fragment.program.adj.empty());
+  const double values[] = {1.0, 2.0, 4.0};
+  const double increment = 0.5;
+  const double* inputs[] = {values, &increment};
+  double outputs[3] = {};
+  run_island<double>(fragment.program, inputs, outputs);
+  expect_close("shaped direct CALL value 0", outputs[0], 1.5);
+  expect_close("shaped direct CALL value 1", outputs[1], 2.5);
+  expect_close("shaped direct CALL value 2", outputs[2], 4.5);
+}
+
+static void test_explicit_fragment_shaped_density_call() {
+  Graph g;
+  const int observations = g.add_slot(3, true);
+  const int mean = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, false);
+  const int density = g.add_slot(1, false);
+  g.add_op(OP_NORMAL_LPDF, {observations, mean, sigma}, density);
+  Fills fills{{sigma, {2.0}}};
+  std::vector<uint8_t> active(g.slots.size(), 0);
+  active[(size_t)observations] = 1;
+  active[(size_t)mean] = 1;
+
+  GraphFragmentProgram fragment;
+  expect("shaped density compiles as explicit CALL",
+         compile_graph_fragment(g, 0, 1, {density}, fills, active, &fragment));
+  expect("shaped density preserves kernel widths",
+         fragment.program.calls.size() == 1 &&
+             fragment.program.calls[0].opcode == OP_NORMAL_LPDF &&
+             fragment.program.calls[0].in_len[0] == 3 &&
+             fragment.program.calls[0].in_len[1] == 1 &&
+             fragment.program.calls[0].in_len[2] == 1 &&
+             fragment.program.calls[0].out_len == 1);
+  expect("shaped density CALL adjoint generated",
+         !fragment.program.adj.empty());
+  const double values[] = {-0.5, 0.25, 1.5};
+  const double mean_value = 0.4;
+  const double* inputs[] = {values, &mean_value};
+  double output = 0.0;
+  run_island<double>(fragment.program, inputs, &output);
+  const std::vector<double> observations_value(values, values + 3);
+  expect_close("shaped density CALL value", output,
+               stan::math::normal_lpdf(observations_value, mean_value, 2.0));
+}
+
+static void test_explicit_fragment_nested_payload_owner() {
+  auto inner = std::make_shared<IslandProg>();
+  inner->n_regs = 2;
+  inner->ins.push_back(IslandProg::LiveIn{0, 1, -1, 0, true});
+  inner->code.push_back({Program::SQUARE, 1, 0});
+  inner->out_regs.push_back(1);
+  expect("nested payload adjoint", gen_adjoint(*inner));
+  inner->native_adj = true;
+  std::weak_ptr<void> lifetime = inner;
+
+  Graph g;
+  const int input = g.add_slot(1, true);
+  const int output = g.add_slot(1, false);
+  Op nested;
+  nested.opcode = OP_ISLAND;
+  nested.n_in = 1;
+  nested.in[0] = input;
+  nested.out = output;
+  nested.udata = inner.get();
+  g.ops.push_back(nested);
+  g.udata_pool.push_back(inner);
+  std::vector<uint8_t> active(g.slots.size(), 0);
+  active[(size_t)input] = 1;
+
+  GraphFragmentProgram fragment;
+  expect("nested island fragment compiles",
+         compile_graph_fragment(g, 0, 1, {output}, {}, active, &fragment));
+  expect("nested island CALL retains payload",
+         fragment.program.calls.size() == 1 &&
+             fragment.program.calls[0].udata == inner.get() &&
+             fragment.udata_owners.size() == 1);
+  inner.reset();
+  g.udata_pool.clear();
+  expect("nested island owner survives source graph", !lifetime.expired());
+  const double input_value = 4.0;
+  const double* inputs[] = {&input_value};
+  double result = 0.0;
+  run_island<double>(fragment.program, inputs, &result);
+  expect_close("nested island fragment value", result, 16.0);
+
+  // Execute the generated fragment as a native outer island. Its CALL enters
+  // the inner native island backward, exercising nested workspace depth and
+  // ensuring the outer adjoint allocation remains intact while the inner
+  // sweep runs.
+  auto outer_payload = std::make_shared<IslandProg>(std::move(fragment.program));
+  Graph outer_graph;
+  const int outer_input = outer_graph.add_slot(1, true);
+  const int outer_output = outer_graph.add_slot(1, false);
+  Op outer_island;
+  outer_island.opcode = OP_ISLAND;
+  outer_island.n_in = 1;
+  outer_island.in[0] = outer_input;
+  outer_island.out = outer_output;
+  outer_island.udata = outer_payload.get();
+  outer_graph.ops.push_back(outer_island);
+  for (auto& owner : fragment.udata_owners)
+    outer_graph.udata_pool.push_back(std::move(owner));
+  fragment.udata_owners.clear();
+  outer_graph.udata_pool.push_back(outer_payload);
+  outer_graph.result_slot = outer_output;
+  Executor outer_executor(std::move(outer_graph));
+  double outer_gradient = 0.0;
+  *outer_executor.param_ptr(outer_input) = 4.0;
+  expect_close("nested native island backward value",
+               outer_executor.gradient(&outer_gradient), 16.0);
+  expect_close("nested native island backward gradient", outer_gradient, 8.0);
+}
+
+static void test_explicit_fragment_refusals() {
+  auto activity = [](const Graph& g) {
+    return std::vector<uint8_t>(g.slots.size(), 0);
+  };
+  GraphFragmentProgram sentinel;
+  sentinel.program.n_regs = 99;
+
+  Graph effect;
+  const int eout = effect.add_slot(1, false);
+  Op rng;
+  rng.opcode = OP_RNG;
+  rng.out = eout;
+  effect.ops.push_back(rng);
+  expect("explicit fragment refuses RNG",
+         !compile_graph_fragment(effect, 0, 1, {eout}, {}, activity(effect),
+                                 &sentinel));
+  expect_eq("refusal leaves result untouched", sentinel.program.n_regs, 99);
+
+  Graph second;
+  const int a = second.add_slot(1, true);
+  const int b = second.add_slot(1, true);
+  const int out = second.add_slot(1, false);
+  const int out2 = second.add_slot(1, false);
+  const int oi = second.add_op(OP_ADD, {a, b}, out);
+  second.ops[(size_t)oi].out2 = out2;
+  expect("explicit fragment refuses out2",
+         !compile_graph_fragment(second, 0, 1, {out}, {}, activity(second),
+                                 &sentinel));
+
+  Graph scan;
+  const int sout = scan.add_slot(1, false);
+  Op scan_op;
+  scan_op.opcode = OP_SCAN;
+  scan_op.out = sout;
+  scan.ops.push_back(scan_op);
+  expect("explicit fragment refuses nested scan",
+         !compile_graph_fragment(scan, 0, 1, {sout}, {}, activity(scan),
+                                 &sentinel));
+}
+
 int main() {
   // What the compiler does with a region, on graphs small enough to
   // reason about. The cost estimate would refuse most of them -- it is
@@ -1274,6 +1996,13 @@ int main() {
   test_compact_straddling_range_kept();
   test_compact_call_ranges();
   test_compact_env_disable();
+  test_explicit_graph_fragment();
+  test_explicit_fragment_many_live_ins();
+  test_explicit_fragment_container_calls();
+  test_explicit_fragment_shaped_direct_call();
+  test_explicit_fragment_shaped_density_call();
+  test_explicit_fragment_nested_payload_owner();
+  test_explicit_fragment_refusals();
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
   test_hmm_parity();
   test_env_disable();
@@ -1285,6 +2014,11 @@ int main() {
   test_too_many_live_ins();
   test_six_live_ins_ok();
   test_packed_live_ins();
+  test_selector_island_backward();
+  test_cfg_island_backward();
+  test_cfg_matrix_replay_oracle();
+  test_sparse_native_reset();
+  test_sparse_native_reset_exception_recovery();
   test_kernel_call_ops_carved(true);
   test_kernel_call_ops_carved(false);
   test_density_mask_data_argument();

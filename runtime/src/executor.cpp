@@ -77,7 +77,8 @@ const Kernel* find_kernel(uint16_t opcode) {
 // the former once and a program invocation reuses one context packet across
 // all of its CALL instructions.
 static void bind_call_fwd_ctx(const Program::Call& call, double* reg,
-                              KernelCtx& ctx) {
+                              KernelCtx& ctx,
+                              const ProgramCallHook* hook = nullptr) {
   ctx.n_in = call.n_in;
   for (int k = 0; k < call.n_in; ++k)
     ctx.in[k] = Desc{reg + call.in[k], call.in_len[k]};
@@ -86,11 +87,14 @@ static void bind_call_fwd_ctx(const Program::Call& call, double* reg,
   ctx.scratch = reg + call.scratch;
   ctx.idata = call.idata.data();
   ctx.n_idata = (int64_t)call.idata.size();
+  ctx.udata = call.udata;
+  ctx.program_call_hook = hook;
 }
 
-KernelCtx call_fwd_ctx(const Program::Call& call, double* reg) {
+KernelCtx call_fwd_ctx(const Program::Call& call, double* reg,
+                       const ProgramCallHook* hook) {
   KernelCtx ctx;
-  bind_call_fwd_ctx(call, reg, ctx);
+  bind_call_fwd_ctx(call, reg, ctx, hook);
   return ctx;
 }
 
@@ -105,15 +109,26 @@ bool bind_call(Program::Call& call) {
 }
 
 void run_call(const Program::Call& call, double* reg, KernelCtx& ctx) {
+  run_call(call, reg, ctx, nullptr);
+}
+
+void run_call(const Program::Call& call, double* reg, KernelCtx& ctx,
+              const ProgramCallHook* hook) {
   if (call.forward == nullptr)
     throw std::logic_error("unbound Program::CALL forward");
-  bind_call_fwd_ctx(call, reg, ctx);
+  bind_call_fwd_ctx(call, reg, ctx, hook);
   call.forward(ctx);
 }
 
 void run_call(const Program::Call& call, double* reg) {
   KernelCtx ctx;
   run_call(call, reg, ctx);
+}
+
+void run_call(const Program::Call& call, double* reg,
+              const ProgramCallHook* hook) {
+  KernelCtx ctx;
+  run_call(call, reg, ctx, hook);
 }
 
 void register_elementwise_kernels();
@@ -129,6 +144,7 @@ void register_scalar_unary_ad_kernels();
 void register_mixture_kernels();
 void register_message_kernels();
 void register_rng_kernel();
+void register_scan_kernel();
 void register_island_kernel();
 
 static void ensure_registered() {
@@ -142,6 +158,7 @@ static void ensure_registered() {
     register_constrain_kernels();
     register_message_kernels();
     register_rng_kernel();
+    register_scan_kernel();
     register_eltwise_kernels();
     register_scalar_binary_kernels();
     register_scalar_unary_ad_kernels();

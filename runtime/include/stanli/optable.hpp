@@ -83,6 +83,7 @@ namespace stanli {
   X(OP_ODE)                         \
   X(OP_RNG)                         \
   X(OP_ISLAND)                      \
+  X(OP_SCAN)                        \
   X(OP_EIGENVALUES_SYM)             \
   X(OP_EIGENVECTORS_SYM)            \
   X(OP_LOG_SUM_EXP)                 \
@@ -161,13 +162,19 @@ namespace stanli {
   X(OP_EXTREMA_VEC)                 \
   X(OP_DYNAMIC_SLICE)               \
   X(OP_MATRIX_EXP)                  \
+  /* Dimension-gated block-Frechet backward for structured Program CFGs. */ \
+  X(OP_MATRIX_EXP_BLOCK_FRECHET)    \
   X(OP_QUAD_FORM_SYM)               \
   X(OP_INVERSE)                     \
   X(OP_INVERSE_SPD)                 \
   X(OP_LOG_DETERMINANT)             \
   X(OP_QUAD_FORM)                   \
   X(OP_ADD_DIAG)                    \
-  X(OP_CROSSPROD)
+  X(OP_CROSSPROD)                   \
+  /* Force-only Program CALL used to test retained HouseholderQR solves. */ \
+  X(OP_MDIVIDE_LEFT_PREPARED)       \
+  /* Dimension-gated exact-prim producer retaining PartialPivLU factors. */ \
+  X(OP_MDIVIDE_LEFT_PREPARED_PRIM_LU)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

@@ -258,6 +258,10 @@ struct Stmt {
   // present, each wrapped as its own Stmt)
   std::vector<Stmt> body;
   std::string raw;
+  // Internal lowering annotation. A proof may remove a data-only control
+  // wrapper while retaining its body as one compact register-program region.
+  // Parsed MIR always leaves this false.
+  bool force_runtime_region = false;
 };
 
 // stanc3 separates write_array's three CSV sections with early-return

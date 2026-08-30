@@ -8,6 +8,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
+#include <stanli/scan.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <stan/math.hpp>
@@ -16,11 +17,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -58,6 +62,54 @@ static std::string slurp(const std::string& path) {
   return ss.str();
 }
 
+// Change only the result metadata attached to selected function applications.
+// This deliberately leaves operand metadata and expression semantics intact,
+// so lowering tests can prove that control availability is not inferred from
+// an AD-lane label.
+static int relabel_fun_result_adlevel(std::string* mir,
+                                     const std::string& function_name,
+                                     const std::string& required_body_text,
+                                     const std::string& from,
+                                     const std::string& to) {
+  int changed = 0;
+  size_t search = 0;
+  const std::string needle = "(FunApp (StanLib " + function_name;
+  while ((search = mir->find(needle, search)) != std::string::npos) {
+    int depth = 0;
+    size_t close = search;
+    for (; close < mir->size(); ++close) {
+      if ((*mir)[close] == '(')
+        ++depth;
+      else if ((*mir)[close] == ')' && --depth == 0)
+        break;
+    }
+    if (close == mir->size()) break;
+    if (!required_body_text.empty() &&
+        mir->substr(search, close - search).find(required_body_text) ==
+            std::string::npos) {
+      search = close + 1;
+      continue;
+    }
+    const size_t meta = mir->find("(meta ", close + 1);
+    if (meta == std::string::npos || meta - close > 80) {
+      search = close + 1;
+      continue;
+    }
+    const size_t meta_close = mir->find("))))", meta);
+    const std::string old_label = "(adlevel " + from + ")";
+    const size_t label = mir->find(old_label, meta);
+    if (meta_close == std::string::npos || label == std::string::npos ||
+        label > meta_close) {
+      search = close + 1;
+      continue;
+    }
+    mir->replace(label, old_label.size(), "(adlevel " + to + ")");
+    ++changed;
+    search = label + to.size();
+  }
+  return changed;
+}
+
 static stanli::CompiledModel compile_without_optional_islands(
     const std::string& mir, const stanli::DataMap& data) {
   test_setenv("STANLI_NO_ISLAND", "1", 1);
@@ -87,10 +139,38 @@ static stanli::CompiledModel compile_without_graph_passes(
   }
 }
 
+static stanli::CompiledModel compile_without_declaration_nan_fold(
+    const std::string& mir, const stanli::DataMap& data) {
+  test_setenv("STANLI_NO_DECLARATION_NAN_FOLD", "1", 1);
+  try {
+    stanli::CompiledModel cm = compile_without_optional_islands(mir, data);
+    test_unsetenv("STANLI_NO_DECLARATION_NAN_FOLD");
+    return cm;
+  } catch (...) {
+    test_unsetenv("STANLI_NO_DECLARATION_NAN_FOLD");
+    throw;
+  }
+}
+
 static int count_opcode(const stanli::CompiledModel& cm, uint16_t opcode) {
   return static_cast<int>(
       std::count_if(cm.graph.ops.begin(), cm.graph.ops.end(),
                     [=](const stanli::Op& op) { return op.opcode == opcode; }));
+}
+
+static int count_island_instruction(const stanli::CompiledModel& cm,
+                                    stanli::Program::Code code) {
+  int count = 0;
+  for (const stanli::Op& op : cm.graph.ops) {
+    if (op.opcode != stanli::OP_ISLAND || op.udata == nullptr) continue;
+    const auto& island = *static_cast<const stanli::IslandProg*>(op.udata);
+    count += static_cast<int>(std::count_if(
+        island.code.begin(), island.code.end(),
+        [=](const stanli::Program::Instr& instruction) {
+          return instruction.code == code;
+        }));
+  }
+  return count;
 }
 
 static bool same_graph_structure(const stanli::CompiledModel& a,
@@ -119,6 +199,22 @@ static bool same_graph_structure(const stanli::CompiledModel& a,
       if (x.in[k] != y.in[k]) return false;
     for (int64_t k = 0; k < x.n_idata; ++k)
       if (x.idata[k] != y.idata[k]) return false;
+  }
+  return true;
+}
+
+static bool same_fill_contents(const stanli::CompiledModel& a,
+                               const stanli::CompiledModel& b) {
+  if (a.fills.size() != b.fills.size()) return false;
+  for (size_t i = 0; i < a.fills.size(); ++i) {
+    if (a.fills[i].first != b.fills[i].first ||
+        a.fills[i].second.size() != b.fills[i].second.size())
+      return false;
+    const size_t bytes = a.fills[i].second.size() * sizeof(double);
+    if (bytes != 0 &&
+        std::memcmp(a.fills[i].second.data(), b.fills[i].second.data(), bytes) !=
+            0)
+      return false;
   }
   return true;
 }
@@ -616,6 +712,1536 @@ int main() {
     expect_eq("invariant local terms lp", local_lp, reference.val());
     expect_eq("invariant local terms grad", grad, x.adj());
     stan::math::recover_memory();
+  }
+
+  // A large fixed-trip recurrence becomes one bounded scan after the
+  // exceptional first row is peeled. The disabled path is the ordinary
+  // unroll oracle; small loops keep that path to avoid scan overhead.
+  {
+    const std::string mir = slurp("tests/fixtures/scan_lower.tmir.sexp");
+    const auto compile_scan = [&](int N) {
+      DataMap d;
+      d.set_int("N", N);
+      return compile_without_graph_passes(mir, d);
+    };
+
+    CompiledModel scan = compile_scan(33);
+    check(count_opcode(scan, OP_SCAN) == 1,
+          "large recurrence lowers to one scan");
+    const ScanSpec* scan_spec = nullptr;
+    for (const Op& op : scan.graph.ops)
+      if (op.opcode == OP_SCAN)
+        scan_spec = static_cast<const ScanSpec*>(op.udata);
+    check(scan_spec != nullptr && scan_spec->templates.size() == 1 &&
+              scan_spec->templates[0].carry.size() == 1 &&
+              scan_spec->templates[0].target_reg >= 0,
+          "scan publishes carry and target bindings");
+    bool active_carry_density = false;
+    if (scan_spec != nullptr)
+      for (const AdjInstr& instr : scan_spec->templates[0].step.adj.code)
+        if (instr.code == Program::DENSITY && (instr.mask & 1u) != 0)
+          active_carry_density = true;
+    check(active_carry_density,
+          "peeled data carry stays active in scan density adjoint");
+    CompiledModel much_larger = compile_scan(1000);
+    check(count_opcode(much_larger, OP_SCAN) == 1 &&
+              same_graph_structure(scan, much_larger),
+          "scan graph is independent of recurrence length");
+    CompiledModel small = compile_scan(8);
+    check(count_opcode(small, OP_SCAN) == 0,
+          "small recurrence keeps ordinary lowering");
+
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel unrolled;
+    try {
+      unrolled = compile_scan(33);
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+    check(count_opcode(unrolled, OP_SCAN) == 0,
+          "scan escape hatch keeps unrolled oracle");
+    check(scan.graph.ops.size() < unrolled.graph.ops.size(),
+          "scan bounds the recurrence graph");
+
+    Executor scan_ex(std::move(scan.graph));
+    scan.bind(scan_ex);
+    Executor unrolled_ex(std::move(unrolled.graph));
+    unrolled.bind(unrolled_ex);
+    scan_ex.params_data()[0] = 0.2;
+    unrolled_ex.params_data()[0] = 0.2;
+    double scan_grad = 0.0, unrolled_grad = 0.0;
+    const double scan_lp = scan_ex.gradient(&scan_grad);
+    const double unrolled_lp = unrolled_ex.gradient(&unrolled_grad);
+    expect_ulp("scan lowering lp", scan_lp, unrolled_lp);
+    expect_ulp("scan lowering grad", scan_grad, unrolled_grad);
+
+    // A longer run exercises the scan's bounded six-way target accumulator.
+    // It mirrors the ordinary OP_ADD_N tree within the stable suffix. The
+    // generated register adjoint still associates repeated invariant-input
+    // increments differently and is documented separately below.
+    CompiledModel scan64 = compile_scan(64);
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel unrolled64;
+    try {
+      unrolled64 = compile_scan(64);
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+    Executor scan64_ex(std::move(scan64.graph));
+    scan64.bind(scan64_ex);
+    Executor unrolled64_ex(std::move(unrolled64.graph));
+    unrolled64.bind(unrolled64_ex);
+    scan64_ex.params_data()[0] = 0.2;
+    unrolled64_ex.params_data()[0] = 0.2;
+    scan_grad = 0.0;
+    unrolled_grad = 0.0;
+    const double scan64_lp = scan64_ex.gradient(&scan_grad);
+    const double unrolled64_lp = unrolled64_ex.gradient(&unrolled_grad);
+    expect_ulp("scan lowering N64 lp", scan64_lp, unrolled64_lp);
+    check(std::llabs(ulp_key(scan_grad) - ulp_key(unrolled_grad)) <= 4,
+          "scan lowering N64 gradient stays within documented ceiling");
+
+    DataMap indexed_data;
+    indexed_data.set_int("N", 40);
+    indexed_data.set_real_array("y", std::vector<double>(40, 0.0));
+    CompiledModel indexed = compile_without_graph_passes(
+        slurp("tests/fixtures/loopy.tmir.sexp"), indexed_data);
+    check(count_opcode(indexed, OP_SCAN) == 0,
+          "iterator-indexed rows refuse fixed scan");
+
+    DataMap effect_data;
+    effect_data.set_int("N", 40);
+    effect_data.set_int("M", 1);
+    effect_data.set_int("mode", 3);
+    CompiledModel effectful = compile_without_graph_passes(
+        slurp("tests/fixtures/invariant_target_loop.tmir.sexp"), effect_data);
+    check(count_opcode(effectful, OP_SCAN) == 0 &&
+              count_opcode(effectful, OP_PRINT) == 40,
+          "effectful loop refuses fixed scan");
+  }
+
+  // Fixed-scan activity is a recurrence fixed point, not just the provenance
+  // of the pre-peel slots. `active_state` begins as data but becomes active
+  // through theta, while data_state and the gain invariant stay inactive.
+  {
+    const std::string mir =
+        slurp("tests/fixtures/scan_dependency_lower.tmir.sexp");
+    const auto dependency_data = [] {
+      DataMap d;
+      d.set_int("N", 40);
+      d.set_real("gain", 0.37);
+      d.set_real("initial_data_state", -0.2);
+      return d;
+    };
+    CompiledModel scan = compile_without_graph_passes(mir, dependency_data());
+    const ScanSpec* spec = nullptr;
+    for (const Op& op : scan.graph.ops)
+      if (op.opcode == OP_SCAN) spec = static_cast<const ScanSpec*>(op.udata);
+    int active_invariants = 0;
+    int inactive_invariants = 0;
+    int active_carries = 0;
+    int inactive_carries = 0;
+    if (spec != nullptr && spec->templates.size() == 1) {
+      const ScanSpec::Template& tm = spec->templates[0];
+      for (const ScanSpec::InputBinding& input : tm.inputs) {
+        active_invariants += input.active ? 1 : 0;
+        inactive_invariants += input.active ? 0 : 1;
+      }
+      for (const ScanSpec::CarryBinding& carry : tm.carry) {
+        const auto input = std::find_if(
+            tm.step.ins.begin(), tm.step.ins.end(),
+            [&](const IslandProg::LiveIn& live_in) {
+              return live_in.reg == carry.entry_reg && live_in.len == carry.len;
+            });
+        if (input == tm.step.ins.end()) continue;
+        active_carries += input->active ? 1 : 0;
+        inactive_carries += input->active ? 0 : 1;
+      }
+    }
+    check(spec != nullptr && active_invariants == 1 &&
+              inactive_invariants == 1 && active_carries == 1 &&
+              inactive_carries == 1,
+          "fixed scan retains exact invariant and carry activity");
+
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel unrolled;
+    try {
+      unrolled = compile_without_graph_passes(mir, dependency_data());
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+    Executor scan_ex(std::move(scan.graph));
+    scan.bind(scan_ex);
+    Executor unrolled_ex(std::move(unrolled.graph));
+    unrolled.bind(unrolled_ex);
+    scan_ex.params_data()[0] = 0.21;
+    unrolled_ex.params_data()[0] = 0.21;
+    double scan_grad = 0.0;
+    double unrolled_grad = 0.0;
+    const double scan_lp = scan_ex.gradient(&scan_grad);
+    const double unrolled_lp = unrolled_ex.gradient(&unrolled_grad);
+    expect_ulp("fixed scan dependency lp", scan_lp, unrolled_lp);
+    expect_ulp("fixed scan dependency grad", scan_grad, unrolled_grad);
+  }
+
+  // A recurrent body with one alternating data branch is represented by two
+  // reusable row programs and an explicit schedule. Matrix/vector state is
+  // carried between templates, the data vector is streamed one row at a
+  // time, and the disjoint scalar likelihood sink is reassembled after the
+  // scan. The nested parameter branch remains a necessity island inside each
+  // template.
+  {
+    const std::string mir =
+        slurp("tests/fixtures/scan_scheduled_lower.tmir.sexp");
+    const auto scheduled_data = [](int N) {
+      std::ostringstream json;
+      json << "{\"N\":" << N << ",\"new_subject\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << (j % 2 == 0 ? 1 : 0);
+      }
+      json << "],\"row\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << '[' << 0.0003 * j << ',' << -0.0002 * j << ']';
+      }
+      json << "],\"jitter\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << 0.00001 * j;
+      }
+      json << "]}";
+      return DataMap::from_json(json.str());
+    };
+    const auto compile_scheduled = [&](int N) {
+      return compile_without_graph_passes(mir, scheduled_data(N));
+    };
+
+    CompiledModel scan40 = compile_scheduled(40);
+    check(count_opcode(scan40, OP_SCAN) == 1,
+          "alternating recurrence lowers to one scheduled scan");
+    const ScanSpec* spec = nullptr;
+    for (const Op& op : scan40.graph.ops)
+      if (op.opcode == OP_SCAN) spec = static_cast<const ScanSpec*>(op.udata);
+    check(spec != nullptr && spec->templates.size() == 2 &&
+              spec->template_for_iteration.size() == 39 &&
+              spec->carry_cells == 6 && spec->output_cells == 46,
+          "scheduled scan publishes two templates and two carries");
+    bool alternating = spec != nullptr;
+    bool nested_parameter_island = false;
+    bool inactive_row_vector_feed = false;
+    bool inactive_row_scalar_feed = false;
+    bool active_invariant = false;
+    if (spec != nullptr) {
+      for (size_t t = 0; t < spec->template_for_iteration.size(); ++t) {
+        // Template ids are assigned in first-seen order; they do not encode
+        // the boolean value which selected a path.
+        const uint32_t expected = t % 2 == 0 ? 0u : 1u;
+        alternating =
+            alternating && spec->template_for_iteration[t] == expected;
+      }
+      for (const ScanSpec::Template& tm : spec->templates) {
+        alternating = alternating && tm.carry.size() == 2 &&
+                      tm.inputs.size() >= 1 && tm.sinks.size() == 1 &&
+                      tm.target_reg < 0;
+        for (const ScanSpec::InputBinding& input : tm.inputs) {
+          if (input.iteration_stride == 3 && input.input_offset == 0 &&
+              input.len == 2 && !input.active)
+            inactive_row_vector_feed = true;
+          if (input.iteration_stride == 3 && input.input_offset == 2 &&
+              input.len == 1 && !input.active)
+            inactive_row_scalar_feed = true;
+          if (input.iteration_stride == 0 && input.active)
+            active_invariant = true;
+        }
+        for (const Program::Call& call : tm.step.calls)
+          nested_parameter_island =
+              nested_parameter_island || call.opcode == OP_ISLAND;
+      }
+    }
+    check(alternating, "scheduled scan records the alternating data plan");
+    check(nested_parameter_island,
+          "scheduled template retains nested parameter conditional");
+    check(inactive_row_vector_feed && inactive_row_scalar_feed &&
+              active_invariant,
+          "scheduled inputs pack multiple row feeds with exact activity");
+
+    CompiledModel scan80 = compile_scheduled(80);
+    check(count_opcode(scan80, OP_SCAN) == 1 &&
+              scan80.graph.ops.size() == scan40.graph.ops.size() &&
+              scan80.graph.slots.size() == scan40.graph.slots.size(),
+          "scheduled graph node counts are independent of row count");
+
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel unrolled40;
+    CompiledModel unrolled80;
+    try {
+      unrolled40 = compile_scheduled(40);
+      unrolled80 = compile_scheduled(80);
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+    check(count_opcode(unrolled40, OP_SCAN) == 0 &&
+              scan40.graph.ops.size() < unrolled40.graph.ops.size() &&
+              unrolled80.graph.ops.size() > unrolled40.graph.ops.size(),
+          "scheduled scan replaces linearly growing unrolled graph nodes");
+
+    Executor scan_ex(std::move(scan40.graph));
+    scan40.bind(scan_ex);
+    Executor unrolled_ex(std::move(unrolled40.graph));
+    unrolled40.bind(unrolled_ex);
+    const std::vector<double> q = {0.4,  0.03,  -0.02, 0.35,
+                                   0.08, -0.05, 0.2,   0.55};
+    check(scan_ex.n_params() == (int64_t)q.size() &&
+              unrolled_ex.n_params() == (int64_t)q.size(),
+          "scheduled fixture parameter count");
+    for (size_t k = 0; k < q.size(); ++k) {
+      scan_ex.params_data()[k] = q[k];
+      unrolled_ex.params_data()[k] = q[k];
+    }
+    std::vector<double> scan_grad(q.size()), unrolled_grad(q.size());
+    const double scan_lp = scan_ex.gradient(scan_grad.data());
+    const double unrolled_lp = unrolled_ex.gradient(unrolled_grad.data());
+    expect_ulp("scheduled scan lp", scan_lp, unrolled_lp);
+    for (size_t k = 0; k < q.size(); ++k)
+      expect_ulp("scheduled scan g" + std::to_string(k), scan_grad[k],
+                 unrolled_grad[k]);
+
+    // Exercise the other arm of the nested parameter conditional through
+    // the same immutable templates.
+    for (size_t k = 0; k < q.size(); ++k) {
+      const double value = k == 6 ? -q[k] : q[k];
+      scan_ex.params_data()[k] = value;
+      unrolled_ex.params_data()[k] = value;
+    }
+    const double negative_scan_lp = scan_ex.gradient(scan_grad.data());
+    const double negative_unrolled_lp =
+        unrolled_ex.gradient(unrolled_grad.data());
+    expect_ulp("scheduled negative lp", negative_scan_lp, negative_unrolled_lp);
+    for (size_t k = 0; k < q.size(); ++k)
+      expect_ulp("scheduled negative g" + std::to_string(k), scan_grad[k],
+                 unrolled_grad[k]);
+
+    // The condition result's AD metadata is not a dependency proof. A
+    // parameter comparison can be mislabeled DataOnly, while an evaluable
+    // data comparison can be conservatively labeled AutoDiffable. Scheduling
+    // must make the same decision from successful pure evaluation and retain
+    // unresolved runtime control in both cases.
+    const auto check_condition_label_variant =
+        [&](const std::string& variant, const std::string& label) {
+          CompiledModel scheduled =
+              compile_without_graph_passes(variant, scheduled_data(40));
+          test_setenv("STANLI_NO_SCAN", "1", 1);
+          CompiledModel ordinary;
+          try {
+            ordinary =
+                compile_without_graph_passes(variant, scheduled_data(40));
+          } catch (...) {
+            test_unsetenv("STANLI_NO_SCAN");
+            throw;
+          }
+          test_unsetenv("STANLI_NO_SCAN");
+          const ScanSpec* variant_spec = nullptr;
+          for (const Op& op : scheduled.graph.ops)
+            if (op.opcode == OP_SCAN)
+              variant_spec = static_cast<const ScanSpec*>(op.udata);
+          check(variant_spec != nullptr &&
+                    variant_spec->templates.size() == 2,
+                label + " retains the scheduled control plan");
+
+          Executor scheduled_executor(std::move(scheduled.graph));
+          scheduled.bind(scheduled_executor);
+          Executor ordinary_executor(std::move(ordinary.graph));
+          ordinary.bind(ordinary_executor);
+          for (double theta_sign : {1.0, -1.0}) {
+            for (size_t k = 0; k < q.size(); ++k) {
+              const double value = k == 6 ? theta_sign * std::abs(q[k]) : q[k];
+              scheduled_executor.params_data()[k] = value;
+              ordinary_executor.params_data()[k] = value;
+            }
+            std::vector<double> got_gradient(q.size()), want_gradient(q.size());
+            const double got =
+                scheduled_executor.gradient(got_gradient.data());
+            const double want = ordinary_executor.gradient(want_gradient.data());
+            expect_ulp(label + " lp", got, want);
+            for (size_t k = 0; k < q.size(); ++k)
+              expect_ulp(label + " g" + std::to_string(k), got_gradient[k],
+                         want_gradient[k]);
+          }
+        };
+    std::string parameter_condition_labeled_data = mir;
+    const int relabeled_parameter_conditions = relabel_fun_result_adlevel(
+        &parameter_condition_labeled_data, "Greater__", "(Var theta)",
+        "AutoDiffable", "DataOnly");
+    check(relabeled_parameter_conditions > 0,
+          "fixture relabels the parameter condition result only");
+    check_condition_label_variant(parameter_condition_labeled_data,
+                                  "data-labeled parameter condition");
+
+    std::string data_condition_labeled_active = mir;
+    const int relabeled_data_conditions = relabel_fun_result_adlevel(
+        &data_condition_labeled_active, "Equals__", "(Var new_subject)",
+        "DataOnly", "AutoDiffable");
+    check(relabeled_data_conditions > 0,
+          "fixture relabels the data condition result only");
+    check_condition_label_variant(data_condition_labeled_active,
+                                  "active-labeled data condition");
+
+    // JSON legitimately spells real-valued observations as integers when
+    // every cell happens to be integral. DataMap retains that lexical fact,
+    // but the MIR result type still says these row and jitter expressions are
+    // numeric feeds rather than integer schedule geometry.
+    const auto integral_numeric_data = [](int N) {
+      std::ostringstream json;
+      json << "{\"N\":" << N << ",\"new_subject\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << (j % 2 == 0 ? 1 : 0);
+      }
+      json << "],\"row\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << '[' << (j % 2) << ',' << ((j / 2) % 2) << ']';
+      }
+      json << "],\"jitter\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << 0;
+      }
+      json << "]}";
+      return DataMap::from_json(json.str());
+    };
+    CompiledModel integral_scan =
+        compile_without_graph_passes(mir, integral_numeric_data(34));
+    check(count_opcode(integral_scan, OP_SCAN) == 1,
+          "integral JSON values retain real row-feed semantics");
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel integral_unrolled;
+    try {
+      integral_unrolled =
+          compile_without_graph_passes(mir, integral_numeric_data(34));
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+    Executor integral_scan_ex(std::move(integral_scan.graph));
+    integral_scan.bind(integral_scan_ex);
+    Executor integral_unrolled_ex(std::move(integral_unrolled.graph));
+    integral_unrolled.bind(integral_unrolled_ex);
+    for (int64_t k = 0; k < integral_scan_ex.n_params(); ++k) {
+      integral_scan_ex.params_data()[k] = 0.0;
+      integral_unrolled_ex.params_data()[k] = 0.0;
+    }
+    std::vector<double> integral_scan_grad((size_t)integral_scan_ex.n_params());
+    std::vector<double> integral_unrolled_grad(
+        (size_t)integral_unrolled_ex.n_params());
+    const double integral_scan_lp =
+        integral_scan_ex.gradient(integral_scan_grad.data());
+    const double integral_unrolled_lp =
+        integral_unrolled_ex.gradient(integral_unrolled_grad.data());
+    expect_ulp("integral numeric scheduled lp", integral_scan_lp,
+               integral_unrolled_lp);
+    for (size_t k = 0; k < integral_scan_grad.size(); ++k)
+      expect_ulp("integral numeric scheduled g" + std::to_string(k),
+                 integral_scan_grad[k], integral_unrolled_grad[k]);
+  }
+
+  // Scheduled analysis may speculatively interpret a fixed inner loop before
+  // retaining it because its body depends on a parameter.  That attempt must
+  // be transactional: its lexical iterator is not the iterator used later by
+  // ordinary unrolled lowering.  The data gate deliberately changes across
+  // inner positions, while a nested parameter condition is a near miss which
+  // must remain runtime control inside the row program.
+  {
+    constexpr int kRows = 40;
+    constexpr int kInner = 5;
+    const std::string mir =
+        slurp("tests/fixtures/scan_iterator_transaction.tmir.sexp");
+    std::string alpha_mir = mir;
+    const auto rename_all = [&](const std::string& from,
+                                const std::string& to) {
+      size_t count = 0;
+      for (size_t at = 0; (at = alpha_mir.find(from, at)) != std::string::npos;
+           at += to.size()) {
+        alpha_mir.replace(at, from.size(), to);
+        ++count;
+      }
+      return count;
+    };
+    size_t renamed = 0;
+    renamed += rename_all("row_score", "objective_cells");
+    renamed += rename_all("observed", "measurements");
+    renamed += rename_all("restart", "renewal");
+    renamed += rename_all("gate", "switches");
+    renamed += rename_all("theta", "coefficient");
+    renamed += rename_all("state", "accumulator");
+    renamed += rename_all("inner", "position");
+    renamed += rename_all("row", "step");
+    check(renamed > 0, "iterator transaction fixture alpha-renamed");
+
+    const auto iterator_data = [](bool alpha) {
+      DataMap data;
+      data.set_int("N", kRows);
+      data.set_int("K", kInner);
+      std::vector<int> restart(kRows, 0);
+      for (int row = 0; row < kRows; row += 8) restart[(size_t)row] = 1;
+      data.set_int_array(alpha ? "renewal" : "restart", std::move(restart));
+      data.set_int_array(alpha ? "switches" : "gate", {1, 0, 1, 0, 1});
+      std::vector<double> observed(kRows);
+      for (int row = 0; row < kRows; ++row)
+        observed[(size_t)row] = -0.3 + 0.02 * row;
+      data.set_real_array(alpha ? "measurements" : "observed",
+                          std::move(observed));
+      return data;
+    };
+    const auto compile_unrolled = [&](const std::string& text,
+                                      const DataMap& data) {
+      test_setenv("STANLI_NO_SCAN", "1", 1);
+      try {
+        CompiledModel compiled = compile_without_graph_passes(text, data);
+        test_unsetenv("STANLI_NO_SCAN");
+        return compiled;
+      } catch (...) {
+        test_unsetenv("STANLI_NO_SCAN");
+        throw;
+      }
+    };
+    const auto find_scan = [](const CompiledModel& compiled) {
+      const ScanSpec* found = nullptr;
+      for (const Op& op : compiled.graph.ops)
+        if (op.opcode == OP_SCAN) {
+          if (found != nullptr) return static_cast<const ScanSpec*>(nullptr);
+          found = static_cast<const ScanSpec*>(op.udata);
+        }
+      return found;
+    };
+
+    CompiledModel scan =
+        compile_without_graph_passes(mir, iterator_data(false));
+    CompiledModel alpha_scan =
+        compile_without_graph_passes(alpha_mir, iterator_data(true));
+    CompiledModel unrolled = compile_unrolled(mir, iterator_data(false));
+    CompiledModel alpha_unrolled =
+        compile_unrolled(alpha_mir, iterator_data(true));
+    const ScanSpec* spec = find_scan(scan);
+    const ScanSpec* alpha_spec = find_scan(alpha_scan);
+    check(spec != nullptr && alpha_spec != nullptr &&
+              spec->count == kRows - 1 && alpha_spec->count == kRows - 1 &&
+              spec->templates.size() == 2 && alpha_spec->templates.size() == 2,
+          "retained inner loop lowers to an alpha-invariant scheduled scan");
+    int runtime_parameter_calls = 0;
+    bool root_control_folded = spec != nullptr;
+    if (spec != nullptr)
+      for (const ScanSpec::Template& tm : spec->templates) {
+        for (const Program::Instr& instruction : tm.step.code)
+          root_control_folded = root_control_folded &&
+                                instruction.code != Program::JZ &&
+                                instruction.code != Program::JMP;
+        for (const Program::Call& call : tm.step.calls)
+          runtime_parameter_calls += call.opcode == OP_ISLAND ? 1 : 0;
+      }
+    check(
+        root_control_folded && runtime_parameter_calls >= kInner,
+        "data iterator control folds while parameter control remains runtime");
+
+    Executor scan_ex(std::move(scan.graph));
+    scan.bind(scan_ex);
+    Executor alpha_scan_ex(std::move(alpha_scan.graph));
+    alpha_scan.bind(alpha_scan_ex);
+    Executor unrolled_ex(std::move(unrolled.graph));
+    unrolled.bind(unrolled_ex);
+    Executor alpha_unrolled_ex(std::move(alpha_unrolled.graph));
+    alpha_unrolled.bind(alpha_unrolled_ex);
+    for (double theta : {0.17, -0.17}) {
+      *scan_ex.params_data() = theta;
+      *alpha_scan_ex.params_data() = theta;
+      *unrolled_ex.params_data() = theta;
+      *alpha_unrolled_ex.params_data() = theta;
+      double scan_grad = 0.0;
+      double alpha_scan_grad = 0.0;
+      double unrolled_grad = 0.0;
+      double alpha_unrolled_grad = 0.0;
+      const double scan_lp = scan_ex.gradient(&scan_grad);
+      const double alpha_scan_lp = alpha_scan_ex.gradient(&alpha_scan_grad);
+      const double unrolled_lp = unrolled_ex.gradient(&unrolled_grad);
+      const double alpha_unrolled_lp =
+          alpha_unrolled_ex.gradient(&alpha_unrolled_grad);
+      const std::string sign = theta > 0 ? " positive" : " negative";
+      expect_eq("iterator transaction lp" + sign, scan_lp, unrolled_lp);
+      check(std::abs(scan_grad - unrolled_grad) <= 1e-12,
+            "iterator transaction gradient" + sign);
+      expect_eq("iterator alpha lp" + sign, alpha_scan_lp, scan_lp);
+      expect_eq("iterator alpha gradient" + sign, alpha_scan_grad, scan_grad);
+      expect_eq("iterator alpha unrolled lp" + sign, alpha_unrolled_lp,
+                unrolled_lp);
+      expect_eq("iterator alpha unrolled gradient" + sign, alpha_unrolled_grad,
+                unrolled_grad);
+    }
+  }
+
+  // Exact-one-trip proofs are source-statement proofs, not condition-text
+  // matches. Exercise two independent while sites nested in a fixed for loop;
+  // two guards update two counters in straight-line order, and a third has a
+  // iterator-dependent zero-trip arm. Multi-trip, early-continue, and unsafe
+  // backedge-read near misses must retain runtime behavior.
+  {
+    constexpr int kRows = 40;
+    constexpr int kLanes = 3;
+    const std::string mir =
+        slurp("tests/fixtures/scan_nested_one_trip.tmir.sexp");
+    std::string alpha_mir = mir;
+    for (const std::string& name : {"cursor_a", "cursor_b", "cursor_c",
+                                    "cursor_d", "cursor_e", "found_a",
+                                    "found_b", "found_c"}) {
+      const std::string renamed = "renamed_" + name;
+      for (size_t at = 0; (at = alpha_mir.find(name, at)) != std::string::npos;
+           at += renamed.size())
+        alpha_mir.replace(at, name.size(), renamed);
+    }
+    const auto nested_data = [&](int variant) {
+      DataMap data;
+      data.set_int("N", kRows);
+      data.set_int("L", kLanes);
+      data.set_int("early_exit", variant == 2);
+      data.set_int("unsafe_read", variant == 3);
+      data.set_int("limit_a", variant == 1 ? 2 : 1);
+      data.set_int("limit_b", 1);
+      std::vector<double> observed(kRows);
+      for (int row = 0; row < kRows; ++row)
+        observed[(size_t)row] = -0.25 + 0.0078125 * row;
+      data.set_real_array("observed", std::move(observed));
+      return data;
+    };
+    const auto find_scan = [](const CompiledModel& compiled) {
+      const ScanSpec* found = nullptr;
+      for (const Op& op : compiled.graph.ops)
+        if (op.opcode == OP_SCAN) {
+          if (found != nullptr) return static_cast<const ScanSpec*>(nullptr);
+          found = static_cast<const ScanSpec*>(op.udata);
+        }
+      return found;
+    };
+    const auto backedges = [](const IslandProg& root) {
+      int total = 0;
+      std::function<void(const IslandProg&)> visit = [&](const IslandProg& p) {
+        for (size_t pc = 0; pc < p.code.size(); ++pc) {
+          const Program::Instr& instruction = p.code[pc];
+          if ((instruction.code == Program::JZ ||
+               instruction.code == Program::JMP) &&
+              instruction.dst <= static_cast<int>(pc))
+            ++total;
+        }
+        for (const Program::Call& call : p.calls)
+          if (call.opcode == OP_ISLAND && call.udata != nullptr)
+            visit(*static_cast<const IslandProg*>(call.udata));
+      };
+      visit(root);
+      return total;
+    };
+    const auto compile_unrolled = [&](const DataMap& data) {
+      test_setenv("STANLI_NO_SCAN", "1", 1);
+      try {
+        CompiledModel compiled = compile_without_graph_passes(mir, data);
+        test_unsetenv("STANLI_NO_SCAN");
+        return compiled;
+      } catch (...) {
+        test_unsetenv("STANLI_NO_SCAN");
+        throw;
+      }
+    };
+    struct Evaluation {
+      double lp = 0.0;
+      double gradient = 0.0;
+    };
+    const auto evaluate = [](CompiledModel* compiled, double theta) {
+      Executor executor(std::move(compiled->graph));
+      compiled->bind(executor);
+      check(executor.n_params() == 1,
+            "nested one-trip fixture parameter count");
+      *executor.params_data() = theta;
+      Evaluation result;
+      result.lp = executor.gradient(&result.gradient);
+      return result;
+    };
+
+    for (int variant : {0, 1, 2, 3}) {
+      const bool near_miss = variant != 0;
+      const DataMap data = nested_data(variant);
+      CompiledModel scan = compile_without_graph_passes(mir, data);
+      const ScanSpec* spec = find_scan(scan);
+      check(near_miss || (spec != nullptr && spec->count == kRows - 1),
+            "nested one-trip loops lower to scheduled scan");
+      int scan_backedges = 0;
+      if (spec != nullptr)
+        for (const ScanSpec::Template& tm : spec->templates)
+          scan_backedges += backedges(tm.step);
+      check(near_miss ? spec == nullptr || scan_backedges > 0
+                      : scan_backedges == 0,
+            near_miss ? "nested two-trip site retains a backedge or refuses"
+                      : "multiple nested one-trip sites are acyclic");
+
+      // Binary-rational inputs isolate control-flow semantics from the
+      // changed adjoint accumulation grouping of the acyclic region.
+      for (double theta : {0.25, -0.125}) {
+        CompiledModel unrolled = compile_unrolled(data);
+        if (variant == 3) {
+          std::string scan_error;
+          std::string unrolled_error;
+          try {
+            (void)evaluate(&scan, theta);
+          } catch (const std::exception& error) {
+            scan_error = error.what();
+          }
+          try {
+            (void)evaluate(&unrolled, theta);
+          } catch (const std::exception& error) {
+            unrolled_error = error.what();
+          }
+          check(scan_error.find("out of") != std::string::npos &&
+                    unrolled_error.find("out of") != std::string::npos,
+                "single-iteration proof preserves failing backedge read");
+          scan = compile_without_graph_passes(mir, data);
+          continue;
+        }
+        const Evaluation scan_result = evaluate(&scan, theta);
+        const Evaluation unrolled_result = evaluate(&unrolled, theta);
+        const std::string tag =
+            std::string(near_miss ? "nested two-trip" : "nested one-trip") +
+            (theta > 0 ? " positive" : " negative");
+        expect_ulp(tag + " lp", scan_result.lp, unrolled_result.lp);
+        expect_ulp(tag + " gradient", scan_result.gradient,
+                   unrolled_result.gradient);
+        if (variant == 0) {
+          CompiledModel alpha =
+              compile_without_graph_passes(alpha_mir, data);
+          const ScanSpec* alpha_spec = find_scan(alpha);
+          check(alpha_spec != nullptr,
+                "alpha-renamed bounded loops retain scheduled scan");
+          if (alpha_spec != nullptr)
+            for (const ScanSpec::Template& tm : alpha_spec->templates)
+              check(backedges(tm.step) == 0,
+                    "alpha-renamed bounded loops remain acyclic");
+          const Evaluation alpha_result = evaluate(&alpha, theta);
+          expect_eq(tag + " alpha lp", alpha_result.lp, scan_result.lp);
+          expect_eq(tag + " alpha gradient", alpha_result.gradient,
+                    scan_result.gradient);
+        }
+        // evaluate consumes the graph; rebuild the scheduled candidate for
+        // the second parameter point.
+        scan = compile_without_graph_passes(mir, data);
+      }
+    }
+  }
+
+  // A row-varying data conditional nested below an unresolved parameter
+  // conditional becomes a four-template scheduled scan. Both parameter signs
+  // still match the unrolled oracle at the existing ULP budget.
+  {
+    constexpr int N = 40;
+    const std::string mir = slurp(
+        "tests/fixtures/scan_scheduled_data_if_near_miss.tmir.sexp");
+    const auto near_miss_data = [=] {
+      std::ostringstream json;
+      json << "{\"N\":" << N << ",\"new_subject\":[";
+      for (int row = 1; row <= N; ++row) {
+        if (row > 1) json << ',';
+        json << (row % 2 == 0 ? 1 : 0);
+      }
+      json << "],\"gate\":[";
+      for (int row = 1; row <= N; ++row) {
+        if (row > 1) json << ',';
+        // Deliberately vary the nested data branch after the peeled row.
+        json << (row % 3 == 0 ? 1 : 0);
+      }
+      json << "],\"row\":[";
+      for (int row = 1; row <= N; ++row) {
+        if (row > 1) json << ',';
+        json << '[' << 0.0003 * row << ',' << -0.0002 * row << ']';
+      }
+      json << "],\"jitter\":[";
+      for (int row = 1; row <= N; ++row) {
+        if (row > 1) json << ',';
+        json << 0.00001 * row;
+      }
+      json << "]}";
+      return DataMap::from_json(json.str());
+    };
+    const DataMap data = near_miss_data();
+    CompiledModel near_miss = compile_without_graph_passes(mir, data);
+    const ScanSpec* near_spec = nullptr;
+    for (const Op& op : near_miss.graph.ops)
+      if (op.opcode == OP_SCAN)
+        near_spec = static_cast<const ScanSpec*>(op.udata);
+    check(count_opcode(near_miss, OP_SCAN) == 1 && near_spec != nullptr &&
+              near_spec->count == N - 1 && near_spec->templates.size() == 4 &&
+              near_spec->template_for_iteration.size() == (size_t)N - 1,
+          "nested row-varying data If lowers to four scheduled templates");
+    const uint32_t expected_cycle[] = {0, 1, 0, 2, 3, 2};
+    bool near_schedule = near_spec != nullptr;
+    if (near_schedule)
+      for (size_t row = 0; row < near_spec->template_for_iteration.size();
+           ++row)
+        near_schedule = near_schedule &&
+                        near_spec->template_for_iteration[row] ==
+                            expected_cycle[row % 6];
+    check(near_schedule,
+          "nested row-varying data If records its four-template schedule");
+
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel unrolled;
+    try {
+      unrolled = compile_without_graph_passes(mir, data);
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+    check(count_opcode(unrolled, OP_SCAN) == 0,
+          "near-miss oracle remains unrolled");
+
+    Executor near_miss_ex(std::move(near_miss.graph));
+    near_miss.bind(near_miss_ex);
+    Executor unrolled_ex(std::move(unrolled.graph));
+    unrolled.bind(unrolled_ex);
+    const double values[8] = {0.4,  0.03,  -0.02, 0.35,
+                              0.08, -0.05, 0.2,   0.55};
+    check(near_miss_ex.n_params() == 8 && unrolled_ex.n_params() == 8,
+          "near-miss parameter count");
+    for (size_t i = 0; i < 8; ++i)
+      near_miss_ex.params_data()[i] = unrolled_ex.params_data()[i] = values[i];
+    double near_miss_grad[8] = {};
+    double unrolled_grad[8] = {};
+    for (double theta : {0.4, -0.4}) {
+      near_miss_ex.params_data()[6] = theta;
+      unrolled_ex.params_data()[6] = theta;
+      const double near_miss_lp = near_miss_ex.gradient(near_miss_grad);
+      const double unrolled_lp = unrolled_ex.gradient(unrolled_grad);
+      const std::string tag = std::string("nested data near miss ") +
+                              (theta > 0 ? "positive" : "negative");
+      expect_ulp(tag + " lp", near_miss_lp, unrolled_lp);
+      for (int i = 0; i < 8; ++i)
+        expect_ulp(tag + " g" + std::to_string(i), near_miss_grad[i],
+                   unrolled_grad[i]);
+    }
+  }
+
+  // Adapt the existing hand-authored unsized-array MIR by putting a shape
+  // query before its first assignment. The deferred binding must reject this
+  // read; accepting it as the historical zero-width sentinel would let the
+  // parameter-dependent island compile with the wrong geometry.
+  {
+    std::string mir = slurp("tests/fixtures/pr236_unsized_island.tmir.sexp");
+    const std::string marker =
+        "((pattern\n"
+        "                    (Assignment ((LVariable sym1__) ()) (UArray UInt)";
+    const size_t insertion = mir.find(marker);
+    check(insertion != std::string::npos,
+          "find unsized-array assignment for deferred-shape regression");
+    if (insertion != std::string::npos) {
+      const std::string probe =
+          "((pattern\n"
+          "                    (For (loopvar shape_probe__)\n"
+          "                     (lower\n"
+          "                      ((pattern (Lit Int 1))\n"
+          "                       (meta ((type_ UInt) (loc <opaque>)\n"
+          "                              (adlevel DataOnly)))))\n"
+          "                     (upper\n"
+          "                      ((pattern\n"
+          "                        (FunApp (CompilerInternal FnLength)\n"
+          "                         (((pattern (Var sym1__))\n"
+          "                           (meta ((type_ (UArray UInt))\n"
+          "                                  (loc <opaque>) (adlevel DataOnly)))))))\n"
+          "                       (meta ((type_ UInt) (loc <opaque>)\n"
+          "                              (adlevel DataOnly)))))\n"
+          "                     (body\n"
+          "                      ((pattern (Block ())) (meta <opaque>)))))\n"
+          "                    (meta <opaque>))\n";
+      mir.insert(insertion, probe);
+      DataMap d;
+      d.set_int_array("d", {2});
+      bool threw = false;
+      std::string message;
+      try {
+        (void)compile_model(mir, d);
+      } catch (const CompileError& e) {
+        threw = true;
+        message = e.what();
+      } catch (const std::exception& e) {
+        message = e.what();
+      }
+      check(threw,
+            "deferred unsized shape read before assignment fails closed");
+      check(message.find("FnLength") != std::string::npos ||
+                message.find("unsized local") != std::string::npos,
+            "deferred shape failure is not a zero-width sentinel fold: " +
+                message);
+    }
+  }
+
+  // A compact state-space recurrence exercises the generic scheduled-loop
+  // proof without relying on a model identity or a user-visible spelling.
+  // The twin is a complete alpha-renaming with permuted model-local carry
+  // declarations.  Numeric group data are selected through an immutable
+  // local alias, so freezing a representative group produces a real parity
+  // failure rather than merely a different structural census.
+  {
+    constexpr int kRows = 40;
+    constexpr int kGroups = 7;
+    const std::string mir =
+        slurp("tests/fixtures/scan_state_space_generic.tmir.sexp");
+    const std::string alpha_mir =
+        slurp("tests/fixtures/scan_state_space_generic_alpha.tmir.sexp");
+    const auto state_space_data = [=](bool alpha, int skipped_row = -1,
+                                      int third_fingerprint_row = -1,
+                                      int two_trip_row = -1,
+                                      bool unsafe_parameter_alias = false) {
+      DataMap data;
+      const auto name = [alpha](const char* ordinary, const char* renamed) {
+        return std::string(alpha ? renamed : ordinary);
+      };
+      data.set_int(name("T", "n_steps"), kRows);
+      data.set_int(name("G", "n_groups"), kGroups);
+      std::vector<int> reset(kRows), enabled(kRows, 1), group(kRows),
+          fingerprint(kRows, 0);
+      std::vector<double> time(kRows), predictor(kGroups), observation(kRows);
+      for (int row = 1; row <= kRows; ++row) {
+        // The peeled first row is not scheduled. Thereafter the first-seen
+        // reset template is followed by two continuations: 0,1,1,0,1,1,...
+        reset[(size_t)row - 1] = row >= 2 && (row - 2) % 3 == 0 ? 1 : 0;
+        group[(size_t)row - 1] = 1 + (row * 3) % kGroups;
+        time[(size_t)row - 1] = 0.01 * row;
+        observation[(size_t)row - 1] = -0.35 + 0.017 * row;
+      }
+      for (int group_index = 0; group_index < kGroups; ++group_index)
+        predictor[(size_t)group_index] =
+            group_index < 2 ? 0.0 : 0.15 * (group_index - 1);
+      if (skipped_row > 0) enabled[(size_t)skipped_row - 1] = 0;
+      if (third_fingerprint_row > 0)
+        fingerprint[(size_t)third_fingerprint_row - 1] = 1;
+      // The final scheduled row is a continuation. Enlarging only its span
+      // makes its exact data-only loop require two iterations.
+      if (two_trip_row > 1)
+        time[(size_t)two_trip_row - 1] =
+            time[(size_t)two_trip_row - 2] + 0.04;
+      data.set_int_array(name("restart", "boundary"), std::move(reset));
+      data.set_int_array(name("enabled", "usable"), std::move(enabled));
+      data.set_int_array(name("cohort", "membership"), std::move(group));
+      data.set_real_array(name("timestamps", "moments"), std::move(time));
+      data.set_real(name("max_step", "slice_limit"), 0.025);
+      data.set_real_array(name("predictors", "design"),
+                          std::move(predictor), {kGroups, 1});
+      data.set_real_array(name("observed", "measurement"),
+                          std::move(observation));
+      data.set_int(name("indexed_effects", "choose_indexed"),
+                   unsafe_parameter_alias ? 1 : 0);
+      data.set_int_array(name("fingerprint", "path_mark"),
+                         std::move(fingerprint));
+      return data;
+    };
+    const auto find_scan = [](const CompiledModel& compiled) {
+      const ScanSpec* found = nullptr;
+      for (const Op& op : compiled.graph.ops)
+        if (op.opcode == OP_SCAN) {
+          if (found != nullptr) return static_cast<const ScanSpec*>(nullptr);
+          found = static_cast<const ScanSpec*>(op.udata);
+        }
+      return found;
+    };
+    const auto program_census = [](const IslandProg& root) {
+      std::map<int, int> instructions;
+      std::map<int, int> calls;
+      int backedges = 0;
+      std::function<void(const IslandProg&)> visit = [&](const IslandProg& p) {
+        for (size_t pc = 0; pc < p.code.size(); ++pc) {
+          const Program::Instr& instruction = p.code[pc];
+          ++instructions[(int)instruction.code];
+          if ((instruction.code == Program::JZ ||
+               instruction.code == Program::JMP) &&
+              instruction.dst <= static_cast<int>(pc))
+            ++backedges;
+        }
+        for (const Program::Call& call : p.calls) {
+          ++calls[(int)call.opcode];
+          if (call.opcode == OP_ISLAND && call.udata != nullptr)
+            visit(*static_cast<const IslandProg*>(call.udata));
+        }
+      };
+      visit(root);
+      std::ostringstream out;
+      out << "i";
+      for (const auto& entry : instructions)
+        out << ':' << entry.first << '=' << entry.second;
+      out << ";c";
+      for (const auto& entry : calls)
+        out << ':' << entry.first << '=' << entry.second;
+      out << ";b=" << backedges;
+      return out.str();
+    };
+    const auto nested_backedges = [&](const ScanSpec* candidate,
+                                      size_t template_index) {
+      if (candidate == nullptr || template_index >= candidate->templates.size())
+        return 0;
+      const std::string census =
+          program_census(candidate->templates[template_index].step);
+      const size_t marker = census.rfind(";b=");
+      return marker == std::string::npos
+                 ? 0
+                 : std::stoi(census.substr(marker + 3));
+    };
+    const auto scan_census = [&](const ScanSpec* spec) {
+      if (spec == nullptr) return std::string("no-scan");
+      std::ostringstream out;
+      out << "n=" << spec->count << ";k=" << spec->templates.size()
+          << ";carry=" << spec->carry_cells
+          << ";output=" << spec->output_cells << ";schedule=";
+      for (uint32_t id : spec->template_for_iteration) out << id << ',';
+      for (size_t template_index = 0; template_index < spec->templates.size();
+           ++template_index) {
+        const ScanSpec::Template& tm = spec->templates[template_index];
+        std::vector<std::tuple<int64_t, int64_t, bool>> inputs;
+        std::vector<std::tuple<int64_t, bool, bool>> carries;
+        std::vector<std::pair<int64_t, int64_t>> sinks;
+        for (const ScanSpec::InputBinding& input : tm.inputs)
+          inputs.emplace_back(input.iteration_stride, input.len, input.active);
+        for (const ScanSpec::CarryBinding& carry : tm.carry)
+          carries.emplace_back(carry.len, carry.entry_reg >= 0,
+                               carry.exit_reg >= 0);
+        for (const ScanSpec::SinkBinding& sink : tm.sinks)
+          sinks.emplace_back(sink.iteration_stride, sink.len);
+        std::sort(inputs.begin(), inputs.end());
+        std::sort(carries.begin(), carries.end());
+        std::sort(sinks.begin(), sinks.end());
+        out << ";t" << template_index << ":in";
+        for (const auto& input : inputs)
+          out << '[' << std::get<0>(input) << ',' << std::get<1>(input) << ','
+              << std::get<2>(input) << ']';
+        out << ":carry";
+        for (const auto& carry : carries)
+          out << '[' << std::get<0>(carry) << ',' << std::get<1>(carry) << ','
+              << std::get<2>(carry) << ']';
+        out << ":sink";
+        for (const auto& sink : sinks)
+          out << '[' << sink.first << ',' << sink.second << ']';
+        out << ":adj=" << tm.step.adj.code.size() << ':'
+            << program_census(tm.step);
+      }
+      return out.str();
+    };
+    struct Evaluation {
+      double lp = 0.0;
+      std::vector<double> gradient;
+    };
+    const std::vector<double> q = {0.17, -0.08, 0.23, -0.2, 0.01, -0.02,
+                                   0.03, -0.04, 0.05, -0.06, 0.07};
+    const auto evaluate = [&](CompiledModel* compiled) {
+      Executor executor(std::move(compiled->graph));
+      compiled->bind(executor);
+      check(executor.n_params() == (int64_t)q.size(),
+            "generic state-space fixture parameter count");
+      for (size_t k = 0; k < q.size(); ++k) executor.params_data()[k] = q[k];
+      Evaluation result;
+      result.gradient.resize(q.size());
+      result.lp = executor.gradient(result.gradient.data());
+      return result;
+    };
+    const auto expect_evaluation_ulp = [&](const std::string& tag,
+                                           const Evaluation& got,
+                                           const Evaluation& want) {
+      expect_ulp(tag + " lp", got.lp, want.lp);
+      check(got.gradient.size() == want.gradient.size(), tag + " grad size");
+      for (size_t k = 0;
+           k < std::min(got.gradient.size(), want.gradient.size()); ++k)
+        expect_ulp(tag + " g" + std::to_string(k), got.gradient[k],
+                   want.gradient[k]);
+    };
+    const auto expect_evaluation_exact = [&](const std::string& tag,
+                                             const Evaluation& got,
+                                             const Evaluation& want) {
+      expect_eq(tag + " lp", got.lp, want.lp);
+      check(got.gradient.size() == want.gradient.size(), tag + " grad size");
+      for (size_t k = 0;
+           k < std::min(got.gradient.size(), want.gradient.size()); ++k)
+        expect_eq(tag + " g" + std::to_string(k), got.gradient[k],
+                  want.gradient[k]);
+    };
+    const auto compile_unrolled = [&](const std::string& text,
+                                      const DataMap& data) {
+      test_setenv("STANLI_NO_SCAN", "1", 1);
+      try {
+        CompiledModel compiled = compile_without_graph_passes(text, data);
+        test_unsetenv("STANLI_NO_SCAN");
+        return compiled;
+      } catch (...) {
+        test_unsetenv("STANLI_NO_SCAN");
+        throw;
+      }
+    };
+
+    const DataMap ordinary_data = state_space_data(false);
+    const DataMap renamed_data = state_space_data(true);
+    CompiledModel scan = compile_without_graph_passes(mir, ordinary_data);
+    CompiledModel alpha_scan =
+        compile_without_graph_passes(alpha_mir, renamed_data);
+    const ScanSpec* spec = find_scan(scan);
+    const ScanSpec* alpha_spec = find_scan(alpha_scan);
+    check(count_opcode(scan, OP_SCAN) == 1 &&
+              count_opcode(alpha_scan, OP_SCAN) == 1 && spec != nullptr &&
+              alpha_spec != nullptr && spec->count == kRows - 1 &&
+              spec->templates.size() == 2,
+          "arbitrary identifiers lower to one two-template scheduled scan");
+    bool exact_schedule = spec != nullptr && alpha_spec != nullptr &&
+                          spec->template_for_iteration.size() == kRows - 1;
+    if (exact_schedule)
+      for (size_t row = 0; row < spec->template_for_iteration.size(); ++row) {
+        const uint32_t expected = row % 3 == 0 ? 0u : 1u;
+        exact_schedule = exact_schedule &&
+                         spec->template_for_iteration[row] == expected &&
+                         alpha_spec->template_for_iteration[row] == expected;
+      }
+    check(exact_schedule,
+          "scheduled template ids follow first-seen nonalternating paths");
+    bool streamed_numeric_alias = false;
+    bool reset_carry = false;
+    bool continuation_carry = false;
+    if (spec != nullptr && spec->templates.size() == 2) {
+      for (const ScanSpec::Template& tm : spec->templates)
+        for (const ScanSpec::InputBinding& input : tm.inputs)
+          streamed_numeric_alias =
+              streamed_numeric_alias ||
+              (input.iteration_stride > 0 && input.len == 1 && !input.active);
+      for (const ScanSpec::CarryBinding& carry : spec->templates[0].carry)
+        reset_carry =
+            reset_carry || (carry.entry_reg < 0 && carry.exit_reg >= 0);
+      for (const ScanSpec::CarryBinding& carry : spec->templates[1].carry)
+        continuation_carry = continuation_carry ||
+                             (carry.entry_reg >= 0 && carry.exit_reg >= 0);
+    }
+    check(streamed_numeric_alias && reset_carry && continuation_carry,
+          "scan streams aliased numeric data and distinguishes reset carries");
+    check(spec != nullptr && alpha_spec != nullptr &&
+              scan_census(spec) == scan_census(alpha_spec),
+          "alpha rename and declaration permutation preserve scan census");
+    check(spec != nullptr && nested_backedges(spec, 0) == 0 &&
+              nested_backedges(spec, 1) == 0,
+          "data-proven one-trip continuation is acyclic");
+
+    CompiledModel unrolled = compile_unrolled(mir, ordinary_data);
+    CompiledModel alpha_unrolled = compile_unrolled(alpha_mir, renamed_data);
+    Evaluation scan_eval = evaluate(&scan);
+    Evaluation unrolled_eval = evaluate(&unrolled);
+    Evaluation alpha_scan_eval = evaluate(&alpha_scan);
+    Evaluation alpha_unrolled_eval = evaluate(&alpha_unrolled);
+    expect_evaluation_ulp("generic scheduled", scan_eval, unrolled_eval);
+    expect_evaluation_ulp("alpha scheduled", alpha_scan_eval,
+                          alpha_unrolled_eval);
+    expect_evaluation_exact("alpha equivalence", alpha_scan_eval, scan_eval);
+
+    const DataMap multi_data = state_space_data(false, -1, -1, kRows);
+    CompiledModel multi_step = compile_without_graph_passes(mir, multi_data);
+    const ScanSpec* multi_spec = find_scan(multi_step);
+    check(count_opcode(multi_step, OP_SCAN) == 0 ||
+              (multi_spec != nullptr && nested_backedges(multi_spec, 1) > 0),
+          "two-trip near miss is refused or retains its runtime loop");
+    CompiledModel multi_unrolled = compile_unrolled(mir, multi_data);
+    expect_evaluation_ulp("two-trip fallback", evaluate(&multi_step),
+                          evaluate(&multi_unrolled));
+
+    const auto check_special_schedule = [&](const CompiledModel& candidate,
+                                            int special_row,
+                                            const std::string& label) {
+      const ScanSpec* candidate_spec = find_scan(candidate);
+      check(count_opcode(candidate, OP_SCAN) == 1 && candidate_spec != nullptr &&
+                candidate_spec->count == kRows - 1 &&
+                candidate_spec->templates.size() == 3 &&
+                candidate_spec->template_for_iteration.size() ==
+                    (size_t)kRows - 1,
+            label + " lowers to three scheduled templates");
+      bool schedule = candidate_spec != nullptr;
+      if (schedule)
+        for (size_t row = 0;
+             row < candidate_spec->template_for_iteration.size(); ++row) {
+          const uint32_t expected =
+              (int)row == special_row - 2 ? 2u : (row % 3 == 0 ? 0u : 1u);
+          schedule = schedule &&
+                     candidate_spec->template_for_iteration[row] == expected;
+        }
+      check(schedule, label + " records its three-template schedule");
+    };
+    const DataMap skipped_data = state_space_data(false, 17);
+    CompiledModel skipped = compile_without_graph_passes(mir, skipped_data);
+    check_special_schedule(skipped, 17, "a skipped stable row");
+    const DataMap third_data = state_space_data(false, -1, 19);
+    CompiledModel third = compile_without_graph_passes(mir, third_data);
+    check_special_schedule(third, 19, "three specialized row fingerprints");
+    CompiledModel skipped_unrolled = compile_unrolled(mir, skipped_data);
+    CompiledModel third_unrolled = compile_unrolled(mir, third_data);
+    expect_evaluation_ulp("skipped stable row", evaluate(&skipped),
+                          evaluate(&skipped_unrolled));
+    expect_evaluation_ulp("three fingerprints", evaluate(&third),
+                          evaluate(&third_unrolled));
+    CompiledModel unsafe = compile_without_graph_passes(
+        mir, state_space_data(false, -1, -1, -1, true));
+    const ScanSpec* active_spec = find_scan(unsafe);
+    bool streams_active_rows = false;
+    if (active_spec != nullptr)
+      for (const ScanSpec::Template& tm : active_spec->templates)
+        for (const ScanSpec::InputBinding& input : tm.inputs)
+          streams_active_rows = streams_active_rows ||
+                                (input.active &&
+                                 input.iteration_stride > 0);
+    check(count_opcode(unsafe, OP_SCAN) == 1 && streams_active_rows,
+          "a local data alias streams parameter-selected row values");
+    CompiledModel unsafe_unrolled = compile_unrolled(
+        mir, state_space_data(false, -1, -1, -1, true));
+    expect_evaluation_ulp("active parameter row feed", evaluate(&unsafe),
+                          evaluate(&unsafe_unrolled));
+  }
+
+  // Four independent row controls expose sixteen reachable control patterns.
+  // The generic scheduler must cap template discovery and leave this model
+  // as ordinary unrolled graph work once the eight-template budget is passed.
+  {
+    constexpr int kRows = 34;
+    const std::string mir =
+        slurp("tests/fixtures/scan_scheduled_over_cap.tmir.sexp");
+    const auto over_cap_data = [=] {
+      DataMap data;
+      std::vector<int> gate_a(kRows), gate_b(kRows), gate_c(kRows),
+          gate_d(kRows);
+      std::vector<double> observation(kRows);
+      for (int row = 0; row < kRows; ++row) {
+        const int pattern = row == 0 ? 0 : (row - 1) % 16;
+        gate_a[(size_t)row] = (pattern >> 3) & 1;
+        gate_b[(size_t)row] = (pattern >> 2) & 1;
+        gate_c[(size_t)row] = (pattern >> 1) & 1;
+        gate_d[(size_t)row] = pattern & 1;
+        observation[(size_t)row] = -0.2 + 0.01 * row;
+      }
+      data.set_int("N", kRows);
+      data.set_int_array("gate_a", std::move(gate_a));
+      data.set_int_array("gate_b", std::move(gate_b));
+      data.set_int_array("gate_c", std::move(gate_c));
+      data.set_int_array("gate_d", std::move(gate_d));
+      data.set_real_array("observation", std::move(observation));
+      return data;
+    };
+    const DataMap data = over_cap_data();
+    const auto compile_unrolled = [&](const DataMap& input) {
+      test_setenv("STANLI_NO_SCAN", "1", 1);
+      try {
+        CompiledModel compiled = compile_without_graph_passes(mir, input);
+        test_unsetenv("STANLI_NO_SCAN");
+        return compiled;
+      } catch (...) {
+        test_unsetenv("STANLI_NO_SCAN");
+        throw;
+      }
+    };
+    CompiledModel over_cap = compile_without_graph_passes(mir, data);
+    CompiledModel over_cap_unrolled = compile_unrolled(data);
+    check(count_opcode(over_cap, OP_SCAN) == 0,
+          "sixteen control patterns exceed the scheduled-template cap");
+    check(same_graph_structure(over_cap, over_cap_unrolled) &&
+              same_fill_contents(over_cap, over_cap_unrolled),
+          "scheduled-template refusal leaves the ordinary graph unchanged");
+
+    struct Evaluation {
+      double lp = 0.0;
+      double gradient = 0.0;
+    };
+    const auto evaluate = [](CompiledModel* compiled, double theta) {
+      Executor executor(std::move(compiled->graph));
+      compiled->bind(executor);
+      check(executor.n_params() == 1,
+            "over-cap scheduled fixture parameter count");
+      executor.params_data()[0] = theta;
+      Evaluation result;
+      result.lp = executor.gradient(&result.gradient);
+      return result;
+    };
+    for (double theta : {0.35, -0.35}) {
+      CompiledModel fallback =
+          compile_without_graph_passes(mir, data);
+      CompiledModel oracle = compile_unrolled(data);
+      const Evaluation got = evaluate(&fallback, theta);
+      const Evaluation want = evaluate(&oracle, theta);
+      const std::string tag = std::string("over-cap fallback ") +
+                              (theta > 0 ? "positive" : "negative");
+      expect_ulp(tag + " lp", got.lp, want.lp);
+      expect_ulp(tag + " gradient", got.gradient, want.gradient);
+    }
+  }
+
+  // The generic opening-gate adapter accepts arbitrary row/previous aliases
+  // and proves that two read-modify-write updates both address the current
+  // sink cell.  Its alpha-renamed twin also permutes independent model-local
+  // declarations.  A neighboring-cell read is a distinct near miss: it must
+  // remain ordinary unrolled graph work.
+  {
+    constexpr int kRows = 40;
+    const std::string mir =
+        slurp("tests/fixtures/scan_normalize_generic.tmir.sexp");
+    const std::string alpha_mir =
+        slurp("tests/fixtures/scan_normalize_generic_alpha.tmir.sexp");
+    const std::string neighbor_mir =
+        slurp("tests/fixtures/scan_normalize_neighbor.tmir.sexp");
+    const std::string opening_sink_mir =
+        slurp("tests/fixtures/scan_normalize_opening_sink.tmir.sexp");
+    const auto adapter_data = [=](bool alpha) {
+      DataMap data;
+      const auto name = [alpha](const char* ordinary, const char* renamed) {
+        return std::string(alpha ? renamed : ordinary);
+      };
+      data.set_int(name("N", "width"), kRows);
+      std::vector<int> active(kRows, 1), reset(kRows);
+      std::vector<double> time(kRows), input(kRows), observation(kRows);
+      for (int row = 1; row <= kRows; ++row) {
+        reset[(size_t)row - 1] = (row - 1) % 3 == 0 ? 1 : 0;
+        time[(size_t)row - 1] = 0.01 * row;
+        input[(size_t)row - 1] = row < 8 ? 0.0 : 0.003 * row;
+        observation[(size_t)row - 1] = -0.2 + 0.011 * row;
+      }
+      data.set_int_array(name("active", "admitted"), std::move(active));
+      data.set_int_array(name("restart", "renewal"), std::move(reset));
+      data.set_real_array(name("clock", "instants"), std::move(time));
+      data.set_real_array(name("input", "forcing"), std::move(input));
+      data.set_real_array(name("observed", "response"),
+                          std::move(observation));
+      return data;
+    };
+    const auto find_scan = [](const CompiledModel& compiled) {
+      const ScanSpec* found = nullptr;
+      for (const Op& op : compiled.graph.ops)
+        if (op.opcode == OP_SCAN) {
+          if (found != nullptr) return static_cast<const ScanSpec*>(nullptr);
+          found = static_cast<const ScanSpec*>(op.udata);
+        }
+      return found;
+    };
+    const auto adapter_census = [](const ScanSpec* spec) {
+      if (spec == nullptr) return std::string("no-scan");
+      std::ostringstream out;
+      out << spec->count << ':' << spec->carry_cells << ':'
+          << spec->output_cells << ':' << spec->templates.size() << ':';
+      for (uint32_t id : spec->template_for_iteration) out << id << ',';
+      for (const ScanSpec::Template& tm : spec->templates) {
+        std::vector<std::tuple<int64_t, int64_t, bool>> inputs;
+        std::vector<std::tuple<int64_t, bool, bool>> carries;
+        for (const ScanSpec::InputBinding& input_binding : tm.inputs)
+          inputs.emplace_back(input_binding.iteration_stride,
+                              input_binding.len, input_binding.active);
+        for (const ScanSpec::CarryBinding& carry : tm.carry)
+          carries.emplace_back(carry.len, carry.entry_reg >= 0,
+                               carry.exit_reg >= 0);
+        std::sort(inputs.begin(), inputs.end());
+        std::sort(carries.begin(), carries.end());
+        out << ";in";
+        for (const auto& input_binding : inputs)
+          out << '[' << std::get<0>(input_binding) << ','
+              << std::get<1>(input_binding) << ','
+              << std::get<2>(input_binding) << ']';
+        out << ";carry";
+        for (const auto& carry : carries)
+          out << '[' << std::get<0>(carry) << ',' << std::get<1>(carry) << ','
+              << std::get<2>(carry) << ']';
+        out << ";sink" << tm.sinks.size() << ";code" << tm.step.code.size()
+            << ";call" << tm.step.calls.size() << ";adj"
+            << tm.step.adj.code.size();
+      }
+      return out.str();
+    };
+    const DataMap ordinary_data = adapter_data(false);
+    const DataMap renamed_data = adapter_data(true);
+    CompiledModel scan = compile_without_graph_passes(mir, ordinary_data);
+    CompiledModel alpha_scan =
+        compile_without_graph_passes(alpha_mir, renamed_data);
+    const ScanSpec* spec = find_scan(scan);
+    const ScanSpec* alpha_spec = find_scan(alpha_scan);
+    check(count_opcode(scan, OP_SCAN) == 1 &&
+              count_opcode(alpha_scan, OP_SCAN) == 1 && spec != nullptr &&
+              alpha_spec != nullptr && spec->count == kRows &&
+              spec->templates.size() == 2,
+          "generic opening-gate aliases normalize to scheduled scans");
+    bool exact_schedule = spec != nullptr && alpha_spec != nullptr &&
+                          spec->template_for_iteration.size() == kRows;
+    if (exact_schedule)
+      for (size_t row = 0; row < spec->template_for_iteration.size(); ++row) {
+        const uint32_t expected = row % 3 == 0 ? 0u : 1u;
+        exact_schedule = exact_schedule &&
+                         spec->template_for_iteration[row] == expected &&
+                         alpha_spec->template_for_iteration[row] == expected;
+      }
+    check(exact_schedule && adapter_census(spec) == adapter_census(alpha_spec),
+          "generic adapter alpha rename preserves exact scan structure");
+    bool one_sink_per_template = spec != nullptr;
+    if (spec != nullptr)
+      for (const ScanSpec::Template& tm : spec->templates)
+        one_sink_per_template = one_sink_per_template && tm.sinks.size() == 1 &&
+                                tm.sinks[0].len == 1;
+    check(one_sink_per_template,
+          "same-cell read-modify-write updates publish one scalar sink");
+
+    const auto compile_unrolled = [&](const std::string& text,
+                                      const DataMap& data) {
+      test_setenv("STANLI_NO_SCAN", "1", 1);
+      try {
+        CompiledModel compiled = compile_without_graph_passes(text, data);
+        test_unsetenv("STANLI_NO_SCAN");
+        return compiled;
+      } catch (...) {
+        test_unsetenv("STANLI_NO_SCAN");
+        throw;
+      }
+    };
+    CompiledModel unrolled = compile_unrolled(mir, ordinary_data);
+    CompiledModel alpha_unrolled = compile_unrolled(alpha_mir, renamed_data);
+    const std::vector<double> q = {0.13, -0.09, -0.25};
+    const auto evaluate = [&](CompiledModel* compiled) {
+      Executor executor(std::move(compiled->graph));
+      compiled->bind(executor);
+      check(executor.n_params() == (int64_t)q.size(),
+            "generic adapter fixture parameter count");
+      for (size_t k = 0; k < q.size(); ++k) executor.params_data()[k] = q[k];
+      std::vector<double> gradient(q.size());
+      const double lp = executor.gradient(gradient.data());
+      return std::make_pair(lp, gradient);
+    };
+    const auto scan_result = evaluate(&scan);
+    const auto unrolled_result = evaluate(&unrolled);
+    const auto alpha_result = evaluate(&alpha_scan);
+    const auto alpha_unrolled_result = evaluate(&alpha_unrolled);
+    expect_ulp("generic adapter lp", scan_result.first,
+               unrolled_result.first);
+    expect_ulp("generic adapter alpha lp", alpha_result.first,
+               alpha_unrolled_result.first);
+    expect_eq("generic adapter rename lp", alpha_result.first,
+              scan_result.first);
+    for (size_t k = 0; k < q.size(); ++k) {
+      expect_ulp("generic adapter g" + std::to_string(k),
+                 scan_result.second[k], unrolled_result.second[k]);
+      expect_ulp("generic adapter alpha g" + std::to_string(k),
+                 alpha_result.second[k], alpha_unrolled_result.second[k]);
+      expect_eq("generic adapter rename g" + std::to_string(k),
+                alpha_result.second[k], scan_result.second[k]);
+    }
+
+    CompiledModel neighbor =
+        compile_without_graph_passes(neighbor_mir, ordinary_data);
+    check(count_opcode(neighbor, OP_SCAN) == 0,
+          "neighboring-cell sink read refuses generic normalization");
+    CompiledModel opening_sink =
+        compile_without_graph_passes(opening_sink_mir, ordinary_data);
+    check(count_opcode(opening_sink, OP_SCAN) == 0,
+          "opening sink write refuses read-modify-write normalization");
+    CompiledModel opening_sink_unrolled =
+        compile_unrolled(opening_sink_mir, ordinary_data);
+    const auto opening_result = evaluate(&opening_sink);
+    const auto opening_unrolled_result = evaluate(&opening_sink_unrolled);
+    expect_eq("opening sink fallback lp", opening_result.first,
+              opening_unrolled_result.first);
+    for (size_t k = 0; k < q.size(); ++k)
+      expect_eq("opening sink fallback g" + std::to_string(k),
+                opening_result.second[k], opening_unrolled_result.second[k]);
+  }
+
+  // More logical carries/invariants than Op::in can hold are packed by
+  // dependency class.  The active pack participates in reverse mode, while
+  // the streamed-row descriptor remains inactive and distinct.
+  {
+    const std::string mir =
+        slurp("tests/fixtures/scan_packed_inputs.tmir.sexp");
+    const auto packed_data = [](int N) {
+      std::ostringstream json;
+      json << "{\"N\":" << N << ",\"new_subject\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << (j % 2 == 0 ? 1 : 0);
+      }
+      json << "],\"row\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << 0.0001 * j;
+      }
+      json << "],\"jitter\":[";
+      for (int j = 1; j <= N; ++j) {
+        if (j > 1) json << ',';
+        json << 0.00001 * j;
+      }
+      json << "],\"gain\":0.17,\"shift\":-0.09}";
+      return DataMap::from_json(json.str());
+    };
+
+    CompiledModel scan = compile_without_graph_passes(mir, packed_data(40));
+    const Op* scan_op = nullptr;
+    const ScanSpec* spec = nullptr;
+    for (const Op& op : scan.graph.ops) {
+      if (op.opcode != OP_SCAN) continue;
+      scan_op = &op;
+      spec = static_cast<const ScanSpec*>(op.udata);
+    }
+    check(scan_op != nullptr && spec != nullptr,
+          "many-input recurrence lowers to scheduled scan");
+    std::set<int> active_inputs, row_inputs;
+    std::set<int64_t> active_offsets, row_offsets;
+    bool inactive_rows = true;
+    if (spec != nullptr) {
+      for (const ScanSpec::Template& tm : spec->templates) {
+        for (const ScanSpec::InputBinding& input : tm.inputs) {
+          if (input.iteration_stride != 0) {
+            row_inputs.insert(input.op_input);
+            row_offsets.insert(input.input_offset);
+            inactive_rows = inactive_rows && !input.active;
+          } else if (input.active) {
+            active_inputs.insert(input.op_input);
+            active_offsets.insert(input.input_offset);
+          }
+        }
+        for (const ScanSpec::CarryBinding& carry : tm.carry)
+          active_inputs.insert(carry.op_input);
+      }
+    }
+    check(scan_op != nullptr && scan_op->n_in == 2 &&
+              active_inputs.size() == 1 && row_inputs.size() == 1 &&
+              *active_inputs.begin() != *row_inputs.begin() && inactive_rows,
+          "scheduled descriptor packs preserve dependency classes");
+    check(active_offsets.size() >= 7 && row_offsets.size() >= 2,
+          "scheduled packs retain logical invariant offsets");
+
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel unrolled;
+    try {
+      unrolled = compile_without_graph_passes(mir, packed_data(40));
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+    Executor scan_ex(std::move(scan.graph));
+    scan.bind(scan_ex);
+    Executor unrolled_ex(std::move(unrolled.graph));
+    unrolled.bind(unrolled_ex);
+    const std::vector<double> q = {0.2,  0.31, -0.12, 0.07,
+                                   0.18, 0.09, -0.04, 0.27};
+    for (size_t k = 0; k < q.size(); ++k) {
+      scan_ex.params_data()[k] = q[k];
+      unrolled_ex.params_data()[k] = q[k];
+    }
+    std::vector<double> scan_grad(q.size()), unrolled_grad(q.size());
+    const double scan_lp = scan_ex.gradient(scan_grad.data());
+    const double unrolled_lp = unrolled_ex.gradient(unrolled_grad.data());
+    expect_ulp("packed scheduled lp", scan_lp, unrolled_lp);
+    for (size_t k = 0; k < q.size(); ++k)
+      expect_ulp("packed scheduled g" + std::to_string(k), scan_grad[k],
+                 unrolled_grad[k]);
   }
 
   // Static if inside an unrolled loop, condition indexing data by the loop
@@ -2632,6 +4258,234 @@ int main() {
     test_unsetenv("STANLI_NO_ISLAND");
   }
 
+  // A runtime region invalidates any interpreter copy of the names it
+  // writes.  Otherwise the second condition below is folded from x's old
+  // data value even though the first condition may replace x with theta.
+  {
+    DataMap d;
+    d.set_real("d", -1.0);
+    CompiledModel cm = compile_model(
+        slurp("tests/fixtures/runtime_liveout_condition.tmir.sexp"), d);
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    double grad = 0.0;
+    *ex.params_data() = 0.1;
+    expect_eq("runtime live-out condition positive lp", ex.gradient(&grad),
+              10.1);
+    expect_eq("runtime live-out condition positive grad", grad, 1.0);
+    *ex.params_data() = -0.1;
+    expect_eq("runtime live-out condition negative lp", ex.gradient(&grad),
+              19.0);
+    expect_eq("runtime live-out condition negative grad", grad, 0.0);
+  }
+
+  // A fixed scan has the same interpreter-invalidation obligation as a
+  // runtime region.  Its peeled first iteration observes state == 1, but the
+  // condition after the scan must read the final carry state == N.
+  {
+    DataMap d;
+    d.set_int("N", 33);
+    CompiledModel cm = compile_without_graph_passes(
+        slurp("tests/fixtures/scan_liveout_condition.tmir.sexp"), d);
+    check(count_opcode(cm, OP_SCAN) == 1,
+          "scan live-out condition uses fixed scan");
+    check(count_opcode(cm, OP_ISLAND) == 1,
+          "scan live-out condition reads the runtime carry");
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    *ex.params_data() = 0.5;
+    double grad = 0.0;
+    expect_eq("scan live-out condition lp", ex.gradient(&grad), 17.0);
+    expect_eq("scan live-out condition grad", grad, 34.0);
+  }
+
+  // A runtime region may change a container's values without changing its
+  // declared geometry.  Shape specialization must read the live-out view and
+  // fold the following guard instead of creating a second parameter island.
+  {
+    DataMap d;
+    d.set_int("n", 3);
+    CompiledModel cm = compile_without_optional_islands(
+        slurp("tests/fixtures/runtime_liveout_shape.tmir.sexp"), d);
+    check(count_opcode(cm, OP_ISLAND) == 1,
+          "runtime live-out shape guard folds after value island");
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    check(ex.n_params() == 13, "runtime live-out shape parameter count");
+    for (int i = 0; i < 13; ++i) ex.params_data()[i] = 0.0;
+    std::vector<double> grad(13);
+    for (double theta : {0.5, -0.5}) {
+      ex.params_data()[0] = theta;
+      expect_eq("runtime live-out shape lp " + std::to_string(theta),
+                ex.gradient(grad.data()), theta);
+      expect_eq("runtime live-out shape theta grad " + std::to_string(theta),
+                grad[0], 1.0);
+      for (int i = 1; i < 13; ++i)
+        expect_eq("runtime live-out shape matrix grad " + std::to_string(i),
+                  grad[i], 0.0);
+    }
+  }
+
+  // O1 represents an inlined container return with a zero-width sentinel.
+  // A parameter-selected array-of-vector result must adopt the runtime
+  // region's complete logical shape, including its vector leaf.
+  {
+    CompiledModel cm = compile_without_optional_islands(
+        slurp("tests/fixtures/runtime_liveout_array_shape.tmir.sexp"),
+        DataMap());
+    check(count_opcode(cm, OP_ISLAND) == 1,
+          "runtime array live-out uses one value island");
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    check(ex.n_params() == 9, "runtime array live-out parameter count");
+    const double params[9] = {0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+    std::copy(std::begin(params), std::end(params), ex.params_data());
+    double grad[9] = {};
+    expect_eq("runtime array live-out positive lp", ex.gradient(grad), 3.0);
+    for (int i = 0; i < 9; ++i)
+      expect_eq("runtime array live-out positive grad " + std::to_string(i),
+                grad[i], i == 1 || i == 2 ? 1.0 : 0.0);
+
+    ex.params_data()[0] = -0.5;
+    expect_eq("runtime array live-out negative lp", ex.gradient(grad), 11.0);
+    for (int i = 0; i < 9; ++i)
+      expect_eq("runtime array live-out negative grad " + std::to_string(i),
+                grad[i], i == 5 || i == 6 ? 1.0 : 0.0);
+  }
+
+  // Runtime control does not make a value parameter-dependent by itself.
+  // This while executes in a register-program island, but all of z's inputs
+  // are data, so z remains a valid data design matrix for normal_id_glm.
+  {
+    DataMap d;
+    d.set_real_array("x", {1.0, 0.0, 0.0, 1.0}, {2, 2});
+    d.set_real_array("y", {0.0, 0.0}, {2});
+    CompiledModel cm = compile_model(
+        slurp("tests/fixtures/runtime_data_liveout_glm.tmir.sexp"), d);
+    check(cm.n_unconstrained == 4,
+          "data-only runtime live-out remains GLM-compatible");
+  }
+
+  // A parameter-selected region may still produce a data-only value.  Build
+  // the two focused variants from the existing GLM MIR so both exercise the
+  // same downstream normal_id_glm check and differ only in the arm values.
+  {
+    const std::string base =
+        slurp("tests/fixtures/runtime_data_liveout_glm.tmir.sexp");
+    const std::string begin =
+        "((pattern\n         (Assignment ((LVariable z) ()) UMatrix";
+    const std::string end =
+        "       ((pattern\n         (While";
+    const size_t first = base.find(begin);
+    const size_t last = base.find(end, first);
+    check(first != std::string::npos && last != std::string::npos &&
+              first < last,
+          "find GLM live-out assignment for provenance variants");
+    if (first != std::string::npos && last != std::string::npos &&
+        first < last) {
+      const std::string assignment = base.substr(first, last - first);
+      const std::string condition_fixture =
+          slurp("tests/fixtures/runtime_liveout_condition.tmir.sexp");
+      const std::string condition_start =
+          "((pattern\n            (FunApp (StanLib Greater__ FnPlain AoS)";
+      const std::string condition_end =
+          "          ((pattern\n            (Block";
+      const size_t condition_at = condition_fixture.find(condition_start);
+      const size_t condition_stop =
+          condition_fixture.find(condition_end, condition_at);
+      check(condition_at != std::string::npos &&
+                condition_stop != std::string::npos &&
+                condition_at < condition_stop,
+            "find parameter condition for provenance variants");
+      std::string condition = condition_fixture.substr(
+          condition_at, condition_stop - condition_at);
+      size_t theta_at = condition.find("theta");
+      while (theta_at != std::string::npos) {
+        condition.replace(theta_at, 5, "alpha");
+        theta_at = condition.find("theta", theta_at + 5);
+      }
+      const auto block = [&](const std::string& value) {
+        return "((pattern (Block (" + value + "))) (meta <opaque>))";
+      };
+      const auto branch = [&](const std::string& value) {
+        return "((pattern\n (IfElse\n" + condition + "\n" +
+               block(value) + "\n(" + block(value) + ")" +
+               "))\n (meta <opaque>))\n";
+      };
+      const std::string identical =
+          base.substr(0, first) + branch(assignment) + base.substr(last);
+      DataMap d;
+      d.set_real_array("x", {1.0, 0.0, 0.0, 1.0}, {2, 2});
+      d.set_real_array("y", {0.0, 0.0}, {2});
+      bool accepted = true;
+      std::string identical_error;
+      try {
+        (void)compile_model(identical, d);
+      } catch (const std::exception& e) {
+        accepted = false;
+        identical_error = e.what();
+      }
+      check(accepted,
+            "identical data-valued parameter arms remain GLM-compatible: " +
+                identical_error);
+
+      const std::string source = "((pattern (Var x))";
+      const size_t source_at = assignment.find(source);
+      const size_t source_end = assignment.find("))))", source_at);
+      check(source_at != std::string::npos,
+            "find GLM provenance variant source value");
+      check(source_end != std::string::npos,
+            "find GLM provenance variant source metadata");
+      if (source_at != std::string::npos && source_end != std::string::npos) {
+        const size_t source_size = source_end + 4 - source_at;
+        const std::string data_value =
+            "((pattern (Var x)) (meta ((type_ UMatrix) (loc <opaque>) "
+            "(adlevel AutoDiffable))))";
+        const std::string ternary =
+            "((pattern (TernaryIf\n" + condition + "\n" + data_value +
+            "\n" + data_value + ")\n (meta ((type_ UMatrix) "
+            "(loc <opaque>) (adlevel AutoDiffable)))))";
+        std::string ternary_assignment = assignment;
+        ternary_assignment.replace(source_at, source_size, ternary);
+        const std::string ternary_mir =
+            base.substr(0, first) + ternary_assignment + base.substr(last);
+        bool ternary_accepted = true;
+        std::string ternary_error;
+        try {
+          (void)compile_model(ternary_mir, d);
+        } catch (const std::exception& e) {
+          ternary_accepted = false;
+          ternary_error = e.what();
+        }
+        check(ternary_accepted,
+              "identical data-valued parameter ternary remains GLM-compatible: " +
+                  ternary_error);
+
+        const std::string doubled = R"MIR(((pattern
+          (FunApp (StanLib Plus__ FnPlain AoS)
+           (((pattern (Var x))
+             (meta ((type_ UMatrix) (loc <opaque>) (adlevel AutoDiffable))))
+            ((pattern (Var x))
+             (meta ((type_ UMatrix) (loc <opaque>) (adlevel AutoDiffable)))))))
+         (meta ((type_ UMatrix) (loc <opaque>) (adlevel AutoDiffable)))))MIR";
+        std::string differing = assignment;
+        differing.replace(source_at, source_size, doubled);
+        const std::string differing_mir =
+            base.substr(0, first) +
+            "((pattern\n (IfElse\n" + condition + "\n" +
+            block(assignment) + "\n(" + block(differing) + ")" +
+            "))\n (meta <opaque>))\n" +
+            base.substr(last);
+        const std::string differing_error =
+            lower_error(differing_mir, d, false);
+        check(differing_error.find("normal_id_glm: X must be a data matrix") !=
+                  std::string::npos,
+              "differing data-valued parameter arms stay GLM-rejected: " +
+                  differing_error);
+      }
+    }
+  }
+
   // A shape-only guard on a parameter matrix is fixed when the data is
   // bound, despite the matrix values remaining autodiffable.  It must fold
   // before the UDF's synthetic early-return loop is lowered: the resulting
@@ -2662,6 +4516,35 @@ int main() {
         expect_eq(tag + " matrix grad " + std::to_string(i), grad[i], 0.0);
       expect_eq(tag + " alpha grad", grad[2 * n], residual);
       expect_eq(tag + " beta grad", grad[2 * n + 1], x * residual);
+    }
+  }
+
+  // Shape-only predicates stay static through wrappers which would otherwise
+  // lower real graph work: transpose, array indexing, and indexed dims.  The
+  // array leaf and matrix row extent are deliberately zero in the first run.
+  {
+    const std::string mir =
+        slurp("tests/fixtures/shape_wrapped_guard.tmir.sexp");
+    for (int n : {0, 3}) {
+      DataMap d;
+      d.set_int("n", n);
+      CompiledModel cm = compile_without_optional_islands(mir, d);
+      const std::string tag = "wrapped shape guard " + std::to_string(n);
+      check(cm.n_unconstrained == 4 * n + 1, tag + " parameter count");
+      check(count_opcode(cm, OP_ISLAND) == 0, tag + " has no island");
+      check(count_opcode(cm, OP_TRANSPOSE) == 0,
+            tag + " does not materialize shape-only transpose");
+
+      Executor ex(std::move(cm.graph));
+      cm.bind(ex);
+      for (int i = 0; i < 4 * n; ++i) ex.params_data()[i] = 0.1 * (i + 1);
+      ex.params_data()[4 * n] = 0.5;
+      std::vector<double> grad(static_cast<size_t>(4 * n + 1));
+      expect_eq(tag + " lp", ex.gradient(grad.data()), 3.5);
+      for (int i = 0; i < 4 * n; ++i)
+        expect_eq(tag + " geometry parameter grad " + std::to_string(i),
+                  grad[i], 0.0);
+      expect_eq(tag + " theta grad", grad[4 * n], 7.0);
     }
   }
 
@@ -2701,6 +4584,9 @@ int main() {
       (void)compile_without_optional_islands(mir, bad);
     } catch (const CompileError& e) {
       threw = std::string(e.what()).find("out of bounds") != std::string::npos;
+    } catch (const std::exception& e) {
+      threw = std::string(e.what()).find("must be less than or equal") !=
+              std::string::npos;
     }
     check(threw, "indexed shape guard rejects reached out-of-bounds index");
   }
@@ -2764,6 +4650,310 @@ int main() {
     }
   }
 
+  // A data gather selects part of a parameter matrix, but rows()/cols() still
+  // inspect only the selected view's data-sized geometry.  That first guard
+  // folds without materializing the gather; the following scalar cell read is
+  // a genuine parameter condition and must remain one necessity island.
+  {
+    DataMap d;
+    d.set_int("N", 3);
+    d.set_int("K", 2);
+    d.set_int_array("idx", {3, 1});
+    CompiledModel cm = compile_without_optional_islands(
+        slurp("tests/fixtures/parameter_indexed_shape_condition.tmir.sexp"), d);
+    check(cm.n_unconstrained == 7,
+          "indexed parameter shape condition parameter count");
+    check(count_opcode(cm, OP_ISLAND) == 1,
+          "indexed parameter shape leaves only the value condition");
+    check(count_opcode(cm, OP_GATHER) == 0,
+          "indexed parameter shape does not materialize its gather");
+
+    const IslandProg* region = nullptr;
+    for (const Op& op : cm.graph.ops)
+      if (op.opcode == OP_ISLAND)
+        region = static_cast<const IslandProg*>(op.udata);
+    check(region != nullptr && region->ins.size() == 2 &&
+              region->ins[0].active && region->ins[1].active,
+          "indexed parameter value condition retains active live-ins");
+
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    for (int i = 0; i < 7; ++i) ex.params_data()[i] = 0.0;
+    ex.params_data()[6] = 0.5;
+    double grad[7] = {};
+    for (double selected : {0.25, -0.25}) {
+      ex.params_data()[2] = selected;  // M[3, 1], selected by idx[1].
+      const bool positive = selected > 0.0;
+      const std::string tag = std::string("indexed parameter condition ") +
+                              (positive ? "positive" : "negative");
+      expect_eq(tag + " lp", ex.gradient(grad), positive ? 2.0 : 2.5);
+      for (int i = 0; i < 6; ++i)
+        expect_eq(tag + " matrix grad " + std::to_string(i), grad[i], 0.0);
+      expect_eq(tag + " theta grad", grad[6], positive ? 4.0 : 5.0);
+    }
+  }
+
+  // Shape queries inside an unresolved parameter branch must retain only the
+  // branch parameter as an active live-in.  The indexed parameter view is
+  // data-sized, so lowering rows(M[idx, :]) must not materialize M or emit a
+  // gather merely to decide the branch.
+  {
+    DataMap d;
+    d.set_int("K", 2);
+    d.set_int_array("idx", {1, 3});
+    CompiledModel cm = compile_model(
+        slurp("tests/fixtures/parameter_nested_indexed_shape_guard.tmir.sexp"),
+        d);
+    check(cm.n_unconstrained == 7,
+          "nested indexed parameter shape parameter count");
+    check(count_opcode(cm, OP_ISLAND) == 1,
+          "nested indexed parameter shape has one island");
+    check(count_opcode(cm, OP_GATHER) == 0,
+          "nested indexed parameter shape has no gather");
+    const IslandProg* region = nullptr;
+    for (const Op& op : cm.graph.ops)
+      if (op.opcode == OP_ISLAND)
+        region = static_cast<const IslandProg*>(op.udata);
+    check(region != nullptr && region->ins.size() == 1 &&
+              region->ins[0].active,
+          "nested indexed parameter shape island binds only theta");
+
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    for (int i = 0; i < 6; ++i) ex.params_data()[i] = 0.1 * (i + 1);
+    double grad[7] = {};
+    for (double theta : {0.5, -0.5}) {
+      ex.params_data()[6] = theta;
+      if (theta < 0)
+        for (int i = 0; i < 6; ++i)
+          ex.params_data()[i] = -17.0 + 3.25 * i;
+      const std::string tag = std::string("nested indexed shape ") +
+                              (theta > 0 ? "positive" : "negative");
+      const double scale = theta > 0 ? 1.0 : 3.0;
+      expect_eq(tag + " lp", ex.gradient(grad), scale * theta);
+      for (int i = 0; i < 6; ++i)
+        expect_eq(tag + " matrix grad " + std::to_string(i), grad[i], 0.0);
+      expect_eq(tag + " theta grad", grad[6], scale);
+    }
+
+    DataMap bad;
+    bad.set_int("K", 2);
+    bad.set_int_array("idx", {1, 4});
+    bool threw = false;
+    try {
+      (void)compile_model(
+          slurp("tests/fixtures/parameter_nested_indexed_shape_guard.tmir.sexp"),
+          bad);
+    } catch (const CompileError& e) {
+      threw = std::string(e.what()).find("out of bounds") != std::string::npos;
+    } catch (const std::exception& e) {
+      threw = std::string(e.what()).find("must be less than or equal") !=
+              std::string::npos;
+    }
+    check(threw, "nested indexed shape rejects out-of-bounds selector");
+  }
+
+  // An uninitialized real container has exact declaration-time NaNs.  Static
+  // loop indices let the register compiler prove that the six off-diagonal
+  // cells below are untouched and fold those guards.  The three diagonal
+  // cells have been assigned parameter values: their UInt is_nan results have
+  // no adjoint lane, but the branches remain parameter-value dependent.
+  {
+    const std::string mir =
+        slurp("tests/fixtures/known_nan_cell_condition.tmir.sexp");
+    test_unsetenv("STANLI_NO_DECLARATION_NAN_FOLD");
+    CompiledModel folded = compile_without_optional_islands(mir, DataMap());
+    CompiledModel unfolded =
+        compile_without_declaration_nan_fold(mir, DataMap());
+    check(folded.n_unconstrained == 10,
+          "known declaration NaN parameter count");
+    check(count_opcode(folded, OP_ISLAND) == 1,
+          "known declaration NaN uses one runtime island");
+    check(count_island_instruction(folded, Program::JZ) == 4,
+          "only parameter-assigned declaration cells retain branches");
+    check(count_island_instruction(unfolded, Program::JZ) == 10,
+          "declaration NaN escape hatch retains every cell branch");
+
+    const auto evaluate = [&](CompiledModel cm, const std::string& tag) {
+      Executor ex(std::move(cm.graph));
+      cm.bind(ex);
+      for (int i = 0; i < 9; ++i) ex.params_data()[i] = i + 1.0;
+      ex.params_data()[9] = 2.0;
+      double grad[10] = {};
+      expect_eq(tag + " finite lp", ex.gradient(grad), 30.0);
+      for (int i = 0; i < 9; ++i)
+        expect_eq(tag + " finite matrix grad " + std::to_string(i), grad[i],
+                  i == 0 || i == 4 || i == 8 ? 2.0 : 0.0);
+      expect_eq(tag + " finite theta grad", grad[9], 15.0);
+
+      ex.params_data()[0] = std::numeric_limits<double>::quiet_NaN();
+      expect_eq(tag + " NaN lp", ex.gradient(grad), 28.0);
+      for (int i = 0; i < 9; ++i)
+        expect_eq(tag + " NaN matrix grad " + std::to_string(i), grad[i],
+                  i == 4 || i == 8 ? 2.0 : 0.0);
+      expect_eq(tag + " NaN theta grad", grad[9], 14.0);
+    };
+    evaluate(std::move(folded), "folded declaration NaN");
+    evaluate(std::move(unfolded), "unfolded declaration NaN");
+  }
+
+  // A runtime integer selector deliberately fails the exact-cell proof even
+  // when every possible selected cell is still a declaration NaN.  Keeping
+  // DYN_INDEX and its guard makes this optimization fail closed as index
+  // support expands, rather than silently generalizing a point proof.
+  {
+    CompiledModel cm = compile_without_optional_islands(
+        slurp("tests/fixtures/known_nan_runtime_index.tmir.sexp"), DataMap());
+    check(cm.n_unconstrained == 1,
+          "runtime declaration NaN index parameter count");
+    check(count_opcode(cm, OP_ISLAND) >= 1,
+          "runtime declaration NaN index uses runtime control");
+    check(count_island_instruction(cm, Program::DYN_INDEX) == 1,
+          "runtime declaration NaN index fails closed");
+    check(count_island_instruction(cm, Program::JZ) == 2,
+          "runtime declaration NaN predicate remains control flow");
+
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    double grad[1] = {};
+    for (double theta : {0.5, -0.5}) {
+      ex.params_data()[0] = theta;
+      expect_eq("runtime declaration NaN index lp " + std::to_string(theta),
+                ex.gradient(grad), theta);
+      expect_eq(
+          "runtime declaration NaN index grad " + std::to_string(theta),
+          grad[0], 1.0);
+    }
+  }
+
+  // An uninitialized local array is an exact graph fill, but it has no MIR
+  // interpreter binding until expression lowering materializes its slot.  A
+  // pure data-only UDF may consume that observed value at compile time; its
+  // indexed construction must disappear.  The adjacent UDF takes theta, so
+  // it has no exact observation and remains one genuine runtime island.
+  {
+    CompiledModel cm = compile_without_optional_islands(
+        slurp("tests/fixtures/udf_observed_fill.tmir.sexp"), DataMap());
+    check(cm.n_unconstrained == 1, "observed-fill UDF parameter count");
+    check(count_opcode(cm, OP_SET_INDEX) == 0,
+          "observed-fill data UDF is evaluated statically");
+    check(count_opcode(cm, OP_ISLAND) == 1,
+          "parameter-active UDF remains runtime");
+
+    const IslandProg* region = nullptr;
+    for (const Op& op : cm.graph.ops)
+      if (op.opcode == OP_ISLAND)
+        region = static_cast<const IslandProg*>(op.udata);
+    check(region != nullptr && region->ins.size() == 1 && region->ins[0].active,
+          "parameter-active UDF retains an active live-in");
+
+    Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    double grad[1] = {};
+    for (double theta : {0.25, -0.25}) {
+      ex.params_data()[0] = theta;
+      const bool positive = theta > 0.0;
+      const std::string tag = std::string("observed-fill UDF ") +
+                              (positive ? "positive" : "negative");
+      const double scale = positive ? 8.0 : 10.0;
+      expect_eq(tag + " lp", ex.gradient(grad), scale * theta);
+      expect_eq(tag + " grad", grad[0], scale);
+    }
+  }
+
+  // Scheduled templates need not mutate every carry uniformly.  A
+  // subject-start row replaces state without reading its predecessor, while
+  // a continuation row reads the same state in its sink but leaves it
+  // unchanged.  The scan descriptor must sever the former adjoint path and
+  // preserve the latter.
+  {
+    constexpr int N = 40;
+    const std::string mir =
+        slurp("tests/fixtures/scan_identity_reset_lower.tmir.sexp");
+    std::ostringstream json;
+    json << "{\"N\":" << N << ",\"new_subject\":[";
+    for (int j = 1; j <= N; ++j) {
+      if (j > 1) json << ',';
+      json << (j % 2 == 0 ? 1 : 0);
+    }
+    json << "],\"row\":[";
+    for (int j = 1; j <= N; ++j) {
+      if (j > 1) json << ',';
+      json << 0.025 * j - 0.1;
+    }
+    json << "]}";
+    const DataMap data = DataMap::from_json(json.str());
+
+    CompiledModel scan = compile_without_graph_passes(mir, data);
+    const ScanSpec* spec = nullptr;
+    for (const Op& op : scan.graph.ops)
+      if (op.opcode == OP_SCAN) spec = static_cast<const ScanSpec*>(op.udata);
+    bool identity = false;
+    bool reset = false;
+    if (spec != nullptr && spec->templates.size() == 2) {
+      for (const ScanSpec::Template& tm : spec->templates) {
+        if (tm.carry.size() != 1) continue;
+        const ScanSpec::CarryBinding& carry = tm.carry[0];
+        identity = identity || (carry.entry_reg >= 0 && carry.exit_reg < 0);
+        reset = reset || (carry.entry_reg < 0 && carry.exit_reg >= 0);
+      }
+    }
+    check(count_opcode(scan, OP_SCAN) == 1 && spec != nullptr && identity &&
+              reset,
+          "scheduled lowering distinguishes identity and reset carries");
+
+    test_setenv("STANLI_NO_SCAN", "1", 1);
+    CompiledModel unrolled;
+    try {
+      unrolled = compile_without_graph_passes(mir, data);
+    } catch (...) {
+      test_unsetenv("STANLI_NO_SCAN");
+      throw;
+    }
+    test_unsetenv("STANLI_NO_SCAN");
+
+    Executor scan_ex(std::move(scan.graph));
+    scan.bind(scan_ex);
+    Executor unrolled_ex(std::move(unrolled.graph));
+    unrolled.bind(unrolled_ex);
+    const double initial = 0.35;
+    const double theta = -0.12;
+    scan_ex.params_data()[0] = unrolled_ex.params_data()[0] = initial;
+    scan_ex.params_data()[1] = unrolled_ex.params_data()[1] = theta;
+    double scan_grad[2] = {};
+    double unrolled_grad[2] = {};
+    const double scan_lp = scan_ex.gradient(scan_grad);
+    const double unrolled_lp = unrolled_ex.gradient(unrolled_grad);
+    expect_ulp("scheduled identity/reset lp", scan_lp, unrolled_lp);
+    expect_ulp("scheduled identity/reset initial grad", scan_grad[0],
+               unrolled_grad[0]);
+    expect_ulp("scheduled identity/reset theta grad", scan_grad[1],
+               unrolled_grad[1]);
+
+    // Direct sensitivity oracle: the first reset cuts initial_state off from
+    // every later row; each following identity row retains theta's path.
+    double state = initial;
+    double d_initial = 1.0;
+    double d_theta = 0.0;
+    double want_initial = 0.0;
+    double want_theta = 0.0;
+    for (int j = 1; j <= N; ++j) {
+      const double row = 0.025 * j - 0.1;
+      if (j > 1 && j % 2 == 0) {
+        state = theta + row;
+        d_initial = 0.0;
+        d_theta = 1.0;
+      }
+      const double residual = row - state;
+      want_initial += residual * d_initial;
+      want_theta += residual * d_theta;
+    }
+    check(std::fabs(scan_grad[0] - want_initial) < 1e-12,
+          "scheduled reset severs predecessor gradient");
+    check(std::fabs(scan_grad[1] - want_theta) < 1e-12,
+          "scheduled identity preserves current-subject gradient");
+  }
+
   // A read-only live-in can still be a declared local with no preceding
   // assignment. Ordinary lowering gives it Stan's uninitialized NaN value;
   // the necessity-island binder must materialize the same slot rather than
@@ -2809,8 +4999,18 @@ int main() {
   // rows() in a necessity island reads the logical matrix geometry rather
   // than being rejected as an unknown register-machine function.
   {
-    CompiledModel cm = compile_model(
+    CompiledModel cm = compile_without_optional_islands(
         slurp("tests/fixtures/paramcond_rows.tmir.sexp"), DataMap());
+    const Op* region_op = nullptr;
+    for (const Op& op : cm.graph.ops)
+      if (op.opcode == OP_ISLAND) region_op = &op;
+    const IslandProg* region =
+        region_op == nullptr ? nullptr
+                             : static_cast<const IslandProg*>(region_op->udata);
+    check(count_opcode(cm, OP_ISLAND) == 1 && region_op != nullptr &&
+              region_op->n_in == 1 && region != nullptr &&
+              region->ins.size() == 1 && region->ins[0].active,
+          "parameter-condition rows binds theta but not matrix geometry");
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
     const int64_t n = ex.n_params();

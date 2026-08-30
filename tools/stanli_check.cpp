@@ -68,7 +68,8 @@ int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
-                 "[--stanc PATH | --mir PATH] [--point N] [--columns]\n"
+                 "[--stanc PATH | --mir PATH] [--point N] "
+                 "[--columns | --lp-only]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--ledger PATH]]\n");
     return 2;
@@ -82,6 +83,7 @@ int main(int argc, char** argv) {
   bool stanc_arg = false;
   int variant = 0;
   bool columns_only = false;
+  bool lp_only = false;
   bool wa_values = false;
   bool paths_only = false;
   bool cross = false;
@@ -92,6 +94,8 @@ int main(int argc, char** argv) {
     const std::string a = argv[i];
     if (a == "--columns")
       columns_only = true;
+    else if (a == "--lp-only")
+      lp_only = true;
     else if (a == "--wa-values")
       wa_values = true;
     else if (a == "--paths")
@@ -263,7 +267,9 @@ int main(int argc, char** argv) {
     // so the machine-readable stdout contract is unchanged; this is what the
     // corpus sweep reads to say how many models get their transformed
     // parameters and generated quantities.
-    if (!cm.write_array) {
+    if (lp_only) {
+      std::fprintf(stderr, "WA skipped (--lp-only)\n");
+    } else if (!cm.write_array) {
       std::fprintf(stderr, "WA none\n");
     } else if (cm.write_array->interp) {
       // The graph could not express the whole section; the per-draw
@@ -338,8 +344,9 @@ int main(int argc, char** argv) {
         if (wa_values) std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", we.what());
       }
     }
-    if (wa_values && (!cm.write_array || (!cm.write_array->interp &&
-                                          cm.write_array->columns.empty())))
+    if (!lp_only && wa_values &&
+        (!cm.write_array ||
+         (!cm.write_array->interp && cm.write_array->columns.empty())))
       std::printf("WANAMES FAIL no write_array\nWAVALS FAIL\n");
     std::printf("OK %.17g", lp);
     for (double g : grad) std::printf(" %.17g", g);

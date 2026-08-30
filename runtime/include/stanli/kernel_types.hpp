@@ -9,6 +9,7 @@
 namespace stanli {
 
 class WaRng;
+struct ProgramCallHook;
 
 // Per-evaluation resources that are neither graph structure nor arena state.
 // The caller owns every pointed-to resource. In particular, an RNG stream
@@ -59,6 +60,10 @@ struct KernelCtx {
   const int* idata = nullptr;
   int64_t n_idata = 0;
   const void* udata = nullptr;
+  // Optional execution-local interception for a Program::CALL. This is used
+  // by scan replay to restore retained values; ordinary graph execution
+  // leaves it null.
+  const ProgramCallHook* program_call_hook = nullptr;
   EvalState* eval_state = nullptr;
   Desc out2{nullptr, 0};  // second output value (scalar), if any
   // Backward only. Data inputs get {nullptr, len}: kernels skip them.

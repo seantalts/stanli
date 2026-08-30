@@ -18,6 +18,8 @@
 #include <stanli/optable.hpp>
 #include <stanli/program.hpp>
 
+#include "env_helpers.hpp"
+
 #include <stan/math.hpp>
 
 #include <algorithm>
@@ -45,6 +47,82 @@ static void test_call_forward(KernelCtx& ctx) {
 static void test_call_backward(KernelCtx& ctx) {
   ctx.in_adj[0].data[0] += ctx.out_adj * ctx.in[1].data[0];
   ctx.in_adj[1].data[0] += ctx.out_adj * ctx.in[0].data[0];
+}
+
+static void expect(const char* what, bool ok);
+
+static const IslandProg* nested_backward_program = nullptr;
+
+static void nested_leaf_forward(KernelCtx& ctx) {
+  ctx.out.data[0] = ctx.in[0].data[0] + 1.0;
+}
+
+static void nested_leaf_backward(KernelCtx& ctx) {
+  ctx.in_adj[0].data[0] += ctx.out_adj;
+}
+
+static void nested_outer_forward(KernelCtx& ctx) {
+  ctx.out.data[0] = 2.0 * ctx.in[0].data[0];
+}
+
+// Run a second generated CALL-bearing adjoint while the outer CALL's
+// backward packet is live. This catches TLS/shared-context implementations:
+// the nested invocation must not replace the outer in_adj destination.
+static void nested_outer_backward(KernelCtx& ctx) {
+  const IslandProg& nested = *nested_backward_program;
+  std::vector<double> values(static_cast<size_t>(nested.n_regs), 0.0);
+  values[0] = 3.0;
+  run_program(nested, values.data());
+  std::vector<double> adj(static_cast<size_t>(nested.adj.n_regs), 0.0);
+  adj[static_cast<size_t>(nested.adj.adj_reg[nested.out_regs[0]])] = 1.0;
+  run_adjoint(nested, nested.adj, values.data(), adj.data());
+  ctx.in_adj[0].data[0] += 2.0 * ctx.out_adj;
+}
+
+static void test_nested_backward_context_reentrant() {
+  IslandProg nested;
+  nested.n_regs = 2;
+  nested.ins = {{0, 1}};
+  Program::Call leaf;
+  leaf.opcode = OP_COUNT_;
+  leaf.forward = nested_leaf_forward;
+  leaf.backward = nested_leaf_backward;
+  leaf.n_in = 1;
+  leaf.in[0] = 0;
+  leaf.in_len[0] = 1;
+  leaf.out = 1;
+  leaf.out_len = 1;
+  nested.calls.push_back(leaf);
+  nested.code.push_back({Program::CALL, 0, 0});
+  nested.out_regs = {1};
+  expect("nested CALL adjoint generated", gen_adjoint(nested));
+
+  IslandProg outer;
+  outer.n_regs = 2;
+  outer.ins = {{0, 1}};
+  Program::Call parent;
+  parent.opcode = OP_COUNT_;
+  parent.forward = nested_outer_forward;
+  parent.backward = nested_outer_backward;
+  parent.n_in = 1;
+  parent.in[0] = 0;
+  parent.in_len[0] = 1;
+  parent.out = 1;
+  parent.out_len = 1;
+  outer.calls.push_back(parent);
+  outer.code.push_back({Program::CALL, 0, 0});
+  outer.out_regs = {1};
+  nested_backward_program = &nested;
+  expect("outer nested CALL adjoint generated", gen_adjoint(outer));
+  std::vector<double> values(static_cast<size_t>(outer.n_regs), 0.0);
+  values[0] = 4.0;
+  run_program(outer, values.data());
+  std::vector<double> adj(static_cast<size_t>(outer.adj.n_regs), 0.0);
+  adj[static_cast<size_t>(outer.adj.adj_reg[outer.out_regs[0]])] = 1.0;
+  run_adjoint(outer, outer.adj, values.data(), adj.data());
+  expect("nested backward preserves outer input adjoint",
+         adj[static_cast<size_t>(outer.adj.adj_reg[outer.ins[0].reg])] == 2.0);
+  nested_backward_program = nullptr;
 }
 
 static void expect(const char* what, bool ok) {
@@ -91,19 +169,46 @@ static std::vector<double> replay_adjoints(const IslandProg& p,
   return adj;
 }
 
+// The forward contract for CFG native execution is the canonical Program on
+// doubles. Some structured Stan Math operations (notably mdivide_left) have
+// observably different primitive and reverse-mode value algorithms, so this
+// is intentionally distinct from the var-replay value above.
+static std::vector<double> direct_values(const IslandProg& p,
+                                         const std::vector<double>& in) {
+  std::vector<double> reg((size_t)p.n_regs, 0.0);
+  int64_t off = 0;
+  for (const auto& li : p.ins)
+    for (int i = 0; i < li.len; ++i)
+      reg[(size_t)(li.reg + i)] = in[(size_t)off++];
+  run_program(p, reg);
+  std::vector<double> out;
+  out.reserve(p.out_regs.size());
+  for (int r : p.out_regs) out.push_back(reg[(size_t)r]);
+  return out;
+}
+
 // The subject: forward on doubles, then the generated adjoint program.
 static std::vector<double> native_adjoints(const IslandProg& p,
                                            const std::vector<double>& in,
                                            const std::vector<double>& seed,
                                            std::vector<double>* out_vals,
                                            const Program* optimized = nullptr) {
-  std::vector<double> val((size_t)p.n_regs, 0.0);
+  const size_t trace_words =
+      p.adj.trace_bits > 0 ? (size_t)(p.adj.trace_bits + 63) / 64 : 0;
+  std::vector<double> val((size_t)p.n_regs + trace_words, 0.0);
   int64_t off = 0;
   for (const auto& li : p.ins)
     for (int i = 0; i < li.len; ++i)
       val[(size_t)(li.reg + i)] = in[(size_t)off++];
-  run_program(optimized ? *optimized : static_cast<const Program&>(p),
-              val.data());
+  uint8_t* const executed =
+      trace_words ? reinterpret_cast<uint8_t*>(val.data() + p.n_regs) : nullptr;
+  if (trace_words) {
+    std::memset(executed, 0, trace_words * sizeof(uint64_t));
+    run_program(p, p.code, val.data(), executed, p.trace_pc.data());
+  } else {
+    run_program(optimized ? *optimized : static_cast<const Program&>(p),
+                val.data());
+  }
   for (size_t m = 0; m < p.out_regs.size(); ++m)
     out_vals->push_back(val[(size_t)p.out_regs[m]]);
 
@@ -111,7 +216,7 @@ static std::vector<double> native_adjoints(const IslandProg& p,
   const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += seed[m];
-  run_adjoint(p, p.adj, val.data(), adj.data());
+  run_adjoint(p, p.adj, val.data(), adj.data(), executed);
 
   std::vector<double> got(in.size());
   off = 0;
@@ -361,6 +466,44 @@ static bool check(const std::string& name, Case c, int64_t tol = 0,
                   (long long)ulps(want[k], got[k]), (long long)tol);
     }
   }
+  return passed;
+}
+
+static bool check_cfg(const std::string& name, Case c,
+                      bool expected_profitable = true) {
+  const IslandProg replay = c.p;
+  if (!gen_cfg_adjoint(c.p)) {
+    ++failures;
+    std::printf("FAIL %s: cfg adjoint refused the program\n", name.c_str());
+    return false;
+  }
+  expect((name + " trace map covers generated forward").c_str(),
+         c.p.trace_pc.size() == c.p.code.size());
+  expect((name + " trace is enabled").c_str(),
+         c.p.adj.trace_bits == static_cast<int>(replay.code.size()));
+  expect((name + " profitability decision").c_str(),
+         cfg_native_profitable(c.p) == expected_profitable);
+  std::vector<double> want_v, got_v;
+  const std::vector<double> want =
+      replay_adjoints(replay, c.in, c.seed, &want_v);
+  const std::vector<double> got =
+      native_adjoints(c.p, c.in, c.seed, &got_v);
+  bool passed = true;
+  for (size_t m = 0; m < want_v.size(); ++m)
+    if (ulps(want_v[m], got_v[m]) != 0) {
+      ++failures;
+      passed = false;
+      std::printf("FAIL %s: value %zu replay %.17g native %.17g\n",
+                  name.c_str(), m, want_v[m], got_v[m]);
+    }
+  for (size_t k = 0; k < want.size(); ++k)
+    if (ulps(want[k], got[k]) != 0) {
+      ++failures;
+      passed = false;
+      std::printf("FAIL %s: adj[%zu] replay %.17g native %.17g (%lld ulp)\n",
+                  name.c_str(), k, want[k], got[k],
+                  (long long)ulps(want[k], got[k]));
+    }
   return passed;
 }
 
@@ -815,6 +958,7 @@ static void test_softmax3_activation() {
     call.out = 8;
     call.out_len = 1;
     call.idata = {11, 13, 17};
+    expect("softmax3 seed CALL binds kernel", bind_call(call));
     p.calls.push_back(std::move(call));
     p.code.insert(p.code.begin(), Program::Instr{Program::CALL, 8, 0, 0, 0, 0});
     p.out_regs = {8};
@@ -897,6 +1041,7 @@ static void test_softmax3_activation() {
   existing.in_len[0] = 1;
   existing.out = 8;
   existing.out_len = 1;
+  expect("softmax3 existing CALL binds kernel", bind_call(existing));
   eligible.calls.push_back(existing);
   eligible.code.insert(eligible.code.begin(),
                        Program::Instr{Program::CALL, 8, 0, 0, 0, 0});
@@ -935,6 +1080,740 @@ static void test_softmax3_activation() {
          optimized.code.back().code == Program::SOFTMAX &&
              optimized.code.back().len == 4);
   expect("softmax3 appends calls", optimized.calls.size() == 33);
+}
+
+static int call_activity_forwards = 0;
+static int call_activity_backwards = 0;
+
+static void call_activity_fwd(KernelCtx& ctx) {
+  ++call_activity_forwards;
+  const double x = ctx.in[0].data[0];
+  ctx.out.data[0] = x * x;
+  for (int k = 0; k < 3; ++k) ctx.scratch[k] = x + k;
+}
+
+static void call_activity_bwd(KernelCtx& ctx) {
+  ++call_activity_backwards;
+  ctx.in_adj[0].data[0] += (2.0 * ctx.in[0].data[0]) * ctx.out_adj_vec.data[0];
+}
+
+static void test_call_activity_elision() {
+  // The private opcode was exercised by the softmax tests above. Reuse its
+  // otherwise-test-only registry entry for a kernel whose backward invocation
+  // is observable here.
+  register_kernel(kProgramSoftmax3Opcode,
+                  Kernel{call_activity_fwd, call_activity_bwd, nullptr});
+
+  const auto run = [](bool call_input_active) {
+    IslandProg p;
+    p.n_regs = 8;
+    p.ins.push_back(IslandProg::LiveIn{0, 1, 0, 0, call_input_active});
+    p.ins.push_back(IslandProg::LiveIn{1, 1, 1, 0, true});
+    Program::Call call;
+    call.opcode = kProgramSoftmax3Opcode;
+    call.n_in = 1;
+    call.in[0] = 0;
+    call.in_len[0] = 1;
+    call.out = 2;
+    call.out_len = 1;
+    call.scratch = 3;
+    call.scratch_len = 3;
+    expect("CALL activity binds kernel", bind_call(call));
+    p.calls.push_back(call);
+    p.code.push_back(Program::Instr{Program::CALL, 2, 0, 0, 0, 0});
+    // Overwrite the CALL input after it runs. An active CALL backward needs
+    // the generated value checkpoint; an inactive one does not run at all.
+    p.code.push_back(Program::Instr{Program::ADD, 0, 0, 1, 0, 0});
+    p.code.push_back(Program::Instr{Program::MUL, 7, 2, 0, 0, 0});
+    p.out_regs = {7};
+
+    expect("CALL activity adjoint generated", gen_adjoint(p));
+    int adjoint_calls = 0;
+    for (const AdjInstr& instr : p.adj.code)
+      if (instr.code == Program::CALL) ++adjoint_calls;
+    expect(call_input_active ? "active CALL retains backward"
+                             : "inactive CALL elides backward",
+           adjoint_calls == (call_input_active ? 1 : 0));
+    expect("CALL scratch shares one dead adjoint cell",
+           p.adj.adj_reg[3] == p.adj.adj_reg[0] &&
+               p.adj.adj_reg[4] == p.adj.adj_reg[0] &&
+               p.adj.adj_reg[5] == p.adj.adj_reg[0]);
+    expect(call_input_active ? "active CALL checkpoints overwritten input"
+                             : "inactive CALL skips value checkpoint",
+           call_input_active ? p.calls[0].bwd_value_in[0] >= 8
+                             : p.calls[0].bwd_value_in[0] == 0);
+
+    std::vector<double> values((size_t)p.n_regs, 0.0);
+    values[0] = 2.0;
+    values[1] = 3.0;
+    call_activity_forwards = 0;
+    call_activity_backwards = 0;
+    run_program(p, values.data());
+    std::vector<double> adj((size_t)p.adj.n_regs, 0.0);
+    adj[(size_t)p.adj.adj_reg[7]] = 1.0;
+    run_adjoint(p, p.adj, values.data(), adj.data());
+
+    expect("CALL activity forward value", values[7] == 20.0);
+    expect("CALL activity forward invoked", call_activity_forwards == 1);
+    expect(call_input_active ? "active CALL backward invoked"
+                             : "inactive CALL backward not invoked",
+           call_activity_backwards == (call_input_active ? 1 : 0));
+    expect("CALL activity parameter gradient",
+           adj[(size_t)p.adj.adj_reg[1]] == 4.0);
+    if (call_input_active)
+      expect("active CALL input gradient uses checkpoint",
+             adj[(size_t)p.adj.adj_reg[0]] == 24.0);
+    expect("CALL output adjoint consumed",
+           adj[(size_t)p.adj.adj_reg[2]] == 0.0);
+  };
+
+  run(false);
+  run(true);
+}
+
+static Case terminal_jz_case(double condition) {
+  Build b({condition, 1.7, 0.6});
+  const int prefix = b.emit(Program::MUL, 1, 2);
+  const size_t jz = b.p.code.size();
+  b.p.code.push_back(Program::Instr{Program::JZ, 0, 0});
+  // Both overwritten live-ins make the test exercise ordinary value
+  // checkpoints and the branch-condition checkpoint together. The outputs
+  // retain their old live-in values when the body is skipped.
+  b.emit_to(Program::ADD, 1, prefix, 2);
+  b.emit_to(Program::SQUARE, 0, 1);
+  b.p.code[jz].dst = static_cast<int32_t>(b.p.code.size());
+  return b.done({0, 1, prefix}, {1.1, -0.4, 0.7});
+}
+
+static void test_terminal_jz_adjoint() {
+  check("terminal JZ taken", terminal_jz_case(1.0));
+  check("terminal JZ skipped", terminal_jz_case(0.0));
+
+  {
+    Case c = terminal_jz_case(1.0);
+    const int old_regs = c.p.n_regs;
+    expect("terminal JZ generates adjoint", gen_adjoint(c.p));
+    const auto guard = std::find_if(
+        c.p.adj.code.begin(), c.p.adj.code.end(),
+        [](const AdjInstr& instr) { return instr.code == Program::JZ; });
+    expect("terminal JZ has one reverse guard",
+           guard != c.p.adj.code.end() &&
+               std::count_if(c.p.adj.code.begin(), c.p.adj.code.end(),
+                             [](const AdjInstr& instr) {
+                               return instr.code == Program::JZ;
+                             }) == 1);
+    expect("terminal JZ checkpoints overwritten condition",
+           guard != c.p.adj.code.end() && guard->va >= old_regs);
+    const auto forward_guard = std::find_if(
+        c.p.code.begin(), c.p.code.end(),
+        [](const Program::Instr& instr) { return instr.code == Program::JZ; });
+    expect("terminal JZ retargets around checkpoints",
+           forward_guard != c.p.code.end() &&
+               forward_guard->dst == static_cast<int>(c.p.code.size()));
+  }
+  const auto refused = [](std::vector<Program::Instr> code) {
+    IslandProg p;
+    p.n_regs = 4;
+    p.ins.push_back(IslandProg::LiveIn{0, 4});
+    p.code = std::move(code);
+    p.out_regs = {3};
+    return !gen_adjoint(p);
+  };
+  expect("nonterminal JZ refused", refused({{Program::JZ, 2, 0},
+                                            {Program::SQUARE, 3, 1},
+                                            {Program::ADD, 3, 1, 2}}));
+  expect("backedge JZ refused",
+         refused({{Program::ADD, 3, 1, 2}, {Program::JZ, 0, 0}}));
+  expect("multiple JZs refused", refused({{Program::JZ, 3, 0},
+                                          {Program::JZ, 3, 1},
+                                          {Program::SQUARE, 3, 2}}));
+  expect("JMP control refused",
+         refused({{Program::JMP, 2}, {Program::SQUARE, 3, 1}}));
+}
+
+static Case nested_cfg_case(double outer, double inner) {
+  Build b({outer, inner, 0.37, 0.83});
+  const int temporary = b.alloc();
+  const int selected = b.alloc();
+  b.p.code = {
+      {Program::JZ, 8, 0},
+      {Program::JZ, 5, 1},
+      {Program::MUL, temporary, 2, 3},
+      {Program::MOV, selected, temporary},
+      {Program::JMP, 10},
+      {Program::SQUARE, temporary, 2},
+      {Program::MOV, selected, temporary},
+      {Program::JMP, 10},
+      {Program::EXP, temporary, 3},
+      {Program::MOV, selected, temporary},
+      // Repeated destination after the join forces the selected value to be
+      // checkpointed; both untaken arm writes must remain absent in reverse.
+      {Program::ADD, selected, selected, 2},
+  };
+  return b.done({selected}, {1.3});
+}
+
+// One branch containing the dominant scalar pair families. The output is
+// initialized before the branch so both taken and skipped paths are valid;
+// the taken arm overwrites that same register, exercising checkpoint and
+// repeated-destination semantics as well as pair dispatch.
+static Case scalar_pair_cfg_case(double condition) {
+  Build b({condition, 0.73, 1.17});
+  const int selected = b.alloc();
+  b.emit_to(Program::MOV, selected, 1);
+  const size_t skip = b.p.code.size();
+  b.p.code.push_back({Program::JZ, 0, 0});
+  int chain = 1;
+  for (int k = 0; k < 10; ++k) chain = b.emit(Program::NEG, chain);
+  chain = b.emit(Program::ADD, chain, 2);
+  chain = b.emit(Program::MUL, chain, 2);
+  chain = b.emit(Program::MUL, chain, 2);
+  chain = b.emit(Program::ADD, chain, 2);
+  chain = b.emit(Program::MUL, chain, 2);
+  chain = b.emit(Program::MUL, chain, 2);
+  chain = b.emit(Program::ADD, chain, 2);
+  chain = b.emit(Program::ADD, chain, 2);
+  chain = b.emit(Program::SUB, chain, 2);
+  chain = b.emit(Program::SUB, chain, 2);
+  b.emit_to(Program::MOV, selected, chain);
+  b.p.code[skip].dst = static_cast<int>(b.p.code.size());
+  return b.done({selected}, {1.3});
+}
+
+// The same families with every destination overwriting its first operand.
+// This is the consume-clear-add corner: dst and a share an adjoint cell, so
+// each pair handler must retain the exact read/clear/update order.
+static Case inplace_pair_cfg_case(double condition) {
+  Build b({condition, 0.73, 1.17});
+  const size_t skip = b.p.code.size();
+  b.p.code.push_back({Program::JZ, 0, 0});
+  b.emit_to(Program::NEG, 1, 1);
+  b.emit_to(Program::NEG, 1, 1);
+  b.emit_to(Program::ADD, 1, 1, 2);
+  b.emit_to(Program::MUL, 1, 1, 2);
+  b.emit_to(Program::MUL, 1, 1, 2);
+  b.emit_to(Program::ADD, 1, 1, 2);
+  b.emit_to(Program::MUL, 1, 1, 2);
+  b.emit_to(Program::MUL, 1, 1, 2);
+  b.emit_to(Program::ADD, 1, 1, 2);
+  b.emit_to(Program::ADD, 1, 1, 2);
+  b.emit_to(Program::SUB, 1, 1, 2);
+  b.emit_to(Program::SUB, 1, 1, 2);
+  b.p.code[skip].dst = static_cast<int>(b.p.code.size());
+  return b.done({1}, {1.3});
+}
+
+static size_t adj_pair_count(const IslandProg& p) {
+  return static_cast<size_t>(std::count_if(
+      p.adj.code.begin(), p.adj.code.end(),
+      [](const AdjInstr& instruction) {
+        return instruction.pair != AdjPair::None;
+      }));
+}
+
+static bool trace_plan_partitions(const IslandProg& p) {
+  int32_t begin = 0;
+  for (const AdjTraceBlock& block : p.adj.trace_blocks) {
+    if (block.end <= begin ||
+        block.end > static_cast<int32_t>(p.adj.code.size()) ||
+        block.trace_pc < 0 || block.trace_pc >= p.adj.trace_bits)
+      return false;
+    begin = block.end;
+  }
+  return !p.adj.trace_blocks.empty() &&
+         begin == static_cast<int32_t>(p.adj.code.size());
+}
+
+static void test_cfg_trace_blocks() {
+  test_unsetenv("STANLI_CFG_ADJ_TRACE_BLOCKS");
+  test_unsetenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS");
+  test_unsetenv("STANLI_CFG_ADJ_SUPERINSTRUCTIONS");
+  test_unsetenv("STANLI_NO_CFG_ADJ_SUPERINSTRUCTIONS");
+  {
+    Case c = nested_cfg_case(1.0, 0.0);
+    expect("cfg trace blocks default generation succeeds",
+           gen_cfg_adjoint(c.p));
+    expect("cfg trace blocks default off", c.p.adj.trace_blocks.empty());
+    expect("cfg scalar pairs default off",
+           !c.p.adj.has_pairs && adj_pair_count(c.p) == 0);
+  }
+
+  test_setenv("STANLI_CFG_ADJ_TRACE_BLOCKS", "1", 1);
+  for (const auto& path : {std::pair<double, double>{1.0, 1.0},
+                           {1.0, 0.0}, {0.0, 1.0}}) {
+    Case c = nested_cfg_case(path.first, path.second);
+    const IslandProg replay = c.p;
+    expect("cfg trace block generation succeeds", gen_cfg_adjoint(c.p));
+    expect("cfg trace block plan partitions reverse",
+           trace_plan_partitions(c.p));
+    expect("cfg trace-only plan does not tag scalar pairs",
+           !c.p.adj.has_pairs && adj_pair_count(c.p) == 0);
+    std::vector<double> want_value, got_value;
+    const std::vector<double> want =
+        replay_adjoints(replay, c.in, c.seed, &want_value);
+    const std::vector<double> got =
+        native_adjoints(c.p, c.in, c.seed, &got_value);
+    expect("cfg trace block value bitwise",
+           want_value.size() == got_value.size() &&
+               std::equal(want_value.begin(), want_value.end(),
+                          got_value.begin()));
+    expect("cfg trace block adjoint bitwise",
+           want.size() == got.size() &&
+               std::equal(want.begin(), want.end(), got.begin()));
+  }
+
+  {
+    Case c = nested_cfg_case(1.0, 0.0);
+    test_setenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS", "1", 1);
+    expect("cfg trace escape recompilation succeeds", gen_cfg_adjoint(c.p));
+    expect("cfg trace escape authoritative", c.p.adj.trace_blocks.empty());
+    test_unsetenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS");
+  }
+
+  // The explicit seam lets malformed-map behavior remain a focused unit
+  // property rather than relying on a generator bug to manufacture it.
+  {
+    Case c = nested_cfg_case(1.0, 0.0);
+    test_unsetenv("STANLI_CFG_ADJ_TRACE_BLOCKS");
+    expect("cfg trace malformed base generation succeeds",
+           gen_cfg_adjoint(c.p));
+    IslandProg bad_forward = c.p;
+    auto mapped = std::find_if(bad_forward.trace_pc.begin(),
+                               bad_forward.trace_pc.end(),
+                               [](int32_t pc) { return pc >= 0; });
+    expect("cfg trace malformed has mapped forward",
+           mapped != bad_forward.trace_pc.end());
+    if (mapped != bad_forward.trace_pc.end()) *mapped = -1;
+    expect("cfg trace malformed forward fails closed",
+           !prepare_cfg_trace_blocks(bad_forward) &&
+               bad_forward.adj.trace_blocks.empty());
+
+    IslandProg bad_reverse = c.p;
+    bad_reverse.adj.code.front().fwd_pc = -1;
+    expect("cfg trace malformed reverse fails closed",
+           !prepare_cfg_trace_blocks(bad_reverse) &&
+               bad_reverse.adj.trace_blocks.empty());
+
+    IslandProg backedge = c.p;
+    auto branch = std::find_if(
+        backedge.code.begin(), backedge.code.end(),
+        [](const Program::Instr& instruction) {
+          return instruction.code == Program::JZ ||
+                 instruction.code == Program::JMP;
+        });
+    expect("cfg trace malformed has final branch",
+           branch != backedge.code.end());
+    if (branch != backedge.code.end()) branch->dst = 0;
+    expect("cfg trace final backedge fails closed",
+           !prepare_cfg_trace_blocks(backedge) &&
+               backedge.adj.trace_blocks.empty());
+  }
+  test_unsetenv("STANLI_CFG_ADJ_TRACE_BLOCKS");
+  test_unsetenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS");
+
+  test_setenv("STANLI_CFG_ADJ_SUPERINSTRUCTIONS", "1", 1);
+  for (double condition : {1.0, 0.0}) {
+    Case c = scalar_pair_cfg_case(condition);
+    const IslandProg replay = c.p;
+    expect("cfg pair generation succeeds", gen_cfg_adjoint(c.p));
+    expect("cfg pair force implicitly builds trace blocks",
+           trace_plan_partitions(c.p));
+    expect("cfg pair force tags scalar pairs",
+           c.p.adj.has_pairs && adj_pair_count(c.p) >= 5);
+    int32_t begin = 0;
+    for (const AdjTraceBlock& block : c.p.adj.trace_blocks) {
+      for (int32_t pc = begin; pc < block.end; ++pc) {
+        const AdjInstr& instruction = c.p.adj.code[static_cast<size_t>(pc)];
+        if (instruction.pair == AdjPair::None) continue;
+        expect("cfg pair remains inside one trace block", pc + 1 < block.end);
+        if (pc + 1 < block.end)
+          expect("cfg pair second entry is never a pair head",
+                 c.p.adj.code[static_cast<size_t>(pc + 1)].pair ==
+                     AdjPair::None);
+      }
+      begin = block.end;
+    }
+    std::vector<double> want_value, got_value;
+    const std::vector<double> want =
+        replay_adjoints(replay, c.in, c.seed, &want_value);
+    const std::vector<double> got =
+        native_adjoints(c.p, c.in, c.seed, &got_value);
+    expect(condition == 0.0 ? "cfg pair skipped value bitwise"
+                            : "cfg pair taken value bitwise",
+           want_value == got_value);
+    expect(condition == 0.0 ? "cfg pair skipped adjoint bitwise"
+                            : "cfg pair taken adjoint bitwise",
+           want == got);
+  }
+
+  for (double condition : {1.0, 0.0}) {
+    Case c = inplace_pair_cfg_case(condition);
+    const IslandProg replay = c.p;
+    expect("cfg in-place pair generation succeeds", gen_cfg_adjoint(c.p));
+    expect("cfg in-place pair tags overlapping scalar rules",
+           c.p.adj.has_pairs && adj_pair_count(c.p) >= 5);
+    std::vector<double> want_value, got_value;
+    const std::vector<double> want =
+        replay_adjoints(replay, c.in, c.seed, &want_value);
+    const std::vector<double> got =
+        native_adjoints(c.p, c.in, c.seed, &got_value);
+    expect(condition == 0.0 ? "cfg in-place skipped value bitwise"
+                            : "cfg in-place taken value bitwise",
+           want_value == got_value);
+    expect(condition == 0.0 ? "cfg in-place skipped adjoint bitwise"
+                            : "cfg in-place taken adjoint bitwise",
+           want == got);
+  }
+
+  {
+    Case c = scalar_pair_cfg_case(1.0);
+    test_setenv("STANLI_NO_CFG_ADJ_SUPERINSTRUCTIONS", "1", 1);
+    expect("cfg pair escape recompilation succeeds", gen_cfg_adjoint(c.p));
+    expect("cfg pair escape is authoritative",
+           !c.p.adj.has_pairs && adj_pair_count(c.p) == 0);
+    test_unsetenv("STANLI_NO_CFG_ADJ_SUPERINSTRUCTIONS");
+  }
+  {
+    Case c = scalar_pair_cfg_case(1.0);
+    test_setenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS", "1", 1);
+    expect("cfg pair trace escape recompilation succeeds",
+           gen_cfg_adjoint(c.p));
+    expect("cfg pair trace escape fails closed",
+           c.p.adj.trace_blocks.empty() && !c.p.adj.has_pairs &&
+               adj_pair_count(c.p) == 0);
+    test_unsetenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS");
+  }
+
+  // The pair seam independently revalidates the trace partition. A caller
+  // cannot merge neighboring blocks and thereby pair two differently
+  // controlled instructions under one representative trace bit.
+  {
+    test_unsetenv("STANLI_CFG_ADJ_SUPERINSTRUCTIONS");
+    test_setenv("STANLI_CFG_ADJ_TRACE_BLOCKS", "1", 1);
+    Case c = scalar_pair_cfg_case(1.0);
+    expect("cfg pair malformed base generation succeeds",
+           gen_cfg_adjoint(c.p));
+    expect("cfg pair malformed base has multiple blocks",
+           c.p.adj.trace_blocks.size() > 1);
+    if (c.p.adj.trace_blocks.size() > 1)
+      c.p.adj.trace_blocks.front().end = c.p.adj.trace_blocks[1].end;
+    expect("cfg pair malformed partition fails transactionally",
+           !prepare_cfg_adjoint_superinstructions(c.p) &&
+               !c.p.adj.has_pairs && adj_pair_count(c.p) == 0);
+  }
+  test_unsetenv("STANLI_CFG_ADJ_TRACE_BLOCKS");
+  test_unsetenv("STANLI_NO_CFG_ADJ_TRACE_BLOCKS");
+  test_unsetenv("STANLI_CFG_ADJ_SUPERINSTRUCTIONS");
+  test_unsetenv("STANLI_NO_CFG_ADJ_SUPERINSTRUCTIONS");
+}
+
+// A production-policy probe with one direct structured instruction and an
+// exact number of mapped reverse instructions on its cheapest structured
+// path.  Unique scalar destinations avoid checkpoints, keeping the count
+// transparent.  `cold_skip` adds a path that jumps over the whole body.
+static IslandProg structured_profitability_case(size_t structured_work,
+                                                 bool cold_skip) {
+  IslandProg p;
+  p.n_regs = 4;
+  p.ins = {{0, 4}};  // condition, scalar chain input, 1x1 diagonal and matrix
+  p.code.reserve(structured_work + 2);
+  size_t opening_jz = std::numeric_limits<size_t>::max();
+  if (cold_skip) {
+    opening_jz = p.code.size();
+    p.code.push_back({Program::JZ, 0, 0});
+  }
+
+  const int structured_out = p.n_regs++;
+  p.code.push_back(
+      {Program::DIAG_PRE_MULTIPLY, structured_out, 2, 3, 1, 1});
+  int chain = 1;
+  for (size_t k = 1; k < structured_work; ++k) {
+    const int next = p.n_regs++;
+    p.code.push_back({Program::NEG, next, chain});
+    chain = next;
+  }
+
+  if (cold_skip) {
+    p.code[opening_jz].dst = static_cast<int>(p.code.size());
+  } else {
+    // Keep this a CFG while making every path execute exactly
+    // `structured_work` common reverse instructions.
+    const size_t trailing_jz = p.code.size();
+    p.code.push_back({Program::JZ, 0, 0});
+    const int optional = p.n_regs++;
+    p.code.push_back({Program::NEG, optional, chain});
+    p.code[trailing_jz].dst = static_cast<int>(p.code.size());
+  }
+  p.out_regs = {chain};
+  return p;
+}
+
+static void test_cfg_adjoint() {
+  check_cfg("cfg nested first arm", nested_cfg_case(1.0, 1.0));
+  check_cfg("cfg nested second arm", nested_cfg_case(1.0, 0.0));
+  check_cfg("cfg nested outer skip", nested_cfg_case(0.0, 1.0));
+
+  {
+    Case scalar = nested_cfg_case(1.0, 0.0);
+    expect("scalar cfg generated for profitability",
+           gen_cfg_adjoint(scalar.p));
+    expect("scalar cfg remains production-profitable",
+           cfg_native_profitable(scalar.p));
+
+    IslandProg bad_reverse = scalar.p;
+    bad_reverse.adj.code.front().fwd_pc = -1;
+    expect("cfg malformed reverse map fails closed",
+           !cfg_native_profitable(bad_reverse));
+
+    IslandProg bad_forward = scalar.p;
+    auto mapped = std::find_if(
+        bad_forward.trace_pc.begin(), bad_forward.trace_pc.end(),
+        [](int32_t pc) { return pc >= 0; });
+    expect("cfg test has a mapped forward pc",
+           mapped != bad_forward.trace_pc.end());
+    if (mapped != bad_forward.trace_pc.end()) *mapped = -1;
+    expect("cfg malformed forward map fails closed",
+           !cfg_native_profitable(bad_forward));
+  }
+
+  {
+    IslandProg ctsem_shaped = structured_profitability_case(19754, false);
+    expect("ctsem-shaped cfg generated", gen_cfg_adjoint(ctsem_shaped));
+    expect("ctsem-shaped minimum structured work is selected",
+           cfg_native_profitable(ctsem_shaped));
+  }
+
+  {
+    IslandProg cold_huge = structured_profitability_case(32769, true);
+    expect("cold huge structured cfg generated", gen_cfg_adjoint(cold_huge));
+    expect("cold huge structured cfg exceeds trace-scan cap",
+           !cfg_native_profitable(cold_huge));
+  }
+
+  const auto check_call_path = [](double condition) {
+    IslandProg cfg;
+    cfg.n_regs = 6;
+    cfg.ins = {{0, 1, 0, 0, true}, {1, 1, 1, 0, true}};
+    Program::Call call;
+    call.opcode = kProgramSoftmax3Opcode;
+    call.n_in = 1;
+    call.in[0] = 1;
+    call.in_len[0] = 1;
+    call.out = 2;
+    call.out_len = 1;
+    call.scratch = 3;
+    call.scratch_len = 3;
+    expect("CFG CALL binds kernel", bind_call(call));
+    cfg.calls = {call};
+    cfg.code = {{Program::MOV, 2, 1},
+                {Program::JZ, 3, 0},
+                {Program::CALL, 2, 0}};
+    cfg.out_regs = {2};
+
+    // The registered test CALL computes square.  Replacing it with the
+    // corresponding Program opcode gives a genuine var-replay oracle while
+    // preserving the same control flow.  x=2 makes both reverse
+    // multiplication groupings bit-identical even for a non-unit seed.
+    IslandProg oracle = cfg;
+    oracle.n_regs = 3;
+    oracle.calls.clear();
+    oracle.code[2] = {Program::SQUARE, 2, 1};
+    const std::vector<double> input{condition, 2.0};
+    const std::vector<double> seed{1.3};
+    std::vector<double> want_value, got_value;
+    const std::vector<double> want =
+        replay_adjoints(oracle, input, seed, &want_value);
+    expect(condition == 0.0 ? "cfg skipped CALL generated"
+                            : "cfg taken CALL generated",
+           gen_cfg_adjoint(cfg));
+    expect("cfg CALL trace plan partitions", trace_plan_partitions(cfg));
+    int32_t block_begin = 0;
+    for (const AdjTraceBlock& block : cfg.adj.trace_blocks) {
+      for (int32_t pc = block_begin; pc < block.end; ++pc)
+        if (cfg.adj.code[static_cast<size_t>(pc)].code == Program::CALL)
+          expect("cfg CALL trace block is singleton",
+                 block.end == block_begin + 1);
+      block_begin = block.end;
+    }
+    expect(condition == 0.0 ? "cfg skipped canonical CALL fails closed"
+                            : "cfg taken canonical CALL fails closed",
+           !cfg_native_profitable(cfg));
+    call_activity_forwards = 0;
+    call_activity_backwards = 0;
+    const std::vector<double> got =
+        native_adjoints(cfg, input, seed, &got_value);
+    expect(condition == 0.0 ? "cfg skipped CALL value parity"
+                            : "cfg taken CALL value parity",
+           ulps(want_value[0], got_value[0]) == 0);
+    expect(condition == 0.0 ? "cfg skipped CALL adjoint parity"
+                            : "cfg taken CALL adjoint parity",
+           ulps(want[0], got[0]) == 0 && ulps(want[1], got[1]) == 0);
+    expect(condition == 0.0 ? "cfg skipped CALL not forwarded"
+                            : "cfg taken CALL forwarded",
+           call_activity_forwards == (condition == 0.0 ? 0 : 1));
+    expect(condition == 0.0 ? "cfg skipped CALL not reversed"
+                            : "cfg taken CALL reversed",
+           call_activity_backwards == (condition == 0.0 ? 0 : 1));
+  };
+  test_setenv("STANLI_CFG_ADJ_TRACE_BLOCKS", "1", 1);
+  check_call_path(1.0);
+  check_call_path(0.0);
+  test_unsetenv("STANLI_CFG_ADJ_TRACE_BLOCKS");
+
+  {
+    Case c = nested_cfg_case(1.0, 0.0);
+    const IslandProg before = c.p;
+    expect("legacy generator refuses general cfg", !gen_adjoint(c.p));
+    expect("legacy cfg refusal leaves code",
+           c.p.code.size() == before.code.size() &&
+               c.p.code[1].dst == before.code[1].dst);
+  }
+  {
+    IslandProg backedge;
+    backedge.n_regs = 2;
+    backedge.ins = {{0, 2}};
+    backedge.code = {{Program::ADD, 1, 0, 1}, {Program::JMP, 0}};
+    backedge.out_regs = {1};
+    const IslandProg before = backedge;
+    expect("cfg backedge refused", !gen_cfg_adjoint(backedge));
+    expect("cfg refusal transactional",
+           backedge.code.size() == before.code.size() &&
+               backedge.code.back().dst == before.code.back().dst &&
+               backedge.n_regs == before.n_regs);
+  }
+}
+
+static void test_cfg_structured_calls() {
+  for (double condition : {1.0, 0.0}) {
+    {
+      Build b({condition, 0.7, -0.4, 1.2, -0.2, 0.3, 0.9});
+      const int out = b.alloc(4);
+      b.p.code = {{Program::MOVR, out, 3, 0, 0, 4},
+                  {Program::JZ, 3, 0},
+                  {Program::DIAG_PRE_MULTIPLY, out, 1, 3, 2, 2}};
+      check_cfg(condition ? "cfg diag_pre taken" : "cfg diag_pre skipped",
+                b.done({out, out + 1, out + 2, out + 3},
+                       {0.2, -0.4, 0.7, 1.1}),
+                false);
+    }
+    {
+      Build b({condition, 0.1, -0.2, 0.3, 0.4});
+      const int out = b.alloc(4);
+      b.p.code = {{Program::MOVR, out, 1, 0, 0, 4},
+                  {Program::JZ, 3, 0},
+                  {Program::MATRIX_EXP, out, 1, 2, 2, 4}};
+      Case c = b.done({out, out + 1, out + 2, out + 3},
+                      {0.2, -0.4, 0.7, 1.1});
+      const IslandProg replay = c.p;
+      const std::vector<double> want_double = direct_values(replay, c.in);
+      expect(condition ? "cfg matrix_exp generated" : "cfg matrix_exp skip generated",
+             gen_cfg_adjoint(c.p));
+      expect("cfg matrix_exp keeps direct forward and kernel backward",
+             std::count_if(c.p.code.begin(), c.p.code.end(),
+                           [](const Program::Instr& instruction) {
+                             return instruction.code == Program::MATRIX_EXP;
+                           }) == 1 &&
+                 std::none_of(c.p.code.begin(), c.p.code.end(),
+                              [](const Program::Instr& instruction) {
+                                return instruction.code == Program::CALL;
+                              }) &&
+                 c.p.calls.size() == 1 &&
+                 c.p.calls[0].opcode == OP_MATRIX_EXP);
+      expect("cfg matrix_exp is generated but fails closed",
+             !cfg_native_profitable(c.p));
+      std::vector<double> want_v, got_v;
+      const std::vector<double> want =
+          replay_adjoints(replay, c.in, c.seed, &want_v);
+      const std::vector<double> got =
+          native_adjoints(c.p, c.in, c.seed, &got_v);
+      for (size_t k = 0; k < want.size(); ++k)
+        expect("cfg matrix_exp adjoint parity", ulps(want[k], got[k]) == 0);
+      for (size_t k = 0; k < want_double.size(); ++k)
+        expect("cfg matrix_exp direct value parity",
+               ulps(want_double[k], got_v[k]) == 0);
+    }
+    {
+      Build b({condition, 2.0, 0.3, 0.3, 1.4, 0.6, -0.2});
+      const int out = b.alloc(2);
+      b.p.code = {{Program::MOVR, out, 5, 0, 0, 2},
+                  {Program::JZ, 3, 0},
+                  {Program::MDIVIDE_LEFT, out, 1, 5, -2, 2}};
+      Case c = b.done({out, out + 1}, {0.7, -1.1});
+      const IslandProg replay = c.p;
+      const std::vector<double> want_double = direct_values(replay, c.in);
+      expect("cfg mdivide_left generated", gen_cfg_adjoint(c.p));
+      expect("cfg mdivide_left attaches active vector backward",
+                 c.p.calls.size() == 1 &&
+                 c.p.calls[0].opcode == OP_MDIVIDE_LEFT &&
+                 c.p.calls[0].variant == 15u);
+      std::vector<double> want_v, got_v;
+      const std::vector<double> want =
+          replay_adjoints(replay, c.in, c.seed, &want_v);
+      const std::vector<double> got =
+          native_adjoints(c.p, c.in, c.seed, &got_v);
+      for (size_t k = 0; k < want.size(); ++k)
+        expect("cfg mdivide_left adjoint parity", ulps(want[k], got[k]) == 0);
+      for (size_t k = 0; k < want_double.size(); ++k)
+        expect("cfg mdivide_left direct value parity",
+               ulps(want_double[k], got_v[k]) == 0);
+    }
+    {
+      Build b({condition, 1.5, 0.2, 0.2, 0.9, 0.7, -0.1, 0.4, 0.8});
+      const int out = b.alloc(4);
+      b.p.code = {{Program::MOVR, out, 5, 0, 0, 4},
+                  {Program::JZ, 3, 0},
+                  {Program::QUAD_FORM_SYM, out, 1, 5, 2, 4}};
+      Case c = b.done({out, out + 1, out + 2, out + 3},
+                      {0.2, -0.4, 0.7, 1.1});
+      const IslandProg replay = c.p;
+      const std::vector<double> want_double = direct_values(replay, c.in);
+      expect("cfg quad_form_sym generated", gen_cfg_adjoint(c.p));
+      expect("cfg quad_form_sym attaches active matrix backward",
+             c.p.calls.size() == 1 &&
+                 c.p.calls[0].opcode == OP_QUAD_FORM_SYM &&
+                 c.p.calls[0].variant == 2u);
+      std::vector<double> want_v, got_v;
+      const std::vector<double> want =
+          replay_adjoints(replay, c.in, c.seed, &want_v);
+      const std::vector<double> got =
+          native_adjoints(c.p, c.in, c.seed, &got_v);
+      for (size_t k = 0; k < want.size(); ++k)
+        expect("cfg quad_form_sym adjoint parity", ulps(want[k], got[k]) == 0);
+      for (size_t k = 0; k < want_double.size(); ++k)
+        expect("cfg quad_form_sym direct value parity",
+               ulps(want_double[k], got_v[k]) == 0);
+    }
+  }
+}
+
+static void test_selector_adjoint_recognition() {
+  IslandProg selector;
+  selector.n_regs = 5;
+  selector.ins = {{0, 1}, {1, 1}, {2, 1}};
+  selector.pool = {0.4};
+  selector.code = {
+      {Program::CONST, 3, 0},
+      {Program::GT, 4, 0, 3},
+      {Program::JZ, 5, 4},
+      {Program::MOV, 1, 2},
+      {Program::JMP, 5},
+  };
+  selector.out_regs = {1};
+  expect("pure selector recognized", supports_selector_adjoint(selector));
+
+  IslandProg arithmetic = selector;
+  arithmetic.code[3] = {Program::ADD, 1, 1, 2};
+  expect("arithmetic selector refused",
+         !supports_selector_adjoint(arithmetic));
+
+  IslandProg backedge = selector;
+  backedge.code.back().dst = 1;
+  expect("selector backedge refused", !supports_selector_adjoint(backedge));
+
+  IslandProg bad_pool = selector;
+  bad_pool.pool.clear();
+  expect("selector bad constant refused",
+         !supports_selector_adjoint(bad_pool));
 }
 
 static void test_reductions() {
@@ -1423,6 +2302,7 @@ static void test_fuzz_ranges() {
 int main() {
   test_call_binding_refusal();
   test_call_cached_forward_reverse_aliasing();
+  test_nested_backward_context_reentrant();
   test_binary_ops();
   test_fma();
   test_unary_ops();
@@ -1450,6 +2330,12 @@ int main() {
   test_two_gradients();
   test_fuzz();
   test_fuzz_ranges();
+  test_call_activity_elision();
+  test_terminal_jz_adjoint();
+  test_cfg_trace_blocks();
+  test_cfg_adjoint();
+  test_cfg_structured_calls();
+  test_selector_adjoint_recognition();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

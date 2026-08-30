@@ -284,6 +284,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/mixture.cpp
   runtime/kernels/message.cpp
   runtime/kernels/rng.cpp
+  runtime/kernels/scan.cpp
   runtime/kernels/island.cpp
   runtime/src/island.cpp
   runtime/src/adjoint.cpp
@@ -704,6 +705,18 @@ add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_grad PRIVATE stanli)
 add_dependencies(bench_grad stanli_mir_fixtures)
+add_test(NAME test_bench_grad_param_override
+         COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
+                 tests/fixtures/ar1.json 1 --set-param 0 -0.1
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(test_bench_grad_param_override PROPERTIES
+  PASS_REGULAR_EXPRESSION "[0-9]+\\.[0-9]+ [-+0-9.e]+ [0-9]+\\.[0-9]+ 24")
+add_test(NAME test_bench_grad_param_override_bad_index
+         COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
+                 tests/fixtures/ar1.json 1 --set-param 24 0
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(test_bench_grad_param_override_bad_index PROPERTIES
+  WILL_FAIL TRUE)
 add_executable(bench_mir_decode tools/bench_mir_decode.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_mir_decode PRIVATE stanli)
@@ -798,7 +811,9 @@ set(STANLI_TESTS
   test_partition
   test_solve test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
-  test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
+  test_adjoint test_prepared_mdivide test_prepared_mdivide_lu
+  test_matrix_exp_block_frechet test_cfg_native_canary test_cfg_native_large
+  test_scan test_diagnose test_multichain test_newtrans test_rejectprint
   test_odevariadic test_algebra test_estimate test_brmsmono
   test_structured_arrays test_pathfinder test_unconstrain
   test_init_interp)

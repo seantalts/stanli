@@ -16,6 +16,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 O0_FIXTURES = {
     "paramcond_intarray",
     "runtime_int_array_udf",
+    "udf_observed_fill",
     "structured_matrix_ops",
     "udf_conditional_return",
     "udf_local_shape",

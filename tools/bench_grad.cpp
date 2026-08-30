@@ -3,12 +3,17 @@
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 
+#include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 static std::string slurp(const char* p) {
@@ -20,14 +25,73 @@ static std::string slurp(const char* p) {
 
 int main(int argc, char** argv) {
   if (argc < 4) {
-    std::fprintf(stderr, "usage: bench_grad mir.sexp data.json N|--prep\n");
+    std::fprintf(stderr,
+                 "usage: bench_grad mir.sexp data.json N|--prep "
+                 "[--set-param INDEX VALUE]...\n");
     return 2;
   }
   const bool prep_only = std::string(argv[3]) == "--prep";
-  const int N = prep_only ? 0 : std::atoi(argv[3]);
-  if (!prep_only && N <= 0) {
-    std::fprintf(stderr, "bench_grad: N must be positive\n");
-    return 2;
+  int N = 0;
+  if (!prep_only) {
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(argv[3], &end, 10);
+    if (errno != 0 || end == argv[3] || *end != '\0' || parsed <= 0 ||
+        parsed > std::numeric_limits<int>::max()) {
+      std::fprintf(stderr, "bench_grad: N must be a positive integer\n");
+      return 2;
+    }
+    N = static_cast<int>(parsed);
+  }
+  std::vector<std::pair<int64_t, double>> param_overrides;
+  std::unordered_set<int64_t> overridden;
+  for (int arg = 4; arg < argc;) {
+    if (std::string(argv[arg]) != "--set-param") {
+      std::fprintf(stderr, "bench_grad: unknown argument: %s\n", argv[arg]);
+      return 2;
+    }
+    if (prep_only) {
+      std::fprintf(stderr,
+                   "bench_grad: --set-param is invalid with --prep\n");
+      return 2;
+    }
+    if (arg + 2 >= argc) {
+      std::fprintf(stderr,
+                   "bench_grad: --set-param requires INDEX and VALUE\n");
+      return 2;
+    }
+    errno = 0;
+    char* index_end = nullptr;
+    const long long parsed_index =
+        std::strtoll(argv[arg + 1], &index_end, 10);
+    if (errno != 0 || index_end == argv[arg + 1] || *index_end != '\0' ||
+        parsed_index < 0) {
+      std::fprintf(stderr,
+                   "bench_grad: parameter index must be a nonnegative "
+                   "integer: %s\n",
+                   argv[arg + 1]);
+      return 2;
+    }
+    errno = 0;
+    char* value_end = nullptr;
+    const double value = std::strtod(argv[arg + 2], &value_end);
+    if (errno != 0 || value_end == argv[arg + 2] || *value_end != '\0' ||
+        !std::isfinite(value)) {
+      std::fprintf(stderr,
+                   "bench_grad: parameter value must be finite: %s\n",
+                   argv[arg + 2]);
+      return 2;
+    }
+    const int64_t index = static_cast<int64_t>(parsed_index);
+    if (!overridden.insert(index).second) {
+      std::fprintf(stderr,
+                   "bench_grad: parameter index specified more than once: "
+                   "%lld\n",
+                   parsed_index);
+      return 2;
+    }
+    param_overrides.emplace_back(index, value);
+    arg += 3;
   }
   using Clock = std::chrono::steady_clock;
   using Time = Clock::time_point;
@@ -112,6 +176,16 @@ int main(int argc, char** argv) {
   const int64_t n = ex.n_params();
   for (int64_t i = 0; i < n; ++i)
     ex.params_data()[i] = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
+  for (const auto& override : param_overrides) {
+    if (override.first >= n) {
+      std::fprintf(stderr,
+                   "bench_grad: parameter index %lld is out of range for "
+                   "%lld parameters\n",
+                   (long long)override.first, (long long)n);
+      return 2;
+    }
+    ex.params_data()[override.first] = override.second;
+  }
   std::vector<double> grad(n);
   double sink = 0;
   // Warm up by time, not by count: 1000 evaluations is nothing on a scalar

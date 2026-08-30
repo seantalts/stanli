@@ -190,6 +190,9 @@ struct Program {
     int32_t bwd_adj_in[6] = {0, 0, 0, 0, 0, 0};
     int32_t bwd_value_out = 0;
     int32_t bwd_adj_out = 0;
+    // Non-owning payload retained by the graph or the enclosing region's
+    // udata owners, including nested island CALLs in reusable loop steps.
+    const void* udata = nullptr;
   };
 
   std::vector<Instr> code;
@@ -197,6 +200,14 @@ struct Program {
   std::vector<double> pool;  // CONSTR data
   int n_regs = 0;
   std::vector<int> out_regs;  // the values the caller reads back
+};
+
+// Execution-local interception for a CALL. A scan replay can restore a
+// retained call result and scratch without rerunning the kernel.
+struct ProgramCallHook {
+  void* state = nullptr;
+  bool (*restore)(void* state, const Program& program, int32_t call_index,
+                  double* reg) = nullptr;
 };
 
 struct ProgramOpSpec {
@@ -252,7 +263,8 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
 
 // Assemble the forward context for `call` over the register file `reg`.
 // Backward-only fields are left null; run_adjoint fills its own.
-KernelCtx call_fwd_ctx(const Program::Call& call, double* reg);
+KernelCtx call_fwd_ctx(const Program::Call& call, double* reg,
+                       const ProgramCallHook* hook = nullptr);
 
 // Resolve a manually constructed call site once. Production carvers already
 // have the Kernel in hand and bind its pointers directly. False leaves the
@@ -261,10 +273,14 @@ bool bind_call(Program::Call& call);
 
 // Run one CALL forward through its pre-resolved function.
 void run_call(const Program::Call& call, double* reg);
+void run_call(const Program::Call& call, double* reg,
+              const ProgramCallHook* hook);
 
 // Reuse a caller-owned transient context. Its pointer fields are rebound per
 // site, while construction/defaulting of the full packet is not paid again.
 void run_call(const Program::Call& call, double* reg, KernelCtx& ctx);
+void run_call(const Program::Call& call, double* reg, KernelCtx& ctx,
+              const ProgramCallHook* hook);
 
 // Run `p` over `reg`, which the caller has seeded and sized to at least
 // p.n_regs. The compilers guarantee every register is written before it is
@@ -278,12 +294,25 @@ struct ProgramCallCtx<true> {
 };
 
 template <bool ReuseCallCtx, typename T>
-void run_program_impl(const Program& p, T* reg) {
+void run_program_impl(const Program& p, T* reg,
+                      const std::vector<Program::Instr>* code_override = nullptr,
+                      uint8_t* executed = nullptr,
+                      const int32_t* trace_pc = nullptr,
+                      const ProgramCallHook* call_hook = nullptr) {
   using VecT = Eigen::Matrix<T, Eigen::Dynamic, 1>;
   ProgramCallCtx<ReuseCallCtx> call_ctx;
-  const int64_t n = (int64_t)p.code.size();
+  const auto& code = code_override == nullptr ? p.code : *code_override;
+  const int64_t n = (int64_t)code.size();
   for (int64_t pc = 0; pc < n; ++pc) {
-    const Program::Instr& I = p.code[(size_t)pc];
+    const Program::Instr& I = code[(size_t)pc];
+    if (executed != nullptr) {
+      const int32_t original = trace_pc == nullptr
+                                   ? static_cast<int32_t>(pc)
+                                   : trace_pc[(size_t)pc];
+      if (original >= 0)
+        executed[(size_t)original >> 3] |=
+            static_cast<uint8_t>(1u << (original & 7));
+    }
     // `dst` is a register for everything but the jumps, where it is an
     // instruction index -- so it is only dereferenced in the cases that
     // actually write a register.
@@ -536,10 +565,16 @@ void run_program_impl(const Program& p, T* reg) {
       // program.
       case Program::CALL:
         if constexpr (std::is_same_v<T, double>) {
-          if constexpr (ReuseCallCtx)
-            run_call(p.calls[(size_t)I.a], reg, call_ctx.ctx);
-          else
-            run_call(p.calls[(size_t)I.a], reg);
+          const bool restored = call_hook != nullptr &&
+                                call_hook->restore != nullptr &&
+                                call_hook->restore(call_hook->state, p, I.a,
+                                                   reg);
+          if (!restored) {
+            if constexpr (ReuseCallCtx)
+              run_call(p.calls[(size_t)I.a], reg, call_ctx.ctx, call_hook);
+            else
+              run_call(p.calls[(size_t)I.a], reg, call_hook);
+          }
         } else {
           // Kernels are double machinery; a program that reaches here
           // under var was carved wrong, and saying so beats corrupting
@@ -573,6 +608,33 @@ void run_program(const Program& p, T* reg) {
     }
   }
   run_program_impl<false>(p, reg);
+}
+
+template <typename T>
+inline void run_program(const Program& p, T* reg,
+                        const ProgramCallHook* call_hook) {
+  if constexpr (std::is_same_v<T, double>) {
+    if (!p.calls.empty()) {
+      run_program_impl<true>(p, reg, nullptr, nullptr, nullptr, call_hook);
+      return;
+    }
+  }
+  run_program_impl<false>(p, reg, nullptr, nullptr, nullptr, call_hook);
+}
+
+template <typename T>
+inline void run_program(const Program& p,
+                        const std::vector<Program::Instr>& code, T* reg,
+                        uint8_t* executed = nullptr,
+                        const int32_t* trace_pc = nullptr,
+                        const ProgramCallHook* call_hook = nullptr) {
+  if constexpr (std::is_same_v<T, double>) {
+    if (!p.calls.empty()) {
+      run_program_impl<true>(p, reg, &code, executed, trace_pc, call_hook);
+      return;
+    }
+  }
+  run_program_impl<false>(p, reg, &code, executed, trace_pc, call_hook);
 }
 
 template <typename T>

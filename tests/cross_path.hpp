@@ -207,7 +207,8 @@ inline void scan_graph(const Graph& g, Paths* p) {
   for (const Op& op : g.ops) {
     if (op.opcode == OP_ISLAND) {
       ++p->islands;
-      if (static_cast<const IslandProg*>(op.udata)->native_adj) ++p->native_adj;
+      const auto* island = static_cast<const IslandProg*>(op.udata);
+      if (island->native_adj || island->selector_adj) ++p->native_adj;
     } else if (op.opcode == OP_ODE) {
       ++p->ode;
       const auto* spec = static_cast<const OdeSpec*>(op.udata);

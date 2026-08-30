@@ -2618,11 +2618,11 @@ class MirInterp {
 
     // A multivariate density consumes its vector and matrix arguments as
     // whole containers, so the scalar-density broadcaster below cannot
-    // represent it.  ctsem uses both a single vector and array[N] vector[K]
-    // observations, with shared or vectorized locations and one Cholesky
-    // factor. Interpreter storage is first-index-fast: the N array elements
-    // are the fast axis and each observation must therefore be gathered with
-    // stride N before it is handed to Stan Math.
+    // represent it. Models may use either a single vector or array[N]
+    // vector[K] observations, with shared or vectorized locations and one
+    // Cholesky factor. Interpreter storage is first-index-fast: the N array
+    // elements are the fast axis and each observation must therefore be
+    // gathered with stride N before it is handed to Stan Math.
     if (e.name == "multi_normal_cholesky_lpdf" && e.args.size() == 3) {
       Value y = eval(e.args[0]), mu_value = eval(e.args[1]),
             factor = eval(e.args[2]);

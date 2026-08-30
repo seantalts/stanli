@@ -25,9 +25,12 @@
 #include <stanli/optable.hpp>
 #include <stanli/program_density.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -173,6 +176,12 @@ struct Compiler {
   // adjoint count below: effective weight 1.
   int64_t n_call_scratch = 0;
   bool ok = true;
+  size_t max_live_ins = (size_t)kMaxLiveIns;
+  // The legacy carver deliberately refuses already-vectorized work.  An
+  // explicitly requested graph fragment has different policy: preserve a
+  // shaped direct opcode by calling its graph kernel when the register
+  // machine's scalar instruction cannot represent it.
+  bool explicit_kernel_fallback = false;
 
   // A copy-then-modify op (SET_INDEX/SET_SLICE writing a slot distinct
   // from its base) can reuse the base's registers when nothing reads the
@@ -215,7 +224,7 @@ struct Compiler {
       reg_of.emplace(slot, r);
       return r;
     }
-    if ((int)live_in_slots.size() >= kMaxLiveIns) {
+    if (live_in_slots.size() >= max_live_ins) {
       ok = false;
       return 0;
     }
@@ -274,6 +283,7 @@ struct Compiler {
     call.n_in = (int8_t)op.n_in;
     call.forward = k->forward;
     call.backward = k->backward;
+    call.udata = op.udata;
     for (int j = 0; j < op.n_in; ++j) {
       call.in[j] = read_reg(op.in[j]);
       call.in_len[j] = (int)g.slots[op.in[j]].len;
@@ -287,8 +297,10 @@ struct Compiler {
       if (call.out < call.in[j] + call.in_len[j] &&
           call.in[j] < call.out + call.out_len)
         return false;
-    call.scratch_len =
-        k->scratch_size ? (int)k->scratch_size(op, g.slots.data()) : 0;
+    const int64_t scratch =
+        k->scratch_size ? k->scratch_size(op, g.slots.data()) : 0;
+    if (scratch < 0 || scratch > std::numeric_limits<int>::max()) return false;
+    call.scratch_len = (int)scratch;
     call.scratch = call.scratch_len ? alloc(call.scratch_len) : 0;
     call.idata.assign(op.idata, op.idata + op.n_idata);
     n_call_scratch += call.scratch_len;
@@ -304,6 +316,8 @@ struct Compiler {
       case OP_SUB:
       case OP_MUL:
       case OP_DIV: {
+        if (explicit_kernel_fallback && !scalar_ins(g, op))
+          return compile_call(op);
         static_assert(Program::SUB == Program::ADD + 1 &&
                           Program::MUL == Program::ADD + 2 &&
                           Program::DIV == Program::ADD + 3 &&
@@ -332,6 +346,9 @@ struct Compiler {
 #undef X
         {
           const Program::Code c = (Program::Code)unary_code(op.opcode);
+          if (explicit_kernel_fallback && out_len != 1 && c != Program::LOG &&
+              c != Program::EXP)
+            return compile_call(op);
           const int a = read_reg(op.in[0]);
           const int d = write_reg(op.out);
           if (out_len == 1) {
@@ -407,17 +424,21 @@ struct Compiler {
         return ok;
       }
       case OP_LSE2: {
+        if (explicit_kernel_fallback && out_len != 1) return compile_call(op);
         const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
         emit(Program::LSE2, write_reg(op.out), a, b);
         return ok;
       }
       case OP_LOG_MIX: {
+        if (explicit_kernel_fallback && out_len != 1) return compile_call(op);
         const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
         const int c = read_reg(op.in[2]);
         emit(Program::LOG_MIX, write_reg(op.out), a, b, c);
         return ok;
       }
       case OP_FMA: {
+        if (explicit_kernel_fallback && !scalar_ins(g, op))
+          return compile_call(op);
         const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
         const int c = read_reg(op.in[2]);
         emit(Program::FMA, write_reg(op.out), a, b, c);
@@ -427,6 +448,8 @@ struct Compiler {
         const int dc = program_density_id_by_opcode(op.opcode);
         if (dc < 0) return compile_call(op);
         if (op.n_in != program_density_arity(dc)) return false;
+        if (explicit_kernel_fallback && !scalar_ins(g, op))
+          return compile_call(op);
         int argv[kMaxDensityArgs];
         for (int k = 0; k < op.n_in; ++k) argv[k] = read_reg(op.in[k]);
         if (op.n_in > 3) {
@@ -441,6 +464,130 @@ struct Compiler {
     }
   }
 };
+
+bool compiler_direct_opcode(uint16_t opcode) {
+  switch (opcode) {
+    case OP_ADD:
+    case OP_SUB:
+    case OP_MUL:
+    case OP_DIV:
+    case OP_FMA:
+    case OP_ADD_N:
+    case OP_INDEX:
+    case OP_SET_INDEX:
+    case OP_SET_INDEX_INPLACE:
+    case OP_SLICE:
+    case OP_SET_SLICE:
+    case OP_SET_SLICE_INPLACE:
+    case OP_DOT:
+    case OP_LOG_SUM_EXP:
+    case OP_SOFTMAX:
+    case OP_LSE2:
+    case OP_LOG_MIX:
+      return true;
+    default:
+      return unary_code(opcode) >= 0 ||
+             program_density_id_by_opcode(opcode) >= 0;
+  }
+}
+
+bool direct_shape_allowed(const Graph& g, const Op& op) {
+  if (!in_vocab(g, op)) return false;
+  switch (op.opcode) {
+    case OP_ADD:
+    case OP_SUB:
+    case OP_MUL:
+    case OP_DIV:
+    case OP_LSE2:
+    case OP_DOT:
+      return op.n_in == 2;
+    case OP_FMA:
+    case OP_LOG_MIX:
+      return op.n_in == 3;
+    case OP_ADD_N:
+      return op.n_in >= 1;
+    case OP_INDEX:
+    case OP_SLICE:
+      return op.n_in == 1 && op.n_idata == 1 && op.idata != nullptr;
+    case OP_SET_INDEX:
+    case OP_SET_INDEX_INPLACE:
+    case OP_SET_SLICE:
+    case OP_SET_SLICE_INPLACE:
+      return op.n_in == 2 && op.n_idata == 1 && op.idata != nullptr;
+    case OP_LOG_SUM_EXP:
+    case OP_SOFTMAX:
+      return op.n_in == 1;
+    default:
+      if (unary_code(op.opcode) >= 0) return op.n_in == 1;
+      const int density = program_density_id_by_opcode(op.opcode);
+      return density >= 0 && op.n_in == program_density_arity(density);
+  }
+}
+
+bool explicit_kernel_fallback_allowed(const Graph& g, const Op& op) {
+  if (op.udata != nullptr || op.n_idata != 0 ||
+      find_kernel(op.opcode) == nullptr)
+    return false;
+  const int64_t out_len = g.slots[(size_t)op.out].len;
+  const auto broadcastable = [&]() {
+    for (int j = 0; j < op.n_in; ++j) {
+      const int64_t len = g.slots[(size_t)op.in[j]].len;
+      if (len != 1 && len != out_len) return false;
+    }
+    return true;
+  };
+  const int density = program_density_id_by_opcode(op.opcode);
+  if (density >= 0)
+    return op.n_in == program_density_arity(density) && out_len == 1;
+  switch (op.opcode) {
+    case OP_ADD:
+    case OP_SUB:
+    case OP_MUL:
+    case OP_DIV:
+    case OP_LSE2:
+      return op.n_in == 2 && out_len != 1 && broadcastable();
+    case OP_FMA:
+    case OP_LOG_MIX:
+      return op.n_in == 3 && out_len != 1 && broadcastable();
+    default:
+      return unary_code(op.opcode) >= 0 && op.n_in == 1 && out_len != 1 &&
+             g.slots[(size_t)op.in[0]].len == out_len;
+  }
+}
+
+bool explicit_op_allowed(const Graph& g, const Op& op) {
+  if (op.opcode == OP_NONE_ || op.opcode == OP_SCAN || op.opcode == OP_RNG ||
+      is_effectful_op(op.opcode) || op.out2 >= 0 || op.n_in < 0 ||
+      op.n_in > 6 || op.out < 0 || (size_t)op.out >= g.slots.size())
+    return false;
+  if (compiler_direct_opcode(op.opcode))
+    return op.udata == nullptr && (direct_shape_allowed(g, op) ||
+                                   explicit_kernel_fallback_allowed(g, op));
+  return find_kernel(op.opcode) != nullptr;
+}
+
+bool retain_udata_owner(const Graph& g, const void* payload, uint16_t opcode,
+                        std::unordered_set<const void*>* retained,
+                        std::unordered_set<const void*>* expanded_islands,
+                        std::vector<std::shared_ptr<void>>* owners) {
+  if (payload == nullptr) return true;
+  if (retained->insert(payload).second) {
+    auto owner = std::find_if(g.udata_pool.begin(), g.udata_pool.end(),
+                              [payload](const std::shared_ptr<void>& p) {
+                                return p.get() == payload;
+                              });
+    if (owner == g.udata_pool.end()) return false;
+    owners->push_back(*owner);
+  }
+  if (opcode != OP_ISLAND) return true;
+  if (!expanded_islands->insert(payload).second) return true;
+  const auto& nested = *static_cast<const IslandProg*>(payload);
+  for (const Program::Call& call : nested.calls)
+    if (!retain_udata_owner(g, call.udata, call.opcode, retained,
+                            expanded_islands, owners))
+      return false;
+  return true;
+}
 
 // Retaining the raw program lets an accepted island receive destination
 // forwarding after the legacy program has been priced, but copying every
@@ -473,6 +620,122 @@ bool compact_island_gated(IslandProg& p, bool enable_destination_forwarding) {
       compact_program_gated(p, seeded, enable_destination_forwarding);
   for (size_t k = 0; k < p.ins.size(); ++k) p.ins[k].reg = seeded[k].first;
   return destination_forwarded;
+}
+
+bool compile_graph_fragment(
+    const Graph& g, size_t op_begin, size_t op_end,
+    const std::vector<int>& live_out_slots,
+    const std::vector<std::pair<int, std::vector<double>>>& fills,
+    const std::vector<uint8_t>& slot_active, GraphFragmentProgram* out,
+    std::string* diagnostic) {
+  auto refuse = [&](const std::string& why) {
+    if (diagnostic != nullptr) *diagnostic = why;
+    return false;
+  };
+  if (out == nullptr) return refuse("null graph-fragment result");
+  if (op_begin >= op_end || op_end > g.ops.size())
+    return refuse("invalid graph-fragment op range");
+  if (slot_active.size() != g.slots.size())
+    return refuse("graph-fragment activity does not cover every slot");
+  if (live_out_slots.empty())
+    return refuse("graph fragment has no explicit live-outs");
+
+  std::unordered_map<int, size_t> last_use;
+  std::unordered_set<int> written;
+  for (size_t u = 0; u < g.ops.size(); ++u) {
+    const Op& op = g.ops[u];
+    if (op.n_in < 0 || op.n_in > 6)
+      return refuse("graph fragment contains an invalid input count");
+    for (int j = 0; j < op.n_in; ++j) {
+      const int input = op.in[j];
+      if (input < 0 || (size_t)input >= g.slots.size())
+        return refuse("graph fragment contains an invalid input slot");
+      last_use[input] = u;
+    }
+    if (op.out >= 0) {
+      if ((size_t)op.out >= g.slots.size())
+        return refuse("graph fragment contains an invalid output slot");
+      written.insert(op.out);
+    }
+    if (op.out2 >= 0) {
+      if ((size_t)op.out2 >= g.slots.size())
+        return refuse("graph fragment contains an invalid second output");
+      written.insert(op.out2);
+    }
+  }
+
+  std::unordered_map<int, const std::vector<double>*> const_slots;
+  for (const auto& fill : fills) {
+    if (fill.first < 0 || (size_t)fill.first >= g.slots.size() ||
+        (int64_t)fill.second.size() != g.slots[(size_t)fill.first].len)
+      return refuse("graph-fragment fill does not match its slot");
+    if (!written.count(fill.first)) const_slots[fill.first] = &fill.second;
+  }
+
+  std::unordered_set<int> produced;
+  std::unordered_set<const void*> retained_payloads;
+  std::unordered_set<const void*> expanded_islands;
+  GraphFragmentProgram candidate;
+  for (size_t u = op_begin; u < op_end; ++u) {
+    const Op& op = g.ops[u];
+    if (!explicit_op_allowed(g, op))
+      return refuse("graph fragment contains an unsupported op");
+    if (op.n_idata < 0 || (op.n_idata > 0 && op.idata == nullptr))
+      return refuse("graph fragment contains malformed integer payload");
+    if ((op.opcode == OP_ISLAND || op.opcode == OP_ODE) && op.udata == nullptr)
+      return refuse("graph fragment contains a missing required payload");
+    if (!retain_udata_owner(g, op.udata, op.opcode, &retained_payloads,
+                            &expanded_islands, &candidate.udata_owners))
+      return refuse("graph fragment payload has no graph owner");
+    if (g.slots[(size_t)op.out].len < 0 ||
+        g.slots[(size_t)op.out].len > std::numeric_limits<int>::max())
+      return refuse("graph-fragment output is too large for a program");
+    for (int j = 0; j < op.n_in; ++j) {
+      const int64_t len = g.slots[(size_t)op.in[j]].len;
+      if (len < 0 || len > std::numeric_limits<int>::max())
+        return refuse("graph-fragment input is too large for a program");
+    }
+    produced.insert(op.out);
+  }
+
+  std::unordered_set<int> pinned;
+  for (int slot : live_out_slots) {
+    if (slot < 0 || (size_t)slot >= g.slots.size() || !produced.count(slot))
+      return refuse("graph-fragment live-out is not produced by the range");
+    if (!pinned.insert(slot).second)
+      return refuse("graph-fragment live-outs contain a duplicate slot");
+  }
+
+  Compiler cc{g, const_slots, last_use, pinned, {}, {}, {}, 0, 0, true};
+  cc.max_live_ins = std::numeric_limits<size_t>::max();
+  cc.explicit_kernel_fallback = true;
+  for (size_t u = op_begin; u < op_end; ++u) {
+    cc.op_index = u;
+    if (!cc.compile(g.ops[u]) || !cc.ok)
+      return refuse("graph fragment could not compile an op");
+  }
+  for (int slot : live_out_slots) {
+    auto reg = cc.reg_of.find(slot);
+    if (reg == cc.reg_of.end())
+      return refuse("graph-fragment live-out has no program register");
+    const int64_t len = g.slots[(size_t)slot].len;
+    for (int64_t k = 0; k < len; ++k)
+      cc.prog.out_regs.push_back(reg->second + (int)k);
+  }
+  for (size_t k = 0; k < cc.prog.ins.size(); ++k)
+    cc.prog.ins[k].active = slot_active[(size_t)cc.live_in_slots[k]] != 0;
+
+  compact_island(cc.prog);
+  const bool generated = gen_adjoint(cc.prog);
+  cc.prog.native_adj = generated && !std::getenv("STANLI_NO_NATIVE_ADJ");
+  if (!cc.prog.calls.empty() && !generated)
+    return refuse("graph-fragment CALL has no generated adjoint");
+
+  candidate.program = std::move(cc.prog);
+  candidate.live_in_slots = std::move(cc.live_in_slots);
+  *out = std::move(candidate);
+  if (diagnostic != nullptr) diagnostic->clear();
+  return true;
 }
 
 int carve_islands(Graph& g,
