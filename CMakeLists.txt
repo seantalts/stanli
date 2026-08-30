@@ -400,15 +400,15 @@ endfunction()
 stanli_embed_stanc(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
-# Static everywhere except under a sanitizer, where the library is
-# shared. The reason is disk, not elegance: 52 statically linked test
-# binaries each carry their own instrumented copy of the runtime and its
-# debug info, and under ASan that tree overran a disk which started with
-# 86 GB free -- the link step died of "No space left on device" three
-# runs straight. One shared object holds the single copy; the binaries
-# shrink to their own test code; CMake's build-tree RPATH makes ctest
-# find it with no further ceremony. Unlike stanli_shared this library
-# keeps every symbol visible, which is what the tests link against.
+# Sanitizer builds keep using a shared C++ runtime. The reason is disk, not
+# elegance: 52 statically linked test binaries each carry their own
+# instrumented copy of the runtime and its debug info, and under ASan that
+# tree overran a disk which started with 86 GB free -- the link step died of
+# "No space left on device" three runs straight. One shared object holds the
+# single copy; the binaries shrink to their own test code; CMake's build-tree
+# RPATH makes ctest find it with no further ceremony. Unlike stanli_shared
+# this library keeps every symbol visible, which is what the tests link
+# against.
 if(STANLI_SANITIZE)
   set(_stanli_kind SHARED)
 else()
@@ -450,6 +450,44 @@ if(NOT EMSCRIPTEN)
   # ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr. Not under
   # Emscripten, whose libc already carries it.
   target_link_libraries(stanli PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+endif()
+
+# Native Clang developer builds put the same C++ implementation behind one
+# test-only shared library. Keep the ordinary static target as well: stanli_run
+# and stanli_check are installed executables and must not acquire a runtime
+# dependency on a library that is deliberately absent from the install set.
+# Non-Clang and Windows builds retain their established static test linkage;
+# sanitizer builds already use the shared `stanli` target above.
+set(_stanli_shared_test_runtime_default OFF)
+if(NOT EMSCRIPTEN AND NOT WIN32 AND
+   CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
+  set(_stanli_shared_test_runtime_default ON)
+endif()
+option(STANLI_SHARED_TEST_RUNTIME
+  "Link native tests to one shared C++ runtime in Clang developer builds"
+  ${_stanli_shared_test_runtime_default})
+
+set(STANLI_TEST_RUNTIME_TARGET stanli)
+if(STANLI_SHARED_TEST_RUNTIME AND NOT STANLI_SANITIZE AND
+   NOT EMSCRIPTEN AND NOT WIN32)
+  add_library(stanli_test_runtime SHARED
+    runtime/src/build_id.cpp
+    $<TARGET_OBJECTS:stanli_runtime_objects>)
+  set_target_properties(stanli_test_runtime PROPERTIES
+                        OUTPUT_NAME stanli_test_core)
+  target_include_directories(stanli_test_runtime PUBLIC runtime/include)
+  target_compile_definitions(stanli_test_runtime PUBLIC BRIDGESTAN_EXPORT=1)
+  target_link_libraries(stanli_test_runtime
+                        PUBLIC stanmath sundials Threads::Threads
+                               ${CMAKE_DL_LIBS})
+  # Test executables continue to provide the single-threaded TBB stub. Linux
+  # permits that unresolved shared-library reference by default; Darwin needs
+  # the equivalent policy stated explicitly.
+  if(APPLE)
+    target_link_options(stanli_test_runtime PRIVATE
+                        -Wl,-undefined,dynamic_lookup)
+  endif()
+  set(STANLI_TEST_RUNTIME_TARGET stanli_test_runtime)
 endif()
 
 # The browser/WASM build: the same runtime and C ABI over the MIR-text
@@ -555,7 +593,7 @@ endfunction()
 # its source: force-including stan-math would collide with the class definition
 # in the stub's non-Apple branch.
 add_library(stanli_test_pch OBJECT tests/pch_anchor.cpp)
-target_link_libraries(stanli_test_pch PRIVATE stanli)
+target_link_libraries(stanli_test_pch PRIVATE ${STANLI_TEST_RUNTIME_TARGET})
 target_compile_options(stanli_test_pch PRIVATE -O0)
 target_precompile_headers(stanli_test_pch PRIVATE ${STANLI_TEST_PCH})
 endif()
@@ -564,7 +602,7 @@ endif()
 function(stanli_add_test NAME)
   add_executable(${NAME} tests/${NAME}.cpp
     $<TARGET_OBJECTS:stanli_tbb_stub>)
-  target_link_libraries(${NAME} PRIVATE stanli)
+  target_link_libraries(${NAME} PRIVATE ${STANLI_TEST_RUNTIME_TARGET})
   if(STANLI_FAST_TEST_TUS)
     stanli_configure_test_tu(${NAME})
   endif()
