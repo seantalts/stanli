@@ -28,8 +28,10 @@ EXPORTS
   stanli_sample
   stanli_sample_stream
   stanli_sample_stream_stats
+  stanli_sample_stream_stats_init
   stanli_sample_walnuts_stream
   stanli_run_pathfinder
+  stanli_pathfinder_inits
   stanli_n_constrained
   stanli_constrained_name
   stanli_constrain
