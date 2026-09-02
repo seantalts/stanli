@@ -261,6 +261,22 @@ fit = model.sample(seed=1, warmup=1000, samples=1000, delta=0.8,
 fit["theta.1"]                      # ndarray, chains concatenated
 ```
 
+Pathfinder can generate one initialization per chain before NUTS. The
+sampling seed controls both stages; an empty options object uses CmdStan's
+single-path defaults:
+
+```python
+fit = model.sample(
+    chains=4,
+    seed=303,
+    pathfinder_init={"num_iterations": 500, "num_elbo_draws": 25},
+)
+```
+
+The other supported options are `history_size` and Pathfinder's own
+`init_radius`. `pathfinder_init` and explicit `inits` are mutually exclusive;
+single-path Pathfinder does not perform PSIS resampling.
+
 `data` accepts a path to a JSON file or a dict of Python scalars,
 lists, and numpy arrays. `sample` returns every column CmdStan's CSV
 would carry (constrained parameters, transformed parameters, generated
@@ -294,8 +310,9 @@ the user's machine.
 Stated plainly:
 
 - The sampler is Stan's own NUTS with diagonal-metric adaptation, and
-  `optimize()` is Stan's L-BFGS. No variational inference or Pathfinder
-  yet.
+  `optimize()` is Stan's L-BFGS. Single-path Pathfinder is available for
+  sampler initialization; a standalone Python Pathfinder result is not yet
+  exposed.
 - `inits` are on the unconstrained scale. `model.unconstrain({...})`
   turns constrained starting values into that vector, so unconstraining is
   a step per starting point rather than a second kind of argument.

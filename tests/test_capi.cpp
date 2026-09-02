@@ -611,6 +611,38 @@ void expect_pathfinder() {
     std::printf("FAIL C API pathfinder summary: khat %g selected %g\n", khat,
                 selected);
   }
+
+  // Pathfinder-as-initialization is a distinct additive boundary: one
+  // chain-major unconstrained row per requested chain, reproducible from the
+  // sampling seed and not a change to stanli_sample_opts.
+  std::vector<double> inits((size_t)(3 * n));
+  std::vector<double> repeated(inits.size());
+  std::vector<double> changed(inits.size());
+  path.clear();
+  const int init_rc =
+      stanli_pathfinder_inits(model, 1729, 1, 3, 1000, 25, 5, 2.0, inits.data(),
+                              on_iter, &path, err, sizeof err);
+  const int repeated_rc = stanli_pathfinder_inits(
+      model, 1729, 1, 3, 1000, 25, 5, 2.0, repeated.data(), nullptr, nullptr,
+      err, sizeof err);
+  const int changed_rc = stanli_pathfinder_inits(model, 1730, 1, 3, 1000, 25, 5,
+                                                 2.0, changed.data(), nullptr,
+                                                 nullptr, err, sizeof err);
+  expect_true("C API Pathfinder inits succeed",
+              init_rc == 0 && repeated_rc == 0 && changed_rc == 0);
+  expect_true("C API Pathfinder inits expose progress", !path.empty());
+  expect_true("C API Pathfinder inits reproduce", inits == repeated);
+  expect_true("C API Pathfinder init seed changes output", inits != changed);
+  expect_true("C API Pathfinder gives chains distinct starts",
+              !std::equal(inits.begin(), inits.begin() + n, inits.begin() + n));
+
+  err[0] = '\0';
+  const int invalid = stanli_pathfinder_inits(
+      model, 1, 1, 3, 1000, 25, 5, std::numeric_limits<double>::quiet_NaN(),
+      inits.data(), nullptr, nullptr, err, sizeof err);
+  expect_true("C API Pathfinder init rejects invalid settings",
+              invalid != 0 &&
+                  std::string(err).find("init_radius") != std::string::npos);
   stanli_model_free(model);
 }
 
@@ -766,6 +798,23 @@ void expect_streaming_stats() {
               stanli_sample(model, opts.seed, opts.warmup, opts.samples,
                             opts.delta, streamed.data(), err, sizeof err) == 0);
   expect_true("old sampler retains identical draws", streamed == reference);
+
+  // The browser's additive explicit-init stream is the one-chain multi API,
+  // byte for byte. This is the handoff Pathfinder initialization uses.
+  std::vector<double> init((size_t)n, 0.0);
+  opts.inits = init.data();
+  expect_true("explicit-init multi sampling",
+              stanli_sample_multi(model, &opts, reference.data(), stats.data(),
+                                  err, sizeof err) == 0);
+  expect_true("explicit-init streaming sampling",
+              stanli_sample_stream_stats_init(
+                  model, opts.seed, opts.warmup, opts.samples, opts.delta,
+                  init.data(), streamed.data(), streamed_stats.data(), nullptr,
+                  nullptr, err, sizeof err) == 0);
+  expect_true("explicit-init stream matches multi draws",
+              streamed == reference);
+  expect_true("explicit-init stream matches multi stats",
+              streamed_stats == stats);
   stanli_model_free(model);
 }
 

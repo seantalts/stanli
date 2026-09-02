@@ -181,6 +181,39 @@ createStanli().then((M) => {
   const pfMs = M.HEAPF64[sumPtr / 8 + 3];
   M._free(sumPtr);
 
+  // The web initialization handoff: Pathfinder writes one unconstrained
+  // point, then the additive stream entry starts NUTS from exactly that
+  // buffer while retaining sampler statistics and live-draw compatibility.
+  const pfInitPtr = M._malloc(8 * n);
+  const pfInitPath = [];
+  const pfInitCb = M.addFunction(
+      (iter, plp) => pfInitPath.push([iter, plp]), "vidi");
+  const rcPI = M._stanli_pathfinder_inits(
+      model, 303, 1, 1, 100, 10, 5, 2, pfInitPtr, pfInitCb, 0, errPtr,
+      errLen);
+  M.removeFunction(pfInitCb);
+  if (rcPI !== 0)
+    fail("pathfinder initialization: " + M.UTF8ToString(errPtr));
+  if (!pfInitPath.length ||
+      !M.HEAPF64.subarray(pfInitPtr / 8, pfInitPtr / 8 + n)
+          .every(Number.isFinite))
+    fail("pathfinder initialization produced no finite start");
+  const initSamples = 20;
+  const initStatsPtr = M._malloc(8 * initSamples * 7);
+  const rcPISample = M._stanli_sample_stream_stats_init(
+      model, 303, 30, initSamples, 0.8, pfInitPtr, drawsPtr, initStatsPtr, 0,
+      0, errPtr, errLen);
+  if (rcPISample !== 0)
+    fail("sampling from Pathfinder initialization: " +
+         M.UTF8ToString(errPtr));
+  if (!M.HEAPF64.subarray(drawsPtr / 8, drawsPtr / 8 + initSamples * n)
+          .every(Number.isFinite) ||
+      !M.HEAPF64.subarray(initStatsPtr / 8, initStatsPtr / 8 + initSamples * 7)
+          .every(Number.isFinite))
+    fail("sampling from Pathfinder initialization produced nonfinite output");
+  M._free(initStatsPtr);
+  M._free(pfInitPtr);
+
   M._stanli_model_free(model);
 
   // A source-to-WASM generated-quantities smoke for the portable producer.

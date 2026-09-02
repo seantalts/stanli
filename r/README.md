@@ -46,6 +46,13 @@ library(stanli)
 m <- stanli_model(file = "eight_schools.stan", data = list(J = 8L, y = y, sigma = s))
 fit <- sample_model(m, chains = 4, seed = 1)
 
+# Fit a single-path Pathfinder approximation first, then draw one
+# reproducible NUTS start per chain from it.
+fit_pf <- sample_model(
+  m, chains = 4, seed = 303,
+  pathfinder_init = list(num_iterations = 500L, num_elbo_draws = 25L)
+)
+
 summary(fit)          # mean, MCSE, sd, quantiles, bulk/tail ESS, R-hat
 stanli_diagnose(fit)  # divergences, treedepth, E-BFMI, R-hat, ESS
 as_draws_array(fit)   # a posterior::draws_array
@@ -71,6 +78,10 @@ including E-BFMI, the one that catches a badly explored heavy tail.
 `unconstrain(m, list(mu = 0.5, sigma = 1.2))` builds the same vector from
 starting values on the constrained scale, naming the parameter when one is
 missing, the wrong size, or outside its support.
+`pathfinder_init = list()` uses single-path Pathfinder defaults; its supported
+overrides are `num_iterations`, `num_elbo_draws`, `history_size`, and
+`init_radius`. It is mutually exclusive with explicit `init`, and does not
+perform PSIS resampling.
 
 Chains run in parallel by default. Threading does not change the
 answer: each chain owns its executor and its RNG stream, so a parallel

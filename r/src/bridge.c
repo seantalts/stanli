@@ -92,6 +92,7 @@ typedef struct {
 
 typedef void (*stanli_sample_progress_cb)(int32_t, int64_t, int64_t, int32_t,
                                           void*);
+typedef void (*stanli_path_cb)(int32_t, double, void*);
 
 typedef struct {
   uint32_t seed;
@@ -133,6 +134,9 @@ static int (*p_sample_multi_progress)(void*, const stanli_sample_opts*, int,
                                       double*, double*,
                                       stanli_sample_progress_cb, void*,
                                       stanli_sample_report*, char*, size_t);
+static int (*p_pathfinder_inits)(void*, uint32_t, int, int, int, int, int,
+                                 double, double*, stanli_path_cb, void*, char*,
+                                 size_t);
 static const char* (*p_sampler_column_name)(int);
 static int (*p_summary_stats)(const double*, int64_t, int64_t, int64_t,
                               double*);
@@ -211,6 +215,9 @@ SEXP stanli_bridge_load(SEXP path) {
    * than making an optional feature prevent the library loading. */
   *(void**)(&p_sample_multi_progress) =
       dl_sym(g_lib, "stanli_sample_multi_progress");
+  /* Pathfinder initialization is also additive. Only callers that request it
+   * require a runtime new enough to provide the symbol. */
+  *(void**)(&p_pathfinder_inits) = dl_sym(g_lib, "stanli_pathfinder_inits");
   BIND("stanli_sampler_column_name", p_sampler_column_name);
   BIND("stanli_summary_stats", p_summary_stats);
   BIND("stanli_diagnose_text", p_diagnose_text);
@@ -412,6 +419,38 @@ static void print_sample_reports(const stanli_sample_opts* o, int64_t nchain,
         (long long)n_max_treedepth, (long long)transitions,
         o->max_depth > 0 ? o->max_depth : 10);
   R_FlushConsole();
+}
+
+SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options) {
+  require_loaded();
+  if (p_pathfinder_inits == NULL)
+    error(
+        "Pathfinder initialization is unavailable with this older stanli "
+        "runtime. Run stanli_install(overwrite = TRUE) to update.");
+  void* mm = model_ptr(m);
+  const int nchain = asInteger(chains);
+  if (nchain <= 0) error("chains must be positive");
+  const int64_t n = p_n_unconstrained(mm);
+  double* raw = (double*)R_alloc((size_t)nchain * (size_t)n, sizeof(double));
+  char err[4096];
+  err[0] = '\0';
+  const int rc = p_pathfinder_inits(
+      mm, (uint32_t)asInteger(seed), 1, nchain,
+      asInteger(VECTOR_ELT(options, 0)), asInteger(VECTOR_ELT(options, 1)),
+      asInteger(VECTOR_ELT(options, 2)), asReal(VECTOR_ELT(options, 3)), raw,
+      NULL, NULL, err, sizeof err);
+  if (rc != 0)
+    error("Pathfinder initialization failed: %s",
+          err[0] ? err : "unknown error");
+
+  /* Return an ordinary chains-by-parameters R matrix. R owns columns, while
+   * the C ABI owns chain-major rows, so transpose the memory layout here. */
+  SEXP out = PROTECT(allocMatrix(REALSXP, nchain, (int)n));
+  for (int c = 0; c < nchain; ++c)
+    for (int64_t j = 0; j < n; ++j)
+      REAL(out)[c + (int64_t)nchain * j] = raw[(int64_t)c * n + j];
+  UNPROTECT(1);
+  return out;
 }
 
 SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {

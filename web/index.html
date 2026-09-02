@@ -173,6 +173,18 @@ Compare methods side by side.</p>
   <label>seed <input id="seed" value="1"></label>
   <label id="deltalab">delta <input id="delta" value="0.8"></label>
   <label id="maxerrlab" hidden>max err <input id="maxerr" value="0.5"></label>
+  <label id="initlab">init <select id="initmethod">
+    <option value="random">random</option>
+    <option value="pathfinder">Pathfinder</option>
+  </select></label>
+  <label class="pfinit" hidden>PF iterations
+    <input id="pfiterations" value="1000"></label>
+  <label class="pfinit" hidden>PF ELBO draws
+    <input id="pfelbodraws" value="25"></label>
+  <label class="pfinit" hidden>PF history
+    <input id="pfhistory" value="5"></label>
+  <label class="pfinit" hidden>PF radius
+    <input id="pfradius" value="2"></label>
   <button id="csv" class="plain" hidden>Download CSV</button>
   <span id="status"></span>
 </div>
@@ -504,7 +516,7 @@ const MODE_SAMPLERS = {
   pathfinder: ["pathfinder"], nutspf: ["nuts", "pathfinder"],
 };
 function samplerMode() { return $("sampler").value; }
-$("sampler").onchange = () => {
+function updateSamplerControls() {
   const on = MODE_SAMPLERS[samplerMode()];
   // delta tunes NUTS's adaptation target; max err tunes how much the
   // joint log density may drift across one WALNUTS macro step. Each is
@@ -512,7 +524,20 @@ $("sampler").onchange = () => {
   // optimizes rather than samples.
   $("deltalab").hidden = !on.includes("nuts");
   $("maxerrlab").hidden = !on.includes("walnuts");
-};
+  // Pathfinder initialization is a NUTS start, not another sampler mode.
+  // Keep it out of comparison modes, whose point is to compare methods under
+  // their established shared-start contracts.
+  const canInitialize = samplerMode() === "nuts";
+  $("initlab").hidden = !canInitialize;
+  const showPathfinder = canInitialize &&
+      $("initmethod").value === "pathfinder";
+  document.querySelectorAll(".pfinit").forEach((el) => {
+    el.hidden = !showPathfinder;
+  });
+}
+$("sampler").onchange = updateSamplerControls;
+$("initmethod").onchange = updateSamplerControls;
+updateSamplerControls();
 
 // ---- run -------------------------------------------------------------------
 // fit = {names, samples, generatedStart,
@@ -600,6 +625,7 @@ function newLive(nChains) {
            // Pathfinder streams L-BFGS iterates instead of draws, one
            // climb per chain slot.
            path: Array.from({ length: nChains }, () => []),
+           pfInit: new Array(nChains).fill(0),
            lo: Infinity, hi: -Infinity };
 }
 // Fold one chain's live messages into `live`, then let `redraw` decide
@@ -613,6 +639,11 @@ function liveHandler(live, progress, redraw) {
       live.path[c].push({ iter: lv.iter, lp: lv.lp });
       progress();
       redraw();
+      return;
+    }
+    if (lv.phase === "pathfinder-init") {
+      live.pfInit[c] = lv.iter + 1;
+      progress();
       return;
     }
     if (lv.phase === "warmup") {
@@ -673,6 +704,14 @@ $("run").onclick = async () => {
     samples: parseInt($("samples").value, 10) || 1000,
     delta: parseFloat($("delta").value) || 0.8,
     maxError: parseFloat($("maxerr").value) || 0,
+    pathfinderInit: $("initmethod").value === "pathfinder" && mode === "nuts"
+        ? {
+            numIterations: parseInt($("pfiterations").value, 10),
+            numElboDraws: parseInt($("pfelbodraws").value, 10),
+            historySize: parseInt($("pfhistory").value, 10),
+            initRadius: Number($("pfradius").value),
+          }
+        : null,
   };
   try {
     // Compile once; every chain of every sampler then runs from the same
@@ -704,10 +743,14 @@ async function runSingle(mode, opts, nChains, seed, compiled, tWall) {
   const progress = throttled(() => {
     const w = live.warm.reduce((a, b) => a + b, 0);
     const d = live.drawn.reduce((a, b) => a + b, 0);
+    const pfi = live.pfInit.reduce((a, b) => a + b, 0);
     $("status").textContent = pathfinder
         ? `${label}: ${iterates()} L-BFGS iterates across ${nChains} paths`
         : d
         ? `${label} sampling: ${d}/${nChains * opts.samples} draws across ` +
+          `${nChains} chains`
+        : pfi && !w
+        ? `Pathfinder initialization: ${pfi} L-BFGS iterates across ` +
           `${nChains} chains`
         : `${label} warmup: ${w}/${nChains * opts.warmup} across ` +
           `${nChains} chains`;

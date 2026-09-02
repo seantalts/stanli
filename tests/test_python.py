@@ -631,6 +631,52 @@ def test_explicit_inits():
         raise AssertionError("expected ValueError for mismatched inits")
 
 
+def test_pathfinder_initialization_reproduces_multichain_sampling():
+    m = _normal()
+    options = {"num_iterations": 100, "num_elbo_draws": 10,
+               "history_size": 5, "init_radius": 2.0}
+    a = m.sample(chains=2, seed=303, warmup=30, samples=20,
+                 pathfinder_init=options, parallel_chains=1, refresh=0)
+    b = m.sample(chains=2, seed=303, warmup=30, samples=20,
+                 pathfinder_init=options, parallel_chains=2, refresh=0)
+    assert np.array_equal(a.draws(), b.draws()), \
+        "same seed and Pathfinder options must reproduce"
+    assert np.array_equal(a.sampler_stats, b.sampler_stats)
+    assert not np.array_equal(a.draws("x")[0], a.draws("x")[1]), \
+        "Pathfinder must provide one start for each chain"
+
+
+def test_pathfinder_initialization_options_and_explicit_init_exclusion():
+    assert stanli._pathfinder_init_options({}) == {
+        "num_iterations": 1000, "num_elbo_draws": 25,
+        "history_size": 5, "init_radius": 2.0}
+    assert stanli._pathfinder_init_options({
+        "num_iterations": np.int64(7), "init_radius": np.float64(0.5)
+    })["num_iterations"] == 7
+    for value, error in [([], TypeError),
+                         ({"not_an_option": 1}, ValueError),
+                         ({"num_iterations": 0}, ValueError),
+                         ({"num_elbo_draws": 1.5}, TypeError),
+                         ({"history_size": True}, TypeError),
+                         ({"init_radius": float("nan")}, ValueError),
+                         ({"init_radius": -1}, ValueError)]:
+        try:
+            stanli._pathfinder_init_options(value)
+        except error:
+            pass
+        else:
+            raise AssertionError(
+                f"pathfinder_init={value!r} did not raise {error.__name__}")
+
+    try:
+        _normal().sample(chains=1, warmup=1, samples=1, inits=[0.0],
+                         pathfinder_init={}, refresh=0)
+    except ValueError as exc:
+        assert "mutually exclusive" in str(exc)
+    else:
+        raise AssertionError("explicit and Pathfinder inits were both accepted")
+
+
 def test_generated_quantities_differ_across_chains():
     # Each chain must get its own RNG stream, or every chain reports the
     # same posterior-predictive draws and the predictive check is a lie.

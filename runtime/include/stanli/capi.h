@@ -318,6 +318,16 @@ int stanli_sample_stream_stats(stanli_model* m, uint32_t seed, int warmup,
                                double* stats, stanli_draw_cb cb, void* user,
                                char* err, size_t err_len);
 
+/* Explicit-init form of stanli_sample_stream_stats. `init` is one
+ * n_unconstrained vector on the unconstrained scale. This is an additive
+ * entry point so existing stream callers and stanli_sample_opts keep their
+ * version-1 layouts. */
+int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
+                                    int samples, double delta,
+                                    const double* init, double* draws,
+                                    double* stats, stanli_draw_cb cb,
+                                    void* user, char* err, size_t err_len);
+
 /* WALNUTS (within-orbit adaptive step-length NUTS, arXiv:2506.18746),
  * same streaming contract as stanli_sample_stream. `max_error` is the
  * sampler's tunable in place of NUTS's `delta`: the largest drift in
@@ -352,6 +362,23 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
                           int num_draws, double* draws, double* lp,
                           double* lp_approx, double* summary, stanli_path_cb cb,
                           void* user, char* err, size_t err_len);
+
+/* Generate one unconstrained NUTS starting point per chain from a single-path
+ * Pathfinder approximation. `inits` receives chains * n_unconstrained
+ * doubles in chain-major order, ready for stanli_sample_opts::inits. The
+ * sampling seed owns reproducibility: Pathfinder uses (seed, chain_id), then
+ * returns `chains` draws from the selected approximation. Single-path
+ * Pathfinder performs no PSIS resampling.
+ *
+ * The four tunables are the deliberately small initialization surface. Pass
+ * CmdStan defaults (1000, 25, 5, 2) unless the host's dedicated Pathfinder
+ * options object overrides them. `cb`, when non-null, observes the L-BFGS
+ * path and can provide initialization progress in an interactive caller. */
+int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
+                            int chains, int num_iterations, int num_elbo_draws,
+                            int history_size, double init_radius, double* inits,
+                            stanli_path_cb cb, void* user, char* err,
+                            size_t err_len);
 
 /* write_array: every CSV column CmdStan would emit for one draw --
  * constrained parameters, transformed parameters, generated quantities,

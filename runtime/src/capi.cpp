@@ -12,11 +12,13 @@
 #include "build_id.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -276,12 +278,23 @@ int stanli_sample_stream_stats(stanli_model* m, uint32_t seed, int warmup,
                                int samples, double delta, double* draws,
                                double* stats, stanli_draw_cb cb, void* user,
                                char* err, size_t err_len) {
+  return stanli_sample_stream_stats_init(m, seed, warmup, samples, delta,
+                                         nullptr, draws, stats, cb, user, err,
+                                         err_len);
+}
+
+int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
+                                    int samples, double delta,
+                                    const double* init, double* draws,
+                                    double* stats, stanli_draw_cb cb,
+                                    void* user, char* err, size_t err_len) {
   try {
     stanli::NutsConfig cfg;
     cfg.seed = seed;
     cfg.warmup = warmup;
     cfg.samples = samples;
     cfg.delta = delta;
+    cfg.init = init;
     const int64_t n = m->ex->n_params();
     stanli::DrawObserver observe;
     if (cb) {
@@ -370,6 +383,64 @@ int stanli_run_pathfinder(stanli_model* m, uint32_t seed, int chain_id,
       summary[STANLI_PATHFINDER_SELECTED_ITER] = r.selected_iter;
       summary[STANLI_PATHFINDER_SELECTED_ELBO] = r.selected_elbo;
       summary[STANLI_PATHFINDER_ELAPSED_MS] = r.elapsed_ms;
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
+                            int chains, int num_iterations, int num_elbo_draws,
+                            int history_size, double init_radius, double* inits,
+                            stanli_path_cb cb, void* user, char* err,
+                            size_t err_len) {
+  try {
+    if (chains <= 0) throw std::invalid_argument("chains must be positive");
+    if (num_iterations <= 0)
+      throw std::invalid_argument("num_iterations must be positive");
+    if (num_elbo_draws <= 0)
+      throw std::invalid_argument("num_elbo_draws must be positive");
+    if (history_size <= 0)
+      throw std::invalid_argument("history_size must be positive");
+    if (!std::isfinite(init_radius) || init_radius < 0)
+      throw std::invalid_argument("init_radius must be finite and nonnegative");
+
+    stanli::PathfinderConfig cfg;
+    cfg.seed = seed;
+    cfg.chain_id = chain_id > 0 ? chain_id : 1;
+    cfg.num_draws = chains;
+    cfg.num_iterations = num_iterations;
+    cfg.num_elbo_draws = num_elbo_draws;
+    cfg.history_size = history_size;
+    cfg.init_radius = init_radius;
+    stanli::PathObserver observe;
+    if (cb) {
+      observe = [&](const stanli::PathIterate& it) {
+        cb((int32_t)it.iter, it.lp, user);
+      };
+    }
+    stanli::PathfinderResult r = stanli::run_pathfinder(*m->ex, cfg, observe);
+    if (r.return_code != 0) {
+      put_err(err, err_len,
+              r.message.empty() ? "pathfinder failed" : r.message.c_str());
+      return r.return_code;
+    }
+
+    const int64_t n = m->ex->n_params();
+    if ((int)r.draws.size() != chains)
+      throw std::runtime_error(
+          "pathfinder returned an unexpected number of draws");
+    for (int c = 0; c < chains; ++c) {
+      if ((int64_t)r.draws[(size_t)c].size() != n)
+        throw std::runtime_error(
+            "pathfinder returned a draw of the wrong size");
+      if (n > 0) {
+        if (inits == nullptr) throw std::invalid_argument("null inits buffer");
+        std::memcpy(inits + (int64_t)c * n, r.draws[(size_t)c].data(),
+                    sizeof(double) * (size_t)n);
+      }
     }
     return 0;
   } catch (const std::exception& e) {

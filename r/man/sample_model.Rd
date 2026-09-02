@@ -16,6 +16,7 @@ sample_model(
   save_warmup = FALSE,
   init = NULL,
   init_radius = 2,
+  pathfinder_init = NULL,
   parallel_chains = NULL,
   refresh = 100
 )
@@ -39,6 +40,13 @@ a start is.}
 
 \item{init_radius}{Random inits are drawn uniform(-r, r); 0 starts at
 the origin.}
+
+\item{pathfinder_init}{Optional named list enabling Pathfinder-generated
+starts. An empty list uses defaults; supported entries are
+`num_iterations` (1000), `num_elbo_draws` (25), `history_size` (5), and
+Pathfinder's own `init_radius` (2). Uses `seed`, returns one start per
+chain, and cannot be combined with `init`. Single-path Pathfinder does
+not perform PSIS resampling.}
 
 \item{parallel_chains}{Chains to run at once. Defaults to all of them.}
 

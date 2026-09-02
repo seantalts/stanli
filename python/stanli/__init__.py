@@ -6,6 +6,7 @@ to an op graph in-process, and samples with NUTS. No C++ toolchain, no model
 compilation on this machine.
 """
 import ctypes
+from collections.abc import Mapping
 import json
 import math
 import operator
@@ -164,6 +165,12 @@ def _load_lib():
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
         _SampleProgressCallback, ctypes.c_void_p,
         ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_pathfinder_inits.restype = ctypes.c_int
+    lib.stanli_pathfinder_inits.argtypes = [
+        ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_double,
+        ctypes.POINTER(ctypes.c_double), ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_summary_stats.restype = ctypes.c_int
     lib.stanli_summary_stats.argtypes = [ctypes.POINTER(ctypes.c_double),
                                          ctypes.c_int64, ctypes.c_int64,
@@ -200,6 +207,55 @@ SAMPLER_COLUMNS = tuple(_lib.stanli_sampler_column_name(i).decode()
 
 def _dptr(a):
     return a.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+
+
+_PATHFINDER_INIT_DEFAULTS = {
+    "num_iterations": 1000,
+    "num_elbo_draws": 25,
+    "history_size": 5,
+    "init_radius": 2.0,
+}
+
+
+def _pathfinder_init_options(value):
+    """Validate the small, deliberately separate Pathfinder-init surface."""
+    if not isinstance(value, Mapping):
+        raise TypeError("pathfinder_init must be a mapping of options")
+    unknown = set(value) - set(_PATHFINDER_INIT_DEFAULTS)
+    if unknown:
+        raise ValueError(
+            "unknown pathfinder_init option" + ("s" if len(unknown) > 1 else "")
+            + ": " + ", ".join(sorted(map(str, unknown))))
+    out = dict(_PATHFINDER_INIT_DEFAULTS)
+    out.update(value)
+    int_max = 2 ** (8 * ctypes.sizeof(ctypes.c_int) - 1) - 1
+    for name in ("num_iterations", "num_elbo_draws", "history_size"):
+        raw = out[name]
+        if isinstance(raw, (bool, np.bool_)):
+            raise TypeError(f"pathfinder_init {name} must be a positive integer")
+        try:
+            parsed = operator.index(raw)
+        except TypeError:
+            raise TypeError(
+                f"pathfinder_init {name} must be a positive integer") from None
+        if parsed <= 0:
+            raise ValueError(f"pathfinder_init {name} must be positive")
+        if parsed > int_max:
+            raise OverflowError(f"pathfinder_init {name} does not fit in a C int")
+        out[name] = parsed
+    radius = out["init_radius"]
+    if isinstance(radius, (bool, np.bool_)):
+        raise TypeError("pathfinder_init init_radius must be nonnegative")
+    try:
+        radius = float(radius)
+    except (TypeError, ValueError):
+        raise TypeError(
+            "pathfinder_init init_radius must be nonnegative") from None
+    if not math.isfinite(radius) or radius < 0:
+        raise ValueError(
+            "pathfinder_init init_radius must be finite and nonnegative")
+    out["init_radius"] = radius
+    return out
 
 
 def _compiler_command(model_path: pathlib.Path):
@@ -797,8 +853,8 @@ class Model:
 
     def sample(self, *, chains=4, seed=1, warmup=1000, samples=1000,
                delta=0.8, max_depth=10, thin=1, save_warmup=False,
-               inits=None, init_radius=2.0, parallel_chains=None,
-               refresh=100):
+               inits=None, init_radius=2.0, pathfinder_init=None,
+               parallel_chains=None, refresh=100):
         """NUTS draws as a Fit.
 
         Four chains by default, because R-hat needs more than one and a
@@ -811,6 +867,13 @@ class Model:
         passing them through `unconstrain()` first -- one scale here means
         one contract for what a start is. `init_radius=0` starts every
         chain at the origin, which is CmdStan's `init=0`.
+
+        `pathfinder_init={}` instead fits one single-path Pathfinder
+        approximation and draws one unconstrained start per chain from it.
+        The mapping can override `num_iterations` (1000), `num_elbo_draws`
+        (25), `history_size` (5), and Pathfinder's own `init_radius` (2).
+        It uses this call's seed and is mutually exclusive with `inits`.
+        Single-path Pathfinder does not perform PSIS resampling.
 
         `parallel_chains` defaults to running every chain at once, capped
         at the machine's cores. Threading changes nothing about the
@@ -861,7 +924,25 @@ class Model:
         # this buffer, so letting it fall out of scope would hand the
         # sampler freed memory.
         init_arr = None
-        if inits is not None:
+        if inits is not None and pathfinder_init is not None:
+            raise ValueError("inits and pathfinder_init are mutually exclusive")
+        if pathfinder_init is not None:
+            if opts.chains <= 0:
+                raise ValueError(
+                    "chains must be positive with Pathfinder initialization")
+            pf = _pathfinder_init_options(pathfinder_init)
+            init_arr = np.empty((opts.chains, self.n_unconstrained))
+            err = ctypes.create_string_buffer(4096)
+            rc = _lib.stanli_pathfinder_inits(
+                self._m, opts.seed, opts.chain_id, opts.chains,
+                pf["num_iterations"], pf["num_elbo_draws"],
+                pf["history_size"], pf["init_radius"], _dptr(init_arr),
+                None, None, err, len(err))
+            if rc != 0:
+                raise RuntimeError(
+                    f"Pathfinder initialization failed: {err.value.decode()}")
+            opts.inits = _dptr(init_arr)
+        elif inits is not None:
             init_arr = np.ascontiguousarray(inits, dtype=np.float64)
             if init_arr.ndim == 1:
                 init_arr = np.ascontiguousarray(

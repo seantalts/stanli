@@ -142,6 +142,12 @@ unconstrain <- function(model, values) {
 #'   a start is.
 #' @param init_radius Random inits are drawn uniform(-r, r); 0 starts at
 #'   the origin.
+#' @param pathfinder_init Optional named list enabling Pathfinder-generated
+#'   starts. An empty list uses defaults; supported entries are
+#'   `num_iterations` (1000), `num_elbo_draws` (25), `history_size` (5), and
+#'   Pathfinder's own `init_radius` (2). Uses `seed`, returns one start per
+#'   chain, and cannot be combined with `init`. Single-path Pathfinder does
+#'   not perform PSIS resampling.
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
@@ -155,15 +161,29 @@ unconstrain <- function(model, values) {
 sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          samples = 1000, thin = 1, delta = 0.8,
                          max_depth = 10, save_warmup = FALSE, init = NULL,
-                         init_radius = 2, parallel_chains = NULL,
-                         refresh = 100) {
+                         init_radius = 2, pathfinder_init = NULL,
+                         parallel_chains = NULL, refresh = 100) {
   if (length(refresh) != 1L || !is.numeric(refresh) || is.na(refresh) ||
       !is.finite(refresh) || refresh < 0 || refresh != floor(refresh) ||
       refresh > .Machine$integer.max)
     stop("refresh must be a single nonnegative integer", call. = FALSE)
   refresh <- as.integer(refresh)
+  if (!is.null(init) && !is.null(pathfinder_init))
+    stop("init and pathfinder_init are mutually exclusive", call. = FALSE)
+  if (!is.null(pathfinder_init))
+    pathfinder_init <- .pathfinder_init_options(pathfinder_init)
+  if (!is.null(pathfinder_init) &&
+      (length(chains) != 1L || !is.numeric(chains) || is.logical(chains) ||
+       is.na(chains) || !is.finite(chains) || chains <= 0 ||
+       chains != floor(chains) || chains > .Machine$integer.max))
+    stop("chains must be a positive integer with Pathfinder initialization",
+         call. = FALSE)
   load_runtime()
   if (is.null(parallel_chains)) parallel_chains <- chains
+  if (!is.null(pathfinder_init)) {
+    init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
+                  as.integer(chains), unname(pathfinder_init))
+  }
   init_vec <- numeric(0)
   if (!is.null(init)) {
     m <- if (is.matrix(init)) init else
@@ -205,6 +225,38 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                  columns = model$columns, max_depth = max_depth, seed = seed,
                  model = model, report = report),
             class = "stanli_fit")
+}
+
+.pathfinder_init_options <- function(x) {
+  if (!is.list(x))
+    stop("pathfinder_init must be a named list of options", call. = FALSE)
+  defaults <- list(num_iterations = 1000L, num_elbo_draws = 25L,
+                   history_size = 5L, init_radius = 2)
+  if (length(x) > 0L) {
+    if (is.null(names(x)) || any(!nzchar(names(x))) || anyDuplicated(names(x)))
+      stop("pathfinder_init must be a named list of options", call. = FALSE)
+    unknown <- setdiff(names(x), names(defaults))
+    if (length(unknown) > 0L)
+      stop("unknown pathfinder_init option", if (length(unknown) > 1L) "s" else "",
+           ": ", paste(unknown, collapse = ", "), call. = FALSE)
+  }
+  out <- utils::modifyList(defaults, x)
+  for (name in c("num_iterations", "num_elbo_draws", "history_size")) {
+    value <- out[[name]]
+    if (length(value) != 1L || !is.numeric(value) || is.logical(value) ||
+        is.na(value) || !is.finite(value) || value <= 0 ||
+        value != floor(value) || value > .Machine$integer.max)
+      stop("pathfinder_init ", name, " must be a positive integer",
+           call. = FALSE)
+    out[[name]] <- as.integer(value)
+  }
+  radius <- out$init_radius
+  if (length(radius) != 1L || !is.numeric(radius) || is.logical(radius) ||
+      is.na(radius) || !is.finite(radius) || radius < 0)
+    stop("pathfinder_init init_radius must be finite and nonnegative",
+         call. = FALSE)
+  out$init_radius <- as.double(radius)
+  out
 }
 
 #' @export

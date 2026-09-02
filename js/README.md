@@ -27,6 +27,22 @@ fit.generatedStart;    // index where generated-quantity columns begin
 fit.ms;                // {stanc, lower, sample, total} in milliseconds
 ```
 
+NUTS can take its starting point from single-path Pathfinder. The same seed
+controls initialization and sampling, and an empty options object uses the
+defaults:
+
+```js
+const fit = await sample({
+  code,
+  data,
+  seed: 303,
+  pathfinderInit: { numIterations: 500, numElboDraws: 25 },
+});
+```
+
+`historySize` and Pathfinder's own `initRadius` are also supported. This mode
+does not perform PSIS resampling.
+
 For NUTS, `await diagnose(fit)` returns the same text report as the R and
 Python bindings: divergences, maximum-treedepth saturation, E-BFMI,
 rank-normalized R-hat, and bulk/tail ESS. Pass an array of fits from the

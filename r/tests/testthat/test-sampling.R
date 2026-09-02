@@ -198,6 +198,43 @@ test_that("chains are different streams of the same seed", {
   expect_false(identical(a$draws[, 1, "mu"], a$draws[, 2, "mu"]))
 })
 
+test_that("Pathfinder initialization is reproducible across chains", {
+  skip_without_runtime()
+  m <- progress_model()
+  options <- list(num_iterations = 100L, num_elbo_draws = 10L,
+                  history_size = 5L, init_radius = 2)
+  a <- sample_model(m, chains = 2, seed = 303, warmup = 30, samples = 20,
+                    pathfinder_init = options, parallel_chains = 1,
+                    refresh = 0)
+  b <- sample_model(m, chains = 2, seed = 303, warmup = 30, samples = 20,
+                    pathfinder_init = options, parallel_chains = 2,
+                    refresh = 0)
+  expect_identical(a$draws, b$draws)
+  expect_identical(a$sampler, b$sampler)
+  expect_false(identical(a$draws[, 1, "x"], a$draws[, 2, "x"]))
+})
+
+test_that("Pathfinder initialization validates its dedicated options", {
+  expect_identical(
+    stanli:::.pathfinder_init_options(list()),
+    list(num_iterations = 1000L, num_elbo_draws = 25L,
+         history_size = 5L, init_radius = 2))
+  bad <- list(
+    1,
+    list(1),
+    list(not_an_option = 1),
+    list(num_iterations = 0),
+    list(num_elbo_draws = 1.5),
+    list(history_size = TRUE),
+    list(init_radius = NaN),
+    list(init_radius = -1))
+  for (value in bad)
+    expect_error(stanli:::.pathfinder_init_options(value), "pathfinder_init")
+  expect_error(
+    sample_model(NULL, init = 0, pathfinder_init = list(), refresh = 0),
+    "mutually exclusive", fixed = TRUE)
+})
+
 test_that("the draws array is posterior-shaped and keeps its names", {
   skip_without_runtime()
   fit <- sample_model(es_model(), chains = 2, seed = 4, warmup = 200,

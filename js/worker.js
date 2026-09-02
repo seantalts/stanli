@@ -1,7 +1,8 @@
 // The sampling worker: stanc3 (js_of_ocaml) compiles the model to MIR,
 // stanli.wasm lowers it and runs NUTS or WALNUTS. Everything heavy lives
 // here so the page never blocks. Protocol: {cmd: "run", code, dataJson,
-// seed, warmup, samples, delta, sampler, maxError} in; {status} progress
+// seed, warmup, samples, delta, sampler, maxError, pathfinderInit} in;
+// {status} progress
 // messages and one {done} or {error} out. `sampler` is "nuts",
 // "walnuts" or "pathfinder".
 "use strict";
@@ -113,6 +114,25 @@ function runPathfinder(M, model, req, numDraws, drawsPtr, errPtr, errLen) {
            elapsedMs: sum[3] };
 }
 
+// Fit a single Pathfinder approximation and draw one unconstrained start for
+// this worker's NUTS chain. A page runs chains in separate workers, each with
+// its already-established per-chain seed, so the starts and subsequent chains
+// reproduce together without sharing mutable WASM state.
+function runPathfinderInit(M, model, req, initPtr, errPtr, errLen) {
+  const opts = req.pathfinderInit;
+  const cbPtr = M.addFunction((iter, lp) => {
+    if (req.live)
+      postMessage({ live: { phase: "pathfinder-init", iter, lp } });
+  }, "vidi");
+  const rc = M._stanli_pathfinder_inits(
+      model, req.seed >>> 0, 1, 1, opts.numIterations, opts.numElboDraws,
+      opts.historySize, opts.initRadius, initPtr, cbPtr, 0, errPtr, errLen);
+  M.removeFunction(cbPtr);
+  if (rc !== 0)
+    throw new Error("Pathfinder initialization failed: " +
+                    M.UTF8ToString(errPtr));
+}
+
 onmessage = async (e) => {
   const req = e.data;
   const t0 = performance.now();
@@ -177,6 +197,7 @@ onmessage = async (e) => {
         : (walnuts ? "WALNUTS: " : "NUTS: ") + warmup + " warmup + " +
           samples + " draws");
     const drawsPtr = M._malloc(8 * samples * n);
+    const initPtr = req.pathfinderInit ? M._malloc(8 * n) : 0;
 
     // Stream: every draw lands in the buffer before its callback, so the
     // page can plot the chain as it grows. Constrained rows batch in
@@ -222,13 +243,22 @@ onmessage = async (e) => {
       if (pathfinder) {
         pf = runPathfinder(M, model, req, samples, drawsPtr, errPtr, errLen);
       } else {
+        if (req.pathfinderInit) {
+          say("Pathfinder initialization: fitting approximation");
+          runPathfinderInit(M, model, req, initPtr, errPtr, errLen);
+          say("Pathfinder initialization complete; starting NUTS");
+        }
         const rc = walnuts
             ? M._stanli_sample_walnuts_stream(model, req.seed >>> 0, warmup,
                                               samples, +req.maxError || 0,
                                               drawsPtr, cbPtr, 0, errPtr, errLen)
-            : M._stanli_sample_stream_stats(model, req.seed >>> 0, warmup,
-                                            samples, +req.delta, drawsPtr,
-                                            statsPtr, cbPtr, 0, errPtr, errLen);
+            : req.pathfinderInit
+            ? M._stanli_sample_stream_stats_init(
+                model, req.seed >>> 0, warmup, samples, +req.delta, initPtr,
+                drawsPtr, statsPtr, cbPtr, 0, errPtr, errLen)
+            : M._stanli_sample_stream_stats(
+                model, req.seed >>> 0, warmup, samples, +req.delta, drawsPtr,
+                statsPtr, cbPtr, 0, errPtr, errLen);
         if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
         if (statsPtr)
           samplerStats = M.HEAPF64.slice(statsPtr / 8, statsPtr / 8 + samples * 7);
@@ -237,6 +267,7 @@ onmessage = async (e) => {
       if (cbPtr) M.removeFunction(cbPtr);
       if (liveRowPtr) M._free(liveRowPtr);
       if (statsPtr) M._free(statsPtr);
+      if (initPtr) M._free(initPtr);
     }
     const tSample = performance.now();
 

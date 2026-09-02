@@ -95,6 +95,29 @@ export function compile(opts) {
   return request({ cmd: "compile", code: opts.code }, opts);
 }
 
+function pathfinderInitOptions(value) {
+  if (value == null) return null;
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new TypeError("pathfinderInit must be an options object");
+  const defaults = { numIterations: 1000, numElboDraws: 25,
+                     historySize: 5, initRadius: 2 };
+  const unknown = Object.keys(value).filter((key) => !(key in defaults));
+  if (unknown.length)
+    throw new RangeError("unknown pathfinderInit option" +
+                         (unknown.length > 1 ? "s" : "") + ": " +
+                         unknown.join(", "));
+  const out = { ...defaults, ...value };
+  for (const name of ["numIterations", "numElboDraws", "historySize"])
+    if (!Number.isInteger(out[name]) || out[name] <= 0 ||
+        out[name] > 2147483647)
+      throw new RangeError(`pathfinderInit ${name} must be a positive integer`);
+  if (typeof out.initRadius !== "number" || !Number.isFinite(out.initRadius) ||
+      out.initRadius < 0)
+    throw new RangeError(
+        "pathfinderInit initRadius must be finite and nonnegative");
+  return out;
+}
+
 /** Compile (unless `mir` is given) and draw from the posterior.
  *
  * @param {Object} opts
@@ -108,6 +131,10 @@ export function compile(opts) {
  * @param {number} [opts.warmup=1000]
  * @param {number} [opts.samples=1000]
  * @param {number} [opts.delta=0.8]    Adaptation target acceptance (NUTS).
+ * @param {Object} [opts.pathfinderInit]  Generate the NUTS start with
+ *   single-path Pathfinder. `{}` uses defaults; supported keys are
+ *   `numIterations`, `numElboDraws`, `historySize`, and `initRadius`.
+ *   The sampling seed controls both stages. NUTS only; no PSIS resampling.
  * @param {string} [opts.sampler="nuts"]  "nuts", "walnuts" (within-orbit
  *   adaptive step-length NUTS, arXiv:2506.18746), or "pathfinder"
  *   (a normal approximation fitted along an L-BFGS path). Pathfinder
@@ -141,6 +168,11 @@ export function compile(opts) {
  *   divergent__, energy__. Other methods return null for samplerStats.
  */
 export function sample(opts) {
+  const sampler = opts.sampler === "walnuts" || opts.sampler === "pathfinder"
+      ? opts.sampler : "nuts";
+  const pathfinderInit = pathfinderInitOptions(opts.pathfinderInit);
+  if (pathfinderInit && sampler !== "nuts")
+    throw new RangeError("pathfinderInit is available only with NUTS");
   return request({
     cmd: "run",
     code: opts.code,
@@ -153,9 +185,9 @@ export function sample(opts) {
     warmup: opts.warmup == null ? 1000 : opts.warmup,
     samples: opts.samples == null ? 1000 : opts.samples,
     delta: opts.delta == null ? 0.8 : opts.delta,
-    sampler: opts.sampler === "walnuts" || opts.sampler === "pathfinder"
-        ? opts.sampler : "nuts",
+    sampler,
     maxError: opts.maxError == null ? 0 : opts.maxError,
+    pathfinderInit,
   }, opts).then((done) => {
     const { names, samples, generatedStart, ms, exactLp, pathfinder,
             sampler, maxDepth } = done;
