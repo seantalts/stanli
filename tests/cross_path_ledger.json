@@ -38,5 +38,21 @@
     "bound_ulp": 101,
     "cause": "STANLI_NO_ODE_DIRECT_RK forces ode_adjoint_tol_ctl's sensitivities through Stan Math's autodiff oracle instead of the compiled direct-RK Jacobian path -- two different numerical methods for the same adjoint ODE, not a reordering of one computation, so agreement is close but not exact. Confirmed stable and reproducible across repeated Windows (win_amd64, mingw-w64/UCRT64) runs after fixing the unrelated run_adjoint reentrancy bug this fixture's grad[5] failure was riding on; bitwise on Linux (glibc) and macOS (Apple libm).",
     "since": "2026-09-03"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/island_always",
+    "bound_ulp": 6,
+    "cause": "nested-tape regrouping, the same mechanism and magnitude already ledgered for this fixture's default/no_island pair (both carve islands differently from default; this fixture sums 35 higher-order calls that mostly read `rate`/grad[5], compounding the regrouping past the usual 2 ULP band). Bitwise on Linux (glibc) and macOS (Apple libm); only exceeds it on Windows (win_amd64, mingw-w64/UCRT64).",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/island_always",
+    "bound_ulp": 1,
+    "cause": "nested-tape regrouping between default's necessity-only island carving and island_always's more aggressive carving; 1 ULP is within the design's pre-authorized band for this mechanism. Bitwise on Linux (glibc) and macOS (Apple libm); only observed on Windows (win_amd64, mingw-w64/UCRT64).",
+    "since": "2026-09-03"
   }
 ]
