@@ -420,11 +420,13 @@ using CAdjA = Eigen::Map<const Eigen::ArrayXd>;
 
 void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
                  double* adj) {
-  KernelCtx* call_ctx = nullptr;
-  if (!fwd.calls.empty()) {
-    static thread_local KernelCtx worker_call_ctx;
-    call_ctx = &worker_call_ctx;
-  }
+  // A per-invocation local, not a shared static: island_bwd_native calls
+  // back into run_adjoint for an island's own adjoint program, and that
+  // program can itself contain a CALL. A static (or thread_local) ctx here
+  // aliased the outer and inner frames, so the recursive call clobbered
+  // in/in_adj/out fields the outer frame still needed after it returned.
+  KernelCtx worker_call_ctx;
+  KernelCtx* call_ctx = fwd.calls.empty() ? nullptr : &worker_call_ctx;
   for (const AdjInstr& I : ap.code) {
     if (I.code == Program::CALL) {
       // The kernel's own backward is the rule: values from the (possibly

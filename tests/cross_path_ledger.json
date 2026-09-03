@@ -30,21 +30,5 @@
     "bound_ulp": -1,
     "cause": "OPEN BUG, and the GRAPH is the wrong side: on `array[0] matrix[2, 3]` the interpreter throws 'index 2 out of bounds for size 1' evaluating dims() of the empty array, where the graph answers {0, 2, 3} from the declaration. CmdStan agrees with the interpreter -- stan::math::dims on a std::vector recurses into element 0 only `if (x.size() > 0)`, so dims(x) is {0} and the generated `rvalue(stan::math::dims(x), \"dims(x)\", index_uni(2))` throws out_of_range. Retire by teaching the graph to stop answering from the declaration for a zero-length array, not by giving the interpreter the declared shape. Unrelated to the rows()/cols() orientation bug retired 2026-08-23: that one was rank-1 storage losing a vector's orientation, this one is a declared shape the value no longer carries.",
     "since": "2026-08-23"
-  },
-  {
-    "model": "higher_order_all_contexts",
-    "quantity": "grad[5]",
-    "pair": "default/no_island",
-    "bound_ulp": 6,
-    "cause": "nested-tape regrouping, the mechanism this pair's 2 ULP pre-authorization already names -- this fixture sums 35 higher-order function calls, most of which read `rate` (grad[5]), so island vs no-island reordering compounds across more terms than any other fixture exercises and clears the usual 2 ULP band. Bitwise on Linux (glibc) and macOS (Apple libm); only exceeds it on Windows (win_amd64, mingw-w64/UCRT64), whose codegen and math library round the accumulation differently.",
-    "since": "2026-09-03"
-  },
-  {
-    "model": "ode_adjoint_region",
-    "quantity": "grad[4]",
-    "pair": "default/passes_off",
-    "bound_ulp": 102,
-    "cause": "reroll/inplace/constfold reorder the adjoint ODE's per-step arithmetic; this fixture runs ode_adjoint_tol_ctl at 1e-10 absolute and relative tolerance with up to 100000 steps, so a sub-ULP per-step difference between the two representations compounds over the integration into a larger final divergence. Bitwise on Linux (glibc) and macOS (Apple libm); only observed on Windows (win_amd64, mingw-w64/UCRT64).",
-    "since": "2026-09-03"
   }
 ]
