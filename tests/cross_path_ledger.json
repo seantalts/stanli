@@ -30,5 +30,13 @@
     "bound_ulp": -1,
     "cause": "OPEN BUG, and the GRAPH is the wrong side: on `array[0] matrix[2, 3]` the interpreter throws 'index 2 out of bounds for size 1' evaluating dims() of the empty array, where the graph answers {0, 2, 3} from the declaration. CmdStan agrees with the interpreter -- stan::math::dims on a std::vector recurses into element 0 only `if (x.size() > 0)`, so dims(x) is {0} and the generated `rvalue(stan::math::dims(x), \"dims(x)\", index_uni(2))` throws out_of_range. Retire by teaching the graph to stop answering from the declaration for a zero-length array, not by giving the interpreter the declared shape. Unrelated to the rows()/cols() orientation bug retired 2026-08-23: that one was rank-1 storage losing a vector's orientation, this one is a declared shape the value no longer carries.",
     "since": "2026-08-23"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/no_ode_direct_rk",
+    "bound_ulp": 101,
+    "cause": "STANLI_NO_ODE_DIRECT_RK forces ode_adjoint_tol_ctl's sensitivities through Stan Math's autodiff oracle instead of the compiled direct-RK Jacobian path -- two different numerical methods for the same adjoint ODE, not a reordering of one computation, so agreement is close but not exact. Confirmed stable and reproducible across repeated Windows (win_amd64, mingw-w64/UCRT64) runs after fixing the unrelated run_adjoint reentrancy bug this fixture's grad[5] failure was riding on; bitwise on Linux (glibc) and macOS (Apple libm).",
+    "since": "2026-09-03"
   }
 ]
