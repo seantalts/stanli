@@ -30,5 +30,85 @@
     "bound_ulp": -1,
     "cause": "OPEN BUG, and the GRAPH is the wrong side: on `array[0] matrix[2, 3]` the interpreter throws 'index 2 out of bounds for size 1' evaluating dims() of the empty array, where the graph answers {0, 2, 3} from the declaration. CmdStan agrees with the interpreter -- stan::math::dims on a std::vector recurses into element 0 only `if (x.size() > 0)`, so dims(x) is {0} and the generated `rvalue(stan::math::dims(x), \"dims(x)\", index_uni(2))` throws out_of_range. Retire by teaching the graph to stop answering from the declaration for a zero-length array, not by giving the interpreter the declared shape. Unrelated to the rows()/cols() orientation bug retired 2026-08-23: that one was rank-1 storage losing a vector's orientation, this one is a declared shape the value no longer carries.",
     "since": "2026-08-23"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/no_island",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused. This fixture and default/island_always were riding a run_adjoint reentrancy bug fixed 2026-09-03 (a static thread_local KernelCtx aliased outer and recursively-nested Program::CALL frames -- see runtime/src/adjoint.cpp). That fix eliminated the thousands-to-tens-of-thousands-ULP swings the reentrancy caused, but this pair is still unbounded on Windows (win_amd64, mingw-w64/UCRT64) after the fix: one run agreed to 6 ULP, another to 84,225,866 ULP, a third agreed exactly. No known-clean bound exists yet. Suspected mechanism: no_island runs far more of this fixture's 35 higher-order calls through one flat, ungrouped run_adjoint sequence than default does (which carves most of them into separate islands), so a kernel backward that reads a KernelCtx slot beyond its own call's n_in -- a bug independent of the reentrancy one, since it needs no recursion -- would pick up a stale Desc left by whichever unrelated call ran immediately before it in that flat sequence, with a magnitude bounded only by what garbage that stale pointer happens to reach. Not investigated past this hypothesis. Bitwise on Linux (glibc) and macOS (Apple libm) every run so far.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/island_always",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account. Only observed once, at 6 ULP, which is not enough runs to trust as a stable bound given no_island's demonstrated swing on the identical mechanism. Bitwise on Linux (glibc) and macOS (Apple libm).",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account. All five non-default pairs have now each been individually observed to diverge on this fixture and quantity, which is why this open bug is ledgered per pair (the matcher has no pair wildcard) rather than left to keep surfacing one CI run at a time.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/no_ode_direct_rk",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/passes_off",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/no_ode_direct_rk",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see higher_order_all_contexts default/no_island for the fuller account of the still-open issue this fixture's grad[4] was also riding the now-fixed reentrancy bug alongside. Only observed once post-fix, at 101 ULP; downgraded from a numeric bound to OPEN BUG because that single observation is not enough evidence to trust as stable, given the same fixture's default/island_always pair (also below) showed 1 ULP once. Bitwise on Linux (glibc) and macOS (Apple libm).",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/island_always",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity. Only observed once, at 1 ULP. Bitwise on Linux (glibc) and macOS (Apple libm).",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/no_island",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity, and higher_order_all_contexts default/no_island for the fuller account. Every one of this fixture's five non-default pairs is ledgered together since higher_order_all_contexts's identical mechanism was independently observed to affect all five of its own pairs, and this fixture rides the same open bug.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/passes_off",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity.",
+    "since": "2026-09-03"
   }
 ]
