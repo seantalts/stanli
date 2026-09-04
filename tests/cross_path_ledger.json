@@ -48,6 +48,30 @@
     "since": "2026-09-03"
   },
   {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account. All five non-default pairs have now each been individually observed to diverge on this fixture and quantity, which is why this open bug is ledgered per pair (the matcher has no pair wildcard) rather than left to keep surfacing one CI run at a time.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/no_ode_direct_rk",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "higher_order_all_contexts",
+    "quantity": "grad[5]",
+    "pair": "default/passes_off",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_island on this same fixture and quantity for the full account.",
+    "since": "2026-09-03"
+  },
+  {
     "model": "ode_adjoint_region",
     "quantity": "grad[4]",
     "pair": "default/no_ode_direct_rk",
@@ -61,6 +85,30 @@
     "pair": "default/island_always",
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity. Only observed once, at 1 ULP. Bitwise on Linux (glibc) and macOS (Apple libm).",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/no_island",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity, and higher_order_all_contexts default/no_island for the fuller account. Every one of this fixture's five non-default pairs is ledgered together since higher_order_all_contexts's identical mechanism was independently observed to affect all five of its own pairs, and this fixture rides the same open bug.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity.",
+    "since": "2026-09-03"
+  },
+  {
+    "model": "ode_adjoint_region",
+    "quantity": "grad[4]",
+    "pair": "default/passes_off",
+    "bound_ulp": -1,
+    "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity.",
     "since": "2026-09-03"
   }
 ]
