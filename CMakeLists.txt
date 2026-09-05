@@ -314,6 +314,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
   runtime/src/cse.cpp
+  runtime/src/graph_print.cpp
   runtime/src/partition.cpp
   runtime/src/data.cpp
   runtime/src/data_var_context.cpp
@@ -807,7 +808,7 @@ set(STANLI_TESTS
   test_reroll test_profile test_inplace test_pass_safety test_sampling
   test_ode_prog test_mir_program_conformance test_mir_checks
   test_structured_checks test_structured_loop
-  test_mir_unary_fallback test_constfold test_cse
+  test_mir_unary_fallback test_constfold test_cse test_graph_print test_pass_dump
   test_partition
   test_solve test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
