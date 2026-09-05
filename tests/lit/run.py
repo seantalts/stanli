@@ -10,6 +10,13 @@ comments:
 
 Known gaps use ``XFAIL``.  Matching XFAILs pass the CTest invocation; a changed
 result fails it so the case must be reviewed and promoted when the gap closes.
+
+A case can also assert the shape of one lowering-pass dump:
+
+    // STANLI-LIT-DUMP: log_prob:reroll
+    // STANLI-LIT-CHECK: s{{[0-9]+}}[195] = FMA
+    // STANLI-LIT-CHECK-NEXT: s{{[0-9]+}}[1] = INDEX
+    // STANLI-LIT-CHECK-NOT: SUM_VEC
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import subprocess
 import tempfile
 
@@ -24,6 +32,12 @@ import tempfile
 PREFIX = "// STANLI-LIT: "
 EXPECT_PREFIX = "// STANLI-LIT-EXPECT: "
 DATA_PREFIX = "// STANLI-LIT-DATA: "
+DUMP_PREFIX = "// STANLI-LIT-DUMP: "
+CHECK_PREFIXES = {
+    "// STANLI-LIT-CHECK: ": "CHECK",
+    "// STANLI-LIT-CHECK-NEXT: ": "CHECK-NEXT",
+    "// STANLI-LIT-CHECK-NOT: ": "CHECK-NOT",
+}
 
 
 def directive(lines: list[str], prefix: str) -> str | None:
@@ -32,6 +46,58 @@ def directive(lines: list[str], prefix: str) -> str | None:
     if len(values) > 1:
         raise ValueError(f"duplicate {prefix.strip()} directive")
     return values[0] if values else None
+
+
+def checks(lines: list[str]) -> list[tuple[str, str]]:
+    found = []
+    for line in lines:
+        for prefix, kind in CHECK_PREFIXES.items():
+            if line.startswith(prefix):
+                found.append((kind, line[len(prefix):].strip()))
+    return found
+
+
+def compile_pattern(pattern: str) -> re.Pattern[str]:
+    parts = re.split(r"\{\{(.*?)\}\}", pattern)
+    return re.compile("".join(part if i % 2 else re.escape(part)
+                              for i, part in enumerate(parts)))
+
+
+def slice_region(stdout: str, stage: str) -> list[str] | None:
+    begin, end = f";; {stage}", f";; end {stage}"
+    lines = stdout.splitlines()
+    try:
+        first = lines.index(begin)
+        last = lines.index(end, first)
+    except ValueError:
+        return None
+    return lines[first + 1:last]
+
+
+def run_checks(region: list[str],
+               directives: list[tuple[str, str]]) -> str | None:
+    """Return a failure message, or None when every directive is satisfied."""
+    pos = 0
+    pending_not = []
+    for kind, pattern in directives:
+        rx = compile_pattern(pattern)
+        if kind == "CHECK-NOT":
+            pending_not.append((pattern, rx))
+            continue
+        end = pos + 1 if kind == "CHECK-NEXT" else len(region)
+        hit = next((i for i in range(pos, min(end, len(region)))
+                    if rx.search(region[i])), None)
+        if hit is None:
+            return f"{kind}: {pattern}"
+        for not_pattern, not_rx in pending_not:
+            if any(not_rx.search(line) for line in region[pos:hit]):
+                return f"CHECK-NOT: {not_pattern}"
+        pending_not = []
+        pos = hit + 1
+    for not_pattern, not_rx in pending_not:
+        if any(not_rx.search(line) for line in region[pos:]):
+            return f"CHECK-NOT: {not_pattern}"
+    return None
 
 
 def result_line(completed: subprocess.CompletedProcess[str]) -> str:
@@ -68,6 +134,10 @@ def main() -> int:
         status = directive(lines, PREFIX)
         expect = directive(lines, EXPECT_PREFIX)
         data_text = directive(lines, DATA_PREFIX) or "{}"
+        dump_stage = directive(lines, DUMP_PREFIX)
+        check_directives = checks(lines)
+        if check_directives and not dump_stage:
+            raise ValueError("CHECK directives need a STANLI-LIT-DUMP stage")
         if status not in {"PASS", "XFAIL"}:
             raise ValueError("STANLI-LIT must be PASS or XFAIL")
         if not expect:
@@ -89,13 +159,12 @@ def main() -> int:
         data_path = root / f"{args.case.stem}.json"
         source.write_text(source_text, encoding="utf-8")
         data_path.write_text(json.dumps(data), encoding="utf-8")
+        command = [str(args.stanli_check), str(source), str(data_path)]
+        if dump_stage:
+            command.append(f"--dump-passes={dump_stage}")
         try:
             completed = subprocess.run(
-                [
-                    str(args.stanli_check),
-                    str(source),
-                    str(data_path),
-                ],
+                command,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -107,9 +176,29 @@ def main() -> int:
             return 1
 
     result = result_line(completed)
+    region = slice_region(completed.stdout, dump_stage) if dump_stage else None
+
     if args.discover:
+        if dump_stage:
+            if region is None:
+                print(f"{args.case}: no ';; {dump_stage}' region in:")
+                print(completed.stdout)
+            else:
+                print("\n".join(region))
         print(f"{args.case}: {result}")
         return 0
+
+    if dump_stage and region is None:
+        print(f"FAIL {args.case}: no ';; {dump_stage}' region in stdout")
+        print(completed.stdout)
+        return 1
+
+    if check_directives:
+        failed = run_checks(region, check_directives)
+        if failed:
+            print(f"FAIL {args.case}: unmatched {failed}")
+            print("\n".join(region))
+            return 1
 
     if matches(expect, result, completed.returncode):
         print(f"{status} {args.case}: {result}")

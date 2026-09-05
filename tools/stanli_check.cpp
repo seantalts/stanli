@@ -70,7 +70,8 @@ int main(int argc, char** argv) {
                  "usage: stanli_check model.stan data.json "
                  "[--stanc PATH | --mir PATH] [--point N] [--columns]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
-                 "[--draw-variant N] [--ledger PATH]]\n");
+                 "[--draw-variant N] [--ledger PATH]]\n"
+                 "       [--dump-passes=STAGES] [--dump-dir=DIR]\n");
     return 2;
   }
 #ifdef _WIN32
@@ -88,9 +89,14 @@ int main(int argc, char** argv) {
   std::string cross_one;
   std::string ledger_path = "tests/cross_path_ledger.json";
   int draw_variant = -1;
+  std::string dump_stages, dump_dir;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
-    if (a == "--columns")
+    if (a.rfind("--dump-passes=", 0) == 0)
+      dump_stages = a.substr(sizeof("--dump-passes=") - 1);
+    else if (a.rfind("--dump-dir=", 0) == 0)
+      dump_dir = a.substr(sizeof("--dump-dir=") - 1);
+    else if (a == "--columns")
       columns_only = true;
     else if (a == "--wa-values")
       wa_values = true;
@@ -118,6 +124,18 @@ int main(int argc, char** argv) {
     return 2;
   }
   if (const char* env = std::getenv("STANC")) stanc = env;
+  if (!dump_stages.empty() || !dump_dir.empty()) {
+    const std::string sink = dump_dir.empty() ? "-" : dump_dir;
+#ifdef _WIN32
+    _putenv_s("STANLI_DUMP_PASSES", sink.c_str());
+    if (!dump_stages.empty())
+      _putenv_s("STANLI_DUMP_STAGES", dump_stages.c_str());
+#else
+    setenv("STANLI_DUMP_PASSES", sink.c_str(), 1);
+    if (!dump_stages.empty())
+      setenv("STANLI_DUMP_STAGES", dump_stages.c_str(), 1);
+#endif
+  }
 
   std::string mir;
   try {
