@@ -13,6 +13,7 @@
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/constfold.hpp>
+#include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -144,10 +145,7 @@ static void test_keeps_categorical_op() {
   fills.emplace_back(theta, std::vector<double>{0.2, 0.3, 0.5});
   const int checked = g.add_slot(1, false);
   const int op = g.add_op(OP_CATEGORICAL, {outcome, theta}, checked);
-  auto spec = std::make_shared<CategoricalSpec>();
-  spec->scalar_outcome = true;
-  g.ops[(size_t)op].udata = spec.get();
-  g.udata_pool.push_back(std::move(spec));
+  g.ops[(size_t)op].variant = kCategoricalScalarOutcome | 0x80u;
   g.result_slot = checked;
 
   ConstFoldStats st = const_fold(g, fills, {checked});

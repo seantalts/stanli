@@ -72,6 +72,7 @@
     "chi_square_lpdf",
     "chi_square_rng",
     "cholesky_decompose",
+    "choose",
     "col",
     "cols",
     "columns_dot_product",
@@ -209,7 +210,15 @@
     "log_rising_factorial",
     "log_softmax",
     "log_sum_exp",
+    "logical_and",
+    "logical_eq",
+    "logical_gt",
+    "logical_gte",
+    "logical_lt",
+    "logical_lte",
     "logical_negation",
+    "logical_neq",
+    "logical_or",
     "logistic_cdf",
     "logistic_lccdf",
     "logistic_lcdf",
@@ -426,7 +435,14 @@
     "integrate_1d_double_exponential_tol": "tests/fixtures/quadrature_region.stan exercises graph and runtime-control lowering",
     "integrate_1d_gauss_kronrod": "tests/fixtures/quadrature_region.stan exercises graph and runtime-control lowering",
     "integrate_1d_gauss_kronrod_tol": "tests/fixtures/quadrature_region.stan exercises graph and runtime-control lowering",
-    "integrate_ode": "tests/fixtures/higher_order_all_contexts.stan exercises transformed-data, graph, runtime-control, and interpreted write_array execution"
+    "integrate_ode": "tests/fixtures/higher_order_all_contexts.stan exercises transformed-data, graph, runtime-control, and interpreted write_array execution",
+    "one_hot_array": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts",
+    "one_hot_int_array": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts",
+    "one_hot_row_vector": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts",
+    "one_hot_vector": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts",
+    "ones_int_array": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts",
+    "uniform_simplex": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts",
+    "zeros_array": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts"
   },
   "models": {
     "containers": {
@@ -512,6 +528,7 @@
     },
     "data_functions": {
       "names": [
+        "choose",
         "ceil",
         "floor",
         "round",
@@ -519,6 +536,14 @@
         "step",
         "is_inf",
         "is_nan",
+        "logical_eq",
+        "logical_neq",
+        "logical_lt",
+        "logical_lte",
+        "logical_gt",
+        "logical_gte",
+        "logical_and",
+        "logical_or",
         "not_a_number",
         "machine_precision",
         "negative_infinity",
@@ -1152,7 +1177,7 @@
       ]
     }
   },
-  "name_count": 419,
+  "name_count": 428,
   "recognized_but_unsupported": {
     "gaussian_dlm_obs_lpdf": "Explicitly refused: seven inputs exceed the graph's six-input operation layout."
   },

@@ -143,18 +143,6 @@ struct BoundCheckSpec {
   bool shapes_match = false;
 };
 
-// The two categorical families share one exact value/check/pullback op.
-// `scalar_outcome` is a language type distinction: array[1] int must select
-// Stan Math's vector overload even though its flat slot also has length one.
-struct CategoricalSpec {
-  bool logit = false;
-  bool scalar_outcome = false;
-  // These are independent: write_array values depend on q but instantiate on
-  // double, while a graph-constant AutoDiffable local instantiates on var.
-  bool arg_autodiff = false;
-  bool propto = true;  // template flag; Stan Math decides what it can drop
-};
-
 class Executor {
  public:
   explicit Executor(Graph g);

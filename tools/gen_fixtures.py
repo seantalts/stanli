@@ -5,10 +5,18 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import subprocess
 
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
+
+# These are source-level lit corpora. The lit runner asks stanc for MIR in a
+# temporary directory when each test runs, so also materializing their MIR in
+# tests/fixtures only makes every ordinary build process a large duplicate
+# corpus.
+SOURCE_ONLY_PATTERN = re.compile(
+    r"(?:builtin|density)_signatures_[0-9]+\.stan\Z")
 
 # These models exercise structured control that O1 intentionally rewrites
 # away. Keep the policy centralized here so CMake and the manual wrapper
@@ -24,6 +32,11 @@ O0_FIXTURES = {
     "udf_local_shape",
     "whileloop",
 }
+
+
+def fixture_sources(source_dir: pathlib.Path) -> list[pathlib.Path]:
+    return [source for source in sorted(source_dir.glob("*.stan"))
+            if SOURCE_ONLY_PATTERN.fullmatch(source.name) is None]
 
 
 def canonical_mir(text: str, o0: bool) -> str:
@@ -76,6 +89,8 @@ def main() -> int:
                         type=pathlib.Path)
     parser.add_argument("--output-dir", default="tests/fixtures",
                         type=pathlib.Path)
+    parser.add_argument("--list-sources", action="store_true",
+                        help="print the legacy fixture sources and exit")
     args = parser.parse_args()
 
     stanc = args.stanc.expanduser().resolve()
@@ -83,9 +98,13 @@ def main() -> int:
     output_dir = (REPO / args.output_dir).resolve()
     if not stanc.is_file():
         parser.error(f"stanc executable not found: {stanc}")
-    sources = sorted(source_dir.glob("*.stan"))
+    sources = fixture_sources(source_dir)
     if not sources:
         parser.error(f"no .stan fixtures found in {source_dir}")
+    if args.list_sources:
+        for source in sources:
+            print(source)
+        return 0
 
     expected = {f"{stan.stem}.tmir.sexp" for stan in sources}
     for stale in output_dir.glob("*.tmir.sexp"):

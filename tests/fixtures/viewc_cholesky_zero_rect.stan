@@ -4,4 +4,4 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL stanli compile: cholesky_decompose needs a square matrix
+// STANLI-LIT-EXPECT: COMPILE_FAIL stanli compile: cholesky_decompose: needs a square matrix

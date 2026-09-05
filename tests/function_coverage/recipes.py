@@ -132,10 +132,21 @@ GROUPS = {
         "operator/": "x' / s", "operator\\": "s \\ x",
     },
     "data_functions": {
+        "choose": "choose(8, 3)",
         "ceil": "ceil(v)", "floor": "floor(v)", "round": "round(v)",
         "trunc": "trunc(v)", "step": "step(-0.5)",
         "is_inf": "is_inf(positive_infinity())",
         "is_nan": "is_nan(0.0)",
+        # The logical_* library spellings of the comparison operators, with
+        # mixed int/real operands to exercise promotion.
+        "logical_eq": "logical_eq(2.5, 2.5)",
+        "logical_neq": "logical_neq(1, 2.5)",
+        "logical_lt": "logical_lt(1, 2.5)",
+        "logical_lte": "logical_lte(2.5, 2.5)",
+        "logical_gt": "logical_gt(3.5, 2)",
+        "logical_gte": "logical_gte(2, 3.5)",
+        "logical_and": "logical_and(2, 0)",
+        "logical_or": "logical_or(0, 3)",
         "not_a_number": "is_nan(not_a_number())",
         "machine_precision": "machine_precision()",
         "negative_infinity": "is_inf(negative_infinity())",

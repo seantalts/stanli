@@ -16,6 +16,7 @@
 // because that is the only time the values exist. CmdStan formats a
 // vector as `[1,2,3]` and a scalar bare, and so does this.
 #include <stanli/graph.hpp>
+#include <stanli/density_registry.hpp>
 #include <stanli/message.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
@@ -256,9 +257,8 @@ int categorical_outcome(double value) {
   return static_cast<int>(value);
 }
 
-std::vector<int> categorical_outcomes(const KernelCtx& ctx,
-                                      const CategoricalSpec& spec) {
-  if (spec.scalar_outcome && ctx.in[0].len != 1)
+std::vector<int> categorical_outcomes(const KernelCtx& ctx) {
+  if ((ctx.variant & kCategoricalScalarOutcome) && ctx.in[0].len != 1)
     throw std::logic_error("categorical scalar outcome has wrong width");
   std::vector<int> outcomes;
   outcomes.reserve((size_t)ctx.in[0].len);
@@ -268,22 +268,22 @@ std::vector<int> categorical_outcomes(const KernelCtx& ctx,
 }
 
 template <typename Arg>
-auto categorical_eval(const CategoricalSpec& spec,
-                      const std::vector<int>& outcomes, const Arg& arg) {
-  if (spec.scalar_outcome) {
-    if (spec.logit)
-      return spec.propto
+auto categorical_eval(uint8_t variant, const std::vector<int>& outcomes,
+                      const Arg& arg) {
+  const bool propto = (variant & 0x80u) != 0;
+  if (variant & kCategoricalScalarOutcome) {
+    if (variant & kCategoricalLogit)
+      return propto
                  ? stan::math::categorical_logit_lpmf<true>(outcomes[0], arg)
                  : stan::math::categorical_logit_lpmf<false>(outcomes[0], arg);
-    return spec.propto ? stan::math::categorical_lpmf<true>(outcomes[0], arg)
-                       : stan::math::categorical_lpmf<false>(outcomes[0], arg);
+    return propto ? stan::math::categorical_lpmf<true>(outcomes[0], arg)
+                  : stan::math::categorical_lpmf<false>(outcomes[0], arg);
   }
-  if (spec.logit)
-    return spec.propto
-               ? stan::math::categorical_logit_lpmf<true>(outcomes, arg)
-               : stan::math::categorical_logit_lpmf<false>(outcomes, arg);
-  return spec.propto ? stan::math::categorical_lpmf<true>(outcomes, arg)
-                     : stan::math::categorical_lpmf<false>(outcomes, arg);
+  if (variant & kCategoricalLogit)
+    return propto ? stan::math::categorical_logit_lpmf<true>(outcomes, arg)
+                  : stan::math::categorical_logit_lpmf<false>(outcomes, arg);
+  return propto ? stan::math::categorical_lpmf<true>(outcomes, arg)
+                : stan::math::categorical_lpmf<false>(outcomes, arg);
 }
 
 Eigen::Matrix<stan::math::var, -1, 1> categorical_vars(const Desc& input) {
@@ -299,8 +299,10 @@ Eigen::Matrix<stan::math::var, -1, 1> categorical_vars(const Desc& input) {
 // scalar rev rule directly below.  Array outcomes deliberately stay on the
 // replay: repeated selections share log nodes, and replacing that tape with
 // counts would regroup low bits (pinned in test_lower.cpp).
-bool native_scalar_probability(const CategoricalSpec& spec) {
-  return !spec.logit && spec.scalar_outcome && spec.arg_autodiff;
+bool native_scalar_probability(uint8_t variant) {
+  return !(variant & kCategoricalLogit) &&
+         (variant & kCategoricalScalarOutcome) &&
+         (variant & kCategoricalArgAutodiff);
 }
 
 int categorical_scalar_outcome(const KernelCtx& ctx) {
@@ -310,14 +312,13 @@ int categorical_scalar_outcome(const KernelCtx& ctx) {
 }
 
 void categorical_fwd(KernelCtx& ctx) {
-  if (ctx.n_in != 2 || ctx.out.len != 1 || ctx.udata == nullptr)
+  if (ctx.n_in != 2 || ctx.out.len != 1)
     throw std::logic_error("malformed categorical op");
-  const auto& spec = *static_cast<const CategoricalSpec*>(ctx.udata);
   // forward_value_only intentionally instantiates the expression on doubles:
   // a propto call whose source type was var therefore returns its dropped
   // zero in that mode.  Preserve that existing contract and use the native
   // active-type path only for a normal forward/gradient evaluation.
-  if (native_scalar_probability(spec) && !values_only()) {
+  if (native_scalar_probability(ctx.variant) && !values_only()) {
     const int outcome = categorical_scalar_outcome(ctx);
     const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
     // With an active argument, both <true> and <false> retain this summand;
@@ -325,23 +326,23 @@ void categorical_fwd(KernelCtx& ctx) {
     ctx.out.data[0] = stan::math::categorical_lpmf<false>(outcome, arg);
     return;
   }
-  const std::vector<int> outcomes = categorical_outcomes(ctx, spec);
-  if (spec.arg_autodiff && !values_only()) {
+  const std::vector<int> outcomes = categorical_outcomes(ctx);
+  if ((ctx.variant & kCategoricalArgAutodiff) && !values_only()) {
     stan::math::nested_rev_autodiff nested;
     const auto arg = categorical_vars(ctx.in[1]);
-    ctx.out.data[0] = categorical_eval(spec, outcomes, arg).val();
+    ctx.out.data[0] = categorical_eval(ctx.variant, outcomes, arg).val();
   } else {
     Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
-    ctx.out.data[0] = categorical_eval(spec, outcomes, arg);
+    ctx.out.data[0] = categorical_eval(ctx.variant, outcomes, arg);
   }
 }
 
 void categorical_bwd(KernelCtx& ctx) {
-  const auto& spec = *static_cast<const CategoricalSpec*>(ctx.udata);
-  if (!spec.arg_autodiff || ctx.in_adj[1].data == nullptr ||
-      (!spec.scalar_outcome && ctx.in[0].len == 0))
+  if (!(ctx.variant & kCategoricalArgAutodiff) ||
+      ctx.in_adj[1].data == nullptr ||
+      (!(ctx.variant & kCategoricalScalarOutcome) && ctx.in[0].len == 0))
     return;
-  if (native_scalar_probability(spec)) {
+  if (native_scalar_probability(ctx.variant)) {
     const int outcome = categorical_scalar_outcome(ctx);
     ctx.in_adj[1].data[outcome - 1] +=
         ctx.out_adj / ctx.in[1].data[outcome - 1];
@@ -351,12 +352,21 @@ void categorical_bwd(KernelCtx& ctx) {
   auto arg = categorical_vars(ctx.in[1]);
   for (int64_t k = 0; k < ctx.in[1].len; ++k)
     arg(k).adj() = ctx.in_adj[1].data[k];
-  const auto outcomes = categorical_outcomes(ctx, spec);
-  const stan::math::var lp = categorical_eval(spec, outcomes, arg);
+  const auto outcomes = categorical_outcomes(ctx);
+  const stan::math::var lp = categorical_eval(ctx.variant, outcomes, arg);
   stan::math::grad((lp * ctx.out_adj).vi_);
   for (int64_t k = 0; k < ctx.in[1].len; ++k)
     ctx.in_adj[1].data[k] = arg(k).adj();
 }
+
+void all_integer_density_fwd(KernelCtx& ctx) {
+  const auto density =
+      static_cast<AllIntegerDensity>(ctx.variant & uint8_t{0x7f});
+  ctx.out.data[0] = evaluate_packed_all_integer_density(
+      density, ctx.idata, ctx.n_idata, (ctx.variant & 0x80u) != 0);
+}
+
+void all_integer_density_bwd(KernelCtx&) {}
 
 }  // namespace
 
@@ -369,6 +379,9 @@ void register_message_kernels() {
   register_kernel(OP_CHECK_UPPER, Kernel{check_fwd<false>, nullptr, nullptr});
   register_kernel(OP_CATEGORICAL,
                   Kernel{categorical_fwd, categorical_bwd, nullptr});
+  register_kernel(
+      OP_ALL_INTEGER_DENSITY,
+      Kernel{all_integer_density_fwd, all_integer_density_bwd, nullptr});
   register_kernel(OP_REJECT, Kernel{reject_fwd, nullptr, nullptr});
   register_kernel(OP_PRINT, Kernel{print_fwd, nullptr, nullptr});
 }

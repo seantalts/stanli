@@ -24,6 +24,7 @@ import tempfile
 PREFIX = "// STANLI-LIT: "
 EXPECT_PREFIX = "// STANLI-LIT-EXPECT: "
 DATA_PREFIX = "// STANLI-LIT-DATA: "
+TIMEOUT_PREFIX = "// STANLI-LIT-TIMEOUT: "
 
 
 def directive(lines: list[str], prefix: str) -> str | None:
@@ -68,11 +69,15 @@ def main() -> int:
         status = directive(lines, PREFIX)
         expect = directive(lines, EXPECT_PREFIX)
         data_text = directive(lines, DATA_PREFIX) or "{}"
+        timeout_text = directive(lines, TIMEOUT_PREFIX) or "30"
         if status not in {"PASS", "XFAIL"}:
             raise ValueError("STANLI-LIT must be PASS or XFAIL")
         if not expect:
             raise ValueError("missing STANLI-LIT-EXPECT directive")
         data = json.loads(data_text)
+        timeout = float(timeout_text)
+        if timeout <= 0:
+            raise ValueError("STANLI-LIT-TIMEOUT must be positive")
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"FAIL {args.case}: {error}")
         return 1
@@ -100,10 +105,10 @@ def main() -> int:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
-                timeout=30,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            print(f"FAIL {args.case}: timed out after 30 seconds")
+            print(f"FAIL {args.case}: timed out after {timeout:g} seconds")
             return 1
 
     result = result_line(completed)

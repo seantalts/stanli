@@ -110,6 +110,7 @@ namespace stanli {
   X(OP_DIV)                           \
   X(OP_POW)                           \
   X(OP_DOT)                           \
+  X(OP_GROUP_DOT)                     \
   X(OP_NEG)                           \
   X(OP_EXPV)                          \
   X(OP_LOGV)                          \
@@ -138,6 +139,7 @@ namespace stanli {
   X(OP_LOG_MODIFIED_BESSEL_1)         \
   X(OP_LOG_RISING_FACTORIAL)          \
   X(OP_OWENS_T)                       \
+  X(OP_CHOOSE)                        \
   X(OP_BESSEL_1)                      \
   X(OP_BESSEL_2)                      \
   X(OP_MODIFIED_BESSEL_1)             \
@@ -167,6 +169,7 @@ namespace stanli {
   X(OP_CHECK_LOWER)                   \
   X(OP_CHECK_UPPER)                   \
   X(OP_CATEGORICAL)                   \
+  X(OP_ALL_INTEGER_DENSITY)           \
   X(OP_REJECT)                        \
   X(OP_PRINT)                         \
   X(OP_DIRICHLET_LPDF)                \
@@ -657,6 +660,11 @@ constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
   X(OP_RISING_FACTORIAL, rising_factorial, rising_factorial)    \
   X(OP_LDEXP, ldexp, ldexp)
 
+// Two integer arguments and an integer result. Values still travel through
+// graph/register double slots, but the kernel converts both operands back to
+// their declared integer type and has no reverse pass.
+#define STANLI_SCALAR_BINARY_INTEGER_LIST(X) X(OP_CHOOSE, choose, choose)
+
 // The tier a density is actually built at. STANLI_LITE_LP drops the
 // propto family from every one of them: about half the library, at the
 // cost of an lp__ that differs from CmdStan's by a per-model constant on
@@ -822,10 +830,10 @@ constexpr bool has_op_trait(uint16_t opcode, uint8_t trait) {
 }
 
 // Ops no rewrite may run a different number of times than the graph says.
-// Most are effects -- a merged print prints once, a hoisted draw returns the
-// same number twice, a folded check throws at compile time -- and
-// OP_CATEGORICAL rides along because its per-op spec payload is not
-// comparable, so two of them are never known to be the same computation.
+// A merged print prints once, a hoisted draw returns the same number twice,
+// and a folded check throws at compile time. OP_CATEGORICAL remains a boundary
+// because its runtime outcome/check topology is consumed by lane partitioning;
+// its call contract itself is now comparable in the variant byte.
 constexpr bool is_effectful_op(uint16_t opcode) {
   switch (opcode) {
     case OP_CHECK_STRUCTURED:
@@ -833,6 +841,7 @@ constexpr bool is_effectful_op(uint16_t opcode) {
     case OP_CHECK_LOWER:
     case OP_CHECK_UPPER:
     case OP_CATEGORICAL:
+    case OP_ALL_INTEGER_DENSITY:
     case OP_RNG:
     case OP_PRINT:
     case OP_REJECT:

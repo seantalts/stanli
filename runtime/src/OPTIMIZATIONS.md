@@ -361,7 +361,10 @@ derivative: only the selected probability receives the incoming seed divided
 by that probability. Its kernel therefore asks Stan Math's double overload to
 compute the value and perform every domain and bounds check, then applies that
 single pullback directly. This removes the nested reverse-mode tape from both
-sweeps without changing the graph or its operation count.
+sweeps without changing the graph or its operation count. Both categorical
+families enter this kernel through the shared density registry; probability
+versus logit, scalar versus array outcome, activity, and propto are ordinary
+variant bits rather than an opaque per-op payload.
 
 The contract is intentionally no wider: the outcome must be scalar, the
 probability vector must be active, and the call must use probabilities rather

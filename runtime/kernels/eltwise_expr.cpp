@@ -266,6 +266,47 @@ void dot_bwd(KernelCtx& ctx) {
   if (ctx.in_adj[1].data) dx_a(ctx, 1) += ctx.out_adj * in_a(ctx, 0);
 }
 
+// ---- grouped dots: columns/rows_dot_product, columns/rows_dot_self --------
+// idata = {groups, width, group_stride, cell_stride}; result cell g folds
+// the width source cells at g*group_stride + k*cell_stride. The AoS
+// reverse-mode overloads CmdStan's model block instantiates accumulate each
+// group's value strictly in order (dot_product's arena .val().dot() and
+// dot_self's explicit loop both reduce sequentially), so the forward is a
+// scalar in-order loop rather than OP_DOT's packet redux; the prim double
+// partial reduxes group differently by ulps at width >= the packet size,
+// below reference-CSV precision. Self forms pass the one input twice and the
+// backward accumulates both terms, the same convention OP_DOT's dot_self
+// call relies on.
+void group_dot_fwd(KernelCtx& ctx) {
+  const int64_t groups = ctx.idata[0], width = ctx.idata[1];
+  const int64_t gs = ctx.idata[2], cs = ctx.idata[3];
+  const double* a = ctx.in[0].data;
+  const double* b = ctx.in[1].data;
+  for (int64_t g = 0; g < groups; ++g) {
+    double sum = 0.0;
+    for (int64_t k = 0; k < width; ++k)
+      sum += a[g * gs + k * cs] * b[g * gs + k * cs];
+    ctx.out.data[g] = sum;
+  }
+}
+void group_dot_bwd(KernelCtx& ctx) {
+  const int64_t groups = ctx.idata[0], width = ctx.idata[1];
+  const int64_t gs = ctx.idata[2], cs = ctx.idata[3];
+  const double* a = ctx.in[0].data;
+  const double* b = ctx.in[1].data;
+  // A one-column or one-row input makes a one-cell container result, which
+  // a register-machine call still marks vector_output; take whichever
+  // adjoint form the caller populated.
+  const double* dout =
+      ctx.out_adj_vec.data != nullptr ? ctx.out_adj_vec.data : &ctx.out_adj;
+  for (int64_t g = 0; g < groups; ++g)
+    for (int64_t k = 0; k < width; ++k) {
+      const int64_t at = g * gs + k * cs;
+      if (ctx.in_adj[0].data) ctx.in_adj[0].data[at] += dout[g] * b[at];
+      if (ctx.in_adj[1].data) ctx.in_adj[1].data[at] += dout[g] * a[at];
+    }
+}
+
 // ---- unaries ---------------------------------------------------------------
 // AoS Matrix<var> unaries route through apply_scalar_unary: scalar libm per
 // element, NOT Eigen packet math. Transcendental kernels therefore use
@@ -562,6 +603,7 @@ void register_eltwise_kernels() {
   register_kernel(OP_DIV, Kernel{div_fwd, div_bwd, nullptr});
   register_kernel(OP_POW, Kernel{pow_fwd, pow_bwd, nullptr});
   register_kernel(OP_DOT, Kernel{dot_fwd, dot_bwd, nullptr});
+  register_kernel(OP_GROUP_DOT, Kernel{group_dot_fwd, group_dot_bwd, nullptr});
   register_kernel(OP_NEG, Kernel{negu_fwd, negu_bwd, nullptr});
   register_kernel(OP_EXPV, Kernel{expv_fwd, expv_bwd, nullptr});
   register_kernel(OP_TANHV, Kernel{tanhv_fwd, tanhv_bwd, nullptr});

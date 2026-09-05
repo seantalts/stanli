@@ -10,12 +10,15 @@ Each file has two required directives and one optional data directive:
 // STANLI-LIT: PASS
 // STANLI-LIT-EXPECT: OK
 // STANLI-LIT-DATA: {"N": 3}
+// STANLI-LIT-TIMEOUT: 60
 ```
 
 - `STANLI-LIT` is `PASS` for supported behavior and `XFAIL` for a known gap.
 - `STANLI-LIT-EXPECT` is `OK`, `CRASH`, or a substring of the expected
   `COMPILE_FAIL`/`EVAL_FAIL` result.
 - `STANLI-LIT-DATA` is JSON. It defaults to `{}` when omitted.
+- `STANLI-LIT-TIMEOUT` is an optional positive timeout in seconds. It
+  defaults to `30` when omitted.
 
 A matching `XFAIL` passes CTest. Any changed result fails so the case is
 reviewed and, when fixed, promoted to `PASS` with its new expectation. This is
@@ -45,6 +48,24 @@ cmake --build build --target lit-broken -j24
 
 The targets default to 24 parallel CTest jobs. A smaller machine can choose a
 different value at configure time with `-DSTANLI_LIT_JOBS=8`.
+
+The exhaustive ordinary-builtin and density fixtures are generated from the
+same runtime registry exposed by `build/dump_function_specs`. Their shared
+generator support partitions large inventories and renders each shard in all
+four execution contexts. Regenerate them after changing registered functions:
+
+```sh
+tools/generate_builtin_signature_models.py \
+  --registry build/dump_function_specs
+tools/generate_density_signature_model.py \
+  --registry build/dump_function_specs
+```
+
+The corresponding JSON manifests under `tests/function_coverage/` record each
+tested, excluded, and missing stanc signature, including functions for which
+only some overloads are excluded. CTest checks that fixtures and manifests
+remain current. These generated models are source-only lit inputs: ordinary
+builds do not also materialize their legacy MIR under `tests/fixtures/`.
 
 For a single case, invoke the runner directly; `--discover` prints the current
 result without enforcing the checked-in expectation:

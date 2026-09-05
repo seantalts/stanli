@@ -191,6 +191,7 @@ inline bool source_binary_elementwise(const std::string& name) {
   STANLI_SCALAR_BINARY_LIST(STANLI_SOURCE_BINARY)
   STANLI_SCALAR_BINARY_INT_FIRST_LIST(STANLI_SOURCE_BINARY)
   STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_SOURCE_BINARY)
+  STANLI_SCALAR_BINARY_INTEGER_LIST(STANLI_SOURCE_BINARY)
 #undef STANLI_SOURCE_BINARY
   return binary || name == "Plus__" || name == "Minus__" ||
          name == "EltTimes__" || name == "EltDivide__" || name == "EltPow__" ||

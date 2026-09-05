@@ -88,7 +88,12 @@ void test_contextual_zero_shapes() {
   data.set_real_array("matrices", {}, {0, 2, 3});
   data.set_real_array("scalars", {}, {0, 3});
   check_gradient("tests/fixtures/viewa_contextual_empty.tmir.sexp", data,
-                 {0.25}, 36.0, {4}, "zero outer container dimensions");
+                 // 32, not the 36 the pre-registry dims rule produced:
+                 // Stan Math's dims() pushes rows and columns for any Eigen
+                 // leaf, so dims(array[] row_vector)[2] is the inserted row
+                 // extent 1, not the row length (CmdStan prints
+                 // dims(array[4] vector[2]) as [4,2,1]).
+                 {0.25}, 32.0, {4}, "zero outer container dimensions");
 }
 
 void test_explicit_zero_vectors() {

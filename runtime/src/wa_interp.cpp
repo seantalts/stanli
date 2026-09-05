@@ -1,5 +1,6 @@
 #include <stanli/wa_interp.hpp>
 
+#include <stanli/function_registry.hpp>
 #include <stanli/higher_order_eval.hpp>
 #include <stanli/mir_interp.hpp>
 
@@ -14,19 +15,14 @@
 namespace stanli {
 
 const ScalarRng* scalar_rng_family(const std::string& name) {
-  static const std::map<std::string, ScalarRng> kFamilies = {
-      {"poisson_log_rng", ScalarRng::PoissonLog},
-      {"uniform_rng", ScalarRng::Uniform},
-      {"bernoulli_rng", ScalarRng::Bernoulli},
-      {"normal_rng", ScalarRng::Normal},
-      {"lognormal_rng", ScalarRng::Lognormal},
-      {"binomial_rng", ScalarRng::Binomial},
-      {"gumbel_rng", ScalarRng::Gumbel},
-      {"beta_binomial_rng", ScalarRng::BetaBinomial},
-      {"exponential_rng", ScalarRng::Exponential},
-  };
-  const auto found = kFamilies.find(name);
-  return found == kFamilies.end() ? nullptr : &found->second;
+  // The unified FunctionSpec registry owns the name-to-family mapping; the
+  // enum-keyed arity and integer-result helpers below stay the single
+  // statement of each family's properties, which registration reuses.
+  const FunctionSpec* spec = function_spec(name, FunctionFamily::Builtin);
+  if (spec == nullptr || spec->builtin() == nullptr ||
+      spec->builtin()->shape != BuiltinShapePolicy::Rng)
+    return nullptr;
+  return &spec->builtin()->rng;
 }
 
 size_t scalar_rng_arity(ScalarRng family) {

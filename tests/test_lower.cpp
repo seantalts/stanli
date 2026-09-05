@@ -6,6 +6,7 @@
 #include "stdout_capture.hpp"
 #include <stanli/compile.hpp>
 #include <stanli/dae.hpp>
+#include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
 #include <stanli/ode_adjoint.hpp>
@@ -1985,13 +1986,8 @@ int main() {
     const int outcome = g.add_slot(1, false);
     const int cat = g.add_slot(1, false);
     const int cat_op = g.add_op(OP_CATEGORICAL, {outcome, beta}, cat);
-    auto spec = std::make_shared<CategoricalSpec>();
-    spec->logit = true;
-    spec->scalar_outcome = true;
-    spec->arg_autodiff = true;
-    spec->propto = false;
-    g.ops[(size_t)cat_op].udata = spec.get();
-    g.udata_pool.push_back(std::move(spec));
+    g.ops[(size_t)cat_op].variant =
+        kCategoricalLogit | kCategoricalScalarOutcome | kCategoricalArgAutodiff;
     const int beta0 = g.add_slot(1, false);
     g.add_op(OP_INDEX, {beta}, beta0, {0});
     const int scale = g.add_slot(1, false);
@@ -2032,13 +2028,8 @@ int main() {
     const int outcome = g.add_slot(1, false);
     const int cat = g.add_slot(1, false);
     const int cat_op = g.add_op(OP_CATEGORICAL, {outcome, theta}, cat);
-    auto spec = std::make_shared<CategoricalSpec>();
-    spec->logit = false;
-    spec->scalar_outcome = true;
-    spec->arg_autodiff = true;
-    spec->propto = true;
-    g.ops[(size_t)cat_op].udata = spec.get();
-    g.udata_pool.push_back(std::move(spec));
+    g.ops[(size_t)cat_op].variant =
+        kCategoricalScalarOutcome | kCategoricalArgAutodiff | 0x80u;
     const int cat_scale = g.add_slot(1, false);
     const int scaled_cat = g.add_slot(1, false);
     g.add_op(OP_MUL, {cat, cat_scale}, scaled_cat);
@@ -2086,11 +2077,6 @@ int main() {
     check(kernel && kernel->scratch_size == nullptr,
           "categorical native kernel scratchless");
     if (kernel) {
-      CategoricalSpec spec;
-      spec.logit = false;
-      spec.scalar_outcome = true;
-      spec.arg_autodiff = true;
-      spec.propto = true;
       double outcome = 1.0;
       double theta[2] = {1.0, 0.0};
       double theta_adj[2] = {0.0, -0.0};
@@ -2102,7 +2088,7 @@ int main() {
       ctx.in_adj[0] = Desc{nullptr, 1};
       ctx.in_adj[1] = Desc{theta_adj, 2};
       ctx.out = Desc{&out, 1};
-      ctx.udata = &spec;
+      ctx.variant = kCategoricalScalarOutcome | kCategoricalArgAutodiff | 0x80u;
 
       kernel->forward(ctx);
       ctx.out_adj = std::numeric_limits<double>::infinity();
@@ -2147,13 +2133,7 @@ int main() {
     const int outcomes = g.add_slot(6, false);
     const int cat = g.add_slot(1, false);
     const int cat_op = g.add_op(OP_CATEGORICAL, {outcomes, theta}, cat);
-    auto spec = std::make_shared<CategoricalSpec>();
-    spec->logit = false;
-    spec->scalar_outcome = false;
-    spec->arg_autodiff = true;
-    spec->propto = false;
-    g.ops[(size_t)cat_op].udata = spec.get();
-    g.udata_pool.push_back(std::move(spec));
+    g.ops[(size_t)cat_op].variant = kCategoricalArgAutodiff;
     const int scale = g.add_slot(1, false);
     const int total = g.add_slot(1, false);
     g.add_op(OP_MUL, {cat, scale}, total);
@@ -4577,22 +4557,89 @@ int main() {
     expect_eq("later runtime no-break grad", gradient, 2.0);
   }
 
-  // The same region written with `~`: refused, by name, with the fix in
-  // the message. Before the check existed this compiled and was wrong in
-  // lp by exactly the dropped constant, with a correct gradient.
+  // The same region written with `~`. Runtime density calls now use the
+  // graph kernel ABI, including its argument-activity mask, so the propto
+  // instantiation drops exactly the constants that generated Stan does.
   {
     DataMap d;
     d.set_real("y", 1.75);
-    bool threw = false;
+    CompiledModel pm =
+        compile_model(slurp("tests/fixtures/paramcond_tilde.tmir.sexp"), d);
+    Executor pex(std::move(pm.graph));
+    pm.bind(pex);
+    double grad = 0.0;
+    pex.params_data()[0] = 0.4;
+    expect_eq("runtime propto positive lp", pex.gradient(&grad),
+              -0.5 * (1.75 - 0.4) * (1.75 - 0.4));
+    expect_eq("runtime propto positive grad", grad, 1.75 - 0.4);
+    pex.params_data()[0] = -0.4;
+    expect_eq("runtime propto negative lp", pex.gradient(&grad),
+              -0.5 * (1.75 - 0.4) * (1.75 - 0.4));
+    expect_eq("runtime propto negative grad", grad, -(1.75 - 0.4));
+  }
+
+  // The same CALL bridge also carries integer groups and structured GLM
+  // layout. Check two different descriptors in one parameter-selected region
+  // against Stan Math, including the pullback through both calls.
+  {
+    DataMap d = DataMap::from_json(
+        R"({"y": 2, "N": 5, "z": [1, 0], "c": 2, "cats": [1, 3], "X": [[0.4], [-0.7]]})");
+    CompiledModel dm = compile_model(
+        slurp("tests/fixtures/density_runtime_shared.tmir.sexp"), d);
+    Executor dex(std::move(dm.graph));
+    dm.bind(dex);
+    double grad = 0.0;
+    dex.params_data()[0] = -0.3;
+    expect_eq("shared runtime density untaken lp", dex.gradient(&grad), 0.0);
+    expect_eq("shared runtime density untaken grad", grad, 0.0);
+
+    dex.params_data()[0] = 0.3;
+    const double got = dex.gradient(&grad);
+    using stan::math::var;
+    var theta = 0.3;
+    Eigen::MatrixXd X(2, 1);
+    X << 0.4, -0.7;
+    Eigen::VectorXd beta(1);
+    beta << 0.3;
+    std::vector<int> z{1, 0};
+    Eigen::Matrix<var, Eigen::Dynamic, 1> logits(3);
+    logits << theta, 0.0, -theta;
+    std::vector<int> cats{1, 3};
+    var want =
+        stan::math::beta_binomial_lpmf<false>(2, 5, exp(theta), 2.2) +
+        stan::math::bernoulli_logit_glm_lpmf<false>(z, X, theta, beta) +
+        stan::math::categorical_lpmf<false>(2, stan::math::softmax(logits)) +
+        stan::math::categorical_logit_lpmf<false>(cats, logits) +
+        stan::math::hypergeometric_lpmf<false>(2, 5, 4, 4) +
+        stan::math::discrete_range_lpmf<false>(2, 1, 5);
+    want.grad();
+    // The kernels and this replay are separately compiled evaluations of the
+    // same math; clang and gcc round their sums a ULP apart.
+    expect_ulp("shared runtime density lp", got, want.val());
+    expect_ulp("shared runtime density grad", grad, theta.adj());
+    stan::math::recover_memory();
+
+    // The integer arguments are known while the region is compiled, but its
+    // support checks still belong to the selected runtime branch.
+    DataMap invalid = DataMap::from_json(
+        R"({"y": 5, "N": 5, "z": [1, 0], "c": 2, "cats": [1, 3], "X": [[0.4], [-0.7]]})");
+    CompiledModel invalid_model = compile_model(
+        slurp("tests/fixtures/density_runtime_shared.tmir.sexp"), invalid);
+    Executor invalid_executor(std::move(invalid_model.graph));
+    invalid_model.bind(invalid_executor);
+    invalid_executor.params_data()[0] = -0.3;
+    expect_eq("untaken all-integer validation",
+              invalid_executor.gradient(&grad), 0.0);
+    invalid_executor.params_data()[0] = 0.3;
+    bool runtime_rejected = false;
     try {
-      compile_model(slurp("tests/fixtures/paramcond_tilde.tmir.sexp"), d);
-    } catch (const CompileError& e) {
-      const std::string msg = e.what();
-      threw = msg.find("`~` inside a runtime-control region") !=
-                  std::string::npos &&
-              msg.find("target +=") != std::string::npos;
+      (void)invalid_executor.gradient(&grad);
+    } catch (const std::domain_error& error) {
+      runtime_rejected =
+          std::string(error.what()).find("hypergeometric_lpmf") !=
+          std::string::npos;
     }
-    check(threw, "propto ~ in a parameter region refused with the fix");
+    check(runtime_rejected, "taken all-integer validation executes");
   }
 
   // propto through a user-defined density. CmdStan compiles one as a
@@ -5267,6 +5314,9 @@ int main() {
     const int label[3] = {0, 1, 0};
     const int count[3] = {0, 1, 2};
     var acc = 0, term = 0;
+    acc += stan::math::exp(x[0]) + stan::math::exp(x[1]);
+    acc += stan::math::atan2(x[2], probability[2]) +
+           stan::math::atan2(x[0], probability[0]);
 #define REGULAR_TERM(expr)                  \
   term = 0;                                 \
   for (int i = 0; i < 3; ++i) term += expr; \
@@ -5283,6 +5333,7 @@ int main() {
     REGULAR_TERM(stan::math::modified_bessel_second_kind(order[i], x[i]))
     REGULAR_TERM(stan::math::rising_factorial(x[i], count[i]))
 #undef REGULAR_TERM
+    acc += stan::math::choose(2, 0);
     acc.grad();
 
     check(std::abs(lp - acc.val()) <=
@@ -5651,12 +5702,21 @@ int main() {
           "transformed-data HOF lp");
     check(std::fabs(gradient[0] - expected) < 1e-7,
           "transformed-data HOF gradient");
-    check(hm.write_array && hm.write_array->interp,
-          "higher-order write_array interpreter selected");
-    if (hm.write_array && hm.write_array->interp) {
-      WaRng rng(123);
-      const auto row =
-          hm.write_array->interp->eval(hm.constrained_env(hex), rng);
+    check(hm.write_array && !hm.write_array->interp &&
+              hm.write_array->truncated.empty(),
+          "higher-order write_array compiled completely");
+    if (hm.write_array && !hm.write_array->interp &&
+        hm.write_array->truncated.empty()) {
+      Executor wex(std::move(hm.write_array->graph));
+      hm.write_array->bind(wex);
+      wex.params_data()[0] = 0.0;
+      wex.run_forward_only();
+      std::vector<double> row;
+      for (const auto& column : hm.write_array->columns) {
+        const double* values = wex.value_ptr(column.slot);
+        for (int64_t i = 0; i < column.len; ++i)
+          row.push_back(values[column.storage_index(i)]);
+      }
       const std::vector<double> want{0.0, 10.0, 2.0, 0.5, 0.2, 0.2, 1e-10, 0.2};
       check(row.size() == want.size(), "higher-order write_array row width");
       if (row.size() == want.size())
@@ -6189,6 +6249,61 @@ int main() {
     }
   }
 
+  // Every multivariate density with the (vector-or-array-of-vectors, ...,
+  // square matrix) signature gets vectorized y/mu handling from one registry
+  // policy. Exercise all five users through both graph lowering and the
+  // runtime-control CALL bridge; the fixture contributes each term once in
+  // each context.
+  {
+    DataMap d = DataMap::from_json(R"({
+      "N": 2, "K": 2,
+      "y": [[1.0, -0.5], [0.3, 1.2]],
+      "Sigma": [[1.44, 0.24], [0.24, 0.68]],
+      "precision": [[0.7378472222222222, -0.2604166666666667],
+                    [-0.2604166666666667, 1.5625]],
+      "L": [[1.2, 0.0], [0.2, 0.8]],
+      "nu": 4.5
+    })");
+    CompiledModel model = compile_model(
+        slurp("tests/fixtures/mvt_vectorized_inputs.tmir.sexp"), d);
+    Executor executor(std::move(model.graph));
+    model.bind(executor);
+    const double point[4] = {0.2, -0.4, -0.1, 0.7};
+    std::copy(point, point + 4, executor.params_data());
+    double gradient[4] = {};
+    const double got = executor.gradient(gradient);
+
+    using stan::math::var;
+    std::vector<Eigen::VectorXd> y(2, Eigen::VectorXd(2));
+    y[0] << 1.0, -0.5;
+    y[1] << 0.3, 1.2;
+    std::vector<Eigen::Matrix<var, Eigen::Dynamic, 1>> mu(
+        2, Eigen::Matrix<var, Eigen::Dynamic, 1>(2));
+    for (int k = 0; k < 2; ++k)
+      for (int i = 0; i < 2; ++i) mu[(size_t)k](i) = point[k * 2 + i];
+    Eigen::MatrixXd L(2, 2);
+    L << 1.2, 0.0, 0.2, 0.8;
+    const Eigen::MatrixXd Sigma = L * L.transpose();
+    const Eigen::MatrixXd precision = Sigma.inverse();
+    var one = stan::math::multi_normal_lpdf<false>(y, mu, Sigma) +
+              stan::math::multi_normal_prec_lpdf<false>(y, mu, precision) +
+              stan::math::multi_normal_cholesky_lpdf<false>(y, mu, L) +
+              stan::math::multi_student_t_lpdf<false>(y, 4.5, mu, Sigma) +
+              stan::math::multi_student_t_cholesky_lpdf<false>(y, 4.5, mu, L);
+    var want = 2.0 * one;
+    want.grad();
+    const auto near = [](double a, double b) {
+      return std::abs(a - b) <= 64 * std::numeric_limits<double>::epsilon() *
+                                    std::max(1.0, std::abs(b));
+    };
+    check(near(got, want.val()), "shared vectorized-density value");
+    for (int k = 0; k < 2; ++k)
+      for (int i = 0; i < 2; ++i)
+        check(near(gradient[k * 2 + i], mu[(size_t)k](i).adj()),
+              "shared vectorized-density gradient");
+    stan::math::recover_memory();
+  }
+
   // array[N] vector[K] data into a vectorized multivariate density. See
   // tests/fixtures/mnarr.stan: the data path stores this shape the way it
   // stores a matrix, and the kernel wants each element contiguous, so the
@@ -6281,23 +6396,42 @@ int main() {
     stan::math::recover_memory();
   }
 
-  // multi_student_t shares the shape derivation but not the kernel, whose
-  // location is one vector.
+  // multi_student_t shares the shape derivation and, through the encoded
+  // per-argument layout, the array-location kernel path: stan-math's
+  // vectorized overload takes the array of locations directly.
   {
     DataMap d;
     d.set_int("N", 3);
     d.set_int("K", 2);
     d.set_real_array("y", {1, 3, 5, 2, 4, 6}, {3, 2});
     d.set_real_array("S", {2.0, 0.5, 0.5, 1.0}, {2, 2});
-    std::string msg;
-    try {
-      compile_model(slurp("tests/fixtures/mstarrmu.tmir.sexp"), d);
-    } catch (const CompileError& e) {
-      msg = e.what();
-    }
-    check(msg.find("multi_student_t_lpdf") != std::string::npos &&
-              msg.find("array-valued location") != std::string::npos,
-          "multi_student_t refuses an array-valued location");
+    CompiledModel am =
+        compile_model(slurp("tests/fixtures/mstarrmu.tmir.sexp"), d);
+    check(am.n_unconstrained == 6, "mstarrmu 6 unconstrained");
+    Executor aex(std::move(am.graph));
+    am.bind(aex);
+    const double q[6] = {0.4, -0.7, -0.3, 0.9, 0.15, -0.55};
+    for (int k = 0; k < 6; ++k) aex.params_data()[k] = q[k];
+    double grad[6];
+    const double lp = aex.gradient(grad);
+
+    using stan::math::var;
+    std::vector<Eigen::Matrix<var, -1, 1>> mus(3, Eigen::Matrix<var, -1, 1>(2));
+    for (int n = 0; n < 3; ++n)
+      for (int i = 0; i < 2; ++i) mus[(size_t)n](i) = q[n * 2 + i];
+    std::vector<Eigen::VectorXd> ys(3, Eigen::VectorXd(2));
+    ys[0] << 1, 2;
+    ys[1] << 3, 4;
+    ys[2] << 5, 6;
+    Eigen::MatrixXd Sd(2, 2);
+    Sd << 2.0, 0.5, 0.5, 1.0;
+    var acc = stan::math::multi_student_t_lpdf<false>(ys, 3.0, mus, Sd);
+    acc.grad();
+    expect_ulp("mstarrmu lp", lp, acc.val());
+    for (int k = 0; k < 6; ++k)
+      expect_ulp("mstarrmu g" + std::to_string(k), grad[k],
+                 mus[(size_t)(k / 2)](k % 2).adj());
+    stan::math::recover_memory();
   }
 
   // `p ~ dirichlet(a)` over an array of simplexes. See
@@ -6520,29 +6654,35 @@ int main() {
   }
 
   // A GLM whose outcome is a language-level scalar rather than an array of
-  // one value per row. The kernels map `rows` integers out of idata, so a
-  // one-element group used to be read past the end and answered with
-  // whatever followed it in the vector -- on this fixture -29.48 where the
-  // equivalent array outcome gives -16.22, no diagnostic. It is refused at
-  // lowering rather than replicated because for poisson_log_glm stan-math's
-  // own broadcast is not the replicated call: its <false> form subtracts
-  // lgamma(y+1) once for a scalar and once per row for an array, so
-  // replicating would put stanli's lp a constant off CmdStan's. See
-  // docs/coverage.md.
+  // one value per row. Scalar-vs-array is retained in the shared GLM payload:
+  // merely replicating the value changes poisson_log_glm's <false> constant.
   {
     DataMap d = DataMap::from_json(
         R"({"N": 4, "K": 2,
             "x": [[0.3, -0.2], [1.1, 0.4], [-0.5, 0.9], [0.2, 0.7]],
             "y": 3})");
-    std::string msg;
-    try {
-      compile_model(slurp("tests/fixtures/glmscalary.tmir.sexp"), d);
-    } catch (const CompileError& e) {
-      msg = e.what();
-    }
-    check(msg.find("poisson_log_glm_lpmf") != std::string::npos &&
-              msg.find("4 rows") != std::string::npos,
-          "glm scalar outcome refused by name, not read past the end");
+    CompiledModel gm =
+        compile_model(slurp("tests/fixtures/glmscalary.tmir.sexp"), d);
+    Executor gex(std::move(gm.graph));
+    gm.bind(gex);
+    const double q[3] = {0.15, 0.3, -0.25};
+    std::copy(q, q + 3, gex.params_data());
+    double grad[3] = {};
+    const double lp = gex.gradient(grad);
+
+    using stan::math::var;
+    var alpha = q[0];
+    Eigen::Matrix<var, -1, 1> beta(2);
+    beta << q[1], q[2];
+    Eigen::MatrixXd X(4, 2);
+    X << 0.3, -0.2, 1.1, 0.4, -0.5, 0.9, 0.2, 0.7;
+    var want = stan::math::poisson_log_glm_lpmf<false>(3, X, alpha, beta);
+    want.grad();
+    check(lp == want.val(), "glm scalar outcome value");
+    check(grad[0] == alpha.adj() && grad[1] == beta(0).adj() &&
+              grad[2] == beta(1).adj(),
+          "glm scalar outcome gradients");
+    stan::math::recover_memory();
   }
 
   // normal_id_glm with the OUTCOME as a parameter. stanc3's --O1 partial
@@ -7156,11 +7296,10 @@ int main() {
   }
 
   {
-    // Stan Math's hypergeometric implementation performs support checks
-    // before dropping an all-data propto term. Without a native density
-    // implementation, accepting the model as a constant zero would therefore
-    // be exact only for valid data and silently accept invalid data. The
-    // honest boundary is to refuse both.
+    // All-integer densities have no differentiable graph edge, but their
+    // shared registry policy still evaluates them during model preparation.
+    // In particular, Stan Math performs support checks before dropping an
+    // all-data propto term: valid data becomes zero and invalid data throws.
     const std::string hypergeometric_mir = R"(
 ((functions_block ())
  (input_vars
@@ -7195,24 +7334,38 @@ int main() {
     check(oracle_rejected,
           "all-data propto oracle still checks invalid support");
 
-    auto lowering_refuses = [&](int n, int N, int a, int b) {
+    auto lower = [&](int n, int N, int a, int b) {
       DataMap d;
       d.set_int("n", n);
       d.set_int("N", N);
       d.set_int("a", a);
       d.set_int("b", b);
-      try {
-        (void)compile_model(hypergeometric_mir, d);
-      } catch (const CompileError& e) {
-        return std::string(e.what()).find("hypergeometric_lpmf") !=
-               std::string::npos;
-      }
-      return false;
+      CompiledModel model = compile_model(hypergeometric_mir, d);
+      Executor executor(std::move(model.graph));
+      model.bind(executor);
+      return executor.gradient(nullptr);
     };
-    check(lowering_refuses(1, 2, 3, 4),
-          "unsupported valid all-data propto density is refused");
-    check(lowering_refuses(4, 4, 3, 3),
-          "unsupported invalid all-data propto density is refused");
+    expect_eq("valid all-data propto density", lower(1, 2, 3, 4), 0.0);
+    bool lowering_rejected = false;
+    try {
+      (void)lower(4, 4, 3, 3);
+    } catch (const std::domain_error& e) {
+      lowering_rejected = std::string(e.what()).find("hypergeometric_lpmf") !=
+                          std::string::npos;
+    }
+    check(lowering_rejected,
+          "all-data propto density preserves support validation");
+
+    const DensitySpec* range = density_spec("discrete_range_lpmf");
+    check(range != nullptr &&
+              range->evaluation == DensityEvaluationPolicy::AllInteger,
+          "discrete range uses the shared all-integer policy");
+    std::vector<IntegerDensityArgument> range_args{
+        {{2, 4}, false}, {{1}, true}, {{3, 5}, false}};
+    expect_eq("all-integer scalar/array dispatch",
+              evaluate_all_integer_density(*range, range_args, false),
+              stan::math::discrete_range_lpmf(std::vector<int>{2, 4}, 1,
+                                              std::vector<int>{3, 5}));
   }
 
   {

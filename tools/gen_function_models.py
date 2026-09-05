@@ -147,6 +147,14 @@ def render():
         "tests/fixtures/higher_order_all_contexts.stan exercises transformed-data, "
         "graph, runtime-control, and interpreted write_array execution"
     )
+    for name in ("ones_int_array", "zeros_array", "one_hot_vector",
+                 "one_hot_row_vector", "one_hot_array", "one_hot_int_array",
+                 "uniform_simplex"):
+        focused[name] = (
+            "generated tests/fixtures/builtin_signatures fixtures execute "
+            "every registered constructor overload in transformed data, "
+            "graph, runtime-control, and generated-quantities contexts"
+        )
     missing = candidates - covered - set(refusals) - set(focused)
     if missing:
         raise ValueError("Runtime functions need coverage recipes: " + ", ".join(sorted(missing)))

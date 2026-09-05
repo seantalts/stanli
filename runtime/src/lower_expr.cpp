@@ -52,8 +52,15 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
     }
     return out;
   }
+  if (ix.name == "IndexUpfrom") {
+    const int64_t lo = eval_int(ix.args[0]);
+    check_range(lo, extent, extent, what, raw);
+    for (int64_t i = lo; i <= extent; ++i) out.push_back(i - 1);
+    return out;
+  }
   fail(std::string("unsupported ") + what + " " + ix.name, raw);
 }
+
 // Target models build int arrays in ascending contiguous writes.  Track the
 // initialized prefix in O(1) per immutable slot: overwrites inside it are
 // safe, an adjacent write extends it, and any gap/stride fails closed.  The
@@ -63,8 +70,18 @@ void Lowering::propagate_int_update(const Val& out_v, const Val& base,
                                     const Val& rhs, int64_t start,
                                     int64_t stride) {
   // A write of an observed value into an observed base stays observed:
-  // splice the element into a copy of the base's entry.
-  if (const DataMap::Entry* be = observation(base)) {
+  // splice the element into a copy of the base's entry. Graph slots store
+  // arrays outer-major while DataMap entries keep first-index-fast order,
+  // so splicing graph offsets is only sound where the two flat orders
+  // coincide: scalars, vectors, matrices (column-major on both sides), and
+  // one-dimensional flat arrays. Deeper and Eigen-leaf arrays drop the
+  // observation instead of recording cells under the wrong order; their
+  // reads then evaluate against the graph value itself.
+  const bool splice_orders_agree =
+      !is_array(base.si) || (array_shape(base.si).dims.size() == 1 &&
+                             array_shape(base.si).leaf == ViewKind::Flat);
+  if (const DataMap::Entry* be =
+          splice_orders_agree ? observation(base) : nullptr) {
     const DataMap::Entry* re = observation(rhs);
     const int64_t rl = g.slots[rhs.slot].len;
     if ((rl == 0 || re) && g.slots[out_v.slot].len == g.slots[base.slot].len) {
@@ -128,6 +145,27 @@ void Lowering::propagate_int_update(const Val& out_v, const Val& base,
   }
   int_ranges[out_v.slot] = range;
 }
+bool Lowering::scalar_shape_query(const mir::Expr& e) {
+  if (e.name == "FnLength") return true;
+  const BuiltinSpec* query =
+      shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::ShapeQuery);
+  return query != nullptr && query->shape_query != BuiltinShapeQueryKind::Dims;
+}
+
+long Lowering::answer_shape_query(const mir::Expr& e, const SlotInfo& si,
+                                  int64_t len) {
+  const BuiltinSpec* query =
+      shaped_builtin_spec(e.name == "FnLength" ? "size" : e.name, 1,
+                          BuiltinShapePolicy::ShapeQuery);
+  try {
+    return (long)builtin_shape_query(
+               *query, view_argument_shape(si, len, BuiltinArgumentKind::Real))
+        .front();
+  } catch (const std::invalid_argument& error) {
+    fail(e.name + ": " + error.what(), e.raw);
+  }
+}
+
 long Lowering::eval_int(const mir::Expr& e) {
   if (expr_effectful(e))
     fail("effectful expression cannot be used as a compile-time integer",
@@ -204,21 +242,32 @@ long Lowering::eval_int(const mir::Expr& e) {
       return eval_int(e.args[0]) != 0 && eval_int(e.args[1]) != 0;
     }
     case mir::Expr::Promotion:
-      if (e.args.size() != 1) fail("malformed promoted size expression", e.raw);
+      fail("malformed promoted size expression", e.raw);
       return eval_int(e.args[0]);
     case mir::Expr::FunApp:
+      if (const FunctionSpec* function = function_spec(e);
+          function != nullptr && function->builtin() != nullptr &&
+          function->builtin()->shape == BuiltinShapePolicy::Elementwise &&
+          function->result() == FunctionArgumentKind::Integer) {
+        const BuiltinSpec& spec = *function->builtin();
+        if (spec.arity == 1)
+          return evaluate_integer_unary_builtin(
+              spec, static_cast<int>(eval_int(e.args[0])));
+        if (spec.arity == 2)
+          return evaluate_integer_binary_builtin(
+              spec, static_cast<int>(eval_int(e.args[0])),
+              static_cast<int>(eval_int(e.args[1])));
+        fail(e.name + ": unsupported integer builtin arity", e.raw);
+      }
       if (e.name == "sum" && e.args.size() == 1) {
         long acc = 0;
         for (int v : const_ints(e.args[0])) acc += v;
         return acc;
       }
-      if (e.name == "Plus__") return eval_int(e.args[0]) + eval_int(e.args[1]);
-      if (e.name == "Minus__") return eval_int(e.args[0]) - eval_int(e.args[1]);
-      if (e.name == "Times__") return eval_int(e.args[0]) * eval_int(e.args[1]);
-      if ((e.name == "Equals__" || e.name == "NEquals__" ||
-           e.name == "Greater__" || e.name == "Geq__" || e.name == "Less__" ||
-           e.name == "Leq__") &&
-          e.args.size() == 2) {
+      if (const BuiltinSpec* pred =
+              e.args.size() == 2 ? shaped_builtin_spec(
+                                       e.name, 2, BuiltinShapePolicy::Predicate)
+                                 : nullptr) {
         const auto scalar = [&](const mir::Expr& arg) -> double {
           if (arg.type_ == "UInt") return (double)eval_int(arg);
           if (auto evaluated = try_eval_pure(arg)) {
@@ -233,50 +282,20 @@ long Lowering::eval_int(const mir::Expr& e) {
           fail("comparison operand is not known data", arg.raw);
         };
         const double lhs = scalar(e.args[0]), rhs = scalar(e.args[1]);
-        if (e.name == "Equals__") return lhs == rhs;
-        if (e.name == "NEquals__") return lhs != rhs;
-        if (e.name == "Greater__") return lhs > rhs;
-        if (e.name == "Geq__") return lhs >= rhs;
-        if (e.name == "Less__") return lhs < rhs;
-        return lhs <= rhs;
+        return evaluate_predicate_builtin(*pred, lhs, rhs);
       }
       // Shape queries on slot-bound values (e.g. rows(v) on an inlined
       // UDF's vector argument) answer from binding-owned metadata before
       // the interpreter, which cannot recover vector orientation.
-      if ((e.name == "rows" || e.name == "cols" || e.name == "size" ||
-           e.name == "num_elements" || e.name == "FnLength") &&
-          e.args.size() == 1 && e.args[0].kind == mir::Expr::Var) {
+      if (scalar_shape_query(e) && e.args.size() == 1 &&
+          e.args[0].kind == mir::Expr::Var) {
         auto sit = scope.find(e.args[0].name);
-        if (sit != scope.end()) {
-          const SlotInfo& si = sit->second.si;
-          const int64_t len = g.slots[sit->second.slot].len;
-          if (is_array(si)) {
-            const ArrayShape& sh = array_shape(si);
-            if (e.name == "size" || e.name == "FnLength")
-              return sh.dims.front();
-            if (e.name == "num_elements") return len;
-            fail(e.name + " is undefined for an array value", e.raw);
-          }
-          const LogicalDims dims = logical_dims(si, len, e.name);
-          if (e.name == "rows") return dims.rows;
-          if (e.name == "cols") return dims.cols;
-          return len;
-        }
+        if (sit != scope.end())
+          return answer_shape_query(e, sit->second.si,
+                                    g.slots[sit->second.slot].len);
         auto dl = decls.find(e.args[0].name);
-        if (dl != decls.end()) {
-          const DeclView& sh = dl->second;
-          if (is_array(sh.si)) {
-            const ArrayShape& arr = array_shape(sh.si);
-            if (e.name == "size" || e.name == "FnLength")
-              return arr.dims.front();
-            if (e.name == "num_elements") return sh.len;
-            fail(e.name + " is undefined for an array declaration", e.raw);
-          }
-          const LogicalDims dims = logical_dims(sh.si, sh.len, e.name);
-          if (e.name == "rows") return dims.rows;
-          if (e.name == "cols") return dims.cols;
-          return sh.len;
-        }
+        if (dl != decls.end())
+          return answer_shape_query(e, dl->second.si, dl->second.len);
         // A name td knows but neither scope nor decls does: the scalar
         // `int` input. bind_data fills both tables from a declared shape
         // and a scalar int has none, so it falls past both -- the one
@@ -303,22 +322,11 @@ long Lowering::eval_int(const mir::Expr& e) {
       // arrives as `rows(segment(beta, pos[i], m[i]))`. Lower the
       // argument and answer from its slot metadata; any op this emits
       // is one the body was about to emit anyway.
-      if ((e.name == "rows" || e.name == "cols" || e.name == "size" ||
-           e.name == "num_elements" || e.name == "FnLength") &&
-          e.args.size() == 1 && e.args[0].kind != mir::Expr::Var) {
+      if (scalar_shape_query(e) && e.args.size() == 1 &&
+          e.args[0].kind != mir::Expr::Var) {
         CallArguments actuals(*this, e);
         const Val v = actuals.at(0).value();
-        const int64_t len = g.slots[v.slot].len;
-        if (is_array(v.si)) {
-          const ArrayShape& sh = array_shape(v.si);
-          if (e.name == "size" || e.name == "FnLength") return sh.dims.front();
-          if (e.name == "num_elements") return len;
-          fail(e.name + " is undefined for an array value", e.raw);
-        }
-        const LogicalDims dims = logical_dims(v.si, len, e.name);
-        if (e.name == "rows") return dims.rows;
-        if (e.name == "cols") return dims.cols;
-        return len;
+        return answer_shape_query(e, v.si, g.slots[v.slot].len);
       }
       // Anything else data-only the td interpreter can evaluate (sum of an
       // int array in a size expression, etc.).
@@ -565,9 +573,12 @@ Lowering::LogicalDims Lowering::logical_dims(const SlotInfo& si, int64_t len,
   fail(what + ": array values do not have one rows/cols view");
 }
 Lowering::Val Lowering::lower_dims(const mir::Expr& e, CallArguments& actuals) {
-  if (e.args.size() != 1) fail("dims arity", e.raw);
+  const BuiltinSpec* query =
+      shaped_builtin_spec("dims", 1, BuiltinShapePolicy::ShapeQuery);
+  if (e.args.size() != 1 || query == nullptr) fail("dims arity", e.raw);
+  const Val a = actuals.at(0).value();
   const std::vector<int64_t> dims =
-      logical_shape(actuals.at(0).value(), "dims");
+      builtin_shape_query(*query, builtin_argument_shape(e.args[0], a));
   std::vector<double> vals(dims.begin(), dims.end());
   const int slot = add_slot((int64_t)vals.size(), false);
   out.fills.emplace_back(slot, vals);
@@ -1128,14 +1139,83 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         check_index(cj, base.si.cols, "matrix column", e.raw);
         flat = (cj - 1) * base.si.rows + (ri - 1);
       } else {
-        std::string desc =
-            "unsupported index expression: base=" +
-            (e.args[0].kind == mir::Expr::Var ? e.args[0].name
-                                              : std::string("<expr>"));
-        for (size_t k = 1; k < e.args.size(); ++k)
-          desc += " [" + (e.args[k].name.empty() ? "?" : e.args[k].name) + "]";
-        desc += " type=" + e.type_;
-        fail(desc, e.raw);
+        // Any remaining static selection resolves through the shared
+        // index geometry over graph (outer-major) storage. This closes
+        // what used to be the unsupported-index gap: mixed selections
+        // over deep arrays, matrix-leaf arrays, and upfrom ranges. The
+        // shape-specialized patterns above stay as fast paths carrying
+        // their aliasing provenance; this generic path always owns its
+        // result.
+        const BuiltinArgumentShape shape =
+            builtin_argument_shape(e.args[0], base);
+        const size_t indexes = e.args.size() - 1;
+        if (indexes > shape.dimensions.size())
+          fail("unsupported index expression: too many indexes for " + e.type_,
+               e.raw);
+        std::vector<std::vector<int64_t>> selected;
+        std::vector<bool> drops;
+        selected.reserve(indexes);
+        drops.reserve(indexes);
+        for (size_t k = 0; k < indexes; ++k) {
+          selected.push_back(index_positions(e.args[1 + k], shape.dimensions[k],
+                                             "index", e.raw));
+          drops.push_back(e.args[1 + k].name == "IndexSingle");
+        }
+        BuiltinIndexMap map;
+        try {
+          map = builtin_index_map(shape, selected, drops,
+                                  SliceStorageOrder::OuterMajor);
+        } catch (const std::invalid_argument& error) {
+          fail(std::string("unsupported index expression: ") + error.what(),
+               e.raw);
+        }
+        SlotInfo si;
+        if (e.type_ == "UReal" || e.type_ == "UInt") {
+          si = view_of(e.type_);
+        } else if (e.type_ == "UVector" || e.type_ == "URowVector") {
+          si = view_of(e.type_);
+          si.param_free = base.si.param_free;
+        } else if (e.type_ == "UMatrix") {
+          if (map.dimensions.size() != 2)
+            fail("unsupported index expression: matrix shape", e.raw);
+          si = matrix_view(map.dimensions[0], map.dimensions[1],
+                           base.si.param_free);
+        } else {
+          const ViewKind leaf =
+              e.unsized.leaf == mir::UnsizedLeaf::Matrix   ? ViewKind::Matrix
+              : e.unsized.leaf == mir::UnsizedLeaf::Vector ? ViewKind::Vector
+              : e.unsized.leaf == mir::UnsizedLeaf::RowVector
+                  ? ViewKind::RowVector
+                  : ViewKind::Flat;
+          si = array_view(map.dimensions, leaf, base.si.param_free);
+        }
+        switch (map.kind) {
+          case BuiltinSliceMap::Kind::Contiguous:
+            if (map.count == 1 && (e.type_ == "UReal" || e.type_ == "UInt"))
+              return with_layout(
+                  emit_value(OP_INDEX, {base}, 1, si,
+                             {checked_immediate(map.offset, "index offset")}),
+                  ExpressionLayout::scalar());
+            return with_layout(
+                emit_value(OP_SLICE, {base}, map.count, si,
+                           {checked_immediate(map.offset, "index offset")}),
+                owning_layout(si));
+          case BuiltinSliceMap::Kind::Strided:
+            return with_layout(
+                emit_value(OP_SLICE_STRIDED, {base}, map.count, si,
+                           {checked_immediate(map.offset, "index offset"),
+                            checked_immediate(map.stride, "index stride")}),
+                ExpressionLayout::scalar());
+          default: {
+            std::vector<int> gather;
+            gather.reserve(map.gather.size());
+            for (const int64_t cell : map.gather)
+              gather.push_back(checked_immediate(cell, "index gather"));
+            return with_layout(
+                emit_value(OP_GATHER, {base}, map.count, si, gather),
+                ExpressionLayout::scalar());
+          }
+        }
       }
       return with_layout(emit_value(OP_INDEX, {base}, 1, view_of(e.type_),
                                     {checked_immediate(flat, "index offset")}),
@@ -1333,13 +1413,20 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
         base.value.si.kind = ViewKind::Vector;
       return base;
     }
-    const auto regular = resolve_regular_builtin(e.name, e.args.size());
-    if (regular && regular->kind == RegularKind::Unary)
+    // Elementwise and WholeValue calls preserve their argument's geometry,
+    // so a unary one answers with its argument's view and a binary one with
+    // the broadcast of its arguments' views.
+    const BuiltinSpec* elementwise = shaped_builtin_spec(
+        e.name, e.args.size(), BuiltinShapePolicy::Elementwise);
+    if (elementwise == nullptr && e.args.size() == 1)
+      elementwise =
+          shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::WholeValue);
+    if (elementwise != nullptr && e.args.size() == 1)
       return try_static_view(e.args[0]);
     const bool scalar_factor =
         e.args.size() == 2 &&
         (is_scalar_type(e.args[0].type_) || is_scalar_type(e.args[1].type_));
-    if (regular || (e.name == "fma" && e.args.size() == 3) ||
+    if (elementwise != nullptr || (e.name == "fma" && e.args.size() == 3) ||
         ((e.name == "Times__" || e.name == "multiply") && scalar_factor))
       return try_static_broadcast_view(e);
   }
@@ -1518,36 +1605,21 @@ SlotInfo Lowering::shape_of(const Val& a, const Val& b) {
 // array[,] int)` is an array -- so the result takes the real side's view
 // when it has one and the int side's when the real side is a scalar,
 // which is what the signature list says in every case.
-Lowering::Val Lowering::lower_binary_int(uint16_t opcode, bool int_first,
+Lowering::Val Lowering::lower_binary_int(const BuiltinSpec& spec,
                                          CallArguments& actuals) {
   actuals.require_arity(2);
   const mir::Expr& e = actuals.call_expr();
   Val a = actuals.at(0).value();
   Val b = actuals.at(1).value();
-  const Val& re = int_first ? b : a;
-  const Val& iv = int_first ? a : b;
-  const int64_t lr = g.slots[re.slot].len, li = g.slots[iv.slot].len;
-  // Only a language scalar broadcasts. A one-element container against a
-  // wider one is the size error stan-math throws, not a broadcast.
-  if (!is_scalar(re) && !is_scalar(iv) && lr != li)
-    fail(e.name + ": arguments must match in size", e.raw);
-  const SlotInfo si = is_scalar(re) ? iv.si : re.si;
-  // The one place the two flat orders disagree: a matrix leaf is stored
-  // column-major and an int array's trailing two extents are row-major.
-  // Handing the kernel that leaf's rows and cols is what tells it to undo
-  // the difference; see IntLane in kernels/scalar_binary.cpp.
+  const std::vector<Val> values{a, b};
+  const BuiltinLayout layout = resolved_builtin_layout(e, spec, values);
+  SlotInfo si = values[layout.result_argument].si;
+  si.param_free = a.si.param_free && b.si.param_free;
   std::vector<int> idata;
-  if (!is_scalar(iv)) {
-    if (is_matrix(re.si)) {
-      idata = {(int)re.si.rows, (int)re.si.cols};
-    } else if (is_array(re.si)) {
-      const ArrayShape& s = array_shape(re.si);
-      if (s.leaf == ViewKind::Matrix)
-        idata = {(int)s.dims[s.dims.size() - 2], (int)s.dims.back()};
-    }
-  }
+  if (layout.integer_matrix_rows != 0)
+    idata = {(int)layout.integer_matrix_rows, (int)layout.integer_matrix_cols};
   return with_layout(
-      emit_value(opcode, {a, b}, std::max(lr, li), si, std::move(idata)),
+      emit_value(spec.opcode, {a, b}, layout.lanes, si, std::move(idata)),
       elementwise_layout({a, b}));
 }
 // Value of a data-only expression at compile time. The interpreter

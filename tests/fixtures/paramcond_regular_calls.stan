@@ -11,6 +11,8 @@ parameters {
 }
 model {
   if (probe > 0) {
+    target += sum(exp(x[1:2]));
+    target += sum(atan2(x[{3, 1}], probability[{3, 1}]));
     target += sum(atan2(x, probability));
     target += sum(tgamma(x));
     target += sum(bessel_first_kind(order, x));
@@ -22,5 +24,6 @@ model {
     target += sum(modified_bessel_first_kind(order, x));
     target += sum(modified_bessel_second_kind(order, x));
     target += sum(rising_factorial(x, count));
+    target += choose(degree[1], count[1]);
   }
 }

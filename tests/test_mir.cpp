@@ -825,6 +825,13 @@ int main(int argc, char** argv) {
       e.args = std::move(args);
       return e;
     };
+    {
+      const DataMap::Entry chosen =
+          interp.eval(call("choose", {integer(8), integer(3)}));
+      check(chosen.is_int && chosen.i == std::vector<int>({56}) &&
+                chosen.r.size() == 1 && chosen.r[0] == 56.0,
+            "shared integer builtin interpreter");
+    }
     mir::Expr matrix_arg;
     matrix_arg.kind = mir::Expr::Var;
     matrix_arg.name = "container_matrix";
@@ -1479,6 +1486,68 @@ int main(int argc, char** argv) {
     for (const var& v : Lr) want_adj.push_back(v.adj());
     check(rev_got.r[0].val() == rev_want.val() && got_adj == want_adj,
           "multi-normal Cholesky interpreter gradients");
+  }
+
+  // Probability functions in interpreted sections use the same registered
+  // graph kernel as ordinary lowering and runtime-control programs. Exercise
+  // a two-integer-group density here: this packing shape previously existed
+  // only in graph lowering, and its value and pullback must both survive the
+  // shared CALL bridge.
+  {
+    auto integer = [](int value) {
+      mir::Expr e;
+      e.kind = mir::Expr::LitInt;
+      e.lit_i = value;
+      e.type_ = "UInt";
+      e.unsized = {0, mir::UnsizedLeaf::Int};
+      e.data_only = true;
+      return e;
+    };
+    mir::Expr alpha;
+    alpha.kind = mir::Expr::Var;
+    alpha.name = "alpha";
+    alpha.type_ = "UReal";
+    alpha.unsized = {0, mir::UnsizedLeaf::Real};
+    alpha.data_only = false;
+    mir::Expr beta;
+    beta.kind = mir::Expr::LitReal;
+    beta.lit = 2.2;
+    beta.type_ = "UReal";
+    beta.unsized = {0, mir::UnsizedLeaf::Real};
+    beta.data_only = true;
+    mir::Expr density;
+    density.kind = mir::Expr::FunApp;
+    density.fn_lib = mir::Expr::Lib::StanLib;
+    density.name = "beta_binomial_lpmf";
+    density.type_ = "UReal";
+    density.unsized = {0, mir::UnsizedLeaf::Real};
+    density.args = {integer(1), integer(4), alpha, beta};
+
+    std::map<std::string, const mir::FunDef*> functions;
+    MirInterp<double> interp(functions, "shared density value test");
+    DataMap::Entry av;
+    av.r = {1.7};
+    interp.env()["alpha"] = av;
+    const DataMap::Entry got = interp.eval(density);
+    const double want = stan::math::beta_binomial_lpmf<false>(1, 4, 1.7, 2.2);
+    check(got.r.size() == 1 && got.r[0] == want,
+          "shared density interpreter value");
+
+    using stan::math::var;
+    stan::math::nested_rev_autodiff nested;
+    MirInterp<var> rev(functions, "shared density gradient test");
+    MirVal<var> arv;
+    arv.r = {var(1.7)};
+    rev.env()["alpha"] = arv;
+    MirVal<var> rev_got = rev.eval(density);
+    rev_got.r[0].grad();
+    const double got_adj = rev.env().at("alpha").r[0].adj();
+    stan::math::set_zero_all_adjoints();
+    var alpha_ref = 1.7;
+    var want_var = stan::math::beta_binomial_lpmf<false>(1, 4, alpha_ref, 2.2);
+    want_var.grad();
+    check(rev_got.r[0].val() == want_var.val() && got_adj == alpha_ref.adj(),
+          "shared density interpreter gradient");
   }
 
   // rows()/cols() answer from the MIR type, not from the storage rank.

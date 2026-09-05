@@ -1,6 +1,6 @@
 // MIR<double>/MIR<var> reductions, matrix algebra and discrete densities vs the
 // graph kernel table.
-#include <stanli/kernel_bridge.hpp>
+#include <stanli/program.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
@@ -17,6 +17,60 @@
 #include <vector>
 
 namespace {
+
+using namespace stanli;
+
+// The reference-side kernel invoker: a throwaway Program::Call over a
+// local register file, formerly runtime kernel_bridge.hpp. The runtime
+// dispatches through the registry's own bridge now, so this harness
+// lives with the test that needs a registry-independent baseline.
+template <typename T>
+void call_kernel(uint16_t opcode, uint8_t variant, uint8_t input_adjoint_mask,
+                 std::vector<int> idata,
+                 const std::vector<const std::vector<T>*>& in,
+                 std::vector<T>& out) {
+  const Kernel* kernel = find_kernel(opcode);
+  if (kernel == nullptr)
+    throw std::logic_error(std::string("kernel_bridge: unavailable opcode ") +
+                           opcode_name(opcode));
+  Program::Call call;
+  call.opcode = opcode;
+  call.variant = variant;
+  call.input_adjoint_mask = input_adjoint_mask;
+  call.n_in = (int8_t)in.size();
+  int32_t total = 0;
+  for (size_t k = 0; k < in.size(); ++k) {
+    call.in[k] = total;
+    call.in_len[k] = (int32_t)in[k]->size();
+    total += call.in_len[k];
+  }
+  call.out = total;
+  call.out_len = (int32_t)out.size();
+  total += call.out_len;
+  call.idata = std::move(idata);
+  const int64_t scratch = kernel_call_scratch(
+      kernel->scratch_size, opcode, variant, call.n_in, call.in_len,
+      call.out_len, call.idata.data(), (int64_t)call.idata.size(), nullptr);
+  call.scratch = total;
+  call.scratch_len = (int32_t)scratch;
+  total += call.scratch_len;
+  if (!bind_call(call))
+    throw std::logic_error(std::string("kernel_bridge: unbound opcode ") +
+                           opcode_name(opcode));
+
+  std::vector<T> reg((size_t)total, T(0.0));
+  for (size_t k = 0; k < in.size(); ++k)
+    for (size_t i = 0; i < in[k]->size(); ++i)
+      reg[(size_t)(call.in[k] + i)] = (*in[k])[i];
+
+  if constexpr (std::is_same_v<T, double>) {
+    run_call(call, reg.data(), nullptr);
+  } else {
+    run_call_var(call, reg.data());
+  }
+  for (int i = 0; i < call.out_len; ++i)
+    out[(size_t)i] = reg[(size_t)(call.out + i)];
+}
 
 using stanli::MirInterp;
 using stanli::mir::Expr;
@@ -76,7 +130,7 @@ auto kernel(VecOfVal& a, size_t n_in, uint16_t opcode, uint8_t variant,
   auto r = out_like(a, std::move(out_dims), out_len);
   std::vector<const std::vector<T>*> in;
   for (size_t k = 0; k < n_in; ++k) in.push_back(&a[k].r);
-  stanli::call_kernel<T>(opcode, variant, 0x3f, idata, in, r.r);
+  call_kernel<T>(opcode, variant, 0x3f, idata, in, r.r);
   return r;
 }
 
@@ -185,7 +239,7 @@ auto lpmf1(uint16_t opcode) {
     std::vector<const std::vector<T>*> in;
     for (size_t k = 1; k < a.size(); ++k) in.push_back(&a[k].r);
     const std::vector<int> idata(a[0].i.begin(), a[0].i.end());
-    stanli::call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
+    call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
     return r;
   };
 }
@@ -198,7 +252,7 @@ auto lpmf2(uint16_t opcode) {
     idata.push_back((int)a[1].i.size());
     idata.insert(idata.end(), a[1].i.begin(), a[1].i.end());
     const std::vector<const std::vector<T>*> in{&a[2].r};
-    stanli::call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
+    call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
     return r;
   };
 }

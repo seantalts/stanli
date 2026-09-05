@@ -26,6 +26,8 @@ harnesses/conformance/repro/
 harnesses/conformance/generated/
 tests/fixtures/*.hpp
 tests/fixtures/*.tmir.sexp
+tests/fixtures/builtin_signatures_*.stan
+tests/fixtures/density_signatures_*.stan
 tests/stanc3/*.hpp
 tests/brms/*.hpp
 build-wasm/

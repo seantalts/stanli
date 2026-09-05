@@ -3,12 +3,14 @@
 // the four shape combos (vv, vs, sv, ss). In-support inputs per function.
 #include "graph_helpers.hpp"
 
+#include <stanli/builtin_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
 #include <stan/math.hpp>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 static int failures = 0;
@@ -98,6 +100,78 @@ static void check_int_fn(const std::string& name, uint16_t opcode,
 
 int main() {
   using namespace stanli;
+  const auto shape =
+      [](BuiltinArgumentKind value, BuiltinContainerKind container,
+         std::vector<int64_t> dimensions, int64_t size,
+         BuiltinContainerKind leaf = BuiltinContainerKind::Scalar) {
+        return BuiltinArgumentShape{value, container, leaf,
+                                    std::move(dimensions), size};
+      };
+  const BuiltinSpec* choose_spec = builtin_spec("choose", 2);
+  if (choose_spec == nullptr || choose_spec->opcode != OP_CHOOSE ||
+      choose_spec->arguments[0] != BuiltinArgumentKind::Integer ||
+      choose_spec->arguments[1] != BuiltinArgumentKind::Integer ||
+      choose_spec->result != FunctionArgumentKind::Integer ||
+      choose_spec->activity_mask != 0) {
+    ++failures;
+    std::printf("FAIL choose BuiltinSpec metadata\n");
+  }
+  {
+    const BuiltinSpec* atan2_spec = builtin_spec("atan2", 2);
+    const BuiltinLayout layout = builtin_layout(
+        *atan2_spec,
+        {shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Scalar, {}, 1),
+         shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Matrix, {2, 3},
+               6)});
+    if (layout.lanes != 6 || layout.result_argument != 1) {
+      ++failures;
+      std::printf("FAIL scalar/matrix BuiltinLayout\n");
+    }
+    bool rejected = false;
+    try {
+      (void)builtin_layout(*atan2_spec,
+                           {shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::Vector, {3}, 3),
+                            shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {3}, 3)});
+    } catch (const std::invalid_argument&) {
+      rejected = true;
+    }
+    if (!rejected) {
+      ++failures;
+      std::printf("FAIL logical-shape mismatch accepted\n");
+    }
+  }
+  {
+    const BuiltinSpec* bessel = builtin_spec("bessel_first_kind", 2);
+    const BuiltinLayout layout = builtin_layout(
+        *bessel, {shape(BuiltinArgumentKind::Integer,
+                        BuiltinContainerKind::Array, {2, 3}, 6),
+                  shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Matrix,
+                        {2, 3}, 6)});
+    if (layout.lanes != 6 || layout.result_argument != 1 ||
+        layout.integer_matrix_rows != 2 || layout.integer_matrix_cols != 3) {
+      ++failures;
+      std::printf("FAIL mixed matrix/array BuiltinLayout\n");
+    }
+  }
+  {
+    const BuiltinSpec* softmax = builtin_spec("softmax", 1);
+    const BuiltinLayout layout =
+        builtin_layout(*softmax, {shape(BuiltinArgumentKind::Real,
+                                        BuiltinContainerKind::Vector, {4}, 4)});
+    if (layout.lanes != 4) {
+      ++failures;
+      std::printf("FAIL whole-value BuiltinLayout\n");
+    }
+  }
+  {
+    auto r = stanli::testutil::run_op_sum(
+        OP_CHOOSE, 4, {{5, 6, 7, 8}, {0, 1, 2, 3}}, {false, false});
+    const double want = stan::math::choose(5, 0) + stan::math::choose(6, 1) +
+                        stan::math::choose(7, 2) + stan::math::choose(8, 3);
+    expect_eq("choose integer kernel", r.value, want);
+  }
 #define F(fn) \
   [](const var& x, const var& y) -> var { return stan::math::fn(x, y); }
 

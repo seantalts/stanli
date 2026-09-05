@@ -25,90 +25,77 @@ void softmax_bwd(KernelCtx& ctx) {
 // legacy propto op must bind each argument var-or-double per the activity
 // mask, exactly like the native kernels do; promoting an inactive argument
 // to var silently keeps terms CmdStan drops.
+inline int64_t vectorized_count(int encoded) {
+  return encoded < 0 ? 1 : encoded;
+}
+
+template <typename Scalar, typename Input>
+std::vector<Eigen::Matrix<Scalar, -1, 1>> vectorized_vectors(const Input& input,
+                                                             int64_t width,
+                                                             int encoded) {
+  using Vector = Eigen::Matrix<Scalar, -1, 1>;
+  std::vector<Vector> result((size_t)vectorized_count(encoded), Vector(width));
+  for (int64_t n = 0; n < (int64_t)result.size(); ++n)
+    for (int64_t k = 0; k < width; ++k)
+      result[(size_t)n](k) = input.data[n * width + k];
+  return result;
+}
+
+template <typename Vectors, typename F>
+decltype(auto) with_vectorized_argument(Vectors& values, int encoded, F&& f) {
+  return encoded < 0 ? std::forward<F>(f)(values[0])
+                     : std::forward<F>(f)(values);
+}
+
 double dirichlet_eval(KernelCtx& ctx) {
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   const bool propto = (ctx.variant & 0x80u) != 0;
   const unsigned mask = ctx.variant == 0 ? 0x3u : (ctx.variant & 0x3fu);
-  Eigen::Matrix<var, -1, 1> theta(ctx.in[0].len), alpha(ctx.in[1].len);
-  for (int64_t i = 0; i < ctx.in[0].len; ++i) theta(i) = ctx.in[0].data[i];
-  for (int64_t i = 0; i < ctx.in[1].len; ++i) alpha(i) = ctx.in[1].data[i];
-  Eigen::Map<const Eigen::VectorXd> theta_d(ctx.in[0].data, ctx.in[0].len);
-  Eigen::Map<const Eigen::VectorXd> alpha_d(ctx.in[1].data, ctx.in[1].len);
-  var lp;
+  // New calls encode {inner width, theta count, alpha count}. Retain the
+  // historic unencoded theta-array/alpha-vector layout for direct graphs.
+  const int64_t width = ctx.n_idata >= 3 ? ctx.idata[0] : ctx.in[1].len;
+  const int theta_encoded =
+      ctx.n_idata >= 3
+          ? ctx.idata[1]
+          : (width > 0 && ctx.in[0].len > width ? (int)(ctx.in[0].len / width)
+                                                : -1);
+  const int alpha_encoded = ctx.n_idata >= 3 ? ctx.idata[2] : -1;
+  auto theta = vectorized_vectors<var>(ctx.in[0], width, theta_encoded);
+  auto alpha = vectorized_vectors<var>(ctx.in[1], width, alpha_encoded);
+  auto theta_d = vectorized_vectors<double>(ctx.in[0], width, theta_encoded);
+  auto alpha_d = vectorized_vectors<double>(ctx.in[1], width, alpha_encoded);
   const bool a0 = (mask & 1u) != 0, a1 = (mask & 2u) != 0;
-
-  // `p ~ dirichlet(a)` over an array of simplexes. A single dirichlet needs
-  // theta and alpha the same length, so a longer theta is unambiguously the
-  // vectorized form: reps simplexes of K, element n contiguous in K.
-  // stan-math reads both through vector_seq_view, so the only work here is
-  // splitting the slot.
-  const int64_t K = ctx.in[1].len;
-  const int64_t reps = K > 0 ? ctx.in[0].len / K : 1;
-  if (reps > 1) {
-    std::vector<Eigen::Matrix<var, -1, 1>> th(reps,
-                                              Eigen::Matrix<var, -1, 1>(K));
-    std::vector<Eigen::VectorXd> thd(reps, Eigen::VectorXd(K));
-    for (int64_t r = 0; r < reps; ++r)
-      for (int64_t i = 0; i < K; ++i) {
-        th[r](i) = ctx.in[0].data[r * K + i];
-        thd[r](i) = ctx.in[0].data[r * K + i];
-      }
-    var lpv;
-    if (propto) {
-      if (a0 && a1)
-        lpv = stan::math::dirichlet_lpdf<true>(th, alpha);
-      else if (a0)
-        lpv = stan::math::dirichlet_lpdf<true>(th, alpha_d);
-      else if (a1)
-        lpv = stan::math::dirichlet_lpdf<true>(thd, alpha);
-      else
-        lpv = 0.0;
-    } else {
-      if (a0 && a1)
-        lpv = stan::math::dirichlet_lpdf<false>(th, alpha);
-      else if (a0)
-        lpv = stan::math::dirichlet_lpdf<false>(th, alpha_d);
-      else if (a1)
-        lpv = stan::math::dirichlet_lpdf<false>(thd, alpha);
-      else
-        lpv = stan::math::dirichlet_lpdf<false>(thd, alpha_d);
-    }
-    const double vv = lpv.val();
-    if (!values_only()) {
-      stan::math::grad(lpv.vi_);
-      double* s = ctx.scratch;
-      for (int64_t r = 0; r < reps; ++r)
-        for (int64_t i = 0; i < K; ++i) *s++ = th[r](i).adj();
-      for (int64_t i = 0; i < K; ++i) *s++ = alpha(i).adj();
-    }
-    return vv;
-  }
-  if (propto) {
-    if (a0 && a1)
-      lp = stan::math::dirichlet_lpdf<true>(theta, alpha);
-    else if (a0)
-      lp = stan::math::dirichlet_lpdf<true>(theta, alpha_d);
-    else if (a1)
-      lp = stan::math::dirichlet_lpdf<true>(theta_d, alpha);
+  const auto call = [&](const auto& theta_arg, const auto& alpha_arg) {
+    return propto ? stan::math::dirichlet_lpdf<true>(theta_arg, alpha_arg)
+                  : stan::math::dirichlet_lpdf<false>(theta_arg, alpha_arg);
+  };
+  var lp;
+  const auto with_alpha = [&](const auto& theta_arg) {
+    if (a1)
+      with_vectorized_argument(alpha, alpha_encoded, [&](const auto& arg) {
+        lp = call(theta_arg, arg);
+      });
     else
-      lp = 0.0;
+      with_vectorized_argument(alpha_d, alpha_encoded, [&](const auto& arg) {
+        lp = call(theta_arg, arg);
+      });
+  };
+  if (propto && !a0 && !a1) {
+    lp = 0.0;
+  } else if (a0) {
+    with_vectorized_argument(theta, theta_encoded, with_alpha);
   } else {
-    if (a0 && a1)
-      lp = stan::math::dirichlet_lpdf<false>(theta, alpha);
-    else if (a0)
-      lp = stan::math::dirichlet_lpdf<false>(theta, alpha_d);
-    else if (a1)
-      lp = stan::math::dirichlet_lpdf<false>(theta_d, alpha);
-    else
-      lp = stan::math::dirichlet_lpdf<false>(theta_d, alpha_d);
+    with_vectorized_argument(theta_d, theta_encoded, with_alpha);
   }
   const double value = lp.val();
   if (!values_only()) {
     stan::math::grad(lp.vi_);
     double* s = ctx.scratch;
-    for (int64_t i = 0; i < ctx.in[0].len; ++i) *s++ = theta(i).adj();
-    for (int64_t i = 0; i < ctx.in[1].len; ++i) *s++ = alpha(i).adj();
+    for (auto& value : theta)
+      for (int64_t i = 0; i < value.size(); ++i) *s++ = value(i).adj();
+    for (auto& value : alpha)
+      for (int64_t i = 0; i < value.size(); ++i) *s++ = value(i).adj();
   }
   return value;
 }

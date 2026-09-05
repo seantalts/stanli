@@ -3,6 +3,7 @@
 // values would move.
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
+#include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/partition.hpp>
@@ -784,11 +785,8 @@ static Irt build_irt(const std::vector<int>& item_m,
           y, std::vector<double>{(double)(1 + ((int)l + i) % (m + 1))});
       const int lp = b.g.add_slot(1, false);
       b.g.add_op(OP_CATEGORICAL, {y, probs}, lp);
-      auto spec = std::make_shared<CategoricalSpec>();
-      spec->scalar_outcome = true;
-      spec->arg_autodiff = true;
-      b.g.ops.back().udata = spec.get();
-      b.g.udata_pool.push_back(std::move(spec));
+      b.g.ops.back().variant =
+          kCategoricalScalarOutcome | kCategoricalArgAutodiff;
       b.terms.push_back(lp);
     }
   }
@@ -890,11 +888,7 @@ static void test_irt_refuse_near_miss(double lead, bool concat) {
     fills.emplace_back(y, std::vector<double>{(double)(1 + (int)l % wide)});
     const int lp = g.add_slot(1, false);
     g.add_op(OP_CATEGORICAL, {y, probs}, lp);
-    auto spec = std::make_shared<CategoricalSpec>();
-    spec->scalar_outcome = true;
-    spec->arg_autodiff = true;
-    g.ops.back().udata = spec.get();
-    g.udata_pool.push_back(std::move(spec));
+    g.ops.back().variant = kCategoricalScalarOutcome | kCategoricalArgAutodiff;
     terms.push_back(lp);
   }
   const size_t before = g.ops.size();

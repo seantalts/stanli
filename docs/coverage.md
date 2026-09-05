@@ -119,11 +119,6 @@ The headline ratios hide several important gaps:
   All inputs are integers, so the probability-kernel layout has no
   differentiable real edge. The harness marks all 24 signatures inapplicable,
   not unsupported.
-- **All-data `propto=true` forms of `hypergeometric_lpmf` and
-  `discrete_range_lpmf`:** these are refused. Their normalized all-data calls
-  can run once during model preparation. Stan Math checks support before
-  dropping the constant value; returning zero without those checks would
-  accept invalid data.
 - **Missing scalar math:** all-real scalar calls to `hypergeometric_1F0`,
   `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`,
   `wiener_lcdf_unnorm`, and `wiener_lccdf_unnorm` are refused because no graph
@@ -138,24 +133,16 @@ The headline ratios hide several important gaps:
 - **Tuple results:** tuple-valued results are refused by policy. The graph
   cannot yet represent or destructure tuples.
 
-### GLM argument-shape gaps
+### GLM argument shapes
 
-`bernoulli_logit_glm_lpmf`, `poisson_log_glm_lpmf`, and
-`neg_binomial_2_log_glm_lpmf` require one outcome per row of the design
-matrix. They refuse Stan Math's scalar-outcome broadcast.
-
-Copying a scalar outcome into an array is not always equivalent. For four rows
-with `y = 3`, the normalized scalar and replicated-array forms of
-`poisson_log_glm_lpmf` have identical gradients but differ by
-
-\[
-3\,\log\Gamma(4) = 5.375278407684165.
-\]
-
-The difference is parameter-independent, but the absolute log density would no
-longer match generated Stan. stanli therefore refuses this form.
-`binomial_logit_glm_lpmf` and `categorical_logit_glm_lpmf` use separate
-layouts and are not covered by the refusal.
+GLM integer groups retain whether each source argument was a language scalar
+or an array. Scalar outcomes and trial counts therefore use Stan Math's native
+broadcast overload rather than being copied into an array, which matters to
+the normalized constant in functions such as `poisson_log_glm_lpmf`.
+Per-row vector intercepts are supported alongside scalar intercepts. This
+shape payload is produced identically by graph lowering, runtime-control
+compilation, and MIR interpretation; kernels retain compatibility with the
+older `{rows, columns}` payload used by direct and serialized graphs.
 
 ## Parameter transforms
 
@@ -246,10 +233,38 @@ Runtime regions implement parameter-dependent `if` and ternary expressions.
 `for` loops with load-time bounds are unrolled; `break` and `continue` inside
 parameter-dependent branches become runtime jumps. A `while` loop works only
 when its condition can be evaluated during region construction on every
-iteration. Sampling syntax (`~`) and vectorized density calls inside a
-parameter-dependent region are refused; explicit scalar
-`target += foo_lpdf(...)` calls work when the function is in the region's
-supported instruction set.
+iteration. Probability functions backed by graph kernels, including sampling
+syntax (`~`), vectorized calls, discrete distributions, CDFs, GLMs, and matrix
+density functions, use the same kernel ABI in parameter-dependent regions.
+Their argument shapes, integer payloads, propto flag, and activity mask come
+from one shared registry also used by ordinary graph lowering and MIR
+interpretation. This includes `categorical_lpmf` and
+`categorical_logit_lpmf`; their atomic vector argument and scalar-versus-array
+outcome selection are a registry shape policy rather than backend-specific
+dispatch. `hypergeometric_lpmf` and `discrete_range_lpmf` use the registry's
+all-integer evaluation policy: because they have no differentiable edge, each
+backend reaches the same scalar-or-array Stan Math evaluator (through one
+generic runtime kernel where evaluation must be deferred), retaining
+validation and `propto` semantics.
+Multivariate vectorization is likewise a registry policy rather than a
+backend exception. `multi_normal_lpdf`, `multi_normal_prec_lpdf`,
+`multi_normal_cholesky_lpdf`, `multi_student_t_lpdf`, and
+`multi_student_t_cholesky_lpdf` all accept a vector or array of vectors for
+both the random variable and location. The registry centrally validates the
+shared widths, distinguishes a single vector from an array of one vector, and
+requires equal array lengths when both arguments are arrays; graph lowering,
+runtime-control programs, and MIR interpretation consume the same encoded
+layout.
+The same vector-layout policy covers `dirichlet_lpdf` when either argument is
+an array of vectors, and the ordered-logistic/probit densities when cutpoints
+are supplied as one vector per observation.
+An automatically generated source fixture instantiates all 3,003 density
+signatures reported by the pinned `stanc --dump-stan-math-signatures` (70
+functions after excluding Wiener and Gaussian-DLM), executes them in
+transformed data, ordinary autodiff, parameter-dependent runtime control, and
+generated quantities, and is checked for dump drift by CTest.
+The explicitly unsupported probability functions listed above remain outside
+that registry.
 
 stanli also refuses a `print` or `reject` inside a replayed
 parameter-dependent region because reverse-mode replay could execute it twice.

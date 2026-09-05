@@ -32,6 +32,7 @@
 // cumsum([0, ta - b_1, ...])[j] = j*t*a - sum_{i<=j} b_i. Buckets refine on
 // the subtracted vector -- the item -- and the slope is whichever of the two
 // scalars that refinement holds still.
+#include <stanli/density_registry.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/partition.hpp>
 
@@ -61,13 +62,11 @@ constexpr int64_t kDensityElem = 6;
 // not turn that into a quadratic term.
 constexpr int64_t kMaxSplits = 32;
 
-// OP_CATEGORICAL is on ops_match's blocklist because its spec pointer is not
-// comparable; here the spec's fields go into the key instead. It is admitted
-// only as a lane's delimiter, and only the GLM arm below has an emission for
-// it -- every other arm keys off a re-roll trait, which it has none of.
+// OP_CATEGORICAL is admitted only as a lane delimiter, and only the GLM arm
+// below emits it. Its complete per-call contract now lives in the comparable
+// variant byte, like the other registered densities.
 bool is_blocked(const Op& op, bool is_delimiter) {
-  if (op.opcode == OP_CATEGORICAL)
-    return !is_delimiter || op.udata == nullptr || op.out2 >= 0;
+  if (op.opcode == OP_CATEGORICAL) return !is_delimiter || op.out2 >= 0;
   return is_effectful_op(op.opcode) ||
          has_op_trait(op.opcode, op_trait::kVariantGrouped) || op.out2 >= 0 ||
          op.udata != nullptr;
@@ -169,7 +168,7 @@ struct Pos {
 // positions outermost first and `chain` every position the substitution
 // consumes; anything else in the lane has to be dead.
 struct Glm {
-  const CategoricalSpec* spec = nullptr;
+  uint8_t categorical_variant = 0;
   std::vector<int> chain;
   std::vector<int> sub;
   std::vector<int> held;  // each SUB's subtrahend producer, -1 when external
@@ -282,13 +281,6 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       if (is_blocked(op, u + 1 == lane.end)) {
         ok = false;
         break;
-      }
-      if (op.opcode == OP_CATEGORICAL) {
-        const auto& spec = *static_cast<const CategoricalSpec*>(op.udata);
-        key.w.push_back(spec.logit);
-        key.w.push_back(spec.scalar_outcome);
-        key.w.push_back(spec.arg_autodiff);
-        key.w.push_back(spec.propto);
       }
       key.w.push_back(op.opcode);
       key.w.push_back(op.variant);
@@ -466,7 +458,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     lp.in[1] = alpha;
     lp.in[2] = beta;
     lp.out = g.add_slot(1, false);
-    lp.variant = (uint8_t)((glm.spec->propto ? 0x80u : 0u) | 0x7u);
+    lp.variant = (uint8_t)((glm.categorical_variant & 0x80u) | 0x7u);
     outcomes.push_back((int)n);
     outcomes.push_back(1);
     attach_idata(lp, std::move(outcomes));
@@ -594,9 +586,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     Glm glm;
     if (op_at(k - 1, 0).opcode == OP_CATEGORICAL) {
       const Op& cat = op_at(k - 1, 0);
-      glm.spec = static_cast<const CategoricalSpec*>(cat.udata);
+      glm.categorical_variant = cat.variant;
       int at = local_at(cat.in[1], k - 1);
-      bool hit = glm.spec->scalar_outcome && glm.spec->arg_autodiff &&
+      bool hit = (cat.variant & kCategoricalScalarOutcome) &&
+                 (cat.variant & kCategoricalArgAutodiff) &&
                  g.slots[(size_t)cat.in[0]].len == 1 &&
                  local_at(cat.in[0], k - 1) < 0 && at >= 0;
       glm.chain.push_back(k - 1);
@@ -607,7 +600,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         hit = o.opcode == opcode && o.n_in == 1 &&
               (at = local_at(o.in[0], at)) >= 0;
       };
-      if (hit && !glm.spec->logit) step(OP_SOFTMAX);
+      if (hit && !(cat.variant & kCategoricalLogit)) step(OP_SOFTMAX);
       step(OP_CUMSUM);
       if (hit) {
         const Op& cc = op_at(at, 0);

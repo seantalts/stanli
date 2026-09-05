@@ -8,6 +8,9 @@
 #include <stanli/constfold.hpp>
 #include <stanli/cse.hpp>
 #include <stanli/dae.hpp>
+#include <stanli/density_registry.hpp>
+#include <stanli/function_registry.hpp>
+#include <stanli/function_view_shape.hpp>
 #include <stanli/higher_order_eval.hpp>
 #include <stanli/expression_layout.hpp>
 #include <stanli/inplace.hpp>
@@ -24,7 +27,7 @@
 #include <stanli/partition.hpp>
 #include <stanli/quadrature.hpp>
 #include <stanli/reroll.hpp>
-#include <stanli/regular_builtin.hpp>
+#include <stanli/builtin_registry.hpp>
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -634,20 +637,28 @@ struct Lowering {
     Dae,
     ShapeQuery,
   };
+
   struct BuiltinDispatch {
     BuiltinFamily family = BuiltinFamily::Elementwise;
-    std::optional<RegularSpec> regular;
+    const BuiltinSpec* builtin = nullptr;
+    const DensitySpec* density = nullptr;
     std::optional<ScalarRng> scalar_rng;
 
     BuiltinDispatch() = default;
     BuiltinDispatch(BuiltinFamily selected,
-                    std::optional<RegularSpec> regular_call = std::nullopt,
+                    const BuiltinSpec* builtin_call = nullptr,
+                    const DensitySpec* density_call = nullptr,
                     std::optional<ScalarRng> rng = std::nullopt)
-        : family(selected), regular(regular_call), scalar_rng(rng) {}
+        : family(selected),
+          builtin(builtin_call),
+          density(density_call),
+          scalar_rng(rng) {}
   };
+
   static BuiltinDispatch rng_dispatch(ScalarRng family) {
-    return {BuiltinFamily::ScalarRng, std::nullopt, family};
+    return {BuiltinFamily::ScalarRng, nullptr, nullptr, family};
   }
+
   static bool ends_with(std::string_view name, std::string_view suffix) {
     return name.size() >= suffix.size() &&
            name.substr(name.size() - suffix.size()) == suffix;
@@ -884,6 +895,11 @@ struct Lowering {
   void propagate_int_update(const Val& out_v, const Val& base, const Val& rhs,
                             int64_t start, int64_t stride);
 
+  // The registered scalar shape queries, plus FnLength, the compiler
+  // internal that the compile-time evaluators have always answered as size.
+  static bool scalar_shape_query(const mir::Expr& e);
+  long answer_shape_query(const mir::Expr& e, const SlotInfo& si, int64_t len);
+
   long eval_int(const mir::Expr& e);
 
   int64_t checked_product(const std::vector<int64_t>& dims,
@@ -965,6 +981,42 @@ struct Lowering {
 
   bool same_view(const SlotInfo& a, int64_t alen, const SlotInfo& b,
                  int64_t blen) const;
+
+  BuiltinArgumentShape view_argument_shape(const SlotInfo& si, int64_t len,
+                                           BuiltinArgumentKind kind) const {
+    std::vector<int64_t> array_dimensions;
+    ViewKind leaf = ViewKind::Flat;
+    if (si.kind == ViewKind::Array) {
+      const ArrayShape& array = array_shape(si);
+      array_dimensions = array.dims;
+      leaf = array.leaf;
+    }
+    return make_view_function_shape(kind, si.kind, leaf,
+                                    std::move(array_dimensions), len, si.rows,
+                                    si.cols);
+  }
+
+  BuiltinArgumentShape builtin_argument_shape(const mir::Expr& source,
+                                              const Val& value) const {
+    return view_argument_shape(value.si, g.slots[value.slot].len,
+                               source.unsized.leaf == mir::UnsizedLeaf::Int
+                                   ? BuiltinArgumentKind::Integer
+                                   : BuiltinArgumentKind::Real);
+  }
+
+  BuiltinLayout resolved_builtin_layout(const mir::Expr& e,
+                                        const BuiltinSpec& spec,
+                                        const std::vector<Val>& values) {
+    std::vector<BuiltinArgumentShape> shapes;
+    shapes.reserve(values.size());
+    try {
+      for (size_t k = 0; k < values.size(); ++k)
+        shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
+      return builtin_layout(spec, shapes);
+    } catch (const std::invalid_argument& error) {
+      fail(e.name + ": " + error.what(), e.raw);
+    }
+  }
 
   bool is_scalar(const Val& v) const {
     return v.si.kind == ViewKind::Flat && v.si.shape == 0 &&
@@ -1493,7 +1545,7 @@ struct Lowering {
   // array[,] int)` is an array -- so the result takes the real side's view
   // when it has one and the int side's when the real side is a scalar,
   // which is what the signature list says in every case.
-  Val lower_binary_int(uint16_t opcode, bool int_first, CallArguments& actuals);
+  Val lower_binary_int(const BuiltinSpec& spec, CallArguments& actuals);
 
   // Stan's bound transforms, callable as ordinary functions rather than
   // written on a declaration. `<t>_constrain(x, bounds...)` is the value
@@ -1617,18 +1669,15 @@ struct Lowering {
 
   Val lower_funapp(const mir::Expr& e);
 
-  // Density calls: the table-driven kernels plus exact categorical and
-  // matrix-argument implementations (multi_normal, lkj, glm).
-  Val emit_categorical(const mir::Expr& e, const Val& outcome, const Val& arg,
-                       bool logit);
-
+  // Density calls: the registry-planned kernels.
   std::optional<Val> lower_density_fn(const mir::Expr& e,
-                                      CallArguments& actuals);
+                                      CallArguments& actuals,
+                                      const DensitySpec* selected);
 
   // Elementwise math, reductions, and dot products.
   std::optional<Val> lower_eltwise_fn(const mir::Expr& e,
                                       CallArguments& actuals,
-                                      const RegularSpec* regular);
+                                      const BuiltinSpec* builtin);
 
   // Matrix shape and algebra: transposes, reshapes, factorizations,
   // slices, and concatenations.

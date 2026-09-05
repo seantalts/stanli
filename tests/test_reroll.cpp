@@ -3,6 +3,7 @@
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/compile.hpp>
+#include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/optable.hpp>
@@ -1589,13 +1590,11 @@ static void test_bail_categorical_ops() {
   const int sigma = g.add_slot(1, true);
   fills.emplace_back(outcome, std::vector<double>{2.0});
   fills.emplace_back(theta, std::vector<double>{0.2, 0.3, 0.5});
-  auto spec = std::make_shared<CategoricalSpec>();
-  spec->scalar_outcome = true;
   std::vector<int> terms;
   for (int lane = 0; lane < 8; ++lane) {
     const int checked = g.add_slot(1, false);
     const int op = g.add_op(OP_CATEGORICAL, {outcome, theta}, checked);
-    g.ops[(size_t)op].udata = spec.get();
+    g.ops[(size_t)op].variant = kCategoricalScalarOutcome;
     const int y = g.add_slot(1, false);
     fills.emplace_back(y, std::vector<double>{0.1 * lane});
     const int lp = g.add_slot(1, false);
@@ -1603,8 +1602,6 @@ static void test_bail_categorical_ops() {
     g.ops[(size_t)density].variant = 0x06;
     terms.push_back(lp);
   }
-  g.udata_pool.push_back(std::move(spec));
-
   const size_t before = g.ops.size();
   RerollStats st = reroll(g, fills, terms, {});
   expect("categorical ops are not rerolled", st.regions == 0);

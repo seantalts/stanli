@@ -20,11 +20,14 @@
 #ifndef STANLI_MIR_PROG_HPP
 #define STANLI_MIR_PROG_HPP
 
+#include <stanli/builtin_registry.hpp>
 #include <stanli/mir_message.hpp>
 #include <stanli/mir.hpp>
+#include <stanli/density_registry.hpp>
+#include <stanli/function_registry.hpp>
+#include <stanli/function_view_shape.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/program.hpp>
-#include <stanli/regular_builtin.hpp>
 #include <stanli/rng_family.hpp>
 
 #include <algorithm>
@@ -39,8 +42,6 @@
 #include <vector>
 
 namespace stanli {
-
-enum class ViewKind : uint8_t { Flat, Vector, RowVector, Matrix, Array };
 
 // A value is a contiguous run of registers: scalars are runs of one, arrays
 // and vectors are runs of their length.
@@ -272,32 +273,29 @@ struct ProgramCompiler {
   // the view is the only way these can be answered at all: the register
   // file holds doubles, and no opcode reports an extent.
   static bool is_shape_query(const mir::Expr& e) {
-    return e.args.size() == 1 &&
-           (e.name == "rows" || e.name == "cols" || e.name == "size" ||
-            e.name == "num_elements" || e.name == "FnLength");
+    if (e.args.size() != 1) return false;
+    if (e.name == "FnLength") return true;
+    const BuiltinSpec* query =
+        shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::ShapeQuery);
+    return query != nullptr &&
+           query->shape_query != BuiltinShapeQueryKind::Dims;
   }
 
-  // The answers match the graph lowering's (lower.cpp): `size` and
-  // `FnLength` are an array's first extent and any other value's length,
-  // `num_elements` is the total, and rows/cols read a matrix's declared
-  // extents or a vector's orientation.
-  long shape_query(const std::string& fn, const Range& v) {
-    if (v.kind == ViewKind::Array) {
-      const std::vector<int64_t> dims =
-          v.dims.empty() ? std::vector<int64_t>{v.len} : v.dims;
-      if (fn == "size" || fn == "FnLength") return (long)dims.front();
-      if (fn == "num_elements") return v.len;
-      bail(fn + " is undefined for an array value");
+  // The registered names answer through the shared resolver, matching the
+  // graph's compile-time evaluator; FnLength keeps the size rule those
+  // evaluators have always applied to it.
+  long shape_query(const mir::Expr& e, Range v) {
+    if (v.kind == ViewKind::Array && v.dims.empty()) v.dims = {v.len};
+    const BuiltinSpec* query =
+        shaped_builtin_spec(e.name == "FnLength" ? "size" : e.name, 1,
+                            BuiltinShapePolicy::ShapeQuery);
+    try {
+      return (long)builtin_shape_query(*query,
+                                       builtin_argument_shape(e.args[0], v))
+          .front();
+    } catch (const std::invalid_argument& error) {
+      bail(e.name + ": " + std::string(error.what()));
     }
-    if (fn == "rows")
-      return (long)(v.kind == ViewKind::Matrix      ? v.rows
-                    : v.kind == ViewKind::RowVector ? 1
-                                                    : v.len);
-    if (fn == "cols")
-      return (long)(v.kind == ViewKind::Matrix   ? v.cols
-                    : v.kind == ViewKind::Vector ? 1
-                                                 : v.len);
-    return v.len;
   }
 
   int64_t checked_shape_product(const std::vector<int64_t>& dims,
@@ -451,6 +449,111 @@ struct ProgramCompiler {
     if (e.kind == mir::Expr::LitInt || e.kind == mir::Expr::LitReal) {
       *out = Range{0, 1};
       return true;
+    }
+    // A registered shape-policy call: the shared resolvers report result
+    // geometry as a pure function of operand shapes, so the extent of, say,
+    // `cols(to_matrix(v, 6, 1))` -- the form stanc's inliner leaves behind
+    // for a matrix argument -- is known without building the value. A
+    // resolver rejection is not swallowed semantically: the value
+    // expression raises it wherever it is really evaluated, while a
+    // shape-only use keeps the caller's ordinary diagnostics.
+    if (e.kind == mir::Expr::FunApp) {
+      if (const BuiltinSpec* slice = shaped_builtin_spec(
+              e.name, e.args.size(), BuiltinShapePolicy::SliceView)) {
+        Range a;
+        if (!static_view(e.args[0], &a)) return false;
+        const bool append = builtin_slice_is_append(slice->slice);
+        Range b;
+        if (append && !static_view(e.args[1], &b)) return false;
+        std::vector<int64_t> indexes;
+        indexes.reserve(e.args.size() - 1);
+        for (size_t k = 1; !append && k < e.args.size(); ++k) {
+          long index = 0;
+          if (!try_cint(e.args[k], &index)) return false;
+          indexes.push_back(index);
+        }
+        try {
+          const BuiltinSliceMap map =
+              append ? builtin_append_map(*slice,
+                                          builtin_argument_shape(e.args[0], a),
+                                          builtin_argument_shape(e.args[1], b),
+                                          SliceStorageOrder::OuterMajor)
+                     : builtin_slice_map(
+                           *slice, builtin_argument_shape(e.args[0], a),
+                           indexes, SliceStorageOrder::OuterMajor);
+          *out = shaped(Range{0, (int)map.count}, map.result);
+          return true;
+        } catch (const std::exception&) {
+          return false;
+        }
+      }
+      if (const BuiltinSpec* grouped = shaped_builtin_spec(
+              e.name, e.args.size(), BuiltinShapePolicy::GroupedReduction)) {
+        Range a;
+        if (!static_view(e.args[0], &a)) return false;
+        Range b = a;
+        if (grouped->arity == 2 && !static_view(e.args[1], &b)) return false;
+        const mir::Expr& rhs = e.args[grouped->arity == 2 ? 1 : 0];
+        try {
+          const BuiltinGroupedDotMap map = builtin_grouped_dot_map(
+              *grouped, builtin_argument_shape(e.args[0], a),
+              builtin_argument_shape(rhs, b));
+          *out = shaped(Range{0, (int)map.groups}, map.result);
+          return true;
+        } catch (const std::exception&) {
+          return false;
+        }
+      }
+      if (const BuiltinSpec* matrix = shaped_builtin_spec(
+              e.name, e.args.size(), BuiltinShapePolicy::MatrixOp)) {
+        std::vector<BuiltinArgumentShape> shapes;
+        shapes.reserve(matrix->arity);
+        for (size_t k = 0; k < e.args.size(); ++k) {
+          Range operand;
+          if (!static_view(e.args[k], &operand)) return false;
+          shapes.push_back(builtin_argument_shape(e.args[k], operand));
+        }
+        try {
+          const BuiltinMatrixMap map = builtin_matrix_map(*matrix, shapes);
+          *out = shaped(Range{0, (int)map.result.storage_size}, map.result);
+          return true;
+        } catch (const std::exception&) {
+          return false;
+        }
+      }
+      if (const BuiltinSpec* ctor = shaped_builtin_spec(
+              e.name, e.args.size(), BuiltinShapePolicy::Constructor)) {
+        std::vector<double> arguments;
+        arguments.reserve(e.args.size());
+        for (size_t k = 0; k < e.args.size(); ++k) {
+          double value = 0.0;
+          if (ctor->arguments[k] == BuiltinArgumentKind::Integer) {
+            long argument = 0;
+            if (!try_cint(e.args[k], &argument)) return false;
+            value = (double)argument;
+          } else if (!try_creal(e.args[k], &value)) {
+            return false;
+          }
+          arguments.push_back(value);
+        }
+        try {
+          const ConstructorValue built =
+              evaluate_constructor_builtin(*ctor, arguments);
+          Range r{0, (int)built.values.size()};
+          r.kind = function_view_kind(ctor->constructor_container);
+          if (r.kind == ViewKind::Matrix) {
+            r.rows = built.dimensions[0];
+            r.cols = built.dimensions[1];
+          } else if (r.kind == ViewKind::Array) {
+            r.dims = built.dimensions;
+          }
+          *out = r;
+          return true;
+        } catch (const std::exception&) {
+          return false;
+        }
+      }
+      return false;
     }
     if (e.kind != mir::Expr::Var) return false;
     if (deferred_shapes.count(e.name)) return false;
@@ -661,6 +764,19 @@ struct ProgramCompiler {
         return cint(e.args[1]) != 0;
       }
       case mir::Expr::FunApp:
+        if (const FunctionSpec* function = function_spec(e);
+            function != nullptr && function->builtin() != nullptr &&
+            function->builtin()->shape == BuiltinShapePolicy::Elementwise &&
+            function->result() == FunctionArgumentKind::Integer) {
+          const BuiltinSpec* spec = function->builtin();
+          if (spec->arity == 1)
+            return evaluate_integer_unary_builtin(
+                *spec, static_cast<int>(cint(e.args[0])));
+          if (spec->arity != 2) bail("integer builtin arity");
+          return evaluate_integer_binary_builtin(
+              *spec, static_cast<int>(cint(e.args[0])),
+              static_cast<int>(cint(e.args[1])));
+        }
         if (e.args.size() == 2) {
           // Each operator with the named spelling beside it: on ints the
           // alias is the operator, down to `divide`'s truncation.
@@ -678,36 +794,37 @@ struct ProgramCompiler {
           // right, and a `while` condition or an integer local written
           // with one -- `int found = (a[i] == k);` -- is as much a
           // compile-time value as its operands are.
-          if (int_operand(e.args[0]) && int_operand(e.args[1])) {
-            if (e.name == "Equals__") return cint(e.args[0]) == cint(e.args[1]);
-            if (e.name == "NEquals__")
-              return cint(e.args[0]) != cint(e.args[1]);
-            if (e.name == "Less__") return cint(e.args[0]) < cint(e.args[1]);
-            if (e.name == "Leq__") return cint(e.args[0]) <= cint(e.args[1]);
-            if (e.name == "Greater__") return cint(e.args[0]) > cint(e.args[1]);
-            if (e.name == "Geq__") return cint(e.args[0]) >= cint(e.args[1]);
-          }
-          double lhs = 0.0, rhs = 0.0;
-          if (try_creal(e.args[0], &lhs) && try_creal(e.args[1], &rhs)) {
-            if (e.name == "Equals__") return lhs == rhs;
-            if (e.name == "NEquals__") return lhs != rhs;
-            if (e.name == "Less__") return lhs < rhs;
-            if (e.name == "Leq__") return lhs <= rhs;
-            if (e.name == "Greater__") return lhs > rhs;
-            if (e.name == "Geq__") return lhs >= rhs;
+          if (const BuiltinSpec* pred = shaped_builtin_spec(
+                  e.name, 2, BuiltinShapePolicy::Predicate)) {
+            if (int_operand(e.args[0]) && int_operand(e.args[1]))
+              return evaluate_predicate_builtin(*pred, (double)cint(e.args[0]),
+                                                (double)cint(e.args[1]));
+            double lhs = 0.0, rhs = 0.0;
+            if (try_creal(e.args[0], &lhs) && try_creal(e.args[1], &rhs))
+              return evaluate_predicate_builtin(*pred, lhs, rhs);
           }
         }
         if (e.args.size() == 1 && e.name == "PMinus__") return -cint(e.args[0]);
-        if (e.args.size() == 1 && int_operand(e.args[0]) &&
-            (e.name == "PNot__" || e.name == "logical_negation"))
-          return cint(e.args[0]) == 0;
+        if (e.args.size() == 1) {
+          if (const BuiltinSpec* pred = shaped_builtin_spec(
+                  e.name, 1, BuiltinShapePolicy::Predicate)) {
+            if (int_operand(e.args[0]) &&
+                pred->predicate == BuiltinPredicate::Negation)
+              return evaluate_predicate_builtin(*pred, (double)cint(e.args[0]));
+            // The IEEE classifications (and negation of a real) fold over
+            // any compile-time value.
+            double value = 0.0;
+            if (try_creal(e.args[0], &value))
+              return evaluate_predicate_builtin(*pred, value);
+          }
+        }
         // A declared extent, a loop bound or an index written as a shape
         // query: `matrix[rows(m), cols(m)] out;`, `for (i in 1:rows(m))`.
         // Before this, only a shape query in a real-valued context was
         // answered, and these were refused as unknown integer functions.
         if (is_shape_query(e)) {
           Range v;
-          if (static_view(e.args[0], &v)) return shape_query(e.name, v);
+          if (static_view(e.args[0], &v)) return shape_query(e, v);
         }
         if (e.args.size() == 1 && e.name == "sum" &&
             e.args[0].unsized.leaf == mir::UnsizedLeaf::Int) {
@@ -748,6 +865,21 @@ struct ProgramCompiler {
       std::vector<long> values;
       std::vector<int64_t> dims;
       if (external_int_array(e, &values, &dims)) return values;
+    }
+    // dims of a statically shaped value is a compile-time integer array.
+    if (e.kind == mir::Expr::FunApp && e.args.size() == 1) {
+      if (const BuiltinSpec* query =
+              shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::ShapeQuery);
+          query != nullptr &&
+          query->shape_query == BuiltinShapeQueryKind::Dims) {
+        Range v;
+        if (static_view(e.args[0], &v)) {
+          if (v.kind == ViewKind::Array && v.dims.empty()) v.dims = {v.len};
+          const std::vector<int64_t> extents =
+              builtin_shape_query(*query, builtin_argument_shape(e.args[0], v));
+          return std::vector<long>(extents.begin(), extents.end());
+        }
+      }
     }
     if (e.kind == mir::Expr::Var) {
       auto known = known_int_arrays.find(e.name);
@@ -899,6 +1031,12 @@ struct ProgramCompiler {
       }
     } else if (index.name == "IndexMulti" && index.args.size() == 1) {
       values = cints(index.args[0]);
+    } else if (index.name == "IndexUpfrom" && index.args.size() == 1) {
+      const long lo = cint(index.args[0]);
+      if (lo < 1 || lo > extent + 1)
+        bail("matrix " + axis + " upfrom is outside its extent");
+      values.reserve((size_t)(extent - lo + 1));
+      for (long i = lo; i <= extent; ++i) values.push_back(i);
     } else {
       bail("matrix " + axis + " index form");
     }
@@ -1020,6 +1158,47 @@ struct ProgramCompiler {
     if (a.kind == ViewKind::Array)
       return a.len == b.len && a.dims == b.dims && a.leaf == b.leaf;
     return a.rows == b.rows && a.cols == b.cols;
+  }
+
+  static BuiltinArgumentShape builtin_argument_shape(const mir::Expr& source,
+                                                     const Range& value) {
+    const BuiltinArgumentKind kind =
+        source.unsized.leaf == mir::UnsizedLeaf::Int
+            ? BuiltinArgumentKind::Integer
+            : BuiltinArgumentKind::Real;
+    return make_view_function_shape(kind, value.kind, value.leaf, value.dims,
+                                    value.len, value.rows, value.cols);
+  }
+
+  // Rewrite a Range's geometry to a resolver-reported result shape; `reg`
+  // and `len` stay the caller's.
+  static Range shaped(Range out, const BuiltinArgumentShape& shape) {
+    out.kind = function_view_kind(shape.container);
+    out.rows = out.cols = 0;
+    out.dims.clear();
+    out.leaf = ViewKind::Flat;
+    if (out.kind == ViewKind::Matrix) {
+      out.rows = shape.dimensions[0];
+      out.cols = shape.dimensions[1];
+    } else if (out.kind == ViewKind::Array) {
+      out.dims = shape.dimensions;
+      out.leaf = function_view_kind(shape.array_leaf);
+    }
+    return out;
+  }
+
+  static BuiltinLayout resolved_builtin_layout(
+      const mir::Expr& e, const BuiltinSpec& spec,
+      const std::vector<Range>& values) {
+    std::vector<BuiltinArgumentShape> shapes;
+    shapes.reserve(values.size());
+    try {
+      for (size_t k = 0; k < values.size(); ++k)
+        shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
+      return builtin_layout(spec, shapes);
+    } catch (const std::invalid_argument& error) {
+      throw Bail{e.name + ": " + error.what()};
+    }
   }
 
   // Does an assignment to `name` here run on every path that can reach a
@@ -1268,15 +1447,53 @@ struct ProgramCompiler {
               bail("matrix index out of the declared range");
             return {b.reg + (int)((j - 1) * b.rows + i - 1), 1};
           }
-          // A column, `m[, j]`, is a contiguous run this could return as a
-          // view; nothing reaches it yet, so it stays refused rather than
-          // untested.
+          // Any remaining one-index matrix selection (a row range,
+          // gather, or upfrom) resolves through the shared index geometry
+          // over the column-major registers.
+          if (e.args.size() == 2) {
+            const std::vector<int64_t> rows =
+                matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name);
+            const BuiltinIndexMap map = builtin_index_map(
+                {b.rows, b.cols}, 2, {rows}, {e.args[1].name == "IndexSingle"},
+                SliceStorageOrder::OuterMajor);
+            if (map.count > kMaxRegs)
+              bail("matrix selection needs too many registers");
+            const int r = alloc((int)map.count);
+            for (int64_t k = 0; k < map.count; ++k) {
+              const int64_t cell = map.kind == BuiltinSliceMap::Kind::Contiguous
+                                       ? map.offset + k
+                                   : map.kind == BuiltinSliceMap::Kind::Strided
+                                       ? map.offset + k * map.stride
+                                       : map.gather[(size_t)k];
+              emit(Program::MOV, r + (int)k, b.reg + (int)cell);
+            }
+            Range out{r, (int)map.count};
+            if (e.type_ == "UMatrix" && map.dimensions.size() == 2) {
+              out.kind = ViewKind::Matrix;
+              out.rows = map.dimensions[0];
+              out.cols = map.dimensions[1];
+            } else {
+              out = typed(out, e.type_);
+            }
+            return out;
+          }
           bail("matrix index form");
         }
 
         if (b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
             b.kind == ViewKind::Flat) {
           if (e.args.size() != 2) bail("one-dimensional index form");
+          if (e.args[1].name == "IndexUpfrom") {
+            const long lo = cint(e.args[1].args[0]);
+            if (lo < 1 || lo > b.len + 1)
+              bail("upfrom index out of the declared range");
+            return typed(Range{b.reg + (int)lo - 1, (int)(b.len - lo + 1)},
+                         e.type_);
+          }
+          // Only a Single selects one element; any other index kind was
+          // silently misread as one before this guard.
+          if (e.args[1].name != "IndexSingle")
+            bail("one-dimensional index form " + e.args[1].name);
           long ix;
           if (try_cint(e.args[1].args[0], &ix)) {
             if (ix < 1 || ix > b.len) bail("index out of the declared range");
@@ -1297,7 +1514,7 @@ struct ProgramCompiler {
         const size_t n_idx = e.args.size() - 1;
         if (n_idx > dims.size()) bail("too many array indices");
 
-        // Arrays use Stan's first-index-fastest storage order.  A selection
+        // Register-file arrays are outer-major (graph order).  A selection
         // can therefore be strided even when it fixes a leading index, so
         // gather the complete result rather than pretending it is a
         // contiguous suffix.  This also covers array slices such as
@@ -1341,28 +1558,31 @@ struct ProgramCompiler {
                                           (int32_t)dims[runtime_dim]});
           return {r, 1};
         }
-        for (size_t d = n_idx; d < dims.size(); ++d) {
-          if (dims[d] < 0 || dims[d] > kMaxRegs)
-            bail("array selection has an invalid omitted extent");
-          positions.emplace_back();
-          positions.back().reserve((size_t)dims[d]);
-          for (int64_t k = 0; k < dims[d]; ++k) positions.back().push_back(k);
-          drops.push_back(false);
+        const size_t leaf_axes =
+            b.leaf == ViewKind::Matrix                                    ? 2
+            : b.leaf == ViewKind::Vector || b.leaf == ViewKind::RowVector ? 1
+                                                                          : 0;
+        BuiltinIndexMap map;
+        try {
+          // The shared index geometry over outer-major storage; trailing
+          // axes keep their full extent inside the resolver.
+          map = builtin_index_map(dims, leaf_axes, positions, drops,
+                                  SliceStorageOrder::OuterMajor);
+        } catch (const std::invalid_argument& error) {
+          bail("array selection: " + std::string(error.what()));
         }
-        int64_t width = 1;
-        std::vector<int64_t> out_dims;
-        for (size_t d = 0; d < positions.size(); ++d) {
-          if (!positions[d].empty() &&
-              width > kMaxRegs / (int64_t)positions[d].size())
-            bail("array selection needs too many registers");
-          width *= (int64_t)positions[d].size();
-          if (!drops[d]) out_dims.push_back((int64_t)positions[d].size());
-        }
+        const int64_t width = map.count;
+        if (width > kMaxRegs) bail("array selection needs too many registers");
+        std::vector<int64_t> out_dims = map.dimensions;
         const int r = alloc((int)width);
-        const std::vector<int64_t> offsets =
-            graph_array_offsets(dims, b.leaf, positions);
-        for (size_t k = 0; k < offsets.size(); ++k)
-          emit(Program::MOV, r + (int)k, b.reg + (int)offsets[k]);
+        for (int64_t k = 0; k < width; ++k) {
+          const int64_t cell = map.kind == BuiltinSliceMap::Kind::Contiguous
+                                   ? map.offset + k
+                               : map.kind == BuiltinSliceMap::Kind::Strided
+                                   ? map.offset + k * map.stride
+                                   : map.gather[(size_t)k];
+          emit(Program::MOV, r + (int)k, b.reg + (int)cell);
+        }
         if (width == 1 && (e.type_ == "UReal" || e.type_ == "UInt"))
           return {r, 1};
         Range out{r, (int)width};
@@ -1467,18 +1687,6 @@ struct ProgramCompiler {
       emit(Program::MOV, r + (int)j, m.reg + (int)(j * m.rows + (i - 1)));
     Range out{r, (int)m.cols};
     out.kind = ViewKind::RowVector;
-    return out;
-  }
-
-  // The diagonal, on the same terms as a row: column-major storage puts
-  // its elements rows + 1 apart, and Eigen's stops at the shorter side.
-  Range matrix_diagonal(const Range& m) {
-    const int64_t n = m.rows < m.cols ? m.rows : m.cols;
-    const int r = alloc((int)n);
-    for (int64_t k = 0; k < n; ++k)
-      emit(Program::MOV, r + (int)k, m.reg + (int)(k * (m.rows + 1)));
-    Range out{r, (int)n};
-    out.kind = ViewKind::Vector;
     return out;
   }
 
@@ -1806,80 +2014,147 @@ struct ProgramCompiler {
   // else in the shared regular-function registry reaches the exact same graph
   // kernel through CALL, so adding an optable entry also makes it available in
   // parameter-dependent control flow without another name table here.
-  static bool native_regular_opcode(uint16_t opcode) {
-    switch (opcode) {
-      case OP_ADD:
-      case OP_SUB:
-      case OP_MUL:
-      case OP_DIV:
-      case OP_POW:
-      case OP_FMAX:
-      case OP_FMIN:
-      case OP_LSE2:
-      case OP_LOG_DIFF_EXP:
-      case OP_NEG:
-      case OP_EXPV:
-      case OP_LOGV:
-      case OP_SQRT:
-      case OP_SQUARE:
-      case OP_INV:
-      case OP_ABS:
-      case OP_INV_LOGIT:
-      case OP_LOG1P_EXP:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  Range regular_kernel_call(const mir::Expr& e, const RegularSpec& spec) {
-    const size_t arity = spec.kind == RegularKind::Unary ? 1 : 2;
+  Range builtin_kernel_call(const mir::Expr& e, const BuiltinSpec& spec) {
+    const size_t arity = spec.arity;
     if (e.args.size() != arity) bail(e.name + ": wrong number of arguments");
     std::vector<Range> args;
     args.reserve(arity);
     for (const mir::Expr& arg : e.args) args.push_back(expr(arg));
-
-    Range out = args[0];
-    if (spec.kind != RegularKind::Unary) {
-      const bool as = is_scalar(args[0]), bs = is_scalar(args[1]);
-      if (spec.kind == RegularKind::Binary) {
-        if (!as && !bs && !same_view(args[0], args[1]))
-          bail(e.name + ": incompatible logical views");
-        if (as && !bs) out = args[1];
-      } else {
-        const bool int_first = spec.kind == RegularKind::BinaryIntFirst;
-        const Range& re = args[int_first ? 1 : 0];
-        const Range& iv = args[int_first ? 0 : 1];
-        if (!is_scalar(re) && !is_scalar(iv) && re.len != iv.len)
-          bail(e.name + ": arguments must match in size");
-        out = is_scalar(re) ? iv : re;
-      }
-    }
-
+    const BuiltinLayout layout = resolved_builtin_layout(e, spec, args);
+    Range out = args[layout.result_argument];
     out = typed(out, e.type_);
-    uint8_t input_adjoint_mask = 0x3f;
-    if (spec.kind == RegularKind::BinaryIntFirst)
-      input_adjoint_mask = 0x2;
-    else if (spec.kind == RegularKind::BinaryIntSecond)
-      input_adjoint_mask = 0x1;
-
     std::vector<int> idata;
-    if (spec.kind == RegularKind::BinaryIntFirst ||
-        spec.kind == RegularKind::BinaryIntSecond) {
-      const bool int_first = spec.kind == RegularKind::BinaryIntFirst;
-      const Range& re = args[int_first ? 1 : 0];
-      const Range& iv = args[int_first ? 0 : 1];
-      if (!is_scalar(iv)) {
-        if (re.kind == ViewKind::Matrix) {
-          idata = {(int)re.rows, (int)re.cols};
-        } else if (re.kind == ViewKind::Array && re.leaf == ViewKind::Matrix &&
-                   re.dims.size() >= 2) {
-          idata = {(int)re.dims[re.dims.size() - 2], (int)re.dims.back()};
-        }
-      }
-    }
-    return kernel_call(spec.opcode, args, out, 0, input_adjoint_mask,
+    if (layout.integer_matrix_rows != 0)
+      idata = {(int)layout.integer_matrix_rows,
+               (int)layout.integer_matrix_cols};
+    return kernel_call(spec.opcode, args, out, 0, spec.activity_mask,
                        std::move(idata), {}, e.name);
+  }
+
+  static std::optional<Program::Code> native_builtin_code(uint16_t opcode) {
+    switch (opcode) {
+      case OP_ADD:
+        return Program::ADD;
+      case OP_SUB:
+        return Program::SUB;
+      case OP_MUL:
+        return Program::MUL;
+      case OP_DIV:
+        return Program::DIV;
+      case OP_POW:
+        return Program::POW;
+      case OP_FMAX:
+        return Program::FMAX;
+      case OP_FMIN:
+        return Program::FMIN;
+      case OP_LSE2:
+        return Program::LSE2;
+      case OP_LOG_DIFF_EXP:
+        return Program::LOG_DIFF_EXP;
+      case OP_NEG:
+        return Program::NEG;
+      case OP_EXPV:
+        return Program::EXP;
+      case OP_LOGV:
+        return Program::LOG;
+      case OP_SQRT:
+        return Program::SQRT;
+      case OP_SQUARE:
+        return Program::SQUARE;
+      case OP_INV:
+        return Program::INV;
+      case OP_ABS:
+        return Program::FABS;
+      case OP_INV_LOGIT:
+        return Program::INV_LOGIT;
+      case OP_LOG1P_EXP:
+        return Program::LOG1P_EXP;
+      default:
+        return std::nullopt;
+    }
+  }
+
+  Range native_builtin_call(const mir::Expr& e, const BuiltinSpec& spec,
+                            Program::Code native_code) {
+    std::vector<Range> args;
+    args.reserve(spec.arity);
+    for (const mir::Expr& argument : e.args) args.push_back(expr(argument));
+    if (args.empty() || args.size() > 2)
+      bail(e.name + ": unsupported native builtin arity");
+    const BuiltinLayout layout = resolved_builtin_layout(e, spec, args);
+    Range out = args[layout.result_argument];
+    const int n = (int)layout.lanes;
+
+    Program::Code code = native_code;
+    if (spec.opcode == OP_DIV && e.type_ == "UInt") code = Program::IDIV;
+    const int result = alloc(n);
+    for (int i = 0; i < n; ++i) {
+      const int a = args[0].reg + (is_scalar(args[0]) ? 0 : i);
+      const int b =
+          args.size() == 2 ? args[1].reg + (is_scalar(args[1]) ? 0 : i) : 0;
+      emit(code, result + i, a, b);
+    }
+    out.reg = result;
+    out.len = n;
+    return typed(out, e.type_);
+  }
+
+  // Probability functions use their shared registry policy. Graph-backed
+  // descriptors marshal register ranges and integer payloads into KernelCtx;
+  // all-integer descriptors evaluate once as constants, with the same Stan
+  // Math implementation used by graph lowering and MIR interpretation.
+  Range density_call(const mir::Expr& e, const DensitySpec& spec) {
+    if ((int)e.args.size() != spec.arity)
+      bail(e.name + ": wrong number of arguments");
+
+    const auto integer_values = [&](const mir::Expr& arg) {
+      const std::vector<long> source =
+          arg.type_ == "UInt" && arg.unsized.depth == 0
+              ? std::vector<long>{cint(arg)}
+              : cints(arg);
+      std::vector<int> result;
+      result.reserve(source.size());
+      for (long value : source) {
+        if (value < std::numeric_limits<int>::min() ||
+            value > std::numeric_limits<int>::max())
+          bail(e.name + ": integer argument is out of range");
+        result.push_back((int)value);
+      }
+      return result;
+    };
+    std::vector<Range> args;
+    args.reserve(e.args.size() - (size_t)spec.integer_args);
+    std::vector<DensityCallArgument> plan_arguments;
+    plan_arguments.reserve(e.args.size());
+    try {
+      for (size_t k = 0; k < e.args.size(); ++k) {
+        const mir::Expr& source = e.args[k];
+        DensityCallArgument argument;
+        if (spec.evaluation == DensityEvaluationPolicy::AllInteger ||
+            k < static_cast<size_t>(spec.integer_args)) {
+          argument = integer_density_argument(integer_values(source),
+                                              source.unsized.depth == 0,
+                                              source.data_only);
+        } else {
+          argument.scalar = source.unsized.depth == 0;
+          argument.data_only = source.data_only;
+          argument.active = !source.data_only;
+          args.push_back(expr(source));
+          argument.shape = builtin_argument_shape(source, args.back());
+        }
+        plan_arguments.push_back(std::move(argument));
+      }
+      const DensityCallPlan plan =
+          density_call_plan(spec, plan_arguments, e.fn_propto);
+      if (plan.empty_result) return {konst(0.0), 1};
+      Range out{0, 1};
+      return kernel_call(spec.opcode, args, out, plan.variant,
+                         plan.activity_mask, plan.idata, {}, e.name);
+    } catch (const std::exception& error) {
+      bail(e.name + ": " + error.what());
+    }
+
+    return {};
   }
 
   Range matrix_gram(const Range& m, bool transpose_first) {
@@ -2089,7 +2364,25 @@ struct ProgramCompiler {
     if (is_shape_query(e)) {
       Range v;
       if (!static_view(e.args[0], &v)) v = expr(e.args[0]);
-      return {konst((double)shape_query(e.name, v)), 1};
+      return {konst((double)shape_query(e, v)), 1};
+    }
+    // dims is the container-answer shape query: every extent, as constants.
+    if (const BuiltinSpec* query =
+            e.args.size() == 1
+                ? shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::ShapeQuery)
+                : nullptr) {
+      Range v;
+      if (!static_view(e.args[0], &v)) v = expr(e.args[0]);
+      if (v.kind == ViewKind::Array && v.dims.empty()) v.dims = {v.len};
+      const std::vector<int64_t> extents =
+          builtin_shape_query(*query, builtin_argument_shape(e.args[0], v));
+      const std::vector<double> values(extents.begin(), extents.end());
+      const int r = alloc((int)values.size());
+      if (!values.empty()) emit_const(r, values.data(), (int)values.size());
+      Range out{r, (int)values.size()};
+      out.kind = ViewKind::Array;
+      out.dims = {(int64_t)values.size()};
+      return out;
     }
     if (e.data_only && e.unsized.depth != 0 &&
         e.unsized.leaf == mir::UnsizedLeaf::Int) {
@@ -2110,96 +2403,240 @@ struct ProgramCompiler {
         return out;
       }
     }
-    if ((e.name == "Transpose__" || e.name == "transpose") &&
-        e.args.size() == 1) {
-      Range value = expr(e.args[0]);
-      if (value.kind == ViewKind::Vector) {
-        value.kind = ViewKind::RowVector;
-        return value;
-      }
-      if (value.kind == ViewKind::RowVector) {
-        value.kind = ViewKind::Vector;
-        return value;
-      }
-      if (value.kind != ViewKind::Matrix)
-        bail("transpose needs a vector, row vector, or matrix");
-      const int r = alloc(value.len);
-      for (int64_t j = 0; j < value.cols; ++j)
-        for (int64_t i = 0; i < value.rows; ++i)
-          emit(Program::MOV, r + (int)(i * value.cols + j),
-               value.reg + (int)(j * value.rows + i));
-      Range out{r, value.len};
-      out.kind = ViewKind::Matrix;
-      out.rows = value.cols;
-      out.cols = value.rows;
-      return out;
-    }
     if (rng_call_name(e.name)) return rng_call(e);
     CallableTransformSpec transform;
     if (callable_transform(e.name, &transform))
       return transform_call(e, transform);
-    const auto regular = resolve_regular_builtin(e.name, e.args.size());
-    if (regular && !native_regular_opcode(regular->opcode))
-      return regular_kernel_call(e, *regular);
+    const FunctionSpec* registered = function_spec(e);
+    const BuiltinSpec* builtin =
+        registered != nullptr && registered->builtin() != nullptr
+            ? registered->builtin()
+            : nullptr;
+    // Registered constructors fold to one constant register range through
+    // the shared Stan Math evaluator; every argument is a data scalar, so
+    // extents, spacing rules, and domain errors are CmdStan's own.
+    if (const BuiltinSpec* ctor = shaped_builtin_spec(
+            e.name, e.args.size(), BuiltinShapePolicy::Constructor)) {
+      std::vector<double> ctor_args;
+      ctor_args.reserve(e.args.size());
+      for (size_t k = 0; k < e.args.size(); ++k)
+        ctor_args.push_back(ctor->arguments[k] == BuiltinArgumentKind::Integer
+                                ? (double)cint(e.args[k])
+                                : creal(e.args[k]));
+      ConstructorValue built;
+      try {
+        built = evaluate_constructor_builtin(*ctor, ctor_args);
+      } catch (const std::domain_error&) {
+        // Stan Math's own validation, the rejection CmdStan throws.
+        throw;
+      } catch (const std::invalid_argument& error) {
+        bail(e.name + ": " + std::string(error.what()));
+      }
+      const int len = (int)built.values.size();
+      const int r = alloc(len);
+      if (len != 0) emit_const(r, built.values.data(), len);
+      Range out{r, len};
+      switch (ctor->constructor_container) {
+        case FunctionContainerKind::Vector:
+          out.kind = ViewKind::Vector;
+          break;
+        case FunctionContainerKind::RowVector:
+          out.kind = ViewKind::RowVector;
+          break;
+        case FunctionContainerKind::Matrix:
+          out.kind = ViewKind::Matrix;
+          out.rows = built.dimensions[0];
+          out.cols = built.dimensions[1];
+          break;
+        default:
+          out.kind = ViewKind::Array;
+          out.leaf = ViewKind::Flat;
+          out.dims = built.dimensions;
+          break;
+      }
+      return out;
+    }
+
+    // Registered slice/view selections: the shared resolver maps result
+    // cells to source registers over the register file's outer-major array
+    // storage (Eigen leaves are column-major under both conventions), with
+    // Stan Math's own index checks (out_of_range and domain_error propagate
+    // as CmdStan's rejections). Every selection is a per-lane MOV, so later
+    // writes to a source variable cannot alias the result and adjoints
+    // accumulate through MOV's reverse pass.
+    if (const BuiltinSpec* slice = shaped_builtin_spec(
+            e.name, e.args.size(), BuiltinShapePolicy::SliceView)) {
+      const Range a = expr(e.args[0]);
+      Range b{};
+      BuiltinSliceMap map;
+      try {
+        if (builtin_slice_is_append(slice->slice)) {
+          // Appends map result cells over both operands' concatenated
+          // storage; a source cell at or past the left run reads the right.
+          b = expr(e.args[1]);
+          map = builtin_append_map(*slice, builtin_argument_shape(e.args[0], a),
+                                   builtin_argument_shape(e.args[1], b),
+                                   SliceStorageOrder::OuterMajor);
+        } else {
+          std::vector<int64_t> indexes;
+          indexes.reserve(e.args.size() - 1);
+          for (size_t k = 1; k < e.args.size(); ++k)
+            indexes.push_back(cint(e.args[k]));
+          map = builtin_slice_map(*slice, builtin_argument_shape(e.args[0], a),
+                                  indexes, SliceStorageOrder::OuterMajor);
+        }
+      } catch (const std::invalid_argument& error) {
+        bail(e.name + ": " + std::string(error.what()));
+      }
+      const auto stamp = [&](Range out) {
+        return shaped(std::move(out), map.result);
+      };
+      // A reshape's identity map relabels the source run outright -- the
+      // zero-instruction lowering the named vector transpose always used;
+      // persistence still copies at the assignment site.
+      if (builtin_slice_is_reshape(slice->slice) &&
+          map.kind == BuiltinSliceMap::Kind::Contiguous)
+        return stamp(a);
+      const int r = alloc((int)map.count);
+      const auto source_cell = [&](int64_t k) {
+        switch (map.kind) {
+          case BuiltinSliceMap::Kind::Contiguous:
+            return map.offset + k;
+          case BuiltinSliceMap::Kind::Strided:
+            return map.offset + k * map.stride;
+          case BuiltinSliceMap::Kind::Transpose: {
+            const int64_t rows = map.result.dimensions[0];
+            const int64_t cols = map.result.dimensions[1];
+            return k / rows + cols * (k % rows);
+          }
+          case BuiltinSliceMap::Kind::Gather:
+            break;
+        }
+        return map.gather[(size_t)k];
+      };
+      for (int64_t k = 0; k < map.count; ++k) {
+        const int64_t cell = source_cell(k);
+        const int source =
+            cell < a.len ? a.reg + (int)cell : b.reg + (int)(cell - a.len);
+        emit(Program::MOV, r + (int)k, source);
+      }
+      return stamp(Range{r, (int)map.count});
+    }
+
+    // Registered paired reductions: the dot kernel over two equal-length
+    // ranges (or one, paired with itself); squared_distance subtracts first
+    // with the same native SUB lanes the graph's OP_SUB computes.
+    if (const BuiltinSpec* paired = shaped_builtin_spec(
+            e.name, e.args.size(), BuiltinShapePolicy::PairedReduction)) {
+      Range a = expr(e.args[0]);
+      Range b = paired->arity == 2 ? expr(e.args[1]) : a;
+      (void)resolved_builtin_layout(e, *paired,
+                                    paired->arity == 2
+                                        ? std::vector<Range>{a, b}
+                                        : std::vector<Range>{a});
+      Range out{0, 1};
+      if (paired->difference) {
+        const int d = alloc(a.len);
+        for (int i = 0; i < a.len; ++i)
+          emit(Program::SUB, d + i, a.reg + i, b.reg + i);
+        const Range difference{d, a.len};
+        return kernel_call(OP_DOT, {difference, difference}, out, 0, 0x3, {},
+                           {}, e.name);
+      }
+      return kernel_call(OP_DOT, {a, b}, out, 0, 0x3, {}, {}, e.name);
+    }
+
+    // Registered grouped reductions: the shared grouped dot kernel over the
+    // operands' column-major ranges, one in-order dot per column or row --
+    // the accumulation the AoS reverse-mode overloads perform. Previously
+    // unsupported here.
+    if (const BuiltinSpec* grouped = shaped_builtin_spec(
+            e.name, e.args.size(), BuiltinShapePolicy::GroupedReduction)) {
+      Range a = expr(e.args[0]);
+      Range b = grouped->arity == 2 ? expr(e.args[1]) : a;
+      BuiltinGroupedDotMap map;
+      try {
+        map = builtin_grouped_dot_map(
+            *grouped, builtin_argument_shape(e.args[0], a),
+            builtin_argument_shape(e.args[grouped->arity == 2 ? 1 : 0], b));
+      } catch (const std::invalid_argument& error) {
+        bail(e.name + ": " + std::string(error.what()));
+      }
+      Range out{0, (int)map.groups};
+      out.kind = function_view_kind(map.result.container);
+      return kernel_call(OP_GROUP_DOT, {a, b}, out, 0, 0x3,
+                         {(int)map.groups, (int)map.width,
+                          (int)map.group_stride, (int)map.cell_stride},
+                         {}, e.name);
+    }
+
+    // Registered matrix operations: the same dedicated kernels the graph
+    // emits, called over the operands' column-major ranges. The active
+    // variant bit mirrors the graph's autodiff stamp -- any non-data
+    // operand -- with the kernels' values_only() guard covering
+    // values-only executions, exactly as it does for graph ops.
+    if (const BuiltinSpec* matrix = shaped_builtin_spec(
+            e.name, e.args.size(), BuiltinShapePolicy::MatrixOp)) {
+      std::vector<Range> args;
+      args.reserve(matrix->arity);
+      for (const mir::Expr& argument : e.args) args.push_back(expr(argument));
+      BuiltinMatrixMap map;
+      try {
+        std::vector<BuiltinArgumentShape> shapes;
+        shapes.reserve(args.size());
+        for (size_t k = 0; k < args.size(); ++k)
+          shapes.push_back(builtin_argument_shape(e.args[k], args[k]));
+        map = builtin_matrix_map(*matrix, shapes);
+      } catch (const std::invalid_argument& error) {
+        bail(e.name + ": " + std::string(error.what()));
+      }
+      bool active = false;
+      for (const mir::Expr& argument : e.args)
+        if (!argument.data_only) active = true;
+      Range out{0, (int)map.result.storage_size};
+      out = shaped(std::move(out), map.result);
+      std::vector<int> idata;
+      idata.reserve(map.idata.size());
+      for (const int64_t value : map.idata) idata.push_back((int)value);
+      return kernel_call(
+          matrix->opcode, args, out,
+          (uint8_t)(map.variant | (active ? map.active_variant : 0u)),
+          matrix->activity_mask, std::move(idata), {}, e.name);
+    }
+
+    // Registered reductions never take the elementwise dispatch below. sum
+    // and log_sum_exp keep their native register loops further down; the
+    // remaining reductions call their registered kernel with a scalar out.
+    if (const BuiltinSpec* reduction =
+            reduction_builtin_spec(e.name, e.args.size());
+        reduction != nullptr) {
+      builtin = nullptr;
+      if (reduction->opcode != OP_SUM_VEC &&
+          reduction->opcode != OP_LOG_SUM_EXP) {
+        const std::vector<Range> args{expr(e.args[0])};
+        (void)resolved_builtin_layout(e, *reduction, args);
+        Range out{0, 1};
+        return kernel_call(reduction->opcode, args, out, 0,
+                           reduction->activity_mask, {}, {}, e.name);
+      }
+    }
+    // Matrix right-division is a solve, not the scalar/elementwise DIV in the
+    // descriptor. Its specialized shape-aware lowering remains below, as does
+    // predicate lowering: a Predicate descriptor has no kernel, and its
+    // comparison-opcode spelling lives with the other operators.
+    if (builtin != nullptr && builtin->shape != BuiltinShapePolicy::Predicate &&
+        builtin->shape != BuiltinShapePolicy::Product &&
+        builtin->shape != BuiltinShapePolicy::Solve &&
+        !(e.name == "Divide__" && e.args.size() == 2 &&
+          e.args[1].type_ == "UMatrix")) {
+      if (const auto native = native_builtin_code(builtin->opcode))
+        return native_builtin_call(e, *builtin, *native);
+      return builtin_kernel_call(e, *builtin);
+    }
+    if (registered != nullptr && registered->density() != nullptr)
+      return density_call(e, *registered->density());
     if (e.name == "tcrossprod" && e.args.size() == 1)
       return matrix_gram(expr(e.args[0]), false);
-    if (e.name == "crossprod" && e.args.size() == 1)
-      return matrix_gram(expr(e.args[0]), true);
-    if (e.name == "multiply_lower_tri_self_transpose" && e.args.size() == 1) {
-      // One instruction rather than the scalar sums matrix_gram emits above:
-      // the upper triangle has to be dropped before the product, and the
-      // reverse-mode overload's pullback symmetrises the output adjoint and
-      // masks the result. Scalar MULs would reproduce neither.
-      const Range m = expr(e.args[0]);
-      if (m.kind != ViewKind::Matrix)
-        bail("multiply_lower_tri_self_transpose requires a matrix");
-      if (m.rows != 0 && m.rows > kMaxRegs / m.rows)
-        bail("multiply_lower_tri_self_transpose result is too large");
-      const int64_t width = m.rows * m.rows;
-      const int r = alloc((int)width);
-      if (width != 0)
-        p.code.push_back(Program::Instr{Program::MULT_LOWER_TRI_SELF_TRANSPOSE,
-                                        r, m.reg, (int32_t)m.rows,
-                                        (int32_t)m.cols, m.len});
-      Range out{r, (int)width};
-      out.kind = ViewKind::Matrix;
-      out.rows = out.cols = m.rows;
-      return out;
-    }
-    if (e.name == "add_diag" && e.args.size() == 2) {
-      const Range input = expr(e.args[0]);
-      const Range diagonal = expr(e.args[1]);
-      if (input.kind != ViewKind::Matrix)
-        bail("add_diag requires a matrix first argument");
-      const int64_t n = std::min(input.rows, input.cols);
-      if (!is_scalar(diagonal) && ((diagonal.kind != ViewKind::Vector &&
-                                    diagonal.kind != ViewKind::RowVector) ||
-                                   diagonal.len != n))
-        bail("add_diag diagonal size mismatch");
-      const int r = alloc(input.len);
-      for (int k = 0; k < input.len; ++k)
-        emit(Program::MOV, r + k, input.reg + k);
-      for (int64_t k = 0; k < n; ++k)
-        emit(Program::ADD, r + (int)(k * (input.rows + 1)),
-             r + (int)(k * (input.rows + 1)),
-             diagonal.reg + (is_scalar(diagonal) ? 0 : (int)k));
-      Range out = input;
-      out.reg = r;
-      return out;
-    }
-    if (e.name == "matrix_exp" && e.args.size() == 1) {
-      const Range input = expr(e.args[0]);
-      if (input.kind != ViewKind::Matrix || input.rows != input.cols)
-        bail("matrix_exp requires a square matrix");
-      const int r = alloc(input.len);
-      if (input.len != 0)
-        p.code.push_back(Program::Instr{Program::MATRIX_EXP, r, input.reg,
-                                        (int32_t)input.rows,
-                                        (int32_t)input.cols, input.len});
-      Range out = input;
-      out.reg = r;
-      return out;
-    }
     if ((e.name == "LDivide__" || e.name == "mdivide_left") &&
         e.args.size() == 2) {
       const Range divisor = expr(e.args[0]);
@@ -2242,33 +2679,45 @@ struct ProgramCompiler {
       out.reg = r;
       return out;
     }
-    if (e.name == "quad_form_sym" && e.args.size() == 2) {
-      const Range a = expr(e.args[0]);
-      const Range b = expr(e.args[1]);
-      if (a.kind != ViewKind::Matrix || a.rows != a.cols)
-        bail("quad_form_sym requires a square first matrix");
-      if ((b.kind != ViewKind::Matrix && b.kind != ViewKind::Vector) ||
-          (b.kind == ViewKind::Matrix && b.rows != a.rows) ||
-          (b.kind == ViewKind::Vector && b.len != a.rows))
-        bail("quad_form_sym second argument size mismatch");
-      const int64_t ncol = b.kind == ViewKind::Vector ? 1 : b.cols;
-      const int64_t width = ncol * ncol;
-      if (width > kMaxRegs) bail("quad_form_sym result is too large");
-      const int r = alloc((int)width);
-      const int32_t encoded_rows =
-          b.kind == ViewKind::Vector ? -(int32_t)a.rows : (int32_t)a.rows;
-      if (a.rows == 0) {
-        const std::vector<double> zero((size_t)width, 0.0);
-        emit_const(r, zero.data(), (int)width);
-      } else {
-        p.code.push_back(Program::Instr{Program::QUAD_FORM_SYM, r, a.reg, b.reg,
-                                        encoded_rows, (int32_t)width});
+    // The remaining registered solves (and the operator spellings the two
+    // native instructions above do not cover) go through the graph solve
+    // kernels: the shared resolver validates the square divisor and the
+    // dividend's conformity, and the variant carries the same operand-type
+    // bits the graph lowering stamps -- result var, vector-vs-one-column
+    // dividend, and the divisor/dividend scalar types.
+    {
+      const BuiltinSpec* solve =
+          shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Solve);
+      if (solve == nullptr && e.name == "Divide__" && e.args.size() == 2 &&
+          e.args[1].type_ == "UMatrix")
+        solve =
+            shaped_builtin_spec("mdivide_right", 2, BuiltinShapePolicy::Solve);
+      if (solve != nullptr) {
+        std::vector<Range> args;
+        args.reserve(2);
+        for (const mir::Expr& argument : e.args) args.push_back(expr(argument));
+        BuiltinSolveMap map;
+        try {
+          map = builtin_solve_map(*solve,
+                                  builtin_argument_shape(e.args[0], args[0]),
+                                  builtin_argument_shape(e.args[1], args[1]));
+        } catch (const std::invalid_argument& error) {
+          bail(e.name + ": " + std::string(error.what()));
+        }
+        const size_t dividend = solve->solve_left ? 1 : 0;
+        const bool divisor_active = !e.args[1 - dividend].data_only;
+        const bool dividend_active = !e.args[dividend].data_only;
+        const bool dm = args[dividend].kind == ViewKind::Matrix;
+        Range out{0, (int)map.result.storage_size};
+        out = shaped(std::move(out), map.result);
+        const uint8_t variant =
+            (uint8_t)(((divisor_active || dividend_active) ? 1u : 0u) |
+                      (dm ? 0u : 2u) | (divisor_active ? 4u : 0u) |
+                      (dividend_active ? 8u : 0u));
+        return kernel_call(solve->opcode, args, out, variant,
+                           solve->activity_mask,
+                           {(int)map.order, (int)map.columns}, {}, e.name);
       }
-      if (b.kind == ViewKind::Vector) return {r, 1};
-      Range out{r, (int)width};
-      out.kind = ViewKind::Matrix;
-      out.rows = out.cols = ncol;
-      return out;
     }
     if (e.fn_lib == mir::Expr::Lib::UserDefined) {
       auto it = funs.find(e.name);
@@ -2310,18 +2759,23 @@ struct ProgramCompiler {
         std::vector<int64_t> array_leaf_dims;
         if (e.name == "FnMakeArray") {
           if (!parts.empty() && !is_scalar(parts.front())) {
-            array_leaf = parts.front().kind;
-            if (array_leaf == ViewKind::Array)
-              bail(
-                  "array literal element view is unsupported by the "
-                  "register program");
             for (const Range& q : parts)
               if (!same_view(q, parts.front()))
                 bail("array literal elements have different logical views");
-            if (array_leaf == ViewKind::Matrix)
+            if (parts.front().kind == ViewKind::Array) {
+              // An outer array literal adds one axis to the complete child
+              // geometry; the scalar width of a singleton child must not
+              // collapse that axis. Storage is already element-contiguous,
+              // so only the neutral logical view needs extending.
+              array_leaf = parts.front().leaf;
+              array_leaf_dims = parts.front().dims;
+            } else if (parts.front().kind == ViewKind::Matrix) {
+              array_leaf = ViewKind::Matrix;
               array_leaf_dims = {parts.front().rows, parts.front().cols};
-            else
+            } else {
+              array_leaf = parts.front().kind;
               array_leaf_dims = {(int64_t)parts.front().len};
+            }
           } else {
             for (const Range& q : parts)
               if (!is_scalar(q))
@@ -2344,162 +2798,6 @@ struct ProgramCompiler {
         return out;
       }
       bail("internal function " + e.name);
-    }
-    if (e.args.size() == 2 && e.name == "append_array") {
-      const Range a = expr(e.args[0]);
-      const Range b = expr(e.args[1]);
-      if (a.kind != ViewKind::Array || b.kind != ViewKind::Array)
-        bail("append_array requires two array arguments");
-      if (e.args[0].unsized.depth != e.args[1].unsized.depth ||
-          e.args[0].unsized.leaf != e.args[1].unsized.leaf)
-        bail("append_array element logical views differ");
-
-      const auto dimensions = [&](const Range& value) {
-        return value.dims.empty() ? std::vector<int64_t>{value.len}
-                                  : value.dims;
-      };
-      const auto validate_dimensions = [&](const Range& value,
-                                           const std::vector<int64_t>& dims) {
-        int64_t product = 1;
-        for (int64_t extent : dims) {
-          if (extent < 0 ||
-              (extent != 0 && product > (int64_t)kMaxRegs / extent))
-            bail("append_array has an invalid element shape");
-          product *= extent;
-        }
-        if (product != value.len)
-          bail("append_array storage and logical shape disagree");
-      };
-      const std::vector<int64_t> adims = dimensions(a);
-      const std::vector<int64_t> bdims = dimensions(b);
-      validate_dimensions(a, adims);
-      validate_dimensions(b, bdims);
-      if (adims.size() != bdims.size())
-        bail("append_array element shapes differ");
-      const int64_t a_outer = adims.front();
-      const int64_t b_outer = bdims.front();
-      if (a_outer != 0 && b_outer != 0 &&
-          !std::equal(adims.begin() + 1, adims.end(), bdims.begin() + 1))
-        bail("append_array element shapes differ");
-      if (a_outer > std::numeric_limits<int64_t>::max() - b_outer ||
-          b.len > kMaxRegs - a.len)
-        bail("append_array result is too large");
-
-      std::vector<int64_t> out_dims =
-          a_outer == 0 && b_outer != 0 ? bdims : adims;
-      out_dims[0] = a_outer + b_outer;
-      const int r = alloc(a.len + b.len);
-      for (int k = 0; k < a.len; ++k) emit(Program::MOV, r + k, a.reg + k);
-      for (int k = 0; k < b.len; ++k)
-        emit(Program::MOV, r + a.len + k, b.reg + k);
-      Range out{r, a.len + b.len};
-      out.kind = ViewKind::Array;
-      out.dims = std::move(out_dims);
-      return out;
-    }
-    if (e.args.size() == 1 && e.name == "diagonal") {
-      const Range a = expr(e.args[0]);
-      if (a.kind != ViewKind::Matrix)
-        bail("diagonal requires a matrix logical view");
-      return matrix_diagonal(a);
-    }
-    if (e.args.size() == 1 && e.name == "diag_matrix") {
-      const Range diagonal = expr(e.args[0]);
-      if (diagonal.kind != ViewKind::Vector &&
-          diagonal.kind != ViewKind::RowVector)
-        bail("diag_matrix requires a vector");
-      if (diagonal.len != 0 && diagonal.len > kMaxRegs / diagonal.len)
-        bail("diag_matrix result is too large");
-      const int n = diagonal.len;
-      const int r = alloc(n * n);
-      const double zero = 0.0;
-      for (int j = 0; j < n; ++j)
-        for (int i = 0; i < n; ++i) {
-          const int dst = r + j * n + i;
-          if (i == j)
-            emit(Program::MOV, dst, diagonal.reg + i);
-          else
-            emit_const(dst, &zero, 1);
-        }
-      Range out{r, n * n};
-      out.kind = ViewKind::Matrix;
-      out.rows = out.cols = n;
-      return out;
-    }
-    if (e.args.size() == 2 && e.name == "rep_vector") {
-      // The register file is a flat run of doubles, so a vector of one
-      // repeated value is a run the compiler fills -- the same fill a
-      // declaration's default uses. The length has to be a compile-time
-      // integer, which is what every extent inside a region is.
-      const long n = cint(e.args[1]);
-      if (n < 0) bail("rep_vector of a negative length");
-      Range out{0, (int)n};
-      out.kind = ViewKind::Vector;
-      if (n == 0) {
-        out.reg = alloc(0);
-        return out;
-      }
-      // A literal value is the whole run in one instruction; anything else
-      // is computed once and copied, which is what its adjoint wants too:
-      // each copy adds into the one source cell, summing the broadcast.
-      if (e.args[0].kind == mir::Expr::LitInt ||
-          e.args[0].kind == mir::Expr::LitReal) {
-        const double v = e.args[0].kind == mir::Expr::LitInt
-                             ? (double)e.args[0].lit_i
-                             : e.args[0].lit;
-        out.reg = alloc((int)n);
-        const std::vector<double> fill((size_t)n, v);
-        emit_const(out.reg, fill.data(), (int)n);
-        return out;
-      }
-      const Range v = expr(e.args[0]);
-      if (!is_scalar(v)) bail("rep_vector of a container");
-      out.reg = alloc((int)n);
-      for (long k = 0; k < n; ++k) emit(Program::MOV, out.reg + (int)k, v.reg);
-      return out;
-    }
-    if (e.args.size() == 2 && e.name == "rep_row_vector") {
-      const long n = cint(e.args[1]);
-      if (n < 0) bail("rep_row_vector of a negative length");
-      const Range value = expr(e.args[0]);
-      if (!is_scalar(value)) bail("rep_row_vector of a container");
-      const int r = alloc((int)n);
-      for (long i = 0; i < n; ++i) emit(Program::MOV, r + (int)i, value.reg);
-      Range out{r, (int)n};
-      out.kind = ViewKind::RowVector;
-      return out;
-    }
-    if (e.name == "rep_matrix" && (e.args.size() == 2 || e.args.size() == 3)) {
-      const Range value = expr(e.args[0]);
-      int64_t rows = 0, cols = 0;
-      if (e.args.size() == 3) {
-        if (!is_scalar(value)) bail("three-argument rep_matrix needs a scalar");
-        rows = cint(e.args[1]);
-        cols = cint(e.args[2]);
-      } else if (value.kind == ViewKind::Vector) {
-        rows = value.len;
-        cols = cint(e.args[1]);
-      } else if (value.kind == ViewKind::RowVector) {
-        rows = cint(e.args[1]);
-        cols = value.len;
-      } else {
-        bail("two-argument rep_matrix needs a vector or row vector");
-      }
-      if (rows < 0 || cols < 0 || (rows != 0 && cols > kMaxRegs / rows))
-        bail("rep_matrix has an invalid or excessive size");
-      const int r = alloc((int)(rows * cols));
-      for (int64_t j = 0; j < cols; ++j)
-        for (int64_t i = 0; i < rows; ++i) {
-          int source = value.reg;
-          if (value.kind == ViewKind::Vector) source += (int)i;
-          if (value.kind == ViewKind::RowVector) source += (int)j;
-          emit(Program::MOV, r + (int)(j * rows + i), source);
-        }
-      Range out{r, (int)(rows * cols)};
-      out.kind = ViewKind::Matrix;
-      out.rows = rows;
-      out.cols = cols;
-      return out;
     }
     const mir::ExtremaCall extrema = mir::extrema_call(e);
     if (extrema.kind != mir::ExtremaKind::Legacy) {
@@ -2698,43 +2996,26 @@ struct ProgramCompiler {
         bail("array arithmetic is unsupported by the register program");
       if ((e.name == "Times__" || e.name == "multiply") && !a_scalar &&
           !b_scalar) {
-        int64_t rows = 0, inner = 0, cols = 0;
-        ViewKind result_kind = ViewKind::Flat;
-        if (a.kind == ViewKind::Matrix && b.kind == ViewKind::Matrix) {
-          rows = a.rows;
-          inner = a.cols;
-          cols = b.cols;
-          if (inner != b.rows) bail("matrix multiplication size mismatch");
-          result_kind = ViewKind::Matrix;
-        } else if (a.kind == ViewKind::Matrix && b.kind == ViewKind::Vector) {
-          rows = a.rows;
-          inner = a.cols;
-          cols = 1;
-          if (inner != b.len) bail("matrix-vector size mismatch");
-          result_kind = ViewKind::Vector;
-        } else if (a.kind == ViewKind::RowVector &&
-                   b.kind == ViewKind::Matrix) {
-          rows = 1;
-          inner = a.len;
-          cols = b.cols;
-          if (inner != b.rows) bail("row-vector matrix size mismatch");
-          result_kind = ViewKind::RowVector;
-        } else if (a.kind == ViewKind::RowVector &&
-                   b.kind == ViewKind::Vector) {
-          rows = cols = 1;
-          inner = a.len;
-          if (inner != b.len) bail("dot-product size mismatch");
-        } else if (a.kind == ViewKind::Vector &&
-                   b.kind == ViewKind::RowVector) {
-          rows = a.len;
-          inner = 1;
-          cols = b.len;
-          result_kind = ViewKind::Matrix;
-        } else {
-          bail(
-              "container multiplication is unsupported by the register "
-              "program");
+        // The shared product resolver classifies the matvec/GEMM/outer/
+        // inner forms and validates the inner dimension; the register
+        // emission below stays the explicit MUL/ADD chain the adjoint
+        // machinery prices.
+        BuiltinProductMap map;
+        try {
+          map = builtin_product_map(builtin_argument_shape(e.args[0], a),
+                                    builtin_argument_shape(e.args[1], b));
+        } catch (const std::invalid_argument& error) {
+          bail(e.name + ": " + error.what());
         }
+        const int64_t rows = map.m, inner = map.k, cols = map.n;
+        const ViewKind result_kind =
+            map.result.container == FunctionContainerKind::Matrix
+                ? ViewKind::Matrix
+            : map.result.container == FunctionContainerKind::Vector
+                ? ViewKind::Vector
+            : map.result.container == FunctionContainerKind::RowVector
+                ? ViewKind::RowVector
+                : ViewKind::Flat;
 
         const int64_t width = rows * cols;
         if (width > kMaxRegs) bail("matrix product needs too many registers");
@@ -2802,19 +3083,51 @@ struct ProgramCompiler {
         c = Program::LSE2;
       else if (e.name == "log_diff_exp")
         c = Program::LOG_DIFF_EXP;
-      else if (e.name == "Greater__")
-        c = Program::GT;
-      else if (e.name == "Geq__")
-        c = Program::GE;
-      else if (e.name == "Less__")
-        c = Program::LT;
-      else if (e.name == "Leq__")
-        c = Program::LE;
-      else if (e.name == "Equals__")
-        c = Program::EQ;
-      else if (e.name == "NEquals__")
-        c = Program::NE;
-      else
+      else if (const BuiltinSpec* pred = shaped_builtin_spec(
+                   e.name, 2, BuiltinShapePolicy::Predicate)) {
+        // Comparisons on the comparison opcodes, for both the operator
+        // spellings and the logical_* library names. logical_and and
+        // logical_or fold each side's zero-ness first: both sides are
+        // always evaluated, Stan Math's own (non-short-circuit) rule.
+        switch (pred->predicate) {
+          case BuiltinPredicate::Gt:
+            c = Program::GT;
+            break;
+          case BuiltinPredicate::Gte:
+            c = Program::GE;
+            break;
+          case BuiltinPredicate::Lt:
+            c = Program::LT;
+            break;
+          case BuiltinPredicate::Lte:
+            c = Program::LE;
+            break;
+          case BuiltinPredicate::Eq:
+            c = Program::EQ;
+            break;
+          case BuiltinPredicate::Neq:
+            c = Program::NE;
+            break;
+          case BuiltinPredicate::And:
+          case BuiltinPredicate::Or: {
+            const int zero = konst(0.0);
+            const int lhs_set = alloc(n), rhs_set = alloc(n), both = alloc(n);
+            for (int i = 0; i < n; ++i) {
+              emit(Program::NE, lhs_set + i, a.reg + (a_scalar ? 0 : i), zero);
+              emit(Program::NE, rhs_set + i, b.reg + (b_scalar ? 0 : i), zero);
+              if (pred->predicate == BuiltinPredicate::And) {
+                emit(Program::MUL, both + i, lhs_set + i, rhs_set + i);
+              } else {
+                emit(Program::ADD, both + i, lhs_set + i, rhs_set + i);
+                emit(Program::NE, both + i, both + i, zero);
+              }
+            }
+            return typed(Range{both, n}, e.type_);
+          }
+          default:
+            bail("function " + e.name);
+        }
+      } else
         bail("function " + e.name);
       const int r = alloc(n);
       for (int i = 0; i < n; ++i)
@@ -2847,15 +3160,17 @@ struct ProgramCompiler {
         for (int i = 1; i < a.len; ++i) emit(Program::ADD, r, r, a.reg + i);
         return {r, 1};
       }
-      // Predicates, spelled on the comparison opcodes rather than opcodes of
-      // their own: both read through value_of, so neither carries an adjoint
-      // edge, which is what a 0/1 answer wants. x != x holds for NaN alone.
-      if (e.name == "is_nan" || e.name == "is_inf" || e.name == "PNot__" ||
-          e.name == "logical_negation") {
-        const int rhs = e.name == "is_nan" ? -1 : konst(0.0);
-        const Program::Code c = e.name == "is_nan" ? Program::NE : Program::EQ;
+      // Registered unary predicates, spelled on the comparison opcodes
+      // rather than opcodes of their own: both read through value_of, so
+      // neither carries an adjoint edge, which is what a 0/1 answer wants.
+      // x != x holds for NaN alone.
+      if (const BuiltinSpec* pred =
+              shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::Predicate)) {
+        const bool nan = pred->predicate == BuiltinPredicate::IsNan;
+        const int rhs = nan ? -1 : konst(0.0);
+        const Program::Code c = nan ? Program::NE : Program::EQ;
         const int r = alloc(a.len);
-        if (e.name == "is_inf") {
+        if (pred->predicate == BuiltinPredicate::IsInf) {
           const int pos = konst(std::numeric_limits<double>::infinity());
           const int neg = konst(-std::numeric_limits<double>::infinity());
           const int eq_pos = alloc(a.len), eq_neg = alloc(a.len);
@@ -2965,6 +3280,11 @@ struct ProgramCompiler {
       case mir::Stmt::Decl: {
         // A declaration shadows every compile-time fact retained for an
         // earlier optimized symbol with the same name.
+        // It also shadows either runtime representation: --O1 may reuse one
+        // symbol id for a scalar int in one block and an array/container in
+        // the next, and the later assignment must not see the old binding.
+        reals.erase(s.decl_id);
+        ints.erase(s.decl_id);
         deferred_shapes.erase(s.decl_id);
         known_int_arrays.erase(s.decl_id);
         known_int_array_dims.erase(s.decl_id);
@@ -2983,8 +3303,6 @@ struct ProgramCompiler {
               view.leaf != mir::UnsizedLeaf::Matrix)
             bail("scalar unsized declaration " + s.decl_id);
 
-          reals.erase(s.decl_id);
-          ints.erase(s.decl_id);
           if (view.depth != 0 && view.leaf == mir::UnsizedLeaf::Int) {
             int_array_names.insert(s.decl_id);
             int_decl_at[s.decl_id] = {branch_depth, loops.size()};
@@ -3288,8 +3606,27 @@ struct ProgramCompiler {
           }
           if (v.len != (int)width)
             bail("array assignment width mismatch for " + s.lhs);
-          const std::vector<int64_t> offsets =
-              graph_array_offsets(dims, dst.leaf, positions);
+          // The same shared index geometry the rvalue reads resolve
+          // through; destination cells and the assigned run pair up in the
+          // identical outer-major enumeration.
+          const size_t leaf_axes =
+              dst.leaf == ViewKind::Matrix ? 2
+              : dst.leaf == ViewKind::Vector || dst.leaf == ViewKind::RowVector
+                  ? 1
+                  : 0;
+          const BuiltinIndexMap store_map =
+              builtin_index_map(dims, leaf_axes, positions,
+                                std::vector<bool>(positions.size(), false),
+                                SliceStorageOrder::OuterMajor);
+          std::vector<int64_t> offsets;
+          offsets.reserve((size_t)store_map.count);
+          for (int64_t k = 0; k < store_map.count; ++k)
+            offsets.push_back(store_map.kind ==
+                                      BuiltinSliceMap::Kind::Contiguous
+                                  ? store_map.offset + k
+                              : store_map.kind == BuiltinSliceMap::Kind::Strided
+                                  ? store_map.offset + k * store_map.stride
+                                  : store_map.gather[(size_t)k]);
           for (size_t k = 0; k < offsets.size(); ++k)
             emit(Program::MOV, dst.reg + (int)offsets[k], v.reg + (int)k);
           if (int_array_names.count(s.lhs)) {

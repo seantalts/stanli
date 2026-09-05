@@ -705,6 +705,15 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
 void Lowering::lower_stmt_impl(const mir::Stmt& s) {
   switch (s.kind) {
     case mir::Stmt::Decl:
+      // --O1 reuses one symbol id for block-local declarations at the same
+      // source position. A preceding scalar-int declaration may therefore
+      // leave a folded binding under the id subsequently assigned to an
+      // array or real container. The fresh declaration shadows every
+      // representation of that old scalar before its initializer is read.
+      if (s.decl_type.base != "SInt") {
+        int_env.erase(s.decl_id);
+        int_locals.erase(s.decl_id);
+      }
       if (s.read_transform) {
         lower_read_param(s);
       } else if (s.decl_type.base == "SInt") {
@@ -904,16 +913,15 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           sync_indexed_data_local(s.lhs, nv);
           return;
         }
-        // Between write w[a:b] = rhs (contiguous on 1-D values).
-        if (s.lhs_idx.size() == 1 && is_range(s.lhs_idx[0])) {
-          const bool flat_1d_array =
-              is_array(prev_v.si) && array_shape(prev_v.si).dims.size() == 1 &&
-              array_shape(prev_v.si).leaf == ViewKind::Flat;
-          if (!is_vector(prev_v.si) && !is_row_vector(prev_v.si) &&
-              !flat_1d_array)
-            fail("range assignment needs a one-dimensional flat value for " +
-                     s.lhs,
-                 s.raw);
+        // Between write w[a:b] = rhs (contiguous on 1-D values). Deeper
+        // bases fall through to the shared index geometry below.
+        const bool flat_1d_array =
+            is_array(prev_v.si) && array_shape(prev_v.si).dims.size() == 1 &&
+            array_shape(prev_v.si).leaf == ViewKind::Flat;
+        const bool one_dimensional =
+            is_vector(prev_v.si) || is_row_vector(prev_v.si) || flat_1d_array;
+        if (s.lhs_idx.size() == 1 && is_range(s.lhs_idx[0]) &&
+            one_dimensional) {
           const StaticRange range =
               *static_range(s.lhs_idx[0], g.slots[prev].len);
           const int64_t lo = range.lo;
@@ -932,10 +940,12 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           sync_indexed_data_local(s.lhs, nv);
           return;
         }
-        // Scatter write x[idx] = rhs. The indices are data, so spell it as
-        // one element write each; repeats then resolve last-wins as CmdStan.
+        // Scatter write x[idx] = rhs on a 1-D value: the indices are data,
+        // so spell it as one element write each; repeats then resolve
+        // last-wins as CmdStan. A gather over a deeper base selects whole
+        // outer elements and resolves through the index geometry below.
         if (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexMulti" &&
-            !is_matrix(prev_v.si)) {
+            one_dimensional) {
           DataMap::Entry iv =
               eval_pure(s.lhs_idx[0].args[0], "a scatter index");
           if (!iv.is_int) fail("scatter index must be int data", s.raw);
@@ -1080,6 +1090,77 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
                                 g.slots[prev].len, out_si, {(int)a.off});
             propagate_int_update(nv, prev_v, rhs_v, a.off, 1);
+            scope[s.lhs] = nv;
+            sync_indexed_data_local(s.lhs, nv);
+            return;
+          }
+        }
+        // Any remaining static selection over a container base resolves
+        // through the shared index geometry: mixed ranges, gathers, and
+        // upfrom forms over deep and container-leaf arrays, and the
+        // one-index matrix row forms. The map enumerates destination cells
+        // in the graph's outer-major storage, the order the RHS stores its
+        // cells, so repeated gather indices keep CmdStan's last-write-wins.
+        if (!is_scalar(prev_v) && !all_single) {
+          const BuiltinArgumentShape shape = view_argument_shape(
+              prev_v.si, g.slots[prev].len, BuiltinArgumentKind::Real);
+          if (s.lhs_idx.size() <= shape.dimensions.size()) {
+            std::vector<std::vector<int64_t>> selected;
+            std::vector<bool> drops;
+            selected.reserve(s.lhs_idx.size());
+            drops.reserve(s.lhs_idx.size());
+            for (size_t d = 0; d < s.lhs_idx.size(); ++d) {
+              selected.push_back(index_positions(s.lhs_idx[d],
+                                                 shape.dimensions[d],
+                                                 "assignment index", s.raw));
+              drops.push_back(s.lhs_idx[d].name == "IndexSingle");
+            }
+            BuiltinIndexMap map;
+            try {
+              map = builtin_index_map(shape, selected, drops,
+                                      SliceStorageOrder::OuterMajor);
+            } catch (const std::invalid_argument& error) {
+              fail(std::string("unsupported indexed assignment: ") +
+                       error.what(),
+                   s.raw);
+            }
+            if (g.slots[rhs].len != map.count)
+              fail("indexed assignment size mismatch for " + s.lhs, s.raw);
+            Val nv = prev_v;
+            switch (map.kind) {
+              case BuiltinSliceMap::Kind::Contiguous:
+                nv = with_layout(emit_value(OP_SET_SLICE, {prev_v, rhs_v},
+                                            g.slots[prev].len, out_si,
+                                            {checked_immediate(
+                                                map.count == 0 ? 0 : map.offset,
+                                                "assignment offset")}),
+                                 owning_layout(out_si));
+                propagate_int_update(nv, prev_v, rhs_v, map.offset, 1);
+                break;
+              case BuiltinSliceMap::Kind::Strided:
+                nv = with_layout(
+                    emit_value(
+                        OP_SET_SLICE_STRIDED, {prev_v, rhs_v},
+                        g.slots[prev].len, out_si,
+                        {checked_immediate(map.offset, "assignment offset"),
+                         checked_immediate(map.stride, "assignment stride")}),
+                    owning_layout(out_si));
+                propagate_int_update(nv, prev_v, rhs_v, map.offset, map.stride);
+                break;
+              default:
+                for (int64_t k = 0; k < map.count; ++k) {
+                  const int cell = checked_immediate(map.gather[(size_t)k],
+                                                     "assignment cell");
+                  const Val el = emit_value(OP_INDEX, {rhs_v}, 1,
+                                            view_of("UReal"), {(int)k});
+                  const Val next =
+                      emit_value(OP_SET_INDEX, {nv, el}, g.slots[prev].len,
+                                 out_si, {cell});
+                  propagate_int_update(next, nv, el, map.gather[(size_t)k], 1);
+                  nv = next;
+                }
+                break;
+            }
             scope[s.lhs] = nv;
             sync_indexed_data_local(s.lhs, nv);
             return;

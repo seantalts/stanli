@@ -5,7 +5,7 @@
 // be replicated either: stan-math's <false> poisson_log_glm subtracts
 // lgamma(y+1) once for a scalar and once per row for an array, so the
 // gradients would be right and the lp a constant off CmdStan's. The
-// lowering refuses it by name; see docs/coverage.md.
+// the shared GLM payload retains the scalar-vs-array distinction.
 data {
   int<lower=1> N;
   int<lower=1> K;

@@ -1,6 +1,6 @@
 #include <stanli/callable_transform.hpp>
+#include <stanli/function_registry.hpp>
 #include <stanli/mir.hpp>
-#include <stanli/optable.hpp>
 
 #include "mir_reader_internal.hpp"
 
@@ -44,6 +44,14 @@ bool named(const Expr& e, std::initializer_list<const char*> names) {
 void validate_funapp_arity(const Expr& e) {
   if (e.fn_lib == Expr::Lib::UserDefined) return;
 
+  // A call matching a registered overload's arity is structurally sound.
+  // A registered name at another arity is not rejected here: some names have
+  // legitimate arities outside the registry (one-argument log_sum_exp's
+  // reduction, seven-argument wiener_lpdf's extension), so those fall
+  // through to the per-name rules below; a registered name matching no rule
+  // at all is rejected at the end of this function.
+  if (function_arity_registered(e.name, e.args.size())) return;
+
   if (named(e, {"IndexAll"})) {
     require_arity(e, 0);
     return;
@@ -69,163 +77,20 @@ void validate_funapp_arity(const Expr& e) {
     return;
   }
 
-// Keep these generated checks tied to the same registries that dispatch the
-// native lowering and interpreter kernels.
-#define STANLI_VALIDATE_UNARY(code, fn, value, delta, topology) \
-  if (e.name == #fn) {                                          \
-    require_arity(e, 1);                                        \
-    return;                                                     \
-  }
-  STANLI_SCALAR_UNARY_LIST(STANLI_VALIDATE_UNARY)
-#undef STANLI_VALIDATE_UNARY
-
-#define STANLI_VALIDATE_BINARY(code, fn, impl) \
-  if (e.name == #fn) {                         \
-    require_arity(e, 2);                       \
-    return;                                    \
-  }
-  STANLI_SCALAR_BINARY_LIST(STANLI_VALIDATE_BINARY)
-  STANLI_SCALAR_BINARY_INT_FIRST_LIST(STANLI_VALIDATE_BINARY)
-  STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_VALIDATE_BINARY)
-#undef STANLI_VALIDATE_BINARY
-
-#define STANLI_VALIDATE_DENSITY(code, fn, arity, tier) \
-  if (e.name == #fn) {                                 \
-    require_arity(e, arity);                           \
-    return;                                            \
-  }
-  STANLI_SCALAR_DENSITY_LIST(STANLI_VALIDATE_DENSITY)
-  STANLI_SCALAR_CDF_LIST(STANLI_VALIDATE_DENSITY)
-  STANLI_TAIL_CDF_LIST(STANLI_VALIDATE_DENSITY)
-#undef STANLI_VALIDATE_DENSITY
-
-#define STANLI_VALIDATE_INT_DENSITY(code, fn, real_arity, tier) \
-  if (e.name == #fn) {                                          \
-    require_arity(e, (real_arity) + 1);                         \
-    return;                                                     \
-  }
-  STANLI_INT_DENSITY_LIST(STANLI_VALIDATE_INT_DENSITY)
-  STANLI_INT_CDF_LIST(STANLI_VALIDATE_INT_DENSITY)
-  STANLI_TAIL_INT_CDF_LIST(STANLI_VALIDATE_INT_DENSITY)
-  STANLI_ORDERED_DENSITY_LIST(STANLI_VALIDATE_INT_DENSITY)
-#undef STANLI_VALIDATE_INT_DENSITY
-
-#define STANLI_VALIDATE_TWO_INT_CDF(code, fn, real_arity, tier) \
-  if (e.name == #fn) {                                          \
-    require_arity(e, (real_arity) + 2);                         \
-    return;                                                     \
-  }
-  STANLI_TWO_INT_CDF_LIST(STANLI_VALIDATE_TWO_INT_CDF)
-#undef STANLI_VALIDATE_TWO_INT_CDF
-
-  if (named(e, {"Plus__",
-                "Minus__",
-                "Times__",
-                "LDivide__",
-                "Divide__",
-                "EltTimes__",
-                "EltDivide__",
-                "Pow__",
-                "pow",
-                "Modulo__",
-                "IntDivide__",
-                "Greater__",
-                "Geq__",
-                "Less__",
-                "Leq__",
-                "Equals__",
-                "NEquals__",
-                "add",
-                "subtract",
-                "multiply",
-                "divide",
-                "elt_multiply",
-                "elt_divide",
-                "multiply_log",
-                "binomial_coefficient_log",
-                "dot_product",
-                "squared_distance",
-                "diag_pre_multiply",
-                "diag_post_multiply",
-                "quad_form_diag",
-                "quad_form_sym",
-                "append_array",
-                "mdivide_left",
-                "mdivide_right",
-                "mdivide_left_spd",
-                "mdivide_right_spd",
-                "mdivide_left_tri_low",
-                "mdivide_right_tri_low",
-                "append_row",
-                "append_col",
-                "rep_vector",
-                "rep_row_vector",
-                "col",
-                "row",
-                "head",
-                "tail"})) {
+  if (named(e, {"Modulo__", "diag_pre_multiply", "diag_post_multiply",
+                "quad_form_diag"})) {
     require_arity(e, 2);
     return;
   }
-  if (named(e, {"PMinus__",
-                "PPlus__",
-                "PNot__",
-                "minus",
-                "plus",
-                "exp",
-                "log",
-                "sqrt",
-                "square",
-                "inv",
-                "fabs",
-                "inv_logit",
-                "logit",
-                "log1m",
-                "tanh",
-                "cumulative_sum",
-                "softmax",
-                "log_softmax",
-                "mean",
-                "sd",
-                "sum",
-                "prod",
-                "dot_self",
-                "Transpose__",
-                "transpose",
-                "to_vector",
-                "to_row_vector",
-                "to_array_1d",
-                "rows",
-                "cols",
-                "size",
-                "num_elements",
-                "dims",
-                "multiply_lower_tri_self_transpose",
-                "diag_matrix",
-                "diagonal",
-                "cholesky_decompose",
-                "matrix_exp",
-                "eigenvalues_sym",
-                "eigenvectors_sym",
-                "categorical_rng",
-                "poisson_log_rng",
-                "bernoulli_rng",
-                "std_normal_qf",
-                "trigamma",
-                "is_nan",
-                "tcrossprod"})) {
+  if (named(e, {"PPlus__", "plus", "prod", "categorical_rng", "tcrossprod"})) {
     require_arity(e, 1);
     return;
   }
-  if (named(e, {"min", "max", "log_sum_exp"})) {
+  if (named(e, {"min", "max"})) {
     require_arity(e, 1, 2);
     return;
   }
-  if (e.name == "rep_matrix") {
-    require_arity(e, 2, 3);
-    return;
-  }
-  if (named(e, {"fma", "segment"})) {
+  if (e.name == "fma") {
     require_arity(e, 3);
     return;
   }
@@ -236,16 +101,6 @@ void validate_funapp_arity(const Expr& e) {
   if (named(e, {"gp_exp_quad_cov", "gp_matern32_cov", "gp_matern52_cov",
                 "gp_exponential_cov"})) {
     require_arity(e, 3, 4);
-    return;
-  }
-  if (e.name == "to_matrix") {
-    if (e.args.size() != 1 && e.args.size() != 3 && e.args.size() != 4)
-      malformed("to_matrix call: expected 1, 3, or 4 argument(s), got " +
-                std::to_string(e.args.size()));
-    return;
-  }
-  if (e.name == "sub_col") {
-    require_arity(e, 4);
     return;
   }
   if (e.name == "map_rect") {
@@ -264,66 +119,18 @@ void validate_funapp_arity(const Expr& e) {
     require_arity(e, 5, 8);
     return;
   }
-  if (e.name == "log_diff_exp") {
-    require_arity(e, 2);
-    return;
-  }
-  if (named(e, {"multi_normal_rng", "uniform_rng", "normal_rng",
-                "lognormal_rng", "binomial_rng"})) {
+  if (named(e, {"multi_normal_rng"})) {
     require_arity(e, 2);
     return;
   }
 
-  struct NamedArity {
-    const char* name;
-    size_t arity;
-  };
-  static constexpr NamedArity kManual[] = {
-      {"bernoulli_lpmf", 2},
-      {"bernoulli_logit_lpmf", 2},
-      {"poisson_lpmf", 2},
-      {"poisson_log_lpmf", 2},
-      {"categorical_lpmf", 2},
-      {"categorical_logit_lpmf", 2},
-      {"dirichlet_lpdf", 2},
-      {"lkj_corr_lpdf", 2},
-      {"lkj_corr_cholesky_lpdf", 2},
-      {"multinomial_lpmf", 2},
-      {"multinomial_logit_lpmf", 2},
-      {"dirichlet_multinomial_lpmf", 2},
-      {"neg_binomial_2_lpmf", 3},
-      {"binomial_lpmf", 3},
-      {"binomial_logit_lpmf", 3},
-      {"multi_normal_lpdf", 3},
-      {"multi_normal_prec_lpdf", 3},
-      {"multi_normal_cholesky_lpdf", 3},
-      {"multi_gp_lpdf", 3},
-      {"multi_gp_cholesky_lpdf", 3},
-      {"ordered_probit_lpmf", 3},
-      {"wishart_lpdf", 3},
-      {"inv_wishart_lpdf", 3},
-      {"wishart_cholesky_lpdf", 3},
-      {"inv_wishart_cholesky_lpdf", 3},
-      {"beta_binomial_lpmf", 4},
-      {"poisson_log_glm_lpmf", 4},
-      {"bernoulli_logit_glm_lpmf", 4},
-      {"lkj_cov_lpdf", 4},
-      {"multi_student_t_lpdf", 4},
-      {"multi_student_t_cholesky_lpdf", 4},
-      {"categorical_logit_glm_lpmf", 4},
-      {"ordered_logistic_glm_lpmf", 4},
-      {"hypergeometric_lpmf", 4},
-      {"discrete_range_lpmf", 3},
-      {"neg_binomial_2_log_glm_lpmf", 5},
-      {"binomial_logit_glm_lpmf", 5},
-      {"normal_id_glm_lpdf", 5},
-      {"gaussian_dlm_obs_lpdf", 7},
-  };
-  for (const NamedArity& item : kManual)
-    if (e.name == item.name) {
-      require_arity(e, item.arity);
-      return;
-    }
+  // Registered probability functions are validated through the registry
+  // above; gaussian_dlm_obs is the one density with a fixed arity that stays
+  // outside it (an op holds six inputs and it takes seven).
+  if (e.name == "gaussian_dlm_obs_lpdf") {
+    require_arity(e, 7);
+    return;
+  }
 
   // The language has both the original five-parameter Wiener density and
   // its seven-parameter extension. The current execution kernels implement
@@ -361,6 +168,13 @@ void validate_funapp_arity(const Expr& e) {
       malformed(e.name + " call: expected 7 or 10 argument(s), got " +
                 std::to_string(e.args.size()));
   }
+
+  // A registered name that matched neither a registry arity nor any per-name
+  // rule above carries a malformed argument vector; reject it here rather
+  // than letting it reach an unchecked args[k] in dispatch.
+  if (function_registered(e.name))
+    malformed(e.name + " call: no registered overload takes " +
+              std::to_string(e.args.size()) + " argument(s)");
 }
 
 std::string dump(const Node& n, size_t budget = 240) {
@@ -1125,12 +939,12 @@ void validate_expression(const Expr& e, const Bindings& bindings,
           binding->second.view.leaf != arg.unsized.leaf)
         throw std::runtime_error(
             "mir: categorical argument type disagrees with its binding");
-      // GQ is statically double even for a constrained-parameter read. In
-      // log_prob, though, DataOnly metadata on an AutoDiffable declaration is
-      // contradictory and must not be allowed to change propto semantics.
-      if (arg.data_only && !binding->second.declared_data_only)
-        throw std::runtime_error(
-            "mir: categorical argument adlevel disagrees with its binding");
+      // Do not compare adlevels here. stanc specializes an inlined user
+      // function to its caller: the declaration can retain the function's
+      // AutoDiffable type while a transformed-data or generated-quantities
+      // expression is correctly marked DataOnly. Execution derives activity
+      // from the actual binding (or the interpreter scalar type), just as it
+      // does for every other density.
     }
   }
   if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined) {

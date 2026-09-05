@@ -10,6 +10,7 @@
 // is what makes a broadcast scalar's adjoint accumulate in the same
 // order there and here.
 #include <stanli/graph.hpp>
+#include <stanli/builtin_registry.hpp>
 #include <stanli/optable.hpp>
 
 #include <stan/math.hpp>
@@ -107,6 +108,21 @@ STANLI_SCALAR_BINARY_LIST(STANLI_DEFINE_BINARY)
 // value that took a detour through arithmetic (a loop bound, a size)
 // landing on the integer it names.
 int as_int(double v) { return static_cast<int>(std::llround(v)); }
+
+void binary_integer_fwd(KernelCtx& ctx, uint16_t opcode) {
+  const bool s0 = ctx.in[0].len == 1, s1 = ctx.in[1].len == 1;
+  for (int64_t i = 0; i < ctx.out.len; ++i)
+    ctx.out.data[i] = static_cast<double>(evaluate_integer_binary_builtin(
+        opcode, as_int(ctx.in[0].data[s0 ? 0 : i]),
+        as_int(ctx.in[1].data[s1 ? 0 : i])));
+}
+
+void binary_integer_bwd(KernelCtx&) {}
+
+#define STANLI_DEFINE_BINARY_INTEGER(code, name, fn) \
+  void name##_2ifwd(KernelCtx& ctx) { binary_integer_fwd(ctx, code); }
+STANLI_SCALAR_BINARY_INTEGER_LIST(STANLI_DEFINE_BINARY_INTEGER)
+#undef STANLI_DEFINE_BINARY_INTEGER
 
 // Which lane of the int argument pairs with output lane i.
 //
@@ -213,6 +229,10 @@ void register_scalar_binary_kernels() {
   STANLI_SCALAR_BINARY_INT_FIRST_LIST(STANLI_REGISTER_BINARY)
   STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_REGISTER_BINARY)
 #undef STANLI_REGISTER_BINARY
+#define STANLI_REGISTER_INTEGER_BINARY(code, name, fn) \
+  register_kernel(code, Kernel{name##_2ifwd, binary_integer_bwd, nullptr});
+  STANLI_SCALAR_BINARY_INTEGER_LIST(STANLI_REGISTER_INTEGER_BINARY)
+#undef STANLI_REGISTER_INTEGER_BINARY
 }
 
 }  // namespace stanli
