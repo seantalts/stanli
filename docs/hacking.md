@@ -208,6 +208,34 @@ The tools you will reach for most:
   call also includes emitting the buffered profile rows.
 - [`dump_ops`](../tools/dump_ops.cpp): print the op list a model
   lowered to. Usually the first thing to look at.
+- `STANLI_DUMP_PASSES=<dir>`: an environment variable read by anything that
+  compiles a model. It writes the graph after every lowering pass to
+  `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
+  the input MIR as `00-mir.sexp`. Diff two consecutive files to see exactly
+  what one pass did. A pass that throws still leaves
+  `NN-<graph>-FAILED-after-<stage>.txt` with the graph it died on.
+
+  ```
+  STANLI_DUMP_PASSES=/tmp/d ./build/stanli_check model.stan data.json
+  diff /tmp/d/05-log_prob-constfold.txt /tmp/d/06-log_prob-reroll.txt
+  ```
+
+  `STANLI_DUMP_PASSES=-` writes to stdout instead, each dump bracketed by
+  `;; <graph>:<stage>` and `;; end <graph>:<stage>`. No printed op or header
+  line can begin with `;`, so a consumer can slice one stage back out.
+
+  `STANLI_DUMP_STAGES=<list>` narrows the selection to a comma-separated set;
+  unset or `all` is every stage. An entry is a bare stage name, which matches
+  that stage in every graph, or `graph:stage`, which matches one. The input
+  MIR is the stage `mir`. Sequence numbers still count the stages the filter
+  dropped, so `05-log_prob-constfold.txt` is `05` under any selection.
+  `stanli_check` takes the same two as `--dump-passes=<list>` and
+  `--dump-dir=<dir>`; without a directory it dumps to stdout.
+
+  ```
+  ./build/stanli_check model.stan data.json --dump-passes=log_prob:reroll
+  ```
+
 - [`dump_islands`](../tools/dump_islands.cpp): print every island's
   forward and adjoint programs, instruction by instruction.
 - [`verify_refs.py`](../tools/verify_refs.py): replay the whole model
@@ -629,7 +657,9 @@ For a live CmdStan column-name comparison, use `--wa-headers deps/cmdstan`.
 Both modes default to `build-rel/stanli_check`. For any
 performance claim, measure with `STANLI_PROFILE=1` before and after for
 evaluation work, or `STANLI_PROFILE_PREP=1` for compilation and binding;
-[`docs/benchmarks.md`](benchmarks.md) has the harnesses.
+[`docs/benchmarks.md`](benchmarks.md) has the harnesses. When the question is
+what a pass did rather than what it cost, `STANLI_DUMP_PASSES=<dir>` writes
+one graph dump per stage for diffing.
 
 ## Landing a change
 

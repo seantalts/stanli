@@ -7,6 +7,7 @@
 #include <stanli/dae.hpp>
 #include <stanli/higher_order_eval.hpp>
 #include <stanli/expression_layout.hpp>
+#include <stanli/graph_print.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/mir_message.hpp>
 #include <stanli/mir_prog.hpp>
@@ -30,6 +31,11 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 #include <array>
 #include <chrono>
 #include <functional>
@@ -247,6 +253,78 @@ struct PrepTrace {
     if (size_ >= rows_.size()) std::abort();
     return rows_[size_++];
   }
+};
+
+// STANLI_DUMP_PASSES=<dir>|-: one graph dump per lowering stage, to files or
+// to stdout. STANLI_DUMP_STAGES selects stages by bare name or graph:stage.
+// Separate from PrepTrace, which selects a different reroll implementation
+// when it is on.
+struct PassDumper {
+  PassDumper(const char* dir, const char* stages) : dir_(dir ? dir : "") {
+    if (stages && *stages) {
+      std::string_view rest(stages);
+      while (!rest.empty()) {
+        const size_t comma = rest.find(',');
+        const std::string_view one = rest.substr(0, comma);
+        if (!one.empty()) stages_.emplace_back(one);
+        rest = comma == std::string_view::npos ? std::string_view()
+                                               : rest.substr(comma + 1);
+      }
+    }
+    if (stages_.size() == 1 && stages_[0] == "all") stages_.clear();
+    if (dir_.empty() || to_stdout()) return;
+    for (size_t i = 1; i <= dir_.size(); ++i) {
+      if (i < dir_.size() && dir_[i] != '/' && dir_[i] != '\\') continue;
+      const std::string part = dir_.substr(0, i);
+#ifdef _WIN32
+      _mkdir(part.c_str());
+#else
+      ::mkdir(part.c_str(), 0777);
+#endif
+    }
+  }
+
+  bool enabled() const { return !dir_.empty(); }
+
+  bool selects(const std::string& label) const {
+    if (stages_.empty()) return true;
+    const size_t colon = label.find(':');
+    const std::string stage =
+        colon == std::string::npos ? label : label.substr(colon + 1);
+    for (const std::string& want : stages_)
+      if (want == label || want == stage) return true;
+    return false;
+  }
+
+  // The sequence number advances for every stage the lowering reaches, so a
+  // filtered run keeps the numbers an unfiltered one would have given.
+  void write(const std::string& label, const std::string& name,
+             const std::string& text, bool unfiltered = false) {
+    const int n = n_++;
+    if (!unfiltered && !selects(label)) return;
+    if (to_stdout()) {
+      std::printf(";; %s\n", label.c_str());
+      std::fwrite(text.data(), 1, text.size(), stdout);
+      if (!text.empty() && text.back() != '\n') std::fputc('\n', stdout);
+      std::printf(";; end %s\n", label.c_str());
+      std::fflush(stdout);
+      return;
+    }
+    char prefix[8];
+    std::snprintf(prefix, sizeof(prefix), "%02d-", n);
+    const std::string path = dir_ + "/" + prefix + name;
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return;
+    std::fwrite(text.data(), 1, text.size(), f);
+    std::fclose(f);
+  }
+
+ private:
+  bool to_stdout() const { return dir_ == "-"; }
+
+  std::string dir_;
+  std::vector<std::string> stages_;
+  int n_ = 0;
 };
 
 struct SlotInfo {
@@ -761,7 +839,10 @@ struct Lowering {
   const DataMap& data;
   std::shared_ptr<ShapeInterner> shape_pool;
   PrepTrace& prep;
+  PassDumper& dumper;
   const char* prep_graph;
+  const char* last_stage = "start";
+  std::vector<int> last_roots;
   // The MIR interpreter instance for everything DataOnly: prepare_data,
   // data-only conditions, size expressions. Its environment doubles as the
   // lowering's view of transformed data. Hooks route FnReadData to the
@@ -867,9 +948,52 @@ struct Lowering {
   }
 
   explicit Lowering(
-      const DataMap& d, PrepTrace& p, const char* graph_name,
+      const DataMap& d, PrepTrace& p, PassDumper& dump_to,
+      const char* graph_name,
       std::shared_ptr<ShapeInterner> pool = std::make_shared<ShapeInterner>())
-      : data(d), shape_pool(std::move(pool)), prep(p), prep_graph(graph_name) {}
+      : data(d),
+        shape_pool(std::move(pool)),
+        prep(p),
+        dumper(dump_to),
+        prep_graph(graph_name) {}
+
+  void dump_named(const std::string& label, const std::string& name,
+                  const std::vector<int>& roots, bool unfiltered) {
+    GraphPrintInfo info;
+    info.roots = roots;
+    info.target_terms = target_terms;
+    info.jac_slots = jac_slots;
+    for (const CompiledModel::ParamView& v : out.views)
+      info.views.emplace_back(v.name, v.slot);
+    info.fills = &out.fills;
+    std::string text;
+    print_graph(text, g, info);
+    dumper.write(label, name, text, unfiltered);
+  }
+
+  void dump(const char* stage, const std::vector<int>& roots) {
+    if (!dumper.enabled()) return;
+    dump_named(std::string(prep_graph) + ":" + stage,
+               std::string(prep_graph) + "-" + stage + ".txt", roots, false);
+    last_stage = stage;
+    last_roots = roots;
+  }
+
+  struct DumpOnThrow {
+    Lowering& lo;
+    bool done = false;
+    ~DumpOnThrow() {
+      if (done || !lo.dumper.enabled()) return;
+      try {
+        lo.dump_named(
+            std::string(lo.prep_graph) + ":FAILED-after-" + lo.last_stage,
+            std::string(lo.prep_graph) + "-FAILED-after-" + lo.last_stage +
+                ".txt",
+            lo.last_roots, true);
+      } catch (...) {
+      }
+    }
+  };
 
   void observe(const Val& v, DataMap::Entry en) {
     const int64_t len = g.slots[v.slot].len;
@@ -8686,6 +8810,7 @@ struct Lowering {
     int_env["emit_transformed_parameters__"] = 1;
     int_env["emit_generated_quantities__"] = 1;
     CompiledModel::WriteArray wa;
+    DumpOnThrow guard{*this};
     const auto lower_time = prep.start();
     try {
       for (const auto& s : p.generate_quantities) lower_stmt(s);
@@ -8701,16 +8826,19 @@ struct Lowering {
     prep.graph(prep_graph, "lower", lower_time, g, out.fills,
                target_terms.size(), out.views.size(),
                PrepTrace::Extra::Truncated, !wa.truncated.empty());
+    dump("lower", roots);
     const auto inplace_time = prep.start();
     const int inplace = make_inplace_updates(g, roots);
     prep.graph(prep_graph, "inplace", inplace_time, g, out.fills,
                target_terms.size(), out.views.size(),
                PrepTrace::Extra::Rewrites, inplace);
+    dump("inplace", roots);
     const auto forward_time = prep.start();
     const int forwarded = forward_stores_to_loads(g, roots);
     prep.graph(prep_graph, "store_forward", forward_time, g, out.fills,
                target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
                forwarded);
+    dump("store_forward", roots);
     const auto reroll_time = prep.start();
     RerollStats rerolled;
     detail::RerollDispositionStats reroll_dispositions;
@@ -8727,6 +8855,7 @@ struct Lowering {
                rerolled.regions, rerolled.list_steps, false, 0,
                rerolled.candidate_steps, rerolled.row_steps,
                &reroll_dispositions);
+    dump("reroll", roots);
     // Re-roll can replace many element writes with copying slice stores.
     // Give those new ops the same last-use proof as the scalar stores.
     const auto post_reroll_inplace_time = prep.start();
@@ -8735,6 +8864,7 @@ struct Lowering {
     prep.graph(prep_graph, "post_reroll_inplace", post_reroll_inplace_time, g,
                out.fills, target_terms.size(), out.views.size(),
                PrepTrace::Extra::Rewrites, post_reroll_inplace);
+    dump("post_reroll_inplace", roots);
     const auto finalize_time = prep.start();
     // Nothing reads a result here, but forward() asserts a scalar result
     // slot, so point it at one.
@@ -8742,9 +8872,11 @@ struct Lowering {
     wa.n_unconstrained = out.n_unconstrained;
     prep.graph(prep_graph, "finalize", finalize_time, g, out.fills,
                target_terms.size(), out.views.size());
+    dump("finalize", roots);
     prep.graph(prep_graph, "total", total_time, g, out.fills,
                target_terms.size(), out.views.size(), PrepTrace::Extra::None, 0,
                0, true, out.n_unconstrained);
+    guard.done = true;
     wa.graph = std::move(g);
     // A section stanc did not emit a guard for (or one lowering stopped
     // short of) has no columns of its own: it starts where the CSV ends.
@@ -8759,16 +8891,19 @@ struct Lowering {
   }
 
   CompiledModel run(const mir::Program& p) {
+    DumpOnThrow guard{*this};
     const auto total_time = prep.start();
     for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
     const auto bind_time = prep.start();
     bind_data(p);
     prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
                target_terms.size(), out.views.size());
+    dump("bind_data", {});
     const auto lower_time = prep.start();
     for (const auto& s : p.log_prob) lower_stmt(s);
     prep.graph(prep_graph, "lower", lower_time, g, out.fills,
                target_terms.size(), out.views.size());
+    dump("lower", {});
     // Jacobian terms and constrained-parameter views are read straight out
     // of the arena, so no op consumes them and the pass cannot infer them.
     std::vector<int> roots = jac_slots;
@@ -8784,6 +8919,7 @@ struct Lowering {
     prep.graph(prep_graph, "inplace", inplace_time, g, out.fills,
                target_terms.size(), out.views.size(),
                PrepTrace::Extra::Rewrites, inplace);
+    dump("inplace", update_roots);
     // Deleting the write/read-back pairs first is what leaves a plain
     // arithmetic lane for reroll to vectorize.
     const auto forward_time = prep.start();
@@ -8791,6 +8927,7 @@ struct Lowering {
     prep.graph(prep_graph, "store_forward", forward_time, g, out.fills,
                target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
                forwarded);
+    dump("store_forward", update_roots);
     // After the update chains collapse, so a data-only chain is one slot
     // rather than N; before reroll, so the lanes it sees have data operands.
     const auto constfold_time = prep.start();
@@ -8799,6 +8936,7 @@ struct Lowering {
                target_terms.size(), out.views.size(),
                PrepTrace::Extra::ConstFold, constfolded.ops_removed,
                constfolded.slots_folded);
+    dump("constfold", update_roots);
     const auto reroll_time = prep.start();
     RerollStats rerolled;
     detail::RerollDispositionStats reroll_dispositions;
@@ -8815,6 +8953,7 @@ struct Lowering {
                rerolled.regions, rerolled.list_steps, false, 0,
                rerolled.candidate_steps, rerolled.row_steps,
                &reroll_dispositions);
+    dump("reroll", roots);
     // Target terms may have been replaced by vector reductions, so rebuild
     // the implicit-root set before considering the slice stores reroll made.
     std::vector<int> post_reroll_roots = roots;
@@ -8826,6 +8965,7 @@ struct Lowering {
     prep.graph(prep_graph, "post_reroll_inplace", post_reroll_inplace_time, g,
                out.fills, target_terms.size(), out.views.size(),
                PrepTrace::Extra::Rewrites, post_reroll_inplace);
+    dump("post_reroll_inplace", post_reroll_roots);
     // After re-roll, which keeps first crack at the contiguous shapes it
     // already handles, and before CSE, which would merge ops shared between
     // lanes and leave the lanes no longer whole.
@@ -8836,6 +8976,7 @@ struct Lowering {
                target_terms.size(), out.views.size(),
                PrepTrace::Extra::Partition, parted.groups, parted.lanes, false,
                0, parted.declined, parted.list_steps);
+    dump("partition", roots);
     // Same proof the slice stores re-roll makes get: rebuilt from the terms
     // partition just replaced.
     std::vector<int> post_partition_roots = roots;
@@ -8848,6 +8989,7 @@ struct Lowering {
                post_partition_inplace_time, g, out.fills, target_terms.size(),
                out.views.size(), PrepTrace::Extra::Rewrites,
                post_partition_inplace);
+    dump("post_partition_inplace", post_partition_roots);
     // After every pass that emits a slice store, and before islands, whose
     // bodies name outer slots in a payload this rename cannot reach.
     const auto elide_time = prep.start();
@@ -8855,6 +8997,7 @@ struct Lowering {
     prep.graph(prep_graph, "elide_stores", elide_time, g, out.fills,
                target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
                elided);
+    dump("elide_stores", post_partition_roots);
     // After reroll, whose lane matching needs the repeated ops it hoists to
     // still be there, and before islands, so they compile the smaller
     // residue.
@@ -8862,6 +9005,7 @@ struct Lowering {
     const CseStats cse_st = cse(g, out.fills, target_terms, roots);
     prep.graph(prep_graph, "cse", cse_time, g, out.fills, target_terms.size(),
                out.views.size(), PrepTrace::Extra::Removed, cse_st.ops_removed);
+    dump("cse", roots);
     // LAST, after every other pass has had first crack: compile whatever
     // scalar residue survives (recurrences the re-roll can never widen)
     // into island ops. Off under STANLI_NO_ISLAND.
@@ -8870,15 +9014,18 @@ struct Lowering {
     prep.graph(prep_graph, "island", island_time, g, out.fills,
                target_terms.size(), out.views.size(), PrepTrace::Extra::Regions,
                islands);
+    dump("island", roots);
     const auto reduce_time = prep.start();
     std::vector<int> all = target_terms;
     all.insert(all.end(), jac_slots.begin(), jac_slots.end());
     g.result_slot = reduce_terms(all);
     prep.graph(prep_graph, "reduce", reduce_time, g, out.fills,
                target_terms.size(), out.views.size());
+    dump("reduce", roots);
     prep.graph(prep_graph, "total", total_time, g, out.fills,
                target_terms.size(), out.views.size(), PrepTrace::Extra::None, 0,
                0, true, out.n_unconstrained);
+    guard.done = true;
     out.graph = std::move(g);
     return std::move(out);
   }
@@ -8889,6 +9036,9 @@ struct Lowering {
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data) {
   const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
   PrepTrace prep(prep_env && prep_env[0] != '0');
+  PassDumper dumper(std::getenv("STANLI_DUMP_PASSES"),
+                    std::getenv("STANLI_DUMP_STAGES"));
+  if (dumper.enabled()) dumper.write("mir", "mir.sexp", mir_text);
   const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,
   // keeps the generate_quantities statements and UDF bodies alive for the
@@ -8897,13 +9047,13 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data) {
   auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
              static_cast<int64_t>(mir_text.size()));
-  Lowering lo(data, prep, "log_prob");
+  Lowering lo(data, prep, dumper, "log_prob");
   CompiledModel cm = lo.run(*prog);
   if (!prog->generate_quantities.empty()) {
     // A second lowering, over the transformed data the first one already
     // interpreted: re-running prepare_data would double preparation time on
     // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
-    Lowering wa(data, prep, "write_array", lo.shape_pool);
+    Lowering wa(data, prep, dumper, "write_array", lo.shape_pool);
     const auto env_copy_time = prep.start();
     wa.td.env() = lo.td.env();
     wa.int_env = lo.int_env_data;
