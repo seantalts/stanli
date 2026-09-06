@@ -24,6 +24,7 @@ jobs:
       # Stanli release fail. Refresh this together with the test if stanr
       # changes its vendoring or backend contract.
       STANR_REF: d1269a22d28215b9d8599a1c62636a0af5cb2c0b
+      STANR_REPOSITORY: https://github.com/seantalts/stanr.git
       MAKEFLAGS: -j2
       TESTTHAT_CPUS: 2
     steps:
