@@ -46,6 +46,12 @@ web/stanli.mjs
 # rather than committed, for the same reason the wasm is.
 web/models/
 *.tgz
+# tools/browser_smoke.mjs resolves Playwright and the published tarball
+# from the checkout (see tools/browser_smoke.mjs for the fetch commands).
+# No trailing slash on node_modules: it is often symlinked in from
+# elsewhere rather than installed, and a `dir/` rule does not match that.
+node_modules
+bundle/
 r/src/*.o
 r/src/*.so
 r/src/*.dll
