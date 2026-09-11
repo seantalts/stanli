@@ -60,16 +60,20 @@ mkdir -p "$cmdstan_dir/bin"
 # Both sides of the differential compile with the identical frontend:
 # CmdStan gets the same source-built stanc that stanli lowers through,
 # in place of whatever make/stanc would download.
-cp "$stanc_pinned" "$cmdstan_dir/bin/stanc"
-
+stanc_suffix=""
 case "$(uname -s)" in
   Darwin) tbb_target=stan/lib/stan_math/lib/tbb/libtbb.dylib ;;
   Linux) tbb_target=stan/lib/stan_math/lib/tbb/libtbb.so.2 ;;
+  MINGW*|MSYS*|CYGWIN*)
+    stanc_suffix=.exe
+    tbb_target=stan/lib/stan_math/lib/tbb/tbb.dll
+    ;;
   *)
-    echo "Automatic TBB setup currently supports Linux and macOS." >&2
+    echo "Automatic TBB setup supports Linux, macOS and Windows." >&2
     exit 1
     ;;
 esac
+cp "$stanc_pinned" "$cmdstan_dir/bin/stanc$stanc_suffix"
 make -C "$cmdstan_dir" "$tbb_target"
 
 echo "CmdStan conformance reference ready at $cmdstan_dir"

@@ -722,6 +722,7 @@ template <bool Profile>
 struct OracleRhs {
   const BenchCase* benchmark;
   OracleCallbackProfile* profile;
+  mutable stanli::RhsWorkspace workspace;
 
   template <typename T_y, typename T_theta>
   Eigen::Matrix<stan::return_type_t<T_y, T_theta>, Eigen::Dynamic, 1>
@@ -734,7 +735,8 @@ struct OracleRhs {
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(
         static_cast<Eigen::Index>(benchmark->ode.prog.out_regs.size()));
     stanli::run_rhs_into<T>(benchmark->ode.prog, t, y.data(), theta.data(),
-                            theta.size(), x_r.data(), out.data());
+                            theta.size(), x_r.data(), out.data(),
+                            workspace.get<T>());
     if constexpr (Profile) {
       if constexpr (std::is_same_v<T, double>) {
         ++profile->double_calls;
@@ -942,9 +944,10 @@ LocalRhsResult local_reverse_result(const BenchCase& benchmark, double t) {
   for (double value : benchmark.theta) theta.emplace_back(value);
 
   std::vector<var> output(benchmark.ode.prog.out_regs.size());
+  std::vector<var> rhs_registers;
   stanli::run_rhs_into<var>(benchmark.ode.prog, t, y.data(), theta.data(),
                             theta.size(), benchmark.ode.x_r.data(),
-                            output.data());
+                            output.data(), rhs_registers);
   LocalRhsResult result;
   result.values.resize(output.size());
   const size_t width = y.size() + theta.size();

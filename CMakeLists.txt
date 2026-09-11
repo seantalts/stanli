@@ -420,7 +420,21 @@ function(stanli_embed_stanc TGT)
       runtime/src/stanc_embed_c.cpp ${STANLI_STANC_EMBED_OBJ})
     target_include_directories(${TGT} PRIVATE ${STANLI_OCAML_STDLIB})
     target_compile_definitions(${TGT} PRIVATE STANLI_EMBED_STANC)
-    target_link_libraries(${TGT} PRIVATE dl pthread)
+    target_link_libraries(${TGT} PRIVATE ${CMAKE_DL_LIBS} pthread)
+    if(WIN32)
+      target_link_options(${TGT} PRIVATE -static)
+      target_compile_definitions(${TGT} PRIVATE CAMLDLLIMPORT=)
+      execute_process(
+        COMMAND "${STANLI_OCAML_STDLIB}/../../bin/ocamlopt.exe"
+                -config-var native_c_libraries
+        OUTPUT_VARIABLE _ocaml_libraries OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _ocaml_config_result)
+      if(NOT _ocaml_config_result EQUAL 0)
+        message(FATAL_ERROR "Could not read OCaml's native link libraries")
+      endif()
+      separate_arguments(_ocaml_libraries NATIVE_COMMAND "${_ocaml_libraries}")
+      target_link_libraries(${TGT} PRIVATE ${_ocaml_libraries})
+    endif()
   endif()
 endfunction()
 stanli_embed_stanc(stanli_shared)
@@ -714,6 +728,17 @@ function(stanli_add_test NAME)
   target_link_libraries(${NAME} PRIVATE ${STANLI_TEST_RUNTIME_TARGET})
   if(STANLI_FAST_TEST_TUS)
     stanli_configure_test_tu(${NAME})
+  endif()
+  if(MINGW AND CMAKE_BUILD_TYPE MATCHES "^(Debug|RelWithDebInfo)$")
+    # Large DWARF sections can make Windows reject the test executable.
+    # Keep full debug information in a sidecar that GDB can discover.
+    add_custom_command(TARGET ${NAME} POST_BUILD
+      COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
+              "$<TARGET_FILE:${NAME}>" "$<TARGET_FILE:${NAME}>.debug"
+      COMMAND "${CMAKE_OBJCOPY}" --strip-debug
+              "--add-gnu-debuglink=$<TARGET_FILE:${NAME}>.debug"
+              "$<TARGET_FILE:${NAME}>"
+      VERBATIM)
   endif()
   # Tests run from the repo root so fixture paths are stable.
   add_test(NAME ${NAME} COMMAND ${NAME}

@@ -4,23 +4,38 @@
 
 namespace stanli {
 
-ExecutorPool::Lease ExecutorPool::acquire() {
-  // stan-math REQUIRES an autodiff stack on every thread that builds a
-  // nested tape, and under STAN_THREADS the pointer to it is thread_local
-  // and starts null. CmdStan never writes this because TBB's
-  // scheduler-entry hook does it for every worker, and this build stubs
-  // TBB out; nuts.cpp does it explicitly for the chain threads it starts
-  // itself. Here the threads belong to the CALLER -- a sampler embedding
-  // the runtime -- so the pool is the only place that can.
-  //
-  // Constructing one on a thread that already has a stack is a no-op:
-  // AutodiffStackSingleton::init() hands ownership to the first
-  // constructor on the thread and returns false to every later one, whose
-  // destructor then leaves the stack alone. So this is safe on the main
-  // thread too. Destroyed when the thread exits, which is the only point
-  // at which freeing the tape is correct.
-  static thread_local stan::math::ChainableStack ad_tape_for_this_thread;
+// Only the non-owning pointer is TLS. The last lease destroys the tape while
+// its calling thread is still running, including when leases overlap or move.
+struct ExecutorPool::Tape {
+  stan::math::ChainableStack stack;
+  size_t leases = 0;
 
+  static Tape*& current() {
+    static thread_local Tape* tape = nullptr;
+    return tape;
+  }
+};
+
+ExecutorPool::Lease::Lease(ExecutorPool& pool, std::unique_ptr<Executor> ex)
+    : pool_(&pool), ex_(std::move(ex)), tape_(Tape::current()) {
+  if (!tape_) Tape::current() = tape_ = new Tape;
+  ++tape_->leases;
+}
+
+ExecutorPool::Lease::Lease(Lease&& other) noexcept
+    : pool_(other.pool_), ex_(std::move(other.ex_)), tape_(other.tape_) {
+  other.tape_ = nullptr;
+}
+
+ExecutorPool::Lease::~Lease() {
+  if (ex_) pool_->give_back(std::move(ex_));
+  if (tape_ && --tape_->leases == 0) {
+    Tape::current() = nullptr;
+    delete tape_;
+  }
+}
+
+ExecutorPool::Lease ExecutorPool::acquire() {
   std::unique_ptr<Executor> ex;
   {
     std::lock_guard<std::mutex> lock(mu_);

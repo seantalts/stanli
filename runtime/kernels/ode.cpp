@@ -49,6 +49,7 @@ using stan::math::var;
 // one, the MIR interpreter when there is not.
 struct MirRhs {
   const OdeSpec* spec;
+  mutable RhsWorkspace workspace;
 
   template <typename T_y, typename T_param>
   std::vector<stan::return_type_t<T_y, T_param>> eval(
@@ -61,7 +62,8 @@ struct MirRhs {
       // theta.size(), rather than prog.n_th, retains promotion of lowering's
       // unread no-parameter placeholder in the old tape position.
       std::vector<T> out;
-      run_rhs<T>(spec->prog, t, y, theta.data(), theta.size(), x_r.data(), out);
+      run_rhs<T>(spec->prog, t, y, theta.data(), theta.size(), x_r.data(), out,
+                 workspace.get<T>());
       return out;
     }
     // Preserve the interpreter adapter exactly. The modern caller used to
@@ -117,6 +119,7 @@ struct MirRhs {
 // into the right-hand side's declared parameters.
 struct VarRhs {
   const OdeSpec* spec;
+  mutable RhsWorkspace workspace;
 
   template <typename T_y, typename T_param>
   Eigen::Matrix<stan::return_type_t<T_y, T_param>, Eigen::Dynamic, 1>
@@ -132,7 +135,7 @@ struct VarRhs {
       // return object. The vector-returning MirRhs entry remains the exact
       // interpreter fallback and compatibility path.
       run_rhs_into<T>(spec->prog, t, y.data(), theta.data(), theta.size(),
-                      x_r.data(), out.data());
+                      x_r.data(), out.data(), workspace.get<T>());
       return out;
     }
     const std::vector<T> dy =
@@ -218,10 +221,8 @@ std::vector<std::vector<stan::return_type_t<T_y0, T_theta, T_t0, T_ts>>> solve(
   return out;
 }
 
-// Mutable storage for the direct RK callback. It is deliberately per thread,
-// not part of OdeSpec: executors share the immutable spec and may run in
-// parallel. An ODE RHS cannot itself solve an ODE, so the same non-reentrant
-// contract as rhs_regs<T>() lets successive solves reuse every allocation.
+// Mutable storage owned by one direct solve and reused by its RK callbacks.
+// OdeSpec stays immutable and can be shared by concurrent solves.
 struct DirectRkWorkspace {
   std::vector<double> values;
   std::vector<double> adjoints;
@@ -231,11 +232,6 @@ struct DirectRkWorkspace {
   std::vector<double> state;
   std::vector<double> times;
 };
-
-DirectRkWorkspace& direct_rk_workspace() {
-  static thread_local DirectRkWorkspace workspace;
-  return workspace;
-}
 
 // Evaluate f, J_y and (when needed) J_theta without constructing a nested
 // autodiff tape. The immutable payload is a clone of the canonical RHS with
@@ -440,7 +436,7 @@ void solve_direct_rk(KernelCtx& ctx, const OdeSpec& spec) {
   if ((size_t)ctx.out.len != spec.ts.size() * states)
     throw std::runtime_error("OP_ODE output shape does not match solve times");
 
-  DirectRkWorkspace& workspace = direct_rk_workspace();
+  DirectRkWorkspace workspace;
   workspace.state.assign(coupled_size, 0.0);
   for (size_t i = 0; i < states; ++i) workspace.state[i] = ctx.in[0].data[i];
   if constexpr (YAutodiff)

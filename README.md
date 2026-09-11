@@ -356,7 +356,7 @@ python3 -m http.server -d web     # then open http://localhost:8000
 
 ## Build
 
-Developer C/C++ builds should use a C++17 Clang toolchain (`clang` and
+Linux/macOS developer C/C++ builds use a C++17 Clang toolchain (`clang` and
 `clang++`) to match pull-request validation. The shipped Linux and Windows
 release wheels retain their established GCC toolchains, while macOS uses
 AppleClang. Other GNU libraries and tools may remain installed for auxiliary
@@ -371,6 +371,12 @@ One-shot setup (fetches pinned deps, builds, runs tests):
 ./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
 ./tools/dev_setup.sh --all
 ```
+
+On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
+Setup reuses the installation providing `pacman` on `PATH`, or checks
+`C:/msys64` and installs `MSYS2.MSYS2` with winget if absent. It prepends
+the UCRT64 directories on x86_64 or CLANGARM64 directories on ARM64 to `PATH`.
+Pacman provides Git, Python, make, Clang and CMake; missing opam uses winget.
 
 `--conformance` is what makes the differential Stan language sweep runnable
 here rather than only in the nightly; see

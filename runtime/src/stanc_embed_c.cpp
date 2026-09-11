@@ -27,8 +27,8 @@ std::mutex compile_mutex;
 thread_local bool startup_thread = false;
 
 void start_ocaml() {
-  static char arg0[] = "stanli";
-  static char* argv[] = {arg0, nullptr};
+  static char_os arg0[] = {'s', 't', 'a', 'n', 'l', 'i', '\0'};
+  static char_os* argv[] = {arg0, nullptr};
   caml_startup(argv);
   startup_thread = true;
 

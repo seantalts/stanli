@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -49,7 +50,7 @@ static std::vector<double> run_grad(Graph g, const Fills& fills) {
   return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
-// The island kernel reuses its thread-local compact adjoint file. Running the
+// The island kernel reuses its executor-owned compact adjoint file. Running the
 // same executor twice catches a stale cell beyond the shortened zeroed range.
 static std::vector<double> run_grad_twice(Graph g, const Fills& fills) {
   Executor ex(std::move(g));
@@ -83,9 +84,7 @@ static std::string slurp(const std::string& path) {
 // not run -- and the live-out harvest reads them regardless. Before the
 // prologue fill (mir_prog.hpp) the backward's var replay read a register
 // file no one had written and dereferenced a null vari: SIGSEGV, not a
-// wrong number. Runs first so the replay's thread_local register file is
-// still empty, which is the state that makes that a null rather than a
-// vari from an already-recovered nested tape.
+// wrong number. Each replay now starts with an empty register file.
 static void test_branch_bound_live_out() {
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/branchudf.tmir.sexp"), DataMap());
@@ -1479,7 +1478,34 @@ static void test_while_lpmf_region_matches_flat() {
   }
 }
 
+// Exercise both island buffer paths on short-lived workers, sharing graph
+// payloads while each executor owns its scratch and each replay owns its vars.
+static void test_worker_lifetimes() {
+  for (bool native : {false, true}) {
+    const Graph graph = build_packed_live_ins(native);
+    std::vector<int> ok(4, 1);
+    std::vector<std::thread> workers;
+    for (int t = 0; t < 4; ++t) {
+      workers.emplace_back([&, t] {
+        stan::math::ChainableStack tape;
+        Executor ex(graph);
+        for (int repeat = 0; repeat < 6; ++repeat) {
+          for (int64_t i = 0; i < ex.n_params(); ++i)
+            ex.params_data()[i] = t + repeat + 1;
+          std::vector<double> grad((size_t)ex.n_params());
+          const double value = ex.gradient(grad.data());
+          ok[t] &= value == 7.0 * (t + repeat + 1);
+          for (double derivative : grad) ok[t] &= derivative == 1.0;
+        }
+      });
+    }
+    for (auto& worker : workers) worker.join();
+    for (int result : ok) expect("island worker values and gradients", result);
+  }
+}
+
 int main() {
+  test_worker_lifetimes();
   // What the compiler does with a region, on graphs small enough to
   // reason about. The cost estimate would refuse most of them -- it is
   // policy, tested separately below, and these are about correctness.

@@ -9,9 +9,11 @@
 #   tools/dev_setup.sh --all         everything
 #   tools/dev_setup.sh --no-build    stop before cmake (CI builds separately)
 #
-# Core needs: git, curl, python3, and opam (the OCaml 5.5.0 switch for the
+# Core needs: git, curl, python, and opam (the OCaml 5.5.0 switch for the
 # pinned stanc is built automatically). The default C++ build additionally
-# needs CMake plus C++17 clang and clang++; --no-build needs neither.
+# needs CMake plus clang/clang++. Windows uses MSYS2's UCRT64 libraries on
+# x86_64 and CLANGARM64 on ARM64.
+# Windows: run from Git Bash or MSYS2 Bash; setup uses winget and pacman.
 # --corpus adds: ~2 GB of checkouts under deps/ and a CmdStan build.
 # --conformance adds: the pinned CmdStan/BridgeStan pair and a venv
 #   holding the version-pinned reference client. It reuses the same
@@ -43,7 +45,7 @@ for arg in "$@"; do
     --conformance) WANT_CONFORMANCE=1 ;;
     --all) WANT_EMBED=1; WANT_CORPUS=1; WANT_CONFORMANCE=1 ;;
     --no-build) WANT_BUILD=0 ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -/{ /^set -/d; p; }' tools/dev_setup.sh; exit 0 ;;
     *) echo "unknown flag: $arg (try --help)"; exit 2 ;;
   esac
 done
@@ -52,71 +54,59 @@ done
 # host's. Two reasons, and the second is the one that bites: requirements.txt
 # pins bridgestan and numpy exactly, for the same reason both sides of the
 # differential share one stanc; and the harness reads TOML through tomllib,
-# which arrived in 3.11, so on an older system python3 the driver does not
+# which arrived in 3.11, so on an older system python the driver does not
 # start at all. Relative to the repo root, which is where every command in
 # this script and in the conformance README runs from.
 CONFORMANCE_VENV=${CONFORMANCE_VENV:-.venv-conformance}
+VENV_PYTHON="$CONFORMANCE_VENV/bin/python"
 
 step() { printf '\n== %s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# When requested, the CMake build must use Clang. Allow callers to select a
-# versioned or otherwise explicitly located Clang, but do not silently accept
-# GCC through CC/CXX: that would leave a misleadingly configured build tree.
-is_clang() {
-  have "$1" && "$1" --version 2>/dev/null | grep -qi clang
-}
-
-if [ "$WANT_BUILD" = 1 ]; then
-  if [ -n "${CC+x}" ] && ! is_clang "$CC"; then
-    echo "CC must name a Clang compiler (for example clang or clang-18)" >&2
-    exit 1
-  fi
-  if [ -n "${CXX+x}" ] && ! is_clang "$CXX"; then
-    echo "CXX must name a Clang compiler (for example clang++ or clang++-18)" >&2
-    exit 1
-  fi
-fi
-CLANG_C=${CC:-clang}
-CLANG_CXX=${CXX:-clang++}
-
 # --- host prerequisites ----------------------------------------------------
 step "checking prerequisites"
-missing=()
-for tool in git curl python3; do
-  have "$tool" || missing+=("$tool")
-done
-if [ "$WANT_BUILD" = 1 ]; then
-  have cmake || missing+=(cmake)
-  is_clang "$CLANG_C" || missing+=("$CLANG_C (Clang C compiler)")
-  is_clang "$CLANG_CXX" || missing+=("$CLANG_CXX (Clang C++ compiler)")
-fi
-have opam || missing+=(opam)
-if [ ${#missing[@]} -gt 0 ]; then
-  if have brew; then
-    echo "installing via homebrew: ${missing[*]}"
-    for tool in "${missing[@]}"; do
-      case "$tool" in
-        cmake|opam|git|curl) brew install "$tool" ;;
-        *) echo "install manually: $tool"; exit 1 ;;
-      esac
+EXE_SUFFIX=""
+CMAKE_FLAGS=(
+  "-DCMAKE_C_COMPILER=${CC:-clang}"
+  "-DCMAKE_CXX_COMPILER=${CXX:-clang++}"
+)
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    EXE_SUFFIX=.exe
+    CMAKE_FLAGS+=(-G "MSYS Makefiles")
+    source tools/dev_setup_windows.sh
+    ;;
+  *)
+    # Unix developer builds use Clang to match pull-request validation.
+    is_clang() {
+      have "$1" && "$1" --version 2>/dev/null | grep -qi clang
+    }
+    missing=()
+    for tool in git curl python opam; do
+      have "$tool" || missing+=("$tool")
     done
-  else
-    echo "missing: ${missing[*]}"
-    echo "install them (apt: sudo apt install ${missing[*]}) and re-run."
-    exit 1
-  fi
-fi
-if [ "$WANT_BUILD" = 1 ] &&
-   { ! is_clang "$CLANG_C" || ! is_clang "$CLANG_CXX"; }; then
-  echo "clang and clang++ are required for stanli C/C++ builds" >&2
-  exit 1
-fi
-if [ "$WANT_BUILD" = 1 ]; then
-  echo "ok: git curl cmake python3 opam and Clang C/C++ compilers present"
-else
-  echo "ok: git curl python3 and opam present (--no-build skips CMake/Clang)"
-fi
+    if [ "$WANT_BUILD" = 1 ]; then
+      have cmake || missing+=(cmake)
+      is_clang "${CC:-clang}" || missing+=("${CC:-clang} (Clang C compiler)")
+      is_clang "${CXX:-clang++}" || missing+=("${CXX:-clang++} (Clang C++ compiler)")
+    fi
+    if [ ${#missing[@]} -gt 0 ]; then
+      if have brew; then
+        echo "installing via homebrew: ${missing[*]}"
+        for tool in "${missing[@]}"; do
+          case "$tool" in
+            cmake|opam|git|curl) brew install "$tool" ;;
+            *) echo "install manually: $tool"; exit 1 ;;
+          esac
+        done
+      else
+        echo "missing: ${missing[*]}"
+        echo "install them (apt: sudo apt install ${missing[*]}) and re-run."
+        exit 1
+      fi
+    fi
+    ;;
+esac
 
 # --- vendored headers -------------------------------------------------------
 step "fetching pinned deps (Stan Math and Stan)"
@@ -132,17 +122,17 @@ step "stanc3 executable from source at $STANC3_SRC_SHA"
 if [ "$WANT_EMBED" = 1 ] &&
    { [ "$(git -C deps/stanc3-src rev-parse HEAD 2>/dev/null || true)" != \
        "$STANC3_SRC_SHA" ] ||
-     ! opam switch list --short 2>/dev/null | grep -qx "$OPAM_SWITCH"; }; then
+     ! opam switch list --color=never --short 2>/dev/null | tr -d '\r' | grep -qx "$OPAM_SWITCH"; }; then
   rm -f deps/stanc3/stanc-pinned deps/stanc3/stanc-pinned.src
 fi
 ./harnesses/conformance/build_stanc.sh "$OPAM_SWITCH"
-install -m 755 deps/stanc3/stanc-pinned deps/stanc3/stanc
+install -m 755 deps/stanc3/stanc-pinned "deps/stanc3/stanc$EXE_SUFFIX"
 cp deps/stanc3/stanc-pinned.src deps/stanc3/stanc.src
 [ "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA" ] || {
   echo "stanc3 provenance does not match STANC3_SRC_SHA" >&2
   exit 1
 }
-./deps/stanc3/stanc --version
+"./deps/stanc3/stanc$EXE_SUFFIX" --version
 
 # --- embedded stanc3 (optional) --------------------------------------------
 if [ "$WANT_EMBED" = 1 ]; then
@@ -164,7 +154,7 @@ if [ "$WANT_BUILD" = 1 ]; then
   step "configuring and building with $BUILD_JOBS jobs (build/ dev, build-rel/ benchmarks)"
   EMBED_FLAGS=()
   if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
-       "$STANC3_SRC_SHA" && have opam; then
+       "$STANC3_SRC_SHA"; then
     EMBED_FLAGS=(
       "-DSTANLI_STANC_EMBED_OBJ=$REPO/deps/stanc3/stanc_embed.o"
       "-DSTANLI_OCAML_STDLIB=$(opam var --switch="$OPAM_SWITCH" lib 2>/dev/null)/ocaml"
@@ -173,11 +163,11 @@ if [ "$WANT_BUILD" = 1 ]; then
     echo "ignoring embedded object with absent or mismatched provenance" >&2
   fi
   cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_C_COMPILER="$CLANG_C" -DCMAKE_CXX_COMPILER="$CLANG_CXX" \
+    "${CMAKE_FLAGS[@]}" \
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
   cmake --build build --parallel "$BUILD_JOBS"
   cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER="$CLANG_C" -DCMAKE_CXX_COMPILER="$CLANG_CXX"
+    "${CMAKE_FLAGS[@]}"
   cmake --build build-rel --parallel "$BUILD_JOBS" \
     --target bench_grad stanli_run
 
@@ -205,7 +195,8 @@ if [ "$WANT_CORPUS" = 1 ]; then
   git -C deps/cmdstan submodule update --init --recursive --quiet
 
   if [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/libtbb.dylib ] &&
-     [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/libtbb.so.2 ]; then
+     [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/libtbb.so.2 ] &&
+     [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/tbb.dll ]; then
     step "building CmdStan (one-time; provides TBB + the bench comparator)"
     make -C deps/cmdstan -j"$BUILD_JOBS" build
   else
@@ -213,7 +204,7 @@ if [ "$WANT_CORPUS" = 1 ]; then
   fi
 
   step "corpus scoreboard"
-  python3 tools/corpus.py deps/posteriordb || true
+  python tools/corpus.py deps/posteriordb || true
 fi
 
 # --- Stan conformance reference stack (optional) ---------------------------
@@ -229,10 +220,10 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
   ./harnesses/conformance/fetch_cmdstan.sh
 
   step "conformance reference client ($CONFORMANCE_VENV)"
-  [ -d "$CONFORMANCE_VENV" ] || python3 -m venv "$CONFORMANCE_VENV"
-  "$CONFORMANCE_VENV/bin/pip" install -q --disable-pip-version-check \
+  [ -f "$VENV_PYTHON" ] || python -m venv "$CONFORMANCE_VENV"
+  "$VENV_PYTHON" -m pip install -q --disable-pip-version-check \
     -r harnesses/conformance/requirements.txt
-  echo "reference client ready under $("$CONFORMANCE_VENV/bin/python" -V)"
+  echo "reference client ready under $("$VENV_PYTHON" -V)"
 
   # The harness never loads anything out of the build tree; it drives stanli
   # through the public Python package, which finds its library and its stanc
@@ -251,21 +242,25 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
     [ -n "$LIB" ] || { echo "no shared library in build-rel/"; exit 1; }
     mkdir -p python/stanli/_bin
     cp "$LIB" python/stanli/_bin/
-    cp deps/stanc3/stanc-pinned python/stanli/_bin/stanc
-    chmod +x python/stanli/_bin/stanc
+    install -m 755 deps/stanc3/stanc-pinned "python/stanli/_bin/stanc$EXE_SUFFIX"
   else
     step "--no-build: stage python/stanli/_bin before running the harness"
     echo "  cmake --build build-rel --target stanli_shared"
-    echo "  cp build-rel/libstanli.* python/stanli/_bin/"
-    echo "  cp deps/stanc3/stanc-pinned python/stanli/_bin/stanc"
+    echo "  mkdir -p python/stanli/_bin"
+    if [ "$EXE_SUFFIX" = .exe ]; then
+      echo "  cp build-rel/stanli.dll python/stanli/_bin/"
+    else
+      echo "  cp build-rel/libstanli.* python/stanli/_bin/"
+    fi
+    echo "  cp deps/stanc3/stanc-pinned python/stanli/_bin/stanc$EXE_SUFFIX"
   fi
 fi
 
 step "done"
 echo "dev build:   build/            (tests: ctest --test-dir build)"
 echo "bench build: build-rel/        (tools/bench_grad.cpp)"
-echo "corpus:      python3 tools/corpus.py deps/posteriordb"
-echo "verify:      python3 tools/verify_sample.py deps/cmdstan deps/posteriordb MODEL..."
+echo "corpus:      python tools/corpus.py deps/posteriordb"
+echo "verify:      python tools/verify_sample.py deps/cmdstan deps/posteriordb MODEL..."
 if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
      "$STANC3_SRC_SHA"; then
   echo "wheel:       tools/build_wheel.sh"
@@ -280,8 +275,8 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
 
 conformance: one case, from the repo root, to prove the stack end to end:
 
-  $CONFORMANCE_VENV/bin/python harnesses/stan_conformance.py \\
-    --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan \\
+  "$VENV_PYTHON" harnesses/stan_conformance.py \\
+    --stanc deps/stanc3/stanc$EXE_SUFFIX --cmdstan deps/cmdstan \\
     --build build-rel --stanli-pythonpath python \\
     --case 'abs(real)=>real'
 

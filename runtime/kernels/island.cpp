@@ -36,9 +36,10 @@ int64_t island_scratch(const Op& op, const Slot* slots) {
   const auto& p = *static_cast<const IslandProg*>(op.udata);
   // The generated backward reads the whole register file, so the forward
   // runs in scratch and leaves it there. n_regs covers the live-ins, which
-  // occupy registers of their own. The replay only needs their snapshot.
-  if (p.native_adj) return p.n_regs;
-  return sum_in_lens(op, slots);
+  // occupy registers of their own. Backward has a separate adjoint region;
+  // replay uses an input snapshot followed by its forward registers.
+  if (p.native_adj) return (int64_t)p.n_regs + p.adj.n_regs;
+  return sum_in_lens(op, slots) + p.n_regs;
 }
 
 template <bool ReuseCallCtx>
@@ -66,16 +67,15 @@ void island_fwd_impl(KernelCtx& ctx) {
     in[k] = ctx.scratch + off;
     off += ctx.in[k].len;
   }
-  run_island<double>(p, in, ctx.out.data, ctx.eval_state);
+  run_island<double>(p, in, ctx.out.data, ctx.scratch + off, ctx.eval_state);
 }
 
 void island_fwd(KernelCtx& ctx) { island_fwd_impl<false>(ctx); }
 
 // The generated backward: seed the live-outs, sweep, harvest the live-ins.
 void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
-  static thread_local std::vector<double> adj;
-  if ((int64_t)adj.size() < p.adj.n_regs) adj.resize((size_t)p.adj.n_regs);
-  std::fill(adj.begin(), adj.begin() + p.adj.n_regs, 0.0);
+  double* adj = ctx.scratch + p.n_regs;
+  std::fill_n(adj, p.adj.n_regs, 0.0);
   // Through the sharing map, since a live-out register need not own its
   // adjoint cell. Descending, because two live-out slots can share a
   // register range (the carver aliases a dead copy-then-modify chain onto
@@ -83,7 +83,7 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
   const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += ctx.out_adj_vec.data[m];
-  run_adjoint(p, p.adj, ctx.scratch, adj.data());
+  run_adjoint(p, p.adj, ctx.scratch, adj);
   for (size_t k = 0; k < p.ins.size(); ++k) {
     const auto& li = p.ins[k];
     const int input = li.input >= 0 ? li.input : (int)k;
@@ -114,7 +114,8 @@ void island_bwd(KernelCtx& ctx) {
     off += ctx.in[k].len;
   }
   std::vector<var> vout(p.out_regs.size());
-  run_island<var>(p, in, vout.data());
+  std::vector<var> reg((size_t)p.n_regs);
+  run_island<var>(p, in, vout.data(), reg.data());
   var j = 0.0;
   for (size_t m = 0; m < vout.size(); ++m)
     j += vout[m] * ctx.out_adj_vec.data[m];

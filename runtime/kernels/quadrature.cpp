@@ -17,6 +17,7 @@ namespace {
 
 struct MirIntegrand {
   const QuadratureSpec* spec;
+  mutable RhsWorkspace workspace;
 
   template <typename Theta>
   auto operator()(double x, double xc, std::ostream*,
@@ -29,7 +30,7 @@ struct MirIntegrand {
     if (spec->prog.ok) {
       run_rhs<T>(spec->prog, x, &xc, theta.data(),
                  static_cast<size_t>(spec->parameter_count), spec->x_r.data(),
-                 result);
+                 result, workspace.get<T>());
     } else {
       const mir::FunDef* callback = spec->callback();
       if (!callback)

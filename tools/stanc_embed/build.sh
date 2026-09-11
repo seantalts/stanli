@@ -24,6 +24,11 @@ mkdir -p deps/stanc3
 tools/stanc_embed/install_overlay.sh native "$SRC"
 eval "$(opam env --switch="$SWITCH")"
 
+OCAML_OS_TYPE=$(ocamlc -config-var os_type)
+if [ "$OCAML_OS_TYPE" = Win32 ]; then
+  export STANLI_OCAML_RUNTIME_VARIANT=
+fi
+
 # OCaml's complete-object mode calls `ld -r` directly. The manylinux toolchain
 # does not give that partial linker the system archive directory that `cc`
 # normally supplies, so locate the static librt archive through the compiler
@@ -43,15 +48,20 @@ fi
 # reason. Worth 364 KB of the final shared library.
 (cd "$SRC" && dune runtest -j "$BUILD_JOBS" --profile release \
    src/stanc_embed)
-if ! (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
+if [ "$OCAML_OS_TYPE" = Win32 ]; then
+  python tools/stanc_embed/build_windows.py "$SRC" "$BUILD_JOBS"
+  OBJ="$SRC/_build/stanc_embed.static.o"
+else
+  if ! (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
       src/stanc_embed/stanc_embed.exe.o 2>&1 | tail -5); then
-  (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
-    src/stanc_embed 2>&1 | tail -5)
+    (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
+      src/stanc_embed 2>&1 | tail -5)
+  fi
+  OBJ=$(find "$SRC/_build" -path '*/src/stanc_embed/stanc_embed*.o' | head -1)
 fi
 (cd "$SRC" &&
  dune build -j "$BUILD_JOBS" --profile release \
    src/stanc_embed/stanli_vectorize_probe.exe)
-OBJ=$(find "$SRC/_build" -path '*/src/stanc_embed/stanc_embed*.o' | head -1)
 [ -n "$OBJ" ] && [ -f "$OBJ" ] || {
   echo "dune did not produce the embedded stanc object" >&2
   exit 1

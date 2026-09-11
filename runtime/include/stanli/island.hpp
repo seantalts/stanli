@@ -127,12 +127,10 @@ std::shared_ptr<const Program> specialize_softmax3(const IslandProg& p,
 
 // Evaluate on T = double (forward) or stan::math::var (backward replay,
 // inside the caller's nested_rev_autodiff). The register file is reused
-// between calls. Not reentrant; islands cannot contain islands.
+// by the caller, which owns its lifetime.
 template <typename T>
-void run_island(const IslandProg& p, const T* const* in, T* out,
+void run_island(const IslandProg& p, const T* const* in, T* out, T* reg,
                 EvalState* state = nullptr) {
-  static thread_local std::vector<T> reg;
-  if ((int64_t)reg.size() < p.n_regs) reg.resize((size_t)p.n_regs);
   for (size_t k = 0; k < p.ins.size(); ++k) {
     const int input = p.ins[k].input >= 0 ? p.ins[k].input : (int)k;
     for (int i = 0; i < p.ins[k].len; ++i)

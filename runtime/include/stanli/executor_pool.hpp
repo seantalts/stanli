@@ -32,6 +32,8 @@
 namespace stanli {
 
 class ExecutorPool {
+  struct Tape;
+
  public:
   // The prototype is cloned on demand and must outlive the pool. It is
   // never handed out itself, so the caller keeps using it if it wants.
@@ -42,12 +44,9 @@ class ExecutorPool {
 
   class Lease {
    public:
-    Lease(ExecutorPool& pool, std::unique_ptr<Executor> ex)
-        : pool_(&pool), ex_(std::move(ex)) {}
-    ~Lease() {
-      if (ex_) pool_->give_back(std::move(ex_));
-    }
-    Lease(Lease&& o) noexcept : pool_(o.pool_), ex_(std::move(o.ex_)) {}
+    Lease(ExecutorPool& pool, std::unique_ptr<Executor> ex);
+    ~Lease();
+    Lease(Lease&& o) noexcept;
     Lease& operator=(Lease&&) = delete;
     Lease(const Lease&) = delete;
     Lease& operator=(const Lease&) = delete;
@@ -58,6 +57,7 @@ class ExecutorPool {
    private:
     ExecutorPool* pool_;
     std::unique_ptr<Executor> ex_;
+    Tape* tape_;
   };
 
   // An executor for the duration of one evaluation. Also makes sure the

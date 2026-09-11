@@ -311,7 +311,9 @@ ProgramObservation observe_program(
   Observation accepted{Stage::Compile, OutcomeKind::Accepted, {}, {}, {}};
   return {std::move(accepted), observe_execution([&] {
             std::vector<double> value;
-            run_rhs<double>(p, t, y.data(), theta.data(), x_r.data(), value);
+            std::vector<double> rhs_registers;
+            run_rhs<double>(p, t, y.data(), theta.data(), x_r.data(), value,
+                            rhs_registers);
             return value;
           }),
           false};

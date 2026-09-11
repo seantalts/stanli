@@ -13,6 +13,7 @@
 // iterations to lose a race if there is one.
 #include <stanli/compile.hpp>
 #include <stanli/executor_pool.hpp>
+#include <stan/math/rev/core/chainablestack.hpp>
 
 #include <cstdio>
 #include <fstream>
@@ -64,11 +65,26 @@ int main() {
   const int kThreads = 8;
   std::vector<std::vector<double>> got_lp((size_t)kThreads);
   std::vector<std::vector<std::vector<double>>> got_g((size_t)kThreads);
+  std::vector<int> tape_lifetime_ok(kThreads, 0);
   std::vector<std::thread> ts;
   for (int t = 0; t < kThreads; ++t) {
     got_lp[(size_t)t].resize((size_t)kIters);
     got_g[(size_t)t].resize((size_t)kIters);
     ts.emplace_back([&, t] {
+      auto* initial_tape = stan::math::ChainableStack::instance_;
+      {
+        ExecutorPool scope_pool(proto);
+        auto first =
+            std::make_unique<ExecutorPool::Lease>(scope_pool.acquire());
+        auto second = scope_pool.acquire();
+        auto moved = std::move(second);
+        auto* tape = stan::math::ChainableStack::instance_;
+        first.reset();
+        tape_lifetime_ok[t] =
+            tape && stan::math::ChainableStack::instance_ == tape;
+      }
+      tape_lifetime_ok[t] &=
+          stan::math::ChainableStack::instance_ == initial_tape;
       for (int k = 0; k < kIters; ++k) {
         auto lease = pool.acquire();
         for (int64_t i = 0; i < n; ++i) lease->params_data()[i] = point(i, k);
@@ -76,9 +92,20 @@ int main() {
         got_lp[(size_t)t][(size_t)k] =
             lease->gradient(got_g[(size_t)t][(size_t)k].data());
       }
+      tape_lifetime_ok[t] &=
+          stan::math::ChainableStack::instance_ == initial_tape;
     });
   }
   for (auto& th : ts) th.join();
+
+  for (int t = 0; t < kThreads; ++t) {
+    if (!tape_lifetime_ok[t]) {
+      ++failures;
+      std::printf(
+          "FAIL thread %d: autodiff tape outlived or died before its leases\n",
+          t);
+    }
+  }
 
   for (int t = 0; t < kThreads; ++t)
     for (int k = 0; k < kIters; ++k) {
