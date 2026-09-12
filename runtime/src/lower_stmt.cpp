@@ -1,4 +1,5 @@
 #include "lower_internal.hpp"
+#include "reroll_plan.hpp"
 
 namespace stanli {
 namespace lower_detail {
@@ -6,6 +7,8 @@ namespace lower_detail {
 // A guard that stays decidable and never false is the model's own
 // nontermination. Stop unrolling and let it compile as a loop.
 constexpr long kWhileUnrollLimit = 1L << 16;
+
+#include "lower_symbolic_lane.inc"
 
 bool Lowering::expr_has_jacobian(const mir::Expr& e) {
   if (e.kind == mir::Expr::FunApp) {
@@ -1410,6 +1413,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         int_env.erase(s.loopvar);
         return;
       }
+      if (&s == symbolic_lane_tail && try_lower_symbolic_lane_tail(s, lo, hi))
+        return;
       // Both the pre-control target fold and the ordinary path ask the same
       // structural question.  A nonselected automatic candidate reaches
       // both sites, so retain the answer for this lowering encounter rather

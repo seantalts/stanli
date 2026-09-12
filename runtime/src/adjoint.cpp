@@ -312,21 +312,30 @@ bool gen_adjoint(IslandProg& p) {
   for (int i = 0; i < (int)orig.size(); ++i) {
     const Program::Instr& I = orig[i];
     if (I.code == Program::CALL) {
-      // The kernel's backward may read its input VALUES, not just its
-      // scratch (backward_ignores_values is a whitelist, not a
-      // guarantee), and some read their output values too -- so both are
-      // checkpointed whenever a later instruction overwrites them.
       Program::Call call = fwd.calls[(size_t)I.a];
+      // Metadata describes the registered implementation, not an arbitrary
+      // CALL payload.  A private/replaced function therefore keeps the old
+      // save-everything behavior even when it borrows a known opcode.
+      const Kernel* registered = find_kernel(call.opcode);
+      const bool canonical = registered && registered->backward &&
+                             call.backward == registered->backward &&
+                             registered->primal_reads;
+      const BackwardPrimalReads reads =
+          canonical ? backward_primal_reads(registered, call.variant)
+                    : BackwardPrimalReads{};
       for (int j = 0; j < call.n_in; ++j) {
         call.bwd_adj_in[j] = mapn(call.in[j], call.in_len[j]);
-        call.bwd_value_in[j] = save_range(call.in[j], call.in_len[j], i);
+        call.bwd_value_in[j] = reads.input(j)
+                                   ? save_range(call.in[j], call.in_len[j], i)
+                                   : call.in[j];
       }
       call.bwd_adj_out = mapn(call.out, call.out_len);
       if (!mapped_ranges_ok) return false;
       Program::Instr F = I;
       F.a = static_cast<int32_t>(bound_calls.size());
       ncode.push_back(F);
-      call.bwd_value_out = save_range(call.out, call.out_len, i);
+      call.bwd_value_out =
+          reads.output() ? save_range(call.out, call.out_len, i) : call.out;
       AdjInstr A;
       A.code = Program::CALL;
       A.a = static_cast<int32_t>(bound_calls.size());

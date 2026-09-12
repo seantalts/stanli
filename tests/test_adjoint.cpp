@@ -289,6 +289,92 @@ static void test_call_cached_forward_reverse_aliasing() {
          ulps(adj[(size_t)p.adj.adj_reg[4]], want_c) == 0);
 }
 
+static void test_call_primal_read_contract() {
+  const BackwardPrimalReads add_reads =
+      backward_primal_reads(find_kernel(OP_ADD), 0);
+  expect("ADD backward reads no primals",
+         !add_reads.input(0) && !add_reads.input(1) && !add_reads.output());
+  const BackwardPrimalReads unknown = backward_primal_reads(nullptr, 255);
+  expect("unknown backward retains every primal",
+         unknown.input(0) && unknown.input(5) && unknown.output(0) &&
+             unknown.output(1));
+
+  // Both an input and the output are overwritten after the call.  ADD's
+  // registered backward only routes adjoints, so gen_adjoint need not insert
+  // value checkpoints for either range.
+  IslandProg p;
+  p.n_regs = 5;
+  p.ins = {IslandProg::LiveIn{0, 1}, IslandProg::LiveIn{1, 1},
+           IslandProg::LiveIn{4, 1}};
+  p.out_regs = {3};
+  Program::Call add;
+  add.opcode = OP_ADD;
+  add.n_in = 2;
+  add.in[0] = 0;
+  add.in[1] = 1;
+  add.in_len[0] = add.in_len[1] = 1;
+  add.out = 2;
+  add.out_len = 1;
+  expect("value-free CALL binds", bind_call(add));
+  p.calls.push_back(add);
+  p.code = {{Program::CALL, 0, 0},
+            {Program::MOV, 3, 2},
+            {Program::MOV, 0, 4},
+            {Program::MOV, 2, 4}};
+  expect("value-free CALL adjoint generated", gen_adjoint(p));
+  if (!p.calls.empty()) {
+    expect("value-free CALL keeps original input binding",
+           p.calls[0].bwd_value_in[0] == 0);
+    expect("value-free CALL keeps original output binding",
+           p.calls[0].bwd_value_out == 2);
+  }
+
+  // A private backward carrying the same opcode is not covered by the
+  // registered kernel's metadata and must retain the conservative saves.
+  IslandProg private_call;
+  private_call.n_regs = 5;
+  private_call.ins = p.ins;
+  private_call.out_regs = {3};
+  add.backward = test_call_backward;
+  private_call.calls.push_back(add);
+  private_call.code = {{Program::CALL, 0, 0},
+                       {Program::MOV, 3, 2},
+                       {Program::MOV, 0, 4},
+                       {Program::MOV, 2, 4}};
+  expect("private CALL adjoint generated", gen_adjoint(private_call));
+  if (!private_call.calls.empty()) {
+    expect("private CALL checkpoints overwritten input",
+           private_call.calls[0].bwd_value_in[0] != 0);
+    expect("private CALL checkpoints overwritten output",
+           private_call.calls[0].bwd_value_out != 2);
+  }
+
+  // Registry identity alone is insufficient: a replacement implementation
+  // has no contract unless it explicitly registers one alongside itself.
+  const Kernel saved_add = *find_kernel(OP_ADD);
+  register_kernel(OP_ADD,
+                  Kernel{saved_add.forward, test_call_backward, nullptr});
+  IslandProg replaced;
+  replaced.n_regs = 5;
+  replaced.ins = p.ins;
+  replaced.out_regs = {3};
+  Program::Call rebound = add;
+  expect("replacement CALL binds", bind_call(rebound));
+  replaced.calls.push_back(rebound);
+  replaced.code = {{Program::CALL, 0, 0},
+                   {Program::MOV, 3, 2},
+                   {Program::MOV, 0, 4},
+                   {Program::MOV, 2, 4}};
+  expect("replacement CALL adjoint generated", gen_adjoint(replaced));
+  if (!replaced.calls.empty()) {
+    expect("replacement CALL defaults to input checkpoint",
+           replaced.calls[0].bwd_value_in[0] != 0);
+    expect("replacement CALL defaults to output checkpoint",
+           replaced.calls[0].bwd_value_out != 2);
+  }
+  register_kernel(OP_ADD, saved_add);
+}
+
 // One case, both ways. `tol` is how many ulp of disagreement the case
 // tolerates, and is 0 -- bitwise -- everywhere except the fuzzer.
 //
@@ -1594,6 +1680,7 @@ static void test_fuzz_ranges() {
 int main() {
   test_call_binding_refusal();
   test_call_cached_forward_reverse_aliasing();
+  test_call_primal_read_contract();
   test_binary_ops();
   test_fma();
   test_unary_ops();

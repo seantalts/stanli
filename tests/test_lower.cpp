@@ -431,11 +431,249 @@ static void reference(const double* q, double* lp_out, double* grad_out) {
   stan::math::recover_memory();
 }
 
+// Keep the planner's small-loop refusal and large-loop vector accumulation
+// decision exact. The cancellation inputs distinguish the two reverse orders.
+static void test_symbolic_lane_chain(const std::string& fixture) {
+  const std::string mir = slurp("tests/fixtures/" + fixture + ".tmir.sexp");
+  for (bool stress : {false, true}) {
+    for (int n : {0, 1, 3, 4, 5, 6, 8, 16, 33, 4096}) {
+      std::ostringstream json;
+      json << "{\"N\":" << n << ",\"y\":[";
+      for (int i = 0; i < n; ++i) {
+        if (i) json << ',';
+        if (!stress) {
+          const char* finite[] = {"-0.3", "0.1", "0.2", "0.0", "-0.0", "0.4"};
+          json << finite[i % 6];
+          continue;
+        }
+        json << (i % 4 == 0   ? "1e8"
+                 : i % 4 == 1 ? "-1e8"
+                 : i % 4 == 2 ? "0.2"
+                              : "0.3");
+      }
+      json << "]}";
+      const auto data = stanli::DataMap::from_json(json.str());
+      test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+      auto baseline = stanli::compile_model(mir, data);
+      test_unsetenv("STANLI_SYMBOLIC_LANES");
+      auto candidate = stanli::compile_model(mir, data);
+      test_unsetenv("STANLI_SYMBOLIC_LANES");
+      if (n == 16) {
+        test_setenv("STANLI_SYMBOLIC_LANES", "1", 1);
+        const auto explicit_on = stanli::compile_model(mir, data);
+        test_unsetenv("STANLI_SYMBOLIC_LANES");
+        check(same_graph_structure(candidate, explicit_on) &&
+                  candidate.fills == explicit_on.fills,
+              "automatic symbolic selection matches explicit enablement");
+        check(baseline.graph.slots.size() > candidate.graph.slots.size(),
+              "explicit zero disables the symbolic shortcut");
+        test_setenv("STANLI_SYMBOLIC_LANES", "unknown", 1);
+        const auto unknown = stanli::compile_model(mir, data);
+        test_unsetenv("STANLI_SYMBOLIC_LANES");
+        check(same_graph_structure(baseline, unknown) &&
+                  baseline.fills == unknown.fills,
+              "unknown symbolic policy conservatively disables the shortcut");
+      }
+      check(candidate.n_unconstrained == baseline.n_unconstrained &&
+                candidate.n_unconstrained == 2,
+            "symbolic lanes preserve parameter layout");
+      if (n >= 6) {
+        check(candidate.graph.ops.size() == 3 &&
+                  candidate.graph.slots.size() <= 12,
+              "symbolic lane metadata does not expand with trip count");
+        const auto& ops = candidate.graph.ops;
+        const auto& slots = candidate.graph.slots;
+        const auto anchor = fixture == "symbolic_lane_chain" ? stanli::OP_FMA
+                            : fixture == "symbolic_lane_add" ? stanli::OP_ADD
+                                                             : stanli::OP_MUL;
+        check(ops[0].opcode == anchor && ops[1].opcode == stanli::OP_EXPV &&
+                  ops[2].opcode == stanli::OP_SUM_VEC &&
+                  slots[ops[0].out].len == n && slots[ops[1].out].len == n &&
+                  slots[ops[2].out].len == 1 && ops[1].in[0] == ops[0].out &&
+                  ops[2].in[0] == ops[1].out,
+              "symbolic lanes use the existing ordered vector kernel chain");
+        const int varying = fixture == "symbolic_lane_add" ? 0 : 1;
+        check(slots[ops[0].in[varying]].len == n &&
+                  slots[ops[0].in[1 - varying]].is_param,
+              "symbolic lanes preserve parameter and read operand positions");
+      } else {
+        check(same_graph_structure(candidate, baseline) &&
+                  candidate.fills == baseline.fills,
+              "unprofitable symbolic lanes preserve graph and fills exactly");
+      }
+      stanli::Executor a(std::move(baseline.graph));
+      stanli::Executor b(std::move(candidate.graph));
+      baseline.bind(a);
+      candidate.bind(b);
+      check(a.n_params() == b.n_params() && b.n_params() == 2,
+            "virtual lane identities never become parameters");
+      for (const auto point :
+           {std::pair<double, double>{0.1, 0.0}, {0.0, 1e-9}, {-0.1, -1e-9}}) {
+        a.params_data()[0] = b.params_data()[0] = point.first;
+        a.params_data()[1] = b.params_data()[1] = point.second;
+        for (int repeat = 0; repeat < 2; ++repeat) {
+          double ga[2], gb[2];
+          const double la = a.gradient(ga), lb = b.gradient(gb);
+          check(std::memcmp(&la, &lb, sizeof(double)) == 0 &&
+                    std::memcmp(ga, gb, sizeof(ga)) == 0,
+                "symbolic lane LP/gradient matches existing selection bitwise");
+        }
+      }
+    }
+  }
+  stanli::DataMap data;
+  data.set_int("N", 16);
+  data.set_real_array("y", std::vector<double>(16, 0.2));
+  for (const char* flag :
+       {"STANLI_NO_REROLL", "STANLI_NO_CONSTFOLD", "STANLI_STRUCTURED_LOOPS"}) {
+    test_setenv(flag, "1", 1);
+    test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+    const auto baseline = stanli::compile_model(mir, data);
+    test_setenv("STANLI_SYMBOLIC_LANES", "1", 1);
+    const auto candidate = stanli::compile_model(mir, data);
+    test_unsetenv("STANLI_SYMBOLIC_LANES");
+    test_unsetenv(flag);
+    check(same_graph_structure(baseline, candidate) &&
+              baseline.fills == candidate.fills,
+          std::string("symbolic lane source respects ") + flag);
+  }
+}
+
+static void test_symbolic_lane_backing() {
+  const std::string mir =
+      slurp("tests/fixtures/symbolic_lane_backing.tmir.sexp");
+  for (int n : {4, 5, 6, 16}) {
+    stanli::DataMap data;
+    data.set_int("N", n);
+    data.set_int("M", 262144);
+    data.set_real_array("y", std::vector<double>(262144, 0.2));
+    data.set_real_array("unused", std::vector<double>(262144, -0.3));
+    test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+    auto baseline = stanli::compile_model(mir, data);
+    test_unsetenv("STANLI_SYMBOLIC_LANES");
+    auto candidate = stanli::compile_model(mir, data);
+    if (n <= 5) {
+      check(
+          same_graph_structure(baseline, candidate) &&
+              baseline.fills == candidate.fills,
+          "seed refusal retains ordinary graph/fills with large backing data");
+    } else {
+      check(
+          candidate.graph.ops.size() == 3 && candidate.graph.slots.size() <= 12,
+          "large backing or unrelated data does not prevent compact lowering");
+    }
+    stanli::Executor a(std::move(baseline.graph));
+    stanli::Executor b(std::move(candidate.graph));
+    baseline.bind(a);
+    candidate.bind(b);
+    for (double value : {-0.3, 0.0, 0.2}) {
+      a.params_data()[0] = b.params_data()[0] = 0.1;
+      a.params_data()[1] = b.params_data()[1] = value;
+      double ga[2], gb[2];
+      const double la = a.gradient(ga), lb = b.gradient(gb);
+      check(
+          std::memcmp(&la, &lb, sizeof(double)) == 0 &&
+              std::memcmp(ga, gb, sizeof(ga)) == 0,
+          "seed continuation and direct slicing preserve LP/gradient exactly");
+    }
+  }
+}
+
+static void test_symbolic_lane_executor_sharing() {
+  const std::string mir = slurp("tests/fixtures/symbolic_lane_chain.tmir.sexp");
+  stanli::DataMap data;
+  data.set_int("N", 16);
+  data.set_real_array("y", {-0.3, 0.1, 0.2, 0.0, -0.0, 0.4, -0.3, 0.1, 0.2, 0.0,
+                            -0.0, 0.4, -0.3, 0.1, 0.2, 0.0});
+
+  test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+  auto ordinary = stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_SYMBOLIC_LANES");
+  auto symbolic = stanli::compile_model(mir, data);
+  check(symbolic.graph.ops.size() == 3,
+        "symbolic sharing fixture selects the compact graph");
+  if (symbolic.graph.ops.size() != 3 || ordinary.graph.ops.empty()) return;
+
+  const stanli::Op& anchor = symbolic.graph.ops.front();
+  int packed = -1;
+  for (int j = 0; j < anchor.n_in; ++j) {
+    const auto& slot = symbolic.graph.slots[anchor.in[j]];
+    if (!slot.is_param && slot.len == 16) packed = anchor.in[j];
+  }
+  const auto ordinary_anchor = std::find_if(
+      ordinary.graph.ops.begin(), ordinary.graph.ops.end(),
+      [](const stanli::Op& op) { return op.opcode == stanli::OP_FMA; });
+  int ordinary_packed = -1;
+  if (ordinary_anchor != ordinary.graph.ops.end()) {
+    for (int j = 0; j < ordinary_anchor->n_in; ++j) {
+      const auto& slot = ordinary.graph.slots[ordinary_anchor->in[j]];
+      if (!slot.is_param && slot.len == 16)
+        ordinary_packed = ordinary_anchor->in[j];
+    }
+  }
+  if (packed < 0 || ordinary_packed < 0) {
+    check(false, "symbolic sharing fixture exposes packed ordinary data");
+    return;
+  }
+  const int anchor_out = anchor.out;
+  const int vector_out = symbolic.graph.ops[1].out;
+
+  stanli::Executor reference(std::move(ordinary.graph));
+  stanli::Executor prototype(std::move(symbolic.graph));
+  ordinary.bind(reference);
+  symbolic.bind(prototype);
+  reference.params_data()[0] = prototype.params_data()[0] = 0.1;
+  reference.params_data()[1] = prototype.params_data()[1] = -0.2;
+
+  stanli::Executor clone(prototype);
+  const stanli::Executor& const_prototype = prototype;
+  const stanli::Executor& const_clone = clone;
+  check(const_prototype.value_ptr(packed) == const_clone.value_ptr(packed),
+        "symbolic packed constant data is shared by executor clones");
+  check(const_prototype.value_ptr(anchor_out) !=
+                const_clone.value_ptr(anchor_out) &&
+            const_prototype.value_ptr(vector_out) !=
+                const_clone.value_ptr(vector_out),
+        "symbolic vector outputs remain private to each executor");
+
+  const double original = const_prototype.value_ptr(packed)[0];
+  double* clone_packed = clone.value_ptr(packed);
+  check(clone_packed != const_prototype.value_ptr(packed),
+        "writing a cloned symbolic constant detaches its data");
+  clone_packed[0] = original + 0.5;
+  check(const_prototype.value_ptr(packed)[0] == original,
+        "cloned symbolic data mutation leaves the prototype unchanged");
+
+  stanli::Executor changed_reference(reference);
+  changed_reference.value_ptr(ordinary_packed)[0] = original + 0.5;
+  double reference_grad[2], prototype_grad[2], changed_grad[2], clone_grad[2];
+  const double reference_lp = reference.gradient(reference_grad);
+  const double prototype_lp = prototype.gradient(prototype_grad);
+  const double changed_lp = changed_reference.gradient(changed_grad);
+  check(std::memcmp(&prototype_lp, &reference_lp, sizeof(double)) == 0,
+        "symbolic prototype kernels match the ordinary reference");
+  check(
+      std::memcmp(prototype_grad, reference_grad, sizeof(prototype_grad)) == 0,
+      "symbolic prototype gradients match the ordinary reference");
+  const double clone_lp = clone.gradient(clone_grad);
+  check(std::memcmp(&clone_lp, &changed_lp, sizeof(double)) == 0,
+        "mutated symbolic clone keeps vector kernels correct");
+  check(
+      std::memcmp(clone_grad, changed_grad, sizeof(clone_grad)) == 0 &&
+          std::memcmp(changed_grad, reference_grad, sizeof(changed_grad)) != 0,
+      "mutated symbolic clone observes its private data");
+}
+
 int main() {
   // These fixtures pin ULP-level parity with DEFAULT CmdStan, whose AoS
   // Matrix<var> paths run scalar libm per element; the packet path answers
   // to `stanc --O1` instead and is verified there.
   stanli::set_packet_math(false);
+  test_symbolic_lane_backing();
+  test_symbolic_lane_executor_sharing();
+  for (const char* fixture :
+       {"symbolic_lane_chain", "symbolic_lane_add", "symbolic_lane_multiply"})
+    test_symbolic_lane_chain(fixture);
   using namespace stanli;
 
   // Section A1's five reductions must lower in the autodiff model graph, not
@@ -3752,6 +3990,30 @@ int main() {
     for (int k = 0; k < 14; ++k)
       expect_eq("tdintsize g" + std::to_string(k), grad[k], x(k).adj());
     stan::math::recover_memory();
+
+    check(lm.write_array && lm.write_array->truncated.empty(),
+          "tdintsize prepared write_array compiled");
+    if (lm.write_array && lm.write_array->truncated.empty()) {
+      Executor wx(std::move(lm.write_array->graph));
+      lm.write_array->bind(wx);
+      for (int k = 0; k < 14; ++k) wx.params_data()[k] = 0.1 * (k + 1) - 0.7;
+      wx.run_forward_only();
+      int found = 0;
+      for (const auto& col : lm.write_array->columns) {
+        if (col.name == "prepared_size") {
+          ++found;
+          expect_eq("tdintsize prepared integer", *wx.value_ptr(col.slot), 14);
+        } else if (col.name == "prepared_leaf") {
+          ++found;
+          check(col.len == 12 && col.rows == 3,
+                "tdintsize prepared leaf keeps matrix geometry");
+          for (int k = 0; k < 12; ++k)
+            expect_eq("tdintsize prepared leaf " + std::to_string(k),
+                      wx.value_ptr(col.slot)[col.storage_index(k)], 16);
+        }
+      }
+      check(found == 2, "tdintsize writes prepared integer and shaped leaf");
+    }
   }
 
   // profile("name") { ... } wraps ordinary statements purely for stanc's own

@@ -84,8 +84,9 @@ struct Softmax3IslandProg : IslandProg {
 // IslandProg violates the tagged payload contract; the graph carver is the
 // only production producer. Its
 // forward must leave outputs and scratch bitwise-identical to OP_ISLAND's
-// canonical forward: the profiled executor and direct kernel-table callers
-// use that path, and the generated adjoint consumes either register file.
+// canonical forward: direct kernel-table callers use that path, and the
+// generated adjoint consumes either register file. Both executor modes use
+// the same bound specialized forward.
 // test_softmax3_double_exact enforces this contract.
 constexpr uint8_t kIslandSoftmax3Variant = 1;
 // Generic variant for a canonical IslandProg whose forward bytecode contains

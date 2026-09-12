@@ -24,6 +24,39 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       dumper(dump_to),
       prep_graph(graph_name),
       td_rng(std::move(stream)) {}
+Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
+                   const char* graph_name,
+                   const PreparedContext& prepared_context)
+    : Lowering(d, p, dump_to, graph_name, prepared_context.rng,
+               prepared_context.shapes) {
+  const auto env_copy_time = prep.start();
+  td.env() = prepared_context.environment;
+  int_env = prepared_context.integers;
+  decls = prepared_context.declarations;
+  prep.plain(prep_graph, "env_copy", env_copy_time);
+}
+Lowering::Lowering(Lowering& parent, RegionTrialTag)
+    : Lowering(parent.data, parent.prep, parent.dumper, parent.prep_graph,
+               parent.td_rng,
+               std::make_shared<ShapeInterner>(*parent.shape_pool)) {
+  fun_defs = parent.fun_defs;
+  decls = parent.decls;
+  td.env() = parent.td.env();
+  int_env = parent.int_env;
+  int_locals = parent.int_locals;
+  propto_ctx = parent.propto_ctx;
+  udf_depth = parent.udf_depth;
+  udf_autodiff_ctx = parent.udf_autodiff_ctx;
+  udf_formal_autodiff = parent.udf_formal_autodiff;
+}
+PreparedContext Lowering::prepared_context() {
+  if (!data_prepared)
+    throw std::logic_error("lowering has not prepared model data");
+  return {td_rng, shape_pool, td.env(), int_env_data, decls};
+}
+Lowering Lowering::fork_region_trial() {
+  return Lowering(*this, RegionTrialTag{});
+}
 void Lowering::dump_named(const std::string& label, const std::string& name,
                           const std::vector<int>& roots, bool unfiltered) {
   GraphPrintInfo info;
@@ -284,6 +317,7 @@ void Lowering::bind_data(const mir::Program& p) {
     if (e.is_int && e.i.size() == 1 && e.dims.empty()) int_env[name] = e.i[0];
   }
   int_env_data = int_env;
+  data_prepared = true;
 }
 // ---- statements -----------------------------------------------------------
 CompiledModel::ParamView Lowering::parameter_view(const mir::Stmt& s, int slot,
@@ -775,6 +809,23 @@ CompiledModel Lowering::run(const mir::Program& p) {
              target_terms.size(), out.views.size());
   dump("bind_data", {});
   const auto lower_time = prep.start();
+  const char* symbolic_lanes = std::getenv("STANLI_SYMBOLIC_LANES");
+  if (!symbolic_lanes || std::string_view(symbolic_lanes) == "1") {
+    const auto terminal =
+        [&](const auto& self,
+            const std::vector<mir::Stmt>& body) -> const mir::Stmt* {
+      for (auto it = body.rbegin(); it != body.rend(); ++it) {
+        if (it->kind == mir::Stmt::Skip) continue;
+        if (it->kind == mir::Stmt::Block || it->kind == mir::Stmt::SList) {
+          if (const auto* tail = self(self, it->body)) return tail;
+          continue;
+        }
+        return &*it;
+      }
+      return nullptr;
+    };
+    symbolic_lane_tail = terminal(terminal, p.log_prob);
+  }
   for (const auto& s : p.log_prob) lower_stmt(s);
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size());
@@ -848,15 +899,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     // A second lowering, over the transformed data the first one already
     // interpreted: re-running prepare_data would double preparation time on
     // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
-    Lowering wa(data, prep, dumper, "write_array", lo.td_rng, lo.shape_pool);
-    const auto env_copy_time = prep.start();
-    wa.td.env() = lo.td.env();
-    wa.int_env = lo.int_env_data;
-    // bind_data owns immutable declaration shape and physical-layout facts;
-    // write_array skips that expensive pass, so its fresh lexical lowering
-    // receives the facts together with the already-prepared environment.
-    wa.decls = lo.decls;
-    prep.plain("write_array", "env_copy", env_copy_time);
+    const PreparedContext prepared = lo.prepared_context();
+    Lowering wa(data, prep, dumper, "write_array", prepared);
     CompiledModel::WriteArray w = wa.run_write_array(*prog);
     for (const std::string& note : wa.out.interpreter_fallbacks)
       add_interpreter_fallback(cm, note);
@@ -884,7 +928,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
-      auto env = lo.td.env();
+      auto env = prepared.environment;
       for (const char* flag :
            {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
         DataMap::Entry one;

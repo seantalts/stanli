@@ -754,6 +754,41 @@ enum Opcode : uint16_t {
       OP_COUNT_
 };
 
+// Value buffers a registered kernel's backward may read.  This is separate
+// from adjoint activity: a backward can route an adjoint through an input
+// without reading that input's primal value.  Unknown opcodes deliberately
+// claim every input and both outputs, so consumers may only discard a value
+// after recognizing the exact registered backward function as well.
+struct BackwardPrimalReads {
+  static constexpr uint8_t kAllInputs = 0x3fu;
+  static constexpr uint8_t kAllOutputs = 0x03u;
+  uint8_t input_mask = kAllInputs;
+  uint8_t output_mask = kAllOutputs;
+
+  constexpr bool input(int i) const {
+    return i < 0 || i >= 6 || (input_mask & (uint8_t)(1u << i)) != 0;
+  }
+  constexpr bool output(int i = 0) const {
+    return i < 0 || i >= 2 || (output_mask & (uint8_t)(1u << i)) != 0;
+  }
+  constexpr bool none() const { return input_mask == 0 && output_mask == 0; }
+};
+
+using BackwardPrimalReadFn = BackwardPrimalReads (*)(uint8_t variant);
+
+// Contracts are registered beside the implementation they describe. These
+// callbacks accept the variant even where today's implementation has one
+// rule for every variant.
+constexpr BackwardPrimalReads backward_reads_none(uint8_t variant) {
+  (void)variant;
+  return BackwardPrimalReads{0, 0};
+}
+
+constexpr BackwardPrimalReads backward_reads_inputs_only(uint8_t variant) {
+  (void)variant;
+  return BackwardPrimalReads{BackwardPrimalReads::kAllInputs, 0};
+}
+
 // OP_NONE_ is the graph's unregistered sentinel. A specialized Program::CALL
 // temporarily claims that otherwise-unused table slot for its fixed-size,
 // allocation-free three-lane softmax; ordinary graph ops never carry either
@@ -918,7 +953,17 @@ struct Kernel {
   // Optional mutable state, created once per bound Executor/op. Graph udata
   // remains immutable and safely shared by executor copies.
   KernelState* (*make_state)(const Op&, const Slot* slots) = nullptr;
+  // Null is the conservative default: backward may read every primal. The
+  // callback lives on the registered implementation so replacing a kernel
+  // cannot accidentally inherit an opcode-only promise.
+  BackwardPrimalReadFn primal_reads = nullptr;
 };
+
+inline BackwardPrimalReads backward_primal_reads(const Kernel* kernel,
+                                                 uint8_t variant) {
+  return kernel && kernel->primal_reads ? kernel->primal_reads(variant)
+                                        : BackwardPrimalReads{};
+}
 
 // The most common Kernel::scratch_size shape: one scratch double per
 // element of every input.
