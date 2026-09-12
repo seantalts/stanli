@@ -598,7 +598,8 @@ void register_eltwise_kernels() {
   register_kernel(code, Kernel{name##_ufwd, name##_ubwd, nullptr});
   STANLI_SCALAR_UNARY_LIST(STANLI_REGISTER_UNARY)
 #undef STANLI_REGISTER_UNARY
-  register_kernel(OP_ADD, Kernel{add_fwd, add_bwd, nullptr});
+  register_kernel(
+      OP_ADD, Kernel{add_fwd, add_bwd, nullptr, nullptr, backward_reads_none});
   register_kernel(OP_SUB, Kernel{sub_fwd, sub_bwd, nullptr});
   register_kernel(OP_MUL, Kernel{mul_fwd, mul_bwd, nullptr});
   register_kernel(OP_FMA, Kernel{fma_fwd, fma_bwd, nullptr});

@@ -629,17 +629,16 @@ void Executor::run_forward_only(EvalState state) {
   } restore{eval_state_, eval_state_};
   eval_state_ = state;
   // The profiled path keeps the opcode-keyed loop (attribution needs the
-  // opcode anyway, and the timing calls dwarf dispatch cost). This bypasses
-  // resolve_forward_fn, so a variant-specialized op is timed through its
-  // canonical kernel. island.hpp requires the two forwards to leave bitwise-
-  // identical outputs and scratch; switch this loop to fwd_fn_ only when the
-  // executor's layout is next re-gated.
+  // opcode anyway, and the timing calls dwarf dispatch cost), but it must
+  // invoke the same bound function pointer as the fast path. The registry is
+  // mutable for extension kernels; consulting it here would make profiling
+  // change both variant specialization and post-bind kernel overrides.
   if (profile_) {
     const size_t np = graph_.ops.size();
     for (size_t i = 0; i < np; ++i) {
       const uint16_t op = graph_.ops[i].opcode;
       const auto t0 = std::chrono::steady_clock::now();
-      kernel(op).forward(ctx_[i]);
+      fwd_fn_[i](ctx_[i]);
       const auto t1 = std::chrono::steady_clock::now();
       ProfEntry& e = prof_[op];
       ++e.calls;
@@ -687,14 +686,17 @@ double Executor::gradient(double* grad_out) {
   assert(result_adjoint_offset_ >= 0);
   adjoints_[result_adjoint_offset_] = 1.0;
   if (profile_) {
-    for (size_t pi = graph_.ops.size(); pi-- > 0;) {
-      const Kernel& k = kernel(graph_.ops[pi].opcode);
-      if (!k.backward) continue;
-      KernelCtx& ctx = ctx_[pi];
+    // Profile the exact bound backward plan. Each context belongs to ctx_,
+    // so its index supplies opcode attribution without a second graph walk
+    // or extra fields in the fast-path BwdStep layout.
+    for (const BwdStep& step : bwd_) {
+      KernelCtx& ctx = *step.ctx;
+      const size_t pi = static_cast<size_t>(step.ctx - ctx_.data());
+      assert(pi < graph_.ops.size());
       if (ctx.out_adj_vec.len == 1) ctx.out_adj = ctx.out_adj_vec.data[0];
-      if (out2_adj_ptr_[pi]) ctx.out2_adj = *out2_adj_ptr_[pi];
+      if (step.out2_adj) ctx.out2_adj = *step.out2_adj;
       const auto t0 = std::chrono::steady_clock::now();
-      k.backward(ctx);
+      step.fn(ctx);
       prof_[graph_.ops[pi].opcode].bwd_ns +=
           std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::steady_clock::now() - t0)

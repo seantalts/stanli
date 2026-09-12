@@ -113,7 +113,12 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
    become gathers, and N scalar density terms fuse into one summed
    vector density. `radon_pooled` goes from 27,670 ops to 8. Anything a
    pass cannot prove safe it leaves alone. `STANLI_NO_REROLL=1` disables
-   the main pass.
+   the main pass. A proven subset of terminal scalar loops (one indexed
+   real-data read, parameter addition/multiplication or FMA, then an
+   optional `exp`/`square` chain) is priced before expanding its iterations.
+   When profitable, lowering emits the same vector kernels directly.
+   `STANLI_SYMBOLIC_LANES=0` disables this shortcut; unset or `1` enables
+   automatic selection. Other values conservatively disable it.
 
 4. **Execution** (`runtime/src/executor.cpp`). The op graph is the AD
    tape. The forward sweep computes the log density and stashes each

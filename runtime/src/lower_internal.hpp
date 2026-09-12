@@ -467,6 +467,27 @@ inline std::vector<double> graph_order(const DataMap::Entry& en,
   return graph_container_order(en.r, en.dims, outer_rank);
 }
 
+struct DeclView {
+  int64_t len = 0;
+  bool autodiff = false;
+  SlotInfo si;
+  bool int_array = false;
+  bool deferred_shape = false;
+  std::vector<int> runtime_dims;
+};
+
+// A lifetime-bound view of the prepared facts handed from the completed
+// log-probability lowering to write_array. The integer map is the one snapshot
+// bind_data retains; the other references preserve the established handoff
+// timing without another O(data bytes) copy.
+struct PreparedContext {
+  const WaRng& rng;
+  const std::shared_ptr<ShapeInterner>& shapes;
+  const std::map<std::string, DataMap::Entry>& environment;
+  const std::map<std::string, long>& integers;
+  const std::map<std::string, DeclView>& declarations;
+};
+
 struct Lowering {
   struct Val {
     int slot;
@@ -835,6 +856,7 @@ struct Lowering {
   // int_env as bind_data left it, before either section's locals and loop
   // variables were folded in; the write_array lowering starts from this.
   std::map<std::string, long> int_env_data;
+  bool data_prepared = false;
   // Lowering generate_quantities rather than log_prob: parameters are columns
   // to emit, not values to differentiate.
   bool in_write_array = false;
@@ -859,6 +881,11 @@ struct Lowering {
   // its collapsed trip counts. TargetPE consumes the product at the edge,
   // so nested invariant loops still emit one scale rather than a MUL chain.
   double target_scale = 1.0;
+  // Automatic symbolic-lane probe: only the terminal unconditional model loop.
+  // False leaves ordinary lowering untouched; true handles the whole loop.
+  const mir::Stmt* symbolic_lane_tail = nullptr;
+  bool try_lower_symbolic_lane_tail(const mir::Stmt& s, int64_t first,
+                                    int64_t last);
   // OR of the actual real/container scalar types for the current inlined
   // UDF. Generic AutoDiffable locals and returns instantiate to this type.
   bool udf_autodiff_ctx = false;
@@ -875,6 +902,13 @@ struct Lowering {
       const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       const char* graph_name, WaRng stream,
       std::shared_ptr<ShapeInterner> pool = std::make_shared<ShapeInterner>());
+  Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
+           const char* graph_name, const PreparedContext& prepared_context);
+  struct RegionTrialTag {};
+  Lowering(Lowering& parent, RegionTrialTag);
+
+  PreparedContext prepared_context();
+  Lowering fork_region_trial();
 
   void dump_named(const std::string& label, const std::string& name,
                   const std::vector<int>& roots, bool unfiltered);
@@ -1883,14 +1917,6 @@ struct Lowering {
 
   void lower_read_param(const mir::Stmt& s);
 
-  struct DeclView {
-    int64_t len = 0;
-    bool autodiff = false;
-    SlotInfo si;
-    bool int_array = false;
-    bool deferred_shape = false;
-    std::vector<int> runtime_dims;
-  };
   // The only name-keyed declaration protocol. Runtime values carry the same
   // static scalar type and SlotInfo in `scope`; this registry is needed only
   // before first binding.

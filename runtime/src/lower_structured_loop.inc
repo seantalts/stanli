@@ -1995,17 +1995,10 @@ bool try_lower_region(
   {
     bool candidate_ready = false;
     try {
-      Lowering trial(data, prep, dumper, prep_graph, td_rng,
-                     std::make_shared<ShapeInterner>(*shape_pool));
-      trial.fun_defs = fun_defs;
-      trial.decls = decls;
-      trial.td.env() = td.env();
-      trial.int_env = int_env;
-      trial.int_locals = int_locals;
-      trial.propto_ctx = propto_ctx;
-      trial.udf_depth = udf_depth;
-      trial.udf_autodiff_ctx = udf_autodiff_ctx;
-      trial.udf_formal_autodiff = udf_formal_autodiff;
+      // Keep the complete trial seed in one audited helper. The candidate owns
+      // its mutable interpreter and shape state until every refusal point has
+      // passed; only the shape interner is published below.
+      Lowering trial = fork_region_trial();
       auto p = std::make_shared<StructuredLoop>();
       trial.region_current = &p->root;
       std::map<int, int> imported;
