@@ -1,10 +1,12 @@
 name: allocator regression diagnostics
 on:
   workflow_dispatch:
-  # Bootstrap this branch-only diagnostic once; remove after dispatch.
-  push:
-    branches: [codex/private-allocator-defaults]
-    paths: [.github/workflows/allocator-regressions.yml]
+    inputs:
+      stage:
+        description: Frozen diagnostic stage
+        type: choice
+        default: tls
+        options: [placement, tls]
 permissions:
   contents: read
   actions: read
@@ -18,6 +20,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     container:
       image: ${{ matrix.container }}
+      # Profiling only this job's user-mode processes in an ephemeral runner.
+      # No host perf sysctls or persistent security settings are changed.
+      options: --cap-add=PERFMON --security-opt seccomp=unconfined
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -36,6 +41,7 @@ jobs:
           mkdir diagnostic-host
           c++ --version > diagnostic-host/compiler.txt
           lscpu > diagnostic-host/lscpu.txt
+          lscpu -e=CPU,SOCKET,CORE,ONLINE > diagnostic-host/cpu-topology.txt
           cat /proc/self/status > diagnostic-host/process-status.txt
           cat /proc/meminfo > diagnostic-host/meminfo.txt
       - uses: actions/cache@v4
@@ -83,20 +89,67 @@ jobs:
             mkdir -p "diagnostic-libs/$allocator"
             cp build-placement/libstanli_allocator_benchmark.so "diagnostic-libs/$allocator/"
             cp build-placement/CMakeCache.txt "diagnostic-host/cache-$allocator.txt"
+            if [ "$allocator" = MIMALLOC ]; then
+              cp build-placement/private-mimalloc/CMakeFiles/mimalloc-static.dir/flags.make diagnostic-host/dynamic-tls-flags.txt
+            fi
           done
           python3 -m venv /tmp/allocator-placement-python
           /tmp/allocator-placement-python/bin/pip install numpy
+      - name: Build isolated pthread TLS variant
+        if: inputs.stage == 'tls'
+        run: |
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+          cmake -B build-placement -DSTANLI_SHARED_ALLOCATOR=MIMALLOC \
+            -DCMAKE_PROJECT_INCLUDE="$PWD/tools/allocator/pthread_tls.cmake"
+          cmake --build build-placement --target stanli_allocator_benchmark --parallel 2
+          mkdir -p diagnostic-libs/PTHREADS
+          cp build-placement/libstanli_allocator_benchmark.so diagnostic-libs/PTHREADS/
+          cp build-placement/CMakeCache.txt diagnostic-host/cache-PTHREADS.txt
+          cp build-placement/private-mimalloc/CMakeFiles/mimalloc-static.dir/flags.make diagnostic-host/pthread-tls-flags.txt
+      - name: Attempt user-mode CPU profiles (separate from timings)
+        if: inputs.stage == 'tls'
+        run: |
+          mkdir -p diagnostic-host/profile
+          if ! command -v perf; then
+            yum -q -y install perf > diagnostic-host/profile/install.log 2>&1 || true
+          fi
+          for allocator in SYSTEM MIMALLOC; do
+            if STANLI_ALLOCATOR_BENCH_PLACEMENT=worker perf record -e cpu-clock:u \
+              -F 199 --call-graph dwarf,8192 -o "diagnostic-host/profile/$allocator.data" \
+              -- /tmp/allocator-placement-python/bin/python tools/allocator/bench.py worker \
+              --library "diagnostic-libs/$allocator/libstanli_allocator_benchmark.so" \
+              --mode "$([ "$allocator" = SYSTEM ] && echo system || echo private)" \
+              --mir original-screen/models/inputs/normal_8/model.mir \
+              --data original-screen/models/inputs/normal_8/data.json \
+              --workers 4 --reps 20000000 --samples 1 \
+              --snapshot "diagnostic-host/profile/$allocator.snapshot" \
+              > "diagnostic-host/profile/$allocator.stdout" 2> "diagnostic-host/profile/$allocator.stderr"; then
+              perf report --stdio --no-children --percent-limit 0.5 \
+                -i "diagnostic-host/profile/$allocator.data" \
+                > "diagnostic-host/profile/$allocator.report" 2>&1 || true
+            fi
+          done
       - name: Fixed placement experiment (no concurrent build or test)
+        if: inputs.stage != 'tls'
         run: |
           /tmp/allocator-placement-python/bin/python tools/allocator/placement.py \
             --inputs original-screen/models/models.json \
             --system diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so \
             --candidate diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so \
             --output placement-results
+      - name: Fixed TLS experiment (no concurrent build or profile)
+        if: inputs.stage == 'tls'
+        run: |
+          /tmp/allocator-placement-python/bin/python tools/allocator/tls.py \
+            --inputs original-screen/models/models.json --libraries diagnostic-libs \
+            --output tls-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: allocator-placement-${{ matrix.runtime }}
+          name: allocator-${{ inputs.stage || 'placement' }}-${{ matrix.runtime }}
           path: |
             placement-results
+            tls-results
+            tls-results.design.json
             diagnostic-host
