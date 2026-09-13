@@ -1,0 +1,80 @@
+{
+  "phase": "bench",
+  "head": "3c7b85fafe94016e9db98b3dd8c78a490128c5f2",
+  "machine": "Windows-2022Server-10.0.20348-SP0",
+  "processor": "AMD64 Family 25 Model 1 Stepping 1, AuthenticAMD",
+  "python": "D:\\a\\stanli\\stanli\\wheeltest\\Scripts\\python.exe",
+  "input_sha256": "f9d853924e704173fcfa7070cd4c81dfb554d3332bcbe3e979d728b45ed62335",
+  "harness_sha256": "18ed680b09fc09af5432a5c235cbec1d4cb54f932e77af4286e5f0ea4e64e7d5",
+  "native_source_sha256": "b0f88fae330fc58f75edc672eb787990db7007df37bf82d2aa356b53a50434f3",
+  "variants": {
+    "system": {
+      "library": "D:\\a\\stanli\\stanli\\allocator-measurements\\system\\stanli_allocator_benchmark.dll",
+      "mode": "system",
+      "sha256": "d3b07b790de0647088cb838807d7078859288c35d11577b06a12de7a7fa7e445"
+    },
+    "candidate": {
+      "library": "D:\\a\\stanli\\stanli\\allocator-measurements\\candidate\\stanli_allocator_benchmark.dll",
+      "mode": "private",
+      "sha256": "bfce080e7f76a9548163737c9d6541f7d6c7d6cfdc48e86647e6be90edd27ef0"
+    }
+  },
+  "slots": [
+    "system",
+    "candidate",
+    "system_aa",
+    "candidate_aa"
+  ],
+  "cells": [
+    [
+      "eight_schools_noncentered",
+      1
+    ],
+    [
+      "eight_schools_noncentered",
+      4
+    ],
+    [
+      "hierarchical_gp",
+      1
+    ],
+    [
+      "hierarchical_gp",
+      4
+    ],
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_1024",
+      1
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      1
+    ],
+    [
+      "normal_262144",
+      4
+    ],
+    [
+      "gamma_16384",
+      1
+    ],
+    [
+      "gamma_16384",
+      4
+    ]
+  ],
+  "rounds": 5,
+  "started": 1789294315.7957437
+}

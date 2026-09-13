@@ -95,6 +95,23 @@ That measurement-target wiring is corrected separately from the allocator.
 Native CI performance results are not claimed complete until their artifacts
 have been reviewed.
 
+The subsequent [Windows shipping and timing job](https://github.com/seantalts/stanli/actions/runs/34750701616)
+passes all 246 native tests, Python checks, and all 92 numerical verification
+and 480 timing processes.
+On this Windows Server 2022 x86_64 runner, the allocator-only ratios for
+one/four workers are Eight Schools 1.440/1.420, hierarchical GP 1.120/1.132,
+normal 8 1.626/1.660, normal 1024 1.081/1.055, and normal 262144 2.576/3.257.
+Each of these cells improves in five/five rounds. Gamma 16384 is 0.998/1.000;
+the small one-worker negative is retained, not rounded into a win. Both A/A
+median ratios remain within 3% of one in every Windows cell, although the
+large-normal controls have wider individual round ranges. All 12 cells,
+ranges, memory measurements, and controls are in the
+[Windows scorecard](../tools/allocator/results/ci-34750701616-windows-x86_64/summary.json).
+The Linux metadata read failed before timing in that run; a scoped repository
+provenance fix is being validated in
+[34751295812](https://github.com/seantalts/stanli/actions/runs/34751295812).
+Linux performance evidence remains outstanding, not assumed from Windows/Mac.
+
 The final formatted local source passes **247 candidate / 243 SYSTEM native
 CTest tests**, and each configuration passes **48 Python checks / 173 R
 assertions**, plus BridgeStan embedding. Sixteen GC/model lifetimes, 4,096
@@ -121,6 +138,13 @@ flag, so this comparison is allocator-only. The
 [Apple ARM raw scorecard](../tools/allocator/results/ci-34749792182-darwin-arm64/summary.json)
 measures the combined candidate. Neither screen substitutes for Linux/Windows
 measurements.
+
+A later [Apple ARM validation rerun](../tools/allocator/results/ci-34750701616-darwin-arm64/summary.json)
+at formatted source is also retained in full, not substituted for the first
+screen. It has substantial hosted-runner noise: normal 1024/four workers has
+SYSTEM/private A/A medians 0.830/0.873, and gamma 16384/four workers shows a
+0.908 candidate ratio alongside a 1.107 private A/A median. This is an
+unresolved negative signal, not evidence of a clean no-regression pass.
 
 The existing protected `manylinux_2_28_x86_64` PR gate now also requires the
 native ownership matrix. Auto-merge must not bypass missing performance
@@ -167,6 +191,8 @@ host/native suite logs. Timed binaries are identified by their immutable
 recorded hashes; later changes are formatting, fallback/configuration tests,
 documentation, and the ELF/PE measurement-target include path, not additional
 timing runs. The post-format verification is recorded separately.
+The [evidence index](../tools/allocator/results/README.md) distinguishes the
+first valid native CI screens, completed validation reruns, and unfinished runs.
 
 Use the standalone commands in the evidence README to reproduce the matched
 boundary. The existing CLI-versus-CmdStan table is historical and has not been

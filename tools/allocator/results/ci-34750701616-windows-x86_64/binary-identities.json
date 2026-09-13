@@ -1,0 +1,10 @@
+{
+  "candidate": {
+    "path": "D:\\a\\stanli\\stanli\\allocator-measurements\\candidate\\stanli_allocator_benchmark.dll",
+    "sha256": "bfce080e7f76a9548163737c9d6541f7d6c7d6cfdc48e86647e6be90edd27ef0"
+  },
+  "system": {
+    "path": "D:\\a\\stanli\\stanli\\allocator-measurements\\system\\stanli_allocator_benchmark.dll",
+    "sha256": "d3b07b790de0647088cb838807d7078859288c35d11577b06a12de7a7fa7e445"
+  }
+}
