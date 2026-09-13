@@ -4,10 +4,16 @@
 
 The user requested one PR that enables a useful default, with the necessary
 testing. PR #363 consolidates the integration and corrected evaluator; #364
-is superseded. The rebased baseline is main `10f94763`. The original dirty
+is superseded. The frozen measurement baseline is main `10f94763`; the
+integration was subsequently rebased onto `f7723961` with unchanged runtime,
+compiler and evaluator sources. The original dirty
 research worktree and [complete earlier evidence](https://github.com/seantalts/stanli/tree/4e2d1bb4da8b7b602c73baaab875bf78f5c7b439)
 are preserved. Auto-merge is paused and the PR is a draft until this gate is
-resolved.
+resolved. The [matched results](linux-allocator-results.md) currently block
+x86_64 promotion: confirmed source-to-Fit regressions and a smaller consistent
+warm-gradient loss remain. ARM64 also completed collection and fails promotion
+because HMM and diamonds regress in the fixed warm-gradient confirmation.
+Neither platform's default is approved; the PR remains draft.
 
 Candidate: private mimalloc 3.5.1 for supported Linux x86_64/ARM64 native
 shared libraries. Fresh Linux builds select AUTO; explicit/cached SYSTEM is

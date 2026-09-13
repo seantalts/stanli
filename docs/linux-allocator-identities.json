@@ -1,0 +1,368 @@
+{
+  "linux_x86_64": {
+    "source": "3637822bedb77d2b98fa1fb7d2f4a2f8d933be3c",
+    "host": {
+      "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.28",
+      "cpu": "Intel(R) Xeon(R) 6973P-C",
+      "cpu_count": 4,
+      "environment": {},
+      "cgroup_cpu_max": "max 100000\n"
+    },
+    "compiler": "c++ (GCC) 14.2.1 20250110 (Red Hat 14.2.1-11)\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "binary_sha256": {
+      "system": {
+        "libstanli.so": "04f7a6aca1bad226ad88c2cabbc7a176fab90bd802402c9b61fc35442f4460cc",
+        "libstanli_allocator_benchmark.so": "07a848fae959d252c4f990c2d33e42a3fe21b2ae4fe4e84107bd8e888bbb60d0"
+      },
+      "candidate": {
+        "libstanli.so": "2ccef582b67ce239754d4628b6d1af10195bf1461bd8a1a9f4d4e4269ebd5c3d",
+        "libstanli_allocator_benchmark.so": "c890a7071604953aa95215f1ab4f44413e1605697db9e06888daf312453d01f8"
+      }
+    },
+    "input_sha256": "aa8d3beaf64e72769a47619601bd92708f6eaa41f20c436e4cc22806482d0cf1",
+    "harness_sha256": "6671331a382a7d8510cc25ee514175cc2c09d68a7f7800b1e3c0c0cd29824353",
+    "native_source_sha256": "25d3044694911019b2972d8be8ca94e3d2a0b7796d648104f3d2e59726f12843",
+    "sampling_source_sha256": "8662456ffed6a70e2581db0206981b3daef783d1ae740ff8ef41fd28dbe1e1fe",
+    "audit": {
+      "gradients/verify": {
+        "processes": 104,
+        "checked_snapshots": 104,
+        "minimum_warmup_ns": 500000479
+      },
+      "gradients/bench": {
+        "processes": 2080,
+        "checked_snapshots": 2080,
+        "minimum_warmup_ns": 500000074
+      },
+      "gradient-confirmation/bench": {
+        "processes": 280,
+        "checked_snapshots": 280,
+        "minimum_warmup_ns": 500000233
+      },
+      "sampling/verify": {
+        "processes": 28,
+        "checked_snapshots": 28
+      },
+      "sampling/bench": {
+        "processes": 280,
+        "checked_snapshots": 280
+      },
+      "sampling/confirm": {
+        "processes": 168,
+        "checked_snapshots": 168
+      }
+    },
+    "retention": {
+      "system": {
+        "native_gradients": 1179648,
+        "initial_rss_bytes": 37449728,
+        "peak_rss_bytes": 91525120,
+        "destroyed_rss_bytes": [
+          40992768,
+          47648768,
+          41693184,
+          41693184,
+          47861760,
+          43659264,
+          43659264,
+          48050176,
+          43843584,
+          43843584,
+          48594944,
+          44392448,
+          44392448,
+          48590848,
+          44388352,
+          44388352,
+          44388352,
+          44388352,
+          44388352,
+          48590848,
+          44388352,
+          44388352,
+          48590848,
+          44388352,
+          44388352,
+          48599040,
+          44388352,
+          44388352,
+          48599040,
+          44388352,
+          44388352,
+          48599040,
+          44388352,
+          44388352,
+          44388352,
+          44388352
+        ],
+        "final_rss_bytes": 44388352,
+        "last_six_cycles_destroyed_range": [
+          44388352,
+          48599040
+        ],
+        "after_small_last_six_cycles": [
+          44388352,
+          44388352,
+          44388352,
+          44388352,
+          44388352,
+          44388352
+        ]
+      },
+      "candidate": {
+        "native_gradients": 1179648,
+        "initial_rss_bytes": 39874560,
+        "peak_rss_bytes": 105099264,
+        "destroyed_rss_bytes": [
+          53059584,
+          80224256,
+          78417920,
+          78422016,
+          84434944,
+          80244736,
+          80244736,
+          84443136,
+          80244736,
+          80244736,
+          84443136,
+          80248832,
+          80248832,
+          84447232,
+          80248832,
+          80248832,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          80244736,
+          84447232,
+          80252928,
+          80252928,
+          82345984,
+          82345984,
+          82345984,
+          84451328,
+          78614528
+        ],
+        "final_rss_bytes": 78614528,
+        "last_six_cycles_destroyed_range": [
+          78614528,
+          84451328
+        ],
+        "after_small_last_six_cycles": [
+          80244736,
+          80244736,
+          80244736,
+          80252928,
+          82345984,
+          78614528
+        ]
+      }
+    },
+    "summary_sha256": {
+      "gradients/bench/summary.json": "3c62b93f541881c95dfce37fe1f716a76b6445a3c8bbb74f1c6f06a787488819",
+      "gradient-confirmation/bench/summary.json": "78699c2803a32f0867270b86aa25394738e439033cf446717c31cf49a42258a7",
+      "sampling/bench/summary.json": "6e550e8a0cf58ed36f90f4b19853fdbe4a9d599c948c7696b1a391981df2c897",
+      "sampling/confirm/summary.json": "1f58c63d5b7f1ae069c55c8d826b9bfbf6e206f8891e6675126766b514a1f966"
+    },
+    "artifact": {
+      "run": 34758730953,
+      "id": 10319589156,
+      "name": "allocator-rollout-linux-x86_64",
+      "sha256": "340bda90f3a0bc2e4ee22291d200786879c171f0caa319caab1bfebc09c35954",
+      "retention_days": 90
+    }
+  },
+  "linux_arm64": {
+    "source": "3637822bedb77d2b98fa1fb7d2f4a2f8d933be3c",
+    "host": {
+      "platform": "Linux-6.17.0-1022-azure-aarch64-with-glibc2.28",
+      "cpu": [
+        "CPU implementer\t: 0x41",
+        "CPU architecture: 8",
+        "CPU part\t: 0xd49"
+      ],
+      "cpu_count": 4,
+      "environment": {},
+      "cgroup_cpu_max": "max 100000\n"
+    },
+    "compiler": "c++ (GCC) 14.2.1 20250110 (Red Hat 14.2.1-11)\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "binary_sha256": {
+      "system": {
+        "libstanli.so": "d4585066d05549692ce23cf8e3b15afa8d42eb42d2dd93581526b143ddce887e",
+        "libstanli_allocator_benchmark.so": "4961f4a670cd4b59e3ddab541b2464232c34b7c512190709bd8f53891c30846f"
+      },
+      "candidate": {
+        "libstanli.so": "a2a17744c1ddcd788442b1518a475f73fdeff6f2d05380201b18bd27ad12815d",
+        "libstanli_allocator_benchmark.so": "11a75fc8f90b89b6c246287025763046c0020693b4abf6bf3e71b678515aa6ec"
+      }
+    },
+    "input_sha256": "07af6e6815bb63bd17e944e52c1076f32f131d7029ac64b9b2eda07aad1bd13b",
+    "harness_sha256": "6671331a382a7d8510cc25ee514175cc2c09d68a7f7800b1e3c0c0cd29824353",
+    "native_source_sha256": "25d3044694911019b2972d8be8ca94e3d2a0b7796d648104f3d2e59726f12843",
+    "sampling_source_sha256": "8662456ffed6a70e2581db0206981b3daef783d1ae740ff8ef41fd28dbe1e1fe",
+    "audit": {
+      "gradients/verify": {
+        "processes": 104,
+        "checked_snapshots": 104,
+        "minimum_warmup_ns": 500002436
+      },
+      "gradients/bench": {
+        "processes": 2080,
+        "checked_snapshots": 2080,
+        "minimum_warmup_ns": 500000055
+      },
+      "gradient-confirmation/bench": {
+        "processes": 504,
+        "checked_snapshots": 504,
+        "minimum_warmup_ns": 500000089
+      },
+      "sampling/verify": {
+        "processes": 28,
+        "checked_snapshots": 28
+      },
+      "sampling/bench": {
+        "processes": 280,
+        "checked_snapshots": 280
+      },
+      "sampling/confirm": {
+        "processes": 84,
+        "checked_snapshots": 84
+      }
+    },
+    "retention": {
+      "system": {
+        "native_gradients": 1179648,
+        "initial_rss_bytes": 36536320,
+        "peak_rss_bytes": 89243648,
+        "destroyed_rss_bytes": [
+          39424000,
+          46071808,
+          40058880,
+          40058880,
+          46071808,
+          41873408,
+          41873408,
+          41869312,
+          41869312,
+          41869312,
+          41869312,
+          41869312,
+          41869312,
+          46075904,
+          41869312,
+          41869312,
+          46075904,
+          41869312,
+          41869312,
+          46080000,
+          41869312,
+          41869312,
+          46080000,
+          41873408,
+          41873408,
+          46080000,
+          41873408,
+          41873408,
+          41873408,
+          41873408,
+          41877504,
+          46084096,
+          41877504,
+          41877504,
+          41877504,
+          41877504
+        ],
+        "final_rss_bytes": 41877504,
+        "last_six_cycles_destroyed_range": [
+          41869312,
+          46084096
+        ],
+        "after_small_last_six_cycles": [
+          41869312,
+          41873408,
+          41873408,
+          41873408,
+          41877504,
+          41877504
+        ]
+      },
+      "candidate": {
+        "native_gradients": 1179648,
+        "initial_rss_bytes": 39280640,
+        "peak_rss_bytes": 101892096,
+        "destroyed_rss_bytes": [
+          51912704,
+          83218432,
+          52039680,
+          54136832,
+          83214336,
+          79011840,
+          79011840,
+          79011840,
+          79011840,
+          53911552,
+          83218432,
+          53911552,
+          53911552,
+          83222528,
+          79015936,
+          79015936,
+          83226624,
+          79015936,
+          53915648,
+          83222528,
+          53915648,
+          53915648,
+          83226624,
+          79015936,
+          79015936,
+          83226624,
+          79015936,
+          53915648,
+          83226624,
+          53915648,
+          53915648,
+          79015936,
+          79020032,
+          79020032,
+          83226624,
+          79020032
+        ],
+        "final_rss_bytes": 79020032,
+        "last_six_cycles_destroyed_range": [
+          53915648,
+          83226624
+        ],
+        "after_small_last_six_cycles": [
+          53915648,
+          79015936,
+          79015936,
+          53915648,
+          79020032,
+          79020032
+        ]
+      }
+    },
+    "summary_sha256": {
+      "gradients/bench/summary.json": "5f836826a55ff10a3ad75a5133330be61158562910338ca5ac40f7b1cf3bdcfb",
+      "gradient-confirmation/bench/summary.json": "8883b19df89724d7862b1392690f848b9cd166e33bbe21c6714dfcccfef45567",
+      "sampling/bench/summary.json": "c3a1e8b9018cebe8a8dd49ec4b00108d04caa55bea1786f35c7dd5534cad9472",
+      "sampling/confirm/summary.json": "c743b37327abee9df74688dbdbb40a52696d18861988350effbadf0e5509afff"
+    },
+    "artifact": {
+      "run": 34758730953,
+      "id": 10320536135,
+      "name": "allocator-rollout-linux-arm64",
+      "sha256": "2dd31e88ece5a8e38802ef20bad13f770eee2ee131fa5d7e5155e7df0574a50a",
+      "retention_days": 90
+    }
+  }
+}

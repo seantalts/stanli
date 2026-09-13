@@ -4,7 +4,9 @@ Fresh Linux builds select `STANLI_SHARED_ALLOCATOR=AUTO`, enabling the
 private allocator on supported configurations. Windows and macOS default
 to SYSTEM. This Linux rollout is gated by the
 [matched validation plan](linux-allocator-rollout.md); the PR remains a draft
-until those results justify promotion. No Stan Math or Eigen source changes
+until those results justify promotion. The [matched results](linux-allocator-results.md)
+block both Linux defaults: correctness passes, but x86_64 source-to-Fit and
+ARM64 warm-gradient regressions persist. No Stan Math or Eigen source changes
 are required, and no claim is made that every model is faster.
 
 After the usual dependency/compiler setup:
@@ -36,6 +38,9 @@ matching library free function; they are not host-owned buffers.
 - Linux and MinGW rewrite a **copy** of the target's input archive. Only its
   C allocation references change; original reusable objects, dependency
   archives and the statically linked C++ runtime retain system allocation.
+  The embedded compiler's complete object is a direct target input, so its
+  OCaml C runtime is currently included in the rewrite; it is not an excluded
+  dependency archive.
   There is no final-link `--wrap`, process interposition or preload.
 - mimalloc 3.5.1 is pinned in `deps/fetch.sh`, built privately without
   override/interpose/zone/redirect support or newer-CPU optimizations.
