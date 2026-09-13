@@ -1,0 +1,102 @@
+name: allocator regression diagnostics
+on:
+  workflow_dispatch:
+  # Bootstrap this branch-only diagnostic once; remove after dispatch.
+  push:
+    branches: [codex/private-allocator-defaults]
+    paths: [.github/workflows/allocator-regressions.yml]
+permissions:
+  contents: read
+  actions: read
+  packages: read
+concurrency:
+  group: allocator-regression-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  placement:
+    name: placement (${{ matrix.runtime }})
+    runs-on: ${{ matrix.os }}
+    container:
+      image: ${{ matrix.container }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, runtime: linux-x86_64, plat: manylinux_2_28_x86_64, container: 'ghcr.io/seantalts/stanli-manylinux:2_28-x86_64'}
+          - {os: ubuntu-24.04-arm, runtime: linux-arm64, plat: manylinux_2_28_aarch64, container: 'ghcr.io/seantalts/stanli-manylinux:2_28-aarch64'}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record compiler and host
+        id: compiler
+        run: |
+          echo "id=$(c++ --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          mkdir diagnostic-host
+          c++ --version > diagnostic-host/compiler.txt
+          lscpu > diagnostic-host/lscpu.txt
+          cat /proc/self/status > diagnostic-host/process-status.txt
+          cat /proc/meminfo > diagnostic-host/meminfo.txt
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: allocator-placement-${{ matrix.runtime }}-${{ steps.compiler.outputs.id }}-${{ hashFiles('tools/allocator/**', 'runtime/**', 'CMakeLists.txt') }}
+          restore-keys: ccache-${{ matrix.plat }}-release-v4-${{ steps.compiler.outputs.id }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+      - run: ./deps/fetch.sh
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps/stanc3/stanc_embed.o
+            deps/stanc3/stanc_embed.o.stamp
+            deps/stanc3/stanc
+            deps/stanc3/stanc.src
+            deps/stanc3/stanli-vectorize-probe
+            deps/stanc3/stanli-vectorize-probe.stamp
+            deps/ocaml-include
+          key: stanc-embed-v2-${{ matrix.plat }}-8e154ac3454790cb5427ae72106c859b3fb8d90a-ocaml5.5.0-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: allocator-measurements-${{ matrix.runtime }}
+          run-id: 34751295812
+          github-token: ${{ github.token }}
+          path: original-screen
+      - name: Build matched diagnostic libraries
+        run: |
+          test -s deps/stanc3/stanc_embed.o
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+          for allocator in MIMALLOC SYSTEM; do
+            cmake -B build-placement -DCMAKE_BUILD_TYPE=Release \
+              -DSTANLI_SHARED_ALLOCATOR="$allocator" -DSTANLI_ALIGN_LOOPS=OFF \
+              -DSTANLI_BUILD_ALLOCATOR_BENCHMARK=ON \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+              -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+            cmake --build build-placement --target stanli_allocator_benchmark --parallel 2
+            mkdir -p "diagnostic-libs/$allocator"
+            cp build-placement/libstanli_allocator_benchmark.so "diagnostic-libs/$allocator/"
+            cp build-placement/CMakeCache.txt "diagnostic-host/cache-$allocator.txt"
+          done
+          python3 -m venv /tmp/allocator-placement-python
+          /tmp/allocator-placement-python/bin/pip install numpy
+      - name: Fixed placement experiment (no concurrent build or test)
+        run: |
+          /tmp/allocator-placement-python/bin/python tools/allocator/placement.py \
+            --inputs original-screen/models/models.json \
+            --system diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so \
+            --candidate diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so \
+            --output placement-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allocator-placement-${{ matrix.runtime }}
+          path: |
+            placement-results
+            diagnostic-host

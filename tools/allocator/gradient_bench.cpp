@@ -164,7 +164,8 @@ struct Chain {
 
 static void run_model(const std::string& mir, const std::string& json,
                       int chains, int reps, int samples, int cycle,
-                      FILE* snapshots, const char* allocator) {
+                      FILE* snapshots, const char* allocator,
+                      const std::string& placement) {
   const auto begin = Clock::now();
   auto data = stanli::DataMap::from_json(json);
   auto compiled = stanli::compile_model(mir, data);
@@ -174,7 +175,8 @@ static void run_model(const std::string& mir, const std::string& json,
   for (const auto& slot : base.graph().slots) slot_elements += slot.len;
   std::vector<std::unique_ptr<Chain>> workers;
   for (int c = 0; c < chains; ++c)
-    workers.push_back(std::make_unique<Chain>(base, c));
+    workers.push_back(placement == "worker" ? nullptr
+                                            : std::make_unique<Chain>(base, c));
   const double prep_ns = elapsed(begin);
   std::printf(
       "{\"kind\":\"prepare\",\"cycle\":%d,\"ns\":%.1f,\"params\":%lld,"
@@ -192,7 +194,12 @@ static void run_model(const std::string& mir, const std::string& json,
       // workers.
       stan::math::ChainableStack tape;
       ownership(allocator);
+      if (placement == "worker") workers[c] = std::make_unique<Chain>(base, c);
       Chain& chain = *workers[c];
+      if (placement == "gradient") {
+        Eigen::VectorXd local(chain.gradient.size());
+        chain.gradient.swap(local);
+      }
       const auto first = Clock::now();
       chain.one(0);
       chain.first_ns = elapsed(first);
@@ -215,7 +222,27 @@ static void run_model(const std::string& mir, const std::string& json,
     });
   for (int s = 0; s < samples; ++s) {
     barrier.wait();
-    if (s == 0) memory("warmed", cycle);
+    if (s == 0) {
+      memory("warmed", cycle);
+      for (int c = 0; c < chains; ++c) {
+        Chain& chain = *workers[c];
+        const auto address = [&](const char* field, const void* p,
+                                 size_t bytes) {
+          std::printf(
+              "{\"kind\":\"placement\",\"mode\":\"%s\",\"cycle\":%d,"
+              "\"chain\":%d,\"field\":\"%s\",\"address\":%llu,\"bytes\":%zu}\n",
+              placement.c_str(), cycle, c, field,
+              static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(p)),
+              bytes);
+        };
+        address("gradient", chain.gradient.data(),
+                chain.gradient.size() * sizeof(double));
+        address("gradient_object", &chain.gradient, sizeof(chain.gradient));
+        address("lp", &chain.lp, sizeof(chain.lp));
+        address("values", chain.executor->params_data(),
+                chain.executor->mutable_value_size() * sizeof(double));
+      }
+    }
     const auto start = Clock::now();
     barrier.wait();
     barrier.wait();
@@ -271,12 +298,18 @@ extern "C" ALLOCATOR_BENCH_EXPORT int stanli_allocator_bench_run(int argc,
     require(chains > 0 && chains <= 32 && reps > 0 && samples > 0 && cycles > 0,
             "invalid benchmark counts");
     ownership(argv[3]);
+    const char* placement_env = std::getenv("STANLI_ALLOCATOR_BENCH_PLACEMENT");
+    const std::string placement = placement_env ? placement_env : "main";
+    require(
+        placement == "main" || placement == "gradient" || placement == "worker",
+        "invalid test-only placement");
     const std::string mir = slurp(argv[1]), json = slurp(argv[2]);
     FILE* snapshots = argc == 10 ? std::fopen(argv[9], "wb") : nullptr;
     require(argc != 10 || snapshots, "cannot open snapshots");
     memory("start", -1);
     for (int cycle = 0; cycle < cycles; ++cycle) {
-      run_model(mir, json, chains, reps, samples, cycle, snapshots, argv[3]);
+      run_model(mir, json, chains, reps, samples, cycle, snapshots, argv[3],
+                placement);
       memory("destroyed", cycle);
     }
     if (snapshots) std::fclose(snapshots);
