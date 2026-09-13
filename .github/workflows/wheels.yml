@@ -46,7 +46,7 @@ on:
         default: OFF
         options: [OFF, AUTO]
       allocator_bench:
-        description: Paired allocator screen on native x86 and Linux ARM (select MIMALLOC)
+        description: Paired allocator/alignment screen on all native platforms (select MIMALLOC)
         type: boolean
         default: false
 
@@ -669,7 +669,7 @@ jobs:
           /tmp/wheeltest/bin/python tests/test_bridgestan_embed.py
 
       - name: Matched native allocator measurements
-        if: inputs.allocator_bench && matrix.runtime != 'darwin-arm64'
+        if: inputs.allocator_bench
         run: |
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
           /tmp/wheeltest/bin/python tools/allocator/ci.py \
@@ -677,7 +677,7 @@ jobs:
             --output allocator-measurements --jobs ${{ matrix.build_jobs }}
 
       - name: Publish matched allocator measurements
-        if: always() && inputs.allocator_bench && matrix.runtime != 'darwin-arm64'
+        if: always() && inputs.allocator_bench
         uses: actions/upload-artifact@v4
         with:
           name: allocator-measurements-${{ matrix.runtime }}

@@ -80,7 +80,7 @@ memory queries are outside timed regions. Prove the refactor against the
 retained host evaluator before using its numbers. No remote run is claimed
 until its actual execution result is available.
 
-## Native non-Apple-ARM screen (declared before running)
+## Native CI screen (declared before running)
 
 `tools/allocator/ci.py` reuses the runtime objects on platforms where the loop
 flag is unchanged, and builds the non-installed DSO for MIMALLOC and SYSTEM.
@@ -91,6 +91,8 @@ to eight schools, hierarchical GP, normal 8/1024/262144, gamma 16384 at one
 and four workers: five rounds, two processes per slot, three blocks, and
 both identical-binary aliases (480 processes per platform). Report every
 cell and controls; do not treat hosted-runner noise as proof of equivalence.
-Apple ARM uses the separate complete 52-cell experiment. The optional manual
+The additional Apple ARM runner rebuilds the baseline objects with alignment
+OFF: a check of the combined default on another Apple machine, alongside the
+local complete 52-cell experiment. The optional manual
 workflow input `allocator_bench` runs this screen after each shipping host's
 tests, never concurrently with its build. It publishes raw measurements.

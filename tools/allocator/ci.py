@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Paired allocator measurements after a native shipping build, outside its tests.
 
-For hosts where alignment is unchanged, reuse runtime objects and relink only
-the non-installed benchmark target. Apple ARM needs two complete builds and is
-covered by the separate 52-cell experiment, not this allocator-only screen.
+Where alignment is unchanged, reuse runtime objects and relink the non-installed
+benchmark target. Apple ARM also rebuilds those objects with alignment OFF for
+the baseline, to check the combined default on a second Apple machine.
 """
 import argparse
 import hashlib
@@ -21,7 +21,7 @@ NAMES = ["eight_schools_noncentered", "hierarchical_gp", "normal_8",
 
 
 def main(args):
-    assert not (sys.platform == "darwin" and platform.machine() == "arm64")
+    apple_arm = sys.platform == "darwin" and platform.machine() == "arm64"
     build, out = args.build.resolve(), args.output.resolve()
     out.mkdir(parents=True)
     commands = []
@@ -44,8 +44,9 @@ def main(args):
     variants = {}
     try:
         for slot, mode in [("candidate", "MIMALLOC"), ("system", "SYSTEM")]:
+            alignment = ["-DSTANLI_ALIGN_LOOPS=" + ("ON" if slot == "candidate" else "OFF")] if apple_arm else []
             run(["cmake", "-S", ROOT, "-B", build, "-DSTANLI_BUILD_ALLOCATOR_BENCHMARK=ON",
-                 "-DSTANLI_SHARED_ALLOCATOR=" + mode])
+                 "-DSTANLI_SHARED_ALLOCATOR=" + mode, *alignment])
             run(["cmake", "--build", build, "--target", "stanli_allocator_benchmark", "--parallel", args.jobs])
             directory = out / slot
             directory.mkdir()
