@@ -370,17 +370,23 @@ workflows.
 One-shot setup (fetches pinned deps, builds, runs tests):
 
 ```
-./tools/dev_setup.sh               # core build + tests + source-pinned stanc3 (executable and embedded)
+./tools/dev_setup.sh               # core build + tests + source-pinned stanc3 and stanli-compile
+./tools/dev_setup.sh --embed       # use the in-process compiler instead
 ./tools/dev_setup.sh --corpus      # + posteriordb and CmdStan
 ./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
 ./tools/dev_setup.sh --all
 ```
 
 On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
+Without `--embed`, setup builds `stanli-compile` and CMake places it beside
+`stanli_check`. `--embed` is unsupported on Windows ARM64.
 Setup reuses the installation providing `pacman` on `PATH`, or checks
 `C:/msys64` and installs `MSYS2.MSYS2` with winget if absent. It prepends
 the UCRT64 directories on x86_64 or CLANGARM64 directories on ARM64 to `PATH`.
 Pacman provides Git, Python, make, Clang and CMake; missing opam uses winget.
+MinGW `RelWithDebInfo` builds use `-g1` to reduce object and `.exe.debug` sizes,
+retaining source lines and backtraces. Use `-DCMAKE_BUILD_TYPE=Debug` for full
+variable and type information.
 
 `--conformance` is what makes the differential Stan language sweep runnable
 here rather than only in the nightly; see

@@ -2,8 +2,8 @@
 # One-shot dev environment setup. Safe to re-run; every step is
 # idempotent and skipped once its output exists.
 #
-#   tools/dev_setup.sh               core: pinned stanc, in-process compiler,
-#                                    cmake builds/tests
+#   tools/dev_setup.sh               core: pinned stanc, stanli-compile, cmake builds/tests
+#   tools/dev_setup.sh --embed       + in-process compiler
 #   tools/dev_setup.sh --corpus      + posteriordb and CmdStan rig
 #   tools/dev_setup.sh --conformance + the Stan conformance reference stack
 #   tools/dev_setup.sh --all         everything
@@ -20,8 +20,7 @@
 #   deps/cmdstan checkout as --corpus and the same stanc3 source tree and
 #   opam switch as core, so with either of those already done most of
 #   it is a no-op.
-# --embed is accepted and does nothing: the in-process compiler is part of
-#   core because stanli_check and the lit tests compile through it.
+# --embed builds and links the in-process compiler; unsupported on Windows ARM64.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
@@ -36,15 +35,16 @@ source tools/stanc_embed/provenance.sh
 source tools/build_jobs.sh
 BUILD_JOBS=$(stanli_detect_build_jobs)
 
+WANT_EMBED=0
 WANT_CORPUS=0
 WANT_CONFORMANCE=0
 WANT_BUILD=1
 for arg in "$@"; do
   case "$arg" in
-    --embed) ;;
+    --embed) WANT_EMBED=1 ;;
     --corpus) WANT_CORPUS=1 ;;
     --conformance) WANT_CONFORMANCE=1 ;;
-    --all) WANT_CORPUS=1; WANT_CONFORMANCE=1 ;;
+    --all) WANT_EMBED=1; WANT_CORPUS=1; WANT_CONFORMANCE=1 ;;
     --no-build) WANT_BUILD=0 ;;
     -h|--help) sed -n '2,/^set -/{ /^set -/d; p; }' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg (try --help)"; exit 2 ;;
@@ -120,10 +120,8 @@ step "fetching pinned deps (Stan Math and Stan)"
 ./deps/fetch.sh
 
 # --- source-pinned stanc3 --------------------------------------------------
-# Fixture generation and the signature model generators run this executable;
-# the ctest suite compiles everything else through the in-process compiler
-# built below. build_stanc caches by source revision; after the first build
-# this is a no-op.
+# Fixture generation and the signature model generators run this executable.
+# build_stanc caches by source revision.
 step "stanc3 executable from source at $STANC3_SRC_SHA"
 # The embed build needs the source checkout too. Force the centralized builder
 # to recreate a cached output when that checkout or its opam switch is absent.
@@ -141,38 +139,49 @@ cp deps/stanc3/stanc-pinned.src deps/stanc3/stanc.src
 }
 "./deps/stanc3/stanc$EXE_SUFFIX" --version
 
-# --- embedded stanc3 -------------------------------------------------------
-step "building the embeddable stanc object"
-if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
-     "$STANC3_SRC_SHA" &&
-   [ -x deps/stanc3/stanli-vectorize-probe ] &&
-   stanc_embed_artifact_matches deps/stanc3/stanli-vectorize-probe \
-     "$STANC3_SRC_SHA"; then
-  echo "embedded compiler artifacts match the source and producer inputs"
+# --- stanli compiler ------------------------------------------------------
+if [ "$WANT_EMBED" = 1 ]; then
+  step "building the embeddable stanc object"
+  if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
+       "$STANC3_SRC_SHA" &&
+     [ -x deps/stanc3/stanli-vectorize-probe ] &&
+     stanc_embed_artifact_matches deps/stanc3/stanli-vectorize-probe \
+       "$STANC3_SRC_SHA"; then
+    echo "embedded compiler artifacts match the source and producer inputs"
+  else
+    echo "embedded compiler artifacts are absent or mismatched; rebuilding"
+    tools/stanc_embed/build.sh deps/stanc3-src "$OPAM_SWITCH"
+  fi
 else
-  echo "embedded compiler artifacts are absent or mismatched; rebuilding"
-  tools/stanc_embed/build.sh deps/stanc3-src "$OPAM_SWITCH"
+  step "building stanli-compile for the non-embedded checker"
+  # Build only the native CLI target; the JS overlay's default alias also
+  # builds JavaScript and needs js_of_ocaml. Dune handles incremental rebuilds.
+  tools/stanc_embed/install_overlay.sh js deps/stanc3-src
+  (cd deps/stanc3-src &&
+   opam exec --switch="$OPAM_SWITCH" -- dune build -j "$BUILD_JOBS" \
+     --profile release src/stanli_stancjs/stanli_compiler_cli.exe)
+  install -m 755 \
+    deps/stanc3-src/_build/default/src/stanli_stancjs/stanli_compiler_cli.exe \
+    "deps/stanc3/stanli-compile$EXE_SUFFIX"
 fi
 
 # --- cmake builds ----------------------------------------------------------
 if [ "$WANT_BUILD" = 1 ]; then
   step "configuring and building with $BUILD_JOBS jobs (build/ dev, build-rel/ benchmarks)"
-  EMBED_FLAGS=()
-  if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
-       "$STANC3_SRC_SHA"; then
+  EMBED_FLAGS=(-DSTANLI_STANC_EMBED_OBJ= -DSTANLI_OCAML_STDLIB=)
+  if [ "$WANT_EMBED" = 1 ]; then
     EMBED_FLAGS=(
       "-DSTANLI_STANC_EMBED_OBJ=$REPO/deps/stanc3/stanc_embed.o"
       "-DSTANLI_OCAML_STDLIB=$(opam var --switch="$OPAM_SWITCH" lib 2>/dev/null)/ocaml"
     )
-  elif [ -f deps/stanc3/stanc_embed.o ]; then
-    echo "ignoring embedded object with absent or mismatched provenance" >&2
   fi
   cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     "${CMAKE_FLAGS[@]}" \
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
   cmake --build build --parallel "$BUILD_JOBS"
   cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
-    "${CMAKE_FLAGS[@]}"
+    "${CMAKE_FLAGS[@]}" \
+    ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
   cmake --build build-rel --parallel "$BUILD_JOBS" \
     --target bench_grad stanli_run
 
@@ -270,7 +279,7 @@ if stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
      "$STANC3_SRC_SHA"; then
   echo "wheel:       tools/build_wheel.sh"
 else
-  echo "wheel:       rerun tools/dev_setup.sh, then tools/build_wheel.sh"
+  echo "wheel:       rerun tools/dev_setup.sh --embed, then tools/build_wheel.sh"
 fi
 if [ "$WANT_CONFORMANCE" = 1 ]; then
   # Run the driver under the venv interpreter, not the host's: the harness

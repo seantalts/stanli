@@ -16,7 +16,13 @@ windows_install() {
 
 case "$(powershell.exe -NoProfile -NonInteractive -Command \
   '(Get-CimInstance Win32_Processor | Select-Object -First 1).Architecture' | tr -d '\r')" in
-  12) msys_env=clangarm64; msys_package_prefix=mingw-w64-clang-aarch64 ;; # ARM64
+  12)
+    if [ "$WANT_EMBED" = 1 ]; then
+      echo "--embed is unsupported on Windows ARM64: OCaml runs under x64 emulation and cannot build native ARM64 objects." >&2
+      exit 1
+    fi
+    msys_env=clangarm64; msys_package_prefix=mingw-w64-clang-aarch64
+    ;;
   9) msys_env=ucrt64; msys_package_prefix=mingw-w64-ucrt-x86_64 ;;        # x64
   *) echo "Unsupported Windows architecture" >&2; exit 1 ;;
 esac
@@ -26,6 +32,7 @@ if have pacman; then
 else
   msys_root=$(cygpath -u 'C:/msys64')
 fi
+msys_root=${msys_root%/}
 [[ -x "$msys_root/usr/bin/pacman.exe" ]] || windows_install MSYS2.MSYS2
 
 have opam || windows_install OCaml.opam
