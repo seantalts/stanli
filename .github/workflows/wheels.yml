@@ -34,6 +34,12 @@ on:
     # 08:00 UTC daily, which is overnight in US time zones.
     - cron: '0 8 * * *'
   workflow_dispatch:
+    inputs:
+      shared_allocator:
+        description: Native shared-library allocator under validation (default remains SYSTEM)
+        type: choice
+        default: SYSTEM
+        options: [SYSTEM, MIMALLOC, AUTO]
 
 permissions:
   contents: read
@@ -54,6 +60,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  STANLI_CI_SHARED_ALLOCATOR: ${{ inputs.shared_allocator || 'SYSTEM' }}
   # Must match tools/dev_setup.sh. The embedded compiler cache is keyed on
   # the commit, so bumping it there and here invalidates the cache once.
   STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
@@ -412,6 +419,7 @@ jobs:
             compiler_args+=("-DCMAKE_C_COMPILER=$CC" "-DCMAKE_CXX_COMPILER=$CXX")
           fi
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_SHARED_ALLOCATOR="$STANLI_CI_SHARED_ALLOCATOR" \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -1324,6 +1332,7 @@ jobs:
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
           ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_SHARED_ALLOCATOR="$STANLI_CI_SHARED_ALLOCATOR" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
@@ -1958,10 +1967,17 @@ jobs:
   # Branch protection requires this exact check name. It follows the heavy
   # manylinux build for source PRs and succeeds after the static checks for a
   # docs-only PR; a failed or unexpectedly skipped heavy build still fails.
+  allocator-validation:
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
+    uses: ./.github/workflows/private-allocator.yml
+
   pr-gate:
     name: manylinux_2_28_x86_64
     if: always() && github.event_name == 'pull_request'
-    needs: [changes, static_checks, build]
+    needs: [changes, static_checks, build, allocator-validation]
     runs-on: ubuntu-latest
     steps:
       - name: Verify the required validation path
@@ -1970,14 +1986,17 @@ jobs:
           STATIC_RESULT: ${{ needs.static_checks.result }}
           HEAVY: ${{ needs.changes.outputs.heavy }}
           BUILD_RESULT: ${{ needs.build.result }}
+          ALLOCATOR_RESULT: ${{ needs.allocator-validation.result }}
         run: |
           test "$CHANGE_RESULT" = success
           test "$STATIC_RESULT" = success
           if [ "$HEAVY" = true ]; then
             test "$BUILD_RESULT" = success
+            test "$ALLOCATOR_RESULT" = success
           else
             test "$HEAVY" = false
             test "$BUILD_RESULT" = skipped
+            test "$ALLOCATOR_RESULT" = skipped
           fi
 
   # The public demo: web/ plus the runtime and compiler artifacts, deployed

@@ -81,6 +81,7 @@ if(MINGW)
 endif()
 
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
+include(cmake/StanliAllocator.cmake)
 file(GLOB _eigen ${DEPS}/math/lib/eigen_*)
 file(GLOB _boost ${DEPS}/math/lib/boost_*)
 file(GLOB _sundials ${DEPS}/math/lib/sundials_*)
@@ -449,6 +450,7 @@ function(stanli_embed_stanc TGT)
   endif()
 endfunction()
 stanli_embed_stanc(stanli_shared)
+stanli_link_private_allocator(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
 # Sanitizer builds keep using a shared C++ runtime. The reason is disk, not
@@ -1109,6 +1111,20 @@ if(STANLI_FAST_TEST_TUS)
 endif()
 add_test(NAME test_function COMMAND test_function
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(STANLI_USE_PRIVATE_MIMALLOC)
+  include(cmake/StanliAllocatorTests.cmake)
+  stanli_add_allocator_probe()
+  add_dependencies(test_private_allocator stanli_shared)
+  add_test(NAME test_private_allocator COMMAND test_private_allocator
+    $<TARGET_FILE:stanli_shared> $<TARGET_FILE:stanli_allocator_test_probe>)
+  add_test(NAME test_private_allocator_exports
+    COMMAND ${CMAKE_COMMAND} -DLIBRARY=$<TARGET_FILE:stanli_shared>
+      -DNM=${CMAKE_NM} -DOBJDUMP=${CMAKE_OBJDUMP} -DPLATFORM=${CMAKE_SYSTEM_NAME}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_allocator_exports.cmake)
+endif()
+add_test(NAME test_allocator_config COMMAND ${CMAKE_COMMAND}
+  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_config.cmake)
 
 # The conformance gate has its own failure modes (parser drift, a broad policy
 # rule, nonfinite comparison, partition loss) which C++ runtime tests cannot
