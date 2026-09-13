@@ -509,15 +509,22 @@ tuning were added after seeing these results.
   allocator ownership jobs.
 - [Rebased full platform run](https://github.com/seantalts/stanli/actions/runs/34764263000)
   passed both Linux releases, both macOS architectures, Windows, R, browser,
-  webR and standalone ownership jobs. ASan/TSan are still building.
+  webR and standalone ownership jobs. ASan passes 245/245, including the
+  relocated compiler deployment test; TSan passes all three threaded tests.
+  The complete full-platform run is green. Sanitizer
+  builds select SYSTEM by design: these validate fallback integration, not
+  private mimalloc running under sanitizers.
 - Post-rebase local private CTest: 250/250. The matched measured-source local
   SYSTEM build passed 246/246. Local Python passed both allocators; R passed
   173 checks per allocator with no failures/warnings/skips, plus the private
   portable-compiler integration check. These are compatibility checks, not
   Linux timing claims.
-- The original measured-source run remains retained separately. It predates
-  main's sanitizer-tool installation fix; do not substitute it for the
-  rebased sanitizer validation or discard any resulting failures.
+- The original measured-source ASan run is retained with its failure:
+  244/245 passed; only `test_compiler_deployment` failed because the moved
+  installation could not find `libstanli_core.so`. The rebased ASan run
+  above passes that same test after main's installation fix. This is an
+  infrastructure/packaging failure, not a discarded allocator timing sample
+  or an ASan memory-error report. Both runs are linked, not pooled.
 
 ## Reproduction
 
