@@ -8,6 +8,12 @@
 
 namespace stanli {
 
-const char* runtime_build_id() { return STANLI_BUILD_ID; }
+const char* runtime_build_id() {
+#ifdef STANLI_PRIVATE_MIMALLOC
+  return STANLI_BUILD_ID "-mimalloc-3.5.1-private-c";
+#else
+  return STANLI_BUILD_ID;
+#endif
+}
 
 }  // namespace stanli
