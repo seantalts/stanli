@@ -420,6 +420,7 @@ jobs:
           fi
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_SHARED_ALLOCATOR="$STANLI_CI_SHARED_ALLOCATOR" \
+            -DSTANLI_BUILD_ALLOCATOR_BENCHMARK=ON \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -1333,6 +1334,7 @@ jobs:
           ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DSTANLI_SHARED_ALLOCATOR="$STANLI_CI_SHARED_ALLOCATOR" \
+            -DSTANLI_BUILD_ALLOCATOR_BENCHMARK=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
