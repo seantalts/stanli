@@ -45,6 +45,10 @@ on:
         type: choice
         default: OFF
         options: [OFF, AUTO]
+      allocator_bench:
+        description: Paired allocator screen on native x86 and Linux ARM (select MIMALLOC)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -663,6 +667,24 @@ jobs:
           # The BridgeStan transport: the manifest embedded in the data
           # argument, two models through the one dlopen'd runtime library.
           /tmp/wheeltest/bin/python tests/test_bridgestan_embed.py
+
+      - name: Matched native allocator measurements
+        if: inputs.allocator_bench && matrix.runtime != 'darwin-arm64'
+        run: |
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          /tmp/wheeltest/bin/python tools/allocator/ci.py \
+            --build build-rel --pdb deps/posteriordb \
+            --output allocator-measurements --jobs ${{ matrix.build_jobs }}
+
+      - name: Publish matched allocator measurements
+        if: always() && inputs.allocator_bench && matrix.runtime != 'darwin-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: allocator-measurements-${{ matrix.runtime }}
+          path: |
+            allocator-measurements
+            !allocator-measurements/*/*.so
+            !allocator-measurements/*/*.dylib
 
       # Exercise the real OCaml producer against the exact-source legacy
       # compiler, then compare the decoded program and the executable graph.
@@ -1366,6 +1388,32 @@ jobs:
           $whl = Get-Item dist\*.whl
           wheeltest\Scripts\pip install $whl.FullName
           wheeltest\Scripts\python tests\test_python.py
+
+      - name: Matched native allocator measurements
+        if: inputs.allocator_bench
+        run: |
+          git clone --filter=blob:none --sparse \
+            https://github.com/stan-dev/posteriordb.git deps/posteriordb
+          git -C deps/posteriordb sparse-checkout set \
+            posterior_database/models/stan posterior_database/data/data \
+            posterior_database/posteriors
+          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          git -C deps/posteriordb checkout -q "$PDB_SHA"
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          cp deps/stanc3/stanli-compile deps/stanc3/stanli-compile.exe
+          wheeltest/Scripts/python.exe tools/allocator/ci.py \
+            --build build-rel --pdb deps/posteriordb \
+            --compiler deps/stanc3/stanli-compile.exe \
+            --output allocator-measurements --jobs 4
+
+      - name: Publish matched allocator measurements
+        if: always() && inputs.allocator_bench
+        uses: actions/upload-artifact@v4
+        with:
+          name: allocator-measurements-windows-x86_64
+          path: |
+            allocator-measurements
+            !allocator-measurements/*/*.dll
 
       - uses: actions/upload-artifact@v4
         with:
