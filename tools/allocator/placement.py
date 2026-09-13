@@ -94,6 +94,7 @@ def experiment(args):
             reps=reps, command=command, started=started, finished=time.time(),
             returncode=process.returncode, graph=graph, timing_ns=timings,
             host_states=[r for r in data if r.get("kind") == "host_state"],
+            warmup=[r for r in data if r.get("kind") == "warmup"],
             environment={k: process_env.get(k) for k in set(
                 variant.get("unset_environment", []) + list(variant.get("environment", {})))},
             median_ns=stats.median(timings) if timings else None,
@@ -148,7 +149,7 @@ def experiment(args):
                           for rnd in range(5)] for slot in slots}
         comparisons = {}
         if design:
-            pairs = design["comparisons"]
+            pairs = list(design["comparisons"])
         else:
             pairs = [(place, "system-" + place, "private-" + place) for place in ("main", "gradient", "worker")]
             pairs += [(mode + "-gradient/main", mode + "-main", mode + "-gradient") for mode in ("system", "private")]

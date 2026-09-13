@@ -5,8 +5,8 @@ on:
       stage:
         description: Frozen diagnostic stage
         type: choice
-        default: startup
-        options: [placement, tls, startup]
+        default: warmup
+        options: [placement, tls, startup, warmup]
 permissions:
   contents: read
   actions: read
@@ -150,6 +150,12 @@ jobs:
           /tmp/allocator-placement-python/bin/python tools/allocator/startup.py \
             --inputs original-screen/models/models.json --libraries diagnostic-libs \
             --output startup-results
+      - name: Fixed native-warmup experiment (no concurrent build or profile)
+        if: inputs.stage == 'warmup'
+        run: |
+          /tmp/allocator-placement-python/bin/python tools/allocator/warmup.py \
+            --inputs original-screen/models/models.json --libraries diagnostic-libs \
+            --output warmup-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -160,5 +166,7 @@ jobs:
             tls-results.design.json
             startup-results
             startup-results.design.json
+            warmup-results
+            warmup-results.design.json
             diagnostic-host
             diagnostic-libs

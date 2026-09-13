@@ -165,7 +165,7 @@ struct Chain {
 static void run_model(const std::string& mir, const std::string& json,
                       int chains, int reps, int samples, int cycle,
                       FILE* snapshots, const char* allocator,
-                      const std::string& placement) {
+                      const std::string& placement, int warmup_ms) {
   const auto begin = Clock::now();
   auto data = stanli::DataMap::from_json(json);
   auto compiled = stanli::compile_model(mir, data);
@@ -188,6 +188,8 @@ static void run_model(const std::string& mir, const std::string& json,
   memory("prepared", cycle);
   Barrier barrier(chains + 1);
   std::vector<std::thread> threads;
+  std::vector<double> warm_ns(chains);
+  std::vector<uint64_t> warm_gradients(chains);
   for (int c = 0; c < chains; ++c)
     threads.emplace_back([&, c] {
       // Same thread-local Stan tape initialization as production's chain
@@ -205,10 +207,22 @@ static void run_model(const std::string& mir, const std::string& json,
       chain.first_ns = elapsed(first);
       for (int p = 0; p < 8; ++p) chain.snapshots[p] = chain.snapshot(p);
       const auto warm = Clock::now();
+      uint64_t warm_count = 0;
       for (int i = 0; i < 1000; ++i) {
         chain.one(i);
+        ++warm_count;
         if (i >= 31 && elapsed(warm) > 20000000) break;
       }
+      // Optional bounded diagnostic: warm actual native work, not a sleep or
+      // a change to the measured kernel. Clock checks only between batches.
+      if (warmup_ms > 0) {
+        do {
+          for (int i = 0; i < 256; ++i) chain.one(i);
+          warm_count += 256;
+        } while (elapsed(warm) < warmup_ms * 1e6);
+      }
+      warm_ns[c] = elapsed(warm);
+      warm_gradients[c] = warm_count;
       for (int s = 0; s < samples; ++s) {
         barrier.wait();  // warm/previous block complete
         barrier.wait();  // timed start
@@ -226,6 +240,11 @@ static void run_model(const std::string& mir, const std::string& json,
       memory("warmed", cycle);
       for (int c = 0; c < chains; ++c) {
         Chain& chain = *workers[c];
+        std::printf(
+            "{\"kind\":\"warmup\",\"cycle\":%d,\"chain\":%d,\"requested_ms\":%d,"
+            "\"wall_ns\":%.1f,\"gradients\":%llu}\n",
+            cycle, c, warmup_ms, warm_ns[c],
+            static_cast<unsigned long long>(warm_gradients[c]));
         const auto address = [&](const char* field, const void* p,
                                  size_t bytes) {
           std::printf(
@@ -303,13 +322,17 @@ extern "C" ALLOCATOR_BENCH_EXPORT int stanli_allocator_bench_run(int argc,
     require(
         placement == "main" || placement == "gradient" || placement == "worker",
         "invalid test-only placement");
+    const char* warmup_env = std::getenv("STANLI_ALLOCATOR_BENCH_WARMUP_MS");
+    const int warmup_ms = warmup_env ? std::stoi(warmup_env) : 0;
+    require(warmup_ms >= 0 && warmup_ms <= 5000,
+            "invalid test-only warmup duration");
     const std::string mir = slurp(argv[1]), json = slurp(argv[2]);
     FILE* snapshots = argc == 10 ? std::fopen(argv[9], "wb") : nullptr;
     require(argc != 10 || snapshots, "cannot open snapshots");
     memory("start", -1);
     for (int cycle = 0; cycle < cycles; ++cycle) {
       run_model(mir, json, chains, reps, samples, cycle, snapshots, argv[3],
-                placement);
+                placement, warmup_ms);
       memory("destroyed", cycle);
     }
     if (snapshots) std::fclose(snapshots);

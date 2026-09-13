@@ -176,3 +176,39 @@ If the fallback recovers the large-vector deficit, broaden the affected-size
 and ownership matrix before shipping; if it does not, do not threshold-sweep.
 This is a scoped mitigation test, not proof that direct syscall time accounts
 for the entire original regression.
+
+## Startup and fallback checkpoints
+
+The [startup stage](https://github.com/seantalts/stanli/actions/runs/34755149573)
+passes 360 timed + 18 verification processes per Linux architecture. With the
+same DSO, x86 normal 8/four changes from 0.688x under original startup to
+1.070x after a 500 ms pre-execution pause (five/five positive); ARM changes
+0.664x to 1.088x (four/five positive, with wider private A/A variation).
+Limiting OpenBLAS to one thread alone does NOT recover either loss:
+0.709x / 0.708x. Thus host startup is causally relevant, but attributing the
+whole effect to BLAS would contradict the discriminator. Thread counters show
+active host helpers under defaults and no such helpers under the single-thread
+setting; cgroup records show no CPU quota or throttling in these containers.
+The small-model losses must not be labeled steady-state allocator overhead
+without adequate native warmup. The instantaneous post-load behavior remains
+real and retained; a warm-gradient correction does not erase startup costs.
+
+The Apple fallback passes 180 timed + nine verification processes. At eight
+workers private/SYSTEM is 0.910x and fallback/SYSTEM 0.947x (both lose five/five).
+Fallback/private is 1.041x, five/five positive: partial recovery, not a fix.
+Normal 1024/four retains 1.327x private and 1.331x fallback; at large/one worker
+the fallback is 1.003x with a 0.989–1.015 range. Do not integrate the partial
+fallback or sweep its threshold.
+
+Next fixed Linux stage compares original warmup with 500 ms of actual native
+gradient work per worker before the timer. It does not sleep, set BLAS thread
+counts or alter shipping code. Both modes are in the same measurement DSO;
+each allocator/mode has an identical alias. Test normal 8/one and four,
+Eight Schools/four, normal 1024/four, normal 262144/four. Fixed repetitions are
+500,000 / 100,000 / 100,000 / 30,000 / 128. Five rounds, two processes per slot,
+three blocks: 400 timed + 20 verification processes per architecture. Preserve
+the same full-byte/graph oracle and complete negative/positive scorecards.
+If sustained work recovers the small parallel losses, correct the evaluator's
+warm boundary and mark historical short-warm screens as such. If not, do not
+substitute sleep as a runtime workaround. No Apple/default rollout claim is
+authorized by this Linux diagnostic.
