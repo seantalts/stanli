@@ -1015,6 +1015,23 @@ add_custom_target(stanli_signature_models ALL
 include(GNUInstallDirs)
 install(TARGETS stanli_run stanli_check
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT NativeTools)
+# Sanitizer builds share the instrumented core to keep test links small.
+# Relocated native tools need that library alongside them as well.
+get_target_property(_stanli_core_type stanli TYPE)
+if(_stanli_core_type STREQUAL "SHARED_LIBRARY")
+  install(TARGETS stanli
+          LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT NativeTools
+          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT NativeTools)
+  if(APPLE)
+    set(_stanli_tool_rpath "@loader_path")
+  elseif(UNIX)
+    set(_stanli_tool_rpath "$ORIGIN")
+  endif()
+  if(DEFINED _stanli_tool_rpath)
+    set_property(TARGET stanli_run stanli_check APPEND PROPERTY
+                 INSTALL_RPATH "${_stanli_tool_rpath}")
+  endif()
+endif()
 if(NOT STANLI_STANC_EMBED_OBJ AND STANLI_PORTABLE_COMPILER)
   install(PROGRAMS "${STANLI_PORTABLE_COMPILER}"
           DESTINATION ${CMAKE_INSTALL_BINDIR}
