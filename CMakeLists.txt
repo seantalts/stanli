@@ -119,6 +119,8 @@ endif()
 # between the kernels and the var-path references (measured: 2 ULP on
 # eight-schools d/dmu). Cost is well inside the performance budget.
 target_compile_options(stanmath INTERFACE -ffp-contract=off)
+include(cmake/StanliLoopAlignment.cmake)
+stanli_apply_loop_alignment(stanmath)
 
 # Half the library is the propto family: stan-math drops a term based on
 # the argument TYPES, so an exact `~` needs the density instantiated once
@@ -255,6 +257,10 @@ if(STANLI_LITE_LP)
 endif()
 if(STANLI_THREADS)
   string(APPEND STANLI_BUILD_ID "-threads")
+endif()
+if(STANLI_USE_LOOP_ALIGNMENT)
+  string(APPEND STANLI_BUILD_ID
+    "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-align32>")
 endif()
 
 # Only this tiny translation unit reads the build id. Keeping this definition
@@ -1048,6 +1054,12 @@ if(STANLI_FAST_TEST_TUS)
 endif()
 add_test(NAME test_function COMMAND test_function
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+stanli_loop_alignment_supported(_stanli_test_alignment_supported)
+add_test(NAME test_loop_alignment_config COMMAND ${CMAKE_COMMAND}
+  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+  -DBINARY=${CMAKE_CURRENT_BINARY_DIR}/loop-alignment-config-tests
+  -DNATIVE_SUPPORTED=${_stanli_test_alignment_supported}
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_loop_alignment_config.cmake)
 
 # The conformance gate has its own failure modes (parser drift, a broad policy
 # rule, nonfinite comparison, partition loss) which C++ runtime tests cannot
