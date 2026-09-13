@@ -43,6 +43,28 @@ def worker(args):
     library.stanli_build_id.restype = ctypes.c_char_p
     print(json.dumps(dict(kind="host", numpy=np.__version__,
                          build_id=library.stanli_build_id().decode())), flush=True)
+    def host_state(stage):
+        if not args.host_diagnostics:
+            return
+        # Outside native timing. Retain raw thread CPU counters and cgroup
+        # limits rather than inferring contention from elapsed time alone.
+        tasks = {}
+        for path in pathlib.Path("/proc/self/task").glob("*/stat"):
+            try:
+                tasks[path.parent.name] = path.read_text()
+            except FileNotFoundError:
+                pass
+        cgroup = {}
+        for name in ("cpu.max", "cpu.stat", "cpuset.cpus.effective"):
+            path = pathlib.Path("/sys/fs/cgroup") / name
+            if path.exists():
+                cgroup[name] = path.read_text()
+        print(json.dumps(dict(kind="host_state", stage=stage, tasks=tasks,
+                              cgroup=cgroup, at=time.time())), flush=True)
+    host_state("loaded")
+    if args.settle_ms:
+        time.sleep(args.settle_ms / 1000)
+    host_state("before_native")
     entry = library.stanli_allocator_bench_run
     entry.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
     entry.restype = ctypes.c_int
@@ -52,6 +74,7 @@ def worker(args):
             str(args.snapshot).encode()]
     native = (ctypes.c_char_p * len(argv))(*argv)
     result = entry(len(argv), native)
+    host_state("after_native")
     assert np.array_equal(old, fresh)
     assert not owns(old.ctypes.data) and not owns(fresh.ctypes.data)
     return result
@@ -214,6 +237,8 @@ if __name__ == "__main__":
     parser.add_argument("--samples", type=int, default=1)
     parser.add_argument("--cycles", type=int, default=1)
     parser.add_argument("--snapshot", type=pathlib.Path)
+    parser.add_argument("--settle-ms", type=int, default=0)
+    parser.add_argument("--host-diagnostics", action="store_true")
     args = parser.parse_args()
     if args.phase == "worker":
         sys.exit(worker(args))

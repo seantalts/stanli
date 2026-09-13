@@ -5,8 +5,8 @@ on:
       stage:
         description: Frozen diagnostic stage
         type: choice
-        default: tls
-        options: [placement, tls]
+        default: startup
+        options: [placement, tls, startup]
 permissions:
   contents: read
   actions: read
@@ -131,7 +131,7 @@ jobs:
             fi
           done
       - name: Fixed placement experiment (no concurrent build or test)
-        if: inputs.stage != 'tls'
+        if: inputs.stage == 'placement'
         run: |
           /tmp/allocator-placement-python/bin/python tools/allocator/placement.py \
             --inputs original-screen/models/models.json \
@@ -144,6 +144,12 @@ jobs:
           /tmp/allocator-placement-python/bin/python tools/allocator/tls.py \
             --inputs original-screen/models/models.json --libraries diagnostic-libs \
             --output tls-results
+      - name: Fixed host-startup experiment (no concurrent build or profile)
+        if: inputs.stage == 'startup'
+        run: |
+          /tmp/allocator-placement-python/bin/python tools/allocator/startup.py \
+            --inputs original-screen/models/models.json --libraries diagnostic-libs \
+            --output startup-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -152,4 +158,7 @@ jobs:
             placement-results
             tls-results
             tls-results.design.json
+            startup-results
+            startup-results.design.json
             diagnostic-host
+            diagnostic-libs

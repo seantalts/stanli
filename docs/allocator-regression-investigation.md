@@ -106,7 +106,53 @@ validate ownership/late-load behavior and broader workloads before integrating
 it. If not, use available profiles to select the next cause; do not tune TLS
 variants repeatedly until a favorable sign appears.
 
+For the Apple residual, collect one eight-second native stack sample per
+SYSTEM/aligned and private/aligned process on normal 262144/eight workers,
+64,000 repetitions, with full end-of-run snapshot agreement. Use the already
+frozen ablation DSOs; no rebuild or option changes. These sampled durations
+are diagnostic only, never added to the uninstrumented timing scorecard.
+
 Delivery requires distinguishing a harness correction from a runtime fix,
 preserving all original evidence, updating the PR/report, and running relevant
 checks for any production changes. No default promotion while unexplained
 regressions or required integration gates remain.
+
+## TLS checkpoint and host-startup discriminator
+
+Native run [34754559037](https://github.com/seantalts/stanli/actions/runs/34754559037)
+passes 300 timed + 15 verification processes per architecture. On x86 normal
+8/four, dynamic TLS is 0.682x and pthread TLS 0.694x, both negative five/five.
+The TLS substitution does not recover the loss and will not be integrated.
+ARM remains positive with either backend. This x86 runner is Intel Xeon 8573C,
+not the previous placement runner's AMD EPYC 7763; both expose two cores/four
+SMT threads. Do not pool their absolute timings.
+
+Both user-mode Linux profiles succeeded. The long profiled runs do not show
+a large allocator CPU-time increase, and both include OpenBLAS thread-server
+samples from the host's NumPy import. In the uninstrumented x86 short runs,
+normal 8/four's frozen 97,112 repetitions produce roughly 33 ms SYSTEM blocks,
+not the nominal 150 ms calibration target. Some private block times decrease from
+roughly 190 to 120 to 80 ns/gradient across the three samples. This warrants
+a startup-contention discriminator; it is not yet proof of the cause and
+profiled elapsed times are not a replacement benchmark.
+
+Next fixed design uses unchanged SYSTEM/private native code and worker
+placement, crossing the two allocators with (a) original NumPy thread defaults,
+(b) OPENBLAS_NUM_THREADS=1 before import, and (c) original defaults with 500 ms
+settling after import/dlopen and before native execution. All six have aliases.
+Three cells: normal 8/one worker, normal 8/four, normal 1024/four, with fixed
+500,000 / 100,000 / 30,000 repetitions respectively (not short-block-derived
+calibration). Five balanced rounds, two processes/slot, three blocks: 360 timed
++ 18 verification processes per architecture. Record host-thread CPU counters
+before/after settling and native execution, cgroup limits/counters and exact
+environment overrides outside timing. Retain both DSOs. Stop at that scorecard:
+if controlling host startup recovers the loss, correct the benchmark boundary
+and validate long warmed runs; do not present it as a runtime allocator fix.
+If not, retain the negative and return to runtime attribution.
+
+Apple profiles pass complete snapshot equality. Most samples remain inside
+normal_lpdf; private madvise appears in 620 of approximately 45,616 worker
+samples, predominantly under _mi_os_reuse / MADV_FREE_REUSE. Pinned mimalloc's
+purge delay is 1,000 ms (arena multiplier four), not 10 ms. The reuse syscall
+is independent of that purge option, so simply disabling purging is not a
+source-supported fix for this hotspot.

@@ -73,9 +73,16 @@ def experiment(args):
             "--workers", workers, "--reps", reps, "--samples", samples,
             "--snapshot", base.with_suffix(".snapshot")]
         command = list(map(str, command))
+        if variant.get("settle_ms"):
+            command += ["--settle-ms", str(variant["settle_ms"])]
+        if variant.get("host_diagnostics"):
+            command += ["--host-diagnostics"]
+        process_env = {k: v for k, v in env.items()
+                       if k not in variant.get("unset_environment", [])}
+        process_env.update(variant.get("environment", {}))
+        process_env["STANLI_ALLOCATOR_BENCH_PLACEMENT"] = variant["placement"]
         started = time.time()
-        process = subprocess.run(command, env={**env,
-            "STANLI_ALLOCATOR_BENCH_PLACEMENT": variant["placement"]},
+        process = subprocess.run(command, env=process_env,
             capture_output=True, text=True, timeout=180)
         base.with_suffix(".stdout").write_text(process.stdout)
         base.with_suffix(".stderr").write_text(process.stderr)
@@ -86,6 +93,9 @@ def experiment(args):
         record = dict(name=name, workers=workers, slot=slot, round=round_number,
             reps=reps, command=command, started=started, finished=time.time(),
             returncode=process.returncode, graph=graph, timing_ns=timings,
+            host_states=[r for r in data if r.get("kind") == "host_state"],
+            environment={k: process_env.get(k) for k in set(
+                variant.get("unset_environment", []) + list(variant.get("environment", {})))},
             median_ns=stats.median(timings) if timings else None,
             addresses=[r for r in data if r.get("kind") == "placement"],
             snapshot_sha256=sha(base.with_suffix(".snapshot")) if base.with_suffix(".snapshot").exists() else None)
@@ -106,6 +116,9 @@ def experiment(args):
             assert result["snapshot_sha256"] == baseline["snapshot_sha256"]
             assert result["graph"] == baseline["graph"]
         reps = max(64, min(4000000, 8 * math.ceil(150e6 / baseline["median_ns"] / cell[1] / 8)))
+        if design and "fixed_repetitions" in design:
+            reps = next(r["reps"] for r in design["fixed_repetitions"] if tuple(r["cell"]) == cell)
+            assert isinstance(reps, int) and 0 < reps <= 4000000 and reps % 8 == 0
         calibration[cell] = dict(reps=reps, graph=baseline["graph"], snapshot_sha256=baseline["snapshot_sha256"])
     save(out / "calibration.json", [dict(cell=cell, **row) for cell, row in calibration.items()])
     if args.verify_only:
