@@ -505,6 +505,30 @@ jobs:
       - name: Every demo model has a description
         run: python3 tools/gen_web_models.py --check
 
+      # Optional measurements need the native CTest and their own NumPy-host
+      # oracle, but not the unrelated full vectorization sweep. Collect them
+      # here; all corpus, wheel, binding and ABI checks below still gate the job.
+      - name: Matched native allocator measurements
+        if: inputs.allocator_bench
+        run: |
+          python3 -m venv /tmp/allocator-bench-python
+          /tmp/allocator-bench-python/bin/pip install numpy
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+          /tmp/allocator-bench-python/bin/python tools/allocator/ci.py \
+            --build build-rel --pdb deps/posteriordb \
+            --output allocator-measurements --jobs ${{ matrix.build_jobs }}
+
+      - name: Publish matched allocator measurements
+        if: always() && inputs.allocator_bench
+        uses: actions/upload-artifact@v4
+        with:
+          name: allocator-measurements-${{ matrix.runtime }}
+          path: |
+            allocator-measurements
+            !allocator-measurements/*/*.so
+            !allocator-measurements/*/*.dylib
+
       # The strongest oracle in the project: every referenced posteriordb
       # model evaluated and compared against CmdStan's recorded lp and full
       # gradient (docs/corpus-refs.json.gz, written by the local rig).
@@ -667,25 +691,6 @@ jobs:
           # The BridgeStan transport: the manifest embedded in the data
           # argument, two models through the one dlopen'd runtime library.
           /tmp/wheeltest/bin/python tests/test_bridgestan_embed.py
-
-      - name: Matched native allocator measurements
-        if: inputs.allocator_bench
-        run: |
-          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
-          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
-          /tmp/wheeltest/bin/python tools/allocator/ci.py \
-            --build build-rel --pdb deps/posteriordb \
-            --output allocator-measurements --jobs ${{ matrix.build_jobs }}
-
-      - name: Publish matched allocator measurements
-        if: always() && inputs.allocator_bench
-        uses: actions/upload-artifact@v4
-        with:
-          name: allocator-measurements-${{ matrix.runtime }}
-          path: |
-            allocator-measurements
-            !allocator-measurements/*/*.so
-            !allocator-measurements/*/*.dylib
 
       # Exercise the real OCaml producer against the exact-source legacy
       # compiler, then compare the decoded program and the executable graph.

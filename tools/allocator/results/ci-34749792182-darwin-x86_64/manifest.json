@@ -1,0 +1,80 @@
+{
+  "phase": "bench",
+  "head": "9c3d204e0349a25904f7226b7e80633038c4e34a",
+  "machine": "macOS-15.7.9-x86_64-i386-64bit",
+  "processor": "i386",
+  "python": "/private/tmp/wheeltest/bin/python",
+  "input_sha256": "d06ea3f82c813e77118f2dabcc629e5bdb014f5bbca5bc4a77b9e1ed614a27db",
+  "harness_sha256": "1a4dd471640c445e1481f412f0b4229db21ca7dd719ac83555814d95988b67ad",
+  "native_source_sha256": "5caa868f7a4b8488e6877b95b9bb708d1ae37cac008a1001ccd79b951b446dbc",
+  "variants": {
+    "system": {
+      "library": "/Users/runner/work/stanli/stanli/allocator-measurements/system/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "sha256": "cb076416f8044b947f9cdd68cdaa780601872cf438958f2ccc9471f003ef1cc0"
+    },
+    "candidate": {
+      "library": "/Users/runner/work/stanli/stanli/allocator-measurements/candidate/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "sha256": "828daa48cfffcccf3aa3156ee8a1e6462e34fddcd774a109070a0481b43870fd"
+    }
+  },
+  "slots": [
+    "system",
+    "candidate",
+    "system_aa",
+    "candidate_aa"
+  ],
+  "cells": [
+    [
+      "eight_schools_noncentered",
+      1
+    ],
+    [
+      "eight_schools_noncentered",
+      4
+    ],
+    [
+      "hierarchical_gp",
+      1
+    ],
+    [
+      "hierarchical_gp",
+      4
+    ],
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_1024",
+      1
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      1
+    ],
+    [
+      "normal_262144",
+      4
+    ],
+    [
+      "gamma_16384",
+      1
+    ],
+    [
+      "gamma_16384",
+      4
+    ]
+  ],
+  "rounds": 5,
+  "started": 1789293319.578548
+}

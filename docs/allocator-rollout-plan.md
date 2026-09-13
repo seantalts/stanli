@@ -94,5 +94,7 @@ cell and controls; do not treat hosted-runner noise as proof of equivalence.
 The additional Apple ARM runner rebuilds the baseline objects with alignment
 OFF: a check of the combined default on another Apple machine, alongside the
 local complete 52-cell experiment. The optional manual
-workflow input `allocator_bench` runs this screen after each shipping host's
-tests, never concurrently with its build. It publishes raw measurements.
+workflow input `allocator_bench` runs this screen after native CTest, never
+concurrently with its build. All normal corpus, wheel and Python checks still
+gate the job; Unix collects its optional screen before the unrelated long MIR
+vectorization sweep. It publishes raw measurements.

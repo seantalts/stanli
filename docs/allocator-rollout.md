@@ -104,6 +104,24 @@ each binding. A post-format recheck of all 52 native cells also matches the
 screen's exact snapshots and graph dimensions; its calibration timings were
 not used as performance evidence because test suites were running concurrently.
 
+The [second Apple ARM host's measurements](https://github.com/seantalts/stanli/actions/runs/34749792182)
+completed all 46 one/four-worker numerical cells and 480 timing processes on
+macOS 15.7.9. In its six-model screen, Eight Schools improves 1.263x/1.261x
+(one/four workers), hierarchical GP 1.049x/1.065x, normal 8 1.249x/1.246x,
+normal 1024 1.039x/1.030x, and normal 262144 1.709x/1.965x. Gamma 16384 is
+0.999x at both counts. The large-normal four-worker A/A medians also shift
+about 9%, so the exact 1.965x should not be oversold. This screen did not test
+eight workers and does not invalidate the local eight-worker regression.
+The [Intel Mac screen](../tools/allocator/results/ci-34749792182-darwin-x86_64/summary.json)
+also completes 92 verification and 480 timing processes. Eight Schools improves
+1.250x/1.243x and hierarchical GP 1.167x/1.200x (one/four workers), each positive
+in five/five rounds. Several other cells have large A/A shifts and broad ranges;
+all of those controls remain in the results. Intel receives no loop-alignment
+flag, so this comparison is allocator-only. The
+[Apple ARM raw scorecard](../tools/allocator/results/ci-34749792182-darwin-arm64/summary.json)
+measures the combined candidate. Neither screen substitutes for Linux/Windows
+measurements.
+
 The existing protected `manylinux_2_28_x86_64` PR gate now also requires the
 native ownership matrix. Auto-merge must not bypass missing performance
 evidence or a known regression merely because that CI gate is green.
@@ -135,6 +153,10 @@ the final five full sequences:
 That is lower retained memory in this stress case, not a general maximum-RSS
 guarantee or proof that every application lifetime is leak-free. Raw block,
 join, and destruction observations and the full snapshots are retained.
+The fresh-process screen shows a counterexample: normal 262144/one worker's
+median peak RSS rises from 64,782,336 B to 69,902,336 B. At eight workers it
+falls from 153,534,464 B to 143,949,824 B. Retention, peak memory, code size,
+and throughput therefore need separate judgments.
 
 ## Retained evidence and reproduction
 

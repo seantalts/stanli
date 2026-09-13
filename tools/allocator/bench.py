@@ -81,7 +81,9 @@ def experiment(args):
         cells = json.loads(args.cells.read_text())
     assert len({tuple(c) for c in cells}) == len(cells)
     manifest = dict(phase=args.phase, head=subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        # actions/checkout's container mount can have a different owner. Trust
+        # only this explicit checkout for this read; no global Git mutation.
+        ["git", "-c", "safe.directory=" + str(ROOT), "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         machine=platform.platform(), processor=platform.processor(), python=sys.executable,
         input_sha256=sha(args.inputs), harness_sha256=sha(__file__),
         native_source_sha256=sha(ROOT / "tools/allocator/gradient_bench.cpp"),

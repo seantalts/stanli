@@ -1,0 +1,10 @@
+{
+  "candidate": {
+    "path": "/Users/runner/work/stanli/stanli/allocator-measurements/candidate/libstanli_allocator_benchmark.dylib",
+    "sha256": "ef9d8eb58bf81bcfea05b2f5e11e58ced6675e56fa724db893d46fcb8cf1301a"
+  },
+  "system": {
+    "path": "/Users/runner/work/stanli/stanli/allocator-measurements/system/libstanli_allocator_benchmark.dylib",
+    "sha256": "435b4e74c1b631e7a9168fec3551ffcf563e871c3495a7f074032dc18ac5f99f"
+  }
+}
