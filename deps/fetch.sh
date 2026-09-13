@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 
 MATH_SHA=8f326d14599d3030c626c46532d8e8534c1cdbec
 STAN_SHA=c96d04115d35cb04f42e45c5a69a82f9704798f1
+MIMALLOC_SHA=34fbd7e7cd4627424490afe19b20f8066bfc537d # v3.5.1
 
 fetch() { # name url sha sparse-paths...
   local name=$1 url=$2 sha=$3
@@ -20,6 +21,7 @@ fetch() { # name url sha sparse-paths...
 
 fetch math https://github.com/stan-dev/math.git "$MATH_SHA" stan lib
 fetch stan https://github.com/stan-dev/stan.git "$STAN_SHA" src/stan lib/rapidjson_1.1.0
+fetch mimalloc https://github.com/microsoft/mimalloc.git "$MIMALLOC_SHA" include src cmake
 
 # The adjoint ODE's backward quadrature callback accumulates into the CVODES
 # output vector without assigning it first, so it inherits whatever the
@@ -57,4 +59,4 @@ if [ -e stanc3/stanc ] &&
   rm -f stanc3/stanc stanc3/stanc.src
 fi
 
-echo "deps ready: math@$MATH_SHA stan@$STAN_SHA"
+echo "deps ready: math@$MATH_SHA stan@$STAN_SHA mimalloc@$MIMALLOC_SHA"

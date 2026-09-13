@@ -1,0 +1,8 @@
+EXPORTS
+  allocator_test_owns
+  allocator_test_alloc
+  allocator_test_free
+  allocator_test_delete
+  allocator_test_realloc
+  allocator_test_eigen
+  allocator_test_thread

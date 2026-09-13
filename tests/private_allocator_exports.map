@@ -1,0 +1,1 @@
+{ global: allocator_test_*; local: *; };
