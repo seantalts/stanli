@@ -4,6 +4,11 @@
 verify creates the calibration and full-byte baseline; bench uses it unchanged.
 All execution phases refuse existing output directories. This is not a
 replacement for the CLI/CmdStan benchmark boundary.
+
+The current native evaluator defaults to 500 ms of actual gradient work per
+worker before timing. Historical short-warm diagnostic drivers select zero
+explicitly. First-gradient/preparation costs remain separate output fields;
+never count warmup as a shipping runtime change or erase startup measurements.
 """
 import argparse
 import ctypes

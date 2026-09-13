@@ -14,7 +14,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     variants = {name: dict(library=str((args.libraries / directory /
                     "libstanli_allocator_benchmark.so").resolve()),
-                    mode="system" if name == "system" else "private", placement="worker")
+                    mode="system" if name == "system" else "private", placement="worker",
+                    environment={"STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"})
                 for name, directory in [("system", "SYSTEM"), ("dynamic", "MIMALLOC"),
                                          ("pthread", "PTHREADS")]}
     design = dict(baseline="system", variants=variants,

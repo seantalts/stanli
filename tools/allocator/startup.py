@@ -19,7 +19,8 @@ if __name__ == "__main__":
                 library=str((args.libraries / directory / "libstanli_allocator_benchmark.so").resolve()),
                 mode=mode, placement="worker", host_diagnostics=True,
                 unset_environment=["OPENBLAS_NUM_THREADS", "OPENBLAS_DEFAULT_NUM_THREADS", "GOTO_NUM_THREADS", "OMP_NUM_THREADS"],
-                environment={"OPENBLAS_NUM_THREADS": "1"} if setting == "single" else {},
+                environment={"STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0",
+                             **({"OPENBLAS_NUM_THREADS": "1"} if setting == "single" else {})},
                 settle_ms=500 if setting == "settled" else 0)
     repetitions = [("normal_8", 1, 500000), ("normal_8", 4, 100000), ("normal_1024", 4, 30000)]
     design = dict(baseline="system-default", variants=variants,

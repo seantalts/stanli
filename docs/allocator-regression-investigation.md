@@ -230,3 +230,48 @@ the incomplete scorecard is not a performance pass. Preserve the failed run
 and retry ARM once with the same frozen design, handling both disappearing-
 thread errors. The native source and allocator are unchanged by this collector
 fix. Do not rerun a completed x86 scorecard merely because ARM needs a retry.
+
+## Sustained-work checkpoint and accepted evaluator correction
+
+The x86 job in [34755561756](https://github.com/seantalts/stanli/actions/runs/34755561756)
+completes 400 timed + 20 verification processes. It runs on an AMD EPYC 9V74
+with two cores/four SMT threads, not the previous x86 hosts. Within the same
+DSOs, normal 8/four changes from 0.696x to 1.011x with sustained native warmup,
+and Eight Schools/four from 0.890x to 1.047x. Warm ratios are positive five/five;
+normal 8 is near parity rather than a substantial throughput win. Normal
+1024/four is 1.033x and large/four 2.697x after warmup. The former's historical
+short-start loss does not reproduce in this stage (short ratio 1.034x), so do
+not claim its recovery was demonstrated here. One-worker normal 8 is 1.099x.
+Full ranges and controls remain in the scorecard.
+
+Apple completes 240 timed + 12 verification processes. The large/eight-worker
+ratio is 0.980x with original warmup and 0.922x [0.915, 1.005] with sustained
+work; four/five warmed rounds lose. Warm SYSTEM/private A/A medians are
+0.986/0.984 with broad ranges. The precise loss is not perfectly stationary,
+but sustained warmup does not establish recovery. Large/one worker is 0.980x
+[0.969, 0.990], five/five negative, and normal 1024/four remains 1.342x
+[1.197, 1.355], five/five positive, with a noisy SYSTEM control.
+
+One Apple protocol deviation is explicitly retained: during its final round,
+the shared Python worker file received the ESRCH collector fix. That optional
+Linux collector branch was disabled for every Apple process; native binaries,
+inputs, timed code and schedule stayed fixed. The dataset includes both exact
+Python sources, the small diff, observed file-mtime transition and affected
+process boundaries. No observations were discarded or replaced. This is
+diagnostic evidence of a remaining loss, not a release-gate pass.
+
+Accepted change: the non-installed native measurement evaluator now defaults
+to 500 ms of actual work per worker before timing. The original placement,
+TLS and startup drivers explicitly select zero to preserve their question.
+First-gradient and preparation costs remain recorded separately. No shipping
+runtime warmup/sleep, TLS change, allocator option or threshold fallback is
+integrated. The final evaluator passes 16 local reference/default/explicit/
+short-warm processes across four models/thread counts, with full gradient
+bytes and graph dimensions equal and declared warmup durations checked.
+These verification timings are not a performance result.
+
+The failed ARM collector attempt and its eventual retry are separate evidence,
+not substituted results. The broader no-regression, CLI alignment and release
+gates remain required before default promotion. Next production work should
+target Apple's residual allocator/data-path cost; the failed placement, TLS
+and partial large-allocation fallback hypotheses do not justify shipping them.

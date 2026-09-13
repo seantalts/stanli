@@ -323,7 +323,10 @@ extern "C" ALLOCATOR_BENCH_EXPORT int stanli_allocator_bench_run(int argc,
         placement == "main" || placement == "gradient" || placement == "worker",
         "invalid test-only placement");
     const char* warmup_env = std::getenv("STANLI_ALLOCATOR_BENCH_WARMUP_MS");
-    const int warmup_ms = warmup_env ? std::stoi(warmup_env) : 0;
+    // This evaluator reports warm gradients. Short post-dlopen bursts showed
+    // large startup-dependent artifacts on Linux; preserve that diagnostic
+    // explicitly with STANLI_ALLOCATOR_BENCH_WARMUP_MS=0, never by default.
+    const int warmup_ms = warmup_env ? std::stoi(warmup_env) : 500;
     require(warmup_ms >= 0 && warmup_ms <= 5000,
             "invalid test-only warmup duration");
     const std::string mir = slurp(argv[1]), json = slurp(argv[2]);

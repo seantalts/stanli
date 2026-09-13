@@ -37,7 +37,8 @@ def experiment(args):
     design = json.loads(args.design.read_text()) if args.design else None
     assert design or (args.system and args.candidate), "Supply a design or both libraries"
     variants = {} if design else {mode + "-" + place: dict(library=str(library.resolve()),
-                    mode=mode, placement=place, sha256=sha(library))
+                    mode=mode, placement=place, sha256=sha(library),
+                    environment={"STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"})
                 for mode, library in [("system", args.system), ("private", args.candidate)]
                 for place in ["main", "gradient", "worker"]}
     cells_for_run = [tuple(c) for c in design["cells"]] if design else CELLS
