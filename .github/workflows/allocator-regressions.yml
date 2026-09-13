@@ -17,7 +17,7 @@ permissions:
   actions: read
   packages: read
 concurrency:
-  group: allocator-regression-${{ github.ref }}
+  group: allocator-regression-${{ github.ref }}-${{ inputs.architecture || 'both' }}
   cancel-in-progress: true
 jobs:
   placement:
