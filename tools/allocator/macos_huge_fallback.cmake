@@ -1,0 +1,17 @@
+# Diagnostic-only project hook. Never changes the shipping target or mimalloc.
+include_guard(GLOBAL)
+function(stanli_diagnostic_macos_huge_fallback)
+  if(NOT APPLE OR NOT TARGET stanli_allocator_benchmark OR
+     NOT STANLI_USE_PRIVATE_MIMALLOC)
+    message(FATAL_ERROR "The huge fallback diagnostic requires Apple's private benchmark")
+  endif()
+  get_target_property(_sources stanli_allocator_benchmark SOURCES)
+  set(_original "${CMAKE_SOURCE_DIR}/runtime/src/private_allocator_macos.cpp")
+  if(NOT _original IN_LIST _sources)
+    message(FATAL_ERROR "Expected exactly the native private shim in the benchmark")
+  endif()
+  list(REMOVE_ITEM _sources "${_original}")
+  list(APPEND _sources "${CMAKE_SOURCE_DIR}/tools/allocator/macos_huge_fallback.cpp")
+  set_property(TARGET stanli_allocator_benchmark PROPERTY SOURCES "${_sources}")
+endfunction()
+cmake_language(DEFER CALL stanli_diagnostic_macos_huge_fallback)

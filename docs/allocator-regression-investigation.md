@@ -156,3 +156,23 @@ samples, predominantly under _mi_os_reuse / MADV_FREE_REUSE. Pinned mimalloc's
 purge delay is 1,000 ms (arena multiplier four), not 10 ms. The reuse syscall
 is independent of that purge option, so simply disabling purging is not a
 source-supported fix for this hotspot.
+
+## Apple singleton-allocation fallback discriminator
+
+Architectural alternative to allocator-internal tuning: keep small allocations
+private but let the system allocator handle mimalloc's singleton-sized malloc
+requests on Apple. The fixed threshold is mimalloc 3.5.1's default size-class
+boundary (512 KiB), not a model-size cutoff selected by a sweep. Test only
+malloc first: calloc/aligned APIs and ownership-preserving realloc stay as
+before. A deferred project hook replaces only the diagnostic DSO's shim;
+shipping sources and both upstream dependencies remain unchanged.
+
+Compare the frozen aligned SYSTEM/private DSOs with this aligned diagnostic
+using normal 262144 at one/eight workers and normal 1024/four as the preserved
+small-allocation canary. Five rounds, two processes per slot, three blocks,
+all three aliases: 180 timed + nine verification processes. All graph and
+gradient bytes must agree. Retain the shim/configuration and binary identities.
+If the fallback recovers the large-vector deficit, broaden the affected-size
+and ownership matrix before shipping; if it does not, do not threshold-sweep.
+This is a scoped mitigation test, not proof that direct syscall time accounts
+for the entire original regression.
