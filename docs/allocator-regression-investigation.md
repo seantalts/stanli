@@ -212,3 +212,21 @@ If sustained work recovers the small parallel losses, correct the evaluator's
 warm boundary and mark historical short-warm screens as such. If not, do not
 substitute sleep as a runtime workaround. No Apple/default rollout claim is
 authorized by this Linux diagnostic.
+
+Apply the same sustained-work discriminator on the local Apple ARM host before
+carrying its short-warm conclusions into a corrected warm-gradient table.
+Freeze aligned SYSTEM/private DSOs built with the same new diagnostic source;
+cross each with original/500 ms warmup and aliases. Use the Apple fallback
+stage's three cells (large normal/one and eight, normal 1024/four), fixed
+512 / 512 / 100,000 repetitions respectively. Five rounds, two processes per
+slot, three blocks: 240 timed + 12 verification processes. Main placement is
+retained, unlike Linux's worker placement. No fallback/tuning is combined with
+this warmup attribution and no concurrent local build/test is allowed.
+
+The ARM warmup attempt in run 34755561756 stopped after process 70 (zero-based)
+because reading a recently joined worker's /proc stat raised ESRCH rather than
+ENOENT. Its native result and snapshot match, but the host collector failed;
+the incomplete scorecard is not a performance pass. Preserve the failed run
+and retry ARM once with the same frozen design, handling both disappearing-
+thread errors. The native source and allocator are unchanged by this collector
+fix. Do not rerun a completed x86 scorecard merely because ARM needs a retry.

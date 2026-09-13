@@ -7,6 +7,11 @@ on:
         type: choice
         default: warmup
         options: [placement, tls, startup, warmup]
+      architecture:
+        description: Native diagnostic host (use one for infrastructure retries)
+        type: choice
+        default: both
+        options: [both, linux-arm64, linux-x86_64]
 permissions:
   contents: read
   actions: read
@@ -16,10 +21,12 @@ concurrency:
   cancel-in-progress: true
 jobs:
   placement:
-    name: placement (${{ matrix.runtime }})
-    runs-on: ${{ matrix.os }}
+    name: diagnostic (${{ matrix.runtime }})
+    runs-on: ${{ matrix.runtime == 'linux-arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    env:
+      DIAGNOSTIC_PLAT: ${{ matrix.runtime == 'linux-arm64' && 'manylinux_2_28_aarch64' || 'manylinux_2_28_x86_64' }}
     container:
-      image: ${{ matrix.container }}
+      image: ${{ matrix.runtime == 'linux-arm64' && 'ghcr.io/seantalts/stanli-manylinux:2_28-aarch64' || 'ghcr.io/seantalts/stanli-manylinux:2_28-x86_64' }}
       # Profiling only this job's user-mode processes in an ephemeral runner.
       # No host perf sysctls or persistent security settings are changed.
       options: --cap-add=PERFMON --security-opt seccomp=unconfined
@@ -29,9 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {os: ubuntu-24.04, runtime: linux-x86_64, plat: manylinux_2_28_x86_64, container: 'ghcr.io/seantalts/stanli-manylinux:2_28-x86_64'}
-          - {os: ubuntu-24.04-arm, runtime: linux-arm64, plat: manylinux_2_28_aarch64, container: 'ghcr.io/seantalts/stanli-manylinux:2_28-aarch64'}
+        runtime: ${{ fromJSON(inputs.architecture == 'linux-arm64' && '["linux-arm64"]' || inputs.architecture == 'linux-x86_64' && '["linux-x86_64"]' || '["linux-x86_64","linux-arm64"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Record compiler and host
@@ -48,7 +53,7 @@ jobs:
         with:
           path: .ccache
           key: allocator-placement-${{ matrix.runtime }}-${{ steps.compiler.outputs.id }}-${{ hashFiles('tools/allocator/**', 'runtime/**', 'CMakeLists.txt') }}
-          restore-keys: ccache-${{ matrix.plat }}-release-v4-${{ steps.compiler.outputs.id }}-
+          restore-keys: ccache-${{ env.DIAGNOSTIC_PLAT }}-release-v4-${{ steps.compiler.outputs.id }}-
       - uses: actions/cache@v4
         with:
           path: |
@@ -66,7 +71,7 @@ jobs:
             deps/stanc3/stanli-vectorize-probe
             deps/stanc3/stanli-vectorize-probe.stamp
             deps/ocaml-include
-          key: stanc-embed-v2-${{ matrix.plat }}-8e154ac3454790cb5427ae72106c859b3fb8d90a-ocaml5.5.0-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+          key: stanc-embed-v2-${{ env.DIAGNOSTIC_PLAT }}-8e154ac3454790cb5427ae72106c859b3fb8d90a-ocaml5.5.0-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
       - uses: actions/download-artifact@v4
         with:
           name: allocator-measurements-${{ matrix.runtime }}
