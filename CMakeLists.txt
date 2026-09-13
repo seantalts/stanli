@@ -450,6 +450,32 @@ function(stanli_embed_stanc TGT)
   endif()
 endfunction()
 stanli_embed_stanc(stanli_shared)
+# Separate, non-installed DSO with an additive test entry around the native
+# sampler-gradient evaluator. Reuses the shipping objects and allocator scope.
+option(STANLI_BUILD_ALLOCATOR_BENCHMARK "Build a non-installed allocator measurement DSO" OFF)
+if(STANLI_BUILD_ALLOCATOR_BENCHMARK)
+  get_target_property(_bench_sources stanli_shared SOURCES)
+  add_library(stanli_allocator_benchmark SHARED
+    ${_bench_sources} tools/allocator/gradient_bench.cpp)
+  foreach(_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
+                    LINK_OPTIONS LINK_LIBRARIES LINK_DEPENDS)
+    get_target_property(_value stanli_shared ${_property})
+    if(_value)
+      set_property(TARGET stanli_allocator_benchmark PROPERTY ${_property} "${_value}")
+    endif()
+  endforeach()
+  if(STANLI_USE_PRIVATE_MIMALLOC)
+    # The ownership query is in the copied input archive on ELF/PE, before
+    # the final DSO receives mimalloc-static's interface include directory.
+    target_include_directories(stanli_allocator_benchmark PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/deps/mimalloc/include")
+  endif()
+  if(WIN32)
+    set_target_properties(stanli_allocator_benchmark PROPERTIES PREFIX "")
+    target_link_libraries(stanli_allocator_benchmark PRIVATE psapi)
+  endif()
+  stanli_link_private_allocator(stanli_allocator_benchmark)
+endif()
 stanli_link_private_allocator(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
@@ -1125,6 +1151,21 @@ if(STANLI_USE_PRIVATE_MIMALLOC)
 endif()
 add_test(NAME test_allocator_config COMMAND ${CMAKE_COMMAND}
   -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_config.cmake)
+if(TARGET stanli_allocator_benchmark)
+  add_dependencies(stanli_allocator_benchmark stanli_mir_fixtures)
+  if(STANLI_USE_PRIVATE_MIMALLOC)
+    set(_allocator_bench_mode private)
+  else()
+    set(_allocator_bench_mode system)
+  endif()
+  add_test(NAME test_allocator_benchmark COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_benchmark.py
+    --library $<TARGET_FILE:stanli_allocator_benchmark>
+    --shipping $<TARGET_FILE:stanli_shared> --mode ${_allocator_bench_mode}
+    --mir ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/es.tmir.sexp
+    --data ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/es.json)
+  set_tests_properties(test_allocator_benchmark PROPERTIES TIMEOUT 120)
+endif()
 
 # The conformance gate has its own failure modes (parser drift, a broad policy
 # rule, nonfinite comparison, partition loss) which C++ runtime tests cannot
