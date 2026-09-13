@@ -36,10 +36,14 @@ on:
   workflow_dispatch:
     inputs:
       shared_allocator:
-        description: Native shared-library allocator under validation (default remains SYSTEM)
+        description: Native shared-library allocator under validation
         type: choice
-        default: SYSTEM
-        options: [SYSTEM, MIMALLOC, AUTO]
+        default: DEFAULT
+        options: [DEFAULT, SYSTEM, MIMALLOC, AUTO]
+      allocator_rollout:
+        description: Full paired Linux gradient, sampling and memory rollout validation
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -60,7 +64,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  STANLI_CI_SHARED_ALLOCATOR: ${{ inputs.shared_allocator || 'SYSTEM' }}
+  STANLI_CI_SHARED_ALLOCATOR: ${{ inputs.shared_allocator || 'DEFAULT' }}
   # Must match tools/dev_setup.sh. The embedded compiler cache is keyed on
   # the commit, so bumping it there and here invalidates the cache once.
   STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
@@ -415,11 +419,13 @@ jobs:
           export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
           ccache -z
           compiler_args=()
+          if [ "$STANLI_CI_SHARED_ALLOCATOR" != DEFAULT ]; then
+            compiler_args+=("-DSTANLI_SHARED_ALLOCATOR=$STANLI_CI_SHARED_ALLOCATOR")
+          fi
           if [ -n "${CC:-}" ] && [ -n "${CXX:-}" ]; then
             compiler_args+=("-DCMAKE_C_COMPILER=$CC" "-DCMAKE_CXX_COMPILER=$CXX")
           fi
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
-            -DSTANLI_SHARED_ALLOCATOR="$STANLI_CI_SHARED_ALLOCATOR" \
             -DSTANLI_BUILD_ALLOCATOR_BENCHMARK=ON \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -498,6 +504,27 @@ jobs:
       # contract a runner can check without a browser.
       - name: Every demo model has a description
         run: python3 tools/gen_web_models.py --check
+
+      - name: Matched Linux allocator rollout (no concurrent build or test)
+        if: inputs.allocator_rollout && runner.os == 'Linux'
+        run: |
+          python3 -m venv /tmp/allocator-rollout-python
+          /tmp/allocator-rollout-python/bin/pip install numpy
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+          /tmp/allocator-rollout-python/bin/python tools/allocator/rollout.py \
+            --build build-rel --pdb deps/posteriordb \
+            --output allocator-rollout --jobs ${{ matrix.build_jobs }}
+
+      - name: Publish Linux allocator rollout evidence
+        if: always() && inputs.allocator_rollout && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: allocator-rollout-${{ matrix.runtime }}
+          retention-days: 90
+          path: |
+            allocator-rollout
+            !allocator-rollout/packages
 
       # The strongest oracle in the project: every referenced posteriordb
       # model evaluated and compared against CmdStan's recorded lp and full
@@ -1333,7 +1360,7 @@ jobs:
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
           ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DSTANLI_SHARED_ALLOCATOR="$STANLI_CI_SHARED_ALLOCATOR" \
+            ${{ inputs.shared_allocator && inputs.shared_allocator != 'DEFAULT' && format('-DSTANLI_SHARED_ALLOCATOR={0}', inputs.shared_allocator) || '' }} \
             -DSTANLI_BUILD_ALLOCATOR_BENCHMARK=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache

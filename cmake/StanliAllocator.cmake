@@ -1,9 +1,14 @@
 # A DSO-local C allocator, not a process-wide malloc/new override. Never
 # attach the shim to stanmath, the reusable runtime objects, or the CLI.
 get_filename_component(STANLI_ALLOCATOR_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-# Integration and default promotion are separate decisions. Keep SYSTEM
-# until each platform passes corrected throughput and full-inference gates.
-set(STANLI_SHARED_ALLOCATOR "SYSTEM" CACHE STRING
+# Linux defaults are validated independently of the unresolved Apple
+# large-vector regression. AUTO still fails closed for unsupported builds.
+# Preserve any explicit/cached selection, including a SYSTEM opt-out.
+set(_stanli_allocator_default SYSTEM)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(_stanli_allocator_default AUTO)
+endif()
+set(STANLI_SHARED_ALLOCATOR "${_stanli_allocator_default}" CACHE STRING
     "Shared-library C allocator: AUTO, SYSTEM, or MIMALLOC")
 set_property(CACHE STANLI_SHARED_ALLOCATOR PROPERTY STRINGS AUTO SYSTEM MIMALLOC)
 if(NOT STANLI_SHARED_ALLOCATOR MATCHES "^(AUTO|SYSTEM|MIMALLOC)$")

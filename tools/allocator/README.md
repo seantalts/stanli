@@ -1,7 +1,7 @@
 # Native warm-gradient measurements
 
 This is a non-installed measurement target, separate from the
-[opt-in private allocator](../../docs/private-allocator.md). It adds no
+[private allocator](../../docs/private-allocator.md). It adds no
 shipping warmup, sleeps, allocator tuning, loop alignment or public API.
 
 The evaluator uses the shipping runtime objects and allocator boundary, calls
@@ -96,3 +96,20 @@ Those data used the archived evaluator; removing its placement telemetry and
 unused diagnostic modes changes the source identity. New comparisons must
 record fresh binaries; historical tables are not relabeled as measurements
 of this cleaned harness.
+
+## Linux default rollout
+
+The combined [rollout plan](../../docs/linux-allocator-rollout.md) fixes the
+broader gradients, end-to-end sampling and memory gates. The manual wheels
+workflow accepts `shared_allocator=DEFAULT` and `allocator_rollout=true`.
+It invokes `rollout.py` on both Linux release architectures, after building
+and testing; normal wheel/corpus/binding validation still runs.
+
+`sampling.py` verifies and measures the shipping Python source-to-Fit path,
+including adaptation, without artificial native warmup. It freezes packages,
+source/data, seed, transition counts and complete draw/statistic snapshots;
+both variants have A/A aliases. Its `--smoke` mode is only a harness check,
+not rollout evidence. `rollout.py` retains every command, log, binary,
+manifest, snapshot and summary. Collection completion is not an automatic
+performance approval; all regressions, controls and memory behavior must be
+reviewed before enabling auto-merge.

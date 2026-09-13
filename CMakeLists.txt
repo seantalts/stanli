@@ -1173,6 +1173,11 @@ endif()
 # standalone runs on older Python use the Tomli backport in requirements.txt.
 find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  if(NOT WIN32)
+    add_test(NAME test_allocator_sampling_harness
+      COMMAND ${Python3_EXECUTABLE} tests/test_allocator_sampling.py
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
