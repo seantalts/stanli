@@ -241,7 +241,8 @@ static void run_model(const std::string& mir, const std::string& json,
       for (int c = 0; c < chains; ++c) {
         Chain& chain = *workers[c];
         std::printf(
-            "{\"kind\":\"warmup\",\"cycle\":%d,\"chain\":%d,\"requested_ms\":%d,"
+            "{\"kind\":\"warmup\",\"cycle\":%d,\"chain\":%d,\"requested_ms\":%"
+            "d,"
             "\"wall_ns\":%.1f,\"gradients\":%llu}\n",
             cycle, c, warmup_ms, warm_ns[c],
             static_cast<unsigned long long>(warm_gradients[c]));
