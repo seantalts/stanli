@@ -1,7 +1,9 @@
 # Native allocator and alignment rollout measurements
 
-2026-09-13. Default promotion is **on hold**: a repeatable large-vector,
+2026-09-13. Default promotion is **on hold**: a repeatable local large-vector,
 eight-worker loss tripped the [predeclared gate](allocator-rollout-plan.md).
+The subsequent Linux screens also find 23% (ARM) and 29–34% (x86_64)
+four-worker throughput losses in small models, each negative in five/five rounds.
 The implementation remains SYSTEM / alignment OFF by default, with independent
 explicit controls. [PR #362](https://github.com/seantalts/stanli/pull/362) is a
 draft; auto-merge is not enabled while this decision and the remaining gates
@@ -73,7 +75,9 @@ not established by these measurements.
 
 This is the combined allocator/alignment size change, not an alignment-only
 attribution. The local embedded object carries a newer deployment target;
-minimum-OS compatibility is checked by the actual CI shipping jobs instead.
+release CI builds use the wheel's declared deployment targets. These runs on
+current hosted runners do not constitute execution tests on the oldest
+supported macOS versions.
 
 ## Native scope and compatibility
 
@@ -81,8 +85,10 @@ The [six-job native ownership matrix](https://github.com/seantalts/stanli/action
 passed on macOS arm64/x86_64, Linux arm64/x86_64 (GCC and an additional Clang
 check), and Windows MinGW/UCRT x86_64. It exercises C allocation versus C++
 new/delete ownership, host/foreign pointers, reusable objects, dependency
-archives, Eigen, exceptions, thread teardown, cross-thread frees, unload/reload,
-and export isolation. The first Windows failure was a test-parser bug for
+archives, Eigen, exceptions, thread teardown, cross-thread frees, probe handle
+close/reopen, and export isolation. Successful handle closure does not prove
+that an OS unmapped the DSO; the shipping runtime and embedded compiler remain
+loaded through process exit in these tests. The first Windows failure was a test-parser bug for
 GNU objdump's extra ordinal column; the corrected parser and format fixtures
 pass. No allocator export was waived or added to the allowlist.
 
@@ -107,10 +113,41 @@ median ratios remain within 3% of one in every Windows cell, although the
 large-normal controls have wider individual round ranges. All 12 cells,
 ranges, memory measurements, and controls are in the
 [Windows scorecard](../tools/allocator/results/ci-34750701616-windows-x86_64/summary.json).
-The Linux metadata read failed before timing in that run; a scoped repository
-provenance fix is being validated in
+The Linux metadata read failed before timing in that run; the corrected screen
+subsequently completed on both Linux architectures in
 [34751295812](https://github.com/seantalts/stanli/actions/runs/34751295812).
-Linux performance evidence remains outstanding, not assumed from Windows/Mac.
+
+Linux ARM passes all 247 native tests, the full shipping job, 92 numerical
+verification processes, and 480 timed processes. Its allocator-only
+[scorecard](../tools/allocator/results/ci-34751295812-linux-arm64/summary.json)
+shows a new important negative: normal 8/four workers is **0.772
+[0.677, 0.778]**, losing five/five rounds, with SYSTEM/private A/A medians
+1.015/0.980. This has not received a separate confirmation session, but cannot
+be treated as a no-regression pass or dismissed by its much smaller controls.
+The same normal 8 case improves 1.103x at one worker. Eight Schools is
+1.089x/1.065x, hierarchical GP 1.052x/1.033x, normal 1024 1.034x/0.998x,
+large normal 3.810x/3.973x, and gamma 16384 1.000x/0.993x (one/four workers).
+The small four-worker gamma loss appears in four/five rounds with near-one
+A/A medians. Large-vector wins do not cancel the tiny-vector parallel loss.
+
+Linux x86_64 also completes all 92 verification and 480 timing processes.
+Its allocator-only [scorecard](../tools/allocator/results/ci-34751295812-linux-x86_64/summary.json)
+has three large four-worker losses, each negative in five/five rounds:
+
+| Linux x86_64 / four workers | Candidate ratio [round range] | SYSTEM / private A/A medians |
+| --- | --- | --- |
+| Eight Schools non-centered | **0.661 [0.627, 0.682]** | 0.999 / 0.986 |
+| Normal 8 | **0.707 [0.677, 0.734]** | 1.003 / 0.975 |
+| Normal 1024 | **0.690 [0.669, 0.730]** | 1.000 / 0.990 |
+
+Eight Schools also loses slightly at one worker: 0.986 [0.980, 0.986],
+five/five negative rounds. Normal 8/one worker is 0.985 with four/five negative
+rounds and controls 0.991/1.008. Hierarchical GP improves 1.024x/1.036x,
+normal 1024/one worker 1.018x, and large normal 2.896x/2.838x (one/four workers).
+Gamma is 1.001x/1.002x. These are first five-round CI screens, not additional
+confirmation sessions. The large small-model parallel deficits are much larger
+than their A/A shifts. No loop-alignment flag is applied on either Linux
+architecture: those regressions already occur in the allocator-only candidate.
 
 The final formatted local source passes **247 candidate / 243 SYSTEM native
 CTest tests**, and each configuration passes **48 Python checks / 173 R
@@ -149,6 +186,17 @@ unresolved negative signal, not evidence of a clean no-regression pass.
 The existing protected `manylinux_2_28_x86_64` PR gate now also requires the
 native ownership matrix. Auto-merge must not bypass missing performance
 evidence or a known regression merely because that CI gate is green.
+
+If diagnosis continues, the next discriminating experiment is a matched
+two-by-two Apple ARM ablation (SYSTEM/private allocator x loops OFF/ON),
+focused on the large-normal/eight-worker loss and a positive control. The
+combined comparison cannot attribute that loss to either change individually.
+The new Linux deficits need a separate multithreaded allocator profile: they
+occur without the loop flag and cannot be explained away as that Apple-only
+alignment change. No Linux allocator-contention or TLS-cost cause is established
+by these timing results alone.
+No such additional timing experiment has been run, and no new allocator tuning,
+CPU/model-specific policy, or regression allowance is inferred from these wins.
 
 ## CLI alignment and memory retention
 

@@ -1,0 +1,80 @@
+{
+  "phase": "bench",
+  "head": "4c7e38ffc8e6bd2aa5e5a732d1dbb00b8ff6e088",
+  "machine": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.28",
+  "processor": "x86_64",
+  "python": "/tmp/allocator-bench-python/bin/python",
+  "input_sha256": "182f22c9dd93f836e699854f03526161e3e465a43a8c411257a93e8a756286d4",
+  "harness_sha256": "a07bb422bc59514ee28cdb3b86d48c1a8fdba06d4a171ab94a18f1e60d5994d4",
+  "native_source_sha256": "cc9edb6976a3de2cc6d54de3bcffa5d219f57666d6eba633f0fae702d9e751b1",
+  "variants": {
+    "system": {
+      "library": "/__w/stanli/stanli/allocator-measurements/system/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "sha256": "145305236d2ff9322d0df2c8617d532372e940d8207c7c3840afa5090b22be82"
+    },
+    "candidate": {
+      "library": "/__w/stanli/stanli/allocator-measurements/candidate/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "sha256": "8eed1f348897d9a7f7dc2a6893f6e7b3f030370833b8665c98d04343bdec1ad9"
+    }
+  },
+  "slots": [
+    "system",
+    "candidate",
+    "system_aa",
+    "candidate_aa"
+  ],
+  "cells": [
+    [
+      "eight_schools_noncentered",
+      1
+    ],
+    [
+      "eight_schools_noncentered",
+      4
+    ],
+    [
+      "hierarchical_gp",
+      1
+    ],
+    [
+      "hierarchical_gp",
+      4
+    ],
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_1024",
+      1
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      1
+    ],
+    [
+      "normal_262144",
+      4
+    ],
+    [
+      "gamma_16384",
+      1
+    ],
+    [
+      "gamma_16384",
+      4
+    ]
+  ],
+  "rounds": 5,
+  "started": 1789295348.5691946
+}

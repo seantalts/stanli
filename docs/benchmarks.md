@@ -109,7 +109,22 @@ Python-loaded library, not fresh CmdStan comparisons or whole-sampling gains.
 | Normal vector, N=262144 / 8 | **0.948x (slower)** |
 
 Default promotion is on hold: the large-vector/eight-worker case lost in
-all 12 screen/confirmation rounds. See the [rollout report](allocator-rollout.md)
+all 12 screen/confirmation rounds. Subsequent five-round Linux CI screens,
+which apply the allocator change **without** the Apple-only alignment flag,
+find additional four-worker throughput losses:
+
+| Platform / model | Candidate throughput vs current default (first CI screen) |
+| --- | ---: |
+| Linux ARM / Normal N=8 | **0.772x (slower)** |
+| Linux x86_64 / Eight Schools non-centered | **0.661x (slower)** |
+| Linux x86_64 / Normal N=8 | **0.707x (slower)** |
+| Linux x86_64 / Normal N=1024 | **0.690x (slower)** |
+
+Each loses in five/five rounds, by much more than its A/A control shifts.
+Linux large normals improve 2.8–4.0x, and Windows Eight Schools improves
+1.42–1.44x; those gains do not cancel the losing workloads. These first CI
+screens have not received separate confirmation sessions.
+See the [rollout report](allocator-rollout.md)
 for both identical-binary controls, dispersion, other workloads, compatibility
 gates, and remaining uncertainties. The historical CLI/CmdStan tables above
 have not been multiplied by these ratios or relabeled as new measurements.
