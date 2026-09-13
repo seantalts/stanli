@@ -75,6 +75,11 @@ if(STANLI_SANITIZE)
   endif()
 endif()
 
+if(MINGW)
+  # Keep source lines without duplicating full type information in every test.
+  add_compile_options("$<$<CONFIG:RelWithDebInfo>:-g1>")
+endif()
+
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
 file(GLOB _eigen ${DEPS}/math/lib/eigen_*)
 file(GLOB _boost ${DEPS}/math/lib/boost_*)
@@ -107,6 +112,11 @@ target_include_directories(stanmath INTERFACE
   ${_sundials}/include
   ${_tbb}/include)
 target_compile_definitions(stanmath INTERFACE _REENTRANT BOOST_DISABLE_ASSERTS)
+# Match Stan Math's TBB configuration on Windows ARM64 for every consumer
+# of the vendored headers, including runtime, tool, test, and PCH targets.
+if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Rr][Mm]64|[Aa][Aa][Rr][Cc][Hh]64)$")
+  target_compile_definitions(stanmath INTERFACE TBB_USE_GCC_BUILTINS=1)
+endif()
 # Boost's default policy evaluates double in long double. On x86 that's the
 # hardware 80-bit type, which is what CmdStan's reference results are
 # computed with. Elsewhere long double is software binary128, whose epsilon
@@ -733,7 +743,7 @@ function(stanli_add_test NAME)
   endif()
   if(MINGW AND CMAKE_BUILD_TYPE MATCHES "^(Debug|RelWithDebInfo)$")
     # Large DWARF sections can make Windows reject the test executable.
-    # Keep full debug information in a sidecar that GDB can discover.
+    # Keep debug information in a sidecar that GDB can discover.
     add_custom_command(TARGET ${NAME} POST_BUILD
       COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
               "$<TARGET_FILE:${NAME}>" "$<TARGET_FILE:${NAME}>.debug"
@@ -777,6 +787,10 @@ if(NOT STANLI_STANC_EMBED_OBJ)
     endforeach()
   endif()
   if(STANLI_PORTABLE_COMPILER)
+    # Re-run the post-build copy when setup rebuilds the compiler, even if
+    # none of the checker's C++ sources changed.
+    set_property(TARGET stanli_check APPEND PROPERTY LINK_DEPENDS
+                 "${STANLI_PORTABLE_COMPILER}")
     add_custom_command(TARGET stanli_check POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
               "${STANLI_PORTABLE_COMPILER}"

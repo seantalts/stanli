@@ -1,0 +1,61 @@
+name: Windows dev setup
+
+on:
+  pull_request:
+  push:
+    branches: main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dev-setup:
+    name: Dev setup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      OPAMROOT: C:\opam
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            msystem: UCRT64
+          - os: windows-11-arm
+            msystem: CLANGARM64
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          # Keep the action-installed opam on PATH in the MSYS2 shell.
+          path-type: inherit
+          install: git make curl
+          pacboy: clang:p llvm-tools:p cmake:p python:p
+
+      - name: Install opam and configure PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $opamDir = Join-Path $env:RUNNER_TEMP 'opam-bin'
+          New-Item -ItemType Directory -Force -Path $opamDir | Out-Null
+          $opamExe = Join-Path $opamDir 'opam.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/ocaml/opam/releases/download/2.5.2/opam-2.5.2-x86_64-windows.exe' -OutFile $opamExe
+          $opamDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          Join-Path $msysRoot 'usr\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Join-Path $msysRoot '${{ matrix.msystem }}\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Cache opam switch and packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.OPAMROOT }}
+          key: windows-opam-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ hashFiles('.github/workflows/dev-setup-windows.yml', 'tools/dev_setup.sh', 'tools/dev_setup_windows.sh', 'harnesses/conformance/build_stanc.sh') }}
+
+      - name: Install prerequisites, build, and test
+        run: bash tools/dev_setup.sh ${{ matrix.os == 'windows-latest' && '--embed' || '' }}
+        shell: pwsh
