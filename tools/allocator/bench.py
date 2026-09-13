@@ -97,7 +97,7 @@ def experiment(args):
     index = (phase / "runs.jsonl").open("x")
     count = 0
     env = {k: v for k, v in os.environ.items() if not k.startswith(
-           ("DYLD_", "MIMALLOC_", "TCMALLOC_", "Malloc", "STANLI_"))}
+           ("DYLD_", "LD_PRELOAD", "LD_AUDIT", "MIMALLOC_", "TCMALLOC_", "Malloc", "STANLI_"))}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
     def one(cell, slot, reps, samples, rnd=-1):

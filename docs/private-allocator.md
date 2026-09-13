@@ -1,8 +1,11 @@
 # Private native allocation
 
-The default remains `STANLI_SHARED_ALLOCATOR=SYSTEM`. This is an opt-in
-integration, not a default rollout or a promise that every model is faster.
-No Stan Math or Eigen source changes are required.
+Fresh Linux builds select `STANLI_SHARED_ALLOCATOR=AUTO`, enabling the
+private allocator on supported configurations. Windows and macOS default
+to SYSTEM. This Linux rollout is gated by the
+[matched validation plan](linux-allocator-rollout.md); the PR remains a draft
+until those results justify promotion. No Stan Math or Eigen source changes
+are required, and no claim is made that every model is faster.
 
 After the usual dependency/compiler setup:
 
@@ -15,7 +18,8 @@ ctest --test-dir build-rel --output-on-failure
 `SYSTEM` leaves allocation unchanged. `MIMALLOC` requires a supported
 configuration and fails at configuration time otherwise. `AUTO` selects
 private mimalloc on supported configurations and SYSTEM elsewhere; AUTO is
-itself an explicit opt-in. The build ID of an enabled shared library ends in
+an explicit opt-in outside Linux. Existing cached selections are respected,
+including SYSTEM. The build ID of an enabled shared library ends in
 `-mimalloc-3.5.1-private-c`.
 
 ## Ownership boundary
@@ -66,7 +70,8 @@ ctest --test-dir build-allocator --output-on-failure
 The reusable ownership workflow runs on five native platform/architecture
 pairs plus Linux Clang. The existing required PR gate depends on it.
 The wheels workflow also accepts a manual `shared_allocator=MIMALLOC`
-validation input; normal PR, release and nightly builds still select SYSTEM.
+validation input; normal PR, release and nightly builds use the platform
+default, including Linux's supported private-allocator path.
 
 Default promotion is a separate platform-by-platform decision. It needs
 broader corrected warm-gradient comparisons, first-gradient/startup costs,
@@ -86,8 +91,9 @@ also retained on `codex/allocator-research-archive`:
 - [Measurements, ranges and limitations](https://github.com/seantalts/stanli/blob/4e2d1bb4da8b7b602c73baaab875bf78f5c7b439/docs/allocator-rollout.md)
 - [Raw evidence, full snapshots and source identities](https://github.com/seantalts/stanli/blob/4e2d1bb4da8b7b602c73baaab875bf78f5c7b439/tools/allocator/results/README.md)
 
-This integration excludes the benchmark target and timing tables (a separate
-measurement change), loop-alignment controls (a separate parked change), raw
-research artifacts, and unsuccessful placement/TLS/large-allocation fallback
-prototypes. The remaining Apple mechanism question is preserved, not solved
-by an allocator threshold or default change.
+PR #363 now consolidates the integration, corrected benchmark and Linux
+default rollout at the user's request. It excludes loop-alignment controls
+(a separate parked branch), raw historical research artifacts and unsuccessful
+placement/TLS/large-allocation fallback prototypes. The remaining Apple
+mechanism question is preserved, not solved by an allocator threshold or
+default change.

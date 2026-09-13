@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(stanli_allocator_gate LANGUAGES C CXX)
-# This test project always exercises the candidate. The parent project keeps
-# SYSTEM as its default while rollout gates remain unresolved.
+# This standalone test always exercises the private allocator, independently
+# of the parent project's platform-specific defaults.
 set(STANLI_SHARED_ALLOCATOR MIMALLOC CACHE STRING "Allocator under test")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

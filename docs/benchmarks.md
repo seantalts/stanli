@@ -495,8 +495,9 @@ python3 tools/corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec
 ## Private allocator research
 
 This is a separate native-gradient measurement boundary, not an update to
-the historical CLI/CmdStan tables above. The allocator remains opt-in and
-SYSTEM remains the default; loop alignment is a separate, parked change.
+the historical CLI/CmdStan tables above. These archived results used an
+opt-in allocator. The [Linux-default rollout](linux-allocator-rollout.md)
+has its own current validation gate; loop alignment remains parked.
 
 The original short warmup was startup-sensitive for small parallel Linux
 models. A same-binary comparison with 500 ms of actual gradient work per
