@@ -672,6 +672,7 @@ jobs:
         if: inputs.allocator_bench
         run: |
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
           /tmp/wheeltest/bin/python tools/allocator/ci.py \
             --build build-rel --pdb deps/posteriordb \
             --output allocator-measurements --jobs ${{ matrix.build_jobs }}

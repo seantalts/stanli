@@ -2,8 +2,6 @@ name: private allocator ownership
 on:
   workflow_call:
   workflow_dispatch:
-  push:
-    branches: [codex/private-allocator-defaults]
 permissions:
   contents: read
 jobs:
