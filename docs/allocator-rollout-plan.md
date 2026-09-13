@@ -32,6 +32,10 @@ Promotion requires:
    consistent negatives too. One bounded confirmation of flagged cases plus
    positive/unrelated controls is allowed; no rerunning until a favorable
    sign. No geomean may conceal a losing case.
+   Confirmation selection is fixed before inspecting the screen: every cell
+   with a median ratio below 0.97, plus eight schools/1 worker, normal 1024/4,
+   and hierarchical GP/4. Seven balanced rounds, the same four slots, two
+   processes per slot, three blocks, unchanged binaries and calibrated counts.
 4. Native private-ownership execution on macOS arm64/x86_64, Linux
    arm64/x86_64 (GCC plus a Clang check), and Windows MinGW/UCRT x86_64.
    Cross-linking does not satisfy this gate. Full shipping wheel/runtime
@@ -39,6 +43,10 @@ Promotion requires:
    Retain SYSTEM fallback for unsupported/sanitized/LTO configurations.
 5. Repeated-gradient retention and changing model-size/lifetime checks;
    investigate unexplained retained-memory growth, not just speed.
+   Fixed retention run: 12 small/large/small normal model sequences in one
+   NumPy host, four workers, 1,024 repetitions x eight blocks each. This is
+   1,179,648 native gradients per variant plus warmup/checks. Compare complete
+   snapshots and RSS after each block/join/destruction; no forced collection.
 6. Full local native/Python/R tests, configuration defaults and mechanical
    rollback checks, final linked-loop inspection on Apple ARM, export/ownership
    checks, and normal CI. Keep alignment platform-scoped, not guessed for x86.
@@ -57,6 +65,13 @@ multiply old CmdStan or source-to-CSV numbers by these allocator speedups.
 If common loop flags affect the CLI, measure that consumer separately and
 either refresh its measured columns honestly or retain a scope that leaves
 the existing table applicable. Do not relabel historical timings as fresh.
+
+The CLI consumer screen uses the existing unmodified `bench_grad` in the two
+builds: SYSTEM in both, loops OFF/ON. All 23 models, five balanced rounds with
+one fresh process per slot/round and both A/A aliases (460 timing processes).
+Keep its fixed point and 200 ms warmup; baseline-only calibration targets
+150 ms of timed gradients. This is a separate alignment ablation, not an
+allocator benchmark and not a fresh CmdStan comparison.
 
 The portable benchmark DSO is separate and non-installed; it reuses production
 objects and the same private allocator function, with an additive measurement
