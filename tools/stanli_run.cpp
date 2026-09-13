@@ -3,7 +3,8 @@
 // with NUTS, emits constrained parameter draws.
 //
 // Usage: stanli_run model.stan data.json [--seed N] [--warmup N]
-//        [--samples N] [--delta X] [--max-depth N] [--stanc PATH]
+//        [--samples N] [--delta X] [--max-depth N]
+//        [--stanli-compile PATH | --stanc PATH]
 //        [--sampler-stats] [--chains N] [--num-threads N] [--thin N]
 //        [--save-warmup] [--init-radius X] [--summary]
 //
@@ -16,7 +17,8 @@
 //
 // Built with the stanc3 embed object this needs nothing else on the
 // machine: no C++ toolchain, no separate compiler binary. Without it,
-// --stanc (or $STANC) points at a stanc3 to shell out to.
+// stanli-compile is found beside the executable or on PATH. --stanli-compile
+// selects it explicitly; --stanc (or $STANC) selects stock stanc instead.
 //
 // --sampler-stats prepends CmdStan's seven sampler columns (lp__,
 // accept_stat__, stepsize__, treedepth__, n_leapfrog__, divergent__,
@@ -37,31 +39,20 @@
 #include <string>
 #include <vector>
 
-static std::string run_stanc(const std::string& stanc,
-                             const std::string& model) {
-  std::string out = stanli::tooling::run_stanc_process(stanc, model);
-  if (out.empty())
-    throw std::runtime_error("stanc produced no MIR (compile error?)");
-  return out;
-}
-
 int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_run model.stan data.json [--seed N] "
                  "[--warmup N] [--samples N] [--delta X] "
-                 "[--max-depth N] [--stanc PATH] [--sampler-stats] "
+                 "[--max-depth N] [--stanli-compile PATH | --stanc PATH] "
+                 "[--sampler-stats] "
                  "[--chains N] [--num-threads N] [--thin N] "
                  "[--save-warmup] [--init-radius X] [--summary]\n");
     return 2;
   }
   std::string model = argv[1], datafile = argv[2];
-#ifdef _WIN32
-  std::string stanc = "deps/stanc3/stanc.exe";
-#else
-  std::string stanc = "deps/stanc3/stanc";
-#endif
-  bool stanc_explicit = false;
+  std::string stanc;
+  std::string compiler;
   stanli::NutsConfig cfg;
   cfg.seed = 1;
   cfg.warmup = 1000;
@@ -109,10 +100,10 @@ int main(int argc, char** argv) {
       cfg.thin = std::stoi(v);
     else if (k == "--init-radius")
       cfg.init_radius = std::stod(v);
-    else if (k == "--stanc") {
+    else if (k == "--stanc")
       stanc = v;
-      stanc_explicit = true;
-    }
+    else if (k == "--stanli-compile")
+      compiler = v;
   }
   if (n_chains < 1) n_chains = 1;
   if (n_threads <= 0) n_threads = n_chains;
@@ -127,22 +118,21 @@ int main(int argc, char** argv) {
     n_threads = 1;
   }
   if (const char* env = std::getenv("STANC")) {
-    stanc = env;
-    stanc_explicit = true;
+    if (*env) stanc = env;
+  }
+  if (!stanc.empty() && !compiler.empty()) {
+    std::fprintf(stderr,
+                 "stanli_run: --stanc (or STANC) and --stanli-compile are "
+                 "mutually exclusive\n");
+    return 2;
   }
 
   try {
     stanli::DataMap data = stanli::DataMap::from_json_file(datafile);
-    // The embedded compiler wins unless the caller named a stanc
-    // explicitly (--stanc or $STANC), which is how a build with both can
-    // still be pointed at a different stanc3 for a bisect.
-#ifdef STANLI_EMBED_STANC
-    const std::string mir = stanc_explicit
-                                ? run_stanc(stanc, model)
-                                : stanli::tooling::embedded_stanc(model);
-#else
-    const std::string mir = run_stanc(stanc, model);
-#endif
+    const std::string mir =
+        stanli::tooling::compile_source(stanc, compiler, model);
+    if (mir.empty())
+      throw std::runtime_error("the compiler produced no MIR (compile error?)");
     stanli::CompiledModel cm = stanli::compile_model(mir, data, cfg.seed);
     stanli::Executor ex(std::move(cm.graph));
     cm.bind(ex);

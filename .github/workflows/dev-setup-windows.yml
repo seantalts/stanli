@@ -1,0 +1,172 @@
+name: Windows dev setup
+
+on:
+  push:
+    branches: main
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Full native setup is postsubmit; PRs keep the fast setup contract checks.
+# Let cache-producing runs finish so later main builds can reuse their work.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dev-setup:
+    name: Dev setup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      OPAMROOT: C:\opam
+      OPAM_VERSION: 2.5.2
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPRESS: '1'
+      CCACHE_MAXSIZE: 2G
+      # Match the existing native CI cache's treatment of regenerated PCHs.
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            msystem: UCRT64
+            setup_args: ''
+            ocaml_packages: ''
+          - os: windows-11-arm
+            msystem: CLANGARM64
+            setup_args: --no-embed
+            # OCaml runs as x64 on ARM; these live outside the OPAMROOT cache.
+            ocaml_packages: mingw-w64-x86_64-gcc
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          # Keep the action-installed opam on PATH in the MSYS2 shell.
+          path-type: inherit
+          install: git make curl ${{ matrix.ocaml_packages }}
+          pacboy: clang:p llvm-tools:p cmake:p python:p ccache:p
+
+      - name: Check setup script contracts before the expensive build
+        shell: msys2 {0}
+        run: python tests/test_dev_setup.py
+
+      - name: Identify compiler cache inputs
+        id: toolchain
+        shell: msys2 {0}
+        run: |
+          source tools/stanc_embed/provenance.sh
+          echo "id=$(clang++ --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "ocaml=$(stanc_embed_read_setup OCAML_VERSION)" >> "$GITHUB_OUTPUT"
+          echo "switch=$(stanc_embed_read_setup OPAM_SWITCH)" >> "$GITHUB_OUTPUT"
+          echo "stanc=$(stanc_embed_read_setup STANC3_SRC_SHA)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore C++ compilation
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: windows-dev-ccache-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('.github/workflows/dev-setup-windows.yml', 'CMakeLists.txt', 'runtime/**', 'tests/**', 'tools/**', 'deps/fetch.sh') }}
+          restore-keys: windows-dev-ccache-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-
+
+      - name: Install opam and configure PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $opamDir = Join-Path $env:RUNNER_TEMP 'opam-bin'
+          New-Item -ItemType Directory -Force -Path $opamDir | Out-Null
+          $opamExe = Join-Path $opamDir 'opam.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/ocaml/opam/releases/download/${env:OPAM_VERSION}/opam-${env:OPAM_VERSION}-x86_64-windows.exe" -OutFile $opamExe
+          $opamDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          Join-Path $msysRoot 'usr\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Join-Path $msysRoot '${{ matrix.msystem }}\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Restore opam switch and packages
+        id: opam-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.OPAMROOT }}
+          # Workflow and local compiler edits do not change this toolchain.
+          # Source-pin changes can reuse the switch; opam installs any newly
+          # required dependencies when setup rebuilds stanc from that pin.
+          key: windows-opam-v2-${{ matrix.os }}-${{ matrix.msystem }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.switch }}-${{ steps.toolchain.outputs.stanc }}
+          restore-keys: |
+            windows-opam-v2-${{ matrix.os }}-${{ matrix.msystem }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.switch }}-
+            windows-opam-v1-${{ matrix.os }}-${{ matrix.msystem }}-
+
+      - name: Validate the restored OCaml switch
+        if: steps.opam-cache.outputs.cache-matched-key != ''
+        shell: msys2 {0}
+        run: bash tools/stanc_embed/validate_cached_switch.sh
+
+      - name: Restore built Stan compilers and source state
+        id: stanc-cache
+        uses: actions/cache/restore@v6
+        with:
+          # Setup validates the pinned checkout and embed provenance. The
+          # standalone path reapplies its overlay and lets Dune validate the
+          # cached build against the current sources. Keep the checkout and
+          # _build together: setup rebuilds when the checkout is absent.
+          path: |
+            deps/stanc3
+            deps/stanc3-src
+          key: windows-stanc-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.stanc }}-${{ hashFiles('compiler/**', 'tools/stanc_embed/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+          restore-keys: windows-stanc-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.stanc }}-
+
+      - name: Prepare and validate the compilers
+        run: bash tools/dev_setup.sh --no-build ${{ matrix.setup_args }}
+        shell: pwsh
+
+      # Commit successful preparation now, even if the C++ build or tests
+      # fail later. Never publish a partially prepared toolchain.
+      - name: Save prepared opam switch and packages
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.OPAMROOT }}
+          key: ${{ steps.opam-cache.outputs.cache-primary-key }}
+
+      - name: Save prepared Stan compilers and source state
+        if: steps.stanc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            deps/stanc3
+            deps/stanc3-src
+          key: ${{ steps.stanc-cache.outputs.cache-primary-key }}
+
+      - name: Build development and release configurations
+        run: bash tools/dev_setup.sh --no-test ${{ matrix.setup_args }}
+        shell: pwsh
+
+      - name: Save completed C++ compilation
+        if: steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+      - name: Run the full test suite
+        shell: msys2 {0}
+        run: |
+          source tools/build_jobs.sh
+          ctest --test-dir build --parallel "$(stanli_detect_build_jobs)" --output-on-failure
+
+      - name: C++ cache statistics
+        if: always()
+        shell: msys2 {0}
+        run: ccache --show-stats

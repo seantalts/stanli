@@ -1,5 +1,7 @@
 #pragma once
 
+#include "stanc_process.hpp"
+
 #include <array>
 #include <cstdio>
 #include <memory>
@@ -33,3 +35,27 @@ inline std::string embedded_stanc(const std::string& model) {
 
 }  // namespace stanli::tooling
 #endif
+
+namespace stanli::tooling {
+
+// Both native tools use the shipped pipeline by default. Stock stanc is an
+// explicit override only; a missing or broken portable compiler must fail.
+inline std::string compile_source(const std::string& stanc,
+                                  const std::string& compiler,
+                                  const std::string& model) {
+  if (!stanc.empty()) return run_stanc_process(stanc, model);
+  if (!compiler.empty()) return run_portable_compiler(compiler, model);
+#ifdef STANLI_EMBED_STANC
+  return embedded_stanc(model);
+#else
+  const std::string found = find_portable_compiler(executable_directory());
+  if (found.empty())
+    throw std::runtime_error(
+        "this build does not embed stanc3 and no stanli-compile is beside "
+        "the executable or on PATH; pass --stanli-compile PATH or --stanc "
+        "PATH");
+  return run_portable_compiler(found, model);
+#endif
+}
+
+}  // namespace stanli::tooling

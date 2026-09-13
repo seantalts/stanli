@@ -75,6 +75,11 @@ if(STANLI_SANITIZE)
   endif()
 endif()
 
+if(MINGW)
+  # Keep source lines without duplicating full type information in every test.
+  add_compile_options("$<$<CONFIG:RelWithDebInfo>:-g1>")
+endif()
+
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
 file(GLOB _eigen ${DEPS}/math/lib/eigen_*)
 file(GLOB _boost ${DEPS}/math/lib/boost_*)
@@ -107,6 +112,11 @@ target_include_directories(stanmath INTERFACE
   ${_sundials}/include
   ${_tbb}/include)
 target_compile_definitions(stanmath INTERFACE _REENTRANT BOOST_DISABLE_ASSERTS)
+# Match Stan Math's TBB configuration on Windows ARM64 for every consumer
+# of the vendored headers, including runtime, tool, test, and PCH targets.
+if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Rr][Mm]64|[Aa][Aa][Rr][Cc][Hh]64)$")
+  target_compile_definitions(stanmath INTERFACE TBB_USE_GCC_BUILTINS=1)
+endif()
 # Boost's default policy evaluates double in long double. On x86 that's the
 # hardware 80-bit type, which is what CmdStan's reference results are
 # computed with. Elsewhere long double is software binary128, whose epsilon
@@ -733,7 +743,7 @@ function(stanli_add_test NAME)
   endif()
   if(MINGW AND CMAKE_BUILD_TYPE MATCHES "^(Debug|RelWithDebInfo)$")
     # Large DWARF sections can make Windows reject the test executable.
-    # Keep full debug information in a sidecar that GDB can discover.
+    # Keep debug information in a sidecar that GDB can discover.
     add_custom_command(TARGET ${NAME} POST_BUILD
       COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
               "$<TARGET_FILE:${NAME}>" "$<TARGET_FILE:${NAME}>.debug"
@@ -761,10 +771,16 @@ add_executable(stanli_check tools/stanli_check.cpp
 target_link_libraries(stanli_check PRIVATE stanli stanli_stanc_process)
 add_dependencies(stanli_check stanli_mir_fixtures)
 stanli_embed_stanc(stanli_check)
-# Without the embedded object, stanli_check runs the same pipeline through
+if(WIN32)
+  # Standalone-compiler deployments must also run without MSYS2's C++/thread
+  # runtime DLLs on PATH. Embedded targets already receive these link flags.
+  target_link_options(stanli_run PRIVATE -static)
+  target_link_options(stanli_check PRIVATE -static)
+endif()
+# Without the embedded object, both tools run the same pipeline through
 # its executable, stanli-compile, which it looks for beside itself.
 set(STANLI_PORTABLE_COMPILER "" CACHE FILEPATH
-    "stanli-compile executable copied beside stanli_check when no embedded stanc3 object is linked")
+    "stanli-compile executable deployed with the native tools when no embedded stanc3 object is linked")
 if(NOT STANLI_STANC_EMBED_OBJ)
   if(NOT STANLI_PORTABLE_COMPILER)
     foreach(_stanli_cli_candidate
@@ -777,12 +793,18 @@ if(NOT STANLI_STANC_EMBED_OBJ)
     endforeach()
   endif()
   if(STANLI_PORTABLE_COMPILER)
-    add_custom_command(TARGET stanli_check POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              "${STANLI_PORTABLE_COMPILER}"
-              "$<TARGET_FILE_DIR:stanli_check>/stanli-compile${CMAKE_EXECUTABLE_SUFFIX}"
-      VERBATIM)
-    message(STATUS "stanli_check compiles through ${STANLI_PORTABLE_COMPILER}")
+    foreach(_stanli_tool stanli_run stanli_check)
+      # Re-run the copy when setup rebuilds the compiler, including when
+      # only stanli_run is requested in the release build.
+      set_property(TARGET ${_stanli_tool} APPEND PROPERTY LINK_DEPENDS
+                   "${STANLI_PORTABLE_COMPILER}")
+      add_custom_command(TARGET ${_stanli_tool} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${STANLI_PORTABLE_COMPILER}"
+                "$<TARGET_FILE_DIR:${_stanli_tool}>/stanli-compile${CMAKE_EXECUTABLE_SUFFIX}"
+        VERBATIM)
+    endforeach()
+    message(STATUS "native tools compile through ${STANLI_PORTABLE_COMPILER}")
   else()
     message(WARNING
       "no embedded stanc3 object and no stanli-compile under deps/stanc3; "
@@ -793,6 +815,8 @@ endif()
 add_executable(test_stanc_process tests/test_stanc_process.cpp)
 target_link_libraries(test_stanc_process PRIVATE stanli_stanc_process)
 add_test(NAME test_stanc_process COMMAND test_stanc_process)
+add_test(NAME test_dev_setup
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dev_setup.py)
 add_test(NAME test_check_precompiled_mir
          COMMAND stanli_check tests/fixtures/ar1.stan tests/fixtures/ar1.json
                  --mir tests/fixtures/ar1.tmir.sexp
@@ -990,13 +1014,33 @@ add_custom_target(stanli_signature_models ALL
 # the Python wheel does its own copying (tools/build_wheel.sh).
 include(GNUInstallDirs)
 install(TARGETS stanli_run stanli_check
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT NativeTools)
+if(NOT STANLI_STANC_EMBED_OBJ AND STANLI_PORTABLE_COMPILER)
+  install(PROGRAMS "${STANLI_PORTABLE_COMPILER}"
+          DESTINATION ${CMAKE_INSTALL_BINDIR}
+          RENAME "stanli-compile${CMAKE_EXECUTABLE_SUFFIX}"
+          COMPONENT NativeTools)
+endif()
 install(TARGETS stanli_shared
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY runtime/include/stanli
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
+  add_test(NAME test_compiler_deployment
+           COMMAND ${CMAKE_COMMAND}
+                   -DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}
+                   -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                   -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/compiler-deployment
+                   -DBINDIR=${CMAKE_INSTALL_BINDIR}
+                   -DCONFIG=$<CONFIG>
+                   -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
+                   -DEMBEDDED=$<BOOL:${STANLI_STANC_EMBED_OBJ}>
+                   -DSTANC=${STANLI_STANC_EXECUTABLE}
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_compiler_deployment.cmake)
+endif()
 
 set(STANLI_TESTS
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen

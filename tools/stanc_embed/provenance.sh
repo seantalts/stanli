@@ -38,24 +38,27 @@ _stanc_embed_switch_exists() {
   local opam_switch=${1:?opam switch}
   command -v opam >/dev/null 2>&1 &&
     opam switch list --color=never --short 2>/dev/null |
+      tr -d '\r' |
       grep -Fqx "$opam_switch"
 }
 
 _stanc_embed_ocaml_version() {
   local opam_switch=${1:?opam switch}
-  opam exec --switch="$opam_switch" -- ocamlc -version
+  local version
+  version=$(opam exec --switch="$opam_switch" -- ocamlc -version) || return $?
+  printf '%s\n' "$version" | tr -d '\r'
 }
 
 _stanc_embed_ocaml_target() {
   local opam_switch=${1:?opam switch}
-  opam exec --switch="$opam_switch" -- ocamlc -config-var target
+  opam exec --switch="$opam_switch" -- ocamlc -config-var target | tr -d '\r'
 }
 
 _stanc_embed_package_version() {
   local opam_switch=${1:?opam switch}
   local package=${2:?opam package}
   opam list --color=never --switch="$opam_switch" --installed --short \
-    --columns=version "$package" 2>/dev/null
+    --columns=version "$package" 2>/dev/null | tr -d '\r'
 }
 
 _stanc_embed_stamp_value() {
@@ -292,7 +295,7 @@ stanli_windows_cli_expected_stamp() {
   ocaml_meta_version=$(
     _stanc_embed_package_version "$opam_switch" ocaml-windows)
   ocaml_target=$(opam var --color=never --switch="$opam_switch" \
-    conf-gcc-windows64:host 2>/dev/null || true)
+    conf-gcc-windows64:host 2>/dev/null | tr -d '\r' || true)
   dune_version=$(_stanc_embed_package_version "$opam_switch" dune)
 
   printf '%s\n' \

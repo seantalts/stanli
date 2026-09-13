@@ -58,26 +58,6 @@ static double eval_point(int64_t i, int variant) {
   }
 }
 
-static std::string compile_source(const std::string& stanc,
-                                  const std::string& compiler,
-                                  const std::string& model) {
-  if (!stanc.empty()) return stanli::tooling::run_stanc_process(stanc, model);
-  if (!compiler.empty())
-    return stanli::tooling::run_portable_compiler(compiler, model);
-#ifdef STANLI_EMBED_STANC
-  return stanli::tooling::embedded_stanc(model);
-#else
-  const std::string found = stanli::tooling::find_portable_compiler(
-      stanli::tooling::executable_directory());
-  if (found.empty())
-    throw std::runtime_error(
-        "this build does not embed stanc3 and no stanli-compile is beside "
-        "stanli_check or on PATH; pass --stanli-compile PATH, --stanc PATH, "
-        "or --mir PATH");
-  return stanli::tooling::run_portable_compiler(found, model);
-#endif
-}
-
 static std::string read_mir(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) throw std::runtime_error("cannot open MIR file " + path);
@@ -160,8 +140,9 @@ int main(int argc, char** argv) {
 
   std::string mir;
   try {
-    mir = mir_path.empty() ? compile_source(stanc, compiler, argv[1])
-                           : read_mir(mir_path);
+    mir = mir_path.empty()
+              ? stanli::tooling::compile_source(stanc, compiler, argv[1])
+              : read_mir(mir_path);
     if (mir.empty()) {
       std::printf("COMPILE_FAIL %s produced no MIR\n",
                   mir_path.empty() ? "the compiler" : "the MIR file");
