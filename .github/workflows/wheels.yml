@@ -945,7 +945,7 @@ jobs:
       - name: Fetch the previous release and the legacy anchor
         run: |
           mkdir -p previous-release/runtime legacy-release
-          previous=https://github.com/seantalts/stanli/releases/download/v0.11.1
+          previous=https://github.com/seantalts/stanli/releases/download/v0.12.0
           legacy=https://github.com/seantalts/stanli/releases/download/v0.9.3
           # A GitHub asset redirect reset the connection once and failed this
           # whole job. Plain --retry does not include curl error 35, so keep
@@ -954,13 +954,13 @@ jobs:
             "$previous/stanli-runtime-linux-x86_64.tar.gz" \
             -o previous-release/runtime.tar.gz
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
-            "$previous/stanli_0.11.1.tar.gz" \
-            -o previous-release/stanli_0.11.1.tar.gz
+            "$previous/stanli_0.12.0.tar.gz" \
+            -o previous-release/stanli_0.12.0.tar.gz
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
             "$legacy/stanli_0.9.3.tar.gz" \
             -o legacy-release/stanli_0.9.3.tar.gz
-          echo 'b3902d4044f522f5feb0d08bfea6de0c4510c81d37609577f9ccb454c55f7817  previous-release/runtime.tar.gz' | sha256sum -c -
-          echo '40f72e86f911a717c41f70eaea84758b3b9db7c36fbda9bad47d0760c307d245  previous-release/stanli_0.11.1.tar.gz' | sha256sum -c -
+          echo '614ff7b39c243b15f71f6257d5ad16128726be396a87a6208fc91978806e3418  previous-release/runtime.tar.gz' | sha256sum -c -
+          echo '5595cb3fd2fb51a97ad1288a8ca77719b9b484b3d7b3b51f7e9d6e391260a906  previous-release/stanli_0.12.0.tar.gz' | sha256sum -c -
           echo '1acbe821c58115678a69451c553a9b23c141d009f53c142492cee94599430495  legacy-release/stanli_0.9.3.tar.gz' | sha256sum -c -
           tar xzf previous-release/runtime.tar.gz \
             -C previous-release/runtime
@@ -1012,7 +1012,7 @@ jobs:
         working-directory: r
         run: |
           current_library="$PWD/../r-current-library"
-          previous_library="$PWD/../r-v0.11.1-library"
+          previous_library="$PWD/../r-v0.12.0-library"
           legacy_library="$PWD/../r-v0.9.3-library"
           previous_runtime="$PWD/../previous-release/runtime/libstanli.so"
           current_runtime="$STANLI_RUNTIME"
@@ -1023,7 +1023,7 @@ jobs:
 
           mkdir -p "$previous_library"
           R CMD INSTALL --library="$previous_library" \
-            ../previous-release/stanli_0.11.1.tar.gz
+            ../previous-release/stanli_0.12.0.tar.gz
           STANLI_RUNTIME="$current_runtime" \
             R_LIBS_USER="$previous_library${R_LIBS_USER:+:$R_LIBS_USER}" \
             Rscript ../tests/test_r_portable_compiler.R

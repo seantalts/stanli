@@ -27,7 +27,7 @@ __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
            "SAMPLER_COLUMNS", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
 _BIN = pathlib.Path(__file__).parent / "_bin"
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
 
 ### The upstream loop vectorizer's new shapes lower without regressions
 
@@ -92,6 +92,31 @@ about as much there, CmdStan by its one-term-at-a-time sum and stanli by
 Eigen's packet reduction, so the gap is a difference in rounding rather
 than an error on one side, and `tools/corpus.py` records it as such.
 
+### RNG functions in transformed data
+
+Transformed data can now call `_rng` functions. Draws come from the
+construction seed the way CmdStan's generated constructor seeds them, so a
+matched seed reproduces CmdStan's transformed data bit for bit. Python
+`Model(seed=1)`, R `stanli_model(seed = 1)`, `stanli_run --seed` and the C
+API's `stanli_model_new_seeded` set that seed; the unseeded constructors use
+1, and BridgeStan passes its construction seed through. One seed governs a
+run, as in CmdStan: Python `sample` and `optimize` and R `sample_model` and
+`optimize_model` rebuild the model under their own seed when transformed
+data drew and the seed differs. Models without transformed-data draws are
+never rebuilt. An `_rng` call inside a user-defined `_rng` function failed
+with "unknown variable" in the interpreted write_array; it works now.
+
+### Executors share model data
+
+Model data is shared across executor copies. Parameters, written outputs,
+adjoints and scratch stay private, and taking a writable pointer detaches
+that executor's copy. Eight MNIST executors peak at 4.8 GB of memory where
+they peaked at 10.3 GB. Parsed JSON arrays move straight into the data map,
+and the exponentiated-quadratic GP kernel with fixed coordinates and
+Cholesky decompositions reuse their saved forward results in the backward
+pass in place of a nested autodiff tape, so gp_regr's gradient takes 2.6 µs
+where it took 6.7.
+
 ### Every stanc signature replays against CmdStan
 
 The generated builtin and density signature models used to prove only that
@@ -156,6 +181,22 @@ so the compiler's 64-bit integer constants were undefined and the first
 compile threw. The build now joins those lines and fails if any remain.
 The reporter also fixed the printer upstream in ocsigen/js_of_ocaml#2421
 (#342).
+
+The runtime no longer keeps a `thread_local` object with a destructor.
+Island registers, native adjoints and solver workspaces live in executor
+scratch, and the executor pool's autodiff tape is leased from a free list
+the pool owns and returned empty when a thread's last lease ends. Under
+MinGW's emulated thread-local storage those destructors ran after the DLL
+that owned them was unloaded, which crashed R worker processes on Windows.
+A worker thread with no autodiff stack of its own, the case when BridgeStan
+is driven from the caller's threads, now takes a gradient about as fast as
+the main thread.
+
+The adjoint ODE solver handed stan-math an uninitialized quadrature vector
+on the first backward step, and stan-math accumulates into it without
+assigning it first, so a backward solve could fail depending on what the
+allocator returned. The pinned stan-math is patched at checkout to zero the
+vector.
 
 ## 0.12.0
 
