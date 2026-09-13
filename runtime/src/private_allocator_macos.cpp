@@ -1,7 +1,8 @@
 // DSO-local C allocation only. The export allowlist keeps these definitions
 // private to libstanli; never attach this source to a static/CLI/host target.
 // In particular, do NOT add new/delete overrides: libc++ can delete objects
-// (notably std::thread's TLS support) that were allocated by inline caller code.
+// (notably std::thread's TLS support) that were allocated by inline caller
+// code.
 #include <mimalloc.h>
 #include <malloc/malloc.h>
 #include <cstdlib>

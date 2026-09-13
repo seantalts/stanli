@@ -1,0 +1,221 @@
+{
+  "records": [
+    {
+      "name": "eight_schools_noncentered",
+      "sha256": "cd8f63a9dcd0a553c341ab5504fbd5330b6ead3e4d304b129e7e6ef37d643dcf"
+    },
+    {
+      "name": "eight_schools_centered",
+      "sha256": "e5730d0ec48ada5750904e21f403303fcd931fe2be5fde6e5e675cc067aa1dd4"
+    },
+    {
+      "name": "kidscore_momiq",
+      "sha256": "eb287e54592020ce90d836f1e1b0849015eca19d0055392b94516dead15f0c4f"
+    },
+    {
+      "name": "radon_pooled",
+      "sha256": "ad4ef141b3fdbdfb8d767fadc1a3b9e24faef35a1d1378d4c19c4cb092ad9b7b"
+    },
+    {
+      "name": "logistic_regression_rhs",
+      "sha256": "005a333f7f10a311112e35bc919b22ad8f589da33255a9cf09da2455788ed234"
+    },
+    {
+      "name": "normal_mixture",
+      "sha256": "dc488c3adfdb4da8f24f7a1a23734511f2a6da1f03b356a86caeeb25241c8f68"
+    },
+    {
+      "name": "garch11",
+      "sha256": "2da4dc7da28a94f41be1c78a941e4cfaf0859137f35a261f2f7a0716b8ad94f4"
+    },
+    {
+      "name": "gp_regr",
+      "sha256": "67f5cfc78b7695ca1eb950d8c619d271927700e6b4f1c17573f442cb7fcadd74"
+    },
+    {
+      "name": "hierarchical_gp",
+      "sha256": "871decf92b46949f75101ac8edc08b7e38510ee639c2925f10bcc6f8afafdb56"
+    },
+    {
+      "name": "hmm_example",
+      "sha256": "af07432e57a2965e4cf2db0ba7cb55f0bf0c459b845ac2cf2c1ecf2f60ef2476"
+    },
+    {
+      "name": "lotka_volterra",
+      "sha256": "53460176e4c9ebcd81048729665d91498a6f070ca580ecd9da298728b0006bdc"
+    },
+    {
+      "name": "soil_incubation",
+      "sha256": "b4c1f60ec69b7c908f1288869d92433d7502a8eecab91ebe993929b44177640a"
+    },
+    {
+      "name": "one_comp_mm_elim_abs",
+      "sha256": "30ae3c1992d48913feecee1c9fb3d297859f67813d958a0e93f4f064e81f8123"
+    },
+    {
+      "name": "GLM_Poisson_model",
+      "sha256": "d87ee3389cb907b64400db5560612c6536ad2d7122ed2ff3edc0fa35b517175f"
+    },
+    {
+      "name": "dogs",
+      "sha256": "7d7da91a6cf10533afd1b040dd96bc0e73aabffbdb5a09d862b35257299c7cdf"
+    },
+    {
+      "name": "diamonds",
+      "sha256": "e0f36cc95ad74675e26ca1e53e77f97d9ed898a16ceda8a5026c7176f4d6db35"
+    },
+    {
+      "name": "normal_8",
+      "sha256": "e1475eb8b9bf3405940ab24a1719ad6b6d7ad846a52d3c04cd1f7992f00a31a6"
+    },
+    {
+      "name": "normal_128",
+      "sha256": "a427523744bab24732f5676b45e46eb65fc316d9808be6e69a147f01fb973ceb"
+    },
+    {
+      "name": "normal_1024",
+      "sha256": "b674308af22221c66869cd81ded987b5aa73d88b98c0b47ce819a3cacefc3e8f"
+    },
+    {
+      "name": "normal_16384",
+      "sha256": "2388886e4d988d760a1ab0e294ddeff3b34cc78ac52aa7795831112af1396710"
+    },
+    {
+      "name": "normal_262144",
+      "sha256": "31bbc96d639d7c6e40876f34cc67c83e449f4c4d7c260fb4f122e6475000cde1"
+    },
+    {
+      "name": "gamma_128",
+      "sha256": "4866df4c7098a4c4309ef9b7596639ed6e24db3eb98633cd1a948e42430d1010"
+    },
+    {
+      "name": "gamma_16384",
+      "sha256": "ec9891e3aca11146cedcddd7e0af971fd1f70c8a0e11655cd5656274981ffb4d"
+    }
+  ],
+  "compile": [
+    "/usr/bin/c++",
+    "-O3",
+    "-DNDEBUG",
+    "-std=gnu++17",
+    "-arch",
+    "arm64",
+    "-mmacosx-version-min=11.0",
+    "-fPIC",
+    "-ffp-contract=off",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/runtime/include",
+    "-I/Users/xitrium/.opam/stanc3-55/lib/ocaml",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/math",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/stan/src",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/stan/lib/rapidjson_1.1.0",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/math/lib/eigen_5.0.1",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/math/lib/boost_1.87.0",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/math/lib/sundials_6.1.1/include",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/math/lib/tbb_2020.3/include",
+    "-DBOOST_DISABLE_ASSERTS",
+    "-DBOOST_MATH_PROMOTE_DOUBLE_POLICY=false",
+    "-DSTANLI_EMBED_STANC",
+    "-DSTAN_THREADS=1",
+    "-D_REENTRANT",
+    "-Dstanli_shared_EXPORTS",
+    "-I/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/deps/mimalloc/include",
+    "-c",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/native_allocator_experiment/sampler_probe.cpp",
+    "-o",
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/refactor-oracle/old-probe.o"
+  ],
+  "link": [
+    "/usr/bin/c++",
+    "-O3",
+    "-DNDEBUG",
+    "-arch",
+    "arm64",
+    "-mmacosx-version-min=11.0",
+    "-dynamiclib",
+    "-Wl,-headerpad_max_install_names",
+    "-Wl,-exported_symbols_list,/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/exported_symbols.txt",
+    "-o",
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/refactor-oracle/old-evaluator.dylib",
+    "-install_name",
+    "@rpath/libstanli.dylib",
+    "CMakeFiles/stanli_shared.dir/runtime/src/capi.cpp.o",
+    "CMakeFiles/stanli_shared.dir/runtime/src/function.cpp.o",
+    "CMakeFiles/stanli_shared.dir/runtime/src/build_id.cpp.o",
+    "CMakeFiles/stanli_shared.dir/runtime/src/stanc_embed_c.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/executor.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/elementwise.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_common.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_lpmf.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_glm.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_common_b.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_rest.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_rest_b.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_cdf_a.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/densities_cdf_b.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/legacy_fns.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/matrix_fns.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/scalar_binary.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/scalar_unary_ad.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/algebra.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/quadrature.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/ode.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/dae.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/ode_adjoint.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/ode_prog.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/higher_order_eval.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/program.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/program_transform.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/constrain.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/eltwise_expr.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/mixture.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/message.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/rng.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/kernels/island.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/island.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/adjoint.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/builtin_registry.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/density_registry.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/function_registry.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/program_density.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/nuts.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/walnuts.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/diagnose.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/estimate.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/pathfinder.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/mir_reader.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/mir_decode.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/portable_mir_v2_reader.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/lower.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/lower_expr.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/lower_stmt.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/lower_funapp.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/lower_higher_order.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/structured_loop.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/init_interp.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/unconstrain.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/wa_interp.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/message_sink.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/executor_pool.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/reroll.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/inplace.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/constfold.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/cse.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/graph_print.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/partition.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/data.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/data_var_context.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/program_softmax.cpp.o",
+    "CMakeFiles/stanli_runtime_objects.dir/runtime/src/bridgestan_abi.cpp.o",
+    "CMakeFiles/stanli_tbb_stub.dir/tests/tbb_stub.cpp.o",
+    "/Users/xitrium/claud/stanrt/deps/stanc3/stanc_embed.o",
+    "libsundials.a",
+    "-lpthread",
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/refactor-oracle/old-probe.o"
+  ],
+  "sources": {
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/native_allocator_experiment/sampler_probe.cpp": "243a4cd49bc5bb48f199caf5eaccada27cbe30b788127c2bde4db5275791e939",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/eigen_arena_experiment/full_model.cpp": "3e867e4a6e9c9459044205894c832d442c5bbf6f0c26c35f75c088befc8d992e"
+  },
+  "binary_sha256": "39586bc375f6856150fc6314572d66ec296c89f841109165d4908bde15f7620d"
+}

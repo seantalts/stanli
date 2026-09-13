@@ -18,8 +18,10 @@ void* stli_mi_malloc(size_t n) { return mi_malloc(n); }
 void* stli_mi_calloc(size_t n, size_t size) { return mi_calloc(n, size); }
 void stli_mi_free(void* p) {
   if (!p) return;
-  if (mi_is_in_heap_region(p)) mi_free(p);
-  else std::free(p);
+  if (mi_is_in_heap_region(p))
+    mi_free(p);
+  else
+    std::free(p);
 }
 void* stli_mi_realloc(void* p, size_t n) {
   if (!p || mi_is_in_heap_region(p)) return mi_realloc(p, n);
@@ -41,7 +43,8 @@ void* (*stli_mi_import_calloc)(size_t, size_t) = stli_mi_calloc;
 void (*stli_mi_import_free)(void*) = stli_mi_free;
 void* (*stli_mi_import_realloc)(void*, size_t) = stli_mi_realloc;
 void* (*stli_mi_import_aligned_alloc)(size_t, size_t) = stli_mi_aligned_alloc;
-int (*stli_mi_import_posix_memalign)(void**, size_t, size_t) = stli_mi_posix_memalign;
+int (*stli_mi_import_posix_memalign)(void**, size_t,
+                                     size_t) = stli_mi_posix_memalign;
 void* (*stli_mi_import_valloc)(size_t) = stli_mi_valloc;
 #endif
 }

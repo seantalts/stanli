@@ -1,0 +1,456 @@
+{
+  "system": {
+    "mode": "system",
+    "python": "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+    "native_gradients": 1179648,
+    "snapshots": [
+      {
+        "cycle": 0,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 0,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 0,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 1,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 1,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 1,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 2,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 2,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 2,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 3,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 3,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 3,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 4,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 4,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 4,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 5,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 5,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 5,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 6,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 6,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 6,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 7,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 7,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 7,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 8,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 8,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 8,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 9,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 9,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 9,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 10,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 10,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 10,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 11,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 11,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 11,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      }
+    ],
+    "library_sha256": "07ac4272d236c8905f493af2ea3d286153bf8d62c00158e6dfc06e4f28bd9881",
+    "destroyed_rss": [
+      37240832,
+      118128640,
+      118407168,
+      118456320,
+      131170304,
+      131219456,
+      131317760,
+      131334144,
+      131334144,
+      131350528,
+      131350528,
+      131399680,
+      131416064,
+      131432448,
+      131432448,
+      131448832,
+      131465216,
+      131481600,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984,
+      131497984
+    ],
+    "peak_rss": 131629056
+  },
+  "private": {
+    "mode": "private",
+    "python": "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+    "native_gradients": 1179648,
+    "snapshots": [
+      {
+        "cycle": 0,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 0,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 0,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 1,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 1,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 1,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 2,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 2,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 2,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 3,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 3,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 3,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 4,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 4,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 4,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 5,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 5,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 5,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 6,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 6,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 6,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 7,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 7,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 7,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 8,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 8,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 8,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 9,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 9,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 9,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 10,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 10,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 10,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      },
+      {
+        "cycle": 11,
+        "name": "normal_8",
+        "sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+      },
+      {
+        "cycle": 11,
+        "name": "normal_262144",
+        "sha256": "26c2ab5045640557a0f7e53a4a60e46581f4ab8af784d04f9103d958916f6b1e"
+      },
+      {
+        "cycle": 11,
+        "name": "normal_1024",
+        "sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+      }
+    ],
+    "library_sha256": "794e27f35cc660652a2fbad926ef0868f90441f2beec5df7057b134d7b0ca663",
+    "destroyed_rss": [
+      37568512,
+      95600640,
+      95715328,
+      95731712,
+      95764480,
+      95797248,
+      95846400,
+      95928320,
+      95944704,
+      95961088,
+      95993856,
+      95993856,
+      96010240,
+      96026624,
+      96026624,
+      96026624,
+      96026624,
+      96026624,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008,
+      96043008
+    ],
+    "peak_rss": 96174080
+  }
+}

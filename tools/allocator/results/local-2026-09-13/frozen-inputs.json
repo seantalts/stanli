@@ -1,0 +1,303 @@
+{
+  "head": "17d9faa912374e516e9791176214885d3117ee03",
+  "pdb_head": "28f8d3d6e975315f42aa274a8399f21e07a43b30",
+  "math_head": "8f326d14599d3030c626c46532d8e8534c1cdbec",
+  "stan_head": "c96d04115d35cb04f42e45c5a69a82f9704798f1",
+  "runtime_build_id": "abi1-17d9faa91237-Darwin-arm64-threads",
+  "compile_command": [
+    "/usr/bin/clang++",
+    "-O3",
+    "-DNDEBUG",
+    "-std=gnu++17",
+    "-arch",
+    "arm64",
+    "-mmacosx-version-min=11.0",
+    "-ffp-contract=off",
+    "-DBOOST_DISABLE_ASSERTS",
+    "-DBOOST_MATH_PROMOTE_DOUBLE_POLICY=false",
+    "-DBRIDGESTAN_EXPORT=1",
+    "-DSTAN_THREADS=1",
+    "-D_REENTRANT",
+    "-I/Users/xitrium/.codex/worktrees/7c4e/stanrt/runtime/include",
+    "-I/Users/xitrium/.codex/worktrees/7c4e/stanrt/deps/math",
+    "-I/Users/xitrium/.codex/worktrees/7c4e/stanrt/deps/stan/src",
+    "-I/Users/xitrium/.codex/worktrees/7c4e/stanrt/deps/math/lib/eigen_5.0.1",
+    "-I/Users/xitrium/.codex/worktrees/7c4e/stanrt/deps/math/lib/boost_1.87.0",
+    "-I/Users/xitrium/.codex/worktrees/7c4e/stanrt/deps/math/lib/sundials_6.1.1/include",
+    "-I/Users/xitrium/.codex/worktrees/7c4e/stanrt/deps/math/lib/tbb_2020.3/include",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/eigen_arena_experiment/full_model.cpp",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-review/CMakeFiles/stanli_tbb_stub.dir/tests/tbb_stub.cpp.o",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-review/libstanli.a",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-review/libsundials.a",
+    "-o",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/full_model"
+  ],
+  "timestamp": 1789273880.599204,
+  "machine": "Darwin SeansMacStudio 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:18:53 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_T6031 arm64",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+  "binary_sha256": {
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/full_model": "ea25eb47c80aa815cc8bb744c5d34cc6024141690d244f0c1f15475a482d3f84",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-review/libstanli.a": "750cea70bdc491dec5ce833171adafe856e1bcba5d5251828c1ad6614786330e",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-review/libstanli.dylib": "fa08f82c105277cd4b1f186aa99b7e33edc33440cf7e6d2e1045d8115e21e262",
+    "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-review/libsundials.a": "7d2170cb8fe89045aa5aa4f7d6848ef9d097daff63b64ee58153fdae5dae9fbd"
+  },
+  "source_sha256": {
+    "full_model.cpp": "b6c9a063b207ec1799f77ada6008ad28cf4f73cf7520f31135b9def3fcef9b11",
+    "prepare_full_models.py": "f9d28b151fbd2af933152c230220589cc8a2ebb9d336d57d1d937ca032e02e25"
+  },
+  "cases": [
+    {
+      "name": "eight_schools_noncentered",
+      "origin": "posteriordb/eight_schools",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/eight_schools_noncentered",
+      "source_compile_seconds": 0.008743749999999828,
+      "sha256": {
+        "data.json": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+        "model.mir": "9f31ec0d12933a8e0ce86974133f696f30c15e38225ea9a26a975acd0c601d4b",
+        "model.stan": "b28d5326b1936cce0014c98c2591d1ba5c1d21987ea5a5d0d9c074c6d6ce9253"
+      }
+    },
+    {
+      "name": "eight_schools_centered",
+      "origin": "posteriordb/eight_schools",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/eight_schools_centered",
+      "source_compile_seconds": 0.0014777090000004378,
+      "sha256": {
+        "data.json": "f06889e8cae3755c00a4a44f002d5fc3acf3263ff9ae8ffe5655b1907bcadd80",
+        "model.mir": "5b55386f916b07c583a1175c1ff0e65181d0d30e09944c1e629083717e4e9a04",
+        "model.stan": "ccaf2d7beed22602f62f276cd4096194ab5de5b5c1d6bb2bae9a3655a3845c05"
+      }
+    },
+    {
+      "name": "kidscore_momiq",
+      "origin": "posteriordb/kidiq",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/kidscore_momiq",
+      "source_compile_seconds": 0.001790999999999876,
+      "sha256": {
+        "data.json": "8f6026d1d51013be5956cdeec880e4fd522c1a98a8d1c3600f12dd438924f21b",
+        "model.mir": "dcafd16e12f91de0449bb384e602eaf54684dd15296ba68e40ec28344fc17eb3",
+        "model.stan": "4a09d0baf54d23c5a9f2aebaaf212c4017b839ba5b9f04910ec98cb698593a2f"
+      }
+    },
+    {
+      "name": "radon_pooled",
+      "origin": "posteriordb/radon_all",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/radon_pooled",
+      "source_compile_seconds": 0.0020586659999999313,
+      "sha256": {
+        "data.json": "05cac39913090df5430e3f769d8eb8d2ee4e6f0a3c5286c9e767f37926d51ffd",
+        "model.mir": "6077f9f7a843edd320cf705ceaad9f770a00e6f65acbad13e9c57c47c284dde3",
+        "model.stan": "680277f397ca17ab3603fa8acb0042fe547cdedfd19d4bc22aedd40e3ae7d0de"
+      }
+    },
+    {
+      "name": "logistic_regression_rhs",
+      "origin": "posteriordb/ovarian",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/logistic_regression_rhs",
+      "source_compile_seconds": 0.011864250000000354,
+      "sha256": {
+        "data.json": "640e60012a432ac5e430f6d2552ff66ac07d86508fd0df65d78b63736ba6f1c9",
+        "model.mir": "b7b258c958d876ce6a5993289e06f97e67d23a622ff0bf3cc8f5b72d36cd2b80",
+        "model.stan": "b5c3167d819c155b81558c8889295c7bd1b1d4a7d137ce1bcd04783825c7b00b"
+      }
+    },
+    {
+      "name": "normal_mixture",
+      "origin": "posteriordb/normal_2",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/normal_mixture",
+      "source_compile_seconds": 0.0011972079999997831,
+      "sha256": {
+        "data.json": "936eba745a34b361d60a34728fb5a9ab18c84815da704644497b715ac029bd3b",
+        "model.mir": "0a50c833cae49af7454e696c77017463705e0e96edfd2f0ced448f0b86721d96",
+        "model.stan": "347644c84000e76f74c10314dda7774fd2d3b13cd53f37f049b6bfdc2054c87e"
+      }
+    },
+    {
+      "name": "garch11",
+      "origin": "posteriordb/garch",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/garch11",
+      "source_compile_seconds": 0.0016668749999997345,
+      "sha256": {
+        "data.json": "6f5dd0d191c8f5f0dd655d1936a78dded65c41807d9c733e18d08a2fb0437ce0",
+        "model.mir": "4c55b6bda53cca718249bc8dd08550de9207c89c6f51bbcb599460105beb17eb",
+        "model.stan": "bbfe1929a9dbf6f5a4066f6099d90fc8c3e1bf1c65e1072b47af19534c60a679"
+      }
+    },
+    {
+      "name": "gp_regr",
+      "origin": "posteriordb/gp_pois_regr",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/gp_regr",
+      "source_compile_seconds": 0.0019268330000006273,
+      "sha256": {
+        "data.json": "9094c25b7653ba5f347178b2614d697fd7b709d4ee16ca33112ffd6266936e12",
+        "model.mir": "9ddc0a0071a94dce448a5f9f7f59cd755bdde3daf47a30b19298c48b0f5f5874",
+        "model.stan": "bfbba64339a06d6ca5e0619aa0e3bffee2865504ee00768dd999066182db9873"
+      }
+    },
+    {
+      "name": "hierarchical_gp",
+      "origin": "posteriordb/state_wide_presidential_votes",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/hierarchical_gp",
+      "source_compile_seconds": 0.01682975000000031,
+      "sha256": {
+        "data.json": "95f6ba56a4269ceb8b58789a7c600b203e5ebe423dc4043a326e69cc343c100b",
+        "model.mir": "9650e866fc6c768b33c8e4e7e2ee2e4f8e5b05ec2dc1691b361bc62232310340",
+        "model.stan": "f97e9de5153301188473b3e0ac922d3891c5de133d0b4172bf40bb0f75b1376e"
+      }
+    },
+    {
+      "name": "hmm_example",
+      "origin": "posteriordb/hmm_example",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/hmm_example",
+      "source_compile_seconds": 0.006246790999999696,
+      "sha256": {
+        "data.json": "8fe2ad2a4ceb9f006694dced959f4fb8190277cfaadde2a281ebef92b6a36019",
+        "model.mir": "1de5964323370fbe0c95880f205d8823463df74b05a72880e6c381aef2772dbe",
+        "model.stan": "8ebe19f3469e97153177d69c9dea248207278cc6f3d1d16885f83a791b11c476"
+      }
+    },
+    {
+      "name": "lotka_volterra",
+      "origin": "posteriordb/hudson_lynx_hare",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/lotka_volterra",
+      "source_compile_seconds": 0.004217833999999421,
+      "sha256": {
+        "data.json": "381934bf92c9f86e938da824fda8adcc0b5b43dd3c0eb62c0686006beea0893d",
+        "model.mir": "34327f9e522bedd85c1b528908a5c14f3533191518a07e60be274f8223b8e82d",
+        "model.stan": "f1cb4dda6af07ea721d5a38c6cbe8e3b60f7d48294db0374f331dc9803fe4328"
+      }
+    },
+    {
+      "name": "soil_incubation",
+      "origin": "posteriordb/soil_carbon",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/soil_incubation",
+      "source_compile_seconds": 0.004288792000000541,
+      "sha256": {
+        "data.json": "4e5506af4aaeaf3ae44b163d6ea3dfbe9954e844d9cd4aeaca8fced27e1d1c2e",
+        "model.mir": "378884fa78005c2aa674ffb855537da6a3294760cbe1ceb9b0dac6b173096119",
+        "model.stan": "6c845fcee0e9e5a49508c5b3395bb09613495b2773d93dbeef9f72664ce10e57"
+      }
+    },
+    {
+      "name": "one_comp_mm_elim_abs",
+      "origin": "posteriordb/one_comp_mm_elim_abs",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/one_comp_mm_elim_abs",
+      "source_compile_seconds": 0.003318666000000192,
+      "sha256": {
+        "data.json": "8df0f4206783394f97241d81f8ba53680dd559f1bc9ad3a721ee438c9151093e",
+        "model.mir": "89d0a69c0f167b9174d5f7eb15abe75ebd7f16e0e1d497191e2768c943ad30a1",
+        "model.stan": "dbb2bdf39dd21bdf83f062b59a2d5f210b5ccd372d93631302d723a5b5f57d9c"
+      }
+    },
+    {
+      "name": "GLM_Poisson_model",
+      "origin": "posteriordb/GLM_Poisson_Data",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/GLM_Poisson_model",
+      "source_compile_seconds": 0.002498582999999499,
+      "sha256": {
+        "data.json": "3a0352fad3ddf15cc83e082bccbc4d8c3257d83d0f36481bf1122f440269f7d8",
+        "model.mir": "77e437a54b19d006b33dabeb64dc6530815d65f724f7a39ee004d4e3bfd4ec25",
+        "model.stan": "84186ad779e2add1b934a00e211d9e642ae29cba0e02caf3fedb5c1b29e54f85"
+      }
+    },
+    {
+      "name": "dogs",
+      "origin": "posteriordb/dogs",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/dogs",
+      "source_compile_seconds": 0.003294166999999959,
+      "sha256": {
+        "data.json": "a0a846b35922994afb60ed464eecf3e118efe06fa04b917eda5e642668986211",
+        "model.mir": "878fe7fdb66b85f9a55e6d31901ab23cfc09242bb48c33402d8c447fb069f804",
+        "model.stan": "bc4c096706d2bb0558cdd88f171ccafda252d7a62b3cd7d1210642c3508b613a"
+      }
+    },
+    {
+      "name": "diamonds",
+      "origin": "posteriordb/diamonds",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/diamonds",
+      "source_compile_seconds": 0.003647542000000392,
+      "sha256": {
+        "data.json": "681cd95077f24986782f8ad2b52f1a0ca80b337d368d6be155264b6abe3ba21d",
+        "model.mir": "745c0224a95ea87efbd6b78b9cdd64767c56487e7ec79fcac4c70867fb8bce9c",
+        "model.stan": "b499b08e74598f65a5db338ea31cb9db868d1d56a6f580ddf28280dbe7425657"
+      }
+    },
+    {
+      "name": "normal_8",
+      "origin": "generated scaling fixture",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/normal_8",
+      "source_compile_seconds": 0.0011737089999996897,
+      "sha256": {
+        "data.json": "e561d82df004cd071c98c3dea5730ac24e15b08bb51f767c4cd09caca2fb7892",
+        "model.mir": "ec79e57a3de6aef80c01f774018eeb7fc6a197f4f79a2e09a0e1cde2ae1a2557",
+        "model.stan": "99307421246418f0d914d6c75e5e554df045cffd545374327c13bb546c4f6d15"
+      }
+    },
+    {
+      "name": "normal_128",
+      "origin": "generated scaling fixture",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/normal_128",
+      "source_compile_seconds": 0.0010821670000007444,
+      "sha256": {
+        "data.json": "3cf116b4629e03e02e335599bc7ef6a3891b9f935ab129731efbaf3c15481736",
+        "model.mir": "ec79e57a3de6aef80c01f774018eeb7fc6a197f4f79a2e09a0e1cde2ae1a2557",
+        "model.stan": "99307421246418f0d914d6c75e5e554df045cffd545374327c13bb546c4f6d15"
+      }
+    },
+    {
+      "name": "normal_1024",
+      "origin": "generated scaling fixture",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/normal_1024",
+      "source_compile_seconds": 0.0010440420000001893,
+      "sha256": {
+        "data.json": "e71ad93fb8485d673198a63938d51287fd24ce2ebb729c392bd10cc61223bd1e",
+        "model.mir": "ec79e57a3de6aef80c01f774018eeb7fc6a197f4f79a2e09a0e1cde2ae1a2557",
+        "model.stan": "99307421246418f0d914d6c75e5e554df045cffd545374327c13bb546c4f6d15"
+      }
+    },
+    {
+      "name": "normal_16384",
+      "origin": "generated scaling fixture",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/normal_16384",
+      "source_compile_seconds": 0.0010506250000004158,
+      "sha256": {
+        "data.json": "44e13a64e673218810d3da497aef5a07acf99dd1afe528038db1b2a2eea9fd0d",
+        "model.mir": "ec79e57a3de6aef80c01f774018eeb7fc6a197f4f79a2e09a0e1cde2ae1a2557",
+        "model.stan": "99307421246418f0d914d6c75e5e554df045cffd545374327c13bb546c4f6d15"
+      }
+    },
+    {
+      "name": "normal_262144",
+      "origin": "generated scaling fixture",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/normal_262144",
+      "source_compile_seconds": 0.0011509160000002794,
+      "sha256": {
+        "data.json": "3b1ea0c867644d4e7524e69178dbcfdbe5366cae00ae09f6276cca08d4c0a3a7",
+        "model.mir": "ec79e57a3de6aef80c01f774018eeb7fc6a197f4f79a2e09a0e1cde2ae1a2557",
+        "model.stan": "99307421246418f0d914d6c75e5e554df045cffd545374327c13bb546c4f6d15"
+      }
+    },
+    {
+      "name": "gamma_128",
+      "origin": "generated scaling fixture",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/gamma_128",
+      "source_compile_seconds": 0.0010330840000003505,
+      "sha256": {
+        "data.json": "3cf116b4629e03e02e335599bc7ef6a3891b9f935ab129731efbaf3c15481736",
+        "model.mir": "c7f12611d75030631d1f505a042339eee55607c775ec6c49db4a456236909ebb",
+        "model.stan": "5e3f65d0622f769903af31af3f93877a8ee08036e44ddd6ecc0257f7728bfeb2"
+      }
+    },
+    {
+      "name": "gamma_16384",
+      "origin": "generated scaling fixture",
+      "input_dir": "/Users/xitrium/.codex/worktrees/7c4e/stanrt/build-allocator-models/inputs/gamma_16384",
+      "source_compile_seconds": 0.0009762499999999008,
+      "sha256": {
+        "data.json": "44e13a64e673218810d3da497aef5a07acf99dd1afe528038db1b2a2eea9fd0d",
+        "model.mir": "c7f12611d75030631d1f505a042339eee55607c775ec6c49db4a456236909ebb",
+        "model.stan": "5e3f65d0622f769903af31af3f93877a8ee08036e44ddd6ecc0257f7728bfeb2"
+      }
+    }
+  ]
+}

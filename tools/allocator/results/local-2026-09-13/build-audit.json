@@ -1,0 +1,132 @@
+{
+  "loops": [
+    {
+      "mode": "off",
+      "kind": "shipping",
+      "path": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/libstanli.dylib",
+      "sha256": "095baf0413743ad2f2701fbdca15c54cb78720ef4c27a9aa4c684c52960d1606",
+      "file_bytes": 39039520,
+      "text_bytes": 25905544,
+      "loop_address": "0x42c38",
+      "aligned32": false,
+      "crosses4k": false,
+      "loop_words": [
+        "fc687a80",
+        "fd002fe0",
+        "1e602000",
+        "540000c6",
+        "91000508",
+        "f90033e8",
+        "eb17011f",
+        "54ffff23"
+      ]
+    },
+    {
+      "mode": "off",
+      "kind": "benchmark",
+      "path": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/libstanli_allocator_benchmark.dylib",
+      "sha256": "07ac4272d236c8905f493af2ea3d286153bf8d62c00158e6dfc06e4f28bd9881",
+      "file_bytes": 39061552,
+      "text_bytes": 25919112,
+      "loop_address": "0x47670",
+      "aligned32": false,
+      "crosses4k": false,
+      "loop_words": [
+        "fc687a80",
+        "fd002fe0",
+        "1e602000",
+        "540000c6",
+        "91000508",
+        "f90033e8",
+        "eb17011f",
+        "54ffff23"
+      ]
+    },
+    {
+      "mode": "off",
+      "kind": "cli",
+      "path": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/bench_grad",
+      "sha256": "1ff3353d78c09525d16419a5d7ff62e8490b7897a4b7bb75cedc89f0b354eaac",
+      "file_bytes": 31344952,
+      "text_bytes": 23211696,
+      "loop_address": "0x100033f00",
+      "aligned32": true,
+      "crosses4k": false,
+      "loop_words": [
+        "fc687a80",
+        "fd002fe0",
+        "1e602000",
+        "540000c6",
+        "91000508",
+        "f90033e8",
+        "eb17011f",
+        "54ffff23"
+      ]
+    },
+    {
+      "mode": "on",
+      "kind": "shipping",
+      "path": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli.dylib",
+      "sha256": "3ad3299cefbe34963bb64a22c965f5250dc59c740e8b66b60ada26393e6cd051",
+      "file_bytes": 40846512,
+      "text_bytes": 27665156,
+      "loop_address": "0x6ffe0",
+      "aligned32": true,
+      "crosses4k": false,
+      "loop_words": [
+        "fc687a80",
+        "fd002fe0",
+        "1e602000",
+        "540000c6",
+        "91000508",
+        "f90033e8",
+        "eb17011f",
+        "54ffff23"
+      ]
+    },
+    {
+      "mode": "on",
+      "kind": "benchmark",
+      "path": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+      "sha256": "794e27f35cc660652a2fbad926ef0868f90441f2beec5df7057b134d7b0ca663",
+      "file_bytes": 40868640,
+      "text_bytes": 27679940,
+      "loop_address": "0x74e80",
+      "aligned32": true,
+      "crosses4k": false,
+      "loop_words": [
+        "fc687a80",
+        "fd002fe0",
+        "1e602000",
+        "540000c6",
+        "91000508",
+        "f90033e8",
+        "eb17011f",
+        "54ffff23"
+      ]
+    },
+    {
+      "mode": "on",
+      "kind": "cli",
+      "path": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/bench_grad",
+      "sha256": "2b29fe1d37a71adf670b0aa3ae317044430bc31decea6c6c4421f4bed941211f",
+      "file_bytes": 32963368,
+      "text_bytes": 24802776,
+      "loop_address": "0x1000362e0",
+      "aligned32": true,
+      "crosses4k": false,
+      "loop_words": [
+        "fc687a80",
+        "fd002fe0",
+        "1e602000",
+        "540000c6",
+        "91000508",
+        "f90033e8",
+        "eb17011f",
+        "54ffff23"
+      ]
+    }
+  ],
+  "runtime_commands_match_except_alignment": true,
+  "identical_sundials_objects": 53
+}

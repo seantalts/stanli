@@ -460,6 +460,12 @@ if(STANLI_BUILD_ALLOCATOR_BENCHMARK)
       set_property(TARGET stanli_allocator_benchmark PROPERTY ${_property} "${_value}")
     endif()
   endforeach()
+  if(STANLI_USE_PRIVATE_MIMALLOC)
+    # The ownership query is in the copied input archive on ELF/PE, before
+    # the final DSO receives mimalloc-static's interface include directory.
+    target_include_directories(stanli_allocator_benchmark PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/deps/mimalloc/include")
+  endif()
   if(WIN32)
     set_target_properties(stanli_allocator_benchmark PROPERTIES PREFIX "")
     target_link_libraries(stanli_allocator_benchmark PRIVATE psapi)

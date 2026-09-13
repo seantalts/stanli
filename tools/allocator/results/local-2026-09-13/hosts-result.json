@@ -1,0 +1,12 @@
+{
+  "off": {
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/libstanli.dylib": "627596c545939bb85b3199ce070dbbe3aed44cac8be80de4d199c4d48de07941",
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/python-off.bin": "a02a0441ee12f4ab53e6aa869d446cb12915716cdc3e29e43ba186f593548c1c",
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-off.bin": "97e591d3cce5e1f1d3ce18d7d4118d265b164e0c63338f2d48c578572c9a9b0c"
+  },
+  "on": {
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli.dylib": "80849531edfda8ca1666571acf349d81d0922737ab91600878e1eb33a2b58eef",
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/python-on.bin": "a02a0441ee12f4ab53e6aa869d446cb12915716cdc3e29e43ba186f593548c1c",
+    "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-on.bin": "97e591d3cce5e1f1d3ce18d7d4118d265b164e0c63338f2d48c578572c9a9b0c"
+  }
+}

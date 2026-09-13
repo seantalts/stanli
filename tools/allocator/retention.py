@@ -24,6 +24,9 @@ def main(args):
     lib.stanli_allocator_bench_owns.restype = ctypes.c_bool
     lib.stanli_allocator_bench_run.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
     lib.stanli_allocator_bench_run.restype = ctypes.c_int
+    crt = ctypes.CDLL("ucrtbase" if sys.platform == "win32" else None)
+    crt.fflush.argtypes = [ctypes.c_void_p]
+    crt.fflush.restype = ctypes.c_int
     assert not lib.stanli_allocator_bench_owns(old.ctypes.data)
     cases = {c["name"]: c for c in json.loads(args.inputs.read_text())["cases"]}
     results = []
@@ -36,6 +39,7 @@ def main(args):
                     args.mode.encode(), b"4", b"1024", b"8", b"1", b"retention", str(path).encode()]
             native = (ctypes.c_char_p * len(argv))(*argv)
             assert lib.stanli_allocator_bench_run(len(argv), native) == 0
+            assert crt.fflush(None) == 0  # Preserve lifetime boundaries in captured C/Python stdout.
             results.append(dict(cycle=cycle, name=name,
                                 sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
     fresh = np.arange(8192, dtype=np.float64)

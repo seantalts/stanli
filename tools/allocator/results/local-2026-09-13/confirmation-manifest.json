@@ -1,0 +1,56 @@
+{
+  "phase": "bench",
+  "head": "9c3d204e0349a25904f7226b7e80633038c4e34a",
+  "machine": "macOS-26.6.2-arm64-arm-64bit",
+  "processor": "arm",
+  "python": "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+  "input_sha256": "de45bddf037fda56dfe326ac5af2870242df489b27dbfe013cdacbf4e5a9436b",
+  "harness_sha256": "1a4dd471640c445e1481f412f0b4229db21ca7dd719ac83555814d95988b67ad",
+  "native_source_sha256": "5caa868f7a4b8488e6877b95b9bb708d1ae37cac008a1001ccd79b951b446dbc",
+  "variants": {
+    "system": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "sha256": "07ac4272d236c8905f493af2ea3d286153bf8d62c00158e6dfc06e4f28bd9881"
+    },
+    "candidate": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "sha256": "794e27f35cc660652a2fbad926ef0868f90441f2beec5df7057b134d7b0ca663"
+    }
+  },
+  "slots": [
+    "system",
+    "candidate",
+    "system_aa",
+    "candidate_aa"
+  ],
+  "cells": [
+    [
+      "diamonds",
+      4
+    ],
+    [
+      "eight_schools_noncentered",
+      1
+    ],
+    [
+      "hierarchical_gp",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      8
+    ],
+    [
+      "soil_incubation",
+      4
+    ]
+  ],
+  "rounds": 7,
+  "started": 1789292434.282864
+}

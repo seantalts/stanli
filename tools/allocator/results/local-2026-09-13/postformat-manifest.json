@@ -1,0 +1,240 @@
+{
+  "phase": "verify",
+  "head": "9c3d204e0349a25904f7226b7e80633038c4e34a",
+  "machine": "macOS-26.6.2-arm64-arm-64bit",
+  "processor": "arm",
+  "python": "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+  "input_sha256": "de45bddf037fda56dfe326ac5af2870242df489b27dbfe013cdacbf4e5a9436b",
+  "harness_sha256": "1a4dd471640c445e1481f412f0b4229db21ca7dd719ac83555814d95988b67ad",
+  "native_source_sha256": "cc9edb6976a3de2cc6d54de3bcffa5d219f57666d6eba633f0fae702d9e751b1",
+  "variants": {
+    "system": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "sha256": "e5471d2eb5fb5672e9320606d0e784c2e2d1f0d06bce6f7b864b125055d2c230"
+    },
+    "candidate": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "sha256": "276808f1078ffba3381f7496ca20d83aa6bccfd0f2f4f33c4bcfb60b581facba"
+    }
+  },
+  "slots": [
+    "system",
+    "candidate",
+    "system_aa",
+    "candidate_aa"
+  ],
+  "cells": [
+    [
+      "eight_schools_noncentered",
+      1
+    ],
+    [
+      "eight_schools_noncentered",
+      4
+    ],
+    [
+      "eight_schools_centered",
+      1
+    ],
+    [
+      "eight_schools_centered",
+      4
+    ],
+    [
+      "kidscore_momiq",
+      1
+    ],
+    [
+      "kidscore_momiq",
+      4
+    ],
+    [
+      "radon_pooled",
+      1
+    ],
+    [
+      "radon_pooled",
+      4
+    ],
+    [
+      "logistic_regression_rhs",
+      1
+    ],
+    [
+      "logistic_regression_rhs",
+      4
+    ],
+    [
+      "normal_mixture",
+      1
+    ],
+    [
+      "normal_mixture",
+      4
+    ],
+    [
+      "garch11",
+      1
+    ],
+    [
+      "garch11",
+      4
+    ],
+    [
+      "gp_regr",
+      1
+    ],
+    [
+      "gp_regr",
+      4
+    ],
+    [
+      "hierarchical_gp",
+      1
+    ],
+    [
+      "hierarchical_gp",
+      4
+    ],
+    [
+      "hmm_example",
+      1
+    ],
+    [
+      "hmm_example",
+      4
+    ],
+    [
+      "lotka_volterra",
+      1
+    ],
+    [
+      "lotka_volterra",
+      4
+    ],
+    [
+      "soil_incubation",
+      1
+    ],
+    [
+      "soil_incubation",
+      4
+    ],
+    [
+      "one_comp_mm_elim_abs",
+      1
+    ],
+    [
+      "one_comp_mm_elim_abs",
+      4
+    ],
+    [
+      "GLM_Poisson_model",
+      1
+    ],
+    [
+      "GLM_Poisson_model",
+      4
+    ],
+    [
+      "dogs",
+      1
+    ],
+    [
+      "dogs",
+      4
+    ],
+    [
+      "diamonds",
+      1
+    ],
+    [
+      "diamonds",
+      4
+    ],
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_128",
+      1
+    ],
+    [
+      "normal_128",
+      4
+    ],
+    [
+      "normal_1024",
+      1
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_16384",
+      1
+    ],
+    [
+      "normal_16384",
+      4
+    ],
+    [
+      "normal_262144",
+      1
+    ],
+    [
+      "normal_262144",
+      4
+    ],
+    [
+      "gamma_128",
+      1
+    ],
+    [
+      "gamma_128",
+      4
+    ],
+    [
+      "gamma_16384",
+      1
+    ],
+    [
+      "gamma_16384",
+      4
+    ],
+    [
+      "eight_schools_noncentered",
+      8
+    ],
+    [
+      "gamma_16384",
+      8
+    ],
+    [
+      "hierarchical_gp",
+      8
+    ],
+    [
+      "normal_1024",
+      8
+    ],
+    [
+      "normal_262144",
+      8
+    ],
+    [
+      "normal_8",
+      8
+    ]
+  ],
+  "rounds": 5,
+  "started": 1789293226.764457
+}

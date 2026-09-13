@@ -94,6 +94,26 @@ fallback. The [implementation report](superpowers/plans/2026-09-11-shared-data-n
 records matched before/after measurements and numerical checks; GP gradients
 can differ by rounding and are not claimed to be bitwise identical.
 
+## Native allocator rollout experiment (not the default)
+
+A separate 2026-09-13 matched shared-library experiment compares the current
+SYSTEM allocator/unmodified loop layout with private mimalloc/32-byte loops
+on Apple ARM. These are native warm-gradient throughput ratios inside a
+Python-loaded library, not fresh CmdStan comparisons or whole-sampling gains.
+
+| Model / workers | Candidate throughput vs current default (confirmation) |
+| --- | ---: |
+| Eight Schools non-centered / 1 | 1.241x |
+| Hierarchical GP / 4 | 1.118x |
+| Normal vector, N=1024 / 4 | 1.315x |
+| Normal vector, N=262144 / 8 | **0.948x (slower)** |
+
+Default promotion is on hold: the large-vector/eight-worker case lost in
+all 12 screen/confirmation rounds. See the [rollout report](allocator-rollout.md)
+for both identical-binary controls, dispersion, other workloads, compatibility
+gates, and remaining uncertainties. The historical CLI/CmdStan tables above
+have not been multiplied by these ratios or relabeled as new measurements.
+
 ## Parallel chains
 
 Chains run concurrently by default, with one executor and RNG stream per

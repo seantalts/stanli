@@ -1,0 +1,134 @@
+[
+  {
+    "command": [
+      "R",
+      "CMD",
+      "INSTALL",
+      "--library=/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-lib",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/r"
+    ],
+    "label": "r-install",
+    "returncode": 0,
+    "environment": {}
+  },
+  {
+    "command": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/tests/test_python.py"
+    ],
+    "label": "python-suite-off",
+    "returncode": 0,
+    "environment": {
+      "PYTHONPATH": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/off/package"
+    }
+  },
+  {
+    "command": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/tests/test_bridgestan_embed.py"
+    ],
+    "label": "bridgestan-off",
+    "returncode": 0,
+    "environment": {
+      "PYTHONPATH": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/off/package"
+    }
+  },
+  {
+    "command": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/native_allocator_experiment/host_parity.py",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/python-off.bin"
+    ],
+    "label": "python-lifetime-off",
+    "returncode": 0,
+    "environment": {
+      "PYTHONPATH": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/off/package"
+    }
+  },
+  {
+    "command": [
+      "Rscript",
+      "-e",
+      "library(stanli); testthat::test_dir(\"r/tests/testthat\", package=\"stanli\", stop_on_failure=TRUE, stop_on_warning=TRUE)"
+    ],
+    "label": "r-suite-off",
+    "returncode": 0,
+    "environment": {
+      "R_LIBS_USER": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-lib",
+      "STANLI_RUNTIME": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/libstanli.dylib"
+    }
+  },
+  {
+    "command": [
+      "Rscript",
+      "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/native_allocator_experiment/host_parity.R",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-off.bin"
+    ],
+    "label": "r-lifetime-off",
+    "returncode": 0,
+    "environment": {
+      "R_LIBS_USER": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-lib",
+      "STANLI_RUNTIME": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-off/libstanli.dylib"
+    }
+  },
+  {
+    "command": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/tests/test_python.py"
+    ],
+    "label": "python-suite-on",
+    "returncode": 0,
+    "environment": {
+      "PYTHONPATH": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/on/package"
+    }
+  },
+  {
+    "command": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/tests/test_bridgestan_embed.py"
+    ],
+    "label": "bridgestan-on",
+    "returncode": 0,
+    "environment": {
+      "PYTHONPATH": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/on/package"
+    }
+  },
+  {
+    "command": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/native_allocator_experiment/host_parity.py",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/python-on.bin"
+    ],
+    "label": "python-lifetime-on",
+    "returncode": 0,
+    "environment": {
+      "PYTHONPATH": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/on/package"
+    }
+  },
+  {
+    "command": [
+      "Rscript",
+      "-e",
+      "library(stanli); testthat::test_dir(\"r/tests/testthat\", package=\"stanli\", stop_on_failure=TRUE, stop_on_warning=TRUE)"
+    ],
+    "label": "r-suite-on",
+    "returncode": 0,
+    "environment": {
+      "R_LIBS_USER": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-lib",
+      "STANLI_RUNTIME": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli.dylib"
+    }
+  },
+  {
+    "command": [
+      "Rscript",
+      "/Users/xitrium/.codex/worktrees/7c4e/stanrt/tools/native_allocator_experiment/host_parity.R",
+      "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-on.bin"
+    ],
+    "label": "r-lifetime-on",
+    "returncode": 0,
+    "environment": {
+      "R_LIBS_USER": "/private/tmp/stanli-allocator-rollout.l6S5ZY/host-validation/r-lib",
+      "STANLI_RUNTIME": "/private/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli.dylib"
+    }
+  }
+]
