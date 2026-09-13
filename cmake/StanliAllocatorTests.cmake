@@ -1,5 +1,8 @@
 # Also used by the small, standalone five-platform CI ownership gate.
 function(stanli_add_allocator_probe)
+  add_test(NAME test_allocator_exports_parser COMMAND "${CMAKE_COMMAND}"
+    -DSOURCE=${STANLI_ALLOCATOR_SOURCE_DIR} -DBINARY=${CMAKE_CURRENT_BINARY_DIR}
+    -P "${STANLI_ALLOCATOR_SOURCE_DIR}/tests/test_allocator_exports_parser.cmake")
   # Model both the reused runtime objects and a separately linked C archive.
   # Neither original may be rewritten while constructing the private DSO.
   add_library(stanli_allocator_reused OBJECT
