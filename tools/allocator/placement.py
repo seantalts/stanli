@@ -34,14 +34,25 @@ def experiment(args):
         for filename, digest in case["sha256"].items():
             assert sha(path / filename) == digest, (name, filename)
         paths[name] = path
-    variants = {mode + "-" + place: dict(library=str(library.resolve()),
+    design = json.loads(args.design.read_text()) if args.design else None
+    assert design or (args.system and args.candidate), "Supply a design or both libraries"
+    variants = {} if design else {mode + "-" + place: dict(library=str(library.resolve()),
                     mode=mode, placement=place, sha256=sha(library))
                 for mode, library in [("system", args.system), ("private", args.candidate)]
                 for place in ["main", "gradient", "worker"]}
+    cells_for_run = [tuple(c) for c in design["cells"]] if design else CELLS
+    baseline_slot = design["baseline"] if design else "system-main"
+    if design:
+        variants = design["variants"]
+        for variant in variants.values():
+            variant["library"] = str(pathlib.Path(variant["library"]).resolve())
+            variant["sha256"] = sha(variant["library"])
+        assert baseline_slot in variants
     slots = list(variants) + [name + "_aa" for name in variants]
     manifest = dict(head=subprocess.check_output(["git", "-c", "safe.directory=" + str(ROOT),
         "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(), variants=variants,
-        cells=CELLS, slots=slots, rounds=5, input_sha256=sha(args.inputs),
+        cells=cells_for_run, slots=slots, rounds=5, input_sha256=sha(args.inputs),
+        design_sha256=sha(args.design) if args.design else None,
         harness_sha256=sha(__file__), worker_sha256=sha(ROOT / "tools/allocator/bench.py"),
         native_sha256=sha(ROOT / "tools/allocator/gradient_bench.cpp"),
         platform=platform.platform(), started=time.time())
@@ -86,9 +97,11 @@ def experiment(args):
         return record
 
     calibration = {}
-    for cell in CELLS:
-        baseline = one(cell, "system-main", 1024, 2)
-        for slot in list(variants)[1:]:
+    for cell in cells_for_run:
+        baseline = one(cell, baseline_slot, 1024, 2)
+        for slot in variants:
+            if slot == baseline_slot:
+                continue
             result = one(cell, slot, 128, 1)
             assert result["snapshot_sha256"] == baseline["snapshot_sha256"]
             assert result["graph"] == baseline["graph"]
@@ -101,7 +114,7 @@ def experiment(args):
         return
     schedule = []
     for rnd in range(5):
-        cells = CELLS[:]
+        cells = cells_for_run[:]
         random.Random(32629 + rnd).shuffle(cells)
         order = slots[rnd % len(slots):] + slots[:rnd % len(slots)]
         for cell in cells:
@@ -112,18 +125,21 @@ def experiment(args):
         frozen = calibration[tuple(step["cell"])]
         row = one(step["cell"], step["slot"], frozen["reps"], 3, step["round"])
         assert row["snapshot_sha256"] == frozen["snapshot_sha256"] and row["graph"] == frozen["graph"]
-        if (i + 1) % 24 == 0:
+        if (i + 1) % (2 * len(slots)) == 0:
             print("completed", i + 1, "of", len(schedule), flush=True)
     index.close()
     results = []
-    for name, workers in CELLS:
+    for name, workers in cells_for_run:
         selected = [r for r in rows if (r["name"], r["workers"]) == (name, workers) and r["round"] >= 0]
         grouped = {slot: [stats.median(r["median_ns"] for r in selected if r["slot"] == slot and r["round"] == rnd)
                           for rnd in range(5)] for slot in slots}
         comparisons = {}
-        pairs = [(place, "system-" + place, "private-" + place) for place in ("main", "gradient", "worker")]
-        pairs += [(mode + "-gradient/main", mode + "-main", mode + "-gradient") for mode in ("system", "private")]
-        pairs += [(mode + "-worker/main", mode + "-main", mode + "-worker") for mode in ("system", "private")]
+        if design:
+            pairs = design["comparisons"]
+        else:
+            pairs = [(place, "system-" + place, "private-" + place) for place in ("main", "gradient", "worker")]
+            pairs += [(mode + "-gradient/main", mode + "-main", mode + "-gradient") for mode in ("system", "private")]
+            pairs += [(mode + "-worker/main", mode + "-main", mode + "-worker") for mode in ("system", "private")]
         pairs += [(slot + "-aa", slot, slot + "_aa") for slot in variants]
         for label, a, b in pairs:
             values = [x / y for x, y in zip(grouped[a], grouped[b])]
@@ -137,8 +153,9 @@ def experiment(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser(__doc__)
     p.add_argument("--inputs", type=pathlib.Path, required=True)
-    p.add_argument("--system", type=pathlib.Path, required=True)
-    p.add_argument("--candidate", type=pathlib.Path, required=True)
+    p.add_argument("--system", type=pathlib.Path)
+    p.add_argument("--candidate", type=pathlib.Path)
+    p.add_argument("--design", type=pathlib.Path)
     p.add_argument("--output", type=pathlib.Path, required=True)
     p.add_argument("--verify-only", action="store_true")
     experiment(p.parse_args())

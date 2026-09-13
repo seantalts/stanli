@@ -58,6 +58,15 @@ aliases, before assigning its historical combined loss to either change. Freeze
 the design and builds before looking at timing results. A benchmark-placement
 finding on Linux is not automatically an explanation for Apple ARM.
 
+The Apple ablation is frozen to normal 262144/eight workers and normal 1024/four
+workers, all four configurations and their identical aliases, five balanced
+rounds, two processes per slot, three blocks: 160 timed processes. The same
+test-only source is used for all builds, retaining main-thread state placement
+to isolate the two build settings. Baseline-only 150 ms calibration precedes
+timing; all four configurations must match full gradients and graph dimensions.
+The additional generic `placement.py --design` input expresses these frozen
+variants and paired comparisons; it does not alter the running Linux design.
+
 Delivery requires distinguishing a harness correction from a runtime fix,
 preserving all original evidence, updating the PR/report, and running relevant
 checks for any production changes. No default promotion while unexplained
