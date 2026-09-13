@@ -9,6 +9,44 @@ explicit controls. [PR #362](https://github.com/seantalts/stanli/pull/362) is a
 draft; auto-merge is not enabled while this decision and the remaining gates
 are outstanding.
 
+The [regression investigation](allocator-regression-investigation.md) now
+separates startup behavior from steady-state throughput. On identical Linux
+x86 binaries, normal 8/four workers changes from 0.688x to 1.070x simply by
+settling the host before native execution. Limiting OpenBLAS threads alone
+does not fix it. Historical short-warm screens below remain intact, but they
+cannot be treated as clean evidence of steady-state allocator overhead.
+The Apple allocator-only large/eight-worker loss persists with alignment ON
+or OFF; a benchmark-only system fallback for large malloc requests recovers
+only part of it and is not integrated. Defaults remain unchanged.
+
+Sustained **native work**, rather than a pause, subsequently confirms the
+measurement issue on both Linux architectures. The standard non-installed
+evaluator now warms each worker for 500 ms; historical diagnostic drivers
+request the old warmup explicitly. No warmup/sleep is added to shipping code.
+
+| Focused warmed check / four workers | x86_64 ratio | ARM ratio |
+| --- | ---: | ---: |
+| Normal 8 | 1.011x | 1.085x |
+| Eight Schools non-centered | 1.047x | 1.097x |
+| Normal 1024 | 1.033x | 1.040x |
+| Normal 262144 | 2.697x | 3.912x |
+
+Each architecture completes 400 timed + 20 verification processes, with full
+bytes and graph agreement. Normal 8 and Eight Schools losses reproduce in
+the short-warm mode and recover in the sustained mode using the same DSOs;
+normal 1024's historical short loss does not reproduce in this stage. Ranges
+and controls are in the [investigation](allocator-regression-investigation.md)
+and [evidence index](../tools/allocator/results/README.md). The x86 normal-8
+result is near parity, not a substantial speedup. The first ARM attempt hit a
+post-native diagnostics-collector race; its incomplete artifact is retained
+separately from the one successful infrastructure retry.
+
+Apple ARM remains unresolved after sustained work: large normal/eight workers
+is 0.922x [0.915, 1.005], four/five negative, with noisier A/A controls. Large
+normal/one worker also has a small negative in this focused stage. The accepted
+change is to the evaluator, not to mimalloc/TLS/threshold policy. The original
+tables below are historical short-warm measurements, not rewritten evidence.
+
 ## Matched local screen and confirmation
 
 Fresh current-main baseline `7bbda72c008c16cf227c4db84b0d7f95a3ffc65e`, using
@@ -236,9 +274,9 @@ and throughput therefore need separate judgments.
 every cell/round and both A/A controls, exact commands and binary/source hashes,
 all unique full-gradient snapshots, native logs, retention observations, and
 host/native suite logs. Timed binaries are identified by their immutable
-recorded hashes; later changes are formatting, fallback/configuration tests,
-documentation, and the ELF/PE measurement-target include path, not additional
-timing runs. The post-format verification is recorded separately.
+recorded hashes. The original post-format verification and subsequent bounded
+regression-attribution experiments are recorded separately. They do not
+replace the original corpus/confirmation observations.
 The [evidence index](../tools/allocator/results/README.md) distinguishes the
 first valid native CI screens, completed validation reruns, and unfinished runs.
 

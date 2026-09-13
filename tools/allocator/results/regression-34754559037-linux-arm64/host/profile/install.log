@@ -1,0 +1,6 @@
+
+Installed:
+  libbpf-0.5.0-1.el8.aarch64               libtraceevent-1.5.3-1.el8.aarch64    
+  numactl-libs-2.0.16-4.el8.aarch64        opencsd-1.0.0-4.el8.aarch64          
+  perf-4.18.0-553.162.1.el8_10.aarch64     slang-2.3.2-3.el8.aarch64            
+

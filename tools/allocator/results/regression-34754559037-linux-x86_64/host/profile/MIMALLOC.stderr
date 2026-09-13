@@ -1,0 +1,2 @@
+[ perf record: Woken up 166 times to write data ]
+[ perf record: Captured and wrote 41.823 MB diagnostic-host/profile/MIMALLOC.data (5190 samples) ]

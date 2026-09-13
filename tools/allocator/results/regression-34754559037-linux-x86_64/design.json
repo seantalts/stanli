@@ -1,0 +1,59 @@
+{
+  "baseline": "system",
+  "variants": {
+    "system": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker"
+    },
+    "dynamic": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker"
+    },
+    "pthread": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/PTHREADS/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker"
+    }
+  },
+  "cells": [
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      2
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      4
+    ]
+  ],
+  "comparisons": [
+    [
+      "dynamic/system",
+      "system",
+      "dynamic"
+    ],
+    [
+      "pthread/system",
+      "system",
+      "pthread"
+    ],
+    [
+      "pthread/dynamic",
+      "dynamic",
+      "pthread"
+    ]
+  ]
+}

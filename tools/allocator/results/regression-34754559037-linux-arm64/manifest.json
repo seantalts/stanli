@@ -1,0 +1,61 @@
+{
+  "head": "8d468f8335ae21f1c566ea77c540352e5e3dfcf7",
+  "variants": {
+    "system": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "sha256": "95e738a5a301928974dd8701c49c8355fc564e432436b0bee2a9bc4ebbfbb105"
+    },
+    "dynamic": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "sha256": "793a1e26aea2e18958b3af4f2e9c0a7573a1f13f27aa44273315dc2fc669ffe1"
+    },
+    "pthread": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/PTHREADS/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "sha256": "dabceed24ebe475d0ec5f0402cedc1a25800c32666caf4a322134451f5da555e"
+    }
+  },
+  "cells": [
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      2
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      4
+    ]
+  ],
+  "slots": [
+    "system",
+    "dynamic",
+    "pthread",
+    "system_aa",
+    "dynamic_aa",
+    "pthread_aa"
+  ],
+  "rounds": 5,
+  "input_sha256": "6c966b72f02594445851752dded19192b4b44f43d36354f5dc3abd079f467031",
+  "design_sha256": "606e55fdf530db15f8454a4304d6c670c68314a3af11989b7016f19176825626",
+  "harness_sha256": "144f572767abe59a68c33598244e5dcf9fb8a797f610d1fbb717d94b20ef5884",
+  "worker_sha256": "a07bb422bc59514ee28cdb3b86d48c1a8fdba06d4a171ab94a18f1e60d5994d4",
+  "native_sha256": "aa8e70ab85be7b1f6f9739446497120dbe62ce9be544911502d7240b4363ca74",
+  "platform": "Linux-6.17.0-1022-azure-aarch64-with-glibc2.28",
+  "started": 1789299091.3179703
+}

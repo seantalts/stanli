@@ -1,0 +1,135 @@
+{
+  "head": "31681d1cf95f2415136faf7ac25e95f7de0e139d",
+  "variants": {
+    "system-default": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 0,
+      "sha256": "95e738a5a301928974dd8701c49c8355fc564e432436b0bee2a9bc4ebbfbb105"
+    },
+    "private-default": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 0,
+      "sha256": "793a1e26aea2e18958b3af4f2e9c0a7573a1f13f27aa44273315dc2fc669ffe1"
+    },
+    "system-single": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "settle_ms": 0,
+      "sha256": "95e738a5a301928974dd8701c49c8355fc564e432436b0bee2a9bc4ebbfbb105"
+    },
+    "private-single": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "settle_ms": 0,
+      "sha256": "793a1e26aea2e18958b3af4f2e9c0a7573a1f13f27aa44273315dc2fc669ffe1"
+    },
+    "system-settled": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 500,
+      "sha256": "95e738a5a301928974dd8701c49c8355fc564e432436b0bee2a9bc4ebbfbb105"
+    },
+    "private-settled": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 500,
+      "sha256": "793a1e26aea2e18958b3af4f2e9c0a7573a1f13f27aa44273315dc2fc669ffe1"
+    }
+  },
+  "cells": [
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ]
+  ],
+  "slots": [
+    "system-default",
+    "private-default",
+    "system-single",
+    "private-single",
+    "system-settled",
+    "private-settled",
+    "system-default_aa",
+    "private-default_aa",
+    "system-single_aa",
+    "private-single_aa",
+    "system-settled_aa",
+    "private-settled_aa"
+  ],
+  "rounds": 5,
+  "input_sha256": "6c966b72f02594445851752dded19192b4b44f43d36354f5dc3abd079f467031",
+  "design_sha256": "b2df293fa32505e4049ccf437e9daa6c9e06dbf9bd010b6a69060ecce29b1492",
+  "harness_sha256": "4898210314f13bc4ba406727f1e6af8d2b46031ebed2178a8f2d4cd3b156b0e4",
+  "worker_sha256": "49133da87523bffd558bc9cd5b81a5a985bf977354406f5de100012f2e014f93",
+  "native_sha256": "aa8e70ab85be7b1f6f9739446497120dbe62ce9be544911502d7240b4363ca74",
+  "platform": "Linux-6.17.0-1022-azure-aarch64-with-glibc2.28",
+  "started": 1789299877.2554474
+}

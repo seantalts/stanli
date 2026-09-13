@@ -1,0 +1,1248 @@
+{
+  "processes": 16,
+  "performance_claim": false,
+  "native_source_sha256": "3a29967ed1c8a795a43ca90d01b811c0a9e887adb1750ed38f581416dac0e8f0",
+  "worker_source_sha256": "8d60bb9f8d56aa5bcc66d64ab14690324a58cea4399271754fbf059c54efa077",
+  "records": [
+    {
+      "name": "normal_8",
+      "slot": "reference",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "system",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_8-reference.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "fd3ed2c5efabb2e2849013f9607bf0b3056e739ecfb4321716923af09b45eee4",
+      "snapshot_sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 19,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500010917.0,
+          "gradients": 4174568
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500026334.0,
+          "gradients": 4188136
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500023083.0,
+          "gradients": 4062952
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500015458.0,
+          "gradients": 4383720
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_8",
+      "slot": "default",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_8-default.snapshot"
+      ],
+      "environment": {},
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 19,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500006958.0,
+          "gradients": 5083368
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500024208.0,
+          "gradients": 4940264
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500004541.0,
+          "gradients": 4097512
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500021500.0,
+          "gradients": 5185000
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_8",
+      "slot": "explicit",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_8-explicit.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 19,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500013959.0,
+          "gradients": 5250536
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500015750.0,
+          "gradients": 5238760
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500008042.0,
+          "gradients": 4991464
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500015875.0,
+          "gradients": 4323560
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_8",
+      "slot": "short",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_8/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_8-short.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 19,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 0,
+          "wall_ns": 104458.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 0,
+          "wall_ns": 123583.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 0,
+          "wall_ns": 112167.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 0,
+          "wall_ns": 106625.0,
+          "gradients": 1000
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "eight_schools_noncentered",
+      "slot": "reference",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "system",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/eight_schools_noncentered-reference.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "fd3ed2c5efabb2e2849013f9607bf0b3056e739ecfb4321716923af09b45eee4",
+      "snapshot_sha256": "4c8f3217527c0c5c8026d1340f6d2f0d1fed2ed1429b2eedc795779458c6cde0",
+      "graph": {
+        "params": 10,
+        "ops": 7,
+        "slots": 16,
+        "slot_elements": 44,
+        "adjoint_elements": 25
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500024583.0,
+          "gradients": 2378984
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500052625.0,
+          "gradients": 2144488
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500003708.0,
+          "gradients": 2287592
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500019083.0,
+          "gradients": 2243048
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "eight_schools_noncentered",
+      "slot": "default",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/eight_schools_noncentered-default.snapshot"
+      ],
+      "environment": {},
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "4c8f3217527c0c5c8026d1340f6d2f0d1fed2ed1429b2eedc795779458c6cde0",
+      "graph": {
+        "params": 10,
+        "ops": 7,
+        "slots": 16,
+        "slot_elements": 44,
+        "adjoint_elements": 25
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500003375.0,
+          "gradients": 2930152
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500005708.0,
+          "gradients": 2922472
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500034375.0,
+          "gradients": 2675176
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500004833.0,
+          "gradients": 2974952
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "eight_schools_noncentered",
+      "slot": "explicit",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/eight_schools_noncentered-explicit.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "4c8f3217527c0c5c8026d1340f6d2f0d1fed2ed1429b2eedc795779458c6cde0",
+      "graph": {
+        "params": 10,
+        "ops": 7,
+        "slots": 16,
+        "slot_elements": 44,
+        "adjoint_elements": 25
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500035291.0,
+          "gradients": 2982120
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500051666.0,
+          "gradients": 2717672
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500013458.0,
+          "gradients": 2907880
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500026208.0,
+          "gradients": 2667496
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "eight_schools_noncentered",
+      "slot": "short",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/eight_schools_noncentered/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/eight_schools_noncentered-short.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "4c8f3217527c0c5c8026d1340f6d2f0d1fed2ed1429b2eedc795779458c6cde0",
+      "graph": {
+        "params": 10,
+        "ops": 7,
+        "slots": 16,
+        "slot_elements": 44,
+        "adjoint_elements": 25
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 0,
+          "wall_ns": 178625.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 0,
+          "wall_ns": 191917.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 0,
+          "wall_ns": 176084.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 0,
+          "wall_ns": 190583.0,
+          "gradients": 1000
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_1024",
+      "slot": "reference",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "system",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_1024-reference.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "fd3ed2c5efabb2e2849013f9607bf0b3056e739ecfb4321716923af09b45eee4",
+      "snapshot_sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 1035,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500198958.0,
+          "gradients": 257000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500408208.0,
+          "gradients": 257000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500118958.0,
+          "gradients": 256488
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500430250.0,
+          "gradients": 256232
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_1024",
+      "slot": "default",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_1024-default.snapshot"
+      ],
+      "environment": {},
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 1035,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500090917.0,
+          "gradients": 348904
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500153000.0,
+          "gradients": 347880
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500273708.0,
+          "gradients": 342248
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500049541.0,
+          "gradients": 349160
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_1024",
+      "slot": "explicit",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_1024-explicit.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 1035,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 500084583.0,
+          "gradients": 349416
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 500131083.0,
+          "gradients": 346344
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 500029959.0,
+          "gradients": 344296
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 500166834.0,
+          "gradients": 348904
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_1024",
+      "slot": "short",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_1024/data.json",
+        "--workers",
+        "4",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_1024-short.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 1035,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 0,
+          "wall_ns": 1464125.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 0,
+          "wall_ns": 1450459.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 0,
+          "wall_ns": 1469958.0,
+          "gradients": 1000
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 0,
+          "wall_ns": 1447708.0,
+          "gradients": 1000
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_262144",
+      "slot": "reference",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "system",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/data.json",
+        "--workers",
+        "8",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_262144-reference.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "fd3ed2c5efabb2e2849013f9607bf0b3056e739ecfb4321716923af09b45eee4",
+      "snapshot_sha256": "bb0741c8fc16c7f9a6e6c6aad10c7a3842fd2e98262297482b1e569e2344759d",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 262155,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 579235000.0,
+          "gradients": 1590
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 532392375.0,
+          "gradients": 1593
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 579029459.0,
+          "gradients": 1590
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 521308042.0,
+          "gradients": 1598
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 4,
+          "requested_ms": 500,
+          "wall_ns": 521100000.0,
+          "gradients": 1598
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 5,
+          "requested_ms": 500,
+          "wall_ns": 555846125.0,
+          "gradients": 1590
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 6,
+          "requested_ms": 500,
+          "wall_ns": 556059250.0,
+          "gradients": 1590
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 7,
+          "requested_ms": 500,
+          "wall_ns": 532220208.0,
+          "gradients": 1593
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_262144",
+      "slot": "default",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/data.json",
+        "--workers",
+        "8",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_262144-default.snapshot"
+      ],
+      "environment": {},
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "bb0741c8fc16c7f9a6e6c6aad10c7a3842fd2e98262297482b1e569e2344759d",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 262155,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 571098500.0,
+          "gradients": 1581
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 546482292.0,
+          "gradients": 1588
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 555922167.0,
+          "gradients": 1582
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 544982416.0,
+          "gradients": 1598
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 4,
+          "requested_ms": 500,
+          "wall_ns": 543498750.0,
+          "gradients": 1598
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 5,
+          "requested_ms": 500,
+          "wall_ns": 555570375.0,
+          "gradients": 1582
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 6,
+          "requested_ms": 500,
+          "wall_ns": 571631500.0,
+          "gradients": 1580
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 7,
+          "requested_ms": 500,
+          "wall_ns": 547312625.0,
+          "gradients": 1589
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_262144",
+      "slot": "explicit",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/data.json",
+        "--workers",
+        "8",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_262144-explicit.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "bb0741c8fc16c7f9a6e6c6aad10c7a3842fd2e98262297482b1e569e2344759d",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 262155,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 500,
+          "wall_ns": 590454500.0,
+          "gradients": 1580
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 500,
+          "wall_ns": 552679542.0,
+          "gradients": 1588
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 500,
+          "wall_ns": 557605541.0,
+          "gradients": 1598
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 500,
+          "wall_ns": 547767834.0,
+          "gradients": 1598
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 4,
+          "requested_ms": 500,
+          "wall_ns": 593550333.0,
+          "gradients": 1581
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 5,
+          "requested_ms": 500,
+          "wall_ns": 552304833.0,
+          "gradients": 1585
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 6,
+          "requested_ms": 500,
+          "wall_ns": 561804125.0,
+          "gradients": 1583
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 7,
+          "requested_ms": 500,
+          "wall_ns": 552628750.0,
+          "gradients": 1590
+        }
+      ],
+      "returncode": 0
+    },
+    {
+      "name": "normal_262144",
+      "slot": "short",
+      "command": [
+        "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+        "worker",
+        "--library",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/build-on/libstanli_allocator_benchmark.dylib",
+        "--mode",
+        "private",
+        "--mir",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/model.mir",
+        "--data",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/data.json",
+        "--workers",
+        "8",
+        "--reps",
+        "128",
+        "--snapshot",
+        "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/results/regression-default-warmup-verification/normal_262144-short.snapshot"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "library_sha256": "4f77da1e3b2c05a79532d4c482d0d742af5c09734f9cd3dc68fa560595499120",
+      "snapshot_sha256": "bb0741c8fc16c7f9a6e6c6aad10c7a3842fd2e98262297482b1e569e2344759d",
+      "graph": {
+        "params": 2,
+        "ops": 5,
+        "slots": 12,
+        "slot_elements": 262155,
+        "adjoint_elements": 8
+      },
+      "warmup": [
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 0,
+          "requested_ms": 0,
+          "wall_ns": 20271209.0,
+          "gradients": 59
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 1,
+          "requested_ms": 0,
+          "wall_ns": 20285708.0,
+          "gradients": 59
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 2,
+          "requested_ms": 0,
+          "wall_ns": 20236333.0,
+          "gradients": 59
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 3,
+          "requested_ms": 0,
+          "wall_ns": 20222958.0,
+          "gradients": 59
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 4,
+          "requested_ms": 0,
+          "wall_ns": 20017125.0,
+          "gradients": 61
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 5,
+          "requested_ms": 0,
+          "wall_ns": 20128833.0,
+          "gradients": 51
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 6,
+          "requested_ms": 0,
+          "wall_ns": 20347917.0,
+          "gradients": 52
+        },
+        {
+          "kind": "warmup",
+          "cycle": 0,
+          "chain": 7,
+          "requested_ms": 0,
+          "wall_ns": 20203167.0,
+          "gradients": 53
+        }
+      ],
+      "returncode": 0
+    }
+  ]
+}

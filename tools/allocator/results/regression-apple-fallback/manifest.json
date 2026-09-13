@@ -1,0 +1,53 @@
+{
+  "head": "bc19eae0c167acc214d5a2b36367295fa83df4e5",
+  "variants": {
+    "system": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/system-on/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "placement": "main",
+      "sha256": "9932e3c236b69ab9247bd9a835e3c53bb45c144756fd496016b23b1c3fccf414"
+    },
+    "private": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/private-on/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "placement": "main",
+      "sha256": "812a424aa54ed0bcb9bd36329a8bddbc5267a521c097672993e108bdc7ca6255"
+    },
+    "fallback": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/fallback-on/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "placement": "main",
+      "sha256": "218088519fdff466a2b75cba3a979a6c690ecd09eb0b64e6d373d31df1d7e002"
+    }
+  },
+  "cells": [
+    [
+      "normal_262144",
+      1
+    ],
+    [
+      "normal_262144",
+      8
+    ],
+    [
+      "normal_1024",
+      4
+    ]
+  ],
+  "slots": [
+    "system",
+    "private",
+    "fallback",
+    "system_aa",
+    "private_aa",
+    "fallback_aa"
+  ],
+  "rounds": 5,
+  "input_sha256": "182f22c9dd93f836e699854f03526161e3e465a43a8c411257a93e8a756286d4",
+  "design_sha256": "8f7598e9a2770003322643171601f7b8c6ca3b3ea91b1b9bbc27c6ceb276c8d7",
+  "harness_sha256": "4898210314f13bc4ba406727f1e6af8d2b46031ebed2178a8f2d4cd3b156b0e4",
+  "worker_sha256": "49133da87523bffd558bc9cd5b81a5a985bf977354406f5de100012f2e014f93",
+  "native_sha256": "aa8e70ab85be7b1f6f9739446497120dbe62ce9be544911502d7240b4363ca74",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "started": 1789299955.8787048
+}

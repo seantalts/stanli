@@ -1,0 +1,47 @@
+[
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "reps": 500000,
+    "graph": {
+      "params": 2,
+      "ops": 5,
+      "slots": 12,
+      "slot_elements": 19,
+      "adjoint_elements": 8
+    },
+    "snapshot_sha256": "e1475eb8b9bf3405940ab24a1719ad6b6d7ad846a52d3c04cd1f7992f00a31a6"
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "reps": 100000,
+    "graph": {
+      "params": 2,
+      "ops": 5,
+      "slots": 12,
+      "slot_elements": 19,
+      "adjoint_elements": 8
+    },
+    "snapshot_sha256": "f50f166dc42b30014a2b5317a5e5eecebb1752ebbcc3763a5b5d6f398c4cdeb0"
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "reps": 30000,
+    "graph": {
+      "params": 2,
+      "ops": 5,
+      "slots": 12,
+      "slot_elements": 1035,
+      "adjoint_elements": 8
+    },
+    "snapshot_sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+  }
+]

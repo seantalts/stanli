@@ -1,0 +1,33 @@
+{
+  "baseline": "system-short",
+  "variants": {
+    "system-short": {
+      "library": "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+      "mode": "system", "placement": "main", "environment": {"STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"}
+    },
+    "private-short": {
+      "library": "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/private/libstanli_allocator_benchmark.dylib",
+      "mode": "private", "placement": "main", "environment": {"STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"}
+    },
+    "system-warm": {
+      "library": "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+      "mode": "system", "placement": "main", "environment": {"STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"}
+    },
+    "private-warm": {
+      "library": "/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/private/libstanli_allocator_benchmark.dylib",
+      "mode": "private", "placement": "main", "environment": {"STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"}
+    }
+  },
+  "cells": [["normal_262144", 1], ["normal_262144", 8], ["normal_1024", 4]],
+  "fixed_repetitions": [
+    {"cell": ["normal_262144", 1], "reps": 512},
+    {"cell": ["normal_262144", 8], "reps": 512},
+    {"cell": ["normal_1024", 4], "reps": 100000}
+  ],
+  "comparisons": [
+    ["short", "system-short", "private-short"],
+    ["warm", "system-warm", "private-warm"],
+    ["system-warm/short", "system-short", "system-warm"],
+    ["private-warm/short", "private-short", "private-warm"]
+  ]
+}

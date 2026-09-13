@@ -98,7 +98,7 @@ can differ by rounding and are not claimed to be bitwise identical.
 
 A separate 2026-09-13 matched shared-library experiment compares the current
 SYSTEM allocator/unmodified loop layout with private mimalloc/32-byte loops
-on Apple ARM. These are native warm-gradient throughput ratios inside a
+on Apple ARM. The historical table uses the original short warmup inside a
 Python-loaded library, not fresh CmdStan comparisons or whole-sampling gains.
 
 | Model / workers | Candidate throughput vs current default (confirmation) |
@@ -123,7 +123,40 @@ find additional four-worker throughput losses:
 Each loses in five/five rounds, by much more than its A/A control shifts.
 Linux large normals improve 2.8–4.0x, and Windows Eight Schools improves
 1.42–1.44x; those gains do not cancel the losing workloads. These first CI
-screens have not received separate confirmation sessions.
+screens have not received separate same-binary confirmation sessions. Further
+attribution found a startup effect: these short-warm Linux losses cannot be
+treated as steady-state allocator overhead.
+
+With **500 ms of actual native gradient work per worker before timing**, the
+focused x86 diagnostic reproduces and recovers the small parallel deficits:
+
+| Linux x86_64 / four workers | Original warmup | Sustained warmup [round range] |
+| --- | ---: | ---: |
+| Normal N=8 | 0.696x | 1.011x [1.004, 1.017] |
+| Eight Schools non-centered | 0.890x | 1.047x [1.023, 1.052] |
+| Normal N=1024 | 1.034x | 1.033x [1.021, 1.047] |
+| Normal N=262144 | 2.591x | 2.697x [2.547, 2.717] |
+
+This allocator-only check uses the same native binaries for the two warmup
+modes, five rounds, both A/A controls, 400 timed plus 20 verification processes.
+The N=8 result is near parity, not a large steady-state speedup. The earlier
+N=1024 short-warm loss did not reproduce on this runner, so it is not a
+demonstrated recovery in this stage. The standard measurement evaluator now
+defaults to sustained warmup; this does **not** add warmup or sleep to Stanli's
+shipping runtime. Startup measurements remain separate and are not erased.
+
+The corresponding ARM diagnostic also completes 400 timed plus 20 verification
+processes: warmed normal-8/four is 1.085x [1.079, 1.088], Eight Schools/four
+1.097x [1.078, 1.098], normal-1024/four 1.040x [0.999, 1.060], and large/four
+3.912x [3.806, 3.975]. Both small parallel losses reproduce before sustained
+warmup and recover afterward; all full-gradient and graph checks pass. The
+failed first ARM collector attempt is retained separately from its retry.
+
+Apple ARM's large/eight-worker case still loses with sustained warmup:
+0.922x [0.915, 1.005], four/five negative rounds, with noisier A/A controls.
+Its normal-1024/four-worker control remains positive. A large-allocation
+fallback only partially recovers the loss and is not shipped. Default
+promotion therefore remains on hold.
 See the [rollout report](allocator-rollout.md)
 for both identical-binary controls, dispersion, other workloads, compatibility
 gates, and remaining uncertainties. The historical CLI/CmdStan tables above

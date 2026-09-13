@@ -1,0 +1,74 @@
+[
+  {
+    "variant": "system-on",
+    "command": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "--disassemble",
+      "--start-address=479760",
+      "--stop-address=481624",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/system-on/libstanli_allocator_benchmark.dylib"
+    ],
+    "sha256": "9932e3c236b69ab9247bd9a835e3c53bb45c144756fd496016b23b1c3fccf414",
+    "loop_address": "0x752a0",
+    "aligned32": true,
+    "crosses4k": false,
+    "loop_words": [
+      "fc687a80",
+      "fd002fe0",
+      "1e602000",
+      "540000c6",
+      "91000508",
+      "f90033e8",
+      "eb17011f",
+      "54ffff23"
+    ]
+  },
+  {
+    "variant": "private-on",
+    "command": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "--disassemble",
+      "--start-address=480016",
+      "--stop-address=481880",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/private-on/libstanli_allocator_benchmark.dylib"
+    ],
+    "sha256": "812a424aa54ed0bcb9bd36329a8bddbc5267a521c097672993e108bdc7ca6255",
+    "loop_address": "0x753a0",
+    "aligned32": true,
+    "crosses4k": false,
+    "loop_words": [
+      "fc687a80",
+      "fd002fe0",
+      "1e602000",
+      "540000c6",
+      "91000508",
+      "f90033e8",
+      "eb17011f",
+      "54ffff23"
+    ]
+  },
+  {
+    "variant": "fallback-on",
+    "command": [
+      "/opt/homebrew/opt/llvm/bin/llvm-objdump",
+      "--disassemble",
+      "--start-address=480048",
+      "--stop-address=481912",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/fallback-on/libstanli_allocator_benchmark.dylib"
+    ],
+    "sha256": "218088519fdff466a2b75cba3a979a6c690ecd09eb0b64e6d373d31df1d7e002",
+    "loop_address": "0x753c0",
+    "aligned32": true,
+    "crosses4k": false,
+    "loop_words": [
+      "fc687a80",
+      "fd002fe0",
+      "1e602000",
+      "540000c6",
+      "91000508",
+      "f90033e8",
+      "eb17011f",
+      "54ffff23"
+    ]
+  }
+]

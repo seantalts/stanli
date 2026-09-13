@@ -1,0 +1,15 @@
+diff --git a/tools/allocator/bench.py b/tools/allocator/bench.py
+index 639e3ab0..2748aa98 100644
+--- a/tools/allocator/bench.py
++++ b/tools/allocator/bench.py
+@@ -52,7 +52,9 @@ def worker(args):
+         for path in pathlib.Path("/proc/self/task").glob("*/stat"):
+             try:
+                 tasks[path.parent.name] = path.read_text()
+-            except FileNotFoundError:
++            except (FileNotFoundError, ProcessLookupError):
++                # A joined native worker can disappear after glob/open but
++                # before procfs serves the stat read (ENOENT or ESRCH).
+                 pass
+         cgroup = {}
+         for name in ("cpu.max", "cpu.stat", "cpuset.cpus.effective"):

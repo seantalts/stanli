@@ -1,0 +1,5 @@
+CPU SOCKET CORE ONLINE
+0   0      0    yes
+1   0      0    yes
+2   0      1    yes
+3   0      1    yes

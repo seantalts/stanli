@@ -1,0 +1,2402 @@
+[
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      2
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "pthread_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "dynamic_aa",
+    "round": 4
+  }
+]

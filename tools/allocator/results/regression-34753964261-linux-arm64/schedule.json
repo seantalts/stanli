@@ -1,0 +1,4802 @@
+[
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 0
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 1
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 2
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 2
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 3
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      1
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_262144",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_8",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "eight_schools_noncentered",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-worker_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-gradient_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "system-main_aa",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-worker",
+    "round": 4
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "slot": "private-gradient",
+    "round": 4
+  }
+]

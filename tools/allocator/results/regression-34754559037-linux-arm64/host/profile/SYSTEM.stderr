@@ -1,0 +1,2 @@
+[ perf record: Woken up 2006 times to write data ]
+[ perf record: Captured and wrote 24.127 MB diagnostic-host/profile/SYSTEM.data (2955 samples) ]

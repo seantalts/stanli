@@ -1,0 +1,167 @@
+{
+  "baseline": "system-default",
+  "variants": {
+    "system-default": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 0
+    },
+    "private-default": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 0
+    },
+    "system-single": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "settle_ms": 0
+    },
+    "private-single": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "settle_ms": 0
+    },
+    "system-settled": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 500
+    },
+    "private-settled": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {},
+      "settle_ms": 500
+    }
+  },
+  "cells": [
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ]
+  ],
+  "fixed_repetitions": [
+    {
+      "cell": [
+        "normal_8",
+        1
+      ],
+      "reps": 500000
+    },
+    {
+      "cell": [
+        "normal_8",
+        4
+      ],
+      "reps": 100000
+    },
+    {
+      "cell": [
+        "normal_1024",
+        4
+      ],
+      "reps": 30000
+    }
+  ],
+  "comparisons": [
+    [
+      "default",
+      "system-default",
+      "private-default"
+    ],
+    [
+      "single",
+      "system-single",
+      "private-single"
+    ],
+    [
+      "settled",
+      "system-settled",
+      "private-settled"
+    ],
+    [
+      "system-single/default",
+      "system-default",
+      "system-single"
+    ],
+    [
+      "system-settled/default",
+      "system-default",
+      "system-settled"
+    ],
+    [
+      "private-single/default",
+      "private-default",
+      "private-single"
+    ],
+    [
+      "private-settled/default",
+      "private-default",
+      "private-settled"
+    ]
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "head": "9c938837e3a31802e3d7ff6308f0b59f874c19a6",
+  "variants": {
+    "system-short": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "sha256": "2987cb4d12fe860306027135befb2cbde9eba4761e8ed66e6f84e713a406f8ac"
+    },
+    "private-short": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "sha256": "c3629ced60ecbdc66b37fc1fa691cbe2527d47d19f5f05fb6577293a48775fd2"
+    },
+    "system-warm": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "sha256": "2987cb4d12fe860306027135befb2cbde9eba4761e8ed66e6f84e713a406f8ac"
+    },
+    "private-warm": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "sha256": "c3629ced60ecbdc66b37fc1fa691cbe2527d47d19f5f05fb6577293a48775fd2"
+    }
+  },
+  "cells": [
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "eight_schools_noncentered",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      4
+    ]
+  ],
+  "slots": [
+    "system-short",
+    "private-short",
+    "system-warm",
+    "private-warm",
+    "system-short_aa",
+    "private-short_aa",
+    "system-warm_aa",
+    "private-warm_aa"
+  ],
+  "rounds": 5,
+  "input_sha256": "182f22c9dd93f836e699854f03526161e3e465a43a8c411257a93e8a756286d4",
+  "design_sha256": "84c25a15b611c053ea5ca3e62faa2111cbfb6986981c039614a23489d6d27ca1",
+  "harness_sha256": "c679dd21efe1b9bcbb745b766f73e08f626f2dcf4bfe5310ddc04d026b622df7",
+  "worker_sha256": "49133da87523bffd558bc9cd5b81a5a985bf977354406f5de100012f2e014f93",
+  "native_sha256": "52e51bd32648c41521e9211718ee744cd03c20665c61255227c89dcf8ebbe726",
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.28",
+  "started": 1789300432.7503633
+}

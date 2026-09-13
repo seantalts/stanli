@@ -1,0 +1,340 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 2K of event 'cpu-clock:u'
+# Event count (approx.): 14849244375
+#
+# Overhead  Command  Shared Object                     Symbol                                                                                                                                                                                                                                                                                                                                                                                                                
+# ........  .......  ................................  ......................................................................................................................................................................................................................................................................................................................................................................................................................
+#
+    11.07%  python   libstanli_allocator_benchmark.so  [.] stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+            |
+            ---stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     8.87%  python   libc-2.28.so                      [.] malloc
+            |
+            ---__GI___libc_malloc (inlined)
+               |          
+               |--3.18%--stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               |          _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               |          stanli::dens::normal_lpdf_fwd_gen
+               |          stanli::Executor::run_forward_only
+               |          stanli::Executor::forward
+               |          stanli::Executor::gradient
+               |          std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               |          execute_native_thread_routine
+               |          start_thread
+               |          thread_start
+               |          
+               |--2.91%--Eigen::PlainObjectBase<Eigen::Array<double, -1, 1, 0, -1, 1> >::PlainObjectBase<Eigen::CwiseBinaryOp<Eigen::internal::scalar_product_op<double, double>, Eigen::CwiseNullaryOp<Eigen::internal::scalar_constant_op<double>, Eigen::Array<double, -1, 1, 0, -1, 1> const> const, Eigen::Array<double, -1, 1, 0, -1, 1> const> >
+               |          stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               |          _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               |          stanli::dens::normal_lpdf_fwd_gen
+               |          stanli::Executor::run_forward_only
+               |          stanli::Executor::forward
+               |          stanli::Executor::gradient
+               |          std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               |          execute_native_thread_routine
+               |          start_thread
+               |          thread_start
+               |          
+                --2.77%--Eigen::PlainObjectBase<Eigen::Array<double, -1, 1, 0, -1, 1> >::PlainObjectBase<Eigen::CwiseBinaryOp<Eigen::internal::scalar_product_op<double, double>, Eigen::Array<double, -1, 1, 0, -1, 1> const, Eigen::Array<double, -1, 1, 0, -1, 1> const> >
+                          stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+                          _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+                          stanli::dens::normal_lpdf_fwd_gen
+                          stanli::Executor::run_forward_only
+                          stanli::Executor::forward
+                          stanli::Executor::gradient
+                          std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+                          execute_native_thread_routine
+                          start_thread
+                          thread_start
+
+     8.76%  python   libc-2.28.so                      [.] _int_free
+            |
+            ---_int_free
+               stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     8.09%  python   libstanli_allocator_benchmark.so  [.] stanli::dens::normal_lpdf_fwd_gen
+            |
+            ---stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     7.24%  python   libstanli_allocator_benchmark.so  [.] stanli::dens::density_bwd<3>
+            |
+            ---stanli::dens::density_bwd<3>
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     6.43%  python   libstanli_allocator_benchmark.so  [.] _ZN6stanli4dens11bind_args_mILi3ELj1ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JNS_4rvarEdEEEvS3_OT2_DpRKT3_
+            |
+            ---_ZN6stanli4dens11bind_args_mILi3ELj1ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JNS_4rvarEdEEEvS3_OT2_DpRKT3_
+               _ZN6stanli4dens11bind_args_mILi3ELj1ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     6.26%  python   libstanli_allocator_benchmark.so  [.] stanli::Executor::gradient
+            |
+            ---stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     3.55%  python   libm-2.28.so                      [.] __exp_finite
+            |
+            ---__exp_finite
+               expf32x
+               stanli::(anonymous namespace)::clower_fwd
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     3.08%  python   libc-2.28.so                      [.] cfree@GLIBC_2.17
+            |
+            ---__GI___libc_free (inlined)
+               stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.94%  python   libm-2.28.so                      [.] __log_finite
+            |
+            ---__log_finite
+               stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.81%  python   libm-2.28.so                      [.] expf32x
+            |
+            ---expf32x
+               stanli::(anonymous namespace)::clower_fwd
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.74%  python   libstanli_allocator_benchmark.so  [.] stanli::Executor::run_forward_only
+            |
+            ---stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.64%  python   libstanli_allocator_benchmark.so  [.] Eigen::PlainObjectBase<Eigen::Array<double, -1, 1, 0, -1, 1> >::PlainObjectBase<Eigen::CwiseBinaryOp<Eigen::internal::scalar_product_op<double, double>, Eigen::Array<double, -1, 1, 0, -1, 1> const, Eigen::Array<double, -1, 1, 0, -1, 1> const> >
+            |
+            ---Eigen::PlainObjectBase<Eigen::Array<double, -1, 1, 0, -1, 1> >::PlainObjectBase<Eigen::CwiseBinaryOp<Eigen::internal::scalar_product_op<double, double>, Eigen::Array<double, -1, 1, 0, -1, 1> const, Eigen::Array<double, -1, 1, 0, -1, 1> const> >
+               stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.54%  python   libstanli_allocator_benchmark.so  [.] _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+            |
+            ---_ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.37%  python   libstanli_allocator_benchmark.so  [.] _ZN6stanli4dens11bind_args_mILi3ELj1ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+            |
+            ---_ZN6stanli4dens11bind_args_mILi3ELj1ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.27%  python   libstanli_allocator_benchmark.so  [.] stanli::(anonymous namespace)::clower_fwd
+            |
+            ---stanli::(anonymous namespace)::clower_fwd
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.23%  python   libstanli_allocator_benchmark.so  [.] std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+            |
+            ---std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.06%  python   libstanli_allocator_benchmark.so  [.] stanli::(anonymous namespace)::clower_bwd
+            |
+            ---stanli::(anonymous namespace)::clower_bwd
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     2.03%  python   libstanli_allocator_benchmark.so  [.] stanli::Executor::forward
+            |
+            ---stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     1.93%  python   libstanli_allocator_benchmark.so  [.] Eigen::internal::redux_impl<Eigen::internal::scalar_sum_op<double, double>, Eigen::internal::redux_evaluator<Eigen::Array<double, -1, 1, 0, -1, 1> >, 3, 0>::run<Eigen::Array<double, -1, 1, 0, -1, 1> >
+            |
+            ---Eigen::internal::redux_impl<Eigen::internal::scalar_sum_op<double, double>, Eigen::internal::redux_evaluator<Eigen::Array<double, -1, 1, 0, -1, 1> >, 3, 0>::run<Eigen::Array<double, -1, 1, 0, -1, 1> >
+               stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     1.90%  python   libstanli_allocator_benchmark.so  [.] stan::math::internal::broadcast_array<double, void>::operator=<Eigen::Array<double, -1, 1, 0, -1, 1> >
+            |
+            ---stan::math::internal::broadcast_array<double, void>::operator=<Eigen::Array<double, -1, 1, 0, -1, 1> >
+               stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     1.49%  python   libstanli_allocator_benchmark.so  [.] Eigen::PlainObjectBase<Eigen::Array<double, -1, 1, 0, -1, 1> >::PlainObjectBase<Eigen::CwiseBinaryOp<Eigen::internal::scalar_product_op<double, double>, Eigen::CwiseNullaryOp<Eigen::internal::scalar_constant_op<double>, Eigen::Array<double, -1, 1, 0, -1, 1> const> const, Eigen::Array<double, -1, 1, 0, -1, 1> const> >
+            |
+            ---Eigen::PlainObjectBase<Eigen::Array<double, -1, 1, 0, -1, 1> >::PlainObjectBase<Eigen::CwiseBinaryOp<Eigen::internal::scalar_product_op<double, double>, Eigen::CwiseNullaryOp<Eigen::internal::scalar_constant_op<double>, Eigen::Array<double, -1, 1, 0, -1, 1> const> const, Eigen::Array<double, -1, 1, 0, -1, 1> const> >
+               stan::math::normal_lpdf<true, Eigen::Map<Eigen::Matrix<double, -1, 1, 0, -1, 1> const, 0, Eigen::Stride<0, 0> > const&, stanli::rvar const&, stanli::rvar const&, (void*)0>
+               _ZN6stanli4dens11bind_args_mILi3ELj6ELj0ERZNS0_19normal_lpdf_fwd_genERNS_9KernelCtxEEUlDpRKT_E_JEEEvS3_OT2_DpRKT3_
+               stanli::dens::normal_lpdf_fwd_gen
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     1.42%  python   libstanli_allocator_benchmark.so  [.] stanli::(anonymous namespace)::add_n_fwd
+            |
+            ---stanli::(anonymous namespace)::add_n_fwd
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     1.35%  python   libstanli_allocator_benchmark.so  [.] stanli::(anonymous namespace)::add_n_bwd
+            |
+            ---stanli::(anonymous namespace)::add_n_bwd
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+     1.15%  python   libscipy_openblas64_-f552eb69.so  [.] blas_thread_server
+            |
+            ---blas_thread_server
+               start_thread
+               thread_start
+
+     0.61%  python   libstanli_allocator_benchmark.so  [.] stanli::(anonymous namespace)::seq_sum
+            |
+            ---stanli::(anonymous namespace)::seq_sum
+               stanli::(anonymous namespace)::clower_fwd
+               stanli::Executor::run_forward_only
+               stanli::Executor::forward
+               stanli::Executor::gradient
+               std::thread::_State_impl<std::thread::_Invoker<std::tuple<run_model(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, int, int, int, _IO_FILE*, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)::{lambda()#1}> > >::_M_run
+               execute_native_thread_routine
+               start_thread
+               thread_start
+
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

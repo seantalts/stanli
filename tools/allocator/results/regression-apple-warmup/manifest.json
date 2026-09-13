@@ -1,0 +1,73 @@
+{
+  "head": "9c938837e3a31802e3d7ff6308f0b59f874c19a6",
+  "variants": {
+    "system-short": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "placement": "main",
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "sha256": "fd3ed2c5efabb2e2849013f9607bf0b3056e739ecfb4321716923af09b45eee4"
+    },
+    "private-short": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/private/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "placement": "main",
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      },
+      "sha256": "e0f2f104b4780ec41ee93638ebe26c50c0569413b0b662b4d19b5ab8d72cd5fb"
+    },
+    "system-warm": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/system/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "placement": "main",
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "sha256": "fd3ed2c5efabb2e2849013f9607bf0b3056e739ecfb4321716923af09b45eee4"
+    },
+    "private-warm": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-warmup-libs/private/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "placement": "main",
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      },
+      "sha256": "e0f2f104b4780ec41ee93638ebe26c50c0569413b0b662b4d19b5ab8d72cd5fb"
+    }
+  },
+  "cells": [
+    [
+      "normal_262144",
+      1
+    ],
+    [
+      "normal_262144",
+      8
+    ],
+    [
+      "normal_1024",
+      4
+    ]
+  ],
+  "slots": [
+    "system-short",
+    "private-short",
+    "system-warm",
+    "private-warm",
+    "system-short_aa",
+    "private-short_aa",
+    "system-warm_aa",
+    "private-warm_aa"
+  ],
+  "rounds": 5,
+  "input_sha256": "182f22c9dd93f836e699854f03526161e3e465a43a8c411257a93e8a756286d4",
+  "design_sha256": "3b8c56682b666c68c9e815660f919bfc0a355416ef2be0b81b05e2029d02deee",
+  "harness_sha256": "c679dd21efe1b9bcbb745b766f73e08f626f2dcf4bfe5310ddc04d026b622df7",
+  "worker_sha256": "49133da87523bffd558bc9cd5b81a5a985bf977354406f5de100012f2e014f93",
+  "native_sha256": "52e51bd32648c41521e9211718ee744cd03c20665c61255227c89dcf8ebbe726",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "started": 1789300565.771719
+}

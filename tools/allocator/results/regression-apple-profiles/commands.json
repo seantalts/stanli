@@ -1,0 +1,70 @@
+[
+  {
+    "slot": "system-on",
+    "worker": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+      "worker",
+      "--library",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/system-on/libstanli_allocator_benchmark.dylib",
+      "--mode",
+      "system",
+      "--mir",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/model.mir",
+      "--data",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/data.json",
+      "--workers",
+      "8",
+      "--reps",
+      "64000",
+      "--samples",
+      "1",
+      "--snapshot",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-profiles/system-on.snapshot"
+    ],
+    "sample": [
+      "sample",
+      "82568",
+      "8",
+      "1",
+      "-file",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-profiles/system-on.sample"
+    ],
+    "sample_returncode": 0,
+    "library_sha256": "9932e3c236b69ab9247bd9a835e3c53bb45c144756fd496016b23b1c3fccf414"
+  },
+  {
+    "slot": "private-on",
+    "worker": [
+      "/Users/xitrium/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/pr/tools/allocator/bench.py",
+      "worker",
+      "--library",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/private-on/libstanli_allocator_benchmark.dylib",
+      "--mode",
+      "private",
+      "--mir",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/model.mir",
+      "--data",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/ci-34751295812-linux-x86_64/models/inputs/normal_262144/data.json",
+      "--workers",
+      "8",
+      "--reps",
+      "64000",
+      "--samples",
+      "1",
+      "--snapshot",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-profiles/private-on.snapshot"
+    ],
+    "sample": [
+      "sample",
+      "82597",
+      "8",
+      "1",
+      "-file",
+      "/tmp/stanli-allocator-rollout.l6S5ZY/apple-profiles/private-on.sample"
+    ],
+    "sample_returncode": 0,
+    "library_sha256": "812a424aa54ed0bcb9bd36329a8bddbc5267a521c097672993e108bdc7ca6255"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "cell": [
+      "normal_262144",
+      8
+    ],
+    "reps": 432,
+    "graph": {
+      "params": 2,
+      "ops": 5,
+      "slots": 12,
+      "slot_elements": 262155,
+      "adjoint_elements": 8
+    },
+    "snapshot_sha256": "bb0741c8fc16c7f9a6e6c6aad10c7a3842fd2e98262297482b1e569e2344759d"
+  },
+  {
+    "cell": [
+      "normal_1024",
+      4
+    ],
+    "reps": 77232,
+    "graph": {
+      "params": 2,
+      "ops": 5,
+      "slots": 12,
+      "slot_elements": 1035,
+      "adjoint_elements": 8
+    },
+    "snapshot_sha256": "f3ab157d8419cc092120d9a01af3b2a23f1044d7ce91e3a9f8664278a1f439ef"
+  }
+]

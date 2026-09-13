@@ -1,0 +1,146 @@
+{
+  "baseline": "system-short",
+  "variants": {
+    "system-short": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      }
+    },
+    "private-short": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "0"
+      }
+    },
+    "system-warm": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      }
+    },
+    "private-warm": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "host_diagnostics": true,
+      "unset_environment": [
+        "OPENBLAS_NUM_THREADS",
+        "OPENBLAS_DEFAULT_NUM_THREADS",
+        "GOTO_NUM_THREADS",
+        "OMP_NUM_THREADS"
+      ],
+      "environment": {
+        "STANLI_ALLOCATOR_BENCH_WARMUP_MS": "500"
+      }
+    }
+  },
+  "cells": [
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "eight_schools_noncentered",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      4
+    ]
+  ],
+  "fixed_repetitions": [
+    {
+      "cell": [
+        "normal_8",
+        1
+      ],
+      "reps": 500000
+    },
+    {
+      "cell": [
+        "normal_8",
+        4
+      ],
+      "reps": 100000
+    },
+    {
+      "cell": [
+        "eight_schools_noncentered",
+        4
+      ],
+      "reps": 100000
+    },
+    {
+      "cell": [
+        "normal_1024",
+        4
+      ],
+      "reps": 30000
+    },
+    {
+      "cell": [
+        "normal_262144",
+        4
+      ],
+      "reps": 128
+    }
+  ],
+  "comparisons": [
+    [
+      "short",
+      "system-short",
+      "private-short"
+    ],
+    [
+      "warm",
+      "system-warm",
+      "private-warm"
+    ],
+    [
+      "system-warm/short",
+      "system-short",
+      "system-warm"
+    ],
+    [
+      "private-warm/short",
+      "private-short",
+      "private-warm"
+    ]
+  ]
+}

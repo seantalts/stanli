@@ -1,0 +1,84 @@
+{
+  "head": "9c57bfc29ccaab80884314ecefaf6de8bf235c26",
+  "variants": {
+    "system-main": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "main",
+      "sha256": "95e738a5a301928974dd8701c49c8355fc564e432436b0bee2a9bc4ebbfbb105"
+    },
+    "system-gradient": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "gradient",
+      "sha256": "95e738a5a301928974dd8701c49c8355fc564e432436b0bee2a9bc4ebbfbb105"
+    },
+    "system-worker": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/SYSTEM/libstanli_allocator_benchmark.so",
+      "mode": "system",
+      "placement": "worker",
+      "sha256": "95e738a5a301928974dd8701c49c8355fc564e432436b0bee2a9bc4ebbfbb105"
+    },
+    "private-main": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "main",
+      "sha256": "793a1e26aea2e18958b3af4f2e9c0a7573a1f13f27aa44273315dc2fc669ffe1"
+    },
+    "private-gradient": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "gradient",
+      "sha256": "793a1e26aea2e18958b3af4f2e9c0a7573a1f13f27aa44273315dc2fc669ffe1"
+    },
+    "private-worker": {
+      "library": "/__w/stanli/stanli/diagnostic-libs/MIMALLOC/libstanli_allocator_benchmark.so",
+      "mode": "private",
+      "placement": "worker",
+      "sha256": "793a1e26aea2e18958b3af4f2e9c0a7573a1f13f27aa44273315dc2fc669ffe1"
+    }
+  },
+  "cells": [
+    [
+      "normal_8",
+      1
+    ],
+    [
+      "normal_8",
+      4
+    ],
+    [
+      "eight_schools_noncentered",
+      4
+    ],
+    [
+      "normal_1024",
+      4
+    ],
+    [
+      "normal_262144",
+      4
+    ]
+  ],
+  "slots": [
+    "system-main",
+    "system-gradient",
+    "system-worker",
+    "private-main",
+    "private-gradient",
+    "private-worker",
+    "system-main_aa",
+    "system-gradient_aa",
+    "system-worker_aa",
+    "private-main_aa",
+    "private-gradient_aa",
+    "private-worker_aa"
+  ],
+  "rounds": 5,
+  "input_sha256": "6c966b72f02594445851752dded19192b4b44f43d36354f5dc3abd079f467031",
+  "harness_sha256": "f55da11a063b8e0babf576feae941d04c21750dce9332585a9fa74716ae7850e",
+  "worker_sha256": "a07bb422bc59514ee28cdb3b86d48c1a8fdba06d4a171ab94a18f1e60d5994d4",
+  "native_sha256": "aa8e70ab85be7b1f6f9739446497120dbe62ce9be544911502d7240b4363ca74",
+  "platform": "Linux-6.17.0-1022-azure-aarch64-with-glibc2.28",
+  "started": 1789298229.8805428
+}

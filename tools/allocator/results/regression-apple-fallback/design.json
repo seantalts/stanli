@@ -1,0 +1,23 @@
+{
+  "baseline": "system",
+  "variants": {
+    "system": {
+      "library": "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/system-on/libstanli_allocator_benchmark.dylib",
+      "mode": "system", "placement": "main"
+    },
+    "private": {
+      "library": "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/private-on/libstanli_allocator_benchmark.dylib",
+      "mode": "private", "placement": "main"
+    },
+    "fallback": {
+      "library": "/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/fallback-on/libstanli_allocator_benchmark.dylib",
+      "mode": "private", "placement": "main"
+    }
+  },
+  "cells": [["normal_262144", 1], ["normal_262144", 8], ["normal_1024", 4]],
+  "comparisons": [
+    ["private/system", "system", "private"],
+    ["fallback/system", "system", "fallback"],
+    ["fallback/private", "private", "fallback"]
+  ]
+}

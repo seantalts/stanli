@@ -1,0 +1,57 @@
+{
+  "head": "68124d18ba3f77cfe8a5fcad2fcd4bfc584b1fbc",
+  "variants": {
+    "system-off": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/system-off/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "placement": "main",
+      "sha256": "5c2a83cec941b63d202cdbbf8e58a95856b7c0e8c190f285df0b8b76f91d08fb"
+    },
+    "private-off": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/private-off/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "placement": "main",
+      "sha256": "a271ae75691d34bccae0eeaf38a94c0a9a31ae4963a95c57ba41210348da7b16"
+    },
+    "system-on": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/system-on/libstanli_allocator_benchmark.dylib",
+      "mode": "system",
+      "placement": "main",
+      "sha256": "9932e3c236b69ab9247bd9a835e3c53bb45c144756fd496016b23b1c3fccf414"
+    },
+    "private-on": {
+      "library": "/private/tmp/stanli-allocator-rollout.l6S5ZY/apple-ablation-libs/private-on/libstanli_allocator_benchmark.dylib",
+      "mode": "private",
+      "placement": "main",
+      "sha256": "812a424aa54ed0bcb9bd36329a8bddbc5267a521c097672993e108bdc7ca6255"
+    }
+  },
+  "cells": [
+    [
+      "normal_262144",
+      8
+    ],
+    [
+      "normal_1024",
+      4
+    ]
+  ],
+  "slots": [
+    "system-off",
+    "private-off",
+    "system-on",
+    "private-on",
+    "system-off_aa",
+    "private-off_aa",
+    "system-on_aa",
+    "private-on_aa"
+  ],
+  "rounds": 5,
+  "input_sha256": "182f22c9dd93f836e699854f03526161e3e465a43a8c411257a93e8a756286d4",
+  "design_sha256": "b1035863d4fd12fe30bf459a9d1e4c5b0a24825b9ffc12f8c1ec1a58b24b5bf5",
+  "harness_sha256": "144f572767abe59a68c33598244e5dcf9fb8a797f610d1fbb717d94b20ef5884",
+  "worker_sha256": "a07bb422bc59514ee28cdb3b86d48c1a8fdba06d4a171ab94a18f1e60d5994d4",
+  "native_sha256": "aa8e70ab85be7b1f6f9739446497120dbe62ce9be544911502d7240b4363ca74",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "started": 1789298306.138071
+}

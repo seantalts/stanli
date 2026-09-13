@@ -275,3 +275,20 @@ not substituted results. The broader no-regression, CLI alignment and release
 gates remain required before default promotion. Next production work should
 target Apple's residual allocator/data-path cost; the failed placement, TLS
 and partial large-allocation fallback hypotheses do not justify shipping them.
+
+The single ARM infrastructure retry
+[34755878766](https://github.com/seantalts/stanli/actions/runs/34755878766)
+completes 400 timed + 20 verification processes with the corrected collector.
+Normal 8/four goes from 0.653x short-warm to 1.085x [1.079, 1.088] sustained;
+Eight Schools/four goes from 0.896x to 1.097x [1.078, 1.098]. Both sustained
+cells win five/five rounds. Normal 1024/four is 1.040x [0.999, 1.060], four/five
+positive, and large/four is 3.912x [3.806, 3.975], five/five. One-worker normal
+8 is 1.086x. Short-warm private A/A is noisier (normal 8 median 1.094), but
+the sustained normal-8 medians are 1.001/1.000. The full ranges, including a
+0.927 private A/A round, are retained. All native warmup-duration records,
+graph dimensions and complete gradient bytes pass. This confirms the warmed
+measurement correction on both Linux architectures, not a runtime startup fix.
+
+Final focused native checks also pass allocator ownership, export isolation
+and allocator configuration (three CTest cases). Production allocator and
+alignment defaults remain SYSTEM/OFF; PR #362 stays draft with auto-merge off.
