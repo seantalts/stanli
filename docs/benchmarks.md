@@ -490,3 +490,49 @@ python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   --stancflags --O1 --no-sample --timeout 900
 python3 tools/corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec
 ```
+
+
+## Private allocator research
+
+This is a separate native-gradient measurement boundary, not an update to
+the historical CLI/CmdStan tables above. The allocator remains opt-in and
+SYSTEM remains the default; loop alignment is a separate, parked change.
+
+The original short warmup was startup-sensitive for small parallel Linux
+models. A same-binary comparison with 500 ms of actual gradient work per
+worker yielded the following historical focused results. Ratios are
+SYSTEM/private time (>1 is faster); brackets are the full five-round range,
+not confidence intervals. Multi-worker results measure aggregate throughput.
+
+| Workload / workers | Linux x86_64 | Linux ARM64 |
+| --- | ---: | ---: |
+| Normal 8 / 4 | 1.011 [1.004, 1.017] | 1.085 [1.079, 1.088] |
+| Eight Schools / 4 | 1.047 [1.023, 1.052] | 1.097 [1.078, 1.098] |
+| Normal 1024 / 4 | 1.033 [1.021, 1.047] | 1.040 [0.999, 1.060] |
+| Normal 262144 / 4 | 2.697 [2.547, 2.717] | 3.912 [3.806, 3.975] |
+
+Each platform completed 400 timed and 20 verification processes across the
+short/sustained modes, with unchanged full gradients and graph dimensions.
+Normal 8 and Eight Schools losses reproduced in short mode and recovered
+in sustained mode; normal 1024's earlier deficit did not reproduce in that
+stage. The x86 tiny-normal result is near parity, not a substantial gain.
+Limiting OpenBLAS threads alone did not recover the losses; the precise
+startup mechanism remains incompletely attributed.
+
+Apple ARM still lost on large normal: eight workers gave 0.922
+[0.915, 1.005], four/five negative, with broad A/A controls; one worker gave
+0.980 [0.969, 0.990], five/five negative. Alignment ablation retained the
+large-vector loss with alignment ON or OFF. No Apple default is justified.
+
+The [archived investigation](https://github.com/seantalts/stanli/blob/4e2d1bb4da8b7b602c73baaab875bf78f5c7b439/docs/allocator-regression-investigation.md)
+and [raw evidence index](https://github.com/seantalts/stanli/blob/4e2d1bb4da8b7b602c73baaab875bf78f5c7b439/tools/allocator/results/README.md)
+retain every cell, A/A control, startup cost, failure and source/protocol
+limitation, including the incomplete first ARM collector attempt and its
+single infrastructure retry. These are archived measurements, not a rerun
+of the cleaned harness. No old CLI/CmdStan number has been rescaled.
+
+The accepted change is to the non-installed evaluator: sustained native
+warmup by default, explicit historical short mode, and a regression test.
+No shipping sleeps, startup tuning or per-gradient collection were added.
+See the [reproduction guide](../tools/allocator/README.md). Broader corrected
+comparisons and end-to-end sampling remain gates for any platform default.
