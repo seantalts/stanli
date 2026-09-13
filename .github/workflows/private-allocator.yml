@@ -1,0 +1,57 @@
+name: private allocator ownership
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [codex/private-allocator-defaults]
+permissions:
+  contents: read
+jobs:
+  ownership:
+    name: allocator (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: macos-arm64, os: macos-15, macos_target: '11.0'}
+          - {name: macos-x86_64, os: macos-15-intel, macos_target: '10.15'}
+          - {name: linux-x86_64-gcc, os: ubuntu-24.04}
+          - {name: linux-arm64-gcc, os: ubuntu-24.04-arm}
+          - {name: linux-x86_64-clang, os: ubuntu-24.04, cc: clang, cxx: clang++}
+          - {name: windows-x86_64-ucrt, os: windows-latest}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+      - name: Build and test (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          CC: ${{ matrix.cc || 'cc' }}
+          CXX: ${{ matrix.cxx || 'c++' }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
+        run: |
+          ./deps/fetch.sh
+          cmake -S tests/allocator -B build-allocator -DCMAKE_BUILD_TYPE=Release -DSTANLI_SHARED_ALLOCATOR=MIMALLOC
+          cmake --build build-allocator --parallel 4
+          ctest --test-dir build-allocator --output-on-failure
+      - name: Build and test (MinGW/UCRT)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          ./deps/fetch.sh
+          cmake -G Ninja -S tests/allocator -B build-allocator -DCMAKE_BUILD_TYPE=Release -DSTANLI_SHARED_ALLOCATOR=MIMALLOC
+          cmake --build build-allocator --parallel 4
+          ctest --test-dir build-allocator --output-on-failure
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: private-allocator-${{ matrix.name }}
+          path: build-allocator/Testing/Temporary/LastTest.log

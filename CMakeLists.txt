@@ -76,6 +76,7 @@ if(STANLI_SANITIZE)
 endif()
 
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
+include(cmake/StanliAllocator.cmake)
 file(GLOB _eigen ${DEPS}/math/lib/eigen_*)
 file(GLOB _boost ${DEPS}/math/lib/boost_*)
 file(GLOB _sundials ${DEPS}/math/lib/sundials_*)
@@ -119,6 +120,8 @@ endif()
 # between the kernels and the var-path references (measured: 2 ULP on
 # eight-schools d/dmu). Cost is well inside the performance budget.
 target_compile_options(stanmath INTERFACE -ffp-contract=off)
+include(cmake/StanliLoopAlignment.cmake)
+stanli_apply_loop_alignment(stanmath)
 
 # Half the library is the propto family: stan-math drops a term based on
 # the argument TYPES, so an exact `~` needs the density instantiated once
@@ -255,6 +258,10 @@ if(STANLI_LITE_LP)
 endif()
 if(STANLI_THREADS)
   string(APPEND STANLI_BUILD_ID "-threads")
+endif()
+if(STANLI_USE_LOOP_ALIGNMENT)
+  string(APPEND STANLI_BUILD_ID
+    "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-align32>")
 endif()
 
 # Only this tiny translation unit reads the build id. Keeping this definition
@@ -439,6 +446,27 @@ function(stanli_embed_stanc TGT)
   endif()
 endfunction()
 stanli_embed_stanc(stanli_shared)
+# Separate, non-installed DSO with an additive test entry around the native
+# sampler-gradient evaluator. Reuses the shipping objects and allocator scope.
+option(STANLI_BUILD_ALLOCATOR_BENCHMARK "Build a non-installed allocator measurement DSO" OFF)
+if(STANLI_BUILD_ALLOCATOR_BENCHMARK)
+  get_target_property(_bench_sources stanli_shared SOURCES)
+  add_library(stanli_allocator_benchmark SHARED
+    ${_bench_sources} tools/allocator/gradient_bench.cpp)
+  foreach(_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS
+                    LINK_OPTIONS LINK_LIBRARIES LINK_DEPENDS)
+    get_target_property(_value stanli_shared ${_property})
+    if(_value)
+      set_property(TARGET stanli_allocator_benchmark PROPERTY ${_property} "${_value}")
+    endif()
+  endforeach()
+  if(WIN32)
+    set_target_properties(stanli_allocator_benchmark PROPERTIES PREFIX "")
+    target_link_libraries(stanli_allocator_benchmark PRIVATE psapi)
+  endif()
+  stanli_link_private_allocator(stanli_allocator_benchmark)
+endif()
+stanli_link_private_allocator(stanli_shared)
 endif()  # NOT EMSCRIPTEN
 
 # Sanitizer builds keep using a shared C++ runtime. The reason is disk, not
@@ -1048,6 +1076,26 @@ if(STANLI_FAST_TEST_TUS)
 endif()
 add_test(NAME test_function COMMAND test_function
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(STANLI_USE_PRIVATE_MIMALLOC)
+  include(cmake/StanliAllocatorTests.cmake)
+  stanli_add_allocator_probe()
+  add_dependencies(test_private_allocator stanli_shared)
+  add_test(NAME test_private_allocator COMMAND test_private_allocator
+    $<TARGET_FILE:stanli_shared> $<TARGET_FILE:stanli_allocator_test_probe>)
+  add_test(NAME test_private_allocator_exports
+    COMMAND ${CMAKE_COMMAND} -DLIBRARY=$<TARGET_FILE:stanli_shared>
+      -DNM=${CMAKE_NM} -DOBJDUMP=${CMAKE_OBJDUMP} -DPLATFORM=${CMAKE_SYSTEM_NAME}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_allocator_exports.cmake)
+endif()
+add_test(NAME test_allocator_config COMMAND ${CMAKE_COMMAND}
+  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_allocator_config.cmake)
+stanli_loop_alignment_supported(_stanli_test_alignment_supported)
+add_test(NAME test_loop_alignment_config COMMAND ${CMAKE_COMMAND}
+  -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}
+  -DBINARY=${CMAKE_CURRENT_BINARY_DIR}/loop-alignment-config-tests
+  -DNATIVE_SUPPORTED=${_stanli_test_alignment_supported}
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_loop_alignment_config.cmake)
 
 # The conformance gate has its own failure modes (parser drift, a broad policy
 # rule, nonfinite comparison, partition loss) which C++ runtime tests cannot
