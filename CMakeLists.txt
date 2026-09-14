@@ -1116,6 +1116,26 @@ add_test(NAME test_function COMMAND test_function
 # standalone runs on older Python use the Tomli backport in requirements.txt.
 find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME test_educational_harness
+           COMMAND ${Python3_EXECUTABLE} tests/test_educational.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_educational_models
+           COMMAND ${Python3_EXECUTABLE} tools/check_educational.py
+                   --build ${CMAKE_CURRENT_BINARY_DIR}
+                   --output ${CMAKE_CURRENT_BINARY_DIR}/educational-ctest/results.json
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_educational_models PROPERTIES TIMEOUT 180)
+  add_custom_target(check_educational_performance
+    COMMAND ${Python3_EXECUTABLE} tools/check_educational.py --benchmark
+            --build ${CMAKE_CURRENT_BINARY_DIR}
+            --output ${CMAKE_CURRENT_BINARY_DIR}/educational-benchmark/results.json
+    DEPENDS stanli_check stanli_run
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    USES_TERMINAL)
+  add_test(NAME test_run_timings
+           COMMAND ${Python3_EXECUTABLE} tests/test_run_timings.py
+                   $<TARGET_FILE:stanli_run>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

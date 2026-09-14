@@ -6,7 +6,7 @@
 //        [--samples N] [--delta X] [--max-depth N]
 //        [--stanli-compile PATH | --stanc PATH]
 //        [--sampler-stats] [--chains N] [--num-threads N] [--thin N]
-//        [--save-warmup] [--init-radius X] [--summary]
+//        [--save-warmup] [--init-radius X] [--summary] [--timings]
 //
 // --chains runs N chains and concatenates their draws in chain order, so
 // a reader that expects one chain still parses the CSV. --summary is
@@ -32,6 +32,7 @@
 #include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -47,7 +48,7 @@ int main(int argc, char** argv) {
                  "[--max-depth N] [--stanli-compile PATH | --stanc PATH] "
                  "[--sampler-stats] "
                  "[--chains N] [--num-threads N] [--thin N] "
-                 "[--save-warmup] [--init-radius X] [--summary]\n");
+                 "[--save-warmup] [--init-radius X] [--summary] [--timings]\n");
     return 2;
   }
   std::string model = argv[1], datafile = argv[2];
@@ -59,6 +60,7 @@ int main(int argc, char** argv) {
   cfg.samples = 1000;
   bool want_stats = false;
   bool want_summary = false;
+  bool want_timings = false;
   int n_chains = 1;
   // 0 means "one thread per chain", resolved once n_chains is known.
   // Threading does not change the draws -- they are byte-identical to a
@@ -67,6 +69,10 @@ int main(int argc, char** argv) {
   bool threads_asked = false;
   for (int i = 3; i < argc; ++i) {
     const std::string k = argv[i];
+    if (k == "--timings") {
+      want_timings = true;
+      continue;
+    }
     if (k == "--sampler-stats") {
       want_stats = true;
       continue;
@@ -128,6 +134,8 @@ int main(int argc, char** argv) {
   }
 
   try {
+    using Clock = std::chrono::steady_clock;
+    const auto timing_start = want_timings ? Clock::now() : Clock::time_point{};
     stanli::DataMap data = stanli::DataMap::from_json_file(datafile);
     const std::string mir =
         stanli::tooling::compile_source(stanc, compiler, model);
@@ -147,7 +155,9 @@ int main(int argc, char** argv) {
     auto clones = stanli::clone_executors(ex, n_chains - 1);
     std::vector<stanli::Executor*> execs{&ex};
     for (auto& c : clones) execs.push_back(c.get());
+    const auto prepared = want_timings ? Clock::now() : Clock::time_point{};
     auto chain_res = stanli::run_nuts_chains(execs, cfg, n_threads);
+    const auto sampled = want_timings ? Clock::now() : Clock::time_point{};
     for (size_t c = 0; c < chain_res.size(); ++c)
       if (!chain_res[c].error.empty())
         throw std::runtime_error("chain " + std::to_string(cfg.chain_id + c) +
@@ -328,6 +338,19 @@ int main(int argc, char** argv) {
                  (long long)ex.n_grad_evals());
     const std::string prof = ex.profile_report();
     if (!prof.empty()) std::fprintf(stderr, "%s", prof.c_str());
+    if (want_timings) {
+      // Include CSV flushing in output time; no clocks in the gradient loop.
+      std::fflush(stdout);
+      const auto written = Clock::now();
+      const auto seconds = [](auto duration) {
+        return std::chrono::duration<double>(duration).count();
+      };
+      std::fprintf(
+          stderr,
+          "stanli_run: timings prep_s=%.9g sample_s=%.9g output_s=%.9g\n",
+          seconds(prepared - timing_start), seconds(sampled - prepared),
+          seconds(written - sampled));
+    }
   } catch (const std::exception& e) {
     std::fprintf(stderr, "stanli_run: %s\n", e.what());
     return 1;

@@ -52,6 +52,14 @@ below give the details and known exceptions.
 
 ## Overview of the checks
 
+The [educational corpus](tests/educational/README.md) adds 13 Aalto teaching
+models. CTest checks three-point CmdStan density/gradient/generated-output
+references and complete sampling CSVs. The separate
+`check_educational_performance` build target runs a live, repeated comparison
+against vectorized CmdStan and fails any model below 0.5 times its speed.
+Performance failures are reported individually without exclusions; see the
+corpus README for the measurement boundary and reproducible commands.
+
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | every pull request |
