@@ -94,3 +94,13 @@ The live test is a separate build target because it compiles 13 CmdStan
 executables and timing on busy CI runners is not stable. Run it when changing
 compiler, sampler or output performance. Default CTest always runs the
 recorded correctness oracle and sampling smoke tests.
+
+
+## Main benchmark suite and results page
+
+The main [corpus runner](../../harnesses/corpus_bench.py) discovers all 13
+fixtures by default alongside posteriordb; `--corpus educational` selects
+only this collection. `--stanli-only` refreshes existing rows without adding
+new rows with missing CmdStan measurements. The [main results page](../../docs/benchmarks.md#educational-models)
+includes the paired end-to-end results, rendered from the retained JSON by
+`tools/corpus_table.py --educational REPORT.json`.

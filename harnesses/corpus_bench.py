@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Corpus-wide head-to-head: stanli vs CmdStan on every posteriordb model.
+"""Corpus-wide head-to-head: stanli vs CmdStan on posteriordb and educational models.
 
 Per model, both engines get one column each for
   - model preparation (stanli: file read + parse + compile + bind;
@@ -11,10 +11,14 @@ useful and a rerun can skip what is already there.
 
 Usage: python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb OUT.tsv
                                       [--filter SUBSTR] [--timeout SEC]
+                                      [--corpus all|posteriordb|educational]
                                       [--stanli-only] [--no-sample]
                                       [--cmdstan-stanc PATH]
                                       [--stancflags FLAGS]
 Needs build-rel/ built. Expect hours: CmdStan builds a binary per model.
+Both corpora run by default. --corpus selects one collection; --filter aalto_
+selects the 13 checked-in educational models without reading posteriordb data.
+The stricter paired educational performance gate remains tools/check_educational.py.
 
 The stanli gradient and prep columns compile with
 deps/stanc3/stanli-vectorize-probe and loop vectorization on, which is the
@@ -159,11 +163,46 @@ def installed_stanc(cs, stanc):
             aside.rename(target)
 
 
+def benchmark_cases(pdb, corpus="all"):
+    """Return source/data paths; keep the established first dataset per PDB model."""
+    if corpus not in {"all", "posteriordb", "educational"}:
+        raise ValueError(f"Unknown benchmark corpus: {corpus}")
+    cases = {}
+    if corpus != "educational":
+        for pj in sorted((pdb / "posteriors").glob("*.json")):
+            meta = json.loads(pj.read_text())
+            model = meta["model_name"]
+            cases.setdefault(model, (
+                pdb / "models" / "stan" / f"{model}.stan",
+                pdb / "data" / "data" / f"{meta['data_name']}.json.zip"))
+    if corpus != "posteriordb":
+        from check_educational import files, inventory
+        for model in inventory():
+            if model in cases:
+                raise ValueError(f"Duplicate benchmark model: {model}")
+            cases[model] = files(model)
+    return cases
+
+
+def materialize_data(source, destination):
+    if source.suffix == ".zip":
+        with zipfile.ZipFile(source) as archive:
+            destination.write_bytes(archive.read(archive.namelist()[0]))
+    else:
+        destination.write_bytes(source.read_bytes())
+
+
+def selected_case(model, filt, done, stanli_only, old_rows):
+    return ((not filt or filt in model) and model not in done
+            and (not stanli_only or model in old_rows))
+
+
 def main():
     cs = pathlib.Path(sys.argv[1]).resolve()
     pdb = pathlib.Path(sys.argv[2]) / "posterior_database"
     out_path = pathlib.Path(sys.argv[3])
     filt = option("--filter", "")
+    cases = benchmark_cases(pdb, option("--corpus", "all"))
     timeout = int(option("--timeout", 900))
     stanli_only = "--stanli-only" in sys.argv
     no_sample = "--no-sample" in sys.argv
@@ -206,22 +245,14 @@ def main():
                                  "TSV")
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
-    pairs = {}
-    for pj in sorted((pdb / "posteriors").glob("*.json")):
-        meta = json.loads(pj.read_text())
-        pairs.setdefault(meta["model_name"], meta["data_name"])
-
     with installed_stanc(cs, None if stanli_only else cmdstan_stanc):
-        for model, dname in sorted(pairs.items()):
-            if (filt and filt not in model) or model in done:
+        for model, (stan, data_source) in sorted(cases.items()):
+            if not selected_case(model, filt, done, stanli_only, old_rows):
                 continue
-            stan = pdb / "models" / "stan" / f"{model}.stan"
-            dz = pdb / "data" / "data" / f"{dname}.json.zip"
-            if not stan.exists() or not dz.exists():
-                continue
+            if not stan.exists() or not data_source.exists():
+                raise FileNotFoundError(f"Missing benchmark source/data for {model}")
             dj = tmp / f"{model}.json"
-            with zipfile.ZipFile(dz) as z:
-                dj.write_bytes(z.read(z.namelist()[0]))
+            materialize_data(data_source, dj)
             row = {c: "" for c in COLS}
             row["model"] = model
             notes = []

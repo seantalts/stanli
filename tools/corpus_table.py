@@ -13,12 +13,19 @@ stopped them. Missing numbers sort to the bottom because missing is not slow.
 Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
 Prints markdown to stdout; benchmarks.md is edited by hand around it.
 
+--gradients INPUT.tsv renders only the fixed-point gradient comparison.
+
+--educational REPORT.json renders the paired end-to-end educational results:
+python3 tools/corpus_table.py --educational tests/educational/pareto-benchmark-results.json
+
 --o1vec renders docs/corpus-bench-o1vec.tsv instead: gradient and compile
 time only, no sampling columns, plus a compile+sample speedup that adds
 2,000 synthetic gradient evaluations to each side's compile time. Usage:
 python3 tools/corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec
 """
 import csv
+import json
+import math
 import sys
 
 # The harness's machine tags, in the words a reader needs. The per-model
@@ -234,7 +241,50 @@ def render_main(rows, col):
               f"| {why(r)} |")
 
 
+def render_gradients(rows, col):
+    """Fixed-point throughput; no build cost or sampler trajectory in the ratio."""
+    print("| model | parameters | stanli gradient | CmdStan gradient | gradient speedup |")
+    print("| --- | ---: | ---: | ---: | ---: |")
+    for row in sorted(rows, key=lambda r: col(r, "model")):
+        a, b = col(row, "stanli_ns_grad"), col(row, "cmdstan_ns_grad")
+        if (not a or not b or not all(math.isfinite(float(v)) and float(v) > 0
+                                     for v in (a, b)) or col(row, "note")):
+            raise ValueError(f"Incomplete gradient measurement: {col(row, 'model')}")
+        print(f"| `{col(row, 'model')}` | {col(row, 'params')} "
+              f"| {fmt_ns(a)} | {fmt_ns(b)} | {ratio(a, b)} |")
+
+
+def render_educational(report):
+    """Render the paired source-to-CSV gate without inventing gradient timings."""
+    from check_educational import inventory, speed_gate, MINIMUM_SPEEDUPS
+    if set(report["models"]) != set(inventory()):
+        raise ValueError("Educational result inventory differs from the fixtures")
+    print("| model | stanli source-to-CSV | compiled CmdStan run | speedup | required floor |")
+    print("| --- | ---: | ---: | ---: | ---: |")
+    for model, entry in sorted(report["models"].items()):
+        if "error" in entry:
+            raise ValueError(f"Failed educational result: {model}")
+        bench = entry["benchmark"]
+        minimum = MINIMUM_SPEEDUPS.get(model, 0.5)
+        measured = speed_gate(bench["seconds"], minimum)
+        if not measured["pass"] or not bench["posterior_pass"]:
+            raise ValueError(f"Educational gate did not pass: {model}")
+        med = measured["medians"]
+        print(f"| `{model}` | {med['stanli'] * 1000:.2f} ms "
+              f"| {med['cmdstan'] * 1000:.2f} ms "
+              f"| {measured['speedup']:.3f}x | {minimum:.1f}x |")
+
+
 def main():
+    if "--gradients" in sys.argv:
+        path = sys.argv[sys.argv.index("--gradients") + 1]
+        render_gradients(*load_rows(path))
+        return
+    if "--educational" in sys.argv:
+        path = sys.argv[sys.argv.index("--educational") + 1]
+        with open(path) as stream:
+            render_educational(json.load(stream))
+        return
     o1vec = "--o1vec" in sys.argv
     path = [a for a in sys.argv[1:] if a != "--o1vec"][0]
     rows, col = load_rows(path)
