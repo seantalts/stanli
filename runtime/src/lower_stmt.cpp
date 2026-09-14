@@ -150,6 +150,16 @@ bool Lowering::scan_block(const mir::Stmt& s,
   return found;
 }
 bool Lowering::needs_runtime_control(const mir::Stmt& s) {
+  // Never execute an RNG while the lexical scan tries to discover integer
+  // constants. Its result belongs in a runtime register even when MIR marks
+  // it DataOnly. The program compiler will still refuse dynamic extents.
+  if (s.kind == mir::Stmt::Decl && s.decl_type.base == "SInt" && s.has_init &&
+      expr_effectful(s.init))
+    return true;
+  if (s.kind == mir::Stmt::Assignment && s.lhs_idx.empty() &&
+      s.rhs.unsized.depth == 0 && s.rhs.unsized.leaf == mir::UnsizedLeaf::Int &&
+      expr_effectful(s.rhs))
+    return true;
   // A structured while owns every runtime decision in its body.  Promoting
   // its enclosing block would absorb UDF-local declarations and returns,
   // which are not live-outs of that outer region.

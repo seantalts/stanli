@@ -2026,14 +2026,19 @@ struct ProgramCompiler {
     ViewKind out_kind = ViewKind::Flat;
     std::vector<int> idata;
     if (const ScalarRng* family = scalar_rng_family(e.name)) {
-      // An integer draw is runtime geometry: a size, an index or a branch
-      // condition the region has no way to know. That is the interpreter's
-      // remit, so leave the whole tranche there rather than quietly serving
-      // one out of a double register.
-      if (scalar_rng_is_int(*family))
-        bail(e.name + ": an integer draw stays on WaInterp");
+      // Stan ints fit exactly in double registers. Draws remain effectful
+      // runtime values: cint cannot fold them, shape demands still refuse,
+      // and dynamic indexing uses the existing checked register operations.
+      const auto leaf = scalar_rng_is_int(*family) ? mir::UnsizedLeaf::Int
+                                                   : mir::UnsizedLeaf::Real;
+      if (e.unsized.depth != 0 || e.unsized.leaf != leaf)
+        bail(e.name + ": result type does not match scalar RNG family");
       if (args.size() != scalar_rng_arity(*family))
         bail(e.name + ": wrong number of arguments");
+      if ((*family == ScalarRng::Binomial ||
+           *family == ScalarRng::BetaBinomial) &&
+          e.args[0].unsized.leaf != mir::UnsizedLeaf::Int)
+        bail(e.name + ": first argument must be int");
       for (const Range& a : args)
         if (!is_scalar(a))
           bail(e.name + ": container arguments stay on WaInterp");
@@ -3518,11 +3523,13 @@ struct ProgramCompiler {
           // A conditional write must preserve the old value on the untaken
           // path, so it cannot be folded into the single compile-time copy.
           // Likewise, an unconditional assignment after a structured while
-          // may read loop-carried state that now lives in registers.  The
+          // may read loop-carried state, and a generated-quantities integer
+          // may receive an RNG draw before its first while. The
           // lowering can export scalar-int live-outs, so reify both cases
           // instead of refusing a representable integer recurrence.
           if (!fold_is_certain(s.lhs) ||
-              (structured_while_seen && !try_cint(s.rhs, &ignored)))
+              ((structured_while_seen || in_write_array) &&
+               !try_cint(s.rhs, &ignored)))
             reify_written_int(s.lhs);
         }
         if (ints.count(s.lhs) && s.lhs_idx.empty()) {
