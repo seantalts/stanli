@@ -53,8 +53,8 @@ int main(int argc, char** argv) {
     std::cout << "MIR from " << argv[3] << '\n';
     return 0;
   }
-  if (argc == 2) {
-    std::cout << "PORTABLE from " << argv[1] << '\n';
+  if (argc == 3 && std::string(argv[1]) == "--model-only") {
+    std::cout << "PORTABLE from " << argv[2] << '\n';
     std::cerr << "fake compiler warning\n";
     return 0;
   }

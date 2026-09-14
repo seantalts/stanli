@@ -95,6 +95,57 @@ let selected_default_passes () =
   | None -> default_pass_selection
   | Some _ -> {default_pass_selection with max_o1_statement_depth_cost= None}
 
+module Function_names = Set.Make (String)
+
+let referenced_kind names = function
+  | Middle.Fun_kind.UserDefined (name, _)
+   |Middle.Fun_kind.StanLib (name, _, _) -> Function_names.add name names
+  | CompilerInternal _ -> names
+
+let rec referenced_expr names (expr : Middle.Expr.Typed.t) =
+  let names =
+    match expr.pattern with
+    | Var name -> Function_names.add name names
+    | FunApp (kind, _) -> referenced_kind names kind
+    | _ -> names in
+  Middle.Expr.Pattern.fold referenced_expr names expr.pattern
+
+let rec referenced_stmt names (stmt : Middle.Stmt.Located.t) =
+  let names =
+    match stmt.pattern with
+    | NRFunApp (kind, _) -> referenced_kind names kind
+    | _ -> names in
+  Middle.Stmt.Pattern.fold referenced_expr referenced_stmt names stmt.pattern
+
+let prune_portable_procedures (mir : Middle.Program.Typed.t) =
+  (* Function-valued variables passed to higher-order functions are roots
+     too. Keep all overloads of every reached name and follow their bodies
+     transitively, including recursion and void/effectful calls. A local
+     variable sharing a function name can conservatively retain extra code. *)
+  let roots =
+    List.fold_left (List.fold_left referenced_stmt) Function_names.empty
+      [mir.prepare_data; mir.log_prob; mir.generate_quantities; mir.transform_inits] in
+  let rec closure names =
+    let next =
+      List.fold_left
+        (fun acc (fn : Middle.Stmt.Located.t Middle.Program.fun_def) ->
+          if Function_names.mem fn.fdname names then
+            match fn.fdbody with
+            | Some body -> referenced_stmt acc body
+            | None -> acc
+          else acc)
+        names mir.functions_block in
+    if Function_names.equal names next then names else closure next in
+  let reachable = closure roots in
+  { mir with
+    reverse_mode_log_prob= []
+  ; unconstrain_array= []
+  ; functions_block=
+      List.filter
+        (fun (fn : Middle.Stmt.Located.t Middle.Program.fun_def) ->
+          Function_names.mem fn.fdname reachable)
+        mir.functions_block }
+
 let compile_mir_at_level
     ?(include_source = Driver.Flags.default.include_source) ~optimization_level
     ~model_name (code : string) =
@@ -116,7 +167,8 @@ let compile_mir_at_level
     | Ok (Ok mir) -> Ok mir in
   {result; warnings= !warnings; diagnostics= []}
 
-let compile_mir_with_passes ?include_source ~passes ~model_name code =
+let compile_mir_with_passes ?include_source ?(prune_unused_sections = true)
+    ?(model_only = false) ~passes ~model_name code =
   let compiled =
     compile_mir_at_level ?include_source
       ~optimization_level:Analysis_and_optimization.Optimize.O0 ~model_name code
@@ -132,40 +184,44 @@ let compile_mir_with_passes ?include_source ~passes ~model_name code =
         Common.ICE.with_exn_message (fun () ->
             Analysis_and_optimization.Optimize.optimization_suite ~settings
               candidate) in
-      match passes.max_o1_statement_depth_cost with
-      | None -> (
-        match optimize mir settings with
-        | Error internal -> (Error (Internal_error internal), [])
-        | Ok optimized -> (Ok optimized, []) )
-      | Some budget -> (
-        match
-          Common.ICE.with_exn_message (fun () ->
-              Analysis_and_optimization.Optimize.function_inlining mir)
-        with
-        | Error internal -> (Error (Internal_error internal), [])
-        | Ok inlined ->
-            let stats = max_procedure_stats inlined in
-            if stats.cost > budget then
+      (* Inline before dropping unused procedures: upstream uses a shared
+         fresh-name supply, so skipping their inlining would rename later
+         generated-quantities locals. Preserve the original structural-budget
+         decision as well. The remaining dataflow passes need only the
+         procedures the portable encoder actually consumes. *)
+      match
+        Common.ICE.with_exn_message (fun () ->
+            Analysis_and_optimization.Optimize.function_inlining mir)
+      with
+      | Error internal -> (Error (Internal_error internal), [])
+      | Ok inlined ->
+          let stats = max_procedure_stats inlined in
+          match passes.max_o1_statement_depth_cost with
+          | Some budget when stats.cost > budget ->
               ( Ok mir
               , [O1_budget_exceeded
                    { cost= stats.cost
                    ; budget
                    ; statements= stats.statements
                    ; max_control_depth= stats.max_control_depth }] )
-            else
-              let remaining_settings =
-                {settings with function_inlining= false} in
-              (match optimize inlined remaining_settings with
+          | _ ->
+              let candidate =
+                if prune_unused_sections then
+                  if model_only then prune_portable_procedures inlined
+                  else {inlined with reverse_mode_log_prob= []; unconstrain_array= []}
+                else inlined in
+              let remaining_settings = {settings with function_inlining= false} in
+              (match optimize candidate remaining_settings with
               | Error internal -> (Error (Internal_error internal), [])
-              | Ok optimized -> (Ok optimized, [])) ) ) in
+              | Ok optimized -> (Ok optimized, [])) ) in
   {result; warnings= compiled.warnings; diagnostics}
 
-let compile_mir ?include_source ~model_name code =
-  compile_mir_with_passes ?include_source ~passes:(selected_default_passes ())
+let compile_mir ?include_source ?model_only ~model_name code =
+  compile_mir_with_passes ?include_source ?model_only ~passes:(selected_default_passes ())
     ~model_name code
 
-let compile_portable ?include_source ~model_name code =
-  let compiled = compile_mir ?include_source ~model_name code in
+let compile_portable ?include_source ?model_only ~model_name code =
+  let compiled = compile_mir ?include_source ?model_only ~model_name code in
   let result =
     match compiled.result with
     | Error error -> Error error

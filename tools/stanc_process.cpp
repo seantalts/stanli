@@ -274,7 +274,7 @@ std::string run_stanc_process(const std::string& stanc,
 
 std::string run_portable_compiler(const std::string& compiler,
                                   const std::string& model) {
-  return run_process(compiler, {model}, true);
+  return run_process(compiler, {"--model-only", model}, true);
 }
 
 std::string executable_directory() {

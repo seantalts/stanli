@@ -9,7 +9,7 @@
 #include <string>
 
 #ifdef STANLI_EMBED_STANC
-extern "C" char* stanli_stanc_tmir(const char* stan_code);
+extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
 extern "C" void stanli_stanc_free(char* p);
 
 namespace stanli::tooling {
@@ -25,7 +25,7 @@ inline std::string embedded_stanc(const std::string& model) {
     while ((n = fread(buf.data(), 1, buf.size(), f.get())) > 0)
       src.append(buf.data(), n);
   }
-  char* res = stanli_stanc_tmir(src.c_str());
+  char* res = stanli_stanc_model_tmir(src.c_str());
   const std::string out(res ? res : "ERRstanc returned nothing");
   if (res) stanli_stanc_free(res);
   if (out.compare(0, 3, "ERR") == 0)

@@ -1,8 +1,9 @@
 open Middle
 
-let compile ?(passes = Stanli_pipeline.default_pass_selection) code =
+let compile ?(passes = Stanli_pipeline.default_pass_selection)
+    ?(prune_unused_sections = true) ?(model_only = false) code =
   match
-    Stanli_pipeline.compile_mir_with_passes ~passes
+    Stanli_pipeline.compile_mir_with_passes ~passes ~prune_unused_sections ~model_only
       ~model_name:"pass_selection_test" code
   with
   | {result= Ok mir; _} -> mir
@@ -172,10 +173,46 @@ let o1_equivalence_models =
   ; ("matching loop", matching_loop) ]
 
 let () =
+  let reachability_model = {|
+    functions {
+      real never_called(real x) { return exp(x); }
+      real helper(real x) { return x * x; }
+      vector rhs(real t, vector y) { return helper(t) * y; }
+      real overloaded(real x) { return x + 1; }
+      real overloaded(real x, real y) { return x + y; }
+    }
+    transformed data { real a = overloaded(1.0); }
+    parameters { real x; }
+    model {
+      array[1] vector[1] z = ode_rk45(rhs, rep_vector(x, 1), 0.0, {1.0});
+      target += overloaded(z[1, 1], a);
+    }
+    generated quantities { real check = overloaded(x); }
+  |} in
+  let pruned = compile ~model_only:true reachability_model in
+  let retained name =
+    List.exists (fun fn -> String.equal fn.Program.fdname name)
+      pruned.functions_block in
+  require (not (retained "never_called")) "unreachable UDF survived pruning";
+  List.iter (fun name -> require (retained name) ("lost reachable UDF " ^ name))
+    ["rhs"; "helper"; "overloaded"];
+  require (List.length pruned.functions_block = 4)
+    "pruning did not retain both overloads and the transitive ODE callback";
+  require (pruned.reverse_mode_log_prob = [] && pruned.unconstrain_array = [])
+    "unused backend procedures survived pruning";
+  let old = compile ~prune_unused_sections:false reachability_model in
+  require (List.length (compile reachability_model).functions_block = 5)
+    "general compilation lost an exported function";
+  let projected_old =
+    {old with functions_block=
+       List.filter (fun fn -> retained fn.Program.fdname) old.functions_block} in
+  require (String.equal (encode pruned) (encode projected_old))
+    "pruning changed a consumed procedure or retained function body";
+
   List.iter
     (fun (name, code) ->
       let pass_off_bytes =
-        encode (compile ~passes:(passes false) code) in
+        encode (compile ~passes:(passes false) ~prune_unused_sections:false code) in
       let upstream_o1_bytes = encode (compile_upstream_o1 code) in
       require
         (String.equal pass_off_bytes upstream_o1_bytes)

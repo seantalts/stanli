@@ -148,6 +148,7 @@ stanli_model* stanli_model_new_seeded(const char* tmir_sexp,
 
 #ifdef STANLI_EMBED_STANC
 extern "C" char* stanli_stanc_tmir(const char* stan_code);
+extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
 extern "C" void stanli_stanc_free(char* p);
 #endif
 
@@ -163,7 +164,7 @@ stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
                                                 uint32_t seed, char* err,
                                                 size_t err_len) {
 #ifdef STANLI_EMBED_STANC
-  char* res = stanli_stanc_tmir(stan_code);
+  char* res = stanli_stanc_model_tmir(stan_code);
   if (std::strncmp(res, "OK", 2) != 0) {
     put_err(err, err_len, res + (std::strncmp(res, "ERR", 3) == 0 ? 3 : 0));
     stanli_stanc_free(res);
