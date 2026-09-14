@@ -132,6 +132,9 @@ void print_island_body(std::string& out, const Graph& g, size_t u, int n) {
   appendf(out,
           "\n  ADJOINT (reverse order; dst/a/b/c are adjoint cells, "
           "va/vb/vc/vd are value registers):\n");
+  for (const auto& segment : p.adj.segments)
+    appendf(out, "  when r%d: adjoint [%d, %d)\n", segment.guard, segment.begin,
+            segment.end);
   for (size_t i = 0; i < p.adj.code.size(); ++i) {
     const AdjInstr& A = p.adj.code[i];
     appendf(out,

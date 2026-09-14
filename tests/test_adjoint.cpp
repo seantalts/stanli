@@ -531,6 +531,198 @@ struct Build {
   }
 };
 
+// Forward-only branches must preserve executed paths, overwritten values,
+// conditional copies and joins. Reuse the register file while toggling paths
+// so stale flags/checkpoints cannot pass by starting from zero every time.
+static void check_reused_branches(Case c) {
+  const auto orig = c.p;
+  expect("branch generation", gen_adjoint(c.p));
+  if (c.p.adj.empty()) return;
+  expect("branch segments recorded", !c.p.adj.segments.empty());
+  std::vector<double> val(c.p.n_regs, 0.0), adj(c.p.adj.n_regs);
+  for (double condition : {1.0, 0.0, 1.0, 0.0}) {
+    c.in[0] = condition;
+    std::vector<double> want_v;
+    const auto want = replay_adjoints(orig, c.in, c.seed, &want_v);
+    size_t offset = 0;
+    for (const auto& in : c.p.ins)
+      for (int k = 0; k < in.len; ++k) val[in.reg + k] = c.in[offset++];
+    run_program(c.p, val.data());
+    std::fill(adj.begin(), adj.end(), 0.0);
+    for (size_t k = c.p.out_regs.size(); k-- > 0;) {
+      expect("branch forward exact",
+             ulps(val[c.p.out_regs[k]], want_v[k]) == 0);
+      adj[c.p.adj.adj_reg[c.p.out_regs[k]]] += c.seed[k];
+    }
+    run_adjoint(c.p, c.p.adj, val.data(), adj.data());
+    offset = 0;
+    for (const auto& in : c.p.ins)
+      for (int k = 0; k < in.len; ++k)
+        expect("reused branch gradient exact",
+               ulps(adj[c.p.adj.adj_reg[in.reg + k]], want[offset++]) == 0);
+  }
+}
+
+static void test_acyclic_branches() {
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 4, 0);
+    const int copied = b.emit(Program::MOV, 1);
+    b.emit_to(Program::MUL, result, copied, 2);
+    b.emit_to(Program::JMP, 5, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    b.emit_to(Program::MUL, 1, 1, 2);  // checkpoint taken arm's original x
+    b.emit_to(Program::SUB, 0, 0, 0);  // destroy original branch condition
+    const int out = b.emit(Program::ADD, result, 1);
+    check_reused_branches(b.done({out, result}, {0.75, 1.25}));
+  }
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 7, 0);
+    b.emit_to(Program::JZ, 4, 1);
+    b.emit_to(Program::EXP, result, 2);
+    b.emit_to(Program::JMP, 5, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    b.emit_to(Program::TANH, result, result);
+    b.emit_to(Program::JMP, 8, 0);
+    b.emit_to(Program::MOV, result, 2);
+    auto c = b.done({result}, {1.0});
+    check_reused_branches(c);
+    c.in[1] = 0.0;
+    check_reused_branches(c);
+  }
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 3, 0);
+    b.emit_to(Program::LOG, result, 1);
+    b.emit_to(Program::JMP, 4, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    auto c = b.done({result}, {1.0});
+    c.in[0] = 0;
+    c.in[1] = -1;  // dead invalid derivative must never run
+    check("dead log branch", c);
+  }
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    Program::Call call;
+    call.opcode = OP_POW;
+    call.n_in = 2;
+    call.in[0] = 1;
+    call.in[1] = 2;
+    call.in_len[0] = call.in_len[1] = 1;
+    call.out = result;
+    call.out_len = 1;
+    expect("branch CALL bind", bind_call(call));
+    b.p.calls.push_back(call);
+    b.emit_to(Program::JZ, 3, 0);
+    b.emit_to(Program::CALL, 0, 0);
+    b.emit_to(Program::JMP, 4, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    check_reused_branches(b.done({result}, {1.0}));
+  }
+  {
+    Build b({0.7, 1.3});
+    const int m =
+        b.emit(Program::EXTREMA_RANGE, 0, 1, kProgramExtremaScalar, 2);
+    const int condition = b.emit(Program::GT, m, 0);
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 5, condition);
+    b.emit_to(Program::SQUARE, result, 0);
+    b.emit_to(Program::JMP, 6, 0);
+    b.emit_to(Program::EXP, result, 1);
+    auto c = b.done({result}, {1.0});
+    check("passive extrema guard", c);
+    c.in = {1.3, 0.7};
+    check("passive extrema other path", c);
+    c.p.out_regs = {m};
+    expect("active extrema refuses", !gen_adjoint(c.p));
+  }
+  {
+    Build b({1.0, 0.7});
+    b.emit_to(Program::JZ, 2, 0);
+    b.p.messages.emplace_back();
+    b.p.messages.back().spec.chunks = {"branch rejected"};
+    b.emit_to(Program::REJECT, 0, 0);
+    int out = b.emit(Program::SQUARE, 1);
+    auto c = b.done({out}, {1.0});
+    c.in[0] = 0;
+    check("dead reject", c);
+    expect("reject path generation", gen_adjoint(c.p));
+    std::vector<double> val(c.p.n_regs, 1.0);
+    bool rejected = false;
+    try {
+      run_program(c.p, val.data());
+    } catch (const std::domain_error&) {
+      rejected = true;
+    }
+    expect("taken reject preserved", rejected);
+  }
+  {
+    Build b({1.0, 0.63, 4.0, 0.4, 1.7});
+    const int out = b.alloc();
+    b.emit_to(Program::JZ, 0, 0);
+    const int id = program_density_id_by_name("student_t_lpdf");
+    expect("branch four-argument density", id >= 0);
+    const int density = b.emit_density(id, {1, 2, 3, 4});
+    b.emit_to(Program::MOV, out, density);
+    const int jump = static_cast<int>(b.p.code.size());
+    b.emit_to(Program::JMP, 0, 0);
+    b.p.code[0].dst = static_cast<int>(b.p.code.size());
+    b.emit_to(Program::SQUARE, out, 1);
+    b.p.code[jump].dst = static_cast<int>(b.p.code.size());
+    check_reused_branches(b.done({out}, {1.0}));
+    // An unsupported derivative in the fourth argument must not be missed
+    // by analyses of the instruction's three inline operand fields.
+    Build active({0.63, 4.0, 0.4, 1.7});
+    const int m =
+        active.emit(Program::EXTREMA_RANGE, 3, 1, kProgramExtremaScalar, 1);
+    const int d = active.emit_density(id, {0, 1, 2, m});
+    active.p.out_regs = {d};
+    expect("active fourth density argument refuses", !gen_adjoint(active.p));
+  }
+  // Deterministic branch combinations with exact dyadic arithmetic. This
+  // exercises conditional overwrites and copy aliases without introducing
+  // the existing mutable-copy fuzzer's permitted reassociation tolerance.
+  for (int trial = 0; trial < 256; ++trial) {
+    Build b({1.0, 0.125 * (1 + trial % 7), 0.5});
+    int value = b.emit(Program::MOV, 1);
+    for (int depth = 0; depth < 4; ++depth) {
+      int condition = b.konst((trial >> depth) & 1);
+      const int branch = static_cast<int>(b.p.code.size());
+      b.emit_to(Program::JZ, branch + 3, condition);
+      b.emit_to(Program::MUL, value, value, 2);
+      b.emit_to(Program::JMP, branch + 4, 0);
+      b.emit_to(Program::ADD, value, value, 2);
+      value = b.emit(Program::MOV, value);
+    }
+    check("acyclic dyadic paths", b.done({value}, {0.75}));
+  }
+  const auto refuses = [](IslandProg p) {
+    const auto before = p;
+    expect("branch near miss refuses", !gen_adjoint(p));
+    expect("branch refusal transactional",
+           p.n_regs == before.n_regs && p.pool == before.pool &&
+               p.adj.empty() && p.code.size() == before.code.size() &&
+               std::memcmp(p.code.data(), before.code.data(),
+                           p.code.size() * sizeof(Program::Instr)) == 0);
+  };
+  {
+    Build b({1.0});
+    const int out = b.alloc();
+    b.emit_to(Program::JZ, 2, 0);
+    b.emit_to(Program::SQUARE, out, 0);
+    refuses(b.done({out}, {1.0}).p);  // uninitialized join
+    b.p.code[0].dst = 0;
+    refuses(b.p);  // back edge
+    b.p.code[0].dst = 1000;
+    refuses(b.p);  // invalid target
+  }
+}
+
 // ---- the unary and binary arithmetic ----------------------------------
 
 static void test_binary_ops() {
@@ -1678,6 +1870,7 @@ static void test_fuzz_ranges() {
 }
 
 int main() {
+  test_acyclic_branches();
   test_call_binding_refusal();
   test_call_cached_forward_reverse_aliasing();
   test_call_primal_read_contract();
