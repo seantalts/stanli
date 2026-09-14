@@ -4,7 +4,8 @@ Across 119 posteriordb models, stanli evaluates a gradient **2.10x faster
 than CmdStan at the median**. It is at least as fast on 119 of the 119 models.
 Because stanli does not build a native C++ binary for each model, the first
 complete run is typically faster by more than the gradient ratio alone
-suggests.
+suggests. The [13 educational-model results](#educational-models) below
+also report complete runs against already-compiled CmdStan.
 
 ## Eight Schools: 1.6x faster gradients, roughly 100x faster to draws
 
@@ -417,6 +418,94 @@ main table.
 | model | stanli gradient | CmdStan gradient | gradient speedup | what stopped it |
 | --- | ---: | ---: | ---: | --- |
 | `sir` | - | - | - | stanli's gradient probe threw at the benchmark point; the CmdStan gradient driver would not run; no stanli compile time; no stanli gradient |
+
+## Educational models
+
+All 13 supplied course models are included in the benchmark suite. The table
+below measures the complete Stanli command, including source compilation,
+JSON preparation, 1,000 NUTS warmup iterations, 1,000 saved draws, generated
+quantities and 17-digit CSV output. CmdStan uses an already-built executable
+with `--O1` and `-O3`; its build time is excluded from these speedups.
+
+Measured on 2026-09-14 on the Apple M3 Ultra with the Release implementation
+at `e46e360f`. Values are medians of five alternating pairs after one warmup
+pair, with the same seeds and initialization at unconstrained zero. These
+are the supplied teaching fixtures; seven use synthetic data.
+
+<!-- educational-results:start -->
+| model | stanli source-to-CSV | compiled CmdStan run | speedup | required floor |
+| --- | ---: | ---: | ---: | ---: |
+| `aalto_bern` | 12.08 ms | 16.25 ms | 1.345x | 0.5x |
+| `aalto_binom` | 11.24 ms | 12.94 ms | 1.151x | 0.5x |
+| `aalto_binom2` | 12.94 ms | 16.33 ms | 1.262x | 0.5x |
+| `aalto_binomb` | 10.94 ms | 12.92 ms | 1.181x | 0.5x |
+| `aalto_gpareto` | 30.75 ms | 32.97 ms | 1.072x | 1.0x |
+| `aalto_grp_aov` | 16.54 ms | 21.74 ms | 1.315x | 0.5x |
+| `aalto_grp_prior_mean` | 24.79 ms | 33.49 ms | 1.351x | 0.5x |
+| `aalto_grp_prior_mean_var` | 64.09 ms | 91.37 ms | 1.425x | 0.5x |
+| `aalto_lin` | 22.88 ms | 33.56 ms | 1.467x | 0.5x |
+| `aalto_lin_std` | 18.23 ms | 30.41 ms | 1.668x | 0.5x |
+| `aalto_lin_std_t` | 23.13 ms | 34.42 ms | 1.488x | 0.5x |
+| `aalto_poisson_hurdle` | 653.72 ms | 871.43 ms | 1.333x | 0.5x |
+| `aalto_poisson_simple` | 94.72 ms | 245.24 ms | 2.589x | 0.5x |
+<!-- educational-results:end -->
+
+Pareto's **1.072x** result has a modest margin: its median absolute deviation
+is 0.662 ms versus 0.445 ms for CmdStan. The performance gate requires Pareto
+at or above 1.0x and every other model at or above 0.5x. All 13 pass the
+three-point log-density/gradient/generated-output oracle and sampling checks.
+[Raw observations](../tests/educational/pareto-benchmark-results.json),
+[fixture provenance](../tests/educational/IMPORT_README.md), and the
+[detailed results](../tests/educational/RESULTS.md) retain methodology,
+uncertainty and correctness evidence. These end-to-end measurements are
+separate from the posteriordb gradient summaries above.
+
+### Educational gradients at a fixed point
+
+A separate run through the standard corpus drivers measures warmed gradients
+at the same deterministic unconstrained point, with CmdStan `--O1`. These
+are arithmetic means from one timed loop per engine/model, following the
+standard method below; no sampling or build time enters the gradient ratio.
+
+<!-- educational-gradients:start -->
+| model | parameters | stanli gradient | CmdStan gradient | gradient speedup |
+| --- | ---: | ---: | ---: | ---: |
+| `aalto_bern` | 1 | 75 ns | 103 ns | 1.37x |
+| `aalto_binom` | 1 | 70 ns | 114 ns | 1.63x |
+| `aalto_binom2` | 2 | 123 ns | 186 ns | 1.51x |
+| `aalto_binomb` | 1 | 66 ns | 90 ns | 1.36x |
+| `aalto_gpareto` | 2 | 361 ns | 231 ns | 0.64x |
+| `aalto_grp_aov` | 4 | 248 ns | 329 ns | 1.33x |
+| `aalto_grp_prior_mean` | 6 | 301 ns | 413 ns | 1.37x |
+| `aalto_grp_prior_mean_var` | 10 | 547 ns | 744 ns | 1.36x |
+| `aalto_lin` | 3 | 175 ns | 282 ns | 1.61x |
+| `aalto_lin_std` | 3 | 181 ns | 318 ns | 1.76x |
+| `aalto_lin_std_t` | 4 | 270 ns | 367 ns | 1.36x |
+| `aalto_poisson_hurdle` | 2 | 2.308 us | 58.015 us | 25.14x |
+| `aalto_poisson_simple` | 1 | 840 ns | 956 ns | 1.14x |
+<!-- educational-gradients:end -->
+
+Pareto measures **0.64x** CmdStan gradient throughput at this point, while
+its separately measured complete run reaches **1.072x**. Complete-run time
+also includes preparation and output, and the samplers can take different
+NUTS trajectories and gradient counts. The gradient result is not a claim
+that every phase beats CmdStan. [Raw gradient observations](educational-bench-o1.tsv),
+[compiler identities](educational-bench-o1.manifest.json), and
+[driver/fixture hashes](educational-bench-o1.metadata.json) are retained.
+
+The corpus runner discovers these models by default alongside posteriordb;
+use `--corpus educational` to select them or `--corpus posteriordb` to run only
+the historical collection. The stricter paired educational gate and its table
+can be reproduced with:
+
+```sh
+python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
+  educational-corpus.tsv --corpus educational --stancflags --O1
+python3 tools/check_educational.py --benchmark --repetitions 5 \
+  --output build-rel/educational-benchmark/results.json
+python3 tools/corpus_table.py --educational \
+  tests/educational/pareto-benchmark-results.json
+```
 
 ## Benchmark method
 

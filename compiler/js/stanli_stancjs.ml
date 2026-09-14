@@ -40,14 +40,14 @@ let stan2cpp_wrapped name code flags includes : stancReturn Js.t =
   | Error non_compilation_error ->
       wrap_error ~warnings:include_reader_warnings non_compilation_error
 
-let compile_portable name code includes : stancReturn Js.t =
+let compile_portable ~model_only name code includes : stancReturn Js.t =
   let includes, include_reader_warnings = get_includes_lenient includes in
   let flags = Js.array [|Js.string "O1"|] |> Js.some in
   match process_flags name code flags includes with
   | Error message -> wrap_error ~warnings:include_reader_warnings message
   | Ok {name; code; driver_flags; color_output} ->
       let compilation =
-        Stanli_pipeline.compile_portable ~model_name:name code
+        Stanli_pipeline.compile_portable ~model_only ~model_name:name code
           ~include_source:driver_flags.include_source in
       let warnings =
         include_reader_warnings
@@ -80,4 +80,5 @@ let () =
   Js.export "dump_stan_math_distributions"
     (Js.Unsafe.callback dump_stan_math_distributions);
   Js.export "stanc" (Js.Unsafe.callback stan2cpp_wrapped);
-  Js.export "stanli_compile" (Js.Unsafe.callback compile_portable)
+  Js.export "stanli_compile" (Js.Unsafe.callback (compile_portable ~model_only:false));
+  Js.export "stanli_compile_model" (Js.Unsafe.callback (compile_portable ~model_only:true))

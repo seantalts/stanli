@@ -1503,6 +1503,21 @@ headline historical measurements follow:
   state draws confirm stream alignment. These targeted results do not refresh
   `docs/corpus-bench.tsv` or the current
   [full-corpus table](../../docs/benchmarks.md#full-corpus).
+- **Compiled scalar integer RNG control** extends the register-machine path
+  to generated-quantity branches, rejection loops and checked indices driven
+  by integer draws. Effectful integer initializers cannot run during lexical
+  constant discovery; draw-dependent extents still refuse to the interpreter.
+  Poisson, Student-t and Bernoulli-logit use the shared Stan Math draw kernel.
+  Tests compare repeated graph/interpreter/copy outputs and subsequent RNG
+  state bitwise, including empty loops, dynamic-size fallback and invalid
+  indices. In the 2026-09-14 educational revision A/B, together with compiler
+  procedure pruning and buffered 17-digit CLI formatting, hurdle-Poisson
+  improved 4.75x, simple Poisson 8.51x and Student-t regression 1.96x end to
+  end. All 52 complete CSVs (13 models, four seeds) matched the old binary
+  byte for byte. All 13 models clear the 0.5x vectorized CmdStan wall-time
+  floor, including Stanli source compilation. See the
+  [full educational results](../../tests/educational/RESULTS.md) for the
+  preparation tradeoff, phase measurements and raw observations.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven

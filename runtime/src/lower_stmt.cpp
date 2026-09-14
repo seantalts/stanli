@@ -150,6 +150,16 @@ bool Lowering::scan_block(const mir::Stmt& s,
   return found;
 }
 bool Lowering::needs_runtime_control(const mir::Stmt& s) {
+  // Never execute an RNG while the lexical scan tries to discover integer
+  // constants. Its result belongs in a runtime register even when MIR marks
+  // it DataOnly. The program compiler will still refuse dynamic extents.
+  if (s.kind == mir::Stmt::Decl && s.decl_type.base == "SInt" && s.has_init &&
+      expr_effectful(s.init))
+    return true;
+  if (s.kind == mir::Stmt::Assignment && s.lhs_idx.empty() &&
+      s.rhs.unsized.depth == 0 && s.rhs.unsized.leaf == mir::UnsizedLeaf::Int &&
+      expr_effectful(s.rhs))
+    return true;
   // A structured while owns every runtime decision in its body.  Promoting
   // its enclosing block would absorb UDF-local declarations and returns,
   // which are not live-outs of that outer region.
@@ -427,11 +437,8 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   if (prog->out_regs.empty() && !(e && expr_out->len == 0) &&
       (s == nullptr || reg->out_names.empty()) && !reg->has_effect)
     fail("runtime-control region produces nothing", s ? s->raw : e->raw);
-  // A region with a runtime branch keeps the var replay -- reversing
-  // control flow needs the structured form the flat program has already
-  // lost -- so this usually declines. It is asked anyway because a region
-  // can reach here branch-free: a `~` refusal or an unknown name is not
-  // the only way to end up compiled.
+  // Forward-only branches can record the executed path for generated
+  // adjoints. Unsupported derivatives and loops retain the replay.
   // The register compactor's liveness analysis is straight-line (with
   // forward branches as barriers).  A while adds a back edge, so retaining
   // the uncompact program is the correctness-first choice: a state register
@@ -452,7 +459,9 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   // their operands can have different widths, so retain the original
   // register numbering until those instructions carry explicit spans.
   if (!has_back_edge && !has_unmodelled_ranges) compact_island(*prog);
-  prog->native_adj = gen_adjoint(*prog) && !std::getenv("STANLI_NO_NATIVE_ADJ");
+  // Generated quantities have no backward consumer.
+  prog->native_adj = !in_write_array && gen_adjoint(*prog) &&
+                     !std::getenv("STANLI_NO_NATIVE_ADJ");
   *prog_out = std::move(prog);
 }
 // The OP_ISLAND for a compiled region, plus one extraction per live-out.

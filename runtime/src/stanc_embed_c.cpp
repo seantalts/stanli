@@ -86,7 +86,7 @@ char* error_result(const char* message) {
 extern "C" {
 
 // "OK<MIR>" or "ERR<message>"; caller frees with stanli_stanc_free.
-char* stanli_stanc_tmir(const char* stan_code) {
+static char* compile_callback(const char* stan_code, const char* entry) {
   if (stan_code == nullptr) return error_result("Stan source is null");
 
   std::lock_guard<std::mutex> serial(compile_mutex);
@@ -99,8 +99,7 @@ char* stanli_stanc_tmir(const char* stan_code) {
   }
 
   RuntimeLock runtime;
-  static const value* fn = nullptr;
-  if (fn == nullptr) fn = caml_named_value("stanc_compile_tmir");
+  const value* fn = caml_named_value(entry);
   if (fn == nullptr) {
     return error_result("embedded stanc entry point not registered");
   }
@@ -110,6 +109,14 @@ char* stanli_stanc_tmir(const char* stan_code) {
     return error_result("embedded stanc callback raised an OCaml exception");
   }
   return strdup(String_val(res));
+}
+
+char* stanli_stanc_tmir(const char* stan_code) {
+  return compile_callback(stan_code, "stanc_compile_tmir");
+}
+
+char* stanli_stanc_model_tmir(const char* stan_code) {
+  return compile_callback(stan_code, "stanc_compile_model_tmir");
 }
 
 void stanli_stanc_free(char* p) { std::free(p); }

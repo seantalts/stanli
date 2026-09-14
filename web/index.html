@@ -1764,6 +1764,8 @@ it works</a></p>
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
 <!--gen:corpus_at_par-->119<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
 <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.
+The suite also includes <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md#educational-models">13 educational models with complete-run comparisons</a>
+against already-compiled CmdStan.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
 </p>

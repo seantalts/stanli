@@ -16,12 +16,14 @@ distributes those components too.
 | [SUNDIALS / CVODES](https://computing.llnl.gov/projects/sundials) | ODE integration for `integrate_ode_rk45` and `integrate_ode_bdf` | BSD 3-Clause |
 | [nlohmann/json](https://github.com/nlohmann/json) | reading CmdStan-format JSON data | MIT |
 | [walnutpie](https://github.com/flatironinstitute/walnuts) | WALNUTS sampler and its warmup adaptation | MIT |
+| [{fmt}](https://github.com/fmtlib/fmt) | full-precision CSV formatting in the `stanli_run` CLI only | MIT |
 
 Full license texts ship with the vendored sources fetched by
 `deps/fetch.sh`; see `deps/math/LICENSE.md`, `deps/stan/LICENSE.md`, and
 the license files under `deps/math/lib/`. walnutpie is vendored directly
 in this repository, headers and license together, at
 `runtime/third_party/walnutpie/`.
+The CLI formatter is pinned to {fmt} 11.2.0; its license is in `deps/fmt/LICENSE`.
 
 Notes on the two that carry conditions beyond attribution:
 

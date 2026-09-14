@@ -1,0 +1,15 @@
+{
+  "cmdstan": {
+    "make_stanc": {
+      "path": "/Users/xitrium/claud/stanrt/deps/cmdstan/bin/stanc",
+      "sha256": "d1d0b33531d61cdf46c6fe77d528ae754a6dacee50e74564f5d1ced660fdf246",
+      "version": "stanc3 ac69570 (Unix)"
+    },
+    "header_stanc": {
+      "path": "/private/tmp/stanli-educational-e2e-20260913/deps/stanc3/stanc",
+      "sha256": "40f3ddc99efa9d97fc5fcbcd059241ff445e857108639fa54d46f02d46e8704c",
+      "version": "stanc3 v2.39.0-174-g8e154ac (Unix)"
+    },
+    "stancflags": "--O1"
+  }
+}

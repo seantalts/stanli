@@ -765,6 +765,8 @@ add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
 add_executable(stanli_run tools/stanli_run.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_run PRIVATE stanli stanli_stanc_process)
+target_include_directories(stanli_run PRIVATE ${DEPS}/fmt/include)
+target_compile_definitions(stanli_run PRIVATE FMT_HEADER_ONLY)
 stanli_embed_stanc(stanli_run)
 add_executable(stanli_check tools/stanli_check.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
@@ -815,6 +817,11 @@ endif()
 add_executable(test_stanc_process tests/test_stanc_process.cpp)
 target_link_libraries(test_stanc_process PRIVATE stanli_stanc_process)
 add_test(NAME test_stanc_process COMMAND test_stanc_process)
+
+add_executable(test_csv_writer tests/test_csv_writer.cpp)
+target_include_directories(test_csv_writer PRIVATE ${DEPS}/fmt/include)
+target_compile_definitions(test_csv_writer PRIVATE FMT_HEADER_ONLY)
+add_test(NAME test_csv_writer COMMAND test_csv_writer)
 add_test(NAME test_dev_setup
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dev_setup.py)
 add_test(NAME test_check_precompiled_mir
@@ -1116,6 +1123,26 @@ add_test(NAME test_function COMMAND test_function
 # standalone runs on older Python use the Tomli backport in requirements.txt.
 find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME test_educational_harness
+           COMMAND ${Python3_EXECUTABLE} tests/test_educational.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_educational_models
+           COMMAND ${Python3_EXECUTABLE} tools/check_educational.py
+                   --build ${CMAKE_CURRENT_BINARY_DIR}
+                   --output ${CMAKE_CURRENT_BINARY_DIR}/educational-ctest/results.json
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_educational_models PROPERTIES TIMEOUT 180)
+  add_custom_target(check_educational_performance
+    COMMAND ${Python3_EXECUTABLE} tools/check_educational.py --benchmark
+            --build ${CMAKE_CURRENT_BINARY_DIR}
+            --output ${CMAKE_CURRENT_BINARY_DIR}/educational-benchmark/results.json
+    DEPENDS stanli_check stanli_run
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    USES_TERMINAL)
+  add_test(NAME test_run_timings
+           COMMAND ${Python3_EXECUTABLE} tests/test_run_timings.py
+                   $<TARGET_FILE:stanli_run>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

@@ -27,6 +27,10 @@ enum class ScalarRng : uint8_t {
   Gumbel,
   BetaBinomial,
   Exponential,
+  // Preserve the existing container-variant numbers (9 through 11).
+  Poisson = 12,
+  StudentT,
+  BernoulliLogit,
 };
 
 // OP_RNG's first non-scalar-argument variant. Keep it outside ScalarRng:
