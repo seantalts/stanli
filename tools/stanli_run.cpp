@@ -29,6 +29,7 @@
 #include <stanli/nuts.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "csv_writer.hpp"
 #include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
 
@@ -268,6 +269,7 @@ int main(int argc, char** argv) {
     if (want_summary) summary_draws.reserve(draws.size() * col_names.size());
 
     std::vector<double> row;
+    stanli::tooling::CsvWriter csv(stdout);
     size_t graph_bad = 0;
     std::string first_graph_bad;
     for (size_t d = 0; d < draws.size(); ++d) {
@@ -294,21 +296,15 @@ int main(int argc, char** argv) {
                      std::numeric_limits<double>::quiet_NaN());
         }
       }
-      bool first = true;
       if (want_stats) {
-        for (double v : stats.rows[d]) {
-          std::printf(first ? "%.17g" : ",%.17g", v);
-          first = false;
-        }
+        for (double v : stats.rows[d]) csv.value(v);
       }
-      for (double v : row) {
-        std::printf(first ? "%.17g" : ",%.17g", v);
-        first = false;
-      }
-      std::printf("\n");
+      for (double v : row) csv.value(v);
+      csv.end_row();
       if (want_summary)
         summary_draws.insert(summary_draws.end(), row.begin(), row.end());
     }
+    csv.flush();
     if (graph_bad)
       std::fprintf(stderr,
                    "stanli_run: %zu of %zu draws could not produce generated "

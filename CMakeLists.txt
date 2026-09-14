@@ -765,6 +765,8 @@ add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
 add_executable(stanli_run tools/stanli_run.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_run PRIVATE stanli stanli_stanc_process)
+target_include_directories(stanli_run PRIVATE ${DEPS}/fmt/include)
+target_compile_definitions(stanli_run PRIVATE FMT_HEADER_ONLY)
 stanli_embed_stanc(stanli_run)
 add_executable(stanli_check tools/stanli_check.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
@@ -815,6 +817,11 @@ endif()
 add_executable(test_stanc_process tests/test_stanc_process.cpp)
 target_link_libraries(test_stanc_process PRIVATE stanli_stanc_process)
 add_test(NAME test_stanc_process COMMAND test_stanc_process)
+
+add_executable(test_csv_writer tests/test_csv_writer.cpp)
+target_include_directories(test_csv_writer PRIVATE ${DEPS}/fmt/include)
+target_compile_definitions(test_csv_writer PRIVATE FMT_HEADER_ONLY)
+add_test(NAME test_csv_writer COMMAND test_csv_writer)
 add_test(NAME test_dev_setup
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dev_setup.py)
 add_test(NAME test_check_precompiled_mir
