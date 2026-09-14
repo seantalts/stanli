@@ -36,6 +36,7 @@ val compile_mir :
 
 val compile_mir_with_passes :
      ?include_source:Frontend.Include_files.t
+  -> ?cache_signatures:bool
   -> ?prune_unused_sections:bool
   -> ?model_only:bool
   -> passes:pass_selection

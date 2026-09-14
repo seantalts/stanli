@@ -167,7 +167,7 @@ let compile_mir_at_level
     | Ok (Ok mir) -> Ok mir in
   {result; warnings= !warnings; diagnostics= []}
 
-let compile_mir_with_passes ?include_source ?(prune_unused_sections = true)
+let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = true)
     ?(model_only = false) ~passes ~model_name code =
   let compiled =
     compile_mir_at_level ?include_source
@@ -215,6 +215,16 @@ let compile_mir_with_passes ?include_source ?(prune_unused_sections = true)
               | Error internal -> (Error (Internal_error internal), [])
               | Ok optimized -> (Ok optimized, [])) ) in
   {result; warnings= compiled.warnings; diagnostics}
+
+let compile_mir_with_passes ?include_source ?(cache_signatures = true)
+    ?prune_unused_sections ?model_only
+    ~passes ~model_name code =
+  let compile () =
+    compile_mir_with_passes_uncached ?include_source ?prune_unused_sections ?model_only
+      ~passes ~model_name code in
+  if cache_signatures then
+    Frontend.SignatureMismatch.with_stanlib_cache compile
+  else compile ()
 
 let compile_mir ?include_source ?model_only ~model_name code =
   compile_mir_with_passes ?include_source ?model_only ~passes:(selected_default_passes ())

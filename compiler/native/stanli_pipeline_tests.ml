@@ -1,9 +1,9 @@
 open Middle
 
 let compile ?(passes = Stanli_pipeline.default_pass_selection)
-    ?(prune_unused_sections = true) ?(model_only = false) code =
+    ?(prune_unused_sections = true) ?(model_only = false) ?(cache_signatures = true) code =
   match
-    Stanli_pipeline.compile_mir_with_passes ~passes ~prune_unused_sections ~model_only
+    Stanli_pipeline.compile_mir_with_passes ~passes ~prune_unused_sections ~model_only ~cache_signatures
       ~model_name:"pass_selection_test" code
   with
   | {result= Ok mir; _} -> mir
@@ -173,6 +173,51 @@ let o1_equivalence_models =
   ; ("matching loop", matching_loop) ]
 
 let () =
+  let builtin_sets = Lazy.force Stan_math_signatures.lazy_signatures_alist in
+  let materialized () =
+    List.fold_left (fun n (_, entries) -> n + if Lazy.is_val entries then 1 else 0)
+      0 builtin_sets in
+  require (List.length builtin_sets > 500) "missing built-in signature names";
+  require (materialized () = 0) "built-in registry eagerly materialized overloads";
+  ignore (compile "parameters { real x; } model { x ~ normal(0, 1); }");
+  require (materialized () > 0 && materialized () < List.length builtin_sets / 2)
+    "simple compilation forced unrelated built-in overloads";
+  List.iter (fun code ->
+      match (Stanli_pipeline.compile_mir_with_passes
+        ~passes:Stanli_pipeline.default_pass_selection ~model_name:"undefined" code).result with
+      | Error (Stanli_pipeline.Frontend_error _) -> ()
+      | _ -> failwith "undefined user function escaped the lazy environment scan")
+    [ "functions { real f(real x); } model {}"
+    ; "functions { real f(real x); real f(real x, real y) { return x+y; } } model {}" ];
+  let module S = Frontend.SignatureMismatch in
+  let open UnsizedType in
+  let signatures =
+    [ ("normal_lpdf", [(AutoDiffable, UReal); (DataOnly, UReal); (DataOnly, UReal)])
+    ; ("normal_lpdf", [(DataOnly, UReal); (DataOnly, UReal); (DataOnly, UReal)])
+    ; ("add", [(AutoDiffable, UInt); (DataOnly, UReal)])
+    ; ("add", [(AutoDiffable, UVector); (DataOnly, UVector)])
+    ; ("does_not_exist", [(AutoDiffable, UReal)])
+    ; ("normal_lpdf", [(AutoDiffable, UMatrix)]) ] in
+  let lookup (name, args) =
+    match S.matching_stanlib_function name args with
+    | S.UniqueMatch (ret, kind, promotions, location) ->
+        S.UniqueMatch (ret, kind Fun_kind.FnPlain, promotions, location)
+    | S.AmbiguousMatch result -> S.AmbiguousMatch result
+    | S.SignatureErrors result -> S.SignatureErrors result in
+  let expected = List.map lookup signatures in
+  S.with_stanlib_cache (fun () ->
+      for _ = 1 to 3 do
+        require (List.map lookup signatures = expected)
+          "cached signature result/promotion/error changed";
+        S.with_stanlib_cache (fun () ->
+            require (List.map lookup signatures = expected)
+              "nested signature cache changed results")
+      done;
+      (try S.with_stanlib_cache (fun () -> raise Exit) with Exit -> ());
+      require (List.map lookup signatures = expected)
+        "failed nested signature lookup changed outer scope");
+  require (List.map lookup signatures = expected)
+    "signature scope changed subsequent uncached lookup";
   let reachability_model = {|
     functions {
       real never_called(real x) { return exp(x); }
@@ -219,6 +264,10 @@ let () =
         ("pass-off output differs from upstream O1 for " ^ name);
       let pass_on_bytes =
         encode (compile ~passes:(passes true) code) in
+      require
+        (String.equal pass_on_bytes
+           (encode (compile ~cache_signatures:false ~passes:(passes true) code)))
+        ("signature cache changes portable MIR for " ^ name);
       let production_bytes = compile_portable code in
       require
         (String.equal production_bytes pass_on_bytes)
