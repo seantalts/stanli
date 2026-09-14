@@ -59,7 +59,8 @@ python3 tools/check_educational.py --benchmark --build build-rel \
 # Or: cmake --build build-rel --target check_educational_performance
 ```
 
-Every model must achieve **CmdStan wall time / Stanli wall time >= 0.5**.
+Every model must achieve **CmdStan wall time / Stanli wall time >= 0.5**;
+**Pareto must achieve >= 1.0**.
 This is a per-model floor, never an average. Compilation errors, timeouts,
 malformed CSV, nonfinite outputs and missing timing evidence fail the run.
 Failures remain failures; there are no model exclusions or relaxed floors.

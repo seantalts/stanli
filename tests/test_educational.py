@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 from check_educational import (compare, inventory, parse_timings,
-                               posterior_gate, sample_csv, speed_gate)
+                               posterior_gate, sample_csv, speed_gate, MINIMUM_SPEEDUPS)
 
 
 class EducationalGateTests(unittest.TestCase):
@@ -29,6 +29,12 @@ class EducationalGateTests(unittest.TestCase):
     def test_performance_boundary_and_per_model_failure(self):
         self.assertTrue(speed_gate({"stanli": [2, 2, 2], "cmdstan": [1, 1, 1]})["pass"])
         self.assertFalse(speed_gate({"stanli": [2.01] * 3, "cmdstan": [1] * 3})["pass"])
+
+    def test_pareto_requires_cmdstan_parity(self):
+        minimum = MINIMUM_SPEEDUPS["aalto_gpareto"]
+        self.assertEqual(minimum, 1.0)
+        self.assertTrue(speed_gate({"stanli": [1] * 3, "cmdstan": [1] * 3}, minimum)["pass"])
+        self.assertFalse(speed_gate({"stanli": [1.1] * 3, "cmdstan": [1] * 3}, minimum)["pass"])
 
     def test_missing_or_nonfinite_timings_fail(self):
         for bad in ([], [1, 1], [1, 1, float("nan")], [1, 1, 0]):

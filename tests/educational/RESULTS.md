@@ -1,79 +1,100 @@
 # Educational corpus results — 2026-09-14
 
-**All 13 models pass correctness and the 0.5x end-to-end speed floor.** The
-three-point CmdStan oracle checks 6,609 scalar values, with worst scaled error
-8.30e-15. All sampling CSV and sampled-parameter mean checks pass.
+**Pareto reaches 1.072x vectorized CmdStan end to end. All 13 models pass.**
+The live gate now requires Pareto >= 1.0x and every other model >= 0.5x.
+The three-point CmdStan oracle checks 6,609 scalar values, with worst scaled
+error 8.30e-15; all generated-output, sampling CSV and posterior mean checks pass.
 
 Apple M3 Ultra, macOS arm64, Apple Clang 21, Release. CmdStan uses `--O1`,
-`-O3`, and `-ffp-contract=off`. Each reported median contains three alternating
-pairs following one warmup pair: 1000 warmup + 1000 saved draws, full 17-digit
-CSV files for both engines. Stanli includes source compilation and all
-preparation; the CmdStan executable is already compiled. Its build time is
-recorded separately. No model, output, phase or performance failure is excluded.
+`-O3`, and `-ffp-contract=off`. Each current median contains five alternating
+pairs following one warmup pair: 1000 warmup + 1000 saved draws and complete
+17-digit CSV files. Stanli includes source compilation, JSON preparation,
+NUTS and generated quantities. CmdStan's executable is already compiled;
+its fresh build time is recorded separately. No models or output phases are
+excluded. These are the supplied teaching fixtures, seven with synthetic data.
 
-The baseline is commit `7d4f25ec`; the optimized candidate adds general RNG
-lowering, compiler procedure pruning, and buffered decimal formatting. See
-[baseline observations](benchmark-results.json), [optimized observations](optimized-benchmark-results.json)
-and the [investigation ledger](../../docs/superpowers/plans/2026-09-14-educational-performance.md).
-These reports include binary hashes, toolchain identities, raw timings,
-dispersion, phase measurements and posterior mean comparisons.
+[Current observations](pareto-benchmark-results.json) include hashes, raw
+samples, dispersion, phase measurements and toolchain identities. The previous
+PR results are retained in [optimized observations](optimized-benchmark-results.json),
+and the original pre-fix baseline in [baseline observations](benchmark-results.json).
+The previous column below is historical; it is not a paired revision comparison.
 
-| Model | Baseline Stanli (ms) | Optimized Stanli (ms) | CmdStan (ms) | Speed vs CmdStan | Floor |
-|---|---:|---:|---:|---:|---|
-| aalto_bern | 21.02 | 17.63 | 16.97 | 0.962x | PASS |
-| aalto_binom | 17.29 | 15.86 | 13.65 | 0.861x | PASS |
-| aalto_binom2 | 20.21 | 18.39 | 15.82 | 0.860x | PASS |
-| aalto_binomb | 18.86 | 16.37 | 12.77 | 0.780x | PASS |
-| aalto_gpareto | 66.89 | 48.68 | 26.83 | 0.551x | PASS |
-| aalto_grp_aov | 25.66 | 23.03 | 23.20 | 1.007x | PASS |
-| aalto_grp_prior_mean | 31.19 | 28.82 | 35.04 | 1.216x | PASS |
-| aalto_grp_prior_mean_var | 72.40 | 62.42 | 82.04 | 1.314x | PASS |
-| aalto_lin | 32.16 | 27.17 | 31.68 | 1.166x | PASS |
-| aalto_lin_std | 34.03 | 23.44 | 28.15 | 1.201x | PASS |
-| aalto_lin_std_t | 55.97 | 29.52 | 33.95 | 1.150x | PASS |
-| aalto_poisson_hurdle | 3187.70 | 665.37 | 865.01 | 1.300x | PASS |
-| aalto_poisson_simple | 846.75 | 97.69 | 242.00 | 2.477x | PASS |
+| Model | Previous PR Stanli (ms) | Current Stanli (ms) | CmdStan (ms) | Speed vs CmdStan | Required floor |
+|---|---:|---:|---:|---:|---:|
+| aalto_bern | 17.63 | 12.08 | 16.25 | 1.345x | 0.5x |
+| aalto_binom | 15.86 | 11.24 | 12.94 | 1.151x | 0.5x |
+| aalto_binom2 | 18.39 | 12.94 | 16.33 | 1.262x | 0.5x |
+| aalto_binomb | 16.37 | 10.94 | 12.92 | 1.181x | 0.5x |
+| aalto_gpareto | 48.68 | 30.75 | 32.97 | 1.072x | 1.0x |
+| aalto_grp_aov | 23.03 | 16.54 | 21.74 | 1.315x | 0.5x |
+| aalto_grp_prior_mean | 28.82 | 24.79 | 33.49 | 1.351x | 0.5x |
+| aalto_grp_prior_mean_var | 62.42 | 64.09 | 91.37 | 1.425x | 0.5x |
+| aalto_lin | 27.17 | 22.88 | 33.56 | 1.467x | 0.5x |
+| aalto_lin_std | 23.44 | 18.23 | 30.41 | 1.668x | 0.5x |
+| aalto_lin_std_t | 29.52 | 23.13 | 34.42 | 1.488x | 0.5x |
+| aalto_poisson_hurdle | 665.37 | 653.72 | 871.43 | 1.333x | 0.5x |
+| aalto_poisson_simple | 97.69 | 94.72 | 245.24 | 2.589x | 0.5x |
 
-## Why the failing models improved
+Pareto's current medians are **30.746 ms Stanli / 32.974 ms CmdStan**.
+Stanli ranges from 30.084–31.774 ms (MAD 0.662 ms); CmdStan from
+31.223–33.419 ms (MAD 0.445 ms). An earlier eleven-pair diagnostic measured
+1.110x. The final five-pair gate is authoritative; the margin over parity is
+modest and should remain guarded.
 
-The Poisson models previously interpreted generated-quantity rejection loops.
-Scalar integer RNG draws now run in the existing register machine, using the
-same Stan Math RNG functions. Draw-dependent sizes still fall back, and
-runtime indices still receive bounds checks. The Student-t teaching model
-also benefits from the shared Student-t RNG kernel.
+## General fixes
 
-Pareto spent most of its time preparing the model. Model compilation now
-skips optimization of unused backend procedures and unreachable function
-bodies after inlining; the general function API retains its exported functions.
-CSV formatting was another measured bottleneck. Bounded buffering and {fmt}
-replace per-value printf conversion while retaining exactly the same 17-digit
-CSV text, including the host's NaN spelling.
+- Load built-in signature sets only when used; memoize immutable overload
+  resolution within each compilation with a bounded, exception-safe cache.
+- Return an ordinary unknown result from speculative constant probes instead
+  of repeatedly throwing and catching compiler exceptions. Preserve lazy
+  expression evaluation and parameter-independent shape queries.
+- Generate reverse code for forward-only branches by recording executed
+  blocks. Retain replay for loops, unsupported active derivatives and
+  unproven initialization/aliasing. Generated quantities need no reverse code.
 
-| Model | Preparation before → after (ms) | NUTS before → after (ms) | GQ/output before → after (ms) |
-|---|---:|---:|---:|
-| aalto_gpareto | 32.60 → 24.54 | 14.95 → 13.86 | 13.10 → 4.44 |
-| aalto_poisson_hurdle | 19.34 → 39.58 | 26.05 → 28.55 | 3134.75 → 587.58 |
-| aalto_poisson_simple | 7.74 → 8.43 | 8.91 → 8.22 | 818.54 → 70.29 |
+A [matched five-pair revision comparison](pareto-matched-revision-results.json)
+agrees with the explanation: Pareto improves **1.790x** over PR commit
+`4c25331f`, from 49.456 to 27.632 ms. Preparation falls 25.664 → 8.450 ms
+and sampling 14.898 → 8.403 ms. GQ/CSV output measures 4.409 → 4.961 ms;
+the overall gain comes from preparation and reverse evaluation. Differences
+between these absolute times and the CmdStan run are why each comparison
+uses its own paired measurements. Every educational model's complete elapsed
+median improves in that revision comparison, but small differences such as
+hurdle-Poisson's 1.018x should not be interpreted as statistically established.
 
-Hurdle-Poisson pays more preparation time to compile its generated-quantity
-program, but saves that cost within roughly eight output rows at these data
-sizes. No runtime special case recognizes a teaching model or its source.
+One separate `/usr/bin/time -l` probe measured maximum resident memory of
+27,148,288 → 17,416,192 bytes for Pareto with the same sampling settings.
+The generated island uses ten path flags and 109 adjoint instructions, retaining
+its three kernel calls. No compiler/runtime optimization recognizes a model,
+source name or variable spelling.
 
-A separate [matched revision A/B](revision-ab-results.json) alternated the
-original and optimized Stanli binaries with the same settings on the same
-machine. **All 52 complete CSVs match bitwise** (13 models × four seeds).
-Three timed pairs after one warmup pair measured the following improvements:
+The earlier PR fixes remain: compiled scalar integer RNG control, shared
+Poisson/Student-t/Bernoulli-logit RNG kernels, unused-procedure pruning after
+inlining, and buffered exact 17-digit CSV formatting. Their original evidence
+is preserved in [the first investigation](../../docs/superpowers/plans/2026-09-14-educational-performance.md).
 
-- aalto_gpareto: 1.35x faster.
-- aalto_poisson_hurdle: 4.75x faster.
-- aalto_poisson_simple: 8.51x faster.
-- aalto_lin_std_t: 1.96x faster.
+## Validation and reproduction
 
-Correctness tests run in default CTest. The live performance gate is a separate
-target because it requires CmdStan and an idle machine:
-`cmake --build build-rel --target check_educational_performance`.
+- 247/247 Release CTests, plus the updated performance-floor unit test.
+- 254/254 corpus models, 976,394 values under the existing numerical policy.
+- Native/JavaScript producer bytes agree in general and model-only modes.
+- ASan+UBSan adjoint, program-conformance and write-array tests pass.
+- [52 complete CSV files](pareto-revision-parity.json) match the prior PR
+  bitwise across 13 models and four seeds. The additional matched benchmark
+  confirms byte equality for all six of its seeds as well.
+- Adjoint tests cover reused branch flags, nested paths, conditional copies,
+  overwritten conditions/values, kernel calls, four-argument densities, dead
+  invalid expressions, rejects, active-extrema refusal and 256 dyadic path cases.
 
-These measurements cover the 13 supplied teaching fixtures, seven of which
-have synthetic data. They do not establish full-size course-data performance
-or posterior convergence. Pareto has the smallest margin above the floor;
-retain the full wall-time gate when changing compiler preparation costs.
+```sh
+python3 tools/check_educational.py --benchmark --repetitions 5 \
+  --output build-rel/educational-pareto-final/results.json
+ctest --test-dir build-rel -j8 --output-on-failure
+python3 tools/verify_refs.py deps/posteriordb \
+  --check build-rel/stanli_check --jobs 4
+```
+
+Default CTest uses recorded references; `check_educational_performance` requires
+CmdStan and a quiet machine. See the [Pareto research ledger](../../docs/superpowers/plans/2026-09-14-pareto-parity.md)
+for proof obligations, ablations and conservative fallbacks. These fixtures
+and smoke tests do not establish full-size course-data performance or convergence.

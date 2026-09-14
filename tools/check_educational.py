@@ -3,7 +3,7 @@
 
 --record regenerates references from CmdStan independently of Stanli results.
 --benchmark runs paired, alternating CLI samples and enforces CmdStan/Stanli
-median wall time >= 0.5 for every model. CmdStan compilation is reported
+median wall time >= 0.5 for every model, and >= 1.0 for Pareto. CmdStan compilation is reported
 separately; its cost cannot hide a slow Stanli sampler or generated quantities.
 """
 import argparse
@@ -28,6 +28,7 @@ from cmdstan_ref import compile_cmd
 REPO = pathlib.Path(__file__).resolve().parents[1]
 CORPUS = REPO / "tests/educational"
 REFERENCE = CORPUS / "references.json.gz"
+MINIMUM_SPEEDUPS = {"aalto_gpareto": 1.0}
 
 
 def run(argv, timeout=600, cwd=REPO, stdout=None):
@@ -154,7 +155,7 @@ def parse_timings(stderr):
     return result
 
 
-def speed_gate(measurements):
+def speed_gate(measurements, minimum=0.5):
     if set(measurements) != {"stanli", "cmdstan"}:
         raise ValueError("Both engines must be measured")
     if len(measurements["stanli"]) != len(measurements["cmdstan"]):
@@ -168,7 +169,7 @@ def speed_gate(measurements):
                   for engine, values in measurements.items()}
     speedup = medians["cmdstan"] / medians["stanli"]
     return {"seconds": measurements, "medians": medians, "dispersion": dispersion,
-            "speedup": speedup, "pass": speedup >= 0.5}
+            "speedup": speedup, "minimum_speedup": minimum, "pass": speedup >= minimum}
 
 
 def posterior_gate(chains, names):
@@ -260,7 +261,7 @@ def benchmark(name, reference, args):
                 chains[engine].append(rows)
                 if engine == "stanli":
                     phases.append(parse_timings(proc.stderr))
-    result = speed_gate(measurements)
+    result = speed_gate(measurements, MINIMUM_SPEEDUPS.get(name, 0.5))
     result["cmdstan_build_seconds"] = build_seconds
     result["stanli_phases"] = phases
     result["cmdstan_binary_sha256"] = digest(exe)
@@ -316,7 +317,7 @@ def main():
                 if not result["benchmark"]["posterior_pass"]:
                     raise ValueError("Sampled parameter means differ beyond Monte Carlo uncertainty")
                 if not result["benchmark"]["pass"]:
-                    raise ValueError("Stanli below 0.5x CmdStan end-to-end speed")
+                    raise ValueError(f"Stanli below {result['benchmark']['minimum_speedup']}x CmdStan end-to-end speed")
         except (ValueError, RuntimeError, subprocess.TimeoutExpired, OSError) as error:
             failures.append(name)
             report["models"].setdefault(name, {})["error"] = str(error)
