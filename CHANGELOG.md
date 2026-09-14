@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+## 0.14.0
+
+### Educational models tested from source through sampling and CSV output
+
+Thirteen educational models now have fixed CmdStan references, checks for
+all output columns, and a complete-run performance harness. They also join
+the default corpus benchmark suite, bringing it to 133 models. The results
+page publishes separate fixed-point gradient and complete-run tables with
+raw measurements and reproduction commands.
+
+All thirteen models pass the posterior and complete-run performance checks
+on the recorded synthetic datasets. The Pareto model reaches 1.072x CmdStan
+in the final five-pair measurement: 30.746 ms for Stanli versus 32.974 ms for
+CmdStan. Its complete-run gate is now 1.0x; the other models retain a 0.5x
+floor. These are measurements of the documented datasets and configuration,
+not performance guarantees for other workloads. Pareto's fixed-point
+gradient remains slower than CmdStan at 0.64x.
+
+### Less compiler work and faster sampling and output
+
+The compiler loads built-in overload sets lazily, shares immutable signature
+lookups within a compilation, and probes constants without using exceptions
+for ordinary nonconstant expressions. It prunes unused backend procedures
+after inlining and unreachable functions in model-only compilation, while
+the general compiler API preserves exported functions.
+
+Forward-only branch programs can now use generated adjoints when definite
+initialization and alias checks prove them safe. Loops and unsupported
+active derivatives keep the existing fallback. Generated quantities skip
+adjoint generation. Integer RNG control is compiled, and Poisson,
+Student-t, and Bernoulli-logit RNGs use shared kernels. CLI CSV output uses
+buffered formatting while preserving 17-digit output.
+
+A matched comparison against the earlier educational-model implementation
+measured a 1.790x Pareto complete-run improvement. Validation includes the
+runtime suite, 254 corpus models, native/JavaScript compiler parity,
+sanitisers, and identical seeded CSV output against the prior implementation.
+
+### Windows setup and sanitizer tool installation
+
+Windows development setup now has x64 and arm64 CI coverage, keeps compiler
+embedding enabled by default, and completes standalone deployment. Compiler
+caches are saved before builds and tests; test scripts resolve Bash from
+PATH rather than accidentally launching WSL. Cached ARM OCaml switches
+restore their dependencies before validation. Native tools installed from
+a sanitizer build now include the shared sanitizer core they require.
+
+
 ### The browser's sampling diagnostics box starts collapsed
 
 The diagnostics report on the demo page now sits in a disclosure box, closed
