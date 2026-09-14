@@ -1,5 +1,8 @@
 #pragma once
 
+// fmt 11.2 uses global malloc/free without including their declarations.
+// Include them first for libc++ builds with transitive includes disabled.
+#include <stdlib.h>
 #include <fmt/format.h>
 
 #include <cmath>
