@@ -1,39 +1,79 @@
 # Educational corpus results — 2026-09-14
 
-All 13 models passed the three-point CmdStan oracle (6,609 scalar comparisons), complete sampling CSV checks, and the sampled-parameter mean comparison. Worst scaled pointwise error: 8.30e-15. **Ten pass the 0.5x speed floor; three fail.** No performance failures are suppressed.
+**All 13 models pass correctness and the 0.5x end-to-end speed floor.** The
+three-point CmdStan oracle checks 6,609 scalar values, with worst scaled error
+8.30e-15. All sampling CSV and sampled-parameter mean checks pass.
 
-Apple M3 Ultra, macOS arm64, Apple Clang 21, Release. Stanli base `2448aa1d` plus the optional phase-timing CLI change and this harness. CmdStan uses `--O1`, `-O3`, and `-ffp-contract=off`. See [raw results](benchmark-results.json) for toolchain identities, paired raw timings, dispersion, seeds and all parameter mean checks.
+Apple M3 Ultra, macOS arm64, Apple Clang 21, Release. CmdStan uses `--O1`,
+`-O3`, and `-ffp-contract=off`. Each reported median contains three alternating
+pairs following one warmup pair: 1000 warmup + 1000 saved draws, full 17-digit
+CSV files for both engines. Stanli includes source compilation and all
+preparation; the CmdStan executable is already compiled. Its build time is
+recorded separately. No model, output, phase or performance failure is excluded.
 
-Median of three alternating pairs after one warmup pair; each chain uses 1000 warmup + 1000 saved draws. Both engines write full 17-digit CSVs. The speed ratio includes Stanli source compilation and preparation versus already-compiled CmdStan; CmdStan build time is recorded separately.
+The baseline is commit `7d4f25ec`; the optimized candidate adds general RNG
+lowering, compiler procedure pruning, and buffered decimal formatting. See
+[baseline observations](benchmark-results.json), [optimized observations](optimized-benchmark-results.json)
+and the [investigation ledger](../../docs/superpowers/plans/2026-09-14-educational-performance.md).
+These reports include binary hashes, toolchain identities, raw timings,
+dispersion, phase measurements and posterior mean comparisons.
 
-| Model | Stanli CLI (ms) | CmdStan CLI (ms) | Speed vs CmdStan | Floor |
-|---|---:|---:|---:|---|
-| aalto_bern | 21.02 | 16.67 | 0.793x | PASS |
-| aalto_binom | 17.29 | 12.77 | 0.739x | PASS |
-| aalto_binom2 | 20.21 | 14.98 | 0.741x | PASS |
-| aalto_binomb | 18.86 | 13.41 | 0.711x | PASS |
-| aalto_gpareto | 66.89 | 29.44 | 0.440x | FAIL |
-| aalto_grp_aov | 25.66 | 23.07 | 0.899x | PASS |
-| aalto_grp_prior_mean | 31.19 | 34.34 | 1.101x | PASS |
-| aalto_grp_prior_mean_var | 72.40 | 87.06 | 1.202x | PASS |
-| aalto_lin | 32.16 | 31.10 | 0.967x | PASS |
-| aalto_lin_std | 34.03 | 30.53 | 0.897x | PASS |
-| aalto_lin_std_t | 55.97 | 34.39 | 0.614x | PASS |
-| aalto_poisson_hurdle | 3187.70 | 863.35 | 0.271x | FAIL |
-| aalto_poisson_simple | 846.75 | 230.26 | 0.272x | FAIL |
+| Model | Baseline Stanli (ms) | Optimized Stanli (ms) | CmdStan (ms) | Speed vs CmdStan | Floor |
+|---|---:|---:|---:|---:|---|
+| aalto_bern | 21.02 | 17.63 | 16.97 | 0.962x | PASS |
+| aalto_binom | 17.29 | 15.86 | 13.65 | 0.861x | PASS |
+| aalto_binom2 | 20.21 | 18.39 | 15.82 | 0.860x | PASS |
+| aalto_binomb | 18.86 | 16.37 | 12.77 | 0.780x | PASS |
+| aalto_gpareto | 66.89 | 48.68 | 26.83 | 0.551x | PASS |
+| aalto_grp_aov | 25.66 | 23.03 | 23.20 | 1.007x | PASS |
+| aalto_grp_prior_mean | 31.19 | 28.82 | 35.04 | 1.216x | PASS |
+| aalto_grp_prior_mean_var | 72.40 | 62.42 | 82.04 | 1.314x | PASS |
+| aalto_lin | 32.16 | 27.17 | 31.68 | 1.166x | PASS |
+| aalto_lin_std | 34.03 | 23.44 | 28.15 | 1.201x | PASS |
+| aalto_lin_std_t | 55.97 | 29.52 | 33.95 | 1.150x | PASS |
+| aalto_poisson_hurdle | 3187.70 | 665.37 | 865.01 | 1.300x | PASS |
+| aalto_poisson_simple | 846.75 | 97.69 | 242.00 | 2.477x | PASS |
 
-## Measured failing phases
+## Why the failing models improved
 
-| Model | Preparation (ms) | NUTS (ms) | Generated quantities/output (ms) |
+The Poisson models previously interpreted generated-quantity rejection loops.
+Scalar integer RNG draws now run in the existing register machine, using the
+same Stan Math RNG functions. Draw-dependent sizes still fall back, and
+runtime indices still receive bounds checks. The Student-t teaching model
+also benefits from the shared Student-t RNG kernel.
+
+Pareto spent most of its time preparing the model. Model compilation now
+skips optimization of unused backend procedures and unreachable function
+bodies after inlining; the general function API retains its exported functions.
+CSV formatting was another measured bottleneck. Bounded buffering and {fmt}
+replace per-value printf conversion while retaining exactly the same 17-digit
+CSV text, including the host's NaN spelling.
+
+| Model | Preparation before → after (ms) | NUTS before → after (ms) | GQ/output before → after (ms) |
 |---|---:|---:|---:|
-| aalto_gpareto | 32.60 | 14.95 | 13.10 |
-| aalto_poisson_hurdle | 19.34 | 26.05 | 3134.75 |
-| aalto_poisson_simple | 7.74 | 8.91 | 818.54 |
+| aalto_gpareto | 32.60 → 24.54 | 14.95 → 13.86 | 13.10 → 4.44 |
+| aalto_poisson_hurdle | 19.34 → 39.58 | 26.05 → 28.55 | 3134.75 → 587.58 |
+| aalto_poisson_simple | 7.74 → 8.43 | 8.91 → 8.22 | 818.54 → 70.29 |
 
-The two Poisson models use the generated-quantities interpreter; output dominates their runtime. Pareto spends more than half its measured internal time in source/data preparation. These measurements identify the next optimization targets; this change adds tests and does not claim to fix those costs.
+Hurdle-Poisson pays more preparation time to compile its generated-quantity
+program, but saves that cost within roughly eight output rows at these data
+sizes. No runtime special case recognizes a teaching model or its source.
 
-The initial run, before phase instrumentation and matching file output, also failed the same three models (Pareto 0.449x, hurdle-Poisson 0.267x, simple Poisson 0.279x). The final run above is the authoritative measurement.
+A separate [matched revision A/B](revision-ab-results.json) alternated the
+original and optimized Stanli binaries with the same settings on the same
+machine. **All 52 complete CSVs match bitwise** (13 models × four seeds).
+Three timed pairs after one warmup pair measured the following improvements:
 
-Correctness tests are registered in default CTest. Live performance is a separate target, so adding the oracle does not make routine CI depend on a CmdStan checkout or shared-runner timing. Run `cmake --build build-rel --target check_educational_performance` to enforce the speed floor. Its nonzero exit is expected on the measured candidate.
+- aalto_gpareto: 1.35x faster.
+- aalto_poisson_hurdle: 4.75x faster.
+- aalto_poisson_simple: 8.51x faster.
+- aalto_lin_std_t: 1.96x faster.
 
-Raw CSV and stderr artifacts remain under the output directory named in the JSON report. The retained JSON carries all paired timing observations and source/reference identities. The import is 13 teaching fixtures, including seven synthetic datasets; these results do not establish full-size course-data performance or posterior convergence.
+Correctness tests run in default CTest. The live performance gate is a separate
+target because it requires CmdStan and an idle machine:
+`cmake --build build-rel --target check_educational_performance`.
+
+These measurements cover the 13 supplied teaching fixtures, seven of which
+have synthetic data. They do not establish full-size course-data performance
+or posterior convergence. Pareto has the smallest margin above the floor;
+retain the full wall-time gate when changing compiler preparation costs.
