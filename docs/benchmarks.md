@@ -1,5 +1,11 @@
 # How much faster is stanli?
 
+The numbers below are historical version-1 measurements. New runs use the
+[paired version-2 protocol](benchmark-protocol.md), with equal elapsed-time
+warmup, alternating repetitions and retained raw results. Fresh version-2
+corpus measurements have not yet replaced this table. The old runs lack balanced
+repetitions and dispersion estimates; treat these ratios as indicative.
+
 Across 119 posteriordb models, stanli evaluates a gradient **3.02x faster
 than CmdStan at the median**. It is at least as fast on 117 of the 119 models.
 Because stanli does not build a native C++ binary for each model, the first
@@ -298,13 +304,18 @@ side, and their targeted A/B measurements, read
 
 ## Reproducing
 
+The default suite includes posteriordb and the
+[rethinking teaching corpus](../tests/rethinking/README.md). See the
+[version-2 protocol](benchmark-protocol.md) for measurements and resume rules.
+
 ```sh
 ./tools/dev_setup.sh --corpus          # deps, build, posteriordb, CmdStan
 cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
 cmake --build build-rel -j
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  docs/corpus-bench.tsv --stanli-only --timeout 900
-# To remeasure both sides, omit --stanli-only and use a new output TSV.
+  /tmp/corpus-v2.tsv
+# Add --sampling for the separately recorded full-inference phase.
+# Do not append a new protocol to the historical docs/corpus-bench.tsv.
 python3 tools/corpus_table.py docs/corpus-bench.tsv
 python3 harnesses/ab_corpus.py deps/posteriordb
 ```

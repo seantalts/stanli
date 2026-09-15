@@ -749,6 +749,8 @@ add_test(NAME test_check_precompiled_mir_conflict
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mir_conflict.cmake)
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
+add_executable(test_benchmark_timer tests/test_benchmark_timer.cpp)
+add_test(NAME test_benchmark_timer COMMAND test_benchmark_timer)
 target_link_libraries(bench_grad PRIVATE stanli)
 add_dependencies(bench_grad stanli_mir_fixtures)
 add_executable(bench_mir_decode tools/bench_mir_decode.cpp

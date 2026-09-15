@@ -14,6 +14,7 @@ Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
 Prints markdown to stdout; benchmarks.md is edited by hand around it.
 """
 import csv
+import re
 import sys
 
 # The harness's machine tags, in the words a reader needs. The per-model
@@ -92,17 +93,44 @@ def main():
         return r[idx[name]].strip()
 
     def grad_ratio(r):
+        if "paired_speedup" in idx:
+            return float(col(r, "paired_speedup")) if col(r, "paired_speedup") else -1.0
         a, b = col(r, "stanli_ns_grad"), col(r, "cmdstan_ns_grad")
         return float(b) / float(a) if a and b else -1.0
 
     def why(r):
         """Why this row is incomplete, or "" if it is not."""
-        reasons = [WHY.get(n, n) for n in col(r, "note").split(",") if n]
+        reasons = [re.sub(r"^(stanli|cmdstan)_sample_timeout\((\d+)s\)$",
+                          lambda m: f"{'CmdStan' if m[1] == 'cmdstan' else 'stanli'} "
+                                    f"sampling hit the {m[2]} s cap",
+                          WHY.get(n, n))
+                   for n in re.split(r"[,;]\s*", col(r, "note")) if n]
         if not col(r, "stanli_ns_grad"):
             reasons.append("no stanli gradient")
         if not col(r, "cmdstan_ns_grad") and "eval_fail" not in col(r, "note"):
             reasons.append("no CmdStan gradient")
         return "; ".join(dict.fromkeys(reasons))
+
+    if "paired_speedup" in idx:
+        print("Gradient timings are medians ± MAD; speedups are medians of paired ratios.")
+        print()
+        print("| model | stanli gradient | CmdStan gradient | paired speedup | pairs | status |")
+        print("| --- | ---: | ---: | ---: | ---: | --- |")
+        for r in sorted(rows, key=grad_ratio, reverse=True):
+            times = [f"{fmt_ns(col(r, e + '_ns_grad'))} ± {fmt_ns(col(r, e + '_ns_grad_mad'))}"
+                     for e in ("stanli", "cmdstan")]
+            speedup = (f"{grad_ratio(r):.2f}x ± {float(col(r, 'paired_speedup_mad')):.2f}"
+                       if grad_ratio(r) > 0 else "-")
+            status = col(r, "note").replace("sampling_not_requested", "gradients only") or "complete"
+            print(f"| `{col(r, 'model')}` | {times[0]} | {times[1]} | {speedup} "
+                  f"| {col(r, 'paired_rounds') or '-'} | {status} |")
+        if any(col(r, "stanli_sample_s") or col(r, "cmdstan_sample_s") for r in rows):
+            print("\n| model | stanli CLI median | CmdStan build | CmdStan CLI median |")
+            print("| --- | ---: | ---: | ---: |")
+            for r in rows:
+                print(f"| `{col(r, 'model')}` | {fmt_s(col(r, 'stanli_sample_s'))} "
+                      f"| {fmt_s(col(r, 'cmdstan_build_s'))} | {fmt_s(col(r, 'cmdstan_sample_s'))} |")
+        return
 
     done = [r for r in rows if not why(r)]
     stuck = [r for r in rows if why(r)]
