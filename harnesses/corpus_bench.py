@@ -522,6 +522,9 @@ def main(argv=None):
                         toolchains={"cmdstan": checkout_identity(args.cmdstan),
                                     "stan": checkout_identity(args.cmdstan / "stan"),
                                     "math": checkout_identity(args.cmdstan / "stan/lib/stan_math"),
+                                    "stanli_math": checkout_identity(REPO / "deps/math"),
+                                    "stanli_stan": checkout_identity(REPO / "deps/stan"),
+                                    "stanli_fmt": checkout_identity(REPO / "deps/fmt"),
                                     "libraries": library_identity(args.cmdstan),
                                     "clang_sha256": sha(shutil.which("clang++")),
                                     "build_environment": {k: os.getenv(k) for k in
