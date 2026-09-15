@@ -145,7 +145,7 @@ md += ['', '## Scope and reproducibility', '',
        'The 61 book call sites include repeated fits and correspond to 58 distinct Stan/data pairs. The supplemental hurdle model makes 62 fixtures and 59 distinct pairs. Chapters 4-8 and 10 have no ulam() calls in this supplement. quap(), direct stan() calls, exercises and lecture-only models are outside this corpus.', '',
        '[Pinned book supplement](' + source_url + '). The generator preserves the Stan text and processed data; simulation seeds and data licensing are recorded in tests/rethinking/PROVENANCE.md. Both engines receive exactly the same input bytes.', '',
        f"Run ID: `{manifest['run_id']}`. See `benchmark-manifest.json`, `rethinking-results.json`, `sampling-diagnostics.json`, `numerical-replay.txt` and `rethinking-timings.csv` for identities, numeric results and diagnostics. Raw per-seed CSVs and command logs are retained in the original run directory.", '']
-(OUT / 'rethinking-report.md').write_text('\n'.join(md) + '\n')
+(OUT / 'rethinking-report.md').write_text('\n'.join(md).rstrip() + '\n')
 
 # PDF: a short summary, methods/diagnostics, then the complete timing appendix.
 styles = getSampleStyleSheet()

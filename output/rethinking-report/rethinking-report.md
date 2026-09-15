@@ -102,4 +102,3 @@ The 61 book call sites include repeated fits and correspond to 58 distinct Stan/
 [Pinned book supplement](https://github.com/rmcelreath/rethinking/blob/ac1b3b2cda83f3e14096e2d997a6e30ad109eeee/book_code_boxes.txt). The generator preserves the Stan text and processed data; simulation seeds and data licensing are recorded in tests/rethinking/PROVENANCE.md. Both engines receive exactly the same input bytes.
 
 Run ID: `37fa26701db14f56`. See `benchmark-manifest.json`, `rethinking-results.json`, `sampling-diagnostics.json`, `numerical-replay.txt` and `rethinking-timings.csv` for identities, numeric results and diagnostics. Raw per-seed CSVs and command logs are retained in the original run directory.
-

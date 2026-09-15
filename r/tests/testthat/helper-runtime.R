@@ -45,4 +45,3 @@ log_lik_model <- function(prior_sd = 1) {
     }", data = list(N = 12L, y = seq(-1, 1, length.out = 12),
                      prior_sd = prior_sd))
 }
-
