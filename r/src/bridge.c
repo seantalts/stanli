@@ -335,6 +335,61 @@ SEXP stanli_r_warnings(SEXP m) {
   return mkString(s ? s : "");
 }
 
+/* Read-only validity check for handles serialized through saveRDS(). */
+SEXP stanli_r_model_alive(SEXP m) {
+  return ScalarLogical(TYPEOF(m) == EXTPTRSXP && R_ExternalPtrAddr(m) != NULL);
+}
+
+/* Declared parameters only: inverse transforms ignore TP/GQ list entries,
+ * just as RStan's variable context does. */
+SEXP stanli_r_parameter_columns(SEXP m) {
+  require_loaded();
+  void* mm = model_ptr(m);
+  const int64_t n = p_n_constrained(mm);
+  SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  for (int64_t i = 0; i < n; ++i)
+    SET_STRING_ELT(names, (R_xlen_t)i, mkChar(p_constrained_name(mm, i)));
+  UNPROTECT(1);
+  return names;
+}
+
+/* RStan constrain_pars includes transformed parameters and generated
+ * quantities. Use the existing model's write-array path and RNG stream. */
+SEXP stanli_r_write_array(SEXP m, SEXP q) {
+  require_loaded();
+  void* mm = model_ptr(m);
+  const int64_t n = p_n_unconstrained(mm);
+  if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
+    error("upars must contain %lld unconstrained values", (long long)n);
+  const int64_t wa_n = p_wa_n_columns(mm);
+  const int64_t ncol = wa_n > 0 ? wa_n : p_n_constrained(mm);
+  SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)ncol));
+  const int rc = wa_n > 0 ? p_wa_row(mm, REAL(q), REAL(out)) :
+                            p_constrain(mm, REAL(q), REAL(out));
+  if (rc != 0) {
+    UNPROTECT(1);
+    error("constrain_pars failed while evaluating parameter transforms, "
+          "transformed parameters, or generated quantities");
+  }
+  UNPROTECT(1);
+  return out;
+}
+
+/* Value-only evaluation avoids a reverse pass; gradient evaluation reuses
+ * the existing bridge routine and its domain-error handling below. */
+SEXP stanli_r_log_prob(SEXP m, SEXP q) {
+  require_loaded();
+  void* mm = model_ptr(m);
+  const int64_t n = p_n_unconstrained(mm);
+  if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
+    error("upars must contain %lld unconstrained values", (long long)n);
+  double lp = 0;
+  if (p_grad(mm, REAL(q), &lp, NULL) != 0)
+    error("log density evaluation failed at this point (domain error in a "
+          "distribution or function)");
+  return ScalarReal(lp);
+}
+
 SEXP stanli_r_unconstrain_inits(SEXP m, SEXP json) {
   require_loaded();
   if (p_unconstrain_inits == NULL)

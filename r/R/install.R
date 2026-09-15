@@ -165,6 +165,8 @@ load_runtime <- function(path = stanli_runtime_path()) {
 }
 
 .onLoad <- function(libname, pkgname) {
+  register_ecosystem_methods()
+  register_stanfit_hook()
   # Load quietly when the runtime happens to be there; never download.
   p <- stanli_runtime_path()
   if (file.exists(p)) try(load_runtime(p), silent = TRUE)
