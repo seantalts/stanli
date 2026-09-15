@@ -546,7 +546,56 @@ static void import_reference_tests() {
     close(gradient[i], expected[i], "import ordinals preserve outer gradient");
 }
 
+static void fixed_scalar_index_tests() {
+  const Kernel& kernel = *find_kernel(OP_INDEX_DYNAMIC);
+  for (int mutation = 0; mutation < 5; ++mutation) {
+    for (double at : {-1.0, 0.0, 1.0, 2.0, 4.0, 4.5, 5.0,
+                      std::numeric_limits<double>::infinity(),
+                      std::numeric_limits<double>::quiet_NaN()}) {
+      DynamicIndexSpec spec;
+      spec.axes = {{DynamicIndexSpec::Axis::Single, 4, 1, 1, 0}};
+      spec.selected_size = 1;
+      if (mutation == 1) spec.axes[0].stride = 2;
+      if (mutation == 2) spec.axes[0].input_offset = 1;
+      if (mutation == 3) spec.axes[0].extent = 3;
+      if (mutation == 4) spec.selected_size = 2;
+      double base[] = {0.2, -0.4, 1.7, 3.1};
+      double seed = -2.75;
+      double outputs[2] = {};
+      double adjoints[2][4] = {};
+      std::string errors[2];
+      for (int path = 0; path < 2; ++path) {
+        // An extra input forces the general descriptor path but has no
+        // numerical role. The selector, shape and error obligations agree.
+        spec.input_count = path ? 3 : 2;
+        KernelCtx c{};
+        c.n_in = spec.input_count;
+        c.in[0] = {base, 4};
+        c.in[1] = {&at, 1};
+        c.in[2] = {&at, 1};
+        c.in_adj[0] = {adjoints[path], 4};
+        c.out = {outputs + path, 1};
+        c.out_adj_vec = {&seed, 1};
+        c.udata = &spec;
+        try {
+          kernel.forward(c);
+          kernel.backward(c);
+        } catch (const std::out_of_range& error) {
+          errors[path] = std::string("range:") + error.what();
+        } catch (const std::logic_error& error) {
+          errors[path] = std::string("logic:") + error.what();
+        }
+      }
+      check(errors[0] == errors[1], "scalar index preserves validation errors");
+      check(outputs[0] == outputs[1], "scalar index preserves values");
+      check(std::memcmp(adjoints[0], adjoints[1], sizeof(adjoints[0])) == 0,
+            "scalar index preserves adjoints");
+    }
+  }
+}
+
 static void direct_index_kernel_tests() {
+  fixed_scalar_index_tests();
   const Kernel* dynamic_index = find_kernel(OP_INDEX_DYNAMIC);
   check(dynamic_index && dynamic_index->forward && dynamic_index->backward,
         "dynamic index kernel registered");
