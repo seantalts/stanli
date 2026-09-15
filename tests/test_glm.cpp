@@ -2,6 +2,7 @@
 // same op order, at three fixed parameter vectors. case0-2 (OP_MATVEC): 10
 // ULP. The rest: bitwise.
 #include "models.hpp"
+#include <stanli/density_registry.hpp>
 
 #include <stan/math.hpp>
 #include <cmath>
@@ -291,15 +292,12 @@ static void check_active_designs() {
   }
 }
 
-// The three GLMs that take the var tape rather than the recorder, each with
-// a non-unit output adjoint: their kernels seed the tape with 1.0 in the
-// forward and scale in the backward.
+// Compare the compact GLM kernels with a weighted nested-tape reference.
 static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
                            const std::vector<int>& idata, int rows, int cols,
-                           int alpha_len, int beta_len) {
+                           int alpha_len, int beta_len, double seed = -0.73) {
   using namespace stanli;
   using stan::math::var;
-  const double seed = -0.73;
   std::vector<double> X((size_t)rows * cols), a((size_t)alpha_len),
       b((size_t)beta_len);
   for (int j = 0; j < cols; ++j)
@@ -415,6 +413,78 @@ static void check_tail_glms() {
                  cols, cols, cats - 1);
   check_tail_glm("ord glm propto", OP_ORDERED_LOGISTIC_GLM_LPMF, true, cat,
                  rows, cols, cols, cats - 1);
+  check_tail_glm("ord glm empty", OP_ORDERED_LOGISTIC_GLM_LPMF, false,
+                 {0, cols}, 0, cols, cols, cats - 1,
+                 std::numeric_limits<double>::infinity());
+}
+
+// Shared-cutpoint recorder versus the established nested Stan Math tape.
+// Per-observation cutpoints exercise the deliberately retained fallback.
+static void check_ordered_density(bool array_cuts, bool scalar_location,
+                                  bool propto, double weight, int width) {
+  using namespace stanli;
+  using stan::math::var;
+  const int n = scalar_location ? 1 : 4;
+  const int nc = array_cuts ? n : 1;
+  std::vector<int> y;
+  for (int i = 0; i < n; ++i) y.push_back(1 + i % (width + 1));
+  auto layout = y;
+  layout.insert(layout.end(),
+                {kVectorizedDensityLayoutMarker, width, array_cuts ? nc : -1});
+  Graph g;
+  const int ls = g.add_slot(n, true), cs = g.add_slot(width * nc, true);
+  const int ws = g.add_slot(1, false), out = g.add_slot(1, false);
+  const int scaled = g.add_slot(1, false);
+  g.add_op(OP_ORDERED_LOGISTIC_LPMF, {ls, cs}, out, layout);
+  g.ops.back().variant = propto ? 0x83u : 0;
+  g.add_op(OP_MUL, {out, ws}, scaled);
+  g.result_slot = scaled;
+  Executor ex(std::move(g));
+  ex.value_ptr(ws)[0] = weight;
+  stan::math::nested_rev_autodiff nested;
+  Eigen::Matrix<var, -1, 1> location(n);
+  std::vector<Eigen::Matrix<var, -1, 1>> cuts(nc);
+  for (int i = 0; i < n; ++i)
+    location(i) = ex.param_ptr(ls)[i] = -0.6 + 0.7 * i;
+  for (int j = 0; j < nc; ++j) {
+    cuts[j].resize(width);
+    for (int k = 0; k < width; ++k)
+      cuts[j](k) = ex.param_ptr(cs)[j * width + k] = -1.2 + k + 0.1 * j;
+  }
+  std::vector<double> grad(n + width * nc);
+  const double got = ex.gradient(grad.data());
+  const auto call = [&](const auto& l, const auto& c) {
+    return propto ? stan::math::ordered_logistic_lpmf<true>(y, l, c)
+                  : stan::math::ordered_logistic_lpmf<false>(y, l, c);
+  };
+  var density;
+  if (array_cuts)
+    density = scalar_location ? call(location(0), cuts) : call(location, cuts);
+  else
+    density =
+        scalar_location ? call(location(0), cuts[0]) : call(location, cuts[0]);
+  var ref = density * weight;
+  stan::math::grad(ref.vi_);
+  expect_eq("ordered value", got, ref.val());
+  for (int i = 0; i < n; ++i)
+    expect_eq("ordered location", grad[i], location(i).adj());
+  for (int j = 0; j < nc; ++j)
+    for (int k = 0; k < width; ++k)
+      expect_eq("ordered cutpoint", grad[n + j * width + k], cuts[j](k).adj());
+
+  // Validation must still run, including after a preceding successful call.
+  if (width > 1) {
+    ex.param_ptr(cs)[1] = ex.param_ptr(cs)[0];
+    bool threw = false;
+    try {
+      ex.gradient(grad.data());
+    } catch (const std::domain_error&) {
+      threw = true;
+    }
+    expect_eq("ordered invalid cutpoints", threw, true);
+    ex.param_ptr(cs)[1] += 1.0;
+    expect_eq("ordered recovery after error", ex.gradient(grad.data()), got);
+  }
 }
 
 static void reference(const double* q, double* lp_out, double* grad_out) {
@@ -473,6 +543,13 @@ int main() {
   }
 
   check_tail_glms();
+  for (bool array_cuts : {false, true})
+    for (bool scalar_location : {false, true})
+      for (bool propto : {false, true})
+        for (double weight : {1.0, -2.75, 0.0})
+          for (int width : {0, 1, 3})
+            check_ordered_density(array_cuts, scalar_location, propto, weight,
+                                  width);
   check_vector_alphas();
   check_active_designs();
 

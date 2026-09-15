@@ -80,8 +80,9 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
     for (int i = 0; i < n; ++i)
       for (int j = 0; j < d; ++j)
         check(xadj[i * d + j], 0.125 + points[i][j].adj(), "GP point");
-  if (active & 2) check(sadj, 0.125 + a.adj(), "GP sigma");
-  if (active & 4) check(radj, 0.125 + r.adj(), "GP rho");
+  const bool exact = variant != kGpExpQuad;
+  if (active & 2) check(sadj, 0.125 + a.adj(), "GP sigma", exact);
+  if (active & 4) check(radj, 0.125 + r.adj(), "GP rho", exact);
 }
 static void chol(int n) {
   using namespace stanli;
@@ -133,7 +134,12 @@ int main(int argc, char** argv) {
       }
   for (auto variant :
        {stanli::kGpMatern32, stanli::kGpMatern52, stanli::kGpExponential})
-    gp(4, 2, 7, variant, false);
+    for (int n : {0, 1, 5, 12})
+      for (int d : {1, 3})
+        for (int mask = 0; mask < 8; ++mask) {
+          gp(n, d, mask, variant, false);
+          gp(n, d, mask, variant, true);
+        }
   gp(4, 2, 7, stanli::kGpExpQuad, false, 1e-110);
   gp(4, 2, 7, stanli::kGpExpQuad, false, 1e110);
   for (double sigma : {1e-155, 1e-100, 1e100, 1e150})
