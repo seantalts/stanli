@@ -1,4 +1,4 @@
-# Corpus benchmark protocol, version 2
+# Corpus benchmark protocol, version 3
 
 The benchmark measures **warm gradient latency**. Full inference is a separate,
 explicit phase. A numerical comparison must pass before a timing pair is accepted.
@@ -54,11 +54,12 @@ compiler commands; it must not be relabeled as a measurement of the merged build
 ## Reproducible runs
 
 ```sh
-cmake --build build-rel --target bench_grad stanli_run stanli_vectorize_probe -j 4
+./tools/dev_setup.sh --no-build       # builds the compiler and its probe
+cmake --build build-rel --target bench_grad stanli_run -j 4
 # New output path; gradients only, all default corpora:
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   /tmp/corpus-v2.tsv
-# Rethinking only:
+# Rethinking only (also available: brms, educational, teaching):
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   /tmp/rethinking-v2.tsv --corpus rethinking
 ```
@@ -79,7 +80,12 @@ A sibling `OUT.tsv.run/` contains:
 inputs, binaries and protocol settings. An existing unversioned TSV is rejected.
 There is no candidate-only refresh that combines a fresh measurement with an
 old comparator. Historical version-1 data stays separate until a reviewed
-version-2 run replaces it.
+version-3 run replaces it.
+
+Version 3 waits directly for process exit and enforces deadlines with a
+separate timer. Version 2 used timeout polling, which could add up to 50 ms
+of observer delay to short runs. Its wall times are retained as historical
+evidence and must not be mixed with new measurements.
 
 The command runner distinguishes failure from timeout, keeps logs on both,
 and kills the process group on timeout on POSIX hosts. Failed measurements

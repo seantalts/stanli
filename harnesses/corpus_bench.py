@@ -24,16 +24,17 @@ import statistics
 import subprocess
 import sys
 import time
+import threading
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import compile_cmd
 
-PROTOCOL = "stanli-corpus-v2"
+PROTOCOL = "stanli-corpus-v3"
 BENCH = REPO / "build-rel/bench_grad"
 RUN = REPO / "build-rel/stanli_run"
 STANC = REPO / "deps/stanc3/stanc"
-VECTORIZE_PROBE = REPO / "build-rel/stanli_vectorize_probe"
+VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
 COLS = ["model", "params", "stanli_prep_s", "stanli_ns_grad",
         "stanli_sample_s", "stanli_grads", "cmdstan_build_s",
         "cmdstan_ns_grad", "cmdstan_sample_s", "stanli_ns_grad_mad",
@@ -137,16 +138,26 @@ class Runner:
                 process = subprocess.Popen(record["argv"], cwd=record["cwd"],
                     stdout=out, stderr=err, env={**os.environ, **THREAD_ENV},
                     start_new_session=(os.name == "posix"))
+                # wait(timeout=...) polls with sleeps up to 50 ms on POSIX.
+                # A separate deadline lets waitpid observe short runs promptly.
+                expired = threading.Event()
+                def stop_at_deadline():
+                    if process.poll() is None:
+                        expired.set()
+                        try:
+                            if os.name == "posix":
+                                os.killpg(process.pid, signal.SIGKILL)
+                            else:
+                                process.kill()
+                        except ProcessLookupError:
+                            pass
+                timer = threading.Timer(timeout, stop_at_deadline)
+                timer.daemon = True
+                timer.start()
                 try:
-                    record["returncode"] = process.wait(timeout=timeout)
-                    record["status"] = "ok" if process.returncode == 0 else "failed"
-                except subprocess.TimeoutExpired:
-                    if os.name == "posix":
-                        os.killpg(process.pid, signal.SIGKILL)
-                    else:
-                        process.kill()
                     record["returncode"] = process.wait()
-                    record["status"] = "timeout"
+                    record["status"] = ("timeout" if expired.is_set() else
+                        "ok" if process.returncode == 0 else "failed")
                 except BaseException:
                     if os.name == "posix":
                         os.killpg(process.pid, signal.SIGKILL)
@@ -155,6 +166,9 @@ class Runner:
                     process.wait()
                     record["status"] = "interrupted"
                     raise
+                finally:
+                    timer.cancel()
+                    timer.join()
             except OSError as exc:
                 record.update(status="failed", returncode=None, error=str(exc))
             finally:
@@ -281,7 +295,7 @@ def open_run(output, expected, resume):
 
 def benchmark_cases(pdb, corpus="all"):
     """Return source/data paths; keep the established first dataset per PDB model."""
-    if corpus not in {"all", "posteriordb", "educational", "rethinking"}:
+    if corpus not in {"all", "posteriordb", "educational", "rethinking", "brms", "teaching"}:
         raise ValueError(f"Unknown benchmark corpus: {corpus}")
     cases = {}
     if corpus in {"all", "posteriordb"}:
@@ -291,17 +305,18 @@ def benchmark_cases(pdb, corpus="all"):
             cases.setdefault(model, (
                 pdb / "models" / "stan" / f"{model}.stan",
                 pdb / "data" / "data" / f"{meta['data_name']}.json.zip"))
-    if corpus in {"all", "educational"}:
+    if corpus in {"all", "teaching", "educational"}:
         from check_educational import files, inventory
         for model in inventory():
             if model in cases:
                 raise ValueError(f"Duplicate benchmark model: {model}")
             cases[model] = files(model)
-    if corpus in {"all", "rethinking"}:
-        for source in sorted((REPO / "tests/rethinking").glob("*.stan")):
-            if source.stem in cases:
-                raise ValueError(f"Duplicate benchmark model: {source.stem}")
-            cases[source.stem] = (source, source.with_suffix(".json"))
+    for collection in ("rethinking", "brms"):
+        if corpus in {"all", "teaching", collection}:
+            for source in sorted((REPO / "tests" / collection).glob("*.stan")):
+                if source.stem in cases:
+                    raise ValueError(f"Duplicate benchmark model: {source.stem}")
+                cases[source.stem] = (source, source.with_suffix(".json"))
     return cases
 
 
@@ -426,7 +441,7 @@ def main(argv=None):
     parser.add_argument("cmdstan", type=pathlib.Path)
     parser.add_argument("pdb", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking"), default="all")
+    parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking", "brms", "teaching"), default="all")
     parser.add_argument("--filter", default="")
     parser.add_argument("--rounds", type=int, default=6)
     parser.add_argument("--warmup-ms", type=int, default=200)
@@ -472,6 +487,13 @@ def main(argv=None):
         setattr(args, key, getattr(args, key).absolute())
     if any(os.getenv(k, "0") != "0" for k in ("STANLI_PROFILE", "STANLI_PROFILE_PREP")):
         parser.error("disable profiling for comparative measurements")
+    # Compiler and runtime overrides change which code is measured. Require
+    # explicit tool arguments rather than inherit a shell's experiment state.
+    overrides = [k for k, v in os.environ.items() if v and
+                 (k in ("STANC", "STANLI_COMPILE") or
+                  k.startswith(("STANLI_NO_", "STANLI_PROFILE", "STANLI_LITE_")))]
+    if overrides:
+        parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))
     # Resolve inputs in a separate temporary cache before freezing their identities.
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-bench-inputs-") as cache:
@@ -494,6 +516,7 @@ def main(argv=None):
                         machine=dict(platform=platform.platform(), host=platform.node(),
                                      processor=platform.processor(), logical_cpus=os.cpu_count()),
                         threads=THREAD_ENV, sources=identities,
+                        stanli_source=checkout_identity(REPO),
                         executables={k: sha(getattr(args, k)) for k in
                                      (("bench", "stanc", "vectorize_probe", "run") if args.sampling else ("bench", "stanc", "vectorize_probe"))},
                         toolchains={"cmdstan": checkout_identity(args.cmdstan),

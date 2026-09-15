@@ -112,6 +112,15 @@ class TimingTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_short_runs_use_blocking_wait_without_timeout_polling(self):
+        with tempfile.TemporaryDirectory() as temp:
+            process = mock.Mock(returncode=0)
+            process.wait.return_value = 0
+            with mock.patch("harnesses.corpus_bench.subprocess.Popen", return_value=process):
+                result = Runner(pathlib.Path(temp)).run("short", ["program"], 5)
+            process.wait.assert_called_once_with()
+            self.assertEqual(result["status"], "ok")
+
     def test_nonzero_exit_never_counts_as_success_and_logs_survive(self):
         with tempfile.TemporaryDirectory() as temp:
             runner = Runner(pathlib.Path(temp))
@@ -222,9 +231,11 @@ class CompilerSelectionTests(unittest.TestCase):
 class CorpusInventoryTests(unittest.TestCase):
     def test_educational_cases_are_default_and_selectable_without_posteriordb(self):
         cases = benchmark_cases(pathlib.Path("missing/posterior_database"))
-        self.assertEqual(len(cases), 75)
+        self.assertEqual(len(cases), 199)
         self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "educational")), 13)
         self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "rethinking")), 62)
+        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "brms")), 124)
+        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "teaching")), 199)
         for source, data in cases.values():
             self.assertTrue(source.is_file())
             self.assertTrue(data.is_file())
@@ -240,7 +251,7 @@ class CorpusInventoryTests(unittest.TestCase):
                 (root / "posteriors" / (name + ".json")).write_text(json.dumps(
                     {"model_name": "example", "data_name": data}))
             cases = benchmark_cases(root)
-            self.assertEqual(len(cases), 76)
+            self.assertEqual(len(cases), 200)
             self.assertEqual(cases["example"][1].name, "first.json.zip")
             self.assertEqual(len(benchmark_cases(root, "posteriordb")), 1)
 
