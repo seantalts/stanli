@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""Build the McElreath report from a completed, immutable corpus run.
+
+Usage: report_rethinking.py RUN_DIRECTORY DIAGNOSTICS_JSON REPLAY_LOG OUTPUT_DIR
+Requires reportlab. No benchmarks run here. Retain the run directory as evidence.
+"""
+import csv
+import hashlib
+import json
+import math
+import pathlib
+import re
+import shutil
+import statistics
+import sys
+from xml.sax.saxutils import escape
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+RUN, DIAGNOSTICS, REPLAY, OUT = map(pathlib.Path, sys.argv[1:])
+OUT.mkdir(parents=True, exist_ok=True)
+manifest = json.loads((RUN / 'manifest.json').read_text())
+assert manifest['run_id'] == '37fa26701db14f56', 'This report narrative is tied to its audited run; review it before using other results.'
+assert manifest['identity']['config']['cmdstan_runtime_multiple'] == 3
+assert manifest['identity']['config']['seeds'] == [1, 2, 3, 4]
+assert manifest['identity']['config']['iter_sampling'] == 1000
+assert manifest['identity']['config']['iter_warmup'] == 1000
+records = {p.stem.removesuffix('.result'): json.loads(p.read_text()) for p in RUN.glob('*.result.json')}
+diag = json.loads(DIAGNOSTICS.read_text())
+events = [json.loads(line) for line in (RUN / 'events.jsonl').read_text().splitlines()]
+replay = REPLAY.read_text()
+assert '62/62 models within 1e-09' in replay
+errors = {}
+for line in replay.splitlines():
+    match = re.match(r'((?:ch|extra_)\S+)\t([\deE.+-]+)\t', line)
+    if match: errors[match[1]] = float(match[2])
+assert len(errors) == len(records) == 62
+inventory = list(csv.DictReader((REPO / 'tests/rethinking/inventory.tsv').open(), delimiter='\t'))
+rows = []
+for item in inventory:
+    name = item['file']; record = records[name]
+    row = dict(item, status=record['status'], numeric_error=errors[name], diagnostics=diag[name])
+    stanc = next(e['elapsed_s'] for e in events if e['phase'] == name + '/stanc-cpp')
+    row['cmdstan_compile_s'] = stanc + record['row']['cmdstan_build_s']
+    row['stanli_compile_s'] = None  # included in each stanli CLI duration
+    for engine in ('stanli', 'cmdstan'):
+        runs = [e for e in record['sampling'] if e['engine'] == engine]
+        assert len(runs) == 4
+        row[engine + '_runs'] = [{k: e[k] for k in ('seed', 'status', 'elapsed_s', 'timeout_s') if k in e} for e in runs]
+        values = [e['elapsed_s'] for e in runs if e['status'] == 'ok']
+        complete = len(values) == 4
+        row[engine + '_median_s'] = statistics.median(values) if complete else None
+        row[engine + '_min_s'] = min(values) if complete else None
+        row[engine + '_max_s'] = max(values) if complete else None
+        row[engine + '_first_fit_s'] = (row[engine + '_median_s'] + (row['cmdstan_compile_s'] if engine == 'cmdstan' else 0)) if complete else None
+    rows.append(row)
+book = [r for r in rows if r['file'].startswith('ch')]
+extra = [r for r in rows if not r['file'].startswith('ch')]
+assert len(book) == 61 and len(extra) == 1
+paired = [r for r in book if r['stanli_median_s'] is not None and r['cmdstan_median_s'] is not None]
+clear = [r for r in book if all(r['diagnostics']['engines'][e]['status'] == 'complete' and not r['diagnostics']['engines'][e]['screening_flag'] for e in ('stanli', 'cmdstan'))]
+faster = sum(r['stanli_first_fit_s'] < r['cmdstan_first_fit_s'] for r in paired)
+ratio = statistics.median(r['cmdstan_first_fit_s'] / r['stanli_first_fit_s'] for r in paired)
+summary = dict(book_call_sites=len(book), complete_in_both=len(paired), diagnostic_screen_clear_in_both=len(clear),
+               estimated_first_fit_faster=faster, estimated_first_fit_median_ratio=ratio,
+               worst_scaled_numerical_error=max(errors.values()), supplemental_fixtures=len(extra))
+json_data = dict(summary=summary, run_manifest=manifest, method='Median of four independent single-chain CLI runs; first-fit CmdStan estimate adds matching Stan-to-C++ and C++ build events. No aggregate from surviving seeds.', rows=rows)
+(OUT / 'rethinking-results.json').write_text(json.dumps(json_data, indent=2, allow_nan=False) + '\n')
+shutil.copy2(REPLAY, OUT / 'numerical-replay.txt')
+shutil.copy2(RUN / 'manifest.json', OUT / 'benchmark-manifest.json')
+shutil.copy2(DIAGNOSTICS, OUT / 'sampling-diagnostics.json')
+
+
+def number(v):
+    if v is None: return 'capped'
+    return f'{v:.2f}' if v < 10 else f'{v:.1f}' if v < 100 else f'{v:.0f}'
+
+
+def timing(r, engine):
+    value = r[engine + '_median_s']
+    if value is None:
+        capped = sum(e['status'] != 'ok' for e in r[engine + '_runs'])
+        return f'capped ({capped}/4)'
+    return f"{number(value)} [{number(r[engine + '_min_s'])}-{number(r[engine + '_max_s'])}]"
+
+
+def flag(r, engine):
+    d = r['diagnostics']['engines'][engine]
+    if d['status'] != 'complete': return 'incomplete'
+    return 'review' if d['screening_flag'] else 'clear'
+
+
+fields = ['file', 'model', 'code_box', 'status', 'numeric_error', 'stanli_median_s', 'stanli_min_s', 'stanli_max_s',
+          'cmdstan_median_s', 'cmdstan_min_s', 'cmdstan_max_s', 'cmdstan_compile_s', 'stanli_first_fit_s', 'cmdstan_first_fit_s',
+          'stanli_diagnostic_screen', 'cmdstan_diagnostic_screen', 'stanli_rhat_max', 'cmdstan_rhat_max',
+          'stanli_ess_bulk_min', 'cmdstan_ess_bulk_min', 'stanli_divergences', 'cmdstan_divergences']
+with (OUT / 'rethinking-timings.csv').open('w', newline='') as stream:
+    writer = csv.DictWriter(stream, fieldnames=fields); writer.writeheader()
+    for row in rows:
+        flat = {k: row.get(k) for k in fields}
+        for engine in ('stanli', 'cmdstan'):
+            flat[engine + '_diagnostic_screen'] = flag(row, engine)
+            for key in ('rhat_max', 'ess_bulk_min', 'divergences'):
+                flat[engine + '_' + key] = row['diagnostics']['engines'][engine].get(key)
+        writer.writerow(flat)
+
+pin = 'ac1b3b2cda83f3e14096e2d997a6e30ad109eeee'
+source_url = f'https://github.com/rmcelreath/rethinking/blob/{pin}/book_code_boxes.txt'
+stan_url = 'https://mc-stan.org/docs/2_39/cmdstan-guide/diagnose_utility.html'
+intro = [
+    'Stanli runs Stan programs without a separate C++ compilation for each model. We ran the unchanged Stan programs and data generated by all 61 ulam() call sites in chapters 4-16 of the second-edition code supplement. All passed the numerical comparison with CmdStan. Two fits had one stanli run stopped by the time limit; the other 59 completed all four seeds in both engines.',
+    f'Including model compilation, the estimated time to a first fit was shorter with stanli for {faster} of the {len(paired)} book call sites that completed in both engines. Much of this advantage comes from avoiding a separate C++ compilation. Ordered-response models m12.5 and m12.7 were slower with stanli. Full results, including the capped cases, follow.',
+]
+numerics = 'At three fixed parameter vectors per fixture, we compared the log posterior, every derivative, and the constrained/model-output values. All 62 fixtures passed, including the separately labeled hurdle example: 32,349 values were compared, with a largest scaled discrepancy of 1.48 x 10^-13. The acceptance tolerance was 10^-9. This is agreement at the tested points, not a proof of equality everywhere.'
+quality = f'{len(clear)} of the 61 book call sites completed and met the diagnostic screen in both engines. The others had diagnostic flags or a capped run. The book includes deliberately difficult models, so elapsed time alone is not evidence of reliable inference. We did not retune individual models to make diagnostics pass.'
+method = 'Each engine used four independent seeds, with 1,000 warmup iterations and 1,000 retained draws per seed. Timings below describe one chain, not a parallel four-chain fit. Each stanli CLI run includes Stan translation, model preparation, warmup, sampling, generated quantities and CSV output. CmdStan CLI times start from its compiled model; compilation is shown separately.'
+examples = [
+ ('ch11_m11_4', 'Chimpanzee logistic regression'),
+ ('ch12_m12_4', 'Ordered response, cutpoints only'),
+ ('ch12_m12_5', 'Ordered response with predictors'),
+ ('ch12_m12_6', 'Monotonic education effect'),
+ ('ch13_m13_4nc', 'Non-centered multilevel model'),
+ ('ch14_m14_8', 'Gaussian-process model'),
+ ('ch15_m15_2', 'Measurement-error model'),
+ ('ch16_m16_1', 'Nonlinear height-weight model'),
+]
+lookup = {r['file']: r for r in rows}
+# Editable report accompanies the PDF; all numeric cells use the same rows.
+md = ['# Rethinking models: numerical agreement and time to draws', '', 'Prepared for Richard McElreath | 15 September 2026', '']
+md += [intro[0], '', intro[1]] + ['', '## Numerical agreement', '', numerics, '', '## Sampling quality', '', quality, '', '## Measurement', '', method, '']
+md += ['Apple M3 Ultra, 96 GiB RAM, macOS ARM64; Release build; one engine at a time. Rethinking 2.42, CmdStan 2.39.0, posterior 1.7.0.', '',
+       'The stanli limit for each seed was the smaller of 3x the matching CmdStan CLI time and 900 seconds. CmdStan ran first to establish that limit. Sampling order was therefore not counterbalanced. CmdStan itself had a 900-second limit. A capped seed prevents an aggregate timing for that engine; the successful seeds are not averaged on their own.', '',
+       'Common sampler settings were target acceptance 0.8, maximum tree depth 10 and random initialization. Model-specific chain counts and tuning choices in the book were not reproduced. C++ compilation was measured once per model, with the toolchain already installed; no cold-cache or installation-time claim is made.', '',
+       'Diagnostic screen: no post-warmup divergences or maximum-tree-depth hits; every nonconstant parameter has finite R-hat <= 1.01 and bulk ESS >= 400. Fixed matrix entries are verified and excluded. A clear screen is not a general validation of the posterior. See [Stan diagnostics guidance](' + stan_url + ').', '',
+       '## Full timing appendix', '', 'Seconds: median [minimum-maximum] across four seeds. CmdStan compilation includes the recorded Stan-to-C++ translation and C++ build. For a first-fit estimate add compilation to CmdStan runtime; stanli preparation is already included. These are sums of measured stages, not a directly timed combined invocation.', '',
+       '| Book model | R code | stanli runtime | CmdStan runtime | CmdStan compile | Screen S/C |',
+       '| --- | --- | ---: | ---: | ---: | --- |']
+for row in rows:
+    md.append(f"| {row['model']} | {row['code_box']} | {timing(row, 'stanli')} | {timing(row, 'cmdstan')} | {number(row['cmdstan_compile_s'])} | {flag(row,'stanli')}/{flag(row,'cmdstan')} |")
+md += ['', '## Scope and reproducibility', '',
+       'The 61 book call sites include repeated fits and correspond to 58 distinct Stan/data pairs. The supplemental hurdle model makes 62 fixtures and 59 distinct pairs. Chapters 4-8 and 10 have no ulam() calls in this supplement. quap(), direct stan() calls, exercises and lecture-only models are outside this corpus.', '',
+       '[Pinned book supplement](' + source_url + '). The generator preserves the Stan text and processed data; simulation seeds and data licensing are recorded in tests/rethinking/PROVENANCE.md. Both engines receive exactly the same input bytes.', '',
+       f"Run ID: `{manifest['run_id']}`. See `benchmark-manifest.json`, `rethinking-results.json`, `sampling-diagnostics.json`, `numerical-replay.txt` and `rethinking-timings.csv` for identities, numeric results and diagnostics. Raw per-seed CSVs and command logs are retained in the original run directory.", '']
+(OUT / 'rethinking-report.md').write_text('\n'.join(md) + '\n')
+
+# PDF: a short summary, methods/diagnostics, then the complete timing appendix.
+styles = getSampleStyleSheet()
+styles.add(ParagraphStyle(name='ReportTitle', fontName='Helvetica-Bold', fontSize=21, leading=25, textColor=colors.HexColor('#173d47'), spaceAfter=8))
+styles.add(ParagraphStyle(name='Deck', fontName='Helvetica', fontSize=10, leading=14, textColor=colors.HexColor('#566570'), spaceAfter=15))
+styles.add(ParagraphStyle(name='BodyReport', fontName='Helvetica', fontSize=9.5, leading=13, spaceAfter=9))
+styles.add(ParagraphStyle(name='SmallReport', fontName='Helvetica', fontSize=8, leading=10.5, spaceAfter=6))
+styles.add(ParagraphStyle(name='TableReport', fontName='Helvetica', fontSize=8, leading=10))
+styles.add(ParagraphStyle(name='TableHead', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.white))
+styles['Heading2'].fontName = 'Helvetica-Bold'; styles['Heading2'].fontSize = 12
+styles['Heading2'].textColor = colors.HexColor('#173d47'); styles['Heading2'].spaceAfter = 8
+
+
+def para(text, style='BodyReport'):
+    return Paragraph(text.replace('10^-13', '10<super>-13</super>').replace('10^-9', '10<super>-9</super>'), styles[style])
+
+
+def table(data, widths, head=True):
+    cells = [[para(escape(str(v)), 'TableHead' if head and i == 0 else 'TableReport') for v in row] for i, row in enumerate(data)]
+    result = Table(cells, colWidths=widths, repeatRows=1 if head else 0, hAlign='LEFT')
+    spec = [('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING',(0,0),(-1,-1),6), ('RIGHTPADDING',(0,0),(-1,-1),6),
+            ('TOPPADDING',(0,0),(-1,-1),4), ('BOTTOMPADDING',(0,0),(-1,-1),4),
+            ('LINEBELOW',(0,-1),(-1,-1),0.4,colors.HexColor('#ccd5d8'))]
+    if head:
+        spec += [('BACKGROUND',(0,0),(-1,0),colors.HexColor('#234e59')),
+                 ('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#f0f4f5')])]
+    result.setStyle(TableStyle(spec)); return result
+
+
+def footer(canvas, doc):
+    canvas.setStrokeColor(colors.HexColor('#ccd5d8')); canvas.line(45,36,A4[0]-45,36)
+    canvas.setFont('Helvetica',7.5); canvas.setFillColor(colors.HexColor('#566570'))
+    canvas.drawString(45,24,'Stanli | Statistical Rethinking, second edition | 15 September 2026')
+    canvas.drawRightString(A4[0]-45,24,str(doc.page))
+
+
+story = [para('Rethinking models', 'ReportTitle'), para('Numerical agreement and time to draws<br/>Prepared for Richard McElreath | 15 September 2026', 'Deck')]
+for text in intro: story.append(para(text))
+story += [para('Numerical agreement', 'Heading2'), para(numerics), para('Examples: estimated time to a first fit', 'Heading2'),
+          para('Seconds for one chain. CmdStan includes its recorded model-compilation stages; stanli preparation is already included. Screen S/C means stanli/CmdStan; review flags a diagnostic. See the appendix for all models and the four-seed ranges.', 'SmallReport')]
+data = [['Book model / example', 'stanli', 'CmdStan', 'Screen S/C']]
+for name,label in examples:
+    r=lookup[name]
+    data.append([r['model']+' - '+label, number(r['stanli_first_fit_s']), number(r['cmdstan_first_fit_s']), flag(r,'stanli')+'/'+flag(r,'cmdstan')])
+story += [table(data,[260,65,65,115]), Spacer(1,10), para('Sampling quality matters', 'Heading2'), para(quality)]
+story += [PageBreak(), para('How to read the results', 'ReportTitle'), para(method),
+          para('Hardware and software', 'Heading2'), para('Apple M3 Ultra, 96 GiB RAM, macOS ARM64; Release build; one engine at a time. The toolchain was already installed. Rethinking 2.42, CmdStan 2.39.0 and posterior 1.7.0 were used. These are measurements on a desktop computer, not predicted laptop timings.'),
+          para('The scaled error is abs(a-b) / max(1, abs(a), abs(b)). Log-posterior and derivative comparisons use the same unconstrained parameter values and include the transformation Jacobian.', 'SmallReport'), para('Fixed settings and stopping rule', 'Heading2'), para('Seeds 1-4; target acceptance 0.8; maximum tree depth 10; random initialization. Every model used the same iteration budget. The book\'s model-specific tuning and chain-count choices were not reproduced.'),
+          para('For each seed, CmdStan ran first. Stanli was stopped at the smaller of three times that CmdStan CLI runtime and 900 seconds. CmdStan also had a 900-second ceiling. C++ compilation did not count toward the relative cap. This reference-first order was required by the cap and was not counterbalanced.'),
+          para('Capped cases', 'Heading2'), para('m12.6: stanli seed 1 reached the 900-second ceiling; the other three seeds completed. m13.6: stanli seed 3 reached its 2.74-second relative cap; the other three completed. All CmdStan seeds completed. Neither model receives an aggregate stanli timing: averaging only the completed seeds would bias the result.'),
+          para('Diagnostic screen', 'Heading2'), para('We checked the four runs as four chains. A clear screen requires no post-warmup divergences or maximum-tree-depth hits, finite R-hat no greater than 1.01, and bulk effective sample size of at least 400 for every nonconstant parameter. Fixed correlation-matrix entries were verified and omitted. A flag calls for review; a clear screen is not proof that inference is reliable.'),
+          para('Under this screen, 48 of 59 complete stanli book fits and 50 of 61 CmdStan book fits were clear; 47 were clear in both. Several flagged cases are intentionally difficult teaching examples. Runtime here is the cost of a fixed sampling budget, not the time required to achieve a specified inferential accuracy.'),
+          para('Scope and sources', 'Heading2'), para('All 61 ulam() call sites in chapters 4-16 are included, representing 58 distinct Stan/data pairs. Repeated fits remain listed. The supplemental hurdle fixture is separate. quap(), direct stan() calls, exercises and lecture-only examples are outside this inventory.'),
+          para(f'<link href="{source_url}" color="#234e59">Pinned second-edition code supplement (rethinking 2.42)</link><br/><link href="{stan_url}" color="#234e59">Stan: convergence and efficiency diagnostics</link>', 'SmallReport'),
+          para('The accompanying CSV and JSON files contain every timing, diagnostic result and build/input identity. Run ID: '+manifest['run_id']+'. Numerical replay compared 32,349 values, including model outputs. Inputs were identical across engines; generated Stan programs were not rewritten.', 'SmallReport')]
+for page_index, chunk in enumerate((book[:31],book[31:])):
+    story += [PageBreak(), para('Full timing appendix' + (' (continued)' if page_index else ''), 'ReportTitle'),
+              para('Seconds: median [minimum-maximum] across four seeds. One chain has 1,000 warmup iterations and 1,000 retained draws. S/C = stanli/CmdStan diagnostic screen.', 'SmallReport')]
+    data = [['Book model', 'R code', 'stanli runtime', 'CmdStan runtime', 'CmdStan compile', 'Screen S/C']]
+    for r in chunk:
+        data.append([r['model'],r['code_box'],timing(r,'stanli'),timing(r,'cmdstan'),number(r['cmdstan_compile_s']),flag(r,'stanli')+'/'+flag(r,'cmdstan')])
+    story.append(table(data,[67,43,108,108,68,111]))
+    story += [Spacer(1,8),para('To estimate a first fit, add CmdStan compilation to its runtime; stanli preparation is already included. Compilation was measured once, including Stan-to-C++ translation and the C++ build. First-fit totals are sums of measured stages. Four-seed ranges describe run-to-run variation, not confidence intervals.', 'SmallReport')]
+    if page_index:
+        r=extra[0]
+        story += [para('Supplemental fixture (not a book model)', 'Heading2'),
+                  para('Hurdle Poisson: stanli '+timing(r,'stanli')+' s; CmdStan '+timing(r,'cmdstan')+' s; CmdStan compilation '+number(r['cmdstan_compile_s'])+' s. Screen: '+flag(r,'stanli')+'/'+flag(r,'cmdstan')+'.', 'SmallReport')]
+pdf_path = OUT.parent / 'pdf' / 'rethinking-report.pdf'
+pdf_path.parent.mkdir(parents=True, exist_ok=True)
+SimpleDocTemplate(str(pdf_path), pagesize=A4, rightMargin=45, leftMargin=45,
+                  topMargin=42, bottomMargin=48, title='Rethinking models: numerical agreement and time to draws',
+                  author='Stanli evaluation', subject='Complete Rethinking corpus numerical and sampling comparison').build(story, onFirstPage=footer, onLaterPages=footer)
+print(json.dumps(summary,indent=2))
+print(pdf_path)
