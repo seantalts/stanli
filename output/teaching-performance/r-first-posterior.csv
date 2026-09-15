@@ -1,0 +1,4 @@
+"os","arch","r","stanli","run","elapsed_seconds"
+"Darwin","aarch64","4.6.1","0.14.0",1,0.119
+"Darwin","aarch64","4.6.1","0.14.0",2,0.13
+"Darwin","aarch64","4.6.1","0.14.0",3,0.127

@@ -44,7 +44,7 @@ model evaluation. It is not labeled source-to-model compilation. A gradient
 driver's C++ build time is a setup event, not a user's CmdStan model-build time.
 
 The runner uses the shipped vectorized compilation pipeline via
-`stanli_vectorize_probe` for gradients and the CLI's default compiler for sampling.
+`deps/stanc3/stanli-vectorize-probe` for gradients and the CLI's default compiler for sampling.
 `--cmdstan-stanc` (alias `--stanc`) and `--stancflags` select the reference
 header compiler; the generated header is shared by its gradient driver and
 sampler build. All compiler choices and executable hashes are in the manifest.
@@ -58,10 +58,10 @@ compiler commands; it must not be relabeled as a measurement of the merged build
 cmake --build build-rel --target bench_grad stanli_run -j 4
 # New output path; gradients only, all default corpora:
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/corpus-v2.tsv
+  /tmp/corpus-v3.tsv
 # Rethinking only (also available: brms, educational, teaching):
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/rethinking-v2.tsv --corpus rethinking
+  /tmp/rethinking-v3.tsv --corpus rethinking
 ```
 
 A sibling `OUT.tsv.run/` contains:
@@ -101,7 +101,10 @@ frozen in the manifest. The default sampling timeout is 900 seconds per command.
 
 CSV validation checks the retained draw count, column widths and finite values
 before accepting a successful exit. These are observed CLI wall times, including
-CSV output. They do not measure
+CSV output at each CLI's default precision (CmdStan 2.39 uses eight significant
+digits; stanli uses 17). Output formatting costs are therefore part of each
+engine's measured user path. The independent numerical oracle uses high-precision
+values, not these sampling CSVs. These timings do not measure
 ESS per second or establish mixing quality. CmdStan's ordinary model binary is
 built separately with `make`; its model-build duration is recorded separately.
 If any seed fails or times out, that engine has no aggregate sampling time:

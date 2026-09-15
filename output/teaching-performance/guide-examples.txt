@@ -1,0 +1,14 @@
+No divergent transitions.
+No transitions saturated the maximum treedepth of 10.
+E-BFMI is above 0.3 in every chain.
+R-hat is below 1.01 for every parameter (worst 1.001, sigma).
+Bulk ESS is at least 100 per chain for every parameter (worst 2633, lprior).
+Tail ESS is at least 100 per chain for every parameter (worst 2193, lprior).
+No problems detected.
+No divergent transitions.
+No transitions saturated the maximum treedepth of 10.
+E-BFMI is above 0.3 in every chain.
+R-hat is below 1.01 for every parameter (worst 1.003, mu).
+Bulk ESS is at least 100 per chain for every parameter (worst 1735, sigma).
+Tail ESS is at least 100 per chain for every parameter (worst 1675, mu).
+No problems detected.

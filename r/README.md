@@ -228,3 +228,10 @@ invalid models through the file on Linux, macOS, and Windows.
 defaults to `jacobian=0`, the penalized maximum likelihood, which
 stanli cannot offer: the change-of-variables Jacobian is folded into
 the graph when the model is lowered.
+
+## Teaching collections and migration
+
+See [Teaching with Stanli](../docs/teaching-support.md) for tested Rethinking,
+brms, and educational models, numerical and performance evidence, and working
+examples. The [cmdstanr translation table](../docs/from-cmdstanr.md) covers
+common operations and differences.

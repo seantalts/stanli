@@ -12,11 +12,14 @@ Every `.stan` is the unchanged `stancode()` output of rethinking 2.42 at the
 formulas and preparation from the pinned book supplement rather than
 transcribing them. It fails if any book call is missing from its inventory.
 
-<!--gen:rethinking_verified-->62/62<!--/gen--> fixtures are verified against
-CmdStan. All 186 log-density/gradient points and all 186 output rows were
-recorded; the worst scaled error was 1.48e-13. This is pointwise numerical
-coverage, not a claim that every posterior mixes well or that an `ulam`
-backend already exists.
+<!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan
+references: all 186 log-density/gradient points and all 186 output rows. The
+recording build's worst scaled error was 1.48e-13. On the latest source build,
+61/62 fixtures complete the replay, with a worst scaled error of 6.50e-14;
+`m14.11` times out during preparation before numerical comparison
+([#372](https://github.com/seantalts/stanli/issues/372)). This is pointwise
+numerical coverage, not a claim that every posterior mixes well or that an
+`ulam` backend already exists.
 
 ## What they cover
 
@@ -133,11 +136,17 @@ replace it. No rethinking R implementation is vendored.
 
 | Model | Diagnosis | Issue |
 | --- | --- | --- |
-| None | Every fixture matches the pinned CmdStan oracle at all three points. | — |
+| `ch14_m14_11` | The current source build times out after 300 seconds in graph-partitioning cost search, before the numerical check. Earlier builds verified its retained references; do not count that as a current pass. | [#372](https://github.com/seantalts/stanli/issues/372) |
 
 Keep future failures here with a linked issue. Do not remove a difficult
 model, alter its data, or regenerate an oracle to hide a disagreement.
 Compiler fixes belong in separate changes.
+
+The numerically verified ordered regressions also expose a performance gap:
+`m12.5` takes longer than CmdStan under the shared sampling budget, and one
+`m12.6` seed reaches the 900-second ceiling. Follow-up measurements and
+reproduction commands are in [#373](https://github.com/seantalts/stanli/issues/373).
+The timing appendix retains these cases and their diagnostic results.
 
 ## Regenerating and recording
 

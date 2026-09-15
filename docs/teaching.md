@@ -1,5 +1,8 @@
 # Teaching Bayesian workflow with stanli
 
+For model coverage, numerical evidence, performance results, and examples
+using brms or Rethinking, see [Teaching support](teaching-support.md).
+
 ## Before the first class
 
 Use **R-universe binaries**. Give students with supported macOS or Windows R
@@ -108,9 +111,13 @@ machine, not cold filesystem-cache measurements.
 
 | Platform | Measured median wall time | Evidence |
 |---|---|---|
-| macOS arm64, Apple M3 Ultra, macOS 26.6.2, R 4.6.1 | 0.122 s | Local run: 0.139, 0.122, 0.122 s |
+| macOS arm64, Apple M3 Ultra, macOS 26.6.2, R 4.6.1 | 0.127 s | Latest local build: 0.119, 0.130, 0.127 s |
 | Linux x86_64 | Awaiting the first CI run of this benchmark | `r-first-posterior-linux` artifact |
 | Windows x86_64 | Awaiting the first CI run of this benchmark | `r-first-posterior-windows-x86_64` artifact |
+
+The Mac measurement uses runtime/compiler sources matching main `2ae6c1d0`;
+[the retained CSV](../output/teaching-performance/r-first-posterior.csv) records
+the three fresh-session runs.
 
 The [wheels workflow](../.github/workflows/wheels.yml) records Linux timings
 against its freshly built runtime on source PRs, and macOS/Windows timings after

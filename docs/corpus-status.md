@@ -273,9 +273,9 @@ CmdStan and stanli both reject every shared evaluation point for these models: t
 
 ## Rethinking teaching corpus
 
-62/62 fixtures verified at all three CmdStan points. The inventory covers all 61 ulam call sites in chapters 4–16 of the second edition, plus a supplemental hurdle model. Counts here are separate from posteriordb. These are the recorder's measurements; `tools/verify_refs.py` replays them against the current build in CI.
+Reference recording: 62/62 fixtures verified at all three CmdStan points. The inventory covers all 61 ulam call sites in chapters 4–16 of the second edition, plus a supplemental hurdle model. Counts here are separate from posteriordb. These are the recorder's measurements; `tools/verify_refs.py` replays them against the current build in CI.
 
-See [the inventory and provenance](../tests/rethinking/README.md).
+See [the inventory and provenance](../tests/rethinking/README.md), and [current-build replay and performance results](teaching-support.md). Recording coverage is not a claim that the current build replays every fixture successfully.
 
 | model | verified points | worst scaled error |
 | --- | ---: | ---: |

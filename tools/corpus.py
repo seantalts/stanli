@@ -230,12 +230,14 @@ def rethinking_status():
         rows.append((model, passed, worst))
     verified = sum(passed == 3 for _, passed, _ in rows)
     md = ["", "## Rethinking teaching corpus", "",
-          f"{verified}/{len(models)} fixtures verified at all three CmdStan points. "
+          f"Reference recording: {verified}/{len(models)} fixtures verified at all three CmdStan points. "
           "The inventory covers all 61 ulam call sites in chapters 4–16 of the "
           "second edition, plus a supplemental hurdle model. Counts here are "
           "separate from posteriordb. These are the recorder's measurements; "
           "`tools/verify_refs.py` replays them against the current build in CI.",
-          "", "See [the inventory and provenance](../tests/rethinking/README.md).",
+          "", "See [the inventory and provenance](../tests/rethinking/README.md), and "
+          "[current-build replay and performance results](teaching-support.md). "
+          "Recording coverage is not a claim that the current build replays every fixture successfully.",
           "", "| model | verified points | worst scaled error |",
           "| --- | ---: | ---: |"]
     md += [f"| `{model}` | {passed}/3 | {worst:.2e} |"

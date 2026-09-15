@@ -4,8 +4,9 @@
 
 ### Improvements
 
-- Add a Rethinking numerical and sampling report with the full timing appendix;
-  cap each stanli run at 3x its CmdStan baseline or 900 seconds, whichever is less.
+- Document Rethinking, brms, and educational-model support with current-build
+  numerical checks, a full timing appendix, and a Rethinking report. Cap
+  benchmark sampling at 3x its CmdStan baseline or 900 seconds, whichever is less.
 - Add the complete second-edition rethinking `ulam()` corpus: 61 book calls
   plus a hurdle fixture, pinned regeneration, and CmdStan reference checks.
 - Add optional `as_stanfit()` conversion with native density, gradient, and
@@ -20,6 +21,7 @@
 
 - Replace corpus benchmark heuristics with equal warmup, alternating paired
   trials, median/MAD summaries, and versioned raw records that cannot mix runs.
+  Remove timeout-polling delay from short-process wall times.
 
 ## 0.14.0
 

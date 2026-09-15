@@ -1,0 +1,7 @@
+Run fae5494c296cd547, verified after completion on 2026-09-15.
+199 outcome records; 398 frozen input hashes match the manifest.
+All 10 additional build/compiler file hashes match build-identity.json.
+All 6 benchmark source hashes match the manifest.
+All 6 dependency checkout revisions/diffs, 7 reference library hashes, and clang++ hash match the manifest.
+Runtime/compiler source diff against main 2ae6c1d029ec6c29fc9be5cb7a72cdf94eccfd7f is empty.
+Raw archive contains all 199 model records and 398 frozen inputs.

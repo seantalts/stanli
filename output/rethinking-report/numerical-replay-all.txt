@@ -1,0 +1,12 @@
+references recorded against CmdStan 2.39.0 (11cb052d3e1f), math 8f326d14599d, on Darwin arm64
+ILL-CONDITIONED i320_gp_expquad point 0: cholesky_decompose of a jittered exp-quad covariance whose smallest pivot is 3.7e-12 (1.18e-09)
+ILL-CONDITIONED i320_gp_expquad point 1: cholesky_decompose of a jittered exp-quad covariance whose smallest pivot is 3.7e-12 (1.43e-09)
+KNOWN GAP s2_com_poisson: parameter-dependent while with a runtime-length local; needs the structured executor to take a statement region the island refuses
+ILL-CONDITIONED s2_gp_by_gr point 0: cholesky_decompose of five jittered exp-quad covariances whose smallest pivot is 1.8e-12 (7.33e-07)
+ILL-CONDITIONED s2_gp_by_gr point 1: cholesky_decompose of five jittered exp-quad covariances whose smallest pivot is 1.8e-12 (6.80e-08)
+ILL-CONDITIONED sw_gp point 0: cholesky_decompose of a jittered exp-quad covariance whose smallest pivot is 1.1e-12 (7.83e-09)
+ILL-CONDITIONED sw_gp point 1: cholesky_decompose of a jittered exp-quad covariance whose smallest pivot is 1.1e-12 (1.26e-08)
+TIMEOUT ch14_m14_11 point 0
+
+315/316 models within 1e-09 of the CmdStan references at all 3 evaluation points (1008710 values compared); worst gpcm_latent_reg_irt at 9.38e-13 (7040 ulp)
+1 FAILED: ch14_m14_11

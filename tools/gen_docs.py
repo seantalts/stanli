@@ -22,6 +22,7 @@ import csv
 import json
 import pathlib
 import re
+import statistics
 import subprocess
 import sys
 import warnings
@@ -76,13 +77,15 @@ def corpus_stats():
     ratios = []
     for line in rows[1:]:
         c = line.split("\t")
-        if (REPO / "tests" / "rethinking" / f"{c[idx['model']]}.stan").exists():
+        if ((REPO / "tests/educational/models" / c[idx['model']] / "model.stan").exists()
+                or any((REPO / "tests" / group / f"{c[idx['model']]}.stan").exists()
+                       for group in ("rethinking", "brms", "stanc3"))):
             continue  # Headline here explicitly describes posteriordb.
         s, cm = c[idx["stanli_ns_grad"]], c[idx["cmdstan_ns_grad"]]
         if s.strip() and cm.strip():
             ratios.append(float(cm) / float(s))
     ratios.sort()
-    return len(ratios), ratios[len(ratios) // 2], sum(r >= 1.0 for r in ratios)
+    return len(ratios), statistics.median(ratios), sum(r >= 1.0 for r in ratios)
 
 
 def us(ns):

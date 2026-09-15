@@ -5,6 +5,7 @@ stopifnot(length(args) == 2L)
 jobs <- jsonlite::fromJSON(args[1], simplifyVector = FALSE)
 results <- list()
 for (job in jobs) {
+  stopifnot(is.character(job$run_id), length(job$run_id) == 1L, nzchar(job$run_id))
   engines <- list()
   summaries <- list()
   for (engine in c("stanli", "cmdstan")) {
@@ -64,7 +65,7 @@ for (job in jobs) {
       max_mean_difference_in_sd = max(scaled[valid]),
       max_difference_parameter = a$variable[which.max(replace(scaled, !valid, -Inf))])
   }
-  results[[job$model]] <- list(engines = engines, comparison = comparison)
+  results[[job$model]] <- list(run_id = job$run_id, engines = engines, comparison = comparison)
   cat(job$model, "diagnostics complete\n")
 }
 jsonlite::write_json(results, args[2], auto_unbox = TRUE, pretty = TRUE,

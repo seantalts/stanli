@@ -123,6 +123,13 @@ runtime CI gate, alongside extraction, bayesplot, RStan, and ShinyStan consumers
 
 ### Recorded local validation (2026-09-15)
 
+The fresh Release runtime/compiler matching main `2ae6c1d0` passes the ecosystem
+acceptance suite with no skips, warnings, or failures, including native calls,
+the CSV oracle, plotting, LOO, and namespace-registration tests. The brms and
+Rethinking examples in the teaching guide also run and pass their sampling
+diagnostics. The evidence below distinguishes earlier full-package checks
+from this fresh-runtime acceptance run.
+
 On macOS ARM64 / R 4.6.1, the rebuilt R bridge passed 524 assertions with no
 skips, warnings, or failures against the release runtime and CLI at base
 revision `be0a0c8d`. No core runtime or C ABI changes were needed. Package checks
@@ -131,9 +138,9 @@ passed with a runtime and with both runtime and RStan unavailable; runtime-free
 no-skips gate and workflow syntax checks also passed. Linux/Windows execution
 remains for CI.
 
-A warmed, paired call benchmark on the 29-parameter reference model used five
+On the fresh `2ae6c1d0` runtime, a warmed, paired call benchmark on the 29-parameter reference model used five
 alternating batches of 2,000 evaluations each. Direct `log_prob_grad()` took a
-median 4 microseconds/call (range 3.5–4.5); `rstan::log_prob(..., gradient = TRUE)`
-through the subclass took 14 (12.5–14.5). This measures R dispatch and validation
+median 4 microseconds/call (range 4.0–4.5); `rstan::log_prob(..., gradient = TRUE)`
+through the subclass took 14 (13.0–14.5). This measures R dispatch and validation
 overhead on a small model; it is not an inference-speed comparison. Ordinary
 stanli startup still leaves the RStan namespace unloaded.
