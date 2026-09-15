@@ -130,6 +130,18 @@ endif()
 # eight-schools d/dmu). Cost is well inside the performance budget.
 target_compile_options(stanmath INTERFACE -ffp-contract=off)
 
+# Clang can speculate every pow() in the recorder's piecewise CDF formulas,
+# evaluating unused tail approximations on ordinary inputs. Preserve libm's
+# errno contract in these shards so expensive calls stay in their branches.
+# This keeps the pinned formulas and rounding; it is not fast-math. GCC already
+# defaults to math-errno. Keep the browser's independent size policy below.
+if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  set_property(SOURCE
+    runtime/kernels/densities_cdf_a.cpp
+    runtime/kernels/densities_cdf_b.cpp
+    APPEND PROPERTY COMPILE_OPTIONS -fmath-errno)
+endif()
+
 # Half the library is the propto family: stan-math drops a term based on
 # the argument TYPES, so an exact `~` needs the density instantiated once
 # per activity mask on top of the full form. Dropping it leaves a build
