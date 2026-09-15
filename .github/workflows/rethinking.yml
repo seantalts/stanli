@@ -43,5 +43,12 @@ jobs:
         run: Rscript tools/test_stan_data_json.R
       - name: Regenerate every book call and compare bytes
         run: |
+          Rscript -e 'sessionInfo()'
           Rscript tools/gen_rethinking_models.R "$RUNNER_TEMP/rethinking"
           python3 tools/check_rethinking.py --generated "$RUNNER_TEMP/rethinking"
+      - name: Retain regeneration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rethinking-generated
+          path: ${{ runner.temp }}/rethinking
