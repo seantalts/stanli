@@ -206,31 +206,31 @@ point, both sides `-O3` with FP contraction pinned off:
 <!--gen:bench_table_us-->
 | model | stanli | CmdStan | speedup |
 | --- | ---: | ---: | ---: |
-| `gpcm_latent_reg_irt` | 122.2 us | 1337.7 us | **10.9x** |
-| `dogs` | 7.4 us | 63.7 us | **8.6x** |
-| `radon_pooled` | 43.6 us | 320.9 us | **7.4x** |
-| `GLM_Poisson_model` | 0.35 us | 2.0 us | **5.7x** |
-| `state_space_stochastic_level_stochastic_seasonal` | 6.2 us | 26.3 us | **4.2x** |
-| `eight_schools_noncentered` | 0.20 us | 0.74 us | **3.8x** |
-| `logistic_regression_rhs` | 40.3 us | 113.1 us | **2.8x** |
-| `soil_incubation` | 27.9 us | 60.9 us | **2.2x** |
-| `normal_mixture` | 42.4 us | 88.2 us | **2.1x** |
-| `lotka_volterra` | 21.3 us | 41.3 us | **1.9x** |
-| `hmm_example` | 15.5 us | 27.1 us | **1.8x** |
-| `garch11` | 6.9 us | 9.7 us | **1.4x** |
-| `hierarchical_gp` | 36.7 us | 47.6 us | **1.3x** |
-| `one_comp_mm_elim_abs` | 463.7 us | 470.7 us | **1.0x** |
-| `diamonds` | 31.0 us | 31.5 us | **1.0x** |
-| `gp_regr` | 5.6 us | 4.7 us | 0.84x |
-| `gp_pois_regr` | 5.2 us | 3.9 us | 0.75x |
+| `gpcm_latent_reg_irt` | 122.6 us | 1337.7 us | **10.9x** |
+| `dogs` | 6.2 us | 62.2 us | **10.1x** |
+| `radon_pooled` | 43.7 us | 321.6 us | **7.4x** |
+| `GLM_Poisson_model` | 0.36 us | 0.99 us | **2.8x** |
+| `state_space_stochastic_level_stochastic_seasonal` | 6.4 us | 19.6 us | **3.1x** |
+| `eight_schools_noncentered` | 0.21 us | 0.35 us | **1.6x** |
+| `logistic_regression_rhs` | 39.7 us | 96.5 us | **2.4x** |
+| `soil_incubation` | 30.8 us | 58.9 us | **1.9x** |
+| `normal_mixture` | 42.4 us | 87.6 us | **2.1x** |
+| `lotka_volterra` | 21.6 us | 40.8 us | **1.9x** |
+| `hmm_example` | 16.1 us | 26.2 us | **1.6x** |
+| `garch11` | 6.9 us | 7.9 us | **1.2x** |
+| `hierarchical_gp` | 19.6 us | 41.1 us | **2.1x** |
+| `one_comp_mm_elim_abs` | 459.1 us | 462.8 us | **1.0x** |
+| `diamonds` | 31.1 us | 31.9 us | **1.0x** |
+| `gp_regr` | 2.7 us | 3.3 us | **1.2x** |
+| `gp_pois_regr` | 2.3 us | 2.7 us | **1.2x** |
 <!--/gen-->
 
 The wins come from op granularity. CmdStan's var tape allocates, walks,
 and frees one node per scalar operation per leapfrog step; stanli pays
 a fixed cost per *op*, and a vectorized statement over N elements
 amortizes that to nothing. Across the whole posteriordb corpus the
-median is <!--gen:corpus_median-->3.02x<!--/gen--> and
-<!--gen:corpus_at_par-->117<!--/gen--> of
+median is <!--gen:corpus_median-->2.10x<!--/gen--> and
+<!--gen:corpus_at_par-->119<!--/gen--> of
 <!--gen:corpus_n_grad-->119<!--/gen--> models are at or above CmdStan.
 
 Repeated independent work produces the largest wins. Dense kernels and serial

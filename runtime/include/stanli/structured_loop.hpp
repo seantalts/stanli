@@ -59,6 +59,13 @@ struct StructuredLoop {
     } kind = Sequence;
     enum Storage { Retained, Transient, InPlace } storage = Retained;
     bool active = false;
+    // The active call still records handles and owns an adjoint, but its
+    // historical output primal may live in one per-site workspace cell.
+    bool reuse_primal_output = false;
+    // Snapshot of the variant whose registered backward contract was used
+    // during prepare. Runtime mutation fails closed to ordinary retention.
+    uint8_t primal_contract_variant = 0;
+    BackwardPrimalReadFn primal_contract = nullptr;
     bool memo = false;
     // A memo node whose values are read by nothing once it exits, so the
     // recording evaluation gives its storage back.

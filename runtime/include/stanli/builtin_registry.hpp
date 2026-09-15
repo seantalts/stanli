@@ -401,6 +401,22 @@ std::vector<int64_t> builtin_shape_query(const BuiltinSpec& spec,
 int evaluate_predicate_builtin(const BuiltinSpec& spec, double lhs,
                                double rhs = 0.0);
 
+// Classify a sequence of flat storage offsets, already enumerated in
+// destination order, as one affine run or an irregular gather: Contiguous
+// when consecutive offsets advance by exactly 1, Strided for any other
+// constant non-negative step, Gather when no single step accounts for
+// every consecutive pair (including a descending or repeating sequence).
+// An empty or single-offset sequence is always Contiguous. This is the one
+// place that decides what an affine window is; callers outside this file
+// build their own offset list (a lane's flat read or write positions) and
+// classify it here rather than re-deriving contiguous/strided/gather.
+struct FlatOffsetRun {
+  BuiltinSliceMap::Kind kind = BuiltinSliceMap::Kind::Contiguous;
+  int64_t offset = 0;
+  int64_t stride = 1;
+};
+FlatOffsetRun classify_flat_offsets(const std::vector<int64_t>& offsets);
+
 // One rvalue Cartesian index selection resolved to flat source cells: the
 // single statement of Stan's indexing geometry over both storage orders,
 // shared by every backend's generic Indexed path. `positions[k]` lists the

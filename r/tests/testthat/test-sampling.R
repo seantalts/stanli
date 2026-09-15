@@ -29,6 +29,55 @@ test_that("log_prob_grad returns lp and a gradient of the right length", {
   expect_length(g$grad, m$n_unconstrained)
 })
 
+test_that("a run seed rebuilds transformed data the way CmdStan seeds it", {
+  skip_without_runtime()
+  code <- "
+    transformed data { real z = normal_rng(0, 1); }
+    parameters { real mu; }
+    model { mu ~ normal(z, 1); }"
+  lp_at <- function(m) log_prob_grad(m, 0)$lp
+  seven <- lp_at(stanli_model(code = code, seed = 7))
+  expect_equal(lp_at(stanli_model(code = code, seed = 7)), seven)
+  m <- stanli_model(code = code, seed = 8)
+  expect_false(lp_at(m) == seven)
+  fit <- sample_model(m, chains = 1, seed = 7, warmup = 10, samples = 10,
+                      refresh = 0)
+  expect_equal(fit$model$seed, 7)
+  expect_identical(fit$model$model_code, code)
+  expect_identical(fit$model$model_name, m$model_name)
+  expect_equal(lp_at(fit$model), seven)
+  # A model whose transformed data never draws keeps its handle.
+  plain <- progress_model()
+  fit <- sample_model(plain, chains = 1, seed = 7, warmup = 10, samples = 10,
+                      refresh = 0)
+  expect_identical(fit$model$ptr, plain$ptr)
+})
+
+test_that("a run-seed rebuild refreshes the free vector and the columns", {
+  skip_without_runtime()
+  # Transformed data can size a parameter, so the rebuild can change the
+  # free vector and the columns, not only the draws. The model the fit
+  # carries must describe what it now holds; the caller's object is a value
+  # and keeps its own seed.
+  code <- "
+    transformed data { int k = 1 + poisson_rng(2.0); }
+    parameters { vector[k] mu; }
+    model { mu ~ normal(0, 1); }"
+  first <- stanli_model(code = code, seed = 1)
+  other <- 2
+  while (stanli_model(code = code, seed = other)$n_unconstrained ==
+         first$n_unconstrained) other <- other + 1
+  fresh <- stanli_model(code = code, seed = other)
+  fit <- sample_model(first, chains = 1, seed = other, warmup = 10,
+                      samples = 10, refresh = 0)
+  expect_equal(fit$model$n_unconstrained, fresh$n_unconstrained)
+  expect_identical(fit$model$columns, fresh$columns)
+  expect_identical(dimnames(fit$draws)[[3]], fresh$columns)
+  q <- rep(0, fresh$n_unconstrained)
+  expect_equal(log_prob_grad(fit$model, q)$lp, log_prob_grad(fresh, q)$lp)
+  expect_equal(first$seed, 1)
+})
+
 test_that("unconstrain turns constrained starting values into the free vector", {
   skip_without_runtime()
   # A model whose free order differs from its serial order: the simplex has

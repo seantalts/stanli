@@ -289,6 +289,92 @@ static void test_call_cached_forward_reverse_aliasing() {
          ulps(adj[(size_t)p.adj.adj_reg[4]], want_c) == 0);
 }
 
+static void test_call_primal_read_contract() {
+  const BackwardPrimalReads add_reads =
+      backward_primal_reads(find_kernel(OP_ADD), 0);
+  expect("ADD backward reads no primals",
+         !add_reads.input(0) && !add_reads.input(1) && !add_reads.output());
+  const BackwardPrimalReads unknown = backward_primal_reads(nullptr, 255);
+  expect("unknown backward retains every primal",
+         unknown.input(0) && unknown.input(5) && unknown.output(0) &&
+             unknown.output(1));
+
+  // Both an input and the output are overwritten after the call.  ADD's
+  // registered backward only routes adjoints, so gen_adjoint need not insert
+  // value checkpoints for either range.
+  IslandProg p;
+  p.n_regs = 5;
+  p.ins = {IslandProg::LiveIn{0, 1}, IslandProg::LiveIn{1, 1},
+           IslandProg::LiveIn{4, 1}};
+  p.out_regs = {3};
+  Program::Call add;
+  add.opcode = OP_ADD;
+  add.n_in = 2;
+  add.in[0] = 0;
+  add.in[1] = 1;
+  add.in_len[0] = add.in_len[1] = 1;
+  add.out = 2;
+  add.out_len = 1;
+  expect("value-free CALL binds", bind_call(add));
+  p.calls.push_back(add);
+  p.code = {{Program::CALL, 0, 0},
+            {Program::MOV, 3, 2},
+            {Program::MOV, 0, 4},
+            {Program::MOV, 2, 4}};
+  expect("value-free CALL adjoint generated", gen_adjoint(p));
+  if (!p.calls.empty()) {
+    expect("value-free CALL keeps original input binding",
+           p.calls[0].bwd_value_in[0] == 0);
+    expect("value-free CALL keeps original output binding",
+           p.calls[0].bwd_value_out == 2);
+  }
+
+  // A private backward carrying the same opcode is not covered by the
+  // registered kernel's metadata and must retain the conservative saves.
+  IslandProg private_call;
+  private_call.n_regs = 5;
+  private_call.ins = p.ins;
+  private_call.out_regs = {3};
+  add.backward = test_call_backward;
+  private_call.calls.push_back(add);
+  private_call.code = {{Program::CALL, 0, 0},
+                       {Program::MOV, 3, 2},
+                       {Program::MOV, 0, 4},
+                       {Program::MOV, 2, 4}};
+  expect("private CALL adjoint generated", gen_adjoint(private_call));
+  if (!private_call.calls.empty()) {
+    expect("private CALL checkpoints overwritten input",
+           private_call.calls[0].bwd_value_in[0] != 0);
+    expect("private CALL checkpoints overwritten output",
+           private_call.calls[0].bwd_value_out != 2);
+  }
+
+  // Registry identity alone is insufficient: a replacement implementation
+  // has no contract unless it explicitly registers one alongside itself.
+  const Kernel saved_add = *find_kernel(OP_ADD);
+  register_kernel(OP_ADD,
+                  Kernel{saved_add.forward, test_call_backward, nullptr});
+  IslandProg replaced;
+  replaced.n_regs = 5;
+  replaced.ins = p.ins;
+  replaced.out_regs = {3};
+  Program::Call rebound = add;
+  expect("replacement CALL binds", bind_call(rebound));
+  replaced.calls.push_back(rebound);
+  replaced.code = {{Program::CALL, 0, 0},
+                   {Program::MOV, 3, 2},
+                   {Program::MOV, 0, 4},
+                   {Program::MOV, 2, 4}};
+  expect("replacement CALL adjoint generated", gen_adjoint(replaced));
+  if (!replaced.calls.empty()) {
+    expect("replacement CALL defaults to input checkpoint",
+           replaced.calls[0].bwd_value_in[0] != 0);
+    expect("replacement CALL defaults to output checkpoint",
+           replaced.calls[0].bwd_value_out != 2);
+  }
+  register_kernel(OP_ADD, saved_add);
+}
+
 // One case, both ways. `tol` is how many ulp of disagreement the case
 // tolerates, and is 0 -- bitwise -- everywhere except the fuzzer.
 //
@@ -407,6 +493,20 @@ struct Build {
                int len = 0) {
     p.code.push_back(Program::Instr{c, d, a, b, cc, len});
   }
+  int emit_wide(Program::Code c, int a, int b, int cc, int law, int width,
+                uint8_t bcast) {
+    const int d = alloc(width);
+    emit_wide_to(c, d, a, b, cc, law, width, bcast);
+    return d;
+  }
+  void emit_wide_to(Program::Code c, int d, int a, int b, int cc, int law,
+                    int width, uint8_t bcast) {
+    Program::Instr I(Program::RANGE, d, a, b, cc, width);
+    I.sub = static_cast<uint8_t>(c);
+    I.bcast = bcast;
+    I.law = static_cast<uint8_t>(law);
+    p.code.push_back(I);
+  }
   // A DENSITY laid out the way island.cpp and mir_prog.hpp lay one out:
   // three arguments or fewer ride in the instruction, a fourth goes in a
   // contiguous block.
@@ -430,6 +530,198 @@ struct Build {
     return Case{p, in, seed};
   }
 };
+
+// Forward-only branches must preserve executed paths, overwritten values,
+// conditional copies and joins. Reuse the register file while toggling paths
+// so stale flags/checkpoints cannot pass by starting from zero every time.
+static void check_reused_branches(Case c) {
+  const auto orig = c.p;
+  expect("branch generation", gen_adjoint(c.p));
+  if (c.p.adj.empty()) return;
+  expect("branch segments recorded", !c.p.adj.segments.empty());
+  std::vector<double> val(c.p.n_regs, 0.0), adj(c.p.adj.n_regs);
+  for (double condition : {1.0, 0.0, 1.0, 0.0}) {
+    c.in[0] = condition;
+    std::vector<double> want_v;
+    const auto want = replay_adjoints(orig, c.in, c.seed, &want_v);
+    size_t offset = 0;
+    for (const auto& in : c.p.ins)
+      for (int k = 0; k < in.len; ++k) val[in.reg + k] = c.in[offset++];
+    run_program(c.p, val.data());
+    std::fill(adj.begin(), adj.end(), 0.0);
+    for (size_t k = c.p.out_regs.size(); k-- > 0;) {
+      expect("branch forward exact",
+             ulps(val[c.p.out_regs[k]], want_v[k]) == 0);
+      adj[c.p.adj.adj_reg[c.p.out_regs[k]]] += c.seed[k];
+    }
+    run_adjoint(c.p, c.p.adj, val.data(), adj.data());
+    offset = 0;
+    for (const auto& in : c.p.ins)
+      for (int k = 0; k < in.len; ++k)
+        expect("reused branch gradient exact",
+               ulps(adj[c.p.adj.adj_reg[in.reg + k]], want[offset++]) == 0);
+  }
+}
+
+static void test_acyclic_branches() {
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 4, 0);
+    const int copied = b.emit(Program::MOV, 1);
+    b.emit_to(Program::MUL, result, copied, 2);
+    b.emit_to(Program::JMP, 5, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    b.emit_to(Program::MUL, 1, 1, 2);  // checkpoint taken arm's original x
+    b.emit_to(Program::SUB, 0, 0, 0);  // destroy original branch condition
+    const int out = b.emit(Program::ADD, result, 1);
+    check_reused_branches(b.done({out, result}, {0.75, 1.25}));
+  }
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 7, 0);
+    b.emit_to(Program::JZ, 4, 1);
+    b.emit_to(Program::EXP, result, 2);
+    b.emit_to(Program::JMP, 5, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    b.emit_to(Program::TANH, result, result);
+    b.emit_to(Program::JMP, 8, 0);
+    b.emit_to(Program::MOV, result, 2);
+    auto c = b.done({result}, {1.0});
+    check_reused_branches(c);
+    c.in[1] = 0.0;
+    check_reused_branches(c);
+  }
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 3, 0);
+    b.emit_to(Program::LOG, result, 1);
+    b.emit_to(Program::JMP, 4, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    auto c = b.done({result}, {1.0});
+    c.in[0] = 0;
+    c.in[1] = -1;  // dead invalid derivative must never run
+    check("dead log branch", c);
+  }
+  {
+    Build b({1.0, 0.7, 1.3});
+    const int result = b.alloc();
+    Program::Call call;
+    call.opcode = OP_POW;
+    call.n_in = 2;
+    call.in[0] = 1;
+    call.in[1] = 2;
+    call.in_len[0] = call.in_len[1] = 1;
+    call.out = result;
+    call.out_len = 1;
+    expect("branch CALL bind", bind_call(call));
+    b.p.calls.push_back(call);
+    b.emit_to(Program::JZ, 3, 0);
+    b.emit_to(Program::CALL, 0, 0);
+    b.emit_to(Program::JMP, 4, 0);
+    b.emit_to(Program::SQUARE, result, 2);
+    check_reused_branches(b.done({result}, {1.0}));
+  }
+  {
+    Build b({0.7, 1.3});
+    const int m =
+        b.emit(Program::EXTREMA_RANGE, 0, 1, kProgramExtremaScalar, 2);
+    const int condition = b.emit(Program::GT, m, 0);
+    const int result = b.alloc();
+    b.emit_to(Program::JZ, 5, condition);
+    b.emit_to(Program::SQUARE, result, 0);
+    b.emit_to(Program::JMP, 6, 0);
+    b.emit_to(Program::EXP, result, 1);
+    auto c = b.done({result}, {1.0});
+    check("passive extrema guard", c);
+    c.in = {1.3, 0.7};
+    check("passive extrema other path", c);
+    c.p.out_regs = {m};
+    expect("active extrema refuses", !gen_adjoint(c.p));
+  }
+  {
+    Build b({1.0, 0.7});
+    b.emit_to(Program::JZ, 2, 0);
+    b.p.messages.emplace_back();
+    b.p.messages.back().spec.chunks = {"branch rejected"};
+    b.emit_to(Program::REJECT, 0, 0);
+    int out = b.emit(Program::SQUARE, 1);
+    auto c = b.done({out}, {1.0});
+    c.in[0] = 0;
+    check("dead reject", c);
+    expect("reject path generation", gen_adjoint(c.p));
+    std::vector<double> val(c.p.n_regs, 1.0);
+    bool rejected = false;
+    try {
+      run_program(c.p, val.data());
+    } catch (const std::domain_error&) {
+      rejected = true;
+    }
+    expect("taken reject preserved", rejected);
+  }
+  {
+    Build b({1.0, 0.63, 4.0, 0.4, 1.7});
+    const int out = b.alloc();
+    b.emit_to(Program::JZ, 0, 0);
+    const int id = program_density_id_by_name("student_t_lpdf");
+    expect("branch four-argument density", id >= 0);
+    const int density = b.emit_density(id, {1, 2, 3, 4});
+    b.emit_to(Program::MOV, out, density);
+    const int jump = static_cast<int>(b.p.code.size());
+    b.emit_to(Program::JMP, 0, 0);
+    b.p.code[0].dst = static_cast<int>(b.p.code.size());
+    b.emit_to(Program::SQUARE, out, 1);
+    b.p.code[jump].dst = static_cast<int>(b.p.code.size());
+    check_reused_branches(b.done({out}, {1.0}));
+    // An unsupported derivative in the fourth argument must not be missed
+    // by analyses of the instruction's three inline operand fields.
+    Build active({0.63, 4.0, 0.4, 1.7});
+    const int m =
+        active.emit(Program::EXTREMA_RANGE, 3, 1, kProgramExtremaScalar, 1);
+    const int d = active.emit_density(id, {0, 1, 2, m});
+    active.p.out_regs = {d};
+    expect("active fourth density argument refuses", !gen_adjoint(active.p));
+  }
+  // Deterministic branch combinations with exact dyadic arithmetic. This
+  // exercises conditional overwrites and copy aliases without introducing
+  // the existing mutable-copy fuzzer's permitted reassociation tolerance.
+  for (int trial = 0; trial < 256; ++trial) {
+    Build b({1.0, 0.125 * (1 + trial % 7), 0.5});
+    int value = b.emit(Program::MOV, 1);
+    for (int depth = 0; depth < 4; ++depth) {
+      int condition = b.konst((trial >> depth) & 1);
+      const int branch = static_cast<int>(b.p.code.size());
+      b.emit_to(Program::JZ, branch + 3, condition);
+      b.emit_to(Program::MUL, value, value, 2);
+      b.emit_to(Program::JMP, branch + 4, 0);
+      b.emit_to(Program::ADD, value, value, 2);
+      value = b.emit(Program::MOV, value);
+    }
+    check("acyclic dyadic paths", b.done({value}, {0.75}));
+  }
+  const auto refuses = [](IslandProg p) {
+    const auto before = p;
+    expect("branch near miss refuses", !gen_adjoint(p));
+    expect("branch refusal transactional",
+           p.n_regs == before.n_regs && p.pool == before.pool &&
+               p.adj.empty() && p.code.size() == before.code.size() &&
+               std::memcmp(p.code.data(), before.code.data(),
+                           p.code.size() * sizeof(Program::Instr)) == 0);
+  };
+  {
+    Build b({1.0});
+    const int out = b.alloc();
+    b.emit_to(Program::JZ, 2, 0);
+    b.emit_to(Program::SQUARE, out, 0);
+    refuses(b.done({out}, {1.0}).p);  // uninitialized join
+    b.p.code[0].dst = 0;
+    refuses(b.p);  // back edge
+    b.p.code[0].dst = 1000;
+    refuses(b.p);  // invalid target
+  }
+}
 
 // ---- the unary and binary arithmetic ----------------------------------
 
@@ -717,6 +1009,65 @@ static void test_ranged() {
     Build b({0.3, 0.7, 1.4, 0.2}, 4);
     const int d = b.emit(Program::MOVR, 0, 0, 0, 4, 4);
     check("movr", b.done({d, d + 1, d + 2, d + 3}, {1.1, 0.4, 2.0, 0.7}));
+  }
+}
+
+// Ranged elementwise instructions: every code, every broadcast pattern, in
+// place, and with the operands and the output overwritten afterwards.
+static void test_elementwise_width() {
+  struct Spec {
+    Program::Code code;
+    int n_in;
+  };
+  const Spec specs[] = {{Program::ADD, 2},          {Program::SUB, 2},
+                        {Program::MUL, 2},          {Program::DIV, 2},
+                        {Program::POW, 2},          {Program::FMAX, 2},
+                        {Program::FMIN, 2},         {Program::LSE2, 2},
+                        {Program::LOG_DIFF_EXP, 2}, {Program::FMA, 3},
+                        {Program::LOG_MIX, 3},      {Program::NEG, 1},
+                        {Program::EXP, 1},          {Program::LOG, 1},
+                        {Program::SQRT, 1},         {Program::SQUARE, 1},
+                        {Program::INV, 1},          {Program::FABS, 1},
+                        {Program::INV_LOGIT, 1},    {Program::LOG1M, 1},
+                        {Program::LOG1P_EXP, 1},    {Program::TANH, 1}};
+  // Three length-4 operand ranges at 0, 4 and 8. Every a exceeds every b,
+  // so log_diff_exp stays finite whichever operand broadcasts.
+  const std::vector<double> in = {0.72, 0.85, 0.9, 0.93, 0.31, 0.4,
+                                  0.55, 0.65, 0.6, 0.35, 0.8,  0.45};
+  const std::vector<double> seed = {1.1, 0.4, 2.0, 0.7};
+  for (const Spec& s : specs) {
+    const std::string name = program_code_spec(s.code).name;
+    for (int bcast = 0; bcast < (1 << s.n_in); ++bcast) {
+      Build b(in, 12);
+      const int d = b.emit_wide(s.code, 0, 4, 8, 0, 4, (uint8_t)bcast);
+      check(name + " width bcast=" + std::to_string(bcast),
+            b.done({d, d + 1, d + 2, d + 3}, seed));
+    }
+    {
+      Build b(in, 12);
+      b.emit_wide_to(s.code, 0, 0, 4, 8, 0, 4, 0);
+      check(name + " width in place", b.done({0, 1, 2, 3}, seed));
+    }
+    if (s.n_in >= 2) {
+      Build b(in, 12);
+      b.emit_wide_to(s.code, 4, 0, 4, 8, 0, 4, 0);
+      check(name + " width in place b", b.done({4, 5, 6, 7}, seed));
+    }
+    if (s.n_in >= 3) {
+      Build b(in, 12);
+      b.emit_wide_to(s.code, 8, 0, 4, 8, 0, 4, 0);
+      check(name + " width in place c", b.done({8, 9, 10, 11}, seed));
+    }
+    for (int bcast = 0; bcast < (1 << s.n_in); ++bcast) {
+      Build b(in, 12);
+      const int d = b.emit_wide(s.code, 0, 4, 8, 0, 4, (uint8_t)bcast);
+      const int copy = b.emit(Program::MOVR, d, 0, 0, 4, 4);
+      b.emit_to(Program::MOVR, 0, 8, 0, 0, 4);
+      b.emit_to(Program::MOVR, 4, 8, 0, 0, 4);
+      b.emit_to(Program::MOVR, d, 8, 0, 0, 4);
+      check(name + " width overwritten bcast=" + std::to_string(bcast),
+            b.done({copy, copy + 1, copy + 2, copy + 3}, seed));
+    }
   }
 }
 
@@ -1519,8 +1870,10 @@ static void test_fuzz_ranges() {
 }
 
 int main() {
+  test_acyclic_branches();
   test_call_binding_refusal();
   test_call_cached_forward_reverse_aliasing();
+  test_call_primal_read_contract();
   test_binary_ops();
   test_fma();
   test_unary_ops();
@@ -1536,6 +1889,7 @@ int main() {
   test_ranged_saveout_partial_later_write_refuses();
   test_accumulate_into_one_register();
   test_ranged();
+  test_elementwise_width();
   test_zero_length_output();
   test_softmax3_activation();
   test_softmax3_double_exact();

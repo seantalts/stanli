@@ -90,7 +90,7 @@ def compare(name, reference, args):
     worst = 0.0
     for point, want in enumerate(reference["points"]):
         command = [args.build / "stanli_check", source, args.data,
-                   "--stanc", args.stanc, "--point", point]
+                   "--point", point]
         got = parse(run(command + ["--wa-values"]))
         if got["names"] != want["names"]:
             raise ValueError(name + ": output column names/order differ")

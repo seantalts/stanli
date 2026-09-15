@@ -1188,6 +1188,7 @@
     "gp covariance": "Coordinates are data; scale and length-scale are active.",
     "map_rect": "The integrated probe covers empty jobs; tests/fixtures/map_rect_region.stan covers nonempty serial graph and runtime-control lowering.",
     "overloads": "At least one supported signature per name, not every overload.",
-    "predicates": "logical_negation also exercises a parameter-dependent region."
+    "predicates": "logical_negation also exercises a parameter-dependent region.",
+    "rng": "Every RNG is drawn in generated quantities with active arguments and again in transformed data with data arguments; the transformed-data draws enter the log density and the output."
   }
 }

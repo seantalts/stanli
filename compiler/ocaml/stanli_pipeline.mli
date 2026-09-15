@@ -27,6 +27,7 @@ val default_pass_selection : pass_selection
 
 val compile_mir :
      ?include_source:Frontend.Include_files.t
+  -> ?model_only:bool
   -> model_name:string
   -> string
   -> Middle.Program.Typed.t compilation
@@ -35,6 +36,9 @@ val compile_mir :
 
 val compile_mir_with_passes :
      ?include_source:Frontend.Include_files.t
+  -> ?cache_signatures:bool
+  -> ?prune_unused_sections:bool
+  -> ?model_only:bool
   -> passes:pass_selection
   -> model_name:string
   -> string
@@ -44,7 +48,11 @@ val compile_mir_with_passes :
 
 val compile_portable :
      ?include_source:Frontend.Include_files.t
+  -> ?model_only:bool
   -> model_name:string
   -> string
   -> string compilation
-(** Compile Stan source and encode canonical compact portable MIR v2. *)
+(** Compile Stan source and encode canonical compact portable MIR v2.
+    [model_only] permits removal of functions unreachable from the model's
+    entry points. The default preserves every exported function for the
+    public function API. *)

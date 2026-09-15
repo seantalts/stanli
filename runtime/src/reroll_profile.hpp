@@ -9,6 +9,9 @@
 namespace stanli {
 namespace detail {
 
+constexpr int64_t kMinLanes = 4;
+constexpr int kMaxPeriod = 32;
+
 struct RerollDispositionStats {
   int64_t packed_rows = 0;
   int64_t term_density = 0;
@@ -28,6 +31,16 @@ struct ProfiledRerollStats {
 ProfiledRerollStats reroll_profiled(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
     std::vector<int>& target_terms, const std::vector<int>& extra_roots);
+
+struct SignatureCheckResult {
+  int64_t pairs_checked = 0;
+  int64_t violations = 0;
+};
+
+// Over every pair of ops within `window` positions of each other, and a
+// spread of lane distances, checks that ops_match(g, a, b, distance) true
+// implies the two ops' signature prefilter keys are equal.
+SignatureCheckResult check_signature_soundness(const Graph& g, int64_t window);
 
 }  // namespace detail
 }  // namespace stanli

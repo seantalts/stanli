@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import subprocess
 import tempfile
-
 
 PREFIX = "// STANLI-LIT: "
 EXPECT_PREFIX = "// STANLI-LIT-EXPECT: "
@@ -156,8 +156,8 @@ def main() -> int:
         print(f"FAIL missing stanli_check executable: {args.stanli_check}")
         return 1
 
-    # stanc writes a sibling .hpp even when MIR goes to stdout.  Compile a
-    # temporary copy so source-only lit runs never dirty the checkout.
+    # The source and its data go to a temporary directory so a run never
+    # dirties the checkout.
     with tempfile.TemporaryDirectory(prefix="stanli-lit-") as tmp:
         root = pathlib.Path(tmp)
         source = root / args.case.name

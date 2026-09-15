@@ -15,35 +15,80 @@
   methods; preserve posterior conversions and exclude saved warmup by default.
   Add cmdstanr migration and classroom guides, persistence tests, and platform
   CI checks with fresh-session timing.
-- Compute transformed parameters and generated quantities on each chain's
-  sampling thread, within sampling progress, removing the slow post-run phase
-  in R and Python.
-- Add `STANLI_NO_STDIO` for R packaging: no stdout, stderr, abort, or
-  assert-failure symbols in the object library. Debug traces use the
-  `emit_diagnostic` sink, and the preparation profiler grows instead of aborting
-  at a fixed row limit.
-- Replay every generated builtin and density signature against CmdStan for log
-  density, full gradients, and outputs at three points, including mixed
-  data/parameter arguments. `tools/check_signature_models.py --record` refreshes
-  references; changed partitions require re-recording.
 
 ### Fixes
 
 - Replace corpus benchmark heuristics with equal warmup, alternating paired
   trials, median/MAD summaries, and versioned raw records that cannot mix runs.
-- Poll for an already-pending interrupt before starting sampling threads.
-- Avoid slow software long-double evaluation of `beta_neg_binomial_cdf`,
-  `_lcdf`, and `_lccdf` on non-x86 targets. x86 retains long-double promotion
-  for CmdStan parity.
-- Restore design-matrix gradients for `bernoulli_logit_glm`, `poisson_log_glm`,
-  and `neg_binomial_2_log_glm`.
-- Fix `eta` gradients and proportional densities for `lkj_corr_lpdf` and
-  `lkj_corr_cholesky_lpdf`. Lowering now rejects active arguments a density
-  kernel cannot differentiate.
-- Match CmdStan's `fmax`/`fmin` gradient routing for ties and NaNs in
-  parameter-dependent control flow, using the operands' autodiff types.
-- Resolve shape queries on earlier block locals from their declared types,
-  keeping inlined user functions on the compiled generated-quantities path.
+
+## 0.14.0
+
+- Add 13 educational models with fixed CmdStan references, complete output
+  checks, and separate gradient and end-to-end benchmark tables. All pass the
+  recorded posterior and performance gates; Pareto's final five-pair complete
+  run is 1.072x CmdStan, while its fixed-point gradient remains slower at 0.64x.
+- Load compiler overload sets lazily, share signature lookups, avoid exceptions
+  for ordinary constant probes, and prune unused model-only procedures.
+- Generate adjoints for forward-only branches when initialization and aliasing
+  checks permit; compile integer RNG control and share Poisson, Student-t and
+  Bernoulli-logit kernels. Generated quantities skip adjoint generation.
+- Buffer CLI CSV formatting while preserving 17-digit output and seeded values.
+  The recorded Pareto comparison improves complete-run time by 1.790x. (#367)
+- Add Windows x64/arm64 setup CI, preserve embedded compilation, save compiler
+  caches before tests, and resolve test Bash without launching WSL. (#360)
+- Install the shared sanitizer core with native tools. (#365)
+- Collapse the browser sampling diagnostics by default while keeping the verdict
+  visible, aligning the NUTS and WALNUTS comparison tables. (#361)
+
+## 0.13.0
+
+### Features and performance
+
+- Lower the expanded loop vectorizer's row stores, empty assignments, and
+  elementwise arithmetic without the earlier corpus regressions. Re-roll
+  whole container lanes, use dimension-independent indexed stores, and compile
+  vector operations as range instructions. (#350)
+- Price reductions and absorbed constants when choosing island boundaries;
+  the compile-time carver replaces the preparation-time tuner and replay state.
+- Use the shipped compilation pipeline in corpus checks and benchmarks, with
+  explicit compiler overrides for experiments. Record compiler choices and
+  retain raw before/after measurements.
+- Evaluate transformed parameters and generated quantities on each sampling
+  thread, inside progress reporting, removing R and Python's post-run phase.
+- Support RNG calls in transformed data, including nested user RNG functions.
+  Model construction accepts a seed; sampling and optimization rebuild models
+  under their run seed only when transformed data drew from the RNG. Refresh
+  derived dimensions and columns after rebuilding. (#348)
+- Share unwritten model data across executors while keeping mutable buffers
+  private. Eight MNIST executors use 4.8 GB instead of 10.3 GB. Parse JSON arrays
+  directly and reuse GP covariance and Cholesky forward results in pullbacks;
+  the recorded gp_regr gradient falls from 6.7 to 2.6 microseconds. (#357)
+- Build with `STANLI_NO_STDIO` for R packaging; route debug output through the
+  diagnostic sink and grow the preparation profiler instead of aborting.
+- Replay every generated builtin and density signature at three CmdStan points,
+  including mixed data/parameter arguments, gradients, and outputs. Changed
+  source partitions require fresh reference recording.
+
+### Fixes
+
+- Poll an already-pending interrupt before starting sampling threads.
+- Avoid software long-double evaluation of `beta_neg_binomial_cdf`, `_lcdf`,
+  and `_lccdf` on non-x86 targets; retain x86 promotion for CmdStan parity.
+- Restore parameter design-matrix gradients in three GLM families, and active
+  `eta` gradients and proportional densities in LKJ kernels. Reject density
+  plans whose active arguments the kernel cannot differentiate.
+- Match type-dependent `fmax`/`fmin` adjoints for ties and NaNs in runtime control
+  flow. Resolve earlier locals' shape queries from their declarations, keeping
+  inlined generated-quantities functions on the compiled path.
+- Align island interpreter entry points to a cache line. Document reduction
+  rounding against a high-precision reference instead of treating every ULP
+  distance from CmdStan as a Stanli error.
+- Assign the adjoint ODE quadrature result before Stan Math accumulates it.
+  (#356)
+- Keep `static` on the same line as its field in browser compiler bundles,
+  restoring Safari 17 and iOS 17 compatibility. (#347)
+- Replace destructor-bearing thread-local runtime objects with executor scratch
+  and pooled tape leases, preventing DLL-unload crashes under MinGW. (#352)
 
 ## 0.12.0
 

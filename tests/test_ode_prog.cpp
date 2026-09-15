@@ -71,9 +71,10 @@ void check_generated_local(const std::string& name, const stanli::RhsProgram& p,
     std::vector<stan::math::var> y_vars(y.begin(), y.end());
     std::vector<stan::math::var> theta_vars(theta.begin(), theta.end());
     std::vector<stan::math::var> outputs(p.out_regs.size());
+    std::vector<stan::math::var> registers;
     run_rhs_into<stan::math::var>(p, t, y_vars.data(), theta_vars.data(),
-                                  theta_vars.size(), x_r.data(),
-                                  outputs.data());
+                                  theta_vars.size(), x_r.data(), outputs.data(),
+                                  registers);
     for (size_t output = 0; output < outputs.size(); ++output)
       want_values[output] = outputs[output].val();
     for (size_t output = 0; output < outputs.size(); ++output) {
@@ -235,10 +236,11 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
     for (int i = 0; i < n_th; ++i) th[(size_t)i] = probe(trial * 11 + i) + 0.2;
 
     std::vector<double> got;
-    run_rhs<double>(p, t, y.data(), th.data(), x_r.data(), got);
+    std::vector<double> registers;
+    run_rhs<double>(p, t, y.data(), th.data(), x_r.data(), got, registers);
     std::vector<double> got_into(p.out_regs.size());
-    run_rhs_into<double>(p, t, y.data(), th.data(), x_r.data(),
-                         got_into.data());
+    run_rhs_into<double>(p, t, y.data(), th.data(), x_r.data(), got_into.data(),
+                         registers);
     if (got_into != got) {
       ++failures;
       std::printf("FAIL %s: caller-owned output differs\n", name.c_str());
@@ -313,19 +315,20 @@ MixedRun mixed_run(const stanli::RhsProgram& p, double t,
   const size_t nochain_first = stack->var_nochain_stack_.size();
 
   std::vector<T> out;
+  std::vector<T> registers;
   if constexpr (Into) {
     out.resize(p.out_regs.size());
     stanli::run_rhs_into<T>(p, t, y.data(), theta.data(), theta.size(),
-                            x_r.data(), out.data());
+                            x_r.data(), out.data(), registers);
   } else if constexpr (Staged) {
     std::vector<T> staged_y(y.begin(), y.end());
     std::vector<T> staged_theta(theta.begin(), theta.end());
     const T staged_t(t);
     stanli::run_rhs<T>(p, staged_t, staged_y.data(), staged_theta.data(),
-                       staged_theta.size(), x_r.data(), out);
+                       staged_theta.size(), x_r.data(), out, registers);
   } else {
     stanli::run_rhs<T>(p, t, y.data(), theta.data(), theta.size(), x_r.data(),
-                       out);
+                       out, registers);
   }
 
   MixedRun run;

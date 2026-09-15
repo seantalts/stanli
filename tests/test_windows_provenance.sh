@@ -31,6 +31,14 @@ opam() {
     switch:--short)
       value=cross-test
       ;;
+    exec:-version)
+      printf '%s\r\n' "$STANLI_TEST_OCAML_VERSION"
+      return
+      ;;
+    exec:target)
+      printf '%s\r\n' "$STANLI_TEST_WINDOWS_TARGET"
+      return
+      ;;
     *)
       printf 'unexpected opam query: %s\n' "$*" >&2
       return 2
@@ -39,7 +47,8 @@ opam() {
   if [[ ${CLICOLOR_FORCE:-} == 1 && " $* " != *' --color=never '* ]]; then
     printf '\033[01;35m%s\033[0m\n' "$value"
   else
-    printf '%s\n' "$value"
+    # Native Windows opam emits CRLF; cached stamps must stay canonical.
+    printf '%s\r\n' "$value"
   fi
 }
 
@@ -49,6 +58,9 @@ src_sha=$(stanc_embed_read_setup STANC3_SRC_SHA)
 # setup-ocaml sets this in CI. The mock deliberately contaminates output from
 # any opam query that fails to request machine-clean text.
 CLICOLOR_FORCE=1
+_stanc_embed_switch_exists cross-test
+[[ "$(_stanc_embed_ocaml_version cross-test)" == "$configured_version" ]]
+[[ "$(_stanc_embed_ocaml_target cross-test)" == "$STANLI_TEST_WINDOWS_TARGET" ]]
 stamp=$(stanli_windows_cli_expected_stamp \
   "$src_repo" "$src_sha" cross-test)
 grep -Fqx "ocaml_version=$configured_version" <<<"$stamp"
@@ -64,7 +76,22 @@ stanli_windows_cli_artifact_matches \
   "$artifact" "$src_repo" "$src_sha" cross-test
 stanli_windows_cli_artifact_matches "$artifact" "$src_repo" "$src_sha"
 
+# Cached native embed objects must take the live-switch validation path even
+# when opam uses Windows line endings, and reject a changed compiler or pin.
+embedded="$test_dir/stanc_embed.o"
+: >"$embedded"
+stanc_embed_expected_stamp "$src_sha" cross-test >"$embedded.stamp"
+stanc_embed_artifact_matches "$embedded" "$src_sha" cross-test
+if stanc_embed_artifact_matches "$embedded" stale-source-pin cross-test; then
+  echo "cached embed accepted a different source pin" >&2
+  exit 1
+fi
+
 STANLI_TEST_OCAML_VERSION=0.0.0
+if stanc_embed_artifact_matches "$embedded" "$src_sha" cross-test; then
+  echo "cached embed accepted a different OCaml version" >&2
+  exit 1
+fi
 if diagnostic=$(stanli_windows_cli_expected_stamp \
     "$src_repo" "$src_sha" cross-test 2>&1 >/dev/null); then
   echo "mismatched compiler version was accepted" >&2

@@ -146,16 +146,10 @@ struct BoundCheckSpec {
 class Executor {
  public:
   explicit Executor(Graph g);
-  // Copy: the same graph and the same arena CONTENTS, with fresh contexts
-  // bound to this instance's own arenas. The arena is what carries the
-  // data and constant fills, so copying it is what makes the clone a
-  // bound model rather than an empty one -- binding alone zeroes it.
-  //
-  // Multi-chain sampling is what this is for: one executor per chain,
-  // because the arenas are per-evaluation mutable state, and copying an
-  // op list is far cheaper than lowering the model again. Assignment
-  // stays deleted; the contexts hold interior pointers, so a moved-from
-  // or reassigned executor would be a dangling one.
+  // Copies share unwritten data slots unless a writable pointer escaped.
+  // Parameters, outputs, adjoints, scratch and kernel state remain private.
+  // Writable data access detaches before exposing a pointer; later clones of
+  // that instance copy its data, so even retained pointers remain isolated.
   Executor(const Executor& src);
   Executor& operator=(const Executor&) = delete;
 
@@ -174,12 +168,13 @@ class Executor {
   // The unconstrained parameter vector: the first n_params() arena entries,
   // in parameter-slot declaration order.
   double* params_data() { return values_.data(); }
-  double* param_ptr(int slot) {
-    return values_.data() + graph_.slots[slot].offset;
-  }
-  double* value_ptr(int slot) {
-    return values_.data() + graph_.slots[slot].offset;
-  }
+  double* param_ptr(int slot) { return value_ptr(slot); }
+  double* value_ptr(int slot);
+  const double* value_ptr(int slot) const { return slot_data_(slot); }
+  // Fill without exposing a writable pointer. Used by compiled-model binding.
+  void set_values(int slot, const double* data, size_t size);
+  int64_t shared_data_size() const { return data_->size(); }
+  int64_t mutable_value_size() const { return values_.size(); }
 
   // Forward through all ops; returns value of result_slot (must be scalar).
   double forward();
@@ -214,6 +209,13 @@ class Executor {
 
  private:
   void bind_();
+  void detach_data_();
+  double* slot_data_(int slot) const {
+    const auto offset = data_offsets_[slot];
+    return offset >= 0 ? data_->data() + offset
+                       : const_cast<double*>(values_.data()) +
+                             graph_.slots[slot].offset;
+  }
   KernelCtx make_ctx_(const Op& op, int64_t scratch_offset,
                       const std::vector<char>& written,
                       const std::vector<int64_t>& adjoint_offsets);
@@ -227,6 +229,9 @@ class Executor {
 
   Graph graph_;
   std::vector<double> values_;
+  std::shared_ptr<std::vector<double>> data_;
+  std::vector<int64_t> data_offsets_;
+  bool data_pointer_exposed_ = false;
   std::vector<double> adjoints_;
   int64_t result_adjoint_offset_ = -1;
   std::vector<double> scratch_;
@@ -234,10 +239,9 @@ class Executor {
   // not pay for a parallel null unique_ptr. KernelCtx retains stable raw views
   // into these heap-owned objects.
   std::vector<std::unique_ptr<KernelState>> kernel_states_;
-  // One context per op, assembled once at bind. Every field in it is a
-  // pointer into an arena that never moves after binding, or an immediate
-  // copied from the op, so the only per-evaluation work is refreshing the
-  // two scalar adjoints the reverse sweep passes by value.
+  // One context per op, assembled at bind. Private arenas never move; shared
+  // data input pointers are rebound only when a caller detaches that buffer.
+  // The sweeps only refresh the two scalar adjoints passed by value.
   std::vector<KernelCtx> ctx_;
   // The dispatch tables, resolved at bind. The sweeps walk these instead
   // of reading each op's opcode and indexing the global kernel table:

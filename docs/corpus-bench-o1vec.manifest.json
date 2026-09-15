@@ -1,0 +1,15 @@
+{
+  "cmdstan": {
+    "make_stanc": {
+      "path": "/private/tmp/claude-501/-Users-xitrium-claud/e3495802-bb07-4d1d-bbd4-222319262a2c/scratchpad/stanc3-pin/_build/default/src/stanc/stanc.exe",
+      "sha256": "b92344b57a39e3917f194f9a5fc0438b4cbd4579db159ac04500ea82a790450e",
+      "version": "%%NAME%%3 %%VERSION%% (Unix)"
+    },
+    "header_stanc": {
+      "path": "/private/tmp/claude-501/-Users-xitrium-claud/e3495802-bb07-4d1d-bbd4-222319262a2c/scratchpad/stanc3-pin/_build/default/src/stanc/stanc.exe",
+      "sha256": "b92344b57a39e3917f194f9a5fc0438b4cbd4579db159ac04500ea82a790450e",
+      "version": "%%NAME%%3 %%VERSION%% (Unix)"
+    },
+    "stancflags": "--O1"
+  }
+}

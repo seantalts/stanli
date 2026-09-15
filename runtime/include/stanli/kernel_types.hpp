@@ -35,7 +35,7 @@ struct Desc {
 // A value in the graph. Slots with is_param are the unconstrained parameter
 // vector, in declaration order; everything else is data or an intermediate.
 struct Slot {
-  int64_t offset = 0;  // into the value arena (filled at bind)
+  int64_t offset = 0;  // within its bound value buffer (filled at bind)
   int64_t len = 0;
   bool is_param = false;
 };

@@ -96,7 +96,7 @@ void gp_cov_fwd(KernelCtx& ctx) {
   MatD c = gp_cov_call(ctx.variant, pts, ctx.in[1].data[0], ctx.in[2].data[0]);
   MapM(ctx.out.data, N, N) = c;
 }
-void gp_cov_bwd(KernelCtx& ctx) {
+void gp_cov_replay_bwd(KernelCtx& ctx) {
   // x may be a parameter: rebuild the points from the promoted xs[0] so its
   // adjoints flow back too. nary_bwd copies back whatever input carries an
   // adjoint slot, so a data x simply contributes nothing here.
@@ -108,6 +108,56 @@ void gp_cov_bwd(KernelCtx& ctx) {
       for (int64_t d = 0; d < D; ++d) pts[n](d) = xs[0](n * D + d);
     return gp_cov_call(variant, pts, xs[1](0), xs[2](0));
   });
+}
+
+// Fixed-location exp-quad covariances reuse forward values. Active locations
+// retain replay's exact accumulation order; other families and extreme numeric
+// geometry keep the existing fallback too. Accumulate locally so refusal cannot
+// leave partially updated adjoints.
+void gp_cov_bwd(KernelCtx& ctx) {
+  const double sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
+  if (ctx.variant != kGpExpQuad || ctx.in_adj[0].data ||
+      !std::isnormal(sigma * sigma) || !std::isnormal(rho * rho * rho)) {
+    gp_cov_replay_bwd(ctx);
+    return;
+  }
+  const int64_t n = ctx.idata[0], d = ctx.idata[1];
+  double sigma_adj = 0, rho_adj = 0;
+  for (int64_t j = 0; j < n; ++j) {
+    sigma_adj += ctx.out_adj_vec.data[j * n + j] * (2 * sigma);
+    for (int64_t i = j + 1; i < n; ++i) {
+      const double distance2 =
+          (CMapV(ctx.in[0].data + i * d, d) - CMapV(ctx.in[0].data + j * d, d))
+              .squaredNorm();
+      if (!std::isfinite(distance2)) {
+        gp_cov_replay_bwd(ctx);
+        return;
+      }
+      const double seed =
+          ctx.out_adj_vec.data[j * n + i] + ctx.out_adj_vec.data[i * n + j];
+      const double covariance = ctx.out.data[j * n + i];
+      const double weighted = seed * covariance;
+      const double dsigma = weighted * (2 / sigma);
+      const double drho = weighted * (distance2 / (rho * rho * rho));
+      // Saved covariance cannot recover an underflowed exponential. Also
+      // refuse intermediate overflow/underflow before publishing any partials.
+      if (!std::isnormal(covariance) || !std::isfinite(weighted) ||
+          (weighted == 0 && seed != 0) || !std::isfinite(dsigma) ||
+          !std::isfinite(drho) || (dsigma == 0 && weighted != 0) ||
+          (drho == 0 && weighted != 0 && distance2 != 0)) {
+        gp_cov_replay_bwd(ctx);
+        return;
+      }
+      sigma_adj += dsigma;
+      rho_adj += drho;
+    }
+  }
+  if (!std::isfinite(sigma_adj) || !std::isfinite(rho_adj)) {
+    gp_cov_replay_bwd(ctx);
+    return;
+  }
+  if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += sigma_adj;
+  if (ctx.in_adj[2].data) ctx.in_adj[2].data[0] += rho_adj;
 }
 
 // ---- diag_matrix(v) -------------------------------------------------------
@@ -123,34 +173,30 @@ void diag_bwd(KernelCtx& ctx) {
     ctx.in_adj[0].data[i] += ctx.out_adj_vec.data[i * n + i];
 }
 
-// Single matrix input, matrix output, replayed on a varmat operand:
-// `var_value<MatrixXd>` is one vari over contiguous value and adjoint
-// blocks, so the flat arena slot maps straight in with no per-element
-// promotion, and stan-math's varmat rev overload (what `stanc --O1`
-// reaches for) runs instead of the AoS one. Column-major throughout,
-// matching the slot layout.
-template <typename F>
-void matvar_bwd(KernelCtx& ctx, int64_t n, F&& f) {
-  if (ctx.in_adj[0].data == nullptr) return;
-  stan::math::nested_rev_autodiff nested;
-  stan::math::var_value<Eigen::MatrixXd> a(CMapM(ctx.in[0].data, n, n));
-  auto out = f(a);
-  stan::math::var j = stan::math::sum(stan::math::elt_multiply(
-      out, stan::math::to_matrix(CMapM(ctx.out_adj_vec.data, n, n))));
-  stan::math::grad(j.vi_);
-  MapM(ctx.in_adj[0].data, n, n) += a.adj();
-}
-
 // ---- cholesky_decompose(A) ------------------------------------------------
 void chol_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
   MatD a = CMapM(ctx.in[0].data, n, n);
   MapM(ctx.out.data, n, n) = stan::math::cholesky_decompose(a);
 }
+// Minimal adjoint views let the pinned Stan Math pullbacks operate directly
+// on the saved factor and executor adjoints, with no vari or nested tape.
+struct MatrixAdjointView {
+  MapM storage;
+  Eigen::Index rows() const { return storage.rows(); }
+  Eigen::Index cols() const { return storage.cols(); }
+  MapM& adj() { return storage; }
+};
 void chol_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
   const int64_t n = ctx.idata[0];
-  matvar_bwd(ctx, n,
-             [](const auto& a) { return stan::math::cholesky_decompose(a); });
+  CMapM factor(ctx.out.data, n, n);
+  MatrixAdjointView out{MapM(ctx.out_adj_vec.data, n, n)};
+  MatrixAdjointView in{MapM(ctx.in_adj[0].data, n, n)};
+  if (n <= 35)
+    stan::math::internal::unblocked_cholesky_lambda(factor, out, in)();
+  else
+    stan::math::internal::cholesky_lambda(factor, out, in)();
 }
 
 // ---- matrix_exp(A) ---------------------------------------------------------

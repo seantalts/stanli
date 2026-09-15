@@ -68,7 +68,10 @@ struct MirValFor<double> {
   using type = DataMap::Entry;
 };
 
-// Host hooks, all optional. The lowering installs the first two; the
+template <typename T>
+class MirInterp;
+
+// Host hooks, all optional. The lowering installs the first three; the
 // interpreted write_array installs the last two (they only fire on the
 // double instantiation); the ODE kernels install none.
 struct MirHooks {
@@ -78,8 +81,12 @@ struct MirHooks {
   // outside the interpreter's environment.
   std::function<bool(const std::string&, long*)> int_var;
   // First shot at any StanLib call the host owns (RNG draws, which carry
-  // state the pure interpreter must not). Return true when handled.
-  std::function<bool(const mir::Expr&, DataMap::Entry*)> fun;
+  // state the pure interpreter must not). Return true when handled. The
+  // interpreter making the call is passed in: a user-function body runs in
+  // a sub-interpreter that inherits these hooks, and the call's arguments
+  // live in that body's scope, not in whichever instance installed the hook.
+  std::function<bool(MirInterp<double>&, const mir::Expr&, DataMap::Entry*)>
+      fun;
   // First shot at any statement (FnReadParam and FnWriteParam in the
   // interpreted write_array). Return true when handled.
   std::function<bool(const mir::Stmt&)> stmt;
@@ -2740,7 +2747,7 @@ class MirInterp {
       return r;
     }
     if constexpr (std::is_same_v<T, double>) {
-      if (hooks_.fun && hooks_.fun(e, &r)) return r;
+      if (hooks_.fun && hooks_.fun(*this, e, &r)) return r;
     }
     fail("unsupported function " + e.name, e.raw);
   }

@@ -34,7 +34,10 @@ function portablePayload(encoded, name) {
 const exported = require(compilerPath);
 const compile =
     (exported && exported.stanli_compile) || globalThis.stanli_compile;
+const compileModel =
+    (exported && exported.stanli_compile_model) || globalThis.stanli_compile_model;
 if (typeof compile !== "function") fail("no stanli_compile() export");
+if (typeof compileModel !== "function") fail("no stanli_compile_model() export");
 const compatibleStanc = (exported && exported.stanc) || globalThis.stanc;
 if (typeof compatibleStanc !== "function") fail("no compatible stanc() export");
 const customVersion = compatibleStanc("version-test", "", ["version"]);
@@ -96,6 +99,12 @@ for (const [name, relative, includes] of models) {
     maxBuffer: 1 << 28,
   });
   const js = compile("embedded_model", code, includes);
+  const nativeModel = execFileSync(nativePath, ["--model-only", model], {
+    maxBuffer: 1 << 28,
+  });
+  const jsModel = compileModel("embedded_model", code, includes);
+  if (jsModel.errors || !Buffer.from(String(jsModel.result)).equals(nativeModel))
+    fail(name + ": model-only native/JS bytes differ");
   if (js.errors) fail(name + ": " + Array.from(js.errors).join("\n"));
   const encoded = String(js.result);
   const payload = portablePayload(encoded, name);

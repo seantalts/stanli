@@ -8,28 +8,54 @@
 # its pinned revision predates the lower.cpp split, so the job reports but
 # does not block until stanr can take a current runtime. Keep
 # workflow_dispatch as an on-demand compatibility check.
+#
+# The Windows row exists because stanr compiles the runtime into its own
+# package DLL with Rtools (UCRT64 GCC), where thread_local objects live in
+# emulated TLS and are torn down differently from Linux and macOS. A
+# dispatch can point at another stanr revision and widen the test filter:
+# `stanr_ref=b08398fa test_filter=show-exceptions` reproduces the worker
+# crash andrjohns reported on his full-suite branch (stanli#349).
 name: stanr downstream
 
 on:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      stanr_ref:
+        description: 'stanr git revision to build against (default: the pin)'
+        required: false
+        default: ''
+      test_filter:
+        description: testthat filter regex over stanr's test files
+        required: false
+        default: stanli-backend
+      parallel:
+        description: 'run testthat in parallel worker processes (TRUE/FALSE)'
+        required: false
+        default: 'TRUE'
 
 permissions:
   contents: read
 
 jobs:
   backend:
-    name: current runtime in stanr
-    runs-on: ubuntu-24.04
+    name: current runtime in stanr (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     continue-on-error: true
-    timeout-minutes: 60
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
     env:
       # Pin the downstream source so unrelated upstream changes cannot make a
       # Stanli release fail. Refresh this together with the test if stanr
       # changes its vendoring or backend contract.
-      STANR_REF: da5de850718ca62ad752365d5467566eea22a0c5
-      MAKEFLAGS: -j2
-      TESTTHAT_CPUS: 2
+      STANR_REF: ${{ inputs.stanr_ref || 'da5de850718ca62ad752365d5467566eea22a0c5' }}
+      STANR_TEST_FILTER: ${{ inputs.test_filter || 'stanli-backend' }}
+      TESTTHAT_PARALLEL: ${{ inputs.parallel || 'TRUE' }}
+      MAKEFLAGS: -j4
+      TESTTHAT_CPUS: 4
     steps:
       - uses: actions/checkout@v4
 
@@ -46,4 +72,5 @@ jobs:
             any::R6, any::QuickJSR, any::posterior, any::withr, any::testthat
 
       - name: Build and test stanr's Stanli backend
+        shell: bash
         run: ./tests/test_stanr.sh "$STANR_REF"

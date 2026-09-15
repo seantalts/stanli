@@ -23,7 +23,8 @@ template <class Clock = std::chrono::steady_clock, class F>
 Window window(F&& one, int64_t duration_ns, uint64_t batch = 1,
               bool calibrate = false) {
   if (duration_ns <= 0 || batch == 0)
-    throw std::invalid_argument("benchmark duration and batch must be positive");
+    throw std::invalid_argument(
+        "benchmark duration and batch must be positive");
   Window result;
   const auto start = Clock::now();
   auto previous = start;
@@ -31,10 +32,12 @@ Window window(F&& one, int64_t duration_ns, uint64_t batch = 1,
     for (uint64_t i = 0; i < batch; ++i) one();
     result.iterations += batch;
     const auto now = Clock::now();
-    const auto batch_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now - previous).count();
-    result.elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now - start).count();
+    const auto batch_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - previous)
+            .count();
+    result.elapsed_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - start)
+            .count();
     previous = now;
     // About one clock read per millisecond, even for nanosecond-scale models.
     // A slow evaluation remains a batch of one; the observed overshoot stays
@@ -60,7 +63,8 @@ inline Options options(int argc, char** argv, int first) {
     const std::string value(argv[i + 1]);
     const double ms = std::stod(value, &consumed);
     if (consumed != value.size() || !std::isfinite(ms) || ms < 1 || ms > 60'000)
-      throw std::invalid_argument("benchmark windows must be 1..60000 milliseconds");
+      throw std::invalid_argument(
+          "benchmark windows must be 1..60000 milliseconds");
     (flag == "--warmup-ms" ? result.warmup_ns : result.measure_ns) =
         static_cast<int64_t>(ms * 1e6);
   }
@@ -68,17 +72,19 @@ inline Options options(int argc, char** argv, int first) {
 }
 
 template <class G>
-void output(const Window& warm, const Window& measured, double lp, const G& grad) {
+void output(const Window& warm, const Window& measured, double lp,
+            const G& grad) {
   if (!std::isfinite(lp)) throw std::runtime_error("non-finite log density");
   for (int64_t i = 0; i < static_cast<int64_t>(grad.size()); ++i)
-    if (!std::isfinite(grad[i])) throw std::runtime_error("non-finite gradient");
+    if (!std::isfinite(grad[i]))
+      throw std::runtime_error("non-finite gradient");
   std::cout << std::setprecision(17)
             << "{\"protocol\":\"stanli-gradient-v2\",\"iterations\":"
             << measured.iterations << ",\"elapsed_ns\":" << measured.elapsed_ns
             << ",\"batch\":" << measured.batch
             << ",\"warmup_iterations\":" << warm.iterations
-            << ",\"warmup_elapsed_ns\":" << warm.elapsed_ns
-            << ",\"values\":[" << lp;
+            << ",\"warmup_elapsed_ns\":" << warm.elapsed_ns << ",\"values\":["
+            << lp;
   for (int64_t i = 0; i < static_cast<int64_t>(grad.size()); ++i)
     std::cout << ',' << grad[i];
   std::cout << "]}" << std::endl;

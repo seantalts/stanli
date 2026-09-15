@@ -194,7 +194,6 @@ class bs_model {
   // One per (include_tp, include_gq) combination, indexed below. Owned by
   // the model and freed with it, as the header promises.
   std::string names[4];
-  unsigned int seed = 0;
 
   static size_t flag_index(bool tp, bool gq) {
     return (tp ? 1u : 0u) | (gq ? 2u : 0u);
@@ -246,7 +245,7 @@ class bs_model {
     stanli::WaRng scratch(1);
     lease->run_forward_only(stanli::EvalState{rng == nullptr ? &scratch : rng});
     for (const auto& c : cols) {
-      const double* v = lease->value_ptr(c.slot);
+      const double* v = std::as_const(*lease).value_ptr(c.slot);
       for (int64_t i = 0; i < c.len; ++i) row.push_back(v[c.storage_index(i)]);
     }
     return row;
@@ -317,15 +316,10 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
     }
     std::unique_ptr<bs_model> m(new bs_model());
     if (name != nullptr && name[0] != '\0') m->name = name;
-    // Reference BridgeStan seeds transformed-data RNG calls with this.
-    // stanli's compiler rejects any _rng in transformed data outright
-    // ("unsupported function ..._rng"), so the seed is recorded and that
-    // CompileError is what a caller sees -- pretending to support it
-    // would mean silently ignoring the seed.
-    m->seed = seed;
-
+    // Reference BridgeStan seeds transformed-data RNG calls with this, and
+    // so does stanli's compile: the section runs once here, at construction.
     stanli::DataMap dm = load_data(data);
-    m->cm = stanli::compile_model(mir, dm);
+    m->cm = stanli::compile_model(mir, dm, seed);
     m->ex.reset(new stanli::Executor(std::move(m->cm.graph)));
     m->cm.bind(*m->ex);
     m->pool.reset(new stanli::ExecutorPool(*m->ex));

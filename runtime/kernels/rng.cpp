@@ -21,6 +21,9 @@ namespace {
 
 void rng_fwd(KernelCtx& ctx) {
   if (ctx.variant > static_cast<uint8_t>(ScalarRng::Exponential) &&
+      ctx.variant != static_cast<uint8_t>(ScalarRng::Poisson) &&
+      ctx.variant != static_cast<uint8_t>(ScalarRng::StudentT) &&
+      ctx.variant != static_cast<uint8_t>(ScalarRng::BernoulliLogit) &&
       ctx.variant != kCategoricalRngVariant &&
       ctx.variant != kMultiNormalRngVariant &&
       ctx.variant != kDirichletRngVariant)

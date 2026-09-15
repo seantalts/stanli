@@ -1,0 +1,134 @@
+--- a/src/stan_math_signatures/Generate.ml
++++ b/src/stan_math_signatures/Generate.ml
+@@ -2773,10 +2773,12 @@
+   Printf.printf
+     {|
+ let stan_math_signatures :
+-    (string, Middle.UnsizedType.signature list) Hashtbl.t Lazy.t=
+-  lazy (fst @@ Gc.ramp_up @@
+-        fun () -> unmarshal_hashtbl %S) |}
+-    (marshal_hashtbl stan_math_signatures);
++    (string, Middle.UnsizedType.signature list Lazy.t) Hashtbl.t Lazy.t =
++  lazy (unmarshal %S
++        |> List.map ~f:(fun (name, bytes) -> (name, lazy (unmarshal bytes)))
++        |> List.to_seq |> Hashtbl.of_seq) |}
++    (marshal (Hashtbl.to_seq stan_math_signatures |> List.of_seq
++              |> List.map ~f:(fun (name, signatures) -> (name, marshal signatures))));
+   Printf.printf
+     {|
+ let stan_math_variadic_signatures :
+--- a/src/stan_math_signatures/Stan_math_signatures.ml
++++ b/src/stan_math_signatures/Stan_math_signatures.ml
+@@ -16,10 +16,16 @@
+   Hashtbl.mem (Lazy.force stan_math_signatures) name
+ 
+ let lookup_stan_math_function name =
+-  Hashtbl.find_multi (Lazy.force stan_math_signatures) name
++  match Hashtbl.find_opt (Lazy.force stan_math_signatures) name with
++  | Some signatures -> Lazy.force signatures
++  | None -> []
++
++let lazy_signatures_alist =
++  Lazy.map stan_math_signatures ~f:(Fun.compose List.of_seq Hashtbl.to_seq)
+ 
+ let signatures_alist =
+-  Lazy.map stan_math_signatures ~f:(Fun.compose List.of_seq Hashtbl.to_seq)
++  Lazy.map lazy_signatures_alist ~f:(List.map ~f:(fun (name, signatures) ->
++      (name, Lazy.force signatures)))
+ 
+ let is_stan_math_variadic_function_name =
+   Hashtbl.mem stan_math_variadic_signatures
+@@ -62,7 +68,7 @@
+ 
+ let get_sigs name =
+   let name = Utils.stdlib_distribution_name name in
+-  Hashtbl.find_multi (Lazy.force stan_math_signatures) name
++  lookup_stan_math_function name
+   |> List.sort ~cmp:UnsizedType.compare_signature
+ 
+ let make_assignmentoperator_stan_math_signatures assop =
+--- a/src/stan_math_signatures/Stan_math_signatures.mli
++++ b/src/stan_math_signatures/Stan_math_signatures.mli
+@@ -10,6 +10,9 @@
+ val lookup_stan_math_function : string -> UnsizedType.signature list
+ (** Look up the signature of a Stan Math library function. If it is not found,
+     this returns [[]] *)
++
++val lazy_signatures_alist : (string * UnsizedType.signature list Lazy.t) list Lazy.t
++(** Each immutable overload set is materialized only when first consulted. *)
+ 
+ val signatures_alist : (string * UnsizedType.signature list) list Lazy.t
+ (** Get all the signatures in the Stan Math library *)
+--- a/src/frontend/Environment.ml
++++ b/src/frontend/Environment.ml
+@@ -39,23 +39,25 @@
+       Some location
+   | {kind= `StanMath; _} -> None
+ 
+-type t = info list String.Map.t
++type t = info list Lazy.t String.Map.t
+ 
+ let stan_math_environment =
+-  Lazy.map Stan_math_signatures.signatures_alist ~f:(fun signatures ->
++  Lazy.map Stan_math_signatures.lazy_signatures_alist ~f:(fun signatures ->
+       List.map signatures ~f:(fun (key, values) ->
+           ( key
+-          , List.map values ~f:(fun s ->
+-                {type_= UnsizedType.UFun s; kind= `StanMath}) ))
++          , Lazy.map values ~f:(List.map ~f:(fun s ->
++                {type_= UnsizedType.UFun s; kind= `StanMath})) ))
+       |> String.Map.of_list)
+ 
+-let add env name type_ kind =
+-  String.Map.add_to_list env ~key:name ~data:{type_; kind}
++let find env key =
++  match String.Map.find_opt key env with
++  | Some values -> Lazy.force values
++  | None -> []
+ 
+-let set_raw env key data = String.Map.add env ~key ~data
+-let find env key = String.Map.find_multi key env
++let set_raw env key data = String.Map.add env ~key ~data:(Lazy.from_val data)
++let add env name type_ kind = set_raw env name ({type_; kind} :: find env name)
+ let mem env key = String.Map.mem key env
+-let iteri env f = String.Map.iter env ~f:(fun ~key ~data -> f key data)
++let iteri env f = String.Map.iter env ~f:(fun ~key ~data -> f key (Lazy.force data))
+ 
+ let nearest_ident env name =
+   let open Option.Syntax in
+@@ -78,4 +80,4 @@
+     |> List.filter ~f:(mem env) in
+   let* key = Option.first_some (List.hd suggestions) (List.hd other_suffixes) in
+   let+ values = String.Map.find_opt key env in
+-  (key, List.map ~f:location values)
++  (key, List.map ~f:location (Lazy.force values))
+--- a/src/stan_math_signatures/Generated_signatures.mli
++++ b/src/stan_math_signatures/Generated_signatures.mli
+@@ -5,7 +5,7 @@
+ 
+ open Middle
+ 
+-val stan_math_signatures : (string, UnsizedType.signature list) Hashtbl.t Lazy.t
++val stan_math_signatures : (string, UnsizedType.signature list Lazy.t) Hashtbl.t Lazy.t
+ 
+ val stan_math_variadic_signatures :
+   (string, UnsizedType.variadic_signature) Hashtbl.t
+--- a/src/frontend/Typechecker.ml
++++ b/src/frontend/Typechecker.ml
+@@ -2219,7 +2219,15 @@
+         | Env.{kind= `UserDeclared loc; _} ->
+             Semantic_error.fn_decl_without_def loc name |> error
+         | _ -> ()) in
+-  if not allow_undefined_functions then Env.iteri tenv error_on_undefined;
++  (* Only source function names can contain UserDeclared entries. Preserve
++     the environment's lexical order without forcing every built-in overload
++     merely to establish that Stan Math contains no undefined user function. *)
++  if not allow_undefined_functions then
++    Option.iter stmts_opt ~f:(fun {stmts; _} ->
++        List.filter_map stmts ~f:(fun s ->
++            match s.stmt with FunDef {funname; _} -> Some funname.name | _ -> None)
++        |> String.Set.of_list
++        |> String.Set.iter ~f:(fun name -> error_on_undefined name (Env.find tenv name)));
+   (tenv, typed_fb)
+ 
+ let verify_correctness_invariant (ast : untyped_program)

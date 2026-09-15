@@ -117,6 +117,13 @@ static void* g_lib = NULL;
 static int (*p_abi_version)(void);
 static void* (*p_model_new_from_stan)(const char*, const char*, char*, size_t);
 static void* (*p_model_new)(const char*, const char*, char*, size_t);
+/* The seeded constructors are additive: an older runtime has neither, and
+ * rejects every _rng call in transformed data, so under it the seed has
+ * nothing to affect and the unseeded constructors serve. */
+static void* (*p_model_new_from_stan_seeded)(const char*, const char*, uint32_t,
+                                             char*, size_t);
+static void* (*p_model_new_seeded)(const char*, const char*, uint32_t, char*,
+                                   size_t);
 static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
 static int (*p_exact_lp)(void);
@@ -160,6 +167,7 @@ static const char* (*p_wa_column_name)(const void*, int64_t);
 static void (*p_wa_seed_chain)(void*, uint32_t, uint32_t);
 static int (*p_wa_row)(void*, const double*, double*);
 static const char* (*p_warnings)(const void*);
+static int (*p_transformed_data_rng)(const void*);
 static void (*p_optimize_opts_init)(stanli_optimize_opts*);
 static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
                          double*, char*, size_t);
@@ -208,6 +216,9 @@ SEXP stanli_bridge_load(SEXP path) {
 
   BIND("stanli_model_new_from_stan", p_model_new_from_stan);
   BIND("stanli_model_new", p_model_new);
+  *(void**)(&p_model_new_from_stan_seeded) =
+      dl_sym(g_lib, "stanli_model_new_from_stan_seeded");
+  *(void**)(&p_model_new_seeded) = dl_sym(g_lib, "stanli_model_new_seeded");
   BIND("stanli_model_free", p_model_free);
   BIND("stanli_has_embedded_stanc", p_has_embedded_stanc);
   BIND("stanli_exact_lp", p_exact_lp);
@@ -243,6 +254,8 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_wa_seed_chain", p_wa_seed_chain);
   BIND("stanli_wa_row", p_wa_row);
   *(void**)(&p_warnings) = dl_sym(g_lib, "stanli_warnings");
+  *(void**)(&p_transformed_data_rng) =
+      dl_sym(g_lib, "stanli_transformed_data_rng");
   BIND("stanli_optimize_opts_init", p_optimize_opts_init);
   BIND("stanli_optimize", p_optimize);
   return mkString("");
@@ -274,17 +287,23 @@ static void* model_ptr(SEXP ext) {
   return m;
 }
 
-SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir) {
+SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed) {
   require_loaded();
   char err[8192];
   err[0] = '\0';
   void* m;
+  const char* text = CHAR(STRING_ELT(code, 0));
+  const char* data = CHAR(STRING_ELT(data_json, 0));
+  const uint32_t construction_seed = (uint32_t)asReal(seed);
   if (asLogical(is_mir))
-    m = p_model_new(CHAR(STRING_ELT(code, 0)), CHAR(STRING_ELT(data_json, 0)),
-                    err, sizeof err);
+    m = p_model_new_seeded != NULL
+            ? p_model_new_seeded(text, data, construction_seed, err, sizeof err)
+            : p_model_new(text, data, err, sizeof err);
   else
-    m = p_model_new_from_stan(CHAR(STRING_ELT(code, 0)),
-                              CHAR(STRING_ELT(data_json, 0)), err, sizeof err);
+    m = p_model_new_from_stan_seeded != NULL
+            ? p_model_new_from_stan_seeded(text, data, construction_seed, err,
+                                           sizeof err)
+            : p_model_new_from_stan(text, data, err, sizeof err);
   if (m == NULL) error("%s", err[0] ? err : "stanli: model compilation failed");
   SEXP ext = PROTECT(R_MakeExternalPtr(m, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(ext, model_finalizer, TRUE);
@@ -364,12 +383,13 @@ SEXP stanli_r_write_array(SEXP m, SEXP q) {
   const int64_t wa_n = p_wa_n_columns(mm);
   const int64_t ncol = wa_n > 0 ? wa_n : p_n_constrained(mm);
   SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)ncol));
-  const int rc = wa_n > 0 ? p_wa_row(mm, REAL(q), REAL(out)) :
-                            p_constrain(mm, REAL(q), REAL(out));
+  const int rc = wa_n > 0 ? p_wa_row(mm, REAL(q), REAL(out))
+                          : p_constrain(mm, REAL(q), REAL(out));
   if (rc != 0) {
     UNPROTECT(1);
-    error("constrain_pars failed while evaluating parameter transforms, "
-          "transformed parameters, or generated quantities");
+    error(
+        "constrain_pars failed while evaluating parameter transforms, "
+        "transformed parameters, or generated quantities");
   }
   UNPROTECT(1);
   return out;
@@ -385,9 +405,16 @@ SEXP stanli_r_log_prob(SEXP m, SEXP q) {
     error("upars must contain %lld unconstrained values", (long long)n);
   double lp = 0;
   if (p_grad(mm, REAL(q), &lp, NULL) != 0)
-    error("log density evaluation failed at this point (domain error in a "
-          "distribution or function)");
+    error(
+        "log density evaluation failed at this point (domain error in a "
+        "distribution or function)");
   return ScalarReal(lp);
+}
+
+SEXP stanli_r_transformed_data_rng(SEXP m) {
+  require_loaded();
+  return ScalarLogical(p_transformed_data_rng != NULL &&
+                       p_transformed_data_rng(model_ptr(m)));
 }
 
 SEXP stanli_r_unconstrain_inits(SEXP m, SEXP json) {

@@ -37,8 +37,11 @@ measured in ULPs; the default policy is within 2 ULP. Bitwise agreement is not
 a gate; a change that moves a model from bitwise to a small ULP band is
 accepted. Reassociation-class kernel changes (reductions, matvec, gather
 backward, softmax backward) may reach 10 ULP only when the change states that
-budget in its commit message and updates the baseline in the same commit.
-Anything beyond 10 ULP is a bug. Unit tests for individual operations and
+budget in its commit message and updates the baseline in the same commit. A
+density merged across loop lanes, where one call sums what CmdStan sums in
+one call per iteration, may reach 30 ULP; the models that use the budget are
+listed in `tools/corpus.py` with the measured value and its cause.
+Anything beyond those budgets is a bug. Unit tests for individual operations and
 the cross-path tests (stanli's own paths against each other) still use
 bitwise equality; a kernel change that widens one of them records the new
 limit at the assertion. Most corpus
@@ -48,6 +51,14 @@ points rejected by CmdStan require matching rejection behavior. The sections
 below give the details and known exceptions.
 
 ## Overview of the checks
+
+The [educational corpus](tests/educational/README.md) adds 13 Aalto teaching
+models. CTest checks three-point CmdStan density/gradient/generated-output
+references and complete sampling CSVs. The separate
+`check_educational_performance` build target runs a live, repeated comparison
+against vectorized CmdStan and fails any model below 0.5 times its speed.
+Performance failures are reported individually without exclusions; see the
+corpus README for the measurement boundary and reproducible commands.
 
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
@@ -66,6 +77,7 @@ below give the details and known exceptions.
 | sampler trace | Is NUTS configured comparably to CmdStan? | Diagnostic summaries remain within limits chosen for large configuration errors | manually after sampler changes |
 | AddressSanitizer | Does ASan detect invalid memory access while CTest runs? | No sanitizer diagnostics | after merge and nightly |
 | WebAssembly replay | Does the browser runtime reproduce the recorded corpus? | Same numerical gates; 118 of 119 compiling posteriordb models fit in wasm32 | manually |
+| browser compiler on Safari 17 | Do the js_of_ocaml bundles keep `static` on the same line as the class element it modifies? | No line in either bundle ends in `static` | every pull request |
 | documentation and formatting | Do generated claims match their artifacts, and is C/C++ formatting current? | Exact generated-file and formatter checks | every pull request |
 
 ## MIR loop-vectorization measurement
@@ -88,21 +100,44 @@ python3 harnesses/vectorize_ab.py deps/posteriordb \
 ```
 
 The "MIR vectorization A/B" workflow step runs the complete run on every
-push to main and on the schedule; a pull request runs a 35-model slice
-listed in the workflow, about 90 s, so the full run is a post-submit gate.
+push to main and on the schedule; a pull request runs a 44-model slice
+listed in the workflow, so the full run is a post-submit gate.
 The hard gates cover command/status consistency, result and write-array
 categories, error parity, per-element finite/NaN/infinity classes, shapes and
 names, and both pass modes against the existing CmdStan references. Finite
 bit differences that remain within those gates are listed separately with
-bit patterns and ULP distances.
+bit patterns and ULP distances. Preparation timings and, for a model whose
+portable MIR differs between the two cells, op counts are diagnostics only:
+the lowered log_prob graph growing, or the final log_prob graph growing by
+more than 10% (with the runtime reroll pass on), are listed in `summary.md`
+but never fail the run by themselves. The execution gate is gradient time on
+the fixed `GRADIENT_MODELS` set: a model whose pass-on/pass-off ratio
+exceeds 1.04 is re-measured with a fresh, independently interleaved run, and
+the job fails only if that re-run also exceeds the ratio, so isolated
+measurement noise does not fail a pull request.
+
+The op-count diagnostic and the gradient gate only ever compare a run's own
+pass-off cell against its pass-on cell, so a change that slows (or speeds
+up) the runtime itself, identically in both cells, is invisible to them.
+Passing `--baseline DIR` (a previous `--output-dir`) makes the harness also diff
+final ops, lowered ops, island regions, and slots for every matching cell
+against that directory's `graphs.jsonl`, and lists every model whose final
+ops grew or shrank at the top of `summary.md`. This comparison is
+report-only and never fails the run. On post-submit pushes to main, the
+"Fetch the main-branch vectorization baseline" workflow step downloads the
+`mir-vectorization-measurements` artifact from the most recent successful
+run on main and passes it as `--baseline`; when no such artifact is found
+(the first run, or one past its retention window) the step leaves the
+baseline directory absent and the harness skips the comparison rather than
+failing.
 
 The output directory contains `manifest.json`, `corpus.jsonl`,
 `graphs.jsonl`, `bench.tsv`, `summary.json`, and `summary.md`. The manifest
 records source pins, producer provenance, tool hashes, platform, toolchain,
-environment policy, and corpus scope. Compiler wall time, graph and
-preparation counts, separate log-density/write-array reroll dispositions, and
-auto-calibrated ABBA gradient timings are descriptive measurements; their
-ratios do not decide pass/fail. Missing or malformed measurement output does
+environment policy, and corpus scope. Compiler wall time, preparation
+timings, executor arena slot counts, each measured process's peak resident
+memory, and separate log-density/write-array reroll dispositions are
+descriptive measurements only. Missing or malformed measurement output does
 fail the run because it would make the report incomplete. The report labels
 CmdStan-referenced and A/B-only models separately; the latter have off/on
 category, error, shape, name, and value parity but no fabricated reference
@@ -226,7 +261,11 @@ differ from `a+(b+c)` in the last bit.
 The policy is: agreement within 2 ULP by default. Reassociation-class kernel
 changes (reductions, matvec, gather backward, softmax backward) may use a 10
 ULP budget when the change is measured and that budget is stated in the commit
-message. Bitwise agreement is reported for information but is not a gate; if a
+message. Densities merged across loop lanes may use 30 ULP, recorded per
+model. A larger distance from CmdStan is acceptable when a high-precision
+reference shows stanli at least as close to the true value as CmdStan is;
+the reference measurement is recorded with the model, as dogs' is in
+`tools/corpus.py`. Bitwise agreement is reported for information but is not a gate; if a
 change improves performance by moving a model from bitwise to a small ULP band,
 that is an accepted trade. At their primary recorded point, 41 verified
 posteriordb models have 0 ULP difference with CmdStan. Eight additional language
@@ -303,9 +342,18 @@ that consumes them. To regenerate them explicitly, run:
 `.hpp` files that stanc also writes beside the models are removed. Neither the
 MIR nor the C++ output is checked in.
 
-Core `tools/dev_setup.sh` builds the compiler executable from the configured
-stanc3 source revision because both fixture generation and source-level lit
-tests use it. `--embed` additionally builds the in-process compiler object.
+Core `tools/dev_setup.sh` builds both compiler artifacts from the configured
+stanc3 source revision: the executable, which fixture generation and the
+signature model generators run, and the in-process compiler object, which
+`stanli_check` links. The source-level lit cases, the function model replay,
+and the signature model replay all compile through that in-process pipeline,
+the one `stanli_run` and the language packages ship, so they see the same
+source passes a user does. A build without the object (the Windows and
+AddressSanitizer CI jobs) runs the same pipeline through its executable,
+`stanli-compile`, which CMake copies from `deps/stanc3/` to sit beside
+`stanli_check`, the way the Windows wheel ships it beside the runtime.
+`stanli_check --stanc PATH` runs an external stanc instead, for A/B work and
+compiler bisects.
 
 Unit tests check the kernels and cases they explicitly construct. They do not
 by themselves establish that model lowering selects the intended kernel or

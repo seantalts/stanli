@@ -6,16 +6,19 @@
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -49,7 +52,7 @@ static std::vector<double> run_grad(Graph g, const Fills& fills) {
   return testutil::run_grad(std::move(g), fills, fill_at);
 }
 
-// The island kernel reuses its thread-local compact adjoint file. Running the
+// The island kernel reuses its executor-owned compact adjoint file. Running the
 // same executor twice catches a stale cell beyond the shortened zeroed range.
 static std::vector<double> run_grad_twice(Graph g, const Fills& fills) {
   Executor ex(std::move(g));
@@ -83,9 +86,7 @@ static std::string slurp(const std::string& path) {
 // not run -- and the live-out harvest reads them regardless. Before the
 // prologue fill (mir_prog.hpp) the backward's var replay read a register
 // file no one had written and dereferenced a null vari: SIGSEGV, not a
-// wrong number. Runs first so the replay's thread_local register file is
-// still empty, which is the state that makes that a null rather than a
-// vari from an already-recovered nested tape.
+// wrong number. Each replay now starts with an empty register file.
 static void test_branch_bound_live_out() {
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/branchudf.tmir.sexp"), DataMap());
@@ -200,6 +201,14 @@ static void expect_eq(const std::string& what, int got, int want) {
   if (got != want) {
     ++failures;
     std::printf("FAIL %s: got %d want %d\n", what.c_str(), got, want);
+  }
+}
+
+static void expect_eq(const std::string& what, int64_t got, int64_t want) {
+  if (got != want) {
+    ++failures;
+    std::printf("FAIL %s: got %lld want %lld\n", what.c_str(), (long long)got,
+                (long long)want);
   }
 }
 
@@ -515,6 +524,846 @@ static void test_unsupported_op_splits() {
   const int carved = carve_islands(g, h.fills, h.terms, {});
   expect("split none carved", carved == 0);
   expect("split ops unchanged", g.ops.size() == before);
+}
+
+// A short elementwise op between two scalar runs, as the vectorize pass
+// leaves in iohmm_reg.
+struct VectorBinaryGraph {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+};
+
+// Operand domains: 'b' is a chain value plus 1.5 to 4.5, 's' a chain value
+// in (0, 1).
+struct VectorOpSpec {
+  uint16_t opcode;
+  const char* name;
+  int n_in;
+  const char* domains;
+};
+
+static const VectorOpSpec kVectorOps[] = {
+    {OP_ADD, "add", 2, "bb"},
+    {OP_SUB, "sub", 2, "bb"},
+    {OP_MUL, "mul", 2, "bb"},
+    {OP_DIV, "div", 2, "bb"},
+    {OP_POW, "pow", 2, "bs"},
+    {OP_FMAX, "fmax", 2, "bb"},
+    {OP_FMIN, "fmin", 2, "bb"},
+    {OP_LSE2, "lse2", 2, "bb"},
+    {OP_LOG_DIFF_EXP, "log_diff_exp", 2, "bs"},
+    {OP_FMA, "fma", 3, "bbb"},
+    {OP_LOG_MIX, "log_mix", 3, "sbb"},
+    {OP_NEG, "neg", 1, "b"},
+    {OP_EXPV, "exp", 1, "s"},
+    {OP_LOGV, "log", 1, "b"},
+    {OP_SQRT, "sqrt", 1, "b"},
+    {OP_SQUARE, "square", 1, "b"},
+    {OP_INV_LOGIT, "inv_logit", 1, "b"},
+    {OP_LOG1M, "log1m", 1, "s"},
+    {OP_TANHV, "tanh", 1, "b"},
+    {OP_INV, "inv", 1, "b"},
+    {OP_ABS, "abs", 1, "b"},
+    {OP_LOG1P_EXP, "log1p_exp", 1, "b"},
+};
+
+// `vec` bit k makes operand k a length-n vector built element by element
+// from the first run; a clear bit makes it one scalar from that run.
+static VectorBinaryGraph build_vector_op(const VectorOpSpec& spec, int vec,
+                                         int n) {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  auto cslot = [&](double v) {
+    const int s = g.add_slot(1, false);
+    h.fills.emplace_back(s, std::vector<double>{v});
+    return s;
+  };
+  auto chain = [&](int t, int steps, std::vector<int>* taps) {
+    for (int i = 0; i < steps; ++i) {
+      const int m = g.add_slot(1, false);
+      g.add_op(OP_MUL, {t, cslot(0.7 + 0.05 * i)}, m);
+      const int s = g.add_slot(1, false);
+      g.add_op(OP_ADD, {m, cslot(0.1 * i - 0.4)}, s);
+      t = g.add_slot(1, false);
+      g.add_op(OP_INV_LOGIT, {s}, t);
+      if (taps) taps->push_back(t);
+    }
+    return t;
+  };
+  const int p = g.add_slot(1, true);
+  std::vector<int> taps;
+  chain(p, 12, &taps);
+  size_t next_tap = 0;
+  auto value = [&](char domain) {
+    const int tap = taps[next_tap++ % taps.size()];
+    if (domain == 's') return tap;
+    const int e = g.add_slot(1, false);
+    g.add_op(OP_ADD, {tap, cslot(1.5 + 0.5 * (double)(next_tap % 7))}, e);
+    return e;
+  };
+  int operands[3] = {0, 0, 0};
+  for (int k = 0; k < spec.n_in; ++k) {
+    if (!((vec >> k) & 1)) {
+      operands[k] = value(spec.domains[k]);
+      continue;
+    }
+    const int z = g.add_slot(n, false);
+    h.fills.emplace_back(z, std::vector<double>((size_t)n, 0.0));
+    int cur = z;
+    for (int e = 0; e < n; ++e) {
+      const int dst = g.add_slot(n, false);
+      g.add_op(OP_SET_INDEX, {cur, value(spec.domains[k])}, dst, {e});
+      cur = dst;
+    }
+    operands[k] = cur;
+  }
+  const int v = g.add_slot(n, false);
+  if (spec.n_in == 1)
+    g.add_op(spec.opcode, {operands[0]}, v);
+  else if (spec.n_in == 2)
+    g.add_op(spec.opcode, {operands[0], operands[1]}, v);
+  else
+    g.add_op(spec.opcode, {operands[0], operands[1], operands[2]}, v);
+  int t = -1;
+  for (int k = 0; k < 3; ++k) {
+    const int e = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {v}, e, {k % n});
+    if (t < 0) {
+      t = e;
+      continue;
+    }
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, e}, m);
+    t = m;
+  }
+  const int scaled = g.add_slot(1, false);
+  g.add_op(OP_MUL, {t, cslot(1e-3)}, scaled);
+  t = chain(scaled, 12, nullptr);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {t, cslot(0.25)}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+static void check_vector_op_joins(const std::string& tag, VectorBinaryGraph ref,
+                                  VectorBinaryGraph isl, uint16_t opcode,
+                                  int n) {
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+  expect((tag + " grad nonzero").c_str(), want.size() == 2 && want[1] != 0.0);
+  const int carved = carve_islands(isl.g, isl.fills, isl.terms, {});
+  expect_eq(tag + " carved", carved, 1);
+  int islands = 0, vector_ops = 0;
+  for (const Op& op : isl.g.ops) {
+    if (op.opcode == OP_ISLAND) ++islands;
+    if (op.opcode == opcode && isl.g.slots[op.out].len == n) ++vector_ops;
+  }
+  expect_eq(tag + " islands", islands, 1);
+  expect_eq(tag + " vector ops left", vector_ops, 0);
+  // One island, one extraction of the live-out, the term-producing op.
+  expect_eq(tag + " ops", (int)isl.g.ops.size(), 3);
+  const std::vector<double> got = run_grad_twice(std::move(isl.g), isl.fills);
+  expect((tag + " sizes").c_str(), got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(tag + " v" + std::to_string(i), got[i], want[i]);
+}
+
+static void test_vector_op_joins_runs() {
+  for (const VectorOpSpec& spec : kVectorOps) {
+    for (int vec = 1; vec < (1 << spec.n_in); ++vec) {
+      // Every operand a vector, then each single operand a vector with the
+      // rest broadcast scalars.
+      const bool all = vec == (1 << spec.n_in) - 1;
+      const bool one = (vec & (vec - 1)) == 0;
+      if (!all && !one) continue;
+      const std::string tag =
+          std::string("vecop ") + spec.name + " vec=" + std::to_string(vec);
+      check_vector_op_joins(tag, build_vector_op(spec, vec, 3),
+                            build_vector_op(spec, vec, 3), spec.opcode, 3);
+    }
+  }
+}
+
+// Wider than any per-element cap, with the vector operand a live-in.
+static void test_wide_vector_op_joins_runs() {
+  for (const VectorOpSpec& spec : kVectorOps) {
+    check_vector_op_joins(std::string("wide ") + spec.name,
+                          build_vector_op(spec, 3, 200),
+                          build_vector_op(spec, 3, 200), spec.opcode, 200);
+  }
+}
+
+// The estimate's choice between a run carved whole and carved at its
+// vector ops. Priced, so these run outside the STANLI_ISLAND_ALWAYS batch.
+// Two scalar runs joined by a length-3 add of two vectors the first run
+// built: whole, the add's operands never leave the island.
+static VectorBinaryGraph build_join_wins() {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int p = g.add_slot(1, true);
+  const int q = g.add_slot(1, true);
+  auto chain = [&](int t, int steps, std::vector<int>* taps) {
+    for (int i = 0; i < steps; ++i) {
+      const int m = g.add_slot(1, false);
+      g.add_op(OP_MUL, {t, q}, m);
+      t = g.add_slot(1, false);
+      g.add_op(OP_INV_LOGIT, {m}, t);
+      if (taps) taps->push_back(t);
+    }
+    return t;
+  };
+  std::vector<int> taps;
+  chain(p, 18, &taps);
+  int vecs[2];
+  for (int k = 0; k < 2; ++k) {
+    const int z = g.add_slot(3, false);
+    h.fills.emplace_back(z, std::vector<double>(3, 0.0));
+    int cur = z;
+    for (int e = 0; e < 3; ++e) {
+      const int dst = g.add_slot(3, false);
+      g.add_op(OP_SET_INDEX, {cur, taps[(size_t)(3 * k + e)]}, dst, {e});
+      cur = dst;
+    }
+    vecs[k] = cur;
+  }
+  const int v = g.add_slot(3, false);
+  g.add_op(OP_ADD, {vecs[0], vecs[1]}, v);
+  int t = -1;
+  for (int k = 0; k < 3; ++k) {
+    const int e = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {v}, e, {k});
+    if (t < 0) {
+      t = e;
+      continue;
+    }
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, e}, m);
+    t = m;
+  }
+  t = chain(t, 18, nullptr);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_SUB, {t, q}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+static void test_join_wins_by_estimate() {
+  VectorBinaryGraph ref = build_join_wins();
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+  expect("join grad nonzero", want.size() == 3 && want[1] != 0.0);
+  VectorBinaryGraph isl = build_join_wins();
+  expect_eq("join carved", carve_islands(isl.g, isl.fills, isl.terms, {}), 1);
+  expect_eq("join ops", (int)isl.g.ops.size(), 3);
+  const std::vector<double> got = run_grad_twice(std::move(isl.g), isl.fills);
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("join v" + std::to_string(i), got[i], want[i]);
+}
+
+// A profitable scalar run, a length-40 add, then a run the estimate refuses
+// on its own (one 64-wide template copied per step).
+// Whole, the refused half drags the run under; split, the first half is
+// carved and the add and the wide steps stay graph ops.
+static VectorBinaryGraph build_split_wins() {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int p = g.add_slot(1, true);
+  const int q = g.add_slot(1, true);
+  const int v = g.add_slot(40, true);
+  const int c = g.add_slot(40, false);
+  std::vector<double> cv(40);
+  for (int k = 0; k < 40; ++k) cv[(size_t)k] = 0.5 + 0.01 * k;
+  h.fills.emplace_back(c, cv);
+  int t = p;
+  for (int i = 0; i < 18; ++i) {
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, q}, m);
+    t = g.add_slot(1, false);
+    g.add_op(OP_INV_LOGIT, {m}, t);
+  }
+  const int w = g.add_slot(40, false);
+  g.add_op(OP_ADD, {v, c}, w);
+  const int e = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {w}, e, {0});
+  int prev = g.add_slot(1, false);
+  g.add_op(OP_MUL, {t, e}, prev);
+  const int W = 64;
+  for (int step = 0; step < 12; ++step) {
+    const int sq = g.add_slot(1, false);
+    g.add_op(OP_MUL, {prev, q}, sq);
+    const int tmpl = g.add_slot(W, false);
+    h.fills.emplace_back(tmpl, std::vector<double>((size_t)W, 0.0));
+    const int wide = g.add_slot(W, false);
+    g.add_op(OP_SET_INDEX, {tmpl, sq}, wide, {0});
+    const int back = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {wide}, back, {0});
+    prev = back;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_SUB, {prev, q}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+static void test_split_wins_by_estimate() {
+  VectorBinaryGraph ref = build_split_wins();
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+  expect("split grad nonzero",
+         want.size() == 43 && want[1] != 0.0 && want[3] != 0.0);
+  VectorBinaryGraph isl = build_split_wins();
+  const size_t before = isl.g.ops.size();
+  expect_eq("split carved", carve_islands(isl.g, isl.fills, isl.terms, {}), 1);
+  // The 36-op chain became one island and one extraction; the add, the 38
+  // wide-state ops and the term op remain.
+  expect_eq("split ops", (int)isl.g.ops.size(), (int)before - 36 + 2);
+  expect("split island first",
+         !isl.g.ops.empty() && isl.g.ops[0].opcode == OP_ISLAND);
+  int vector_adds = 0;
+  for (const Op& op : isl.g.ops)
+    if (op.opcode == OP_ADD && isl.g.slots[op.out].len == 40) ++vector_adds;
+  expect_eq("split add stays", vector_adds, 1);
+  const std::vector<double> got = run_grad_twice(std::move(isl.g), isl.fills);
+  expect("split sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("split v" + std::to_string(i), got[i], want[i]);
+}
+
+// Runs `fn` with STANLI_DEBUG_ISLAND set and a diagnostic sink installed,
+// and returns the captured lines.
+static std::vector<std::string> capture_island_debug(
+    const std::function<void()>& fn) {
+  std::vector<std::string> lines;
+  test_setenv("STANLI_DEBUG_ISLAND", "1", 1);
+  set_diagnostic_sink(
+      [&](const char* text, size_t len) { lines.emplace_back(text, len); });
+  fn();
+  set_diagnostic_sink(nullptr);
+  test_unsetenv("STANLI_DEBUG_ISLAND");
+  return lines;
+}
+
+static int64_t parse_field(const std::string& line, const std::string& key) {
+  const size_t pos = line.find(key + "=");
+  if (pos == std::string::npos) return -1;
+  return std::atoll(line.c_str() + pos + key.size() + 1);
+}
+
+static bool ops_match(const Op& x, const Op& y) {
+  if (x.opcode != y.opcode || x.out != y.out || x.out2 != y.out2 ||
+      x.n_in != y.n_in || x.variant != y.variant || x.n_idata != y.n_idata)
+    return false;
+  for (int k = 0; k < x.n_in; ++k)
+    if (x.in[k] != y.in[k]) return false;
+  for (int64_t k = 0; k < x.n_idata; ++k)
+    if (x.idata[k] != y.idata[k]) return false;
+  return true;
+}
+
+static VectorBinaryGraph build_join_guard_fires() {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int p = g.add_slot(1, true);
+  const int q = g.add_slot(1, true);
+  const int v = g.add_slot(40, true);
+  const int c = g.add_slot(40, false);
+  std::vector<double> cv(40);
+  for (int k = 0; k < 40; ++k) cv[(size_t)k] = 0.5 + 0.01 * k;
+  h.fills.emplace_back(c, cv);
+  int t = p;
+  for (int i = 0; i < 18; ++i) {
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, q}, m);
+    t = g.add_slot(1, false);
+    g.add_op(OP_INV_LOGIT, {m}, t);
+  }
+  const int w = g.add_slot(40, false);
+  g.add_op(OP_ADD, {v, c}, w);
+  const int e = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {w}, e, {0});
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_MUL, {t, e}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+static void test_join_guard_skips_a_joined_compile_split_would_lose() {
+  bool skipped = false;
+  for (const std::string& l : capture_island_debug([] {
+         VectorBinaryGraph h = build_join_guard_fires();
+         carve_islands(h.g, h.fills, h.terms, {});
+       }))
+    if (l.rfind("island? ops=", 0) == 0 &&
+        l.find("skip=1") != std::string::npos)
+      skipped = true;
+  expect("join guard fired", skipped);
+
+  VectorBinaryGraph guarded = build_join_guard_fires();
+  const int guarded_carved =
+      carve_islands(guarded.g, guarded.fills, guarded.terms, {});
+
+  test_setenv("STANLI_NO_ISLAND_JOIN_GUARD", "1", 1);
+  VectorBinaryGraph unguarded = build_join_guard_fires();
+  const int unguarded_carved =
+      carve_islands(unguarded.g, unguarded.fills, unguarded.terms, {});
+  test_unsetenv("STANLI_NO_ISLAND_JOIN_GUARD");
+
+  expect_eq("guarded carved count matches unguarded", guarded_carved,
+            unguarded_carved);
+  expect_eq("guarded op count matches unguarded", (int)guarded.g.ops.size(),
+            (int)unguarded.g.ops.size());
+  const size_t n = guarded.g.ops.size() < unguarded.g.ops.size()
+                       ? guarded.g.ops.size()
+                       : unguarded.g.ops.size();
+  for (size_t k = 0; k < n; ++k)
+    expect(("op " + std::to_string(k) + " matches unguarded").c_str(),
+           ops_match(guarded.g.ops[k], unguarded.g.ops[k]));
+}
+
+static VectorBinaryGraph build_two_piece_split_loses() {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int p = g.add_slot(1, true);
+  int qs[4];
+  for (int& q : qs) q = g.add_slot(1, true);
+  const int v = g.add_slot(2, true);
+  const int c = g.add_slot(2, false);
+  h.fills.emplace_back(c, std::vector<double>{0.5, 0.6});
+  const auto chain = [&](int t0, int steps) {
+    int t = t0;
+    for (int i = 0; i < steps; ++i) {
+      const int m = g.add_slot(1, false);
+      g.add_op(OP_MUL, {t, qs[i % 4]}, m);
+      t = g.add_slot(1, false);
+      g.add_op(OP_INV_LOGIT, {m}, t);
+    }
+    return t;
+  };
+  const int t1 = chain(p, 18);
+  const int w = g.add_slot(2, false);
+  g.add_op(OP_ADD, {v, c}, w);
+  const int e = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {w}, e, {0});
+  const int t2 = chain(e, 18);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_MUL, {t1, t2}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+static void test_split_skip_avoids_compiling_split_pieces() {
+  bool skipped = false;
+  int piece_estimate_lines = 0;
+  for (const std::string& l : capture_island_debug([] {
+         VectorBinaryGraph h = build_two_piece_split_loses();
+         carve_islands(h.g, h.fills, h.terms, {});
+       })) {
+    if (l.rfind("island? ops=", 0) == 0 &&
+        l.find("split_skip=1") != std::string::npos)
+      skipped = true;
+    if (l.rfind("island? ops=", 0) == 0 &&
+        l.find("graph=") != std::string::npos)
+      ++piece_estimate_lines;
+  }
+  expect("split skip fired", skipped);
+  expect_eq("one estimate line", piece_estimate_lines, 1);
+
+  VectorBinaryGraph ref = build_two_piece_split_loses();
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+  VectorBinaryGraph isl = build_two_piece_split_loses();
+  expect_eq("two-piece carved", carve_islands(isl.g, isl.fills, isl.terms, {}),
+            1);
+  expect("two-piece island first",
+         !isl.g.ops.empty() && isl.g.ops[0].opcode == OP_ISLAND);
+  const std::vector<double> got = run_grad_twice(std::move(isl.g), isl.fills);
+  expect("two-piece sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("two-piece v" + std::to_string(i), got[i], want[i]);
+}
+
+static void test_split_skip_off_by_guard() {
+  VectorBinaryGraph guarded = build_two_piece_split_loses();
+  const int guarded_carved =
+      carve_islands(guarded.g, guarded.fills, guarded.terms, {});
+
+  test_setenv("STANLI_NO_ISLAND_JOIN_GUARD", "1", 1);
+  VectorBinaryGraph unguarded = build_two_piece_split_loses();
+  const int unguarded_carved =
+      carve_islands(unguarded.g, unguarded.fills, unguarded.terms, {});
+  test_unsetenv("STANLI_NO_ISLAND_JOIN_GUARD");
+
+  expect_eq("split-skip carved count matches unguarded", guarded_carved,
+            unguarded_carved);
+  expect_eq("split-skip op count matches unguarded", (int)guarded.g.ops.size(),
+            (int)unguarded.g.ops.size());
+  const size_t n = guarded.g.ops.size() < unguarded.g.ops.size()
+                       ? guarded.g.ops.size()
+                       : unguarded.g.ops.size();
+  for (size_t k = 0; k < n; ++k)
+    expect(
+        ("op " + std::to_string(k) + " matches unguarded (split-skip)").c_str(),
+        ops_match(guarded.g.ops[k], unguarded.g.ops[k]));
+}
+
+// join_cost_floor and split_cost_floor are meant to be bounds on one cost
+// function, not their own arithmetic: a refactor that expresses them that
+// way must leave every number here untouched. build_join_guard_fires hits
+// the single-run path (join_cost_floor); build_two_piece_split_loses hits
+// the multi-piece path (split_cost_floor and split_has_multiple_pieces).
+static void test_join_and_split_floor_values_pinned() {
+  std::string join_line;
+  for (const std::string& l : capture_island_debug([] {
+         VectorBinaryGraph h = build_join_guard_fires();
+         carve_islands(h.g, h.fills, h.terms, {});
+       }))
+    if (l.find("join_floor=") != std::string::npos) join_line = l;
+  expect("join floor line captured", !join_line.empty());
+  expect_eq("join_floor value", parse_field(join_line, "join_floor"),
+            (int64_t)441);
+  expect_eq("join floor's split value", parse_field(join_line, "split"),
+            (int64_t)249);
+
+  std::string split_line;
+  for (const std::string& l : capture_island_debug([] {
+         VectorBinaryGraph h = build_two_piece_split_loses();
+         carve_islands(h.g, h.fills, h.terms, {});
+       }))
+    if (l.find("split_floor=") != std::string::npos) split_line = l;
+  expect("split floor line captured", !split_line.empty());
+  expect_eq("split_floor value", parse_field(split_line, "split_floor"),
+            (int64_t)434);
+  expect_eq("split floor's joined value", parse_field(split_line, "joined"),
+            (int64_t)429);
+}
+
+// A wide-state chain (every one of its ops must carry the whole `width`-
+// element state across, the same shape test_inplace_slices_carved shows
+// is a profitable island on its own) collapsing to a scalar, then a
+// plain scalar chain of comparable length (build_split_wins's own
+// profitable shape): the cheap crossing is the collapse point, and any
+// cut inside the wide chain is expensive by construction, since it drags
+// the whole state across instead of the one reduced scalar. A single
+// two-element ADD at the very front is the only op the strict vocabulary
+// refuses, so liveness must judge everything after it unaided.
+static VectorBinaryGraph build_wide_then_narrow(int width, int n_updates,
+                                                int chain_len) {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int slice_rhs = g.add_slot(2, true);
+  const int q = g.add_slot(1, true);
+  const int vec = g.add_slot(width, true);
+
+  const int marker_a = g.add_slot(2, false);
+  h.fills.emplace_back(marker_a, std::vector<double>{0.3, 0.7});
+  const int marker_w = g.add_slot(2, false);
+  g.add_op(OP_ADD, {marker_a, marker_a}, marker_w);
+  const int marker_e = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {marker_w}, marker_e, {0});
+
+  for (int k = 0; k < n_updates; ++k)
+    g.add_op(OP_SET_SLICE_INPLACE, {vec, slice_rhs}, vec, {k % (width - 2)});
+  const int reduced = g.add_slot(1, false);
+  g.add_op(OP_LOG_SUM_EXP, {vec}, reduced);
+
+  int t = g.add_slot(1, false);
+  g.add_op(OP_ADD, {reduced, marker_e}, t);
+  for (int i = 0; i < chain_len; ++i) {
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_MUL, {t, q}, m);
+    t = g.add_slot(1, false);
+    g.add_op(OP_INV_LOGIT, {m}, t);
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_MUL, {t, t}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+// Liveness must not fragment the wide-state chain, where every position
+// is expensive to cut, when the cheap cut right after its own reduction
+// to a scalar is available: no accepted (graph >= island) liveness piece
+// may be shorter than the wide chain while starting inside it.
+static void test_liveness_prefers_the_cheap_cut_over_the_expensive_one() {
+  const int width = 40, n_updates = 36, chain_len = 40;
+  const int64_t wide_ops = 2 + n_updates;  // the two marker ops, then the
+                                           // slice-update chain
+  bool saw_accepted_piece = false;
+  for (const std::string& l : capture_island_debug([&] {
+         VectorBinaryGraph h =
+             build_wide_then_narrow(width, n_updates, chain_len);
+         carve_islands(h.g, h.fills, h.terms, {});
+       })) {
+    if (l.rfind("island-liveness? ops=", 0) != 0) continue;
+    const int64_t ops = parse_field(l, "ops");
+    const int64_t graph = parse_field(l, "graph");
+    const int64_t island = parse_field(l, "island");
+    const int64_t boundary = parse_field(l, "boundary");
+    if (graph < island) continue;  // refused, not a real carving option
+    saw_accepted_piece = true;
+    // A width-element value crossing the boundary costs at least
+    // 2 * width in the live-in charge alone (joined_boundary); a piece
+    // shorter than the wide chain with a boundary anywhere near that
+    // would mean a fragment of the wide chain itself was carved,
+    // dragging most of its state across instead of the one reduced
+    // scalar the cheap cut after it carries.
+    expect("accepted liveness piece is not an expensive wide-chain fragment",
+           ops >= wide_ops || boundary < (int64_t)width);
+  }
+  expect("at least one accepted liveness piece appeared", saw_accepted_piece);
+
+  VectorBinaryGraph ref = build_wide_then_narrow(width, n_updates, chain_len);
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+  VectorBinaryGraph isl = build_wide_then_narrow(width, n_updates, chain_len);
+  carve_islands(isl.g, isl.fills, isl.terms, {});
+  const std::vector<double> got = run_grad_twice(std::move(isl.g), isl.fills);
+  expect("wide-then-narrow sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("wide-then-narrow v" + std::to_string(i), got[i], want[i]);
+}
+
+// A scalar fan (strict-admissible on its own) reduced to one value,
+// immediately followed by a length-2 vector op the strict vocabulary
+// refuses, then a plain scalar chain: the strict cut and the pressure
+// minimum both land right after the fan's own reduction, since nothing
+// is live across that point but the one reduced value.
+static VectorBinaryGraph build_fan_reduce_forced_then_chain(int width,
+                                                            int chain_len) {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int p = g.add_slot(1, true);
+  std::vector<int> c(width);
+  for (int k = 0; k < width; ++k) {
+    c[k] = g.add_slot(1, false);
+    h.fills.emplace_back(c[k], std::vector<double>{0.3 + 0.01 * (double)k});
+  }
+  std::vector<int> t(width);
+  for (int k = 0; k < width; ++k) {
+    t[k] = g.add_slot(1, false);
+    g.add_op(OP_MUL, {p, c[k]}, t[k]);
+  }
+  int acc = t[0];
+  for (int k = 1; k < width; ++k) {
+    const int nacc = g.add_slot(1, false);
+    g.add_op(OP_ADD, {acc, t[k]}, nacc);
+    acc = nacc;
+  }
+  const int v = g.add_slot(2, true);
+  const int cc = g.add_slot(2, false);
+  h.fills.emplace_back(cc, std::vector<double>{0.4, 0.6});
+  const int w = g.add_slot(2, false);
+  g.add_op(OP_ADD, {v, cc}, w);
+  const int e = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {w}, e, {0});
+  int chain = g.add_slot(1, false);
+  g.add_op(OP_ADD, {acc, e}, chain);
+  for (int k = 0; k < chain_len; ++k) {
+    const int nchain = g.add_slot(1, false);
+    g.add_op(OP_ADD, {chain, c[k % width]}, nchain);
+    chain = nchain;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_MUL, {chain, chain}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+// With nothing but the strict-forced boundary to recommend itself as a
+// cut, liveness's pressure search agrees with it: the two carvings must
+// match op for op.
+static void test_liveness_cut_coincides_with_strict_cut() {
+  VectorBinaryGraph ref = build_fan_reduce_forced_then_chain(40, 60);
+  const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
+
+  VectorBinaryGraph h = build_fan_reduce_forced_then_chain(40, 60);
+  const int carved = carve_islands(h.g, h.fills, h.terms, {});
+  expect_eq("coincide carved one", carved, 1);
+  int islands = 0;
+  for (const Op& op : h.g.ops)
+    if (op.opcode == OP_ISLAND) ++islands;
+  expect_eq("coincide island ops", islands, 1);
+  const std::vector<double> got = run_grad_twice(std::move(h.g), h.fills);
+  expect("coincide sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close("coincide v" + std::to_string(i), got[i], want[i]);
+}
+
+// build_join_guard_fires naturally decides kSplit (join_floor exceeds
+// split, test_join_guard_skips_a_joined_compile_split_would_lose): with
+// no split path at all, STANLI_NO_ISLAND_LIVENESS=1 must change what
+// gets carved here, since nothing else can recover the accepted island
+// splitting would have found.
+static void test_no_island_liveness_disables_splitting() {
+  VectorBinaryGraph with_split = build_join_guard_fires();
+  const int carved_with_split =
+      carve_islands(with_split.g, with_split.fills, with_split.terms, {});
+  expect_eq("split path carves one", carved_with_split, 1);
+
+  test_setenv("STANLI_NO_ISLAND_LIVENESS", "1", 1);
+  VectorBinaryGraph no_split = build_join_guard_fires();
+  const int carved_no_split =
+      carve_islands(no_split.g, no_split.fills, no_split.terms, {});
+  test_unsetenv("STANLI_NO_ISLAND_LIVENESS");
+
+  expect("STANLI_NO_ISLAND_LIVENESS changes this carving",
+         carved_no_split != carved_with_split ||
+             with_split.g.ops.size() != no_split.g.ops.size());
+}
+
+// build_two_piece_split_loses has two strict sub-runs the estimate would
+// carve on their own, joined by a length-2 vector op; strict can only
+// offer two separately-boundaried islands, but liveness recognizes the
+// whole 74-op span compiles as one piece under the run's own (non-strict)
+// vocabulary and prices that instead, at a lower cost than the two-piece
+// floor test_join_and_split_floor_values_pinned pins (434).
+static void test_liveness_finds_a_cheaper_split_than_strict() {
+  int64_t joined_cost = -1;
+  int matches = 0;
+  int carved = 0;
+  for (const std::string& l : capture_island_debug([&] {
+         VectorBinaryGraph h = build_two_piece_split_loses();
+         carved = carve_islands(h.g, h.fills, h.terms, {});
+       })) {
+    if (l.rfind("island? ops=", 0) != 0 ||
+        l.find("graph=") == std::string::npos)
+      continue;
+    ++matches;
+    joined_cost = parse_field(l, "island") + parse_field(l, "boundary");
+  }
+  expect_eq("cheaper-split carved one", carved, 1);
+  expect_eq("cheaper-split estimate line captured once", matches, 1);
+  expect("cheaper-split cost beats the pinned strict-piece floor",
+         joined_cost < 434);
+}
+
+// Many length-`width` DOT ops feeding a scalar chain.
+static VectorBinaryGraph build_dot_heavy(int width) {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int p = g.add_slot(1, true);
+  auto cvec = [&](double base) {
+    const int s = g.add_slot(width, false);
+    std::vector<double> v((size_t)width);
+    for (int k = 0; k < width; ++k) v[(size_t)k] = base + 0.01 * (double)k;
+    h.fills.emplace_back(s, v);
+    return s;
+  };
+  int t = p;
+  for (int i = 0; i < 40; ++i) {
+    const int scaled = g.add_slot(width, false);
+    g.add_op(OP_MUL, {cvec(0.3 + 0.01 * (double)i), t}, scaled);
+    const int d = g.add_slot(1, false);
+    g.add_op(OP_DOT, {scaled, cvec(0.6 + 0.01 * (double)i)}, d);
+    const int nt = g.add_slot(1, false);
+    g.add_op(OP_ADD, {t, d}, nt);
+    t = nt;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {t, t}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+// The single "ops=... graph=... island=... boundary=..." line evaluate()
+// prints for the joined candidate, or empty if none appeared.
+static std::string capture_estimate_line(const std::function<void()>& fn) {
+  std::string line;
+  int matches = 0;
+  for (const std::string& l : capture_island_debug(fn))
+    if (l.rfind("island? ops=", 0) == 0 &&
+        l.find("graph=") != std::string::npos &&
+        l.find("boundary=") != std::string::npos) {
+      line = l;
+      ++matches;
+    }
+  expect_eq("one estimate line", matches, 1);
+  return line;
+}
+
+// A DOT's width feeds both the graph side of the estimate (graph_cost's
+// element correction) and the island side (touches_width), so doubling it
+// should move both, not just one.
+static void test_dot_width_estimate_moves_together() {
+  test_setenv("STANLI_NO_ISLAND_JOIN_GUARD", "1", 1);
+  const std::string at40 = capture_estimate_line([] {
+    VectorBinaryGraph h = build_dot_heavy(40);
+    carve_islands(h.g, h.fills, h.terms, {});
+  });
+  const std::string at80 = capture_estimate_line([] {
+    VectorBinaryGraph h = build_dot_heavy(80);
+    carve_islands(h.g, h.fills, h.terms, {});
+  });
+  test_unsetenv("STANLI_NO_ISLAND_JOIN_GUARD");
+  expect("dot estimate at width 40 captured", !at40.empty());
+  expect("dot estimate at width 80 captured", !at80.empty());
+  if (at40.empty() || at80.empty()) return;
+  const int64_t graph40 = parse_field(at40, "graph");
+  const int64_t island40 = parse_field(at40, "island");
+  const int64_t graph80 = parse_field(at80, "graph");
+  const int64_t island80 = parse_field(at80, "island");
+  expect("dot width graph cost grows", graph80 > graph40);
+  expect("dot width island cost grows", island80 > island40);
+}
+
+// A fixed-length scalar ADD chain (n steps) reading `k_distinct` constant
+// slots round-robin: `k_distinct == 1` shares one constant across every
+// step, `k_distinct == n` gives every step its own. The op count, and so
+// the instruction count both sides of the chain pay, stays the same
+// either way; only the number of distinct absorbed constants changes.
+static VectorBinaryGraph build_const_chain(int n, int k_distinct) {
+  VectorBinaryGraph h;
+  Graph& g = h.g;
+  const int p = g.add_slot(1, true);
+  std::vector<int> consts((size_t)k_distinct);
+  for (int k = 0; k < k_distinct; ++k) {
+    consts[(size_t)k] = g.add_slot(1, false);
+    h.fills.emplace_back(consts[(size_t)k],
+                         std::vector<double>{0.01 + 0.001 * (double)k});
+  }
+  int t = p;
+  for (int i = 0; i < n; ++i) {
+    const int c = consts[(size_t)(i % k_distinct)];
+    const int nt = g.add_slot(1, false);
+    g.add_op(OP_ADD, {t, c}, nt);
+    t = nt;
+  }
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_ADD, {t, t}, lp);
+  g.result_slot = lp;
+  h.terms.push_back(lp);
+  return h;
+}
+
+// Reading many distinct constants must not cost the register-file weight a
+// live-in or a computed value costs: it may only cost each constant's own
+// materializing instruction, forward and backward.
+static void test_const_count_does_not_grow_island_cost() {
+  constexpr int kSteps = 40;
+  const std::string one_const = capture_estimate_line([] {
+    VectorBinaryGraph h = build_const_chain(kSteps, 1);
+    carve_islands(h.g, h.fills, h.terms, {});
+  });
+  const std::string many_consts = capture_estimate_line([] {
+    VectorBinaryGraph h = build_const_chain(kSteps, kSteps);
+    carve_islands(h.g, h.fills, h.terms, {});
+  });
+  expect("const chain one captured", !one_const.empty());
+  expect("const chain many captured", !many_consts.empty());
+  if (one_const.empty() || many_consts.empty()) return;
+  const int64_t island_one = parse_field(one_const, "island");
+  const int64_t island_many = parse_field(many_consts, "island");
+  // kSteps - 1 extra distinct constants, each paying its own instructions
+  // (CONST forward, a zeroing adjoint backward, one adjoint cell) but not
+  // a register-file charge, which would add kValueRegWeight (2) more.
+  const int64_t grew = island_many - island_one;
+  const int64_t want_max = 4 * (kSteps - 1);
+  expect("island cost grows only by the constants' instructions",
+         grew >= 0 && grew <= want_max);
 }
 
 // A region that carries far more state than it computes: each step drops
@@ -1054,6 +1903,114 @@ static void check_pow_zero_law(const std::string& tag, uint8_t law,
   }
 }
 
+// The carver's DIV instructions carry kDivSafeGrouping (island.cpp's
+// compile_elementwise call for OP_DIV), which must round exactly as the
+// graph's own elementwise division kernel does, including at magnitudes
+// where squaring b would overflow or underflow and the quotient itself
+// would not.
+static void test_div_extreme_matches_graph_kernel() {
+  const double points[2][2] = {{1e200, 1e200}, {1e-200, 1e-200}};
+  for (const auto& pt : points) {
+    const double av = pt[0], bv = pt[1];
+    const std::string tag = "div extreme a=" + std::to_string(av);
+
+    {
+      const testutil::RunResult graph =
+          testutil::run_one_op(OP_DIV, {{av}, {bv}}, {true, true});
+
+      IslandProg p;
+      p.n_regs = 3;
+      p.code.push_back(
+          Program::Instr{Program::DIV, 2, 0, 1, 0, kDivSafeGrouping});
+      p.out_regs = {2};
+      expect((tag + " scalar gen_adjoint").c_str(), gen_adjoint(p));
+
+      std::vector<double> values(3);
+      values[0] = av;
+      values[1] = bv;
+      run_program(p, values);
+      expect_exact(tag + " scalar value", values[2], graph.value);
+
+      std::vector<double> adjoints((size_t)p.adj.n_regs, 0.0);
+      adjoints[(size_t)p.adj.adj_reg[2]] = 1.0;
+      run_adjoint(p, p.adj, values.data(), adjoints.data());
+      expect_exact(tag + " scalar da", adjoints[(size_t)p.adj.adj_reg[0]],
+                   graph.grad[0]);
+      expect_exact(tag + " scalar db", adjoints[(size_t)p.adj.adj_reg[1]],
+                   graph.grad[1]);
+    }
+
+    {
+      const testutil::RunResult graph =
+          testutil::run_op_sum(OP_DIV, 2, {{av, av}, {bv, bv}}, {true, true});
+
+      IslandProg p;
+      p.n_regs = 6;
+      Program::Instr I(Program::RANGE, 4, 0, 2, 0, 2);
+      I.sub = static_cast<uint8_t>(Program::DIV);
+      I.law = kDivSafeGrouping;
+      p.code.push_back(I);
+      p.out_regs = {4, 5};
+      expect((tag + " ranged gen_adjoint").c_str(), gen_adjoint(p));
+
+      std::vector<double> values(6);
+      values[0] = values[1] = av;
+      values[2] = values[3] = bv;
+      run_program(p, values);
+      expect_exact(tag + " ranged value 0", values[4], av / bv);
+      expect_exact(tag + " ranged value 1", values[5], av / bv);
+
+      std::vector<double> adjoints((size_t)p.adj.n_regs, 0.0);
+      adjoints[(size_t)p.adj.adj_reg[4]] = 1.0;
+      adjoints[(size_t)p.adj.adj_reg[5]] = 1.0;
+      run_adjoint(p, p.adj, values.data(), adjoints.data());
+      expect_exact(tag + " ranged da0", adjoints[(size_t)p.adj.adj_reg[0]],
+                   graph.grad[0]);
+      expect_exact(tag + " ranged da1", adjoints[(size_t)p.adj.adj_reg[1]],
+                   graph.grad[1]);
+      expect_exact(tag + " ranged db0", adjoints[(size_t)p.adj.adj_reg[2]],
+                   graph.grad[2]);
+      expect_exact(tag + " ranged db1", adjoints[(size_t)p.adj.adj_reg[3]],
+                   graph.grad[3]);
+    }
+  }
+}
+
+// The full reviewer reproducer: an unrolled multiply chain feeding a vector
+// division, at operand magnitudes that overflow b^2 under the old rule. The
+// default carver picks this region up (checked below), and whether it does
+// must not change the gradient.
+static void test_div_range_model_matches_uncarved() {
+  const std::string mir = slurp("tests/fixtures/div_range_extreme.tmir.sexp");
+  const std::vector<double> point = {1e200, 1e200, 1e200, 1e200, 11.0};
+
+  test_setenv("STANLI_NO_ISLAND", "1", 1);
+  CompiledModel off = compile_model(mir, DataMap());
+  test_unsetenv("STANLI_NO_ISLAND");
+  Executor off_ex(std::move(off.graph));
+  off.bind(off_ex);
+  expect("div range model params", off_ex.n_params() == (int64_t)point.size());
+  std::copy(point.begin(), point.end(), off_ex.params_data());
+  std::vector<double> off_grad(point.size());
+  const double off_lp = off_ex.gradient(off_grad.data());
+
+  CompiledModel on = compile_model(mir, DataMap());
+  bool carved = false;
+  for (const Op& op : on.graph.ops)
+    if (op.opcode == OP_ISLAND) carved = true;
+  expect("div range model carves by default", carved);
+  Executor on_ex(std::move(on.graph));
+  on.bind(on_ex);
+  std::copy(point.begin(), point.end(), on_ex.params_data());
+  std::vector<double> on_grad(point.size());
+  const double on_lp = on_ex.gradient(on_grad.data());
+
+  expect_exact("div range model lp", on_lp, off_lp);
+  for (size_t i = 0; i < point.size(); ++i)
+    expect_exact("div range model g" + std::to_string(i), on_grad[i],
+                 off_grad[i]);
+}
+
 static void test_pow_zero_base_carved() {
   check_pow_zero_law("pow zero scalar law", kPowZeroBaseScalar,
                      {8.0, 8.0, 0.0});
@@ -1479,7 +2436,34 @@ static void test_while_lpmf_region_matches_flat() {
   }
 }
 
+// Exercise both island buffer paths on short-lived workers, sharing graph
+// payloads while each executor owns its scratch and each replay owns its vars.
+static void test_worker_lifetimes() {
+  for (bool native : {false, true}) {
+    const Graph graph = build_packed_live_ins(native);
+    std::vector<int> ok(4, 1);
+    std::vector<std::thread> workers;
+    for (int t = 0; t < 4; ++t) {
+      workers.emplace_back([&, t] {
+        stan::math::ChainableStack tape;
+        Executor ex(graph);
+        for (int repeat = 0; repeat < 6; ++repeat) {
+          for (int64_t i = 0; i < ex.n_params(); ++i)
+            ex.params_data()[i] = t + repeat + 1;
+          std::vector<double> grad((size_t)ex.n_params());
+          const double value = ex.gradient(grad.data());
+          ok[t] &= value == 7.0 * (t + repeat + 1);
+          for (double derivative : grad) ok[t] &= derivative == 1.0;
+        }
+      });
+    }
+    for (auto& worker : workers) worker.join();
+    for (int result : ok) expect("island worker values and gradients", result);
+  }
+}
+
 int main() {
+  test_worker_lifetimes();
   // What the compiler does with a region, on graphs small enough to
   // reason about. The cost estimate would refuse most of them -- it is
   // policy, tested separately below, and these are about correctness.
@@ -1504,6 +2488,8 @@ int main() {
   test_short_run_untouched();
   test_propto_density_refused();
   test_unsupported_op_splits();
+  test_vector_op_joins_runs();
+  test_wide_vector_op_joins_runs();
   test_too_many_live_ins();
   test_six_live_ins_ok();
   test_packed_live_ins();
@@ -1516,6 +2502,18 @@ int main() {
   test_unsetenv("STANLI_ISLAND_ALWAYS");
   test_wide_state_refused();
   test_vector_copies_carved();
+  test_join_wins_by_estimate();
+  test_split_wins_by_estimate();
+  test_join_guard_skips_a_joined_compile_split_would_lose();
+  test_split_skip_avoids_compiling_split_pieces();
+  test_split_skip_off_by_guard();
+  test_join_and_split_floor_values_pinned();
+  test_liveness_prefers_the_cheap_cut_over_the_expensive_one();
+  test_liveness_cut_coincides_with_strict_cut();
+  test_no_island_liveness_disables_splitting();
+  test_liveness_finds_a_cheaper_split_than_strict();
+  test_dot_width_estimate_moves_together();
+  test_const_count_does_not_grow_island_cost();
   test_softmax3_island_executor();
   test_softmax3_private_slot_stays_invalid_graph_ir();
   test_softmax3_payload_copy_lifetime();
@@ -1523,6 +2521,8 @@ int main() {
   test_scalar_chain_carved();
   test_native_extras_carved();
   test_pow_zero_base_carved();
+  test_div_extreme_matches_graph_kernel();
+  test_div_range_model_matches_uncarved();
   test_inplace_slice_cost_refuses_wide_state();
   if (failures) {
     std::printf("%d failures\n", failures);

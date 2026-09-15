@@ -10,8 +10,22 @@ off/on crossed with the C++ re-roll pass off/on).
 Hard failures are semantic: result categories, vector shapes, write_array
 names and shapes, nonfinite behavior, and the existing CmdStan reference
 gates. Different finite bits within those gates are reported as arithmetic
-order changes, with one bit-pattern/ULP row per changed off/on value. Op
-counts and preparation timings are evidence only.
+order changes, with one bit-pattern/ULP row per changed off/on value.
+Preparation timing and, for a model whose portable MIR the pass changes,
+op counts (the lowered log_prob graph growing, or the final log_prob
+graph growing by more than 10%, both in the runtime-reroll-on cells) are
+diagnostics: they never fail the run on their own. The execution gate is
+gradient time on the candidate-pass measurement set (GRADIENT_MODELS)
+against the pass-off cell: a model whose on/off ratio exceeds
+GRADIENT_RATIO_THRESHOLD is re-measured fresh, and only fails the run if
+the re-run also exceeds it.
+
+That gate, like the op-count diagnostic, compares a run's own pass-off
+cell against its pass-on cell, so a change that moves both identically is
+invisible to either. --baseline DIR diffs final ops, lowered ops, island
+regions, and slots against a previous --output-dir's graphs.jsonl and
+reports every model whose final ops grew or shrank; this comparison never
+fails the run either.
 
 Complete semantic report (130 recorded models plus PDB A/B-only models):
   python3 harnesses/vectorize_ab.py deps/posteriordb \
@@ -19,9 +33,9 @@ Complete semantic report (130 recorded models plus PDB A/B-only models):
 
 Bounded report:
   python3 harnesses/vectorize_ab.py deps/posteriordb \
-    normal_mixture radon_pooled soil_incubation arK low_dim_gauss_mix \
-    hmm_example \
-    eight_schools_noncentered --output-dir build/vectorize-ab
+    election88_full iohmm_reg dogs radon_county s2_nlf \
+    one_comp_mm_elim_abs soil_incubation covid19imperial_v2 \
+    --output-dir build/vectorize-ab
 
 The no-model form covers the complete committed reference set, including
 the language fixtures under tests/stanc3, plus every model in posteriordb's
@@ -66,15 +80,42 @@ EXPECTED_MIR_CHANGES = {
 }
 GRADIENT_MODELS = {
     VECTORIZE_LOOPS: frozenset((
+        "2pl_latent_reg_irt",
+        "covid19imperial_v2",
+        "covid19imperial_v3",
+        "dogs",
+        "dogs_log",
+        "election88_full",
+        "gpcm_latent_reg_irt",
+        "grsm_latent_reg_irt",
+        "iohmm_reg",
+        "log10earn_height",
+        "losscurve_sislob",
+        "lotka_volterra",
+        "lsat_model",
+        "mother",
+        "multi_occupancy",
         "normal_mixture",
+        "one_comp_mm_elim_abs",
+        "pilots",
+        "radon_county",
         "radon_pooled",
+        "s2_car",
+        "s2_logistic_normal",
+        "s2_nlf",
         "soil_incubation",
-        "arK",
-        "low_dim_gauss_mix",
-        "hmm_example",
-        "eight_schools_noncentered",
+        "surgical_model",
+        "sw_nonlinear",
     )),
 }
+FINAL_OPS_GROWTH_PERCENT = 10
+# Models whose lowered op count grows with the pass on because the pass
+# turns a zero-trip loop into an indexed assignment whose right-hand side
+# Stan evaluates; the loop form evaluates nothing. The final graph is
+# unchanged, so only the lowered-ops half of the gate is waived.
+LOWERED_GROWTH_EXPECTED = frozenset(("s2_logistic_normal",))
+
+GRADIENT_RATIO_THRESHOLD = 1.04
 
 RUNTIME_ENV_KEYS = (
     "STANLI_DEBUG_ALGEBRA",
@@ -89,6 +130,7 @@ RUNTIME_ENV_KEYS = (
     "STANLI_NO_INPLACE",
     "STANLI_NO_ISLAND",
     "STANLI_NO_ISLAND_COMPACT",
+    "STANLI_NO_ISLAND_JOIN_GUARD",
     "STANLI_NO_NATIVE_ADJ",
     "STANLI_NO_PARTITION",
     "STANLI_NO_REROLL",
@@ -111,6 +153,7 @@ REROLL_FIELDS = (
 REQUIRED_PREP_ROWS = {
     ("driver", "total"): ("ns",),
     ("compile", "total"): ("ns",),
+    ("log_prob", "lower"): ("ns", "ops"),
     ("log_prob", "total"): ("ns", "ops", "slots"),
     ("write_array", "total"): ("ns", "ops", "slots"),
     ("log_prob", "reroll"): ("ns",) + REROLL_FIELDS,
@@ -248,7 +291,7 @@ def execution_metadata(check):
     }
 
 
-def run_command(command, timeout, env=None):
+def _prepare_env(env):
     process_env = dict(os.environ)
     if env:
         for key, value in env.items():
@@ -256,6 +299,26 @@ def run_command(command, timeout, env=None):
                 process_env.pop(key, None)
             else:
                 process_env[key] = value
+    return process_env
+
+
+def _exit_code_from_status(status):
+    if os.WIFSIGNALED(status):
+        return -os.WTERMSIG(status)
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    return None
+
+
+def _maxrss_bytes(rusage):
+    if rusage is None or rusage.ru_maxrss <= 0:
+        return None
+    return rusage.ru_maxrss if sys.platform == "darwin" \
+        else rusage.ru_maxrss * 1024
+
+
+def _run_command_fallback(command, timeout, env=None):
+    process_env = _prepare_env(env)
     started = time.monotonic_ns()
     try:
         proc = subprocess.run(
@@ -267,6 +330,7 @@ def run_command(command, timeout, env=None):
             "stderr": proc.stderr,
             "timeout": False,
             "elapsed_ns": time.monotonic_ns() - started,
+            "maxrss_bytes": None,
         }
     except subprocess.TimeoutExpired as error:
         stdout = error.stdout or ""
@@ -281,7 +345,50 @@ def run_command(command, timeout, env=None):
             "stderr": stderr,
             "timeout": True,
             "elapsed_ns": time.monotonic_ns() - started,
+            "maxrss_bytes": None,
         }
+
+
+def _run_command_wait4(command, timeout, env=None):
+    process_env = _prepare_env(env)
+    started = time.monotonic_ns()
+    deadline = time.monotonic() + timeout
+    with tempfile.TemporaryFile() as out_file, \
+            tempfile.TemporaryFile() as err_file:
+        proc = subprocess.Popen(
+            [str(part) for part in command], cwd=REPO, env=process_env,
+            stdout=out_file, stderr=err_file)
+        reaped, status, rusage = 0, None, None
+        while reaped == 0:
+            reaped, status, rusage = os.wait4(proc.pid, os.WNOHANG)
+            if reaped != 0 or time.monotonic() >= deadline:
+                break
+            time.sleep(0.005)
+        timed_out = reaped == 0
+        if timed_out:
+            proc.kill()
+            _, status, rusage = os.wait4(proc.pid, 0)
+        elapsed_ns = time.monotonic_ns() - started
+        proc.returncode = _exit_code_from_status(status)
+        returncode = None if timed_out else proc.returncode
+        out_file.seek(0)
+        err_file.seek(0)
+        stdout = out_file.read().decode(errors="replace")
+        stderr = err_file.read().decode(errors="replace")
+    return {
+        "returncode": returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "timeout": timed_out,
+        "elapsed_ns": elapsed_ns,
+        "maxrss_bytes": _maxrss_bytes(rusage),
+    }
+
+
+def run_command(command, timeout, env=None):
+    if hasattr(os, "wait4"):
+        return _run_command_wait4(command, timeout, env)
+    return _run_command_fallback(command, timeout, env)
 
 
 def metric(value):
@@ -695,8 +802,10 @@ def summarize_reroll(records):
             wa_total = prep_row(sample["rows"], "write_array", "total")
             log_evidence = reroll_fields(sample["rows"], "log_prob")
             log_evidence["final_ops"] = log_total.get("ops")
+            log_evidence["final_slots"] = log_total.get("slots")
             wa_evidence = reroll_fields(sample["rows"], "write_array")
             wa_evidence["final_ops"] = wa_total.get("ops")
+            wa_evidence["final_slots"] = wa_total.get("slots")
             samples.append({
                 "sample": sample["sample"],
                 "log_prob": log_evidence,
@@ -715,7 +824,8 @@ def graph_cell(dump, bench, mir, data, source_mode, reroll_enabled,
     env = dict(CLEAN_RUNTIME_ENV)
     if not reroll_enabled:
         env["STANLI_NO_REROLL"] = "1"
-    dump_proc = run_command([dump, mir, data, "-1"], timeout, env)
+    dump_env = dict(env)
+    dump_proc = run_command([dump, mir, data, "-1"], timeout, dump_env)
     parsed_dump = (parse_dump(dump_proc["stdout"])
                    if dump_proc["returncode"] == 0 else {})
     dump_issues = dump_problems(parsed_dump)
@@ -731,6 +841,7 @@ def graph_cell(dump, bench, mir, data, source_mode, reroll_enabled,
             "returncode": proc["returncode"],
             "timeout": proc["timeout"],
             "elapsed_ns": proc["elapsed_ns"],
+            "maxrss_bytes": proc["maxrss_bytes"],
             "rows": rows,
             "profile_problems": profile_issues,
             "stdout": proc["stdout"].strip(),
@@ -747,6 +858,160 @@ def graph_cell(dump, bench, mir, data, source_mode, reroll_enabled,
         "graph": parsed_dump,
         "samples": samples,
     }
+
+
+def lower_ops(cell):
+    for sample in cell["samples"]:
+        ops = prep_row(sample["rows"], "log_prob", "lower").get("ops")
+        if isinstance(ops, int):
+            return ops
+    return None
+
+
+def op_count_gate(model, records):
+    cells = {
+        (record["source_pass"], record["runtime_reroll"]): record
+        for record in records
+    }
+    off, on = cells.get(("off", "on")), cells.get(("on", "on"))
+    if off is None or on is None:
+        return []
+    failures = []
+    off_lower, on_lower = lower_ops(off), lower_ops(on)
+    if (off_lower is not None and on_lower is not None
+            and on_lower > off_lower and model not in LOWERED_GROWTH_EXPECTED):
+        failures.append(
+            f"{model}: lowered log_prob ops grew {off_lower} -> {on_lower} "
+            "(off/reroll-on vs on/reroll-on)")
+    off_final = off.get("graph", {}).get("ops")
+    on_final = on.get("graph", {}).get("ops")
+    if (isinstance(off_final, int) and isinstance(on_final, int)
+            and on_final * 100 > off_final * (100 + FINAL_OPS_GROWTH_PERCENT)):
+        failures.append(
+            f"{model}: final log_prob ops grew {off_final} -> {on_final}, "
+            f"over {FINAL_OPS_GROWTH_PERCENT}% "
+            "(off/reroll-on vs on/reroll-on)")
+    return failures
+
+
+BASELINE_FIELDS = ("final_ops", "lower_ops", "regions", "final_slots")
+
+
+def cell_summary(record):
+    rows = [row for sample in record["samples"] for row in sample["rows"]
+            if row.get("graph") == "log_prob"]
+    stages = {row["stage"]: row for row in rows}
+    graph = record.get("graph") or {}
+    return {
+        "final_ops": graph.get("ops"),
+        "final_slots": graph.get("slots"),
+        "lower_ops": stages.get("lower", {}).get("ops"),
+        "regions": stages.get("island", {}).get("regions"),
+        "island_ns": stages.get("island", {}).get("ns"),
+        "prep_ns": stages.get("total", {}).get("ns"),
+    }
+
+
+def cells_from_records(records):
+    return {
+        (record["model"], record["source_pass"], record["runtime_reroll"]):
+            cell_summary(record)
+        for record in records
+    }
+
+
+def load_cells(output_dir):
+    path = pathlib.Path(output_dir) / "graphs.jsonl"
+    if not path.is_file():
+        return None
+    records = []
+    with path.open() as stream:
+        for line in stream:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return cells_from_records(records)
+
+
+def diff_baseline(before, after):
+    changes = []
+    for key in sorted(set(before) & set(after)):
+        b, a = before[key], after[key]
+        if all(b.get(field) == a.get(field) for field in BASELINE_FIELDS):
+            continue
+        model, source_pass, runtime_reroll = key
+        changes.append({
+            "model": model,
+            "source_pass": source_pass,
+            "runtime_reroll": runtime_reroll,
+            "before": {field: b.get(field) for field in BASELINE_FIELDS},
+            "after": {field: a.get(field) for field in BASELINE_FIELDS},
+        })
+    return changes
+
+
+def baseline_comparison_report(baseline_dir, before_cells, after_cells):
+    if before_cells is None:
+        return {
+            "baseline_dir": str(baseline_dir),
+            "available": False,
+            "reason": "no graphs.jsonl in the baseline directory",
+        }
+    changes = diff_baseline(before_cells, after_cells)
+    grew, shrank = set(), set()
+    for change in changes:
+        before_ops = change["before"]["final_ops"]
+        after_ops = change["after"]["final_ops"]
+        if not (isinstance(before_ops, int) and isinstance(after_ops, int)):
+            continue
+        if after_ops > before_ops:
+            grew.add(change["model"])
+        elif after_ops < before_ops:
+            shrank.add(change["model"])
+    return {
+        "baseline_dir": str(baseline_dir),
+        "available": True,
+        "cells_compared": len(set(before_cells) & set(after_cells)),
+        "changed_cells": len(changes),
+        "final_ops_grew_models": sorted(grew),
+        "final_ops_shrank_models": sorted(shrank),
+        "changes": changes,
+    }
+
+
+def render_baseline_comparison(comparison):
+    if comparison is None:
+        return []
+    lines = ["## Baseline comparison", "",
+             f"Baseline: `{comparison['baseline_dir']}`"]
+    if not comparison["available"]:
+        lines += [f"Not available: {comparison['reason']}", ""]
+        return lines
+    lines += [
+        f"Cells compared: {comparison['cells_compared']}. "
+        f"Cells changed: {comparison['changed_cells']}. "
+        f"Models whose final log_prob ops grew: "
+        f"{len(comparison['final_ops_grew_models'])}. "
+        f"Shrank: {len(comparison['final_ops_shrank_models'])}.",
+        "",
+    ]
+    if comparison["changes"]:
+        lines += [
+            "| model | cell | final ops | lower ops | regions | "
+            "final slots |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for change in comparison["changes"]:
+            cell = f"{change['source_pass']}/{change['runtime_reroll']}"
+            b, a = change["before"], change["after"]
+            lines.append(
+                f"| `{change['model']}` | {cell} | "
+                f"{b['final_ops']} -> {a['final_ops']} | "
+                f"{b['lower_ops']} -> {a['lower_ops']} | "
+                f"{b['regions']} -> {a['regions']} | "
+                f"{b['final_slots']} -> {a['final_slots']} |")
+        lines.append("")
+    return lines
 
 
 def parse_bench_output(stdout):
@@ -795,6 +1060,7 @@ def bench_run(bench, mir, data, iterations, timeout):
         "returncode": proc["returncode"],
         "timeout": proc["timeout"],
         "elapsed_ns": proc["elapsed_ns"],
+        "maxrss_bytes": proc["maxrss_bytes"],
         "result": parsed,
         "stderr_tail": proc["stderr"].strip().splitlines()[-1:][0]
         if proc["stderr"].strip() else "",
@@ -852,12 +1118,36 @@ def gradient_benchmark(bench, mirs, data, rounds, calibration_n,
     }
 
 
+def gradient_ratio_exceeds(gradient):
+    ratio = gradient.get("on_over_off") if gradient else None
+    return isinstance(ratio, (int, float)) and ratio > GRADIENT_RATIO_THRESHOLD
+
+
+def gradient_gate(model, gradient, confirmation):
+    if not gradient_ratio_exceeds(gradient):
+        return []
+    if not confirmation or not confirmation.get("ok") \
+            or not gradient_ratio_exceeds(confirmation):
+        return []
+    return [
+        f"{model}: gradient on/off {gradient['on_over_off']:.4f} exceeds "
+        f"{GRADIENT_RATIO_THRESHOLD}, confirmed by a fresh re-run at "
+        f"{confirmation['on_over_off']:.4f}"
+    ]
+
+
 def tsv_value(row, key):
     return row.get(key, "") if row else ""
 
 
+def blank_if_none(value):
+    return value if value is not None else ""
+
+
 def write_reports(output_dir, manifest, corpus_records, graph_records,
-                  model_summaries, failures, infrastructure_failures):
+                  model_summaries, failures, infrastructure_failures,
+                  op_count_diagnostics, gradient_failures,
+                  baseline_comparison=None):
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -874,7 +1164,8 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
         "driver_total_ns", "compile_ns", "log_prob_total_ns",
         "write_array_total_ns", "gradient_n", "gradient_ns", "forward_ns",
         "n_params", "log_prob_ops", "log_prob_scalar_out",
-        "write_array_ops",
+        "write_array_ops", "log_prob_slots", "write_array_slots",
+        "prep_maxrss_bytes", "gradient_maxrss_bytes",
     ]
     for graph in ("log_prob", "write_array"):
         columns.extend(f"{graph}_reroll_{field}" for field in REROLL_FIELDS)
@@ -907,6 +1198,8 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
                         "gradient_ns": result.get("gradient_ns", ""),
                         "forward_ns": result.get("forward_ns", ""),
                         "n_params": result.get("n_params", ""),
+                        "gradient_maxrss_bytes": blank_if_none(
+                            run.get("maxrss_bytes")),
                     })
                 for run in gradient["runs"]:
                     result = run.get("result") or {}
@@ -923,6 +1216,8 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
                         "gradient_ns": result.get("gradient_ns", ""),
                         "forward_ns": result.get("forward_ns", ""),
                         "n_params": result.get("n_params", ""),
+                        "gradient_maxrss_bytes": blank_if_none(
+                            run.get("maxrss_bytes")),
                     })
         for record in graph_records:
             summary = record.get("graph", {}).get("summary", {})
@@ -946,6 +1241,10 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
                     "log_prob_ops": summary.get("ops", ""),
                     "log_prob_scalar_out": summary.get("scalar_out", ""),
                     "write_array_ops": tsv_value(wa_total, "ops"),
+                    "log_prob_slots": tsv_value(log_total, "slots"),
+                    "write_array_slots": tsv_value(wa_total, "slots"),
+                    "prep_maxrss_bytes": blank_if_none(
+                        sample.get("maxrss_bytes")),
                 }
                 for graph in ("log_prob", "write_array"):
                     reroll = prep_row(rows, graph, "reroll")
@@ -959,7 +1258,8 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
                          for summary in model_summaries)
     summary = {
         "schema": 2,
-        "ok": not failures and not infrastructure_failures,
+        "ok": (not failures and not infrastructure_failures
+               and not gradient_failures),
         "candidate_pass": manifest.get("corpus_scope", {}).get(
             "candidate_pass", VECTORIZE_LOOPS),
         "models": len(model_summaries),
@@ -974,14 +1274,18 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
         "mir_changed_models": changed_models,
         "arithmetic_order_changed_values": changed_values,
         "semantic_failures": failures,
+        "op_count_diagnostics": op_count_diagnostics,
+        "gradient_failures": gradient_failures,
         "infrastructure_failures": infrastructure_failures,
+        "baseline_comparison": baseline_comparison,
         "per_model": model_summaries,
     }
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
-    lines = [
-        "# MIR source-pass A/B measurement", "",
+    lines = ["# MIR source-pass A/B measurement", ""]
+    lines += render_baseline_comparison(baseline_comparison)
+    lines += [
         f"Outcome: **{'PASS' if summary['ok'] else 'FAIL'}**", "",
         f"- Candidate pass: `{summary['candidate_pass']}`",
         f"- Models: {summary['models']}",
@@ -995,24 +1299,45 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
         f"- Models with different portable MIR: {changed_models}",
         f"- Finite values changed by arithmetic order: {changed_values}",
         f"- Semantic failures: {len(failures)}",
+        f"- Op count diagnostics: {len(op_count_diagnostics)}",
+        f"- Gradient time failures: {len(gradient_failures)}",
         f"- Measurement infrastructure failures: "
         f"{len(infrastructure_failures)}", "",
-        "Op counts, preparation timings, and gradient timings in "
-        "`graphs.jsonl` and `bench.tsv` are measurements, not gates.", "",
+        "Preparation timings in `graphs.jsonl` and `bench.tsv`, and op "
+        "counts for a model with different portable MIR, are diagnostics: "
+        "they never fail the run on their own. The lowered log_prob graph "
+        "growing, or the final log_prob graph growing by more than "
+        f"{FINAL_OPS_GROWTH_PERCENT}% (both in the runtime-reroll-on "
+        "cells), are listed below as `## Op count diagnostics` but do not "
+        "decide pass/fail. Gradient time on `GRADIENT_MODELS` is the "
+        f"execution gate: a model whose on/off ratio exceeds "
+        f"{GRADIENT_RATIO_THRESHOLD} is re-measured fresh, and the run "
+        "fails only if that re-run also exceeds the ratio.", "",
         "| model | comparison | MIR changed | changed values | semantic points | "
-        "gradient on/off |",
-        "| --- | --- | ---: | ---: | ---: | ---: |",
+        "gradient on/off | confirmation on/off |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in model_summaries:
         ratio = item.get("gradient", {}).get("on_over_off")
         ratio_text = f"{ratio:.4f}" if ratio is not None else ""
+        confirmation_ratio = (item.get("gradient_confirmation") or {}).get(
+            "on_over_off")
+        confirmation_text = (f"{confirmation_ratio:.4f}"
+                             if confirmation_ratio is not None else "")
         lines.append(
             f"| `{item['model']}` | {item.get('reference_kind', '')} | "
             f"{int(item['mir_changed'])} | "
-            f"{item['changed_values']} | {item['points']} | {ratio_text} |")
+            f"{item['changed_values']} | {item['points']} | {ratio_text} | "
+            f"{confirmation_text} |")
     if failures:
         lines += ["", "## Semantic failures", ""]
         lines += [f"- {failure}" for failure in failures]
+    if op_count_diagnostics:
+        lines += ["", "## Op count diagnostics", ""]
+        lines += [f"- {failure}" for failure in op_count_diagnostics]
+    if gradient_failures:
+        lines += ["", "## Gradient time failures", ""]
+        lines += [f"- {failure}" for failure in gradient_failures]
     if infrastructure_failures:
         lines += ["", "## Measurement infrastructure failures", ""]
         lines += [f"- {failure}" for failure in infrastructure_failures]
@@ -1039,6 +1364,10 @@ def main():
                         default=REPO / "build-rel" / "dump_ops")
     parser.add_argument("--output-dir", type=pathlib.Path,
                         default=REPO / "build" / "vectorize-ab")
+    parser.add_argument(
+        "--baseline", type=pathlib.Path, default=None,
+        help="a previous --output-dir to diff final ops, lowered ops, "
+             "island regions, and slots against, report-only")
     parser.add_argument("--max-rel", type=float, default=1e-9)
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--prep-samples", type=int, default=1)
@@ -1167,6 +1496,8 @@ def main():
         "points": list(POINTS),
         "max_rel": args.max_rel,
         "prep_samples": args.prep_samples,
+        "baseline_dir": str(args.baseline.resolve())
+        if args.baseline is not None else None,
         "gradient": {
             "rounds": args.gradient_rounds,
             "process_order": ["off", "on", "on", "off"],
@@ -1174,7 +1505,8 @@ def main():
             "target_seconds": args.gradient_target_seconds,
             "maximum_iterations": args.gradient_max_n,
             "process_timeout_seconds": args.gradient_timeout,
-            "gating": False,
+            "gating": True,
+            "ratio_threshold": GRADIENT_RATIO_THRESHOLD,
         },
         "stanc3": {
             "repository": stanc_repo,
@@ -1211,6 +1543,8 @@ def main():
     model_summaries = []
     failures = []
     infrastructure_failures = []
+    op_count_diagnostics = []
+    gradient_failures = []
     with tempfile.TemporaryDirectory(prefix="stanli_vectorize_ab_") as temp:
         temp = pathlib.Path(temp)
         for model in selected:
@@ -1329,8 +1663,12 @@ def main():
                                 f"{'on' if reroll_enabled else 'off'} "
                                 f"sample {sample['sample']}: bench_grad"
                                 f"{': ' + detail if detail else ''}")
+            if mir_changed:
+                op_count_diagnostics.extend(
+                    op_count_gate(model, model_graph_records))
 
             gradient = None
+            gradient_confirmation = None
             if model in gradient_models:
                 gradient = gradient_benchmark(
                     tools["bench"], mirs, data, args.gradient_rounds,
@@ -1340,6 +1678,17 @@ def main():
                 if not gradient["ok"]:
                     infrastructure_failures.append(
                         f"{model}: gradient benchmark")
+                elif gradient_ratio_exceeds(gradient):
+                    gradient_confirmation = gradient_benchmark(
+                        tools["bench"], mirs, data, args.gradient_rounds,
+                        args.gradient_calibration_n,
+                        args.gradient_target_seconds, args.gradient_max_n,
+                        args.gradient_timeout)
+                    if not gradient_confirmation["ok"]:
+                        infrastructure_failures.append(
+                            f"{model}: gradient confirmation benchmark")
+                    gradient_failures.extend(gradient_gate(
+                        model, gradient, gradient_confirmation))
 
             model_summary = {
                 "model": model,
@@ -1352,6 +1701,8 @@ def main():
             }
             if gradient is not None:
                 model_summary["gradient"] = gradient
+            if gradient_confirmation is not None:
+                model_summary["gradient_confirmation"] = gradient_confirmation
             model_summaries.append(model_summary)
             ratio = gradient.get("on_over_off") if gradient else None
             ratio_text = f", gradient on/off {ratio:.4f}" \
@@ -1361,13 +1712,23 @@ def main():
                 f"{changed_values} arithmetic-order value changes"
                 f"{ratio_text}")
 
+    baseline_comparison = None
+    if args.baseline is not None:
+        baseline_dir = args.baseline.resolve()
+        baseline_comparison = baseline_comparison_report(
+            baseline_dir, load_cells(baseline_dir),
+            cells_from_records(graph_records))
+
     manifest["harness_elapsed_ns"] = time.monotonic_ns() - harness_started_ns
     summary = write_reports(
         output_dir, manifest, corpus_records, graph_records, model_summaries,
-        failures, infrastructure_failures)
+        failures, infrastructure_failures, op_count_diagnostics,
+        gradient_failures, baseline_comparison=baseline_comparison)
     print(
         f"\n{summary['models']} models, {summary['points']} points, "
         f"{len(failures)} semantic failures, "
+        f"{len(op_count_diagnostics)} op count diagnostics, "
+        f"{len(gradient_failures)} gradient time failures, "
         f"{len(infrastructure_failures)} measurement failures")
     print(f"report: {output_dir}")
     return 0 if summary["ok"] else 1

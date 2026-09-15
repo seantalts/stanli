@@ -19,6 +19,7 @@ using stan::math::var;
 
 struct AdjointRhs {
   const OdeAdjointSpec* spec;
+  mutable RhsWorkspace workspace;
 
   template <typename T_time, typename T_y, typename T_param>
   Eigen::Matrix<
@@ -34,7 +35,7 @@ struct AdjointRhs {
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(state.size());
     if (spec->prog.ok) {
       run_rhs_into<T>(spec->prog, t, state.data(), theta.data(), theta.size(),
-                      x_r.data(), out.data());
+                      x_r.data(), out.data(), workspace.get<T>());
       return out;
     }
 

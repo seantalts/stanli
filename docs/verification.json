@@ -630,8 +630,8 @@
   "status": "VERIFIED"
  },
  "dogs": {
-  "max_rel": 5.313593508484538e-16,
-  "max_ulp": 3,
+  "max_rel": 5.4907132921006615e-15,
+  "max_ulp": 31,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"

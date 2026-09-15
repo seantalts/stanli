@@ -225,13 +225,6 @@ def compare(name, source, manifest_sha, functions, reference, ledger,
     used = set()
     worst = 0.0
 
-    # Compile once and hand the three points the MIR. stanli inlines user
-    # functions itself at lowering, so --O0 replays to the digit like --O1
-    # and takes 0.4 s instead of 30 s on a wiener partition.
-    mir = args.build / "signature-mir" / (name + ".mir")
-    mir.parent.mkdir(parents=True, exist_ok=True)
-    mir.write_text(run([args.stanc, "--" + args.opt, "--debug-optimized-mir",
-                        source]))
     cases = CASE.findall(source.read_text())
 
     def evaluate(point):
@@ -239,7 +232,7 @@ def compare(name, source, manifest_sha, functions, reference, ledger,
         # MIR interpreter took over would replay correctly and prove
         # nothing, so make that a compile error instead of a warning.
         return parse(run([args.build / "stanli_check", source, args.data,
-                          "--mir", mir, "--point", point, "--wa-values"],
+                          "--point", point, "--wa-values"],
                          env={**os.environ, "STANLI_NO_INTERPRETER": "1"}))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=POINTS) as pool:
@@ -291,8 +284,6 @@ def main():
     parser.add_argument("--model", action="append",
                         help="restrict to these model stems")
     parser.add_argument("--record", action="store_true")
-    parser.add_argument("--opt", choices=("O0", "O1"), default="O0",
-                        help="stanc optimization level for the replay")
     parser.add_argument("--jobs", type=int, default=32)
     args = parser.parse_args()
     args.build, args.stanc, args.cmdstan, args.reference = (
@@ -339,7 +330,7 @@ def main():
             print("FAIL", error, flush=True)
             return set(), str(error)
 
-    # Each model spends most of its wall time in stanc + lowering, so
+    # Each model spends most of its wall time compiling and lowering, so
     # replay models in parallel too (each also runs its points in parallel).
     with concurrent.futures.ThreadPoolExecutor(
             max_workers=max(1, args.jobs // POINTS)) as pool:

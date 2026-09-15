@@ -30,6 +30,8 @@ size_t scalar_rng_arity(ScalarRng family) {
     case ScalarRng::PoissonLog:
     case ScalarRng::Bernoulli:
     case ScalarRng::Exponential:
+    case ScalarRng::Poisson:
+    case ScalarRng::BernoulliLogit:
       return 1;
     case ScalarRng::Uniform:
     case ScalarRng::Normal:
@@ -38,6 +40,7 @@ size_t scalar_rng_arity(ScalarRng family) {
     case ScalarRng::Gumbel:
       return 2;
     case ScalarRng::BetaBinomial:
+    case ScalarRng::StudentT:
       return 3;
   }
   throw std::logic_error("unknown scalar RNG family");
@@ -45,6 +48,7 @@ size_t scalar_rng_arity(ScalarRng family) {
 
 bool scalar_rng_is_int(ScalarRng family) {
   return family == ScalarRng::PoissonLog || family == ScalarRng::Bernoulli ||
+         family == ScalarRng::Poisson || family == ScalarRng::BernoulliLogit ||
          family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial;
 }
 
@@ -74,6 +78,12 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
           static_cast<int>(args[0]), args[1], args[2], g));
     case ScalarRng::Exponential:
       return stan::math::exponential_rng(args[0], g);
+    case ScalarRng::Poisson:
+      return static_cast<double>(stan::math::poisson_rng(args[0], g));
+    case ScalarRng::StudentT:
+      return stan::math::student_t_rng(args[0], args[1], args[2], g);
+    case ScalarRng::BernoulliLogit:
+      return static_cast<double>(stan::math::bernoulli_logit_rng(args[0], g));
   }
   throw std::logic_error("unknown scalar RNG family");
 }
@@ -171,10 +181,11 @@ std::vector<double> WaInterp::eval(
     }
     return false;
   };
-  h.fun = [this, &cur, &rng](const mir::Expr& e, DataMap::Entry* out) {
-    return rng_fun(*cur, e, out, rng) ||
+  h.fun = [this, &rng](MirInterp<double>& in, const mir::Expr& e,
+                       DataMap::Entry* out) {
+    return interpreted_rng_call(in, e, out, rng) ||
            evaluate_retained_higher_order(
-               funs_, e, [&](const mir::Expr& arg) { return cur->eval(arg); },
+               funs_, e, [&in](const mir::Expr& arg) { return in.eval(arg); },
                out);
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
@@ -277,8 +288,8 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
   return true;
 }
 
-bool WaInterp::rng_fun(MirInterp<double>& in, const mir::Expr& e,
-                       DataMap::Entry* out, WaRng& rng) {
+bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
+                          DataMap::Entry* out, WaRng& rng) {
   stan::rng_t& g = rng.gen();
   const std::string& f = e.name;
   if (f.size() < 5 || f.compare(f.size() - 4, 4, "_rng") != 0) return false;

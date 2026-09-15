@@ -224,6 +224,56 @@ static void test_compact_idata_refusal() {
   expect_eq("retry grad", grad[1], 1.0);
 }
 
+static void test_shared_data() {
+  using namespace stanli;
+  Graph g;
+  const int x = g.add_slot(1, true), data = g.add_slot(3, false);
+  const int selected = g.add_slot(1, false), result = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {data}, selected, {1});
+  g.add_op(OP_MUL, {x, selected}, result);
+  g.result_slot = result;
+  Executor src(g);
+  const double initial[] = {2, 3, 4};
+  src.set_values(data, initial, 3);
+  src.params_data()[0] = 2;
+  auto read = [](const Executor& ex, int slot) { return ex.value_ptr(slot); };
+  auto clone = std::make_unique<Executor>(src);
+  expect_i64("data shared", read(src, data) == read(*clone, data), 1);
+  expect_i64("data storage", src.shared_data_size(), 3);
+  expect_i64("private values", src.mutable_value_size(), 3);
+  expect_i64("outputs private", read(src, selected) != read(*clone, selected),
+             1);
+  double grad = 0;
+  expect_eq("shared gradient value", clone->gradient(&grad), 6);
+  expect_eq("shared derivative", grad, 3);
+  // A pointer obtained after cloning detaches before it escapes.
+  double* escaped = src.value_ptr(data);
+  escaped[1] = 5;
+  expect_eq("clone isolated", clone->gradient(&grad), 6);
+  expect_eq("source detached", src.gradient(&grad), 10);
+  // A pointer obtained before cloning prevents future sharing by the source.
+  Executor later(src);
+  escaped[1] = 7;
+  expect_eq("escaped pointer isolated", later.gradient(&grad), 10);
+  expect_eq("escaped source updated", src.gradient(&grad), 14);
+  // set_values also detaches but does not poison subsequent sharing.
+  const double changed[] = {10, 11, 12};
+  clone->set_values(data, changed, 3);
+  Executor shared_again(*clone);
+  expect_i64("sharing after fill",
+             read(*clone, data) == read(shared_again, data), 1);
+  clone.reset();
+  expect_eq("owner lifetime", shared_again.gradient(&grad), 22);
+  expect_eq("owner lifetime gradient", grad, 11);
+  // A result with no producer is data too, but still has an adjoint seed.
+  Graph constant;
+  constant.result_slot = constant.add_slot(1, false);
+  Executor c(constant);
+  c.set_values(0, initial, 1);
+  Executor cc(c);
+  expect_eq("constant shared result", cc.gradient(&grad), 2);
+}
+
 int main() {
   using namespace stanli;
 
@@ -433,6 +483,7 @@ int main() {
                 (long long)constant_ex.adjoint_storage_size());
   }
 
+  test_shared_data();
   test_compact_idata_lifecycle();
   test_compact_append_after_copy();
   test_mixed_owned_borrowed_idata();

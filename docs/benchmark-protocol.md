@@ -2,9 +2,9 @@
 
 The benchmark measures **warm gradient latency**. Full inference is a separate,
 explicit phase. A numerical comparison must pass before a timing pair is accepted.
-The Rethinking corpus sweep remains paused after focused validation; the
-exploratory measurements made with changing settings are excluded from the
-published benchmark TSV.
+The completed [Rethinking sweep and report](../output/rethinking-report/README.md)
+retain their measured build identity. Exploratory measurements made with changing
+settings are excluded from the report.
 
 ## Fixed measurement contract
 
@@ -43,10 +43,18 @@ Preparation from existing MIR is measured separately, excluding stanc and
 model evaluation. It is not labeled source-to-model compilation. A gradient
 driver's C++ build time is a setup event, not a user's CmdStan model-build time.
 
+The runner uses the shipped vectorized compilation pipeline via
+`stanli_vectorize_probe` for gradients and the CLI's default compiler for sampling.
+`--cmdstan-stanc` (alias `--stanc`) and `--stancflags` select the reference
+header compiler; the generated header is shared by its gradient driver and
+sampler build. All compiler choices and executable hashes are in the manifest.
+The original report predates this integration and records its original explicit
+compiler commands; it must not be relabeled as a measurement of the merged build.
+
 ## Reproducible runs
 
 ```sh
-cmake --build build-rel --target bench_grad stanli_run -j 4
+cmake --build build-rel --target bench_grad stanli_run stanli_vectorize_probe -j 4
 # New output path; gradients only, all default corpora:
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   /tmp/corpus-v2.tsv

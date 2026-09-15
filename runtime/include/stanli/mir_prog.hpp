@@ -660,7 +660,7 @@ struct ProgramCompiler {
     return e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int;
   }
 
-  double creal(const mir::Expr& e) {
+  std::optional<double> constant_real(const mir::Expr& e) {
     if (e.data_only && extern_real && e.type_ == "UReal") {
       double value = 0.0;
       if (extern_real(e, &value)) return value;
@@ -676,46 +676,54 @@ struct ProgramCompiler {
         auto integer = ints.find(e.name);
         if (integer != ints.end() && integer->second.size() == 1)
           return static_cast<double>(integer->second[0]);
-        bail("real " + e.name + " is not known at compile time");
+        return std::nullopt;
       }
       case mir::Expr::Promotion:
-        if (e.args.size() != 1) bail("real promotion form");
-        return creal(e.args[0]);
-      case mir::Expr::TernaryIf:
-        if (e.args.size() != 3) bail("real conditional form");
-        return creal(e.args[cint(e.args[0]) != 0 ? 1 : 2]);
+        return e.args.size() == 1 ? constant_real(e.args[0]) : std::nullopt;
+      case mir::Expr::TernaryIf: {
+        long condition;
+        if (e.args.size() != 3 || !try_cint(e.args[0], &condition))
+          return std::nullopt;
+        return constant_real(e.args[condition != 0 ? 1 : 2]);
+      }
       case mir::Expr::FunApp:
-        if (const auto value = mir::nullary_constant(e)) return *value;
-        if (e.args.size() == 1) {
-          if (e.name == "PMinus__" || e.name == "minus")
-            return -creal(e.args[0]);
-          if (e.name == "PPlus__" || e.name == "plus") return creal(e.args[0]);
+        if (const auto value = mir::nullary_constant(e)) return value;
+        if (e.args.size() == 1 && (e.name == "PMinus__" || e.name == "minus" ||
+                                   e.name == "PPlus__" || e.name == "plus")) {
+          const auto value = constant_real(e.args[0]);
+          if (!value) return std::nullopt;
+          return e.name == "PMinus__" || e.name == "minus" ? -*value : *value;
         }
         if (e.args.size() == 2) {
-          const double lhs = creal(e.args[0]);
-          const double rhs = creal(e.args[1]);
-          if (e.name == "Plus__" || e.name == "add") return lhs + rhs;
-          if (e.name == "Minus__" || e.name == "subtract") return lhs - rhs;
+          const auto lhs = constant_real(e.args[0]);
+          if (!lhs) return std::nullopt;
+          const auto rhs = constant_real(e.args[1]);
+          if (!rhs) return std::nullopt;
+          if (e.name == "Plus__" || e.name == "add") return *lhs + *rhs;
+          if (e.name == "Minus__" || e.name == "subtract") return *lhs - *rhs;
           if (e.name == "Times__" || e.name == "multiply" ||
               e.name == "elt_multiply")
-            return lhs * rhs;
+            return *lhs * *rhs;
           if (e.name == "Divide__" || e.name == "divide" ||
               e.name == "elt_divide")
-            return lhs / rhs;
+            return *lhs / *rhs;
         }
-        bail("real function " + e.name + " is not known at compile time");
+        return std::nullopt;
       default:
-        bail("real expression is not known at compile time");
+        return std::nullopt;
     }
   }
 
+  double creal(const mir::Expr& e) {
+    if (const auto value = constant_real(e)) return *value;
+    bail("real expression is not known at compile time");
+  }
+
   bool try_creal(const mir::Expr& e, double* out) {
-    try {
-      *out = creal(e);
-      return true;
-    } catch (Bail&) {
-      return false;
-    }
+    const auto value = constant_real(e);
+    if (!value) return false;
+    *out = *value;
+    return true;
   }
 
   long cint(const mir::Expr& e) {
@@ -903,6 +911,60 @@ struct ProgramCompiler {
   }
 
   bool try_cint(const mir::Expr& e, long* out) {
+    // Scalar runtime conditions are expected misses. Preserve the throwing
+    // evaluator for required geometry and uncommon forms, but do not unwind
+    // through the compiler just to learn that a scalar value is unavailable.
+    if (e.kind == mir::Expr::Var) {
+      const auto it = ints.find(e.name);
+      if (it == ints.end() || it->second.size() != 1) return false;
+      *out = it->second[0];
+      return true;
+    }
+    if (e.kind == mir::Expr::Promotion)
+      return e.args.size() == 1 && try_cint(e.args[0], out);
+    if (e.kind == mir::Expr::TernaryIf) {
+      long condition;
+      return e.args.size() == 3 && try_cint(e.args[0], &condition) &&
+             try_cint(e.args[condition != 0 ? 1 : 2], out);
+    }
+    if (e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) {
+      long lhs;
+      if (e.args.size() != 2 || !int_operand(e.args[0]) ||
+          !try_cint(e.args[0], &lhs))
+        return false;
+      const bool value = lhs != 0;
+      if (e.kind == mir::Expr::EAnd ? !value : value) {
+        *out = value;
+        return true;
+      }
+      long rhs;
+      if (!int_operand(e.args[1]) || !try_cint(e.args[1], &rhs)) return false;
+      *out = rhs != 0;
+      return true;
+    }
+    if (e.kind == mir::Expr::FunApp &&
+        (e.args.size() == 1 || e.args.size() == 2)) {
+      if (const BuiltinSpec* pred = shaped_builtin_spec(
+              e.name, e.args.size(), BuiltinShapePolicy::Predicate)) {
+        double args[2] = {};
+        const bool integer =
+            int_operand(e.args[0]) &&
+            (e.args.size() == 2
+                 ? int_operand(e.args[1])
+                 : pred->predicate == BuiltinPredicate::Negation);
+        for (size_t k = 0; k < e.args.size(); ++k) {
+          if (integer) {
+            long value;
+            if (!try_cint(e.args[k], &value)) return false;
+            args[k] = static_cast<double>(value);
+          } else if (!try_creal(e.args[k], &args[k]))
+            return false;
+        }
+        *out = evaluate_predicate_builtin(*pred, args[0], args[1]);
+        return true;
+      }
+    }
+
     try {
       *out = cint(e);
       return true;
@@ -2026,14 +2088,19 @@ struct ProgramCompiler {
     ViewKind out_kind = ViewKind::Flat;
     std::vector<int> idata;
     if (const ScalarRng* family = scalar_rng_family(e.name)) {
-      // An integer draw is runtime geometry: a size, an index or a branch
-      // condition the region has no way to know. That is the interpreter's
-      // remit, so leave the whole tranche there rather than quietly serving
-      // one out of a double register.
-      if (scalar_rng_is_int(*family))
-        bail(e.name + ": an integer draw stays on WaInterp");
+      // Stan ints fit exactly in double registers. Draws remain effectful
+      // runtime values: cint cannot fold them, shape demands still refuse,
+      // and dynamic indexing uses the existing checked register operations.
+      const auto leaf = scalar_rng_is_int(*family) ? mir::UnsizedLeaf::Int
+                                                   : mir::UnsizedLeaf::Real;
+      if (e.unsized.depth != 0 || e.unsized.leaf != leaf)
+        bail(e.name + ": result type does not match scalar RNG family");
       if (args.size() != scalar_rng_arity(*family))
         bail(e.name + ": wrong number of arguments");
+      if ((*family == ScalarRng::Binomial ||
+           *family == ScalarRng::BetaBinomial) &&
+          e.args[0].unsized.leaf != mir::UnsizedLeaf::Int)
+        bail(e.name + ": first argument must be int");
       for (const Range& a : args)
         if (!is_scalar(a))
           bail(e.name + ": container arguments stay on WaInterp");
@@ -3518,11 +3585,13 @@ struct ProgramCompiler {
           // A conditional write must preserve the old value on the untaken
           // path, so it cannot be folded into the single compile-time copy.
           // Likewise, an unconditional assignment after a structured while
-          // may read loop-carried state that now lives in registers.  The
+          // may read loop-carried state, and a generated-quantities integer
+          // may receive an RNG draw before its first while. The
           // lowering can export scalar-int live-outs, so reify both cases
           // instead of refusing a representable integer recurrence.
           if (!fold_is_certain(s.lhs) ||
-              (structured_while_seen && !try_cint(s.rhs, &ignored)))
+              ((structured_while_seen || in_write_array) &&
+               !try_cint(s.rhs, &ignored)))
             reify_written_int(s.lhs);
         }
         if (ints.count(s.lhs) && s.lhs_idx.empty()) {

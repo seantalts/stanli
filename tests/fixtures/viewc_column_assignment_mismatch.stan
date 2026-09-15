@@ -6,4 +6,4 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL stanli compile: column assignment size mismatch for M
+// STANLI-LIT-EXPECT: COMPILE_FAIL stanli compile: assignment width mismatch for M

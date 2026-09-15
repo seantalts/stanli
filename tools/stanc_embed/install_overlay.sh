@@ -39,6 +39,30 @@ else
   exit 1
 fi
 
+# Partial evaluation repeatedly resolves the same immutable built-in
+# signatures. The portable producer scopes this bounded cache to one compile;
+# stock stanc leaves it disabled. Include the patch in producer provenance.
+CACHE_PATCH=$(pwd)/compiler/ocaml/stanc3-signature-cache.patch
+if git -C "$SRC" apply --check "$CACHE_PATCH" >/dev/null 2>&1; then
+  git -C "$SRC" apply "$CACHE_PATCH"
+elif git -C "$SRC" apply --reverse --check "$CACHE_PATCH" >/dev/null 2>&1; then
+  :
+else
+  echo "stanc3 signature cache does not apply to this source tree" >&2
+  exit 1
+fi
+
+# Deserialize immutable overload sets only when a source uses their names.
+LAZY_PATCH=$(pwd)/compiler/ocaml/stanc3-lazy-signatures.patch
+if git -C "$SRC" apply --check "$LAZY_PATCH" >/dev/null 2>&1; then
+  git -C "$SRC" apply "$LAZY_PATCH"
+elif git -C "$SRC" apply --reverse --check "$LAZY_PATCH" >/dev/null 2>&1; then
+  :
+else
+  echo "stanc3 lazy signatures do not apply to this source tree" >&2
+  exit 1
+fi
+
 cp compiler/ocaml/*.ml compiler/ocaml/*.mli "$LOCAL_DIR"/*.ml \
   "$LOCAL_DIR"/dune "$SRC/$STANC3_DIR/"
 if [ "$TARGET" = js ]; then

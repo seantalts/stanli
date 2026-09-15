@@ -13,7 +13,7 @@ if(NOT result EQUAL 2)
           "stanli_check --mir/--stanc conflict returned ${result}: ${output}${error}")
 endif()
 
-set(expected "stanli_check: --stanc and --mir are mutually exclusive")
+set(expected "stanli_check: --stanc, --stanli-compile and --mir are mutually exclusive")
 string(FIND "${error}" "${expected}" diagnostic_position)
 if(diagnostic_position EQUAL -1)
   message(FATAL_ERROR

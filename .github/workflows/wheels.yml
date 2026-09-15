@@ -129,6 +129,10 @@ jobs:
       - run: python3 tools/gen_docs.py --check
       - name: Check static packaging inputs
         run: test -s LICENSE && test -s THIRD_PARTY_LICENSES.md
+      - name: Check development setup contracts
+        run: |
+          python3 tests/test_dev_setup.py
+          bash tests/test_cached_ocaml_switch.sh
       - name: Check the Windows C ABI exports
         run: python3 tests/test_windows_exports.py
       - name: Check portable build parallelism
@@ -317,6 +321,40 @@ jobs:
           key: >-
             stanc-embed-v2-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
 
+      # Finished artifacts remain exact-keyed. On a miss, reuse the expensive
+      # OCaml switch independently of edits to our compiler overlay. Use an
+      # explicit root: HOME differs between container shells and JS actions.
+      - name: Identify the stanc3 build toolchain
+        if: steps.stanc-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        id: stanc-toolchain
+        shell: bash
+        run: |
+          echo "OPAMROOT=$GITHUB_WORKSPACE/.ci-opam" >> "$GITHUB_ENV"
+          fingerprint=$({ cc --version; ld --version; ldd --version; } | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the OCaml toolchain
+        if: steps.stanc-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        id: opam-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-opam
+          key: >-
+            stanc-toolchain-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+
+      # Dune validates changed inputs itself. A prefix hit can reuse compiled
+      # upstream modules after an overlay edit, but never supplies final artifacts.
+      - name: Restore the incremental stanc3 build
+        if: steps.stanc-cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        id: stanc-build-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: deps/stanc3-src
+          key: >-
+            stanc-dune-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+          restore-keys: >-
+            stanc-dune-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-
+
       # The pinned release binary, not install.sh: the installer prompts for
       # its target directory and takes no positional argument, so it is not
       # usable unattended. A warm artifact cache does not need opam at all.
@@ -349,6 +387,12 @@ jobs:
             deps/stanc3/stanc deps/stanc3/stanc.src \
             deps/stanc3/stanli-vectorize-probe \
             deps/stanc3/stanli-vectorize-probe.stamp
+          # Remove old untracked overlay sources (including deleted modules),
+          # retaining Dune's dependency-checked build state. The builder resets
+          # tracked sources to the exact upstream pin before applying this overlay.
+          if [ -d deps/stanc3-src/.git ]; then
+            git -C deps/stanc3-src clean -ffd -e _build
+          fi
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build
           mkdir -p deps/ocaml-include
@@ -377,6 +421,22 @@ jobs:
               exit 1
             }
           done
+
+      # Save as soon as compiler validation succeeds, even if later runtime
+      # tests fail or the job is cancelled. PR writes stay scoped to that PR.
+      - name: Save the OCaml toolchain
+        if: steps.stanc-cache.outputs.cache-hit != 'true' && runner.os == 'Linux' && steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-opam
+          key: ${{ steps.opam-cache.outputs.cache-primary-key }}
+
+      - name: Save the incremental stanc3 build
+        if: steps.stanc-cache.outputs.cache-hit != 'true' && runner.os == 'Linux' && steps.stanc-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: deps/stanc3-src
+          key: ${{ steps.stanc-build-cache.outputs.cache-primary-key }}
 
       # The ASan build intentionally does not embed stanc, but its CTest suite
       # includes the source-level lit cases. Hand it the exact executable this
@@ -510,6 +570,25 @@ jobs:
           python3 tools/verify_refs.py deps/posteriordb \
             --check build-rel/stanli_check --jobs 4
 
+      # Report-only: never fails the job. A missing or unreachable baseline
+      # (first run, expired retention, rate limit) leaves the directory
+      # absent and the harness skips the comparison.
+      - name: Fetch the main-branch vectorization baseline
+        if: matrix.runtime == 'linux-x86_64' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        continue-on-error: true
+        run: |
+          rm -rf /tmp/vectorize-baseline
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --branch main \
+            --workflow wheels.yml --status success \
+            --json databaseId --jq '.[0].databaseId' || true)
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+              -n mir-vectorization-measurements -D /tmp/vectorize-baseline \
+              || true
+          fi
+
       # This does not select the candidate source pass for any producer. The
       # test-only OCaml probe emits both inputs, and stanli_check consumes the
       # saved portable MIR directly so every point reuses the exact bytes.
@@ -546,14 +625,22 @@ jobs:
               gp_regr one_comp_mm_elim_abs bym2_offset_only kronecker_gp
               multi_occupancy state_space_stochastic_level_stochastic_seasonal
               mother multidim_var_param_ar45_mat23 reductions_allowed
-              s2_ar_cov s2_invgaussian s2_logistic_normal sw_mv_rescor)
+              s2_ar_cov s2_invgaussian s2_logistic_normal sw_mv_rescor
+              2pl_latent_reg_irt covid19imperial_v2 covid19imperial_v3
+              dogs_log grsm_latent_reg_irt s2_car s2_nlf surgical_model
+              sw_nonlinear)
+          fi
+          baseline_args=()
+          if [ -f /tmp/vectorize-baseline/graphs.jsonl ]; then
+            baseline_args=(--baseline /tmp/vectorize-baseline)
           fi
           python3 harnesses/vectorize_ab.py deps/posteriordb \
             --compiler deps/stanc3/stanli-vectorize-probe \
             --check build-rel/stanli_check \
             --bench build-rel/bench_grad --dump build-rel/dump_ops \
             --timeout 30 --gradient-timeout 20 --prep-samples 2 \
-            --output-dir build-rel/vectorize-ab "${models[@]}"
+            --output-dir build-rel/vectorize-ab "${models[@]}" \
+            "${baseline_args[@]}"
 
       - name: Publish MIR vectorization measurements
         if: >-
@@ -931,7 +1018,7 @@ jobs:
       - name: Fetch the previous release and the legacy anchor
         run: |
           mkdir -p previous-release/runtime legacy-release
-          previous=https://github.com/seantalts/stanli/releases/download/v0.11.1
+          previous=https://github.com/seantalts/stanli/releases/download/v0.13.0
           legacy=https://github.com/seantalts/stanli/releases/download/v0.9.3
           # A GitHub asset redirect reset the connection once and failed this
           # whole job. Plain --retry does not include curl error 35, so keep
@@ -940,13 +1027,13 @@ jobs:
             "$previous/stanli-runtime-linux-x86_64.tar.gz" \
             -o previous-release/runtime.tar.gz
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
-            "$previous/stanli_0.11.1.tar.gz" \
-            -o previous-release/stanli_0.11.1.tar.gz
+            "$previous/stanli_0.13.0.tar.gz" \
+            -o previous-release/stanli_0.13.0.tar.gz
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
             "$legacy/stanli_0.9.3.tar.gz" \
             -o legacy-release/stanli_0.9.3.tar.gz
-          echo 'b3902d4044f522f5feb0d08bfea6de0c4510c81d37609577f9ccb454c55f7817  previous-release/runtime.tar.gz' | sha256sum -c -
-          echo '40f72e86f911a717c41f70eaea84758b3b9db7c36fbda9bad47d0760c307d245  previous-release/stanli_0.11.1.tar.gz' | sha256sum -c -
+          echo '2459a152dfa647f554c11d030e6b620c64e5f9197bb25ef35b9c3a39ae0aa44e  previous-release/runtime.tar.gz' | sha256sum -c -
+          echo 'dcf40750abd2cab0a577eb9a722df57a3335c3e1fa537c10b3fa05844b1b8336  previous-release/stanli_0.13.0.tar.gz' | sha256sum -c -
           echo '1acbe821c58115678a69451c553a9b23c141d009f53c142492cee94599430495  legacy-release/stanli_0.9.3.tar.gz' | sha256sum -c -
           tar xzf previous-release/runtime.tar.gz \
             -C previous-release/runtime
@@ -1010,7 +1097,7 @@ jobs:
         working-directory: r
         run: |
           current_library="$PWD/../r-current-library"
-          previous_library="$PWD/../r-v0.11.1-library"
+          previous_library="$PWD/../r-v0.13.0-library"
           legacy_library="$PWD/../r-v0.9.3-library"
           previous_runtime="$PWD/../previous-release/runtime/libstanli.so"
           current_runtime="$STANLI_RUNTIME"
@@ -1021,7 +1108,7 @@ jobs:
 
           mkdir -p "$previous_library"
           R CMD INSTALL --library="$previous_library" \
-            ../previous-release/stanli_0.11.1.tar.gz
+            ../previous-release/stanli_0.13.0.tar.gz
           STANLI_RUNTIME="$current_runtime" \
             R_LIBS_USER="$previous_library${R_LIBS_USER:+:$R_LIBS_USER}" \
             Rscript ../tests/test_r_portable_compiler.R
@@ -1461,7 +1548,7 @@ jobs:
   # not paying for instrumentation, and the CTest suite is the target.
   asan:
     name: ctest under AddressSanitizer
-    needs: build
+    needs: [build, browser-compiler]
     if: >-
       github.event_name != 'pull_request' &&
       startsWith(github.ref, 'refs/tags/') == false
@@ -1511,6 +1598,23 @@ jobs:
           test "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA"
           chmod +x deps/stanc3/stanc
           ./deps/stanc3/stanc --version
+      # This build does not embed stanc3, so stanli_check compiles through
+      # stanli-compile, the same pipeline as a native executable, which the
+      # browser-compiler job built and validated.
+      - name: Install the portable compiler from the browser-compiler job
+        uses: actions/download-artifact@v4
+        with:
+          name: browser-compilers
+          path: browser-compilers
+      - name: Stage stanli-compile
+        run: |
+          source tools/stanc_embed/provenance.sh
+          stanli_stancjs_artifact_matches browser-compilers/stanli_compiler_cli \
+            "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
+          install -m 755 browser-compilers/stanli_compiler_cli \
+            deps/stanc3/stanli-compile
+          deps/stanc3/stanli-compile tests/fixtures/es.stan > /tmp/es.portable-mir
+          head -c 8 /tmp/es.portable-mir | grep -q '^STANLI2:'
       # Both fatal runs of this job died at the same place -- the density
       # shards -- with "the runner has received a shutdown signal" while
       # the sibling manylinux job on its own runner sailed on. That is the
@@ -1561,7 +1665,8 @@ jobs:
             -DSTANLI_SANITIZE=address \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSTANLI_PORTABLE_COMPILER="$PWD/deps/stanc3/stanli-compile"
           # Peak of the largest single compile, the wheel build's own
           # instrumentation: GNU time reports the largest child, which is
           # exactly the number -j has to fit. This job has been OOM-killed
@@ -1948,6 +2053,11 @@ jobs:
         env:
           OPAMYES: '1'
 
+      - name: Keep static on one line for Safari 17
+        run: |
+          tools/stanc_embed/fix_static_newline.sh \
+            deps/stanc3/stancjs.bc.js deps/stanc3/stanli-compiler.js
+
       - name: Validate browser compiler provenance
         run: |
           source tools/stanc_embed/provenance.sh
@@ -1982,7 +2092,9 @@ jobs:
           cp deps/stanc3/stanli-compiler.js \
             deps/stanc3/stanli-compiler.js.stamp \
             deps/stanc3/stancjs.bc.js \
-            deps/stanc3/stancjs.bc.js.stamp browser-dist/
+            deps/stanc3/stancjs.bc.js.stamp \
+            deps/stanc3/stanli_compiler_cli \
+            deps/stanc3/stanli_compiler_cli.stamp browser-dist/
 
       - uses: actions/upload-artifact@v4
         with:

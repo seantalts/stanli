@@ -19,8 +19,9 @@ stan::model::model_base& new_model(stan::io::var_context& data_context,
 
 int benchmark_main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(stderr, "usage: bench_cmdstan_grad data.json N|--timed "
-                         "[--warmup-ms N --measure-ms N]\n");
+    std::fprintf(stderr,
+                 "usage: bench_cmdstan_grad data.json N|--timed "
+                 "[--warmup-ms N --measure-ms N]\n");
     return 2;
   }
   const bool timed = std::string(argv[2]) == "--timed";
@@ -57,10 +58,13 @@ int benchmark_main(int argc, char** argv) {
     const auto opts = stanli_benchmark::options(argc, argv, 3);
     one();
     if (!std::isfinite(lp) ||
-        !std::all_of(grad.begin(), grad.end(), [](double x) { return std::isfinite(x); }))
-      throw std::runtime_error("benchmark point has non-finite density or gradient");
+        !std::all_of(grad.begin(), grad.end(),
+                     [](double x) { return std::isfinite(x); }))
+      throw std::runtime_error(
+          "benchmark point has non-finite density or gradient");
     const auto warm = stanli_benchmark::window(one, opts.warmup_ns, 1, true);
-    const auto measured = stanli_benchmark::window(one, opts.measure_ns, warm.batch);
+    const auto measured =
+        stanli_benchmark::window(one, opts.measure_ns, warm.batch);
     stanli_benchmark::output(warm, measured, lp, grad);
     return 0;
   }
@@ -75,8 +79,9 @@ int benchmark_main(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
-  try { return benchmark_main(argc, argv); }
-  catch (const std::exception& error) {
+  try {
+    return benchmark_main(argc, argv);
+  } catch (const std::exception& error) {
     std::fprintf(stderr, "bench_cmdstan_grad: %s\n", error.what());
     return 1;
   }

@@ -50,6 +50,13 @@ grep -Fqx 'STANLI_REF="current-checkout"' \
 )
 
 mkdir -p "$r_library"
-R CMD INSTALL --library="$r_library" "$stanr_dir"
-R_LIBS_USER="$r_library${R_LIBS_USER:+:$R_LIBS_USER}" \
+# R is a native program: under Rtools bash on Windows it needs Windows-style
+# paths (bash converts arguments, not environment variables) and a `;`
+# library-path separator.
+native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+lib_sep=:
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) lib_sep=';' ;; esac
+r_library_native=$(native_path "$r_library")
+R CMD INSTALL --library="$r_library_native" "$stanr_dir"
+R_LIBS_USER="$r_library_native${R_LIBS_USER:+$lib_sep$R_LIBS_USER}" \
   Rscript --vanilla "$repo_root/tests/test_stanr_backend.R" "$stanr_dir"

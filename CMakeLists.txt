@@ -75,6 +75,11 @@ if(STANLI_SANITIZE)
   endif()
 endif()
 
+if(MINGW)
+  # Keep source lines without duplicating full type information in every test.
+  add_compile_options("$<$<CONFIG:RelWithDebInfo>:-g1>")
+endif()
+
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
 file(GLOB _eigen ${DEPS}/math/lib/eigen_*)
 file(GLOB _boost ${DEPS}/math/lib/boost_*)
@@ -101,11 +106,17 @@ add_library(stanmath INTERFACE)
 target_include_directories(stanmath INTERFACE
   ${DEPS}/math
   ${DEPS}/stan/src
+  ${DEPS}/stan/lib/rapidjson_1.1.0
   ${_eigen}
   ${_boost}
   ${_sundials}/include
   ${_tbb}/include)
 target_compile_definitions(stanmath INTERFACE _REENTRANT BOOST_DISABLE_ASSERTS)
+# Match Stan Math's TBB configuration on Windows ARM64 for every consumer
+# of the vendored headers, including runtime, tool, test, and PCH targets.
+if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^([Aa][Rr][Mm]64|[Aa][Aa][Rr][Cc][Hh]64)$")
+  target_compile_definitions(stanmath INTERFACE TBB_USE_GCC_BUILTINS=1)
+endif()
 # Boost's default policy evaluates double in long double. On x86 that's the
 # hardware 80-bit type, which is what CmdStan's reference results are
 # computed with. Elsewhere long double is software binary128, whose epsilon
@@ -420,7 +431,21 @@ function(stanli_embed_stanc TGT)
       runtime/src/stanc_embed_c.cpp ${STANLI_STANC_EMBED_OBJ})
     target_include_directories(${TGT} PRIVATE ${STANLI_OCAML_STDLIB})
     target_compile_definitions(${TGT} PRIVATE STANLI_EMBED_STANC)
-    target_link_libraries(${TGT} PRIVATE dl pthread)
+    target_link_libraries(${TGT} PRIVATE ${CMAKE_DL_LIBS} pthread)
+    if(WIN32)
+      target_link_options(${TGT} PRIVATE -static)
+      target_compile_definitions(${TGT} PRIVATE CAMLDLLIMPORT=)
+      execute_process(
+        COMMAND "${STANLI_OCAML_STDLIB}/../../bin/ocamlopt.exe"
+                -config-var native_c_libraries
+        OUTPUT_VARIABLE _ocaml_libraries OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _ocaml_config_result)
+      if(NOT _ocaml_config_result EQUAL 0)
+        message(FATAL_ERROR "Could not read OCaml's native link libraries")
+      endif()
+      separate_arguments(_ocaml_libraries NATIVE_COMMAND "${_ocaml_libraries}")
+      target_link_libraries(${TGT} PRIVATE ${_ocaml_libraries})
+    endif()
   endif()
 endfunction()
 stanli_embed_stanc(stanli_shared)
@@ -587,7 +612,7 @@ enable_testing()
 
 # Runtime and lowering tests consume stanc's legacy MIR, but the generated
 # text is not source. Build it once from the checked-in Stan models with the
-# same pinned compiler the source-level lit tests use. Keeping the output in
+# pinned compiler executable. Keeping the output in
 # tests/fixtures preserves the established test and developer-tool paths while
 # .gitignore keeps a build from dirtying the checkout.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -664,7 +689,8 @@ add_custom_command(
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
   COMMENT "Generating ${STANLI_FIXTURE_COUNT} legacy MIR fixtures"
   VERBATIM)
-add_custom_target(stanli_mir_fixtures ALL DEPENDS ${STANLI_MIR_FIXTURES})
+add_custom_target(stanli_mir_fixtures ALL
+                  DEPENDS ${STANLI_MIR_FIXTURES})
 
 # Pull-request validation uses Clang so its cheap test translation units can
 # link to the optimized runtime objects below. Shipped platform builds may use
@@ -715,6 +741,17 @@ function(stanli_add_test NAME)
   if(STANLI_FAST_TEST_TUS)
     stanli_configure_test_tu(${NAME})
   endif()
+  if(MINGW AND CMAKE_BUILD_TYPE MATCHES "^(Debug|RelWithDebInfo)$")
+    # Large DWARF sections can make Windows reject the test executable.
+    # Keep debug information in a sidecar that GDB can discover.
+    add_custom_command(TARGET ${NAME} POST_BUILD
+      COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
+              "$<TARGET_FILE:${NAME}>" "$<TARGET_FILE:${NAME}>.debug"
+      COMMAND "${CMAKE_OBJCOPY}" --strip-debug
+              "--add-gnu-debuglink=$<TARGET_FILE:${NAME}>.debug"
+              "$<TARGET_FILE:${NAME}>"
+      VERBATIM)
+  endif()
   # Tests run from the repo root so fixture paths are stable.
   add_test(NAME ${NAME} COMMAND ${NAME}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -728,14 +765,65 @@ add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
 add_executable(stanli_run tools/stanli_run.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_run PRIVATE stanli stanli_stanc_process)
+target_include_directories(stanli_run PRIVATE ${DEPS}/fmt/include)
+target_compile_definitions(stanli_run PRIVATE FMT_HEADER_ONLY)
 stanli_embed_stanc(stanli_run)
 add_executable(stanli_check tools/stanli_check.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_check PRIVATE stanli stanli_stanc_process)
 add_dependencies(stanli_check stanli_mir_fixtures)
+stanli_embed_stanc(stanli_check)
+if(WIN32)
+  # Standalone-compiler deployments must also run without MSYS2's C++/thread
+  # runtime DLLs on PATH. Embedded targets already receive these link flags.
+  target_link_options(stanli_run PRIVATE -static)
+  target_link_options(stanli_check PRIVATE -static)
+endif()
+# Without the embedded object, both tools run the same pipeline through
+# its executable, stanli-compile, which it looks for beside itself.
+set(STANLI_PORTABLE_COMPILER "" CACHE FILEPATH
+    "stanli-compile executable deployed with the native tools when no embedded stanc3 object is linked")
+if(NOT STANLI_STANC_EMBED_OBJ)
+  if(NOT STANLI_PORTABLE_COMPILER)
+    foreach(_stanli_cli_candidate
+            "stanli-compile${CMAKE_EXECUTABLE_SUFFIX}" "stanli-compile")
+      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/${_stanli_cli_candidate}")
+        set(STANLI_PORTABLE_COMPILER
+            "${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/${_stanli_cli_candidate}")
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(STANLI_PORTABLE_COMPILER)
+    foreach(_stanli_tool stanli_run stanli_check)
+      # Re-run the copy when setup rebuilds the compiler, including when
+      # only stanli_run is requested in the release build.
+      set_property(TARGET ${_stanli_tool} APPEND PROPERTY LINK_DEPENDS
+                   "${STANLI_PORTABLE_COMPILER}")
+      add_custom_command(TARGET ${_stanli_tool} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${STANLI_PORTABLE_COMPILER}"
+                "$<TARGET_FILE_DIR:${_stanli_tool}>/stanli-compile${CMAKE_EXECUTABLE_SUFFIX}"
+        VERBATIM)
+    endforeach()
+    message(STATUS "native tools compile through ${STANLI_PORTABLE_COMPILER}")
+  else()
+    message(WARNING
+      "no embedded stanc3 object and no stanli-compile under deps/stanc3; "
+      "stanli_check's default compile path will fail (lit, signature_refs, "
+      "test_function_models)")
+  endif()
+endif()
 add_executable(test_stanc_process tests/test_stanc_process.cpp)
 target_link_libraries(test_stanc_process PRIVATE stanli_stanc_process)
 add_test(NAME test_stanc_process COMMAND test_stanc_process)
+
+add_executable(test_csv_writer tests/test_csv_writer.cpp)
+target_include_directories(test_csv_writer PRIVATE ${DEPS}/fmt/include)
+target_compile_definitions(test_csv_writer PRIVATE FMT_HEADER_ONLY)
+add_test(NAME test_csv_writer COMMAND test_csv_writer)
+add_test(NAME test_dev_setup
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dev_setup.py)
 add_test(NAME test_check_precompiled_mir
          COMMAND stanli_check tests/fixtures/ar1.stan tests/fixtures/ar1.json
                  --mir tests/fixtures/ar1.tmir.sexp
@@ -747,6 +835,13 @@ add_test(NAME test_check_precompiled_mir_conflict
                  -DSTANLI_CHECK=$<TARGET_FILE:stanli_check>
                  -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mir_conflict.cmake)
+add_test(NAME test_check_external_stanc
+         COMMAND ${CMAKE_COMMAND}
+                 -DSTANLI_CHECK=$<TARGET_FILE:stanli_check>
+                 -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                 -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/check_external_stanc
+                 -DSTANC=${STANLI_STANC_EXECUTABLE}
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_stanc.cmake)
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 add_executable(test_benchmark_timer tests/test_benchmark_timer.cpp)
@@ -799,9 +894,20 @@ target_link_libraries(bench_program_call PRIVATE stanli)
 add_executable(bench_executor_clone EXCLUDE_FROM_ALL
   tools/bench_executor_clone.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_executor_clone PRIVATE stanli)
+if(NOT WIN32)
+  add_executable(bench_executor_data EXCLUDE_FROM_ALL
+    tools/bench_executor_data.cpp tests/tbb_stub.cpp)
+  target_link_libraries(bench_executor_data PRIVATE stanli)
+endif()
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
+# Developer-only: one pool lease + gradient from the three thread states a
+# caller can be in, for judging what the pool's autodiff-tape policy costs.
+add_executable(bench_pool EXCLUDE_FROM_ALL
+  tools/bench_pool.cpp tests/tbb_stub.cpp)
+target_link_libraries(bench_pool PRIVATE stanli)
+add_dependencies(bench_pool stanli_mir_fixtures)
 # Developer-only ODE RHS generated-adjoint spike.  Not a test and not installed.
 add_executable(bench_rhs_adjoint EXCLUDE_FROM_ALL
   tools/bench_rhs_adjoint.cpp tests/tbb_stub.cpp)
@@ -917,13 +1023,50 @@ add_custom_target(stanli_signature_models ALL
 # the Python wheel does its own copying (tools/build_wheel.sh).
 include(GNUInstallDirs)
 install(TARGETS stanli_run stanli_check
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT NativeTools)
+# Sanitizer builds share the instrumented core to keep test links small.
+# Relocated native tools need that library alongside them as well.
+get_target_property(_stanli_core_type stanli TYPE)
+if(_stanli_core_type STREQUAL "SHARED_LIBRARY")
+  install(TARGETS stanli
+          LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT NativeTools
+          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT NativeTools)
+  if(APPLE)
+    set(_stanli_tool_rpath "@loader_path")
+  elseif(UNIX)
+    set(_stanli_tool_rpath "$ORIGIN")
+  endif()
+  if(DEFINED _stanli_tool_rpath)
+    set_property(TARGET stanli_run stanli_check APPEND PROPERTY
+                 INSTALL_RPATH "${_stanli_tool_rpath}")
+  endif()
+endif()
+if(NOT STANLI_STANC_EMBED_OBJ AND STANLI_PORTABLE_COMPILER)
+  install(PROGRAMS "${STANLI_PORTABLE_COMPILER}"
+          DESTINATION ${CMAKE_INSTALL_BINDIR}
+          RENAME "stanli-compile${CMAKE_EXECUTABLE_SUFFIX}"
+          COMPONENT NativeTools)
+endif()
 install(TARGETS stanli_shared
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY runtime/include/stanli
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
+  add_test(NAME test_compiler_deployment
+           COMMAND ${CMAKE_COMMAND}
+                   -DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}
+                   -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                   -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/compiler-deployment
+                   -DBINDIR=${CMAKE_INSTALL_BINDIR}
+                   -DCONFIG=$<CONFIG>
+                   -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
+                   -DEMBEDDED=$<BOOL:${STANLI_STANC_EMBED_OBJ}>
+                   -DSTANC=${STANLI_STANC_EXECUTABLE}
+                   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_compiler_deployment.cmake)
+endif()
 
 set(STANLI_TESTS
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
@@ -933,6 +1076,7 @@ set(STANLI_TESTS
   test_mir test_mir_decode test_transforms test_eltwise test_scalar_binary
   test_lower
   test_lower_views
+  test_native_matrix_pullbacks
   test_lower_view_contract test_lower_array_contract test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
   test_ode_prog test_mir_program_conformance test_mir_checks
@@ -981,6 +1125,26 @@ add_test(NAME test_function COMMAND test_function
 # standalone runs on older Python use the Tomli backport in requirements.txt.
 find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME test_educational_harness
+           COMMAND ${Python3_EXECUTABLE} tests/test_educational.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_educational_models
+           COMMAND ${Python3_EXECUTABLE} tools/check_educational.py
+                   --build ${CMAKE_CURRENT_BINARY_DIR}
+                   --output ${CMAKE_CURRENT_BINARY_DIR}/educational-ctest/results.json
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_educational_models PROPERTIES TIMEOUT 180)
+  add_custom_target(check_educational_performance
+    COMMAND ${Python3_EXECUTABLE} tools/check_educational.py --benchmark
+            --build ${CMAKE_CURRENT_BINARY_DIR}
+            --output ${CMAKE_CURRENT_BINARY_DIR}/educational-benchmark/results.json
+    DEPENDS stanli_check stanli_run
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    USES_TERMINAL)
+  add_test(NAME test_run_timings
+           COMMAND ${Python3_EXECUTABLE} tests/test_run_timings.py
+                   $<TARGET_FILE:stanli_run>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1014,7 +1178,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_function_models
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
                    --build ${CMAKE_CURRENT_BINARY_DIR}
-                   --stanc ${STANLI_STANC_EXECUTABLE}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_vectorize_ab
            COMMAND ${Python3_EXECUTABLE} tests/test_vectorize_ab.py
@@ -1022,9 +1185,9 @@ if(Python3_Interpreter_FOUND)
   # Source-level lit cases are one marked .stan file each. CMake discovers
   # both the dedicated tests/lit tree and existing fixtures that opt in, then
   # gives every case its own CTest entry. Adding coverage needs no build-system
-  # edit and no new C++ target. The runner invokes stanli_check, whose compiler
-  # is provisioned by the ordinary developer setup; a missing compiler is a
-  # test failure rather than a skip.
+  # edit and no new C++ target. The runner invokes stanli_check, which compiles
+  # through the embedded stanc3 pipeline or its stanli-compile executable; a
+  # build with neither fails these tests rather than skipping them.
   file(GLOB_RECURSE STANLI_LIT_CANDIDATES CONFIGURE_DEPENDS
        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.stan")
   # The generated signature models are replay tests registered from their
@@ -1079,12 +1242,16 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME ${STANLI_SIGNATURE_TEST}
              COMMAND ${Python3_EXECUTABLE} tools/check_signature_models.py
                      --build ${CMAKE_CURRENT_BINARY_DIR}
-                     --stanc ${STANLI_STANC_EXECUTABLE}
                      --model ${STANLI_SIGNATURE_STEM}
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     set_tests_properties(${STANLI_SIGNATURE_TEST} PROPERTIES
       LABELS "signature_refs")
   endforeach()
+  add_test(NAME test_zero_length_whole_assignment_resize
+           COMMAND ${Python3_EXECUTABLE}
+                   tests/test_zero_length_whole_assignment_resize.py
+                   --build ${CMAKE_CURRENT_BINARY_DIR}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Friendly local entry points. These deliberately invoke CTest rather than
   # duplicating discovery in a shell script, so a developer runs exactly the
   # same per-file tests and labels as CI. STANLI_LIT_JOBS is a cache setting

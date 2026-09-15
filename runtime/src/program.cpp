@@ -20,8 +20,10 @@
 // renumbering only drops registers nothing names.
 #include <stanli/program.hpp>
 
+#include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace stanli {
@@ -86,12 +88,11 @@ void each_read(const Program& p, const Program::Instr& I, F fn) {
       fn(Span{message.value_reg[k], message.value_len[k]});
     return;
   }
-  const ProgramOpSpec& spec = program_code_spec(I.code);
+  const ProgramOpSpec& spec = program_spec_of(I);
   if (spec.has(kProgramNoInputs)) return;
-  fn(Span{I.a, spec.has(kProgramRangeA) ? I.len : 1});
-  if (spec.has(kProgramReadB))
-    fn(Span{I.b, spec.has(kProgramRangeB) ? I.len : 1});
-  if (spec.has(kProgramReadC)) fn(Span{I.c, 1});
+  fn(Span{I.a, program_input_len(I, 0)});
+  if (spec.has(kProgramReadB)) fn(Span{I.b, program_input_len(I, 1)});
+  if (spec.has(kProgramReadC)) fn(Span{I.c, program_input_len(I, 2)});
 }
 
 void remap(Program::Call& c, const std::vector<int>& m) {
@@ -120,7 +121,7 @@ void remap(Program::Message& message, const std::vector<int>& m) {
 
 void remap(Program::Instr& I, const std::vector<int>& m) {
   if (I.code == Program::CALL || I.code == Program::TRANSFORM) return;
-  const ProgramOpSpec& spec = program_code_spec(I.code);
+  const ProgramOpSpec& spec = program_spec_of(I);
   if (program_output_len(I) > 0) I.dst = m[(size_t)I.dst];
   // DENSITY_VEC's `a` is a vec_densities index, not a register; its own
   // registers are remapped separately, by the table-level overload above.
@@ -145,15 +146,16 @@ bool overlaps(Span lhs, Span rhs) {
   return lhs.reg < rhs.reg + rhs.len && rhs.reg < lhs.reg + lhs.len;
 }
 
-bool forwardable_producer(Program::Code code) {
+bool forwardable_producer(const Program::Instr& I) {
   // Copies already have a dedicated aliasing pass below. CALL payloads carry
   // output and scratch ranges outside Instr. Instructions without a generated
   // adjoint are outside this experiment as well: the important saving is the
   // producer/copy pair in both the forward and generated reverse streams.
+  const Program::Code code = I.code;
   if (code == Program::MOV || code == Program::MOVR || code == Program::CALL ||
       code == Program::TRANSFORM)
     return false;
-  const ProgramOpSpec& spec = program_code_spec(code);
+  const ProgramOpSpec& spec = program_spec_of(I);
   return !spec.has(kProgramNoOutput) && !spec.has(kProgramNoAdjoint);
 }
 
@@ -208,7 +210,7 @@ bool forward_adjacent_copy_destinations(
   for (size_t i = 0; i + 1 < p.code.size(); ++i) {
     Program::Instr& producer = p.code[i];
     const Program::Instr& copy = p.code[i + 1];
-    if (!forwardable_producer(producer.code) ||
+    if (!forwardable_producer(producer) ||
         (copy.code != Program::MOV && copy.code != Program::MOVR))
       continue;
 
@@ -227,8 +229,7 @@ bool forward_adjacent_copy_destinations(
     // checkpoint copy and give the instruction straight back. Rules without
     // SaveOut consume the destination adjoint directly and may forward into a
     // repeatedly written state cell.
-    const bool saves_output =
-        program_code_spec(producer.code).has(kProgramSaveOut);
+    const bool saves_output = program_spec_of(producer).has(kProgramSaveOut);
     for (int k = 0; k < output_len && safe; ++k) {
       const size_t src = (size_t)(temporary.reg + k);
       const size_t dst = (size_t)(destination.reg + k);
@@ -257,7 +258,199 @@ bool forward_adjacent_copy_destinations(
   return true;
 }
 
+// inv_logit over a container, as the OP_INV_LOGIT kernel spells stan-math's
+// Matrix<var> overload: no sign branch, an inf guard.
+template <typename T>
+T inv_logit_range(const T& x) {
+  if constexpr (std::is_same_v<T, double>) {
+    const double e = std::exp(x);
+    return std::isinf(e) ? 1.0 : e / (1.0 + e);
+  } else {
+    const double v = inv_logit_range(stan::math::value_of(x));
+    T arg = x;
+    return stan::math::make_callback_var(v, [arg, v](auto&& vi) mutable {
+      arg.adj() += vi.adj() * v * (1.0 - v);
+    });
+  }
+}
+
+template <int32_t SA, int32_t SB, int32_t SC, typename T, typename Rule>
+void strided(const Program::Instr& I, T* reg, Rule rule) {
+  for (int32_t k = 0; k < I.len; ++k)
+    rule(reg[(size_t)(I.dst + k)], reg[(size_t)(I.a + SA * k)],
+         reg[(size_t)(I.b + SB * k)], reg[(size_t)(I.c + SC * k)]);
+}
+
+// The rule over the elements. Unit and zero strides are compile-time on the
+// double path, so the loops vectorize. The var replay takes one loop,
+// descending, so its tape unwinds a broadcast operand's adjoint ascending,
+// the order the graph kernels and stan-math's container overloads
+// accumulate in.
+template <int Arity, typename T, typename Rule>
+void each(const Program::Instr& I, T* reg, int32_t sa, int32_t sb, int32_t sc,
+          Rule rule) {
+  if constexpr (!std::is_same_v<T, double>) {
+    for (int32_t k = I.len; k-- > 0;)
+      rule(reg[(size_t)(I.dst + k)], reg[(size_t)(I.a + sa * k)],
+           reg[(size_t)(I.b + sb * k)], reg[(size_t)(I.c + sc * k)]);
+  } else if constexpr (Arity == 1) {
+    if (sa)
+      strided<1, 0, 0>(I, reg, rule);
+    else
+      strided<0, 0, 0>(I, reg, rule);
+  } else if constexpr (Arity == 2) {
+    switch (sa * 2 + sb) {
+      case 0:
+        return strided<0, 0, 0>(I, reg, rule);
+      case 1:
+        return strided<0, 1, 0>(I, reg, rule);
+      case 2:
+        return strided<1, 0, 0>(I, reg, rule);
+      default:
+        return strided<1, 1, 0>(I, reg, rule);
+    }
+  } else {
+    switch (sa * 4 + sb * 2 + sc) {
+      case 0:
+        return strided<0, 0, 0>(I, reg, rule);
+      case 1:
+        return strided<0, 0, 1>(I, reg, rule);
+      case 2:
+        return strided<0, 1, 0>(I, reg, rule);
+      case 3:
+        return strided<0, 1, 1>(I, reg, rule);
+      case 4:
+        return strided<1, 0, 0>(I, reg, rule);
+      case 5:
+        return strided<1, 0, 1>(I, reg, rule);
+      case 6:
+        return strided<1, 1, 0>(I, reg, rule);
+      default:
+        return strided<1, 1, 1>(I, reg, rule);
+    }
+  }
+}
+
+template <typename T>
+void run_range(const Program::Instr& I, T* reg) {
+  const int32_t sa = program_input_len(I, 0) > 1 ? 1 : 0;
+  const int32_t sb = program_reads(I, 1) && program_input_len(I, 1) > 1 ? 1 : 0;
+  const int32_t sc = program_reads(I, 2) && program_input_len(I, 2) > 1 ? 1 : 0;
+  const uint8_t law = I.law;
+  auto unary = [&](auto rule) { each<1>(I, reg, sa, sb, sc, rule); };
+  auto binary = [&](auto rule) { each<2>(I, reg, sa, sb, sc, rule); };
+  auto ternary = [&](auto rule) { each<3>(I, reg, sa, sb, sc, rule); };
+  switch (program_rule(I)) {
+    case Program::ADD:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a + b; });
+      break;
+    case Program::SUB:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a - b; });
+      break;
+    case Program::MUL:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a * b; });
+      break;
+    case Program::DIV:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a / b; });
+      break;
+    case Program::POW:
+      binary([law](T& o, const T& a, const T& b, const T&) {
+        o = program_pow(law, a, b);
+      });
+      break;
+    case Program::FMAX:
+      binary([law](T& o, const T& a, const T& b, const T&) {
+        o = program_extremum(true, law, a, b);
+      });
+      break;
+    case Program::FMIN:
+      binary([law](T& o, const T& a, const T& b, const T&) {
+        o = program_extremum(false, law, a, b);
+      });
+      break;
+    case Program::NEG:
+      unary([](T& o, const T& a, const T&, const T&) { o = -a; });
+      break;
+    case Program::EXP:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = stan::math::exp(a); });
+      break;
+    case Program::LOG:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = stan::math::log(a); });
+      break;
+    case Program::SQRT:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::sqrt(a);
+      });
+      break;
+    case Program::SQUARE:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::square(a);
+      });
+      break;
+    case Program::INV:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = stan::math::inv(a); });
+      break;
+    case Program::FABS:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::fabs(a);
+      });
+      break;
+    case Program::INV_LOGIT:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = inv_logit_range(a); });
+      break;
+    case Program::LOG1M:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::log1m(a);
+      });
+      break;
+    case Program::LOG1P_EXP:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::log1p_exp(a);
+      });
+      break;
+    case Program::TANH:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::tanh(a);
+      });
+      break;
+    case Program::LSE2:
+      binary([](T& o, const T& a, const T& b, const T&) {
+        o = stan::math::log_sum_exp(a, b);
+      });
+      break;
+    case Program::LOG_DIFF_EXP:
+      binary([](T& o, const T& a, const T& b, const T&) {
+        o = stan::math::log_diff_exp(a, b);
+      });
+      break;
+    case Program::LOG_MIX:
+      ternary([](T& o, const T& a, const T& b, const T& c) {
+        o = stan::math::log_mix(a, b, c);
+      });
+      break;
+    case Program::FMA:
+      ternary([](T& o, const T& a, const T& b, const T& c) {
+        o = stan::math::fma(a, b, c);
+      });
+      break;
+    default:
+      throw std::logic_error("run_range: unknown sub-opcode");
+  }
+}
+
 }  // namespace
+
+void run_elementwise_range(const Program::Instr& I, double* reg) {
+  run_range(I, reg);
+}
+
+void run_elementwise_range(const Program::Instr& I, stan::math::var* reg) {
+  run_range(I, reg);
+}
 
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {
   (void)compact_program_gated(p, seeded, true);

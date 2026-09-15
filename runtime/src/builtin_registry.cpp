@@ -1333,28 +1333,35 @@ BuiltinIndexMap builtin_index_map(
     }
   }
 
-  // A selection that walks storage at one non-negative step needs no gather.
-  bool constant_step = true;
-  const int64_t step = total > 1 ? map.gather[1] - map.gather[0] : 1;
-  for (int64_t cell = 1; constant_step && cell < total; ++cell)
-    constant_step = map.gather[cell] - map.gather[cell - 1] == step;
-  if (total == 0) {
-    map.kind = BuiltinSliceMap::Kind::Contiguous;
-    map.offset = 0;
-    map.gather.clear();
-  } else if (constant_step && step == 1) {
-    map.kind = BuiltinSliceMap::Kind::Contiguous;
-    map.offset = map.gather.front();
-    map.gather.clear();
-  } else if (constant_step && step >= 0) {
-    map.kind = BuiltinSliceMap::Kind::Strided;
-    map.offset = map.gather.front();
-    map.stride = step;
-    map.gather.clear();
-  } else {
-    map.kind = BuiltinSliceMap::Kind::Gather;
-  }
+  const FlatOffsetRun run = classify_flat_offsets(map.gather);
+  map.kind = run.kind;
+  map.offset = run.offset;
+  map.stride = run.stride;
+  if (map.kind != BuiltinSliceMap::Kind::Gather) map.gather.clear();
   return map;
+}
+
+FlatOffsetRun classify_flat_offsets(const std::vector<int64_t>& offsets) {
+  const int64_t total = static_cast<int64_t>(offsets.size());
+  bool constant_step = true;
+  const int64_t step = total > 1 ? offsets[1] - offsets[0] : 1;
+  for (int64_t cell = 1; constant_step && cell < total; ++cell)
+    constant_step = offsets[cell] - offsets[cell - 1] == step;
+  FlatOffsetRun run;
+  if (total == 0) {
+    run.kind = BuiltinSliceMap::Kind::Contiguous;
+    run.offset = 0;
+  } else if (constant_step && step == 1) {
+    run.kind = BuiltinSliceMap::Kind::Contiguous;
+    run.offset = offsets.front();
+  } else if (constant_step && step >= 0) {
+    run.kind = BuiltinSliceMap::Kind::Strided;
+    run.offset = offsets.front();
+    run.stride = step;
+  } else {
+    run.kind = BuiltinSliceMap::Kind::Gather;
+  }
+  return run;
 }
 
 int evaluate_predicate_builtin(const BuiltinSpec& spec, double lhs,

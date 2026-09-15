@@ -198,7 +198,7 @@ ConstFoldStats const_fold(
         if (out < 0 || !needed.count(out) || !emitted.insert(out).second)
           continue;
         const int64_t len = g.slots[(size_t)out].len;
-        const double* p = ex.value_ptr(remap.at(out));
+        const double* p = std::as_const(ex).value_ptr(remap.at(out));
         new_fills.emplace_back(out, std::vector<double>(p, p + len));
         if (folded) folded->push_back(out);
       }

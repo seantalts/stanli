@@ -4546,7 +4546,7 @@ void test_gq_reduction_lowering_guards() {
     };
     expect_invalid_range(0, 1, "out of bounds", "low OOB range assignment");
     expect_invalid_range(5, 6, "out of bounds", "high OOB range assignment");
-    expect_invalid_range(4, 4, "size mismatch",
+    expect_invalid_range(4, 4, "width mismatch",
                          "range assignment RHS width mismatch");
 
     // A single range index on a 2-D value selects rows; 4:5 is outside the
@@ -4997,7 +4997,113 @@ void test_runtime_control_write_array() {
   }
 }
 
+void test_integer_rng_control() {
+  using namespace stanli;
+  for (int n : {0, 1, 9}) {
+    DataMap data;
+    data.set_int("N", n);
+    test_setenv("STANLI_WA_FORCE_INTERP", "1");
+    auto cm = compile_model(
+        slurp("tests/fixtures/gq_rng_integer_control.tmir.sexp"), data);
+    test_unsetenv("STANLI_WA_FORCE_INTERP");
+    if (!cm.write_array || !cm.write_array->truncated.empty()) {
+      ++failures;
+      std::printf("FAIL integer RNG control did not compile: %s\n",
+                  cm.write_array ? cm.write_array->truncated.c_str()
+                                 : "no write_array");
+      continue;
+    }
+    Executor ex(cm.write_array->graph);
+    cm.write_array->bind(ex);
+    Executor copy(ex);
+    WaRng graph_rng(91), interp_rng(91), copy_rng(91);
+    for (int draw = 0; draw < 30; ++draw) {
+      const double x = 0.5 * ((draw % 5) - 2);
+      ex.params_data()[0] = copy.params_data()[0] = x;
+      std::map<std::string, DataMap::Entry> params;
+      params["x"].r = {x};
+      const auto expected = cm.write_array->interp->eval(params, interp_rng);
+      const auto evaluate = [&](Executor& engine, WaRng& rng) {
+        engine.run_forward_only(EvalState{&rng});
+        std::vector<double> row;
+        for (const auto& c : cm.write_array->columns) {
+          const double* values =
+              static_cast<const Executor&>(engine).value_ptr(c.slot);
+          for (int64_t i = 0; i < c.len; ++i)
+            row.push_back(values[c.storage_index(i)]);
+        }
+        return row;
+      };
+      if (!same_double_bytes(evaluate(ex, graph_rng), expected) ||
+          !same_double_bytes(evaluate(copy, copy_rng), expected)) {
+        ++failures;
+        std::printf("FAIL integer RNG control row/copy parity N=%d draw=%d\n",
+                    n, draw);
+      }
+    }
+    const auto next = interp_rng.gen()();
+    if (graph_rng.gen()() != next || copy_rng.gen()() != next) {
+      ++failures;
+      std::printf("FAIL integer RNG control consumed the wrong stream\n");
+    }
+  }
+
+  DataMap data;
+  auto dynamic = compile_model(
+      slurp("tests/fixtures/gq_rng_dynamic_shape.tmir.sexp"), data);
+  if (!dynamic.write_array || !dynamic.write_array->interp ||
+      dynamic.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL RNG-dependent local extent must stay interpreted\n");
+  } else {
+    WaRng rng(8), oracle(8);
+    std::map<std::string, DataMap::Entry> params;
+    params["x"].r = {0.5};
+    const auto row = dynamic.write_array->interp->eval(params, rng);
+    const double expected =
+        0.5 * (2 + stan::math::poisson_rng(std::exp(0.5), oracle.gen()) +
+               stan::math::poisson_rng(std::exp(0.5), oracle.gen()));
+    if (row.at(1) != expected || rng.gen()() != oracle.gen()()) {
+      ++failures;
+      std::printf("FAIL dynamic-shape fallback value/stream\n");
+    }
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  auto bad = compile_model(
+      slurp("tests/fixtures/gq_rng_invalid_index.tmir.sexp"), data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!bad.write_array || !bad.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL RNG checked-index fixture did not compile\n");
+  } else {
+    Executor ex(bad.write_array->graph);
+    bad.write_array->bind(ex);
+    ex.params_data()[0] = 0;
+    WaRng graph_rng(9), interp_rng(9);
+    std::map<std::string, DataMap::Entry> params;
+    params["x"].r = {0};
+    bool graph_threw = false, interp_threw = false;
+    try {
+      ex.run_forward_only(EvalState{&graph_rng});
+    } catch (const std::exception&) {
+      graph_threw = true;
+    }
+    try {
+      (void)bad.write_array->interp->eval(params, interp_rng);
+    } catch (const std::exception&) {
+      interp_threw = true;
+    }
+    if (!graph_threw || !interp_threw ||
+        graph_rng.gen()() != interp_rng.gen()()) {
+      ++failures;
+      std::printf("FAIL RNG invalid index must throw after the same draw\n");
+    }
+  }
+}
+
 int main() {
+  test_integer_rng_control();
   test_naming_rules();
   test_wanames_pipeline();
   test_wanames_interpreter_schema();

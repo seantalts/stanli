@@ -31,6 +31,20 @@ VERIFY_JSON = REPO / "docs" / "verification.json"
 # Context for models that evaluate but do not match, so the reason is not
 # lost between runs.
 NOTES = {
+    "dogs":
+        "31 and 32 ULP from CmdStan at two of the three recorded points, "
+        "against a 30 ULP budget. Against a 60-digit reference both engines "
+        "are off by about as much: CmdStan sums the 750 Bernoulli terms one "
+        "at a time and lands 10 to 59 ULP from the true log density, stanli's "
+        "one merged call uses Eigen's packet reduction and vectorized "
+        "exp/log1p and lands 15 to 63 ULP off, and on the gradient each "
+        "engine is the closer one at a different point. Matching CmdStan "
+        "would mean adopting its order; pairwise summation would put the "
+        "merged call within 1 ULP of the reference at a larger distance from "
+        "CmdStan.",
+    "dogs_log":
+        "bitwise at the primary point and 25 ULP at another recorded "
+        "point, for the same reason as dogs, inside the 30 ULP budget.",
     "kronecker_gp":
         "lp matches CmdStan to 1e-13 and 436/438 gradients match; the two "
         "that flow through eigenvectors_sym differ by 0.7%. The covariance "
@@ -147,6 +161,10 @@ def main():
         v = ver[m]
         rel = "0 (bitwise)" if v["max_rel"] == 0 else f"{v['max_rel']:.1e}"
         md.append(f"| `{m}` | {v['n_values']} | {rel} | {v['max_ulp']} |")
+    noted = [m for m in verified if m in NOTES]
+    if noted:
+        md += ["", "Models over the default budget:", ""]
+        md += [f"- `{m}`: {NOTES[m]}" for m in noted]
     wa_refs = {}
     if REFS_PATH.exists():
         # Every point carries its own write_array reference; the table

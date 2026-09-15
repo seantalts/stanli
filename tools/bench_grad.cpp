@@ -24,8 +24,9 @@ static std::string slurp(const char* p) {
 
 int benchmark_main(int argc, char** argv) {
   if (argc < 4) {
-    std::fprintf(stderr, "usage: bench_grad mir.sexp data.json N|--prep|--timed "
-                         "[--warmup-ms N --measure-ms N]\n");
+    std::fprintf(stderr,
+                 "usage: bench_grad mir.sexp data.json N|--prep|--timed "
+                 "[--warmup-ms N --measure-ms N]\n");
     return 2;
   }
   const bool prep_only = std::string(argv[3]) == "--prep";
@@ -123,23 +124,26 @@ int benchmark_main(int argc, char** argv) {
   double lp = 0;
   stanli::ExecutorModel model(ex);
   stan::callbacks::logger logger;
-  const auto one = [&]() {
-    stan::model::gradient(model, q, lp, grad, logger);
-  };
+  const auto one = [&]() { stan::model::gradient(model, q, lp, grad, logger); };
   if (timed) {
     const auto opts = stanli_benchmark::options(argc, argv, 4);
     one();
     if (!std::isfinite(lp) || !grad.allFinite())
-      throw std::runtime_error("benchmark point has non-finite density or gradient");
+      throw std::runtime_error(
+          "benchmark point has non-finite density or gradient");
     const auto warm = stanli_benchmark::window(one, opts.warmup_ns, 1, true);
-    const auto measured = stanli_benchmark::window(one, opts.measure_ns, warm.batch);
+    const auto measured =
+        stanli_benchmark::window(one, opts.measure_ns, warm.batch);
     stanli_benchmark::output(warm, measured, lp, grad);
     return 0;
   }
   // Warm up by time, not by count: 1000 evaluations is nothing on a scalar
   // model and 90 seconds on an ODE one.
   int warmup_evals = 0;
-  const auto legacy_one = [&]() { one(); sink += lp; };
+  const auto legacy_one = [&]() {
+    one();
+    sink += lp;
+  };
   const Time warmup_start = prep_now();
   warmup_evals = static_cast<int>(
       stanli_benchmark::window(legacy_one, 200'000'000, 1, true).iterations);
@@ -166,8 +170,9 @@ int benchmark_main(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
-  try { return benchmark_main(argc, argv); }
-  catch (const std::exception& error) {
+  try {
+    return benchmark_main(argc, argv);
+  } catch (const std::exception& error) {
     std::fprintf(stderr, "bench_grad: %s\n", error.what());
     return 1;
   }

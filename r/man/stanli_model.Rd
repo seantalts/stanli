@@ -4,7 +4,7 @@
 \alias{stanli_model}
 \title{Compile a Stan model}
 \usage{
-stanli_model(file = NULL, code = NULL, data = NULL, mir = NULL)
+stanli_model(file = NULL, code = NULL, data = NULL, mir = NULL, seed = 1)
 }
 \arguments{
 \item{file}{Path to a `.stan` file.}
@@ -15,6 +15,15 @@ stanli_model(file = NULL, code = NULL, data = NULL, mir = NULL)
 
 \item{mir}{Transformed MIR text, for a build without the embedded
 compiler. Rarely needed.}
+
+\item{seed}{The model-construction seed: RNG calls in transformed data
+draw from it once, here, the way CmdStan's generated constructor does.
+[sample_model()] and [optimize_model()] forward their own `seed` here
+when transformed data drew from it, rebuilding the model for that run,
+so one seed governs a whole run as it does in CmdStan. The rebuilt
+model is the one the fit carries as `fit$model`; the object passed in
+is unchanged. A model whose transformed data never draws is never
+rebuilt.}
 }
 \value{
 An object of class `stanli_model` whose `columns` name every

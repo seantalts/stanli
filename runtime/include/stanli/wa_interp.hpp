@@ -69,6 +69,15 @@ void multi_normal_rng_draw(const double* location, size_t location_size,
 void dirichlet_rng_draw(const double* alpha, size_t alpha_size, double* output,
                         size_t output_size, WaRng& rng);
 
+// The interpreter's RNG vocabulary: every `_rng` spelling an interpreted
+// section can draw, evaluated with `in` and advancing `rng`. One function
+// for every interpreter that owns a stream (transformed data at load,
+// interpreted write_array per draw), so no section can speak a different
+// subset. Returns false for a name outside the vocabulary; the caller then
+// falls through to its remaining hooks and finally to "unsupported".
+bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
+                          DataMap::Entry* out, WaRng& rng);
+
 // The columns only exist after one evaluation, so every driver that wants
 // them at construction time has to probe. These two are that probe, shared
 // so the C ABI and the BridgeStan facade discover the SAME columns: a
@@ -101,9 +110,6 @@ class WaInterp {
                   const std::map<std::string, DataMap::Entry>& params);
   bool write_param(MirInterp<double>& in, const mir::Stmt& s,
                    std::vector<double>& row);
-  bool rng_fun(MirInterp<double>& in, const mir::Expr& e, DataMap::Entry* out,
-               WaRng& rng);
-
   std::shared_ptr<const mir::Program> prog_;
   std::map<std::string, const mir::FunDef*> funs_;
   std::map<std::string, DataMap::Entry> base_env_;

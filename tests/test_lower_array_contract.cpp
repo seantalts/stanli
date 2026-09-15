@@ -162,7 +162,8 @@ void test_register_array_boundary() {
     const double theta[4] = {4.0, 5.0, 6.0, 7.0};
     const double xr[1] = {1.5};
     std::vector<double> out;
-    run_rhs<double>(flat, 0.0, y, theta, xr, out);
+    std::vector<double> rhs_registers;
+    run_rhs<double>(flat, 0.0, y, theta, xr, out, rhs_registers);
     check(out.size() == 1, "register scalar-array output width");
     if (out.size() == 1) eq("register scalar-array value", out[0], 15.5);
   }

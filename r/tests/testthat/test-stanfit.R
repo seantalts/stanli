@@ -17,9 +17,6 @@ stanfit_cli_oracle <- function(code, warmup, samples, thin, save_warmup,
              "--warmup", warmup, "--samples", samples, "--thin", thin,
              "--chains", chains, "--sampler-stats")
   if (save_warmup) flags <- c(flags, "--save-warmup")
-  if (.Platform$OS.type == "windows")
-    flags <- c(flags, "--stanc", shQuote(file.path(dirname(stanli_runtime_path()),
-                                                  "stanc.exe")))
   status <- system2(cli, flags, stdout = csv_file, stderr = error_file)
   expect_equal(status, 0L, info = paste(readLines(error_file), collapse = "\n"))
   raw <- readLines(csv_file)
@@ -74,14 +71,6 @@ stanfit_shape_code <- "
 test_that("direct stanfit construction agrees with rstan's CLI CSV import", {
   skip_without_runtime()
   skip_if_not_installed("rstan")
-  if (.Platform$OS.type == "windows") {
-    # The CLI accepts the stock compiler. Use that same producer for the
-    # oracle candidate; the other ecosystem tests exercise R's default path.
-    previous_stanc <- Sys.getenv("STANLI_STANC", unset = NA_character_)
-    on.exit(if (is.na(previous_stanc)) Sys.unsetenv("STANLI_STANC") else
-      Sys.setenv(STANLI_STANC = previous_stanc), add = TRUE)
-    Sys.setenv(STANLI_STANC = file.path(dirname(stanli_runtime_path()), "stanc.exe"))
-  }
   m <- stanli_model(code = stanfit_shape_code)
   for (save_warmup in c(FALSE, TRUE)) {
     fit <- sample_model(m, chains = 2, seed = 18, warmup = 101,

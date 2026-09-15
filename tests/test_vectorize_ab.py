@@ -2,6 +2,7 @@
 """Unit tests for the measurement report parsers and artifact schema."""
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -166,10 +167,47 @@ class VectorizeAbTest(unittest.TestCase):
             ["probe"], 1, output=b"OK 1\n", stderr=b"last line\n")
         with mock.patch.object(vectorize_ab.subprocess, "run",
                                side_effect=timeout):
-            result = vectorize_ab.run_command(["probe"], 1)
+            result = vectorize_ab._run_command_fallback(["probe"], 1)
         self.assertTrue(result["timeout"])
         self.assertEqual(result["stdout"], "OK 1\n")
         self.assertEqual(result["stderr"], "last line\n")
+        self.assertIsNone(result["maxrss_bytes"])
+
+    def test_fallback_command_reports_no_maxrss(self):
+        completed = subprocess.CompletedProcess(
+            [], 0, stdout="out\n", stderr="")
+        with mock.patch.object(vectorize_ab.subprocess, "run",
+                               return_value=completed):
+            result = vectorize_ab._run_command_fallback(["probe"], 1)
+        self.assertFalse(result["timeout"])
+        self.assertEqual(result["returncode"], 0)
+        self.assertIsNone(result["maxrss_bytes"])
+
+    def test_run_command_captures_output_and_returncode(self):
+        result = vectorize_ab.run_command(
+            [sys.executable, "-c",
+             "import sys; print('out'); print('err', file=sys.stderr); "
+             "sys.exit(3)"], 5)
+        self.assertFalse(result["timeout"])
+        self.assertEqual(result["returncode"], 3)
+        self.assertEqual(result["stdout"].strip(), "out")
+        self.assertEqual(result["stderr"].strip(), "err")
+        self.assertIn("maxrss_bytes", result)
+
+    def test_run_command_reports_maxrss_on_this_platform(self):
+        result = vectorize_ab.run_command(
+            [sys.executable, "-c", "pass"], 5)
+        if hasattr(os, "wait4"):
+            self.assertIsInstance(result["maxrss_bytes"], int)
+            self.assertGreater(result["maxrss_bytes"], 0)
+        else:
+            self.assertIsNone(result["maxrss_bytes"])
+
+    def test_run_command_times_out_and_kills_the_child(self):
+        result = vectorize_ab.run_command(
+            [sys.executable, "-c", "import time; time.sleep(2)"], 0.05)
+        self.assertTrue(result["timeout"])
+        self.assertIsNone(result["returncode"])
 
     def test_candidate_pass_selects_only_one_source_pass(self):
         completed = {
@@ -218,7 +256,9 @@ class VectorizeAbTest(unittest.TestCase):
         }])
         sample = evidence[0]["samples"][0]
         self.assertEqual(sample["log_prob"]["final_ops"], 7)
+        self.assertEqual(sample["log_prob"]["final_slots"], 8)
         self.assertEqual(sample["write_array"]["final_ops"], 5)
+        self.assertEqual(sample["write_array"]["final_slots"], 6)
         self.assertEqual(sample["write_array"]["element_store"], 2)
 
     def test_dump_summary_is_parsed(self):
@@ -276,6 +316,180 @@ class VectorizeAbTest(unittest.TestCase):
         self.assertEqual(measured["iterations"], 5000)
         self.assertEqual(measured["on_over_off"], 2.0)
 
+    def test_gradient_ratio_exceeds_threshold(self):
+        threshold = vectorize_ab.GRADIENT_RATIO_THRESHOLD
+        self.assertFalse(vectorize_ab.gradient_ratio_exceeds(
+            {"ok": True, "on_over_off": threshold}))
+        self.assertFalse(vectorize_ab.gradient_ratio_exceeds(
+            {"ok": True, "on_over_off": threshold - 0.001}))
+        self.assertTrue(vectorize_ab.gradient_ratio_exceeds(
+            {"ok": True, "on_over_off": threshold + 0.001}))
+        self.assertFalse(vectorize_ab.gradient_ratio_exceeds(
+            {"ok": True, "on_over_off": None}))
+        self.assertFalse(vectorize_ab.gradient_ratio_exceeds(None))
+
+    def test_gradient_gate_requires_a_confirming_rerun(self):
+        threshold = vectorize_ab.GRADIENT_RATIO_THRESHOLD
+        grown = {"ok": True, "on_over_off": threshold + 0.05}
+        calm = {"ok": True, "on_over_off": 1.0}
+        confirmed = {"ok": True, "on_over_off": threshold + 0.03}
+        unavailable = {"ok": False, "on_over_off": threshold + 0.05}
+
+        # No initial excursion: never asks for a re-run and never fails.
+        self.assertEqual(vectorize_ab.gradient_gate("m", calm, None), [])
+
+        # Initial excursion but no re-run recorded yet: report only.
+        self.assertEqual(vectorize_ab.gradient_gate("m", grown, None), [])
+
+        # Re-run comes back calm: the excursion was noise, no failure.
+        self.assertEqual(vectorize_ab.gradient_gate("m", grown, calm), [])
+
+        # A re-run that could not be measured is not treated as confirming.
+        self.assertEqual(
+            vectorize_ab.gradient_gate("m", grown, unavailable), [])
+
+        # Both the initial measurement and the fresh re-run exceed: fail.
+        failures = vectorize_ab.gradient_gate("m", grown, confirmed)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("m", failures[0])
+        self.assertIn(f"{grown['on_over_off']:.4f}", failures[0])
+        self.assertIn(f"{confirmed['on_over_off']:.4f}", failures[0])
+
+    def _write_graphs_jsonl(self, directory, records):
+        with (pathlib.Path(directory) / "graphs.jsonl").open("w") as stream:
+            for record in records:
+                stream.write(json.dumps(record) + "\n")
+
+    def _cell_record(self, model, source_pass, runtime_reroll, final_ops,
+                     lower_ops, regions, final_slots=100):
+        return {
+            "model": model,
+            "source_pass": source_pass,
+            "runtime_reroll": runtime_reroll,
+            "graph": {"ops": final_ops, "slots": final_slots},
+            "samples": [{"sample": 1, "rows": [
+                {"graph": "log_prob", "stage": "lower", "ops": lower_ops},
+                {"graph": "log_prob", "stage": "island", "regions": regions,
+                 "ns": 10},
+            ]}],
+        }
+
+    def test_load_cells_returns_none_without_graphs_jsonl(self):
+        with tempfile.TemporaryDirectory() as empty:
+            self.assertIsNone(vectorize_ab.load_cells(empty))
+
+    def test_baseline_diff_flags_a_runtime_wide_regression(self):
+        # Both the off and on cells grow identically: invisible to the
+        # on/off gate, which is exactly what a baseline comparison is for.
+        before = [
+            self._cell_record("M0_model", "off", "on", 34, 1013, 0),
+            self._cell_record("M0_model", "on", "on", 34, 1013, 0),
+            self._cell_record("stable_model", "off", "on", 20, 50, 0),
+            self._cell_record("stable_model", "on", "on", 20, 50, 0),
+        ]
+        after = [
+            self._cell_record("M0_model", "off", "on", 62, 1013, 0),
+            self._cell_record("M0_model", "on", "on", 62, 1013, 0),
+            self._cell_record("stable_model", "off", "on", 20, 50, 0),
+            self._cell_record("stable_model", "on", "on", 20, 50, 0),
+        ]
+        with tempfile.TemporaryDirectory() as before_dir, \
+                tempfile.TemporaryDirectory() as after_dir:
+            self._write_graphs_jsonl(before_dir, before)
+            self._write_graphs_jsonl(after_dir, after)
+            before_cells = vectorize_ab.load_cells(before_dir)
+            after_cells = vectorize_ab.load_cells(after_dir)
+            comparison = vectorize_ab.baseline_comparison_report(
+                before_dir, before_cells, after_cells)
+        self.assertTrue(comparison["available"])
+        self.assertEqual(comparison["cells_compared"], 4)
+        self.assertEqual(comparison["changed_cells"], 2)
+        self.assertEqual(comparison["final_ops_grew_models"], ["M0_model"])
+        self.assertEqual(comparison["final_ops_shrank_models"], [])
+        cells = {(c["source_pass"], c["runtime_reroll"])
+                for c in comparison["changes"]}
+        self.assertEqual(cells, {("off", "on"), ("on", "on")})
+
+    def test_baseline_comparison_reports_missing_baseline(self):
+        comparison = vectorize_ab.baseline_comparison_report(
+            "/no/such/dir", None, {})
+        self.assertFalse(comparison["available"])
+        self.assertIn("reason", comparison)
+
+    def test_baseline_comparison_is_first_in_summary_md(self):
+        graph = self._cell_record("probe", "off", "on", 5, 5, 0)
+        graph["samples"][0]["elapsed_ns"] = 1
+        with tempfile.TemporaryDirectory() as temp:
+            out = pathlib.Path(temp)
+            comparison = {
+                "baseline_dir": "/baseline",
+                "available": True,
+                "cells_compared": 1,
+                "changed_cells": 1,
+                "final_ops_grew_models": ["probe"],
+                "final_ops_shrank_models": [],
+                "changes": [{
+                    "model": "probe", "source_pass": "off",
+                    "runtime_reroll": "on",
+                    "before": {"final_ops": 5, "lower_ops": 5,
+                              "regions": 0, "final_slots": 100},
+                    "after": {"final_ops": 9, "lower_ops": 5,
+                             "regions": 0, "final_slots": 100},
+                }],
+            }
+            vectorize_ab.write_reports(
+                out, {"schema": 1}, [], [graph], [{
+                    "model": "probe", "mir_changed": False,
+                    "changed_values": 0, "points": 1,
+                }], [], [], [], [], baseline_comparison=comparison)
+            text = (out / "summary.md").read_text()
+        title_index = text.index("# MIR source-pass A/B measurement")
+        baseline_index = text.index("## Baseline comparison")
+        outcome_index = text.index("Outcome:")
+        self.assertLess(title_index, baseline_index)
+        self.assertLess(baseline_index, outcome_index)
+        self.assertIn("probe", text[baseline_index:outcome_index])
+
+    def test_op_count_gate_compares_reroll_on_cells(self):
+        def cell(source_pass, runtime_reroll, final_ops, lowered_ops):
+            return {
+                "source_pass": source_pass,
+                "runtime_reroll": runtime_reroll,
+                "graph": {"ops": final_ops},
+                "samples": [{"sample": 1, "rows": [{
+                    "graph": "log_prob", "stage": "lower", "ns": 1,
+                    "ops": lowered_ops,
+                }]}],
+            }
+
+        grown = vectorize_ab.op_count_gate("probe", [
+            cell("off", "on", 104, 14041), cell("on", "on", 163, 8311)])
+        self.assertEqual(len(grown), 1)
+        self.assertIn("104 -> 163", grown[0])
+        self.assertEqual(vectorize_ab.op_count_gate("probe", [
+            cell("off", "on", 16, 91), cell("on", "on", 17, 14)]), [])
+        self.assertEqual(vectorize_ab.op_count_gate("probe", [
+            cell("off", "on", 10, 10), cell("on", "on", 11, 10)]), [])
+        lowered = vectorize_ab.op_count_gate("probe", [
+            cell("off", "on", 7, 6), cell("on", "on", 7, 8)])
+        self.assertEqual(len(lowered), 1)
+        self.assertIn("6 -> 8", lowered[0])
+        self.assertEqual(vectorize_ab.op_count_gate("probe", [
+            cell("off", "off", 27, 1), cell("on", "off", 10522, 2),
+            cell("off", "on", 27, 1)]), [])
+        missing = cell("on", "on", None, None)
+        missing["graph"] = {}
+        missing["samples"] = []
+        self.assertEqual(vectorize_ab.op_count_gate("probe", [
+            cell("off", "on", 27, 58449), missing]), [])
+        expected = next(iter(vectorize_ab.LOWERED_GROWTH_EXPECTED))
+        self.assertEqual(vectorize_ab.op_count_gate(expected, [
+            cell("off", "on", 315, 1348), cell("on", "on", 315, 1628)]), [])
+        final_grew = vectorize_ab.op_count_gate(expected, [
+            cell("off", "on", 315, 1348), cell("on", "on", 400, 1628)])
+        self.assertEqual(len(final_grew), 1)
+        self.assertIn("315 -> 400", final_grew[0])
+
     def test_report_writes_all_artifacts(self):
         graph = {
             "model": "probe",
@@ -285,6 +499,7 @@ class VectorizeAbTest(unittest.TestCase):
             "samples": [{
                 "sample": 1,
                 "elapsed_ns": 4,
+                "maxrss_bytes": 12345,
                 "rows": [{
                     "graph": "log_prob", "stage": "reroll", "ns": 3,
                     "regions": 0, "packed_rows": 0, "term_density": 0,
@@ -300,7 +515,7 @@ class VectorizeAbTest(unittest.TestCase):
                 [graph], [{
                     "model": "probe", "mir_changed": False,
                     "changed_values": 0, "points": 1,
-                }], [], [])
+                }], [], [], [], [])
             self.assertTrue(summary["ok"])
             expected = {
                 "manifest.json", "corpus.jsonl", "graphs.jsonl",
@@ -308,10 +523,44 @@ class VectorizeAbTest(unittest.TestCase):
             }
             self.assertEqual({path.name for path in out.iterdir()}, expected)
             self.assertTrue(json.loads((out / "summary.json").read_text())["ok"])
-            header = (out / "bench.tsv").read_text().splitlines()[0]
+            bench_lines = (out / "bench.tsv").read_text().splitlines()
+            header = bench_lines[0]
             self.assertIn("write_array_ops", header)
+            self.assertIn("log_prob_slots", header)
+            self.assertIn("write_array_slots", header)
+            self.assertIn("prep_maxrss_bytes", header)
+            self.assertIn("gradient_maxrss_bytes", header)
             self.assertIn("log_prob_reroll_packed_rows", header)
             self.assertIn("write_array_reroll_element_store", header)
+            columns = header.split("\t")
+            preparation_row = next(
+                row for row in bench_lines[1:]
+                if row.split("\t")[columns.index("measurement")]
+                == "preparation")
+            self.assertEqual(
+                preparation_row.split("\t")[
+                    columns.index("prep_maxrss_bytes")], "12345")
+            summary = vectorize_ab.write_reports(
+                out, {"schema": 1}, [], [graph], [{
+                    "model": "probe", "mir_changed": True,
+                    "changed_values": 0, "points": 1,
+                }], [], [], ["probe: final log_prob ops grew 27 -> 10522"],
+                [])
+            self.assertTrue(summary["ok"])
+            self.assertEqual(len(summary["op_count_diagnostics"]), 1)
+            self.assertIn("## Op count diagnostics",
+                          (out / "summary.md").read_text())
+
+            summary = vectorize_ab.write_reports(
+                out, {"schema": 1}, [], [graph], [{
+                    "model": "probe", "mir_changed": False,
+                    "changed_values": 0, "points": 1,
+                }], [], [], [], ["probe: gradient on/off 1.09 exceeds 1.04, "
+                                 "confirmed at 1.07"])
+            self.assertFalse(summary["ok"])
+            self.assertEqual(len(summary["gradient_failures"]), 1)
+            self.assertIn("## Gradient time failures",
+                          (out / "summary.md").read_text())
 
 
 if __name__ == "__main__":

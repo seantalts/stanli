@@ -50,13 +50,19 @@
   tr { cursor: pointer; }
   tr:hover td { background: #8881; }
   td.bad { color: #c33; font-weight: 600; }
+  /* Collapsed by default, like the generated-quantities table, so the
+     two comparison columns line up whatever their reports say. The
+     summary line carries the verdict so nothing is lost while closed. */
   .diagnostics {
-    margin: .8rem 0; padding: .7rem .9rem;
+    margin: .8rem 0; padding: .5rem .9rem;
     border: 1px solid #8884; border-radius: 6px;
   }
-  .diagnostics h4 { font-size: .85rem; margin: 0 0 .35rem; }
+  .diagnostics summary { cursor: pointer; font-weight: 600;
+                         font-size: .85rem; }
+  .diagnostics .verdict { font-weight: 400; opacity: .8; }
+  .diagnostics .verdict.bad { color: #c33; font-weight: 600; opacity: 1; }
   .diagnostics pre {
-    margin: 0; font: .8rem/1.5 ui-monospace, monospace;
+    margin: .5rem 0 0; font: .8rem/1.5 ui-monospace, monospace;
     white-space: pre-wrap; overflow-wrap: anywhere;
   }
   .diagnostic-note { font-size: .75rem; opacity: .75; margin: .45rem 0 0; }
@@ -132,14 +138,13 @@
 </style>
 </head>
 <body>
-<h1>stanli: The Stan Language Interpreter</h1>
+<h1>stanli: The Stan Language Interpreter (browser edition)</h1>
 <p class="sub">Run Stan locally in your browser&mdash;no server or C++ toolchain.
 stanc3 (OCaml&rarr;JS) compiles the model, then stanli.wasm lowers it to an op
 graph and runs Stan Dynamic HMC,
 <a href="https://arxiv.org/abs/2506.18746">WALNUTS</a>, or
-<a href="https://arxiv.org/abs/2108.03782">Pathfinder</a>.
-Compare methods side by side.</p>
-<p class="sub">And it's often <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">FASTER??</a></p>
+<a href="https://arxiv.org/abs/2108.03782">Pathfinder</a>.</p>
+<p class="sub">And the Python and R packages are often <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">FASTER</a> than RStan / PyStan / CmdStan*?? </p>
 <div>
 <a href="https://github.com/seantalts/stanli">github.com/seantalts/stanli</a>
 &middot; <a href="https://www.npmjs.com/package/@seantalts/stanli">npm</a>
@@ -574,12 +579,30 @@ async function completedFit(results, sampler) {
            chains: results.map((r) => r.columns), diagnostics };
 }
 
+// The one-line verdict shown while the report is collapsed. A NUTS
+// report always ends with its verdict ("No problems detected.", "2
+// diagnostic checks failed.", ...); WALNUTS and a failed diagnose()
+// have no checks to report on.
+function diagnosticVerdict(f) {
+  if (f.sampler !== "nuts" ||
+      f.diagnostics.startsWith("Sampling diagnostics unavailable"))
+    return { text: "unavailable", bad: false };
+  const lines = f.diagnostics.trim().split("\n");
+  const last = lines[lines.length - 1];
+  return { text: last.replace(/\.$/, ""), bad: /failed/.test(last) };
+}
+
 function showDiagnostics(parent, f) {
   if (!f.diagnostics) return;
-  const section = document.createElement("section");
+  const section = document.createElement("details");
   section.className = "diagnostics";
-  const heading = document.createElement("h4");
-  heading.textContent = "Sampling diagnostics";
+  const heading = document.createElement("summary");
+  heading.textContent = "Sampling diagnostics \u00b7 ";
+  const verdict = document.createElement("span");
+  const v = diagnosticVerdict(f);
+  verdict.className = "verdict" + (v.bad ? " bad" : "");
+  verdict.textContent = v.text;
+  heading.appendChild(verdict);
   const report = document.createElement("pre");
   report.textContent = f.diagnostics;
   section.append(heading, report);
@@ -1737,10 +1760,12 @@ Stanli has its own lowering and optimization passes that run in tens of millisec
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
 it works</a></p>
 <p><b>Not just faster to start up, but usually faster gradients and sampling??</b> Median
-<!--gen:corpus_median-->3.02x<!--/gen--> CmdStan across
+<!--gen:corpus_median-->2.10x<!--/gen--> CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
-<!--gen:corpus_at_par-->117<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
+<!--gen:corpus_at_par-->119<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
 <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.
+The suite also includes <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md#educational-models">13 educational models with complete-run comparisons</a>
+against already-compiled CmdStan.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
 </p>

@@ -3,9 +3,10 @@
 // with NUTS, emits constrained parameter draws.
 //
 // Usage: stanli_run model.stan data.json [--seed N] [--warmup N]
-//        [--samples N] [--delta X] [--max-depth N] [--stanc PATH]
+//        [--samples N] [--delta X] [--max-depth N]
+//        [--stanli-compile PATH | --stanc PATH]
 //        [--sampler-stats] [--chains N] [--num-threads N] [--thin N]
-//        [--save-warmup] [--init-radius X] [--summary]
+//        [--save-warmup] [--init-radius X] [--summary] [--timings]
 //
 // --chains runs N chains and concatenates their draws in chain order, so
 // a reader that expects one chain still parses the CSV. --summary is
@@ -16,7 +17,8 @@
 //
 // Built with the stanc3 embed object this needs nothing else on the
 // machine: no C++ toolchain, no separate compiler binary. Without it,
-// --stanc (or $STANC) points at a stanc3 to shell out to.
+// stanli-compile is found beside the executable or on PATH. --stanli-compile
+// selects it explicitly; --stanc (or $STANC) selects stock stanc instead.
 //
 // --sampler-stats prepends CmdStan's seven sampler columns (lp__,
 // accept_stat__, stepsize__, treedepth__, n_leapfrog__, divergent__,
@@ -27,9 +29,11 @@
 #include <stanli/nuts.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "csv_writer.hpp"
+#include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
 
-#include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -37,64 +41,27 @@
 #include <string>
 #include <vector>
 
-#ifdef STANLI_EMBED_STANC
-extern "C" char* stanli_stanc_tmir(const char* stan_code);
-extern "C" void stanli_stanc_free(char* p);
-
-// The compiler linked into this binary. Returns the MIR, or throws with
-// stanc's own error text -- there is no stanc binary to find, no
-// subprocess, and no temp file.
-static std::string embedded_stanc(const std::string& model) {
-  std::string src;
-  {
-    std::unique_ptr<FILE, int (*)(FILE*)> f(std::fopen(model.c_str(), "rb"),
-                                            std::fclose);
-    if (!f) throw std::runtime_error("cannot read " + model);
-    std::array<char, 1 << 16> buf;
-    size_t n;
-    while ((n = fread(buf.data(), 1, buf.size(), f.get())) > 0)
-      src.append(buf.data(), n);
-  }
-  char* res = stanli_stanc_tmir(src.c_str());
-  const std::string out(res ? res : "ERRstanc returned nothing");
-  if (res) stanli_stanc_free(res);
-  if (out.compare(0, 3, "ERR") == 0)
-    throw std::runtime_error("stanc: " + out.substr(3));
-  return out.substr(2);  // strip "OK"
-}
-#endif
-
-static std::string run_stanc(const std::string& stanc,
-                             const std::string& model) {
-  std::string out = stanli::tooling::run_stanc_process(stanc, model);
-  if (out.empty())
-    throw std::runtime_error("stanc produced no MIR (compile error?)");
-  return out;
-}
-
 int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_run model.stan data.json [--seed N] "
                  "[--warmup N] [--samples N] [--delta X] "
-                 "[--max-depth N] [--stanc PATH] [--sampler-stats] "
+                 "[--max-depth N] [--stanli-compile PATH | --stanc PATH] "
+                 "[--sampler-stats] "
                  "[--chains N] [--num-threads N] [--thin N] "
-                 "[--save-warmup] [--init-radius X] [--summary]\n");
+                 "[--save-warmup] [--init-radius X] [--summary] [--timings]\n");
     return 2;
   }
   std::string model = argv[1], datafile = argv[2];
-#ifdef _WIN32
-  std::string stanc = "deps/stanc3/stanc.exe";
-#else
-  std::string stanc = "deps/stanc3/stanc";
-#endif
-  bool stanc_explicit = false;
+  std::string stanc;
+  std::string compiler;
   stanli::NutsConfig cfg;
   cfg.seed = 1;
   cfg.warmup = 1000;
   cfg.samples = 1000;
   bool want_stats = false;
   bool want_summary = false;
+  bool want_timings = false;
   int n_chains = 1;
   // 0 means "one thread per chain", resolved once n_chains is known.
   // Threading does not change the draws -- they are byte-identical to a
@@ -103,6 +70,10 @@ int main(int argc, char** argv) {
   bool threads_asked = false;
   for (int i = 3; i < argc; ++i) {
     const std::string k = argv[i];
+    if (k == "--timings") {
+      want_timings = true;
+      continue;
+    }
     if (k == "--sampler-stats") {
       want_stats = true;
       continue;
@@ -136,10 +107,10 @@ int main(int argc, char** argv) {
       cfg.thin = std::stoi(v);
     else if (k == "--init-radius")
       cfg.init_radius = std::stod(v);
-    else if (k == "--stanc") {
+    else if (k == "--stanc")
       stanc = v;
-      stanc_explicit = true;
-    }
+    else if (k == "--stanli-compile")
+      compiler = v;
   }
   if (n_chains < 1) n_chains = 1;
   if (n_threads <= 0) n_threads = n_chains;
@@ -154,22 +125,24 @@ int main(int argc, char** argv) {
     n_threads = 1;
   }
   if (const char* env = std::getenv("STANC")) {
-    stanc = env;
-    stanc_explicit = true;
+    if (*env) stanc = env;
+  }
+  if (!stanc.empty() && !compiler.empty()) {
+    std::fprintf(stderr,
+                 "stanli_run: --stanc (or STANC) and --stanli-compile are "
+                 "mutually exclusive\n");
+    return 2;
   }
 
   try {
+    using Clock = std::chrono::steady_clock;
+    const auto timing_start = want_timings ? Clock::now() : Clock::time_point{};
     stanli::DataMap data = stanli::DataMap::from_json_file(datafile);
-    // The embedded compiler wins unless the caller named a stanc
-    // explicitly (--stanc or $STANC), which is how a build with both can
-    // still be pointed at a different stanc3 for a bisect.
-#ifdef STANLI_EMBED_STANC
     const std::string mir =
-        stanc_explicit ? run_stanc(stanc, model) : embedded_stanc(model);
-#else
-    const std::string mir = run_stanc(stanc, model);
-#endif
-    stanli::CompiledModel cm = stanli::compile_model(mir, data);
+        stanli::tooling::compile_source(stanc, compiler, model);
+    if (mir.empty())
+      throw std::runtime_error("the compiler produced no MIR (compile error?)");
+    stanli::CompiledModel cm = stanli::compile_model(mir, data, cfg.seed);
     stanli::Executor ex(std::move(cm.graph));
     cm.bind(ex);
     // STANLI_PROFILE=1: per-opcode accounting for the whole sampling run,
@@ -183,7 +156,9 @@ int main(int argc, char** argv) {
     auto clones = stanli::clone_executors(ex, n_chains - 1);
     std::vector<stanli::Executor*> execs{&ex};
     for (auto& c : clones) execs.push_back(c.get());
+    const auto prepared = want_timings ? Clock::now() : Clock::time_point{};
     auto chain_res = stanli::run_nuts_chains(execs, cfg, n_threads);
+    const auto sampled = want_timings ? Clock::now() : Clock::time_point{};
     for (size_t c = 0; c < chain_res.size(); ++c)
       if (!chain_res[c].error.empty())
         throw std::runtime_error("chain " + std::to_string(cfg.chain_id + c) +
@@ -294,6 +269,7 @@ int main(int argc, char** argv) {
     if (want_summary) summary_draws.reserve(draws.size() * col_names.size());
 
     std::vector<double> row;
+    stanli::tooling::CsvWriter csv(stdout);
     size_t graph_bad = 0;
     std::string first_graph_bad;
     for (size_t d = 0; d < draws.size(); ++d) {
@@ -320,21 +296,15 @@ int main(int argc, char** argv) {
                      std::numeric_limits<double>::quiet_NaN());
         }
       }
-      bool first = true;
       if (want_stats) {
-        for (double v : stats.rows[d]) {
-          std::printf(first ? "%.17g" : ",%.17g", v);
-          first = false;
-        }
+        for (double v : stats.rows[d]) csv.value(v);
       }
-      for (double v : row) {
-        std::printf(first ? "%.17g" : ",%.17g", v);
-        first = false;
-      }
-      std::printf("\n");
+      for (double v : row) csv.value(v);
+      csv.end_row();
       if (want_summary)
         summary_draws.insert(summary_draws.end(), row.begin(), row.end());
     }
+    csv.flush();
     if (graph_bad)
       std::fprintf(stderr,
                    "stanli_run: %zu of %zu draws could not produce generated "
@@ -364,6 +334,19 @@ int main(int argc, char** argv) {
                  (long long)ex.n_grad_evals());
     const std::string prof = ex.profile_report();
     if (!prof.empty()) std::fprintf(stderr, "%s", prof.c_str());
+    if (want_timings) {
+      // Include CSV flushing in output time; no clocks in the gradient loop.
+      std::fflush(stdout);
+      const auto written = Clock::now();
+      const auto seconds = [](auto duration) {
+        return std::chrono::duration<double>(duration).count();
+      };
+      std::fprintf(
+          stderr,
+          "stanli_run: timings prep_s=%.9g sample_s=%.9g output_s=%.9g\n",
+          seconds(prepared - timing_start), seconds(sampled - prepared),
+          seconds(written - sampled));
+    }
   } catch (const std::exception& e) {
     std::fprintf(stderr, "stanli_run: %s\n", e.what());
     return 1;

@@ -10,6 +10,7 @@
 #include <stanli/reroll.hpp>
 
 #include "../runtime/src/reroll_profile.hpp"
+#include "../runtime/src/reroll_plan.hpp"
 
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -271,6 +273,127 @@ static void test_gauss_mix_shape() {
   expect("gmix sizes", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close(("gmix v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
+// Gap 3 (docs/superpowers/plans/2026-09-11-lane-layout-unification.md): the
+// gauss_mix idiom above, but each lane's density result is a row rather than
+// a scalar, the way a per-subject mixture over several binary items looks
+// (log_mix(theta, bernoulli_logit_lpmf(y[i,:] | eta1), bernoulli_logit_lpmf
+// (y[i,:] | eta2))). bernoulli_logit has an elementwise form that costs per
+// element what its summed one does, so widening it costs nothing extra: an
+// OP_SUM_ROWS after each row-wide elementwise call folds it back to one lp
+// per lane before OP_LOG_MIX ever sees it, unchanged from the scalar case.
+static void test_row_mixture_shape() {
+  const int L = 12, C = 4;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(L * C, true);  // row-major, a parameter
+  const int theta = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int row = g.add_slot(C, false);
+    g.add_op(OP_SLICE, {base}, row, {l * C});
+    std::vector<int> outcomes1(C), outcomes2(C);
+    for (int k = 0; k < C; ++k) {
+      outcomes1[(size_t)k] = (l + k) % 2;
+      outcomes2[(size_t)k] = (l + k + 1) % 2;
+    }
+    const int lp1 = g.add_slot(1, false);
+    const int i1 = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp1, outcomes1);
+    g.ops[(size_t)i1].variant = 0x81;
+    const int lp2 = g.add_slot(1, false);
+    const int i2 = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp2, outcomes2);
+    g.ops[(size_t)i2].variant = 0x81;
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_LOG_MIX, {theta, lp1, lp2}, t);
+    terms.push_back(t);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const detail::ProfiledRerollStats profiled =
+      detail::reroll_profiled(g, f2, tt, {});
+  const RerollStats st = profiled.work;
+  expect("row mix regions==1", st.regions == 1);
+  expect("row mix element-density dispositions",
+         profiled.dispositions.element_density == 2);
+  expect("row mix term-widen disposition",
+         profiled.dispositions.term_widen == 1);
+  // 2 elementwise BERNOULLI_LOGIT + 2 SUM_ROWS + 1 widened LOG_MIX + 1
+  // SUM_VEC; the row itself elides.
+  expect("row mix ops==6", g.ops.size() == 6);
+  int densities = 0, sum_rows = 0;
+  for (const Op& op : g.ops) {
+    densities += op.opcode == OP_BERNOULLI_LOGIT_LPMF;
+    sum_rows += op.opcode == OP_SUM_ROWS;
+  }
+  expect("row mix two densities, two sum_rows",
+         densities == 2 && sum_rows == 2);
+  expect("row mix one term", tt.size() == 1);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("row mix sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("row mix v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
+// The same gap, column-major (a matrix row: OP_SLICE_STRIDED, the shape a
+// real `y[i, :]` compiles to). The elementwise density packs in column-major
+// order (element k of lane l at l + Luse*k); OP_SUM_ROWS needs lane l's
+// elements contiguous, so this must repack before it, not just widen.
+static void test_row_mixture_shape_column_major() {
+  const int L = 12, C = 4;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(L * C, true);  // column-major, a parameter
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int row = g.add_slot(C, false);
+    g.add_op(OP_SLICE_STRIDED, {base}, row, {l, L});
+    std::vector<int> outcomes(C);
+    for (int k = 0; k < C; ++k) outcomes[(size_t)k] = (l + k) % 2;
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp, outcomes);
+    g.ops[(size_t)id].variant = 0x81;
+    const int zero = g.add_slot(1, false);
+    fills.emplace_back(zero, std::vector<double>{0.0});
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_ADD, {lp, zero}, t);
+    terms.push_back(t);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const detail::ProfiledRerollStats profiled =
+      detail::reroll_profiled(g, f2, tt, {});
+  const RerollStats st = profiled.work;
+  expect("row mix col-major regions==1", st.regions == 1);
+  expect("row mix col-major element-density disposition",
+         profiled.dispositions.element_density == 1);
+  // BERNOULLI_LOGIT + one repacking OP_GATHER + OP_SUM_ROWS + widened ADD
+  // (the zero it adds is a fresh constant per lane, so the chain does not
+  // stay scalar) + OP_SUM_VEC.
+  expect("row mix col-major ops==5", g.ops.size() == 5);
+  int gathers = 0, sum_rows = 0;
+  for (const Op& op : g.ops) {
+    gathers += op.opcode == OP_GATHER;
+    sum_rows += op.opcode == OP_SUM_ROWS;
+  }
+  expect("row mix col-major repacks before summing",
+         gathers == 1 && sum_rows == 1);
+  expect("row mix col-major one term", tt.size() == 1);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("row mix col-major sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("row mix col-major v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
 }
 
 // Logistic was historically omitted from the hand-maintained density
@@ -558,6 +681,43 @@ static void test_data_index_gathers() {
     expect_close(("gather v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
+// The cost model: the same shape as test_data_index_gathers, but at four
+// lanes (the pass's own floor) instead of nine. A gather prices at
+// 2*Luse*width against a scalar dispatch's kLaneOpCost=5; at four lanes
+// the two positions' eliminated dispatches (4*2*5=40) do not clear their
+// own cost (2*4*1 + 2*5 = 18) plus partition.cpp's 40-unit margin, so the
+// region stays scalar. test_data_index_gathers proves the identical shape
+// packs once there are enough lanes to amortize the fixed overhead.
+static void test_cost_model_declines_small_gather() {
+  const int L = 4, J = 4;
+  const int idx[L] = {3, 1, 0, 2};  // a permutation: forces OP_GATHER
+  Graph g;
+  Fills fills;
+  const int alpha = g.add_slot(J, true);
+  const int sigma = g.add_slot(1, true);
+  auto cslot = [&](double v) {
+    const int s = g.add_slot(1, false);
+    fills.emplace_back(s, std::vector<double>{v});
+    return s;
+  };
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int a = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {alpha}, a, {idx[l]});
+    const int lp = g.add_slot(1, false);
+    const int id =
+        g.add_op(OP_NORMAL_LPDF, {cslot(0.3 * l - 1.0), a, sigma}, lp);
+    g.ops[id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  const size_t before = g.ops.size();
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("small gather declines",
+         st.regions == 0 && g.ops.size() == before && tt.size() == (size_t)L);
+}
+
 // (d) STANLI_NO_REROLL disables the pass.
 static void test_env_disable() {
   test_setenv("STANLI_NO_REROLL", "1", 1);
@@ -585,8 +745,12 @@ static void test_env_disable() {
 
 // (e) first lane anomalous (its y is an op output, not a const): the pass
 // must skip lane 0 and still re-roll lanes 1..L-1 on the second attempt.
+// L is large enough that the remaining 1-position region clears reroll's
+// cost model (a bare term density needs Luse > 9 to beat 40's margin at
+// kLaneOpCost=5 per op); a smaller L here would report a correct decline,
+// not a bug, and is exactly what test_bail_recurrence-style cases are for.
 static void test_first_lane_anomalous() {
-  const int L = 8;
+  const int L = 16;
   Graph g;
   Fills fills;
   const int mu = g.add_slot(1, true);
@@ -1307,16 +1471,22 @@ static void test_write_fusion_bails() {
 // already run. Two disjoint comb runs model Mtbh's column fills: the first
 // store must copy its fill-backed base, while the second can reuse that fresh
 // result when the pass runs again.
+// Six lanes per region, not reroll's four-lane floor: two OP_INDEX/
+// OP_SET_INDEX_INPLACE positions priced honestly (reroll.cpp's cost model)
+// need more than the floor to beat staying scalar by more than a rounding
+// error, the same bar partition.cpp's bucket pricing applies.
 static void test_post_reroll_slice_inplace() {
+  const int kLanes = 6;
+  const int n = 2 * kLanes;
   Graph g;
   Fills fills;
-  const int a = g.add_slot(8, true), sigma = g.add_slot(1, true);
-  const int yh = g.add_slot(8, false);
-  fills.emplace_back(yh, std::vector<double>(8, -0.25));
-  const int yd = g.add_slot(8, false);
-  fills.emplace_back(yd, std::vector<double>(8, 0.75));
+  const int a = g.add_slot(n, true), sigma = g.add_slot(1, true);
+  const int yh = g.add_slot(n, false);
+  fills.emplace_back(yh, std::vector<double>((size_t)n, -0.25));
+  const int yd = g.add_slot(n, false);
+  fills.emplace_back(yd, std::vector<double>((size_t)n, 0.75));
 
-  for (int l = 0; l < 4; ++l) {
+  for (int l = 0; l < kLanes; ++l) {
     const int v = g.add_slot(1, false);
     g.add_op(OP_INDEX, {a}, v, {l});
     g.add_op(OP_SET_INDEX_INPLACE, {yh, v}, yh, {2 * l});
@@ -1324,9 +1494,9 @@ static void test_post_reroll_slice_inplace() {
   // A non-lane scalar op separates the two affine store regions.
   const int sep = g.add_slot(1, false);
   g.add_op(OP_SUM_VEC, {a}, sep);
-  for (int l = 0; l < 4; ++l) {
+  for (int l = 0; l < kLanes; ++l) {
     const int v = g.add_slot(1, false);
-    g.add_op(OP_INDEX, {a}, v, {4 + l});
+    g.add_op(OP_INDEX, {a}, v, {kLanes + l});
     g.add_op(OP_SET_INDEX_INPLACE, {yh, v}, yh, {1 + 2 * l});
   }
   const int lp = g.add_slot(1, false);
@@ -1472,6 +1642,503 @@ static void test_pow_widens() {
     expect_close(("pow v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
+// ---- vector lanes: a lane is one row of a container ----------------------
+
+namespace rowlanes {
+
+// Row l of a column-major R x C matrix reads as SLICE_STRIDED {l, R}; row l
+// of an array of C-vectors as SLICE {l * C}.
+enum class Rows { kMatrix, kArray };
+
+struct Built {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  int base = -1;
+  std::vector<std::vector<int>> outcomes;   // density lanes: y per lane
+  std::vector<std::vector<double>> rowval;  // store lanes: x per lane
+};
+
+int flat(Rows rows, int L, int C, int l, int k) {
+  return rows == Rows::kMatrix ? l + L * k : l * C + k;
+}
+
+// L lanes {SLICE row l of a parameter base; BERNOULLI_LOGIT(row) with C
+// outcomes} -> target terms: the dogs likelihood. extra_rows > 0 leaves
+// rows the lanes never read.
+Built build_density(int L, int C, Rows rows, int extra_rows = 0) {
+  Built b;
+  Graph& g = b.g;
+  const int R = L + extra_rows;
+  b.base = g.add_slot((int64_t)R * C, true);
+  for (int l = 0; l < L; ++l) {
+    const int row = g.add_slot(C, false);
+    if (rows == Rows::kMatrix)
+      g.add_op(OP_SLICE_STRIDED, {b.base}, row, {l, R});
+    else
+      g.add_op(OP_SLICE, {b.base}, row, {l * C});
+    std::vector<int> y((size_t)C);
+    for (int k = 0; k < C; ++k) y[(size_t)k] = (l * 7 + k * 3) % 2;
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {row}, lp, y);
+    g.ops[(size_t)id].variant = 0x81;
+    b.outcomes.push_back(y);
+    b.terms.push_back(lp);
+  }
+  return b;
+}
+
+Built build_density_shared_row(int L, int C, Rows rows) {
+  Built b;
+  Graph& g = b.g;
+  b.base = g.add_slot((int64_t)L * C, true);
+  const int shared = g.add_slot(1, true);
+  for (int l = 0; l < L; ++l) {
+    const int row = g.add_slot(C, false);
+    if (rows == Rows::kMatrix)
+      g.add_op(OP_SLICE_STRIDED, {b.base}, row, {l, L});
+    else
+      g.add_op(OP_SLICE, {b.base}, row, {l * C});
+    const int fixed = g.add_slot(1, false);
+    if (rows == Rows::kMatrix)
+      g.add_op(OP_SLICE_STRIDED, {shared}, fixed, {0, 1});
+    else
+      g.add_op(OP_SLICE, {shared}, fixed, {0});
+    const int combined = g.add_slot(C, false);
+    g.add_op(OP_ADD, {row, fixed}, combined);
+    std::vector<int> y((size_t)C);
+    for (int k = 0; k < C; ++k) y[(size_t)k] = (l * 7 + k * 3) % 2;
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {combined}, lp, y);
+    g.ops[(size_t)id].variant = 0x81;
+    b.outcomes.push_back(y);
+    b.terms.push_back(lp);
+  }
+  return b;
+}
+
+// L lanes {INDEX beta[0]; INDEX beta[1]; FMA(b1, x row, b0); store to row l}
+// filling a declared R x C matrix, then one density over the whole matrix.
+// Lane 0 writes the fill-backed declaration functionally, the rest in place.
+Built build_store(int L, int C, Rows rows, int extra_rows = 0,
+                  bool later_write = false) {
+  Built b;
+  Graph& g = b.g;
+  const int R = L + extra_rows;
+  const int beta = g.add_slot(2, true);
+  const int sigma = g.add_slot(1, true);
+  const int decl = g.add_slot((int64_t)R * C, false);
+  b.fills.emplace_back(decl, std::vector<double>((size_t)(R * C), 0.0));
+  b.base = g.add_slot((int64_t)R * C, false);
+  const int ydata = g.add_slot((int64_t)R * C, false);
+  std::vector<double> yv((size_t)(R * C));
+  for (size_t i = 0; i < yv.size(); ++i) yv[i] = 0.3 * (double)i - 1.0;
+  b.fills.emplace_back(ydata, yv);
+  for (int l = 0; l < L; ++l) {
+    const int b0 = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {beta}, b0, {0});
+    const int b1 = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {beta}, b1, {1});
+    const int x = g.add_slot(C, false);
+    std::vector<double> xv((size_t)C);
+    for (int k = 0; k < C; ++k) xv[(size_t)k] = 0.5 * l + 0.25 * k - 1.0;
+    b.fills.emplace_back(x, xv);
+    b.rowval.push_back(xv);
+    const int v = g.add_slot(C, false);
+    g.add_op(OP_FMA, {b1, x, b0}, v);
+    const int src = l == 0 ? decl : b.base;
+    if (rows == Rows::kMatrix)
+      g.add_op(l == 0 ? OP_SET_SLICE_STRIDED : OP_SET_SLICE_STRIDED_INPLACE,
+               {src, v}, b.base, {l, R});
+    else
+      g.add_op(l == 0 ? OP_SET_SLICE : OP_SET_SLICE_INPLACE, {src, v}, b.base,
+               {l * C});
+  }
+  if (later_write) {
+    const int extra = g.add_slot(C, false);
+    b.fills.emplace_back(extra, std::vector<double>((size_t)C, 2.5));
+    if (rows == Rows::kMatrix)
+      g.add_op(OP_SET_SLICE_STRIDED_INPLACE, {b.base, extra}, b.base, {2, R});
+    else
+      g.add_op(OP_SET_SLICE_INPLACE, {b.base, extra}, b.base, {2 * C});
+  }
+  const int lp = g.add_slot(1, false);
+  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, b.base, sigma}, lp);
+  g.ops[(size_t)id].variant = 0x06;
+  b.terms.push_back(lp);
+  return b;
+}
+
+int row_stores(const Graph& g) {
+  return writefuse::count(g, OP_SET_SLICE) +
+         writefuse::count(g, OP_SET_SLICE_INPLACE) +
+         writefuse::count(g, OP_SET_SLICE_STRIDED) +
+         writefuse::count(g, OP_SET_SLICE_STRIDED_INPLACE);
+}
+
+}  // namespace rowlanes
+
+// (a, b) L row-density lanes over a matrix base and over an array of
+// vectors: one density over L*C elements reading the base in place, with
+// the lanes' outcomes laid out in the base's storage order.
+static void test_row_density_lanes() {
+  using namespace rowlanes;
+  for (Rows rows : {Rows::kMatrix, Rows::kArray}) {
+    const int L = 6, C = 4;
+    const std::string tag =
+        rows == Rows::kMatrix ? "rowdens-mat" : "rowdens-arr";
+    Built b = build_density(L, C, rows);
+    Graph ref = b.g;
+    reduce_into_result(ref, b.terms);
+    const std::vector<double> want = run_grad(std::move(ref), b.fills);
+
+    std::vector<int> tt = b.terms;
+    Fills f2 = b.fills;
+    const detail::ProfiledRerollStats profiled =
+        detail::reroll_profiled(b.g, f2, tt, {});
+    expect((tag + " regions==1").c_str(), profiled.work.regions == 1);
+    expect((tag + " term-density disposition").c_str(),
+           profiled.dispositions.term_density == 1);
+    expect((tag + " ops==1").c_str(), b.g.ops.size() == 1);
+    expect((tag + " one term").c_str(), tt.size() == 1);
+    expect((tag + " no constant materialized").c_str(),
+           f2.size() == b.fills.size());
+    if (b.g.ops.size() == 1) {
+      const Op& d = b.g.ops[0];
+      expect((tag + " density reads the base").c_str(),
+             d.opcode == OP_BERNOULLI_LOGIT_LPMF && d.in[0] == b.base);
+      expect((tag + " outcomes L*C").c_str(), d.n_idata == L * C);
+      bool laid_out = d.n_idata == L * C;
+      for (int l = 0; laid_out && l < L; ++l)
+        for (int k = 0; k < C; ++k)
+          if (d.idata[flat(rows, L, C, l, k)] !=
+              b.outcomes[(size_t)l][(size_t)k])
+            laid_out = false;
+      expect((tag + " outcomes in storage order").c_str(), laid_out);
+    }
+    if (!tt.empty()) {
+      reduce_into_result(b.g, tt);
+      const std::vector<double> got = run_grad(std::move(b.g), f2);
+      expect((tag + " sizes").c_str(), got.size() == want.size());
+      for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+        expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+    }
+  }
+}
+
+// (c) L row-store lanes: the FMA chain widens to L*C, its data rows pack
+// into one constant in the base's storage order, and the fused value IS
+// the matrix: no per-row stores remain.
+static void test_row_store_lanes() {
+  using namespace rowlanes;
+  for (Rows rows : {Rows::kMatrix, Rows::kArray}) {
+    const int L = 6, C = 4;
+    const std::string tag =
+        rows == Rows::kMatrix ? "rowstore-mat" : "rowstore-arr";
+    Built b = build_store(L, C, rows);
+    Graph ref = b.g;
+    reduce_into_result(ref, b.terms);
+    const std::vector<double> want = run_grad(std::move(ref), b.fills);
+
+    std::vector<int> tt = b.terms;
+    Fills f2 = b.fills;
+    const detail::ProfiledRerollStats profiled =
+        detail::reroll_profiled(b.g, f2, tt, {});
+    expect((tag + " regions==1").c_str(), profiled.work.regions == 1);
+    expect((tag + " element-store disposition").c_str(),
+           profiled.dispositions.element_store == 1);
+    expect((tag + " no row stores left").c_str(), row_stores(b.g) == 0);
+    expect((tag + " one FMA").c_str(), writefuse::count(b.g, OP_FMA) == 1);
+    // 2 hoisted INDEX + 1 FMA + NORMAL.
+    expect((tag + " ops==4").c_str(), b.g.ops.size() == 4);
+    expect((tag + " one constant materialized").c_str(),
+           f2.size() == b.fills.size() + 1);
+    int fma_out = -1, fma_x = -1;
+    for (const Op& op : b.g.ops)
+      if (op.opcode == OP_FMA) {
+        fma_out = op.out;
+        fma_x = op.in[1];
+      }
+    expect((tag + " FMA widened to L*C").c_str(),
+           fma_out >= 0 && b.g.slots[(size_t)fma_out].len == L * C);
+    for (const Op& op : b.g.ops)
+      if (op.opcode == OP_NORMAL_LPDF)
+        expect((tag + " density reads the fused value").c_str(),
+               op.in[1] == fma_out);
+    if (f2.size() == b.fills.size() + 1) {
+      const auto& packed = f2.back();
+      bool laid_out =
+          packed.first == fma_x && packed.second.size() == (size_t)(L * C);
+      for (int l = 0; laid_out && l < L; ++l)
+        for (int k = 0; k < C; ++k)
+          if (packed.second[(size_t)flat(rows, L, C, l, k)] !=
+              b.rowval[(size_t)l][(size_t)k])
+            laid_out = false;
+      expect((tag + " rows packed in storage order").c_str(), laid_out);
+    }
+    reduce_into_result(b.g, tt);
+    const std::vector<double> got = run_grad(std::move(b.g), f2);
+    expect((tag + " sizes").c_str(), got.size() == want.size());
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+  }
+}
+
+// (d) What vector lanes must leave alone: lanes that do not cover every
+// row, a reduction inside the lane, and an invariant operand as wide as
+// the lane.
+static void test_row_lanes_bail() {
+  using namespace rowlanes;
+  {  // rows 0..L-1 of an (L+1)-row base: the fused op cannot read it whole
+    Built b = build_density(6, 4, Rows::kMatrix, 1);
+    const size_t before = b.g.ops.size();
+    Fills f2 = b.fills;
+    std::vector<int> tt = b.terms;
+    const RerollStats st = reroll(b.g, f2, tt, {});
+    expect("uncovered rows not fused",
+           st.regions == 0 && b.g.ops.size() == before && tt.size() == 6);
+  }
+  {  // the same for row stores
+    Built b = build_store(6, 4, Rows::kMatrix, 1);
+    const size_t before = b.g.ops.size();
+    Fills f2 = b.fills;
+    std::vector<int> tt = b.terms;
+    const RerollStats st = reroll(b.g, f2, tt, {});
+    expect("uncovered row stores not fused",
+           st.regions == 0 && b.g.ops.size() == before && row_stores(b.g) == 6);
+  }
+  {  // a later writer of the matrix: the run fuses into a whole-vector
+     // store and the later write chains onto it
+    Built b = build_store(6, 4, Rows::kMatrix, 0, true);
+    Graph ref = b.g;
+    reduce_into_result(ref, b.terms);
+    const std::vector<double> want = run_grad(std::move(ref), b.fills);
+    Fills f2 = b.fills;
+    std::vector<int> tt = b.terms;
+    const RerollStats st = reroll(b.g, f2, tt, {});
+    expect("later writer forces the whole-vector store form",
+           st.regions == 1 && writefuse::count(b.g, OP_SET_SLICE) == 1 &&
+               writefuse::count(b.g, OP_SET_SLICE_STRIDED) == 0);
+    expect("later row write chains, not blocks",
+           writefuse::count(b.g, OP_SET_SLICE_STRIDED_INPLACE) == 1);
+    reduce_into_result(b.g, tt);
+    const std::vector<double> got = run_grad(std::move(b.g), f2);
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close(("rowstore-chain v" + std::to_string(i)).c_str(), got[i],
+                   want[i]);
+  }
+  {  // DOT inside the lane
+    const int L = 6, C = 4;
+    Graph g;
+    Fills fills;
+    const int base = g.add_slot(L * C, true);
+    const int w = g.add_slot(C, true);
+    const int sigma = g.add_slot(1, true);
+    std::vector<int> terms;
+    for (int l = 0; l < L; ++l) {
+      const int row = g.add_slot(C, false);
+      g.add_op(OP_SLICE_STRIDED, {base}, row, {l, L});
+      const int d = g.add_slot(1, false);
+      g.add_op(OP_DOT, {row, w}, d);
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{0.1 * l});
+      const int lp = g.add_slot(1, false);
+      const int id = g.add_op(OP_NORMAL_LPDF, {y, d, sigma}, lp);
+      g.ops[(size_t)id].variant = 0x06;
+      terms.push_back(lp);
+    }
+    const size_t before = g.ops.size();
+    std::vector<int> tt = terms;
+    const RerollStats st = reroll(g, fills, tt, {});
+    expect("lane reduction not fused",
+           st.regions == 0 && g.ops.size() == before);
+  }
+  {  // An invariant vector operand as wide as the lane tiles via OP_REP_MAT
+     // (gap 2, lane-layout-unification.md) instead of blocking the region.
+     // The row read is OP_SLICE_STRIDED (column-major), so the tile must
+     // repeat each of mu's elements Luse times consecutively, not mu itself
+     // Luse times end to end.
+    const int L = 6, C = 4;
+    Graph g;
+    Fills fills;
+    const int base = g.add_slot(L * C, true);
+    const int mu = g.add_slot(C, true);
+    std::vector<int> terms;
+    for (int l = 0; l < L; ++l) {
+      const int row = g.add_slot(C, false);
+      g.add_op(OP_SLICE_STRIDED, {base}, row, {l, L});
+      const int s = g.add_slot(C, false);
+      g.add_op(OP_ADD, {row, mu}, s);
+      const int lp = g.add_slot(1, false);
+      const int id = g.add_op(OP_BERNOULLI_LOGIT_LPMF, {s}, lp,
+                              std::vector<int>((size_t)C, l % 2));
+      g.ops[(size_t)id].variant = 0x81;
+      terms.push_back(lp);
+    }
+    Graph ref = g;
+    reduce_into_result(ref, terms);
+    const std::vector<double> want = run_grad(std::move(ref), fills);
+
+    std::vector<int> tt = terms;
+    Fills f2 = fills;
+    const RerollStats st = reroll(g, f2, tt, {});
+    expect("lane-wide invariant operand regions==1", st.regions == 1);
+    expect("lane-wide invariant operand ops==3", g.ops.size() == 3);
+    int rep_mats = 0, adds = 0, densities = 0;
+    for (const Op& op : g.ops) {
+      rep_mats += op.opcode == OP_REP_MAT;
+      adds += op.opcode == OP_ADD;
+      densities += op.opcode == OP_BERNOULLI_LOGIT_LPMF;
+    }
+    expect("lane-wide invariant operand tiles mu",
+           rep_mats == 1 && adds == 1 && densities == 1);
+    for (const Op& op : g.ops)
+      if (op.opcode == OP_REP_MAT)
+        expect("lane-wide invariant operand tiles column-major",
+               op.n_idata == 3 && op.idata[0] == L && op.idata[1] == C &&
+                   op.idata[2] == 2 && g.slots[(size_t)op.out].len == L * C);
+    expect("lane-wide invariant operand one term", tt.size() == 1);
+    reduce_into_result(g, tt);
+    const std::vector<double> got = run_grad(std::move(g), f2);
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close(("lane-wide invariant v" + std::to_string(i)).c_str(),
+                   got[i], want[i]);
+  }
+}
+
+static void test_row_lane_shared_read() {
+  using namespace rowlanes;
+  for (Rows rows : {Rows::kMatrix, Rows::kArray}) {
+    const int L = 6, C = 4;
+    const std::string tag =
+        rows == Rows::kMatrix ? "rowshared-mat" : "rowshared-arr";
+    Built b = build_density_shared_row(L, C, rows);
+    Graph ref = b.g;
+    reduce_into_result(ref, b.terms);
+    const std::vector<double> want = run_grad(std::move(ref), b.fills);
+
+    std::vector<int> tt = b.terms;
+    Fills f2 = b.fills;
+    const detail::ProfiledRerollStats profiled =
+        detail::reroll_profiled(b.g, f2, tt, {});
+    expect((tag + " regions==1").c_str(), profiled.work.regions == 1);
+    expect((tag + " shared row hoisted").c_str(),
+           writefuse::count(b.g, OP_SLICE) +
+                   writefuse::count(b.g, OP_SLICE_STRIDED) <=
+               1);
+    if (!tt.empty()) {
+      reduce_into_result(b.g, tt);
+      const std::vector<double> got = run_grad(std::move(b.g), f2);
+      expect((tag + " sizes").c_str(), got.size() == want.size());
+      for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+        expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+    }
+  }
+}
+
+// Gap 1 (docs/superpowers/plans/2026-09-11-lane-layout-unification.md): a
+// partial row read that lowering hands reroll as one OP_GATHER per lane
+// (`m[i, 2:K]` on a column-major parameter matrix, a fixed row alongside a
+// range on the other axis) rather than a strided window. Twelve lanes, each
+// gathering two of the base's three columns skipping column 0: the twelve
+// lanes' gathered offsets are, as a set, one contiguous span of the base
+// (columns 1 and 2 for every row), so the fused form is one OP_SLICE.
+static void test_gather_lane_partial_row() {
+  const int N = 12, C = 3;
+  Graph g;
+  Fills fills;
+  const int m = g.add_slot(N * C, true);  // column-major, a parameter
+  const int mu = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int i = 0; i < N; ++i) {
+    const int w = g.add_slot(2, false);
+    g.add_op(OP_GATHER, {m}, w, {i + N, i + 2 * N});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_NORMAL_LPDF, {w, mu, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x07;
+    terms.push_back(lp);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("gap1 regions==1", st.regions == 1);
+  expect("gap1 ops==2", g.ops.size() == 2);  // SLICE + NORMAL_LPDF
+  int slices = 0, gathers = 0;
+  for (const Op& op : g.ops) {
+    slices += op.opcode == OP_SLICE;
+    gathers += op.opcode == OP_GATHER;
+  }
+  expect("gap1 is a slice, not a gather", slices == 1 && gathers == 0);
+  expect("gap1 one term", tt.size() == 1);
+  for (const Op& op : g.ops)
+    if (op.opcode == OP_SLICE)
+      expect("gap1 slice reads columns 1 and 2 of every row",
+             op.idata[0] == N && g.slots[(size_t)op.out].len == 2 * N);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("gap1 sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("gap1 v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
+// Gap 2 (docs/superpowers/plans/2026-09-11-lane-layout-unification.md): a
+// vector operand shared by every lane, as wide as the row itself
+// (`y[i,:] ~ normal(mu, s)` with `mu` a parameter vector). Row-major
+// storage (a plain OP_SLICE row read): mu tiles tail-to-tail, mode
+// {width, count, 1}, not element-repeated.
+static void test_shared_vector_mean_row_major() {
+  const int L = 12, C = 4;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(L * C, true);  // y, row-major, a parameter
+  const int mu = g.add_slot(C, true);
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int row = g.add_slot(C, false);
+    g.add_op(OP_SLICE, {base}, row, {l * C});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_NORMAL_LPDF, {row, mu, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x07;
+    terms.push_back(lp);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("shared mean regions==1", st.regions == 1);
+  expect("shared mean ops==2", g.ops.size() == 2);  // OP_REP_MAT + NORMAL_LPDF
+  int rep_mats = 0, densities = 0;
+  for (const Op& op : g.ops) {
+    rep_mats += op.opcode == OP_REP_MAT;
+    densities += op.opcode == OP_NORMAL_LPDF;
+  }
+  expect("shared mean tiles mu", rep_mats == 1 && densities == 1);
+  for (const Op& op : g.ops)
+    if (op.opcode == OP_REP_MAT)
+      expect("shared mean tiles row-major",
+             op.n_idata == 3 && op.idata[0] == C && op.idata[1] == L &&
+                 op.idata[2] == 1 && op.in[0] == mu &&
+                 g.slots[(size_t)op.out].len == L * C);
+    else if (op.opcode == OP_NORMAL_LPDF)
+      expect("shared mean density reads the base directly", op.in[0] == base);
+  expect("shared mean one term", tt.size() == 1);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("shared mean sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("shared mean v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+}
+
 // ---- end to end through compile_model ------------------------------------
 
 static std::string slurp(const char* p) {
@@ -1531,6 +2198,171 @@ static void test_e2e_fixtures() {
     expect((std::string(c.name) + " shrinks 4x").c_str(),
            ops_rerolled * 4 <= ops_unrolled);
   }
+}
+
+// Signature prefilter: op_signature(a) != op_signature(b) must prove
+// ops_match(g, a, b, *) false, checked directly against ops_match on a mix
+// of handbuilt graphs covering every ops_match branch and a couple of
+// compiled models.
+static void test_signature_soundness() {
+  const auto check = [&](const std::string& name, const Graph& g) {
+    const auto result = detail::check_signature_soundness(
+        g, (int64_t)detail::kMaxPeriod * detail::kMinLanes);
+    expect((name + " signature sound").c_str(), result.violations == 0);
+  };
+
+  {
+    ldashape::Built b = ldashape::build(24);
+    check("lda", b.g);
+  }
+  {
+    rowlanes::Built b = rowlanes::build_density(6, 4, rowlanes::Rows::kMatrix);
+    check("row density matrix", b.g);
+  }
+  {
+    rowlanes::Built b = rowlanes::build_density(6, 4, rowlanes::Rows::kArray);
+    check("row density array", b.g);
+  }
+  {
+    rowlanes::Built b = rowlanes::build_store(6, 4, rowlanes::Rows::kMatrix);
+    check("row store matrix", b.g);
+  }
+  {
+    rowlanes::Built b = rowlanes::build_store(6, 4, rowlanes::Rows::kArray);
+    check("row store array", b.g);
+  }
+  {
+    rowlanes::Built b =
+        rowlanes::build_density_shared_row(6, 4, rowlanes::Rows::kMatrix);
+    check("row density shared", b.g);
+  }
+
+  const char* rdata =
+      "{\"N\":16,\"x\":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,"
+      "1.3,1.4,1.5,1.6],"
+      "\"y\":[1.1,0.9,1.3,0.7,1.0,1.2,0.8,1.05,0.95,1.15,0.85,1.0,1.1,"
+      "0.92,1.08,0.98]}";
+  const char* adata =
+      "{\"K\":2,\"T\":12,\"y\":[0.3,0.5,0.2,0.6,0.4,0.55,0.35,0.45,0.5,"
+      "0.42,0.48,0.44]}";
+  struct Fixture {
+    const char* sexp;
+    const char* json;
+    const char* name;
+  };
+  const Fixture fixtures[] = {
+      {"tests/fixtures/rloop.tmir.sexp", rdata, "rloop corpus"},
+      {"tests/fixtures/arloop.tmir.sexp", adata, "arloop corpus"},
+  };
+  test_setenv("STANLI_NO_REROLL", "1", 1);
+  for (const Fixture& f : fixtures) {
+    DataMap data = DataMap::from_json(f.json);
+    CompiledModel cm = compile_model(slurp(f.sexp), data);
+    check(f.name, cm.graph);
+    if (cm.write_array)
+      check(std::string(f.name) + " write_array", cm.write_array->graph);
+  }
+  {
+    DataMap data = DataMap::from_json_file("tests/fixtures/brmsmono.json");
+    CompiledModel cm =
+        compile_model(slurp("tests/fixtures/brmsmono.tmir.sexp"), data);
+    check("brmsmono corpus", cm.graph);
+    if (cm.write_array)
+      check("brmsmono corpus write_array", cm.write_array->graph);
+  }
+  test_unsetenv("STANLI_NO_REROLL");
+}
+
+static bool ops_equal(const Op& a, const Op& b) {
+  if (a.opcode != b.opcode || a.variant != b.variant || a.out != b.out ||
+      a.out2 != b.out2 || a.n_in != b.n_in || a.n_idata != b.n_idata)
+    return false;
+  for (int j = 0; j < a.n_in; ++j)
+    if (a.in[j] != b.in[j]) return false;
+  for (int64_t k = 0; k < a.n_idata; ++k)
+    if (a.idata[k] != b.idata[k]) return false;
+  return true;
+}
+
+static bool graphs_equal(const Graph& a, const Graph& b) {
+  if (a.ops.size() != b.ops.size()) return false;
+  for (size_t u = 0; u < a.ops.size(); ++u)
+    if (!ops_equal(a.ops[u], b.ops[u])) return false;
+  return true;
+}
+
+// The prefilter changes how many lanes the scan reaches before ops_match is
+// called, never which lanes it decides to keep: same graph, fills and
+// target terms out of reroll() with STANLI_NO_REROLL_PREFILTER off and on.
+static void expect_prefilter_matches(const std::string& name, const Graph& g,
+                                     const Fills& fills,
+                                     const std::vector<int>& terms) {
+  Graph g_on = g;
+  Fills fills_on = fills;
+  std::vector<int> terms_on = terms;
+  test_unsetenv("STANLI_NO_REROLL_PREFILTER");
+  reroll(g_on, fills_on, terms_on, {});
+
+  Graph g_off = g;
+  Fills fills_off = fills;
+  std::vector<int> terms_off = terms;
+  test_setenv("STANLI_NO_REROLL_PREFILTER", "1", 1);
+  reroll(g_off, fills_off, terms_off, {});
+  test_unsetenv("STANLI_NO_REROLL_PREFILTER");
+
+  expect((name + " prefilter ops match").c_str(), graphs_equal(g_on, g_off));
+  expect((name + " prefilter terms match").c_str(), terms_on == terms_off);
+  bool fills_match = fills_on.size() == fills_off.size();
+  for (size_t k = 0; fills_match && k < fills_on.size(); ++k)
+    fills_match = fills_on[k].first == fills_off[k].first &&
+                  fills_on[k].second == fills_off[k].second;
+  expect((name + " prefilter fills match").c_str(), fills_match);
+}
+
+static void test_prefilter_output_matches() {
+  {
+    ldashape::Built b = ldashape::build(24);
+    expect_prefilter_matches("lda", b.g, b.fills, b.terms);
+  }
+  {
+    rowlanes::Built b = rowlanes::build_density(6, 4, rowlanes::Rows::kMatrix);
+    expect_prefilter_matches("row density matrix", b.g, b.fills, b.terms);
+  }
+  {
+    rowlanes::Built b = rowlanes::build_store(6, 4, rowlanes::Rows::kArray);
+    expect_prefilter_matches("row store array", b.g, b.fills, b.terms);
+  }
+
+  const char* rdata =
+      "{\"N\":16,\"x\":[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,"
+      "1.3,1.4,1.5,1.6],"
+      "\"y\":[1.1,0.9,1.3,0.7,1.0,1.2,0.8,1.05,0.95,1.15,0.85,1.0,1.1,"
+      "0.92,1.08,0.98]}";
+  const char* adata =
+      "{\"K\":2,\"T\":12,\"y\":[0.3,0.5,0.2,0.6,0.4,0.55,0.35,0.45,0.5,"
+      "0.42,0.48,0.44]}";
+  struct Fixture {
+    const char* sexp;
+    const char* json;
+    const char* name;
+  };
+  const Fixture fixtures[] = {
+      {"tests/fixtures/rloop.tmir.sexp", rdata, "rloop corpus"},
+      {"tests/fixtures/arloop.tmir.sexp", adata, "arloop corpus"},
+  };
+  test_setenv("STANLI_NO_REROLL", "1", 1);
+  for (const Fixture& f : fixtures) {
+    DataMap data = DataMap::from_json(f.json);
+    CompiledModel cm = compile_model(slurp(f.sexp), data);
+    expect_prefilter_matches(f.name, cm.graph, cm.fills, {});
+  }
+  {
+    DataMap data = DataMap::from_json_file("tests/fixtures/brmsmono.json");
+    CompiledModel cm =
+        compile_model(slurp("tests/fixtures/brmsmono.tmir.sexp"), data);
+    expect_prefilter_matches("brmsmono corpus", cm.graph, cm.fills, {});
+  }
+  test_unsetenv("STANLI_NO_REROLL");
 }
 
 // (e) a lane output that is a graph root the pass is not told about. The
@@ -1643,13 +2475,171 @@ static void test_bail_message_ops() {
   }
 }
 
+// Pricing is a read-only gate, not permission inferred from the lane count.
+// In particular, the four-lane cancellation fixture must retain scalar
+// accumulation while a larger distinct-lane region may use the vector plan.
+struct ProvenDistinctHashSource : stanli::detail::reroll_plan::GraphSource {
+  static constexpr bool kDistinctLaneHashes = true;
+};
+
+static void test_proven_lane_pricing() {
+  namespace rp = stanli::detail::reroll_plan;
+  // This synthetic source has the same one-varying-field proof as symbolic
+  // lowering. Virtual slot IDs near INT_MAX stress identity arithmetic without
+  // allocating those graph slots. Pricing must not dereference them.
+  Graph g;
+  g.add_slot(1, true);
+  g.add_slot(1, true);
+  for (uint16_t anchor : {OP_FMA, OP_ADD, OP_MUL}) {
+    const int arity = anchor == OP_FMA ? 3 : 2;
+    for (int lanes : {1, 3, 4, 5, 6, 7, 8, 16, 33, 4096}) {
+      for (int period : {1, 2, 4}) {
+        for (int varying = 0; varying < arity; ++varying) {
+          for (bool near_limit : {false, true}) {
+            const int stride = period + 1;
+            const int first = near_limit ? INT_MAX - lanes * stride : 2;
+            rp::CandidatePlan plan;
+            plan.lanes = lanes;
+            plan.positions.resize(period);
+            for (int p = 0; p < period; ++p) {
+              auto& pos = plan.positions[p];
+              pos.ins.resize(p == 0 ? arity : 1);
+              for (int j = 0; j < (p == 0 ? arity : 1); ++j) {
+                pos.ins[j].kind = p              ? rp::InKind::kLaneLocal
+                                  : j == varying ? rp::InKind::kConstLanes
+                                                 : rp::InKind::kInvariant;
+              }
+            }
+            plan.positions.back().term_widen = true;
+            std::vector<Op> ops;
+            for (int lane = 0; lane < lanes; ++lane) {
+              const int read = first + lane * stride;
+              for (int p = 0; p < period; ++p) {
+                Op op;
+                op.opcode = p ? OP_EXPV : anchor;
+                op.n_in = p ? 1 : arity;
+                for (int j = 0; j < op.n_in; ++j)
+                  op.in[j] = p ? read + p : j == varying ? read : j % 2;
+                op.out = read + p + 1;
+                ops.push_back(op);
+              }
+            }
+            const rp::GraphSource hashed{ops.data(), period};
+            ProvenDistinctHashSource proven;
+            proven.ops = ops.data();
+            proven.period = period;
+            expect("proven unique hashes preserve exact lane selection",
+                   rp::profitable(g, plan, hashed) ==
+                       rp::profitable(g, plan, proven));
+          }
+        }
+      }
+    }
+  }
+}
+
+static void test_lane_plan_boundary() {
+  namespace rp = stanli::detail::reroll_plan;
+  for (int lanes : {4, 8}) {
+    for (bool repeated : {false, true}) {
+      Graph g;
+      Fills fills;
+      const int a = g.add_slot(1, true);
+      const int b = g.add_slot(1, true);
+      const int prefix = g.add_slot(1, false);
+      const int suffix = g.add_slot(1, false);
+      fills.emplace_back(prefix, std::vector<double>{10});
+      fills.emplace_back(suffix, std::vector<double>{20});
+      std::vector<int> terms{prefix};
+      int shared = -1;
+      rp::CandidatePlan plan;
+      plan.lanes = lanes;
+      plan.positions.resize(2);
+      auto& fma = plan.positions[0];
+      fma.ins.resize(3);
+      fma.ins[0].kind = rp::InKind::kInvariant;
+      fma.ins[1].kind = rp::InKind::kConstLanes;
+      fma.ins[2].kind = rp::InKind::kInvariant;
+      auto& exp = plan.positions[1];
+      exp.ins.resize(1);
+      exp.ins[0].kind = rp::InKind::kLaneLocal;
+      exp.ins[0].producer_pos = 0;
+      exp.term_widen = true;
+      for (int lane = 0; lane < lanes; ++lane) {
+        const double value = repeated ? 0.2 : 0.2 + 0.1 * lane;
+        int y = shared;
+        if (!repeated || y < 0) {
+          y = g.add_slot(1, false);
+          fills.emplace_back(y, std::vector<double>{value});
+          shared = y;
+        }
+        fma.ins[1].values.push_back(value);
+        const int x = g.add_slot(1, false);
+        g.add_op(OP_FMA, {b, y, a}, x);
+        const int out = g.add_slot(1, false);
+        g.add_op(OP_EXPV, {x}, out);
+        terms.push_back(out);
+      }
+      terms.push_back(suffix);
+      const Graph before = g;
+      const Fills old_fills = fills;
+      const std::vector<int> old_terms = terms;
+      const rp::GraphSource source{g.ops.data(), 2};
+      const bool selected = rp::profitable(g, plan, source);
+      expect("lane pricing respects margin and CSE",
+             selected == (lanes == 8 && !repeated));
+      expect("lane pricing leaves ops unchanged", graphs_equal(g, before));
+      expect("lane pricing leaves allocation unchanged",
+             g.slots.size() == before.slots.size() &&
+                 g.idata_pool.size() == before.idata_pool.size() &&
+                 g.udata_pool.size() == before.udata_pool.size());
+      expect("lane pricing leaves fills/targets unchanged",
+             fills == old_fills && terms == old_terms);
+      auto accepted =
+          rp::SelectedPlan<rp::GraphSource>::select(g, plan, source);
+      expect("selection follows unchanged price",
+             accepted.has_value() == selected);
+      if (!selected) {
+        expect("rejected selection retains candidate for retry",
+               plan.positions.size() == 2 &&
+                   plan.positions[0].ins[1].values.size() == (size_t)lanes);
+        continue;
+      }
+
+      std::unordered_set<int> term_set(terms.begin(), terms.end());
+      std::unordered_map<int, int> renamed;
+      std::vector<Op> emitted;
+      std::move(*accepted).emit(g, fills, terms, term_set, emitted, renamed);
+      expect("lane emitter keeps operation order",
+             emitted.size() == 3 && emitted[0].opcode == OP_FMA &&
+                 emitted[1].opcode == OP_EXPV &&
+                 emitted[2].opcode == OP_SUM_VEC);
+      expect("lane emitter preserves target boundaries",
+             terms == std::vector<int>({prefix, emitted[2].out, suffix}));
+      expect("lane emitter keeps source stable", graphs_equal(g, before));
+      expect("lane emitter updates target membership",
+             term_set == std::unordered_set<int>(terms.begin(), terms.end()));
+      expect("lane emitter owns packed constants",
+             fills.back().second ==
+                     accepted->description().positions[0].ins[1].values &&
+                 g.slots[emitted[0].out].len == lanes &&
+                 g.slots[emitted[1].out].len == lanes &&
+                 g.slots[emitted[2].out].len == 1);
+    }
+  }
+}
+
 int main() {
+  test_proven_lane_pricing();
+  test_lane_plan_boundary();
   test_scalar_density_traits();
   test_scalar_math_widenable_traits();
   test_radon_shape();
   test_ark_shape();
   test_bail_recurrence();
   test_gauss_mix_shape();
+  test_row_mixture_shape();
+  test_row_mixture_shape_column_major();
   test_logistic_elt_shape();
   test_elt_lpmf_shape();
   test_elt_scalar_density_hoists();
@@ -1657,6 +2647,7 @@ int main() {
   test_bail_escaping_density();
   test_partial_range_slices();
   test_data_index_gathers();
+  test_cost_model_declines_small_gather();
   test_env_disable();
   test_first_lane_anomalous();
   test_block_structured();
@@ -1673,7 +2664,15 @@ int main() {
   test_post_reroll_slice_inplace();
   test_write_fusion_scalar_chain();
   test_pow_widens();
+  test_row_density_lanes();
+  test_row_store_lanes();
+  test_row_lanes_bail();
+  test_row_lane_shared_read();
+  test_gather_lane_partial_row();
+  test_shared_vector_mean_row_major();
   test_e2e_fixtures();
+  test_signature_soundness();
+  test_prefilter_output_matches();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;

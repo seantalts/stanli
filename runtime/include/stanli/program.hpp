@@ -15,7 +15,7 @@
 // walking over another program's registers.
 //
 // Constants live in `pool` rather than in the instruction: it keeps Instr
-// at 24 bytes, and a program that absorbs a data array needs the pool
+// small, and a program that absorbs a data array needs the pool
 // anyway.
 #ifndef STANLI_PROGRAM_HPP
 #define STANLI_PROGRAM_HPP
@@ -77,65 +77,67 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
 // and the ones that are not hold register zero rather than nothing, so
 // which registers a program actually reads needs saying. DENSITY's arity
 // decides its own (program_density.hpp) and CALL's payload decides its own.
-#define STANLI_PROGRAM_CODE_LIST(X)                                          \
-  X(CONST, kProgramNoInputs)                                                 \
-  X(CONSTR, kProgramNoInputs | kProgramRangeOutput)                          \
-  X(MOV, 0)                                                                  \
-  X(MOVR, kProgramRangeA | kProgramRangeOutput)                              \
-  X(ADD, kProgramReadB)                                                      \
-  X(SUB, kProgramReadB)                                                      \
-  X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
-  X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
-  X(IDIV, kProgramReadB | kProgramNoAdjoint)                                 \
-  /* len holds the PowZeroBaseLaw; POW has no range. */                      \
-  X(POW, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)    \
-  X(FMAX, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
-  X(FMIN, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
-  X(NEG, 0)                                                                  \
-  X(EXP, kProgramSaveOut)                                                    \
-  X(LOG, kProgramSaveA)                                                      \
-  X(SQRT, kProgramSaveOut)                                                   \
-  X(SQUARE, kProgramSaveA)                                                   \
-  X(INV, kProgramSaveA)                                                      \
-  X(FABS, kProgramSaveA)                                                     \
-  X(INV_LOGIT, kProgramSaveOut)                                              \
-  X(LOG1M, kProgramSaveA)                                                    \
-  X(LOG1P_EXP, kProgramSaveA)                                                \
-  X(TANH, kProgramSaveA)                                                     \
-  X(GT, kProgramReadB)                                                       \
-  X(GE, kProgramReadB)                                                       \
-  X(LT, kProgramReadB)                                                       \
-  X(LE, kProgramReadB)                                                       \
-  X(EQ, kProgramReadB)                                                       \
-  X(NE, kProgramReadB)                                                       \
-  X(DYN_INDEX, kProgramReadB | kProgramNoAdjoint)                            \
-  /* b selects max (1) or min (0); c stores kProgramExtrema* metadata. */    \
-  X(EXTREMA_RANGE, kProgramRangeA | kProgramNoAdjoint)                       \
-  X(JZ, kProgramNoAdjoint | kProgramNoOutput)                                \
-  X(JMP, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)            \
-  X(LOG_RANGE, kProgramRangeA | kProgramSaveA | kProgramRangeOutput)         \
-  X(EXP_RANGE, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)       \
-  X(DOT, kProgramRangeA | kProgramRangeB | kProgramReadB | kProgramSaveA |   \
-             kProgramSaveB)                                                  \
-  X(LSE_RANGE, kProgramRangeA | kProgramSaveA | kProgramSaveOut)             \
-  X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)         \
-  X(LSE2, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
-  X(LOG_DIFF_EXP, kProgramReadB | kProgramSaveA | kProgramSaveB)             \
-  X(LOG_MIX, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB | \
-                 kProgramSaveC)                                              \
-  X(FMA, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB)      \
-  X(DIAG_PRE_MULTIPLY, kProgramReadB | kProgramNoAdjoint)                    \
-  X(DIAG_POST_MULTIPLY, kProgramReadB | kProgramNoAdjoint)                   \
-  X(MDIVIDE_LEFT, kProgramRangeA | kProgramRangeB | kProgramReadB |          \
-                      kProgramRangeOutput | kProgramNoAdjoint)               \
-  X(MDIVIDE_RIGHT_SPD, kProgramRangeA | kProgramRangeB | kProgramReadB |     \
-                           kProgramRangeOutput | kProgramNoAdjoint)          \
-  X(DENSITY, 0)                                                              \
-  X(CALL, 0)                                                                 \
-  X(TRANSFORM, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)      \
-  X(PRINT, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)          \
-  X(REJECT, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)         \
-  X(DENSITY_VEC, kProgramNoAdjoint)
+#define STANLI_PROGRAM_CODE_LIST(X)                                           \
+  X(CONST, kProgramNoInputs)                                                  \
+  X(CONSTR, kProgramNoInputs | kProgramRangeOutput)                           \
+  X(MOV, 0)                                                                   \
+  X(MOVR, kProgramRangeA | kProgramRangeOutput)                               \
+  X(ADD, kProgramReadB)                                                       \
+  X(SUB, kProgramReadB)                                                       \
+  X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                       \
+  X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
+  X(IDIV, kProgramReadB | kProgramNoAdjoint)                                  \
+  /* len holds the PowZeroBaseLaw; a RANGE's law field carries it instead. */ \
+  X(POW, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
+  X(FMAX, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
+  X(FMIN, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
+  X(NEG, 0)                                                                   \
+  X(EXP, kProgramSaveOut)                                                     \
+  X(LOG, kProgramSaveA)                                                       \
+  X(SQRT, kProgramSaveOut)                                                    \
+  X(SQUARE, kProgramSaveA)                                                    \
+  X(INV, kProgramSaveA)                                                       \
+  X(FABS, kProgramSaveA)                                                      \
+  X(INV_LOGIT, kProgramSaveOut)                                               \
+  X(LOG1M, kProgramSaveA)                                                     \
+  X(LOG1P_EXP, kProgramSaveA)                                                 \
+  X(TANH, kProgramSaveA)                                                      \
+  X(GT, kProgramReadB)                                                        \
+  X(GE, kProgramReadB)                                                        \
+  X(LT, kProgramReadB)                                                        \
+  X(LE, kProgramReadB)                                                        \
+  X(EQ, kProgramReadB)                                                        \
+  X(NE, kProgramReadB)                                                        \
+  X(DYN_INDEX, kProgramReadB | kProgramNoAdjoint)                             \
+  /* b selects max (1) or min (0); c stores kProgramExtrema* metadata. */     \
+  X(EXTREMA_RANGE, kProgramRangeA | kProgramNoAdjoint)                        \
+  X(JZ, kProgramNoAdjoint | kProgramNoOutput)                                 \
+  X(JMP, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)             \
+  X(LOG_RANGE, kProgramRangeA | kProgramSaveA | kProgramRangeOutput)          \
+  X(EXP_RANGE, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)        \
+  X(DOT, kProgramRangeA | kProgramRangeB | kProgramReadB | kProgramSaveA |    \
+             kProgramSaveB)                                                   \
+  X(LSE_RANGE, kProgramRangeA | kProgramSaveA | kProgramSaveOut)              \
+  X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)          \
+  X(LSE2, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
+  X(LOG_DIFF_EXP, kProgramReadB | kProgramSaveA | kProgramSaveB)              \
+  X(LOG_MIX, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB |  \
+                 kProgramSaveC)                                               \
+  X(FMA, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB)       \
+  X(DIAG_PRE_MULTIPLY, kProgramReadB | kProgramNoAdjoint)                     \
+  X(DIAG_POST_MULTIPLY, kProgramReadB | kProgramNoAdjoint)                    \
+  X(MDIVIDE_LEFT, kProgramRangeA | kProgramRangeB | kProgramReadB |           \
+                      kProgramRangeOutput | kProgramNoAdjoint)                \
+  X(MDIVIDE_RIGHT_SPD, kProgramRangeA | kProgramRangeB | kProgramReadB |      \
+                           kProgramRangeOutput | kProgramNoAdjoint)           \
+  X(DENSITY, 0)                                                               \
+  X(CALL, 0)                                                                  \
+  X(TRANSFORM, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)       \
+  X(PRINT, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)           \
+  X(REJECT, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)          \
+  X(DENSITY_VEC, kProgramNoAdjoint)                                           \
+  /* An elementwise rule (sub) over len elements; see Instr. */               \
+  X(RANGE, 0)
 
 struct Program {
   enum Code : uint8_t {
@@ -175,8 +177,18 @@ struct Program {
   };
   struct Instr {
     Code code = CONST;
+    // RANGE only: the elementwise rule applied to each of `len` elements,
+    // which operands stay at one register, and the rule's law where it has
+    // one (POW, FMAX, FMIN).
+    uint8_t sub = 0;
+    uint8_t bcast = 0;
+    uint8_t law = 0;
     int32_t dst = 0, a = 0, b = 0, c = 0;
     int32_t len = 0;
+    Instr() = default;
+    Instr(Code code_, int32_t dst_, int32_t a_ = 0, int32_t b_ = 0,
+          int32_t c_ = 0, int32_t len_ = 0)
+        : code(code_), dst(dst_), a(a_), b(b_), c(c_), len(len_) {}
   };
 
   // A CALL's payload: which kernel, and which register ranges stand in
@@ -309,7 +321,19 @@ inline constexpr const ProgramOpSpec& program_code_spec(Program::Code code) {
   return kProgramOpSpecs[static_cast<size_t>(code)];
 }
 
+// The rule an instruction applies: itself, or a RANGE's per-element one.
+inline constexpr Program::Code program_rule(const Program::Instr& instr) {
+  return instr.code == Program::RANGE ? static_cast<Program::Code>(instr.sub)
+                                      : instr.code;
+}
+
+inline constexpr const ProgramOpSpec& program_spec_of(
+    const Program::Instr& instr) {
+  return program_code_spec(program_rule(instr));
+}
+
 inline constexpr int program_output_len(const Program::Instr& instr) {
+  if (instr.code == Program::RANGE) return instr.len;
   if (instr.code == Program::DIAG_PRE_MULTIPLY ||
       instr.code == Program::DIAG_POST_MULTIPLY)
     return static_cast<int>(static_cast<int64_t>(instr.c) * instr.len);
@@ -319,8 +343,24 @@ inline constexpr int program_output_len(const Program::Instr& instr) {
                                          : 1;
 }
 
-static_assert(program_code_count() ==
-                  static_cast<size_t>(Program::DENSITY_VEC) + 1,
+// Whether operand k (a, b, c) is read.
+inline constexpr bool program_reads(const Program::Instr& instr, int k) {
+  const ProgramOpSpec& spec = program_spec_of(instr);
+  if (k == 0) return !spec.has(kProgramNoInputs);
+  if (k == 1) return spec.has(kProgramReadB);
+  return spec.has(kProgramReadC);
+}
+
+inline constexpr int program_input_len(const Program::Instr& instr, int k) {
+  if (instr.code == Program::RANGE)
+    return ((instr.bcast >> k) & 1u) ? 1 : instr.len;
+  const ProgramOpSpec& spec = program_code_spec(instr.code);
+  if (k == 0) return spec.has(kProgramRangeA) ? instr.len : 1;
+  if (k == 1) return spec.has(kProgramRangeB) ? instr.len : 1;
+  return 1;
+}
+
+static_assert(program_code_count() == static_cast<size_t>(Program::RANGE) + 1,
               "every Program::Code needs exactly one ProgramOpSpec");
 
 // Drop the initializer fills and the copies the MIR spells out, then
@@ -386,6 +426,11 @@ struct ProgramCallCtx<true> {
 void run_program_transform(const Program::Transform& tr, double* reg);
 void run_program_transform(const Program::Transform& tr, stan::math::var* reg);
 
+// A RANGE instruction: its rule over every element, broadcast operands held
+// at one register (program.cpp).
+void run_elementwise_range(const Program::Instr& I, double* reg);
+void run_elementwise_range(const Program::Instr& I, stan::math::var* reg);
+
 // fmax/fmin through the overload the operands' data-only classification
 // selects. `law` carries operand activity (bit 0: a, bit 1: b; 0 is the
 // legacy all-var form of a manually built payload). stan-math's rule is
@@ -432,7 +477,8 @@ inline T program_pow(uint8_t law, const T& a, const T& b) {
 }
 
 template <bool ReuseCallCtx, typename T>
-void run_program_impl(const Program& p, T* reg, EvalState* state = nullptr) {
+__attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
+                                                   EvalState* state = nullptr) {
   using VecT = Eigen::Matrix<T, Eigen::Dynamic, 1>;
   ProgramCallCtx<ReuseCallCtx> call_ctx;
   const int64_t n = (int64_t)p.code.size();
@@ -758,6 +804,9 @@ void run_program_impl(const Program& p, T* reg, EvalState* state = nullptr) {
         d() = program_density<T>(I.len, args);
         break;
       }
+      case Program::RANGE:
+        run_elementwise_range(I, reg);
+        break;
       case Program::DENSITY_VEC: {
         const Program::VecDensity& v = p.vec_densities[(size_t)I.a];
         d() = program_density_vec<T>(v.density_id, v.container_mask, v.len, reg,

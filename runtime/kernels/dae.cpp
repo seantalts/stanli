@@ -19,6 +19,7 @@ using stan::math::var;
 
 struct DaeResidual {
   const DaeSpec* spec;
+  mutable RhsWorkspace workspace;
 
   template <typename T_y, typename T_yp, typename T_param>
   Eigen::Matrix<stan::return_type_t<T_y, T_yp, T_param>, Eigen::Dynamic, 1>
@@ -31,7 +32,7 @@ struct DaeResidual {
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(y.size());
     if (spec->prog.ok) {
       run_dae_into<T>(spec->prog, t, y.data(), yp.data(), theta.data(),
-                      theta.size(), x_r.data(), out.data());
+                      theta.size(), x_r.data(), out.data(), workspace.get<T>());
       return out;
     }
 

@@ -2,9 +2,13 @@
 
 #include <array>
 #include <cerrno>
+#include <climits>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -13,9 +17,13 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 namespace stanli::tooling {
@@ -96,8 +104,9 @@ std::wstring quote_windows_arg(const std::wstring& arg) {
   return quoted;
 }
 
-std::string run_stanc_windows(const std::string& stanc,
-                              const std::string& model) {
+std::string run_process_windows(const std::string& exe,
+                                const std::vector<std::string>& args,
+                                bool inherit_stderr) {
   SECURITY_ATTRIBUTES inheritable{};
   inheritable.nLength = sizeof(inheritable);
   inheritable.bInheritHandle = TRUE;
@@ -117,13 +126,11 @@ std::string run_stanc_windows(const std::string& stanc,
   if (null_device.get() == INVALID_HANDLE_VALUE)
     throw windows_error("CreateFileW(NUL)");
 
-  const std::wstring executable = widen_utf8(stanc);
-  const std::array<std::wstring, 4> args = {
-      executable, L"--O1", L"--debug-optimized-mir", widen_utf8(model)};
-  std::wstring command_line;
+  const std::wstring executable = widen_utf8(exe);
+  std::wstring command_line = quote_windows_arg(executable);
   for (const auto& arg : args) {
-    if (!command_line.empty()) command_line.push_back(L' ');
-    command_line += quote_windows_arg(arg);
+    command_line.push_back(L' ');
+    command_line += quote_windows_arg(widen_utf8(arg));
   }
 
   STARTUPINFOW startup{};
@@ -131,7 +138,8 @@ std::string run_stanc_windows(const std::string& stanc,
   startup.dwFlags = STARTF_USESTDHANDLES;
   startup.hStdInput = null_device.get();
   startup.hStdOutput = write_pipe.get();
-  startup.hStdError = null_device.get();
+  startup.hStdError =
+      inherit_stderr ? GetStdHandle(STD_ERROR_HANDLE) : null_device.get();
   PROCESS_INFORMATION process{};
   if (!CreateProcessW(executable.c_str(), command_line.data(), nullptr, nullptr,
                       TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup,
@@ -169,8 +177,14 @@ std::string run_stanc_windows(const std::string& stanc,
 
 #else
 
-std::string run_stanc_posix(const std::string& stanc,
-                            const std::string& model) {
+std::string run_process_posix(const std::string& exe,
+                              const std::vector<std::string>& args,
+                              bool inherit_stderr) {
+  std::vector<char*> argv;
+  argv.push_back(const_cast<char*>(exe.c_str()));
+  for (const auto& arg : args) argv.push_back(const_cast<char*>(arg.c_str()));
+  argv.push_back(nullptr);
+
   int descriptors[2];
   if (pipe(descriptors) != 0)
     throw std::runtime_error(std::string("pipe failed: ") +
@@ -188,11 +202,12 @@ std::string run_stanc_posix(const std::string& stanc,
     close(descriptors[0]);
     if (dup2(descriptors[1], STDOUT_FILENO) == -1) _exit(127);
     close(descriptors[1]);
-    const int null_error = open("/dev/null", O_WRONLY);
-    if (null_error == -1 || dup2(null_error, STDERR_FILENO) == -1) _exit(127);
-    close(null_error);
-    execl(stanc.c_str(), stanc.c_str(), "--O1", "--debug-optimized-mir",
-          model.c_str(), static_cast<char*>(nullptr));
+    if (!inherit_stderr) {
+      const int null_error = open("/dev/null", O_WRONLY);
+      if (null_error == -1 || dup2(null_error, STDERR_FILENO) == -1) _exit(127);
+      close(null_error);
+    }
+    execv(exe.c_str(), argv.data());
     _exit(127);
   }
 
@@ -228,15 +243,104 @@ std::string run_stanc_posix(const std::string& stanc,
 
 #endif
 
+std::string run_process(const std::string& exe,
+                        const std::vector<std::string>& args,
+                        bool inherit_stderr) {
+#ifdef _WIN32
+  return run_process_windows(exe, args, inherit_stderr);
+#else
+  return run_process_posix(exe, args, inherit_stderr);
+#endif
+}
+
+bool is_executable_file(const std::string& path) {
+#ifdef _WIN32
+  const DWORD attributes = GetFileAttributesW(widen_utf8(path).c_str());
+  return attributes != INVALID_FILE_ATTRIBUTES &&
+         !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+#else
+  struct stat info;
+  return stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode) &&
+         access(path.c_str(), X_OK) == 0;
+#endif
+}
+
 }  // namespace
 
 std::string run_stanc_process(const std::string& stanc,
                               const std::string& model) {
+  return run_process(stanc, {"--O1", "--debug-optimized-mir", model}, false);
+}
+
+std::string run_portable_compiler(const std::string& compiler,
+                                  const std::string& model) {
+  return run_process(compiler, {"--model-only", model}, true);
+}
+
+std::string executable_directory() {
+  std::string path;
 #ifdef _WIN32
-  return run_stanc_windows(stanc, model);
+  std::wstring wide(32768, L'\0');
+  const DWORD n =
+      GetModuleFileNameW(nullptr, wide.data(), static_cast<DWORD>(wide.size()));
+  if (n == 0 || n >= wide.size()) return "";
+  const int size =
+      WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(n), nullptr,
+                          0, nullptr, nullptr);
+  if (size <= 0) return "";
+  path.assign(static_cast<size_t>(size), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(n), path.data(),
+                      size, nullptr, nullptr);
+  const size_t slash = path.find_last_of("\\/");
 #else
-  return run_stanc_posix(stanc, model);
+  char resolved[PATH_MAX];
+#ifdef __APPLE__
+  uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size);
+  std::string raw(size, '\0');
+  if (_NSGetExecutablePath(raw.data(), &size) != 0) return "";
+  raw.resize(std::strlen(raw.c_str()));
+  path =
+      realpath(raw.c_str(), resolved) != nullptr ? std::string(resolved) : raw;
+#else
+  const ssize_t n = readlink("/proc/self/exe", resolved, sizeof(resolved) - 1);
+  if (n <= 0) return "";
+  path.assign(resolved, static_cast<size_t>(n));
 #endif
+  const size_t slash = path.find_last_of('/');
+#endif
+  return slash == std::string::npos ? "" : path.substr(0, slash);
+}
+
+std::string find_portable_compiler(const std::string& directory) {
+#ifdef _WIN32
+  const char* const name = "stanli-compile.exe";
+  const char separator = ';';
+  const char slash = '\\';
+#else
+  const char* const name = "stanli-compile";
+  const char separator = ':';
+  const char slash = '/';
+#endif
+  if (!directory.empty()) {
+    const std::string beside = directory + slash + name;
+    if (is_executable_file(beside)) return beside;
+  }
+  const char* path = std::getenv("PATH");
+  if (path == nullptr) return "";
+  const std::string entries = path;
+  size_t start = 0;
+  while (start <= entries.size()) {
+    size_t end = entries.find(separator, start);
+    if (end == std::string::npos) end = entries.size();
+    const std::string dir = entries.substr(start, end - start);
+    if (!dir.empty()) {
+      const std::string candidate = dir + slash + name;
+      if (is_executable_file(candidate)) return candidate;
+    }
+    start = end + 1;
+  }
+  return "";
 }
 
 }  // namespace stanli::tooling

@@ -20,9 +20,10 @@
  ; -runtime-variant _pic: link the PIC build of the OCaml runtime
  ; (libasmrun_pic.a). The default runtime carries R_X86_64_32 absolute
  ; relocations, which the linker rejects inside a shared object on Linux.
- ; macOS is PIC everywhere, so this changes nothing there.
+ ; Windows uses the default runtime; it does not provide the _pic variant.
  (link_flags
-  (-runtime-variant _pic -output-complete-obj -cclib
+  (-runtime-variant "%{env:STANLI_OCAML_RUNTIME_VARIANT=_pic}"
+   -output-complete-obj -cclib
    -L%{env:STANLI_OCAML_SYSTEM_LIBDIR=.})))
 
 (test

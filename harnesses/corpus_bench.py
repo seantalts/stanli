@@ -18,6 +18,8 @@ import pathlib
 import platform
 import signal
 import shutil
+import shlex
+import zipfile
 import statistics
 import subprocess
 import sys
@@ -26,12 +28,12 @@ import time
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import compile_cmd
-from verify_refs import model_files
 
 PROTOCOL = "stanli-corpus-v2"
 BENCH = REPO / "build-rel/bench_grad"
 RUN = REPO / "build-rel/stanli_run"
 STANC = REPO / "deps/stanc3/stanc"
+VECTORIZE_PROBE = REPO / "build-rel/stanli_vectorize_probe"
 COLS = ["model", "params", "stanli_prep_s", "stanli_ns_grad",
         "stanli_sample_s", "stanli_grads", "cmdstan_build_s",
         "cmdstan_ns_grad", "cmdstan_sample_s", "stanli_ns_grad_mad",
@@ -277,25 +279,49 @@ def open_run(output, expected, resume):
     return directory, manifest
 
 
-def model_pairs(pdb, corpus):
-    pairs = {}
-    if corpus != "rethinking":
-        for source in sorted((pdb / "posteriors").glob("*.json")):
-            meta = json.loads(source.read_text())
-            pairs.setdefault(meta["model_name"], meta["data_name"])
-    if corpus != "posteriordb":
-        pairs.update({p.stem: None for p in (REPO / "tests/rethinking").glob("*.stan")})
-    return pairs
+def benchmark_cases(pdb, corpus="all"):
+    """Return source/data paths; keep the established first dataset per PDB model."""
+    if corpus not in {"all", "posteriordb", "educational", "rethinking"}:
+        raise ValueError(f"Unknown benchmark corpus: {corpus}")
+    cases = {}
+    if corpus in {"all", "posteriordb"}:
+        for pj in sorted((pdb / "posteriors").glob("*.json")):
+            meta = json.loads(pj.read_text())
+            model = meta["model_name"]
+            cases.setdefault(model, (
+                pdb / "models" / "stan" / f"{model}.stan",
+                pdb / "data" / "data" / f"{meta['data_name']}.json.zip"))
+    if corpus in {"all", "educational"}:
+        from check_educational import files, inventory
+        for model in inventory():
+            if model in cases:
+                raise ValueError(f"Duplicate benchmark model: {model}")
+            cases[model] = files(model)
+    if corpus in {"all", "rethinking"}:
+        for source in sorted((REPO / "tests/rethinking").glob("*.stan")):
+            if source.stem in cases:
+                raise ValueError(f"Duplicate benchmark model: {source.stem}")
+            cases[source.stem] = (source, source.with_suffix(".json"))
+    return cases
+
+
+def materialize_data(source, destination):
+    if source.suffix == ".zip":
+        with zipfile.ZipFile(source) as archive:
+            destination.write_bytes(archive.read(archive.namelist()[0]))
+    else:
+        destination.write_bytes(source.read_bytes())
 
 
 def build_model(name, stan, data, work, runner, args):
     work.mkdir(exist_ok=True)
     source, hpp, mir = work / f"{name}.stan", work / f"{name}.hpp", work / "model.sexp"
     source.write_bytes(stan.read_bytes())
-    result = runner.require(f"{name}/stanc-mir",
-        [args.stanc, "--O1", "--debug-optimized-mir", source, f"--o={hpp}"], args.build_timeout)
-    mir.write_text(runner.text(result))
-    runner.require(f"{name}/stanc-cpp", [args.stanc, source, f"--o={hpp}"], args.build_timeout)
+    runner.require(f"{name}/stanli-mir",
+        [args.vectorize_probe, "--vectorize-loops", "on", "--output", mir, source],
+        args.build_timeout)
+    runner.require(f"{name}/stanc-cpp",
+        [args.stanc, source, f"--o={hpp}", *shlex.split(args.stancflags)], args.build_timeout)
     gradient = work / "gradbench"
     runner.require(f"{name}/gradient-driver-build",
         compile_cmd(args.cmdstan, hpp, REPO / "tools/bench_cmdstan_grad.cpp", gradient, opt="-O3"),
@@ -357,7 +383,7 @@ def measure_model(name, stan, data, directory, manifest, runner, args):
                         continue
                     command = ([args.run, stan, data, "--warmup", str(args.iter_warmup),
                                 "--samples", str(args.iter_sampling), "--seed", str(seed),
-                                "--sampler-stats", "--stanc", args.stanc]
+                                "--sampler-stats"]
                                if engine == "stanli" else
                                [exe, "sample", f"num_warmup={args.iter_warmup}",
                                 f"num_samples={args.iter_sampling}", "random", f"seed={seed}",
@@ -400,7 +426,7 @@ def main(argv=None):
     parser.add_argument("cmdstan", type=pathlib.Path)
     parser.add_argument("pdb", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--corpus", choices=("all", "posteriordb", "rethinking"), default="all")
+    parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking"), default="all")
     parser.add_argument("--filter", default="")
     parser.add_argument("--rounds", type=int, default=6)
     parser.add_argument("--warmup-ms", type=int, default=200)
@@ -418,7 +444,10 @@ def main(argv=None):
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--bench", type=pathlib.Path, default=BENCH)
     parser.add_argument("--run", type=pathlib.Path, default=RUN)
-    parser.add_argument("--stanc", type=pathlib.Path, default=STANC)
+    parser.add_argument("--stanc", "--cmdstan-stanc", type=pathlib.Path, default=STANC,
+                        help="compiler for the CmdStan model header")
+    parser.add_argument("--stancflags", default="", help="flags for CmdStan header generation")
+    parser.add_argument("--vectorize-probe", type=pathlib.Path, default=VECTORIZE_PROBE)
     args = parser.parse_args(argv)
     if args.cmdstan_runtime_multiple is not None:
         if not args.sampling:
@@ -439,7 +468,7 @@ def main(argv=None):
     if args.sampling and (len(args.seeds) < 2 or len(args.seeds) % 2 or
                           len(set(args.seeds)) != len(args.seeds)):
         parser.error("sampling requires an even number of distinct seeds for balanced order")
-    for key in ("cmdstan", "pdb", "output", "bench", "run", "stanc"):
+    for key in ("cmdstan", "pdb", "output", "bench", "run", "stanc", "vectorize_probe"):
         setattr(args, key, getattr(args, key).absolute())
     if any(os.getenv(k, "0") != "0" for k in ("STANLI_PROFILE", "STANLI_PROFILE_PREP")):
         parser.error("disable profiling for comparative measurements")
@@ -447,10 +476,11 @@ def main(argv=None):
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-bench-inputs-") as cache:
         inputs = {}
-        for name, dname in sorted(model_pairs(args.pdb / "posterior_database", args.corpus).items()):
+        for name, (stan, data_source) in sorted(benchmark_cases(args.pdb / "posterior_database", args.corpus).items()):
             if args.filter and args.filter not in name:
                 continue
-            stan, data = model_files(name, {"data": dname}, args.pdb / "posterior_database", pathlib.Path(cache))
+            data = pathlib.Path(cache) / f"{name}.json"
+            materialize_data(data_source, data)
             inputs[name] = (stan, data)
         if not inputs:
             parser.error("no models selected")
@@ -465,7 +495,7 @@ def main(argv=None):
                                      processor=platform.processor(), logical_cpus=os.cpu_count()),
                         threads=THREAD_ENV, sources=identities,
                         executables={k: sha(getattr(args, k)) for k in
-                                     (("bench", "stanc", "run") if args.sampling else ("bench", "stanc"))},
+                                     (("bench", "stanc", "vectorize_probe", "run") if args.sampling else ("bench", "stanc", "vectorize_probe"))},
                         toolchains={"cmdstan": checkout_identity(args.cmdstan),
                                     "stan": checkout_identity(args.cmdstan / "stan"),
                                     "math": checkout_identity(args.cmdstan / "stan/lib/stan_math"),

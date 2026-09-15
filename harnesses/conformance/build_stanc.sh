@@ -56,13 +56,28 @@ git -C "$src_dir" fetch -q origin "$src_sha"
 git -C "$src_dir" reset -q --hard
 git -C "$src_dir" checkout -q --detach "$src_sha"
 
-if [[ ! -d "$HOME/.opam" ]]; then opam init -y --bare --no-setup; fi
-if ! opam switch list --short 2>/dev/null | grep -qx "$switch"; then
+opam_confirm=yes
+opam_init_args=(--bare --no-setup)
+opam_root=${OPAMROOT:-$HOME/.opam}
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    opam_root=$(cygpath -u "$opam_root")
+    # Reuse the Unix tools and Git on PATH instead of creating internal Cygwin.
+    opam_init_args+=(--cygwin-local-install)
+    # Running pacman non-interactively requires unsafe-yes.
+    opam_confirm=unsafe-yes
+    ;;
+esac
+if [[ ! -f "$opam_root/config" ]]; then
+  opam init --confirm-level="$opam_confirm" "${opam_init_args[@]}"
+fi
+if ! opam switch list --color=never --short 2>/dev/null | tr -d '\r' | grep -Fqx "$switch"; then
   # stanc3 pins its OCaml version exactly; other versions fail to solve.
-  opam switch create "$switch" "ocaml-base-compiler.$ocaml_version" -y
+  opam switch create "$switch" "ocaml-base-compiler.$ocaml_version" \
+    --confirm-level="$opam_confirm"
 fi
 eval "$(opam env --switch="$switch" --set-switch)"
-(cd "$src_dir" && opam install . --deps-only -y)
+(cd "$src_dir" && opam install . --deps-only --confirm-level="$opam_confirm")
 # Fill the %%NAME%%/%%VERSION%% placeholders from git, as the release
 # pipeline would; without this every source build answers --version
 # identically and conformance reports cannot tell two pins apart.

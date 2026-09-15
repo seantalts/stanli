@@ -24,7 +24,9 @@ sample_model(
 \arguments{
 \item{model}{A `stanli_model`.}
 
-\item{chains, seed, warmup, samples, thin}{Sampler configuration.}
+\item{chains, seed, warmup, samples, thin}{Sampler configuration. `seed` is
+also the model-construction seed for this run when transformed data
+draws from it; see [stanli_model()].}
 
 \item{delta}{Target acceptance statistic.}
 

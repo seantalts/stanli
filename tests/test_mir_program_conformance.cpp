@@ -311,7 +311,9 @@ ProgramObservation observe_program(
   Observation accepted{Stage::Compile, OutcomeKind::Accepted, {}, {}, {}};
   return {std::move(accepted), observe_execution([&] {
             std::vector<double> value;
-            run_rhs<double>(p, t, y.data(), theta.data(), x_r.data(), value);
+            std::vector<double> rhs_registers;
+            run_rhs<double>(p, t, y.data(), theta.data(), x_r.data(), value,
+                            rhs_registers);
             return value;
           }),
           false};
@@ -921,9 +923,65 @@ void test_unknown_nrfunapp_fails_loud() {
                        "FnUnmodeledEffect");
 }
 
+// Speculative unknown values are common in runtime branches. Probe lazily,
+// preserving real comparisons and geometry even when values are unavailable.
+void test_constant_probes() {
+  stanli::Program p;
+  std::map<std::string, const FunDef*> functions;
+  stanli::ProgramCompiler pc{p, functions};
+  const auto require = [](bool ok, const char* why) {
+    if (!ok) {
+      ++failures;
+      std::printf("FAIL constant probe: %s\n", why);
+    }
+  };
+  long integer = 123;
+  double real = 123;
+  const Expr unknown = var("unknown", "UInt");
+  require(!pc.try_cint(unknown, &integer) && integer == 123, "unknown integer");
+  require(!pc.try_creal(var("unknown", "UReal"), &real) && real == 123,
+          "unknown real");
+  for (auto kind : {Expr::EAnd, Expr::EOr}) {
+    Expr e;
+    e.kind = kind;
+    e.type_ = "UInt";
+    const long lhs = kind == Expr::EAnd ? 0 : 1;
+    e.args = {lit_int(lhs), unknown};
+    require(pc.try_cint(e, &integer) && integer == lhs, "lazy dead operand");
+    e.args[0] = lit_int(1 - lhs);
+    require(!pc.try_cint(e, &integer), "required unknown operand");
+  }
+  Expr select;
+  select.kind = Expr::TernaryIf;
+  select.type_ = "UReal";
+  select.args = {lit_int(1), lit_real(-0.0), var("unknown", "UReal")};
+  require(pc.try_creal(select, &real) && real == 0 && std::signbit(real),
+          "lazy real ternary and signed zero");
+  select.args[0] = lit_int(0);
+  require(!pc.try_creal(select, &real), "selected unknown arm");
+  require(pc.try_cint(fun("Greater__", {lit_real(2.5), lit_int(2)}, "UInt"),
+                      &integer) &&
+              integer == 1,
+          "fractional comparison must not truncate");
+  require(
+      pc.try_creal(lit_real(std::numeric_limits<double>::quiet_NaN()), &real) &&
+          std::isnan(real),
+      "known NaN is a value");
+  stanli::Range shape;
+  shape.kind = stanli::ViewKind::Vector;
+  shape.len = 7;
+  shape.reg = pc.alloc(shape.len);
+  pc.reals["runtime_values"] = shape;
+  require(pc.try_cint(fun("rows", {var("runtime_values", "UVector")}, "UInt"),
+                      &integer) &&
+              integer == 7,
+          "shape without runtime values");
+}
+
 }  // namespace
 
 int main() {
+  test_constant_probes();
   test_short_circuit_or();
   test_short_circuit_and();
   test_short_circuit_or_requires_rhs();

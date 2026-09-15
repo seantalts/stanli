@@ -186,6 +186,7 @@ struct Observation {
 };
 
 struct OldWorkspace {
+  std::vector<var> registers;
   std::vector<var> y;
   std::vector<var> outputs;
   std::vector<double> harvested;
@@ -265,7 +266,7 @@ double old_callback(const Prototype& p, double t,
   refill_vars(ws.y, y_values);
 
   stanli::run_rhs<var>(p.rhs, t, ws.y.data(), theta.data(), theta.size(),
-                       x_r.data(), ws.outputs);
+                       x_r.data(), ws.outputs, ws.registers);
   const size_t n_out = ws.outputs.size();
   sweep_and_harvest(ws.outputs, ws.y, theta, nested, ws.harvested);
 

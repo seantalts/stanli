@@ -34,7 +34,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `covid19imperial_v2` | 52 | 8.2e-16 | 7 |
 | `covid19imperial_v3` | 52 | 8.2e-16 | 7 |
 | `diamonds` | 27 | 2.6e-12 | 16248 |
-| `dogs` | 4 | 5.3e-16 | 3 |
+| `dogs` | 4 | 5.5e-15 | 31 |
 | `dogs_hierarchical` | 3 | 1.2e-15 | 9 |
 | `dogs_log` | 3 | 0 (bitwise) | 0 |
 | `dogs_nonhierarchical` | 66 | 6.9e-16 | 4 |
@@ -125,6 +125,11 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `wells_dist100ars_model` | 4 | 0 (bitwise) | 0 |
 | `wells_interaction_c_model` | 5 | 6.6e-15 | 39 |
 | `wells_interaction_model` | 5 | 0 (bitwise) | 0 |
+
+Models over the default budget:
+
+- `dogs`: 31 and 32 ULP from CmdStan at two of the three recorded points, against a 30 ULP budget. Against a 60-digit reference both engines are off by about as much: CmdStan sums the 750 Bernoulli terms one at a time and lands 10 to 59 ULP from the true log density, stanli's one merged call uses Eigen's packet reduction and vectorized exp/log1p and lands 15 to 63 ULP off, and on the gradient each engine is the closer one at a different point. Matching CmdStan would mean adopting its order; pairwise summation would put the merged call within 1 ULP of the reference at a larger distance from CmdStan.
+- `dogs_log`: bitwise at the primary point and 25 ULP at another recorded point, for the same reason as dogs, inside the 30 ULP budget.
 
 ## write_array references
 
