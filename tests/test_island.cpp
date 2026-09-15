@@ -5,6 +5,7 @@
 #include "graph_helpers.hpp"
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/graph_print.hpp>
 #include <stanli/island.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
@@ -1238,6 +1239,35 @@ static void test_liveness_finds_a_cheaper_split_than_strict() {
   expect_eq("cheaper-split estimate line captured once", matches, 1);
   expect("cheaper-split cost beats the pinned strict-piece floor",
          joined_cost < 434);
+}
+
+// Caching changes the amount of search, never its chosen partition or tape.
+// Include wide state, strict/pressure disagreement, a joined winner, and a
+// coincident cut. Rendering includes the compiled forward and adjoint bodies.
+static void test_liveness_cached_matches_uncached() {
+  const std::vector<std::function<VectorBinaryGraph()>> builders = {
+      [] { return build_wide_then_narrow(40, 36, 40); },
+      [] { return build_fan_reduce_forced_then_chain(40, 60); },
+      [] { return build_two_piece_split_loses(); },
+      [] { return build_join_guard_fires(); }};
+  for (const auto& build : builders) {
+    auto cached = build();
+    auto uncached = build();
+    const int cached_count =
+        carve_islands(cached.g, cached.fills, cached.terms, {});
+    test_setenv("STANLI_NO_ISLAND_PRICING_CACHE", "1", 1);
+    const int uncached_count =
+        carve_islands(uncached.g, uncached.fills, uncached.terms, {});
+    test_unsetenv("STANLI_NO_ISLAND_PRICING_CACHE");
+    expect_eq("pricing cache chosen count", cached_count, uncached_count);
+    std::string cached_graph, uncached_graph;
+    print_graph(cached_graph, cached.g);
+    print_graph(uncached_graph, uncached.g);
+    expect("pricing cache compiled graph", cached_graph == uncached_graph);
+    const auto got = run_grad_twice(std::move(cached.g), cached.fills);
+    const auto want = run_grad_twice(std::move(uncached.g), uncached.fills);
+    expect("pricing cache bitwise gradients", got == want);
+  }
 }
 
 // Many length-`width` DOT ops feeding a scalar chain.
@@ -2512,6 +2542,7 @@ int main() {
   test_liveness_cut_coincides_with_strict_cut();
   test_no_island_liveness_disables_splitting();
   test_liveness_finds_a_cheaper_split_than_strict();
+  test_liveness_cached_matches_uncached();
   test_dot_width_estimate_moves_together();
   test_const_count_does_not_grow_island_cost();
   test_softmax3_island_executor();
