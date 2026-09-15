@@ -518,14 +518,14 @@
   "status": "VERIFIED"
  },
  "ch15_m15_1": {
-  "max_rel": 5.287246854006961e-16,
+  "max_rel": 2.6436234270034803e-16,
   "max_ulp": 64,
   "n_values": 55,
   "point": 0,
   "status": "VERIFIED"
  },
  "ch15_m15_2": {
-  "max_rel": 1.8506364485238083e-16,
+  "max_rel": 1.850636448523808e-16,
   "max_ulp": 1,
   "n_values": 105,
   "point": 0,

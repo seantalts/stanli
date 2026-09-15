@@ -141,7 +141,9 @@ Compiler fixes belong in separate changes.
 
 ## Regenerating and recording
 
-Use R 4.6.1 and the package versions in [PROVENANCE.md](PROVENANCE.md).
+Use the canonical CRAN R 4.6.1 ARM64 environment and package versions in
+[PROVENANCE.md](PROVENANCE.md); that note explains the observed Homebrew R
+rounding difference.
 The exact installation commands are in the
 [regeneration workflow](../../.github/workflows/rethinking.yml). No CmdStan
 installation or model compilation is needed for generation.
@@ -176,7 +178,7 @@ references; the default replay includes newly added rethinking fixtures
 rather than silently skipping ones without a record. Output columns and
 values are compared as well as log density and the full gradient.
 
-The default benchmark suite includes this directory. The [version-2
+The default benchmark suite includes this directory. The [version-3
 protocol](../../docs/benchmark-protocol.md) measures gradients by default;
 full inference is a separate opt-in phase. To measure this corpus alone:
 

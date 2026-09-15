@@ -13,7 +13,8 @@ in R and Stan*, second edition, CRC Press, 2020.
   evaluation and checks the installed package's `RemoteSha`.
 - The author's [online code supplement](https://xcelab.net/rmpubs/sr2/code.txt)
   has the same 61 model names and code-box numbers (checked September 15, 2026).
-- Generator environment: R 4.6.1, rethinking 2.42, cmdstanr 0.9.0,
+- Canonical generator environment: the CRAN R 4.6.1 ARM64 binary on
+  macOS 15 (as installed by the pinned-version CI job), rethinking 2.42, cmdstanr 0.9.0,
   MASS 7.3-65, ape 5.8-1, nlme 3.1-169, mvtnorm 1.4-2; Darwin arm64.
   The regeneration workflow pins these versions. The phylogeny calculation
   uses ape's tree operations and Brownian covariance exactly as in the book.
@@ -25,6 +26,15 @@ implementation or book code boxes are vendored. `sample = FALSE` returns a
 list in 2.42; the generator puts its formula, data and model in an empty
 `ulam` S4 shell for public `stancode()` dispatch and the book's repeated-fit
 calls. It never samples or builds a CmdStan/RStan model.
+
+The canonical regenerated artifacts are retained by the workflow. Homebrew's
+R 4.6.1 build on macOS 26 gives a one-ULP difference in 36 `D_sd` entries for
+models m15.1 and m15.2 (largest absolute difference 2.22e-16). Those entries
+come from the book's `Divorce.SE / sd(Divorce)` expression. We use the CRAN
+binary's unchanged output and independently rerecord these two CmdStan inputs;
+we do not round either output or weaken the byte-comparison gate. Identical R
+version numbers alone do not promise identical floating-point arithmetic across
+R builds. Use the canonical environment for byte-identical regeneration.
 
 ## License record
 
