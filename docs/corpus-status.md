@@ -265,3 +265,74 @@ CmdStan and stanli both reject every shared evaluation point for these models: t
 ## Failures
 
 - `sir`: EVAL_FAIL stanli MIR check: y is -1.82492e-07, but must be greater than or equal to 0.000000
+
+## Rethinking teaching corpus
+
+62/62 fixtures verified at all three CmdStan points. The inventory covers all 61 ulam call sites in chapters 4–16 of the second edition, plus a supplemental hurdle model. Counts here are separate from posteriordb. These are the recorder's measurements; `tools/verify_refs.py` replays them against the current build in CI.
+
+See [the inventory and provenance](../tests/rethinking/README.md).
+
+| model | verified points | worst scaled error |
+| --- | ---: | ---: |
+| `ch09_m5_8s` | 3/3 | 7.23e-16 |
+| `ch09_m5_8s2` | 3/3 | 5.36e-16 |
+| `ch09_m9_1` | 3/3 | 8.88e-16 |
+| `ch09_m9_1_chains4` | 3/3 | 8.88e-16 |
+| `ch09_m9_2` | 3/3 | 0.00e+00 |
+| `ch09_m9_3` | 3/3 | 0.00e+00 |
+| `ch09_m9_4` | 3/3 | 0.00e+00 |
+| `ch09_m9_5` | 3/3 | 0.00e+00 |
+| `ch09_mp` | 3/3 | 0.00e+00 |
+| `ch11_m11_10` | 3/3 | 0.00e+00 |
+| `ch11_m11_11` | 3/3 | 2.78e-16 |
+| `ch11_m11_4` | 3/3 | 1.70e-15 |
+| `ch11_m11_5` | 3/3 | 5.46e-15 |
+| `ch11_m11_6` | 3/3 | 0.00e+00 |
+| `ch11_m11_7` | 3/3 | 3.54e-16 |
+| `ch11_m11_8` | 3/3 | 0.00e+00 |
+| `ch11_m11_9` | 3/3 | 0.00e+00 |
+| `ch11_m_pois` | 3/3 | 0.00e+00 |
+| `ch12_m12_1` | 3/3 | 3.36e-16 |
+| `ch12_m12_2` | 3/3 | 2.09e-16 |
+| `ch12_m12_3` | 3/3 | 9.10e-15 |
+| `ch12_m12_3_alt` | 3/3 | 1.81e-14 |
+| `ch12_m12_4` | 3/3 | 6.50e-14 |
+| `ch12_m12_5` | 3/3 | 2.00e-14 |
+| `ch12_m12_6` | 3/3 | 2.90e-14 |
+| `ch12_m12_7` | 3/3 | 2.61e-14 |
+| `ch13_m13_1` | 3/3 | 0.00e+00 |
+| `ch13_m13_2` | 3/3 | 0.00e+00 |
+| `ch13_m13_3` | 3/3 | 0.00e+00 |
+| `ch13_m13_4` | 3/3 | 7.69e-15 |
+| `ch13_m13_4b` | 3/3 | 7.69e-15 |
+| `ch13_m13_4nc` | 3/3 | 4.05e-15 |
+| `ch13_m13_5` | 3/3 | 7.18e-15 |
+| `ch13_m13_6` | 3/3 | 4.36e-15 |
+| `ch13_m13_7` | 3/3 | 0.00e+00 |
+| `ch13_m13_7nc` | 3/3 | 0.00e+00 |
+| `ch14_m14_1` | 3/3 | 7.57e-16 |
+| `ch14_m14_10` | 3/3 | 1.82e-15 |
+| `ch14_m14_11` | 3/3 | 1.48e-13 |
+| `ch14_m14_2` | 3/3 | 1.24e-15 |
+| `ch14_m14_3` | 3/3 | 1.28e-15 |
+| `ch14_m14_4` | 3/3 | 8.88e-16 |
+| `ch14_m14_4x` | 3/3 | 8.88e-16 |
+| `ch14_m14_5` | 3/3 | 8.88e-16 |
+| `ch14_m14_6` | 3/3 | 4.03e-15 |
+| `ch14_m14_6x` | 3/3 | 4.03e-15 |
+| `ch14_m14_7` | 3/3 | 2.58e-15 |
+| `ch14_m14_8` | 3/3 | 3.00e-16 |
+| `ch14_m14_8nc` | 3/3 | 4.93e-16 |
+| `ch14_m14_9` | 3/3 | 5.55e-15 |
+| `ch15_m15_1` | 3/3 | 5.29e-16 |
+| `ch15_m15_2` | 3/3 | 2.21e-16 |
+| `ch15_m15_3` | 3/3 | 0.00e+00 |
+| `ch15_m15_4` | 3/3 | 0.00e+00 |
+| `ch15_m15_5` | 3/3 | 1.11e-15 |
+| `ch15_m15_6` | 3/3 | 7.94e-16 |
+| `ch15_m15_7` | 3/3 | 4.00e-15 |
+| `ch15_m15_8` | 3/3 | 4.21e-15 |
+| `ch15_m15_9` | 3/3 | 4.21e-15 |
+| `ch16_m16_1` | 3/3 | 1.81e-15 |
+| `ch16_m16_4` | 3/3 | 1.71e-15 |
+| `extra_hurdle_poisson` | 3/3 | 2.17e-16 |

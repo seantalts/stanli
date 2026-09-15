@@ -30,7 +30,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # The demo page carries headline numbers too, and its markers are HTML
 # comments, so the same substitution works there.
 TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
-           REPO / "web" / "index.html"]
+           REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md"]
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 
@@ -76,6 +76,8 @@ def corpus_stats():
     ratios = []
     for line in rows[1:]:
         c = line.split("\t")
+        if (REPO / "tests" / "rethinking" / f"{c[idx['model']]}.stan").exists():
+            continue  # Headline here explicitly describes posteriordb.
         s, cm = c[idx["stanli_ns_grad"]], c[idx["cmdstan_ns_grad"]]
         if s.strip() and cm.strip():
             ratios.append(float(cm) / float(s))
@@ -99,7 +101,11 @@ def compute():
             if (REPO / "tests" / "stanc3" / f"{k}.stan").exists()}
     brms = {k: v for k, v in ver.items()
             if (REPO / "tests" / "brms" / f"{k}.stan").exists()}
-    ver = {k: v for k, v in ver.items() if k not in lang and k not in brms}
+    rethinking = {p.stem for p in (REPO / "tests" / "rethinking").glob("*.stan")}
+    rethinking_verified = sum(ver.get(k, {}).get("status") == "VERIFIED"
+                             for k in rethinking)
+    ver = {k: v for k, v in ver.items()
+           if k not in lang and k not in brms and k not in rethinking}
     verified = {k: v for k, v in ver.items() if v["status"] == "VERIFIED"}
     bitwise = sum(1 for v in verified.values() if v["max_ulp"] == 0)
     worst = max(v["max_rel"] for v in verified.values())
@@ -132,6 +138,8 @@ def compute():
         "corpus_worst": f"{worst:.1e}".replace("e-0", "e-"),
         "lang_verified": f"{lang_verified}/{len(lang)}",
         "lang_n": str(len(lang)),
+        "rethinking_n": str(len(rethinking)),
+        "rethinking_verified": f"{rethinking_verified}/{len(rethinking)}",
         "bench_span": span,
         "bench_wins": f"{len(wins)} of the {len(rows)}",
         "bench_losses": loss_text,

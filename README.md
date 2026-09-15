@@ -40,6 +40,9 @@ keeping installation small and avoiding a local stan-math build.
   verified against CmdStan's log density and full gradient,
   <!--gen:corpus_bitwise-->36<!--/gen--> of them bitwise identical,
   worst relative deviation <!--gen:corpus_worst-->2.6e-12<!--/gen-->.
+- Rethinking coverage: [tests/rethinking/README.md](tests/rethinking/README.md).
+  All 61 book `ulam()` calls, plus a supplemental hurdle model;
+  <!--gen:rethinking_verified-->62/62<!--/gen--> fixtures verified against CmdStan.
 - Language coverage: [tests/stanc3/README.md](tests/stanc3/README.md).
   <!--gen:lang_verified-->11/11<!--/gen--> models lifted from stanc3's own
   test suite, for the type and language constructs no real posterior

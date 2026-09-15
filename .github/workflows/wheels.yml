@@ -506,6 +506,7 @@ jobs:
       # seconds between them.
       - name: Corpus verification against CmdStan references
         run: |
+          python3 tools/check_rethinking.py
           python3 tools/verify_refs.py deps/posteriordb \
             --check build-rel/stanli_check --jobs 4
 
@@ -870,6 +871,11 @@ jobs:
           name: runtime-${{ matrix.runtime }}
           path: runtime-dist/*.tar.gz
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r-oracle-cli-${{ matrix.runtime }}
+          path: build-rel/stanli_run
+
   # The R package tests, against a real runtime. They skip without
   # one, so this is the integration job where they actually run; r.yml has the
   # package but no library, and a green check there says nothing about whether
@@ -908,12 +914,19 @@ jobs:
           } > /tmp/r-stanc.js.src
           diff -u /tmp/r-stanc.js.src r/inst/js/stanc.js.src
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: r-oracle-cli-linux-x86_64
+          path: r-oracle-cli
+
       - name: Unpack the runtime
         run: |
           mkdir -p rt
           tar xzf runtime/*.tar.gz -C rt
           ls -la rt/
           echo "STANLI_RUNTIME=$PWD/rt/libstanli.so" >> "$GITHUB_ENV"
+          chmod +x r-oracle-cli/stanli_run
+          echo "STANLI_RUN=$PWD/r-oracle-cli/stanli_run" >> "$GITHUB_ENV"
 
       - name: Fetch the previous release and the legacy anchor
         run: |
@@ -948,7 +961,8 @@ jobs:
         with:
           working-directory: r
           extra-packages: >-
-            any::testthat, any::posterior, any::V8, any::jsonlite
+            any::testthat, any::posterior, any::V8, any::jsonlite,
+            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan
           dependencies: '"hard"'
 
       # Through R CMD check rather than testthat directly, so the tests run
@@ -977,9 +991,20 @@ jobs:
         run: |
           current_library="$PWD/../r-current-library"
           mkdir -p "$current_library"
-          R CMD INSTALL --library="$current_library" stanli_*.tar.gz
+          R CMD INSTALL --install-tests --library="$current_library" stanli_*.tar.gz
           R_LIBS_USER="$current_library${R_LIBS_USER:+:$R_LIBS_USER}" \
             Rscript ../tests/test_r_portable_compiler.R
+
+      - name: R ecosystem acceptance (no skips) and fresh-session timing
+        run: |
+          export R_LIBS_USER="$PWD/r-current-library${R_LIBS_USER:+:$R_LIBS_USER}"
+          Rscript tools/test_r_ecosystem.R
+          Rscript tools/bench_r_first_posterior.R r-first-posterior-linux.csv
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r-first-posterior-linux
+          path: r-first-posterior-linux.csv
 
       - name: Both cross-release compiler and runtime directions
         working-directory: r
@@ -1013,6 +1038,65 @@ jobs:
         with:
           name: r-check-log
           path: r/stanli.Rcheck/
+
+  # Full platform builds run after merge, nightly, and on tags. Test the same
+  # optional R integrations against those fresh artifacts, and measure actual
+  # session startup on each host rather than extrapolating Linux timings.
+  r-platform-tests:
+    name: R ecosystem (${{ matrix.runtime }})
+    if: github.event_name != 'pull_request'
+    needs: [build, windows]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, runtime: darwin-arm64, library: libstanli.dylib, cli: stanli_run}
+          - {os: windows-2022, runtime: windows-x86_64, library: stanli.dll, cli: stanli_run.exe}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime-${{ matrix.runtime }}
+          path: runtime
+      - uses: actions/download-artifact@v4
+        with:
+          name: r-oracle-cli-${{ matrix.runtime }}
+          path: r-oracle-cli
+      - name: Unpack the freshly built runtime
+        run: |
+          mkdir -p rt
+          tar xzf runtime/*.tar.gz -C rt
+          runtime_path="$PWD/rt/${{ matrix.library }}"
+          if [ "$RUNNER_OS" = Windows ]; then runtime_path=$(cygpath -m "$runtime_path"); fi
+          echo "STANLI_RUNTIME=$runtime_path" >> "$GITHUB_ENV"
+          cli_path="$PWD/r-oracle-cli/${{ matrix.cli }}"
+          if [ "$RUNNER_OS" = Windows ]; then cli_path=$(cygpath -m "$cli_path"); fi
+          chmod +x "r-oracle-cli/${{ matrix.cli }}"
+          echo "STANLI_RUN=$cli_path" >> "$GITHUB_ENV"
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r
+          extra-packages: >-
+            any::testthat, any::posterior, any::V8, any::jsonlite,
+            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan
+          dependencies: '"hard"'
+      - name: Install and run ecosystem acceptance (no skips)
+        run: |
+          R CMD INSTALL --install-tests r
+          Rscript tools/test_r_ecosystem.R
+      - name: Measure fresh-session time to first posterior
+        run: Rscript tools/bench_r_first_posterior.R r-first-posterior.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r-first-posterior-${{ matrix.runtime }}
+          path: r-first-posterior.csv
 
   # The Windows wheel cannot embed the native compiler yet. Cross-build both
   # the pristine stock rollback executable and stanli's portable-MIR executable
@@ -1347,6 +1431,17 @@ jobs:
         with:
           name: runtime-windows-x86_64
           path: runtime-dist/*.tar.gz
+
+      - name: Stage the CSV oracle CLI and its MinGW runtime dependencies
+        run: |
+          mkdir -p r-oracle-cli
+          cp build-rel/stanli_run.exe r-oracle-cli/
+          cp /ucrt64/bin/libstdc++-6.dll /ucrt64/bin/libgcc_s_seh-1.dll \
+             /ucrt64/bin/libwinpthread-1.dll r-oracle-cli/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r-oracle-cli-windows-x86_64
+          path: r-oracle-cli/
 
   # The test suite with AddressSanitizer's shadow map on. Nothing else in
   # the repo builds with a sanitizer, and the memory bugs that reach this
@@ -2098,7 +2193,7 @@ jobs:
   # source R-universe follows.
   runtime-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [static_checks, build, windows, wasm-webr, stanr]
+    needs: [static_checks, build, windows, wasm-webr, stanr, r-tests, r-platform-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # create the release and attach assets to it

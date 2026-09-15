@@ -1,0 +1,47 @@
+name: Rethinking corpus regeneration
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tests/rethinking/**'
+      - 'tools/gen_rethinking_models.R'
+      - 'tools/stan_data_json.R'
+      - 'tools/check_rethinking.py'
+      - '.github/workflows/rethinking.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regenerate:
+    runs-on: macos-15
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.6.1'
+      - name: Install the pinned generator dependencies
+        shell: Rscript {0}
+        run: |
+          options(repos = c(STAN = "https://stan-dev.r-universe.dev",
+                           CRAN = "https://cloud.r-project.org"))
+          install.packages("remotes")
+          remotes::install_version("cmdstanr", "0.9.0", upgrade = "never")
+          remotes::install_version("ape", "5.8-1", upgrade = "never")
+          remotes::install_version("MASS", "7.3-65", upgrade = "never")
+          remotes::install_version("nlme", "3.1-169", upgrade = "never")
+          remotes::install_version("mvtnorm", "1.4-2", upgrade = "never")
+          remotes::install_github(
+            "rmcelreath/rethinking@ac1b3b2cda83f3e14096e2d997a6e30ad109eeee",
+            upgrade = "never", dependencies = NA)
+      - name: Test declaration-aware JSON
+        run: Rscript tools/test_stan_data_json.R
+      - name: Regenerate every book call and compare bytes
+        run: |
+          Rscript tools/gen_rethinking_models.R "$RUNNER_TEMP/rethinking"
+          python3 tools/check_rethinking.py --generated "$RUNNER_TEMP/rethinking"
