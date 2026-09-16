@@ -1,5 +1,11 @@
 # Native stanfit compatibility
 
+For RStan-style extraction, summaries, and diagnostics **without RStan**, use
+`as_rfit()`. That native S3 interface ships inside Stanli; see the
+[R interface guide](../r/README.md#native-r-style-fit-methods-without-rstan).
+The `as_stanfit()` conversion documented below remains optional and produces
+an actual RStan S4 subclass.
+
 `as_stanfit()` constructs an S4 subclass of RStan's `stanfit` in memory from a
 `stanli_fit`. It neither writes nor reads CSV and never compiles a C++ model.
 RStan is an optional suggested package. This supplies the stored-fit object
