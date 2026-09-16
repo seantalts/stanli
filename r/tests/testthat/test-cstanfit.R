@@ -70,9 +70,12 @@ test_that("CmdStan-style methods agree with CmdStanR on identical CSV draws", {
   expect_equal(fit$summary(),oracle$summary(),tolerance=1e-10)
   expect_equal(summary(fit),fit$summary())
   expect_output(print(fit),"mu")
+  expect_output(print(fit,variables="theta",n=1),"theta\\[1\\]")
   expect_equal(fit$summary("mu","mean","sd",~quantile(.x,probs=c(.1,.9)),"rhat","ess_bulk"),
                oracle$summary("mu","mean","sd",~quantile(.x,probs=c(.1,.9)),"rhat","ess_bulk"),tolerance=1e-10)
   expect_equal(fit$draws("A[2,1]"),oracle$draws("A[2,1]"),tolerance=1e-12)
+  expect_equal(fit$draws(c("theta","lp__","mu")),
+               oracle$draws(c("theta","lp__","mu")),tolerance=1e-12)
   fields <- c("iter_warmup","iter_sampling","thin","id","variables","stan_variables","stan_variable_sizes")
   expect_equal(fit$metadata()[fields],oracle$metadata()[fields])
   expect_identical(fit$metadata()$save_warmup,as.logical(oracle$metadata()$save_warmup))
@@ -110,7 +113,7 @@ test_that("CmdStan-style views preserve warmup metadata and reject invalid reque
   raw <- cstan_fixture(); raw$columns <- rev(raw$columns)
   expect_error(as_cstanfit(raw),"metadata")
   raw <- cstan_fixture(); raw$thin <- NULL
-  expect_error(as_cstanfit(raw),"thin")
+  expect_error(as_cstanfit(raw),"lacks sampling metadata")
   raw <- cstan_fixture(); raw$report$available <- FALSE
   expect_true(all(is.na(as_cstanfit(raw)$time()$chains$warmup)))
 })
@@ -144,6 +147,8 @@ test_that("sample_cstan translates initialization and sampling options", {
     refresh=0,init=unconstrain(stanli_model(code=code),init))
   expect_identical(fit$stanli_fit()$draws,raw$draws)
   expect_identical(fit$stanli_fit()$sampler,raw$sampler)
+  with_extra <- do.call(sample_cstan,c(args,list(init=c(init,list(transformed=123)))))
+  expect_identical(with_extra$draws(),fit$draws())
   by_function <- do.call(sample_cstan,c(args,list(init=function(chain_id) init)))
   by_chain <- do.call(sample_cstan,c(args,list(init=list(init,init))))
   expect_identical(by_function$draws(),fit$draws())
@@ -160,4 +165,23 @@ test_that("sample_cstan refuses unsupported options before preparing a model", {
   expect_error(sample_cstan("invalid",adapt_delta=1),"adapt_delta")
   expect_error(sample_cstan("invalid",init=0),"constrained")
   expect_error(sample_cstan("invalid",init=list(a=0),pathfinder_init=list()),"cannot be combined")
+})
+
+test_that("zero-output models expose lp and diagnostics through native adapters", {
+  skip_without_runtime()
+  fit <- sample_cstan("model { target += 0; }",chains=1,iter_warmup=0,
+                      iter_sampling=5,seed=10,refresh=0)
+  expect_identical(posterior::variables(fit$draws()),"lp__")
+  expect_equal(dim(fit$draws()),c(5,1,1))
+  expect_equal(dim(fit$sampler_diagnostics()),c(5,1,6))
+  rfit <- as_rfit(fit$stanli_fit())
+  expect_equal(dim(extract(rfit,permuted=FALSE)),c(5,1,1))
+})
+
+test_that("stored method delegates use the installed package implementation", {
+  path <- tempfile(fileext=".rds"); on.exit(unlink(path))
+  saveRDS(as_cstanfit(cstan_fixture()),path)
+  fit <- readRDS(path)
+  testthat::local_mocked_bindings(cstan_draws=function(...) "updated implementation", .package="stanli")
+  expect_identical(fit$draws(),"updated implementation")
 })

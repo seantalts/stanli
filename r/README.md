@@ -296,7 +296,8 @@ Summaries use posterior's rank-normalized R-hat and bulk/tail ESS, matching
 CmdStanR's default summary calculations. The existing `as_rfit()` interface
 continues to provide RStan-style tables and basic ESS/R-hat. Iteration counts
 in `$metadata()` are before thinning; draw arrays contain retained iterations.
-Diagnostics have a stable alphabetical column order. Overall wall time is
+Diagnostics have a stable alphabetical column order; CmdStanR CSV order may
+differ. Consumers should select diagnostic columns by name. Overall wall time is
 reported as unavailable because the native report only retains per-chain times.
 Saved-draw methods need the Stanli R package and optional posterior/loo packages,
 but no native runtime. CSV/executable methods and LOO moment matching are not

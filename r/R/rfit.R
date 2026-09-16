@@ -48,7 +48,7 @@ as_rfit <- function(x) {
   ds <- dim(x$sampler)
   warmup <- x$warmup_draws
   if (length(d) != 3L || length(ds) != 3L || !identical(d[1:2], ds[1:2]) ||
-      !identical(dimnames(x$draws)[[3L]], x$columns) ||
+      (length(x$columns) > 0L && !identical(dimnames(x$draws)[[3L]], x$columns)) ||
       !"lp__" %in% dimnames(x$sampler)[[3L]] ||
       length(warmup) != 1L || !is.numeric(warmup) || !is.finite(warmup) ||
       warmup < 0 || warmup != floor(warmup) || warmup >= d[1L])

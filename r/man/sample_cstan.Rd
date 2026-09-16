@@ -39,7 +39,8 @@ sample_cstan(
 \item{init}{Complete constrained parameter list, one list per chain, a
 function returning a list (optionally accepting `chain_id`), or NULL for
 random initialization. Partial lists, numeric radii, and files are unsupported;
-use `init_radius` for random initialization.}
+use `init_radius` for random initialization. Extra non-parameter names
+(such as transformed parameters) are ignored, as in CmdStanR.}
 
 \item{adapt_delta}{Target acceptance probability.}
 

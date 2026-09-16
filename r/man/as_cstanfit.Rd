@@ -10,7 +10,7 @@ as_cstanfit(x)
 
 \method{summary}{stanli_cstanfit}(object, variables = NULL, ...)
 
-\method{print}{stanli_cstanfit}(x, ...)
+\method{print}{stanli_cstanfit}(x, variables = NULL, n = 10L, ...)
 }
 \arguments{
 \item{x}{A `stanli_fit` or an existing `stanli_cstanfit`.}
@@ -20,6 +20,8 @@ as_cstanfit(x)
 \item{variables}{Variables to summarize.}
 
 \item{...}{Arguments passed to `posterior::summarise_draws()`.}
+
+\item{n}{Maximum number of summary rows to print (default 10).}
 }
 \value{
 A `stanli_cstanfit` with methods described below. This is a native
@@ -38,7 +40,8 @@ Neither cmdstanr nor rstan is needed. The original fit is unchanged.
   `posterior::summarise_draws()`, including custom functions and formulas.
   It uses rank-normalized R-hat and bulk/tail ESS by default, as CmdStanR does.
 * `$sampler_diagnostics(inc_warmup = FALSE, format = "draws_array")`
-  returns the six sampler diagnostics in CmdStanR's alphabetical order.
+  returns the six sampler diagnostics in stable alphabetical order;
+  CmdStanR's CSV order may differ.
 * `$metadata()` includes iteration counts **before** thinning, `thin`,
   `save_warmup`, variable names, chain IDs, and sampler settings.
 * `$num_chains()` returns the number of chains.

@@ -12,7 +12,8 @@
 #' @param init Complete constrained parameter list, one list per chain, a
 #'   function returning a list (optionally accepting `chain_id`), or NULL for
 #'   random initialization. Partial lists, numeric radii, and files are unsupported;
-#'   use `init_radius` for random initialization.
+#'   use `init_radius` for random initialization. Extra non-parameter names
+#'   (such as transformed parameters) are ignored, as in CmdStanR.
 #' @param adapt_delta Target acceptance probability.
 #' @param max_treedepth Maximum NUTS tree depth.
 #' @param thin Retain every thin-th iteration, separately in warmup and sampling.
@@ -53,6 +54,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
   model <- stanli_model(code = model_code, data = data, seed = seed)
   unconstrained <- NULL
   if (!is.null(init)) {
+    declared <- unique(sub("\\..*$", "", .Call("stanli_r_parameter_columns", model$ptr)))
     per_chain <- is.list(init) && is.null(names(init))
     if (per_chain && (length(init) != chains || !all(vapply(init, is.list, logical(1)))))
       stop("init must supply one complete named list per chain", call. = FALSE)
@@ -60,9 +62,11 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
       values <- if (is.function(init)) {
         if ("chain_id" %in% names(formals(init))) init(chain_id = chain) else init()
       } else if (per_chain) init[[chain]] else init
-      if (!is.list(values) || is.null(names(values)) || any(!nzchar(names(values))) ||
+      if (!is.list(values) || is.null(names(values)) || anyNA(names(values)) || any(!nzchar(names(values))) ||
           anyDuplicated(names(values)))
         stop("init must supply a complete named list of parameters", call. = FALSE)
+      values <- values[intersect(names(values), declared)]
+      values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
       unconstrain(model, values)
     }))
   }
