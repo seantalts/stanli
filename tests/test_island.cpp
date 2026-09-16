@@ -2308,6 +2308,87 @@ static void test_packed_live_ins() {
   }
 }
 
+// Trim windows within a packed descriptor, preserving branches and a direct
+// live-out. Both backwards must leave unused parameter cells at zero adjoint.
+static void test_input_windows() {
+  {
+    Program p;
+    p.n_regs = 12;
+    p.code = {{Program::DOT, 11, 1, 6, 0, 3}};
+    p.out_regs = {11};
+    const std::vector<std::pair<int, int>> inputs{{0, 6}, {6, 5}, {12, 0}};
+    expect("window keeps full operand ranges",
+           used_program_inputs(p, inputs) ==
+               std::vector<std::pair<int, int>>{{1, 3}, {6, 3}, {12, 0}});
+    Program::Call call;
+    call.n_in = 2;
+    call.in[0] = 2;
+    call.in_len[0] = 4;
+    call.in[1] = 7;
+    call.in_len[1] = 2;
+    call.out = 11;
+    call.out_len = 1;
+    p.calls = {call};
+    p.code = {{Program::CALL, 0, 0}};
+    expect("window keeps CALL operand ranges",
+           used_program_inputs(p, inputs) ==
+               std::vector<std::pair<int, int>>{{2, 4}, {7, 2}, {12, 0}});
+  }
+  for (bool native : {false, true}) {
+    Graph g;
+    const int values = g.add_slot(24, true);
+    const int control = g.add_slot(1, true);
+    auto p = std::make_shared<IslandProg>();
+    p->n_regs = 20;
+    p->ins = {{0, 8, 0, 2}, {8, 8, 0, 12}, {16, 1, 1, 0}};
+    p->pool = {0.};
+    p->code = {{Program::CONST, 17, 0}, {Program::LT, 18, 16, 17},
+               {Program::JZ, 5, 18}, {Program::MUL, 19, 3, 10},
+               {Program::JMP, 6}, {Program::ADD, 19, 5, 12}};
+    p->out_regs = {19, 7};
+    expect("window adjoint generated", gen_adjoint(*p));
+    p->native_adj = native;
+    const std::vector<std::pair<int, int>> ranges{{0, 8}, {8, 8}, {16, 1}};
+    const auto used = used_program_inputs(*p, ranges);
+    expect("window bounds include both branches and direct output",
+           used == std::vector<std::pair<int, int>>{{3, 5}, {10, 3}, {16, 1}});
+    for (size_t k = 0; k < p->ins.size(); ++k) {
+      p->ins[k].offset += used[k].first - p->ins[k].reg;
+      p->ins[k].reg = used[k].first;
+      p->ins[k].len = used[k].second;
+    }
+    const int out = g.add_slot(2, false);
+    const int op = g.add_op(OP_ISLAND, {values, control}, out);
+    g.ops[op].udata = p.get();
+    g.udata_pool.push_back(p);
+    const int sum = g.add_slot(1, false);
+    g.add_op(OP_SUM_VEC, {out}, sum);
+    g.result_slot = sum;
+    Executor ex(std::move(g));
+    for (double sign : {-1., 1., -1.}) {
+      for (int i = 0; i < 24; ++i) ex.params_data()[i] = .25 * (i + 1);
+      ex.params_data()[24] = sign;
+      std::vector<double> gradient(25), want(25, 0.);
+      const auto* x = ex.params_data();
+      const double expected = (sign < 0 ? x[5] * x[14] : x[7] + x[16]) + x[9];
+      want[9] = 1.;
+      if (sign < 0) {
+        want[5] = x[14];
+        want[14] = x[5];
+      } else {
+        want[7] = want[16] = 1.;
+      }
+      expect_exact("window value", ex.gradient(gradient.data()), expected);
+      for (int i = 0; i < 25; ++i)
+        expect_exact("window gradient", gradient[i], want[i]);
+    }
+    Program unmodelled = *p;
+    unmodelled.code.push_back({Program::DYN_INDEX, 19, 0, 16, 0, 8});
+    expect("window refuses unmodelled spans",
+           used_program_inputs(unmodelled, ranges) == ranges);
+  }
+}
+
 // A slot PRODUCED BEFORE the region, then read and updated in place inside
 // it, and read again after: it is a live-in and a live-out at once. If the
 // island's extraction wrote that same slot, its adjoint buffer would hold
@@ -2562,6 +2643,7 @@ int main() {
   test_too_many_live_ins();
   test_six_live_ins_ok();
   test_packed_live_ins();
+  test_input_windows();
   test_kernel_call_ops_carved(true);
   test_kernel_call_ops_carved(false);
   test_density_mask_data_argument();

@@ -452,6 +452,30 @@ void run_elementwise_range(const Program::Instr& I, stan::math::var* reg) {
   run_range(I, reg);
 }
 
+std::vector<std::pair<int, int>> used_program_inputs(
+    const Program& p, const std::vector<std::pair<int, int>>& inputs) {
+  for (const auto& instr : p.code)
+    if (program_spec_of(instr).has(kProgramNoAdjoint) &&
+        instr.code != Program::JZ && instr.code != Program::JMP)
+      return inputs;
+  std::vector<char> read((size_t)p.n_regs, false);
+  for (const auto& instr : p.code)
+    each_read(p, instr, [&](Span span) {
+      for (int i = 0; i < span.len; ++i) read[(size_t)(span.reg + i)] = true;
+    });
+  for (int reg : p.out_regs) read[(size_t)reg] = true;
+  auto result = inputs;
+  for (auto& input : result) {
+    const int end = input.first + input.second;
+    int first = input.first, last = end;
+    while (first < last && !read[(size_t)first]) ++first;
+    while (last > first && !read[(size_t)(last - 1)]) --last;
+    // Keep entirely unread descriptors in this conservative optimization.
+    if (first < last) input = {first, last - first};
+  }
+  return result;
+}
+
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {
   (void)compact_program_gated(p, seeded, true);
 }

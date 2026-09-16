@@ -546,6 +546,18 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
     }
     inputs = std::move(compact);
   }
+  // Preserve graph descriptors (and their upstream evaluation). Only the
+  // register seed/harvest window narrows, after packed offsets are assigned.
+  std::vector<std::pair<int, int>> input_ranges;
+  for (const auto& input : prog->ins)
+    input_ranges.emplace_back(input.reg, input.len);
+  const auto used_inputs = used_program_inputs(*prog, input_ranges);
+  for (size_t k = 0; k < prog->ins.size(); ++k) {
+    auto& input = prog->ins[k];
+    input.offset += used_inputs[k].first - input.reg;
+    input.reg = used_inputs[k].first;
+    input.len = used_inputs[k].second;
+  }
   is.n_in = (int)inputs.size();
   for (int k = 0; k < is.n_in; ++k) is.in[k] = inputs[k];
   is.out = add_slot(packed, false);

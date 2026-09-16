@@ -6,7 +6,8 @@
 
 - Speed up categorical, ordinal, multivariate-normal, Dirichlet, Wiener,
   truncated-distribution and GP calculations; reduce loop and preparation costs.
-- Reduce constant allocation and inactive derivative work in runtime-control replay.
+- Reduce constant allocation, inactive derivative work, and unused input copies
+  in runtime-control replay.
 - Document Rethinking, brms, and educational-model support with current-build
   numerical checks, a full timing appendix, and a Rethinking report. Cap
   benchmark sampling at 3x its CmdStan baseline or 900 seconds, whichever is less.

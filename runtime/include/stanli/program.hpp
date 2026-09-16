@@ -376,6 +376,11 @@ static_assert(program_code_count() == static_cast<size_t>(Program::RANGE) + 1,
 // new numbering along with the program.
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded);
 
+// Narrow input windows to the bounding span of all reads and direct outputs.
+// The register program itself and input descriptor numbering are unchanged.
+std::vector<std::pair<int, int>> used_program_inputs(
+    const Program& p, const std::vector<std::pair<int, int>>& inputs);
+
 // Explicitly gate producer-destination forwarding and report whether it
 // changed the program. The original entry point above remains the public
 // default (and preserves its ABI); islands use this helper to price their

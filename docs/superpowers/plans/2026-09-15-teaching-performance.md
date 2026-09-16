@@ -881,3 +881,39 @@ is 1.0944 s. No completed-run ratio is reported. Exact measured patches, binary
 hashes, and raw records: `/tmp/stanli-teaching-perf/gaps-v8/inactive-*`.
 The remaining cost includes interpreter dispatch and replay; eliminating only
 inactive derivatives cannot reach parity. ALD/GEV remain separate targets.
+
+### Conditional input windows
+
+ALD's 40 native conditional islands each seed and harvest two 40-element
+inputs but read one cell from each. A generic read-span union narrows only
+unused leading/trailing cells in each live-in binding. It includes both branch
+arms and direct live-outs, preserves descriptor packing and upstream evaluation,
+and refuses opcodes whose spans are not modelled. Register code/adjoint order
+stays unchanged. Tests cover packed offsets, both branch outcomes, repeat
+execution, direct outputs, range/CALL operands, and native/var backwards.
+A source lit assertion verifies that the shipped compiler actually narrows
+a conditional's input window. All 251 existing CTests plus the new source test,
+316 existing-policy reference checks and 456 R expectations pass.
+
+The initial prototype refused JZ/JMP, so its measurements are an inactive
+control, not a falsification. After allowing their fully modelled reads, the
+graph dump confirms widths 40 -> 1. Five paired warm gradients improve ALD
+5.910 -> 4.778 us (1.237x), zero-inflated ALD 6.277 -> 5.126 us (1.225x).
+CmdStan/Stanli ratios are 0.707 and 0.860 respectively. Values and gradients
+are identical; COM, GEV and m14.8 show no material change in this short run.
+
+The first four-seed CLI experiment capped ALD seed1 in both copied Stanli
+executables before any output. A fresh-copy no-argument launch diagnostic
+measures Stanli 0.468s initially then 0.00575s; CmdStan 0.156s then 0.00888s.
+Those cold-start records remain unedited. Zero-inflated ALD completed all four
+in that experiment, CmdStan/Stanli 0.843 (previous runtime 0.719).
+
+One predeclared complete confirmation prelaunches each executable with no
+arguments, then still times the whole CLI process including Stanli source
+compilation. All four seeds complete for both models/versions. ALD improves
+0.661 -> 0.775 CmdStan/Stanli; zero-inflated ALD improves 0.645 -> 0.772.
+These are warm-executable CLI ratios, not first-install timings. Differences
+between the two short experiments mean the 0.8 target is not yet established
+robustly. No caps/settings/references or historical v6 records changed.
+Artifacts: `/tmp/stanli-teaching-perf/gaps-v8/input-trim-*`, `window-*`,
+`launch-probe/`; retain the initial inactive and cold-start observations too.
