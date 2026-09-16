@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.1
+
 ### Improvements
 
 - Speed up categorical, ordinal, multivariate-normal, Dirichlet, Wiener,
