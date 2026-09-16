@@ -401,3 +401,26 @@ whether experimental preparation finishes and still matches its oracle.
 
 These harness/workflow-only changes do not change the frozen ea4d7e24 runtime,
 compiler, benchmark sources or inputs used by full timing run a224d12afe02ac98.
+
+PR CI on f2d1fd38 now passes, including the expanded 46-model A/B slice with
+zero semantic or measurement failures. On its Clang Linux runner, m14.11
+prepares in 17.0–17.3 seconds with the source pass off and 21.6–23.4 seconds
+with it on. The saved artifact is `pr-ci-vectorize-fixed/` in the research
+evidence folder. Full release-GCC/platform validation is still running.
+
+The full release-GCC A/B run also passes on f2d1fd38: 316 models, 948 points,
+zero semantic, infrastructure, or gradient-performance failures. m14.11 takes
+22.1–23.7 seconds with the source pass off and 34.0–35.1 seconds with it on.
+This confirms the earlier failure was the 30-second preparation budget; the
+numerical tolerance and every model were preserved. All five platform builds
+passed, allowing the downstream R acceptance/startup jobs to run. Full saved
+measurement artifact: `full-ci-vectorize-fixed/`; run 35047000140.
+
+Cross-platform R acceptance passes on macOS and Linux. Windows reaches the
+independent CSV oracle but its CLI cannot locate stanli-compile.exe: the
+workflow unpacked the CLI into a different directory from the runtime bundle.
+All preceding native/live-method and ecosystem tests passed. Install the
+independently built CLI beside the runtime bundle's compiler and supporting
+DLLs, preserving the oracle and all no-skip assertions; rerun platform CI.
+Fresh startup measurements already recorded: macOS CI 0.262 seconds median
+(0.236, 0.273, 0.262); Linux CI 0.248 (0.248, 0.248, 0.244), R 4.6.1.
