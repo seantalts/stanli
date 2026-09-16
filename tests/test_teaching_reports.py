@@ -78,6 +78,30 @@ class TeachingReports(unittest.TestCase):
             runs = [dict(seed=i, status='ok', elapsed_s=1) for i in seeds]
             self.assertEqual(report.summarize_engine(runs, [1, 2, 3, 4])['status'], 'incomplete')
 
+    def test_cli_target_uses_complete_time_ratio_and_keeps_diagnostics_separate(self):
+        def row(stanli_seconds, cmdstan_seconds, status='complete', flagged=False):
+            return dict(engines={engine: dict(status=status, median_s=seconds,
+                diagnostics=dict(status='complete', screening_flag=flagged))
+                for engine, seconds in [('stanli', stanli_seconds), ('cmdstan', cmdstan_seconds)]})
+
+        boundary = row(1.25, 1, flagged=True)
+        self.assertEqual(report.cli_ratio(boundary), .8)
+        self.assertEqual(report.cli_target(boundary), 'met')
+        self.assertEqual(report.screen(boundary['engines']['stanli']), 'review')
+        below = row(1.25001, 1)
+        faster = row(.5, 1)
+        incomplete = row(.1, 1, status='incomplete')
+        self.assertEqual(report.cli_target(below), 'below')
+        self.assertEqual(report.cli_target(faster), 'met')
+        self.assertIsNone(report.cli_ratio(incomplete))
+        self.assertEqual(report.cli_target(incomplete), 'unmeasured')
+        summary = report.summarize_group([boundary, below, faster, incomplete])
+        self.assertEqual(summary['cli_target_met'], 2)
+        self.assertEqual(summary['cli_target_below'], 1)
+        self.assertEqual(summary['cli_target_unmeasured'], 1)
+        self.assertEqual(summary['stanli_lower_cli_time'], 1)
+        self.assertEqual(summary['diagnostic_screen_clear_in_both'], 2)
+
     def test_serial_total_and_median_have_different_boundaries(self):
         runs = [dict(seed=i, status='ok', elapsed_s=t) for i, t in enumerate([1, 2, 8, 9], 1)]
         result = report.summarize_engine(runs, [1, 2, 3, 4])

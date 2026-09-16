@@ -720,3 +720,30 @@ Artifacts under `/tmp/stanli-teaching-perf`: `gp-ordered-pairs.json`,
 `build-teaching-residual`. Simple loop/carving/liveness policy probes are
 retained in `v7-representation-probes.json`; none resolves the large remaining
 GEV/ALD deficits. Remaining performance targets and COM-Poisson stay open.
+
+
+## Practical end-to-end target (user revision)
+
+The user accepts CmdStan/Stanli >= 0.8 for complete CLI sampling if the last
+20% of speed would require disproportionate architectural work. This means
+Stanli elapsed time <= 1.25 times CmdStan, not a 3x-cap pass. Prefer small,
+general, measured changes. Keep numerical correctness and sampling support
+as independent requirements. Do not add a large subsystem just to close a
+small residual timing gap. No change to reference data, tolerance, adaptation,
+RNG, benchmark inputs or the experiment's 3x/900s cap.
+
+Against the immutable v6 measurements, four completed models remain below
+0.8: s2_gev (0.420), sw_asymlaplace (0.677), s2_zi_asymlaplace (0.700),
+and s2_mixture_theta (0.771). Educational Pareto (0.939) and cumulative
+ordinal (0.957) already meet the revised target. The mixture and the capped
+sw_re_negbin have severe diagnostic flags in both engines, so investigate
+trajectory work separately from execution throughput. All 62 Rethinking
+fixtures already exceeded 1.0 in this sweep. New GP fixes retain their
+separate source-identified evidence until a fresh complete sweep.
+
+The small native-conditional COM-Poisson prototype did not change the
+failure: runtime-control still requires its dynamic integer k at compile
+time. It was removed from production sources; the isolated patch and probe
+log remain under /tmp/stanli-teaching-perf/com-native-branch-*. No support
+claim follows from this attempt. A broader program/lowering change needs
+its own bounded evaluator; the failed prototype is not shipped.

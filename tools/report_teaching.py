@@ -13,6 +13,8 @@ import sys
 REPO = pathlib.Path(__file__).resolve().parent.parent
 ENGINES = ('stanli', 'cmdstan')
 AUDITED_RUN = 'fae5494c296cd547'
+# Practical elapsed-time target; independent of the experiment timeout and diagnostics.
+MIN_CLI_RATIO = 0.8
 
 
 def environment_note(manifest):
@@ -76,11 +78,26 @@ def row_for(record, diagnostic, events, seeds):
             ess = result['diagnostics'].get('ess_bulk_min')
             result['min_bulk_ess_per_cli_second'] = ess / result['sum_s'] if ess is not None else None
         row['engines'][engine] = result
+    row['cmdstan_over_stanli_cli_ratio'] = cli_ratio(row)
+    row['cli_target'] = cli_target(row)
     return row
 
 
 def complete(row):
     return all(row['engines'][e]['status'] == 'complete' for e in ENGINES)
+
+
+def cli_ratio(row):
+    if not complete(row):
+        return None
+    return row['engines']['cmdstan']['median_s'] / row['engines']['stanli']['median_s']
+
+
+def cli_target(row):
+    ratio = cli_ratio(row)
+    if ratio is None:
+        return 'unmeasured'
+    return 'met' if ratio >= MIN_CLI_RATIO else 'below'
 
 
 def screen(result):
@@ -90,10 +107,13 @@ def screen(result):
 
 def summarize_group(rows):
     pairs = [r for r in rows if complete(r)]
-    ratios = [r['engines']['cmdstan']['median_s'] / r['engines']['stanli']['median_s'] for r in pairs]
+    ratios = [cli_ratio(r) for r in pairs]
     first = [r for r in pairs if all(r['engines'][e].get('estimated_first_fit_s') is not None for e in ENGINES)]
     return dict(fixtures=len(rows), completed_in_both=len(pairs), incomplete=len(rows) - len(pairs),
                 stanli_lower_cli_time=sum(r > 1 for r in ratios),
+                cli_target_met=sum(r >= MIN_CLI_RATIO for r in ratios),
+                cli_target_below=sum(r < MIN_CLI_RATIO for r in ratios),
+                cli_target_unmeasured=len(rows) - len(pairs),
                 median_cmdstan_over_stanli_cli_ratio=statistics.median(ratios) if ratios else None,
                 first_fit_pairs=len(first),
                 stanli_lower_estimated_first_fit=sum(r['engines']['stanli']['estimated_first_fit_s'] <
@@ -135,9 +155,11 @@ def export(run, diagnostics, output):
               for g in ('educational', 'rethinking', 'brms')}
     output.mkdir(parents=True, exist_ok=True)
     (output / 'teaching-results.json').write_text(json.dumps(
-        dict(run_id=manifest['run_id'], manifest=manifest, collections=groups, rows=rows),
+        dict(run_id=manifest['run_id'], manifest=manifest, min_cli_ratio=MIN_CLI_RATIO,
+             collections=groups, rows=rows),
         indent=2, allow_nan=False) + '\n')
-    fields = ['collection', 'model', 'status', 'failure_reason', 'cmdstan_compile_s']
+    fields = ['collection', 'model', 'status', 'failure_reason', 'cmdstan_compile_s',
+              'cmdstan_over_stanli_cli_ratio', 'cli_target']
     for engine in ENGINES:
         fields += [engine + '_' + k for k in ('median_s', 'min_s', 'max_s', 'estimated_first_fit_s',
                    'min_bulk_ess_per_cli_second', 'screen', 'rhat_max', 'ess_bulk_min',
@@ -163,14 +185,26 @@ def export(run, diagnostics, output):
     md = ['# Teaching model performance', '', environment_note(manifest), '',
           f"Run `{manifest['run_id']}` includes every one of its {len(rows)} fixtures. Failures and timeouts remain in the tables.", '',
           '## Collection summary', '',
-          '| Collection | Fixtures | Completed in both | Lower Stanli CLI time | Median CmdStan/Stanli CLI ratio | Screen clear in both |',
+          '| Collection | Fixtures | Completed in both | Lower Stanli CLI time | Median CLI sampling time ratio (CmdStan/Stanli) | Screen clear in both |',
           '| --- | ---: | ---: | ---: | ---: | ---: |']
     for group, summary in groups.items():
         n = summary['completed_in_both']
         md.append(f"| {group} | {summary['fixtures']} | {n} | {summary['stanli_lower_cli_time']}/{n} | "
                   f"{number(summary['median_cmdstan_over_stanli_cli_ratio'])} | {summary['diagnostic_screen_clear_in_both']}/{n} |")
-    md += ['', 'A ratio above one means less elapsed time for Stanli. Each model has equal weight in the median; '
+    md += ['', 'The summary compares end-to-end CLI sampling time, including Stanli preparation. '
+           'A ratio above one means less elapsed time for Stanli. Each model has equal weight in the median; '
            'these ratios describe the completed fixtures only. Diagnostic flags are not removed from the timing summary.', '',
+           '## Practical timing target', '',
+           f'The target is CmdStan/Stanli ≥ {MIN_CLI_RATIO:g}: Stanli takes at most '
+           f'{1 / MIN_CLI_RATIO:g}× CmdStan’s complete CLI time. This is a timing target, '
+           'not a claim of numerical correctness or reliable inference. Capped and failed runs remain '
+           'unmeasured; the timeout is not the success threshold.', '',
+           '| Collection | Target met | Below target | Unmeasured |',
+           '| --- | ---: | ---: | ---: |']
+    for group, summary in groups.items():
+        md.append(f"| {group} | {summary['cli_target_met']}/{summary['fixtures']} | "
+                  f"{summary['cli_target_below']} | {summary['cli_target_unmeasured']} |")
+    md += ['',
            '## What was measured', '',
            f"Each engine ran {len(config['seeds'])} independent single-chain seeds, with {config['iter_warmup']} warmup iterations "
            f"and {config['iter_sampling']} retained draws per seed, target acceptance 0.8, tree depth 10, and random initialization. "
@@ -189,14 +223,16 @@ def export(run, diagnostics, output):
            'nonconstant variable in the parameters block. Structural fixed matrix entries are checked and omitted. The CSV also records tail ESS, '
            'minimum E-BFMI, and minimum bulk ESS divided by the sum of the four serial CLI durations. '
            'These are descriptive diagnostics; fixed-budget runtime is not time to equal inferential accuracy.', '',
-           'Gradient results in the CSV use six alternating pairs at the same parameter point. Each pair must satisfy '
+           'Gradient results in the CSV use six alternating pairs at the same parameter point. '
+           '`paired_speedup` is the CmdStan/Stanli gradient time ratio; values above one favor Stanli. Each pair must satisfy '
            'the full density/gradient scaled-error gate of 1e-9. The separate three-point numerical replay and its '
            'known exceptions are described in the [support guide](../../docs/teaching-support.md).', '',
            '## Full appendix', '',
-           '| Collection / fixture | Stanli CLI | CmdStan CLI | CmdStan compile | Screen S/C |',
-           '| --- | ---: | ---: | ---: | --- |']
+           '| Collection / fixture | Stanli CLI | CmdStan CLI | CLI ratio C/S | Timing target | CmdStan compile | Screen S/C |',
+           '| --- | ---: | ---: | ---: | --- | ---: | --- |']
     for row in rows:
         md.append(f"| {row['collection']} / {row['model']} | {time_cell(row, 'stanli')} | {time_cell(row, 'cmdstan')} | "
+                  f"{number(row['cmdstan_over_stanli_cli_ratio'])} | {row['cli_target']} | "
                   f"{number(row['cmdstan_compile_s'])} | {screen(row['engines']['stanli'])}/{screen(row['engines']['cmdstan'])} |")
     md += ['', '## Incomplete fixtures', '']
     for row in rows:
