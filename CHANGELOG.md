@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.1
+
 ### Improvements
 
 - Add `as_rfit()` and native RStan-style extraction, summaries, sampler
