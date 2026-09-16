@@ -2343,8 +2343,8 @@ static void test_input_windows() {
     p->ins = {{0, 8, 0, 2}, {8, 8, 0, 12}, {16, 1, 1, 0}};
     p->pool = {0.};
     p->code = {{Program::CONST, 17, 0}, {Program::LT, 18, 16, 17},
-               {Program::JZ, 5, 18}, {Program::MUL, 19, 3, 10},
-               {Program::JMP, 6}, {Program::ADD, 19, 5, 12}};
+               {Program::JZ, 5, 18},    {Program::MUL, 19, 3, 10},
+               {Program::JMP, 6},       {Program::ADD, 19, 5, 12}};
     p->out_regs = {19, 7};
     expect("window adjoint generated", gen_adjoint(*p));
     p->native_adj = native;

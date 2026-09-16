@@ -2171,8 +2171,8 @@ struct ProgramCompiler {
       if (e.args[k].data_only || int_operand(e.args[k]))
         activity &= (uint8_t)~(1u << k);
     }
-    return kernel_call(spec.opcode, args, out, 0, activity,
-                       std::move(idata), {}, e.name);
+    return kernel_call(spec.opcode, args, out, 0, activity, std::move(idata),
+                       {}, e.name);
   }
 
   static std::optional<Program::Code> native_builtin_code(uint16_t opcode) {

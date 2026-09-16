@@ -992,7 +992,8 @@ void test_builtin_activity() {
       out = pc.expr(fun("lgamma", {argument}, "UReal"));
     } catch (const stanli::Bail& error) {
       ++failures;
-      std::printf("FAIL builtin argument mode %d: %s\n", mode, error.why.c_str());
+      std::printf("FAIL builtin argument mode %d: %s\n", mode,
+                  error.why.c_str());
       continue;
     }
     if (p.calls.size() != 1 ||

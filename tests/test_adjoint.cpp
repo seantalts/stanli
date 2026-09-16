@@ -160,7 +160,9 @@ static void test_inactive_call_replay() {
   call.variant = 2;
   call.idata = {3};
   call.forward = test_call_forward;
-  call.backward = [](KernelCtx&) { throw std::logic_error("unexpected reverse"); };
+  call.backward = [](KernelCtx&) {
+    throw std::logic_error("unexpected reverse");
+  };
   stan::math::nested_rev_autodiff nested;
   stan::math::var a = 2., b = 4.;
   std::vector<stan::math::var> reg{a, b};
@@ -168,7 +170,9 @@ static void test_inactive_call_replay() {
   expect("inactive CALL forward alias/context", reg[0].val() == 13.);
   reg[0].grad();
   expect("inactive CALL has no derivative", a.adj() == 0. && b.adj() == 0.);
-  call.forward = [](KernelCtx&) { throw std::domain_error("forward validation"); };
+  call.forward = [](KernelCtx&) {
+    throw std::domain_error("forward validation");
+  };
   bool threw = false;
   try {
     run_call_var(call, reg.data());
