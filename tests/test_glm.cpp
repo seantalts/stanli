@@ -512,8 +512,8 @@ static void check_multinomial_density() {
   using stan::math::var;
   for (bool propto : {false, true})
     for (bool active : {false, true})
-      for (double weight :
-           {1.0, -2.75, 0.0, std::numeric_limits<double>::infinity()})
+      for (double weight : {1.0, -2.75, 0.0, 1e308, 1e-308,
+                            std::numeric_limits<double>::infinity()})
         for (const auto& values : std::vector<std::vector<double>>{
                  {0.2, 0.3, 0.5}, {0.0, 0.5, 0.5}, {1.0}}) {
           const int n = values.size();
@@ -683,8 +683,8 @@ static void check_wiener_fixed_observation() {
   using stan::math::var;
   for (bool propto : {false, true})
     for (int active_mask = 0; active_mask < 4; ++active_mask)
-      for (double weight :
-           {1.0, -2.75, 0.0, std::numeric_limits<double>::infinity()})
+      for (double weight : {1.0, -2.75, 0.0, 1e308, 1e-308,
+                            std::numeric_limits<double>::infinity()})
         for (double y : {0.201, 0.8, 2.0}) {
           Graph g;
           std::vector<int> slots;

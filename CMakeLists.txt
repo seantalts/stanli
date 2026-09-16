@@ -133,7 +133,7 @@ target_compile_options(stanmath INTERFACE -ffp-contract=off)
 # Clang can speculate every pow() in the recorder's piecewise CDF formulas,
 # evaluating unused tail approximations on ordinary inputs. Preserve libm's
 # errno contract in these shards so expensive calls stay in their branches.
-# This keeps the pinned formulas and rounding; it is not fast-math. GCC already
+# This keeps the pinned formulas without fast-math. GCC already
 # defaults to math-errno. Keep the browser's independent size policy below.
 if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set_property(SOURCE

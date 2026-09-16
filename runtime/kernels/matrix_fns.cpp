@@ -1684,7 +1684,10 @@ void wiener_fwd(KernelCtx& ctx) {
   }
 }
 void wiener_bwd(KernelCtx& ctx) {
-  if (!wiener_fixed_observation(ctx) || !std::isfinite(ctx.out_adj)) {
+  // A unit seed reuses the same reverse arithmetic. Weighted replay must
+  // propagate its seed through that arithmetic: post-scaling unit partials
+  // can hide intermediate overflow or change underflow/cancellation.
+  if (!wiener_fixed_observation(ctx) || ctx.out_adj != 1.0) {
     wiener_eval<true>(ctx);
     return;
   }

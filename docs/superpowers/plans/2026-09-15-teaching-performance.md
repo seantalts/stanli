@@ -366,3 +366,20 @@ canary remains faster than CmdStan. All four outcome/bias activity masks,
 full/propto, zero/negative/infinite seeds, near-boundary observations and
 invalid outcomes pass their oracle. Nonfinite seeds or cached partials retain
 the original weighted replay. Raw samples: `wiener-four-ab.jsonl`.
+
+Final Wiener review found a missing refusal case: finite seeds of 1e308 can
+produce a finite post-scaled unit partial where the original weighted reverse
+produces Inf or NaN through intermediate overflow. The expanded oracle
+reproduces this. Limit cached reverse reuse to a unit output seed; every other
+seed follows the original weighted replay, as do nonfinite cached partials.
+This preserves the corpus target's fast path without approximating weighted
+semantics. Add 1e308 and 1e-308 to the weighted oracle. The partial sweep
+`6f0119ad091842b3` was interrupted before completion and is retained separately;
+none of its timings will enter the final report. A fresh immutable run follows
+this correction and the integration checks.
+
+The extreme-weight tests now pass. Five new alternating pairs retain the
+Wiener gain: 45.02 -> 29.23 us, CmdStan 28.99 us, bitwise fixed-point equality.
+That is near parity (0.8% slower in this repeat), rather than a stable claim of
+being faster. `wiener-unit-ab.jsonl` contains all pairs; weighted overflow and
+underflow follow the unchanged reference arithmetic.
