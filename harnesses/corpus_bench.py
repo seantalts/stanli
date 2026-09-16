@@ -491,7 +491,11 @@ def main(argv=None):
     # explicit tool arguments rather than inherit a shell's experiment state.
     overrides = [k for k, v in os.environ.items() if v and
                  (k in ("STANC", "STANLI_COMPILE") or
-                  k.startswith(("STANLI_NO_", "STANLI_PROFILE", "STANLI_LITE_")))]
+                  k.startswith(("STANLI_NO_", "STANLI_PROFILE", "STANLI_LITE_",
+                                "STANLI_BOUNDED_", "STANLI_STRUCTURED_",
+                                "STANLI_SYMBOLIC_", "STANLI_ISLAND_",
+                                "STANLI_WA_", "STANLI_PACKET_",
+                                "STANLI_DEBUG_", "STANLI_DUMP_")))]
     if overrides:
         parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))
     # Resolve inputs in a separate temporary cache before freezing their identities.
