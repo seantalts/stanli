@@ -775,3 +775,38 @@ These results do not alter v6's counts. PR CI at `b5b61a80` passes its Linux
 runtime R and compiler checks; the earlier full platform/sanitizer run on
 `6e462c2e` remains the full-sweep platform evidence. Remaining support and
 performance gaps are open, so the draft PR is not ready to claim full parity.
+
+## Post-merge COM-Poisson feasibility (16 September)
+
+PR #371 merged as `36310458`; report wording cleanup #375 merged as `e27bad19`.
+All PR checks passed. The earlier full platform run also passed Linux/macOS/
+Windows R and sanitizers. The report is public in the repository, with neutral
+wording, per-model speedups and absolute numerical differences.
+
+On a clean Release rebuild of `e27bad19`, a small early-return function with a
+parameter-controlled while, `terms[n] = z*n`, and `log_sum_exp(terms[1:n])`
+reproduces COM-Poisson's integer-constant refusal. Fixed-prefix and scalar-read
+variants also fail: the first refusal is the runtime vector write, before the
+reduction. Without the early return, native structured lowering instead lacks
+an integer range proof for the prefix after the loop.
+
+A separate 60-line feasibility patch implements checked dynamic scalar vector
+writes and a fused dynamic-range log-sum-exp using existing Stan Math var
+replay. The tiny function evaluates to 1.6425355294551629 with derivative
+2.624647182103895 at z=0.1, matching an independent closed-form calculation to
+within 1e-14. A counter-only variant and dynamic scalar-read variant also work.
+The actual COM-Poisson fixture then advances to unsupported `Modulo__`, at all
+three reference points. A fixed-prefix UDF variant additionally exposes
+unsupported full-vector indexing in the register fallback.
+
+This is feasibility evidence, not a shipped support fix. The patch was removed
+from production source at the predeclared next missing capability, and the
+checker was rebuilt from restored source. No timings were measured, no full
+model numerical comparison succeeded, and no published counts or reference
+policies changed. [Issue #376](https://github.com/seantalts/stanli/issues/376)
+contains the reproducer, findings and next validation gates. Local artifacts:
+`/tmp/stanli-teaching-perf/com-minimal/` (plan, variants, patch, candidate checker,
+logs, closed-form oracle and executable hash). The next bounded experiment is
+integer remainder and full-vector indexing semantics, followed by the complete
+model oracle; do not integrate the prototype without adversarial, replay,
+consumer and end-to-end checks. Frozen v6 inputs and binaries remain untouched.
