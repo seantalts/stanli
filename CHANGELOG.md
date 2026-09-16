@@ -4,6 +4,8 @@
 
 ### Improvements
 
+- Speed up ordinal, multinomial, Dirichlet, truncated-normal and fixed-input
+  GP calculations; specialize bounded loops and reduce model-preparation cost.
 - Document Rethinking, brms, and educational-model support with current-build
   numerical checks, a full timing appendix, and a Rethinking report. Cap
   benchmark sampling at 3x its CmdStan baseline or 900 seconds, whichever is less.
