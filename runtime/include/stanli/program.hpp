@@ -369,6 +369,10 @@ inline constexpr int program_input_len(const Program::Instr& instr, int k) {
 static_assert(program_code_count() == static_cast<size_t>(Program::RANGE) + 1,
               "every Program::Code needs exactly one ProgramOpSpec");
 
+// Sink constant range fills past paths that never access their registers.
+// Refuses cyclic sources/destinations; preserves every read, write and effect.
+bool sink_program_fills(Program& p);
+
 // Drop the initializer fills and the copies the MIR spells out, then
 // renumber away whatever registers that leaves unreferenced (program.cpp).
 // `seeded` names the register ranges the caller writes before the program

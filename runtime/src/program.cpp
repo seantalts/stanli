@@ -55,6 +55,11 @@ void each_write(const Program& p, const Program::Instr& I, F fn) {
 
 template <typename F>
 void each_read(const Program& p, const Program::Instr& I, F fn) {
+  if (I.code == Program::DYN_INDEX) {
+    fn(Span{I.a + I.c, I.len});
+    fn(Span{I.b, 1});
+    return;
+  }
   if (I.code == Program::CALL) {
     const Program::Call& c = p.calls[(size_t)I.a];
     for (int j = 0; j < c.n_in; ++j) fn(Span{c.in[j], c.in_len[j]});
@@ -474,6 +479,125 @@ std::vector<std::pair<int, int>> used_program_inputs(
     if (first < last) input = {first, last - first};
   }
   return result;
+}
+
+// Delay a constant range initialization until a path actually touches it.
+// Every read AND write constrains the destination: sinking across a partial
+// write would erase that write. Both positions must be outside cycles, so the
+// move cannot turn one initialization into one per iteration. No registers,
+// arithmetic, checks or effects are removed; all instruction targets remap.
+bool sink_program_fills(Program& p) {
+  if (std::getenv("STANLI_NO_FILL_SINK")) return false;
+  const int n = static_cast<int>(p.code.size());
+  if (n == 0 || n > 2048) return false;
+  std::vector<std::vector<int>> pred((size_t)n + 1);
+  std::vector<bool> cyclic((size_t)n + 1, false);
+  bool has_fill = false;
+  for (int pc = 0; pc < n; ++pc) {
+    const auto& I = p.code[(size_t)pc];
+    has_fill = has_fill || I.code == Program::FILL;
+    if (program_code_spec(I.code).has(kProgramNoAdjoint) &&
+        I.code != Program::JZ && I.code != Program::JMP &&
+        I.code != Program::IMOD && I.code != Program::IDIV &&
+        I.code != Program::DYN_SET && I.code != Program::DYN_LSE_RANGE &&
+        I.code != Program::DYN_INDEX && I.code != Program::PRINT &&
+        I.code != Program::REJECT)
+      return false;
+    if (branches(I.code)) {
+      if (I.dst < 0 || I.dst > n) return false;
+      pred[(size_t)I.dst].push_back(pc);
+      // Any cycle through an instruction crosses its position in at least
+      // one back edge. Marking the whole interval can only refuse extra moves.
+      if (I.dst <= pc)
+        std::fill(cyclic.begin() + I.dst, cyclic.begin() + pc + 1, true);
+    }
+    if (I.code != Program::JMP) pred[(size_t)pc + 1].push_back(pc);
+  }
+  if (!has_fill) return false;
+  const size_t words = ((size_t)n + 64) / 64;
+  using Bits = std::vector<uint64_t>;
+  const auto contains = [](const Bits& bits, int i) {
+    return (bits[(size_t)i / 64] & (uint64_t{1} << (i % 64))) != 0;
+  };
+  std::vector<Bits> dom((size_t)n + 1, Bits(words, ~uint64_t{0}));
+  std::fill(dom[0].begin(), dom[0].end(), 0);
+  dom[0][0] = 1;
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (int pc = 1; pc <= n; ++pc) {
+      Bits next(words, pred[(size_t)pc].empty() ? 0 : ~uint64_t{0});
+      for (int before : pred[(size_t)pc])
+        for (size_t w = 0; w < words; ++w) next[w] &= dom[(size_t)before][w];
+      next[(size_t)pc / 64] |= uint64_t{1} << (pc % 64);
+      if (next != dom[(size_t)pc]) {
+        dom[(size_t)pc] = std::move(next);
+        changed = true;
+      }
+    }
+  }
+  std::vector<int> destination((size_t)n, -1);
+  for (int pc = 0; pc < n; ++pc) {
+    const auto& I = p.code[(size_t)pc];
+    if (I.code != Program::FILL || I.len <= 1 || cyclic[(size_t)pc]) continue;
+    const Span range{I.dst, I.len};
+    Bits common(words, ~uint64_t{0});
+    bool touched = false, other_fill = false;
+    for (int use = 0; use < n; ++use) {
+      if (use == pc) continue;
+      bool touches = false;
+      const auto check = [&](Span s) {
+        touches = touches || overlaps(range, s);
+      };
+      each_read(p, p.code[(size_t)use], check);
+      each_write(p, p.code[(size_t)use], check);
+      if (!touches) continue;
+      other_fill = other_fill || p.code[(size_t)use].code == Program::FILL;
+      touched = true;
+      for (size_t w = 0; w < words; ++w) common[w] &= dom[(size_t)use][w];
+    }
+    for (int reg : p.out_regs) {
+      if (!overlaps(range, Span{reg, 1})) continue;
+      touched = true;
+      for (size_t w = 0; w < words; ++w) common[w] &= dom[(size_t)n][w];
+    }
+    // Overlapping initializers could otherwise invalidate independent moves.
+    // Unused initializations are left to a separate dead-store proof.
+    if (!touched || other_fill) continue;
+    for (int target = n; target > pc + 1; --target) {
+      if (!cyclic[(size_t)target] && contains(common, target) &&
+          contains(dom[(size_t)target], pc)) {
+        destination[(size_t)pc] = target;
+        break;
+      }
+    }
+  }
+  std::vector<std::vector<int>> before((size_t)n + 1);
+  bool moved = false;
+  for (int pc = 0; pc < n; ++pc)
+    if (destination[(size_t)pc] >= 0) {
+      before[(size_t)destination[(size_t)pc]].push_back(pc);
+      moved = true;
+    }
+  if (!moved) return false;
+  std::vector<int> new_pc((size_t)n + 1);
+  int at = 0;
+  for (int pc = 0; pc <= n; ++pc) {
+    new_pc[(size_t)pc] = at;
+    at += static_cast<int>(before[(size_t)pc].size());
+    if (pc < n && destination[(size_t)pc] < 0) ++at;
+  }
+  std::vector<Program::Instr> code;
+  code.reserve(p.code.size());
+  for (int pc = 0; pc <= n; ++pc) {
+    for (int init : before[(size_t)pc]) code.push_back(p.code[(size_t)init]);
+    if (pc == n || destination[(size_t)pc] >= 0) continue;
+    auto I = p.code[(size_t)pc];
+    if (branches(I.code)) I.dst = new_pc[(size_t)I.dst];
+    code.push_back(I);
+  }
+  p.code = std::move(code);
+  return true;
 }
 
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {

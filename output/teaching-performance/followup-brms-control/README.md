@@ -54,9 +54,9 @@ copied Stanli executable at 0.468 seconds initially and 0.00575 seconds on its
 next launch; CmdStan measured 0.156 and 0.00888 seconds. This demonstrates a
 startup cost that matters for such short runs.
 
-COM-Poisson still reaches the relative sampling cap on all four seeds after
-the two replay optimizations. There is no completed-run Stanli median or CLI
-speedup to report for it.
+At this stage, COM-Poisson reaches the relative sampling cap on all four seeds.
+A [subsequent workspace-initialization fix](../followup-com-poisson/README.md)
+completes all four seeds; its separate measurements do not replace these records.
 
 ## Gradient measurements
 

@@ -917,3 +917,61 @@ between the two short experiments mean the 0.8 target is not yet established
 robustly. No caps/settings/references or historical v6 records changed.
 Artifacts: `/tmp/stanli-teaching-perf/gaps-v8/input-trim-*`, `window-*`,
 `launch-probe/`; retain the initial inactive and cold-start observations too.
+
+### COM-Poisson inside the sampling cap
+
+The user requested getting COM-Poisson under the unchanged 3× matching-CmdStan
+cap, and requested an independent Fable 5.1 review through `claude`. Both
+read-only reviews ran with the explicit `claude-fable-5-1` model; local session
+IDs and full results are retained under `/tmp/stanli-teaching-perf/com-cap/`.
+No delegated agent edited code or ran measurements.
+
+The starting profile measured ~303 us per fixed-point gradient, ~103 us forward,
+99.5% in the 20 runtime-control islands. Each island had 290 instructions and
+10,255 registers. Two bounded probes were rejected for end-to-end performance:
+
+- Immutable constant hoisting: an initial inactive control refused REJECT.
+  Self-review and Fable independently found that refusal and the need to model
+  DYN_INDEX's entire read window. After correction, five alternating windows
+  improved 306.8 ->258.2 us with identical values, but only seed1 completed in
+  both versions and the candidate was slightly slower there (3.326 vs3.282 s).
+- Activity-aware var replay: 301.1 ->273.2 us at the fixed point, identical
+  values, but all four candidate sampling runs capped. Reverted in full.
+
+The fixed point exercises the series path. Reconstructing the branch condition
+at 1,000 retained seed1 draws instead gives 19,980/20,000 observation evaluations
+on the approximation path. This is not a count of warmup or leapfrog proposals.
+Both branches were initializing a 10,000-element vector; the approximation
+branch never reads it. The retained fix sinks a constant FILL to a later common
+dominator of every read AND write. Both source and destination must lie outside
+all back-edge intervals; overlapping initializers and unsupported span metadata
+refuse. Jump targets and exit reads are preserved. No arithmetic, effect,
+validation, model or sampler setting changes. DYN_INDEX now reports its full
+potential window to the shared read-span helper. Existing consumers either
+already refuse this opcode or become more conservative.
+
+Final four-seed 1000+1000 CLI times are Stanli 1.786/1.893/1.912/1.968 s versus
+CmdStan 1.177/1.013/1.113/1.134 s. All four finish within min(3× reference,900s).
+Ratio of medians CmdStan/Stanli is0.59062; per-seed range0.53542–0.65899. This
+meets the requested cap, not the broader0.8 target. Seed1 before/after CSVs are
+byte-identical. A previous-runtime seed3 timeout helper hit a process-exit race
+(PermissionError); baseline reaped before candidate, all candidate/reference
+timers normal. Keep its original timeout status and raw record.
+
+Five fixed-point canary pairs remain essentially unchanged: COM307.93/308.74us,
+ALD4.862/4.809us, GEV13.188/13.416us, m14.8 2.616/2.614us (before/after).
+Every paired value/gradient is identical. Full253 CTests pass, including source
+activation and direct CFG/dynamic-index/partial-write/refusal/reuse tests;
+316 existing-policy references pass (1,008,755values,worst9.38e-13), and456 R
+expectations pass with no warnings/skips/failures. Independent COM references
+retain max absolute LP2.84e-14,gradient2.13e-14,outputs exact at3points. Additional
+28 posterior and branch-boundary points are bitwise equal before/after, and
+within4.97e-13 LP /3.98e-13 gradient of a separately built CmdStan driver.
+Both engines have zero divergences and max-depth hits; Rhat maxima1.0034/1.0061,
+minimum bulkESS1235/1050. The final Fable review found no reachable correctness
+bug; requested multi-fill/exit-jump and exception-recovery tests were added.
+
+Published evidence is separate at
+`output/teaching-performance/followup-com-poisson/`, including the full final
+CSV/log archive, all rejected-probe timing records, exact patches and binary
+identities. Original v6 records and the Rethinking report remain unchanged.

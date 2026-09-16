@@ -213,6 +213,192 @@ static void expect_eq(const std::string& what, int64_t got, int64_t want) {
   }
 }
 
+// A branch bypasses a large local vector; the other initializes it before a
+// dynamic loop. Exercise zero/one/many iterations and alternating paths on a
+// reused executor, against the original bytecode and its Stan Math replay.
+static Program fill_sink_program() {
+  Program p;
+  p.n_regs = 12;
+  p.pool = {std::numeric_limits<double>::quiet_NaN(), 0., 1.};
+  p.code = {{Program::FILL, 3, 0, 0, 0, 4},
+            {Program::CONST, 7, 1},
+            {Program::CONST, 8, 2},
+            {Program::GT, 9, 2, 7},
+            {Program::JZ, 7, 9},
+            {Program::SQUARE, 10, 0},
+            {Program::JMP, 15},
+            {Program::MOV, 3, 7},
+            {Program::LT, 9, 7, 1},
+            {Program::JZ, 14, 9},
+            {Program::ADD, 7, 7, 8},
+            {Program::MUL, 11, 0, 7},
+            {Program::DYN_SET, 3, 3, 11, 7, 4},
+            {Program::JMP, 8},
+            {Program::DYN_LSE_RANGE, 10, 3, 8, 7, 4}};
+  p.out_regs = {10};
+  return p;
+}
+
+static Graph fill_sink_graph(const Program& program) {
+  Graph g;
+  const int input = g.add_slot(3, true);
+  const int out = g.add_slot(1, false);
+  auto p = std::make_shared<IslandProg>();
+  static_cast<Program&>(*p) = program;
+  p->ins = {{0, 3}};
+  const int op = g.add_op(OP_ISLAND, {input}, out);
+  g.ops[op].udata = p.get();
+  g.udata_pool.push_back(p);
+  g.result_slot = out;
+  return g;
+}
+
+static void test_fill_sink() {
+  Program original = fill_sink_program(), optimized = original;
+  expect("fill sinks across unused branch", sink_program_fills(optimized));
+  expect("fill moved after branch", optimized.code[6].code == Program::FILL);
+  expect_eq("fill sinking retains instruction count",
+            (int)optimized.code.size(), (int)original.code.size());
+  Executor before(fill_sink_graph(original)), after(fill_sink_graph(optimized));
+  for (double mode : {-1., 1., -1., 1.}) {
+    for (double n : {0., 1., 4., 2.}) {
+      for (double x : {-0.7, 0.2, 1.3}) {
+        for (Executor* ex : {&before, &after}) {
+          ex->params_data()[0] = x;
+          ex->params_data()[1] = n;
+          ex->params_data()[2] = mode;
+        }
+        double a[3], b[3];
+        expect_exact("sunk fill value", after.gradient(a), before.gradient(b));
+        for (int k = 0; k < 3; ++k) {
+          expect("sunk fill gradient",
+                 a[k] == b[k] || (std::isnan(a[k]) && std::isnan(b[k])));
+        }
+      }
+    }
+  }
+  {
+    Program p = original;
+    p.out_regs.push_back(6);
+    sink_program_fills(p);
+    auto fill = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::FILL;
+    });
+    auto branch = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::JZ;
+    });
+    expect("direct output requires initialization on bypass", fill < branch);
+  }
+  {
+    Program p = original;
+    // An early partial write must not be erased by the delayed initializer.
+    p.code[3] = {Program::MOV, 4, 0};
+    p.code[4] = {Program::JMP, 7};
+    expect("early partial write permits only earlier sink",
+           sink_program_fills(p));
+    auto fill = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::FILL;
+    });
+    auto write = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::MOV && i.dst == 4;
+    });
+    expect("fill precedes partial write", fill < write);
+  }
+  {
+    Program p = original;
+    p.code[3] = {Program::DYN_INDEX, 11, 3, 8, 1, 3};
+    p.code[4] = {Program::JMP, 7};
+    expect("indexed window constrains sink", sink_program_fills(p));
+    auto fill = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::FILL;
+    });
+    auto read = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::DYN_INDEX;
+    });
+    expect("fill precedes offset indexed read", fill < read);
+  }
+  {
+    Program p = original;
+    p.code[13].dst = 0;
+    expect("cyclic fill stays in place", !sink_program_fills(p));
+  }
+  {
+    Program p = original;
+    p.code[7] = {Program::FILL, 4, 1, 0, 0, 2};
+    expect("overlapping fills stay in place", !sink_program_fills(p));
+  }
+  {
+    Program p = original;
+    p.code[7] = {Program::DIAG_PRE_MULTIPLY, 3, 0, 1, 2, 2};
+    expect("unmodelled spans refuse fill sinking", !sink_program_fills(p));
+    expect("refusal keeps original fill", p.code.front().code == Program::FILL);
+  }
+  {
+    // Both disjoint fills move to the exit sentinel. An exit jump must land
+    // on the inserted fills, not skip them; both zero and nonzero trips matter.
+    Program p;
+    p.n_regs = 9;
+    p.pool = {-0., 7., 0., 1.};
+    p.code = {{Program::FILL, 2, 0, 0, 0, 2}, {Program::FILL, 4, 1, 0, 0, 2},
+              {Program::CONST, 6, 2},         {Program::CONST, 7, 3},
+              {Program::LT, 8, 6, 0},         {Program::JZ, 8, 8},
+              {Program::ADD, 6, 6, 7},        {Program::JMP, 4}};
+    p.out_regs = {2, 3, 4, 5};
+    const Program original_exit = p;
+    expect("multiple fills sink to exit", sink_program_fills(p));
+    expect("jump lands on appended fills",
+           p.code[3].code == Program::JZ && p.code[3].dst == 6);
+    expect("both fills appended",
+           p.code[6].code == Program::FILL && p.code[7].code == Program::FILL);
+    for (double count : {0., 3., 1.}) {
+      std::vector<double> before_regs(9, 42.), after_regs(9, -17.);
+      before_regs[0] = after_regs[0] = count;
+      run_program(original_exit, before_regs.data());
+      run_program(p, after_regs.data());
+      for (int r : p.out_regs) {
+        expect_exact("exit fill values", after_regs[r], before_regs[r]);
+        expect("exit fill signed zero",
+               std::signbit(after_regs[r]) == std::signbit(before_regs[r]));
+      }
+    }
+  }
+  {
+    Program p = original;
+    for (auto& I : p.code)
+      if ((I.code == Program::JZ || I.code == Program::JMP) && I.dst > 7)
+        ++I.dst;
+    p.code.insert(p.code.begin() + 7, {Program::IDIV, 11, 8, 0});
+    const Program throwing = p;
+    expect("fill sinks after potentially throwing instruction",
+           sink_program_fills(p));
+    Executor before_throw(fill_sink_graph(throwing)),
+        after_throw(fill_sink_graph(p));
+    for (Executor* ex : {&before_throw, &after_throw}) {
+      ex->params_data()[0] = 0.;
+      ex->params_data()[1] = 2.;
+      ex->params_data()[2] = -1.;
+      double gradient[3];
+      bool threw = false;
+      try {
+        (void)ex->gradient(gradient);
+      } catch (const std::exception&) {
+        threw = true;
+      }
+      expect("sinking preserves integer division exception", threw);
+      ex->params_data()[0] = 2.;
+    }
+    double a[3], b[3];
+    expect_exact("reused executor after exception", after_throw.gradient(a),
+                 before_throw.gradient(b));
+    for (int k = 0; k < 3; ++k)
+      expect_exact("gradient after exception", a[k], b[k]);
+  }
+  test_setenv("STANLI_NO_FILL_SINK", "1", 1);
+  Program disabled = original;
+  expect("fill sink ablation", !sink_program_fills(disabled));
+  test_unsetenv("STANLI_NO_FILL_SINK");
+}
+
 static void test_compact_copy_chain() {
   Program p;
   p.n_regs = 4;
@@ -2613,6 +2799,7 @@ static void test_worker_lifetimes() {
 }
 
 int main() {
+  test_fill_sink();
   test_worker_lifetimes();
   // What the compiler does with a region, on graphs small enough to
   // reason about. The cost estimate would refuse most of them -- it is

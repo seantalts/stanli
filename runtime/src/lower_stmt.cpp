@@ -499,6 +499,7 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   // their operands can have different widths, so retain the original
   // register numbering until those instructions carry explicit spans.
   if (!has_back_edge && !has_unmodelled_ranges) compact_island(*prog);
+  if (has_back_edge) sink_program_fills(*prog);
   // Generated quantities have no backward consumer.
   prog->native_adj = !in_write_array && gen_adjoint(*prog) &&
                      !std::getenv("STANLI_NO_NATIVE_ADJ");

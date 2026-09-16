@@ -52,8 +52,9 @@ are not substituted into this sweep.
 A subsequent [brms control-flow follow-up](../output/teaching-performance/followup-brms-control/README.md)
 adds COM-Poisson evaluation support and reduces asymmetric-Laplace sampling
 costs. It reports fresh numerical differences and separate timings, including
-remaining caps and executable-startup effects; the complete-sweep counts above
-remain unchanged.
+remaining caps and executable-startup effects. A later [COM-Poisson follow-up](../output/teaching-performance/followup-com-poisson/README.md)
+completes all four seeds within the 3× cap at 0.591× CmdStan/Stanli. The
+complete-sweep counts above remain unchanged.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
 covers all 61 book call sites and the separate hurdle fixture. The
@@ -136,8 +137,9 @@ The older brms corpus has 367 finite density/gradient reference points and five
 recorded domain refusals; 307 points also have output-value references. At finite
 points without output references, the checker requires output generation but
 does not compare its values. The usual scaled-error gate is `1e-9`. The brms documentation identifies
-ill-conditioned Gaussian-process exceptions and the unsupported COM-Poisson
-fixture; these exceptions must accompany coverage counts.
+ill-conditioned Gaussian-process exceptions and the original COM-Poisson
+refusal. COM-Poisson support and its later sampling measurements are recorded
+separately above; historical exceptions still accompany the frozen sweep.
 Some points instead check matching domain refusals: for example, the inverse
 Gaussian brms fixture is undefined at all three reference vectors. Agreement
 on rejection is not evidence of a matching finite gradient at those points.
@@ -175,6 +177,6 @@ GP arithmetic fixes in `4db5dca2` resolved all three strict GP discrepancies
 at every recorded point on this machine. Separate four-seed runs completed
 and exceeded the timing target for all three. Inverse Gaussian also samples
 in both engines; its shared reference points are outside its domain. These
-four fixtures retain diagnostic flags in both engines. COM-Poisson remains
-a dynamic-loop support gap. See the [separate results and source identity](../output/teaching-performance/followup-4db5dca2/README.md);
+four fixtures retain diagnostic flags in both engines. COM-Poisson support and
+its sampling cap were subsequently resolved in the follow-ups above. See the [separate results and source identity](../output/teaching-performance/followup-4db5dca2/README.md);
 they do not change the frozen sweep's counts.

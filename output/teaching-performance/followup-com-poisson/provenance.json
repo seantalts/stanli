@@ -1,0 +1,55 @@
+{
+  "baseline_commit": "0742c32088703a8849bcc196f7faae1316e164d4",
+  "final_runtime_patch_sha256": "353d842441075d0c6029997fbe2fbcd9094d261ac87982e00b7e84719420271d",
+  "measured_sampling_identity": "sampling-experiments.json.gz: sink.identity",
+  "measured_canary_identity": "gradient-canaries.json.gz: identity",
+  "format_note": "Sampling binary preceded clang-format; only formatting and tests changed before the full validation build. Its exact measured patch is retained.",
+  "platform": {
+    "machine": "Apple M3 Ultra",
+    "os": "macOS ARM64",
+    "build": "Release"
+  },
+  "local_evidence": "/tmp/stanli-teaching-perf/com-cap",
+  "original_sweep_unchanged": "fd5e0ecacddc7047",
+  "validation_executables": {
+    "build-teaching-residual/stanli_check": "762ea622a138bae9ab320ea3e9960f3d95a50c6226e51d977e05d247c3fea2ca",
+    "build-teaching-residual/stanli_run": "e39f4c267a32dbb3578b087ff7b62789a7010cdd8d11aee8be5b844bebf3b726",
+    "build-teaching-residual/libstanli.dylib": "e1ceeddf652618f5b37c20a4495bd1c7c696337181a66d63ffec563c57783532"
+  },
+  "additional_reference_build": [
+    "clang++",
+    "-std=c++17",
+    "-O2",
+    "-ffp-contract=off",
+    "-D_REENTRANT",
+    "-DBOOST_DISABLE_ASSERTS",
+    "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/src",
+    "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math",
+    "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/rapidjson_1.1.0",
+    "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/eigen_5.0.1",
+    "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/boost_1.87.0",
+    "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/sundials_6.1.1/include",
+    "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/tbb_2020.3/include",
+    "-include",
+    "/tmp/stanli-teaching-perf/gaps-v8/com-reference/s2_com_poisson.hpp",
+    "/tmp/stanli-teaching-perf/com-cap/point-ref.cpp",
+    "-L/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/tbb",
+    "-ltbb",
+    "-Wl,-rpath,/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/tbb",
+    "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a",
+    "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a",
+    "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a",
+    "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan/stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a",
+    "-o",
+    "/tmp/stanli-teaching-perf/com-cap/point-ref"
+  ],
+  "additional_reference_driver_sha256": "699115b404fae27b456639a08fcde08d929d072ba681f0a40b8efafdb91018af",
+  "additional_reference_executable_sha256": "368fb9d734e5419e545fd2f431aff669771a45fd87dc67614130f4cad4778b9d",
+  "commands": {
+    "runtime_tests": "ctest --test-dir build-teaching-residual -j 8 --output-on-failure",
+    "references": "python3 tools/verify_refs.py deps/posteriordb --check build-teaching-residual/stanli_check --jobs 8 --per-model",
+    "R_tests": "See r-ecosystem-tests.txt; runtime-backed ecosystem/sampling tests, fail on warnings/failures/skips",
+    "sampling": "Every argv, timeout, stdout/stderr and status is retained in sampling-raw.tar.gz; sample-sink.py reproduces the protocol",
+    "additional_points": "Build point-ref.cpp with additional_reference_build, run its data.json 0 point.txt argv, and run extra-points.R against the current runtime."
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "s2_com_poisson": {
+    "run_id": "com-fill-sink-followup",
+    "engines": {
+      "stanli": {
+        "status": "complete",
+        "chains": 4,
+        "parameters": 3,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.003427519030218,
+        "ess_bulk_min": 1235.337436629901,
+        "ess_tail_min": 1213.7657312274371,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 1.019991514320008,
+        "screening_flag": false
+      },
+      "cmdstan": {
+        "status": "complete",
+        "chains": 4,
+        "parameters": 3,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0061320651827894,
+        "ess_bulk_min": 1050.1140698565971,
+        "ess_tail_min": 1065.8187092926571,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.93680727302799971,
+        "screening_flag": false
+      }
+    },
+    "comparison": {
+      "status": "complete",
+      "parameters": 3,
+      "median_mean_difference_in_sd": 0.0093926482617493947,
+      "max_mean_difference_in_sd": 0.017938647910500847,
+      "max_difference_parameter": "b.1"
+    }
+  }
+}
