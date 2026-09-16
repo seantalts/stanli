@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the McElreath report from a completed, immutable corpus run.
+"""Build the Rethinking report from a completed, immutable corpus run.
 
 Usage: report_rethinking.py RUN_DIRECTORY DIAGNOSTICS_JSON REPLAY_LOG OUTPUT_DIR
 Requires reportlab and numerical-errors.json in OUTPUT_DIR (from report_rethinking_numerics.py). No benchmarks run here.
@@ -180,7 +180,7 @@ def numeric_cells(row):
 
 
 md = ['# Rethinking models: speedup and numerical differences', '',
-      'Prepared for Richard McElreath | 16 September 2026', '', *[x for text in intro for x in (text, '')],
+      '16 September 2026', '', *[x for text in intro for x in (text, '')],
       '## Numerical differences', '', numerics, '', '## How to read the results', '', method, '', error_method, '', ulp_method, '',
       '## Measurement conditions', '', hardware, '', settings, '', output_method, '',
       '## Estimated first-fit speedup', '', first_fit, '',
@@ -237,7 +237,7 @@ def footer(canvas, doc):
 
 
 story = [para('Rethinking models', 'ReportTitle'),
-         para('Speedup and numerical differences<br/>Prepared for Richard McElreath | 16 September 2026', 'Deck')]
+         para('Speedup and numerical differences<br/>16 September 2026', 'Deck')]
 for text in intro: story.append(para(text))
 story += [para('Numerical differences', 'Heading2'), para(numerics),
           para('Examples', 'Heading2'), para('Speedup is CmdStan/Stanli complete CLI time. Numerical columns show maximum absolute differences.', 'SmallReport')]
