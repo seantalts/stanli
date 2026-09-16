@@ -78,11 +78,29 @@ preparation and excluding CmdStan compilation.
 | `s2_invgaussian` | 1.993× | 1689 / 1671 |
 
 Inverse Gaussian samples in both engines, but the original fixed reference
-points are outside its domain in both. Sampling completion does not supply
-that missing finite-point numerical comparison. All four fixtures retain
+points are outside its domain in both; the additional comparison below covers
+valid points. All four fixtures retain
 diagnostic flags, so these timings do not establish time to equally accurate
 inference. The [corresponding PR CI](https://github.com/seantalts/stanli/actions/runs/35082758748)
 passed its Linux runtime R and compiler checks.
+
+### Additional inverse-Gaussian checks
+
+Runtime `55bef134` agrees with CmdStan at 49 additional finite points: 16
+preselected draws from the four existing CmdStan chains, 27 interior points,
+and six near the positive linear-predictor boundary, down to a margin of 10⁻¹⁰.
+The comparison includes sampling log density with the transform Jacobian,
+all three unconstrained gradients, and all five output columns.
+
+| Quantity | Maximum absolute difference | Maximum ULP |
+| --- | ---: | ---: |
+| Log density | 4.55e-13 | 2 |
+| Gradient | 1.46e-11 | 116 |
+| Constrained/transformed/generated outputs | 0 | 0 |
+
+The three original reference points remain unchanged and produce nonfinite
+density or gradients in both engines. The additional results supplement that
+record; the earlier sampling diagnostic flags still apply.
 
 ## Removing redundant result copies
 
@@ -179,6 +197,27 @@ finite-product calculation over seven dispersion values from 2 to 10¹⁰⁰.
 This demonstrates a library limitation in a regime visited by the chains;
 it does not identify the cause of every divergent proposal. The model and
 upstream density implementation remain unchanged.
+
+Reverse-mode gradients also lose precision. For the same 40 observations,
+the table below gives the derivative of log probability with respect to
+**log dispersion**, the scale used by the sampler. The independent calculation
+uses the finite-product identity at 360 decimal digits; its derivatives agree
+with centered differences to relative error below 1.9e-65 across 63 input points.
+The C++ evaluations call only the pinned upstream Stan Math library.
+
+| Dispersion | Independent derivative | GLM derivative | Non-GLM derivative |
+| --- | ---: | ---: | ---: |
+| 10⁴ | 0.00599840045 | 0.00599840149 | 0.00599840114 |
+| 10⁸ | 5.99999984e-7 | 0 | −2.48201017e-6 |
+| 10¹² | 6.00e-11 | 0 | −0.0603862 |
+| 10¹⁶ | 6.00e-15 | 0 | −120 |
+
+The non-GLM function's accurate log probability therefore does not establish
+an accurate gradient. A further case with 40 observations equal to 12, mean 10
+and dispersion 10¹² gives a GLM log-dispersion derivative of −0.113687 versus
+an independent value of 1.60e-10. These are likelihood derivatives; priors and
+the parameter-transform Jacobian are excluded. No replacement or correction
+to either upstream implementation is applied.
 
 ## Method and validation
 
