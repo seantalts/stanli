@@ -58,5 +58,6 @@
     "compiler_runtime_diff_from_measured_fix": "",
     "R_package_installed_from_current_main": true,
     "R_expectations": 495
-  }
+  },
+  "R_transcript_format": "Carriage returns converted to line breaks and trailing progress padding removed; original log retained under local_evidence/r-tests-current-main.log."
 }
