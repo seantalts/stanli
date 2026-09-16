@@ -810,3 +810,32 @@ logs, closed-form oracle and executable hash). The next bounded experiment is
 integer remainder and full-vector indexing semantics, followed by the complete
 model oracle; do not integrate the prototype without adversarial, replay,
 consumer and end-to-end checks. Frozen v6 inputs and binaries remain untouched.
+
+## Renewed educational/brms gap work
+
+The user explicitly requested continued performance and numerical work. The
+COM-Poisson candidate now handles checked runtime vector element writes,
+scalar log-sum-exp over a runtime range, integer remainder through Stan Math,
+and identity indexing left by index composition. Native adjoints refuse the
+new dynamic operations; existing var replay supplies their derivatives.
+Generic compiler tests cover row/column vectors, aliased RHS, changing indices
+and ranges, empty ranges, invalid bounds, unused NaN tail values, compaction,
+integer sign/boundary cases, and independent Stan Math derivatives.
+
+COM-Poisson matches its unchanged independent CmdStan density/gradient reference
+at all three points, maximum absolute difference 2.84e-14. Independently rebuilt
+write-array output also matches. Validation: 249 runtime tests, 316 existing-
+policy reference checks (1,008,755 values), and 456 R expectations, no failures,
+warnings or skips. Removing the former compilation-gap entry does not remove
+any numerical/domain policy or imply sampling-speed parity.
+
+Fresh four-seed 1000+1000 CLI measurements retain the 3x/900-second cap. CmdStan
+completed all seeds (median 1.1000 s); Stanli hit the relative cap on all four,
+so there is no Stanli median. This is improved compilation coverage, not a
+completed performance fix. The separate evidence and exact source patch are
+in `/tmp/stanli-teaching-perf/gaps-v8/com-sampling/`; v6 remains unchanged.
+A diagnostic profile points to Stan Math variable allocation during replay,
+including large constant fills, as a substantial cost. Next bounded test:
+represent a uniform constant range as a broadcast, preserving every double
+bit pattern and derivative, then compare gradients and capped full sampling.
+ALD/GEV dispatch costs remain a separate performance beam.

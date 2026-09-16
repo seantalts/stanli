@@ -978,9 +978,178 @@ void test_constant_probes() {
           "shape without runtime values");
 }
 
+void test_dynamic_vector_program() {
+  using Var = stan::math::var;
+  using stanli::Program;
+  using stanli::ProgramCompiler;
+  using stanli::Range;
+  using stanli::ViewKind;
+  const auto require = [](bool ok, const char* label) {
+    if (!ok) {
+      ++failures;
+      std::printf("FAIL dynamic vector %s\n", label);
+    }
+  };
+  for (bool row : {false, true}) {
+    for (bool compact : {false, true}) {
+      Program p;
+      std::map<std::string, const FunDef*> functions;
+      ProgramCompiler pc{p, functions};
+      Range base{pc.alloc(8), 8};
+      base.kind = row ? ViewKind::RowVector : ViewKind::Vector;
+      const std::string type = row ? "URowVector" : "UVector";
+      pc.reals["values"] = base;
+      std::vector<std::pair<int, int>> seeds{{base.reg, base.len}};
+      for (const char* name : {"index", "lo", "hi"}) {
+        Range r{pc.alloc(1), 1};
+        pc.reals[name] = r;
+        seeds.emplace_back(r.reg, 1);
+      }
+      // RHS aliases the destination vector. Indexing and the RHS must read
+      // their old values before a write changes the selected element.
+      Stmt set =
+          assignment("values", index_single(var("values", type), 1, "UReal"));
+      Expr index;
+      index.name = "IndexSingle";
+      index.args = {var("index", "UInt")};
+      set.lhs_idx = {index};
+      pc.stmt(set);
+      Expr slice;
+      slice.kind = Expr::Indexed;
+      slice.type_ = type;
+      Expr span;
+      span.name = "IndexBetween";
+      span.args = {var("lo", "UInt"), var("hi", "UInt")};
+      slice.args = {var("values", type), span};
+      const Range result = pc.expr(fun("log_sum_exp", {slice}, "UReal"));
+      p.out_regs = {result.reg};
+      require(p.code.size() == 2 && p.code[0].code == Program::DYN_SET &&
+                  p.code[1].code == Program::DYN_LSE_RANGE,
+              "compiler selects dynamic operations");
+      if (compact) stanli::compact_program(p, seeds);
+      // Reuse the same program across changing writes, extents and an empty
+      // slice. There is deliberately an unread NaN after the final prefix.
+      for (const auto& controls : std::vector<std::vector<int>>{
+               {1, 1, 8}, {3, 2, 6}, {8, 8, 8}, {4, 4, 3}, {3, 1, 2}}) {
+        stan::math::nested_rev_autodiff nested;
+        std::vector<double> input{.2, -.5, 1.7, -3., .8, 2.1, -1.2, .4};
+        if (controls[2] == 2)
+          input[7] = std::numeric_limits<double>::quiet_NaN();
+        std::vector<double> reg(p.n_regs);
+        std::vector<Var> vr(p.n_regs), vin;
+        Eigen::Matrix<Var, Eigen::Dynamic, 1> reference(8);
+        std::vector<Var> ref_in;
+        for (int k = 0; k < 8; ++k) {
+          reg[seeds[0].first + k] = input[k];
+          vin.emplace_back(input[k]);
+          ref_in.emplace_back(input[k]);
+          vr[seeds[0].first + k] = vin.back();
+          reference[k] = ref_in.back();
+        }
+        for (int k = 0; k < 3; ++k) {
+          reg[seeds[k + 1].first] = controls[k];
+          vr[seeds[k + 1].first] = controls[k];
+        }
+        stanli::run_program(p, reg);
+        stanli::run_program(p, vr);
+        reference[controls[0] - 1] = reference[0];
+        const int width = std::max(0, controls[2] - controls[1] + 1);
+        const Eigen::Matrix<Var, Eigen::Dynamic, 1> selected =
+            reference.segment(controls[1] - 1, width);
+        Var expected = stan::math::log_sum_exp(selected);
+        const auto equal = [](double a, double b) {
+          return a == b || (std::isnan(a) && std::isnan(b)) ||
+                 std::abs(a - b) <= 1e-14 * std::max(1., std::abs(b));
+        };
+        require(equal(reg[p.out_regs[0]], expected.val()), "double oracle");
+        require(equal(vr[p.out_regs[0]].val(), expected.val()), "var oracle");
+        // Both tapes are independent, so one sum seeds both outputs without
+        // requiring a reset of nested autodiff's other variables.
+        (vr[p.out_regs[0]] + expected).grad();
+        for (int k = 0; k < 8; ++k)
+          require(equal(vin[k].adj(), ref_in[k].adj()),
+                  "aliased write gradient");
+      }
+      for (const auto& controls : std::vector<std::vector<double>>{
+               {0, 1, 2},
+               {9, 1, 2},
+               {1.5, 1, 2},
+               {1, 0, 2},
+               {1, 1, 9},
+               {1, 1.5, 2},
+               {1, 1, std::numeric_limits<double>::infinity()}}) {
+        std::vector<double> reg(p.n_regs, .2);
+        for (int k = 0; k < 3; ++k) reg[seeds[k + 1].first] = controls[k];
+        bool threw = false;
+        try {
+          stanli::run_program(p, reg);
+        } catch (const std::out_of_range&) {
+          threw = true;
+        }
+        require(threw, "runtime bounds rejection");
+      }
+      // A standalone dynamically sized slice still refuses; this change is
+      // limited to scalar reductions with a fixed-capacity source.
+      bool refused = false;
+      try {
+        (void)pc.expr(slice);
+      } catch (const stanli::Bail&) {
+        refused = true;
+      }
+      require(refused, "standalone dynamic slice still refuses");
+    }
+  }
+}
+
+void test_runtime_remainder_and_identity_index() {
+  stanli::Program p;
+  std::map<std::string, const FunDef*> functions;
+  stanli::ProgramCompiler pc{p, functions};
+  for (const char* name : {"a", "b"})
+    pc.reals[name] = stanli::Range{pc.alloc(1), 1};
+  const auto out =
+      pc.expr(fun("Modulo__", {var("a", "UInt"), var("b", "UInt")}, "UInt"));
+  if (p.code.size() != 1 || p.code[0].code != stanli::Program::IMOD) ++failures;
+  for (auto pair : std::vector<std::pair<int, int>>{
+           {7, 3},
+           {-7, 3},
+           {7, -3},
+           {-7, -3},
+           {0, 2},
+           {std::numeric_limits<int>::min(), 2},
+           {std::numeric_limits<int>::max(), -7}}) {
+    std::vector<double> reg(p.n_regs);
+    reg[0] = pair.first;
+    reg[1] = pair.second;
+    stanli::run_program(p, reg);
+    if (reg[out.reg] != stan::math::modulus(pair.first, pair.second))
+      ++failures;
+  }
+  bool threw = false;
+  try {
+    std::vector<double> reg(p.n_regs, 0.);
+    stanli::run_program(p, reg);
+  } catch (const std::domain_error&) {
+    threw = true;
+  }
+  if (!threw) ++failures;
+  stanli::Range values{pc.alloc(3), 3};
+  values.kind = stanli::ViewKind::Vector;
+  pc.reals["values"] = values;
+  Expr identity;
+  identity.kind = Expr::Indexed;
+  identity.type_ = "UVector";
+  identity.args = {var("values", "UVector")};
+  const auto same = pc.expr(identity);
+  if (same.reg != values.reg || same.len != 3 || same.kind != values.kind)
+    ++failures;
+}
+
 }  // namespace
 
 int main() {
+  test_dynamic_vector_program();
+  test_runtime_remainder_and_identity_index();
   test_constant_probes();
   test_short_circuit_or();
   test_short_circuit_and();

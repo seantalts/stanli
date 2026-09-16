@@ -1221,6 +1221,9 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::RANGE:
           ranged_step(I, val, adj);
           break;
+        case Program::DYN_SET:
+        case Program::DYN_LSE_RANGE:
+        case Program::IMOD:
         case Program::DYN_INDEX:
         case Program::IDIV:
         case Program::EXTREMA_RANGE:

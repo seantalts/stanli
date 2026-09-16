@@ -86,6 +86,7 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(SUB, kProgramReadB)                                                       \
   X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                       \
   X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
+  X(IMOD, kProgramReadB | kProgramNoAdjoint)                                  \
   X(IDIV, kProgramReadB | kProgramNoAdjoint)                                  \
   /* len holds the PowZeroBaseLaw; a RANGE's law field carries it instead. */ \
   X(POW, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
@@ -108,6 +109,8 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(LE, kProgramReadB)                                                        \
   X(EQ, kProgramReadB)                                                        \
   X(NE, kProgramReadB)                                                        \
+  X(DYN_SET, kProgramRangeA | kProgramReadB | kProgramReadC |                 \
+                 kProgramRangeOutput | kProgramNoAdjoint)                     \
   X(DYN_INDEX, kProgramReadB | kProgramNoAdjoint)                             \
   /* b selects max (1) or min (0); c stores kProgramExtrema* metadata. */     \
   X(EXTREMA_RANGE, kProgramRangeA | kProgramNoAdjoint)                        \
@@ -117,6 +120,8 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(EXP_RANGE, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)        \
   X(DOT, kProgramRangeA | kProgramRangeB | kProgramReadB | kProgramSaveA |    \
              kProgramSaveB)                                                   \
+  X(DYN_LSE_RANGE,                                                            \
+    kProgramRangeA | kProgramReadB | kProgramReadC | kProgramNoAdjoint)       \
   X(LSE_RANGE, kProgramRangeA | kProgramSaveA | kProgramSaveOut)              \
   X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)          \
   X(LSE2, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
@@ -520,6 +525,11 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::DIV:
         d() = ra() / rb();
         break;
+      case Program::IMOD:
+        d() = T(
+            stan::math::modulus(static_cast<int>(stan::math::value_of(ra())),
+                                static_cast<int>(stan::math::value_of(rb()))));
+        break;
       case Program::IDIV:
         d() =
             T(stan::math::divide(static_cast<int>(stan::math::value_of(ra())),
@@ -585,6 +595,23 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::NE:
         d() = T(stan::math::value_of(ra()) != stan::math::value_of(rb()));
         break;
+      case Program::DYN_SET: {
+        const double raw = stan::math::value_of(reg[(size_t)I.c]);
+        if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+            raw > static_cast<double>(I.len))
+          throw std::out_of_range(
+              "register-program assignment index out of range");
+        const T value = rb();
+        if (I.dst > I.a && I.dst < I.a + I.len) {
+          for (int32_t i = I.len; i-- > 0;)
+            reg[(size_t)(I.dst + i)] = reg[(size_t)(I.a + i)];
+        } else if (I.dst != I.a) {
+          for (int32_t i = 0; i < I.len; ++i)
+            reg[(size_t)(I.dst + i)] = reg[(size_t)(I.a + i)];
+        }
+        reg[(size_t)(I.dst + static_cast<int32_t>(raw) - 1)] = value;
+        break;
+      }
       case Program::DYN_INDEX: {
         const double raw = stan::math::value_of(rb());
         if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
@@ -683,6 +710,23 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         } else {
           d() = stan::math::dot_product(a, b);
         }
+        break;
+      }
+      case Program::DYN_LSE_RANGE: {
+        const double lo = stan::math::value_of(rb());
+        const double hi = stan::math::value_of(reg[(size_t)I.c]);
+        if (!std::isfinite(lo) || !std::isfinite(hi) || std::trunc(lo) != lo ||
+            std::trunc(hi) != hi)
+          throw std::out_of_range("register-program slice bounds invalid");
+        if (hi < lo) {
+          d() = T(-std::numeric_limits<double>::infinity());
+          break;
+        }
+        if (lo < 1 || hi > I.len)
+          throw std::out_of_range("register-program slice out of range");
+        Eigen::Map<const VecT> a(reg + I.a + static_cast<int32_t>(lo) - 1,
+                                 static_cast<int32_t>(hi - lo + 1));
+        d() = stan::math::log_sum_exp(a);
         break;
       }
       case Program::LSE_RANGE: {

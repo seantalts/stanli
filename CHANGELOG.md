@@ -21,6 +21,8 @@
 
 ### Fixes
 
+- Run brms COM-Poisson models with checked runtime vector writes, prefix
+  reductions, and integer remainder inside parameter-dependent control flow.
 - Match CmdStan's fixed-covariate GP gradient reduction order and accept
   zero-argument `log2()` and `log10()` constants in portable MIR.
 - Replace corpus benchmark heuristics with equal warmup, alternating paired
