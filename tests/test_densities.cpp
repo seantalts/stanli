@@ -536,7 +536,57 @@ static void check_bernoulli_scratch_reset(const std::string& tag,
   expect_bits(tag + " dropped connected", scratch[1], 0.0);
 }
 
+static void check_scalar_poisson_lcdf() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_POISSON_LCDF);
+  const double inf = std::numeric_limits<double>::infinity();
+  auto compare = [](const std::string& label, double a, double b) {
+    if (std::isnan(a) && std::isnan(b)) return;
+    expect_bits(label, a, b);
+  };
+  for (int n : {-1, 0, 1, 2, 7, 32, 1000})
+    for (double rate :
+         {-1.0, 0.0, std::numeric_limits<double>::denorm_min(), 1e-12, 0.2, 2.0,
+          30.0, 1e3, inf, std::numeric_limits<double>::quiet_NaN()})
+      for (double seed : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308, inf}) {
+        stan::math::nested_rev_autodiff nested;
+        double out = 0, adj = 0, scratch[2] = {-9, -9};
+        KernelCtx ctx;
+        ctx.n_in = 1;
+        ctx.in[0] = Desc{&rate, 1};
+        ctx.in_adj[0] = Desc{&adj, 1};
+        ctx.out = Desc{&out, 1};
+        ctx.out_adj = seed;
+        ctx.scratch = scratch;
+        ctx.idata = &n;
+        ctx.n_idata = 1;
+        std::string got_error, ref_error;
+        try {
+          kernel->forward(ctx);
+          kernel->backward(ctx);
+        } catch (const std::exception& e) {
+          got_error = e.what();
+        }
+        stan::math::var lambda = rate, ref;
+        try {
+          // The old kernel binds its single outcome as a container. Keep
+          // that instantiation as the oracle for this shape optimization.
+          Eigen::Map<const Eigen::VectorXi> counts(&n, 1);
+          ref = stan::math::poisson_lcdf(counts, lambda) * seed;
+          ref.grad();
+        } catch (const std::exception& e) {
+          ref_error = e.what();
+        }
+        expect_true("scalar poisson error", got_error == ref_error);
+        if (got_error.empty() && ref_error.empty()) {
+          compare("scalar poisson value", out * seed, ref.val());
+          compare("scalar poisson derivative", adj, lambda.adj());
+        }
+      }
+}
+
 int main() {
+  check_scalar_poisson_lcdf();
   using namespace stanli;
   using stan::math::var;
 

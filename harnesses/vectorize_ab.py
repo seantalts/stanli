@@ -581,6 +581,15 @@ def prep_problems(rows):
 
 
 def prep_row(rows, graph, stage):
+    # A completed bounded specialization is the model's log-probability graph.
+    # Refused trials may leave partial trace rows before the ordinary lowering
+    # runs, so select one completed graph rather than mixing their stages.
+    if graph == "log_prob" and not any(
+            row.get("graph") == graph and row.get("stage") == "total"
+            for row in rows):
+        if any(row.get("graph") == "bounded_log_prob"
+               and row.get("stage") == "total" for row in rows):
+            graph = "bounded_log_prob"
     return next(
         (row for row in rows
          if row.get("graph") == graph and row.get("stage") == stage),

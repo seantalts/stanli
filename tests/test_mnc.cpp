@@ -168,9 +168,10 @@ std::vector<double> sentinel(size_t n, double base) {
 Result run_direct(const Inputs& x, uint8_t variant, double seed,
                   const std::vector<double>& dy0,
                   const std::vector<double>& dmu0,
-                  const std::vector<double>& dL0, bool connect_L = true) {
+                  const std::vector<double>& dL0, bool connect_L = true,
+                  stanli::Opcode opcode = stanli::OP_MULTI_NORMAL_CHOL_LPDF) {
   using namespace stanli;
-  const Kernel* kernel = find_kernel(OP_MULTI_NORMAL_CHOL_LPDF);
+  const Kernel* kernel = find_kernel(opcode);
   if (!kernel) throw std::runtime_error("MNC kernel missing");
   int dims[2] = {x.n, x.m};
   double density = std::numeric_limits<double>::quiet_NaN();
@@ -337,23 +338,41 @@ std::string reference_error(const Inputs& x) {
 // overload. Non-unit output adjoint: the kernel seeds its nested tape with
 // 1.0 and scales in the backward.
 void check_multi_normal(const std::string& tag, int n, int m, uint8_t variant,
-                        double seed) {
+                        double seed, int scenario = 0, bool modern = false,
+                        stanli::Opcode opcode = stanli::OP_MULTI_NORMAL_LPDF,
+                        bool vectorized_mu = false) {
   using namespace stanli;
-  const Inputs x = inputs(n, m, 0.21);
+  Inputs x = inputs(n, m, 0.21);
+  if (scenario == 1) x.y = x.mu;
+  if (scenario == 2)
+    for (double& v : x.L) v *= 1e-6;
+  if (scenario == 3) x.y[0] = std::numeric_limits<double>::infinity();
+  if (scenario == 4) x.y[0] = 1e200;
+  if (vectorized_mu) {
+    x.mu.resize(n * m);
+    for (int k = 1; k < m; ++k)
+      for (int i = 0; i < n; ++i) x.mu[k * n + i] = x.mu[i] + 0.03 * k;
+  }
   Eigen::Map<const MatD> Lm(x.L.data(), n, n);
-  const MatD Sm = Lm * Lm.transpose();
+  const MatD Sm = opcode == OP_MULTI_NORMAL_CHOL_LPDF
+                      ? MatD(Lm)
+                      : MatD(Lm * Lm.transpose());
   const unsigned mask = variant == 0 ? 0x7u : (variant & 0x3fu);
   const bool ay = mask & 1u, am = mask & 2u, aS = mask & 4u;
   const bool propto = (variant & 0x80u) != 0;
 
   Graph g;
   const int y = g.add_slot(n * m, ay);
-  const int mu = g.add_slot(n, am);
+  const int mu_size = vectorized_mu ? n * m : n;
+  const int mu = g.add_slot(mu_size, am);
   const int S = g.add_slot(n * n, aS);
   const int density = g.add_slot(1, false);
   const int seed_slot = g.add_slot(1, false);
   const int total = g.add_slot(1, false);
-  const int op = g.add_op(OP_MULTI_NORMAL_LPDF, {y, mu, S}, density, {n, m});
+  const int op = g.add_op(
+      opcode, {y, mu, S}, density,
+      modern ? std::vector<int>{n, m == 1 ? -1 : m, vectorized_mu ? m : -1}
+             : std::vector<int>{n, m});
   g.ops[(size_t)op].variant = variant;
   g.add_op(OP_MUL, {density, seed_slot}, total);
   g.result_slot = total;
@@ -364,12 +383,16 @@ void check_multi_normal(const std::string& tag, int n, int m, uint8_t variant,
     std::copy(src, src + len, p);
   };
   fill(y, ay, x.y.data(), n * m);
-  fill(mu, am, x.mu.data(), n);
+  fill(mu, am, x.mu.data(), mu_size);
   fill(S, aS, Sm.data(), n * n);
   ex.value_ptr(seed_slot)[0] = seed;
   std::vector<double> grad(
-      (size_t)(ay ? n * m : 0) + (am ? n : 0) + (aS ? n * n : 0), 0.0);
+      (size_t)(ay ? n * m : 0) + (am ? mu_size : 0) + (aS ? n * n : 0), 0.0);
   const double got = ex.gradient(grad.data());
+  ex.forward_value_only();
+  const double value_only = ex.value_ptr(total)[0];
+  std::vector<double> repeated(grad.size());
+  const double again = ex.gradient(repeated.data());
 
   stan::math::nested_rev_autodiff nested;
   std::vector<VarV> yv((size_t)m, VarV(n));
@@ -380,16 +403,30 @@ void check_multi_normal(const std::string& tag, int n, int m, uint8_t variant,
       yd[(size_t)k](i) = x.y[(size_t)k * n + i];
     }
   VarV muv(n);
+  std::vector<VarV> muvs((size_t)m, VarV(n));
+  std::vector<VecD> muds((size_t)m, VecD(n));
+  if (vectorized_mu)
+    for (int k = 0; k < m; ++k)
+      for (int i = 0; i < n; ++i) {
+        muvs[k](i) = x.mu[k * n + i];
+        muds[k](i) = x.mu[k * n + i];
+      }
   VarM Sv(n, n);
   for (int i = 0; i < n; ++i) muv(i) = x.mu[(size_t)i];
   for (int i = 0; i < n * n; ++i) Sv.data()[i] = Sm.data()[i];
   Eigen::Map<const VecD> mud(x.mu.data(), n);
   Eigen::Map<const MatD> Sd(Sm.data(), n, n);
   auto call = [&](auto&& a, auto&& b, auto&& c) {
+    if (opcode == OP_MULTI_NORMAL_CHOL_LPDF)
+      return propto ? stan::math::multi_normal_cholesky_lpdf<true>(a, b, c)
+                    : stan::math::multi_normal_cholesky_lpdf<false>(a, b, c);
     return propto ? stan::math::multi_normal_lpdf<true>(a, b, c)
                   : stan::math::multi_normal_lpdf<false>(a, b, c);
   };
   auto dispatch = [&](auto&& yy) {
+    if (vectorized_mu)
+      return aS ? (am ? call(yy, muvs, Sv) : call(yy, muds, Sv))
+                : (am ? call(yy, muvs, Sd) : call(yy, muds, Sd));
     return aS ? (am ? call(yy, muv, Sv) : call(yy, mud, Sv))
               : (am ? call(yy, muv, Sd) : call(yy, mud, Sd));
   };
@@ -401,20 +438,57 @@ void check_multi_normal(const std::string& tag, int n, int m, uint8_t variant,
   stan::math::var scaled = ref * seed;
   stan::math::grad(scaled.vi_);
 
-  expect_bits(tag + " total", got, scaled.val());
+  // NaN payloads are not part of the density contract; all other values,
+  // including signed zero and infinity, must agree bit for bit.
+  auto compare = [&](const std::string& what, double a, double b) {
+    if (!(std::isnan(a) && std::isnan(b))) expect_bits(what, a, b);
+  };
+  compare(tag + " total", got, scaled.val());
+  compare(tag + " value only", value_only, scaled.val());
+  compare(tag + " reused total", again, scaled.val());
+  for (size_t i = 0; i < grad.size(); ++i)
+    compare(tag + " reused gradient", repeated[i], grad[i]);
   size_t at = 0;
   if (ay)
     for (int k = 0; k < m; ++k)
       for (int i = 0; i < n; ++i)
-        expect_bits(tag + " dy" + std::to_string(k * n + i), grad[at++],
-                    yv[(size_t)k](i).adj());
+        compare(tag + " dy" + std::to_string(k * n + i), grad[at++],
+                yv[(size_t)k](i).adj());
   if (am)
-    for (int i = 0; i < n; ++i)
-      expect_bits(tag + " dmu" + std::to_string(i), grad[at++], muv(i).adj());
+    for (int i = 0; i < mu_size; ++i)
+      compare(tag + " dmu" + std::to_string(i), grad[at++],
+              vectorized_mu ? muvs[i / n](i % n).adj() : muv(i).adj());
   if (aS)
     for (int i = 0; i < n * n; ++i)
-      expect_bits(tag + " dS" + std::to_string(i), grad[at++],
-                  Sv.data()[i].adj());
+      compare(tag + " dS" + std::to_string(i), grad[at++], Sv.data()[i].adj());
+}
+
+void check_multi_normal_errors() {
+  for (int scenario = 0; scenario < 7; ++scenario) {
+    Inputs x = inputs(scenario == 6 ? 0 : 3, 1, 0.21);
+    Eigen::Map<const MatD> L(x.L.data(), x.n, x.n);
+    const MatD S = L * L.transpose();
+    x.L.assign(S.data(), S.data() + S.size());
+    if (scenario == 0) x.mu[1] = std::numeric_limits<double>::infinity();
+    if (scenario == 1) x.y[1] = std::numeric_limits<double>::quiet_NaN();
+    if (scenario == 2) x.L[1] += 1;
+    if (scenario == 3) x.L[0] = -1;
+    if (scenario == 4) x.L[0] = std::numeric_limits<double>::quiet_NaN();
+    if (scenario == 5) std::fill(x.L.begin(), x.L.end(), 0.0);
+    const auto native = thrown([&] {
+      (void)run_direct(x, 7u, 1.0, std::vector<double>(x.y.size()),
+                       std::vector<double>(x.mu.size()),
+                       std::vector<double>(x.L.size()), true,
+                       stanli::OP_MULTI_NORMAL_LPDF);
+    });
+    const auto ref = thrown([&] {
+      Eigen::Map<const VecD> y(x.y.data(), x.n), mu(x.mu.data(), x.n);
+      Eigen::Map<const MatD> sigma(x.L.data(), x.n, x.n);
+      (void)stan::math::multi_normal_lpdf(y, mu, sigma);
+    });
+    check(!native.empty(), "mn invalid input rejected");
+    check(native == ref, "mn invalid input message matches Stan");
+  }
 }
 
 }  // namespace
@@ -514,6 +588,36 @@ int main() {
   check_multi_normal("mn sigma only propto", 3, 1, 0x84u, seed);
   check_multi_normal("mn legacy activity", 3, 1, 0x00u, seed);
   check_multi_normal("mn vectorized", 3, 2, 0x87u, seed);
+  check_multi_normal_errors();
+  for (int n : {1, 3, 8})
+    for (int m : {2, 5})
+      for (unsigned mask = 0; mask < 8; ++mask)
+        for (bool propto : {false, true})
+          for (bool vectorized_mu : {false, true})
+            for (auto opcode :
+                 {OP_MULTI_NORMAL_LPDF, OP_MULTI_NORMAL_CHOL_LPDF})
+              for (double weight : {0.0, -0.0, -1.3, 1e308, 1e-308,
+                                    std::numeric_limits<double>::infinity()}) {
+                const uint8_t variant =
+                    mask | (propto ? 0x80u : (mask == 0 ? 0x40u : 0u));
+                check_multi_normal("vectorized bindings", n, m, variant, weight,
+                                   0, true, opcode, vectorized_mu);
+              }
+  for (int n : {1, 2, 3, 8})
+    for (unsigned mask = 0; mask < 8; ++mask)
+      for (bool propto : {false, true})
+        for (int scenario = 0; scenario < 5; ++scenario)
+          for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308,
+                                std::numeric_limits<double>::infinity()}) {
+            // Bit 6 distinguishes the all-inactive full-density contract
+            // from legacy variant zero (which means all active).
+            const uint8_t variant =
+                mask | (propto ? 0x80u : (mask == 0 ? 0x40u : 0u));
+            const std::string tag = "mn n=" + std::to_string(n) +
+                                    " mask=" + std::to_string(variant) +
+                                    " case=" + std::to_string(scenario);
+            check_multi_normal(tag, n, 1, variant, weight, scenario, true);
+          }
 
   if (failures == 0) std::printf("test_mnc OK\n");
   return failures == 0 ? 0 : 1;

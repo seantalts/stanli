@@ -642,6 +642,44 @@ mir::Program target_program(mir::Expr expression) {
   return program;
 }
 
+// Exercise the reader as well as lowering: constructing an Expr directly
+// bypasses the arity validator that previously rejected log2()/log10().
+void check_nullary_math_constants() {
+  for (const auto& item : std::vector<std::pair<const char*, double>>{
+           {"e", 0x1.5bf0a8b145769p+1},
+           {"pi", 0x1.921fb54442d18p+1},
+           {"log2", 0x1.62e42fefa39efp-1},
+           {"log10", 0x1.26bb1bbb55516p+1},
+           {"sqrt2", 0x1.6a09e667f3bcdp+0},
+           {"machine_precision", std::numeric_limits<double>::epsilon()}}) {
+    mir::Expr call = literal();
+    call.kind = mir::Expr::FunApp;
+    call.name = item.first;
+    CompiledModel model =
+        compile_model(write_v2(target_program(call)), DataMap{});
+    Executor executor(std::move(model.graph));
+    model.bind(executor);
+    check(executor.gradient(nullptr) == item.second,
+          std::string(item.first) + " nullary constant decodes and evaluates");
+
+    // The two logarithm names still accept their ordinary unary overloads.
+    if (call.name == "log2" || call.name == "log10") {
+      call.args = {literal(call.name == "log2" ? 8.0 : 1000.0)};
+      CompiledModel unary =
+          compile_model(write_v2(target_program(call)), DataMap{});
+      Executor unary_executor(std::move(unary.graph));
+      unary.bind(unary_executor);
+      check(unary_executor.gradient(nullptr) == 3.0,
+            call.name + " unary overload preserved");
+      call.args.push_back(literal());
+    } else {
+      call.args = {literal()};
+    }
+    expect_error(write_v2(target_program(call)), call.name + " call",
+                 call.name + " wrong arity rejected");
+  }
+}
+
 void strip_overload_suffix(std::string& name) {
   const size_t signature = name.find('(');
   if (signature != std::string::npos) name.erase(signature);
@@ -1666,6 +1704,7 @@ int main(int argc, char** argv) {
   check_full_span_assignment_lowering();
   check_overload_finalization();
   check_exact_float_bits();
+  check_nullary_math_constants();
   check_structural_rejections();
   check_v2_rejections();
 

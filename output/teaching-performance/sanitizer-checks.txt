@@ -1,0 +1,8 @@
+Measured runtime/compiler revision 6e462c2e.
+https://github.com/seantalts/stanli/actions/runs/35060736527
+
+AddressSanitizer: 249 tests passed
+Retained raw analysis/asan-ci-6e.log SHA256 87178c3163e4548c411192ecb467ef215aff7339c27146a56981f03dd1f9b3dc
+
+ThreadSanitizer: three tests passed
+Retained raw analysis/tsan-ci-6e.log SHA256 c16ef2a3998c5df85330feebce365d237b231a80db9ed2928617181fe1971df8

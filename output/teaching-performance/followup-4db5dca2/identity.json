@@ -1,0 +1,30 @@
+{
+  "absolute_cap": 900,
+  "diff_sha256": "5920f24b950ec82f36d54e2bdcecccd2590a6d5659c5d9c15ed334fd489fb21c",
+  "head": "6e462c2e2bb4bc297165b5640dfe30318345960d",
+  "models": [
+    "sw_gp",
+    "i320_gp_expquad",
+    "s2_gp_by_gr",
+    "s2_invgaussian"
+  ],
+  "purpose": "Separate sampling feasibility and performance check; never backfill the fixed-point-gated baseline",
+  "relative_cap": 3,
+  "samples": 1000,
+  "seeds": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "source_run": "fd5e0ecacddc7047",
+  "stanli_run_sha256": "87a1b7c6587b36296229df9639ca582c3cbb8f8fcbd56b9b014652fb996a45b7",
+  "thread_env": {
+    "MKL_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "STAN_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "warmup": 1000
+}

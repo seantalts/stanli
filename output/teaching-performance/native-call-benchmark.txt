@@ -1,0 +1,16 @@
+29-parameter oracle model, point 2; >=200 ms warmup per arm;
+ five alternating pairs of 20,000 evaluations; microseconds per call.
+   rep     arm evaluations elapsed_s us_per_call
+1    1  direct       20000     0.084        4.20
+2    1 stanfit       20000     0.264       13.20
+3    2 stanfit       20000     0.265       13.25
+4    2  direct       20000     0.083        4.15
+5    3  direct       20000     0.075        3.75
+6    3 stanfit       20000     0.250       12.50
+7    4 stanfit       20000     0.273       13.65
+8    4  direct       20000     0.075        3.75
+9    5  direct       20000     0.075        3.75
+10   5 stanfit       20000     0.269       13.45
+      arm us_per_call.median us_per_call.min us_per_call.max
+1  direct               3.75            3.75            4.20
+2 stanfit              13.25           12.50           13.65

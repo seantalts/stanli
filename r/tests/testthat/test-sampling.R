@@ -1,30 +1,3 @@
-# These need a runtime. Point STANLI_RUNTIME at a build (and
-# STANLI_STANC at a stanc3 if that build does not embed one) to run them;
-# they skip otherwise, so R CMD check passes on a machine with neither.
-skip_without_runtime <- function() {
-  if (!stanli_available()) skip("no stanli runtime installed")
-}
-
-es_model <- function() {
-  code <- "
-    data { int<lower=0> J; array[J] real y; array[J] real<lower=0> sigma; }
-    parameters { real mu; real<lower=0> tau; vector[J] theta_tilde; }
-    transformed parameters { vector[J] theta = mu + tau * theta_tilde; }
-    model {
-      mu ~ normal(0, 5); tau ~ cauchy(0, 5);
-      theta_tilde ~ std_normal(); y ~ normal(theta, sigma);
-    }"
-  stanli_model(code = code, data = list(
-    J = 8L, y = c(28, 8, -3, 7, -1, 1, 18, 12),
-    sigma = c(15, 10, 16, 11, 9, 11, 10, 18)))
-}
-
-progress_model <- function() {
-  stanli_model(code = "
-    parameters { real x; }
-    model { x ~ normal(0, 1); }")
-}
-
 test_that("a model compiles and reports its shape", {
   skip_without_runtime()
   m <- es_model()
@@ -70,6 +43,8 @@ test_that("a run seed rebuilds transformed data the way CmdStan seeds it", {
   fit <- sample_model(m, chains = 1, seed = 7, warmup = 10, samples = 10,
                       refresh = 0)
   expect_equal(fit$model$seed, 7)
+  expect_identical(fit$model$model_code, code)
+  expect_identical(fit$model$model_name, m$model_name)
   expect_equal(lp_at(fit$model), seven)
   # A model whose transformed data never draws keeps its handle.
   plain <- progress_model()

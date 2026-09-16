@@ -90,7 +90,10 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
     mir <- stanc_mir(code)
     is_mir <- TRUE
   }
-  model <- build_model(if (is_mir) mir else code, data_json, is_mir, seed)
+  model <- build_model(if (is_mir) mir else code, data_json, is_mir, seed,
+    model_name = if (is.null(file)) "stanli_model" else
+      tools::file_path_sans_ext(basename(file)),
+    model_code = if (is.null(code)) character(0) else code)
   note <- .Call("stanli_r_warnings", model$ptr)
   if (nzchar(note)) warning(note, call. = FALSE)
   model
@@ -101,13 +104,16 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
 # seed must recompute all of it. Transformed data can size a parameter
 # (`int k = poisson_rng(3);` then `vector[k] mu;`), which changes the free
 # vector length and the columns along with the draws.
-build_model <- function(code, data_json, is_mir, seed) {
+build_model <- function(code, data_json, is_mir, seed,
+                        model_name = "stanli_model", model_code = character(0)) {
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
                as.numeric(seed))
   structure(list(ptr = ptr,
                  n_unconstrained = .Call("stanli_r_n_unconstrained", ptr),
                  columns = stan_variable_names(
                    .Call("stanli_r_column_names", ptr)),
+                 model_name = model_name,
+                 model_code = model_code,
                  source = list(code = code, data_json = data_json,
                                is_mir = is_mir),
                  seed = seed),
@@ -124,7 +130,7 @@ with_run_seed <- function(model, seed) {
       !.Call("stanli_r_transformed_data_rng", model$ptr))
     return(model)
   build_model(model$source$code, model$source$data_json,
-              model$source$is_mir, seed)
+              model$source$is_mir, seed, model$model_name, model$model_code)
 }
 
 stan_variable_names <- function(x) {
@@ -216,7 +222,9 @@ unconstrain <- function(model, values) {
 #'   per-chain warmup and sampling times plus exact divergence and
 #'   maximum-treedepth counts. With a compatible older runtime that predates
 #'   progress reporting, `report$available` is `FALSE` and those values are
-#'   `NA`.
+#'   `NA`. Sampling metadata (`warmup`, `samples`, `thin`, `save_warmup`,
+#'   `chains`, and `delta`) records the configuration for downstream conversion;
+#'   iteration counts are before thinning.
 #' @export
 sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          samples = 1000, thin = 1, delta = 0.8,
@@ -290,7 +298,12 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                  n_max_treedepth = res$n_max_treedepth)
   structure(list(draws = arr, sampler = sarr, unconstrained = uarr,
                  columns = model$columns, max_depth = max_depth, seed = seed,
-                 model = model, report = report),
+                 model = model, report = report,
+                 warmup_draws = if (isTRUE(save_warmup))
+                   as.integer(ceiling(warmup / max(1, thin))) else 0L,
+                 warmup = as.integer(warmup), thin = as.integer(max(1, thin)),
+                 samples = as.integer(samples), save_warmup = isTRUE(save_warmup),
+                 chains = as.integer(nchain), delta = as.double(delta)),
             class = "stanli_fit")
 }
 

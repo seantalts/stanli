@@ -804,7 +804,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   const auto total_time = prep.start();
   for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
   const auto bind_time = prep.start();
-  bind_data(p);
+  if (!data_prepared) bind_data(p);
   prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
              target_terms.size(), out.views.size());
   dump("bind_data", {});
@@ -858,6 +858,81 @@ using namespace lower_detail;
 
 namespace {
 
+// The first bounded alternative covers already-inlined, effect-free loop
+// bodies. Pure shape queries are allowed; unknown loop guards still refuse
+// during lowering. A user call or observable statement keeps the established
+// representation, rather than broadening this proof through another engine.
+bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
+  bool controlled_loop = false;
+  std::function<bool(const mir::Expr&)> expression = [&](const mir::Expr& e) {
+    // Expansion gains were established for single selectors. Range/gather
+    // bodies also expose different reduction/fusion choices; keep their
+    // established representation until that separate arithmetic is proved.
+    if (e.kind == mir::Expr::FunApp && e.name.compare(0, 5, "Index") == 0 &&
+        e.name != "IndexSingle")
+      return false;
+    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
+      return false;
+    if (lo.expr_effectful(e)) return false;
+    for (const auto& a : e.args)
+      if (!expression(a)) return false;
+    return true;
+  };
+  std::function<bool(const mir::Stmt&)> statement = [&](const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::NRFunApp && s.fn_name != "FnCheck" &&
+        s.fn_name != "FnValidateSize")
+      return false;
+    if ((s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) &&
+        lo.region_runtime_control(s))
+      controlled_loop = true;
+    for (const auto* e :
+         {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+      if (!expression(*e)) return false;
+    for (const auto& e : s.lhs_idx)
+      if (!expression(e)) return false;
+    for (const auto& e : s.fn_args)
+      if (!expression(e)) return false;
+    for (const auto& e : s.decl_type.dims)
+      if (!expression(e)) return false;
+    for (const auto& child : s.body)
+      if (!statement(child)) return false;
+    return true;
+  };
+  for (const auto& s : p.log_prob)
+    if (!statement(s)) return false;
+  return controlled_loop;
+}
+
+std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
+                                                        const mir::Program& p) {
+  const char* policy = std::getenv("STANLI_BOUNDED_SPECIALIZATION");
+  // Explicit zero/unknown values keep the established path for ablation.
+  if ((policy && std::string_view(policy) != "1") ||
+      lo.structured_policy != StructuredMode::Auto)
+    return {};
+  for (const auto& f : p.fun_defs) lo.fun_defs[f.name] = &f;
+  if (!bounded_specialization_candidate(lo, p)) return {};
+  // Transformed data, including its RNG and observable effects, runs once.
+  // Both paths start after it; the trial owns every mutable lowering field.
+  lo.bind_data(p);
+  Lowering trial(lo.data, lo.prep, lo.dumper, "bounded_log_prob",
+                 lo.prepared_context());
+  trial.shape_pool = std::make_shared<ShapeInterner>(*lo.shape_pool);
+  trial.int_env_data = lo.int_env_data;
+  trial.data_prepared = true;
+  trial.out.transformed_data_draws = lo.out.transformed_data_draws;
+  trial.bounded_specialization = true;
+  trial.structured_policy = StructuredMode::Off;
+  try {
+    return trial.run(p);
+  } catch (const Lowering::SpecializationRefused&) {
+  } catch (const CompileError&) {
+    // The original path remains authoritative for unsupported constructs and
+    // their diagnostics; a failed alternative is not a model error.
+  }
+  return {};
+}
+
 void add_interpreter_fallback(CompiledModel& cm, const std::string& note) {
   auto& all = cm.interpreter_fallbacks;
   if (std::find(all.begin(), all.end(), note) == all.end()) all.push_back(note);
@@ -894,7 +969,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
-  CompiledModel cm = lo.run(*prog);
+  auto specialized = try_bounded_specialization(lo, *prog);
+  CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
   if (!prog->generate_quantities.empty()) {
     // A second lowering, over the transformed data the first one already
     // interpreted: re-running prepare_data would double preparation time on

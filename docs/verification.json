@@ -167,6 +167,433 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "ch09_m5_8s": {
+  "max_rel": 7.231788047468669e-16,
+  "max_ulp": 4,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_m5_8s2": {
+  "max_rel": 2.731171525154451e-16,
+  "max_ulp": 2,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_m9_1": {
+  "max_rel": 1.4672683031712317e-16,
+  "max_ulp": 2,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_m9_1_chains4": {
+  "max_rel": 1.4672683031712317e-16,
+  "max_ulp": 2,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_m9_2": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_m9_3": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_m9_4": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_m9_5": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch09_mp": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_10": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_11": {
+  "max_rel": 2.7794907579249315e-16,
+  "max_ulp": 2,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_4": {
+  "max_rel": 1.5455677419716531e-15,
+  "max_ulp": 8,
+  "n_values": 12,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_5": {
+  "max_rel": 5.462408730267412e-15,
+  "max_ulp": 37,
+  "n_values": 12,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_6": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 12,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_7": {
+  "max_rel": 2.6467921822880284e-16,
+  "max_ulp": 2,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_8": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 9,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m11_9": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 2,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch11_m_pois": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_1": {
+  "max_rel": 1.2797485220402868e-16,
+  "max_ulp": 1,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_2": {
+  "max_rel": 2.0878635687405046e-16,
+  "max_ulp": 1,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_3": {
+  "max_rel": 4.2607983049820365e-15,
+  "max_ulp": 35,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_3_alt": {
+  "max_rel": 2.551138960875733e-15,
+  "max_ulp": 19,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_4": {
+  "max_rel": 2.6731949012580804e-14,
+  "max_ulp": 207,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_5": {
+  "max_rel": 1.8280595931537582e-14,
+  "max_ulp": 159,
+  "n_values": 12,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_6": {
+  "max_rel": 2.901399394333007e-14,
+  "max_ulp": 230,
+  "n_values": 17,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch12_m12_7": {
+  "max_rel": 2.613822368632419e-14,
+  "max_ulp": 232,
+  "n_values": 11,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_1": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 49,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_2": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 51,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_3": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 63,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_4": {
+  "max_rel": 7.68743593963675e-15,
+  "max_ulp": 36,
+  "n_values": 21,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_4b": {
+  "max_rel": 7.68743593963675e-15,
+  "max_ulp": 36,
+  "n_values": 21,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_4nc": {
+  "max_rel": 4.053296461962401e-15,
+  "max_ulp": 33,
+  "n_values": 21,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_5": {
+  "max_rel": 7.182930645405062e-15,
+  "max_ulp": 44,
+  "n_values": 14,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_6": {
+  "max_rel": 4.3558451550477e-15,
+  "max_ulp": 36,
+  "n_values": 22,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_7": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch13_m13_7nc": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_1": {
+  "max_rel": 7.574030252430712e-16,
+  "max_ulp": 6,
+  "n_values": 47,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_10": {
+  "max_rel": 1.8215537870014654e-15,
+  "max_ulp": 9,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_11": {
+  "max_rel": 6.027329635712296e-15,
+  "max_ulp": 37,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_2": {
+  "max_rel": 9.992007221626409e-16,
+  "max_ulp": 297,
+  "n_values": 77,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_3": {
+  "max_rel": 1.2758654214063307e-15,
+  "max_ulp": 96,
+  "n_values": 77,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_4": {
+  "max_rel": 6.706382202174711e-16,
+  "max_ulp": 6,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_4x": {
+  "max_rel": 6.706382202174711e-16,
+  "max_ulp": 6,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_5": {
+  "max_rel": 6.132764045610973e-16,
+  "max_ulp": 3,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_6": {
+  "max_rel": 4.0253084614122545e-15,
+  "max_ulp": 22,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_6x": {
+  "max_rel": 4.0253084614122545e-15,
+  "max_ulp": 22,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_7": {
+  "max_rel": 1.06651273166001e-15,
+  "max_ulp": 9,
+  "n_values": 657,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_8": {
+  "max_rel": 1.4972697706567586e-16,
+  "max_ulp": 1,
+  "n_values": 16,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_8nc": {
+  "max_rel": 4.93439726392071e-16,
+  "max_ulp": 4,
+  "n_values": 16,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch14_m14_9": {
+  "max_rel": 3.392102184906788e-16,
+  "max_ulp": 3,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_1": {
+  "max_rel": 2.6436234270034803e-16,
+  "max_ulp": 64,
+  "n_values": 55,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_2": {
+  "max_rel": 1.850636448523808e-16,
+  "max_ulp": 1,
+  "n_values": 105,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_3": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_4": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 3,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_5": {
+  "max_rel": 1.1102230246251565e-15,
+  "max_ulp": 40,
+  "n_values": 19,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_6": {
+  "max_rel": 4.440892098500626e-16,
+  "max_ulp": 4,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_7": {
+  "max_rel": 3.9968028886505635e-15,
+  "max_ulp": 144,
+  "n_values": 22,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_8": {
+  "max_rel": 4.211834781568185e-15,
+  "max_ulp": 19,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch15_m15_9": {
+  "max_rel": 4.211834781568185e-15,
+  "max_ulp": 19,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch16_m16_1": {
+  "max_rel": 1.7599526186735774e-15,
+  "max_ulp": 15,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ch16_m16_4": {
+  "max_rel": 1.7124791927648316e-15,
+  "max_ulp": 8,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "cholesky_cov_param_block": {
   "max_rel": 0.0,
   "max_ulp": 0,
@@ -262,6 +689,13 @@
   "max_rel": 9.800746681323284e-15,
   "max_ulp": 81,
   "n_values": 91,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "extra_hurdle_poisson": {
+  "max_rel": 2.171523542565541e-16,
+  "max_ulp": 1,
+  "n_values": 3,
   "point": 0,
   "status": "VERIFIED"
  },

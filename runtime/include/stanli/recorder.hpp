@@ -72,6 +72,15 @@ inline Eigen::Map<const Eigen::Matrix<rvar, -1, 1>> as_rvar(const Desc& d) {
       reinterpret_cast<const rvar*>(d.data), d.len);
 }
 
+// vector_seq_view lives in namespace stan and finds scalar-specific value
+// extraction by ADL. Keep this in rvar's namespace, just as var's overloads
+// are in var's namespace. The view is consumed in the caller's expression.
+template <typename T,
+          std::enable_if_t<std::is_same_v<typename T::Scalar, rvar>, int> = 0>
+inline auto value_of(const T& values) {
+  return values.unaryExpr([](const rvar& value) { return value.val(); });
+}
+
 // The same promotion for a matrix operand (a GLM's parameter-dependent
 // design matrix). Column-major, like every kernel matrix map.
 inline Eigen::Map<const Eigen::Matrix<rvar, -1, -1>> as_rvar_matrix(
@@ -203,7 +212,12 @@ class ops_partials_edge<ViewElt, Op, require_eigen_vector_vt<is_fvar, Op>> {
   bool owns_partials_{true};
   std::vector<double> owned_;
   partials_t partials_;
-  broadcast_array<partials_t> partials_vec_{partials_};
+  // Stan Math's vector-sequence partials accept matrix expressions, while
+  // scalar-vectorized densities use the array view above. Both alias the same
+  // storage and copy construction must rebind both views to the new edge.
+  Eigen::MatrixWrapper<partials_t> vector_partials_{partials_};
+  broadcast_array<Eigen::MatrixWrapper<partials_t>> partials_vec_{
+      vector_partials_};
 
   template <typename OpT, require_eigen_vt<is_fvar, OpT>* = nullptr>
   explicit ops_partials_edge(const OpT& ops, std::size_t idx)

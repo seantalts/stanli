@@ -47,7 +47,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # effect structures posteriordb does not contain (tests/brms/README.md).
 # They go through the same oracle as posteriordb, and a reference is keyed
 # on the file name either way.
-LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms")
+LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms",
+                REPO / "tests" / "rethinking")
 N_SAMPLER_COLS = 7
 REFS_PATH = REPO / "docs" / "corpus-refs.json.gz"
 # The reference file's format. Bumping this is a hard break on purpose:
@@ -799,7 +800,10 @@ def main():
         return check_wa_coverage(pdb, check_bin, args.models, args.filter,
                                  args.timeout, skip)
     refs, recorded = load_refs()
-    models = args.models or sorted(refs)
+    # A new teaching fixture without a reference must fail the default push
+    # gate. Iterating only the existing references would silently omit it.
+    teaching = {p.stem for p in (REPO / "tests" / "rethinking").glob("*.stan")}
+    models = args.models or sorted(set(refs) | teaching)
     models = [m for m in models if m not in skip]
     missing = [m for m in models if m not in refs]
     if missing:

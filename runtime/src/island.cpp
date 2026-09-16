@@ -27,12 +27,17 @@
 #include <stanli/optable.hpp>
 #include <stanli/program_density.hpp>
 
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_flat_set.hpp>
+
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -233,7 +238,9 @@ struct Compiler {
   // no op reader for last_use to see, so they can never be aliased over.
   const std::unordered_set<int>& pinned;
   IslandProg prog;
-  std::unordered_map<int, int> reg_of;  // slot -> first register
+  // Entries are only looked up by slot, never iterated or retained across
+  // insertion. Flat storage avoids a heap node per speculative register.
+  boost::unordered_flat_map<int, int> reg_of;  // slot -> first register
   std::vector<int> live_in_slots;
   size_t op_index = 0;  // graph index of the op being compiled
   // Scratch registers CALLs allocated: working memory the graph op also
@@ -604,6 +611,11 @@ struct Carver {
   std::vector<Candidate> liveness_queue;
   size_t liveness_queue_pos = 0;
   std::vector<size_t> liveness_queue_cuts;
+  size_t pricing_cost_begin = 0;
+  std::vector<int64_t> pricing_cost_prefix;
+  size_t pricing_work = 0;
+  size_t pricing_work_limit = 0;
+  size_t pricing_skipped = 0;
 
   Carver(Graph& graph,
          const std::vector<std::pair<int, std::vector<double>>>& fills,
@@ -654,20 +666,27 @@ struct Carver {
   // The graph's side of the estimate: what its ops move (an in-place
   // element update moves one element, not a vector) plus what each op
   // costs to run.
+  int64_t op_graph_cost(size_t u) const {
+    const Op& op = g.ops[u];
+    int64_t traffic;
+    if (op.opcode == OP_SET_INDEX_INPLACE)
+      traffic = 1;
+    else if (op.opcode == OP_SET_SLICE_INPLACE)
+      traffic = g.slots[op.in[1]].len;
+    else if (op.opcode == OP_DOT)
+      traffic = g.slots[op.in[0]].len;
+    else
+      traffic = g.slots[op.out].len;
+    return traffic + graph_op_cost(op.opcode);
+  }
+
   int64_t graph_cost(size_t i, size_t j) const {
+    if (!pricing_cost_prefix.empty() && i >= pricing_cost_begin &&
+        j - pricing_cost_begin < pricing_cost_prefix.size())
+      return pricing_cost_prefix[j - pricing_cost_begin] -
+             pricing_cost_prefix[i - pricing_cost_begin];
     int64_t cost = 0;
-    for (size_t u = i; u < j; ++u) {
-      const Op& op = g.ops[u];
-      if (op.opcode == OP_SET_INDEX_INPLACE)
-        cost += 1;
-      else if (op.opcode == OP_SET_SLICE_INPLACE)
-        cost += g.slots[op.in[1]].len;
-      else if (op.opcode == OP_DOT)
-        cost += g.slots[op.in[0]].len;
-      else
-        cost += g.slots[op.out].len;
-      cost += graph_op_cost(op.opcode);
-    }
+    for (size_t u = i; u < j; ++u) cost += op_graph_cost(u);
     return cost;
   }
 
@@ -687,7 +706,7 @@ struct Carver {
     // the program's live-outs are registers and compaction renumbers them.
     c.in_set.insert(cc.live_in_slots.begin(), cc.live_in_slots.end());
     if (compiled) {
-      std::unordered_set<int> seen;
+      boost::unordered_flat_set<int> seen;
       for (size_t u = i; u < j; ++u) {
         const int o = g.ops[u].out;
         if (seen.count(o)) continue;
@@ -929,7 +948,7 @@ struct Carver {
   // otherwise every rewrite would double- or triple-book the same value.
   std::vector<int64_t> live_pressure(size_t i, size_t j) const {
     std::vector<int64_t> diff(j - i + 2, 0);
-    std::unordered_set<int> charged;
+    boost::unordered_flat_set<int> charged;
     for (size_t u = i; u < j; ++u) {
       const int o = g.ops[u].out;
       if (o < 0 || !charged.insert(o).second) continue;
@@ -966,97 +985,121 @@ struct Carver {
     return best;
   }
 
-  // Priced form of a liveness carving. Two totals are kept apart: decide
-  // is the boundary-free accepted?island:graph convention c.accepted
-  // itself uses, comparable between a whole span and a fragment of it
-  // without a boundary-only piece looking artificially worse than
-  // interpreting it; report is split_cost's own convention (boundary
-  // added for an accepted piece), the figure this carving competes with
-  // strict's on. pieces is the full partition in order (gaps included,
-  // unpriced), and queue holds the compiled Candidate for each piece at
-  // least kMinIslandOps long, aligned with pieces by position.
+  // Price intervals with the graph held fixed. Only costs and the winning
+  // split are retained: caching compiled programs would keep every rejected
+  // speculative tape alive. A leaf has cut == end; an interior node records
+  // exactly the cut selected by the original whole/pressure/strict ordering.
   struct LivenessPricing {
     int64_t decide = 0;
     int64_t report = 0;
     bool any = false;
-    std::vector<std::pair<size_t, size_t>> pieces;
-    std::vector<Candidate> queue;
+    size_t cut = 0;
+    bool evaluated = false;
   };
+  std::map<std::pair<size_t, size_t>, LivenessPricing> liveness_prices;
+  const bool cache_liveness_prices =
+      std::getenv("STANLI_NO_ISLAND_PRICING_CACHE") == nullptr;
 
-  // [i, j) split at cut and priced on each side; the caller keeps this
-  // only if it beats every other candidate, including whole.
   LivenessPricing price_cut(size_t i, size_t cut, size_t j) {
-    LivenessPricing left = price_liveness(i, cut);
-    LivenessPricing right = price_liveness(cut, j);
-    LivenessPricing out;
-    out.decide = left.decide + right.decide;
-    out.report = left.report + right.report;
-    out.any = left.any || right.any;
-    out.pieces = std::move(left.pieces);
-    out.pieces.insert(out.pieces.end(), right.pieces.begin(),
-                      right.pieces.end());
-    out.queue = std::move(left.queue);
-    for (auto& rc : right.queue) out.queue.push_back(std::move(rc));
-    return out;
+    const LivenessPricing left = price_liveness(i, cut);
+    const LivenessPricing right = price_liveness(cut, j);
+    return {left.decide + right.decide, left.report + right.report,
+            left.any || right.any, cut};
   }
 
-  // [i, j) priced whole, against splitting it at the least-crossing-
-  // traffic interior point (best_cut_point), and against splitting it
-  // where the strict vocabulary itself would have cut (grow(i, j, true)):
-  // never fragments where the whole span is cheaper on the boundary-free
-  // decide figure, so a liveness carving is at worst the whole span, and
-  // it can still recover a strict cut the pressure proxy missed.
   LivenessPricing price_liveness(size_t i, size_t j) {
-    LivenessPricing whole;
-    whole.pieces.emplace_back(i, j);
-    if ((int64_t)(j - i) < kMinIslandOps) {
-      whole.decide = whole.report = graph_cost(i, j);
-      return whole;
+    const auto key = std::make_pair(i, j);
+    const auto found = liveness_prices.find(key);
+    if (cache_liveness_prices && found != liveness_prices.end())
+      return found->second;
+    LivenessPricing best;
+    best.cut = j;
+    const bool over_budget =
+        pricing_work_limit && j - i > pricing_work_limit - pricing_work;
+    if ((int64_t)(j - i) < kMinIslandOps || over_budget) {
+      best.decide = best.report = graph_cost(i, j);
+      if (over_budget) ++pricing_skipped;
+    } else {
+      pricing_work += j - i;
+      best.evaluated = true;
+      // Release the whole-span program before descending into subproblems.
+      {
+        const Candidate c = evaluate(i, j, "island-liveness");
+        best.decide = c.accepted ? c.island_cost : c.graph_cost;
+        best.report = c.accepted ? c.island_cost + c.boundary : c.graph_cost;
+        best.any = c.accepted;
+      }
+      const size_t pressure_cut = best_cut_point(i, j);
+      if (pressure_cut != i) {
+        const auto pressure = price_cut(i, pressure_cut, j);
+        if (pressure.decide < best.decide) best = pressure;
+      }
+      size_t strict_cut = grow(i, j, true);
+      if (strict_cut == i) strict_cut = i + 1;
+      if (strict_cut != j && strict_cut != pressure_cut) {
+        const auto strict = price_cut(i, strict_cut, j);
+        if (strict.decide < best.decide) best = strict;
+      }
     }
-    Candidate c = evaluate(i, j, "island-liveness");
-    whole.decide = c.accepted ? c.island_cost : c.graph_cost;
-    whole.report = c.accepted ? c.island_cost + c.boundary : c.graph_cost;
-    whole.any = c.accepted;
-    whole.queue.push_back(std::move(c));
-
-    std::optional<LivenessPricing> pressure_result;
-    const size_t pressure_cut = best_cut_point(i, j);
-    if (pressure_cut != i) pressure_result = price_cut(i, pressure_cut, j);
-
-    // Unlike the pressure cut, a strict cut may leave a piece under
-    // kMinIslandOps on either side; price_liveness already prices such a
-    // piece as a plain graph-cost gap, the same as strict_pieces would. An
-    // op the strict vocabulary refuses at i itself (grow returns i) is
-    // skipped by one, the same advance strict_pieces makes, so recursion
-    // gets a chance to find the strict-compatible run just past it.
-    std::optional<LivenessPricing> strict_result;
-    size_t strict_cut = grow(i, j, true);
-    if (strict_cut == i) strict_cut = i + 1;
-    if (strict_cut != j && strict_cut != pressure_cut)
-      strict_result = price_cut(i, strict_cut, j);
-
-    LivenessPricing* best = &whole;
-    if (pressure_result && pressure_result->decide < best->decide)
-      best = &*pressure_result;
-    if (strict_result && strict_result->decide < best->decide)
-      best = &*strict_result;
-    return std::move(*best);
+    liveness_prices.emplace(key, best);
+    return best;
   }
 
-  // [i, j) carved at liveness-chosen boundaries instead of the strict
-  // vocabulary: every piece compiles at the run's own (non-strict)
-  // vocabulary, since a liveness cut never lands on an op the run's
-  // vocabulary already refused. Mirrors split_cost, queuing into
-  // liveness_queue and remembering the cuts in liveness_queue_cuts so
-  // run() can re-derive the same pieces without searching again. Returns
-  // the report figure, comparable with split_cost's own return.
+  void collect_liveness(size_t i, size_t j, size_t begin) {
+    const auto& price = liveness_prices.at({i, j});
+    if (price.cut != j) {
+      collect_liveness(i, price.cut, begin);
+      collect_liveness(price.cut, j, begin);
+      return;
+    }
+    if (i != begin) liveness_queue_cuts.push_back(i);
+    if ((int64_t)(j - i) >= kMinIslandOps) {
+      if (price.evaluated) {
+        liveness_queue.push_back(evaluate(i, j, "island-liveness-selected"));
+      } else {
+        // An unpriced interval remains graph operations. Do not compile it
+        // during collection or emission and accidentally spend the budget
+        // again after the search has finished.
+        Candidate unpriced{i, j};
+        unpriced.graph_cost = price.decide;
+        liveness_queue.push_back(std::move(unpriced));
+      }
+    }
+  }
+
   int64_t liveness_split_cost(size_t i, size_t j, bool* any) {
-    LivenessPricing p = price_liveness(i, j);
-    liveness_queue = std::move(p.queue);
+    // Bound speculative compilation by total visited interval length. The
+    // first whole-span candidate and every explored split remain valid;
+    // unexplored leaves retain their graph cost. This is a search policy,
+    // not a claim that an unexplored split could never be cheaper.
+    const char* budget = std::getenv("STANLI_ISLAND_PRICING_BUDGET");
+    pricing_work_limit = !budget || std::string_view(budget) == "1"
+                             ? std::max<size_t>(65536, 4 * (j - i))
+                             : 0;
+    pricing_work = pricing_skipped = 0;
+    // Every candidate sees the same graph until emission. Prefix sums give
+    // exactly the existing additive cost without rescanning each overlapping
+    // interval. Discard them before emission can rename or append slots.
+    if (cache_liveness_prices) {
+      pricing_cost_begin = i;
+      pricing_cost_prefix.assign(j - i + 1, 0);
+      for (size_t u = i; u < j; ++u)
+        pricing_cost_prefix[u + 1 - i] =
+            pricing_cost_prefix[u - i] + op_graph_cost(u);
+    }
+    liveness_prices.clear();
+    const LivenessPricing p = price_liveness(i, j);
+    liveness_queue.clear();
     liveness_queue_pos = 0;
     liveness_queue_cuts.clear();
-    for (size_t k = 1; k < p.pieces.size(); ++k)
-      liveness_queue_cuts.push_back(p.pieces[k].first);
+    collect_liveness(i, j, i);
+    if (std::getenv("STANLI_DEBUG_ISLAND") && pricing_work_limit)
+      emit_diagnostic("island-pricing work=" + std::to_string(pricing_work) +
+                      " limit=" + std::to_string(pricing_work_limit) +
+                      " skipped=" + std::to_string(pricing_skipped));
+    // Emission can rename graph slots. No decision survives that boundary.
+    liveness_prices.clear();
+    pricing_cost_prefix.clear();
     *any = p.any;
     return p.report;
   }
