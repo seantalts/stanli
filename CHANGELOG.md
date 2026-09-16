@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-## 0.14.2
+## 0.14.3
+
+- Configure the optional CmdStanR repository for release-platform R and stanr
+  dependency resolution. Version 0.14.2 reached npm before the full release
+  stopped; 0.14.3 is the complete release across distribution channels.
 
 - Add `as_cstanfit()` and `sample_cstan()` for native CmdStanR-style fit
   methods and sampler arguments without cmdstanr or rstan. Stored-draw
