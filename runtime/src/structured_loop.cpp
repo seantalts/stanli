@@ -1198,8 +1198,38 @@ void selected_positions(const DynamicIndexSpec& p, const IndexRuntime& runtime,
   for (int64_t i = 0; i < runtime.selected; ++i)
     f(i, selected_position(p, runtime, i));
 }
+// The common vector[i] case needs one bounds check, not an arbitrary-rank
+// selection frame. Prove the complete fixed descriptor here; any near miss
+// goes through validate_index, including malformed metadata and dynamic sizes.
+// Return -1 only for refusal; an invalid runtime selector still throws.
+int64_t fixed_scalar_index(const DynamicIndexSpec& p, const KernelCtx& c,
+                           bool update) {
+  if (p.matrix_leaf || p.axes.size() != 1 || p.selected_size != 1) return -1;
+  const auto& a = p.axes[0];
+  const int expected = update ? 3 : 2;
+  if (c.n_in != expected || (p.input_count != 0 && p.input_count != expected) ||
+      p.rhs_input != (update && p.input_count != 0 ? 2 : -1) ||
+      a.kind != DynamicIndexSpec::Axis::Single || a.count != 1 ||
+      a.stride != 1 || a.extent < 0 || a.extent > exact_limit ||
+      a.extent != c.in[0].len || a.selector_input != 1 || a.input_offset < 0 ||
+      a.input_offset >= c.in[1].len || a.count_input_offset >= 0 ||
+      a.extent_input_offset >= 0 ||
+      (update ? (c.out.len != a.extent || c.in[2].len != 1) : c.out.len != 1))
+    return -1;
+  const double raw = c.in[1].data[a.input_offset];
+  if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
+      raw > a.extent)
+    index_out_of_range();
+  return static_cast<int64_t>(raw) - 1;
+}
+
 int64_t scalar_index_forward(KernelCtx& c) {
   const auto& p = *static_cast<const DynamicIndexSpec*>(c.udata);
+  const int64_t fixed = fixed_scalar_index(p, c, false);
+  if (fixed >= 0) {
+    c.out.data[0] = c.in[0].data[fixed];
+    return fixed;
+  }
   const IndexRuntime runtime = validate_index(p, c, false);
   if (p.selected_size != 1 || c.out.len != 1 || runtime.selected > 1)
     throw std::logic_error("invalid compact scalar index shape");
@@ -1224,6 +1254,11 @@ void index_forward(KernelCtx& c) {
 void index_backward(KernelCtx& c) {
   if (!c.in_adj[0].data) return;
   const auto& p = *static_cast<const DynamicIndexSpec*>(c.udata);
+  const int64_t fixed = fixed_scalar_index(p, c, false);
+  if (fixed >= 0) {
+    c.in_adj[0].data[fixed] += c.out_adj_vec.data[0];
+    return;
+  }
   const IndexRuntime runtime = validate_index(p, c, false);
   selected_positions(p, runtime, [&](int64_t i, int64_t at) {
     c.in_adj[0].data[at] += c.out_adj_vec.data[i];
@@ -1704,14 +1739,20 @@ struct Execution {
     bind_inputs(op, c);
     double* values = s.versions[static_cast<size_t>(base)].value;
     c.out.data = values;
-    const IndexRuntime runtime = validate_index(spec, c, true);
     const double* source = c.in[layout.rhs].data;
     const int64_t undo = static_cast<int64_t>(s.undo.size());
-    selected_positions(spec, runtime, [&](int64_t i, int64_t at) {
+    const auto write = [&](int64_t i, int64_t at) {
       s.undo.push_back(static_cast<double>(at));
       s.undo.push_back(values[at]);
       values[at] = source[i];
-    });
+    };
+    const int64_t fixed = fixed_scalar_index(spec, c, true);
+    if (fixed >= 0) {
+      write(0, fixed);
+    } else {
+      const IndexRuntime runtime = validate_index(spec, c, true);
+      selected_positions(spec, runtime, write);
+    }
     s.records.push_back(Record{Record::InPlace, n.site, undo, base, rhs});
   }
 

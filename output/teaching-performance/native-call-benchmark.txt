@@ -1,0 +1,11 @@
+     direct stanfit
+[1,]    4.0    14.0
+[2,]    4.5    14.0
+[3,]    4.5    14.5
+[4,]    4.0    14.0
+[5,]    4.0    13.0
+microseconds/call; median and range
+       direct stanfit
+median    4.0    14.0
+min       4.0    13.0
+max       4.5    14.5

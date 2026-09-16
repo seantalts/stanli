@@ -213,7 +213,36 @@ def main():
     for model, (s, msg) in sorted(results.items()):
         if s != "OK":
             md.append(f"- `{model}`: {s} {msg}")
+    md += rethinking_status()
     (REPO / "docs" / "corpus-status.md").write_text("\n".join(md) + "\n")
+
+
+def rethinking_status():
+    """Keep the teaching corpus separate from posteriordb's denominator."""
+    directory = REPO / "tests" / "rethinking"
+    models = sorted(p.stem for p in directory.glob("*.stan"))
+    refs, _ = load_refs()
+    rows = []
+    for model in models:
+        points = refs.get(model, {}).get("points", {})
+        passed = sum(p.get("status") == "VERIFIED" for p in points.values())
+        worst = max((p.get("max_rel") or 0 for p in points.values()), default=0)
+        rows.append((model, passed, worst))
+    verified = sum(passed == 3 for _, passed, _ in rows)
+    md = ["", "## Rethinking teaching corpus", "",
+          f"Reference recording: {verified}/{len(models)} fixtures verified at all three CmdStan points. "
+          "The inventory covers all 61 ulam call sites in chapters 4–16 of the "
+          "second edition, plus a supplemental hurdle model. Counts here are "
+          "separate from posteriordb. These are the recorder's measurements; "
+          "`tools/verify_refs.py` replays them against the current build in CI.",
+          "", "See [the inventory and provenance](../tests/rethinking/README.md), and "
+          "[current-build replay and performance results](teaching-support.md). "
+          "Recording coverage is not a claim that the current build replays every fixture successfully.",
+          "", "| model | verified points | worst scaled error |",
+          "| --- | ---: | ---: |"]
+    md += [f"| `{model}` | {passed}/3 | {worst:.2e} |"
+           for model, passed, worst in rows]
+    return md
 
 
 if __name__ == "__main__":

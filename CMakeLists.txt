@@ -130,6 +130,19 @@ endif()
 # eight-schools d/dmu). Cost is well inside the performance budget.
 target_compile_options(stanmath INTERFACE -ffp-contract=off)
 
+# Clang can speculate every pow() in the recorder's piecewise CDF formulas,
+# evaluating unused tail approximations on ordinary inputs. Preserve libm's
+# errno contract in these shards so expensive calls stay in their branches.
+# This keeps the pinned formulas without fast-math. GCC already
+# defaults to math-errno. Keep the browser's independent size policy below.
+if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  set_property(SOURCE
+    runtime/kernels/densities_cdf_a.cpp
+    runtime/kernels/densities_cdf_b.cpp
+    runtime/kernels/matrix_fns.cpp
+    APPEND PROPERTY COMPILE_OPTIONS -fmath-errno)
+endif()
+
 # Half the library is the propto family: stan-math drops a term based on
 # the argument TYPES, so an exact `~` needs the density instantiated once
 # per activity mask on top of the full form. Dropping it leaves a build
@@ -844,6 +857,8 @@ add_test(NAME test_check_external_stanc
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_stanc.cmake)
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
+add_executable(test_benchmark_timer tests/test_benchmark_timer.cpp)
+add_test(NAME test_benchmark_timer COMMAND test_benchmark_timer)
 target_link_libraries(bench_grad PRIVATE stanli)
 add_dependencies(bench_grad stanli_mir_fixtures)
 add_executable(bench_mir_decode tools/bench_mir_decode.cpp
@@ -1145,6 +1160,9 @@ if(Python3_Interpreter_FOUND)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_teaching_reports
+           COMMAND ${Python3_EXECUTABLE} tests/test_teaching_reports.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_gen_web_models
            COMMAND ${Python3_EXECUTABLE} tests/test_gen_web_models.py

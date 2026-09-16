@@ -10,9 +10,10 @@
 #' @param x A `stanli_fit`.
 #' @param include_sampler Append the seven sampler columns (`lp__`,
 #'   `accept_stat__`, ...), which is what a CSV reader would see.
+#' @param inc_warmup Include saved warmup draws. Defaults to `FALSE`.
 #' @return A `draws_array`, or a plain array when posterior is absent.
 #' @export
-as_draws_array <- function(x, include_sampler = FALSE) {
+as_draws_array <- function(x, include_sampler = FALSE, inc_warmup = FALSE) {
   arr <- x$draws
   if (include_sampler) {
     arr <- array(c(x$sampler, x$draws),
@@ -21,6 +22,7 @@ as_draws_array <- function(x, include_sampler = FALSE) {
     dimnames(arr) <- list(NULL, NULL,
                           c(dimnames(x$sampler)[[3]], x$columns))
   }
+  arr <- arr[post_warmup_rows(x, inc_warmup), , , drop = FALSE]
   # Naming the dim attribute DROPS dimnames, so the variable names have
   # to be put back afterwards -- otherwise every consumer sees an
   # unlabelled array and the columns become positional.

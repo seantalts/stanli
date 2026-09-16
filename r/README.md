@@ -88,6 +88,99 @@ answer: each chain owns its executor and its RNG stream, so a parallel
 run is byte-identical to a sequential one, which the test suite
 asserts.
 
+## Bayesian workflow packages
+
+Install `bayesplot`, `loo`, and `tidybayes` as needed; they are optional.
+`bayesplot::nuts_params(fit)`, `bayesplot::log_posterior(fit)`,
+`bayesplot::rhat(fit)`, and `bayesplot::neff_ratio(fit)` work directly, as does
+`tidybayes::spread_draws(fit, mu, theta[j])`. With pointwise `log_lik` declared
+in generated quantities, use `loo::loo(fit)` and `loo::loo_compare(fit, fit2)`.
+The ESS ratio uses bulk ESS; bayesplot's CmdStanMCMC method uses basic ESS.
+
+`summary(fit)` deliberately keeps the **stansummary** table. For cmdstanr's
+default `fit$summary()` table, use this one-line alternative:
+
+```r
+posterior::summarise_draws(as_draws_array(fit))
+```
+
+Its columns are `variable`, `mean`, `median`, `sd`, `mad`, `q5`, `q95`, `rhat`,
+`ess_bulk`, and `ess_tail`. Posterior's other conversions, subsetting, chain
+merging, and thinning work on the same draws array. Saved warmup is excluded
+from `as_draws_array()` and ecosystem methods; use `inc_warmup = TRUE` to include
+it in the array. `summary(fit)` continues to summarize the raw stored draws.
+
+See [Coming from cmdstanr](../docs/from-cmdstanr.md) for the API translation,
+plotting, LOO, and saving fits, and the [course quickstart](../docs/teaching.md)
+for binary installation, offline labs, and a self-contained example. These
+are plain Markdown guides so package checks need no runtime to build vignettes.
+
+### Native RStan fits
+
+`as_stanfit(fit)` builds a `stanli_stanfit`, an S4 subclass of `rstan::stanfit`,
+directly from stored arrays. It retains the stanli model for density and
+transform operations, without CSV files or C++ model compilation:
+
+```r
+sf <- as_stanfit(fit)
+rstan::extract(sf)
+rstan::traceplot(sf, pars = "mu")
+q <- fit$unconstrained[1, 1, ]
+pars <- rstan::constrain_pars(sf, q)
+rstan::unconstrain_pars(sf, pars)
+rstan::log_prob(sf, q, gradient = TRUE)
+rstan::grad_log_prob(sf, q)
+rstan::constrain_pars(sf, q)
+rstan::get_num_upars(sf)
+```
+
+Use the parameter names declared by your model for the `unconstrain_pars()`
+list. `constrain_pars()` returns parameters, transformed parameters, and generated
+quantities with their original dimensions; random generated quantities advance
+the retained model's RNG stream. The methods use RStan's defaults, including
+the parameter-transform Jacobian. `adjust_transform = FALSE` errors explicitly:
+the current runtime cannot remove that Jacobian at evaluation time. Density
+methods also reject `STANLI_LITE_LP` runtimes, whose constants differ.
+
+RStan is optional and loads on conversion, not during ordinary stanli startup.
+[CRAN provides rstan 2.32.7 binaries](https://CRAN.R-project.org/package=rstan)
+for supported macOS and Windows R versions (verified September 2026); install
+with `install.packages("rstan", type = "binary")` to avoid requiring a C++
+toolchain. Linux classrooms should provision a compatible binary installation.
+
+Extraction, summaries, sampler diagnostics, plotting, ordinary LOO, and
+ShinyStan work. With a live model and pointwise `log_lik`, RStan's LOO moment
+matching also works: `loo::loo_moment_match(sf, loo = loo::loo(sf), cores = 1)`.
+The result passes `inherits(sf, "stanfit")` and `methods::is(sf, "stanfit")`;
+consumers that require exact class equality may need adaptation. Operations
+that bypass method dispatch and require RStan's own C++ instance, including
+native RStan resampling, remain unsupported. Continue sampling with
+`sample_model()`.
+
+`saveRDS()` preserves draws and parameter-count metadata, but the live model
+pointer does not survive loading or transfer to a serialized worker. Recreate
+the model using the **same source and data** and attach it explicitly:
+
+```r
+saved <- readRDS("fit.rds")
+m <- stanli_model(file = "model.stan", data = original_data)
+sf <- as_stanfit(saved, model = m) # accepts saved stanli_fit or stanli_stanfit
+```
+
+No compilation or download happens automatically on restore. Without a live
+model, extraction and summaries still work; density/transform calls give an
+attachment hint. Use `as_stanfit(fit, model = NULL)` to omit the model entirely.
+
+Per-chain timings are retained when available (`NA` otherwise). Initial values
+and adaptation text are empty because the actual initial state is not retained.
+Shapes come from column names, so declarations with zero elements cannot be
+recovered. Conversion from a `stanli_fit` requires the sampling metadata saved
+by the current package. Set R's seed before conversion when reproducible
+permuted extraction is needed.
+
+See [stanfit compatibility notes](../docs/stanfit-compatibility.md) for checked
+consumer versions, independently recorded RStan references, and CLI validation.
+
 ## How it is put together
 
 Two pieces are not in the package, for two different reasons.
@@ -135,3 +228,10 @@ invalid models through the file on Linux, macOS, and Windows.
 defaults to `jacobian=0`, the penalized maximum likelihood, which
 stanli cannot offer: the change-of-variables Jacobian is folded into
 the graph when the model is lowered.
+
+## Teaching collections and migration
+
+See [Teaching with Stanli](../docs/teaching-support.md) for tested Rethinking,
+brms, and educational models, numerical and performance evidence, and working
+examples. The [cmdstanr translation table](../docs/from-cmdstanr.md) covers
+common operations and differences.

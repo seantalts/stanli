@@ -2,6 +2,7 @@
 // same op order, at three fixed parameter vectors. case0-2 (OP_MATVEC): 10
 // ULP. The rest: bitwise.
 #include "models.hpp"
+#include <stanli/density_registry.hpp>
 
 #include <stan/math.hpp>
 #include <cmath>
@@ -291,15 +292,12 @@ static void check_active_designs() {
   }
 }
 
-// The three GLMs that take the var tape rather than the recorder, each with
-// a non-unit output adjoint: their kernels seed the tape with 1.0 in the
-// forward and scale in the backward.
+// Compare the compact GLM kernels with a weighted nested-tape reference.
 static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
                            const std::vector<int>& idata, int rows, int cols,
-                           int alpha_len, int beta_len) {
+                           int alpha_len, int beta_len, double seed = -0.73) {
   using namespace stanli;
   using stan::math::var;
-  const double seed = -0.73;
   std::vector<double> X((size_t)rows * cols), a((size_t)alpha_len),
       b((size_t)beta_len);
   for (int j = 0; j < cols; ++j)
@@ -415,6 +413,331 @@ static void check_tail_glms() {
                  cols, cols, cats - 1);
   check_tail_glm("ord glm propto", OP_ORDERED_LOGISTIC_GLM_LPMF, true, cat,
                  rows, cols, cols, cats - 1);
+  check_tail_glm("ord glm empty", OP_ORDERED_LOGISTIC_GLM_LPMF, false,
+                 {0, cols}, 0, cols, cols, cats - 1,
+                 std::numeric_limits<double>::infinity());
+}
+
+// Shared-cutpoint recorder versus the established nested Stan Math tape.
+// Per-observation cutpoints exercise the deliberately retained fallback.
+static void check_ordered_density(bool array_cuts, bool scalar_location,
+                                  bool propto, double weight, int width,
+                                  bool probit = false, double shift = 0) {
+  using namespace stanli;
+  using stan::math::var;
+  const int n = scalar_location ? 1 : 4;
+  const int nc = array_cuts ? n : 1;
+  std::vector<int> y;
+  for (int i = 0; i < n; ++i) y.push_back(1 + i % (width + 1));
+  auto layout = y;
+  layout.insert(layout.end(),
+                {kVectorizedDensityLayoutMarker, width, array_cuts ? nc : -1});
+  Graph g;
+  const int ls = g.add_slot(n, true), cs = g.add_slot(width * nc, true);
+  const int ws = g.add_slot(1, false), out = g.add_slot(1, false);
+  const int scaled = g.add_slot(1, false);
+  g.add_op(probit ? OP_ORDERED_PROBIT_LPMF : OP_ORDERED_LOGISTIC_LPMF, {ls, cs},
+           out, layout);
+  g.ops.back().variant = propto ? 0x83u : 0;
+  g.add_op(OP_MUL, {out, ws}, scaled);
+  g.result_slot = scaled;
+  Executor ex(std::move(g));
+  ex.value_ptr(ws)[0] = weight;
+  stan::math::nested_rev_autodiff nested;
+  Eigen::Matrix<var, -1, 1> location(n);
+  std::vector<Eigen::Matrix<var, -1, 1>> cuts(nc);
+  for (int i = 0; i < n; ++i)
+    location(i) = ex.param_ptr(ls)[i] = shift - 0.6 + 0.7 * i;
+  for (int j = 0; j < nc; ++j) {
+    cuts[j].resize(width);
+    for (int k = 0; k < width; ++k)
+      cuts[j](k) = ex.param_ptr(cs)[j * width + k] = -1.2 + k + 0.1 * j;
+  }
+  std::vector<double> grad(n + width * nc);
+  const double got = ex.gradient(grad.data());
+  const auto call = [&](const auto& l, const auto& c) {
+    if (probit)
+      return propto ? stan::math::ordered_probit_lpmf<true>(y, l, c)
+                    : stan::math::ordered_probit_lpmf<false>(y, l, c);
+    return propto ? stan::math::ordered_logistic_lpmf<true>(y, l, c)
+                  : stan::math::ordered_logistic_lpmf<false>(y, l, c);
+  };
+  var density;
+  if (array_cuts)
+    density = scalar_location ? call(location(0), cuts) : call(location, cuts);
+  else
+    density =
+        scalar_location ? call(location(0), cuts[0]) : call(location, cuts[0]);
+  var ref = density * weight;
+  stan::math::grad(ref.vi_);
+  expect_eq("ordered value", got, ref.val());
+  const auto compare_gradient = [&](const char* name, double actual,
+                                    double expected) {
+    // The recorder and var CDF instantiations can differ in the far-tail
+    // approximation's rounding; at +/-30 the observed relative error is
+    // 6e-14. Keep a stricter gate than the 1e-9 external corpus oracle.
+    if (probit && std::isfinite(expected))
+      expect_eq(name,
+                std::abs(actual - expected) <= 1e-12 * (1 + std::abs(expected)),
+                true);
+    else
+      expect_eq(name, actual, expected);
+  };
+  for (int i = 0; i < n; ++i)
+    compare_gradient("ordered location", grad[i], location(i).adj());
+  for (int j = 0; j < nc; ++j)
+    for (int k = 0; k < width; ++k)
+      compare_gradient("ordered cutpoint", grad[n + j * width + k],
+                       cuts[j](k).adj());
+
+  // Validation must still run, including after a preceding successful call.
+  if (width > 1) {
+    ex.param_ptr(cs)[1] = ex.param_ptr(cs)[0];
+    bool threw = false;
+    try {
+      ex.gradient(grad.data());
+    } catch (const std::domain_error&) {
+      threw = true;
+    }
+    expect_eq("ordered invalid cutpoints", threw, true);
+    ex.param_ptr(cs)[1] += 1.0;
+    expect_eq("ordered recovery after error", ex.gradient(grad.data()), got);
+  }
+}
+
+// Compare full/proportional values and weighted gradients with the all-var
+// oracle, including simplex boundaries, inactive edges and invalid inputs.
+static void check_multinomial_density() {
+  using namespace stanli;
+  using stan::math::var;
+  for (bool propto : {false, true})
+    for (bool active : {false, true})
+      for (double weight : {1.0, -2.75, 0.0, 1e308, 1e-308,
+                            std::numeric_limits<double>::infinity()})
+        for (const auto& values : std::vector<std::vector<double>>{
+                 {0.2, 0.3, 0.5}, {0.0, 0.5, 0.5}, {1.0}}) {
+          const int n = values.size();
+          std::vector<int> counts(n);
+          for (int i = 0; i < n; ++i) counts[i] = i == 2 ? 4 : i;
+          Graph g;
+          const int theta = g.add_slot(n, active), w = g.add_slot(1, false);
+          const int out = g.add_slot(1, false), scaled = g.add_slot(1, false);
+          g.add_op(OP_MULTINOMIAL_LPMF, {theta}, out, counts);
+          g.ops.back().variant = propto ? 0x80u : 0u;
+          g.add_op(OP_MUL, {out, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          std::copy(values.begin(), values.end(), ex.value_ptr(theta));
+          ex.value_ptr(w)[0] = weight;
+          std::vector<double> grad(active ? n : 1);
+          const double got = ex.gradient(grad.data());
+          stan::math::nested_rev_autodiff nested;
+          Eigen::Matrix<var, -1, 1> probabilities(n);
+          for (int i = 0; i < n; ++i) probabilities(i) = values[i];
+          var density =
+              propto
+                  ? stan::math::multinomial_lpmf<true>(counts, probabilities)
+                  : stan::math::multinomial_lpmf<false>(counts, probabilities);
+          var ref = density * weight;
+          stan::math::grad(ref.vi_);
+          expect_eq("multinomial value", got, ref.val());
+          if (active)
+            for (int i = 0; i < n; ++i)
+              expect_eq("multinomial weighted gradient", grad[i],
+                        probabilities(i).adj());
+          ex.value_ptr(theta)[0] = -0.1;
+          bool threw = false;
+          try {
+            ex.gradient(grad.data());
+          } catch (const std::domain_error&) {
+            threw = true;
+          }
+          expect_eq("multinomial invalid simplex", threw, true);
+        }
+}
+
+static void check_dirichlet_recorder() {
+  using namespace stanli;
+  using stan::math::var;
+  for (unsigned mask : {0u, 1u, 2u, 3u})
+    for (bool propto : {false, true})
+      for (bool arrays : {false, true})
+        for (double weight : {1.0, -2.75, 0.0}) {
+          constexpr int width = 3;
+          const int n = arrays ? 2 : 1;
+          Graph g;
+          const int t = g.add_slot(width * n, true),
+                    a = g.add_slot(width, true);
+          const int w = g.add_slot(1, false), lp = g.add_slot(1, false);
+          const int scaled = g.add_slot(1, false);
+          g.add_op(OP_DIRICHLET_LPDF, {t, a}, lp, {width, arrays ? n : -1, -1});
+          g.ops.back().variant = 0x40u | mask | (propto ? 0x80u : 0u);
+          g.add_op(OP_MUL, {lp, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          ex.value_ptr(w)[0] = weight;
+          stan::math::nested_rev_autodiff nested;
+          std::vector<Eigen::Matrix<var, -1, 1>> tv(n);
+          std::vector<Eigen::VectorXd> td(n);
+          Eigen::Matrix<var, -1, 1> av(width);
+          Eigen::VectorXd ad(width);
+          for (int j = 0; j < n; ++j) {
+            tv[j].resize(width);
+            td[j].resize(width);
+            for (int k = 0; k < width; ++k)
+              tv[j](k) = td[j](k) = ex.param_ptr(t)[j * width + k] =
+                  (k + 1) / 6.0;
+          }
+          for (int k = 0; k < width; ++k)
+            av(k) = ad(k) = ex.param_ptr(a)[k] = 0.5 + k;
+          var density = 0.0;
+          const auto call = [&](const auto& theta, const auto& alpha) {
+            density = propto ? stan::math::dirichlet_lpdf<true>(theta, alpha)
+                             : stan::math::dirichlet_lpdf<false>(theta, alpha);
+          };
+          const auto alpha = [&](const auto& theta) {
+            if (mask & 2u)
+              call(theta, av);
+            else
+              call(theta, ad);
+          };
+          if (!(propto && mask == 0)) {
+            if (mask & 1u) {
+              if (arrays)
+                alpha(tv);
+              else
+                alpha(tv[0]);
+            } else {
+              if (arrays)
+                alpha(td);
+              else
+                alpha(td[0]);
+            }
+          }
+          var ref = density * weight;
+          stan::math::grad(ref.vi_);
+          std::vector<double> grad(width * (n + 1));
+          expect_eq("dirichlet recorder value", ex.gradient(grad.data()),
+                    ref.val());
+          for (int j = 0; j < n; ++j)
+            for (int k = 0; k < width; ++k)
+              expect_eq("dirichlet recorder theta", grad[j * width + k],
+                        tv[j](k).adj());
+          for (int k = 0; k < width; ++k)
+            expect_eq("dirichlet recorder alpha", grad[n * width + k],
+                      av(k).adj());
+          if (!(propto && mask == 0)) {
+            ex.param_ptr(a)[0] = -1;
+            bool threw = false;
+            try {
+              ex.gradient(grad.data());
+            } catch (const std::domain_error&) {
+              threw = true;
+            }
+            expect_eq("dirichlet recorder validation", threw, true);
+            ex.param_ptr(a)[0] = 0.5;
+            expect_eq("dirichlet recorder error recovery",
+                      ex.gradient(grad.data()), ref.val());
+          }
+        }
+}
+
+static void check_probit_alias() {
+  using namespace stanli;
+  using stan::math::var;
+  for (double weight : {1.0, -2.75, 0.0}) {
+    Graph g;
+    const int input = g.add_slot(3, true), w = g.add_slot(1, false);
+    const int lp = g.add_slot(1, false), scaled = g.add_slot(1, false);
+    const std::vector<int> outcomes{1, 2, 4};
+    g.add_op(OP_ORDERED_PROBIT_LPMF, {input, input}, lp,
+             {1, 2, 4, kVectorizedDensityLayoutMarker, 3, -1});
+    g.add_op(OP_MUL, {lp, w}, scaled);
+    g.result_slot = scaled;
+    Executor ex(std::move(g));
+    ex.value_ptr(w)[0] = weight;
+    stan::math::nested_rev_autodiff nested;
+    Eigen::Matrix<var, -1, 1> locations(3), cuts(3);
+    for (int i = 0; i < 3; ++i)
+      locations(i) = cuts(i) = ex.param_ptr(input)[i] = -1.0 + 1.5 * i;
+    // Bind independent copies, matching the legacy kernel's two input edges,
+    // then scatter both into the aliased caller slot.
+    for (int i = 0; i < 3; ++i) cuts(i) = cuts(i).val();
+    var ref =
+        stan::math::ordered_probit_lpmf(outcomes, locations, cuts) * weight;
+    stan::math::grad(ref.vi_);
+    double gradient[3];
+    expect_eq("probit aliased value", ex.gradient(gradient), ref.val());
+    for (int i = 0; i < 3; ++i) {
+      const double expected = locations(i).adj() + cuts(i).adj();
+      expect_eq(
+          "probit aliased gradient",
+          std::abs(gradient[i] - expected) <= 1e-12 * (1 + std::abs(expected)),
+          true);
+    }
+  }
+}
+
+static void check_wiener_fixed_observation() {
+  using namespace stanli;
+  using stan::math::var;
+  for (bool propto : {false, true})
+    for (int active_mask = 0; active_mask < 4; ++active_mask)
+      for (double weight : {1.0, -2.75, 0.0, 1e308, 1e-308,
+                            std::numeric_limits<double>::infinity()})
+        for (double y : {0.201, 0.8, 2.0}) {
+          Graph g;
+          std::vector<int> slots;
+          for (int i = 0; i < 5; ++i)
+            slots.push_back(g.add_slot(1, i == 0   ? (active_mask & 1)
+                                          : i == 3 ? (active_mask & 2)
+                                                   : true));
+          const int w = g.add_slot(1, false), lp = g.add_slot(1, false),
+                    scaled = g.add_slot(1, false);
+          g.add_op(OP_WIENER_LPDF,
+                   {slots[0], slots[1], slots[2], slots[3], slots[4]}, lp);
+          g.ops.back().variant = propto ? 0x9fu : 0x1fu;
+          g.add_op(OP_MUL, {lp, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          const double vals[] = {y, 1.4, 0.2, 0.35, -0.4};
+          for (int i = 0; i < 5; ++i) ex.value_ptr(slots[i])[0] = vals[i];
+          ex.value_ptr(w)[0] = weight;
+          stan::math::nested_rev_autodiff nested;
+          var v[5];
+          for (int i = 0; i < 5; ++i) v[i] = vals[i];
+          var ref = (propto ? stan::math::wiener_lpdf<true>(v[0], v[1], v[2],
+                                                            v[3], v[4])
+                            : stan::math::wiener_lpdf<false>(v[0], v[1], v[2],
+                                                             v[3], v[4])) *
+                    weight;
+          stan::math::grad(ref.vi_);
+          std::vector<double> grad(ex.n_params());
+          const double got = ex.gradient(grad.data());
+          expect_eq("wiener value", got, ref.val());
+          int at = 0;
+          for (int i = 0; i < 5; ++i) {
+            if ((i == 0 && !(active_mask & 1)) ||
+                (i == 3 && !(active_mask & 2)))
+              continue;
+            const double want = v[i].adj();
+            if (std::isfinite(want))
+              expect_eq(
+                  "wiener weighted gradient",
+                  std::abs(grad[at++] - want) <= 1e-12 * (1 + std::abs(want)),
+                  true);
+            else
+              expect_eq("wiener nonfinite seed", grad[at++], want);
+          }
+          ex.value_ptr(slots[0])[0] = 0.1;
+          bool threw = false;
+          try {
+            ex.gradient(grad.data());
+          } catch (const std::domain_error&) {
+            threw = true;
+          }
+          expect_eq("wiener validation", threw, true);
+        }
 }
 
 static void reference(const double* q, double* lp_out, double* grad_out) {
@@ -473,6 +796,22 @@ int main() {
   }
 
   check_tail_glms();
+  for (bool array_cuts : {false, true})
+    for (bool scalar_location : {false, true})
+      for (bool propto : {false, true})
+        for (double weight : {1.0, -2.75, 0.0})
+          for (int width : {0, 1, 3}) {
+            check_ordered_density(array_cuts, scalar_location, propto, weight,
+                                  width);
+            if (width)
+              for (double shift : {-30.0, 0.0, 30.0})
+                check_ordered_density(array_cuts, scalar_location, propto,
+                                      weight, width, true, shift);
+          }
+  check_multinomial_density();
+  check_dirichlet_recorder();
+  check_probit_alias();
+  check_wiener_fixed_observation();
   check_vector_alphas();
   check_active_designs();
 

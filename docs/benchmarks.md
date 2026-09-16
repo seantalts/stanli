@@ -1,4 +1,34 @@
-# How much faster is stanli?
+# Performance measurements
+
+## Latest measurements (15 September 2026)
+
+Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Runtime and
+compiler sources match main `2ae6c1d0`; [the full appendix](../output/teaching-performance/README.md)
+records every one of the 199 fixtures, including failures and capped runs.
+
+| Collection | Completed in both | Lower Stanli CLI time | Median CmdStan/Stanli ratio | Diagnostic screen clear in both |
+| --- | ---: | ---: | ---: | ---: |
+| Educational lessons | 13/13 | 12/13 | 1.31× | 10/13 |
+| Rethinking (including the supplement) | 59/62 | 55/59 | 1.48× | 48/59 |
+| brms | 111/124 | 88/111 | 1.35× | 69/111 |
+
+Each model contributes the median of four single-chain CLI runs, each with
+1,000 warmup and 1,000 retained draws. Ratios above one mean less elapsed time
+for Stanli. They summarize completed fixtures only, without removing diagnostic
+flags. Stanli preparation is included; CmdStan compilation is shown separately
+in the appendix. This is fixed-budget runtime, not time to equal inferential accuracy.
+
+Adding the measured CmdStan compilation stages gives a first-fit estimate.
+Stanli has the lower estimate for 13/13 educational, 57/59 completed Rethinking,
+and 111/111 completed brms comparisons. These are sums of measured stages, not
+directly timed four-chain R sessions.
+
+The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
+covers all 61 book call sites and the separate hurdle fixture. The
+[classroom guide](teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)
+also records the separate fresh-R-session measurement.
+
+## Historical posteriordb measurements
 
 Across 119 posteriordb models, stanli evaluates a gradient **2.10x faster
 than CmdStan at the median**. It is at least as fast on 119 of the 119 models.
@@ -6,6 +36,18 @@ Because stanli does not build a native C++ binary for each model, the first
 complete run is typically faster by more than the gradient ratio alone
 suggests. The [13 educational-model results](#educational-models) below
 also report complete runs against already-compiled CmdStan.
+
+## Measurement versions
+
+New corpus runs use the [paired benchmark protocol](benchmark-protocol.md):
+equal warmup windows, six alternating pairs, full-gradient numerical checks,
+median/MAD summaries, and retained run identities. Sampling is opt-in.
+The [Rethinking report](../output/rethinking-report/rethinking-report.md) includes
+all 61 book calls and a separate supplemental fixture, with the full timing appendix.
+
+The posteriordb tables below retain their historical measurements. They predate
+the paired protocol and do not provide its repeated-trial uncertainty estimates.
+The educational tables have their own documented measurement protocol.
 
 ## Eight Schools: 1.6x faster gradients, roughly 100x faster to draws
 
@@ -23,7 +65,7 @@ sampling, and CSV output. The CmdStan total is its 3.1 s model build plus its
 so the headline and the first-run table columns deliberately use approximate
 ratios.
 
-The gradient row is the controlled comparison: both engines evaluate the same
+The historical gradient row compares the same fixed input: both engines evaluate the same
 sampling gradient at the same deterministic unconstrained point. The complete
 run is what a user waits for, but it is indicative rather than controlled
 because small numerical differences can send NUTS down different adaptation
@@ -500,7 +542,7 @@ can be reproduced with:
 
 ```sh
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  educational-corpus.tsv --corpus educational --stancflags --O1
+  educational-corpus.tsv --corpus educational --stancflags=--O1
 python3 tools/check_educational.py --benchmark --repetitions 5 \
   --output build-rel/educational-benchmark/results.json
 python3 tools/corpus_table.py --educational \
@@ -554,16 +596,19 @@ partitioning, generated adjoints, tape islands, the compiled ODE right-hand
 side, and their targeted A/B measurements, read
 [Graph optimizations and performance work](../runtime/src/OPTIMIZATIONS.md).
 
-## Reproducing
+## New measurements
+
+Use a fresh output for paired measurements. The historical tables above remain
+unchanged; the current runner cannot append to them or refresh only one engine.
+
 
 ```sh
 ./tools/dev_setup.sh --corpus          # deps, build, posteriordb, CmdStan
 cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
 cmake --build build-rel -j
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  docs/corpus-bench.tsv --stanli-only --timeout 900
-# To remeasure both sides, omit --stanli-only and use a new output TSV.
-python3 tools/corpus_table.py docs/corpus-bench.tsv
+  /tmp/corpus-v2.tsv --sampling --sample-timeout 900
+python3 tools/corpus_table.py /tmp/corpus-v2.tsv
 python3 harnesses/ab_corpus.py deps/posteriordb
 ```
 
@@ -575,7 +620,7 @@ for where stanli's own pipeline does the same.
 
 ```sh
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  docs/corpus-bench-o1vec.tsv --cmdstan-stanc PATH_TO_PATCHED_STANC \
-  --stancflags --O1 --no-sample --timeout 900
-python3 tools/corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec
+  /tmp/corpus-v2-o1vec.tsv --cmdstan-stanc PATH_TO_PATCHED_STANC \
+  --stancflags=--O1 --gradient-timeout 900
+python3 tools/corpus_table.py /tmp/corpus-v2-o1vec.tsv
 ```

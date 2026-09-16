@@ -433,6 +433,87 @@ static void reference(const double* q, double* lp_out, double* grad_out) {
 
 // Keep the planner's small-loop refusal and large-loop vector accumulation
 // decision exact. The cancellation inputs distinguish the two reverse orders.
+static void test_bounded_specialization() {
+  using namespace stanli;
+  const auto mir = slurp("tests/fixtures/bounded_control.tmir.sexp");
+  for (int mode : {0, 1})
+    for (int n : {0, 1, 40, 20000}) {
+      std::ostringstream json;
+      json << "{\"N\":" << n << ",\"mode\":" << mode << ",\"counts\":[";
+      for (int i = 0; i < n; ++i) {
+        if (i) json << ',';
+        json << i % 5;
+      }
+      json << "]}";
+      const auto data = DataMap::from_json(json.str());
+      const auto compile = [&](const char* flag) {
+        test_setenv("STANLI_BOUNDED_SPECIALIZATION", flag, 1);
+        if (n == 1 && mode == 0 && std::string(flag) == "0")
+          test_setenv("STANLI_STRUCTURED_LOOPS", "1", 1);
+        stanli_test::StdoutCapture output;
+        auto cm = compile_model(mir, data, 713);
+        test_unsetenv("STANLI_STRUCTURED_LOOPS");
+        const auto text = output.finish();
+        test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+        check(text == "prepared once\n", "specialization prepares data once");
+        check(cm.transformed_data_draws,
+              "specialization retains TD RNG metadata");
+        return cm;
+      };
+      auto a = compile("0"), b = compile("1");
+      if (mode == 1 || n == 20000)
+        check(same_graph_structure(a, b) && a.fills == b.fills,
+              "refused/budgeted specialization preserves original graph mode=" +
+                  std::to_string(mode) + " N=" + std::to_string(n));
+      if (mode == 0 && n == 40)
+        check(!same_graph_structure(a, b), "bounded data while specializes");
+      check(a.n_unconstrained == b.n_unconstrained &&
+                a.views.size() == b.views.size(),
+            "specialization preserves constrained parameter layout");
+      Executor ea(std::move(a.graph)), eb(std::move(b.graph));
+      a.bind(ea);
+      b.bind(eb);
+      for (double x : {-0.2, 0.0, 2.5})
+        for (int repeat = 0; repeat < 2; ++repeat) {
+          ea.params_data()[0] = eb.params_data()[0] = x;
+          double ga, gb;
+          const double la = ea.gradient(&ga), lb = eb.gradient(&gb);
+          check(std::abs(la - lb) <= 1e-12 * (1 + std::abs(la)) &&
+                    std::abs(ga - gb) <= 1e-12 * (1 + std::abs(ga)),
+                "bounded specialization agrees with retained-loop arithmetic");
+        }
+      check(a.write_array && b.write_array, "specialization keeps write_array");
+      if (a.write_array && b.write_array) {
+        auto& wa = *a.write_array;
+        auto& wb = *b.write_array;
+        Executor xa(std::move(wa.graph)), xb(std::move(wb.graph));
+        wa.bind(xa);
+        wb.bind(xb);
+        xa.params_data()[0] = xb.params_data()[0] = 0.7;
+        xa.run_forward_only();
+        xb.run_forward_only();
+        check(wa.columns.size() == wb.columns.size(),
+              "specialization keeps output columns");
+        for (size_t i = 0; i < wa.columns.size(); ++i)
+          expect_eq("specialization TD RNG shared with GQ",
+                    xa.value_ptr(wa.columns[i].slot)[0],
+                    xb.value_ptr(wb.columns[i].slot)[0]);
+      }
+    }
+  // Range reductions are outside the single-selector specialization proof.
+  const auto range_mir = slurp("tests/fixtures/dynslice.tmir.sexp");
+  const auto range_data =
+      DataMap::from_json(slurp("tests/fixtures/dynslice.json"));
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
+  const auto range_base = compile_model(range_mir, range_data);
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "1", 1);
+  const auto range_trial = compile_model(range_mir, range_data);
+  test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+  check(same_graph_structure(range_base, range_trial) &&
+            range_base.fills == range_trial.fills,
+        "range/gather body keeps its original representation");
+}
+
 static void test_symbolic_lane_chain(const std::string& fixture) {
   const std::string mir = slurp("tests/fixtures/" + fixture + ".tmir.sexp");
   for (bool stress : {false, true}) {
@@ -1317,8 +1398,8 @@ int main() {
     expect_eq("ndlit lp", lp, wt * q[1] + s3 * q[2]);
   }
 
-  // A while loop keeps its loop form: a retained loop by default, a
-  // control island on the legacy path.
+  // This model also uses gathers, so whole-program specialization declines
+  // it. Its whiles retain their loop forms under the automatic policy.
   {
     const auto count_whiles = [](const CompiledModel& model) {
       size_t whiles = 0;
@@ -1330,7 +1411,7 @@ int main() {
         DataMap::from_json(slurp("tests/fixtures/whileloop.json"));
     CompiledModel lm =
         compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
-    check(count_whiles(lm) == 3, "while loops lower as three retained loops");
+    check(count_whiles(lm) == 3, "gather-containing model retains three loops");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.1;
@@ -1345,8 +1426,8 @@ int main() {
     expect_ulp("while lp", lp, -0.5 * 0.1 * 0.1 + sum * 0.1);
     expect_eq("while grad", grad, -0.1 + sum);
 
-    // Building a graph must not execute or replicate a data-controlled
-    // while.  This trip count is just beyond the old lowering-time cap; the
+    // Expansion is bounded and refusal preserves a compact runtime loop.
+    // This trip count is beyond the specialization budget; the
     // model is intentionally not run, because this assertion is about the
     // finite program representation rather than a million-step evaluation.
     DataMap long_d;
@@ -8825,6 +8906,7 @@ int main() {
     }
   }
 
+  test_bounded_specialization();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;
 }

@@ -22,6 +22,10 @@ extern SEXP stanli_r_sampler_columns(void);
 extern SEXP stanli_r_summary(SEXP, SEXP);
 extern SEXP stanli_r_diagnose(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_optimize(SEXP, SEXP, SEXP);
+extern SEXP stanli_r_model_alive(SEXP);
+extern SEXP stanli_r_parameter_columns(SEXP);
+extern SEXP stanli_r_write_array(SEXP, SEXP);
+extern SEXP stanli_r_log_prob(SEXP, SEXP);
 
 static const R_CallMethodDef CallEntries[] = {
     {"stanli_bridge_load", (DL_FUNC)&stanli_bridge_load, 1},
@@ -43,6 +47,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"stanli_r_summary", (DL_FUNC)&stanli_r_summary, 2},
     {"stanli_r_diagnose", (DL_FUNC)&stanli_r_diagnose, 5},
     {"stanli_r_optimize", (DL_FUNC)&stanli_r_optimize, 3},
+    {"stanli_r_model_alive", (DL_FUNC)&stanli_r_model_alive, 1},
+    {"stanli_r_parameter_columns", (DL_FUNC)&stanli_r_parameter_columns, 1},
+    {"stanli_r_write_array", (DL_FUNC)&stanli_r_write_array, 2},
+    {"stanli_r_log_prob", (DL_FUNC)&stanli_r_log_prob, 2},
     {NULL, NULL, 0}};
 
 void R_init_stanli(DllInfo* dll) {

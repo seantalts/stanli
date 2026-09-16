@@ -9,6 +9,7 @@
 // pipeline, so a flat slot maps straight onto Map<MatrixXd>.
 #include <stanli/graph.hpp>
 #include <stanli/density_registry.hpp>
+#include <stanli/recorder.hpp>
 #include <stanli/legacy.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
@@ -97,6 +98,23 @@ void gp_cov_fwd(KernelCtx& ctx) {
   MapM(ctx.out.data, N, N) = c;
 }
 void gp_cov_replay_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data && ctx.variant != kGpExpQuad) {
+    // Fixed locations need no distance derivatives. Keep the hyperparameters
+    // and the weighted matrix reduction on the same Stan Math tape; only the
+    // inactive geometry stays double. Active locations retain the full path.
+    stan::math::nested_rev_autodiff nested;
+    stan::math::var sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
+    const auto covariance =
+        gp_cov_call(ctx.variant, gp_points(ctx), sigma, rho);
+    const int64_t n = ctx.idata[0];
+    if (n == 0) return;
+    const stan::math::var objective = stan::math::sum(stan::math::elt_multiply(
+        covariance, CMapM(ctx.out_adj_vec.data, n, n)));
+    stan::math::grad(objective.vi_);
+    if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += sigma.adj();
+    if (ctx.in_adj[2].data) ctx.in_adj[2].data[0] += rho.adj();
+    return;
+  }
   // x may be a parameter: rebuild the points from the promoted xs[0] so its
   // adjoints flow back too. nary_bwd copies back whatever input carries an
   // adjoint slot, so a data x simply contributes nothing here.
@@ -527,6 +545,29 @@ int64_t tail_density_scratch(const Op& op, const Slot* slots) {
     t += slots[op.in[k]].len;
   }
   return t;
+}
+
+template <int NArgs>
+sink recorded_tail_sink(KernelCtx& ctx) {
+  sink s;
+  int64_t offset = 0;
+  for (int k = 0; k < NArgs; ++k) {
+    s.buf[k] = ctx.scratch + offset;
+    s.len[k] = ctx.in[k].len;
+    offset += s.len[k];
+  }
+  s.connected = ctx.scratch + offset;
+  return s;
+}
+template <int NArgs>
+void recorded_tail_bwd(KernelCtx& ctx) {
+  int64_t offset = 0;
+  for (int k = 0; k < NArgs; ++k) offset += ctx.in[k].len;
+  if (ctx.scratch[offset] != 0.0) tail_density_bwd<NArgs>(ctx);
+}
+template <int NArgs>
+int64_t recorded_tail_scratch(const Op& op, const Slot* slots) {
+  return tail_density_scratch<NArgs>(op, slots) + 1;
 }
 
 // ---- multi_normal_lpdf(y | mu, Sigma) -------------------------------------
@@ -1338,6 +1379,41 @@ double mult_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, theta);
 }
 
+// Multinomial has one independent probability edge per count. Preserve the
+// validation and summation order of Stan Math's prim/prob/multinomial_lpmf.hpp.
+// The reverse uses the weighted multiply_log rule (rev/fun/multiply_log.hpp),
+// multiplying before dividing; caching unit partials changes that rounding.
+void multn_fwd(KernelCtx& ctx) {
+  const std::vector<int> counts(ctx.idata, ctx.idata + ctx.n_idata);
+  const CMapV theta(ctx.in[0].data, ctx.in[0].len);
+  constexpr const char* fn = "multinomial_lpmf";
+  stan::math::check_size_match(fn, "Size of number of trials variable",
+                               counts.size(), "rows of probabilities parameter",
+                               theta.rows());
+  stan::math::check_nonnegative(fn, "Number of trials variable", counts);
+  stan::math::check_simplex(fn, "Probabilities parameter", theta);
+  double value = 0;
+  if (!(ctx.variant & 0x80u)) {
+    double total = 1;
+    for (int count : counts) {
+      total += count;
+      value -= stan::math::lgamma(count + 1.0);
+    }
+    value += stan::math::lgamma(total);
+  }
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    value += counts[i] == 1 ? std::log(theta(i))
+                            : stan::math::multiply_log(counts[i], theta(i));
+  ctx.out.data[0] = value;
+}
+void multn_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    ctx.in_adj[0].data[i] +=
+        ctx.idata[i] == 1 ? ctx.out_adj / ctx.in[0].data[i]
+                          : ctx.out_adj * ctx.idata[i] / ctx.in[0].data[i];
+}
+
 // ---- the two the recorder cannot take ----------------------------------
 // ordered_probit does `c_vec[i].coeff(0) - lambda_vec[i]` and wiener
 // `res *= 0.0` on the scalar type. var has those operators; rvar
@@ -1358,9 +1434,15 @@ double ordered_eval(KernelCtx& ctx) {
   std::vector<int> y(ctx.idata, ctx.idata + N);
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
-  VarV lambda = tail_v(ctx, 0, ctx.in[0].len);
-  std::vector<VarV> cuts = mvt_vectors<var>(ctx.in[1], K, cuts_encoded);
-  var out;
+  // ordered_probit does not condition its summands on propto or the scalar
+  // activity type. Its forward needs only values; retain the original var
+  // replay in backward so weighted adjoint arithmetic stays unchanged.
+  using Scalar =
+      std::conditional_t<!Grad && Kind == kOrderedProbit, double, var>;
+  Eigen::Matrix<Scalar, -1, 1> lambda(ctx.in[0].len);
+  for (int64_t i = 0; i < ctx.in[0].len; ++i) lambda(i) = ctx.in[0].data[i];
+  auto cuts = mvt_vectors<Scalar>(ctx.in[1], K, cuts_encoded);
+  Scalar out;
   const auto call = [&](const auto& location, const auto& cutpoints) {
     if constexpr (Kind == kOrderedLogistic)
       return propto ? stan::math::ordered_logistic_lpmf<true>(y, location,
@@ -1377,7 +1459,10 @@ double ordered_eval(KernelCtx& ctx) {
     out = ctx.in[0].len == 1 ? call(lambda(0), cutpoints)
                              : call(lambda, cutpoints);
   });
-  return finish_tail_density<Grad>(ctx, out, lambda, cuts);
+  if constexpr (!Grad && Kind == kOrderedProbit)
+    return out;
+  else
+    return finish_tail_density<Grad>(ctx, out, lambda, cuts);
 }
 
 // wiener(y | alpha, tau, beta, delta): five real arguments, and every one
@@ -1423,22 +1508,204 @@ STANLI_TAIL_KERNEL(mgp, mgp_eval, kMultiGp)
 STANLI_TAIL_KERNEL(mgpc, mgp_eval, kMultiGpChol)
 STANLI_TAIL_KERNEL(mst, mst_eval, kMst)
 STANLI_TAIL_KERNEL(mstc, mst_eval, kMstChol)
-STANLI_TAIL_KERNEL(multn, mult_eval, kMultinomial)
 STANLI_TAIL_KERNEL(multnl, mult_eval, kMultinomialLogit)
 STANLI_TAIL_KERNEL(dirmult, mult_eval, kDirichletMultinomial)
 #undef STANLI_TAIL_KERNEL
 void ologistic_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = ordered_eval<false, kOrderedLogistic>(ctx);
+  // Arrays of cutpoint vectors retain the general nested-tape path. For a
+  // shared cutpoint vector, Stan Math's propagator can write its partials
+  // straight to scratch; no autodiff tape or second density evaluation is
+  // needed. Keep both operands active, as in ordered_eval, so propto and
+  // validation semantics are unchanged.
+  if (ctx.n_idata < 4 ||
+      ctx.idata[ctx.n_idata - 3] != kVectorizedDensityLayoutMarker ||
+      ctx.idata[ctx.n_idata - 1] >= 0) {
+    ctx.out.data[0] = ordered_eval<false, kOrderedLogistic>(ctx);
+    return;
+  }
+  sink s = recorded_tail_sink<2>(ctx);
+  sink_scope active(s);
+  const std::vector<int> y(ctx.idata, ctx.idata + ctx.n_idata - 3);
+  const auto cuts = as_rvar(ctx.in[1]);
+  const auto call = [&](const auto& location) {
+    record_probability_call([&] {
+      return (ctx.variant & 0x80u)
+                 ? stan::math::ordered_logistic_lpmf<true>(y, location, cuts)
+                 : stan::math::ordered_logistic_lpmf<false>(y, location, cuts);
+    });
+  };
+  if (ctx.in[0].len == 1)
+    call(rvar(ctx.in[0].data[0]));
+  else
+    call(as_rvar(ctx.in[0]));
+  ctx.out.data[0] = s.value;
 }
 void ologistic_bwd(KernelCtx& ctx) {
-  ordered_eval<true, kOrderedLogistic>(ctx);
+  if (ctx.idata[ctx.n_idata - 1] >= 0) {
+    ordered_eval<true, kOrderedLogistic>(ctx);
+    return;
+  }
+  recorded_tail_bwd<2>(ctx);
+}
+// For shared cutpoints retain the primitive CDF partials and log-difference
+// denominators. The weighted reverse follows rev/fun/log_diff_exp.hpp before
+// multiplying the CDF partial, preserving its division/rounding order.
+bool oprobit_shared(const KernelCtx& ctx) {
+  return ctx.n_idata >= 4 &&
+         ctx.idata[ctx.n_idata - 3] == kVectorizedDensityLayoutMarker &&
+         ctx.idata[ctx.n_idata - 1] < 0 && ctx.in[0].len > 0 &&
+         ctx.idata[ctx.n_idata - 2] == ctx.in[1].len;
 }
 void oprobit_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = ordered_eval<false, kOrderedProbit>(ctx);
+  if (!oprobit_shared(ctx)) {
+    ctx.out.data[0] = ordered_eval<false, kOrderedProbit>(ctx);
+    return;
+  }
+  const int64_t n = ctx.in[0].len, width = ctx.in[1].len;
+  const std::vector<int> outcomes(ctx.idata, ctx.idata + ctx.n_idata - 3);
+  const CMapV cuts(ctx.in[1].data, width), locations(ctx.in[0].data, n);
+  // Shared-vector validation follows prim/prob/ordered_probit_lpmf.hpp.
+  // Keep its checks before all CDF work and preserve scalar broadcasting.
+  constexpr const char* fn = "ordered_probit";
+  stan::math::check_nonzero_size(fn, "Cut-points", cuts);
+  if (n == 1)
+    stan::math::check_consistent_sizes(fn, "Integers", outcomes, "Locations",
+                                       locations(0));
+  else
+    stan::math::check_consistent_sizes(fn, "Integers", outcomes, "Locations",
+                                       locations);
+  stan::math::check_bounded(fn, "Random variable", outcomes, 1, width + 1);
+  stan::math::check_nonzero_size(fn, "First cutpoint set", cuts);
+  stan::math::check_ordered(fn, "Cut-points", cuts);
+  if (width > 1)
+    stan::math::check_finite(fn, "Final cut point", cuts(width - 1));
+  stan::math::check_finite(fn, "First cut point", cuts(0));
+  if (n == 1)
+    stan::math::check_finite(fn, "Location parameter", locations(0));
+  else
+    stan::math::check_finite(fn, "Location parameter", locations);
+  double value = 0;
+  const auto cdf = [](double argument, double* partial) {
+    sink s;
+    s.buf[0] = partial;
+    s.len[0] = 1;
+    sink_scope scope(s);
+    record_probability_call(
+        [&] { return stan::math::std_normal_lcdf(rvar(argument)); });
+    return s.value;
+  };
+  for (int64_t i = 0; i < n; ++i) {
+    double* state = ctx.scratch + 4 * i;
+    const int outcome = ctx.idata[i];
+    const double location = ctx.in[0].data[i];
+    if (outcome == 1) {
+      value += cdf(ctx.in[1].data[0] - location, state);
+    } else if (outcome == width + 1) {
+      value += cdf(location - ctx.in[1].data[width - 1], state);
+    } else {
+      const double upper = cdf(ctx.in[1].data[outcome - 1] - location, state);
+      const double lower =
+          cdf(ctx.in[1].data[outcome - 2] - location, state + 1);
+      value += stan::math::log_diff_exp(upper, lower);
+      state[2] = std::expm1(lower - upper);
+      state[3] = std::expm1(upper - lower);
+    }
+  }
+  ctx.out.data[0] = value;
 }
-void oprobit_bwd(KernelCtx& ctx) { ordered_eval<true, kOrderedProbit>(ctx); }
-void wiener_fwd(KernelCtx& ctx) { ctx.out.data[0] = wiener_eval<false>(ctx); }
-void wiener_bwd(KernelCtx& ctx) { wiener_eval<true>(ctx); }
+void oprobit_bwd(KernelCtx& ctx) {
+  if (!oprobit_shared(ctx)) {
+    ordered_eval<true, kOrderedProbit>(ctx);
+    return;
+  }
+  const int64_t n = ctx.in[0].len, width = ctx.in[1].len;
+  double* locations = ctx.scratch + 4 * n;
+  double* cuts = locations + n;
+  std::fill_n(locations, n + width, 0.0);
+  for (int64_t i = n; i-- > 0;) {
+    const double* state = ctx.scratch + 4 * i;
+    const int outcome = ctx.idata[i];
+    if (outcome == 1) {
+      const double g = 0.0 + ctx.out_adj * state[0];
+      cuts[0] += g;
+      locations[i] -= g;
+    } else if (outcome == width + 1) {
+      const double g = 0.0 + ctx.out_adj * state[0];
+      locations[i] += g;
+      cuts[width - 1] -= g;
+    } else {
+      const double lower = 0.0 + (0.0 - ctx.out_adj / state[3]) * state[1];
+      const double upper = 0.0 + (0.0 - ctx.out_adj / state[2]) * state[0];
+      cuts[outcome - 2] += lower;
+      locations[i] -= lower;
+      cuts[outcome - 1] += upper;
+      locations[i] -= upper;
+    }
+  }
+  // Match the replay's final scatter, including aliased caller edges.
+  if (ctx.in_adj[0].data)
+    for (int64_t i = 0; i < n; ++i) ctx.in_adj[0].data[i] += locations[i];
+  if (ctx.in_adj[1].data)
+    for (int64_t i = 0; i < width; ++i) ctx.in_adj[1].data[i] += cuts[i];
+}
+int64_t oprobit_scratch(const Op& op, const Slot* slots) {
+  return 5 * slots[op.in[0]].len + slots[op.in[1]].len;
+}
+// Scalar observations with a fixed outcome need derivatives only
+// for boundary, nondecision time, bias and drift. Keep those types active
+// (including under propto), and retain their unit partials from a single Stan
+// Math tape.
+bool wiener_fixed_observation(const KernelCtx& ctx) {
+  if (ctx.in_adj[0].data) return false;
+  for (int k = 0; k < 5; ++k)
+    if (ctx.in[k].len != 1) return false;
+  return true;
+}
+void wiener_fwd(KernelCtx& ctx) {
+  if (!wiener_fixed_observation(ctx)) {
+    ctx.out.data[0] = wiener_eval<false>(ctx);
+    return;
+  }
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  var alpha = ctx.in[1].data[0], tau = ctx.in[2].data[0],
+      beta = ctx.in[3].data[0], delta = ctx.in[4].data[0];
+  const double y = ctx.in[0].data[0];
+  var out = (ctx.variant & 0x80u)
+                ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
+                : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
+  ctx.out.data[0] = out.val();
+  if (!values_only()) {
+    stan::math::grad(out.vi_);
+    ctx.scratch[0] = alpha.adj();
+    ctx.scratch[1] = tau.adj();
+    ctx.scratch[2] = beta.adj();
+    ctx.scratch[3] = delta.adj();
+  }
+}
+void wiener_bwd(KernelCtx& ctx) {
+  // A unit seed reuses the same reverse arithmetic. Weighted replay must
+  // propagate its seed through that arithmetic: post-scaling unit partials
+  // can hide intermediate overflow or change underflow/cancellation.
+  if (!wiener_fixed_observation(ctx) || ctx.out_adj != 1.0) {
+    wiener_eval<true>(ctx);
+    return;
+  }
+  for (int j = 0; j < 4; ++j)
+    if (!std::isfinite(ctx.scratch[j])) {
+      wiener_eval<true>(ctx);
+      return;
+    }
+  const int inputs[] = {1, 2, 3, 4};
+  for (int j = 0; j < 4; ++j)
+    if (ctx.in_adj[inputs[j]].data)
+      ctx.in_adj[inputs[j]].data[0] += ctx.out_adj * ctx.scratch[j];
+}
+int64_t wiener_scratch(const Op& op, const Slot* slots) {
+  for (int k = 0; k < 5; ++k)
+    if (slots[op.in[k]].len != 1) return 0;
+  return 4;
+}
 
 // ---- the last five ------------------------------------------------------
 // lkj_cov(Sigma | mu, sigma, eta): a covariance matrix, two vectors of
@@ -1458,11 +1725,10 @@ double lkjcov_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, S, mu, sig, eta);
 }
 
-// The three remaining GLMs. Unlike the ones in densities.cpp these carry
-// argument shapes the recorder cannot express (a cutpoint vector, a
-// coefficient matrix, a second int group), so they take the var tape.
+// Binomial and categorical GLMs retain their established nested-tape path.
+// The ordered-logistic GLM below records partials directly.
 // idata = [outcome..., rows, cols] and, for binomial, the trial counts.
-enum GlmKind { kBinomLogitGlm, kCatLogitGlm, kOrdLogisticGlm };
+enum GlmKind { kBinomLogitGlm, kCatLogitGlm };
 template <typename F>
 decltype(auto) with_glm_integer(std::vector<int>& values, bool scalar, F&& f) {
   return scalar ? std::forward<F>(f)(values[0]) : std::forward<F>(f)(values);
@@ -1510,28 +1776,15 @@ double tglm_eval(KernelCtx& ctx) {
     return tail_density_fwd(ctx, out, X, alpha, beta);
   } else {
     std::vector<int> y(ctx.idata, ctx.idata + rows);
-    if constexpr (Kind == kCatLogitGlm) {
-      VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
-      VarM beta = tail_m(ctx, 2, cols, ctx.in[2].len / cols);
-      with_glm_integer(y, scalar_mask & 1u, [&](const auto& y_arg) {
-        out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y_arg, X,
-                                                                    alpha, beta)
-                     : stan::math::categorical_logit_glm_lpmf<false>(
-                           y_arg, X, alpha, beta);
-      });
-      return tail_density_fwd(ctx, out, X, alpha, beta);
-    } else {
-      // in = {X, beta, cutpoints}; alpha above is beta for this one.
-      VarV beta = tail_v(ctx, 1, cols);
-      VarV cuts = tail_v(ctx, 2, ctx.in[2].len);
-      with_glm_integer(y, scalar_mask & 1u, [&](const auto& y_arg) {
-        out = propto ? stan::math::ordered_logistic_glm_lpmf<true>(y_arg, X,
-                                                                   beta, cuts)
-                     : stan::math::ordered_logistic_glm_lpmf<false>(y_arg, X,
-                                                                    beta, cuts);
-      });
-      return tail_density_fwd(ctx, out, X, beta, cuts);
-    }
+    VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
+    VarM beta = tail_m(ctx, 2, cols, ctx.in[2].len / cols);
+    with_glm_integer(y, scalar_mask & 1u, [&](const auto& y_arg) {
+      out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y_arg, X,
+                                                                  alpha, beta)
+                   : stan::math::categorical_logit_glm_lpmf<false>(y_arg, X,
+                                                                   alpha, beta);
+    });
+    return tail_density_fwd(ctx, out, X, alpha, beta);
   }
 }
 
@@ -1544,7 +1797,27 @@ void clglm_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = tglm_eval<kCatLogitGlm>(ctx);
 }
 void olglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<kOrdLogisticGlm>(ctx);
+  const bool scalar_layout =
+      ctx.n_idata >= 4 && ctx.idata[ctx.n_idata - 2] == kGlmScalarLayoutMarker;
+  const int tail = scalar_layout ? 4 : 2;
+  const int64_t rows = ctx.idata[ctx.n_idata - tail];
+  const int64_t cols = ctx.idata[ctx.n_idata - tail + 1];
+  const bool scalar_y = scalar_layout && (ctx.idata[ctx.n_idata - 1] & 1u);
+  std::vector<int> y(ctx.idata, ctx.idata + rows);
+  sink s = recorded_tail_sink<3>(ctx);
+  sink_scope active(s);
+  const auto X = as_rvar_matrix(ctx.in[0], rows, cols);
+  const auto beta = as_rvar(ctx.in[1]), cuts = as_rvar(ctx.in[2]);
+  with_glm_integer(y, scalar_y, [&](const auto& outcome) {
+    record_probability_call([&] {
+      return (ctx.variant & 0x80u)
+                 ? stan::math::ordered_logistic_glm_lpmf<true>(outcome, X, beta,
+                                                               cuts)
+                 : stan::math::ordered_logistic_glm_lpmf<false>(outcome, X,
+                                                                beta, cuts);
+    });
+  });
+  ctx.out.data[0] = s.value;
 }
 
 // ---- the cdfs the recorder cannot take ---------------------------------
@@ -1627,11 +1900,12 @@ void register_matrix_kernels() {
                   Kernel{multnl_fwd, multnl_bwd, nullptr});
   register_kernel(OP_DIRICHLET_MULTINOMIAL_LPMF,
                   Kernel{dirmult_fwd, dirmult_bwd, nullptr});
-  register_kernel(OP_ORDERED_LOGISTIC_LPMF,
-                  Kernel{ologistic_fwd, ologistic_bwd, nullptr});
+  register_kernel(OP_ORDERED_LOGISTIC_LPMF, Kernel{ologistic_fwd, ologistic_bwd,
+                                                   recorded_tail_scratch<2>});
   register_kernel(OP_ORDERED_PROBIT_LPMF,
-                  Kernel{oprobit_fwd, oprobit_bwd, nullptr});
-  register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, nullptr});
+                  Kernel{oprobit_fwd, oprobit_bwd, oprobit_scratch});
+  register_kernel(OP_WIENER_LPDF,
+                  Kernel{wiener_fwd, wiener_bwd, wiener_scratch});
 #define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
   register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
   STANLI_TAIL_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
@@ -1646,7 +1920,7 @@ void register_matrix_kernels() {
       Kernel{clglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
   register_kernel(
       OP_ORDERED_LOGISTIC_GLM_LPMF,
-      Kernel{olglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
+      Kernel{olglm_fwd, recorded_tail_bwd<3>, recorded_tail_scratch<3>});
   register_kernel(OP_DIAG_MATRIX, Kernel{diag_fwd, diag_bwd, nullptr});
   register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, nullptr});
   register_kernel(OP_MATRIX_EXP,

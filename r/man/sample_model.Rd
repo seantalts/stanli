@@ -61,7 +61,9 @@ An object of class `stanli_fit`. Its `report` element contains
   per-chain warmup and sampling times plus exact divergence and
   maximum-treedepth counts. With a compatible older runtime that predates
   progress reporting, `report$available` is `FALSE` and those values are
-  `NA`.
+  `NA`. Sampling metadata (`warmup`, `samples`, `thin`, `save_warmup`,
+  `chains`, and `delta`) records the configuration for downstream conversion;
+  iteration counts are before thinning.
 }
 \description{
 Four chains by default, run in parallel: R-hat needs more than one

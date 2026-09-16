@@ -8,6 +8,46 @@ namespace lower_detail {
 // nontermination. Stop unrolling and let it compile as a loop.
 constexpr long kWhileUnrollLimit = 1L << 16;
 
+// A statement budget must not hide an expensive interpreter calculation in
+// every guard. The bounded alternative only rechecks scalar arithmetic,
+// scalar selectors and direct shape queries. Other guards keep runtime loops.
+static bool bounded_while_guard(const mir::Expr& e) {
+  using E = mir::Expr;
+  if (e.kind == E::LitInt || e.kind == E::LitReal) return true;
+  if (e.kind == E::Var) return e.type_ == "UInt" || e.type_ == "UReal";
+  if (e.kind == E::Indexed) {
+    if (e.args.empty() || e.args[0].kind != E::Var ||
+        (e.type_ != "UInt" && e.type_ != "UReal"))
+      return false;
+    for (size_t i = 1; i < e.args.size(); ++i) {
+      const auto& index = e.args[i];
+      if (index.kind != E::FunApp || index.name != "IndexSingle" ||
+          index.args.size() != 1 || !bounded_while_guard(index.args[0]))
+        return false;
+    }
+    return true;
+  }
+  if (e.kind == E::FunApp) {
+    if (e.fn_lib != E::Lib::StanLib) return false;
+    if ((e.name == "num_elements" || e.name == "rows" || e.name == "cols" ||
+         e.name == "size") &&
+        e.args.size() == 1 && e.args[0].kind == E::Var)
+      return true;
+    static const std::set<std::string> scalar{
+        "Plus__",      "Minus__",   "Times__",   "Divide__",
+        "IntDivide__", "PMinus__",  "PPlus__",   "PNot__",
+        "Less__",      "Leq__",     "Greater__", "Geq__",
+        "Equals__",    "NEquals__", "min",       "max"};
+    if (!scalar.count(e.name)) return false;
+  } else if (e.kind != E::Promotion && e.kind != E::EAnd && e.kind != E::EOr &&
+             e.kind != E::TernaryIf) {
+    return false;
+  }
+  for (const auto& a : e.args)
+    if (!bounded_while_guard(a)) return false;
+  return true;
+}
+
 #include "lower_symbolic_lane.inc"
 
 bool Lowering::expr_has_jacobian(const mir::Expr& e) {
@@ -1422,6 +1462,11 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         int_env.erase(s.loopvar);
         return;
       }
+      // Bound the control scan as well as graph emission in an isolated trial.
+      if (bounded_specialization &&
+          static_cast<long double>(hi) - lo + 1 >
+              specialization_step_limit - specialization_steps)
+        throw SpecializationRefused{};
       if (&s == symbolic_lane_tail && try_lower_symbolic_lane_tail(s, lo, hi))
         return;
       // Both the pre-control target fold and the ordinary path ask the same
@@ -1516,6 +1561,11 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       return;
     }
     case mir::Stmt::While: {
+      if (bounded_specialization) {
+        if (!bounded_while_guard(s.cond)) throw SpecializationRefused{};
+        if (unroll_while(s)) return;
+        throw SpecializationRefused{};
+      }
       // A body that sizes a local from the loop's own state has no loop
       // form: the island and the retained loop both hold the counter at
       // runtime, and a declared extent has to be a compile-time integer.
