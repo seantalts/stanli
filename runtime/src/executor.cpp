@@ -493,9 +493,12 @@ void Executor::bind_() {
         make_ctx_(graph_.ops[i], scratch_offsets[i], written, adjoint_offsets);
     const Kernel& k = kernel(graph_.ops[i].opcode);
     if (k.make_state) {
-      kernel_states_.emplace_back(
+      std::unique_ptr<KernelState> state(
           k.make_state(graph_.ops[i], graph_.slots.data()));
-      ctx_[i].state = kernel_states_.back().get();
+      if (state) {
+        ctx_[i].state = state.get();
+        kernel_states_.push_back(std::move(state));
+      }
     }
     const int o2 = graph_.ops[i].out2;
     if (o2 >= 0) {

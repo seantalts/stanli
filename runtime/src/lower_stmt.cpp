@@ -499,7 +499,10 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   // their operands can have different widths, so retain the original
   // register numbering until those instructions carry explicit spans.
   if (!has_back_edge && !has_unmodelled_ranges) compact_island(*prog);
-  if (has_back_edge) sink_program_fills(*prog);
+  if (has_back_edge) {
+    sink_program_fills(*prog);
+    elide_program_dead_constants(*prog);
+  }
   // Generated quantities have no backward consumer.
   prog->native_adj = !in_write_array && gen_adjoint(*prog) &&
                      !std::getenv("STANLI_NO_NATIVE_ADJ");
@@ -558,6 +561,12 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
     input.offset += used_inputs[k].first - input.reg;
     input.reg = used_inputs[k].first;
     input.len = used_inputs[k].second;
+  }
+  if (!prog->native_adj) {
+    input_ranges.clear();
+    for (const auto& input : prog->ins)
+      input_ranges.emplace_back(input.reg, input.len);
+    prog->replay_initialized = program_initializes_reads(*prog, input_ranges);
   }
   is.n_in = (int)inputs.size();
   for (int k = 0; k < is.n_in; ++k) is.in[k] = inputs[k];

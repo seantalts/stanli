@@ -443,6 +443,15 @@ island's backward as a second instruction list at load time;
 which is what [`tests/test_adjoint.cpp`](tests/test_adjoint.cpp) checks
 the generated program against.
 
+Replayed islands reuse executor-owned handle buffers only when a definite
+initialization proof covers every register read and live-out on every path.
+`STANLI_NO_REPLAY_REUSE=1` (set before executor creation) restores fresh buffers.
+`STANLI_NO_DEAD_CONSTANTS=1` disables local removal of overwritten constant
+initializers, and `STANLI_NO_FILL_SINK=1` disables delaying range initialization
+past unused branches; set these before compiling the model. `test_island`
+covers the proof's refusal paths, loops, indexed spans, nested evaluation,
+exceptions, copied executors, workers, and the fresh-buffer comparison.
+
 Native-adjoint islands can additionally select the shared three-lane softmax
 forward specialization. `STANLI_NO_ISLAND_SOFTMAX3=1` leaves the admitted
 island and its generated backward intact but uses the canonical forward

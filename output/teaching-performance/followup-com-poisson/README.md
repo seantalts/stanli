@@ -1,5 +1,8 @@
 # COM-Poisson sampling follow-up
 
+Later measurements: [workspace and callback allocation follow-up](../followup-com-poisson-80/README.md)
+reports a 0.838× complete-sampling ratio, with the same model and sampling budget.
+
 **All four seeds complete under the unchanged 3× CmdStan cap.** The median
 complete-process ratio is **0.591× CmdStan/Stanli** (higher means faster Stanli).
 This clears the cap; it remains below the separate 0.8× performance target.

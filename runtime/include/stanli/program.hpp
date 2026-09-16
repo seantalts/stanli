@@ -373,6 +373,15 @@ static_assert(program_code_count() == static_cast<size_t>(Program::RANGE) + 1,
 // Refuses cyclic sources/destinations; preserves every read, write and effect.
 bool sink_program_fills(Program& p);
 
+// Remove scalar constant stores overwritten before any read or branch. Unlike
+// register compaction, this local proof is also valid in programs with loops.
+bool elide_program_dead_constants(Program& p);
+
+// Prove definite initialization at every read and exit across the CFG. CALL
+// scratch is private during var replay and therefore is not a register write.
+bool program_initializes_reads(const Program& p,
+                               const std::vector<std::pair<int, int>>& seeded);
+
 // Drop the initializer fills and the copies the MIR spells out, then
 // renumber away whatever registers that leaves unreferenced (program.cpp).
 // `seeded` names the register ranges the caller writes before the program

@@ -1,0 +1,36 @@
+{
+  "base_head": "670e0039586a5176aebff45324d64cc6d6ced552",
+  "upstream_main": "42a7945a64d152eab29777f6864eccea71521f67",
+  "source_patch_sha256": "da6c959a4e1b787dedc83c3d485cdddee81a0d6c64070cda3563479fbbc8e115",
+  "production_binaries": {
+    "stanli_run": "3f892d4367aba501666d9e47b13902165cc2899583ed2fb88099f1156904efc0",
+    "stanli_check": "594c6a587543607dd5f87c48047405c019890c7e149a1a8f2d893b2d28a309c0",
+    "libstanli.dylib": "857cb7839f547b7fd489b9e9bd71df0566be86d8627e6de11e75b21c487bc1a2",
+    "bench_grad": "bd379dcf3d86c912d72cd3b1745b9ebf0e0eaef072ba943a8d780f31c0f6043e"
+  },
+  "commands": {
+    "tests": "ctest --test-dir build-teaching-residual -j8 --output-on-failure",
+    "references": "python3 tools/verify_refs.py deps/posteriordb --check build-teaching-residual/stanli_check --jobs 8 --per-model",
+    "sentinel": "same reference command with the separately built instrumented checker",
+    "R": "R_LIBS_USER=/tmp/stanli-rethinking/latest/r-library STANLI_RUNTIME=build-teaching-residual/libstanli.dylib STANLI_RUN=build-teaching-residual/stanli_run Rscript runtime ecosystem tests (bayesplot|ecosystem|loo|stanfit|sampling|rfit)"
+  },
+  "reviews": {
+    "model": "claude-fable-5-1",
+    "session": "81eeed58-45cc-4fa0-a523-2ac789139e8f",
+    "mode": "read-only CLI"
+  },
+  "logs": "Published text transcripts strip ANSI display codes and trailing whitespace; original logs remain in the local evidence directory. Timing records and CSVs are unmodified.",
+  "retained_nonfinal_trials": "Probes and first confirmation are retained separately. Final confirmation uses the final production build. Earlier diagnostic canaries were not pooled with final measurements; the final canary block ran without overlapping analysis/build/test work.",
+  "dependencies": {
+    "stan_math": {
+      "commit": "8f326d14599d3030c626c46532d8e8534c1cdbec",
+      "existing_patch_sha256": "830200c9c4d3d77ea1ab94c0958c06b351deb7ebefed308201254de7028cd64c",
+      "patch_source": "deps/fetch.sh:26-41",
+      "introduced_by": "95aecfbad (2026-09-11), already present on main",
+      "scope": "Zero the adjoint ODE backward quadrature output before accumulation. Predates this optimization; COM-Poisson does not use ODEs. No dependency edits in this change."
+    },
+    "stan": "c96d04115d35cb04f42e45c5a69a82f9704798f1",
+    "cmdstan": "11cb052d3e1fc8c799e0fec559e2ee5452b38d27"
+  },
+  "source_patch_storage": "source.patch.gz; source_patch_sha256 hashes the uncompressed bytes"
+}

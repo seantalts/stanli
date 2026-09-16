@@ -982,3 +982,62 @@ zero diff in runtime/,CLI/gradient tools,orCMake against6997. Installed current
 R package and reran ecosystem/sampling/native-fit checks:495expectations pass,
 zero warnings/skips/failures. Moved this PR's changelog bullets back under
 Unreleased after the release merge. Final review's extra tests all pass.
+
+## COM-Poisson 0.8 follow-up (September 16)
+
+User authorized continued iteration to CmdStan/Stanli >=0.8, with Fable advice
+as useful. Metric remains complete CLI sampling, 1000 warmup +1000 draws,
+seeds1–4, min(3× same-seed CmdStan time,900s), serial single-threaded runs.
+Baseline is670e0039, current main remains42a7945a. Frozen v6/report untouched.
+Evidence: `/tmp/stanli-teaching-perf/com-80/` and
+`output/teaching-performance/followup-com-poisson-80/`.
+
+Posterior-point profiling, rather than the series-dominated fixed point,
+found ~16%of running-thread samples clearing the 10255-cell var register
+buffer, plus allocation/free cost. Arena-only allocation gave ~0.62;
+register reuse~0.77; combined input/output/register reuse~0.78. Fable identified
+the prototype's TLS destructor as incompatible with the established Windows/R
+shutdown contract. Final storage uses existing executor-owned KernelState,
+with no TLS or intentionally leaked buffer. A bounded must-initialize CFG
+proof gates reuse; it is cached after necessity lowering. Unmodelled spans
+and failed proofs retain fresh buffers. All20 COM replay regions are proved.
+
+Local dead scalar CONST elimination removes only stores overwritten before
+any read or branch. CALL scratch is not a var-register write. Jumps remap,
+including targets inside the elided interval and the exit sentinel. The final
+additional improvement uses Stan Math's arena_allocator for Stanli's three
+scalar-binary callback vectors; all overloads, operations, and reverse order
+stay unchanged. No derivative formulas or Stan Math functions were modified.
+
+Three final four-seed confirmation blocks give0.84010,0.84326,0.83424.
+Combined ratio of medians0.838216, matched baseline0.573257; Stanli time fell
+31.61%. Seed medians0.98755/0.81042/0.81474/0.79944, so the overall target is
+established, not an every-trial guarantee. All36 final processes succeeded
+(12CmdStan,12baseline,12candidate); all12 Stanli CSV pairs are byte-identical.
+Final timing and five-pair canaries ran without overlapping tests/builds/
+diagnostics. Nonfinal probes/confirmation remain separately archived.
+
+Validation:253CTests;316existing-policy references/1008755values;495R
+expectations,0fail/warn/skip. A separate NaN-sentinel instrumented checker
+also passes all316references; instrumented code was removed and production
+rebuilt before final timing. At28extra points, before/after LP,gradient,outputs
+are bitwise identical. Full-precision CmdStan differences: LP1.14e-13/4ULP,
+gradient2.27e-13/127ULP,outputs8.88e-16/1ULP. Errors are calculated before
+decimal serialization and hex float values are archived. Original3points
+retain LP2.84e-14/2ULP,gradient2.13e-14/17ULP,outputs exact. Canary gradients
+before/after us: COM304.90/293.19,ALD4.753/4.767,GEV13.278/11.585,
+m14.8 2.687/2.612; all values identical. ALD's small difference is within
+the observed spread, not evidence of a speed improvement.
+
+Two read-only claude-fable-5-1 reviews (session81eeed58-45cc-4fa0-a523-2ac789139e8f)
+are archived with disposition. Final review found no correctness blocker;
+admission, caching, executed fallback, warm copy, jump-label, sentinel-corpus,
+and opt-out documentation follow-ups are covered.
+
+User reinforced using Stan Math as-is. The allocation edit is solely in
+runtime/kernels/scalar_binary.cpp and uses the public upstream allocator.
+Dependency audit found the existing one-line adjoint ODE quadrature
+initialization patch in deps/fetch.sh, introduced by95aecfbad onSeptember11
+and already onmain. It was not changed here; COM does not use ODEs. The user
+was told this exception, and the exact dependency revision/patch is included
+in build provenance. Do not claim the entire dependency checkout is pristine.

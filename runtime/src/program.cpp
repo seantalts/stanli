@@ -600,6 +600,152 @@ bool sink_program_fills(Program& p) {
   return true;
 }
 
+bool program_initializes_reads(const Program& p,
+                               const std::vector<std::pair<int, int>>& seeded) {
+  const size_t n = p.code.size();
+  if (p.n_regs < 0 || n > 2048) return false;
+  const size_t words = (static_cast<size_t>(p.n_regs) + 63) / 64;
+  // Bound proof cost; a refusal keeps fresh, null-initialized handles.
+  if (words > 1024 * 1024 / (n + 1)) return false;
+  using Bits = std::vector<uint64_t>;
+  const auto valid = [&](Span s) {
+    return s.reg >= 0 && s.len >= 0 && s.reg <= p.n_regs &&
+           s.len <= p.n_regs - s.reg;
+  };
+  const auto mark = [](Bits& bits, Span s) {
+    for (int r = s.reg; r < s.reg + s.len; ++r)
+      bits[(size_t)r / 64] |= uint64_t{1} << (r % 64);
+  };
+  Bits entry(words, 0);
+  for (const auto& seed : seeded) {
+    const Span s{seed.first, seed.second};
+    if (!valid(s)) return false;
+    mark(entry, s);
+  }
+  std::vector<std::vector<size_t>> pred(n + 1);
+  std::vector<std::vector<Span>> reads(n + 1);
+  std::vector<Bits> writes(n + 1, Bits(words, 0));
+  for (size_t pc = 0; pc < n; ++pc) {
+    const auto& I = p.code[pc];
+    // The proof is only as strong as the interpreter spans above. Keep
+    // unmodelled operations out; new opcodes need a span audit before reuse.
+    if (program_spec_of(I).has(kProgramNoAdjoint) && I.code != Program::JZ &&
+        I.code != Program::JMP && I.code != Program::IMOD &&
+        I.code != Program::IDIV && I.code != Program::DYN_SET &&
+        I.code != Program::DYN_INDEX && I.code != Program::DYN_LSE_RANGE &&
+        I.code != Program::PRINT && I.code != Program::REJECT)
+      return false;
+    if (I.code == Program::CALL && (I.a < 0 || (size_t)I.a >= p.calls.size()))
+      return false;
+    if ((I.code == Program::PRINT || I.code == Program::REJECT) &&
+        (I.a < 0 || (size_t)I.a >= p.messages.size()))
+      return false;
+    if (branches(I.code)) {
+      if (I.dst < 0 || (size_t)I.dst > n) return false;
+      pred[(size_t)I.dst].push_back(pc);
+    }
+    if (I.code != Program::JMP) pred[pc + 1].push_back(pc);
+    bool ok = true;
+    each_read(p, I, [&](Span s) {
+      ok = ok && valid(s);
+      reads[pc].push_back(s);
+    });
+    const auto write = [&](Span s) {
+      if (valid(s))
+        mark(writes[pc], s);
+      else
+        ok = false;
+    };
+    if (I.code == Program::CALL) {
+      const auto& call = p.calls[(size_t)I.a];
+      write(Span{call.out, call.out_len});
+    } else {
+      each_write(p, I, write);
+    }
+    if (!ok) return false;
+  }
+  for (int reg : p.out_regs) {
+    if (!valid(Span{reg, 1})) return false;
+    reads[n].push_back(Span{reg, 1});
+  }
+  std::vector<Bits> out(n + 1, Bits(words, ~uint64_t{0}));
+  const auto incoming = [&](size_t pc) {
+    Bits bits = pc == 0 ? entry : Bits(words, ~uint64_t{0});
+    if (pc != 0 && pred[pc].empty()) std::fill(bits.begin(), bits.end(), 0);
+    for (size_t before : pred[pc])
+      for (size_t w = 0; w < words; ++w) bits[w] &= out[before][w];
+    return bits;
+  };
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t pc = 0; pc <= n; ++pc) {
+      Bits bits = incoming(pc);
+      for (size_t w = 0; w < words; ++w) bits[w] |= writes[pc][w];
+      if (bits != out[pc]) {
+        out[pc] = std::move(bits);
+        changed = true;
+      }
+    }
+  }
+  for (size_t pc = 0; pc <= n; ++pc) {
+    const Bits bits = incoming(pc);
+    for (Span s : reads[pc])
+      for (int r = s.reg; r < s.reg + s.len; ++r)
+        if (!(bits[(size_t)r / 64] & (uint64_t{1} << (r % 64)))) return false;
+  }
+  return true;
+}
+
+bool elide_program_dead_constants(Program& p) {
+  if (std::getenv("STANLI_NO_DEAD_CONSTANTS")) return false;
+  const size_t n = p.code.size();
+  for (const auto& I : p.code)
+    if (branches(I.code) && (I.dst < 0 || (size_t)I.dst > n)) return false;
+  std::vector<bool> remove(n, false);
+  bool changed = false;
+  for (size_t pc = 0; pc < n; ++pc) {
+    const auto& initial = p.code[pc];
+    if (initial.code != Program::CONST) continue;
+    const Span cell{initial.dst, 1};
+    for (size_t next = pc + 1; next < n; ++next) {
+      const auto& I = p.code[next];
+      // Stop at control flow and instructions without fully modelled spans.
+      // Refusing extra instructions is cheap; no cross-block liveness needed.
+      if (program_spec_of(I).has(kProgramNoAdjoint)) break;
+      bool read = false, written = false;
+      each_read(p, I, [&](Span s) { read = read || overlaps(cell, s); });
+      if (read) break;
+      if (I.code == Program::CALL) {
+        // Replay stores CALL scratch privately; only its output is written
+        // into both the double and var register files.
+        const auto& call = p.calls[(size_t)I.a];
+        written = overlaps(cell, Span{call.out, call.out_len});
+      } else {
+        each_write(p, I,
+                   [&](Span s) { written = written || overlaps(cell, s); });
+      }
+      if (written) {
+        remove[pc] = changed = true;
+        break;
+      }
+    }
+  }
+  if (!changed) return false;
+  std::vector<int> new_pc(n + 1);
+  std::vector<Program::Instr> code;
+  code.reserve(n);
+  for (size_t pc = 0; pc < n; ++pc) {
+    new_pc[pc] = static_cast<int>(code.size());
+    if (!remove[pc]) code.push_back(p.code[pc]);
+  }
+  new_pc[n] = static_cast<int>(code.size());
+  for (auto& I : code)
+    if (branches(I.code)) I.dst = new_pc[(size_t)I.dst];
+  p.code = std::move(code);
+  return true;
+}
+
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {
   (void)compact_program_gated(p, seeded, true);
 }
