@@ -27,6 +27,9 @@
 #include <stanli/optable.hpp>
 #include <stanli/program_density.hpp>
 
+#include <boost/unordered/unordered_flat_map.hpp>
+#include <boost/unordered/unordered_flat_set.hpp>
+
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
@@ -234,7 +237,9 @@ struct Compiler {
   // no op reader for last_use to see, so they can never be aliased over.
   const std::unordered_set<int>& pinned;
   IslandProg prog;
-  std::unordered_map<int, int> reg_of;  // slot -> first register
+  // Entries are only looked up by slot, never iterated or retained across
+  // insertion. Flat storage avoids a heap node per speculative register.
+  boost::unordered_flat_map<int, int> reg_of;  // slot -> first register
   std::vector<int> live_in_slots;
   size_t op_index = 0;  // graph index of the op being compiled
   // Scratch registers CALLs allocated: working memory the graph op also
@@ -605,6 +610,8 @@ struct Carver {
   std::vector<Candidate> liveness_queue;
   size_t liveness_queue_pos = 0;
   std::vector<size_t> liveness_queue_cuts;
+  size_t pricing_cost_begin = 0;
+  std::vector<int64_t> pricing_cost_prefix;
 
   Carver(Graph& graph,
          const std::vector<std::pair<int, std::vector<double>>>& fills,
@@ -655,20 +662,27 @@ struct Carver {
   // The graph's side of the estimate: what its ops move (an in-place
   // element update moves one element, not a vector) plus what each op
   // costs to run.
+  int64_t op_graph_cost(size_t u) const {
+    const Op& op = g.ops[u];
+    int64_t traffic;
+    if (op.opcode == OP_SET_INDEX_INPLACE)
+      traffic = 1;
+    else if (op.opcode == OP_SET_SLICE_INPLACE)
+      traffic = g.slots[op.in[1]].len;
+    else if (op.opcode == OP_DOT)
+      traffic = g.slots[op.in[0]].len;
+    else
+      traffic = g.slots[op.out].len;
+    return traffic + graph_op_cost(op.opcode);
+  }
+
   int64_t graph_cost(size_t i, size_t j) const {
+    if (!pricing_cost_prefix.empty() && i >= pricing_cost_begin &&
+        j - pricing_cost_begin < pricing_cost_prefix.size())
+      return pricing_cost_prefix[j - pricing_cost_begin] -
+             pricing_cost_prefix[i - pricing_cost_begin];
     int64_t cost = 0;
-    for (size_t u = i; u < j; ++u) {
-      const Op& op = g.ops[u];
-      if (op.opcode == OP_SET_INDEX_INPLACE)
-        cost += 1;
-      else if (op.opcode == OP_SET_SLICE_INPLACE)
-        cost += g.slots[op.in[1]].len;
-      else if (op.opcode == OP_DOT)
-        cost += g.slots[op.in[0]].len;
-      else
-        cost += g.slots[op.out].len;
-      cost += graph_op_cost(op.opcode);
-    }
+    for (size_t u = i; u < j; ++u) cost += op_graph_cost(u);
     return cost;
   }
 
@@ -688,7 +702,7 @@ struct Carver {
     // the program's live-outs are registers and compaction renumbers them.
     c.in_set.insert(cc.live_in_slots.begin(), cc.live_in_slots.end());
     if (compiled) {
-      std::unordered_set<int> seen;
+      boost::unordered_flat_set<int> seen;
       for (size_t u = i; u < j; ++u) {
         const int o = g.ops[u].out;
         if (seen.count(o)) continue;
@@ -930,7 +944,7 @@ struct Carver {
   // otherwise every rewrite would double- or triple-book the same value.
   std::vector<int64_t> live_pressure(size_t i, size_t j) const {
     std::vector<int64_t> diff(j - i + 2, 0);
-    std::unordered_set<int> charged;
+    boost::unordered_flat_set<int> charged;
     for (size_t u = i; u < j; ++u) {
       const int o = g.ops[u].out;
       if (o < 0 || !charged.insert(o).second) continue;
@@ -1034,6 +1048,16 @@ struct Carver {
   }
 
   int64_t liveness_split_cost(size_t i, size_t j, bool* any) {
+    // Every candidate sees the same graph until emission. Prefix sums give
+    // exactly the existing additive cost without rescanning each overlapping
+    // interval. Discard them before emission can rename or append slots.
+    if (cache_liveness_prices) {
+      pricing_cost_begin = i;
+      pricing_cost_prefix.assign(j - i + 1, 0);
+      for (size_t u = i; u < j; ++u)
+        pricing_cost_prefix[u + 1 - i] =
+            pricing_cost_prefix[u - i] + op_graph_cost(u);
+    }
     liveness_prices.clear();
     const LivenessPricing p = price_liveness(i, j);
     liveness_queue.clear();
@@ -1042,6 +1066,7 @@ struct Carver {
     collect_liveness(i, j, i);
     // Emission can rename graph slots. No decision survives that boundary.
     liveness_prices.clear();
+    pricing_cost_prefix.clear();
     *any = p.any;
     return p.report;
   }

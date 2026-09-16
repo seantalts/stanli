@@ -1517,6 +1517,22 @@ static void test_extremum_instantiations() {
 
 // ---- scalar probability functions -------------------------------------
 
+static void test_density_opcode_lookup() {
+  std::vector<int> expected(65536, -1);
+#define STANLI_EXPECT_DENSITY_OPCODE(opc, fn, arity, tier) \
+  expected[opc] = program_density_id_by_name(#fn);
+  STANLI_SCALAR_DENSITY_LIST(STANLI_EXPECT_DENSITY_OPCODE)
+  STANLI_SCALAR_CDF_LIST(STANLI_EXPECT_DENSITY_OPCODE)
+#undef STANLI_EXPECT_DENSITY_OPCODE
+  for (size_t op = 0; op < expected.size(); ++op) {
+    if (program_density_id_by_opcode(static_cast<uint16_t>(op)) !=
+        expected[op]) {
+      ++failures;
+      std::printf("FAIL density opcode/name lookup disagreement: %zu\n", op);
+    }
+  }
+}
+
 static void test_densities() {
   // EVERY scalar density/CDF the register machine speaks, discovered from
   // the shared table rather than listed here, so one added to the runtime is
@@ -1897,6 +1913,7 @@ int main() {
   test_nan_operands();
   test_extremum_instantiations();
   test_reductions();
+  test_density_opcode_lookup();
   test_densities();
   test_density_masked_partials();
   test_density_early_return_partials();
