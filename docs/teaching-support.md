@@ -49,6 +49,12 @@ comparison. Failed or capped runs do not pass. Later GP fixes and their
 [separate validation](../output/teaching-performance/followup-4db5dca2/README.md)
 are not substituted into this sweep.
 
+A subsequent [brms control-flow follow-up](../output/teaching-performance/followup-brms-control/README.md)
+adds COM-Poisson evaluation support and reduces asymmetric-Laplace sampling
+costs. It reports fresh numerical differences and separate timings, including
+remaining caps and executable-startup effects; the complete-sweep counts above
+remain unchanged.
+
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
 covers all 61 book call sites and the separate hurdle fixture. The
 [classroom guide](teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)

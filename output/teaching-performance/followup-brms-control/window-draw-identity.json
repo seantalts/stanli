@@ -1,0 +1,58 @@
+[
+  {
+    "model": "sw_asymlaplace",
+    "seed": 1,
+    "previous_sha256": "ec47d5debc89023cd42d50c88cbba01d94ef9646d2e6f58c2e0de0054e63d937",
+    "candidate_sha256": "ec47d5debc89023cd42d50c88cbba01d94ef9646d2e6f58c2e0de0054e63d937",
+    "identical": true
+  },
+  {
+    "model": "sw_asymlaplace",
+    "seed": 2,
+    "previous_sha256": "d1c0725664547d043e2254d926942c63ca2855c4ddba3eac9891bbb4a7ffeadd",
+    "candidate_sha256": "d1c0725664547d043e2254d926942c63ca2855c4ddba3eac9891bbb4a7ffeadd",
+    "identical": true
+  },
+  {
+    "model": "sw_asymlaplace",
+    "seed": 3,
+    "previous_sha256": "fe9877f2aea10f7391b8e92811cd8b0f7faea0c93aa8fbe8b3beccd8d7688116",
+    "candidate_sha256": "fe9877f2aea10f7391b8e92811cd8b0f7faea0c93aa8fbe8b3beccd8d7688116",
+    "identical": true
+  },
+  {
+    "model": "sw_asymlaplace",
+    "seed": 4,
+    "previous_sha256": "c45baa92c9a8cc76d81bba344696e24e3b5e6fc58ee2eb673d5a3cc0f7939b18",
+    "candidate_sha256": "c45baa92c9a8cc76d81bba344696e24e3b5e6fc58ee2eb673d5a3cc0f7939b18",
+    "identical": true
+  },
+  {
+    "model": "s2_zi_asymlaplace",
+    "seed": 1,
+    "previous_sha256": "0f5b5e72536fa7057c7ac4dbecdfe8baab9483e5f667866396b2a88204e0db01",
+    "candidate_sha256": "0f5b5e72536fa7057c7ac4dbecdfe8baab9483e5f667866396b2a88204e0db01",
+    "identical": true
+  },
+  {
+    "model": "s2_zi_asymlaplace",
+    "seed": 2,
+    "previous_sha256": "3a4a049fdc0c23d199a4c504742b7a00ccfd5f763d486d075fbbb43c35015a95",
+    "candidate_sha256": "3a4a049fdc0c23d199a4c504742b7a00ccfd5f763d486d075fbbb43c35015a95",
+    "identical": true
+  },
+  {
+    "model": "s2_zi_asymlaplace",
+    "seed": 3,
+    "previous_sha256": "e62918dd4f0a3952803efd425c13e255ff4cef1c500157bdb13a7dc890f688e2",
+    "candidate_sha256": "e62918dd4f0a3952803efd425c13e255ff4cef1c500157bdb13a7dc890f688e2",
+    "identical": true
+  },
+  {
+    "model": "s2_zi_asymlaplace",
+    "seed": 4,
+    "previous_sha256": "f0f6a67f2b656b5bb91c37e204c02c558b5dae27457e71d0e5b0e20bbab0f7ea",
+    "candidate_sha256": "f0f6a67f2b656b5bb91c37e204c02c558b5dae27457e71d0e5b0e20bbab0f7ea",
+    "identical": true
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "engine": "stanli",
+    "rep": 0,
+    "elapsed_s": 0.4680895,
+    "returncode": 2,
+    "stdout": "",
+    "stderr": "usage: stanli_run model.stan data.json [--seed N] [--warmup N] [--samples N] [--delta X] [--max-depth N] [--stanli-compile PATH | --stanc PATH] [--sampler-stats] [--chains N] [--num-threads N] [--thin N] [--save-warmup] [--init-radius X] [--summary] [--timings]\n"
+  },
+  {
+    "engine": "stanli",
+    "rep": 1,
+    "elapsed_s": 0.005747082999999986,
+    "returncode": 2,
+    "stdout": "",
+    "stderr": "usage: stanli_run model.stan data.json [--seed N] [--warmup N] [--samples N] [--delta X] [--max-depth N] [--stanli-compile PATH | --stanc PATH] [--sampler-stats] [--chains N] [--num-threads N] [--thin N] [--save-warmup] [--init-radius X] [--summary] [--timings]\n"
+  },
+  {
+    "engine": "cmdstan",
+    "rep": 0,
+    "elapsed_s": 0.15624762500000006,
+    "returncode": 1,
+    "stdout": "Usage: /tmp/stanli-teaching-perf/gaps-v8/launch-probe/cmdstan <arg1> <subarg1_1> ... <subarg1_m> ... <arg_n> <subarg_n_1> ... <subarg_n_m>\n\nBegin by selecting amongst the following inference methods and diagnostics,\n  sample      Bayesian inference with Markov Chain Monte Carlo\n  optimize    Point estimation\n  variational  Variational inference\n  diagnose    Model diagnostics\n  generate_quantities  Generate quantities of interest\n  pathfinder  Pathfinder algorithm\n  log_prob    Return the log density up to a constant and its gradients, given supplied parameters\n  laplace     Sample from a Laplace approximation\n\nOr see help information with\n  help        Prints help\n  help-all    Prints entire argument tree\n\nAdditional configuration available by specifying\n  id          Unique process identifier\n  data        Input data options\n  init        Initialization method: \"x\" initializes randomly between [-x, x], \"0\" initializes to 0, anything else identifies a file of values. If multiple chains are run, this can either be a single path, in which case its name will have _ID appended, or a comma-separated list of names.\n  random      Random number configuration\n  output      File output options\n  num_threads  Number of threads available to the program. To use this argument, re-compile this model with STAN_THREADS=true.\n\nSee /tmp/stanli-teaching-perf/gaps-v8/launch-probe/cmdstan <arg1> [ help | help-all ] for details on individual arguments.\n\n",
+    "stderr": ""
+  },
+  {
+    "engine": "cmdstan",
+    "rep": 1,
+    "elapsed_s": 0.008879542000000074,
+    "returncode": 1,
+    "stdout": "Usage: /tmp/stanli-teaching-perf/gaps-v8/launch-probe/cmdstan <arg1> <subarg1_1> ... <subarg1_m> ... <arg_n> <subarg_n_1> ... <subarg_n_m>\n\nBegin by selecting amongst the following inference methods and diagnostics,\n  sample      Bayesian inference with Markov Chain Monte Carlo\n  optimize    Point estimation\n  variational  Variational inference\n  diagnose    Model diagnostics\n  generate_quantities  Generate quantities of interest\n  pathfinder  Pathfinder algorithm\n  log_prob    Return the log density up to a constant and its gradients, given supplied parameters\n  laplace     Sample from a Laplace approximation\n\nOr see help information with\n  help        Prints help\n  help-all    Prints entire argument tree\n\nAdditional configuration available by specifying\n  id          Unique process identifier\n  data        Input data options\n  init        Initialization method: \"x\" initializes randomly between [-x, x], \"0\" initializes to 0, anything else identifies a file of values. If multiple chains are run, this can either be a single path, in which case its name will have _ID appended, or a comma-separated list of names.\n  random      Random number configuration\n  output      File output options\n  num_threads  Number of threads available to the program. To use this argument, re-compile this model with STAN_THREADS=true.\n\nSee /tmp/stanli-teaching-perf/gaps-v8/launch-probe/cmdstan <arg1> [ help | help-all ] for details on individual arguments.\n\n",
+    "stderr": ""
+  }
+]

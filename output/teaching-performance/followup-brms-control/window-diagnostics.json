@@ -1,0 +1,90 @@
+{
+  "sw_asymlaplace": {
+    "run_id": "32062d8f705a7f84",
+    "engines": {
+      "stanli": {
+        "status": "complete",
+        "chains": 4,
+        "parameters": 4,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0078732598603284,
+        "ess_bulk_min": 674.10677416260694,
+        "ess_tail_min": 824.15934657320201,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.92175685791555328,
+        "screening_flag": false
+      },
+      "cmdstan": {
+        "status": "complete",
+        "chains": 4,
+        "parameters": 4,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.003670405088485,
+        "ess_bulk_min": 668.27018104686681,
+        "ess_tail_min": 760.37154288669012,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.94186211622499372,
+        "screening_flag": false
+      }
+    },
+    "comparison": {
+      "status": "complete",
+      "parameters": 4,
+      "median_mean_difference_in_sd": 0.030513005586303217,
+      "max_mean_difference_in_sd": 0.036553750065447463,
+      "max_difference_parameter": "b.1"
+    }
+  },
+  "s2_zi_asymlaplace": {
+    "run_id": "32062d8f705a7f84",
+    "engines": {
+      "stanli": {
+        "status": "complete",
+        "chains": 4,
+        "parameters": 5,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0032613161181725,
+        "ess_bulk_min": 675.96065446191994,
+        "ess_tail_min": 788.82112608795751,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.91550160581211315,
+        "screening_flag": false
+      },
+      "cmdstan": {
+        "status": "complete",
+        "chains": 4,
+        "parameters": 5,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0027931919317439,
+        "ess_bulk_min": 840.2082629567534,
+        "ess_tail_min": 1108.6225773839474,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 1.025472470348963,
+        "screening_flag": false
+      }
+    },
+    "comparison": {
+      "status": "complete",
+      "parameters": 5,
+      "median_mean_difference_in_sd": 0.020592426124285319,
+      "max_mean_difference_in_sd": 0.03809629001061153,
+      "max_difference_parameter": "b.1"
+    }
+  }
+}
