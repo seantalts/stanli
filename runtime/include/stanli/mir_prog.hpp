@@ -2164,7 +2164,14 @@ struct ProgramCompiler {
     if (layout.integer_matrix_rows != 0)
       idata = {(int)layout.integer_matrix_rows,
                (int)layout.integer_matrix_cols};
-    return kernel_call(spec.opcode, args, out, 0, spec.activity_mask,
+    uint8_t activity = spec.activity_mask;
+    for (size_t k = 0; k < arity; ++k) {
+      // Runtime integers and data-only values still execute normally, but
+      // have no derivative. A promotion alone is not proof of inactivity.
+      if (e.args[k].data_only || int_operand(e.args[k]))
+        activity &= (uint8_t)~(1u << k);
+    }
+    return kernel_call(spec.opcode, args, out, 0, activity,
                        std::move(idata), {}, e.name);
   }
 

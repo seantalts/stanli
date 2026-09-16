@@ -978,6 +978,46 @@ void test_constant_probes() {
           "shape without runtime values");
 }
 
+void test_builtin_activity() {
+  for (int mode = 0; mode < 4; ++mode) {
+    stanli::Program p;
+    std::map<std::string, const FunDef*> functions;
+    stanli::ProgramCompiler pc{p, functions};
+    pc.reals["x"] = stanli::Range{pc.alloc(1), 1};
+    Expr argument = var("x", mode == 2 ? "UInt" : "UReal");
+    argument.data_only = mode == 1;
+    argument.promoted = mode == 3;
+    stanli::Range out;
+    try {
+      out = pc.expr(fun("lgamma", {argument}, "UReal"));
+    } catch (const stanli::Bail& error) {
+      ++failures;
+      std::printf("FAIL builtin argument mode %d: %s\n", mode, error.why.c_str());
+      continue;
+    }
+    if (p.calls.size() != 1 ||
+        p.calls[0].input_adjoint_mask != (mode == 0 || mode == 3 ? 1 : 0)) {
+      ++failures;
+      std::printf("FAIL builtin argument activity mode %d\n", mode);
+    }
+    for (double value : {2., 4.}) {
+      stan::math::nested_rev_autodiff nested;
+      stan::math::var input = value;
+      std::vector<stan::math::var> reg(p.n_regs);
+      reg[0] = input;
+      stanli::run_program(p, reg);
+      reg[out.reg].grad();
+      const double want_grad =
+          mode == 0 || mode == 3 ? stan::math::digamma(value) : 0.;
+      if (reg[out.reg].val() != stan::math::lgamma(value) ||
+          input.adj() != want_grad) {
+        ++failures;
+        std::printf("FAIL builtin argument derivative mode %d\n", mode);
+      }
+    }
+  }
+}
+
 void test_constant_fill_bits() {
   double nan1, nan2;
   const uint64_t bits1 = UINT64_C(0x7ff8000000000021);
@@ -1187,6 +1227,7 @@ void test_runtime_remainder_and_identity_index() {
 }  // namespace
 
 int main() {
+  test_builtin_activity();
   test_constant_fill_bits();
   test_dynamic_vector_program();
   test_runtime_remainder_and_identity_index();

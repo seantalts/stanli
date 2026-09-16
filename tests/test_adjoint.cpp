@@ -149,6 +149,35 @@ static int64_t ulps(double a, double b) {
   return d < 0 ? -d : d;
 }
 
+static void test_inactive_call_replay() {
+  Program::Call call;
+  call.n_in = 2;
+  call.in[0] = 0;
+  call.in[1] = 1;
+  call.in_len[0] = call.in_len[1] = call.out_len = 1;
+  call.out = 0;  // overwrite an input only after reading all input values
+  call.input_adjoint_mask = 0;
+  call.variant = 2;
+  call.idata = {3};
+  call.forward = test_call_forward;
+  call.backward = [](KernelCtx&) { throw std::logic_error("unexpected reverse"); };
+  stan::math::nested_rev_autodiff nested;
+  stan::math::var a = 2., b = 4.;
+  std::vector<stan::math::var> reg{a, b};
+  run_call_var(call, reg.data());
+  expect("inactive CALL forward alias/context", reg[0].val() == 13.);
+  reg[0].grad();
+  expect("inactive CALL has no derivative", a.adj() == 0. && b.adj() == 0.);
+  call.forward = [](KernelCtx&) { throw std::domain_error("forward validation"); };
+  bool threw = false;
+  try {
+    run_call_var(call, reg.data());
+  } catch (const std::domain_error&) {
+    threw = true;
+  }
+  expect("inactive CALL preserves validation", threw);
+}
+
 static void test_call_binding_refusal() {
   Program::Call registered;
   registered.opcode = OP_POW;
@@ -1900,6 +1929,7 @@ static void test_fuzz_ranges() {
 }
 
 int main() {
+  test_inactive_call_replay();
   test_acyclic_branches();
   test_call_binding_refusal();
   test_call_cached_forward_reverse_aliasing();

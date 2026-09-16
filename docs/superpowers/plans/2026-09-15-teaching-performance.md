@@ -859,3 +859,25 @@ median is 1.0997 seconds. No completed-run Stanli median is available.
 Keep this small general optimization, but the sampling performance gap remains.
 Exact patches, identities, raw timings and logs are retained separately in
 `/tmp/stanli-teaching-perf/gaps-v8/fill-*`; the published v6 evidence is unchanged.
+
+### Inactive builtin derivatives
+
+The post-broadcast profile still shows kernel reverse allocation and lgamma
+derivatives for integer arguments. Builtin calls now intersect their derivative
+mask with MIR data-only/integer metadata. Promotion alone is not proof. Calls
+with no active input retain all forward evaluation/validation, but omit reverse
+state and callbacks. Tests cover active/promoted reals, runtime integers/data,
+changing values, aliased outputs, and observable forward exceptions.
+
+Five counterbalanced pairs give COM-Poisson median 332.467 -> 300.672 us
+(candidate range 296.870–307.944 us), CmdStan 59.815 us. CmdStan/Stanli is 0.199
+for warm gradients; internal improvement is 1.106x. Values remain identical.
+ALD medians 5.951/5.910 us, GEV 13.512/13.243 us, m14.8 canary 2.732/2.768 us;
+these short runs do not resolve small differences in canary performance.
+Keep the bounded change. All 251 CTests (including source `%` regressions),
+316 existing-policy reference checks, and 456 R expectations pass.
+Four fresh 1000+1000 sampling pairs still cap all Stanli seeds; CmdStan median
+is 1.0944 s. No completed-run ratio is reported. Exact measured patches, binary
+hashes, and raw records: `/tmp/stanli-teaching-perf/gaps-v8/inactive-*`.
+The remaining cost includes interpreter dispatch and replay; eliminating only
+inactive derivatives cannot reach parity. ALD/GEV remain separate targets.
