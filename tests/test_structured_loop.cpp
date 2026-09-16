@@ -4802,6 +4802,9 @@ static void segment_tests() {
 }
 
 int main() {
+  // This suite exercises retained plans, including their automatic selector.
+  // Whole-program specialization has its own differential tests in test_lower.
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0");
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
   test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
   segment_tests();

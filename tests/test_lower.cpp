@@ -500,6 +500,18 @@ static void test_bounded_specialization() {
                     xb.value_ptr(wb.columns[i].slot)[0]);
       }
     }
+  // Range reductions are outside the single-selector specialization proof.
+  const auto range_mir = slurp("tests/fixtures/dynslice.tmir.sexp");
+  const auto range_data =
+      DataMap::from_json(slurp("tests/fixtures/dynslice.json"));
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
+  const auto range_base = compile_model(range_mir, range_data);
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "1", 1);
+  const auto range_trial = compile_model(range_mir, range_data);
+  test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+  check(same_graph_structure(range_base, range_trial) &&
+            range_base.fills == range_trial.fills,
+        "range/gather body keeps its original representation");
 }
 
 static void test_symbolic_lane_chain(const std::string& fixture) {
@@ -1386,8 +1398,8 @@ int main() {
     expect_eq("ndlit lp", lp, wt * q[1] + s3 * q[2]);
   }
 
-  // Small decidable whiles specialize under the bounded default. The
-  // explicit retained and legacy policies keep their original loop forms.
+  // This model also uses gathers, so whole-program specialization declines
+  // it. Its whiles retain their loop forms under the automatic policy.
   {
     const auto count_whiles = [](const CompiledModel& model) {
       size_t whiles = 0;
@@ -1399,14 +1411,7 @@ int main() {
         DataMap::from_json(slurp("tests/fixtures/whileloop.json"));
     CompiledModel lm =
         compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
-    check(count_opcode(lm, OP_LOOP) == 0,
-          "small data whiles specialize within budget");
-    test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
-    const auto retained =
-        compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
-    test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
-    check(count_whiles(retained) == 3,
-          "ablation retains all three while loops");
+    check(count_whiles(lm) == 3, "gather-containing model retains three loops");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.1;

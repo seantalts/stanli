@@ -865,6 +865,12 @@ namespace {
 bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
   bool controlled_loop = false;
   std::function<bool(const mir::Expr&)> expression = [&](const mir::Expr& e) {
+    // Expansion gains were established for single selectors. Range/gather
+    // bodies also expose different reduction/fusion choices; keep their
+    // established representation until that separate arithmetic is proved.
+    if (e.kind == mir::Expr::FunApp && e.name.compare(0, 5, "Index") == 0 &&
+        e.name != "IndexSingle")
+      return false;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       return false;
     if (lo.expr_effectful(e)) return false;
