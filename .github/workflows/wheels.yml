@@ -1182,7 +1182,7 @@ jobs:
           working-directory: r
           extra-packages: >-
             any::testthat, any::posterior, any::V8, any::jsonlite,
-            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan
+            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr
           dependencies: '"hard"'
       - name: Install and run ecosystem acceptance (no skips)
         run: |
