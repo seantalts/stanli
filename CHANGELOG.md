@@ -4,6 +4,10 @@
 
 ### Improvements
 
+- Add `as_rfit()` and native RStan-style extraction, summaries, sampler
+  parameters, and timings without an RStan dependency. Keep the existing
+  optional S4 `as_stanfit()` conversion and ecosystem integrations.
+
 - Speed up categorical, ordinal, multivariate-normal, Dirichlet, Wiener,
   truncated-distribution and GP calculations; reduce loop and preparation costs.
 - Document Rethinking, brms, and educational-model support with current-build
