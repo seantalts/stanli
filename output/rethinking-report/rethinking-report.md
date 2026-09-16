@@ -1,6 +1,6 @@
 # Rethinking models: speedup and numerical differences
 
-Prepared for Richard McElreath | 16 September 2026
+16 September 2026
 
 We compared the unchanged Stan programs and processed data from all 61 ulam() call sites in the second-edition book supplement. Every call site completed four sampling seeds in both engines. A separate hurdle example is also included.
 
