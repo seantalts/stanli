@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+## 0.14.2
+
 - Add `as_cstanfit()` and `sample_cstan()` for native CmdStanR-style fit
   methods and sampler arguments without cmdstanr or rstan. Stored-draw
-  summaries, diagnostics, and LOO survive serialization without a runtime.
+  summaries, diagnostics, and LOO survive serialization without a runtime,
+  with methods delegated to the installed package for future fixes.
+- Accept extra initialization fields in the CmdStanR-style sampler, and
+  preserve native fit conversion for models without recorded outputs.
 
 - Preserve distinct compiled programs when optimizing loops, and avoid
   redundant copies of single region results.
