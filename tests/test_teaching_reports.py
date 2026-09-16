@@ -1,8 +1,10 @@
 """Regression checks for censoring and selecting diagnostic parameter columns."""
 import importlib.util
 import json
+import math
 import pathlib
 import tempfile
+import sys
 import unittest
 from unittest import mock
 
@@ -16,6 +18,8 @@ def module(name):
     return result
 
 
+with mock.patch.object(sys, 'path', [str(ROOT / 'tools'), *sys.path]):
+    numerics = module('report_rethinking_numerics')
 report = module('report_teaching')
 jobs = module('teaching_diagnostic_jobs')
 docs = module('gen_docs')
@@ -137,6 +141,26 @@ class TeachingReports(unittest.TestCase):
                    'V.1.1', 'V.1.2', 'V.3.2', 'C.2.2', 'C.1.2', 'M.1.1']
         self.assertEqual(jobs.fixed_matrix_entries(source, columns),
                          {'L.2.1.1': 1, 'L.2.1.2': 0, 'V.1.2': 0, 'C.2.2': 1})
+
+
+class NumericalDistances(unittest.TestCase):
+    def test_one_representable_step(self):
+        result = numerics.errors([1.0, -1.0], [math.nextafter(1.0, math.inf), -1.0])
+        self.assertEqual(result['max_ulp'], 1)
+        self.assertEqual(result['max_absolute'], 2 ** -52)
+        self.assertEqual(result['count'], 2)
+
+    def test_near_zero_absolute_and_ulp_are_distinct(self):
+        result = numerics.errors([0.0], [1e-15])
+        self.assertEqual(result['max_absolute'], 1e-15)
+        self.assertGreater(result['max_ulp'], 1000000)
+        self.assertEqual(numerics.errors([-0.0], [0.0])['max_ulp'], 0)
+
+    def test_missing_or_nonfinite_comparisons_are_not_zero_error(self):
+        for reference, observed in [([1.0], []), ([math.inf], [math.inf]),
+                                    ([1.0], [math.nan])]:
+            with self.assertRaises(ValueError):
+                numerics.errors(reference, observed)
 
 
 if __name__ == '__main__':

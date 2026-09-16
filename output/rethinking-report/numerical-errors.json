@@ -1,0 +1,1076 @@
+{
+  "run_id": "fd5e0ecacddc7047",
+  "runtime_revision": "6e462c2e2bb4bc297165b5640dfe30318345960d",
+  "checker_sha256": "cbe9c77a89faf6772bebe159d543c8a1fac9fa43eba45133befa6c1a04fd5f5d",
+  "reference_sha256": "e1c95f5ed9fed26f51ab8b77cafb35b3d137eb510839fc2336317c38d2a7cbcd",
+  "reference_toolchain": {
+    "cmdstan": "11cb052d3e1fc8c799e0fec559e2ee5452b38d27",
+    "cmdstan_version": "2.39.0",
+    "math": "8f326d14599d3030c626c46532d8e8534c1cdbec",
+    "platform": "Darwin arm64",
+    "posteriordb": "28f8d3d6e975315f42aa274a8399f21e07a43b30",
+    "stan": "c96d04115d35cb04f42e45c5a69a82f9704798f1",
+    "stanc3": "8e154ac3454790cb5427ae72106c859b3fb8d90a"
+  },
+  "points": [
+    0,
+    1,
+    2
+  ],
+  "models": {
+    "ch09_m5_8s": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 12,
+        "max_absolute": 2.7284841053187847e-12,
+        "max_ulp": 5
+      },
+      "outputs": {
+        "count": 12,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_m5_8s2": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 12,
+        "max_absolute": 1.3642420526593924e-12,
+        "max_ulp": 3
+      },
+      "outputs": {
+        "count": 12,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_m9_1": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 15,
+        "max_absolute": 2.842170943040401e-14,
+        "max_ulp": 8
+      },
+      "outputs": {
+        "count": 15,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_m9_1_chains4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 15,
+        "max_absolute": 2.842170943040401e-14,
+        "max_ulp": 8
+      },
+      "outputs": {
+        "count": 15,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_m9_2": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_m9_3": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_m9_4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_m9_5": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch09_mp": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_10": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 12,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 72,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_11": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 15,
+        "max_absolute": 1.862645149230957e-09,
+        "max_ulp": 2
+      },
+      "outputs": {
+        "count": 75,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 33,
+        "max_absolute": 3.197442310920451e-14,
+        "max_ulp": 12
+      },
+      "outputs": {
+        "count": 3057,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_5": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 33,
+        "max_absolute": 1.0302869668521453e-13,
+        "max_ulp": 37
+      },
+      "outputs": {
+        "count": 3057,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_6": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 33,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 201,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_7": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 1.1368683772161603e-13,
+        "max_ulp": 3
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_8": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 24,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 24,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m11_9": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 36,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch11_m_pois": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_1": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 8.881784197001252e-16,
+        "max_ulp": 2
+      },
+      "outputs": {
+        "count": 12,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_2": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.4210854715202004e-14,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 18,
+        "max_absolute": 7.105427357601002e-15,
+        "max_ulp": 1
+      },
+      "outputs": {
+        "count": 78,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_3": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.9895196601282805e-12,
+        "max_ulp": 35
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 5.542233338928781e-13,
+        "max_ulp": 78
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_3_alt": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.1937117960769683e-12,
+        "max_ulp": 21
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 9.947598300641403e-13,
+        "max_ulp": 140
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.8844730220735073e-09,
+        "max_ulp": 518
+      },
+      "gradient": {
+        "count": 18,
+        "max_absolute": 1.418811734765768e-10,
+        "max_ulp": 312
+      },
+      "outputs": {
+        "count": 18,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_5": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 5.857145879417658e-10,
+        "max_ulp": 161
+      },
+      "gradient": {
+        "count": 33,
+        "max_absolute": 1.000444171950221e-11,
+        "max_ulp": 22
+      },
+      "outputs": {
+        "count": 33,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_6": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 8.36735125631094e-10,
+        "max_ulp": 230
+      },
+      "gradient": {
+        "count": 48,
+        "max_absolute": 3.495870259939693e-12,
+        "max_ulp": 137
+      },
+      "outputs": {
+        "count": 51,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch12_m12_7": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 8.440110832452774e-10,
+        "max_ulp": 232
+      },
+      "gradient": {
+        "count": 30,
+        "max_absolute": 7.185008144006133e-11,
+        "max_ulp": 79
+      },
+      "outputs": {
+        "count": 30,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_1": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 144,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 432,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_2": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 150,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 438,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_3": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 186,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 186,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 60,
+        "max_absolute": 2.842170943040401e-14,
+        "max_ulp": 36
+      },
+      "outputs": {
+        "count": 3084,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_4b": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 60,
+        "max_absolute": 2.842170943040401e-14,
+        "max_ulp": 36
+      },
+      "outputs": {
+        "count": 60,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_4nc": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 60,
+        "max_absolute": 2.930988785010413e-14,
+        "max_ulp": 58
+      },
+      "outputs": {
+        "count": 99,
+        "max_absolute": 5.551115123125783e-17,
+        "max_ulp": 1
+      }
+    },
+    "ch13_m13_5": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 39,
+        "max_absolute": 4.973799150320701e-14,
+        "max_ulp": 44
+      },
+      "outputs": {
+        "count": 3063,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_6": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 63,
+        "max_absolute": 2.842170943040401e-14,
+        "max_ulp": 36
+      },
+      "outputs": {
+        "count": 3087,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_7": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch13_m13_7nc": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_1": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 138,
+        "max_absolute": 1.0658141036401503e-14,
+        "max_ulp": 6
+      },
+      "outputs": {
+        "count": 147,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_10": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.4210854715202004e-14,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 12,
+        "max_absolute": 6.394884621840902e-14,
+        "max_ulp": 11
+      },
+      "outputs": {
+        "count": 12,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_11": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 15,
+        "max_absolute": 3.211653165635653e-12,
+        "max_ulp": 904
+      },
+      "outputs": {
+        "count": 15,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_2": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 5.684341886080802e-14,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 228,
+        "max_absolute": 1.0658141036401503e-14,
+        "max_ulp": 297
+      },
+      "outputs": {
+        "count": 288,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_3": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 5.684341886080802e-14,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 228,
+        "max_absolute": 1.0658141036401503e-14,
+        "max_ulp": 316
+      },
+      "outputs": {
+        "count": 3564,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 1.4210854715202004e-13,
+        "max_ulp": 3588805953060864
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_4x": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 1.4210854715202004e-13,
+        "max_ulp": 3588805953060864
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_5": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 12,
+        "max_absolute": 8.526512829121202e-14,
+        "max_ulp": 3588805953060864
+      },
+      "outputs": {
+        "count": 12,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_6": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.1368683772161603e-13,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 21,
+        "max_absolute": 2.8421709430404007e-13,
+        "max_ulp": 3588805953060864
+      },
+      "outputs": {
+        "count": 30,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_6x": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.1368683772161603e-13,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 21,
+        "max_absolute": 2.8421709430404007e-13,
+        "max_ulp": 3588805953060864
+      },
+      "outputs": {
+        "count": 30,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_7": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 2.2737367544323206e-13,
+        "max_ulp": 2
+      },
+      "gradient": {
+        "count": 1968,
+        "max_absolute": 5.9117155615240335e-12,
+        "max_ulp": 13
+      },
+      "outputs": {
+        "count": 3798,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_8": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 5.820766091346741e-11,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 45,
+        "max_absolute": 9.313225746154785e-10,
+        "max_ulp": 2
+      },
+      "outputs": {
+        "count": 45,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_8nc": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 45,
+        "max_absolute": 1.862645149230957e-09,
+        "max_ulp": 4
+      },
+      "outputs": {
+        "count": 675,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch14_m14_9": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 12,
+        "max_absolute": 5.684341886080802e-14,
+        "max_ulp": 246290604621824
+      },
+      "outputs": {
+        "count": 12,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_1": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 162,
+        "max_absolute": 1.7763568394002505e-15,
+        "max_ulp": 64
+      },
+      "outputs": {
+        "count": 162,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_2": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.1368683772161603e-13,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 312,
+        "max_absolute": 2.220446049250313e-16,
+        "max_ulp": 1
+      },
+      "outputs": {
+        "count": 312,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_3": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_5": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 54,
+        "max_absolute": 3.552713678800501e-15,
+        "max_ulp": 211106232532992
+      },
+      "outputs": {
+        "count": 54,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_6": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 18,
+        "max_absolute": 1.7763568394002505e-15,
+        "max_ulp": 4
+      },
+      "outputs": {
+        "count": 18,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_7": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 63,
+        "max_absolute": 3.9968028886505635e-15,
+        "max_ulp": 211106232532992
+      },
+      "outputs": {
+        "count": 72,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_8": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.9895196601282805e-13,
+        "max_ulp": 7
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 5.684341886080802e-14,
+        "max_ulp": 21
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch15_m15_9": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.9895196601282805e-13,
+        "max_ulp": 7
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 1.7053025658242404e-13,
+        "max_ulp": 21
+      },
+      "outputs": {
+        "count": 909,
+        "max_absolute": 3.552713678800501e-15,
+        "max_ulp": 16
+      }
+    },
+    "ch16_m16_1": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 1.1368683772161603e-13,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 1.7053025658242404e-13,
+        "max_ulp": 15
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "ch16_m16_4": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 0,
+        "max_ulp": 0
+      },
+      "gradient": {
+        "count": 9,
+        "max_absolute": 1.7053025658242404e-13,
+        "max_ulp": 8
+      },
+      "outputs": {
+        "count": 9,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    },
+    "extra_hurdle_poisson": {
+      "log_density": {
+        "count": 3,
+        "max_absolute": 3.552713678800501e-15,
+        "max_ulp": 1
+      },
+      "gradient": {
+        "count": 6,
+        "max_absolute": 8.881784197001252e-16,
+        "max_ulp": 1
+      },
+      "outputs": {
+        "count": 6,
+        "max_absolute": 0,
+        "max_ulp": 0
+      }
+    }
+  }
+}

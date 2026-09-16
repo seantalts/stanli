@@ -8,23 +8,24 @@ measurements are retained separately and are not mixed into these results.
 
 ## Results
 
-- **Numerics:** all **62/62** fixtures pass the three-point replay, including
-  outputs: 32,349 compared values, worst scaled discrepancy `1.48e-13` against
-  the unchanged `1e-9` gate. The m14.11 preparation timeout is fixed.
-- **Sampling:** all **61/61** book calls plus the hurdle fixture complete four
-  timed seeds in both engines. Stanli has lower median CLI runtime on all 61
-  book comparisons; the median CmdStan/Stanli ratio is **1.576**. m13.6 completes
-  every seed. Phylogenetic m14.11 takes 11.21 seconds versus CmdStan's 13.09.
-- **Quality:** **49/61** book calls plus the hurdle fixture complete and meet
-  the diagnostic screen in both engines. Timing alone does not establish
-  reliable inference.
+- **Speedup:** all 61 book call sites completed all four seeds. Median
+  CmdStan/Stanli complete CLI speedup: **1.576x**. Each fixture's ratio is in
+  the appendix. The report uses speedups; original times remain in the CSV.
+- **Numerics:** 32,349 values compared at three fixed parameter vectors for
+  each of 62 fixtures. Maximum absolute differences: **1.88e-9 log density**,
+  **1.86e-9 gradient component**, **3.55e-15 model output**. The tables separate
+  these quantities, and the CSV also records ULP distances.
+- **Sampler measurements:** divergence counts, maximum R-hat and minimum
+  bulk ESS remain in the CSV. The report has no diagnostic verdict column.
 
 ## Files
 
-- `rethinking-timings.csv`: every book call and the supplemental fixture, with timings and diagnostics.
+- `rethinking-timings.csv`: speedups, absolute differences, ULP distances, original timings and sampler measurements for every fixture.
 - `rethinking-results.json`: per-seed outcomes, caps, numerical results and run manifest.
 - `sampling-diagnostics.json`: post-run diagnostics for all 199 teaching fixtures; the report selects Rethinking rows.
-- `numerical-replay.txt`: all 62 Rethinking numerical/output checks.
+- `numerical-replay.txt`: the original 62-fixture numerical/output replay.
+- `numerical-errors.json`: separate maxima and counts for log density, gradients and model outputs, with checker and reference hashes.
+- `numerical-values.json.gz`: every paired reference/Stanli value from the descriptive replay using the same frozen build and inputs.
 - `numerical-replay-all.txt`: the full 316-model replay under the repository's existing policies.
 - `numerical-reference-subset.json.gz`: all 62 fixtures' pinned CmdStan references, unchanged by the performance fixes.
 - `benchmark-manifest.json`, `benchmark-summary.tsv`, `build-identity.json`: identities and original measurements.
@@ -52,3 +53,23 @@ eight significant digits for CmdStan and 17 for Stanli. Numerical verification
 uses separate high-precision values. Incomplete and flagged models remain in
 the report. Preparation and performance follow-ups are tracked in [#372](https://github.com/seantalts/stanli/issues/372)
 and [#373](https://github.com/seantalts/stanli/issues/373).
+
+## Regenerate the presentation
+
+The raw archive and original replay remain unchanged. The additional numerical
+files were produced afterward with the same frozen checker and model/data bytes.
+From the repository root, with that checker and run directory available:
+
+```sh
+python3 tools/report_rethinking_numerics.py RUN_DIRECTORY \
+  output/rethinking-report/numerical-reference-subset.json.gz \
+  output/teaching-performance/build-identity.json \
+  build-teaching-perf/stanli_check output/rethinking-report
+python3 tools/report_rethinking.py RUN_DIRECTORY \
+  output/rethinking-report/sampling-diagnostics.json \
+  output/rethinking-report/numerical-replay.txt output/rethinking-report
+```
+
+The numerical exporter verifies the checker hash and frozen input hashes;
+it does not change the CmdStan references or benchmark results. The report
+builder requires ReportLab. A new build must have its own recorded identity.
