@@ -612,15 +612,24 @@ double mn_eval(KernelCtx& ctx) {
   const int mu_encoded = ctx.n_idata > 2 ? ctx.idata[2] : -1;
   const bool propto = (ctx.variant & 0x80u) != 0;
   const unsigned mask = ctx.variant == 0 ? 0x7u : (ctx.variant & 0x3fu);
+  const bool ay = mask & 1u, am = mask & 2u, aS = mask & 4u;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
-  std::vector<VarV> ys = mvt_vectors<var>(ctx.in[0], n, y_encoded);
-  std::vector<VecD> ysd = mvt_vectors<double>(ctx.in[0], n, y_encoded);
-  std::vector<VarV> mus = mvt_vectors<var>(ctx.in[1], n, mu_encoded);
-  std::vector<VecD> musd = mvt_vectors<double>(ctx.in[1], n, mu_encoded);
-  VarM S(n, n);
-  for (int64_t j = 0; j < n; ++j)
-    for (int64_t i = 0; i < n; ++i) S(i, j) = ctx.in[2].data[j * n + i];
+  // Bind only the representation selected by activity. Inactive var copies
+  // and active double copies were never passed to Stan Math. Precision's
+  // replay retains its original inactive-var scatter contract.
+  std::vector<VarV> ys, mus;
+  std::vector<VecD> ysd, musd;
+  if (ay || Kind == kMnPrec) ys = mvt_vectors<var>(ctx.in[0], n, y_encoded);
+  if (!ay) ysd = mvt_vectors<double>(ctx.in[0], n, y_encoded);
+  if (am || Kind == kMnPrec) mus = mvt_vectors<var>(ctx.in[1], n, mu_encoded);
+  if (!am) musd = mvt_vectors<double>(ctx.in[1], n, mu_encoded);
+  VarM S;
+  if (aS || Kind == kMnPrec) {
+    S.resize(n, n);
+    for (int64_t j = 0; j < n; ++j)
+      for (int64_t i = 0; i < n; ++i) S(i, j) = ctx.in[2].data[j * n + i];
+  }
   CMapM Sd(ctx.in[2].data, n, n);
   // 8 activity combinations x propto; bind each argument var-or-double.
   auto call = [&](auto&& a, auto&& b, auto&& c) {
@@ -635,7 +644,6 @@ double mn_eval(KernelCtx& ctx) {
                     : stan::math::multi_normal_lpdf<false>(a, b, c);
     }
   };
-  const bool ay = mask & 1u, am = mask & 2u, aS = mask & 4u;
   const auto dispatch_mu = [&](auto&& y) -> var {
     const auto invoke = [&](auto&& mu) -> var {
       return aS ? call(y, mu, S) : call(y, mu, Sd);
@@ -649,7 +657,21 @@ double mn_eval(KernelCtx& ctx) {
   if constexpr (Kind == kMnPrec) {
     return finish_tail_density<Grad>(ctx, out, ys, mus, S);
   } else {
-    return tail_density_fwd(ctx, out, ys, mus, S);
+    if (!values_only()) {
+      stan::math::grad(out.vi_);
+      double* partial = ctx.scratch;
+      const auto stash = [&](int k, bool active, const auto& operand) {
+        if (active)
+          tail_stash(partial, operand);
+        else
+          std::fill_n(partial, ctx.in[k].len, 0.0);
+        partial += ctx.in[k].len;
+      };
+      stash(0, ay, ys);
+      stash(1, am, mus);
+      stash(2, aS, S);
+    }
+    return out.val();
   }
 }
 bool mn_single_shape(const KernelCtx& ctx) {
@@ -880,10 +902,19 @@ void mlt_self_transpose_fwd(KernelCtx& ctx) {
 }
 void mlt_self_transpose_bwd(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
-  nary_bwd(ctx, [rows, cols](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), rows, cols);
-    return stan::math::multiply_lower_tri_self_transpose(a);
-  });
+  if (!ctx.in_adj[0].data || !rows || !cols) return;
+  const CMapM a(ctx.in[0].data, rows, cols);
+  const MatD masked = a.triangularView<Eigen::Lower>();
+  // Match the existing weighted-sum tape's initially zero output adjoints,
+  // then its triangular callback and final input scatter. In particular,
+  // direct assignment of the seed would change negative-zero behavior.
+  const MatD seed =
+      (CMapM(ctx.out_adj_vec.data, rows, rows).array() + 0.0).matrix();
+  MatD local = MatD::Zero(rows, cols);
+  local += ((seed.transpose() + seed) * masked.triangularView<Eigen::Lower>())
+               .triangularView<Eigen::Lower>();
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    ctx.in_adj[0].data[i] += local.data()[i];
 }
 
 // ---- matrix solves: `A \ B` and `B / A` -----------------------------------
@@ -1789,8 +1820,8 @@ double lkjcov_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, S, mu, sig, eta);
 }
 
-// Binomial and categorical GLMs retain their established nested-tape path.
-// The ordered-logistic GLM below records partials directly.
+// Binomial GLMs retain their established nested-tape path.
+// Categorical and ordered-logistic GLMs below record partials directly.
 // idata = [outcome..., rows, cols] and, for binomial, the trial counts.
 enum GlmKind { kBinomLogitGlm, kCatLogitGlm };
 template <typename F>
@@ -1858,7 +1889,31 @@ void blglm_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = tglm_eval<kBinomLogitGlm>(ctx);
 }
 void clglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<kCatLogitGlm>(ctx);
+  const bool scalar_layout =
+      ctx.n_idata >= 4 && ctx.idata[ctx.n_idata - 2] == kGlmScalarLayoutMarker;
+  const int tail = scalar_layout ? 4 : 2;
+  const int64_t rows = ctx.idata[ctx.n_idata - tail];
+  const int64_t cols = ctx.idata[ctx.n_idata - tail + 1];
+  const bool scalar_y = scalar_layout && (ctx.idata[ctx.n_idata - 1] & 1u);
+  std::vector<int> y(ctx.idata, ctx.idata + rows);
+  sink s = recorded_tail_sink<3>(ctx);
+  sink_scope active(s);
+  const auto X = as_rvar_matrix(ctx.in[0], rows, cols);
+  const auto alpha = as_rvar(ctx.in[1]);
+  const auto beta = as_rvar_matrix(ctx.in[2], cols, ctx.in[2].len / cols);
+  // Preserve the established all-active instantiation, including design
+  // matrices supplied as data. Stan Math computes these partials directly;
+  // the recorder deposits them without allocating or walking a var tape.
+  with_glm_integer(y, scalar_y, [&](const auto& outcome) {
+    record_probability_call([&] {
+      return (ctx.variant & 0x80u)
+                 ? stan::math::categorical_logit_glm_lpmf<true>(outcome, X,
+                                                                alpha, beta)
+                 : stan::math::categorical_logit_glm_lpmf<false>(outcome, X,
+                                                                 alpha, beta);
+    });
+  });
+  ctx.out.data[0] = s.value;
 }
 void olglm_fwd(KernelCtx& ctx) {
   const bool scalar_layout =
@@ -1981,7 +2036,7 @@ void register_matrix_kernels() {
       Kernel{blglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
   register_kernel(
       OP_CATEGORICAL_LOGIT_GLM_LPMF,
-      Kernel{clglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
+      Kernel{clglm_fwd, recorded_tail_bwd<3>, recorded_tail_scratch<3>});
   register_kernel(
       OP_ORDERED_LOGISTIC_GLM_LPMF,
       Kernel{olglm_fwd, recorded_tail_bwd<3>, recorded_tail_scratch<3>});

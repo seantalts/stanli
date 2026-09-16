@@ -2442,6 +2442,56 @@ int main() {
     }
   }
 
+  // Scalar logits can bypass the var tape, but must retain the subtraction
+  // and scalar-exp reverse order even for prefilled or signed-zero adjoints.
+  {
+    const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+    const double inf = std::numeric_limits<double>::infinity();
+    const auto same_bits = [](double a, double b) {
+      return (std::isnan(a) && std::isnan(b)) ||
+             std::memcmp(&a, &b, sizeof(double)) == 0;
+    };
+    for (int n : {1, 2, 3, 8, 32})
+      for (int selected = 1; selected <= n; ++selected)
+        for (double scale : {0.0, 1.0, 1000.0, 1e308})
+          for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308, inf})
+            for (bool propto : {false, true}) {
+              stan::math::nested_rev_autodiff nested;
+              Eigen::VectorXd beta(n), adj(n);
+              Eigen::Matrix<stan::math::var, -1, 1> ref_beta(n);
+              for (int i = 0; i < n; ++i) {
+                beta(i) = scale * std::sin(i + 1.0);
+                ref_beta(i) = beta(i);
+                adj(i) = i % 2 ? -0.0 : 0.3125;
+                ref_beta(i).adj() = adj(i);
+              }
+              double outcome = selected, out = 0;
+              KernelCtx ctx{};
+              ctx.n_in = 2;
+              ctx.in[0] = Desc{&outcome, 1};
+              ctx.in[1] = Desc{beta.data(), n};
+              ctx.in_adj[1] = Desc{adj.data(), n};
+              ctx.out = Desc{&out, 1};
+              ctx.out_adj = weight;
+              ctx.variant = kCategoricalScalarOutcome | kCategoricalLogit |
+                            kCategoricalArgAutodiff | (propto ? 0x80u : 0u);
+              kernel->forward(ctx);
+              kernel->backward(ctx);
+              stan::math::var lp =
+                  propto ? stan::math::categorical_logit_lpmf<true>(selected,
+                                                                    ref_beta)
+                         : stan::math::categorical_logit_lpmf<false>(selected,
+                                                                     ref_beta);
+              stan::math::var ref = lp * weight;
+              stan::math::grad(ref.vi_);
+              check(same_bits(out * weight, ref.val()),
+                    "native scalar categorical logit value bits");
+              for (int i = 0; i < n; ++i)
+                check(same_bits(adj(i), ref_beta(i).adj()),
+                      "native scalar categorical logit gradient bits");
+            }
+  }
+
   // Array outcomes add one callback contribution per observation. Preserve
   // that exact accumulation order under a non-unit upstream adjoint; replacing
   // it with count * adjoint changes the selected gradient's low bit. The zero
@@ -3967,6 +4017,51 @@ int main() {
     expect_eq("whilegroup lp", ex.gradient(ga), bx.gradient(gb));
     for (int i = 0; i < 5; ++i)
       expect_eq("whilegroup g" + std::to_string(i), ga[i], gb[i]);
+  }
+
+  // The triangular pullback must match the old nested-tape weighted sum,
+  // including rectangular matrices, ignored upper entries, asymmetric seeds,
+  // overflow, and accumulation into existing input adjoints.
+  {
+    const Kernel* kernel = find_kernel(OP_MULT_LOWER_TRI_SELF_TRANSPOSE);
+    for (int nr : {1, 2, 3, 8})
+      for (int nc : {1, 2, 3, 8})
+        for (double scale : {0.0, 1.0, 1e-100, 1e100})
+          for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308,
+                                std::numeric_limits<double>::infinity()}) {
+            stan::math::nested_rev_autodiff nested;
+            Eigen::MatrixXd a(nr, nc), seed(nr, nr), adj(nr, nc);
+            for (int i = 0; i < a.size(); ++i) {
+              a.data()[i] = scale * std::sin(0.3 * (i + 1));
+              adj.data()[i] = i % 2 ? -0.0 : 0.3125;
+            }
+            for (int i = 0; i < seed.size(); ++i)
+              seed.data()[i] = (i % 3 == 0 ? -1.0 : 1.0) * weight;
+            auto ref_a = a.cast<stan::math::var>().eval();
+            auto result = stan::math::multiply_lower_tri_self_transpose(ref_a);
+            stan::math::var loss =
+                stan::math::sum(stan::math::elt_multiply(result, seed));
+            stan::math::grad(loss.vi_);
+            std::vector<double> expected(a.size());
+            for (int i = 0; i < a.size(); ++i)
+              expected[i] = adj.data()[i] + ref_a.data()[i].adj();
+            int idata[] = {nr, nc};
+            KernelCtx ctx{};
+            ctx.n_in = 1;
+            ctx.in[0] = Desc{a.data(), a.size()};
+            ctx.in_adj[0] = Desc{adj.data(), adj.size()};
+            ctx.out_adj_vec = Desc{seed.data(), seed.size()};
+            ctx.idata = idata;
+            ctx.n_idata = 2;
+            kernel->backward(ctx);
+            for (int i = 0; i < a.size(); ++i)
+              check((std::isnan(adj.data()[i]) && std::isnan(expected[i])) ||
+                        std::memcmp(&adj.data()[i], &expected[i],
+                                    sizeof(double)) == 0,
+                    "triangular native pullback bits");
+            ctx.in_adj[0].data = nullptr;
+            kernel->backward(ctx);
+          }
   }
 
   // multiply_lower_tri_self_transpose on a matrix parameter whose upper

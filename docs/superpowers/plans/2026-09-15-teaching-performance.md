@@ -565,3 +565,78 @@ approximate it. `test_densities` now compares weighted kernel execution against
 the prior container var overload. Raw: `poisson-scalar-probe.cpp` and `.log`.
 Next gates: rebuild, focused oracles, paired actual-model measurements, all
 CTests and references. Broader CDF singleton conversion remains untested.
+
+
+### Residual preparation and categorical/matrix work (16 September)
+
+The Poisson change passed the full 249-test suite, 316 reference-policy checks,
+62 strict Rethinking references, and 456 R expectations without skips or warnings.
+Five paired gradient windows gave upper-truncated Poisson 38.786 → 24.263 µs
+(CmdStan 25.757), both-bounds 43.917 → 30.818 (31.339); an unaffected negative
+binomial canary was 8.559 → 8.646 (8.724). All measured values/gradients were
+bitwise equal to the preceding runtime. Raw: `poisson-gradient-ab.jsonl`.
+
+A counterproposal to faster exhaustive partition pricing was to bound the
+search itself. On m14.11, retaining the structured loop made preparation very
+cheap but gradients about 3.5× slower; disabling liveness splits retained
+bitwise values and cheap preparation. The implemented structural policy allows
+max(65,536, four times span length) visited operations while pricing candidate
+intervals. It always considers the whole span; unvisited leaves retain graph
+operations. This changes the heuristic search, not density semantics, and is
+ablatable with STANLI_ISLAND_PRICING_BUDGET=0. Three alternating pairs reduced
+whole benchmark process time from 8.12–8.55 s to 0.719–0.734 s, with 400 ms
+measurement and 200 ms warmup included; gradients stayed 583–588 versus 588–595
+µs and bitwise equal. Tests exercise exhaustion and an unchanged small graph.
+Raw: `gp-representation-probe.jsonl`, `pricing-budget-ab.jsonl`.
+
+Audit correction: an ambiguous size_t test assertion initially failed to
+compile, and a shell without `set -e` then ran a stale test executable. That
+result was withdrawn. The assertion was corrected, and the fresh build/test
+passed (`budget-corrected-test-build.log`, `budget-corrected-test.log`). The
+316-reference run was fresh because its executable had relinked before that
+failure. Subsequent multi-command build/test scripts stop on errors.
+
+Scalar categorical-logit now keeps the primitive value/validation and applies
+the selected-index contribution followed by scalar exponential normalization.
+An Eigen packet-exp probe failed 253/32,144 exact comparisons; scalar std::exp
+passed all of them. Integrated weighted tests also cover nonzero existing
+adjoints, signed zeros, extremes and both proportional forms. Actual random
+intercept categorical gradients fell 11.088 → 5.108 µs (CmdStan 7.567), bitwise
+at the measured point (`categorical-chol-ab.jsonl`).
+
+Categorical GLM can use the existing partial recorder with the unchanged Stan
+Math probability function. The standalone probe passed 29,568 comparisons;
+production tests cover scalar/array outcomes, empty arrays, one category,
+rectangular designs, seven output weights and value-only/gradient reuse.
+Scalar empty outcomes are excluded: the existing serialized layout carries no
+outcome in that case. Five paired windows gave 1.460 → 1.206 µs (CmdStan 1.308),
+bitwise (`cat-glm-ab.jsonl`). Other GLM kernels retain their existing paths.
+
+Vectorized covariance/Cholesky densities now construct only the var or double
+argument representation their activity mask needs. Precision keeps its original
+bindings/scatter. Tests cover all eight masks, both densities and proportional
+forms, shared/vectorized locations, empty/small shapes and weighted reuse.
+Because the initial benefit was small, a predetermined confirmation used three
+A/A and three A/B pairs. Median A/A noise was 0.797%; candidate gains were
+1.482%, 4.053%, 2.546%, exceeding the declared median threshold 1.594%. Keep.
+Raw: `mvt-confirmation.jsonl` and `mvt-confirmation-summary.json`.
+
+The triangular self-product reverse now evaluates the same matrix callback,
+including zero-initialized seeding and local adjoints before final scatter,
+without rebuilding a var tape. A 5,488-comparison probe and integrated direct
+kernel tests include rectangular matrices, masked upper entries, asymmetric
+weights, overflow and prefilled adjoints. Five paired windows improved s2_unstr
+6.874 → 6.100 µs (CmdStan 6.438), bitwise; the m14.9 canary was 342.735 → 343.962
+(424.276). Raw: `mlt-probe.log`, `mlt-integration-test.log`, `mlt-ab.jsonl`.
+
+Rejected/parked experiments: a native single-vector Cholesky kernel was correct
+but did not accelerate the target, which uses vectorized arrays; removed. Lazy
+construction of the adjoint call context produced sub-percent changes within
+A/A noise; removed. Their patches remain local research artifacts. GEV and
+asymmetric-Laplace profiles still show interpreter/control and dispatch cost;
+changing loop policy alone did not establish parity. No sampling trajectory,
+RNG, adaptation or numerical threshold was adjusted to improve timings.
+
+These are fixed-point gradient and preparation results. A fresh complete
+sampling sweep and full integration checks remain required; none are spliced
+into the immutable a224d12afe02ac98 report checkpoint.

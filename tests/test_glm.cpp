@@ -295,7 +295,8 @@ static void check_active_designs() {
 // Compare the compact GLM kernels with a weighted nested-tape reference.
 static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
                            const std::vector<int>& idata, int rows, int cols,
-                           int alpha_len, int beta_len, double seed = -0.73) {
+                           int alpha_len, int beta_len, double seed = -0.73,
+                           bool scalar_y = false) {
   using namespace stanli;
   using stan::math::var;
   std::vector<double> X((size_t)rows * cols), a((size_t)alpha_len),
@@ -347,21 +348,35 @@ static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
     std::vector<int> yy(idata.begin(), idata.begin() + rows);
     Eigen::Matrix<var, -1, -1> bm(cols, beta_len / cols);
     for (int i = 0; i < beta_len; ++i) bm.data()[i] = bv(i);
-    ref = propto
-              ? stan::math::categorical_logit_glm_lpmf<true>(yy, Xv, av, bm)
-              : stan::math::categorical_logit_glm_lpmf<false>(yy, Xv, av, bm);
+    auto call = [&](const auto& y) {
+      return propto
+                 ? stan::math::categorical_logit_glm_lpmf<true>(y, Xv, av, bm)
+                 : stan::math::categorical_logit_glm_lpmf<false>(y, Xv, av, bm);
+    };
+    ref = scalar_y ? call(yy[0]) : call(yy);
+    auto exact = [&](const std::string& label, double actual, double expected) {
+      if (std::memcmp(&actual, &expected, sizeof(double)) != 0 &&
+          !(std::isnan(actual) && std::isnan(expected))) {
+        ++failures;
+        std::printf("FAIL %s got %.17g want %.17g\n", label.c_str(), actual,
+                    expected);
+      }
+    };
     var scaled_cat = ref * seed;
     stan::math::grad(scaled_cat.vi_);
-    expect_eq(tag + " total", got, scaled_cat.val());
+    exact(tag + " total", got, scaled_cat.val());
     size_t at = 0;
     for (size_t i = 0; i < X.size(); ++i)
-      expect_eq(tag + " dX" + std::to_string(i), grad[at++],
-                Xv.data()[i].adj());
+      exact(tag + " dX" + std::to_string(i), grad[at++], Xv.data()[i].adj());
     for (int i = 0; i < alpha_len; ++i)
-      expect_eq(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
+      exact(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
     for (int i = 0; i < beta_len; ++i)
-      expect_eq(tag + " db" + std::to_string(i), grad[at++],
-                bm.data()[i].adj());
+      exact(tag + " db" + std::to_string(i), grad[at++], bm.data()[i].adj());
+    exact(tag + " value-only", ex.forward_value_only(), got);
+    std::vector<double> repeated(grad.size());
+    exact(tag + " reused total", ex.gradient(repeated.data()), got);
+    for (size_t i = 0; i < grad.size(); ++i)
+      exact(tag + " reused gradient", repeated[i], grad[i]);
     return;
   } else {
     std::vector<int> yy(idata.begin(), idata.begin() + rows);
@@ -406,6 +421,32 @@ static void check_tail_glms() {
                  cols, cats, cols * cats);
   check_tail_glm("cat glm propto", OP_CATEGORICAL_LOGIT_GLM_LPMF, true, cat,
                  rows, cols, cats, cols * cats);
+
+  // Empty outcomes and one-category models disconnect the density; infinite
+  // output weights must not invent a derivative connection. Scalar outcomes
+  // retain their distinct Stan Math overload.
+  for (int nr : {0, 1, 2, 40})
+    for (int nc : {1, 3})
+      for (int categories : {1, 2, 3, 8})
+        for (bool propto : {false, true})
+          for (bool scalar : {false, true}) {
+            if (scalar && nr == 0) continue;
+            std::vector<int> outcomes;
+            for (int i = 0; i < nr; ++i)
+              outcomes.push_back(scalar ? 1 : 1 + i % categories);
+            outcomes.push_back(nr);
+            outcomes.push_back(nc);
+            if (scalar) {
+              outcomes.push_back(kGlmScalarLayoutMarker);
+              outcomes.push_back(1);
+            }
+            for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308,
+                                  std::numeric_limits<double>::infinity()})
+              check_tail_glm("categorical recorder",
+                             OP_CATEGORICAL_LOGIT_GLM_LPMF, propto, outcomes,
+                             nr, nc, categories, nc * categories, weight,
+                             scalar);
+          }
 
   // in = {X, beta, cutpoints}: the cutpoints ride the `alpha` slot here and
   // must stay ordered.
