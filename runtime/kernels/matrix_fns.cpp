@@ -652,7 +652,71 @@ double mn_eval(KernelCtx& ctx) {
     return tail_density_fwd(ctx, out, ys, mus, S);
   }
 }
-void mn_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_eval<false>(ctx); }
+bool mn_single_shape(const KernelCtx& ctx) {
+  if (ctx.n_in != 3 || ctx.n_idata < 1 || ctx.idata == nullptr ||
+      ctx.idata[0] < 0 || ctx.out.len != 1)
+    return false;
+  // Match mn_eval's legacy repetition encoding as well as its independent
+  // vector/array descriptors. Array operands keep the established path.
+  if (ctx.n_idata > 2 ? (ctx.idata[1] >= 0 || ctx.idata[2] >= 0)
+                      : (ctx.n_idata > 1 && ctx.idata[1] > 1))
+    return false;
+  const int64_t n = ctx.idata[0];
+  return ctx.in[0].len == n && ctx.in[1].len == n && ctx.in[2].len == n * n;
+}
+
+// The single-vector overload in Stan Math's prim/prob/multi_normal_lpdf.hpp
+// computes double partials before constructing its autodiff edges. Keep its
+// validation and activity-specific arithmetic, depositing those partials in
+// scratch instead of allocating three var operands and traversing their tape.
+// In particular, active covariance uses an explicit inverse for the value;
+// inactive covariance uses the solve. Substituting one for the other changes
+// rounding. The shape gate proves the overload's three size comparisons.
+double mn_single_fwd(KernelCtx& ctx) {
+  static constexpr const char* function = "multi_normal_lpdf";
+  const int64_t n = ctx.idata[0];
+  const unsigned mask = ctx.variant == 0 ? 7u : (ctx.variant & 7u);
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool record = !values_only();
+  CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
+  CMapM sigma(ctx.in[2].data, n, n);
+  stan::math::check_positive(function, "Covariance matrix rows", sigma.rows());
+  stan::math::check_finite(function, "Location parameter", mu);
+  stan::math::check_not_nan(function, "Random variable", y);
+  stan::math::check_symmetric(function, "Covariance matrix", sigma);
+  auto factor = stan::math::make_ldlt_factor(sigma);
+  stan::math::check_ldlt_factor(function, "LDLT_Factor of covariance parameter",
+                                factor);
+  if (record) std::fill_n(ctx.scratch, 2 * n + n * n, 0.0);
+
+  double logp = 0.0;
+  if (!propto) logp += stan::math::NEG_LOG_SQRT_TWO_PI * n;
+  if (mask != 0 || !propto) {
+    VecD half(n);
+    VecD difference = (y - mu).eval();
+    if (!(mask & 4u)) {
+      half = stan::math::mdivide_left_ldlt(factor, difference);
+      if (!propto) logp += -0.5 * stan::math::log_determinant_ldlt(factor);
+    } else {
+      MatD inverse =
+          stan::math::mdivide_left_ldlt(factor, MatD::Identity(n, n));
+      half.noalias() = inverse * difference;
+      logp += -0.5 * stan::math::log_determinant_ldlt(factor);
+      if (record)
+        MapM(ctx.scratch + 2 * n, n, n) +=
+            0.5 * (half * half.transpose() - inverse);
+    }
+    logp += -0.5 * stan::math::dot_product(difference, half);
+    if (record && (mask & 1u)) Eigen::Map<VecD>(ctx.scratch, n) += -half;
+    if (record && (mask & 2u)) Eigen::Map<VecD>(ctx.scratch + n, n) += half;
+  }
+  return logp;
+}
+
+void mn_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] =
+      mn_single_shape(ctx) ? mn_single_fwd(ctx) : mn_eval<false>(ctx);
+}
 void mn_bwd(KernelCtx& ctx) { tail_density_bwd<3>(ctx); }
 void mnprec_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = mn_eval<false, kMnPrec>(ctx);
