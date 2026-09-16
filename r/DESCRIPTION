@@ -1,7 +1,7 @@
 Package: stanli
 Type: Package
 Title: The Stan Language Interpreter
-Version: 0.14.1
+Version: 0.14.2
 Authors@R: person("Sean", "Talts", email = "xitrium@gmail.com",
                   role = c("aut", "cre"))
 Description: Compile and sample Stan models without a C++ toolchain. Stan
@@ -19,6 +19,7 @@ Encoding: UTF-8
 Depends: R (>= 4.0)
 Imports: utils, tools, methods
 Suggests: V8, jsonlite, posterior, bayesplot, loo, tidybayes,
-    callr, rstan, shinystan, testthat (>= 3.0.0)
+    callr, rstan, cmdstanr, shinystan, testthat (>= 3.0.0)
+Additional_repositories: https://stan-dev.r-universe.dev
 NeedsCompilation: yes
 Config/roxygen2/version: 8.1.0

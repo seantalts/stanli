@@ -16,7 +16,7 @@ stanli::stanli_install()
 `stanli_install()` downloads the prebuilt runtime tarball for the platform and
 R architecture, including its compiler, from the package's pinned GitHub
 release. It extracts into
-`file.path(tools::R_user_dir("stanli", "cache"), "v0.14.0")` for this package
+`file.path(tools::R_user_dir("stanli", "cache"), "v0.14.2")` for this package
 version. `stanli::stanli_runtime_path()` prints the actual library path. Run
 installation once per machine and again after a package upgrade changes the
 runtime pin; model compilation and sampling make no downloads.
@@ -84,7 +84,7 @@ R architecture in the room, from the **release pinned by that package**.
 For example, download the Apple Silicon runtime on a connected machine:
 
 ```r
-tag <- "v0.14.0"  # match the lab's package runtime pin
+tag <- "v0.14.2"  # match the lab's package runtime pin
 asset <- "stanli-runtime-darwin-arm64.tar.gz"
 download.file(paste0("https://github.com/seantalts/stanli/releases/download/", tag, "/", asset), asset, mode = "wb")
 ```
