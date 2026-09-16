@@ -121,26 +121,26 @@ density within 0.2 log units (Monte Carlo tolerance). This is separate from the
 floating-point oracle. The live methods also run under the existing no-skips
 runtime CI gate, alongside extraction, bayesplot, RStan, and ShinyStan consumers.
 
-### Recorded local validation (2026-09-15)
+### Recorded validation (16 September 2026)
 
-The fresh Release runtime/compiler matching main `2ae6c1d0` passes the ecosystem
-acceptance suite with no skips, warnings, or failures, including native calls,
-the CSV oracle, plotting, LOO, and namespace-registration tests. The brms and
-Rethinking examples in the teaching guide also run and pass their sampling
-diagnostics. The evidence below distinguishes earlier full-package checks
-from this fresh-runtime acceptance run.
+The Release runtime at `ea4d7e24` passes the ecosystem acceptance suite with no
+skips, warnings, or failures, including native calls, the independent CSV
+oracle, plotting, LOO, and namespace-registration tests. Both generated-model
+guide examples run with clear diagnostics. All 249 runtime tests and the 13
+educational numerical/output and sampling checks pass.
 
-On macOS ARM64 / R 4.6.1, the rebuilt R bridge passed 524 assertions with no
-skips, warnings, or failures against the release runtime and CLI at base
-revision `be0a0c8d`. No core runtime or C ABI changes were needed. Package checks
-passed with a runtime and with both runtime and RStan unavailable; runtime-free
-`R CMD check --as-cran` reported only the New submission NOTE. The ecosystem
-no-skips gate and workflow syntax checks also passed. Linux/Windows execution
-remains for CI.
+[Full platform CI](https://github.com/seantalts/stanli/actions/runs/35049845476)
+at `f5b047de` uses the same runtime/compiler sources and passes Linux, macOS and
+Windows R acceptance, AddressSanitizer, ThreadSanitizer, and the full compiler
+comparison. Package-only R checks remain separate from runtime acceptance.
+Earlier runtime-free `R CMD check --as-cran` reported only the New submission
+NOTE; the constructor/parser checks require neither a runtime nor RStan.
 
-On the fresh `2ae6c1d0` runtime, a warmed, paired call benchmark on the 29-parameter reference model used five
-alternating batches of 2,000 evaluations each. Direct `log_prob_grad()` took a
-median 4 microseconds/call (range 4.0–4.5); `rstan::log_prob(..., gradient = TRUE)`
-through the subclass took 14 (13.0–14.5). This measures R dispatch and validation
-overhead on a small model; it is not an inference-speed comparison. Ordinary
-stanli startup still leaves the RStan namespace unloaded.
+On macOS ARM64 / R 4.6.1, five alternating batches of 20,000 evaluations on
+the 29-parameter reference model gave a median 4.15 microseconds per direct
+`log_prob_grad()` call (range 3.80–4.25), versus 13.20 through
+`rstan::log_prob(..., gradient = TRUE)` (12.85–13.45). Each arm warmed for at
+least 200 ms. This measures R dispatch and validation overhead on a small
+model, not inference speed. [Raw measurements](../output/teaching-performance/native-call-benchmark.csv)
+were taken after the full sampling sweep. Ordinary stanli startup still leaves
+the RStan namespace unloaded.

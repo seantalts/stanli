@@ -424,3 +424,75 @@ independently built CLI beside the runtime bundle's compiler and supporting
 DLLs, preserving the oracle and all no-skip assertions; rerun platform CI.
 Fresh startup measurements already recorded: macOS CI 0.262 seconds median
 (0.236, 0.273, 0.262); Linux CI 0.248 (0.248, 0.248, 0.244), R 4.6.1.
+
+The same full run passes all 249 CTests under AddressSanitizer and all three
+threaded tests under ThreadSanitizer. Its only failed job is the Windows R
+oracle deployment described above. Corrected platform run 35049845476 at
+f5b047de has started; the runtime and R implementation are unchanged.
+
+### Cross-platform validation, 16 September
+
+Full manual workflow [35049845476](https://github.com/seantalts/stanli/actions/runs/35049845476)
+is green at `f5b047de`; runtime/compiler sources remain those measured at
+`ea4d7e24`. This includes all platform builds, the complete compiler comparison,
+AddressSanitizer, ThreadSanitizer, and runtime R acceptance on Linux, macOS and
+Windows. The Windows CLI oracle now runs from the unpacked runtime directory,
+beside its compiler and supporting DLLs.
+
+Fresh R-session medians from that same workflow, each using three processes
+and four chains with 1000 warmup plus 1000 retained draws, are 0.192 s on macOS
+ARM64, 0.236 s on Linux x86_64, and 0.280 s on Windows x86_64. All use R 4.6.1.
+Raw CSVs are retained under `/tmp/stanli-teaching-perf/ci-f5-{mac,linux,windows}`;
+installation and plotting are outside the measured interval.
+
+The local full sampling sweep is still running. No rebuild or heavy local
+profiling runs alongside it. After its postprocessing and final checks finish,
+the queued residual investigation will profile the remaining preparation and
+kernel costs. The evaluator and competing hypotheses are retained in
+`/tmp/stanli-teaching-perf/remaining-plan.md`; its isolated multivariate-normal
+recorder probe is not a production change or a validated capability yet.
+
+### Complete performance checkpoint: run a224d12afe02ac98
+
+All 199 fixtures finished the protocol on the frozen `ea4d7e24` build. There
+are 192 complete engine comparisons, 178 with lower Stanli median CLI time,
+14 slower completed cases, two sampling caps, and five failures before
+sampling. The original sweep had 183 complete comparisons and 155 Stanli wins.
+No partial-seed aggregates or changed numerical gates were used.
+
+| Collection | Complete | Lower Stanli CLI | Median C/S | Screen clear in both |
+| --- | ---: | ---: | ---: | ---: |
+| Educational | 13/13 | 12/13 | 1.30 | 10/13 |
+| Rethinking | 61/62 | 58/61 | 1.52 | 50/61 |
+| brms | 118/124 | 108/118 | 1.45 | 76/118 |
+
+The capped fixtures are m13.6 seed 3 (2.5747-second limit) and sw_re_negbin
+seed 2 (0.6507-second limit). The strict pre-sampling failures retain the three
+ill-conditioned GP cases, unsupported COM-Poisson and the inverse-Gaussian
+domain refusal. Full diagnostics and per-seed records are published alongside
+the tables; the raw 502,030,085-byte archive is retained locally with checksum.
+The four-page McElreath PDF was regenerated and every rendered page inspected.
+Post-run identities, educational checks, guide examples and R adapter/startup
+measurements all completed before residual profiling began.
+
+The new profile confirms 13.70 seconds in m14.11 island construction. About
+28% of sampled top frames are the linear opcode-to-density lookup, with the
+rest largely repeated partition pricing and candidate construction. The first
+exact-semantics experiment will replace that lookup with a generated switch;
+reusable interval costs and bounded search remain distinct follow-ups.
+
+m15.7 still spends 80.7% in multi-normal density evaluation. A standalone
+rvar-recorder probe failed to compile: the existing partials expose Eigen
+arrays while the covariance density requires matrix additions. No production
+change was made from that probe. A local native single-vector pullback using
+the pinned Stan primitive operations is the bounded alternative to evaluate;
+all activity masks, weighted reverses and refusal/domain cases need oracles.
+
+Truncated-Poisson profiles put 56–57% in LCDF calls, with additional scalar
+index/density dispatch. GEV spends 93.9% in a retained loop. Asymmetric Laplace
+has 40 scalar islands per gradient (59.5%), plus scalar subtraction and index
+operations. These fresh profiles replace the earlier pre-optimization profiles
+as the next experiment's baseline. The preserved binaries and configuration
+are under `/tmp/stanli-teaching-perf/baseline-ea4`; the research plan and failed
+probe remain under the same evidence root. Further performance work is still
+required; this checkpoint does not claim that every model beats CmdStan.

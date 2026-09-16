@@ -21,6 +21,10 @@ version. `stanli::stanli_runtime_path()` prints the actual library path. Run
 installation once per machine and again after a package upgrade changes the
 runtime pin; model compilation and sampling make no downloads.
 
+The performance report identifies its development runtime by source revision.
+Classroom installations use the package's pinned public release; performance
+changes reach those installations when a release includes them.
+
 ### Linux labs
 
 The ordinary repository URL can select source packages on Linux. Instructors
@@ -111,21 +115,23 @@ machine, not cold filesystem-cache measurements.
 
 | Platform | Measured median wall time | Evidence |
 |---|---|---|
-| macOS arm64, Apple M3 Ultra, macOS 26.6.2, R 4.6.1 | 0.127 s | Latest local build: 0.119, 0.130, 0.127 s |
-| Linux x86_64 | Awaiting the first CI run of this benchmark | `r-first-posterior-linux` artifact |
-| Windows x86_64 | Awaiting the first CI run of this benchmark | `r-first-posterior-windows-x86_64` artifact |
+| macOS arm64, macos-15 CI runner | 0.192 s | 0.170, 0.197, 0.192 s |
+| Linux x86_64, ubuntu-24.04 CI runner | 0.236 s | 0.236, 0.235, 0.236 s |
+| Windows x86_64, windows-2022 CI runner | 0.280 s | 0.300, 0.280, 0.280 s |
 
-The Mac measurement uses runtime/compiler sources matching main `2ae6c1d0`;
-[the retained CSV](../output/teaching-performance/r-first-posterior.csv) records
-the three fresh-session runs.
+All three platforms use R 4.6.1 and the development runtime built in
+[CI run 35049845476](https://github.com/seantalts/stanli/actions/runs/35049845476),
+revision `f5b047de` (runtime/compiler sources unchanged from `ea4d7e24`).
+The same jobs pass the R ecosystem acceptance suite, including the independent
+CSV oracle and native density/transform methods.
 
 The [wheels workflow](../.github/workflows/wheels.yml) records Linux timings
-against its freshly built runtime on source PRs, and macOS/Windows timings after
-merge, nightly, and on releases. Its job summaries and downloadable CSV
+against its freshly built runtime on source PRs, and macOS/Windows timings on
+full manual runs, after merge, nightly, and on releases. Its job summaries and downloadable CSV
 artifacts include the platform, R/package versions, and all three timings.
-The macOS CI artifact is `r-first-posterior-darwin-arm64`. Linux and Windows
-figures must come from those hosts; the Mac measurement is not an estimate for
-them. Re-run on the classroom hardware before promising a timing to students.
+The CSV artifacts are `r-first-posterior-darwin-arm64`,
+`r-first-posterior-linux`, and `r-first-posterior-windows-x86_64`.
+Re-run on the classroom hardware before promising a timing to students.
 
 ## Students without a laptop
 

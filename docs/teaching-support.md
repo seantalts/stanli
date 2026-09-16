@@ -18,19 +18,19 @@ promise support for untested formula combinations or reliable inference from
 an arbitrary short run. The inventories retain failures and explain why they
 matter.
 
-## Latest measurements (15 September 2026)
+## Latest measurements (16 September 2026)
 
-Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Runtime and
-compiler sources match main `2ae6c1d0`; [the full appendix](../output/teaching-performance/README.md)
+Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Measured runtime/compiler revision
+`ea4d7e24` includes the performance fixes in this PR; [the full appendix](../output/teaching-performance/README.md)
 records every one of the 199 fixtures, including failures and capped runs.
 The [evidence index](../output/teaching-performance/EVIDENCE.md) links numerical
 checks, raw-data retention, and reproduction instructions.
 
 | Collection | Completed in both | Lower Stanli CLI time | Median CmdStan/Stanli ratio | Diagnostic screen clear in both |
 | --- | ---: | ---: | ---: | ---: |
-| Educational lessons | 13/13 | 12/13 | 1.31× | 10/13 |
-| Rethinking (including the supplement) | 59/62 | 55/59 | 1.48× | 48/59 |
-| brms | 111/124 | 88/111 | 1.35× | 69/111 |
+| Educational lessons | 13/13 | 12/13 | 1.30× | 10/13 |
+| Rethinking (including the supplement) | 61/62 | 58/61 | 1.52× | 50/61 |
+| brms | 118/124 | 108/118 | 1.45× | 76/118 |
 
 Each model contributes the median of four single-chain CLI runs, each with
 1,000 warmup and 1,000 retained draws. Ratios above one mean less elapsed time
@@ -39,8 +39,8 @@ flags. Stanli preparation is included; CmdStan compilation is shown separately
 in the appendix. This is fixed-budget runtime, not time to equal inferential accuracy.
 
 Adding the measured CmdStan compilation stages gives a first-fit estimate.
-Stanli has the lower estimate for 13/13 educational, 57/59 completed Rethinking,
-and 111/111 completed brms comparisons. These are sums of measured stages, not
+Stanli has the lower estimate for 13/13 educational, 60/61 completed Rethinking,
+and 118/118 completed brms comparisons. These are sums of measured stages, not
 directly timed four-chain R sessions.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
@@ -142,16 +142,18 @@ ceiling. A failed or capped seed prevents an aggregate time for that engine;
 there is no average of only the surviving seeds. See the
 [measurement protocol](benchmark-protocol.md) for boundaries and reproducibility.
 
-The fresh source build exposes a preparation timeout for Rethinking m14.11:
-[issue #372](https://github.com/seantalts/stanli/issues/372). Its historical
-numerical references remain available, but the current build cannot claim a
-completed numerical replay or timing for that model. The appendix retains all 16 incomplete
-comparisons: ten capped cases and six that stopped before sampling.
+The earlier Rethinking m14.11 preparation timeout is fixed:
+[issue #372](https://github.com/seantalts/stanli/issues/372). All 62 Rethinking
+fixtures now pass the three-point numerical/output replay. Its preparation
+still contributes 13.49 seconds to a 22.70-second median CLI run, versus
+10.18 seconds for already-compiled CmdStan, so it remains a performance target.
 
-The ordered-regression performance gap is tracked separately in
-[#373](https://github.com/seantalts/stanli/issues/373). Those models pass their
-numerical comparisons; their longer sampling times and capped runs are part
-of the performance evidence.
+The ordered-regression fixes bring m12.5, m12.6 and m12.7 below CmdStan's median
+runtime with clear diagnostic screens in both engines. All four seeds now
+complete for m12.6. Rethinking m13.6 still hits its relative cap on one seed;
+[#373](https://github.com/seantalts/stanli/issues/373) retains that case and the
+remaining slower models. Across all collections there are 192 complete
+comparisons, two capped cases, and five cases stopped before sampling.
 
 The brms capped and slower completed fixtures are tracked in
 [#374](https://github.com/seantalts/stanli/issues/374). Its three ill-conditioned

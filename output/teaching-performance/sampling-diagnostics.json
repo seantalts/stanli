@@ -1,6 +1,6 @@
 {
   "aalto_bern": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -44,7 +44,7 @@
     }
   },
   "aalto_binom": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -88,7 +88,7 @@
     }
   },
   "aalto_binom2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -132,7 +132,7 @@
     }
   },
   "aalto_binomb": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -176,7 +176,7 @@
     }
   },
   "aalto_gpareto": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -220,7 +220,7 @@
     }
   },
   "aalto_grp_aov": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -264,7 +264,7 @@
     }
   },
   "aalto_grp_prior_mean": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -308,7 +308,7 @@
     }
   },
   "aalto_grp_prior_mean_var": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -352,7 +352,7 @@
     }
   },
   "aalto_lin": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -396,7 +396,7 @@
     }
   },
   "aalto_lin_std": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -440,7 +440,7 @@
     }
   },
   "aalto_lin_std_t": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -484,7 +484,7 @@
     }
   },
   "aalto_poisson_hurdle": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -528,7 +528,7 @@
     }
   },
   "aalto_poisson_simple": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -572,7 +572,7 @@
     }
   },
   "ch09_m5_8s": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -616,7 +616,7 @@
     }
   },
   "ch09_m5_8s2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -660,7 +660,7 @@
     }
   },
   "ch09_m9_1": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -704,7 +704,7 @@
     }
   },
   "ch09_m9_1_chains4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -748,7 +748,7 @@
     }
   },
   "ch09_m9_2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -792,7 +792,7 @@
     }
   },
   "ch09_m9_3": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -836,7 +836,7 @@
     }
   },
   "ch09_m9_4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -880,7 +880,7 @@
     }
   },
   "ch09_m9_5": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -924,7 +924,7 @@
     }
   },
   "ch09_mp": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -968,7 +968,7 @@
     }
   },
   "ch11_m11_10": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1012,7 +1012,7 @@
     }
   },
   "ch11_m11_11": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1056,7 +1056,7 @@
     }
   },
   "ch11_m11_4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1100,7 +1100,7 @@
     }
   },
   "ch11_m11_5": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1144,7 +1144,7 @@
     }
   },
   "ch11_m11_6": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1188,7 +1188,7 @@
     }
   },
   "ch11_m11_7": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1232,7 +1232,7 @@
     }
   },
   "ch11_m11_8": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1276,7 +1276,7 @@
     }
   },
   "ch11_m11_9": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1320,7 +1320,7 @@
     }
   },
   "ch11_m_pois": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1364,7 +1364,7 @@
     }
   },
   "ch12_m12_1": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1408,7 +1408,7 @@
     }
   },
   "ch12_m12_2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1452,7 +1452,7 @@
     }
   },
   "ch12_m12_3": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1496,7 +1496,7 @@
     }
   },
   "ch12_m12_3_alt": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1540,7 +1540,7 @@
     }
   },
   "ch12_m12_4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1584,7 +1584,7 @@
     }
   },
   "ch12_m12_5": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1628,11 +1628,23 @@
     }
   },
   "ch12_m12_6": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 3
+        "status": "complete",
+        "chains": 4,
+        "parameters": 17,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0034229813412525,
+        "ess_bulk_min": 1777.306208412856,
+        "ess_tail_min": 1610.5418555127385,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.90952273859856247,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -1652,11 +1664,15 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 17,
+      "median_mean_difference_in_sd": 0.022334442380202785,
+      "max_mean_difference_in_sd": 0.051250310766528133,
+      "max_difference_parameter": "kappa.2"
     }
   },
   "ch12_m12_7": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1700,7 +1716,7 @@
     }
   },
   "ch13_m13_1": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1744,7 +1760,7 @@
     }
   },
   "ch13_m13_2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1788,7 +1804,7 @@
     }
   },
   "ch13_m13_3": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1832,7 +1848,7 @@
     }
   },
   "ch13_m13_4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1876,7 +1892,7 @@
     }
   },
   "ch13_m13_4b": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1920,7 +1936,7 @@
     }
   },
   "ch13_m13_4nc": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1964,7 +1980,7 @@
     }
   },
   "ch13_m13_5": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2008,7 +2024,7 @@
     }
   },
   "ch13_m13_6": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -2036,7 +2052,7 @@
     }
   },
   "ch13_m13_7": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2080,7 +2096,7 @@
     }
   },
   "ch13_m13_7nc": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2124,7 +2140,7 @@
     }
   },
   "ch14_m14_1": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2168,7 +2184,7 @@
     }
   },
   "ch14_m14_10": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2212,23 +2228,51 @@
     }
   },
   "ch14_m14_11": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 0
+        "status": "complete",
+        "chains": 4,
+        "parameters": 5,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0013378599035767,
+        "ess_bulk_min": 3917.9968475327951,
+        "ess_tail_min": 2592.8151148752522,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.99088017774275505,
+        "screening_flag": false
       },
       "cmdstan": {
-        "status": "incomplete",
-        "chains": 0
+        "status": "complete",
+        "chains": 4,
+        "parameters": 5,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0028432361241966,
+        "ess_bulk_min": 3848.5238095829864,
+        "ess_tail_min": 2351.5939013024508,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.96567001942834696,
+        "screening_flag": false
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 5,
+      "median_mean_difference_in_sd": 0.011070100093800822,
+      "max_mean_difference_in_sd": 0.01834221918014672,
+      "max_difference_parameter": "rhosq"
     }
   },
   "ch14_m14_2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2272,7 +2316,7 @@
     }
   },
   "ch14_m14_3": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2316,7 +2360,7 @@
     }
   },
   "ch14_m14_4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2360,7 +2404,7 @@
     }
   },
   "ch14_m14_4x": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2404,7 +2448,7 @@
     }
   },
   "ch14_m14_5": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2448,7 +2492,7 @@
     }
   },
   "ch14_m14_6": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2492,7 +2536,7 @@
     }
   },
   "ch14_m14_6x": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2536,7 +2580,7 @@
     }
   },
   "ch14_m14_7": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2580,7 +2624,7 @@
     }
   },
   "ch14_m14_8": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2624,7 +2668,7 @@
     }
   },
   "ch14_m14_8nc": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2668,7 +2712,7 @@
     }
   },
   "ch14_m14_9": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2712,7 +2756,7 @@
     }
   },
   "ch15_m15_1": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2756,7 +2800,7 @@
     }
   },
   "ch15_m15_2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2800,7 +2844,7 @@
     }
   },
   "ch15_m15_3": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2844,7 +2888,7 @@
     }
   },
   "ch15_m15_4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2888,7 +2932,7 @@
     }
   },
   "ch15_m15_5": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2932,7 +2976,7 @@
     }
   },
   "ch15_m15_6": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2976,7 +3020,7 @@
     }
   },
   "ch15_m15_7": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3020,7 +3064,7 @@
     }
   },
   "ch15_m15_8": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3064,7 +3108,7 @@
     }
   },
   "ch15_m15_9": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3108,7 +3152,7 @@
     }
   },
   "ch16_m16_1": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3152,7 +3196,7 @@
     }
   },
   "ch16_m16_4": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3196,7 +3240,7 @@
     }
   },
   "extra_hurdle_poisson": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3240,7 +3284,7 @@
     }
   },
   "i319_gauss_re": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3284,7 +3328,7 @@
     }
   },
   "i319_negbin_fixed": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3328,7 +3372,7 @@
     }
   },
   "i319_negbin_re": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3372,7 +3416,7 @@
     }
   },
   "i319_pois_fixed": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3416,7 +3460,7 @@
     }
   },
   "i319_pois_re": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3460,7 +3504,7 @@
     }
   },
   "i319_pois_re2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3504,7 +3548,7 @@
     }
   },
   "i320_gp_expquad": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -3520,7 +3564,7 @@
     }
   },
   "i320_gp_matern32": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3564,7 +3608,7 @@
     }
   },
   "i320_mi_nhanes": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3608,7 +3652,7 @@
     }
   },
   "i320_pois_trunc_both": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3652,7 +3696,7 @@
     }
   },
   "i320_pois_trunc_ub": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3696,11 +3740,23 @@
     }
   },
   "i320_sratio_cs": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 1
+        "status": "complete",
+        "chains": 4,
+        "parameters": 8,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0026313609646105,
+        "ess_bulk_min": 2828.1609874887963,
+        "ess_tail_min": 2260.6275874429125,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.97896306307271719,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -3720,15 +3776,31 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 8,
+      "median_mean_difference_in_sd": 0.013113231443381362,
+      "max_mean_difference_in_sd": 0.037819811112750144,
+      "max_difference_parameter": "b.2"
     }
   },
   "i320_sratio_plain": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 0
+        "status": "complete",
+        "chains": 4,
+        "parameters": 6,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0013915310282906,
+        "ess_bulk_min": 2841.0906305902045,
+        "ess_tail_min": 2499.2335220282189,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.99382819248689702,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -3748,11 +3820,15 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 6,
+      "median_mean_difference_in_sd": 0.030709469194341817,
+      "max_mean_difference_in_sd": 0.049779131620704187,
+      "max_difference_parameter": "b.3"
     }
   },
   "s2_ar_cov": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3796,7 +3872,7 @@
     }
   },
   "s2_beta_binomial": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3840,7 +3916,7 @@
     }
   },
   "s2_car": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3884,7 +3960,7 @@
     }
   },
   "s2_car_esicar": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3928,7 +4004,7 @@
     }
   },
   "s2_car_icar": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3972,7 +4048,7 @@
     }
   },
   "s2_categorical_re": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4016,7 +4092,7 @@
     }
   },
   "s2_cens_interval": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4060,7 +4136,7 @@
     }
   },
   "s2_com_poisson": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -4076,7 +4152,7 @@
     }
   },
   "s2_cosy": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4120,7 +4196,7 @@
     }
   },
   "s2_cox": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4164,7 +4240,7 @@
     }
   },
   "s2_cox_cens": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4208,7 +4284,7 @@
     }
   },
   "s2_cumulative_cauchit": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4252,7 +4328,7 @@
     }
   },
   "s2_cumulative_cloglog": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4296,7 +4372,7 @@
     }
   },
   "s2_cumulative_probit": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4340,7 +4416,7 @@
     }
   },
   "s2_custom_vint": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4384,7 +4460,7 @@
     }
   },
   "s2_custom_vreal": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4428,7 +4504,7 @@
     }
   },
   "s2_dirichlet": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4472,7 +4548,7 @@
     }
   },
   "s2_discrete_weibull": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4516,7 +4592,7 @@
     }
   },
   "s2_dist_sigma_re": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4560,7 +4636,7 @@
     }
   },
   "s2_fcor": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4604,7 +4680,7 @@
     }
   },
   "s2_frechet": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4648,7 +4724,7 @@
     }
   },
   "s2_gev": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4692,7 +4768,7 @@
     }
   },
   "s2_gp_approx": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4736,7 +4812,7 @@
     }
   },
   "s2_gp_by_approx": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4780,7 +4856,7 @@
     }
   },
   "s2_gp_by_gr": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -4796,7 +4872,7 @@
     }
   },
   "s2_gr_by": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4840,7 +4916,7 @@
     }
   },
   "s2_gr_student": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4884,7 +4960,7 @@
     }
   },
   "s2_hurdle_cumulative": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4928,7 +5004,7 @@
     }
   },
   "s2_hurdle_negbin": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4972,7 +5048,7 @@
     }
   },
   "s2_index_mi": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5016,7 +5092,7 @@
     }
   },
   "s2_invgaussian": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -5032,7 +5108,7 @@
     }
   },
   "s2_logistic_normal": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5076,7 +5152,7 @@
     }
   },
   "s2_me2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5120,7 +5196,7 @@
     }
   },
   "s2_me2_nomecor": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5164,7 +5240,7 @@
     }
   },
   "s2_mi_lognormal": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5208,7 +5284,7 @@
     }
   },
   "s2_mi_trunc_lb": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5252,7 +5328,7 @@
     }
   },
   "s2_mixture_theta": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5296,7 +5372,7 @@
     }
   },
   "s2_mm": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5340,7 +5416,7 @@
     }
   },
   "s2_mm_weights": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5384,7 +5460,7 @@
     }
   },
   "s2_mmc": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5428,7 +5504,7 @@
     }
   },
   "s2_mo_simo_prior": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5472,7 +5548,7 @@
     }
   },
   "s2_multinomial": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5516,7 +5592,7 @@
     }
   },
   "s2_mv_shared_re": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5560,7 +5636,7 @@
     }
   },
   "s2_mv_subset": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5604,7 +5680,7 @@
     }
   },
   "s2_nl_noloop": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5648,7 +5724,7 @@
     }
   },
   "s2_nlf": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5692,7 +5768,7 @@
     }
   },
   "s2_rate": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5736,7 +5812,7 @@
     }
   },
   "s2_s_by": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5780,7 +5856,7 @@
     }
   },
   "s2_s_cc": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5824,7 +5900,7 @@
     }
   },
   "s2_sar": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5868,7 +5944,7 @@
     }
   },
   "s2_sar_error": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5912,7 +5988,7 @@
     }
   },
   "s2_shifted_lognormal": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5956,7 +6032,7 @@
     }
   },
   "s2_t2_by": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6000,7 +6076,7 @@
     }
   },
   "s2_threading": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6044,7 +6120,7 @@
     }
   },
   "s2_unstr": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6088,7 +6164,7 @@
     }
   },
   "s2_weights_trunc": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6132,7 +6208,7 @@
     }
   },
   "s2_wiener": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6176,11 +6252,23 @@
     }
   },
   "s2_zi_asymlaplace": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 1
+        "status": "complete",
+        "chains": 4,
+        "parameters": 5,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0032613161181725,
+        "ess_bulk_min": 675.96065446191994,
+        "ess_tail_min": 788.82112608795751,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.91550160581211315,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -6200,11 +6288,15 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 5,
+      "median_mean_difference_in_sd": 0.020592426124285319,
+      "max_mean_difference_in_sd": 0.03809629001061153,
+      "max_difference_parameter": "b.1"
     }
   },
   "s2_zi_beta": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6214,12 +6306,12 @@
         "draws": 4000,
         "divergences": 0,
         "max_depth_hits": 0,
-        "rhat_max": 1.0011895226403895,
-        "ess_bulk_min": 4270.3796008658182,
-        "ess_tail_min": 2353.5616043295836,
+        "rhat_max": 1.0012422907805627,
+        "ess_bulk_min": 4008.7375611590742,
+        "ess_tail_min": 2330.1573360136917,
         "rhat_over_1_01": 0,
         "undefined_diagnostics": 0,
-        "ebfmi_min": 1.0655369305232096,
+        "ebfmi_min": 1.0640532937448823,
         "screening_flag": false
       },
       "cmdstan": {
@@ -6242,13 +6334,13 @@
     "comparison": {
       "status": "complete",
       "parameters": 4,
-      "median_mean_difference_in_sd": 0.004100298421137738,
-      "max_mean_difference_in_sd": 0.016793451163704367,
+      "median_mean_difference_in_sd": 0.01081138473063201,
+      "max_mean_difference_in_sd": 0.023052696775309658,
       "max_difference_parameter": "Intercept"
     }
   },
   "s2_zoi_beta": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6258,12 +6350,12 @@
         "draws": 4000,
         "divergences": 0,
         "max_depth_hits": 0,
-        "rhat_max": 1.0020543345515005,
-        "ess_bulk_min": 4272.5801423043031,
-        "ess_tail_min": 2407.1287916103029,
+        "rhat_max": 1.0024273069008398,
+        "ess_bulk_min": 4262.1521537763474,
+        "ess_tail_min": 2017.6307271612598,
         "rhat_over_1_01": 0,
         "undefined_diagnostics": 0,
-        "ebfmi_min": 0.9681626444611402,
+        "ebfmi_min": 0.94154327209246746,
         "screening_flag": false
       },
       "cmdstan": {
@@ -6286,13 +6378,13 @@
     "comparison": {
       "status": "complete",
       "parameters": 5,
-      "median_mean_difference_in_sd": 0.022685193080860495,
-      "max_mean_difference_in_sd": 0.061617511163291595,
-      "max_difference_parameter": "zoi"
+      "median_mean_difference_in_sd": 0.0085251948759774224,
+      "max_mean_difference_in_sd": 0.027658480848224792,
+      "max_difference_parameter": "Intercept"
     }
   },
   "sw_acat": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6336,7 +6428,7 @@
     }
   },
   "sw_acat_cs": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6380,7 +6472,7 @@
     }
   },
   "sw_ar": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6424,7 +6516,7 @@
     }
   },
   "sw_arma": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6468,11 +6560,23 @@
     }
   },
   "sw_asymlaplace": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 2
+        "status": "complete",
+        "chains": 4,
+        "parameters": 4,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0078732598603284,
+        "ess_bulk_min": 674.10677416260694,
+        "ess_tail_min": 824.15934657320201,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.92175685791555328,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -6492,11 +6596,15 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 4,
+      "median_mean_difference_in_sd": 0.030513005586303217,
+      "max_mean_difference_in_sd": 0.036553750065447463,
+      "max_difference_parameter": "b.1"
     }
   },
   "sw_bernoulli": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6540,7 +6648,7 @@
     }
   },
   "sw_beta": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6584,7 +6692,7 @@
     }
   },
   "sw_binomial": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6628,7 +6736,7 @@
     }
   },
   "sw_categorical": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6672,7 +6780,7 @@
     }
   },
   "sw_cens": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6716,11 +6824,23 @@
     }
   },
   "sw_cratio": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 0
+        "status": "complete",
+        "chains": 4,
+        "parameters": 4,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0018796618385708,
+        "ess_bulk_min": 3905.0608770221556,
+        "ess_tail_min": 3022.8791537715583,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 1.0760557708390694,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -6740,15 +6860,31 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 4,
+      "median_mean_difference_in_sd": 0.010434947287149245,
+      "max_mean_difference_in_sd": 0.031786098609775736,
+      "max_difference_parameter": "Intercept.3"
     }
   },
   "sw_cratio_cs": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 0
+        "status": "complete",
+        "chains": 4,
+        "parameters": 7,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0020760771967421,
+        "ess_bulk_min": 4321.6817799204846,
+        "ess_tail_min": 2604.1696309328272,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.93701836062380806,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -6768,11 +6904,15 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 7,
+      "median_mean_difference_in_sd": 0.013217661360013237,
+      "max_mean_difference_in_sd": 0.038621264223605331,
+      "max_difference_parameter": "Intercept.2"
     }
   },
   "sw_cumulative": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6816,7 +6956,7 @@
     }
   },
   "sw_cumulative_cs": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6860,7 +7000,7 @@
     }
   },
   "sw_dist_sigma": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6904,7 +7044,7 @@
     }
   },
   "sw_exgaussian": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6948,7 +7088,7 @@
     }
   },
   "sw_gamma": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6992,7 +7132,7 @@
     }
   },
   "sw_gaussian": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7036,7 +7176,7 @@
     }
   },
   "sw_gp": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -7052,7 +7192,7 @@
     }
   },
   "sw_hurdle_gamma": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7062,12 +7202,12 @@
         "draws": 4000,
         "divergences": 0,
         "max_depth_hits": 0,
-        "rhat_max": 1.0015425609724447,
-        "ess_bulk_min": 3240.2641699174637,
-        "ess_tail_min": 1775.4454851200035,
+        "rhat_max": 1.0028187942304725,
+        "ess_bulk_min": 2913.2291241954258,
+        "ess_tail_min": 1579.0800271410938,
         "rhat_over_1_01": 0,
         "undefined_diagnostics": 0,
-        "ebfmi_min": 0.94638492761217652,
+        "ebfmi_min": 0.9838997843658901,
         "screening_flag": false
       },
       "cmdstan": {
@@ -7090,13 +7230,13 @@
     "comparison": {
       "status": "complete",
       "parameters": 4,
-      "median_mean_difference_in_sd": 0.015656346885321432,
-      "max_mean_difference_in_sd": 0.031207861215446768,
-      "max_difference_parameter": "b.1"
+      "median_mean_difference_in_sd": 0.026159982503788561,
+      "max_mean_difference_in_sd": 0.056778598168468634,
+      "max_difference_parameter": "Intercept"
     }
   },
   "sw_hurdle_lognormal": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7106,12 +7246,12 @@
         "draws": 4000,
         "divergences": 0,
         "max_depth_hits": 0,
-        "rhat_max": 1.0019563224480168,
-        "ess_bulk_min": 3405.87248692923,
-        "ess_tail_min": 1930.6355686618572,
+        "rhat_max": 1.0029893625812747,
+        "ess_bulk_min": 3347.145691575683,
+        "ess_tail_min": 1802.1096069197088,
         "rhat_over_1_01": 0,
         "undefined_diagnostics": 0,
-        "ebfmi_min": 1.0075927519460157,
+        "ebfmi_min": 0.91438019071836873,
         "screening_flag": false
       },
       "cmdstan": {
@@ -7134,13 +7274,13 @@
     "comparison": {
       "status": "complete",
       "parameters": 4,
-      "median_mean_difference_in_sd": 0.015464718914148428,
-      "max_mean_difference_in_sd": 0.066975211493497222,
+      "median_mean_difference_in_sd": 0.02236133657874104,
+      "max_mean_difference_in_sd": 0.078442621203670015,
       "max_difference_parameter": "sigma"
     }
   },
   "sw_hurdle_pois": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7184,7 +7324,7 @@
     }
   },
   "sw_lognormal": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7228,7 +7368,7 @@
     }
   },
   "sw_ma": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7272,7 +7412,7 @@
     }
   },
   "sw_me": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7316,7 +7456,7 @@
     }
   },
   "sw_mi": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7360,7 +7500,7 @@
     }
   },
   "sw_mixture": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7404,7 +7544,7 @@
     }
   },
   "sw_mono": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7448,7 +7588,7 @@
     }
   },
   "sw_mv_norescor": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7492,7 +7632,7 @@
     }
   },
   "sw_mv_rescor": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7536,7 +7676,7 @@
     }
   },
   "sw_negbinomial": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7580,7 +7720,7 @@
     }
   },
   "sw_nonlinear": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7624,7 +7764,7 @@
     }
   },
   "sw_poisson": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7668,7 +7808,7 @@
     }
   },
   "sw_re_bern": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7712,7 +7852,7 @@
     }
   },
   "sw_re_gauss": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7756,7 +7896,7 @@
     }
   },
   "sw_re_negbin": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -7784,7 +7924,7 @@
     }
   },
   "sw_re_pois": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7828,7 +7968,7 @@
     }
   },
   "sw_re_slope": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7872,7 +8012,7 @@
     }
   },
   "sw_se": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7916,7 +8056,7 @@
     }
   },
   "sw_skewnormal": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7960,7 +8100,7 @@
     }
   },
   "sw_spline_s": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8004,7 +8144,7 @@
     }
   },
   "sw_spline_t2": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8048,11 +8188,23 @@
     }
   },
   "sw_sratio": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 1
+        "status": "complete",
+        "chains": 4,
+        "parameters": 4,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 0,
+        "max_depth_hits": 0,
+        "rhat_max": 1.0018796618385708,
+        "ess_bulk_min": 3905.0608770221556,
+        "ess_tail_min": 3022.8791537715583,
+        "rhat_over_1_01": 0,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 1.0760557708390694,
+        "screening_flag": false
       },
       "cmdstan": {
         "status": "complete",
@@ -8072,11 +8224,15 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 4,
+      "median_mean_difference_in_sd": 0.010434947287149245,
+      "max_mean_difference_in_sd": 0.031786098609775736,
+      "max_difference_parameter": "Intercept.3"
     }
   },
   "sw_student": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8120,7 +8276,7 @@
     }
   },
   "sw_trunc": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8164,7 +8320,7 @@
     }
   },
   "sw_vonmises": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8208,7 +8364,7 @@
     }
   },
   "sw_weibull": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8252,7 +8408,7 @@
     }
   },
   "sw_weights": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8296,7 +8452,7 @@
     }
   },
   "sw_zi_binomial": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8340,7 +8496,7 @@
     }
   },
   "sw_zi_negbin": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8384,7 +8540,7 @@
     }
   },
   "sw_zi_poisson": {
-    "run_id": "fae5494c296cd547",
+    "run_id": "a224d12afe02ac98",
     "engines": {
       "stanli": {
         "status": "complete",

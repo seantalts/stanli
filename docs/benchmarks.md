@@ -1,16 +1,16 @@
 # Performance measurements
 
-## Latest measurements (15 September 2026)
+## Latest measurements (16 September 2026)
 
-Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Runtime and
-compiler sources match main `2ae6c1d0`; [the full appendix](../output/teaching-performance/README.md)
+Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Measured runtime/compiler revision
+`ea4d7e24` includes the performance fixes in this PR; [the full appendix](../output/teaching-performance/README.md)
 records every one of the 199 fixtures, including failures and capped runs.
 
 | Collection | Completed in both | Lower Stanli CLI time | Median CmdStan/Stanli ratio | Diagnostic screen clear in both |
 | --- | ---: | ---: | ---: | ---: |
-| Educational lessons | 13/13 | 12/13 | 1.31× | 10/13 |
-| Rethinking (including the supplement) | 59/62 | 55/59 | 1.48× | 48/59 |
-| brms | 111/124 | 88/111 | 1.35× | 69/111 |
+| Educational lessons | 13/13 | 12/13 | 1.30× | 10/13 |
+| Rethinking (including the supplement) | 61/62 | 58/61 | 1.52× | 50/61 |
+| brms | 118/124 | 108/118 | 1.45× | 76/118 |
 
 Each model contributes the median of four single-chain CLI runs, each with
 1,000 warmup and 1,000 retained draws. Ratios above one mean less elapsed time
@@ -19,8 +19,8 @@ flags. Stanli preparation is included; CmdStan compilation is shown separately
 in the appendix. This is fixed-budget runtime, not time to equal inferential accuracy.
 
 Adding the measured CmdStan compilation stages gives a first-fit estimate.
-Stanli has the lower estimate for 13/13 educational, 57/59 completed Rethinking,
-and 111/111 completed brms comparisons. These are sums of measured stages, not
+Stanli has the lower estimate for 13/13 educational, 60/61 completed Rethinking,
+and 118/118 completed brms comparisons. These are sums of measured stages, not
 directly timed four-chain R sessions.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)

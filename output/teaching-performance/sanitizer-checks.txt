@@ -1,0 +1,8 @@
+Runtime source unchanged since ea4d7e24; CI checkout f2d1fd38.
+https://github.com/seantalts/stanli/actions/runs/35047000140
+
+AddressSanitizer: 100% tests passed, 0 tests failed out of 249
+Retained raw analysis/asan-ci.log SHA256 a5b3ac90e7cfc3dc419d53fcfeb4dcd4c4301252f9832d08a7acaa3f93f00b4e
+
+ThreadSanitizer: 100% tests passed, 0 tests failed out of 3
+Retained raw analysis/tsan-ci.log SHA256 13b42764f02dbb3cbcdcf815f491cf555abf1145d6a70c8f3172ce1a2b63b1b9

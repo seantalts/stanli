@@ -1,7 +1,7 @@
 {
   "identity": {
     "config": {
-      "bench": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-latest/bench_grad",
+      "bench": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-perf/bench_grad",
       "build_timeout": 900,
       "cmdstan": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/cmdstan",
       "cmdstan_runtime_multiple": 3.0,
@@ -13,7 +13,7 @@
       "measure_ms": 250,
       "pdb": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/posteriordb",
       "rounds": 6,
-      "run": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-latest/stanli_run",
+      "run": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-perf/stanli_run",
       "sample_timeout": 900,
       "sampling": true,
       "seeds": [
@@ -28,8 +28,8 @@
       "warmup_ms": 200
     },
     "executables": {
-      "bench": "520e503674eade3fca0673722a3d9867282e6730acb86796386fcd5bf934b0be",
-      "run": "bf4f7de0bb586e94f4b1ca700714912cb1e96eb9a2522adf862f4566dbe0e4f4",
+      "bench": "373767991f77c85816080153b5de7610fc4610019759020825afd529b5e6c799",
+      "run": "3bf091b502f59bce39551e6bfdb1bdeea5140e49d74ba0853e5a109a8bba0b07",
       "stanc": "40f3ddc99efa9d97fc5fcbcd059241ff445e857108639fa54d46f02d46e8704c",
       "vectorize_probe": "715a6a0eadf7f69f69819cd0c653a2d94987d671c421490ee0c2b1dacd80c70a"
     },
@@ -839,7 +839,7 @@
     },
     "protocol": "stanli-corpus-v3",
     "sources": {
-      "harnesses/corpus_bench.py": "ec3ace7e2ca32d4087a8ae989a059153e8cc35c1c518d106211df9e87702f4d9",
+      "harnesses/corpus_bench.py": "87ce0f887bc7a6e0405ecdd029288dcf01aad6a4dbbd0a53f675c8f12baf1cd9",
       "tools/bench_cmdstan_grad.cpp": "e377628e54d3783d0a3a4c1ed73fe1f0c5c015d19a65e8e58cb4ab2b2f361fdf",
       "tools/bench_grad.cpp": "2d5cf4ad201e4af4f01afc9144cb782cd599683d8fbc479884bba2e8f02bf5ec",
       "tools/benchmark_timer.hpp": "96846e97f74cec6b7334c543d53355ddba1254e4b891aa5507cb4458f5b1c57b",
@@ -847,7 +847,7 @@
       "tools/verify_refs.py": "35a9c2299df40a9d38b1a27c95e0cb1ed7d84fc64ca1f16a4efbd86878b99c7b"
     },
     "stanli_source": {
-      "head": "bce6148eab243f578d88f62cf6bfe88d2f5786f9",
+      "head": "ea4d7e2470e22386705afb3be3ad0a86037da90d",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -903,6 +903,6 @@
       }
     }
   },
-  "run_id": "fae5494c296cd547",
-  "started_utc": "2026-09-15T19:07:31Z"
+  "run_id": "a224d12afe02ac98",
+  "started_utc": "2026-09-16T01:22:36Z"
 }

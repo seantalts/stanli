@@ -43,8 +43,8 @@ keeping installation small and avoiding a local stan-math build.
 - Rethinking coverage: [tests/rethinking/README.md](tests/rethinking/README.md).
   All 61 book `ulam()` calls, plus a supplemental hurdle model;
   <!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan
-  references. The latest replay completes 61/62; m14.11 has a preparation
-  timeout tracked in [#372](https://github.com/seantalts/stanli/issues/372).
+  references. The latest replay completes all 62, with worst scaled error
+  1.48e-13 across 32,349 compared values.
 - Teaching support: [models, numerics, performance, and R workflows](docs/teaching-support.md)
   for Rethinking, brms, and the educational collection; plus a
   [cmdstanr migration guide](docs/from-cmdstanr.md).

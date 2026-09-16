@@ -14,10 +14,8 @@ transcribing them. It fails if any book call is missing from its inventory.
 
 <!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan
 references: all 186 log-density/gradient points and all 186 output rows. The
-recording build's worst scaled error was 1.48e-13. On the latest source build,
-61/62 fixtures complete the replay, with a worst scaled error of 6.50e-14;
-`m14.11` times out during preparation before numerical comparison
-([#372](https://github.com/seantalts/stanli/issues/372)). This is pointwise
+latest Release build (`ea4d7e24`) completes all 62 fixtures and compares
+32,349 values with a worst scaled error of 1.48e-13. This is pointwise
 numerical coverage, not a claim that every posterior mixes well or that an
 `ulam` backend already exists.
 
@@ -132,21 +130,28 @@ dataset sources, licenses and every simulation seed. The imported fixtures
 retain upstream GPL-3-or-later licensing; stanli's BSD license does not
 replace it. No rethinking R implementation is vendored.
 
-## Known failures
+## Numerical status and preparation
 
-| Model | Diagnosis | Issue |
-| --- | --- | --- |
-| `ch14_m14_11` | The current source build times out after 300 seconds in graph-partitioning cost search, before the numerical check. Earlier builds verified its retained references; do not count that as a current pass. | [#372](https://github.com/seantalts/stanli/issues/372) |
+There are no numerical failures in the latest 62-fixture replay. The preparation
+timeout for `ch14_m14_11` is fixed by retaining graph-partition cost results
+during compilation; its model, data, and references are unchanged. It now
+completes all three reference points within the existing tolerance. The
+diagnosis and measurements are tracked in
+[#372](https://github.com/seantalts/stanli/issues/372).
 
 Keep future failures here with a linked issue. Do not remove a difficult
 model, alter its data, or regenerate an oracle to hide a disagreement.
-Compiler fixes belong in separate changes.
+Compiler fixes are kept in separate commits from imported fixtures.
 
-The numerically verified ordered regressions also expose a performance gap:
-`m12.5` takes longer than CmdStan under the shared sampling budget, and one
-`m12.6` seed reaches the 900-second ceiling. Follow-up measurements and
-reproduction commands are in [#373](https://github.com/seantalts/stanli/issues/373).
-The timing appendix retains these cases and their diagnostic results.
+The original timing sweep found slower ordered regressions: `m12.5` took
+longer than CmdStan and one `m12.6` seed reached the 900-second ceiling.
+The fresh `ea4d7e24` sweep completes all four seeds for those ordered models:
+`m12.5`, `m12.6`, and `m12.7` take median 101, 326, and 131 seconds, versus
+CmdStan's 162, 484, and 213 seconds, with clear diagnostic screens in both.
+Of 62 fixtures, 61 complete in both engines; `m13.6` still hits its relative
+cap on one seed. Remaining gaps and the original results are tracked in
+[#373](https://github.com/seantalts/stanli/issues/373). The appendix retains
+capped cases and their diagnostic results.
 
 ## Regenerating and recording
 

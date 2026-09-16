@@ -1,66 +1,64 @@
-# Current teaching sweep: evidence and reproduction
+# Teaching sweep: evidence and reproduction
 
-Run `fae5494c296cd547` assessed all **199 fixtures**: 13 educational, 62
-Rethinking, and 124 brms. There are 183 complete comparisons, ten capped cases,
-and six cases stopped before sampling. The [full appendix](README.md) retains
-every outcome and defines the measurement and diagnostic boundaries.
+Run `a224d12afe02ac98` covers all **199 fixtures**: 13 educational, 62
+Rethinking, and 124 brms. There are **192 complete comparisons, two capped
+cases, and five cases stopped before sampling**. Stanli has the lower median
+CLI time on 178 completed comparisons; 14 remain slower. The [appendix](README.md)
+retains every outcome and diagnostic flag.
 
-## Build and numerical checks
+## Build and checks
 
-The benchmark started from clean branch revision `bce6148e`; runtime/compiler
-sources match main `2ae6c1d029ec6c29fc9be5cb7a72cdf94eccfd7f`. The fresh Release
-build used Apple M3 Ultra, 96 GiB RAM, macOS 26.6.2 ARM64. All recorded executable,
-compiler, benchmark-source and frozen-input hashes were checked again after the
-sweep. The manifest distinguishes Stanli's patched Math dependency from the
-pristine CmdStan oracle dependencies.
+The measured Release runtime/compiler revision is `ea4d7e24`, on Apple M3 Ultra,
+96 GiB RAM, macOS ARM64. It includes the performance fixes in this PR. Executable,
+compiler, configuration, benchmark-source and frozen-input hashes were rechecked
+after the sweep. The manifest distinguishes Stanli's patched Math dependency
+from the pristine CmdStan oracle dependencies.
 
-- `benchmark-manifest.json`: run, configuration, source, dependency, binary, and input identities.
-- `build-identity.json`: additional compiler/shared-runtime hashes and CMake configuration.
-- `benchmark-summary.tsv`: the original v3 benchmark summary, including incomplete rows.
-- `teaching-results.json` and `teaching-timings.csv`: per-model timings, caps, gradient measurements, diagnostics and collection summaries.
-- `sampling-diagnostics.json`: diagnostics computed after timing finished, from the retained four-chain CSVs.
-- `numerical-replay-all.txt`: current 315/316 policy replay; `m14.11` times out before comparison. The replay includes existing ill-conditioning exceptions, expected support gaps and domain refusals; it is not 315 strict finite-gradient passes.
-- `educational-verification.json`: all 13 educational fixtures pass their three-point numerical/output checks and sampling smoke tests.
-- The [Rethinking evidence](../rethinking-report/README.md) contains its separate 61/62 current replay and unchanged references for the failed fixture.
-- `r-ecosystem-tests.txt` and `guide-examples.txt`: fresh-runtime acceptance and execution of both guide examples.
-- `r-first-posterior.csv` / `.txt`: three separately launched R sessions, median 0.127 s. These were measured after the corpus run and diagnostics finished.
-- `native-call-benchmark.txt`: fresh-runtime paired density/gradient adapter timings, measured after the startup experiment.
-- `SHA256SUMS`: checksums of this evidence set and the raw archive.
+- `benchmark-manifest.json`, `build-identity.json`, and `post-run-identity-check.txt`: exact identities and post-run checks.
+- `benchmark-summary.tsv`: original benchmark summary, including incomplete rows.
+- `teaching-results.json`, `teaching-timings.csv`, and `sampling-diagnostics.json`: timings, caps, gradients and diagnostics for every fixture. Diagnostics ran after timed measurements ended.
+- `baseline-comparison.json`: comparison with the separately retained original sweep; model/data bytes and sampler configuration match. These complete-run before/after timings were not interleaved.
+- `numerical-replay-all.txt`: **316/316** under the existing reference policies, including documented ill-conditioning exceptions, support gaps and domain refusals. This is not 316 strict finite-gradient passes.
+- `educational-verification.json` / `.txt`: **13/13** educational numerical/output checks and sampling smoke tests.
+- [Rethinking evidence](../rethinking-report/README.md): **62/62** three-point numerical/output checks, 32,349 values, largest scaled discrepancy `1.48e-13`.
+- `runtime-tests.txt`: **249/249** runtime tests pass.
+- `r-ecosystem-tests.txt` and `guide-examples.txt`: runtime acceptance without skips, warnings or failures, and both generated-model guide examples.
+- `ci-validation.json`: [full platform CI](https://github.com/seantalts/stanli/actions/runs/35049845476) passes at `f5b047de`, whose runtime/compiler sources match the measured revision. Includes Linux/macOS/Windows R acceptance, full compiler comparisons and sanitizers.
+- `sanitizer-checks.txt`: retained raw-log checksums for the earlier equivalent-source ASAN (249 tests) and TSAN (three tests) run.
+- `r-first-posterior.csv` / `.txt`: three local fresh R sessions, median **0.125 s**, measured after the sweep and diagnostics. `r-first-posterior-ci-{mac,linux,windows}.csv` retains the independent CI platform measurements.
+- `native-call-benchmark.csv` / `.txt`: five alternating pairs of 20,000 density/gradient calls through the direct and native-stanfit APIs.
+- `SHA256SUMS`: checksums for this evidence set and the current raw archive.
 
 ## Raw evidence
 
-`raw-evidence-fae5494c296cd547.tgz` (499 MB) is retained locally and excluded
-from Git. The committed manifest, per-model results and checksums identify it;
-the archive itself is not hosted by this PR. It contains:
+`raw-evidence-a224d12afe02ac98.tgz` (**502,030,085 bytes**) is retained locally
+and excluded from Git. Its SHA256 is
+`7f0508df71b379d3c6cf150be57c87346036a9719675e7f2f689ceb6a889025e`.
+The archive is not hosted by this PR. It contains:
 
-- `run/`: frozen model/data inputs, command events, stdout/stderr, model records,
-  per-seed draws, generated model headers, and MIR. Compiled executables are omitted.
-- `analysis/`: numerical and sampling logs, diagnostic jobs/results, build identity,
-  and the R acceptance/startup measurements.
-- `source/`: benchmark, report, diagnostic, and generator sources used for this evidence.
-- `provenance/`: fixture inventories, data provenance, licenses and coverage notes.
+- `run/`: frozen inputs, command events, stdout/stderr, model records, per-seed CSVs, generated headers and MIR. Executables are omitted.
+- `analysis/`: numerical/sampling logs, diagnostics, identities, CI summaries and R measurements.
+- `source/`: benchmark, report, diagnostic and generator sources used for this evidence.
+- `provenance/`: inventories, data provenance, licenses and coverage notes.
+- `research/`: separately labeled intermediate optimization experiments and profiles; these are not substituted into the final sweep.
 
-The original run remains at
-`/tmp/stanli-rethinking/latest/teaching-v3.tsv.run`. The older run
-`37fa26701db14f56` and its raw archive remain separately retained and are not
-mixed into these results. Earlier `be0a0c8d` timings are superseded here.
+The original run remains at `/tmp/stanli-teaching-perf/teaching-v5.tsv.run`.
+The pre-optimization run `fae5494c296cd547` and its 499 MB archive remain
+separately retained. Interrupted experiments are excluded from this sweep.
 
 ## Reproduction
 
-Use the recorded toolchain and fresh build. The measured command was:
+Use the recorded toolchain and a fresh Release build:
 
 ```sh
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb NEW.tsv \
-  --corpus teaching --bench build-teaching-latest/bench_grad \
-  --run build-teaching-latest/stanli_run --sampling --cmdstan-runtime-multiple 3
+  --corpus teaching --bench build-teaching-perf/bench_grad \
+  --run build-teaching-perf/stanli_run --sampling --cmdstan-runtime-multiple 3
 ```
 
-To regenerate diagnostics/tables from the archive, extract it, then follow the
-commands in the [appendix](README.md#reproduce-the-tables), using its `run/`
-directory. Regenerate diagnostic jobs after relocation because the recorded
-job list has absolute paths. Do not run diagnostic analysis, builds or
-compression concurrently with timed measurements.
-
-The McElreath PDF is generated separately by `tools/report_rethinking.py` from
-the same full run, diagnostics, and the Rethinking numerical replay. Its
-narrative is explicitly tied to this audited run.
+To regenerate tables, extract the archive and follow the commands in the
+[appendix](README.md#reproduce-the-tables). Regenerate diagnostic jobs after
+relocation because their CSV paths are absolute. Do not run analysis, builds
+or compression concurrently with timed measurements. The McElreath PDF uses
+the same run and diagnostics plus the separate Rethinking numerical replay;
+its narrative is explicitly tied to this audited checkpoint.
