@@ -1270,6 +1270,45 @@ static void test_liveness_cached_matches_uncached() {
   }
 }
 
+static void test_liveness_search_budget() {
+  // Many overlapping cuts exceed the work allowance. The budget changes
+  // which proven partitions are considered, never the graph's semantics.
+  const auto build = [] { return build_wide_then_narrow(40, 1200, 1200); };
+  auto plain = build();
+  const auto want = run_grad_twice(std::move(plain.g), plain.fills);
+  auto bounded = build();
+  test_setenv("STANLI_ISLAND_PRICING_BUDGET", "1", 1);
+  const auto lines = capture_island_debug(
+      [&] { carve_islands(bounded.g, bounded.fills, bounded.terms, {}); });
+  test_unsetenv("STANLI_ISLAND_PRICING_BUDGET");
+  bool skipped = false;
+  for (const auto& line : lines) {
+    if (line.rfind("island-pricing work=", 0) != 0) continue;
+    expect("pricing work bounded",
+           parse_field(line, "work") <= parse_field(line, "limit"));
+    skipped |= parse_field(line, "skipped") > 0;
+  }
+  expect("large partition search reached budget", skipped);
+  const auto got = run_grad_twice(std::move(bounded.g), bounded.fills);
+  expect("budget result size", got.size() == want.size());
+  for (size_t i = 0; i < got.size() && i < want.size(); ++i)
+    expect_close("budget preserves gradient", got[i], want[i]);
+
+  // A small search completes under the allowance and keeps exactly the
+  // original chosen programs, including their forward and reverse bodies.
+  auto original = build_wide_then_narrow(40, 36, 40);
+  auto limited = build_wide_then_narrow(40, 36, 40);
+  test_setenv("STANLI_ISLAND_PRICING_BUDGET", "0", 1);
+  carve_islands(original.g, original.fills, original.terms, {});
+  test_setenv("STANLI_ISLAND_PRICING_BUDGET", "1", 1);
+  carve_islands(limited.g, limited.fills, limited.terms, {});
+  test_unsetenv("STANLI_ISLAND_PRICING_BUDGET");
+  std::string a, b;
+  print_graph(a, original.g);
+  print_graph(b, limited.g);
+  expect("unexhausted budget preserves compiled graph", a == b);
+}
+
 // Many length-`width` DOT ops feeding a scalar chain.
 static VectorBinaryGraph build_dot_heavy(int width) {
   VectorBinaryGraph h;
@@ -2543,6 +2582,7 @@ int main() {
   test_no_island_liveness_disables_splitting();
   test_liveness_finds_a_cheaper_split_than_strict();
   test_liveness_cached_matches_uncached();
+  test_liveness_search_budget();
   test_dot_width_estimate_moves_together();
   test_const_count_does_not_grow_island_cost();
   test_softmax3_island_executor();

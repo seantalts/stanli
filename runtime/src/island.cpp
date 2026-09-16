@@ -37,6 +37,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -612,6 +613,9 @@ struct Carver {
   std::vector<size_t> liveness_queue_cuts;
   size_t pricing_cost_begin = 0;
   std::vector<int64_t> pricing_cost_prefix;
+  size_t pricing_work = 0;
+  size_t pricing_work_limit = 0;
+  size_t pricing_skipped = 0;
 
   Carver(Graph& graph,
          const std::vector<std::pair<int, std::vector<double>>>& fills,
@@ -990,6 +994,7 @@ struct Carver {
     int64_t report = 0;
     bool any = false;
     size_t cut = 0;
+    bool evaluated = false;
   };
   std::map<std::pair<size_t, size_t>, LivenessPricing> liveness_prices;
   const bool cache_liveness_prices =
@@ -1009,9 +1014,14 @@ struct Carver {
       return found->second;
     LivenessPricing best;
     best.cut = j;
-    if ((int64_t)(j - i) < kMinIslandOps) {
+    const bool over_budget =
+        pricing_work_limit && j - i > pricing_work_limit - pricing_work;
+    if ((int64_t)(j - i) < kMinIslandOps || over_budget) {
       best.decide = best.report = graph_cost(i, j);
+      if (over_budget) ++pricing_skipped;
     } else {
+      pricing_work += j - i;
+      best.evaluated = true;
       // Release the whole-span program before descending into subproblems.
       {
         const Candidate c = evaluate(i, j, "island-liveness");
@@ -1043,11 +1053,30 @@ struct Carver {
       return;
     }
     if (i != begin) liveness_queue_cuts.push_back(i);
-    if ((int64_t)(j - i) >= kMinIslandOps)
-      liveness_queue.push_back(evaluate(i, j, "island-liveness-selected"));
+    if ((int64_t)(j - i) >= kMinIslandOps) {
+      if (price.evaluated) {
+        liveness_queue.push_back(evaluate(i, j, "island-liveness-selected"));
+      } else {
+        // An unpriced interval remains graph operations. Do not compile it
+        // during collection or emission and accidentally spend the budget
+        // again after the search has finished.
+        Candidate unpriced{i, j};
+        unpriced.graph_cost = price.decide;
+        liveness_queue.push_back(std::move(unpriced));
+      }
+    }
   }
 
   int64_t liveness_split_cost(size_t i, size_t j, bool* any) {
+    // Bound speculative compilation by total visited interval length. The
+    // first whole-span candidate and every explored split remain valid;
+    // unexplored leaves retain their graph cost. This is a search policy,
+    // not a claim that an unexplored split could never be cheaper.
+    const char* budget = std::getenv("STANLI_ISLAND_PRICING_BUDGET");
+    pricing_work_limit = !budget || std::string_view(budget) == "1"
+                             ? std::max<size_t>(65536, 4 * (j - i))
+                             : 0;
+    pricing_work = pricing_skipped = 0;
     // Every candidate sees the same graph until emission. Prefix sums give
     // exactly the existing additive cost without rescanning each overlapping
     // interval. Discard them before emission can rename or append slots.
@@ -1064,6 +1093,10 @@ struct Carver {
     liveness_queue_pos = 0;
     liveness_queue_cuts.clear();
     collect_liveness(i, j, i);
+    if (std::getenv("STANLI_DEBUG_ISLAND") && pricing_work_limit)
+      emit_diagnostic("island-pricing work=" + std::to_string(pricing_work) +
+                      " limit=" + std::to_string(pricing_work_limit) +
+                      " skipped=" + std::to_string(pricing_skipped));
     // Emission can rename graph slots. No decision survives that boundary.
     liveness_prices.clear();
     pricing_cost_prefix.clear();
