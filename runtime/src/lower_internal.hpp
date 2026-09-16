@@ -489,6 +489,15 @@ struct PreparedContext {
 };
 
 struct Lowering {
+  // A bounded alternative is built in its own Lowering. Refusal discards that
+  // entire instance; no partially specialized graph is ever published.
+  struct SpecializationRefused {};
+  bool bounded_specialization = false;
+  uint64_t specialization_steps = 0;
+  uint64_t specialization_elements = 0;
+  static constexpr uint64_t specialization_step_limit = 131072;
+  static constexpr uint64_t specialization_slot_limit = 65536;
+  static constexpr uint64_t specialization_element_limit = 1048576;
   struct Val {
     int slot;
     bool autodiff = false;  // instantiated C++ scalar type carries var
@@ -959,7 +968,16 @@ struct Lowering {
     return it == observations.end() ? nullptr : &it->second;
   }
   void forget_observation(const Val& v) { observations.erase({v.slot, v.si}); }
-  int add_slot(int64_t len, bool is_param) { return g.add_slot(len, is_param); }
+  int add_slot(int64_t len, bool is_param) {
+    if (bounded_specialization) {
+      if (len < 0 || g.slots.size() >= specialization_slot_limit ||
+          uint64_t(len) >
+              specialization_element_limit - specialization_elements)
+        throw SpecializationRefused{};
+      specialization_elements += uint64_t(len);
+    }
+    return g.add_slot(len, is_param);
+  }
   void note_interpreter_fallback(const std::string& what,
                                  const std::string& why) {
     const std::string note = what + " (" + why + ")";
@@ -1924,6 +1942,9 @@ struct Lowering {
 #include "lower_structured_loop.inc"
 
   void lower_stmt(const mir::Stmt& s) {
+    if (bounded_specialization &&
+        ++specialization_steps > specialization_step_limit)
+      throw SpecializationRefused{};
     if (region_current) {
       lower_region_stmt(s);
       return;
