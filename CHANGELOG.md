@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `as_cstanfit()` and `sample_cstan()` for native CmdStanR-style fit
+  methods and sampler arguments without cmdstanr or rstan. Stored-draw
+  summaries, diagnostics, and LOO survive serialization without a runtime.
+
 - Support brms COM-Poisson models with checked runtime vector writes, prefix
   reductions, and integer remainder inside parameter-dependent control flow;
   skip unused workspace initialization on early-return branches.

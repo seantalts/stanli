@@ -266,3 +266,38 @@ call `rstan::extract()` must dispatch to `stanli::extract()` for it. Consumers
 requiring RStan's slots can still use the separate optional `as_stanfit()`
 conversion, which requires RStan. Recreate the live model after serialization
 before using model-dependent operations.
+
+## CmdStanR-style fit methods
+
+The development R package also offers `as_cstanfit(fit)`, a native object with
+`$draws()`, `$summary()`, `$sampler_diagnostics()`, `$metadata()`, `$num_chains()`,
+`$time()`, and `$loo()` methods. It needs neither cmdstanr nor rstan. This is
+useful for integrations that already consume those methods, such as ulam.
+It keeps its own `stanli_cstanfit` class; consumers with CmdStanR class checks
+must explicitly accept it. Use `$stanli_fit()` to retrieve the original fit.
+
+```r
+fit <- sample_cstan(
+  model_code = "parameters { real mu; } model { mu ~ normal(0, 1); }",
+  chains = 4, parallel_chains = 4, iter_warmup = 500, iter_sampling = 1000,
+  init = list(mu = 0), seed = 42, refresh = 0
+)
+fit$draws("mu")
+fit$summary("mu", "mean", "sd", "rhat", "ess_bulk")
+```
+
+`sample_cstan()` translates CmdStanR-style sampler arguments into native
+sampling and then returns `as_cstanfit()`. Initial values must be complete
+constrained lists, a list per chain, or a function returning a list. Unknown
+sampler options fail explicitly. C++ compilation options and within-chain
+threading are unsupported.
+
+Summaries use posterior's rank-normalized R-hat and bulk/tail ESS, matching
+CmdStanR's default summary calculations. The existing `as_rfit()` interface
+continues to provide RStan-style tables and basic ESS/R-hat. Iteration counts
+in `$metadata()` are before thinning; draw arrays contain retained iterations.
+Diagnostics have a stable alphabetical column order. Overall wall time is
+reported as unavailable because the native report only retains per-chain times.
+Saved-draw methods need the Stanli R package and optional posterior/loo packages,
+but no native runtime. CSV/executable methods and LOO moment matching are not
+provided by this adapter.

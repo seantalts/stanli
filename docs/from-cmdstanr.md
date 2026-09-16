@@ -139,3 +139,14 @@ also saves the arrays, but its restored `fit$model$ptr` is unusable.
 
 See the [course quickstart](teaching.md) for installation and an eight-schools
 example that requires no model files.
+
+## Optional fit-method adapter (development)
+
+`as_cstanfit()` exposes a native Stanli fit through CmdStanR-style `$draws()`,
+`$summary()`, `$sampler_diagnostics()`, `$metadata()`, `$num_chains()`, `$time()`,
+and `$loo()` methods. `sample_cstan()` prepares a model and returns this view
+using CmdStanR-style sampling arguments. Neither requires cmdstanr or rstan.
+The object has its own `stanli_cstanfit` class, so this supports consumers of
+those methods, not every package that requires CmdStanR classes or executables.
+The default `stanli_fit` API remains available and unchanged. See
+[`r/README.md`](../r/README.md#cmdstanr-style-fit-methods) for usage and limits.
