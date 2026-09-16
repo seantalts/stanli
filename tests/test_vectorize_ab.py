@@ -239,6 +239,37 @@ class VectorizeAbTest(unittest.TestCase):
         self.assertEqual(rows[0]["packed_rows"], 1)
         self.assertEqual(rows[0]["element_store"], 6)
 
+    def test_prep_selects_completed_bounded_graph_without_rewriting_trace(self):
+        rows = [dict(graph=graph, stage=stage,
+                     **{field: 1 for field in fields})
+                for (graph, stage), fields
+                in vectorize_ab.REQUIRED_PREP_ROWS.items()]
+        for row in rows:
+            if row["graph"] == "log_prob":
+                row["graph"] = "bounded_log_prob"
+        self.assertEqual(vectorize_ab.prep_problems(rows), [])
+        selected = vectorize_ab.prep_row(rows, "log_prob", "lower")
+        self.assertEqual(selected["graph"], "bounded_log_prob")
+        self.assertEqual(selected["ops"], 1)
+        self.assertFalse(any(row["graph"] == "log_prob" for row in rows))
+
+    def test_prep_refused_trial_does_not_supply_fallback_stages(self):
+        rows = [
+            {"graph": "bounded_log_prob", "stage": "lower", "ops": 91},
+            {"graph": "bounded_log_prob", "stage": "reroll", "ns": 17},
+            {"graph": "log_prob", "stage": "lower", "ops": 12},
+            {"graph": "log_prob", "stage": "total", "ops": 7},
+        ]
+        self.assertEqual(vectorize_ab.prep_row(
+            rows, "log_prob", "lower")["ops"], 12)
+        self.assertEqual(vectorize_ab.prep_row(
+            rows, "log_prob", "reroll"), {})
+        self.assertIn("missing log_prob/reroll",
+                      vectorize_ab.prep_problems(rows))
+        # An incomplete trial alone cannot stand in for a completed graph.
+        self.assertEqual(vectorize_ab.prep_row(
+            rows[:2], "log_prob", "lower"), {})
+
     def test_reroll_summary_keeps_both_final_op_counts(self):
         rows = vectorize_ab.parse_prep(
             "stanli_prep graph=log_prob stage=total ns=1 ops=7 slots=8\n"

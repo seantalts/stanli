@@ -601,12 +601,16 @@ jobs:
       # must run on anything that could alter MIR or the compiled output; see
       # changes.vectorize for paths. Pull requests run a bounded slice; pushes
       # to main and scheduled runs cover every recorded model.
+      # Preparation uses the harness's standard 300-second budget, also used
+      # by reference replay. Large teaching-model graphs exceed 30 seconds on
+      # the release GCC runner. Numerical and gradient-ratio gates are unchanged;
+      # this is separate from corpus_bench's 3x CmdStan sampling cap.
       - name: MIR vectorization A/B
         if: >-
           matrix.runtime == 'linux-x86_64' &&
           (github.event_name != 'pull_request' ||
            needs.changes.outputs.vectorize == 'true')
-        timeout-minutes: 25
+        timeout-minutes: 60
         shell: bash
         run: |
           test -x deps/stanc3/stanli-vectorize-probe
@@ -628,7 +632,7 @@ jobs:
               s2_ar_cov s2_invgaussian s2_logistic_normal sw_mv_rescor
               2pl_latent_reg_irt covid19imperial_v2 covid19imperial_v3
               dogs_log grsm_latent_reg_irt s2_car s2_nlf surgical_model
-              sw_nonlinear)
+              sw_nonlinear sw_sratio ch14_m14_11)
           fi
           baseline_args=()
           if [ -f /tmp/vectorize-baseline/graphs.jsonl ]; then
@@ -638,7 +642,7 @@ jobs:
             --compiler deps/stanc3/stanli-vectorize-probe \
             --check build-rel/stanli_check \
             --bench build-rel/bench_grad --dump build-rel/dump_ops \
-            --timeout 30 --gradient-timeout 20 --prep-samples 2 \
+            --timeout 300 --gradient-timeout 20 --prep-samples 2 \
             --output-dir build-rel/vectorize-ab "${models[@]}" \
             "${baseline_args[@]}"
 

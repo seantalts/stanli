@@ -383,3 +383,21 @@ Wiener gain: 45.02 -> 29.23 us, CmdStan 28.99 us, bitwise fixed-point equality.
 That is near parity (0.8% slower in this repeat), rather than a stable claim of
 being faster. `wiener-unit-ab.jsonl` contains all pairs; weighted overflow and
 underflow follow the unchanged reference arithmetic.
+
+Full-platform CI on ea4d7e24 exposed two A/B harness integration issues. Its
+saved 316-model artifact has 88 failed profile samples solely because completed
+specializations emit `bounded_log_prob`, while the consumer required `log_prob`.
+The consumer now selects the completed graph without rewriting raw trace rows;
+a refused trial cannot supply stages missing from the ordinary fallback. All
+30 parser/harness tests pass, and replaying the saved profiles eliminates those
+88 failures. The remaining failures are experimental source-pass preparation
+of m14.11 exceeding the workflow's 30-second limit; the shipped source-pass-off
+path prepares in roughly 25 seconds on that GCC runner and passes reference
+checks. Restore the harness's standard 300-second preparation limit (the same
+as reference replay), retain every model and numerical/gradient gate, and add
+m14.11 plus a successful specialized graph to the PR slice. This does not alter
+the separate three-times-CmdStan sampling cap. The next CI run must establish
+whether experimental preparation finishes and still matches its oracle.
+
+These harness/workflow-only changes do not change the frozen ea4d7e24 runtime,
+compiler, benchmark sources or inputs used by full timing run a224d12afe02ac98.
