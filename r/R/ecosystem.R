@@ -94,7 +94,7 @@ fit_diagnostic <- function(object, pars, column) {
   object$draws <- object$draws[post_warmup_rows(object), , , drop = FALSE]
   # A deserialized fit needs the runtime for stansummary, but no live model.
   load_runtime()
-  s <- summary(object)
+  s <- summary.stanli_fit(object)
   values <- s[[column]]
   if (column == "ess_bulk") values <- values / prod(dim(object$draws)[1:2])
   names(values) <- s$variable
