@@ -1,0 +1,132 @@
+[
+  {
+    "model": "sw_re_negbin",
+    "engines": {
+      "cmdstan": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 4.958325417000001,
+        "range_s": [
+          0.19452645800000035,
+          5.650017084
+        ],
+        "mad_s": 0.3702669794999993
+      },
+      "stanli": {
+        "complete": 3,
+        "seeds": 4,
+        "capped_seeds": [
+          2
+        ]
+      }
+    }
+  },
+  {
+    "model": "s2_mixture_theta",
+    "engines": {
+      "cmdstan": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 1.635906624999997,
+        "range_s": [
+          0.7782026250000058,
+          3.511768374999999
+        ],
+        "mad_s": 0.7579276039999954
+      },
+      "stanli": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 2.0558926454999984,
+        "range_s": [
+          1.5224393749999976,
+          2.538327083000002
+        ],
+        "mad_s": 0.3584537085000026
+      }
+    },
+    "cmdstan_over_stanli": 0.795715976989713
+  },
+  {
+    "model": "s2_gev",
+    "engines": {
+      "cmdstan": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 0.09088385400000121,
+        "range_s": [
+          0.08501683400000104,
+          0.09748804200000194
+        ],
+        "mad_s": 0.0036689159999987453
+      },
+      "stanli": {
+        "complete": 3,
+        "seeds": 4,
+        "capped_seeds": [
+          1
+        ]
+      }
+    }
+  },
+  {
+    "model": "sw_asymlaplace",
+    "engines": {
+      "cmdstan": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 0.1118335419999994,
+        "range_s": [
+          0.09760112499999707,
+          0.11789212500000446
+        ],
+        "mad_s": 0.005602250000002584
+      },
+      "stanli": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 0.1484285624999977,
+        "range_s": [
+          0.1357147920000017,
+          0.155141792000002
+        ],
+        "mad_s": 0.005936541500002335
+      }
+    },
+    "cmdstan_over_stanli": 0.7534502801642449
+  },
+  {
+    "model": "s2_zi_asymlaplace",
+    "engines": {
+      "cmdstan": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 0.1496862710000002,
+        "range_s": [
+          0.13015658300000155,
+          0.15285679199999436
+        ],
+        "mad_s": 0.0025675624999976776
+      },
+      "stanli": {
+        "complete": 4,
+        "seeds": 4,
+        "capped_seeds": [],
+        "median_s": 0.1832892914999995,
+        "range_s": [
+          0.17255787499999542,
+          0.18849200000000366
+        ],
+        "mad_s": 0.003821271000003179
+      }
+    },
+    "cmdstan_over_stanli": 0.8166667554607281
+  }
+]

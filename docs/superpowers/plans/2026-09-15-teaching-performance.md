@@ -1041,3 +1041,44 @@ initialization patch in deps/fetch.sh, introduced by95aecfbad onSeptember11
 and already onmain. It was not changed here; COM does not use ODEs. The user
 was told this exception, and the exact dependency revision/patch is included
 in build provenance. Do not claim the entire dependency checkout is pristine.
+
+## Remaining brms survey after COM confirmation (September 16)
+
+CI finished successfully on cb58eb22, including the Linux runtime, Windows
+compiler parity, browser build, and R runtime job. No local benchmark was still
+running. The check-in now points to draft PR379; PR371 is already merged.
+
+A single prespecified five-model survey used the exact final COM executable,
+frozen v6 inputs and CmdStan binaries, seeds1–4, 1000+1000, warm executables,
+serial thread-limited processes, and unchanged min(3× reference,900s) caps.
+No timing overlapped builds, tests, profiling, diagnostics, or compression.
+Raw evidence is `/tmp/stanli-teaching-perf/residual-cb58/`, published separately
+under `output/teaching-performance/followup-brms-residuals/`. Frozen v6 and
+Rethinking reports remain unchanged. No production code changed in this pass.
+
+Ratios of four-seed medians CmdStan/Stanli: asymmetric Laplace0.75345,
+zero-inflated asymmetric Laplace0.81667, mixture0.79572. These are survey
+observations, not repeated confirmations of a threshold. Negative-binomial
+seed2 and GEVseed1 capped; no aggregate ratio is computed from survivors.
+The negative-binomial reference seed2 has982/1000divergences and19.78mean
+leapfrogs, versus809–972 for its otherseeds. Both engines visit extreme
+dispersion values and show enormous positive densities/tiny step sizes.
+Mixture diagnostics remain poor in both engines; the two Laplace fits have
+zero divergences/depthhits and parameterRhat<1.01 in both engines.
+
+A standalone primitive-only C++ reproducer, with no Stanli headers/libraries,
+demonstrates cancellation in the pinned upstream negative-binomial log GLM.
+For40 counts of3 atmean3, dispersion1e16 gives6144 versus−59.83690413 for
+the equivalent non-GLM Stan Math call; dispersion1e22 gives17179869184.
+The non-GLM call agrees within2.1e-12 with an independent long-double finite
+product calculation over seven dispersion values2…1e100. The GLM header is
+verified byte-identical to its upstream git revision. This explains a library
+limitation in a regime the chains visit; it is not a claim to have traced every
+divergence. No Math patch, density substitution, or sampler/input change made.
+
+GEV profiling separately attributes92.6%of fixed-point gradient time toOP_LOOP,
+with~1ms preparation. Sampled stacks show recursive control dispatch, record/
+version bookkeeping, and the nested lmultiply callback wrapper. Three completed
+Stanli chains and allfour CmdStan chains have no divergences/depthhits. Next
+bounded experiment should separate dispatch elimination from callback overhead
+while preserving existing math and execution order; current source is unchanged.

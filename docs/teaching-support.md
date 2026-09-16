@@ -54,7 +54,11 @@ adds COM-Poisson evaluation support and reduces asymmetric-Laplace sampling
 costs. It reports fresh numerical differences and separate timings, including
 remaining caps and executable-startup effects. A later [COM-Poisson follow-up](../output/teaching-performance/followup-com-poisson/README.md)
 completes all four seeds within the 3× cap at 0.591× CmdStan/Stanli. The
-complete-sweep counts above remain unchanged.
+[workspace and callback follow-up](../output/teaching-performance/followup-com-poisson-80/README.md)
+reaches 0.838× across three confirmation rounds, with identical before/after
+draws. A separate [remaining-brms survey](../output/teaching-performance/followup-brms-residuals/README.md)
+records the outstanding caps, timing ratios, and an upstream negative-binomial
+GLM precision limitation. The complete-sweep counts above remain unchanged.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
 covers all 61 book call sites and the separate hurdle fixture. The

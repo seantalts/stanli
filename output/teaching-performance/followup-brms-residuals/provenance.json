@@ -1,0 +1,17 @@
+{
+  "head": "cb58eb2250fae6bf4177e00f187c2459cec84dc4",
+  "math_revision": "8f326d14599d3030c626c46532d8e8534c1cdbec",
+  "glm_header_unmodified": true,
+  "glm_header_sha256": "6d5c8448764b886b860408943c7684d308abf612f8966b723fecca1d8d3c8c36",
+  "math_tracked_changes": " stan/math/rev/functor/cvodes_integrator_adjoint.hpp | 1 +\n 1 file changed, 1 insertion(+)\n",
+  "note": "The one existing adjoint ODE initialization patch predates this work. The GLM header and all other dependency code are unchanged by this diagnostic pass. The standalone primitive-only program does not use an ODE solver.",
+  "benchmark_binary_matches_com_final": true,
+  "commands": {
+    "survey": "python3 run.py from repository root; choose a fresh output directory",
+    "diagnostics": "R_LIBS_USER=/tmp/stanli-rethinking/latest/r-library Rscript tools/summarize_rethinking_bench.R diagnostic-jobs.json diagnostics.json",
+    "profile": "STANLI_PROFILE=1 STANLI_PROFILE_PREP=1 build-teaching-residual/bench_grad frozen-model.sexp frozen-data.json 10000; independent macOS sample capture, not included in timing"
+  },
+  "profile_binary_sha256": "bd379dcf3d86c912d72cd3b1745b9ebf0e0eaef072ba943a8d780f31c0f6043e",
+  "profile_binary_matches_com_final": true,
+  "reproducer_source": "The direct source link is clang-formatted. The reproduction archive retains the exact original source and compiler command used for the recorded values."
+}

@@ -1,0 +1,23 @@
+[
+  "/usr/bin/c++",
+  "-DBOOST_DISABLE_ASSERTS",
+  "-DBOOST_MATH_PROMOTE_DOUBLE_POLICY=false",
+  "-DBRIDGESTAN_EXPORT=1",
+  "-DSTAN_THREADS=1",
+  "-D_REENTRANT",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/runtime/include",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/math",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/stan/src",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/stan/lib/rapidjson_1.1.0",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/math/lib/eigen_5.0.1",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/math/lib/boost_1.87.0",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/math/lib/sundials_6.1.1/include",
+  "-I/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/math/lib/tbb_2020.3/include",
+  "-O3",
+  "-DNDEBUG",
+  "-std=gnu++17",
+  "-ffp-contract=off",
+  "/tmp/stanli-teaching-perf/residual-cb58/negbin-upstream.cpp",
+  "-o",
+  "/tmp/stanli-teaching-perf/residual-cb58/negbin-upstream"
+]
