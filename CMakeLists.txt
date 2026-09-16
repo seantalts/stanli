@@ -139,6 +139,7 @@ if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set_property(SOURCE
     runtime/kernels/densities_cdf_a.cpp
     runtime/kernels/densities_cdf_b.cpp
+    runtime/kernels/matrix_fns.cpp
     APPEND PROPERTY COMPILE_OPTIONS -fmath-errno)
 endif()
 

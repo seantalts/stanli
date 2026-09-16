@@ -421,7 +421,8 @@ static void check_tail_glms() {
 // Shared-cutpoint recorder versus the established nested Stan Math tape.
 // Per-observation cutpoints exercise the deliberately retained fallback.
 static void check_ordered_density(bool array_cuts, bool scalar_location,
-                                  bool propto, double weight, int width) {
+                                  bool propto, double weight, int width,
+                                  bool probit = false) {
   using namespace stanli;
   using stan::math::var;
   const int n = scalar_location ? 1 : 4;
@@ -435,7 +436,8 @@ static void check_ordered_density(bool array_cuts, bool scalar_location,
   const int ls = g.add_slot(n, true), cs = g.add_slot(width * nc, true);
   const int ws = g.add_slot(1, false), out = g.add_slot(1, false);
   const int scaled = g.add_slot(1, false);
-  g.add_op(OP_ORDERED_LOGISTIC_LPMF, {ls, cs}, out, layout);
+  g.add_op(probit ? OP_ORDERED_PROBIT_LPMF : OP_ORDERED_LOGISTIC_LPMF, {ls, cs},
+           out, layout);
   g.ops.back().variant = propto ? 0x83u : 0;
   g.add_op(OP_MUL, {out, ws}, scaled);
   g.result_slot = scaled;
@@ -454,6 +456,9 @@ static void check_ordered_density(bool array_cuts, bool scalar_location,
   std::vector<double> grad(n + width * nc);
   const double got = ex.gradient(grad.data());
   const auto call = [&](const auto& l, const auto& c) {
+    if (probit)
+      return propto ? stan::math::ordered_probit_lpmf<true>(y, l, c)
+                    : stan::math::ordered_probit_lpmf<false>(y, l, c);
     return propto ? stan::math::ordered_logistic_lpmf<true>(y, l, c)
                   : stan::math::ordered_logistic_lpmf<false>(y, l, c);
   };
@@ -485,6 +490,57 @@ static void check_ordered_density(bool array_cuts, bool scalar_location,
     ex.param_ptr(cs)[1] += 1.0;
     expect_eq("ordered recovery after error", ex.gradient(grad.data()), got);
   }
+}
+
+// Compare full/proportional values and weighted gradients with the all-var
+// oracle, including simplex boundaries, inactive edges and invalid inputs.
+static void check_multinomial_density() {
+  using namespace stanli;
+  using stan::math::var;
+  for (bool propto : {false, true})
+    for (bool active : {false, true})
+      for (double weight :
+           {1.0, -2.75, 0.0, std::numeric_limits<double>::infinity()})
+        for (const auto& values : std::vector<std::vector<double>>{
+                 {0.2, 0.3, 0.5}, {0.0, 0.5, 0.5}, {1.0}}) {
+          const int n = values.size();
+          std::vector<int> counts(n);
+          for (int i = 0; i < n; ++i) counts[i] = i == 2 ? 4 : i;
+          Graph g;
+          const int theta = g.add_slot(n, active), w = g.add_slot(1, false);
+          const int out = g.add_slot(1, false), scaled = g.add_slot(1, false);
+          g.add_op(OP_MULTINOMIAL_LPMF, {theta}, out, counts);
+          g.ops.back().variant = propto ? 0x80u : 0u;
+          g.add_op(OP_MUL, {out, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          std::copy(values.begin(), values.end(), ex.value_ptr(theta));
+          ex.value_ptr(w)[0] = weight;
+          std::vector<double> grad(active ? n : 1);
+          const double got = ex.gradient(grad.data());
+          stan::math::nested_rev_autodiff nested;
+          Eigen::Matrix<var, -1, 1> probabilities(n);
+          for (int i = 0; i < n; ++i) probabilities(i) = values[i];
+          var density =
+              propto
+                  ? stan::math::multinomial_lpmf<true>(counts, probabilities)
+                  : stan::math::multinomial_lpmf<false>(counts, probabilities);
+          var ref = density * weight;
+          stan::math::grad(ref.vi_);
+          expect_eq("multinomial value", got, ref.val());
+          if (active)
+            for (int i = 0; i < n; ++i)
+              expect_eq("multinomial weighted gradient", grad[i],
+                        probabilities(i).adj());
+          ex.value_ptr(theta)[0] = -0.1;
+          bool threw = false;
+          try {
+            ex.gradient(grad.data());
+          } catch (const std::domain_error&) {
+            threw = true;
+          }
+          expect_eq("multinomial invalid simplex", threw, true);
+        }
 }
 
 static void reference(const double* q, double* lp_out, double* grad_out) {
@@ -547,9 +603,14 @@ int main() {
     for (bool scalar_location : {false, true})
       for (bool propto : {false, true})
         for (double weight : {1.0, -2.75, 0.0})
-          for (int width : {0, 1, 3})
+          for (int width : {0, 1, 3}) {
             check_ordered_density(array_cuts, scalar_location, propto, weight,
                                   width);
+            if (width)
+              check_ordered_density(array_cuts, scalar_location, propto, weight,
+                                    width, true);
+          }
+  check_multinomial_density();
   check_vector_alphas();
   check_active_designs();
 

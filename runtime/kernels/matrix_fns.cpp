@@ -1379,6 +1379,41 @@ double mult_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, theta);
 }
 
+// Multinomial has one independent probability edge per count. Preserve the
+// validation and summation order of Stan Math's prim/prob/multinomial_lpmf.hpp.
+// The reverse uses the weighted multiply_log rule (rev/fun/multiply_log.hpp),
+// multiplying before dividing; caching unit partials changes that rounding.
+void multn_fwd(KernelCtx& ctx) {
+  const std::vector<int> counts(ctx.idata, ctx.idata + ctx.n_idata);
+  const CMapV theta(ctx.in[0].data, ctx.in[0].len);
+  constexpr const char* fn = "multinomial_lpmf";
+  stan::math::check_size_match(fn, "Size of number of trials variable",
+                               counts.size(), "rows of probabilities parameter",
+                               theta.rows());
+  stan::math::check_nonnegative(fn, "Number of trials variable", counts);
+  stan::math::check_simplex(fn, "Probabilities parameter", theta);
+  double value = 0;
+  if (!(ctx.variant & 0x80u)) {
+    double total = 1;
+    for (int count : counts) {
+      total += count;
+      value -= stan::math::lgamma(count + 1.0);
+    }
+    value += stan::math::lgamma(total);
+  }
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    value += counts[i] == 1 ? std::log(theta(i))
+                            : stan::math::multiply_log(counts[i], theta(i));
+  ctx.out.data[0] = value;
+}
+void multn_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    ctx.in_adj[0].data[i] +=
+        ctx.idata[i] == 1 ? ctx.out_adj / ctx.in[0].data[i]
+                          : ctx.out_adj * ctx.idata[i] / ctx.in[0].data[i];
+}
+
 // ---- the two the recorder cannot take ----------------------------------
 // ordered_probit does `c_vec[i].coeff(0) - lambda_vec[i]` and wiener
 // `res *= 0.0` on the scalar type. var has those operators; rvar
@@ -1399,9 +1434,15 @@ double ordered_eval(KernelCtx& ctx) {
   std::vector<int> y(ctx.idata, ctx.idata + N);
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
-  VarV lambda = tail_v(ctx, 0, ctx.in[0].len);
-  std::vector<VarV> cuts = mvt_vectors<var>(ctx.in[1], K, cuts_encoded);
-  var out;
+  // ordered_probit does not condition its summands on propto or the scalar
+  // activity type. Its forward needs only values; retain the original var
+  // replay in backward so weighted adjoint arithmetic stays unchanged.
+  using Scalar =
+      std::conditional_t<!Grad && Kind == kOrderedProbit, double, var>;
+  Eigen::Matrix<Scalar, -1, 1> lambda(ctx.in[0].len);
+  for (int64_t i = 0; i < ctx.in[0].len; ++i) lambda(i) = ctx.in[0].data[i];
+  auto cuts = mvt_vectors<Scalar>(ctx.in[1], K, cuts_encoded);
+  Scalar out;
   const auto call = [&](const auto& location, const auto& cutpoints) {
     if constexpr (Kind == kOrderedLogistic)
       return propto ? stan::math::ordered_logistic_lpmf<true>(y, location,
@@ -1418,7 +1459,10 @@ double ordered_eval(KernelCtx& ctx) {
     out = ctx.in[0].len == 1 ? call(lambda(0), cutpoints)
                              : call(lambda, cutpoints);
   });
-  return finish_tail_density<Grad>(ctx, out, lambda, cuts);
+  if constexpr (!Grad && Kind == kOrderedProbit)
+    return out;
+  else
+    return finish_tail_density<Grad>(ctx, out, lambda, cuts);
 }
 
 // wiener(y | alpha, tau, beta, delta): five real arguments, and every one
@@ -1464,7 +1508,6 @@ STANLI_TAIL_KERNEL(mgp, mgp_eval, kMultiGp)
 STANLI_TAIL_KERNEL(mgpc, mgp_eval, kMultiGpChol)
 STANLI_TAIL_KERNEL(mst, mst_eval, kMst)
 STANLI_TAIL_KERNEL(mstc, mst_eval, kMstChol)
-STANLI_TAIL_KERNEL(multn, mult_eval, kMultinomial)
 STANLI_TAIL_KERNEL(multnl, mult_eval, kMultinomialLogit)
 STANLI_TAIL_KERNEL(dirmult, mult_eval, kDirichletMultinomial)
 #undef STANLI_TAIL_KERNEL
@@ -1529,11 +1572,10 @@ double lkjcov_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, S, mu, sig, eta);
 }
 
-// The three remaining GLMs. Unlike the ones in densities.cpp these carry
-// argument shapes the recorder cannot express (a cutpoint vector, a
-// coefficient matrix, a second int group), so they take the var tape.
+// Binomial and categorical GLMs retain their established nested-tape path.
+// The ordered-logistic GLM below records partials directly.
 // idata = [outcome..., rows, cols] and, for binomial, the trial counts.
-enum GlmKind { kBinomLogitGlm, kCatLogitGlm, kOrdLogisticGlm };
+enum GlmKind { kBinomLogitGlm, kCatLogitGlm };
 template <typename F>
 decltype(auto) with_glm_integer(std::vector<int>& values, bool scalar, F&& f) {
   return scalar ? std::forward<F>(f)(values[0]) : std::forward<F>(f)(values);
@@ -1581,28 +1623,15 @@ double tglm_eval(KernelCtx& ctx) {
     return tail_density_fwd(ctx, out, X, alpha, beta);
   } else {
     std::vector<int> y(ctx.idata, ctx.idata + rows);
-    if constexpr (Kind == kCatLogitGlm) {
-      VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
-      VarM beta = tail_m(ctx, 2, cols, ctx.in[2].len / cols);
-      with_glm_integer(y, scalar_mask & 1u, [&](const auto& y_arg) {
-        out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y_arg, X,
-                                                                    alpha, beta)
-                     : stan::math::categorical_logit_glm_lpmf<false>(
-                           y_arg, X, alpha, beta);
-      });
-      return tail_density_fwd(ctx, out, X, alpha, beta);
-    } else {
-      // in = {X, beta, cutpoints}; alpha above is beta for this one.
-      VarV beta = tail_v(ctx, 1, cols);
-      VarV cuts = tail_v(ctx, 2, ctx.in[2].len);
-      with_glm_integer(y, scalar_mask & 1u, [&](const auto& y_arg) {
-        out = propto ? stan::math::ordered_logistic_glm_lpmf<true>(y_arg, X,
-                                                                   beta, cuts)
-                     : stan::math::ordered_logistic_glm_lpmf<false>(y_arg, X,
-                                                                    beta, cuts);
-      });
-      return tail_density_fwd(ctx, out, X, beta, cuts);
-    }
+    VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
+    VarM beta = tail_m(ctx, 2, cols, ctx.in[2].len / cols);
+    with_glm_integer(y, scalar_mask & 1u, [&](const auto& y_arg) {
+      out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y_arg, X,
+                                                                  alpha, beta)
+                   : stan::math::categorical_logit_glm_lpmf<false>(y_arg, X,
+                                                                   alpha, beta);
+    });
+    return tail_density_fwd(ctx, out, X, alpha, beta);
   }
 }
 
