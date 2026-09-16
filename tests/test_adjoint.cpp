@@ -149,6 +149,39 @@ static int64_t ulps(double a, double b) {
   return d < 0 ? -d : d;
 }
 
+static void test_inactive_call_replay() {
+  Program::Call call;
+  call.n_in = 2;
+  call.in[0] = 0;
+  call.in[1] = 1;
+  call.in_len[0] = call.in_len[1] = call.out_len = 1;
+  call.out = 0;  // overwrite an input only after reading all input values
+  call.input_adjoint_mask = 0;
+  call.variant = 2;
+  call.idata = {3};
+  call.forward = test_call_forward;
+  call.backward = [](KernelCtx&) {
+    throw std::logic_error("unexpected reverse");
+  };
+  stan::math::nested_rev_autodiff nested;
+  stan::math::var a = 2., b = 4.;
+  std::vector<stan::math::var> reg{a, b};
+  run_call_var(call, reg.data());
+  expect("inactive CALL forward alias/context", reg[0].val() == 13.);
+  reg[0].grad();
+  expect("inactive CALL has no derivative", a.adj() == 0. && b.adj() == 0.);
+  call.forward = [](KernelCtx&) {
+    throw std::domain_error("forward validation");
+  };
+  bool threw = false;
+  try {
+    run_call_var(call, reg.data());
+  } catch (const std::domain_error&) {
+    threw = true;
+  }
+  expect("inactive CALL preserves validation", threw);
+}
+
 static void test_call_binding_refusal() {
   Program::Call registered;
   registered.opcode = OP_POW;
@@ -820,6 +853,20 @@ static void test_live_copy_both_read() {
 // state vector copied, one element overwritten, the result reduced, and the
 // next step reading the result. `iohmm_reg` is this shape at width 1,500,
 // and it is the region islands exist for.
+static void test_constant_fill_adjoint() {
+  for (bool overwrite : {false, true}) {
+    Build b({0.31, 0.72, -0.45}, 3);
+    const int fill = overwrite ? 0 : b.alloc(3);
+    const int pool = (int)b.p.pool.size();
+    b.p.pool.push_back(0.4);
+    b.emit_to(Program::FILL, fill, pool, 0, 0, 3);
+    const int product = b.emit(Program::MUL, fill, overwrite ? fill + 1 : 1);
+    b.emit_to(Program::MOV, fill + 2, product);
+    const int result = b.emit(Program::LSE_RANGE, fill, 0, 0, 3);
+    check("constant fill and partial overwrite", b.done({result}, {0.7}));
+  }
+}
+
 static void test_copy_then_modify_chain() {
   Build b({0.31, 0.72, -0.45});  // three parameters feeding the updates
   const int W = 4;
@@ -1886,6 +1933,7 @@ static void test_fuzz_ranges() {
 }
 
 int main() {
+  test_inactive_call_replay();
   test_acyclic_branches();
   test_call_binding_refusal();
   test_call_cached_forward_reverse_aliasing();
@@ -1896,6 +1944,7 @@ int main() {
   test_overwrite_needs_checkpoint();
   test_self_write();
   test_live_copy_both_read();
+  test_constant_fill_adjoint();
   test_copy_then_modify_chain();
   test_compact_adjoint_ranges();
   test_forwarded_repeated_destination();

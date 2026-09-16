@@ -213,6 +213,192 @@ static void expect_eq(const std::string& what, int64_t got, int64_t want) {
   }
 }
 
+// A branch bypasses a large local vector; the other initializes it before a
+// dynamic loop. Exercise zero/one/many iterations and alternating paths on a
+// reused executor, against the original bytecode and its Stan Math replay.
+static Program fill_sink_program() {
+  Program p;
+  p.n_regs = 12;
+  p.pool = {std::numeric_limits<double>::quiet_NaN(), 0., 1.};
+  p.code = {{Program::FILL, 3, 0, 0, 0, 4},
+            {Program::CONST, 7, 1},
+            {Program::CONST, 8, 2},
+            {Program::GT, 9, 2, 7},
+            {Program::JZ, 7, 9},
+            {Program::SQUARE, 10, 0},
+            {Program::JMP, 15},
+            {Program::MOV, 3, 7},
+            {Program::LT, 9, 7, 1},
+            {Program::JZ, 14, 9},
+            {Program::ADD, 7, 7, 8},
+            {Program::MUL, 11, 0, 7},
+            {Program::DYN_SET, 3, 3, 11, 7, 4},
+            {Program::JMP, 8},
+            {Program::DYN_LSE_RANGE, 10, 3, 8, 7, 4}};
+  p.out_regs = {10};
+  return p;
+}
+
+static Graph fill_sink_graph(const Program& program) {
+  Graph g;
+  const int input = g.add_slot(3, true);
+  const int out = g.add_slot(1, false);
+  auto p = std::make_shared<IslandProg>();
+  static_cast<Program&>(*p) = program;
+  p->ins = {{0, 3}};
+  const int op = g.add_op(OP_ISLAND, {input}, out);
+  g.ops[op].udata = p.get();
+  g.udata_pool.push_back(p);
+  g.result_slot = out;
+  return g;
+}
+
+static void test_fill_sink() {
+  Program original = fill_sink_program(), optimized = original;
+  expect("fill sinks across unused branch", sink_program_fills(optimized));
+  expect("fill moved after branch", optimized.code[6].code == Program::FILL);
+  expect_eq("fill sinking retains instruction count",
+            (int)optimized.code.size(), (int)original.code.size());
+  Executor before(fill_sink_graph(original)), after(fill_sink_graph(optimized));
+  for (double mode : {-1., 1., -1., 1.}) {
+    for (double n : {0., 1., 4., 2.}) {
+      for (double x : {-0.7, 0.2, 1.3}) {
+        for (Executor* ex : {&before, &after}) {
+          ex->params_data()[0] = x;
+          ex->params_data()[1] = n;
+          ex->params_data()[2] = mode;
+        }
+        double a[3], b[3];
+        expect_exact("sunk fill value", after.gradient(a), before.gradient(b));
+        for (int k = 0; k < 3; ++k) {
+          expect("sunk fill gradient",
+                 a[k] == b[k] || (std::isnan(a[k]) && std::isnan(b[k])));
+        }
+      }
+    }
+  }
+  {
+    Program p = original;
+    p.out_regs.push_back(6);
+    sink_program_fills(p);
+    auto fill = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::FILL;
+    });
+    auto branch = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::JZ;
+    });
+    expect("direct output requires initialization on bypass", fill < branch);
+  }
+  {
+    Program p = original;
+    // An early partial write must not be erased by the delayed initializer.
+    p.code[3] = {Program::MOV, 4, 0};
+    p.code[4] = {Program::JMP, 7};
+    expect("early partial write permits only earlier sink",
+           sink_program_fills(p));
+    auto fill = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::FILL;
+    });
+    auto write = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::MOV && i.dst == 4;
+    });
+    expect("fill precedes partial write", fill < write);
+  }
+  {
+    Program p = original;
+    p.code[3] = {Program::DYN_INDEX, 11, 3, 8, 1, 3};
+    p.code[4] = {Program::JMP, 7};
+    expect("indexed window constrains sink", sink_program_fills(p));
+    auto fill = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::FILL;
+    });
+    auto read = std::find_if(p.code.begin(), p.code.end(), [](const auto& i) {
+      return i.code == Program::DYN_INDEX;
+    });
+    expect("fill precedes offset indexed read", fill < read);
+  }
+  {
+    Program p = original;
+    p.code[13].dst = 0;
+    expect("cyclic fill stays in place", !sink_program_fills(p));
+  }
+  {
+    Program p = original;
+    p.code[7] = {Program::FILL, 4, 1, 0, 0, 2};
+    expect("overlapping fills stay in place", !sink_program_fills(p));
+  }
+  {
+    Program p = original;
+    p.code[7] = {Program::DIAG_PRE_MULTIPLY, 3, 0, 1, 2, 2};
+    expect("unmodelled spans refuse fill sinking", !sink_program_fills(p));
+    expect("refusal keeps original fill", p.code.front().code == Program::FILL);
+  }
+  {
+    // Both disjoint fills move to the exit sentinel. An exit jump must land
+    // on the inserted fills, not skip them; both zero and nonzero trips matter.
+    Program p;
+    p.n_regs = 9;
+    p.pool = {-0., 7., 0., 1.};
+    p.code = {{Program::FILL, 2, 0, 0, 0, 2}, {Program::FILL, 4, 1, 0, 0, 2},
+              {Program::CONST, 6, 2},         {Program::CONST, 7, 3},
+              {Program::LT, 8, 6, 0},         {Program::JZ, 8, 8},
+              {Program::ADD, 6, 6, 7},        {Program::JMP, 4}};
+    p.out_regs = {2, 3, 4, 5};
+    const Program original_exit = p;
+    expect("multiple fills sink to exit", sink_program_fills(p));
+    expect("jump lands on appended fills",
+           p.code[3].code == Program::JZ && p.code[3].dst == 6);
+    expect("both fills appended",
+           p.code[6].code == Program::FILL && p.code[7].code == Program::FILL);
+    for (double count : {0., 3., 1.}) {
+      std::vector<double> before_regs(9, 42.), after_regs(9, -17.);
+      before_regs[0] = after_regs[0] = count;
+      run_program(original_exit, before_regs.data());
+      run_program(p, after_regs.data());
+      for (int r : p.out_regs) {
+        expect_exact("exit fill values", after_regs[r], before_regs[r]);
+        expect("exit fill signed zero",
+               std::signbit(after_regs[r]) == std::signbit(before_regs[r]));
+      }
+    }
+  }
+  {
+    Program p = original;
+    for (auto& I : p.code)
+      if ((I.code == Program::JZ || I.code == Program::JMP) && I.dst > 7)
+        ++I.dst;
+    p.code.insert(p.code.begin() + 7, {Program::IDIV, 11, 8, 0});
+    const Program throwing = p;
+    expect("fill sinks after potentially throwing instruction",
+           sink_program_fills(p));
+    Executor before_throw(fill_sink_graph(throwing)),
+        after_throw(fill_sink_graph(p));
+    for (Executor* ex : {&before_throw, &after_throw}) {
+      ex->params_data()[0] = 0.;
+      ex->params_data()[1] = 2.;
+      ex->params_data()[2] = -1.;
+      double gradient[3];
+      bool threw = false;
+      try {
+        (void)ex->gradient(gradient);
+      } catch (const std::exception&) {
+        threw = true;
+      }
+      expect("sinking preserves integer division exception", threw);
+      ex->params_data()[0] = 2.;
+    }
+    double a[3], b[3];
+    expect_exact("reused executor after exception", after_throw.gradient(a),
+                 before_throw.gradient(b));
+    for (int k = 0; k < 3; ++k)
+      expect_exact("gradient after exception", a[k], b[k]);
+  }
+  test_setenv("STANLI_NO_FILL_SINK", "1", 1);
+  Program disabled = original;
+  expect("fill sink ablation", !sink_program_fills(disabled));
+  test_unsetenv("STANLI_NO_FILL_SINK");
+}
+
 static void test_compact_copy_chain() {
   Program p;
   p.n_regs = 4;
@@ -2308,6 +2494,87 @@ static void test_packed_live_ins() {
   }
 }
 
+// Trim windows within a packed descriptor, preserving branches and a direct
+// live-out. Both backwards must leave unused parameter cells at zero adjoint.
+static void test_input_windows() {
+  {
+    Program p;
+    p.n_regs = 12;
+    p.code = {{Program::DOT, 11, 1, 6, 0, 3}};
+    p.out_regs = {11};
+    const std::vector<std::pair<int, int>> inputs{{0, 6}, {6, 5}, {12, 0}};
+    expect("window keeps full operand ranges",
+           used_program_inputs(p, inputs) ==
+               std::vector<std::pair<int, int>>{{1, 3}, {6, 3}, {12, 0}});
+    Program::Call call;
+    call.n_in = 2;
+    call.in[0] = 2;
+    call.in_len[0] = 4;
+    call.in[1] = 7;
+    call.in_len[1] = 2;
+    call.out = 11;
+    call.out_len = 1;
+    p.calls = {call};
+    p.code = {{Program::CALL, 0, 0}};
+    expect("window keeps CALL operand ranges",
+           used_program_inputs(p, inputs) ==
+               std::vector<std::pair<int, int>>{{2, 4}, {7, 2}, {12, 0}});
+  }
+  for (bool native : {false, true}) {
+    Graph g;
+    const int values = g.add_slot(24, true);
+    const int control = g.add_slot(1, true);
+    auto p = std::make_shared<IslandProg>();
+    p->n_regs = 20;
+    p->ins = {{0, 8, 0, 2}, {8, 8, 0, 12}, {16, 1, 1, 0}};
+    p->pool = {0.};
+    p->code = {{Program::CONST, 17, 0}, {Program::LT, 18, 16, 17},
+               {Program::JZ, 5, 18},    {Program::MUL, 19, 3, 10},
+               {Program::JMP, 6},       {Program::ADD, 19, 5, 12}};
+    p->out_regs = {19, 7};
+    expect("window adjoint generated", gen_adjoint(*p));
+    p->native_adj = native;
+    const std::vector<std::pair<int, int>> ranges{{0, 8}, {8, 8}, {16, 1}};
+    const auto used = used_program_inputs(*p, ranges);
+    expect("window bounds include both branches and direct output",
+           used == std::vector<std::pair<int, int>>{{3, 5}, {10, 3}, {16, 1}});
+    for (size_t k = 0; k < p->ins.size(); ++k) {
+      p->ins[k].offset += used[k].first - p->ins[k].reg;
+      p->ins[k].reg = used[k].first;
+      p->ins[k].len = used[k].second;
+    }
+    const int out = g.add_slot(2, false);
+    const int op = g.add_op(OP_ISLAND, {values, control}, out);
+    g.ops[op].udata = p.get();
+    g.udata_pool.push_back(p);
+    const int sum = g.add_slot(1, false);
+    g.add_op(OP_SUM_VEC, {out}, sum);
+    g.result_slot = sum;
+    Executor ex(std::move(g));
+    for (double sign : {-1., 1., -1.}) {
+      for (int i = 0; i < 24; ++i) ex.params_data()[i] = .25 * (i + 1);
+      ex.params_data()[24] = sign;
+      std::vector<double> gradient(25), want(25, 0.);
+      const auto* x = ex.params_data();
+      const double expected = (sign < 0 ? x[5] * x[14] : x[7] + x[16]) + x[9];
+      want[9] = 1.;
+      if (sign < 0) {
+        want[5] = x[14];
+        want[14] = x[5];
+      } else {
+        want[7] = want[16] = 1.;
+      }
+      expect_exact("window value", ex.gradient(gradient.data()), expected);
+      for (int i = 0; i < 25; ++i)
+        expect_exact("window gradient", gradient[i], want[i]);
+    }
+    Program unmodelled = *p;
+    unmodelled.code.push_back({Program::DYN_INDEX, 19, 0, 16, 0, 8});
+    expect("window refuses unmodelled spans",
+           used_program_inputs(unmodelled, ranges) == ranges);
+  }
+}
+
 // A slot PRODUCED BEFORE the region, then read and updated in place inside
 // it, and read again after: it is a live-in and a live-out at once. If the
 // island's extraction wrote that same slot, its adjoint buffer would hold
@@ -2483,8 +2750,30 @@ static void test_while_lpmf_region_matches_flat() {
   };
   CompiledModel region = compile_model(
       slurp("tests/fixtures/while_lpmf_region.tmir.sexp"), observations());
+  // Also select the register-loop representation to compare workspace reuse
+  // against fresh buffers while keeping its arithmetic grouping unchanged.
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  CompiledModel replay_region = compile_model(
+      slurp("tests/fixtures/while_lpmf_region.tmir.sexp"), observations());
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  int proved = 0;
+  for (const Op& op : replay_region.graph.ops) {
+    if (op.opcode != OP_ISLAND) continue;
+    const auto& p = *static_cast<const IslandProg*>(op.udata);
+    if (!p.native_adj) {
+      expect("lowered loop caches initialization proof",
+             p.replay_initialized.has_value() && *p.replay_initialized);
+      ++proved;
+    }
+  }
+  expect("while fixture exercises proved replay", proved > 0);
   Executor region_ex(std::move(region.graph));
   region.bind(region_ex);
+  Executor replay_ex(std::move(replay_region.graph));
+  replay_region.bind(replay_ex);
+  test_setenv("STANLI_NO_REPLAY_REUSE", "1", 1);
+  Executor fresh(replay_ex);
+  test_unsetenv("STANLI_NO_REPLAY_REUSE");
 
   for (double eta : {-0.3, -1.25, 0.4, 1.5}) {
     DataMap data = observations();
@@ -2499,6 +2788,13 @@ static void test_while_lpmf_region_matches_flat() {
     region_ex.params_data()[0] = eta;
     flat_ex.params_data()[0] = eta;
     const double region_lp = region_ex.gradient(&region_grad);
+    replay_ex.params_data()[0] = eta;
+    fresh.params_data()[0] = eta;
+    double fresh_grad, replay_grad;
+    const double replay_lp = replay_ex.gradient(&replay_grad);
+    expect_exact(tag + " reuse off value", fresh.gradient(&fresh_grad),
+                 replay_lp);
+    expect_exact(tag + " reuse off gradient", fresh_grad, replay_grad);
     const double flat_lp = flat_ex.gradient(&flat_grad);
     expect_exact(tag + " lp", region_lp, flat_lp);
     expect_exact(tag + " grad", region_grad, flat_grad);
@@ -2531,8 +2827,231 @@ static void test_worker_lifetimes() {
   }
 }
 
+// A reentrant CALL evaluates another replayed island before the outer program
+// reads its earlier registers. A thread-local cache must transfer ownership,
+// not let the nested evaluation resize or overwrite an active register file.
+static Graph replay_scalar_graph(const std::shared_ptr<IslandProg>& p) {
+  Graph g;
+  const int input = g.add_slot(1, true), out = g.add_slot(1, false);
+  const int op = g.add_op(OP_ISLAND, {input}, out);
+  g.ops[op].udata = p.get();
+  g.udata_pool.push_back(p);
+  g.result_slot = out;
+  return g;
+}
+
+static void test_dead_constants_in_loops() {
+  auto before = std::make_shared<IslandProg>();
+  before->n_regs = 5;
+  before->ins = {{0, 1}};
+  before->out_regs = {3};
+  before->pool = {0., 1., std::numeric_limits<double>::quiet_NaN()};
+  before->code = {{Program::CONST, 1, 0},  {Program::CONST, 2, 1},
+                  {Program::CONST, 3, 2},  {Program::SQUARE, 3, 0},
+                  {Program::ADD, 1, 1, 2}, {Program::LT, 4, 1, 0},
+                  {Program::JZ, 8, 4},     {Program::JMP, 2}};
+  auto after = std::make_shared<IslandProg>(*before);
+  expect("dead constant removed inside loop",
+         elide_program_dead_constants(*after));
+  expect_eq("one dead constant", (int)after->code.size(),
+            (int)before->code.size() - 1);
+  expect_eq("backedge lands on replacement", after->code.back().dst, 2);
+  expect_eq("exit remaps to new end", after->code[5].dst, 7);
+  Executor a(replay_scalar_graph(before)), b(replay_scalar_graph(after));
+  for (double x : {0., 1., 5., 2., -1.}) {
+    a.params_data()[0] = b.params_data()[0] = x;
+    double ga, gb;
+    expect_exact("dead constant loop value", b.gradient(&gb), a.gradient(&ga));
+    expect_exact("dead constant loop gradient", gb, ga);
+  }
+  for (auto barrier : {Program::Instr{Program::ADD, 4, 3, 0},
+                       Program::Instr{Program::JZ, 3, 0},
+                       Program::Instr{Program::DYN_INDEX, 4, 3, 2, 0, 1}}) {
+    Program p;
+    p.n_regs = 5;
+    p.pool = {7.};
+    p.code = {{Program::CONST, 3, 0}, barrier, {Program::SQUARE, 3, 0}};
+    p.out_regs = {3};
+    expect("read or control flow retains constant",
+           !elide_program_dead_constants(p));
+  }
+  // A CALL's scratch is not a var-register write. Treating it as one could
+  // erase a value the replay still reads after that call.
+  Program p;
+  p.n_regs = 5;
+  p.pool = {7.};
+  Program::Call call;
+  call.out = 2;
+  call.out_len = 1;
+  call.scratch = 3;
+  call.scratch_len = 1;
+  p.calls = {call};
+  p.code = {
+      {Program::CONST, 3, 0}, {Program::CALL, 0, 0}, {Program::ADD, 4, 3, 2}};
+  p.out_regs = {4};
+  expect("CALL scratch does not kill replay value",
+         !elide_program_dead_constants(p));
+  p.calls.clear();
+  p.pool = {7., 9.};
+  p.code = {{Program::JZ, 2, 0},
+            {Program::CONST, 1, 0},
+            {Program::CONST, 2, 0},
+            {Program::CONST, 1, 1},
+            {Program::MOV, 3, 1}};
+  p.out_regs = {3};
+  expect("incoming label between dead constant and kill is safe",
+         elide_program_dead_constants(p));
+  expect_eq("incoming label remapped", p.code[0].dst, 1);
+  for (double take : {0., 1.}) {
+    double registers[5] = {take};
+    run_program(p, registers);
+    expect_exact("incoming label keeps value", registers[3], 9.);
+  }
+}
+
+static void test_replay_initialization_proof() {
+  Program p;
+  p.n_regs = 4;
+  p.pool = {7.};
+  p.out_regs = {2};
+  p.code = {{Program::JZ, 3, 0},
+            {Program::CONST, 1, 0},
+            {Program::JMP, 4},
+            {Program::MOV, 1, 0},
+            {Program::ADD, 2, 1, 0}};
+  expect("both arms initialize read", program_initializes_reads(p, {{0, 1}}));
+  p.code[3] = {Program::CONST, 3, 0};
+  expect("one uninitialized arm refuses reuse",
+         !program_initializes_reads(p, {{0, 1}}));
+  expect("seed covers untaken initializer",
+         program_initializes_reads(p, {{0, 2}}));
+  auto island = std::make_shared<IslandProg>();
+  static_cast<Program&>(*island) = p;
+  island->ins = {{0, 1}};
+  const Graph graph = replay_scalar_graph(island);
+  Executor initialize_kernels(graph);
+  const auto factory = kernel(OP_ISLAND).make_state;
+  expect("island has workspace factory", factory != nullptr);
+  std::unique_ptr<KernelState> refused(
+      factory(graph.ops[0], graph.slots.data()));
+  expect("failed proof selects fresh-buffer fallback", !refused);
+  initialize_kernels.params_data()[0] = 2.;
+  double fallback_grad;
+  expect_exact("refused program executes valid branch with fresh buffer",
+               initialize_kernels.gradient(&fallback_grad), 9.);
+  auto safe = std::make_shared<IslandProg>(*island);
+  safe->code[3] = {Program::MOV, 1, 0};
+  const Graph safe_graph = replay_scalar_graph(safe);
+  std::unique_ptr<KernelState> accepted(
+      factory(safe_graph.ops[0], safe_graph.slots.data()));
+  expect("proved initialization enables reuse", !!accepted);
+  Executor safe_executor(safe_graph);
+  safe_executor.params_data()[0] = 2.;
+  double safe_grad;
+  expect_exact("accepted program matches fallback branch",
+               safe_executor.gradient(&safe_grad), 9.);
+  expect_exact("fallback gradient matches accepted", fallback_grad, safe_grad);
+  p.code = {{Program::ADD, 1, 1, 0}, {Program::JMP, 0}};
+  p.out_regs.clear();
+  expect("backedge does not initialize first iteration",
+         !program_initializes_reads(p, {{0, 1}}));
+  p.code = {{Program::CONST, 1, 0}, {Program::ADD, 1, 1, 0}, {Program::JMP, 1}};
+  expect("loop carry initialized before loop",
+         program_initializes_reads(p, {{0, 1}}));
+  p.code = {{Program::CONST, 1, 0}, {Program::DYN_INDEX, 3, 1, 0, 0, 2}};
+  p.out_regs = {3};
+  expect("dynamic read needs entire possible window",
+         !program_initializes_reads(p, {{0, 1}}));
+  Program::Call call;
+  call.out = 1;
+  call.out_len = 1;
+  call.scratch = 2;
+  call.scratch_len = 1;
+  p.calls = {call};
+  p.code = {{Program::CALL, 0, 0}, {Program::ADD, 3, 1, 2}};
+  expect("private CALL scratch cannot prove initialization",
+         !program_initializes_reads(p, {{0, 1}}));
+}
+
+static void test_replay_workspace_lifetimes() {
+  struct Reentrant {
+    Executor inner;
+    int calls = 0;
+    int throw_on = 0;
+    explicit Reentrant(Graph graph) : inner(std::move(graph)) {}
+  };
+  for (int width : {2, 20000, 3}) {
+    auto inner = std::make_shared<IslandProg>();
+    inner->n_regs = width;
+    inner->ins = {{0, 1}};
+    inner->out_regs = {width - 1};
+    inner->code = {{Program::SQUARE, width - 1, 0}};
+    auto state = std::make_shared<Reentrant>(replay_scalar_graph(inner));
+    auto outer = std::make_shared<IslandProg>();
+    outer->n_regs = 4;
+    outer->ins = {{0, 1}};
+    outer->out_regs = {3};
+    outer->code = {{Program::SQUARE, 1, 0},
+                   {Program::CALL, 0, 0},
+                   {Program::ADD, 3, 1, 2}};
+    Program::Call call;
+    call.n_in = 1;
+    call.in[0] = 0;
+    call.in_len[0] = 1;
+    call.out = 2;
+    call.out_len = 1;
+    call.udata_owner = state;
+    call.forward = [](KernelCtx& ctx) {
+      auto& state = *static_cast<Reentrant*>(const_cast<void*>(ctx.udata));
+      state.inner.params_data()[0] = ctx.in[0].data[0];
+      double grad;
+      ctx.out.data[0] = state.inner.gradient(&grad);
+      if (++state.calls == state.throw_on)
+        throw std::runtime_error("reentrant replay test");
+    };
+    call.backward = [](KernelCtx& ctx) {
+      ctx.in_adj[0].data[0] += 2. * ctx.in[0].data[0] * ctx.out_adj_vec.data[0];
+    };
+    outer->calls = {call};
+    Executor ex(replay_scalar_graph(outer));
+    ex.params_data()[0] = 3.;
+    double initial_grad;
+    expect_exact("populate workspace before copy", ex.gradient(&initial_grad),
+                 18.);
+    Executor copy(ex);
+    for (Executor* current : {&ex, &copy}) {
+      for (double x : {0., 2., -3., 1.}) {
+        current->params_data()[0] = x;
+        double grad;
+        expect_exact("reentrant replay value", current->gradient(&grad),
+                     2. * x * x);
+        expect_exact("reentrant replay gradient", grad, 4. * x);
+      }
+      // The second CALL is in the outer var replay, after it has acquired its
+      // workspace. Throw there, then recover and evaluate the same executor.
+      state->throw_on = state->calls + 2;
+      double grad;
+      bool threw = false;
+      try {
+        (void)current->gradient(&grad);
+      } catch (const std::runtime_error&) {
+        threw = true;
+      }
+      expect("replay throws after acquiring workspace", threw);
+      state->throw_on = 0;
+      expect_exact("replay workspace recovers after throw",
+                   current->gradient(&grad), 2.);
+      expect_exact("replay gradient recovers after throw", grad, 4.);
+    }
+  }
+}
+
 int main() {
+  test_fill_sink();
   test_worker_lifetimes();
+  test_replay_workspace_lifetimes();
+  test_dead_constants_in_loops();
+  test_replay_initialization_proof();
   // What the compiler does with a region, on graphs small enough to
   // reason about. The cost estimate would refuse most of them -- it is
   // policy, tested separately below, and these are about correctness.
@@ -2562,6 +3081,7 @@ int main() {
   test_too_many_live_ins();
   test_six_live_ins_ok();
   test_packed_live_ins();
+  test_input_windows();
   test_kernel_call_ops_carved(true);
   test_kernel_call_ops_carved(false);
   test_density_mask_data_argument();

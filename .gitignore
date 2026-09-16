@@ -74,3 +74,6 @@ model-census.json
 
 # Compiler output beside generated teaching fixtures.
 tests/rethinking/*.hpp
+
+# Keep exploratory benchmark artifacts local; publish their summaries in docs/.
+/output/teaching-performance/followup-*/

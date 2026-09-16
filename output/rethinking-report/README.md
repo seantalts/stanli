@@ -22,13 +22,12 @@ measurements are retained separately and are not mixed into these results.
 
 - `rethinking-timings.csv`: speedups, absolute differences, ULP distances, original timings and sampler measurements for every fixture.
 - `rethinking-results.json`: per-seed outcomes, caps, numerical results and run manifest.
-- `sampling-diagnostics.json`: post-run diagnostics for all 199 teaching fixtures; the report selects Rethinking rows.
+- [Shared sampling diagnostics](../teaching-performance/sampling-diagnostics.json): post-run diagnostics for all 199 teaching fixtures; the report selects Rethinking rows.
 - `numerical-replay.txt`: the original 62-fixture numerical/output replay.
 - `numerical-errors.json`: separate maxima and counts for log density, gradients and model outputs, with checker and reference hashes.
 - `numerical-values.json.gz`: every paired reference/Stanli value from the descriptive replay using the same frozen build and inputs.
-- `numerical-replay-all.txt`: the full 316-model replay under the repository's existing policies.
 - `numerical-reference-subset.json.gz`: all 62 fixtures' pinned CmdStan references, unchanged by the performance fixes.
-- `benchmark-manifest.json`, `benchmark-summary.tsv`, `build-identity.json`: identities and original measurements.
+- Shared [run manifest](../teaching-performance/benchmark-manifest.json), [benchmark summary](../teaching-performance/benchmark-summary.tsv), and [build identity](../teaching-performance/build-identity.json): identities and original measurements.
 - `SHA256SUMS`: checksums, including the PDF and shared raw archive.
 
 The **550,455,487-byte** raw archive is retained locally at
@@ -66,7 +65,7 @@ python3 tools/report_rethinking_numerics.py RUN_DIRECTORY \
   output/teaching-performance/build-identity.json \
   build-teaching-perf/stanli_check output/rethinking-report
 python3 tools/report_rethinking.py RUN_DIRECTORY \
-  output/rethinking-report/sampling-diagnostics.json \
+  output/teaching-performance/sampling-diagnostics.json \
   output/rethinking-report/numerical-replay.txt output/rethinking-report
 ```
 

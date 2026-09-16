@@ -1,9 +1,0 @@
-{
-  "measured_base": "6e462c2e2bb4bc297165b5640dfe30318345960d",
-  "measured_patch_sha256": "5920f24b950ec82f36d54e2bdcecccd2590a6d5659c5d9c15ed334fd489fb21c",
-  "integrated_commit": "4db5dca2dfe4b73952d0b626da32c8142894cb16",
-  "runtime_files_match": {
-    "runtime/kernels/matrix_fns.cpp": "8def0083b1e5504b5f37e5d344b82ff49c4a77ef6212bdf550cde1086eeed4a3",
-    "runtime/src/mir_reader.cpp": "b9441da25e5176d7808b931146c52203411c8f3273f50762a77ce2cc925b4d76"
-  }
-}

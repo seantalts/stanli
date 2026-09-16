@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <map>
@@ -243,7 +244,8 @@ struct ProgramCompiler {
   // over a few arrays would otherwise carry hundreds of copies of 0.
   int pool_at(const double* v, int n) {
     for (size_t s = 0; s + (size_t)n <= p.pool.size(); ++s)
-      if (std::equal(v, v + n, p.pool.begin() + (long)s)) return (int)s;
+      if (std::memcmp(v, p.pool.data() + s, (size_t)n * sizeof(double)) == 0)
+        return (int)s;
     const int at = (int)p.pool.size();
     p.pool.insert(p.pool.end(), v, v + n);
     return at;
@@ -251,6 +253,14 @@ struct ProgramCompiler {
 
   // dst[0..n) = the given values, as one instruction.
   Program::Instr const_instr(int dst, const double* v, int n) {
+    // Broadcast immutable constants, never active registers. In var replay
+    // one leaf represents the fill; writes still replace individual handles.
+    // Compare bits to retain signed zero and NaN payloads exactly.
+    bool uniform = n > 1;
+    for (int k = 1; uniform && k < n; ++k)
+      uniform = std::memcmp(v, v + k, sizeof(double)) == 0;
+    if (uniform)
+      return Program::Instr{Program::FILL, dst, pool_at(v, 1), 0, 0, n};
     return Program::Instr{
         n == 1 ? Program::CONST : Program::CONSTR, dst, pool_at(v, n), 0, 0, n};
   }
@@ -1496,6 +1506,9 @@ struct ProgramCompiler {
         }
         if (e.args.empty()) bail("index form");
         const Range b = expr(e.args[0]);
+        // Index composition can erase every selector of a full span. The
+        // remaining base-only node is the identity, as in MirInterp.
+        if (e.args.size() == 1) return b;
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
         // General compile-time matrix selection. Registers are column-major,
         // so selected columns are outer and rows inner; this covers All,
@@ -2151,8 +2164,15 @@ struct ProgramCompiler {
     if (layout.integer_matrix_rows != 0)
       idata = {(int)layout.integer_matrix_rows,
                (int)layout.integer_matrix_cols};
-    return kernel_call(spec.opcode, args, out, 0, spec.activity_mask,
-                       std::move(idata), {}, e.name);
+    uint8_t activity = spec.activity_mask;
+    for (size_t k = 0; k < arity; ++k) {
+      // Runtime integers and data-only values still execute normally, but
+      // have no derivative. A promotion alone is not proof of inactivity.
+      if (e.args[k].data_only || int_operand(e.args[k]))
+        activity &= (uint8_t)~(1u << k);
+    }
+    return kernel_call(spec.opcode, args, out, 0, activity, std::move(idata),
+                       {}, e.name);
   }
 
   static std::optional<Program::Code> native_builtin_code(uint16_t opcode) {
@@ -2459,6 +2479,32 @@ struct ProgramCompiler {
   }
 
   Range fun(const mir::Expr& e) {
+    // A scalar reduction does not need a variable-width register result.
+    // Keep the source's fixed capacity and check both bounds when executed.
+    // Other dynamic slices retain their existing refusal; no array padding
+    // or unused tail values participate in the reduction or its derivative.
+    if (e.fn_lib == mir::Expr::Lib::StanLib && e.name == "log_sum_exp" &&
+        e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
+      const auto& slice = e.args[0];
+      if (slice.args.size() == 2 && slice.args[1].name == "IndexBetween" &&
+          slice.args[1].args.size() == 2 &&
+          (slice.args[0].type_ == "UVector" ||
+           slice.args[0].type_ == "URowVector")) {
+        long lo, hi;
+        if (!try_cint(slice.args[1].args[0], &lo) ||
+            !try_cint(slice.args[1].args[1], &hi)) {
+          const Range base = expr(slice.args[0]);
+          const Range lower = expr(slice.args[1].args[0]);
+          const Range upper = expr(slice.args[1].args[1]);
+          if (!is_scalar(lower) || !is_scalar(upper))
+            bail("non-scalar slice bound");
+          const int r = alloc(1);
+          emit(Program::DYN_LSE_RANGE, r, base.reg, lower.reg, upper.reg,
+               base.len);
+          return {r, 1};
+        }
+      }
+    }
     if (const auto intrinsic = mir::stateful_intrinsic_kind(e)) {
       switch (*intrinsic) {
         case mir::StatefulIntrinsicKind::Target: {
@@ -3206,6 +3252,8 @@ struct ProgramCompiler {
                e.name == "EltDivide__" || e.name == "divide" ||
                e.name == "elt_divide")
         c = e.type_ == "UInt" ? Program::IDIV : Program::DIV;
+      else if (e.name == "Modulo__")
+        c = Program::IMOD;
       else if (e.name == "Pow__" || e.name == "pow")
         c = Program::POW;
       else if (e.name == "fmax")
@@ -3802,6 +3850,20 @@ struct ProgramCompiler {
         if ((dst.kind == ViewKind::Vector || dst.kind == ViewKind::RowVector ||
              dst.kind == ViewKind::Flat) &&
             s.lhs_idx.size() == 1) {
+          long fixed_index;
+          if (s.lhs_idx[0].name == "IndexSingle" &&
+              s.lhs_idx[0].args.size() == 1 &&
+              !try_cint(s.lhs_idx[0].args[0], &fixed_index)) {
+            if (!is_scalar(v)) bail("element assignment from a container");
+            const Range index = expr(s.lhs_idx[0].args[0]);
+            if (!is_scalar(index)) bail("non-scalar assignment index");
+            // Reading and writing the full range in the opcode metadata
+            // preserves untouched cells through register compaction. Replay
+            // records the selected write, including an aliased RHS, normally.
+            emit(Program::DYN_SET, dst.reg, dst.reg, v.reg, index.reg, dst.len);
+            known_int_arrays.erase(s.lhs);
+            return;
+          }
           const std::vector<int64_t> positions =
               matrix_positions(s.lhs_idx[0], dst.len, "assignment vector");
           if (v.len != static_cast<int>(positions.size()))

@@ -767,8 +767,9 @@ locally, excluded from Git, with SHA256
 Interrupted partial evidence remains separately labeled inside it. Published
 text logs normalize whitespace; the archive retains their original bytes.
 
-The GP/inverse-Gaussian checks are published separately under
-`output/teaching-performance/followup-4db5dca2/`. Applying the retained measured
+The GP/inverse-Gaussian checks are summarized in the
+[brms report](../../brms-performance.md#earlier-gp-and-inverse-gaussian-results).
+Raw records are retained outside the source tree. Applying the retained measured
 patch to its recorded baseline reconstructs exactly the two runtime files in
 commit `4db5dca2`; source equivalence and executable identity are included.
 These results do not alter v6's counts. PR CI at `b5b61a80` passes its Linux

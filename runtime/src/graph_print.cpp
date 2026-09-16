@@ -65,6 +65,10 @@ void print_instr(std::string& out, const Program& p, size_t i,
     case Program::CONST:
       appendf(out, " r%d <- pool[%d] (=%g)", I.dst, I.a, p.pool[(size_t)I.a]);
       break;
+    case Program::FILL:
+      appendf(out, " r%d..r%d <- repeat(pool[%d]=%g)", I.dst, I.dst + I.len - 1,
+              I.a, p.pool[(size_t)I.a]);
+      break;
     case Program::CONSTR:
       appendf(out, " r%d..r%d <- pool[%d..] (=", I.dst, I.dst + I.len - 1, I.a);
       for (int k = 0; k < I.len; ++k)

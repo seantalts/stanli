@@ -79,6 +79,7 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
 // decides its own (program_density.hpp) and CALL's payload decides its own.
 #define STANLI_PROGRAM_CODE_LIST(X)                                           \
   X(CONST, kProgramNoInputs)                                                  \
+  X(FILL, kProgramNoInputs | kProgramRangeOutput)                             \
   X(CONSTR, kProgramNoInputs | kProgramRangeOutput)                           \
   X(MOV, 0)                                                                   \
   X(MOVR, kProgramRangeA | kProgramRangeOutput)                               \
@@ -86,6 +87,7 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(SUB, kProgramReadB)                                                       \
   X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                       \
   X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
+  X(IMOD, kProgramReadB | kProgramNoAdjoint)                                  \
   X(IDIV, kProgramReadB | kProgramNoAdjoint)                                  \
   /* len holds the PowZeroBaseLaw; a RANGE's law field carries it instead. */ \
   X(POW, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
@@ -108,6 +110,8 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(LE, kProgramReadB)                                                        \
   X(EQ, kProgramReadB)                                                        \
   X(NE, kProgramReadB)                                                        \
+  X(DYN_SET, kProgramRangeA | kProgramReadB | kProgramReadC |                 \
+                 kProgramRangeOutput | kProgramNoAdjoint)                     \
   X(DYN_INDEX, kProgramReadB | kProgramNoAdjoint)                             \
   /* b selects max (1) or min (0); c stores kProgramExtrema* metadata. */     \
   X(EXTREMA_RANGE, kProgramRangeA | kProgramNoAdjoint)                        \
@@ -117,6 +121,8 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(EXP_RANGE, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)        \
   X(DOT, kProgramRangeA | kProgramRangeB | kProgramReadB | kProgramSaveA |    \
              kProgramSaveB)                                                   \
+  X(DYN_LSE_RANGE,                                                            \
+    kProgramRangeA | kProgramReadB | kProgramReadC | kProgramNoAdjoint)       \
   X(LSE_RANGE, kProgramRangeA | kProgramSaveA | kProgramSaveOut)              \
   X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)          \
   X(LSE2, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
@@ -363,12 +369,30 @@ inline constexpr int program_input_len(const Program::Instr& instr, int k) {
 static_assert(program_code_count() == static_cast<size_t>(Program::RANGE) + 1,
               "every Program::Code needs exactly one ProgramOpSpec");
 
+// Sink constant range fills past paths that never access their registers.
+// Refuses cyclic sources/destinations; preserves every read, write and effect.
+bool sink_program_fills(Program& p);
+
+// Remove scalar constant stores overwritten before any read or branch. Unlike
+// register compaction, this local proof is also valid in programs with loops.
+bool elide_program_dead_constants(Program& p);
+
+// Prove definite initialization at every read and exit across the CFG. CALL
+// scratch is private during var replay and therefore is not a register write.
+bool program_initializes_reads(const Program& p,
+                               const std::vector<std::pair<int, int>>& seeded);
+
 // Drop the initializer fills and the copies the MIR spells out, then
 // renumber away whatever registers that leaves unreferenced (program.cpp).
 // `seeded` names the register ranges the caller writes before the program
 // runs -- an ODE argument region, an island live-in -- and comes back in the
 // new numbering along with the program.
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded);
+
+// Narrow input windows to the bounding span of all reads and direct outputs.
+// The register program itself and input descriptor numbering are unchanged.
+std::vector<std::pair<int, int>> used_program_inputs(
+    const Program& p, const std::vector<std::pair<int, int>>& inputs);
 
 // Explicitly gate producer-destination forwarding and report whether it
 // changed the program. The original entry point above remains the public
@@ -497,6 +521,11 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::CONST:
         d() = T(p.pool[(size_t)I.a]);
         break;
+      case Program::FILL: {
+        const T value(p.pool[(size_t)I.a]);
+        std::fill_n(reg + I.dst, I.len, value);
+        break;
+      }
       case Program::CONSTR:
         for (int32_t i = 0; i < I.len; ++i)
           reg[(size_t)(I.dst + i)] = T(p.pool[(size_t)(I.a + i)]);
@@ -519,6 +548,11 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         break;
       case Program::DIV:
         d() = ra() / rb();
+        break;
+      case Program::IMOD:
+        d() = T(
+            stan::math::modulus(static_cast<int>(stan::math::value_of(ra())),
+                                static_cast<int>(stan::math::value_of(rb()))));
         break;
       case Program::IDIV:
         d() =
@@ -585,6 +619,23 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::NE:
         d() = T(stan::math::value_of(ra()) != stan::math::value_of(rb()));
         break;
+      case Program::DYN_SET: {
+        const double raw = stan::math::value_of(reg[(size_t)I.c]);
+        if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+            raw > static_cast<double>(I.len))
+          throw std::out_of_range(
+              "register-program assignment index out of range");
+        const T value = rb();
+        if (I.dst > I.a && I.dst < I.a + I.len) {
+          for (int32_t i = I.len; i-- > 0;)
+            reg[(size_t)(I.dst + i)] = reg[(size_t)(I.a + i)];
+        } else if (I.dst != I.a) {
+          for (int32_t i = 0; i < I.len; ++i)
+            reg[(size_t)(I.dst + i)] = reg[(size_t)(I.a + i)];
+        }
+        reg[(size_t)(I.dst + static_cast<int32_t>(raw) - 1)] = value;
+        break;
+      }
       case Program::DYN_INDEX: {
         const double raw = stan::math::value_of(rb());
         if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
@@ -683,6 +734,23 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         } else {
           d() = stan::math::dot_product(a, b);
         }
+        break;
+      }
+      case Program::DYN_LSE_RANGE: {
+        const double lo = stan::math::value_of(rb());
+        const double hi = stan::math::value_of(reg[(size_t)I.c]);
+        if (!std::isfinite(lo) || !std::isfinite(hi) || std::trunc(lo) != lo ||
+            std::trunc(hi) != hi)
+          throw std::out_of_range("register-program slice bounds invalid");
+        if (hi < lo) {
+          d() = T(-std::numeric_limits<double>::infinity());
+          break;
+        }
+        if (lo < 1 || hi > I.len)
+          throw std::out_of_range("register-program slice out of range");
+        Eigen::Map<const VecT> a(reg + I.a + static_cast<int32_t>(lo) - 1,
+                                 static_cast<int32_t>(hi - lo + 1));
+        d() = stan::math::log_sum_exp(a);
         break;
       }
       case Program::LSE_RANGE: {

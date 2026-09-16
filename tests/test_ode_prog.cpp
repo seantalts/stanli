@@ -153,6 +153,7 @@ void check_exact_opcode_contract() {
 
   p.pool = {0.375, -0.25, 1.5};
   emit(Program::CONST, 0);
+  emit(Program::FILL, 1, 0, 0, 3, 3);
   emit(Program::CONSTR, 1, 0, 0, 2, 2);
   emit(Program::MOV, p.y0);
   emit(Program::MOVR, p.y0, 0, 0, 2, 2);

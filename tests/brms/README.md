@@ -85,15 +85,17 @@ tokens.
 
 ## Known gaps
 
-Every model here runs, including the ones reported in issues #319 and
-#320, except the one that `KNOWN_GAPS` in
-[`tools/verify_refs.py`](../../tools/verify_refs.py) names.
-`s2_com_poisson` writes a `while` whose guard depends on a parameter and
-whose body sizes a local from the loop's own state, which needs the
-structured executor to take a statement region the island refuses. An
-entry suppresses only the failure: when the gap closes the model matches
-its references, the replay reports `GAP_CLOSED`, and the run stays red
-until the entry is deleted.
+All 124 fixtures compile and evaluate at their recorded reference points,
+subject to the numerical and domain policies in
+[`tools/verify_refs.py`](../../tools/verify_refs.py). This includes COM-Poisson:
+its parameter-dependent loop can write vector elements and reduce a prefix
+whose length is determined at runtime. The register program checks the indices
+and uses Stan Math autodiff replay for those operations. The original failure
+and reduced examples are recorded in [#376](https://github.com/seantalts/stanli/issues/376).
+
+Numerical coverage does not imply matching sampling performance. The
+[teaching comparison](../../docs/teaching-support.md) retains the separately
+measured performance gaps and sampler measurements.
 
 ## Regenerating and recording
 

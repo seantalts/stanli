@@ -48,9 +48,12 @@ void binary_bwd_typed(KernelCtx& ctx, F&& f) {
   // A broadcast scalar is ONE var shared across lanes, so per-lane
   // partials accumulate into a single adjoint, exactly as stan-math's
   // scalar-vs-vector overloads accumulate theirs.
-  std::vector<T0> a;
-  std::vector<T1> b;
-  VecVar y;
+  // These handle/value buffers live exactly as long as the nested tape. Arena
+  // allocation keeps the same construction and reverse order without three
+  // small heap allocations for every scalar CALL.
+  std::vector<T0, stan::math::arena_allocator<T0>> a;
+  std::vector<T1, stan::math::arena_allocator<T1>> b;
+  std::vector<var, stan::math::arena_allocator<var>> y;
   a.reserve(s0 ? 1 : n);
   b.reserve(s1 ? 1 : n);
   y.reserve(n);

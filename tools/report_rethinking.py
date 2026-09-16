@@ -88,11 +88,10 @@ summary = dict(book_call_sites=len(book), complete_in_both=len(paired),
                                     for g in ('log_density', 'gradient', 'outputs')})
 json_data = dict(summary=summary, run_manifest=manifest, method='Median of four independent single-chain CLI runs; first-fit CmdStan estimate adds matching Stan-to-C++ and C++ build events. No aggregate from surviving seeds.', rows=rows)
 (OUT / 'rethinking-results.json').write_text(json.dumps(json_data, indent=2, allow_nan=False) + '\n')
-for source, name in [(REPLAY, 'numerical-replay.txt'),
-                     (RUN / 'manifest.json', 'benchmark-manifest.json'),
-                     (DIAGNOSTICS, 'sampling-diagnostics.json')]:
-    if source.resolve() != (OUT / name).resolve():
-        shutil.copy2(source, OUT / name)
+# The manifest and selected diagnostics are embedded in rethinking-results.json.
+# Keep the shared teaching evidence in one place rather than copying it here.
+if REPLAY.resolve() != (OUT / 'numerical-replay.txt').resolve():
+    shutil.copy2(REPLAY, OUT / 'numerical-replay.txt')
 
 
 def speedup(value):
@@ -196,7 +195,7 @@ md += ['', '## Supplemental fixture (not a book model)', '',
        '## Scope and reproducibility', '', scope, '', '[Pinned book supplement](' + source_url + '). '
        'The generator preserves the Stan text and processed data. Simulation seeds and data licensing are recorded in '
        'tests/rethinking/PROVENANCE.md. Both engines receive identical input bytes.', '',
-       'See `benchmark-manifest.json`, `rethinking-results.json`, `rethinking-timings.csv`, `numerical-errors.json` and '
+       'See `rethinking-results.json` (including the run manifest), `rethinking-timings.csv`, `numerical-errors.json` and '
        '`numerical-values.json.gz`. The last file retains every compared value from both engines. Raw sampling CSVs and '
        'command logs remain in the original run directory.', '']
 (OUT / 'rethinking-report.md').write_text('\n'.join(md).rstrip() + '\n')

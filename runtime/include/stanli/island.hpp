@@ -36,6 +36,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -68,6 +69,10 @@ struct IslandProg : Program {
   // so the two backwards are compared over the SAME islands running the
   // SAME forward program, which is the only comparison worth having.
   bool native_adj = false;
+  // Set after necessity lowering has finalized code and live-in windows.
+  // Immutable once published; hand-built programs leave this unset and the
+  // workspace factory proves initialization when binding them.
+  std::optional<bool> replay_initialized;
 };
 
 // Payload used only by OP_ISLAND with kIslandSoftmax3Variant. Ordinary islands

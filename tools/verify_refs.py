@@ -91,11 +91,7 @@ QUARANTINED = {}
 # closes, the model matches its references, the replay reports GAP_CLOSED,
 # and the run stays red until the entry is deleted. A crash is never
 # excused: a segfault and a refusal are different bugs.
-KNOWN_GAPS = {
-    "s2_com_poisson": "parameter-dependent while with a runtime-length "
-                      "local; needs the structured executor to take a "
-                      "statement region the island refuses",
-}
+KNOWN_GAPS = {}
 
 # (model, point) pairs excused from probe_point's finite-gradient rule,
 # for points that carry no reference at all. Empty while every point is

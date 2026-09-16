@@ -46,8 +46,14 @@ directly timed four-chain R sessions.
 The practical target is CmdStan/Stanli ≥ 0.8 for complete CLI elapsed time.
 Of all 199 fixtures, 189 meet it, four fall below it, and six lack a complete
 comparison. Failed or capped runs do not pass. Later GP fixes and their
-[separate validation](../output/teaching-performance/followup-4db5dca2/README.md)
+[separate validation](brms-performance.md#earlier-gp-and-inverse-gaussian-results)
 are not substituted into this sweep.
+
+The [brms performance and numerics report](brms-performance.md) records later
+COM-Poisson support, its 0.838× CmdStan/Stanli sampling ratio, and identical
+before/after draws. It also covers the remaining timing gaps, caps, and an
+upstream negative-binomial GLM precision limitation. These separate measurements
+leave the complete-sweep counts above unchanged.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
 covers all 61 book call sites and the separate hurdle fixture. The
@@ -130,8 +136,9 @@ The older brms corpus has 367 finite density/gradient reference points and five
 recorded domain refusals; 307 points also have output-value references. At finite
 points without output references, the checker requires output generation but
 does not compare its values. The usual scaled-error gate is `1e-9`. The brms documentation identifies
-ill-conditioned Gaussian-process exceptions and the unsupported COM-Poisson
-fixture; these exceptions must accompany coverage counts.
+ill-conditioned Gaussian-process exceptions and the original COM-Poisson
+refusal. COM-Poisson support and its later sampling measurements are recorded
+separately above; historical exceptions still accompany the frozen sweep.
 Some points instead check matching domain refusals: for example, the inverse
 Gaussian brms fixture is undefined at all three reference vectors. Agreement
 on rejection is not evidence of a matching finite gradient at those points.
@@ -169,6 +176,6 @@ GP arithmetic fixes in `4db5dca2` resolved all three strict GP discrepancies
 at every recorded point on this machine. Separate four-seed runs completed
 and exceeded the timing target for all three. Inverse Gaussian also samples
 in both engines; its shared reference points are outside its domain. These
-four fixtures retain diagnostic flags in both engines. COM-Poisson remains
-a dynamic-loop support gap. See the [separate results and source identity](../output/teaching-performance/followup-4db5dca2/README.md);
+four fixtures retain diagnostic flags in both engines. COM-Poisson support and
+its sampling cap were subsequently resolved in the brms report above. See the [separate results and source identity](brms-performance.md#earlier-gp-and-inverse-gaussian-results);
 they do not change the frozen sweep's counts.

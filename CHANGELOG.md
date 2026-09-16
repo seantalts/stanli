@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Support brms COM-Poisson models with checked runtime vector writes, prefix
+  reductions, and integer remainder inside parameter-dependent control flow;
+  skip unused workspace initialization on early-return branches.
+- Reduce constant allocation, inactive derivative work, and unused input copies
+  in runtime-control replay; reuse verified workspaces and remove overwritten
+  initializers. COM-Poisson sampling now exceeds the 0.8× CmdStan/Stanli target.
+
 ## 0.14.1
 
 ### Improvements
