@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -105,6 +106,65 @@ static void test_branch_bound_live_out() {
   for (int64_t i = 0; i < n; ++i)
     if (grad[(size_t)i] != (i < 100 ? 0.0 : 1.0)) ++wrong;
   expect("branchudf grad", wrong == 0);
+}
+
+// Returning the region's own fresh slot must not alias a live-in or collapse
+// distinct live-outs. The old extraction path is a bitwise oracle; the simple
+// piecewise polynomial also gives independent values and derivatives.
+static void test_region_direct_output() {
+  const std::string mir =
+      slurp("tests/fixtures/region_direct_output.tmir.sexp");
+  for (int n : {0, 1, 5}) {
+    const DataMap data =
+        DataMap::from_json("{\"N\":" + std::to_string(n) + "}");
+    test_setenv("STANLI_NO_REGION_DIRECT_OUTPUT", "1", 1);
+    CompiledModel before = compile_model(mir, data);
+    test_unsetenv("STANLI_NO_REGION_DIRECT_OUTPUT");
+    CompiledModel after = compile_model(mir, data);
+    expect("direct output removes extraction",
+           after.graph.ops.size() < before.graph.ops.size());
+    bool multi_output = false;
+    for (const auto& op : after.graph.ops) {
+      if (op.opcode != OP_ISLAND) continue;
+      multi_output = multi_output || after.graph.slots[op.out].len > 1;
+      for (int k = 0; k < op.n_in; ++k)
+        expect("direct output distinct from live-ins", op.out != op.in[k]);
+    }
+    expect("multi-output region retained", multi_output);
+    Executor old_ex(std::move(before.graph)), new_ex(std::move(after.graph));
+    before.bind(old_ex);
+    after.bind(new_ex);
+    expect("direct output parameter count", new_ex.n_params() == n + 1);
+    for (double selector : {-2., -.5, -0., 0., .5, 2., -.5}) {
+      double sum = 0;
+      for (int i = 0; i < n; ++i) {
+        const double x = .25 * (i + 1);
+        old_ex.params_data()[i + 1] = new_ex.params_data()[i + 1] = x;
+        sum += x;
+      }
+      old_ex.params_data()[0] = new_ex.params_data()[0] = selector;
+      std::vector<double> old_value(n + 2), new_value(n + 2);
+      old_value[0] = old_ex.gradient(old_value.data() + 1);
+      new_value[0] = new_ex.gradient(new_value.data() + 1);
+      expect("direct output bitwise oracle",
+             std::memcmp(old_value.data(), new_value.data(),
+                         old_value.size() * sizeof(double)) == 0);
+      const double expected =
+          selector > 0
+              ? 2 * selector * sum + selector * selector + 2 * selector + 9
+          : selector < 0 ? 2 * sum + (n + 13) * selector + 26
+                         : 2 * sum + 9;
+      const double derivative = selector > 0   ? 2 * sum + 2 * selector + 2
+                                : selector < 0 ? n + 13
+                                               : n + 1;
+      expect_exact("direct output density", new_value[0], expected);
+      expect_exact("direct output selector derivative", new_value[1],
+                   derivative);
+      for (int i = 0; i < n; ++i)
+        expect_exact("direct output vector derivative", new_value[i + 2],
+                     selector > 0 ? 2 * selector : 2);
+    }
+  }
 }
 
 // A mini HMM forward pass: per step, index the previous state pair, take
@@ -3056,6 +3116,10 @@ int main() {
   // reason about. The cost estimate would refuse most of them -- it is
   // policy, tested separately below, and these are about correctness.
   test_branch_bound_live_out();
+  test_region_direct_output();
+  test_setenv("STANLI_NO_NATIVE_ADJ", "1", 1);
+  test_region_direct_output();
+  test_unsetenv("STANLI_NO_NATIVE_ADJ");
   test_while_lpmf_region_matches_flat();
   test_compact_copy_chain();
   test_compact_dead_fill();

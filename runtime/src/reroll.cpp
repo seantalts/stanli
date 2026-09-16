@@ -114,6 +114,10 @@ bool two_int_groups(uint16_t opcode) {
 // place.
 bool ops_match(const Graph& g, const Op& a, const Op& b,
                int64_t lane_distance) {
+  // Opaque payloads can contain different programs, constants, or effects
+  // despite identical visible operands. Hoisting or widening needs a proof
+  // for that payload's semantics, which this matcher does not provide.
+  if (a.udata != nullptr || b.udata != nullptr) return false;
   if (a.opcode != b.opcode) {
     const bool maybe_row_store =
         (a.opcode == OP_SET_SLICE && b.opcode == OP_SET_SLICE_INPLACE) ||

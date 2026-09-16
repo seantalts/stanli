@@ -6,6 +6,7 @@
 #include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/inplace.hpp>
+#include <stanli/island.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/reroll.hpp>
 
@@ -50,6 +51,43 @@ using stanli::testutil::reduce_into_result;
 static double fill_at(int64_t i) { return 0.2 + 0.1 * (i % 3); }
 static std::vector<double> run_grad(Graph g, const Fills& fills) {
   return testutil::run_grad(std::move(g), fills, fill_at);
+}
+
+// Identical visible operands do not make opaque programs identical. Each
+// lane multiplies the same parameter by a different constant in its payload.
+// Hoisting one lane would silently repeat its value and derivative six times.
+static void test_opaque_payload_not_hoisted() {
+  Graph g;
+  Fills fills;
+  const int x = g.add_slot(1, true);
+  const int values = g.add_slot(6, false);
+  fills.emplace_back(values, std::vector<double>(6, 0.));
+  for (int lane = 0; lane < 6; ++lane) {
+    auto p = std::make_shared<IslandProg>();
+    p->n_regs = 3;
+    p->ins = {{0, 1}};
+    p->pool = {double(lane + 1)};
+    p->code = {{Program::CONST, 1, 0}, {Program::MUL, 2, 0, 1}};
+    p->out_regs = {2};
+    expect("opaque adjoint generated", gen_adjoint(*p));
+    p->native_adj = true;
+    const int value = g.add_slot(1, false);
+    const int op = g.add_op(OP_ISLAND, {x}, value);
+    g.ops[op].udata = p.get();
+    g.udata_pool.push_back(p);
+    g.add_op(OP_SET_INDEX_INPLACE, {values, value}, values, {lane});
+  }
+  const int sum = g.add_slot(1, false);
+  g.add_op(OP_SUM_VEC, {values}, sum);
+  g.result_slot = sum;
+  const auto expected = run_grad(g, fills);
+  std::vector<int> terms;
+  const auto result = reroll(g, fills, terms, {sum});
+  expect("opaque region refused", result.regions == 0);
+  const auto actual = run_grad(std::move(g), fills);
+  expect_close("opaque independent value", actual[0], 21 * fill_at(0));
+  expect_close("opaque independent gradient", actual[1], 21.);
+  expect("opaque exact value and gradient", actual == expected);
 }
 
 // Scalar LPDF kernels all use density_fwd_v, so their re-roll eligibility is
@@ -2630,6 +2668,7 @@ static void test_lane_plan_boundary() {
 }
 
 int main() {
+  test_opaque_payload_not_hoisted();
   test_proven_lane_pricing();
   test_lane_plan_boundary();
   test_scalar_density_traits();

@@ -7,7 +7,8 @@ Stanli build. Stanli's median runtime fell 31.6%; it takes about 19% longer than
 CmdStan on this workload.
 
 All ratios below are **CmdStan / Stanli**: above one means Stanli is faster.
-The latest September 16, 2026 measurements use runtime `cb58eb22` and supplement the
+The COM-Poisson confirmation uses runtime `cb58eb22`; the later result-copy
+comparison below uses `06fb1b90`. Both September 16, 2026 measurements supplement the
 [199-model teaching report](../output/teaching-performance/README.md).
 
 ## COM-Poisson sampling
@@ -83,9 +84,55 @@ diagnostic flags, so these timings do not establish time to equally accurate
 inference. The [corresponding PR CI](https://github.com/seantalts/stanli/actions/runs/35082758748)
 passed its Linux runtime R and compiler checks.
 
+## Removing redundant result copies
+
+Runtime `06fb1b90` returns a region's single result directly, removing 40
+identity copies from each Laplace model. It also prevents the loop optimizer
+from treating distinct compiled programs as interchangeable merely because
+their visible inputs match. A regression demonstrates the old mistake changing
+a derivative from 21 to 6; the fix retains each program's own computation.
+
+This separate comparison uses main `eb51be1f` as its matched baseline. Each
+model has three rounds of seeds 1–4, with the same 1,000 warmup iterations,
+1,000 retained draws, thread limits, executable preconditioning and caps as
+above. All runs complete. Ratios divide the medians of all 12 CLI durations
+per engine; they are not averages of the round ratios.
+
+| Model | Before: CmdStan / Stanli | After: CmdStan / Stanli |
+| --- | ---: | ---: |
+| Asymmetric Laplace | 0.804× | 0.841× |
+| Zero-inflated asymmetric Laplace | 0.834× | 0.853× |
+| Mixture with estimated proportions | 0.788× | 0.786× |
+| COM-Poisson | 0.843× | 0.849× |
+
+Asymmetric Laplace's median Stanli runtime falls 4.4%; the zero-inflated
+variant falls 2.3%. Asymmetric Laplace's three round ratios are **0.853×,
+0.792× and 0.793×**, so the combined result does not establish 0.8× in every
+round. The zero-inflated variant gives 0.901×, 0.825× and 0.847×; one round
+has a slightly higher Stanli median than its matched baseline.
+
+Mixture and COM-Poisson also include a second timing arm using the identical
+baseline executable, with all six arm orders used twice. Median paired timing
+differences between those identical arms are 1.6% and 0.7%, respectively.
+The small canary changes above do not establish a performance improvement or
+regression. Mixture remains below the practical target and has poor mixing
+in both engines.
+
+All **48 before/after Stanli draw files are byte-identical**, as are the 24
+baseline/control pairs. Both Laplace models retain zero divergences and depth
+hits, with maximum parameter R-hat below 1.01 in both engines. Mixture retains
+64 Stanli divergences and 1,333 CmdStan divergences. These are fixed-budget
+timings, not time to equally accurate inference.
+
+Validation passes all 253 CTests, all 13 educational fixtures, the 316-model
+reference replay under existing policies, and runtime R acceptance without
+skips or warnings. Density, gradients and outputs for six targeted models at
+three points each are bitwise identical to the baseline. No model, reference,
+numerical threshold or Stan Math implementation changed.
+
 ## Remaining models
 
-A separate four-seed survey used the same final executable. Each ratio divides
+A preceding four-seed survey used `cb58eb22`. Each ratio divides
 the two engines' median runtimes. This is one survey, not repeated confirmation
 of a performance threshold.
 
