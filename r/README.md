@@ -235,3 +235,34 @@ See [Teaching with Stanli](../docs/teaching-support.md) for tested Rethinking,
 brms, and educational models, numerical and performance evidence, and working
 examples. The [cmdstanr translation table](../docs/from-cmdstanr.md) covers
 common operations and differences.
+
+## Native R-style fit methods without RStan
+
+The development package includes `as_rfit()`, a view of an existing fit with
+RStan-style method signatures and result layouts:
+
+```r
+native <- as_rfit(fit)
+post <- stanli::extract(native)             # named, draw-first parameter arrays
+summary(native)$summary                    # RStan-shaped summary matrix
+stanli::get_sampler_params(native)          # one matrix per chain
+stanli::get_elapsed_time(native)            # chain-by-phase seconds
+```
+
+This interface ships inside Stanli. It requires no adapter package and never
+loads RStan. Summaries use the optional posterior package and need no native
+runtime; extraction and timings work directly from saved arrays. Permuted
+extraction excludes warmup and preserves joint draws using stored per-chain
+permutations. Set R's seed before `as_rfit()` to reproduce those permutations.
+
+The fit retains class `stanli_fit` for the existing bayesplot, loo, tidybayes,
+and draw-conversion methods. Its RStan-shaped `summary()` uses posterior's
+basic ESS and split R-hat. The ESS implementation differs from RStan's legacy
+estimator, so `n_eff` and `se_mean` need not match RStan. Existing, unconverted
+Stanli fits retain their original summary behavior.
+
+A `stanli_rfit` owns its S3 class; it is not an RStan S4 object. Consumers that
+call `rstan::extract()` must dispatch to `stanli::extract()` for it. Consumers
+requiring RStan's slots can still use the separate optional `as_stanfit()`
+conversion, which requires RStan. Recreate the live model after serialization
+before using model-dependent operations.
