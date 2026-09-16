@@ -180,6 +180,27 @@ This demonstrates a library limitation in a regime visited by the chains;
 it does not identify the cause of every divergent proposal. The model and
 upstream density implementation remain unchanged.
 
+Reverse-mode gradients also lose precision. For the same 40 observations,
+the table below gives the derivative of log probability with respect to
+**log dispersion**, the scale used by the sampler. The independent calculation
+uses the finite-product identity at 360 decimal digits; its derivatives agree
+with centered differences to relative error below 1.9e-65 across 63 input points.
+The C++ evaluations call only the pinned upstream Stan Math library.
+
+| Dispersion | Independent derivative | GLM derivative | Non-GLM derivative |
+| --- | ---: | ---: | ---: |
+| 10⁴ | 0.00599840045 | 0.00599840149 | 0.00599840114 |
+| 10⁸ | 5.99999984e-7 | 0 | −2.48201017e-6 |
+| 10¹² | 6.00e-11 | 0 | −0.0603862 |
+| 10¹⁶ | 6.00e-15 | 0 | −120 |
+
+The non-GLM function's accurate log probability therefore does not establish
+an accurate gradient. A further case with 40 observations equal to 12, mean 10
+and dispersion 10¹² gives a GLM log-dispersion derivative of −0.113687 versus
+an independent value of 1.60e-10. These are likelihood derivatives; priors and
+the parameter-transform Jacobian are excluded. No replacement or correction
+to either upstream implementation is applied.
+
 ## Method and validation
 
 - Apple M3 Ultra, macOS ARM64, Release build; Stanli `cb58eb22`, matched previous
