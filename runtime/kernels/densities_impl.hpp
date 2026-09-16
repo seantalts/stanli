@@ -363,8 +363,21 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
 // Integer-outcome cdfs. Same as above with the count read from idata,
 // the way the lpmfs read theirs -- a whole vector of outcomes in one
 // call, since the summed form is the only one these have.
+// A singleton Poisson log-CDF with a scalar rate can use the scalar Stan
+// overload: identical value/partial arithmetic, without allocating Eigen
+// temporaries for its incomplete-gamma expression. Other CDFs and broadcast
+// shapes retain their separately verified container instantiations.
 #define STANLI_DEFINE_INT_CDF_FWD(code, fn, nreal, tier)                 \
   void fn##_fwd_gen(KernelCtx& ctx) {                                    \
+    if constexpr (code == OP_POISSON_LCDF) {                             \
+      if (ctx.n_idata == 1 && ctx.in[0].len == 1) {                      \
+        cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(  \
+            ctx, [&](const auto&... a) {                                 \
+              return stan::math::fn(ctx.idata[0], a...);                 \
+            });                                                          \
+        return;                                                          \
+      }                                                                  \
+    }                                                                    \
     Eigen::Map<const Eigen::VectorXi> y(                                 \
         ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));              \
     cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(      \

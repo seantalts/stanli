@@ -496,3 +496,72 @@ as the next experiment's baseline. The preserved binaries and configuration
 are under `/tmp/stanli-teaching-perf/baseline-ea4`; the research plan and failed
 probe remain under the same evidence root. Further performance work is still
 required; this checkpoint does not claim that every model beats CmdStan.
+
+## Residual optimization after the v5 report checkpoint
+
+The complete run `a224d12afe02ac98` (runtime/compiler `ea4d7e24`) remains
+immutable: 192 complete comparisons, 178 lower Stanli CLI medians, 14 slower,
+two caps and five pre-sampling failures. All baseline executables and their
+hashes are retained in `/tmp/stanli-teaching-perf/baseline-ea4`. The report
+checkpoint is `bba78e61`; subsequent source changes need new full-run evidence.
+
+Preparation profiling of m14.11 found repeated linear opcode lookup and
+allocation in partition pricing. Three changes preserve the original search
+and register assignment: a generated opcode switch, flat temporary lookup
+containers (never iterated for ordering), and exact additive cost prefix sums
+while the graph is immutable. The pricing-cache ablation also disables the
+prefix sums, so the existing full-graph equality fixture covers both paths.
+All 65,536 opcode values are checked against the original name registry.
+Three alternating preparation pairs gave 12.984 s baseline versus 11.393 s
+with lookup; a separate matched experiment gave 10.330 s lookup versus
+7.656 s with flat containers. Prefix sums improved that by about 2%.
+A bounded confirmation used three identical-binary controls (median 0.297%
+difference) and three new alternating pairs (1.825–2.327% gains). All passed
+the predeclared threshold max(0.5%, twice median A/A noise); keep the cache.
+Raw: `lookup-prep-ab.jsonl`, `flat-prep-ab.jsonl`, `prefix-confirmation.jsonl`
+and `prefix-confirmation-summary.json` under `/tmp/stanli-teaching-perf`.
+
+For single-vector covariance multi-normal, the recorder experiment could not
+compile because its Eigen Array partials interface does not accept the Matrix
+operations this density uses. The alternative uses the same primitive
+factorization, solve/inverse, validation and partial arithmetic as pinned Stan
+Math, retaining the computed partials in the existing scratch layout. It does
+not change precision, Cholesky or vectorized-array kernels. A shape guard proves
+the dimensions; active covariance keeps the explicit inverse, inactive
+covariance the solve, preserving their distinct rounding. The standalone
+weighted feasibility oracle passed 36,480 comparisons; integrated `test_mnc`
+checks all eight activity masks, proportional/full forms, widths 1/2/3/8,
+coincident, ill-conditioned and nonfinite cases, seven output weights, error
+messages, and value-only/gradient reuse. Finite values and signed zeros require
+bit equality; NaN payloads are not compared. The unchanged backward retains
+its existing scatter and alias semantics.
+
+Five alternating warm-gradient measurements (400 ms each, microseconds):
+
+| Fixture | Before native covariance | Candidate | CmdStan |
+|---|---:|---:|---:|
+| ch15_m15_7 | 19.139 | 10.584 | 14.655 |
+| ch14_m14_11 | 668.408 | 577.908 | 679.939 |
+| ch14_m14_9 | 425.873 | 347.702 | 425.971 |
+| s2_unstr (unaffected canary) | 7.219 | 7.204 | 6.473 |
+
+Every candidate value and gradient equals the previous runtime bitwise at
+the measured point; worst external relative difference is 4.41e-15. Raw:
+`mn-gradient-ab.jsonl`. These are gradient measurements, not new sampling
+medians. Full suites, numerical references and sampling remain integration
+gates before publishing updated corpus results.
+
+Truncated-Poisson profiling assigns 57% to scalar Poisson log-CDF calls. Their
+integer outcomes were bound as length-one Eigen vectors, allocating temporary
+arrays inside the unchanged special-function expression. A singleton-count,
+scalar-rate call can instead use Stan Math's scalar overload. A 70-case probe
+compared value, partial, connectivity and errors, including invalid rates,
+zero/subnormal rates, negative counts, infinity and NaN: no differences.
+Six alternating isolated measurements gave roughly 47–53 ns scalar versus
+121–147 ns container. Only this proven distribution/shape is changed; all
+other CDFs and broadcast shapes keep their original implementation. This
+removes allocation around the same incomplete-gamma calculation; it does not
+approximate it. `test_densities` now compares weighted kernel execution against
+the prior container var overload. Raw: `poisson-scalar-probe.cpp` and `.log`.
+Next gates: rebuild, focused oracles, paired actual-model measurements, all
+CTests and references. Broader CDF singleton conversion remains untested.
