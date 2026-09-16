@@ -1547,10 +1547,110 @@ void ologistic_bwd(KernelCtx& ctx) {
   }
   recorded_tail_bwd<2>(ctx);
 }
-void oprobit_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = ordered_eval<false, kOrderedProbit>(ctx);
+// For shared cutpoints retain the primitive CDF partials and log-difference
+// denominators. The weighted reverse follows rev/fun/log_diff_exp.hpp before
+// multiplying the CDF partial, preserving its division/rounding order.
+bool oprobit_shared(const KernelCtx& ctx) {
+  return ctx.n_idata >= 4 &&
+         ctx.idata[ctx.n_idata - 3] == kVectorizedDensityLayoutMarker &&
+         ctx.idata[ctx.n_idata - 1] < 0 && ctx.in[0].len > 0 &&
+         ctx.idata[ctx.n_idata - 2] == ctx.in[1].len;
 }
-void oprobit_bwd(KernelCtx& ctx) { ordered_eval<true, kOrderedProbit>(ctx); }
+void oprobit_fwd(KernelCtx& ctx) {
+  if (!oprobit_shared(ctx)) {
+    ctx.out.data[0] = ordered_eval<false, kOrderedProbit>(ctx);
+    return;
+  }
+  const int64_t n = ctx.in[0].len, width = ctx.in[1].len;
+  const std::vector<int> outcomes(ctx.idata, ctx.idata + ctx.n_idata - 3);
+  const CMapV cuts(ctx.in[1].data, width), locations(ctx.in[0].data, n);
+  // Shared-vector validation follows prim/prob/ordered_probit_lpmf.hpp.
+  // Keep its checks before all CDF work and preserve scalar broadcasting.
+  constexpr const char* fn = "ordered_probit";
+  stan::math::check_nonzero_size(fn, "Cut-points", cuts);
+  if (n == 1)
+    stan::math::check_consistent_sizes(fn, "Integers", outcomes, "Locations",
+                                       locations(0));
+  else
+    stan::math::check_consistent_sizes(fn, "Integers", outcomes, "Locations",
+                                       locations);
+  stan::math::check_bounded(fn, "Random variable", outcomes, 1, width + 1);
+  stan::math::check_nonzero_size(fn, "First cutpoint set", cuts);
+  stan::math::check_ordered(fn, "Cut-points", cuts);
+  if (width > 1)
+    stan::math::check_finite(fn, "Final cut point", cuts(width - 1));
+  stan::math::check_finite(fn, "First cut point", cuts(0));
+  if (n == 1)
+    stan::math::check_finite(fn, "Location parameter", locations(0));
+  else
+    stan::math::check_finite(fn, "Location parameter", locations);
+  double value = 0;
+  const auto cdf = [](double argument, double* partial) {
+    sink s;
+    s.buf[0] = partial;
+    s.len[0] = 1;
+    sink_scope scope(s);
+    record_probability_call(
+        [&] { return stan::math::std_normal_lcdf(rvar(argument)); });
+    return s.value;
+  };
+  for (int64_t i = 0; i < n; ++i) {
+    double* state = ctx.scratch + 4 * i;
+    const int outcome = ctx.idata[i];
+    const double location = ctx.in[0].data[i];
+    if (outcome == 1) {
+      value += cdf(ctx.in[1].data[0] - location, state);
+    } else if (outcome == width + 1) {
+      value += cdf(location - ctx.in[1].data[width - 1], state);
+    } else {
+      const double upper = cdf(ctx.in[1].data[outcome - 1] - location, state);
+      const double lower =
+          cdf(ctx.in[1].data[outcome - 2] - location, state + 1);
+      value += stan::math::log_diff_exp(upper, lower);
+      state[2] = std::expm1(lower - upper);
+      state[3] = std::expm1(upper - lower);
+    }
+  }
+  ctx.out.data[0] = value;
+}
+void oprobit_bwd(KernelCtx& ctx) {
+  if (!oprobit_shared(ctx)) {
+    ordered_eval<true, kOrderedProbit>(ctx);
+    return;
+  }
+  const int64_t n = ctx.in[0].len, width = ctx.in[1].len;
+  double* locations = ctx.scratch + 4 * n;
+  double* cuts = locations + n;
+  std::fill_n(locations, n + width, 0.0);
+  for (int64_t i = n; i-- > 0;) {
+    const double* state = ctx.scratch + 4 * i;
+    const int outcome = ctx.idata[i];
+    if (outcome == 1) {
+      const double g = 0.0 + ctx.out_adj * state[0];
+      cuts[0] += g;
+      locations[i] -= g;
+    } else if (outcome == width + 1) {
+      const double g = 0.0 + ctx.out_adj * state[0];
+      locations[i] += g;
+      cuts[width - 1] -= g;
+    } else {
+      const double lower = 0.0 + (0.0 - ctx.out_adj / state[3]) * state[1];
+      const double upper = 0.0 + (0.0 - ctx.out_adj / state[2]) * state[0];
+      cuts[outcome - 2] += lower;
+      locations[i] -= lower;
+      cuts[outcome - 1] += upper;
+      locations[i] -= upper;
+    }
+  }
+  // Match the replay's final scatter, including aliased caller edges.
+  if (ctx.in_adj[0].data)
+    for (int64_t i = 0; i < n; ++i) ctx.in_adj[0].data[i] += locations[i];
+  if (ctx.in_adj[1].data)
+    for (int64_t i = 0; i < width; ++i) ctx.in_adj[1].data[i] += cuts[i];
+}
+int64_t oprobit_scratch(const Op& op, const Slot* slots) {
+  return 5 * slots[op.in[0]].len + slots[op.in[1]].len;
+}
 void wiener_fwd(KernelCtx& ctx) { ctx.out.data[0] = wiener_eval<false>(ctx); }
 void wiener_bwd(KernelCtx& ctx) { wiener_eval<true>(ctx); }
 
@@ -1750,7 +1850,7 @@ void register_matrix_kernels() {
   register_kernel(OP_ORDERED_LOGISTIC_LPMF, Kernel{ologistic_fwd, ologistic_bwd,
                                                    recorded_tail_scratch<2>});
   register_kernel(OP_ORDERED_PROBIT_LPMF,
-                  Kernel{oprobit_fwd, oprobit_bwd, nullptr});
+                  Kernel{oprobit_fwd, oprobit_bwd, oprobit_scratch});
   register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, nullptr});
 #define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
   register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
