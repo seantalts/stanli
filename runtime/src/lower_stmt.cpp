@@ -574,6 +574,13 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
   is.udata = prog.get();
   g.udata_pool.push_back(prog);
   g.ops.push_back(is);
+  // A single nonempty live-out already occupies this entire fresh slot.
+  // Keep it distinct from all live-ins, but avoid an identity extraction.
+  if (out_lens.size() == 1 && out_lens[0] > 0 &&
+      !std::getenv("STANLI_NO_REGION_DIRECT_OUTPUT")) {
+    out_slots->push_back(is.out);
+    return;
+  }
   int64_t off = 0;
   for (size_t k = 0; k < out_lens.size(); ++k) {
     const int len = out_lens[k];
