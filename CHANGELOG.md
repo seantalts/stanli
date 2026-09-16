@@ -21,6 +21,8 @@
 
 ### Fixes
 
+- Match CmdStan's fixed-covariate GP gradient reduction order and accept
+  zero-argument `log2()` and `log10()` constants in portable MIR.
 - Replace corpus benchmark heuristics with equal warmup, alternating paired
   trials, median/MAD summaries, and versioned raw records that cannot mix runs.
   Remove timeout-polling delay from short-process wall times.

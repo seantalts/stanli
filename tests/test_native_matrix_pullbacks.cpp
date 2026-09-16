@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <string>
 
 using Mat = Eigen::MatrixXd;
 using Vec = Eigen::VectorXd;
@@ -58,18 +59,27 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
     for (int j = 0; j < d; ++j) points[i][j] = x[i * d + j];
   Var a = sigma, r = rho;
   Eigen::Matrix<Var, -1, -1> cov;
-  switch (variant) {
-    case kGpMatern32:
-      cov = stan::math::gp_matern32_cov(points, a, r);
-      break;
-    case kGpMatern52:
-      cov = stan::math::gp_matern52_cov(points, a, r);
-      break;
-    case kGpExponential:
-      cov = stan::math::gp_exponential_cov(points, a, r);
-      break;
-    default:
-      cov = stan::math::gp_exp_quad_cov(points, a, r);
+  const auto covariance = [&](const auto& locations) {
+    switch (variant) {
+      case kGpMatern32:
+        return stan::math::gp_matern32_cov(locations, a, r);
+      case kGpMatern52:
+        return stan::math::gp_matern52_cov(locations, a, r);
+      case kGpExponential:
+        return stan::math::gp_exponential_cov(locations, a, r);
+      default:
+        return stan::math::gp_exp_quad_cov(locations, a, r);
+    }
+  };
+  if (active & 1) {
+    cov = covariance(points);
+  } else {
+    // CmdStan keeps data covariates as doubles. Promoting them to var chooses
+    // a different exp-quad pullback and hides its accumulation-order contract.
+    std::vector<Vec> fixed(n, Vec(d));
+    for (int i = 0; i < n; ++i)
+      for (int j = 0; j < d; ++j) fixed[i][j] = x[i * d + j];
+    cov = covariance(fixed);
   }
   Var objective = stan::math::sum(
       stan::math::elt_multiply(cov, Eigen::Map<Mat>(seed.data(), n, n)));
@@ -80,9 +90,15 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
     for (int i = 0; i < n; ++i)
       for (int j = 0; j < d; ++j)
         check(xadj[i * d + j], 0.125 + points[i][j].adj(), "GP point");
-  const bool exact = variant != kGpExpQuad;
-  if (active & 2) check(sadj, 0.125 + a.adj(), "GP sigma", exact);
-  if (active & 4) check(radj, 0.125 + r.adj(), "GP rho", exact);
+  const bool exact = true;
+  const std::string context = " n=" + std::to_string(n) +
+                              " d=" + std::to_string(d) +
+                              " mask=" + std::to_string(active) +
+                              " repeated=" + std::to_string(repeated);
+  if (active & 2)
+    check(sadj, 0.125 + a.adj(), ("GP sigma" + context).c_str(), exact);
+  if (active & 4)
+    check(radj, 0.125 + r.adj(), ("GP rho" + context).c_str(), exact);
 }
 static void chol(int n) {
   using namespace stanli;
@@ -126,7 +142,7 @@ int main(int argc, char** argv) {
   const bool unblocked_only =
       argc == 2 && std::strcmp(argv[1], "--unblocked-only") == 0;
   if (argc > 1 && !unblocked_only) return 2;
-  for (int n : {0, 1, 5, 12})
+  for (int n : {0, 1, 5, 9, 10, 11, 12, 21})
     for (int d : {1, 3})
       for (int mask = 0; mask < 8; ++mask) {
         gp(n, d, mask, stanli::kGpExpQuad, false);

@@ -98,7 +98,7 @@ void gp_cov_fwd(KernelCtx& ctx) {
   MapM(ctx.out.data, N, N) = c;
 }
 void gp_cov_replay_bwd(KernelCtx& ctx) {
-  if (!ctx.in_adj[0].data && ctx.variant != kGpExpQuad) {
+  if (!ctx.in_adj[0].data) {
     // Fixed locations need no distance derivatives. Keep the hyperparameters
     // and the weighted matrix reduction on the same Stan Math tape; only the
     // inactive geometry stays double. Active locations retain the full path.
@@ -128,10 +128,10 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
   });
 }
 
-// Fixed-location exp-quad covariances reuse forward values. Active locations
-// retain replay's exact accumulation order; other families and extreme numeric
-// geometry keep the existing fallback too. Accumulate locally so refusal cannot
-// leave partially updated adjoints.
+// Match the pinned Stan Math fixed-location exp-quad callback's blocked
+// reduction order. Scaling each term before summing is not interchangeable
+// for nearly singular covariances: it amplifies rounding in hypergradients.
+// See stan/math/rev/fun/gp_exp_quad_cov.hpp for the reference callback.
 void gp_cov_bwd(KernelCtx& ctx) {
   const double sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
   if (ctx.variant != kGpExpQuad || ctx.in_adj[0].data ||
@@ -140,36 +140,45 @@ void gp_cov_bwd(KernelCtx& ctx) {
     return;
   }
   const int64_t n = ctx.idata[0], d = ctx.idata[1];
-  double sigma_adj = 0, rho_adj = 0;
-  for (int64_t j = 0; j < n; ++j) {
-    sigma_adj += ctx.out_adj_vec.data[j * n + j] * (2 * sigma);
-    for (int64_t i = j + 1; i < n; ++i) {
-      const double distance2 =
-          (CMapV(ctx.in[0].data + i * d, d) - CMapV(ctx.in[0].data + j * d, d))
-              .squaredNorm();
-      if (!std::isfinite(distance2)) {
-        gp_cov_replay_bwd(ctx);
-        return;
+  if (n == 0) return;
+  double covariance_sum = 0, distance_sum = 0;
+  constexpr int64_t block = 10;
+  for (int64_t jb = 0; jb < n; jb += block) {
+    const int64_t j_end = std::min(n, jb + block);
+    for (int64_t ib = jb; ib < n; ib += block) {
+      const int64_t i_end = std::min(n, ib + block);
+      for (int64_t j = jb; j < j_end; ++j) {
+        for (int64_t i = std::max(ib, j + 1); i < i_end; ++i) {
+          const double distance2 = (CMapV(ctx.in[0].data + i * d, d) -
+                                    CMapV(ctx.in[0].data + j * d, d))
+                                       .squaredNorm();
+          const double seed = 0.0 + ctx.out_adj_vec.data[i * n + j] +
+                              ctx.out_adj_vec.data[j * n + i];
+          const double weighted = ctx.out.data[j * n + i] * seed;
+          if (!std::isfinite(distance2) || !std::isfinite(weighted)) {
+            gp_cov_replay_bwd(ctx);
+            return;
+          }
+          distance_sum += weighted * distance2;
+          covariance_sum += weighted;
+        }
       }
-      const double seed =
-          ctx.out_adj_vec.data[j * n + i] + ctx.out_adj_vec.data[i * n + j];
-      const double covariance = ctx.out.data[j * n + i];
-      const double weighted = seed * covariance;
-      const double dsigma = weighted * (2 / sigma);
-      const double drho = weighted * (distance2 / (rho * rho * rho));
-      // Saved covariance cannot recover an underflowed exponential. Also
-      // refuse intermediate overflow/underflow before publishing any partials.
-      if (!std::isnormal(covariance) || !std::isfinite(weighted) ||
-          (weighted == 0 && seed != 0) || !std::isfinite(dsigma) ||
-          !std::isfinite(drho) || (dsigma == 0 && weighted != 0) ||
-          (drho == 0 && weighted != 0 && distance2 != 0)) {
-        gp_cov_replay_bwd(ctx);
-        return;
-      }
-      sigma_adj += dsigma;
-      rho_adj += drho;
     }
   }
+  // Matrix<var> exposes its diagonal values through a scalar Eigen accessor.
+  // Keep that reduction order: a packetized double-vector sum rounds
+  // differently.
+  Eigen::VectorXd diagonal(n), diagonal_adj(n);
+  for (int64_t j = 0; j < n; ++j) {
+    diagonal[j] = ctx.out.data[j * n + j];
+    diagonal_adj[j] = 0.0 + ctx.out_adj_vec.data[j * n + j];
+  }
+  covariance_sum +=
+      (diagonal.unaryExpr([](double value) { return value; }).array() *
+       diagonal_adj.array())
+          .sum();
+  const double sigma_adj = covariance_sum * 2 / sigma;
+  const double rho_adj = distance_sum / (rho * rho * rho);
   if (!std::isfinite(sigma_adj) || !std::isfinite(rho_adj)) {
     gp_cov_replay_bwd(ctx);
     return;

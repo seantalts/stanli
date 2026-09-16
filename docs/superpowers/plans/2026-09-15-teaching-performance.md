@@ -640,3 +640,83 @@ RNG, adaptation or numerical threshold was adjusted to improve timings.
 These are fixed-point gradient and preparation results. A fresh complete
 sampling sweep and full integration checks remain required; none are spliced
 into the immutable a224d12afe02ac98 report checkpoint.
+
+
+## Complete v6 sweep and the end-to-end parity gate
+
+The user clarified that every tested model should reach end-to-end parity or
+better; merely staying below the 3x cap is not success. Preserve preparation,
+warmup, sampling, generated quantities and output in Stanli's measured CLI
+boundary. Keep diagnostics alongside timings. Gradient improvements are
+intermediate evidence only. No model-specific tuning, fingerprints, reference
+edits or widened tolerances are authorized substitutes for this target.
+
+Run `fd5e0ecacddc7047` finished all 199 fixtures on runtime `6e462c2e`: 193
+complete comparisons, 187 lower Stanli medians, six slower, one capped and five
+stopped before sampling. All 61 book calls completed and had lower Stanli CLI
+medians, median CmdStan/Stanli 1.576; 49 passed the diagnostic screen in both.
+The six slower fixtures were GEV, asymmetric Laplace, zero-inflated asymmetric
+Laplace, mixture theta, educational Pareto, and cumulative ordinal. The cap was
+`sw_re_negbin` seed 2. Its CmdStan reference chain finished unusually quickly
+and the combined CmdStan fit had severe divergences, depth hits and poor R-hat;
+that timing is not evidence of successful inference. The baseline remains
+immutable, including the separately retained interrupted m12.6 attempt.
+
+### Fixed-location GP arithmetic
+
+A typed-input experiment resolved all three strict GP mismatches: keeping the
+covariates double selects Stan Math's specialized exp-quad callback, whereas
+promoting them to var selects a different reduction. The replay prototype
+matched two models exactly and the third within 4.44e-16, but added overhead.
+The native replacement retains the same blocked traversal, accumulates products
+before scaling and uses the reference's scalar Eigen diagonal reduction.
+A packetized diagonal prototype failed exact tests by a few ULP and was
+replaced; no tolerance was relaxed. Tests now use the proper double-location
+oracle, all eight activity masks, empty/repeated points, block boundaries,
+asymmetric weights, extreme scales, and existing nonzero input adjoints.
+Active-location replay remains unchanged.
+
+Five alternating gradient pairs, 200 ms warmup and 400 ms measurement, gave
+CmdStan/Stanli ratios 1.237 (`sw_gp`), 1.310 (`i320_gp_expquad`), 1.311
+(`s2_gp_by_gr`) and 1.289 (m14.8 canary). These are warm-gradient ratios.
+The three previously failing fixtures match every recorded value at all three
+CmdStan reference points exactly; the four-model replay compares 900 values,
+with the m14.8 canary's largest scaled error 3.00e-16.
+
+Separate four-seed 1000+1000 sampling checks, with the original 3x/900s cap,
+produce complete results for all three GP fixtures: median Stanli/CmdStan
+seconds 1.033/1.233, 0.623/0.860 and 0.545/0.814. Their CmdStan/Stanli CLI
+ratios are 1.194, 1.381 and 1.492. Both engines retain diagnostic flags on
+these models, so completion is not claimed as reliable inference. These
+checks are not inserted into the fixed-point-gated v6 aggregate.
+
+Inverse Gaussian also samples in both engines: 0.0248/0.0495 seconds, all four
+seeds complete. Both have many divergences. Its original fixed test point is
+outside the model's domain in both engines; this is not missing sampling
+support. A generic valid-point benchmark policy still needs separate design
+and verification, retaining the original refusal evidence.
+
+### Nullary reader fix and remaining work
+
+MIR arity validation rejected valid log2()/log10() constants already supported
+by execution. Reuse shared nullary recognition; test actual decoding and
+execution, unary overloads and malformed arities. COM-Poisson now reaches the
+existing dynamic-loop limitation instead of failing at log2. Prefer/force
+structured-loop probes additionally reveal a runtime integer outcome that
+native density lowering expects to be compile-time data. COM-Poisson is not
+yet fixed.
+
+Current integration: 249/249 tests, 316/316 existing-policy reference checks,
+and 456 R expectations with no warnings, failures or skips. The existing
+cross-platform ill-conditioning policies have not been changed on the basis
+of one machine. Initial reference execution in the separate build found an
+omitted embedded-compiler configuration; it was corrected before the recorded
+numerical and complete-run checks. The original measured build is untouched.
+
+Artifacts under `/tmp/stanli-teaching-perf`: `gp-ordered-pairs.json`,
+`gp-ordered-identity.json`, `gp-ordered-candidate.patch`,
+`gp-ordered-three-point-embedded.log`, `blocker-sampling-v7/`, and
+`residual-v7-{ctest,refs,r-tests}.log`. The separate candidate build is
+`build-teaching-residual`. Simple loop/carving/liveness policy probes are
+retained in `v7-representation-probes.json`; none resolves the large remaining
+GEV/ALD deficits. Remaining performance targets and COM-Poisson stay open.
