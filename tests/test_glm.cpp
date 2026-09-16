@@ -678,6 +678,68 @@ static void check_probit_alias() {
   }
 }
 
+static void check_wiener_fixed_observation() {
+  using namespace stanli;
+  using stan::math::var;
+  for (bool propto : {false, true})
+    for (int active_mask = 0; active_mask < 4; ++active_mask)
+      for (double weight :
+           {1.0, -2.75, 0.0, std::numeric_limits<double>::infinity()})
+        for (double y : {0.201, 0.8, 2.0}) {
+          Graph g;
+          std::vector<int> slots;
+          for (int i = 0; i < 5; ++i)
+            slots.push_back(g.add_slot(1, i == 0   ? (active_mask & 1)
+                                          : i == 3 ? (active_mask & 2)
+                                                   : true));
+          const int w = g.add_slot(1, false), lp = g.add_slot(1, false),
+                    scaled = g.add_slot(1, false);
+          g.add_op(OP_WIENER_LPDF,
+                   {slots[0], slots[1], slots[2], slots[3], slots[4]}, lp);
+          g.ops.back().variant = propto ? 0x9fu : 0x1fu;
+          g.add_op(OP_MUL, {lp, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          const double vals[] = {y, 1.4, 0.2, 0.35, -0.4};
+          for (int i = 0; i < 5; ++i) ex.value_ptr(slots[i])[0] = vals[i];
+          ex.value_ptr(w)[0] = weight;
+          stan::math::nested_rev_autodiff nested;
+          var v[5];
+          for (int i = 0; i < 5; ++i) v[i] = vals[i];
+          var ref = (propto ? stan::math::wiener_lpdf<true>(v[0], v[1], v[2],
+                                                            v[3], v[4])
+                            : stan::math::wiener_lpdf<false>(v[0], v[1], v[2],
+                                                             v[3], v[4])) *
+                    weight;
+          stan::math::grad(ref.vi_);
+          std::vector<double> grad(ex.n_params());
+          const double got = ex.gradient(grad.data());
+          expect_eq("wiener value", got, ref.val());
+          int at = 0;
+          for (int i = 0; i < 5; ++i) {
+            if ((i == 0 && !(active_mask & 1)) ||
+                (i == 3 && !(active_mask & 2)))
+              continue;
+            const double want = v[i].adj();
+            if (std::isfinite(want))
+              expect_eq(
+                  "wiener weighted gradient",
+                  std::abs(grad[at++] - want) <= 1e-12 * (1 + std::abs(want)),
+                  true);
+            else
+              expect_eq("wiener nonfinite seed", grad[at++], want);
+          }
+          ex.value_ptr(slots[0])[0] = 0.1;
+          bool threw = false;
+          try {
+            ex.gradient(grad.data());
+          } catch (const std::domain_error&) {
+            threw = true;
+          }
+          expect_eq("wiener validation", threw, true);
+        }
+}
+
 static void reference(const double* q, double* lp_out, double* grad_out) {
   using stan::math::var;
   using stanli::testmodels::LogisticGlm;
@@ -749,6 +811,7 @@ int main() {
   check_multinomial_density();
   check_dirichlet_recorder();
   check_probit_alias();
+  check_wiener_fixed_observation();
   check_vector_alphas();
   check_active_designs();
 

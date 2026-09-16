@@ -1651,8 +1651,58 @@ void oprobit_bwd(KernelCtx& ctx) {
 int64_t oprobit_scratch(const Op& op, const Slot* slots) {
   return 5 * slots[op.in[0]].len + slots[op.in[1]].len;
 }
-void wiener_fwd(KernelCtx& ctx) { ctx.out.data[0] = wiener_eval<false>(ctx); }
-void wiener_bwd(KernelCtx& ctx) { wiener_eval<true>(ctx); }
+// Scalar observations with a fixed outcome need derivatives only
+// for boundary, nondecision time, bias and drift. Keep those types active
+// (including under propto), and retain their unit partials from a single Stan
+// Math tape.
+bool wiener_fixed_observation(const KernelCtx& ctx) {
+  if (ctx.in_adj[0].data) return false;
+  for (int k = 0; k < 5; ++k)
+    if (ctx.in[k].len != 1) return false;
+  return true;
+}
+void wiener_fwd(KernelCtx& ctx) {
+  if (!wiener_fixed_observation(ctx)) {
+    ctx.out.data[0] = wiener_eval<false>(ctx);
+    return;
+  }
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  var alpha = ctx.in[1].data[0], tau = ctx.in[2].data[0],
+      beta = ctx.in[3].data[0], delta = ctx.in[4].data[0];
+  const double y = ctx.in[0].data[0];
+  var out = (ctx.variant & 0x80u)
+                ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
+                : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
+  ctx.out.data[0] = out.val();
+  if (!values_only()) {
+    stan::math::grad(out.vi_);
+    ctx.scratch[0] = alpha.adj();
+    ctx.scratch[1] = tau.adj();
+    ctx.scratch[2] = beta.adj();
+    ctx.scratch[3] = delta.adj();
+  }
+}
+void wiener_bwd(KernelCtx& ctx) {
+  if (!wiener_fixed_observation(ctx) || !std::isfinite(ctx.out_adj)) {
+    wiener_eval<true>(ctx);
+    return;
+  }
+  for (int j = 0; j < 4; ++j)
+    if (!std::isfinite(ctx.scratch[j])) {
+      wiener_eval<true>(ctx);
+      return;
+    }
+  const int inputs[] = {1, 2, 3, 4};
+  for (int j = 0; j < 4; ++j)
+    if (ctx.in_adj[inputs[j]].data)
+      ctx.in_adj[inputs[j]].data[0] += ctx.out_adj * ctx.scratch[j];
+}
+int64_t wiener_scratch(const Op& op, const Slot* slots) {
+  for (int k = 0; k < 5; ++k)
+    if (slots[op.in[k]].len != 1) return 0;
+  return 4;
+}
 
 // ---- the last five ------------------------------------------------------
 // lkj_cov(Sigma | mu, sigma, eta): a covariance matrix, two vectors of
@@ -1851,7 +1901,8 @@ void register_matrix_kernels() {
                                                    recorded_tail_scratch<2>});
   register_kernel(OP_ORDERED_PROBIT_LPMF,
                   Kernel{oprobit_fwd, oprobit_bwd, oprobit_scratch});
-  register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, nullptr});
+  register_kernel(OP_WIENER_LPDF,
+                  Kernel{wiener_fwd, wiener_bwd, wiener_scratch});
 #define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
   register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
   STANLI_TAIL_CDF_LIST(STANLI_REGISTER_TAIL_CDF)

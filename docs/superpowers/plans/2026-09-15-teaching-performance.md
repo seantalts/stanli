@@ -333,3 +333,36 @@ shared/array cutpoints, +/-30 tail inputs, aliased inputs and validation/error
 recovery tests pass. `probit-native-ab.jsonl` retains all samples. The native
 reverse uses separate operand buffers before scatter, retaining caller alias
 semantics; no density approximation or sampler setting changed.
+
+Integration narrowed the specialization selector: the cross-path oracle found
+one ULP of island/no-island drift when a range slice became statically exposed.
+Range/gather selectors now decline the whole trial; the original graph and
+fills are asserted unchanged. The retained-plan suite explicitly disables the
+whole-program alternative so it continues to exercise retained plans. All
+seven measured ordinal/ALD cases still specialize. No cross-path tolerance or
+reference was relaxed. Fresh R ecosystem acceptance passes with the built CLI
+explicitly configured; the first attempt correctly failed for a skipped CSV
+oracle when that path was absent.
+
+Wiener follow-up: the retained graph has forty scalar Wiener calls. Its
+existing kernel builds a tape for forward, discards it, then builds another
+for reverse, promoting even parameter-independent outcome/bias to var. Probe
+an all-scalar signature with those two adjoint edges absent: keep boundary,
+nondecision time and drift active, call the same Stan Math template once and
+retain its unit partials. Other signatures/active outcomes keep replay. This
+is selected by shape/adjoint edges, not the recorded model or values. Weighted
+unit comparisons (1e-12 relative), near-boundary observations, active-edge
+fallback and validation failures must pass, followed by paired timings and
+the unmodified three-point external gate.
+
+The first Wiener probe did not apply to the target (45 us unchanged): bias
+is active in its graph. Correct the hypothesis to a fixed outcome with all
+four distribution parameters active, retaining four partials. Exercise all
+four outcome/bias activity combinations, including replay for active outcomes.
+
+Wiener result: five alternating pairs give 46.07 -> 28.34 us versus
+CmdStan 29.37 us, with bitwise fixed-point value/gradient equality. The probit
+canary remains faster than CmdStan. All four outcome/bias activity masks,
+full/propto, zero/negative/infinite seeds, near-boundary observations and
+invalid outcomes pass their oracle. Nonfinite seeds or cached partials retain
+the original weighted replay. Raw samples: `wiener-four-ab.jsonl`.
