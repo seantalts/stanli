@@ -51,5 +51,12 @@
     "R_tests": "See r-ecosystem-tests.txt; runtime-backed ecosystem/sampling tests, fail on warnings/failures/skips",
     "sampling": "Every argv, timeout, stdout/stderr and status is retained in sampling-raw.tar.gz; sample-sink.py reproduces the protocol",
     "additional_points": "Build point-ref.cpp with additional_reference_build, run its data.json 0 point.txt argv, and run extra-points.R against the current runtime."
+  },
+  "main_integration": {
+    "main_commit": "42a7945a",
+    "merge_commit": "a7585881178e3ffb08aec427bb9e2fb89563a271",
+    "compiler_runtime_diff_from_measured_fix": "",
+    "R_package_installed_from_current_main": true,
+    "R_expectations": 495
   }
 }

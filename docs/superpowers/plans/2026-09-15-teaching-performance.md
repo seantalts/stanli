@@ -975,3 +975,10 @@ Published evidence is separate at
 `output/teaching-performance/followup-com-poisson/`, including the full final
 CSV/log archive, all rejected-probe timing records, exact patches and binary
 identities. Original v6 records and the Rethinking report remain unchanged.
+
+Integration: commit6997f80b contains the measured runtime fix. Main advanced to
+42a7945a (native R fit interface and0.14.1 release); merged asa7585881. Verified
+zero diff in runtime/,CLI/gradient tools,orCMake against6997. Installed current
+R package and reran ecosystem/sampling/native-fit checks:495expectations pass,
+zero warnings/skips/failures. Moved this PR's changelog bullets back under
+Unreleased after the release merge. Final review's extra tests all pass.

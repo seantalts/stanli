@@ -67,9 +67,10 @@ Runs are serial with all numerical thread limits set to one.
 - [Runtime tests](runtime-tests.txt): 253 passed.
 - [Corpus replay](numerical-replay.txt): 316 existing-policy checks passed;
   1,008,755 values, unchanged numerical and domain policies.
-- [R acceptance](r-ecosystem-tests.txt): 456 expectations, no failures, warnings,
+- [R acceptance](r-ecosystem-tests.txt): 495 expectations, no failures, warnings,
   or skips.
-- [Provenance and reproduction](provenance.json).
+- [Provenance and reproduction](provenance.json). The latest-main R interface
+  and 0.14.1 release changes are included; they change no compiler or runtime code.
 
 A deadline-helper process-exit race raised a PermissionError for the previous
 runtime's seed 3. That baseline remains recorded as timed out. It exited and was

@@ -2,10 +2,10 @@
 
 ⠏ |          0 | bayesplot                                                      
 ⠋ |          1 | bayesplot                                                      
-⠴ |          6 | bayesplot                                                      
-⠙ |         32 | bayesplot                                                      
+⠋ |         31 | bayesplot                                                      
+⠼ |         35 | bayesplot                                                      
 ⠴ |         36 | bayesplot                                                      
-✔ |         51 | bayesplot [1.4s]
+✔ |         51 | bayesplot [1.2s]
 
 ⠏ |          0 | ecosystem-registration                                         
 ⠋ |          1 | ecosystem-registration                                         
@@ -14,17 +14,22 @@
 ⠸ |          4 | ecosystem-registration                                         
 ⠼ |          5 | ecosystem-registration                                         
 ⠴ |          6 | ecosystem-registration                                         
-✔ |          6 | ecosystem-registration [3.5s]
+✔ |          6 | ecosystem-registration [2.5s]
 
 ⠏ |          0 | loo                                                            
-⠹ |         13 | loo                                                            
+⠸ |         14 | loo                                                            
 ✔ |         18 | loo
 
 ⠏ |          0 | posterior-ecosystem                                            
-⠋ |          1 | posterior-ecosystem                                            
+⠹ |          3 | posterior-ecosystem                                            
 ⠴ |         16 | posterior-ecosystem                                            
 ⠧ |         18 | posterior-ecosystem                                            
-✔ |         24 | posterior-ecosystem [1.3s]
+✔ |         24 | posterior-ecosystem [1.2s]
+
+⠏ |          0 | rfit                                                           
+⠼ |         25 | rfit                                                           
+⠙ |         32 | rfit                                                           
+✔ |         39 | rfit
 
 ⠏ |          0 | sampling                                                       
 ⠙ |         62 | sampling                                                       
@@ -35,27 +40,26 @@
 ✔ |         19 | stanfit-columns
 
 ⠏ |          0 | stanfit-live                                                   
-⠋ |          1 | stanfit-live                                                   
 ⠏ |         30 | stanfit-live                                                   
 ⠋ |         61 | stanfit-live                                                   
 ⠦ |         67 | stanfit-live                                                   
-✔ |         73 | stanfit-live [1.9s]
+✔ |         73 | stanfit-live [1.5s]
 
 ⠏ |          0 | stanfit-registration                                           
 ⠋ |          1 | stanfit-registration                                           
 ⠙ |          2 | stanfit-registration                                           
-✔ |          2 | stanfit-registration [1.6s]
+✔ |          2 | stanfit-registration [1.5s]
 
 ⠏ |          0 | stanfit                                                        
 ⠸ |         54 | stanfit                                                        
-⠹ |        123 | stanfit                                                        
+⠼ |        125 | stanfit                                                        
 ⠦ |        157 | stanfit                                                        
 ⠧ |        168 | stanfit                                                        
-✔ |        168 | stanfit [1.5s]
+✔ |        168 | stanfit [1.2s]
 
 ══ Results ═════════════════════════════════════════════════════════════════════
-Duration: 11.8 s
+Duration: 10.1 s
 
-[ FAIL 0 | WARN 0 | SKIP 0 | PASS 456 ]
+[ FAIL 0 | WARN 0 | SKIP 0 | PASS 495 ]
 
 😸

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Support brms COM-Poisson models with checked runtime vector writes, prefix
+  reductions, and integer remainder inside parameter-dependent control flow;
+  skip unused workspace initialization on early-return branches.
+- Reduce constant allocation, inactive derivative work, and unused input copies
+  in runtime-control replay.
+
 ## 0.14.1
 
 ### Improvements
@@ -12,8 +18,6 @@
 
 - Speed up categorical, ordinal, multivariate-normal, Dirichlet, Wiener,
   truncated-distribution and GP calculations; reduce loop and preparation costs.
-- Reduce constant allocation, inactive derivative work, and unused input copies
-  in runtime-control replay.
 - Document Rethinking, brms, and educational-model support with current-build
   numerical checks, a full timing appendix, and a Rethinking report. Cap
   benchmark sampling at 3x its CmdStan baseline or 900 seconds, whichever is less.
@@ -29,9 +33,6 @@
 
 ### Fixes
 
-- Support brms COM-Poisson models with checked runtime vector writes, prefix
-  reductions, and integer remainder inside parameter-dependent control flow;
-  skip unused workspace initialization on early-return branches.
 - Match CmdStan's fixed-covariate GP gradient reduction order and accept
   zero-argument `log2()` and `log10()` constants in portable MIR.
 - Replace corpus benchmark heuristics with equal warmup, alternating paired
