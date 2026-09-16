@@ -1,0 +1,507 @@
+Test project /Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual
+        Start   1: test_stanc_process
+        Start   2: test_csv_writer
+        Start   3: test_dev_setup
+        Start   4: test_check_precompiled_mir
+        Start   5: test_check_precompiled_mir_conflict
+        Start   6: test_check_external_stanc
+        Start   7: test_benchmark_timer
+        Start   8: test_prep_only
+        Start   9: test_prep_profile
+        Start  10: test_prep_profile_reroll_dispositions
+        Start  11: test_bench_opcost_smoke
+        Start  12: test_compiler_deployment
+        Start  13: test_smoke
+        Start  14: test_executor
+        Start  15: test_recorder
+        Start  16: test_densities
+        Start  17: test_matvec
+        Start  18: test_eigen
+        Start  19: test_mnc
+        Start  20: test_legacy
+        Start  21: test_eight_schools
+        Start  22: test_glm
+        Start  23: test_nuts
+        Start  24: test_walnuts
+  1/249 Test   #4: test_check_precompiled_mir ........................................   Passed    0.01 sec
+  2/249 Test   #8: test_prep_only ....................................................   Passed    0.01 sec
+  3/249 Test   #9: test_prep_profile .................................................   Passed    0.01 sec
+  4/249 Test  #10: test_prep_profile_reroll_dispositions .............................   Passed    0.01 sec
+        Start  25: test_sexp
+        Start  26: test_model_adapter
+        Start  27: test_mir
+        Start  28: test_mir_decode
+  5/249 Test   #5: test_check_precompiled_mir_conflict ...............................   Passed    0.01 sec
+        Start  29: test_transforms
+  6/249 Test   #2: test_csv_writer ...................................................   Passed    0.36 sec
+        Start  30: test_eltwise
+  7/249 Test   #7: test_benchmark_timer ..............................................   Passed    0.39 sec
+        Start  31: test_scalar_binary
+  8/249 Test  #11: test_bench_opcost_smoke ...........................................   Passed    0.73 sec
+        Start  32: test_lower
+  9/249 Test  #13: test_smoke ........................................................   Passed    0.85 sec
+        Start  33: test_lower_views
+ 10/249 Test  #14: test_executor .....................................................   Passed    0.98 sec
+        Start  34: test_native_matrix_pullbacks
+ 11/249 Test  #34: test_native_matrix_pullbacks ......................................   Passed    0.06 sec
+        Start  35: test_lower_view_contract
+ 12/249 Test  #15: test_recorder .....................................................   Passed    1.10 sec
+        Start  36: test_lower_array_contract
+ 13/249 Test  #17: test_matvec .......................................................   Passed    1.38 sec
+        Start  37: test_data
+ 14/249 Test  #18: test_eigen ........................................................   Passed    1.55 sec
+        Start  38: test_e2e
+ 15/249 Test  #20: test_legacy .......................................................   Passed    1.83 sec
+        Start  39: test_reroll
+ 16/249 Test  #19: test_mnc ..........................................................   Passed    1.89 sec
+        Start  40: test_profile
+ 17/249 Test  #21: test_eight_schools ................................................   Passed    1.95 sec
+        Start  41: test_inplace
+ 18/249 Test  #24: test_walnuts ......................................................   Passed    2.11 sec
+        Start  42: test_pass_safety
+ 19/249 Test  #22: test_glm ..........................................................   Passed    2.31 sec
+        Start  43: test_sampling
+ 20/249 Test  #23: test_nuts .........................................................   Passed    2.42 sec
+        Start  44: test_ode_prog
+ 21/249 Test  #16: test_densities ....................................................   Passed    2.44 sec
+        Start  45: test_mir_program_conformance
+ 22/249 Test  #25: test_sexp .........................................................   Passed    2.50 sec
+        Start  46: test_mir_checks
+ 23/249 Test  #26: test_model_adapter ................................................   Passed    2.63 sec
+        Start  47: test_structured_checks
+ 24/249 Test  #27: test_mir ..........................................................   Passed    3.02 sec
+        Start  48: test_structured_loop
+ 25/249 Test  #29: test_transforms ...................................................   Passed    3.11 sec
+        Start  49: test_mir_unary_fallback
+ 26/249 Test  #28: test_mir_decode ...................................................   Passed    3.28 sec
+        Start  50: test_mir_binary_fallback
+ 27/249 Test   #6: test_check_external_stanc .........................................   Passed    3.83 sec
+        Start  51: test_mir_reduction_fallback
+ 28/249 Test  #30: test_eltwise ......................................................   Passed    3.87 sec
+        Start  52: test_constfold
+ 29/249 Test  #31: test_scalar_binary ................................................   Passed    3.96 sec
+        Start  53: test_cse
+ 30/249 Test  #33: test_lower_views ..................................................   Passed    3.91 sec
+        Start  54: test_graph_print
+ 31/249 Test  #35: test_lower_view_contract ..........................................   Passed    3.84 sec
+        Start  55: test_pass_dump
+ 32/249 Test  #36: test_lower_array_contract .........................................   Passed    3.93 sec
+        Start  56: test_function_registry
+ 33/249 Test  #37: test_data .........................................................   Passed    3.78 sec
+        Start  57: test_function_shape
+ 34/249 Test  #38: test_e2e ..........................................................   Passed    3.77 sec
+        Start  58: test_partition
+ 35/249 Test  #40: test_profile ......................................................   Passed    3.66 sec
+        Start  59: test_solve
+ 36/249 Test  #39: test_reroll .......................................................   Passed    3.83 sec
+        Start  60: test_cross_path
+ 37/249 Test  #41: test_inplace ......................................................   Passed    3.74 sec
+        Start  61: test_write_array
+ 38/249 Test  #42: test_pass_safety ..................................................   Passed    3.75 sec
+        Start  62: test_pool
+ 39/249 Test  #43: test_sampling .....................................................   Passed    3.77 sec
+        Start  63: test_bridgestan
+ 40/249 Test  #44: test_ode_prog .....................................................   Passed    3.76 sec
+        Start  64: test_mixture
+ 41/249 Test  #45: test_mir_program_conformance ......................................   Passed    3.90 sec
+        Start  65: test_island
+ 42/249 Test  #46: test_mir_checks ...................................................   Passed    3.97 sec
+        Start  66: test_adjoint
+ 43/249 Test  #47: test_structured_checks ............................................   Passed    4.00 sec
+        Start  67: test_diagnose
+ 44/249 Test  #48: test_structured_loop ..............................................   Passed    3.86 sec
+        Start  68: test_multichain
+ 45/249 Test  #49: test_mir_unary_fallback ...........................................   Passed    3.86 sec
+        Start  69: test_newtrans
+ 46/249 Test  #50: test_mir_binary_fallback ..........................................   Passed    3.88 sec
+        Start  70: test_rejectprint
+ 47/249 Test  #12: test_compiler_deployment ..........................................   Passed    7.76 sec
+        Start  71: test_odevariadic
+ 48/249 Test  #51: test_mir_reduction_fallback .......................................   Passed    4.13 sec
+        Start  72: test_algebra
+ 49/249 Test   #1: test_stanc_process ................................................   Passed    8.14 sec
+        Start  73: test_estimate
+ 50/249 Test  #52: test_constfold ....................................................   Passed    4.04 sec
+        Start  74: test_brmsmono
+ 51/249 Test  #53: test_cse ..........................................................   Passed    4.04 sec
+        Start  75: test_reduce_sum
+ 52/249 Test  #54: test_graph_print ..................................................   Passed    3.76 sec
+        Start  76: test_structured_arrays
+ 53/249 Test  #55: test_pass_dump ....................................................   Passed    3.78 sec
+        Start  77: test_pathfinder
+ 54/249 Test  #56: test_function_registry ............................................   Passed    3.75 sec
+        Start  78: test_unconstrain
+ 55/249 Test  #57: test_function_shape ...............................................   Passed    3.75 sec
+        Start  79: test_init_interp
+ 56/249 Test  #32: test_lower ........................................................   Passed    8.28 sec
+        Start  80: test_constrain_structured
+ 57/249 Test  #58: test_partition ....................................................   Passed    3.75 sec
+        Start  81: test_capi
+ 58/249 Test  #59: test_solve ........................................................   Passed    3.68 sec
+        Start  82: test_function
+ 59/249 Test  #61: test_write_array ..................................................   Passed    3.92 sec
+        Start  83: test_educational_harness
+ 60/249 Test  #62: test_pool .........................................................   Passed    3.76 sec
+        Start  84: test_educational_models
+ 61/249 Test  #83: test_educational_harness ..........................................   Passed    0.05 sec
+        Start  85: test_run_timings
+ 62/249 Test  #85: test_run_timings ..................................................   Passed    0.06 sec
+        Start  86: test_corpus_bench
+ 63/249 Test  #63: test_bridgestan ...................................................   Passed    3.69 sec
+        Start  87: test_teaching_reports
+ 64/249 Test  #87: test_teaching_reports .............................................   Passed    0.07 sec
+        Start  88: test_gen_web_models
+ 65/249 Test  #88: test_gen_web_models ...............................................   Passed    0.04 sec
+        Start  89: test_conformance_harness
+ 66/249 Test  #64: test_mixture ......................................................   Passed    3.72 sec
+        Start  90: test_function_model_generation
+ 67/249 Test  #65: test_island .......................................................   Passed    3.80 sec
+        Start  91: test_density_signature_model_generation
+ 68/249 Test  #86: test_corpus_bench .................................................   Passed    0.50 sec
+        Start  92: test_builtin_signature_model_generation
+ 69/249 Test  #66: test_adjoint ......................................................   Passed    3.81 sec
+        Start  93: test_signature_manifests
+ 70/249 Test  #93: test_signature_manifests ..........................................   Passed    0.03 sec
+        Start  94: test_function_model_harness
+ 71/249 Test  #67: test_diagnose .....................................................   Passed    3.72 sec
+        Start  95: test_function_models
+ 72/249 Test  #84: test_educational_models ...........................................   Passed    0.86 sec
+        Start  96: test_vectorize_ab
+ 73/249 Test  #68: test_multichain ...................................................   Passed    3.64 sec
+        Start  97: lit_fixtures_block_negative_extent
+ 74/249 Test  #97: lit_fixtures_block_negative_extent ................................   Passed    0.04 sec
+        Start  98: lit_fixtures_int_divide_zero
+ 75/249 Test  #90: test_function_model_generation ....................................   Passed    0.66 sec
+        Start  99: lit_fixtures_viewa_mixed_slice_refuse
+ 76/249 Test  #98: lit_fixtures_int_divide_zero ......................................   Passed    0.04 sec
+        Start 100: lit_fixtures_viewa_zero_product_mismatch
+ 77/249 Test  #99: lit_fixtures_viewa_mixed_slice_refuse .............................   Passed    0.04 sec
+        Start 101: lit_fixtures_viewc_append_col_matrix_vector_bad
+ 78/249 Test  #69: test_newtrans .....................................................   Passed    3.64 sec
+        Start 102: lit_fixtures_viewc_append_col_mismatch
+ 79/249 Test #100: lit_fixtures_viewa_zero_product_mismatch ..........................   Passed    0.04 sec
+        Start 103: lit_fixtures_viewc_append_row_mismatch
+ 80/249 Test #101: lit_fixtures_viewc_append_col_matrix_vector_bad ...................   Passed    0.04 sec
+        Start 104: lit_fixtures_viewc_append_row_row_matrix_bad
+ 81/249 Test #102: lit_fixtures_viewc_append_col_mismatch ............................   Passed    0.04 sec
+        Start 105: lit_fixtures_viewc_array_bind_mismatch
+ 82/249 Test  #96: test_vectorize_ab .................................................   Passed    0.18 sec
+        Start 106: lit_fixtures_viewc_array_matrix_prefix_mismatch
+ 83/249 Test #104: lit_fixtures_viewc_append_row_row_matrix_bad ......................   Passed    0.04 sec
+        Start 107: lit_fixtures_viewc_array_matrix_single_index_transpose_mismatch
+ 84/249 Test #103: lit_fixtures_viewc_append_row_mismatch ............................   Passed    0.04 sec
+        Start 108: lit_fixtures_viewc_cholesky_zero_rect
+ 85/249 Test #106: lit_fixtures_viewc_array_matrix_prefix_mismatch ...................   Passed    0.04 sec
+        Start 109: lit_fixtures_viewc_column_assignment_mismatch
+ 86/249 Test #105: lit_fixtures_viewc_array_bind_mismatch ............................   Passed    0.04 sec
+        Start 110: lit_fixtures_viewc_eigen_zero_rect
+ 87/249 Test #108: lit_fixtures_viewc_cholesky_zero_rect .............................   Passed    0.04 sec
+        Start 111: lit_fixtures_viewc_matvec_mismatch
+ 88/249 Test #107: lit_fixtures_viewc_array_matrix_single_index_transpose_mismatch ...   Passed    0.04 sec
+        Start 112: lit_fixtures_viewc_negative_range_assignment_mismatch
+ 89/249 Test #109: lit_fixtures_viewc_column_assignment_mismatch .....................   Passed    0.04 sec
+ 90/249 Test #110: lit_fixtures_viewc_eigen_zero_rect ................................   Passed    0.04 sec
+        Start 113: lit_fixtures_viewc_row_broadcast_graph
+        Start 114: lit_fixtures_viewc_row_broadcast_program
+ 91/249 Test  #70: test_rejectprint ..................................................   Passed    3.60 sec
+        Start 115: lit_fixtures_viewc_to_matrix_mismatch
+ 92/249 Test #112: lit_fixtures_viewc_negative_range_assignment_mismatch .............   Passed    0.04 sec
+        Start 116: lit_fixtures_viewc_vec_broadcast_graph
+ 93/249 Test #111: lit_fixtures_viewc_matvec_mismatch ................................   Passed    0.04 sec
+        Start 117: lit_fixtures_viewc_vec_broadcast_program
+ 94/249 Test #113: lit_fixtures_viewc_row_broadcast_graph ............................   Passed    0.05 sec
+        Start 118: lit_fixtures_viewc_zero_length_whole_assignment_resize
+ 95/249 Test #114: lit_fixtures_viewc_row_broadcast_program ..........................   Passed    0.05 sec
+        Start 119: lit_issue_257_array_vector_range_slice
+ 96/249 Test #115: lit_fixtures_viewc_to_matrix_mismatch .............................   Passed    0.04 sec
+        Start 120: lit_issue_257_array_vector_whole_assignment
+ 97/249 Test #116: lit_fixtures_viewc_vec_broadcast_graph ............................   Passed    0.04 sec
+        Start 121: lit_issue_257_array_vector_whole_assignment_transformed_data
+ 98/249 Test #117: lit_fixtures_viewc_vec_broadcast_program ..........................   Passed    0.04 sec
+        Start 122: lit_issue_257_bounded_real_array_to_vector
+ 99/249 Test #118: lit_fixtures_viewc_zero_length_whole_assignment_resize ............   Passed    0.04 sec
+        Start 123: lit_issue_257_columns_dot_product
+100/249 Test #119: lit_issue_257_array_vector_range_slice ............................   Passed    0.04 sec
+        Start 124: lit_issue_257_columns_dot_self
+101/249 Test #120: lit_issue_257_array_vector_whole_assignment .......................   Passed    0.04 sec
+        Start 125: lit_issue_257_computed_parameter_extent
+102/249 Test #121: lit_issue_257_array_vector_whole_assignment_transformed_data ......   Passed    0.04 sec
+103/249 Test #122: lit_issue_257_bounded_real_array_to_vector ........................   Passed    0.04 sec
+        Start 126: lit_issue_257_csr_extract_w_transformed_data
+        Start 127: lit_issue_257_csr_matrix_times_vector
+104/249 Test #124: lit_issue_257_columns_dot_self ....................................   Passed    0.04 sec
+        Start 128: lit_issue_257_gamma_lcdf_transformed_data
+105/249 Test #123: lit_issue_257_columns_dot_product .................................   Passed    0.04 sec
+106/249 Test #125: lit_issue_257_computed_parameter_extent ...........................   Passed    0.04 sec
+        Start 129: lit_issue_257_multi_normal_long_random_variable
+        Start 130: lit_issue_257_multi_normal_short_random_variable
+107/249 Test #127: lit_issue_257_csr_matrix_times_vector .............................   Passed    0.04 sec
+        Start 131: lit_issue_257_one_row_transposed_product
+108/249 Test #126: lit_issue_257_csr_extract_w_transformed_data ......................   Passed    0.04 sec
+        Start 132: lit_issue_257_parameter_truncation_declared_bound
+109/249 Test  #60: test_cross_path ...................................................   Passed    5.23 sec
+        Start 133: lit_issue_257_parameter_truncation_lower
+110/249 Test  #71: test_odevariadic ..................................................   Passed    3.16 sec
+        Start 134: lit_issue_257_parameter_truncation_two_sided
+111/249 Test #128: lit_issue_257_gamma_lcdf_transformed_data .........................   Passed    0.04 sec
+        Start 135: lit_issue_257_rows_dot_product_transformed_data
+112/249 Test #129: lit_issue_257_multi_normal_long_random_variable ...................   Passed    0.04 sec
+113/249 Test #130: lit_issue_257_multi_normal_short_random_variable ..................   Passed    0.04 sec
+114/249 Test #132: lit_issue_257_parameter_truncation_declared_bound .................   Passed    0.04 sec
+        Start 136: lit_issue_257_rows_dot_self_transformed_data
+        Start 137: lit_issue_257_runtime_control_is_inf
+        Start 138: lit_issue_257_runtime_control_log_sum_exp
+115/249 Test #131: lit_issue_257_one_row_transposed_product ..........................   Passed    0.04 sec
+116/249 Test #133: lit_issue_257_parameter_truncation_lower ..........................   Passed    0.04 sec
+        Start 139: lit_issue_257_to_array_1d
+        Start 140: lit_issue_257_to_matrix_column
+117/249 Test  #92: test_builtin_signature_model_generation ...........................   Passed    0.73 sec
+        Start 141: lit_issue_257_two_dimensional_int_column_slice
+118/249 Test #134: lit_issue_257_parameter_truncation_two_sided ......................   Passed    0.04 sec
+        Start 142: lit_issue_257_unit_vector_parameter
+119/249 Test #138: lit_issue_257_runtime_control_log_sum_exp .........................   Passed    0.04 sec
+        Start 143: lit_issue_257_zero_row_inlined_function_result
+120/249 Test #136: lit_issue_257_rows_dot_self_transformed_data ......................   Passed    0.04 sec
+121/249 Test #140: lit_issue_257_to_matrix_column ....................................   Passed    0.04 sec
+        Start 144: lit_issue_320_nan_fails_bound
+        Start 145: lit_issue_320_nonfinite_bound_passes
+122/249 Test #135: lit_issue_257_rows_dot_product_transformed_data ...................   Passed    0.04 sec
+123/249 Test #137: lit_issue_257_runtime_control_is_inf ..............................   Passed    0.04 sec
+124/249 Test #139: lit_issue_257_to_array_1d .........................................   Passed    0.04 sec
+        Start 146: lit_issue_320_nonfinite_int_data_rejected
+        Start 147: lit_issue_320_nonfinite_real_data
+        Start 148: lit_passes_ark_reroll_fma
+125/249 Test #141: lit_issue_257_two_dimensional_int_column_slice ....................   Passed    0.04 sec
+        Start 149: lit_passes_array3_vector_leaf_write
+126/249 Test  #94: test_function_model_harness .......................................   Passed    0.69 sec
+        Start 150: lit_passes_array_vector_index_oob
+127/249 Test #142: lit_issue_257_unit_vector_parameter ...............................   Passed    0.04 sec
+        Start 151: lit_passes_array_vector_leaf_write
+128/249 Test #146: lit_issue_320_nonfinite_int_data_rejected .........................   Passed    0.04 sec
+        Start 152: lit_passes_empty_gather_assignment
+129/249 Test #143: lit_issue_257_zero_row_inlined_function_result ....................   Passed    0.04 sec
+        Start 153: lit_passes_empty_range_assignment
+130/249 Test #147: lit_issue_320_nonfinite_real_data .................................   Passed    0.04 sec
+        Start 154: lit_passes_empty_range_assignment_evaluates_rhs
+131/249 Test #144: lit_issue_320_nan_fails_bound .....................................   Passed    0.05 sec
+132/249 Test #145: lit_issue_320_nonfinite_bound_passes ..............................   Passed    0.05 sec
+        Start 155: lit_passes_empty_range_read
+        Start 156: lit_passes_empty_upfrom_assignment
+133/249 Test #148: lit_passes_ark_reroll_fma .........................................   Passed    0.05 sec
+        Start 157: lit_passes_matrix_cell_write_oob
+134/249 Test #149: lit_passes_array3_vector_leaf_write ...............................   Passed    0.05 sec
+        Start 158: lit_passes_matrix_column_range_write
+135/249 Test #150: lit_passes_array_vector_index_oob .................................   Passed    0.04 sec
+        Start 159: lit_passes_matrix_column_write
+136/249 Test #151: lit_passes_array_vector_leaf_write ................................   Passed    0.04 sec
+        Start 160: lit_passes_matrix_gather_column_write
+137/249 Test #152: lit_passes_empty_gather_assignment ................................   Passed    0.04 sec
+        Start 161: lit_passes_matrix_row_range_column_write
+138/249 Test #153: lit_passes_empty_range_assignment .................................   Passed    0.04 sec
+        Start 162: lit_passes_matrix_row_range_write
+139/249 Test #154: lit_passes_empty_range_assignment_evaluates_rhs ...................   Passed    0.04 sec
+        Start 163: lit_passes_matrix_row_segment_write
+140/249 Test #156: lit_passes_empty_upfrom_assignment ................................   Passed    0.04 sec
+        Start 164: lit_passes_matrix_row_write
+141/249 Test #155: lit_passes_empty_range_read .......................................   Passed    0.04 sec
+142/249 Test #157: lit_passes_matrix_cell_write_oob ..................................   Passed    0.04 sec
+        Start 165: lit_passes_row_density_lanes
+        Start 166: lit_passes_scalar_density_loop_vectorized
+143/249 Test  #72: test_algebra ......................................................   Passed    3.12 sec
+        Start 167: lit_passes_scalar_loop_reroll_collapse
+144/249 Test #158: lit_passes_matrix_column_range_write ..............................   Passed    0.04 sec
+        Start 168: lit_passes_vector_gather_write
+145/249 Test #159: lit_passes_matrix_column_write ....................................   Passed    0.04 sec
+        Start 169: lit_passes_vector_range_write
+146/249 Test #160: lit_passes_matrix_gather_column_write .............................   Passed    0.05 sec
+        Start 170: lit_passes_vector_repeated_gather_write
+147/249 Test #161: lit_passes_matrix_row_range_column_write ..........................   Passed    0.04 sec
+        Start 171: lit_passes_zero_trip_loop
+148/249 Test #162: lit_passes_matrix_row_range_write .................................   Passed    0.05 sec
+149/249 Test #163: lit_passes_matrix_row_segment_write ...............................   Passed    0.05 sec
+        Start 172: lit_regions_array_slice_order
+        Start 173: lit_regions_mixed_index_selections
+150/249 Test #166: lit_passes_scalar_density_loop_vectorized .........................   Passed    0.04 sec
+        Start 174: lit_regions_mixed_index_stores
+151/249 Test #165: lit_passes_row_density_lanes ......................................   Passed    0.05 sec
+        Start 175: lit_regions_product_solve_classification
+152/249 Test #164: lit_passes_matrix_row_write .......................................   Passed    0.05 sec
+        Start 176: lit_shape_queries_registered_call_extents
+153/249 Test #167: lit_passes_scalar_loop_reroll_collapse ............................   Passed    0.05 sec
+        Start 177: signature_refs_builtin_signatures_01
+154/249 Test #168: lit_passes_vector_gather_write ....................................   Passed    0.05 sec
+        Start 178: signature_refs_builtin_signatures_02
+155/249 Test #169: lit_passes_vector_range_write .....................................   Passed    0.04 sec
+        Start 179: signature_refs_builtin_signatures_03
+156/249 Test #170: lit_passes_vector_repeated_gather_write ...........................   Passed    0.04 sec
+        Start 180: signature_refs_builtin_signatures_04
+157/249 Test #171: lit_passes_zero_trip_loop .........................................   Passed    0.04 sec
+        Start 181: signature_refs_builtin_signatures_05
+158/249 Test #172: lit_regions_array_slice_order .....................................   Passed    0.05 sec
+        Start 182: signature_refs_builtin_signatures_06
+159/249 Test #175: lit_regions_product_solve_classification ..........................   Passed    0.05 sec
+        Start 183: signature_refs_builtin_signatures_07
+160/249 Test #174: lit_regions_mixed_index_stores ....................................   Passed    0.05 sec
+        Start 184: signature_refs_builtin_signatures_08
+161/249 Test #176: lit_shape_queries_registered_call_extents .........................   Passed    0.05 sec
+        Start 185: signature_refs_builtin_signatures_09
+162/249 Test #173: lit_regions_mixed_index_selections ................................   Passed    0.05 sec
+        Start 186: signature_refs_builtin_signatures_10
+163/249 Test  #95: test_function_models ..............................................   Passed    0.84 sec
+        Start 187: signature_refs_builtin_signatures_11
+164/249 Test  #73: test_estimate .....................................................   Passed    3.19 sec
+        Start 188: signature_refs_builtin_signatures_12
+165/249 Test  #74: test_brmsmono .....................................................   Passed    3.21 sec
+        Start 189: signature_refs_builtin_signatures_13
+166/249 Test  #75: test_reduce_sum ...................................................   Passed    3.24 sec
+        Start 190: signature_refs_builtin_signatures_14
+167/249 Test  #76: test_structured_arrays ............................................   Passed    3.30 sec
+        Start 191: signature_refs_builtin_signatures_15
+168/249 Test  #77: test_pathfinder ...................................................   Passed    3.27 sec
+        Start 192: signature_refs_builtin_signatures_16
+169/249 Test  #78: test_unconstrain ..................................................   Passed    3.31 sec
+        Start 193: signature_refs_builtin_signatures_17
+170/249 Test  #91: test_density_signature_model_generation ...........................   Passed    2.07 sec
+        Start 194: signature_refs_builtin_signatures_18
+171/249 Test  #79: test_init_interp ..................................................   Passed    3.33 sec
+        Start 195: signature_refs_builtin_signatures_19
+172/249 Test  #80: test_constrain_structured .........................................   Passed    3.39 sec
+        Start 196: signature_refs_builtin_signatures_20
+173/249 Test #177: signature_refs_builtin_signatures_01 ..............................   Passed    1.61 sec
+        Start 197: signature_refs_builtin_signatures_21
+174/249 Test #182: signature_refs_builtin_signatures_06 ..............................   Passed    1.60 sec
+        Start 198: signature_refs_builtin_signatures_22
+175/249 Test #181: signature_refs_builtin_signatures_05 ..............................   Passed    1.67 sec
+        Start 199: signature_refs_builtin_signatures_23
+176/249 Test #178: signature_refs_builtin_signatures_02 ..............................   Passed    1.76 sec
+        Start 200: signature_refs_builtin_signatures_24
+177/249 Test  #89: test_conformance_harness ..........................................   Passed    3.09 sec
+        Start 201: signature_refs_builtin_signatures_25
+178/249 Test #187: signature_refs_builtin_signatures_11 ..............................   Passed    1.80 sec
+        Start 202: signature_refs_builtin_signatures_26
+179/249 Test #179: signature_refs_builtin_signatures_03 ..............................   Passed    1.87 sec
+        Start 203: signature_refs_builtin_signatures_27
+180/249 Test #180: signature_refs_builtin_signatures_04 ..............................   Passed    1.88 sec
+        Start 204: signature_refs_builtin_signatures_28
+181/249 Test #184: signature_refs_builtin_signatures_08 ..............................   Passed    1.87 sec
+        Start 205: signature_refs_builtin_signatures_29
+182/249 Test #183: signature_refs_builtin_signatures_07 ..............................   Passed    1.91 sec
+        Start 206: signature_refs_builtin_signatures_30
+183/249 Test #185: signature_refs_builtin_signatures_09 ..............................   Passed    1.95 sec
+        Start 207: signature_refs_builtin_signatures_31
+184/249 Test #186: signature_refs_builtin_signatures_10 ..............................   Passed    1.96 sec
+        Start 208: signature_refs_builtin_signatures_32
+185/249 Test #188: signature_refs_builtin_signatures_12 ..............................   Passed    1.87 sec
+        Start 209: signature_refs_density_signatures_01
+186/249 Test  #82: test_function .....................................................   Passed    4.19 sec
+        Start 210: signature_refs_density_signatures_02
+187/249 Test #189: signature_refs_builtin_signatures_13 ..............................   Passed    1.99 sec
+        Start 211: signature_refs_density_signatures_03
+188/249 Test #190: signature_refs_builtin_signatures_14 ..............................   Passed    1.87 sec
+        Start 212: signature_refs_density_signatures_04
+189/249 Test  #81: test_capi .........................................................   Passed    4.63 sec
+        Start 213: signature_refs_density_signatures_05
+190/249 Test #208: signature_refs_builtin_signatures_32 ..............................   Passed    0.64 sec
+        Start 214: signature_refs_density_signatures_06
+191/249 Test #191: signature_refs_builtin_signatures_15 ..............................   Passed    2.09 sec
+        Start 215: signature_refs_density_signatures_07
+192/249 Test #192: signature_refs_builtin_signatures_16 ..............................   Passed    2.24 sec
+        Start 216: signature_refs_density_signatures_08
+193/249 Test #195: signature_refs_builtin_signatures_19 ..............................   Passed    2.02 sec
+        Start 217: signature_refs_density_signatures_09
+194/249 Test #193: signature_refs_builtin_signatures_17 ..............................   Passed    2.18 sec
+        Start 218: signature_refs_density_signatures_10
+195/249 Test #209: signature_refs_density_signatures_01 ..............................   Passed    1.11 sec
+        Start 219: signature_refs_density_signatures_11
+196/249 Test #212: signature_refs_density_signatures_04 ..............................   Passed    1.10 sec
+        Start 220: signature_refs_density_signatures_12
+197/249 Test #194: signature_refs_builtin_signatures_18 ..............................   Passed    2.41 sec
+        Start 221: signature_refs_density_signatures_13
+198/249 Test #213: signature_refs_density_signatures_05 ..............................   Passed    0.98 sec
+        Start 222: signature_refs_density_signatures_14
+199/249 Test #196: signature_refs_builtin_signatures_20 ..............................   Passed    2.30 sec
+        Start 223: signature_refs_density_signatures_15
+200/249 Test #211: signature_refs_density_signatures_03 ..............................   Passed    1.42 sec
+        Start 224: signature_refs_density_signatures_16
+201/249 Test #214: signature_refs_density_signatures_06 ..............................   Passed    1.22 sec
+        Start 225: signature_refs_density_signatures_17
+202/249 Test #215: signature_refs_density_signatures_07 ..............................   Passed    1.13 sec
+        Start 226: signature_refs_density_signatures_18
+203/249 Test #207: signature_refs_builtin_signatures_31 ..............................   Passed    1.98 sec
+        Start 227: signature_refs_density_signatures_19
+204/249 Test #203: signature_refs_builtin_signatures_27 ..............................   Passed    2.09 sec
+        Start 228: signature_refs_density_signatures_20
+205/249 Test #198: signature_refs_builtin_signatures_22 ..............................   Passed    2.35 sec
+        Start 229: signature_refs_density_signatures_21
+206/249 Test #199: signature_refs_builtin_signatures_23 ..............................   Passed    2.34 sec
+        Start 230: signature_refs_density_signatures_22
+207/249 Test #218: signature_refs_density_signatures_10 ..............................   Passed    0.90 sec
+        Start 231: signature_refs_density_signatures_23
+208/249 Test #197: signature_refs_builtin_signatures_21 ..............................   Passed    2.46 sec
+        Start 232: signature_refs_density_signatures_24
+209/249 Test #210: signature_refs_density_signatures_02 ..............................   Passed    1.77 sec
+        Start 233: signature_refs_density_signatures_25
+210/249 Test #202: signature_refs_builtin_signatures_26 ..............................   Passed    2.23 sec
+        Start 234: signature_refs_density_signatures_26
+211/249 Test #201: signature_refs_builtin_signatures_25 ..............................   Passed    2.28 sec
+        Start 235: signature_refs_density_signatures_27
+212/249 Test #219: signature_refs_density_signatures_11 ..............................   Passed    0.96 sec
+        Start 236: signature_refs_density_signatures_28
+213/249 Test #217: signature_refs_density_signatures_09 ..............................   Passed    1.00 sec
+        Start 237: signature_refs_density_signatures_29
+214/249 Test #200: signature_refs_builtin_signatures_24 ..............................   Passed    2.38 sec
+        Start 238: signature_refs_density_signatures_30
+215/249 Test #206: signature_refs_builtin_signatures_30 ..............................   Passed    2.26 sec
+        Start 239: signature_refs_density_signatures_31
+216/249 Test #216: signature_refs_density_signatures_08 ..............................   Passed    1.15 sec
+        Start 240: signature_refs_density_signatures_32
+217/249 Test #204: signature_refs_builtin_signatures_28 ..............................   Passed    2.39 sec
+        Start 241: signature_refs_density_signatures_33
+218/249 Test #205: signature_refs_builtin_signatures_29 ..............................   Passed    2.41 sec
+        Start 242: signature_refs_density_signatures_34
+219/249 Test #220: signature_refs_density_signatures_12 ..............................   Passed    0.98 sec
+        Start 243: signature_refs_density_signatures_35
+220/249 Test #221: signature_refs_density_signatures_13 ..............................   Passed    1.00 sec
+        Start 244: signature_refs_density_signatures_36
+221/249 Test #223: signature_refs_density_signatures_15 ..............................   Passed    1.01 sec
+        Start 245: signature_refs_density_signatures_37
+222/249 Test #222: signature_refs_density_signatures_14 ..............................   Passed    1.04 sec
+        Start 246: signature_refs_density_signatures_38
+223/249 Test #224: signature_refs_density_signatures_16 ..............................   Passed    1.16 sec
+        Start 247: test_zero_length_whole_assignment_resize
+224/249 Test #247: test_zero_length_whole_assignment_resize ..........................   Passed    0.07 sec
+        Start 248: test_census
+225/249 Test #225: signature_refs_density_signatures_17 ..............................   Passed    1.20 sec
+        Start 249: test_verify_refs
+226/249 Test #248: test_census .......................................................   Passed    0.09 sec
+227/249 Test #226: signature_refs_density_signatures_18 ..............................   Passed    1.21 sec
+228/249 Test #228: signature_refs_density_signatures_20 ..............................   Passed    1.18 sec
+229/249 Test #229: signature_refs_density_signatures_21 ..............................   Passed    1.17 sec
+230/249 Test #227: signature_refs_density_signatures_19 ..............................   Passed    1.26 sec
+231/249 Test #235: signature_refs_density_signatures_27 ..............................   Passed    1.12 sec
+232/249 Test #230: signature_refs_density_signatures_22 ..............................   Passed    1.22 sec
+233/249 Test #233: signature_refs_density_signatures_25 ..............................   Passed    1.18 sec
+234/249 Test #234: signature_refs_density_signatures_26 ..............................   Passed    1.16 sec
+235/249 Test #231: signature_refs_density_signatures_23 ..............................   Passed    1.23 sec
+236/249 Test #232: signature_refs_density_signatures_24 ..............................   Passed    1.22 sec
+237/249 Test #240: signature_refs_density_signatures_32 ..............................   Passed    1.09 sec
+238/249 Test #236: signature_refs_density_signatures_28 ..............................   Passed    1.17 sec
+239/249 Test #241: signature_refs_density_signatures_33 ..............................   Passed    1.02 sec
+240/249 Test #238: signature_refs_density_signatures_30 ..............................   Passed    1.18 sec
+241/249 Test #239: signature_refs_density_signatures_31 ..............................   Passed    1.15 sec
+242/249 Test #237: signature_refs_density_signatures_29 ..............................   Passed    1.22 sec
+243/249 Test #246: signature_refs_density_signatures_38 ..............................   Passed    0.81 sec
+244/249 Test #242: signature_refs_density_signatures_34 ..............................   Passed    1.32 sec
+245/249 Test #243: signature_refs_density_signatures_35 ..............................   Passed    1.26 sec
+246/249 Test #244: signature_refs_density_signatures_36 ..............................   Passed    1.22 sec
+247/249 Test #245: signature_refs_density_signatures_37 ..............................   Passed    1.20 sec
+248/249 Test #249: test_verify_refs ..................................................   Passed    6.04 sec
+249/249 Test   #3: test_dev_setup ....................................................   Passed   23.36 sec
+
+100% tests passed, 0 tests failed out of 249
+
+Label Time Summary:
+lit               =   3.47 sec*proc (80 tests)
+signature_refs    = 108.33 sec*proc (70 tests)
+
+Total Test time (real) =  23.37 sec

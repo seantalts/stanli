@@ -14,7 +14,7 @@
       "pdb": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/posteriordb",
       "rounds": 6,
       "run": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-perf/stanli_run",
-      "sample_timeout": 900,
+      "sample_timeout": 900.0,
       "sampling": true,
       "seeds": [
         1,
@@ -28,8 +28,8 @@
       "warmup_ms": 200
     },
     "executables": {
-      "bench": "373767991f77c85816080153b5de7610fc4610019759020825afd529b5e6c799",
-      "run": "3bf091b502f59bce39551e6bfdb1bdeea5140e49d74ba0853e5a109a8bba0b07",
+      "bench": "680ea560b9cb913104b7c42f13d45a8d16cea3371581f173f3917e28364b1dba",
+      "run": "83ce43fbfbff25006f24102db7d1a50f387c2c6a92ffc62137067eaf9a37a5d8",
       "stanc": "40f3ddc99efa9d97fc5fcbcd059241ff445e857108639fa54d46f02d46e8704c",
       "vectorize_probe": "715a6a0eadf7f69f69819cd0c653a2d94987d671c421490ee0c2b1dacd80c70a"
     },
@@ -847,7 +847,7 @@
       "tools/verify_refs.py": "35a9c2299df40a9d38b1a27c95e0cb1ed7d84fc64ca1f16a4efbd86878b99c7b"
     },
     "stanli_source": {
-      "head": "ea4d7e2470e22386705afb3be3ad0a86037da90d",
+      "head": "6e462c2e2bb4bc297165b5640dfe30318345960d",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -903,6 +903,6 @@
       }
     }
   },
-  "run_id": "a224d12afe02ac98",
-  "started_utc": "2026-09-16T01:22:36Z"
+  "run_id": "fd5e0ecacddc7047",
+  "started_utc": "2026-09-16T05:45:40Z"
 }

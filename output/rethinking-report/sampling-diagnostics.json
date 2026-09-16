@@ -1,6 +1,6 @@
 {
   "aalto_bern": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -44,7 +44,7 @@
     }
   },
   "aalto_binom": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -88,7 +88,7 @@
     }
   },
   "aalto_binom2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -132,7 +132,7 @@
     }
   },
   "aalto_binomb": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -176,7 +176,7 @@
     }
   },
   "aalto_gpareto": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -220,7 +220,7 @@
     }
   },
   "aalto_grp_aov": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -264,7 +264,7 @@
     }
   },
   "aalto_grp_prior_mean": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -308,7 +308,7 @@
     }
   },
   "aalto_grp_prior_mean_var": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -352,7 +352,7 @@
     }
   },
   "aalto_lin": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -396,7 +396,7 @@
     }
   },
   "aalto_lin_std": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -440,7 +440,7 @@
     }
   },
   "aalto_lin_std_t": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -484,7 +484,7 @@
     }
   },
   "aalto_poisson_hurdle": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -528,7 +528,7 @@
     }
   },
   "aalto_poisson_simple": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -572,7 +572,7 @@
     }
   },
   "ch09_m5_8s": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -616,7 +616,7 @@
     }
   },
   "ch09_m5_8s2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -660,7 +660,7 @@
     }
   },
   "ch09_m9_1": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -704,7 +704,7 @@
     }
   },
   "ch09_m9_1_chains4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -748,7 +748,7 @@
     }
   },
   "ch09_m9_2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -792,7 +792,7 @@
     }
   },
   "ch09_m9_3": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -836,7 +836,7 @@
     }
   },
   "ch09_m9_4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -880,7 +880,7 @@
     }
   },
   "ch09_m9_5": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -924,7 +924,7 @@
     }
   },
   "ch09_mp": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -968,7 +968,7 @@
     }
   },
   "ch11_m11_10": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1012,7 +1012,7 @@
     }
   },
   "ch11_m11_11": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1056,7 +1056,7 @@
     }
   },
   "ch11_m11_4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1100,7 +1100,7 @@
     }
   },
   "ch11_m11_5": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1144,7 +1144,7 @@
     }
   },
   "ch11_m11_6": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1188,7 +1188,7 @@
     }
   },
   "ch11_m11_7": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1232,7 +1232,7 @@
     }
   },
   "ch11_m11_8": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1276,7 +1276,7 @@
     }
   },
   "ch11_m11_9": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1320,7 +1320,7 @@
     }
   },
   "ch11_m_pois": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1364,7 +1364,7 @@
     }
   },
   "ch12_m12_1": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1408,7 +1408,7 @@
     }
   },
   "ch12_m12_2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1452,7 +1452,7 @@
     }
   },
   "ch12_m12_3": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1496,7 +1496,7 @@
     }
   },
   "ch12_m12_3_alt": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1540,7 +1540,7 @@
     }
   },
   "ch12_m12_4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1584,7 +1584,7 @@
     }
   },
   "ch12_m12_5": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1628,7 +1628,7 @@
     }
   },
   "ch12_m12_6": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1672,7 +1672,7 @@
     }
   },
   "ch12_m12_7": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1716,7 +1716,7 @@
     }
   },
   "ch13_m13_1": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1760,7 +1760,7 @@
     }
   },
   "ch13_m13_2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1804,7 +1804,7 @@
     }
   },
   "ch13_m13_3": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1848,7 +1848,7 @@
     }
   },
   "ch13_m13_4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1892,7 +1892,7 @@
     }
   },
   "ch13_m13_4b": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1936,7 +1936,7 @@
     }
   },
   "ch13_m13_4nc": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -1980,7 +1980,7 @@
     }
   },
   "ch13_m13_5": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2024,11 +2024,23 @@
     }
   },
   "ch13_m13_6": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
-        "status": "incomplete",
-        "chains": 3
+        "status": "complete",
+        "chains": 4,
+        "parameters": 21,
+        "fixed_entries_omitted": 0,
+        "draws": 4000,
+        "divergences": 5,
+        "max_depth_hits": 1,
+        "rhat_max": 1.0143727318064035,
+        "ess_bulk_min": 375.12112248940468,
+        "ess_tail_min": 163.33537720905488,
+        "rhat_over_1_01": 7,
+        "undefined_diagnostics": 0,
+        "ebfmi_min": 0.51841813025067263,
+        "screening_flag": true
       },
       "cmdstan": {
         "status": "complete",
@@ -2048,11 +2060,15 @@
       }
     },
     "comparison": {
-      "status": "incomplete"
+      "status": "complete",
+      "parameters": 21,
+      "median_mean_difference_in_sd": 0.017539460548364711,
+      "max_mean_difference_in_sd": 0.095704540900275317,
+      "max_difference_parameter": "a.2"
     }
   },
   "ch13_m13_7": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2096,7 +2112,7 @@
     }
   },
   "ch13_m13_7nc": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2140,7 +2156,7 @@
     }
   },
   "ch14_m14_1": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2184,7 +2200,7 @@
     }
   },
   "ch14_m14_10": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2228,7 +2244,7 @@
     }
   },
   "ch14_m14_11": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2272,7 +2288,7 @@
     }
   },
   "ch14_m14_2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2316,7 +2332,7 @@
     }
   },
   "ch14_m14_3": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2360,7 +2376,7 @@
     }
   },
   "ch14_m14_4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2404,7 +2420,7 @@
     }
   },
   "ch14_m14_4x": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2448,7 +2464,7 @@
     }
   },
   "ch14_m14_5": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2492,7 +2508,7 @@
     }
   },
   "ch14_m14_6": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2536,7 +2552,7 @@
     }
   },
   "ch14_m14_6x": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2580,7 +2596,7 @@
     }
   },
   "ch14_m14_7": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2624,7 +2640,7 @@
     }
   },
   "ch14_m14_8": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2668,7 +2684,7 @@
     }
   },
   "ch14_m14_8nc": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2712,7 +2728,7 @@
     }
   },
   "ch14_m14_9": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2756,7 +2772,7 @@
     }
   },
   "ch15_m15_1": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2800,7 +2816,7 @@
     }
   },
   "ch15_m15_2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2844,7 +2860,7 @@
     }
   },
   "ch15_m15_3": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2888,7 +2904,7 @@
     }
   },
   "ch15_m15_4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2932,7 +2948,7 @@
     }
   },
   "ch15_m15_5": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -2976,7 +2992,7 @@
     }
   },
   "ch15_m15_6": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3020,7 +3036,7 @@
     }
   },
   "ch15_m15_7": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3064,7 +3080,7 @@
     }
   },
   "ch15_m15_8": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3108,7 +3124,7 @@
     }
   },
   "ch15_m15_9": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3152,7 +3168,7 @@
     }
   },
   "ch16_m16_1": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3196,7 +3212,7 @@
     }
   },
   "ch16_m16_4": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3240,7 +3256,7 @@
     }
   },
   "extra_hurdle_poisson": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3284,7 +3300,7 @@
     }
   },
   "i319_gauss_re": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3328,7 +3344,7 @@
     }
   },
   "i319_negbin_fixed": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3372,7 +3388,7 @@
     }
   },
   "i319_negbin_re": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3416,7 +3432,7 @@
     }
   },
   "i319_pois_fixed": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3460,7 +3476,7 @@
     }
   },
   "i319_pois_re": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3504,7 +3520,7 @@
     }
   },
   "i319_pois_re2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3548,7 +3564,7 @@
     }
   },
   "i320_gp_expquad": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -3564,7 +3580,7 @@
     }
   },
   "i320_gp_matern32": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3608,7 +3624,7 @@
     }
   },
   "i320_mi_nhanes": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3652,7 +3668,7 @@
     }
   },
   "i320_pois_trunc_both": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3696,7 +3712,7 @@
     }
   },
   "i320_pois_trunc_ub": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3740,7 +3756,7 @@
     }
   },
   "i320_sratio_cs": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3784,7 +3800,7 @@
     }
   },
   "i320_sratio_plain": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3828,7 +3844,7 @@
     }
   },
   "s2_ar_cov": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3872,7 +3888,7 @@
     }
   },
   "s2_beta_binomial": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3916,7 +3932,7 @@
     }
   },
   "s2_car": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -3960,7 +3976,7 @@
     }
   },
   "s2_car_esicar": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4004,7 +4020,7 @@
     }
   },
   "s2_car_icar": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4048,7 +4064,7 @@
     }
   },
   "s2_categorical_re": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4092,7 +4108,7 @@
     }
   },
   "s2_cens_interval": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4136,7 +4152,7 @@
     }
   },
   "s2_com_poisson": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -4152,7 +4168,7 @@
     }
   },
   "s2_cosy": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4196,7 +4212,7 @@
     }
   },
   "s2_cox": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4240,7 +4256,7 @@
     }
   },
   "s2_cox_cens": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4284,7 +4300,7 @@
     }
   },
   "s2_cumulative_cauchit": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4328,7 +4344,7 @@
     }
   },
   "s2_cumulative_cloglog": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4372,7 +4388,7 @@
     }
   },
   "s2_cumulative_probit": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4416,7 +4432,7 @@
     }
   },
   "s2_custom_vint": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4460,7 +4476,7 @@
     }
   },
   "s2_custom_vreal": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4504,7 +4520,7 @@
     }
   },
   "s2_dirichlet": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4548,7 +4564,7 @@
     }
   },
   "s2_discrete_weibull": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4592,7 +4608,7 @@
     }
   },
   "s2_dist_sigma_re": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4636,7 +4652,7 @@
     }
   },
   "s2_fcor": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4680,7 +4696,7 @@
     }
   },
   "s2_frechet": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4724,7 +4740,7 @@
     }
   },
   "s2_gev": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4768,7 +4784,7 @@
     }
   },
   "s2_gp_approx": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4812,7 +4828,7 @@
     }
   },
   "s2_gp_by_approx": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4856,7 +4872,7 @@
     }
   },
   "s2_gp_by_gr": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -4872,7 +4888,7 @@
     }
   },
   "s2_gr_by": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4916,7 +4932,7 @@
     }
   },
   "s2_gr_student": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -4960,7 +4976,7 @@
     }
   },
   "s2_hurdle_cumulative": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5004,7 +5020,7 @@
     }
   },
   "s2_hurdle_negbin": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5048,7 +5064,7 @@
     }
   },
   "s2_index_mi": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5092,7 +5108,7 @@
     }
   },
   "s2_invgaussian": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -5108,7 +5124,7 @@
     }
   },
   "s2_logistic_normal": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5152,7 +5168,7 @@
     }
   },
   "s2_me2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5196,7 +5212,7 @@
     }
   },
   "s2_me2_nomecor": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5240,7 +5256,7 @@
     }
   },
   "s2_mi_lognormal": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5284,7 +5300,7 @@
     }
   },
   "s2_mi_trunc_lb": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5328,7 +5344,7 @@
     }
   },
   "s2_mixture_theta": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5372,7 +5388,7 @@
     }
   },
   "s2_mm": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5416,7 +5432,7 @@
     }
   },
   "s2_mm_weights": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5460,7 +5476,7 @@
     }
   },
   "s2_mmc": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5504,7 +5520,7 @@
     }
   },
   "s2_mo_simo_prior": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5548,7 +5564,7 @@
     }
   },
   "s2_multinomial": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5592,7 +5608,7 @@
     }
   },
   "s2_mv_shared_re": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5636,7 +5652,7 @@
     }
   },
   "s2_mv_subset": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5680,7 +5696,7 @@
     }
   },
   "s2_nl_noloop": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5724,7 +5740,7 @@
     }
   },
   "s2_nlf": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5768,7 +5784,7 @@
     }
   },
   "s2_rate": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5812,7 +5828,7 @@
     }
   },
   "s2_s_by": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5856,7 +5872,7 @@
     }
   },
   "s2_s_cc": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5900,7 +5916,7 @@
     }
   },
   "s2_sar": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5944,7 +5960,7 @@
     }
   },
   "s2_sar_error": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -5988,7 +6004,7 @@
     }
   },
   "s2_shifted_lognormal": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6032,7 +6048,7 @@
     }
   },
   "s2_t2_by": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6076,7 +6092,7 @@
     }
   },
   "s2_threading": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6120,7 +6136,7 @@
     }
   },
   "s2_unstr": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6164,7 +6180,7 @@
     }
   },
   "s2_weights_trunc": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6208,7 +6224,7 @@
     }
   },
   "s2_wiener": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6252,7 +6268,7 @@
     }
   },
   "s2_zi_asymlaplace": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6296,7 +6312,7 @@
     }
   },
   "s2_zi_beta": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6340,7 +6356,7 @@
     }
   },
   "s2_zoi_beta": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6384,7 +6400,7 @@
     }
   },
   "sw_acat": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6428,7 +6444,7 @@
     }
   },
   "sw_acat_cs": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6472,7 +6488,7 @@
     }
   },
   "sw_ar": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6516,7 +6532,7 @@
     }
   },
   "sw_arma": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6560,7 +6576,7 @@
     }
   },
   "sw_asymlaplace": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6604,7 +6620,7 @@
     }
   },
   "sw_bernoulli": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6648,7 +6664,7 @@
     }
   },
   "sw_beta": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6692,7 +6708,7 @@
     }
   },
   "sw_binomial": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6736,7 +6752,7 @@
     }
   },
   "sw_categorical": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6780,7 +6796,7 @@
     }
   },
   "sw_cens": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6824,7 +6840,7 @@
     }
   },
   "sw_cratio": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6868,7 +6884,7 @@
     }
   },
   "sw_cratio_cs": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6912,7 +6928,7 @@
     }
   },
   "sw_cumulative": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -6956,7 +6972,7 @@
     }
   },
   "sw_cumulative_cs": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7000,7 +7016,7 @@
     }
   },
   "sw_dist_sigma": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7044,7 +7060,7 @@
     }
   },
   "sw_exgaussian": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7088,7 +7104,7 @@
     }
   },
   "sw_gamma": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7132,7 +7148,7 @@
     }
   },
   "sw_gaussian": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7176,7 +7192,7 @@
     }
   },
   "sw_gp": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -7192,7 +7208,7 @@
     }
   },
   "sw_hurdle_gamma": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7236,7 +7252,7 @@
     }
   },
   "sw_hurdle_lognormal": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7280,7 +7296,7 @@
     }
   },
   "sw_hurdle_pois": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7324,7 +7340,7 @@
     }
   },
   "sw_lognormal": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7368,7 +7384,7 @@
     }
   },
   "sw_ma": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7412,7 +7428,7 @@
     }
   },
   "sw_me": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7456,7 +7472,7 @@
     }
   },
   "sw_mi": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7500,7 +7516,7 @@
     }
   },
   "sw_mixture": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7544,7 +7560,7 @@
     }
   },
   "sw_mono": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7588,7 +7604,7 @@
     }
   },
   "sw_mv_norescor": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7632,7 +7648,7 @@
     }
   },
   "sw_mv_rescor": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7676,7 +7692,7 @@
     }
   },
   "sw_negbinomial": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7720,7 +7736,7 @@
     }
   },
   "sw_nonlinear": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7764,7 +7780,7 @@
     }
   },
   "sw_poisson": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7808,7 +7824,7 @@
     }
   },
   "sw_re_bern": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7852,7 +7868,7 @@
     }
   },
   "sw_re_gauss": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7896,7 +7912,7 @@
     }
   },
   "sw_re_negbin": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "incomplete",
@@ -7924,7 +7940,7 @@
     }
   },
   "sw_re_pois": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -7968,7 +7984,7 @@
     }
   },
   "sw_re_slope": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8012,7 +8028,7 @@
     }
   },
   "sw_se": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8056,7 +8072,7 @@
     }
   },
   "sw_skewnormal": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8100,7 +8116,7 @@
     }
   },
   "sw_spline_s": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8144,7 +8160,7 @@
     }
   },
   "sw_spline_t2": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8188,7 +8204,7 @@
     }
   },
   "sw_sratio": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8232,7 +8248,7 @@
     }
   },
   "sw_student": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8276,7 +8292,7 @@
     }
   },
   "sw_trunc": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8320,7 +8336,7 @@
     }
   },
   "sw_vonmises": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8364,7 +8380,7 @@
     }
   },
   "sw_weibull": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8408,7 +8424,7 @@
     }
   },
   "sw_weights": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8452,7 +8468,7 @@
     }
   },
   "sw_zi_binomial": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8496,7 +8512,7 @@
     }
   },
   "sw_zi_negbin": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",
@@ -8540,7 +8556,7 @@
     }
   },
   "sw_zi_poisson": {
-    "run_id": "a224d12afe02ac98",
+    "run_id": "fd5e0ecacddc7047",
     "engines": {
       "stanli": {
         "status": "complete",

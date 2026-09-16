@@ -2,7 +2,7 @@
 
 ⠏ |          0 | bayesplot
 ⠋ |          1 | bayesplot
-⠧ |         28 | bayesplot
+⠇ |          9 | bayesplot
 ⠹ |         33 | bayesplot
 ⠴ |         36 | bayesplot
 ✔ |         51 | bayesplot [1.2s]
@@ -14,7 +14,7 @@
 ⠸ |          4 | ecosystem-registration
 ⠼ |          5 | ecosystem-registration
 ⠴ |          6 | ecosystem-registration
-✔ |          6 | ecosystem-registration [2.5s]
+✔ |          6 | ecosystem-registration [2.6s]
 
 ⠏ |          0 | loo
 ⠹ |         13 | loo
@@ -51,10 +51,10 @@
 ⠼ |        125 | stanfit
 ⠦ |        157 | stanfit
 ⠧ |        168 | stanfit
-✔ |        168 | stanfit [1.2s]
+✔ |        168 | stanfit [1.3s]
 
 ══ Results ═════════════════════════════════════════════════════════════════════
-Duration: 9.7 s
+Duration: 9.9 s
 
 [ FAIL 0 | WARN 0 | SKIP 0 | PASS 456 ]
 

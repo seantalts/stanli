@@ -18,19 +18,19 @@ promise support for untested formula combinations or reliable inference from
 an arbitrary short run. The inventories retain failures and explain why they
 matter.
 
-## Latest measurements (16 September 2026)
+## Latest complete sweep (16 September 2026)
 
 Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Measured runtime/compiler revision
-`ea4d7e24` includes the performance fixes in this PR; [the full appendix](../output/teaching-performance/README.md)
+`6e462c2e` includes the measured performance fixes; [the full appendix](../output/teaching-performance/README.md)
 records every one of the 199 fixtures, including failures and capped runs.
 The [evidence index](../output/teaching-performance/EVIDENCE.md) links numerical
 checks, raw-data retention, and reproduction instructions.
 
-| Collection | Completed in both | Lower Stanli CLI time | Median CmdStan/Stanli ratio | Diagnostic screen clear in both |
+| Collection | Completed in both | Lower Stanli CLI time | Median CLI sampling time ratio (CmdStan/Stanli) | Diagnostic screen clear in both |
 | --- | ---: | ---: | ---: | ---: |
-| Educational lessons | 13/13 | 12/13 | 1.30× | 10/13 |
-| Rethinking (including the supplement) | 61/62 | 58/61 | 1.52× | 50/61 |
-| brms | 118/124 | 108/118 | 1.45× | 76/118 |
+| Educational lessons | 13/13 | 12/13 | 1.32× | 10/13 |
+| Rethinking (including the supplement) | 62/62 | 62/62 | 1.54× | 50/62 |
+| brms | 118/124 | 113/118 | 1.45× | 76/118 |
 
 Each model contributes the median of four single-chain CLI runs, each with
 1,000 warmup and 1,000 retained draws. Ratios above one mean less elapsed time
@@ -39,9 +39,15 @@ flags. Stanli preparation is included; CmdStan compilation is shown separately
 in the appendix. This is fixed-budget runtime, not time to equal inferential accuracy.
 
 Adding the measured CmdStan compilation stages gives a first-fit estimate.
-Stanli has the lower estimate for 13/13 educational, 60/61 completed Rethinking,
+Stanli has the lower estimate for 13/13 educational, 62/62 completed Rethinking,
 and 118/118 completed brms comparisons. These are sums of measured stages, not
 directly timed four-chain R sessions.
+
+The practical target is CmdStan/Stanli ≥ 0.8 for complete CLI elapsed time.
+Of all 199 fixtures, 189 meet it, four fall below it, and six lack a complete
+comparison. Failed or capped runs do not pass. Later GP fixes and their
+[separate validation](../output/teaching-performance/followup-4db5dca2/README.md)
+are not substituted into this sweep.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
 covers all 61 book call sites and the separate hurdle fixture. The
@@ -143,19 +149,26 @@ there is no average of only the surviving seeds. See the
 [measurement protocol](benchmark-protocol.md) for boundaries and reproducibility.
 
 The earlier Rethinking m14.11 preparation timeout is fixed:
-[issue #372](https://github.com/seantalts/stanli/issues/372). All 62 Rethinking
-fixtures now pass the three-point numerical/output replay. Its preparation
-still contributes 13.49 seconds to a 22.70-second median CLI run, versus
-10.18 seconds for already-compiled CmdStan, so it remains a performance target.
+[issue #372](https://github.com/seantalts/stanli/issues/372). In this sweep its
+preparation takes 0.161 seconds and its complete CLI median is 11.21 seconds,
+versus 13.09 seconds for already-compiled CmdStan. All 62 Rethinking fixtures
+complete all four seeds and have lower Stanli median CLI times. The ordered
+regression models m12.5, m12.6 and m12.7 have clear screens in both engines.
+m13.6 now completes, but retains diagnostic flags in both.
+[#373](https://github.com/seantalts/stanli/issues/373) records the follow-up.
 
-The ordered-regression fixes bring m12.5, m12.6 and m12.7 below CmdStan's median
-runtime with clear diagnostic screens in both engines. All four seeds now
-complete for m12.6. Rethinking m13.6 still hits its relative cap on one seed;
-[#373](https://github.com/seantalts/stanli/issues/373) retains that case and the
-remaining slower models. Across all collections there are 192 complete
-comparisons, two capped cases, and five cases stopped before sampling.
+Across all collections, the complete sweep has 193 paired comparisons, one
+capped case (`sw_re_negbin`), and five fixtures stopped before sampling.
+Four completed fixtures remain below the practical 0.8 target: GEV, asymmetric
+Laplace, zero-inflated asymmetric Laplace, and mixture theta. The mixture and
+the capped fixture have severe diagnostic flags in both engines.
 
-The brms capped and slower completed fixtures are tracked in
-[#374](https://github.com/seantalts/stanli/issues/374). Its three ill-conditioned
-GP cases, COM-Poisson gap, and inverse-Gaussian domain refusal stopped before
-sampling in this strict-gate benchmark; they remain in the appendix.
+The brms follow-up is tracked in
+[#374](https://github.com/seantalts/stanli/issues/374). After this sweep, native
+GP arithmetic fixes in `4db5dca2` resolved all three strict GP discrepancies
+at every recorded point on this machine. Separate four-seed runs completed
+and exceeded the timing target for all three. Inverse Gaussian also samples
+in both engines; its shared reference points are outside its domain. These
+four fixtures retain diagnostic flags in both engines. COM-Poisson remains
+a dynamic-loop support gap. See the [separate results and source identity](../output/teaching-performance/followup-4db5dca2/README.md);
+they do not change the frozen sweep's counts.

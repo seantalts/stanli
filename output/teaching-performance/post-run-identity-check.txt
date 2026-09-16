@@ -1,4 +1,1 @@
-Run a224d12afe02ac98: all 199 model records complete.
-Postprocessing verified every frozen model/data pair and benchmark-source hash.
-Evidence copying independently rechecked all 10 build/compiler/configuration hashes.
-Measured runtime source: ea4d7e2470e22386705afb3be3ad0a86037da90d
+199 records complete; binaries, benchmark sources and inputs verified

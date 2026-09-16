@@ -123,23 +123,23 @@ runtime CI gate, alongside extraction, bayesplot, RStan, and ShinyStan consumers
 
 ### Recorded validation (16 September 2026)
 
-The Release runtime at `ea4d7e24` passes the ecosystem acceptance suite with no
+The Release runtime at `6e462c2e` passes the ecosystem acceptance suite with no
 skips, warnings, or failures, including native calls, the independent CSV
 oracle, plotting, LOO, and namespace-registration tests. Both generated-model
 guide examples run with clear diagnostics. All 249 runtime tests and the 13
 educational numerical/output and sampling checks pass.
 
-[Full platform CI](https://github.com/seantalts/stanli/actions/runs/35049845476)
-at `f5b047de` uses the same runtime/compiler sources and passes Linux, macOS and
+[Full platform CI](https://github.com/seantalts/stanli/actions/runs/35060736527)
+at `6e462c2e` uses the measured runtime/compiler sources and passes Linux, macOS and
 Windows R acceptance, AddressSanitizer, ThreadSanitizer, and the full compiler
 comparison. Package-only R checks remain separate from runtime acceptance.
 Earlier runtime-free `R CMD check --as-cran` reported only the New submission
 NOTE; the constructor/parser checks require neither a runtime nor RStan.
 
 On macOS ARM64 / R 4.6.1, five alternating batches of 20,000 evaluations on
-the 29-parameter reference model gave a median 4.15 microseconds per direct
-`log_prob_grad()` call (range 3.80–4.25), versus 13.20 through
-`rstan::log_prob(..., gradient = TRUE)` (12.85–13.45). Each arm warmed for at
+the 29-parameter reference model gave a median 3.75 microseconds per direct
+`log_prob_grad()` call (range 3.75–4.20), versus 13.25 through
+`rstan::log_prob(..., gradient = TRUE)` (12.50–13.65). Each arm warmed for at
 least 200 ms. This measures R dispatch and validation overhead on a small
 model, not inference speed. [Raw measurements](../output/teaching-performance/native-call-benchmark.csv)
 were taken after the full sampling sweep. Ordinary stanli startup still leaves

@@ -115,13 +115,13 @@ machine, not cold filesystem-cache measurements.
 
 | Platform | Measured median wall time | Evidence |
 |---|---|---|
-| macOS arm64, macos-15 CI runner | 0.192 s | 0.170, 0.197, 0.192 s |
-| Linux x86_64, ubuntu-24.04 CI runner | 0.236 s | 0.236, 0.235, 0.236 s |
-| Windows x86_64, windows-2022 CI runner | 0.280 s | 0.300, 0.280, 0.280 s |
+| macOS arm64, macos-15 CI runner | 0.152 s | 0.157, 0.149, 0.152 s |
+| Linux x86_64, ubuntu-24.04 CI runner | 0.217 s | 0.216, 0.220, 0.217 s |
+| Windows x86_64, windows-2022 CI runner | 0.230 s | 0.230, 0.240, 0.220 s |
 
 All three platforms use R 4.6.1 and the development runtime built in
-[CI run 35049845476](https://github.com/seantalts/stanli/actions/runs/35049845476),
-revision `f5b047de` (runtime/compiler sources unchanged from `ea4d7e24`).
+[CI run 35060736527](https://github.com/seantalts/stanli/actions/runs/35060736527),
+revision `6e462c2e`.
 The same jobs pass the R ecosystem acceptance suite, including the independent
 CSV oracle and native density/transform methods.
 

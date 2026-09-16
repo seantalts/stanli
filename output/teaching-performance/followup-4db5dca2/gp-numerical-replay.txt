@@ -1,0 +1,7 @@
+references recorded against CmdStan 2.39.0 (11cb052d3e1f), math 8f326d14599d, on Darwin arm64
+sw_gp	0.00e+00	0
+i320_gp_expquad	0.00e+00	0
+s2_gp_by_gr	0.00e+00	0
+ch14_m14_8	3.00e-16	2
+
+4/4 models within 1e-09 of the CmdStan references at all 3 evaluation points (900 values compared); worst ch14_m14_8 at 3.00e-16 (2 ulp)

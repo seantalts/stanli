@@ -747,3 +747,31 @@ time. It was removed from production sources; the isolated patch and probe
 log remain under /tmp/stanli-teaching-perf/com-native-branch-*. No support
 claim follows from this attempt. A broader program/lowering change needs
 its own bounded evaluator; the failed prototype is not shipped.
+
+### Small-change follow-up and report checkpoint
+
+A 20-line structured-sequence flattening experiment preserved the tested
+values exactly and passed the structured-loop suite but did not meet its
+predeclared 5% gradient benefit criterion. Five counterbalanced pairs gave
+baseline/candidate microseconds 13.164/13.268 (GEV), 5.920/5.921 (ALD),
+6.240/6.180 (zero-inflated ALD), and 2.689/2.651 (m14.8 canary). No meaningful
+win was established; the prototype was removed. The raw plan, patch, identity,
+measurements and logs remain under `/tmp/stanli-teaching-perf/sequence-*`.
+No runtime change is integrated from this attempt.
+
+The published teaching tables and four-page McElreath PDF now use the complete
+v6 checkpoint (`fd5e0ecacddc7047`, runtime `6e462c2e`). All PDF pages were
+rendered and visually inspected. The 550,455,487-byte raw archive is retained
+locally, excluded from Git, with SHA256
+`30840d8b8ed7ae4734ec3d69f41fff54bad51c91d9f4cf2227e00667182125ad`.
+Interrupted partial evidence remains separately labeled inside it. Published
+text logs normalize whitespace; the archive retains their original bytes.
+
+The GP/inverse-Gaussian checks are published separately under
+`output/teaching-performance/followup-4db5dca2/`. Applying the retained measured
+patch to its recorded baseline reconstructs exactly the two runtime files in
+commit `4db5dca2`; source equivalence and executable identity are included.
+These results do not alter v6's counts. PR CI at `b5b61a80` passes its Linux
+runtime R and compiler checks; the earlier full platform/sanitizer run on
+`6e462c2e` remains the full-sweep platform evidence. Remaining support and
+performance gaps are open, so the draft PR is not ready to claim full parity.

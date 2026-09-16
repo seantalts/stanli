@@ -2,55 +2,55 @@
   "models": {
     "aalto_bern": {
       "max_scaled_error": 0.0,
-      "smoke_seconds": 0.0077104579999999895
+      "smoke_seconds": 0.007856457999999983
     },
     "aalto_binom": {
       "max_scaled_error": 0.0,
-      "smoke_seconds": 0.0069795
+      "smoke_seconds": 0.007128374999999992
     },
     "aalto_binom2": {
       "max_scaled_error": 1.2314656771052195e-16,
-      "smoke_seconds": 0.007729458999999994
+      "smoke_seconds": 0.007716541999999993
     },
     "aalto_binomb": {
       "max_scaled_error": 0.0,
-      "smoke_seconds": 0.007183458000000004
+      "smoke_seconds": 0.007321292000000007
     },
     "aalto_gpareto": {
       "max_scaled_error": 1.867245174022254e-15,
-      "smoke_seconds": 0.016165583999999955
+      "smoke_seconds": 0.014509084000000005
     },
     "aalto_grp_aov": {
       "max_scaled_error": 0.0,
-      "smoke_seconds": 0.00947037500000003
+      "smoke_seconds": 0.008662249999999982
     },
     "aalto_grp_prior_mean": {
       "max_scaled_error": 0.0,
-      "smoke_seconds": 0.010817915999999983
+      "smoke_seconds": 0.011189500000000019
     },
     "aalto_grp_prior_mean_var": {
       "max_scaled_error": 0.0,
-      "smoke_seconds": 0.015375583000000026
+      "smoke_seconds": 0.015655291999999987
     },
     "aalto_lin": {
       "max_scaled_error": 3.855882435273912e-16,
-      "smoke_seconds": 0.012571374999999996
+      "smoke_seconds": 0.012708374999999994
     },
     "aalto_lin_std": {
       "max_scaled_error": 4.12292316655024e-16,
-      "smoke_seconds": 0.010496916999999995
+      "smoke_seconds": 0.010536500000000004
     },
     "aalto_lin_std_t": {
       "max_scaled_error": 3.3306690738754696e-16,
-      "smoke_seconds": 0.01109508299999995
+      "smoke_seconds": 0.012314166999999987
     },
     "aalto_poisson_hurdle": {
       "max_scaled_error": 8.296620645834153e-15,
-      "smoke_seconds": 0.09261145800000004
+      "smoke_seconds": 0.08688299999999993
     },
     "aalto_poisson_simple": {
       "max_scaled_error": 0.0,
-      "smoke_seconds": 0.017607457999999965
+      "smoke_seconds": 0.01747912500000004
     }
   },
   "settings": {
@@ -59,14 +59,14 @@
     "stanc": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/deps/stanc3/stanc",
     "record": false,
     "benchmark": false,
-    "output": "/private/tmp/stanli-teaching-perf/educational-verification-release.json",
+    "output": "/private/tmp/stanli-teaching-perf/educational-verification-v6.json",
     "repetitions": 3,
     "warmup": 1000,
     "samples": 1000,
     "timeout": 600
   },
-  "stanli_check_sha256": "fa0e81178585a552c7e43ad7cb7952cdd4c495bca6970edec98997a1140856e2",
-  "stanli_run_sha256": "3bf091b502f59bce39551e6bfdb1bdeea5140e49d74ba0853e5a109a8bba0b07",
+  "stanli_check_sha256": "cbe9c77a89faf6772bebe159d543c8a1fac9fa43eba45133befa6c1a04fd5f5d",
+  "stanli_run_sha256": "83ce43fbfbff25006f24102db7d1a50f387c2c6a92ffc62137067eaf9a37a5d8",
   "reference_sha256": "847b7b80c04b6504619589f2dd4c43bfce6e163637c6cb029369f344ff786d61",
   "platform": "macOS-26.6.2-arm64-arm-64bit"
 }

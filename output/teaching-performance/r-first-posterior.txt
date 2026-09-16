@@ -1,6 +1,5 @@
-Three fresh Rscript --vanilla sessions, including startup, runtime loading, model preparation, and four chains of 1000 warmup plus 1000 retained draws.
-"os","arch","r","stanli","run","elapsed_seconds"
-"Darwin","aarch64","4.6.1","0.14.0",1,0.141
-"Darwin","aarch64","4.6.1","0.14.0",2,0.125
-"Darwin","aarch64","4.6.1","0.14.0",3,0.118
-Median seconds: 0.125
+      os    arch     r stanli run elapsed_seconds
+1 Darwin aarch64 4.6.1 0.14.0   1           0.149
+2 Darwin aarch64 4.6.1 0.14.0   2           0.120
+3 Darwin aarch64 4.6.1 0.14.0   3           0.114
+Median fresh-session wall time: 0.12 seconds

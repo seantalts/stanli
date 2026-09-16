@@ -1,0 +1,1018 @@
+[
+  {
+    "cmdstan_sha256": "c09821d39e2c96873ed6ae73ed15971ceb3d7a8269b4d26556656db335d0f042",
+    "inputs": {
+      "data": "efd4ac19ae25f26cb56b6159d85e5b09cd3ab7cebadf2efec1c9102ddba42f49",
+      "stan": "909515313b2ee07bdd865deb403ccb4fa41b92d306b723c79c91562c474d36ae"
+    },
+    "model": "sw_gp",
+    "sampling": [
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sw_gp",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=1",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sample-1.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 1.4107598330000002,
+        "engine": "cmdstan",
+        "id": 4,
+        "load_average": [
+          3.06494140625,
+          3.26025390625,
+          3.70751953125
+        ],
+        "phase": "sw_gp/sample/1/cmdstan",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000004.stderr",
+        "stdout": "logs/000004.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "1",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 1.3636462499999986,
+        "engine": "stanli",
+        "id": 5,
+        "load_average": [
+          3.06494140625,
+          3.26025390625,
+          3.70751953125
+        ],
+        "phase": "sw_gp/sample/1/stanli",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000005.stderr",
+        "stdout": "logs/000005.stdout",
+        "timeout_s": 4.2322794990000006
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sw_gp",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=2",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sample-2.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 1.107895082999999,
+        "engine": "cmdstan",
+        "id": 6,
+        "load_average": [
+          3.06494140625,
+          3.26025390625,
+          3.70751953125
+        ],
+        "phase": "sw_gp/sample/2/cmdstan",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000006.stderr",
+        "stdout": "logs/000006.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "2",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 1.1954930410000024,
+        "engine": "stanli",
+        "id": 7,
+        "load_average": [
+          3.06494140625,
+          3.26025390625,
+          3.70751953125
+        ],
+        "phase": "sw_gp/sample/2/stanli",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000007.stderr",
+        "stdout": "logs/000007.stdout",
+        "timeout_s": 3.323685248999997
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sw_gp",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=3",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sample-3.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 1.3582154590000002,
+        "engine": "cmdstan",
+        "id": 8,
+        "load_average": [
+          3.1396484375,
+          3.2724609375,
+          3.708984375
+        ],
+        "phase": "sw_gp/sample/3/cmdstan",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000008.stderr",
+        "stdout": "logs/000008.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "3",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.8706876250000022,
+        "engine": "stanli",
+        "id": 9,
+        "load_average": [
+          3.1396484375,
+          3.2724609375,
+          3.708984375
+        ],
+        "phase": "sw_gp/sample/3/stanli",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000009.stderr",
+        "stdout": "logs/000009.stdout",
+        "timeout_s": 4.0746463770000005
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sw_gp",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=4",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/sw_gp/sample-4.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 1.071657958000003,
+        "engine": "cmdstan",
+        "id": 10,
+        "load_average": [
+          3.1396484375,
+          3.2724609375,
+          3.708984375
+        ],
+        "phase": "sw_gp/sample/4/cmdstan",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000010.stderr",
+        "stdout": "logs/000010.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/sw_gp.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "4",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.838764624999996,
+        "engine": "stanli",
+        "id": 11,
+        "load_average": [
+          3.1396484375,
+          3.2724609375,
+          3.708984375
+        ],
+        "phase": "sw_gp/sample/4/stanli",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000011.stderr",
+        "stdout": "logs/000011.stdout",
+        "timeout_s": 3.214973874000009
+      }
+    ],
+    "summary": {
+      "cmdstan_sample_s": 1.2330552709999996,
+      "stanli_sample_s": 1.0330903330000023
+    }
+  },
+  {
+    "cmdstan_sha256": "22a41be235d2be19196aed228790b85563310e6bf87b89b3fe1752abb855313a",
+    "inputs": {
+      "data": "1b0cc07e5b9d462ff2b00c0eb4383b9e72c24cb9d8d5b98dea89f6fb27acf501",
+      "stan": "f5e7599aa02549f59bd787e46abca0d3dfcd4d381a20ea21a677f38c2d385602"
+    },
+    "model": "i320_gp_expquad",
+    "sampling": [
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/i320_gp_expquad",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=1",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/sample-1.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 1.109260374999998,
+        "engine": "cmdstan",
+        "id": 12,
+        "load_average": [
+          2.96826171875,
+          3.234375,
+          3.69287109375
+        ],
+        "phase": "i320_gp_expquad/sample/1/cmdstan",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000012.stderr",
+        "stdout": "logs/000012.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "1",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.6050224580000005,
+        "engine": "stanli",
+        "id": 13,
+        "load_average": [
+          2.96826171875,
+          3.234375,
+          3.69287109375
+        ],
+        "phase": "i320_gp_expquad/sample/1/stanli",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000013.stderr",
+        "stdout": "logs/000013.stdout",
+        "timeout_s": 3.3277811249999942
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/i320_gp_expquad",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=2",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/sample-2.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.9138570420000036,
+        "engine": "cmdstan",
+        "id": 14,
+        "load_average": [
+          2.96826171875,
+          3.234375,
+          3.69287109375
+        ],
+        "phase": "i320_gp_expquad/sample/2/cmdstan",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000014.stderr",
+        "stdout": "logs/000014.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "2",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.640629208,
+        "engine": "stanli",
+        "id": 15,
+        "load_average": [
+          2.96826171875,
+          3.234375,
+          3.69287109375
+        ],
+        "phase": "i320_gp_expquad/sample/2/stanli",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000015.stderr",
+        "stdout": "logs/000015.stdout",
+        "timeout_s": 2.741571126000011
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/i320_gp_expquad",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=3",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/sample-3.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.806690875000001,
+        "engine": "cmdstan",
+        "id": 16,
+        "load_average": [
+          2.96826171875,
+          3.234375,
+          3.69287109375
+        ],
+        "phase": "i320_gp_expquad/sample/3/cmdstan",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000016.stderr",
+        "stdout": "logs/000016.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "3",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.5227099589999966,
+        "engine": "stanli",
+        "id": 17,
+        "load_average": [
+          2.96826171875,
+          3.234375,
+          3.69287109375
+        ],
+        "phase": "i320_gp_expquad/sample/3/stanli",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000017.stderr",
+        "stdout": "logs/000017.stdout",
+        "timeout_s": 2.420072625000003
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/i320_gp_expquad",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=4",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/i320_gp_expquad/sample-4.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.7391106250000021,
+        "engine": "cmdstan",
+        "id": 18,
+        "load_average": [
+          2.96826171875,
+          3.234375,
+          3.69287109375
+        ],
+        "phase": "i320_gp_expquad/sample/4/cmdstan",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000018.stderr",
+        "stdout": "logs/000018.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/i320_gp_expquad.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "4",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.7188301249999967,
+        "engine": "stanli",
+        "id": 19,
+        "load_average": [
+          2.970703125,
+          3.23046875,
+          3.6884765625
+        ],
+        "phase": "i320_gp_expquad/sample/4/stanli",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000019.stderr",
+        "stdout": "logs/000019.stdout",
+        "timeout_s": 2.2173318750000064
+      }
+    ],
+    "summary": {
+      "cmdstan_sample_s": 0.8602739585000023,
+      "stanli_sample_s": 0.6228258330000003
+    }
+  },
+  {
+    "cmdstan_sha256": "fc114290d106d783b816bbdf21a193598560ec8a58bdaea5f3e1a92d99aeab90",
+    "inputs": {
+      "data": "71e48ef673c6ec02727eb105af0a2d03e4c50c178d904bc5b663034c967e2b5f",
+      "stan": "a633065436aa42db768a34ff2b5bc4328580038566aecf067178c1dbb68f8c60"
+    },
+    "model": "s2_gp_by_gr",
+    "sampling": [
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/s2_gp_by_gr",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=1",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/sample-1.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.9974517500000033,
+        "engine": "cmdstan",
+        "id": 20,
+        "load_average": [
+          2.970703125,
+          3.23046875,
+          3.6884765625
+        ],
+        "phase": "s2_gp_by_gr/sample/1/cmdstan",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000020.stderr",
+        "stdout": "logs/000020.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "1",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.5534090420000055,
+        "engine": "stanli",
+        "id": 21,
+        "load_average": [
+          2.970703125,
+          3.23046875,
+          3.6884765625
+        ],
+        "phase": "s2_gp_by_gr/sample/1/stanli",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000021.stderr",
+        "stdout": "logs/000021.stdout",
+        "timeout_s": 2.99235525000001
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/s2_gp_by_gr",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=2",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/sample-2.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.8315950830000034,
+        "engine": "cmdstan",
+        "id": 22,
+        "load_average": [
+          2.970703125,
+          3.23046875,
+          3.6884765625
+        ],
+        "phase": "s2_gp_by_gr/sample/2/cmdstan",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000022.stderr",
+        "stdout": "logs/000022.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "2",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.5620197500000046,
+        "engine": "stanli",
+        "id": 23,
+        "load_average": [
+          2.970703125,
+          3.23046875,
+          3.6884765625
+        ],
+        "phase": "s2_gp_by_gr/sample/2/stanli",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000023.stderr",
+        "stdout": "logs/000023.stdout",
+        "timeout_s": 2.49478524900001
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/s2_gp_by_gr",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=3",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/sample-3.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.788704334000002,
+        "engine": "cmdstan",
+        "id": 24,
+        "load_average": [
+          2.970703125,
+          3.23046875,
+          3.6884765625
+        ],
+        "phase": "s2_gp_by_gr/sample/3/cmdstan",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000024.stderr",
+        "stdout": "logs/000024.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "3",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.537277207999999,
+        "engine": "stanli",
+        "id": 25,
+        "load_average": [
+          2.970703125,
+          3.23046875,
+          3.6884765625
+        ],
+        "phase": "s2_gp_by_gr/sample/3/stanli",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000025.stderr",
+        "stdout": "logs/000025.stdout",
+        "timeout_s": 2.366113002000006
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/s2_gp_by_gr",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=4",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_gp_by_gr/sample-4.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.7957578749999996,
+        "engine": "cmdstan",
+        "id": 26,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_gp_by_gr/sample/4/cmdstan",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000026.stderr",
+        "stdout": "logs/000026.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_gp_by_gr.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "4",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.5265819580000013,
+        "engine": "stanli",
+        "id": 27,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_gp_by_gr/sample/4/stanli",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000027.stderr",
+        "stdout": "logs/000027.stdout",
+        "timeout_s": 2.387273624999999
+      }
+    ],
+    "summary": {
+      "cmdstan_sample_s": 0.8136764790000015,
+      "stanli_sample_s": 0.5453431250000023
+    }
+  },
+  {
+    "cmdstan_sha256": "7e3fc3e7cd773759a208baa34e9559cf3b4766e343452cf1d3e1c72340b4ef46",
+    "inputs": {
+      "data": "47f183c1a96a7d8d042f272a39c53035f091dbe039f64b210cec87e4d3d6e8a6",
+      "stan": "83166a56ed85a5cb78ebf2241a51c9bccae68d21da3d6cc5615661b794e03f0d"
+    },
+    "model": "s2_invgaussian",
+    "sampling": [
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/s2_invgaussian",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=1",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/sample-1.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.2351896670000002,
+        "engine": "cmdstan",
+        "id": 28,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/1/cmdstan",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000028.stderr",
+        "stdout": "logs/000028.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "1",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.03133741700000314,
+        "engine": "stanli",
+        "id": 29,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/1/stanli",
+        "returncode": 0,
+        "seed": 1,
+        "status": "ok",
+        "stderr": "logs/000029.stderr",
+        "stdout": "logs/000029.stdout",
+        "timeout_s": 0.7055690010000006
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/s2_invgaussian",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=2",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/sample-2.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.05227879200000274,
+        "engine": "cmdstan",
+        "id": 30,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/2/cmdstan",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000030.stderr",
+        "stdout": "logs/000030.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "2",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.02472195900000429,
+        "engine": "stanli",
+        "id": 31,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/2/stanli",
+        "returncode": 0,
+        "seed": 2,
+        "status": "ok",
+        "stderr": "logs/000031.stderr",
+        "stdout": "logs/000031.stdout",
+        "timeout_s": 0.15683637600000822
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/s2_invgaussian",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=3",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/sample-3.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.04666712499999903,
+        "engine": "cmdstan",
+        "id": 32,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/3/cmdstan",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000032.stderr",
+        "stdout": "logs/000032.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "3",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.024913665999996226,
+        "engine": "stanli",
+        "id": 33,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/3/stanli",
+        "returncode": 0,
+        "seed": 3,
+        "status": "ok",
+        "stderr": "logs/000033.stderr",
+        "stdout": "logs/000033.stdout",
+        "timeout_s": 0.1400013749999971
+      },
+      {
+        "argv": [
+          "/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/s2_invgaussian",
+          "sample",
+          "num_warmup=1000",
+          "num_samples=1000",
+          "random",
+          "seed=4",
+          "data",
+          "file=/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "output",
+          "file=/tmp/stanli-teaching-perf/blocker-sampling-v7/s2_invgaussian/sample-4.csv"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.04167833300000012,
+        "engine": "cmdstan",
+        "id": 34,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/4/cmdstan",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000034.stderr",
+        "stdout": "logs/000034.stdout",
+        "timeout_s": 900
+      },
+      {
+        "argv": [
+          "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt/build-teaching-residual/stanli_run",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.stan",
+          "/tmp/stanli-teaching-perf/teaching-v6.tsv.run/inputs/s2_invgaussian.json",
+          "--warmup",
+          "1000",
+          "--samples",
+          "1000",
+          "--seed",
+          "4",
+          "--sampler-stats"
+        ],
+        "cwd": "/Users/xitrium/.codex/worktrees/a306b115-f724-46b5-aa4e-73dd81dbea42/stanrt",
+        "elapsed_s": 0.02469225000000108,
+        "engine": "stanli",
+        "id": 35,
+        "load_average": [
+          2.97265625,
+          3.2265625,
+          3.68408203125
+        ],
+        "phase": "s2_invgaussian/sample/4/stanli",
+        "returncode": 0,
+        "seed": 4,
+        "status": "ok",
+        "stderr": "logs/000035.stderr",
+        "stdout": "logs/000035.stdout",
+        "timeout_s": 0.12503499900000037
+      }
+    ],
+    "summary": {
+      "cmdstan_sample_s": 0.049472958500000885,
+      "stanli_sample_s": 0.024817812500000258
+    }
+  }
+]

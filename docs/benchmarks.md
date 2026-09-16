@@ -1,16 +1,16 @@
 # Performance measurements
 
-## Latest measurements (16 September 2026)
+## Latest complete sweep (16 September 2026)
 
 Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Measured runtime/compiler revision
-`ea4d7e24` includes the performance fixes in this PR; [the full appendix](../output/teaching-performance/README.md)
+`6e462c2e` includes the measured performance fixes; [the full appendix](../output/teaching-performance/README.md)
 records every one of the 199 fixtures, including failures and capped runs.
 
-| Collection | Completed in both | Lower Stanli CLI time | Median CmdStan/Stanli ratio | Diagnostic screen clear in both |
+| Collection | Completed in both | Lower Stanli CLI time | Median CLI sampling time ratio (CmdStan/Stanli) | Diagnostic screen clear in both |
 | --- | ---: | ---: | ---: | ---: |
-| Educational lessons | 13/13 | 12/13 | 1.30× | 10/13 |
-| Rethinking (including the supplement) | 61/62 | 58/61 | 1.52× | 50/61 |
-| brms | 118/124 | 108/118 | 1.45× | 76/118 |
+| Educational lessons | 13/13 | 12/13 | 1.32× | 10/13 |
+| Rethinking (including the supplement) | 62/62 | 62/62 | 1.54× | 50/62 |
+| brms | 118/124 | 113/118 | 1.45× | 76/118 |
 
 Each model contributes the median of four single-chain CLI runs, each with
 1,000 warmup and 1,000 retained draws. Ratios above one mean less elapsed time
@@ -19,9 +19,15 @@ flags. Stanli preparation is included; CmdStan compilation is shown separately
 in the appendix. This is fixed-budget runtime, not time to equal inferential accuracy.
 
 Adding the measured CmdStan compilation stages gives a first-fit estimate.
-Stanli has the lower estimate for 13/13 educational, 60/61 completed Rethinking,
+Stanli has the lower estimate for 13/13 educational, 62/62 completed Rethinking,
 and 118/118 completed brms comparisons. These are sums of measured stages, not
 directly timed four-chain R sessions.
+
+The practical target is CmdStan/Stanli ≥ 0.8 for complete CLI elapsed time.
+Of all 199 fixtures, 189 meet it, four fall below it, and six lack a complete
+comparison. Failed or capped runs do not pass. Later GP fixes and their
+[separate validation](../output/teaching-performance/followup-4db5dca2/README.md)
+are not substituted into this sweep.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
 covers all 61 book call sites and the separate hurdle fixture. The
