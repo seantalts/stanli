@@ -1,5 +1,0 @@
-{
-  "sha256": "feee0eab23315a042067b5f36b504f03fb8b39e85a428ea015c6e3721bc48d4a",
-  "source_sha256": "221e45ab9a9a58f9cef230ef4cf28d42797fbc0e7d68a954c6fd739b94186c63",
-  "instrumentation": "Fill every var register with one NaN sentinel before each replay; fail if its adjoint is touched. External reference gate also observes values and branch decisions."
-}

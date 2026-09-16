@@ -107,9 +107,9 @@ CTest and the 254-model reference sweep also passed again after this change.
 Implementation commits: `3d9dda2b` (sharing), `f84233d9` (JSON), `c12c1389`
 (pullbacks). All changes are enabled. Runtime implementation is net 58 lines
 smaller; this excludes added tests, the clone benchmark, and documentation.
-[Retained results](2026-09-11-shared-data-native-pullbacks.results.json) contain
-all raw measurements, min/max/MAD, input hashes, commands, profiles, the
-rejected JSON prototype, verification output and the independent UBSan repro.
+Raw measurements, input hashes, commands, profiles, the rejected JSON prototype,
+verification output and the independent UBSan reproducer are retained outside
+the source tree. The results and method are summarized below.
 
 Apple M3 Ultra, arm64, Release, Apple Clang 21, `-ffp-contract=off`. Baseline
 and candidate run in alternating order as fresh processes, after builds and

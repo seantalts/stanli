@@ -26,7 +26,7 @@ directly timed four-chain R sessions.
 The practical target is CmdStan/Stanli ≥ 0.8 for complete CLI elapsed time.
 Of all 199 fixtures, 189 meet it, four fall below it, and six lack a complete
 comparison. Failed or capped runs do not pass. Later GP fixes and their
-[separate validation](../output/teaching-performance/followup-4db5dca2/README.md)
+[separate validation](brms-performance.md#earlier-gp-and-inverse-gaussian-results)
 are not substituted into this sweep.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)

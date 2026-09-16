@@ -108,4 +108,4 @@ All 61 ulam() call sites in the chapters 4-16 supplement are listed, representin
 
 [Pinned book supplement](https://github.com/rmcelreath/rethinking/blob/ac1b3b2cda83f3e14096e2d997a6e30ad109eeee/book_code_boxes.txt). The generator preserves the Stan text and processed data. Simulation seeds and data licensing are recorded in tests/rethinking/PROVENANCE.md. Both engines receive identical input bytes.
 
-See `benchmark-manifest.json`, `rethinking-results.json`, `rethinking-timings.csv`, `numerical-errors.json` and `numerical-values.json.gz`. The last file retains every compared value from both engines. Raw sampling CSVs and command logs remain in the original run directory.
+See `rethinking-results.json` (including the run manifest), `rethinking-timings.csv`, `numerical-errors.json` and `numerical-values.json.gz`. The last file retains every compared value from both engines. Raw sampling CSVs and command logs remain in the original run directory.

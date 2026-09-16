@@ -46,19 +46,14 @@ directly timed four-chain R sessions.
 The practical target is CmdStan/Stanli ≥ 0.8 for complete CLI elapsed time.
 Of all 199 fixtures, 189 meet it, four fall below it, and six lack a complete
 comparison. Failed or capped runs do not pass. Later GP fixes and their
-[separate validation](../output/teaching-performance/followup-4db5dca2/README.md)
+[separate validation](brms-performance.md#earlier-gp-and-inverse-gaussian-results)
 are not substituted into this sweep.
 
-A subsequent [brms control-flow follow-up](../output/teaching-performance/followup-brms-control/README.md)
-adds COM-Poisson evaluation support and reduces asymmetric-Laplace sampling
-costs. It reports fresh numerical differences and separate timings, including
-remaining caps and executable-startup effects. A later [COM-Poisson follow-up](../output/teaching-performance/followup-com-poisson/README.md)
-completes all four seeds within the 3× cap at 0.591× CmdStan/Stanli. The
-[workspace and callback follow-up](../output/teaching-performance/followup-com-poisson-80/README.md)
-reaches 0.838× across three confirmation rounds, with identical before/after
-draws. A separate [remaining-brms survey](../output/teaching-performance/followup-brms-residuals/README.md)
-records the outstanding caps, timing ratios, and an upstream negative-binomial
-GLM precision limitation. The complete-sweep counts above remain unchanged.
+The [brms performance and numerics report](brms-performance.md) records later
+COM-Poisson support, its 0.838× CmdStan/Stanli sampling ratio, and identical
+before/after draws. It also covers the remaining timing gaps, caps, and an
+upstream negative-binomial GLM precision limitation. These separate measurements
+leave the complete-sweep counts above unchanged.
 
 The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
 covers all 61 book call sites and the separate hurdle fixture. The
@@ -182,5 +177,5 @@ at every recorded point on this machine. Separate four-seed runs completed
 and exceeded the timing target for all three. Inverse Gaussian also samples
 in both engines; its shared reference points are outside its domain. These
 four fixtures retain diagnostic flags in both engines. COM-Poisson support and
-its sampling cap were subsequently resolved in the follow-ups above. See the [separate results and source identity](../output/teaching-performance/followup-4db5dca2/README.md);
+its sampling cap were subsequently resolved in the brms report above. See the [separate results and source identity](brms-performance.md#earlier-gp-and-inverse-gaussian-results);
 they do not change the frozen sweep's counts.

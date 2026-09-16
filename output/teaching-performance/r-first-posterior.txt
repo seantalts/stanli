@@ -1,5 +1,0 @@
-      os    arch     r stanli run elapsed_seconds
-1 Darwin aarch64 4.6.1 0.14.0   1           0.149
-2 Darwin aarch64 4.6.1 0.14.0   2           0.120
-3 Darwin aarch64 4.6.1 0.14.0   3           0.114
-Median fresh-session wall time: 0.12 seconds
