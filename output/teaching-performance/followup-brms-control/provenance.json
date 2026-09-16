@@ -39,5 +39,6 @@
     "build-teaching-residual/stanli_check": "dfb2448a71342cc9b49395ceb3e83fc93d12733c37033ac7879972fd69d23bce",
     "build-teaching-residual/stanli_run": "51d976cb79f4de77b9bb9f4cb43d4e2d9abbc4820d397b60b98d7ff53b5ed978",
     "build-teaching-residual/bench_grad": "4a2319b1b152ed29ca6319e13fff025b34fa4f45c3a2c190151bd18eb5f5323e"
-  }
+  },
+  "R_transcript_format": "Carriage returns converted to line breaks and trailing progress padding removed; original archived at /tmp/stanli-teaching-perf/com-cap/prior-R-transcript-original.txt. Results unchanged."
 }
