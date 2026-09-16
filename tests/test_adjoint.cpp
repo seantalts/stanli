@@ -820,6 +820,20 @@ static void test_live_copy_both_read() {
 // state vector copied, one element overwritten, the result reduced, and the
 // next step reading the result. `iohmm_reg` is this shape at width 1,500,
 // and it is the region islands exist for.
+static void test_constant_fill_adjoint() {
+  for (bool overwrite : {false, true}) {
+    Build b({0.31, 0.72, -0.45}, 3);
+    const int fill = overwrite ? 0 : b.alloc(3);
+    const int pool = (int)b.p.pool.size();
+    b.p.pool.push_back(0.4);
+    b.emit_to(Program::FILL, fill, pool, 0, 0, 3);
+    const int product = b.emit(Program::MUL, fill, overwrite ? fill + 1 : 1);
+    b.emit_to(Program::MOV, fill + 2, product);
+    const int result = b.emit(Program::LSE_RANGE, fill, 0, 0, 3);
+    check("constant fill and partial overwrite", b.done({result}, {0.7}));
+  }
+}
+
 static void test_copy_then_modify_chain() {
   Build b({0.31, 0.72, -0.45});  // three parameters feeding the updates
   const int W = 4;
@@ -1896,6 +1910,7 @@ int main() {
   test_overwrite_needs_checkpoint();
   test_self_write();
   test_live_copy_both_read();
+  test_constant_fill_adjoint();
   test_copy_then_modify_chain();
   test_compact_adjoint_ranges();
   test_forwarded_repeated_destination();

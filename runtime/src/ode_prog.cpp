@@ -49,6 +49,7 @@ bool supported_rhs_view(const mir::UnsizedView& view) {
 bool exact_ode_adjoint_opcode(Program::Code code) {
   switch (code) {
     case Program::CONST:
+    case Program::FILL:
     case Program::CONSTR:
     case Program::MOV:
     case Program::MOVR:

@@ -996,6 +996,7 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::CONST:
           adj[I.dst] = 0.0;
           break;
+        case Program::FILL:
         case Program::CONSTR:
           AdjA(adj + I.dst, I.len).setZero();
           break;

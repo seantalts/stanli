@@ -978,6 +978,45 @@ void test_constant_probes() {
           "shape without runtime values");
 }
 
+void test_constant_fill_bits() {
+  double nan1, nan2;
+  const uint64_t bits1 = UINT64_C(0x7ff8000000000021);
+  const uint64_t bits2 = UINT64_C(0x7ff8000000000022);
+  std::memcpy(&nan1, &bits1, sizeof nan1);
+  std::memcpy(&nan2, &bits2, sizeof nan2);
+  const std::vector<std::vector<double>> cases{
+      {0., 0., 0.}, {-0., -0., -0.}, {1.5, 1.5, 1.5}, {nan1, nan1, nan1},
+      {nan1, nan2}, {0., -0.},       {1., 2., 1.}};
+  for (const auto& values : cases) {
+    stanli::Program program;
+    std::map<std::string, const FunDef*> functions;
+    stanli::ProgramCompiler pc{program, functions};
+    (void)pc.konst(0.);  // a later -0 must not reuse this different bit pattern
+    const int dst = pc.alloc((int)values.size());
+    pc.emit_const(dst, values.data(), (int)values.size());
+    bool uniform = true;
+    for (size_t k = 1; k < values.size(); ++k)
+      uniform = uniform && std::memcmp(values.data(), values.data() + k,
+                                       sizeof(double)) == 0;
+    if ((program.code.back().code == stanli::Program::FILL) != uniform)
+      ++failures;
+    std::vector<double> reg(program.n_regs);
+    stanli::run_program(program, reg);
+    stan::math::nested_rev_autodiff nested;
+    std::vector<stan::math::var> vr(program.n_regs);
+    stanli::run_program(program, vr);
+    for (size_t k = 0; k < values.size(); ++k) {
+      const double replayed = vr[dst + k].val();
+      if (std::memcmp(&reg[dst + k], &values[k], sizeof(double)) != 0 ||
+          std::memcmp(&replayed, &values[k], sizeof(double)) != 0) {
+        ++failures;
+        std::printf("FAIL constant fill changed a literal bit pattern\n");
+      }
+    }
+    if (uniform && vr[dst].vi_ != vr[dst + 1].vi_) ++failures;
+  }
+}
+
 void test_dynamic_vector_program() {
   using Var = stan::math::var;
   using stanli::Program;
@@ -1148,6 +1187,7 @@ void test_runtime_remainder_and_identity_index() {
 }  // namespace
 
 int main() {
+  test_constant_fill_bits();
   test_dynamic_vector_program();
   test_runtime_remainder_and_identity_index();
   test_constant_probes();

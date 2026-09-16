@@ -536,7 +536,8 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
   int next_branch = never;
   for (size_t i = n; i-- > 0;) {
     const Program::Instr& I = p.code[i];
-    if (I.code == Program::CONST || I.code == Program::CONSTR) {
+    if (I.code == Program::CONST || I.code == Program::CONSTR ||
+        I.code == Program::FILL) {
       bool dead = true;
       each_write(p, I, [&](Span s) {
         for (int k = 0; k < s.len; ++k) {

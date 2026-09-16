@@ -79,6 +79,7 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
 // decides its own (program_density.hpp) and CALL's payload decides its own.
 #define STANLI_PROGRAM_CODE_LIST(X)                                           \
   X(CONST, kProgramNoInputs)                                                  \
+  X(FILL, kProgramNoInputs | kProgramRangeOutput)                             \
   X(CONSTR, kProgramNoInputs | kProgramRangeOutput)                           \
   X(MOV, 0)                                                                   \
   X(MOVR, kProgramRangeA | kProgramRangeOutput)                               \
@@ -502,6 +503,11 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::CONST:
         d() = T(p.pool[(size_t)I.a]);
         break;
+      case Program::FILL: {
+        const T value(p.pool[(size_t)I.a]);
+        std::fill_n(reg + I.dst, I.len, value);
+        break;
+      }
       case Program::CONSTR:
         for (int32_t i = 0; i < I.len; ++i)
           reg[(size_t)(I.dst + i)] = T(p.pool[(size_t)(I.a + i)]);

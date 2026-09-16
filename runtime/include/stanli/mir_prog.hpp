@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <map>
@@ -243,7 +244,8 @@ struct ProgramCompiler {
   // over a few arrays would otherwise carry hundreds of copies of 0.
   int pool_at(const double* v, int n) {
     for (size_t s = 0; s + (size_t)n <= p.pool.size(); ++s)
-      if (std::equal(v, v + n, p.pool.begin() + (long)s)) return (int)s;
+      if (std::memcmp(v, p.pool.data() + s, (size_t)n * sizeof(double)) == 0)
+        return (int)s;
     const int at = (int)p.pool.size();
     p.pool.insert(p.pool.end(), v, v + n);
     return at;
@@ -251,6 +253,14 @@ struct ProgramCompiler {
 
   // dst[0..n) = the given values, as one instruction.
   Program::Instr const_instr(int dst, const double* v, int n) {
+    // Broadcast immutable constants, never active registers. In var replay
+    // one leaf represents the fill; writes still replace individual handles.
+    // Compare bits to retain signed zero and NaN payloads exactly.
+    bool uniform = n > 1;
+    for (int k = 1; uniform && k < n; ++k)
+      uniform = std::memcmp(v, v + k, sizeof(double)) == 0;
+    if (uniform)
+      return Program::Instr{Program::FILL, dst, pool_at(v, 1), 0, 0, n};
     return Program::Instr{
         n == 1 ? Program::CONST : Program::CONSTR, dst, pool_at(v, n), 0, 0, n};
   }

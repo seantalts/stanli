@@ -839,3 +839,23 @@ including large constant fills, as a substantial cost. Next bounded test:
 represent a uniform constant range as a broadcast, preserving every double
 bit pattern and derivative, then compare gradients and capped full sampling.
 ALD/GEV dispatch costs remain a separate performance beam.
+
+### Uniform constant replay
+
+A uniform constant range now uses one broadcast instruction and, during var
+replay, one shared immutable constant node. Constant-pool equality is bitwise
+to preserve signed zero and NaN payloads. Tests cover partial overwrites,
+aliasing, gradients, compaction, and the ODE exact-instruction contract.
+All 249 CTests and 316 existing-policy reference checks pass; the independent
+COM-Poisson three-point density/gradient/output comparison also passes.
+
+Five counterbalanced gradient pairs (200 ms warmup, 400 ms measurement per
+engine) reduce COM-Poisson's median from 859.315 to 334.877 microseconds, a
+2.57x improvement; CmdStan measures 60.030 microseconds (CmdStan/Stanli 0.179).
+Candidate range: 331.309–343.490 microseconds. Values are identical to the
+previous runtime. ALD, GEV and the m14.8 canary show no material change.
+A fresh four-seed 1000+1000 CLI comparison still caps every Stanli run; CmdStan
+median is 1.0997 seconds. No completed-run Stanli median is available.
+Keep this small general optimization, but the sampling performance gap remains.
+Exact patches, identities, raw timings and logs are retained separately in
+`/tmp/stanli-teaching-perf/gaps-v8/fill-*`; the published v6 evidence is unchanged.
