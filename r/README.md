@@ -302,3 +302,17 @@ reported as unavailable because the native report only retains per-chain times.
 Saved-draw methods need the Stanli R package and optional posterior/loo packages,
 but no native runtime. CSV/executable methods and LOO moment matching are not
 provided by this adapter.
+
+### Native model interface
+
+`cstan_model(code)$sample(...)` accepts the same arguments and defaults as
+`sample_cstan(code, ...)`, plus `threads_per_chain = 1`. This lets callers
+reuse CmdStanR sampling calls by changing the model constructor. `$code()`
+returns the source and `$model_name()` returns `"stanli_model"`. Preparation
+happens at sampling time with the supplied data and seed. The native object
+has its own class and provides sampling, not CmdStan compilation or CSV methods.
+It requires neither CmdStanR nor RStan nor a C++ toolchain.
+
+For the optional S4 `as_stanfit()` adapter, load RStan before rethinking in a
+fresh R session to avoid rethinking's placeholder `stanfit` class. Native
+`as_cstanfit()` and `as_rfit()` are unaffected.
