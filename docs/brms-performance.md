@@ -173,6 +173,26 @@ R-hats below 1.01 in both engines. The mixture has 64 divergences for Stanli
 and 1,333 for CmdStan, with poor mixing in both. Fixed-budget runtime therefore
 does not establish time to equally accurate inference.
 
+### GEV close to zero shape
+
+A separate 40-row stress fixture uses the [same GEV expression](../tests/brms/s2_gev.stan)
+with scale 1, responses `y[i] = (i - 20) / 8` and locations
+`mu[i] = 0.025 * sin(i + 1)`, for `i = 0, ..., 39`. The table compares the
+likelihood derivative with respect to shape against a 100-digit calculation
+at the same double-precision inputs.
+
+| Shape | Independent derivative | CmdStan / Stanli scalar-program derivative | Absolute error |
+| --- | ---: | ---: | ---: |
+| 0.25 | −1405.830841685 | −1405.830841685 | 2.78e-13 |
+| 10⁻⁸ | −131.317854760 | −129.007145405 | 2.31 |
+| 10⁻¹² | −131.317846817 | −26827812.078125 | 2.68e7 |
+
+Across 27 evaluations, CmdStan and Stanli's scalar-program path give
+bit-identical densities and gradients. The independent derivatives agree
+with centered differences to a maximum scaled discrepancy of 1.51e-44.
+These are synthetic stress points, not posterior draws; they do not establish
+that the earlier sampled GEV chains visit this regime or explain their timing.
+
 ### Negative-binomial numerical limitation
 
 The fast CmdStan seed has 982 divergences in 1,000 retained draws and averages
