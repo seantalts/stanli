@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `sample_ulam()` to translate total iterations, warmup, cores, control
+  settings, and constrained starts into the native CmdStanR-style sampler.
+  Integrations no longer need to implement that translation themselves;
+  `sample_cstan()` retains its existing interface and defaults.
+
 ## 0.14.3
 
 - Configure the optional CmdStanR repository for release-platform R and stanr
