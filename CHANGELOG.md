@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.14.4
 
-- Add `sample_ulam()` to translate total iterations, warmup, cores, control
-  settings, and constrained starts into the native CmdStanR-style sampler.
-  Integrations no longer need to implement that translation themselves;
-  `sample_cstan()` retains its existing interface and defaults.
+- Add `cstan_model()` with native `$sample()`, `$code()`, and `$model_name()`
+  methods. Integrations can reuse CmdStanR sampling calls without depending on
+  CmdStanR or RStan. Sampling delegates to the existing `sample_cstan()` API.
+- Diagnose conflicting S4 `stanfit` classes when using optional `as_stanfit()`
+  conversion, with instructions for loading RStan before rethinking.
 
 ## 0.14.3
 

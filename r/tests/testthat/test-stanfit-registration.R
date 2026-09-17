@@ -20,3 +20,21 @@ test_that("optional S4 methods register with either namespace load order", {
     expect_true(all(result))
   }
 })
+
+test_that("a conflicting stanfit class does not prevent native APIs from loading", {
+  skip_if_not_installed("rstan")
+  skip_if_not_installed("callr")
+  result <- callr::r(function() {
+    # Reproduce a package defining its own placeholder before RStan is loaded.
+    registry <- new.env(parent=globalenv())
+    registry$.packageName <- "placeholder"
+    methods::setClass("stanfit", slots=c(id="character"), where=registry)
+    loadNamespace("stanli")
+    loadNamespace("rstan")
+    message <- tryCatch(stanli::as_stanfit(structure(list(),class="stanli_fit")),
+                        error=conditionMessage)
+    list(message=message,code=stanli::cstan_model("source")$code())
+  }, libpath=.libPaths())
+  expect_match(result$message,"load rstan before rethinking",fixed=TRUE)
+  expect_identical(result$code,"source")
+})

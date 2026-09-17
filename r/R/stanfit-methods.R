@@ -11,6 +11,10 @@ register_stanfit_class <- function() {
   registry <- .stanfit_registry
   if (exists(".__C__stanli_stanfit", envir = registry, inherits = FALSE))
     return(invisible(NULL))
+  # Some packages define a placeholder named stanfit. Do not register against
+  # that class, and do not make an optional adapter prevent package loading.
+  if (!identical(methods::getClass("stanfit")@package, "rstan"))
+    return(invisible(NULL))
   parent.env(registry) <- asNamespace("stanli")
   registry$.packageName <- "stanli"
   methods::setClass("stanli_stanfit", contains = "stanfit", where = registry)

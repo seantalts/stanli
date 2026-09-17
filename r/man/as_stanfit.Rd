@@ -39,6 +39,10 @@ Extraction, summaries, plots, and ordinary LOO inherit RStan's
   `get_num_upars` uses retained metadata and also works without a live model.
   LOO moment matching works with `cores = 1` and a live model.
 
+  If using rethinking, load rstan before rethinking in a fresh R session.
+  Its placeholder `stanfit` class can otherwise conflict with RStan's class.
+  Native [as_cstanfit()] and [as_rfit()] do not need this load order.
+
   Density calls support `adjust_transform = TRUE` (the default) and require
   an exact-lp runtime. `adjust_transform = FALSE` is rejected because the
   graph includes the parameter-transform Jacobian. Native RStan resampling

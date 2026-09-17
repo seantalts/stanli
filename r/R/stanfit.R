@@ -75,6 +75,10 @@ stanfit_no_cppmodule <- function(...) {
 #'   `get_num_upars` uses retained metadata and also works without a live model.
 #'   LOO moment matching works with `cores = 1` and a live model.
 #'
+#'   If using rethinking, load rstan before rethinking in a fresh R session.
+#'   Its placeholder `stanfit` class can otherwise conflict with RStan's class.
+#'   Native [as_cstanfit()] and [as_rfit()] do not need this load order.
+#'
 #'   Density calls support `adjust_transform = TRUE` (the default) and require
 #'   an exact-lp runtime. `adjust_transform = FALSE` is rejected because the
 #'   graph includes the parameter-transform Jacobian. Native RStan resampling
@@ -115,6 +119,9 @@ as_stanfit.stanli_fit <- function(x, model = x$model, ...) {
     stop("as_stanfit() needs rstan. Install a compatible binary with ",
          "install.packages('rstan', type = 'binary') on macOS/Windows; ",
          "use a provisioned binary on Linux.", call. = FALSE)
+  if (!identical(methods::getClass("stanfit")@package, "rstan"))
+    stop("as_stanfit() found a conflicting stanfit class. In a fresh R session, ",
+         "load rstan before rethinking, then load stanli.", call. = FALSE)
   register_stanfit_class()
   live_model <- model
   stanfit_check_model(live_model, x$columns, dim(x$unconstrained)[3L])
