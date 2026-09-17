@@ -806,11 +806,11 @@ the estimate charges it accordingly. Vector-result ops still end runs.
 
 The pass still refuses outright: short runs (under 32 ops), regions with
 more than six distinct inputs, densities in the dropped-constants form
-(see the refusal above), and regions producing target entries. One more
-applies to the generated backward alone: a region with a branch on a
-parameter keeps the autodiff replay, because reversing a branch needs
-the nested if/else shape the flat instruction list has already thrown
-away.
+(see the refusal above), and regions producing target entries. The generated
+backward supports forward-only branches by recording which basic blocks ran
+and reversing only those blocks. Back edges, malformed jump targets,
+unsupported derivatives, and paths that can read an uninitialized register
+retain the autodiff replay.
 
 ### Shared three-lane softmax (`program_softmax.cpp`, disable: `STANLI_NO_ISLAND_SOFTMAX3=1`)
 
@@ -1696,10 +1696,11 @@ was 1.07e-14 away, and `iohmm_reg` is 3.46e-13 against the replay's
 Beyond the estimate, islands still refuse propto densities (their
 term-dropping depends on argument types, which the island's uniform
 binding cannot reproduce), runs under 32 ops, and regions producing
-target terms. `gen_adjoint` additionally refuses jumps, so the regions
-lowering emits for parameter-dependent control flow keep the replay:
-reversing control flow wants the structured form the flat instruction
-list has already lost.
+target terms. Parameter-dependent forward branches can use generated
+adjoints; recorded block flags preserve the executed path. Back edges and
+unsupported derivatives retain the replay. The branch tests in
+`tests/test_adjoint.cpp` cover reused frames, conditional overwrites, nested
+branches, kernel calls, and refusal of uninitialized joins.
 
 ### ODE models and preparation
 
