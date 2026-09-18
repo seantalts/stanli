@@ -4955,6 +4955,95 @@ static void segment_tests() {
   }
 }
 
+static void replay_parity_tests() {
+  const char* fixtures[] = {"structured_param_if", "structured_nested",
+                            "structured_exits",    "structured_counted",
+                            "structured_direct_index"};
+  for (const char* name : fixtures) {
+    const bool needs_y = std::strcmp(name, "structured_param_if") == 0;
+    const auto native = needs_y
+                            ? compile_fixture(name, observed_data(24), Mode::Force)
+                            : compile_fixture(name, 24, Mode::Force);
+    const auto legacy = needs_y
+                            ? compile_fixture(name, observed_data(24), Mode::Off)
+                            : compile_fixture(name, 24, Mode::Off);
+    check(retained(native) != nullptr, name);
+    Executor a = diagnosed_executor(native.graph);
+    native.bind(a);
+    test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+    Executor ref(native.graph);
+    test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+    native.bind(ref);
+    Executor b(legacy.graph);
+    legacy.bind(b);
+    std::vector<double> ga(static_cast<size_t>(native.n_unconstrained));
+    std::vector<double> gref(ga.size());
+    std::vector<double> gb(static_cast<size_t>(legacy.n_unconstrained));
+    std::vector<std::vector<double>> points(3,
+                                            std::vector<double>(ga.size()));
+    for (size_t p = 0; p < points.size(); ++p)
+      for (size_t k = 0; k < ga.size(); ++k)
+        points[p][k] = .3 + .1 * static_cast<double>(p) +
+                      .05 * static_cast<double>(k);
+    int call_index = 0;
+    for (const auto& point : points) {
+      std::copy(point.begin(), point.end(), ref.params_data());
+      const double vref = ref.gradient(gref.data());
+      std::copy(point.begin(), point.end(), b.params_data());
+      close(b.gradient(gb.data()), vref, name);
+      for (size_t k = 0; k < gb.size(); ++k) close(gb[k], gref[k], name);
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        ++call_index;
+        std::copy(point.begin(), point.end(), a.params_data());
+        stanli_test::StdoutCapture captured(stderr);
+        const double va = a.gradient(ga.data());
+        const std::string diagnostics = captured.finish();
+        check(va == vref, name);
+        for (size_t k = 0; k < ga.size(); ++k) check(ga[k] == gref[k], name);
+        if (call_index >= 3)
+          check(reported_field(diagnostics, "replay=") == 1, name);
+      }
+    }
+  }
+}
+
+static void replay_guard_flip_tests() {
+  const auto native =
+      compile_fixture("structured_param_if", observed_data(24), Mode::Force);
+  check(retained(native) != nullptr, "guard flip fixture retains OP_LOOP");
+  Executor a = diagnosed_executor(native.graph);
+  native.bind(a);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(native.graph);
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  native.bind(ref);
+  std::vector<double> ga(static_cast<size_t>(native.n_unconstrained));
+  std::vector<double> gref(ga.size());
+  const std::vector<std::vector<double>> points = {
+      {.4, .2}, {.9, .5}, {-.3, .2}, {-.7, .4}};
+  for (size_t i = 0; i < points.size(); ++i) {
+    std::copy(points[i].begin(), points[i].end(), ref.params_data());
+    const double vref = ref.gradient(gref.data());
+    std::copy(points[i].begin(), points[i].end(), a.params_data());
+    stanli_test::StdoutCapture captured(stderr);
+    const double va = a.gradient(ga.data());
+    const std::string diagnostics = captured.finish();
+    check(va == vref, "guard flip target bitwise");
+    for (size_t k = 0; k < ga.size(); ++k)
+      check(ga[k] == gref[k], "guard flip gradient bitwise");
+    if (i == 2)
+      check(reported_field(diagnostics, "respecialized=") >= 1,
+            "sign flip triggers a guard respecialization");
+    else if (i == 1)
+      check(reported_field(diagnostics, "respecialized=") == 0,
+            "same-sign evaluation does not respecialize");
+    else if (i == 3)
+      check(reported_field(diagnostics, "replay=") == 1,
+            "post-flip same-sign evaluation replays without a further "
+            "respecialization");
+  }
+}
+
 int main() {
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
@@ -4993,6 +5082,8 @@ int main() {
   trace_tests();
   for_trace_tests();
   memo_release_tests();
+  replay_parity_tests();
+  replay_guard_flip_tests();
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS");
   if (failures == 0) std::printf("test_structured_loop OK\n");

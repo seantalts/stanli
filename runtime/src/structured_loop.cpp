@@ -1315,10 +1315,28 @@ int64_t set_index_scratch(const Op& op, const Slot* slots) {
   return index_selection_is_ordered_unique(p) ? 0 : slots[op.in[0]].len;
 }
 
+struct ArenaSnapshot {
+  struct Range {
+    const double* base;
+    size_t used;
+    size_t offset;
+  };
+  std::vector<Range> ranges;
+  std::vector<double> cells;
+  double* remap(double* p) {
+    if (!p) return p;
+    for (const auto& r : ranges)
+      if (p >= r.base && p < r.base + r.used)
+        return cells.data() + r.offset + static_cast<size_t>(p - r.base);
+    return p;
+  }
+};
+
 struct BlockArena {
   struct Block {
     std::unique_ptr<double[]> data;
     size_t capacity = 0;
+    size_t used = 0;
   };
   struct Mark {
     size_t block = 0;
@@ -1358,7 +1376,8 @@ struct BlockArena {
       blocks.push_back(make(std::max(n, min_block)));
       cursor = 0;
     } else {
-      closed += used_here();
+      blocks[cursor].used = used_here();
+      closed += blocks[cursor].used;
       if (cursor + 1 < blocks.size() && n <= blocks[cursor + 1].capacity) {
         ++cursor;
       } else {
@@ -1400,6 +1419,19 @@ struct BlockArena {
     cursor = closed = 0;
     open(0);
   }
+  void snapshot(ArenaSnapshot& out) const {
+    out.ranges.clear();
+    size_t total = 0;
+    for (size_t i = 0; i <= cursor && i < blocks.size(); ++i) {
+      const size_t used = i == cursor ? used_here() : blocks[i].used;
+      out.ranges.push_back(
+          ArenaSnapshot::Range{blocks[i].data.get(), used, total});
+      total += used;
+    }
+    out.cells.assign(total, 0.0);
+    for (const auto& r : out.ranges)
+      std::copy_n(r.base, r.used, out.cells.data() + r.offset);
+  }
 };
 
 template <class T>
@@ -1435,6 +1467,153 @@ struct Record {
   int64_t other;    // InPlace: rhs version; Copy: to; Segment: adjoint base
 };
 static_assert(sizeof(Record) == 32, "records are the largest tape entry");
+
+struct FrozenCall {
+  const Node* n = nullptr;
+  KernelCtx ctx;
+  int64_t in_version[6] = {-1, -1, -1, -1, -1, -1};
+  int64_t out_version = -1;
+  int64_t out2_version = -1;
+  int64_t in_adjoint[6] = {-1, -1, -1, -1, -1, -1};
+  int64_t out_adjoint = -1;
+  int64_t out2_adjoint = -1;
+  bool active = false;
+  bool reuse_primal = false;
+};
+
+struct FrozenInPlace {
+  const Node* n = nullptr;
+  double* base = nullptr;
+  const double* rhs = nullptr;
+  std::vector<int64_t> positions;
+  size_t old_offset = 0;
+  int64_t base_version = -1;
+  int64_t rhs_version = -1;
+  int64_t base_adjoint = -1;
+  int64_t rhs_adjoint = -1;
+};
+
+struct FrozenCopy {
+  const double* src = nullptr;
+  double* dst = nullptr;
+  int64_t len = 0;
+  int64_t from_version = -1;
+  int64_t to_version = -1;
+  int64_t from_adjoint = -1;
+  int64_t to_adjoint = -1;
+};
+
+struct SegmentInput {
+  const double* src = nullptr;
+  int64_t version = -1;
+  int reg = 0;
+  int len = 0;
+};
+
+struct FrozenSegment {
+  const Node* n = nullptr;
+  const Segment* segment = nullptr;
+  double* frame = nullptr;
+  std::vector<SegmentInput> ins;
+  std::vector<int64_t> in_adjoint;
+  int64_t adjoint_base = -1;
+};
+
+struct FrozenSet {
+  double* ptr = nullptr;
+  double value = 0;
+};
+
+struct FrozenGuard {
+  enum Kind : uint8_t { If, While, For } kind;
+  const double* a = nullptr;
+  const double* b = nullptr;
+  double va = 0, vb = 0;
+  bool decision = false;
+};
+
+struct FrozenTarget {
+  const double* value = nullptr;
+  int64_t version = -1;
+  int64_t adjoint = -1;
+};
+
+struct FrozenImport {
+  double* dst = nullptr;
+  int64_t len = 0;
+  int input = 0;
+  int64_t offset = 0;
+};
+
+struct StreamInstr {
+  enum Kind : uint8_t { Call, InPlace, Copy, Seg, Guard, Tgt, Set } kind;
+  uint32_t index = 0;
+};
+
+struct BackwardInstr {
+  enum Kind : uint8_t { Kernel, InPlace, Copy, Seg } kind;
+  uint32_t index = 0;
+};
+
+struct Stream {
+  std::vector<StreamInstr> program;
+  std::vector<FrozenCall> calls;
+  std::vector<FrozenInPlace> inplaces;
+  std::vector<FrozenCopy> copies;
+  std::vector<FrozenSegment> segs;
+  std::vector<FrozenGuard> guards;
+  std::vector<FrozenTarget> targets;
+  std::vector<FrozenSet> sets;
+  std::vector<BackwardInstr> backward_program;
+
+  ArenaSnapshot arena;
+  std::vector<double> adjoints;
+  std::vector<double> inplace_old;
+  std::vector<double> target_work;
+
+  std::vector<FrozenImport> imports;
+  std::vector<const double*> output_value;
+  std::vector<int64_t> output_len;
+  std::vector<int64_t> output_adjoint;
+  int64_t adjoint_size = 0;
+  uint64_t import_mask = 0;
+  size_t respecialized = 0;
+};
+
+double* resolve_adjoint(int64_t id, double* adjoints, const StructuredLoop& p,
+                        KernelCtx& outer) {
+  if (id >= 0) return adjoints + id;
+  if (id == -1) return nullptr;
+  const auto& in = p.imports[static_cast<size_t>(-(id + 2))];
+  double* base = outer.in_adj[in.input].data;
+  return base ? base + in.offset : nullptr;
+}
+
+uint64_t import_activity_mask(const StructuredLoop& p, KernelCtx& outer) {
+  if (p.imports.size() > 63) return std::numeric_limits<uint64_t>::max();
+  uint64_t mask = 0;
+  for (size_t i = 0; i < p.imports.size(); ++i)
+    if (outer.in_adj[p.imports[i].input].data) mask |= uint64_t{1} << i;
+  return mask;
+}
+
+double reduce_target(std::vector<double>& work) {
+  size_t count = work.size();
+  while (count > 1) {
+    size_t next = 0;
+    for (size_t i = 0; i < count; i += 6) {
+      if (i + 1 == count) {
+        work[next++] = work[i];
+        continue;
+      }
+      double sum = 0;
+      for (size_t j = i; j < std::min(count, i + 6); ++j) sum += work[j];
+      work[next++] = sum;
+    }
+    count = next;
+  }
+  return count ? work[0] : 0.0;
+}
 
 struct LoopState : KernelState {
   const StructuredLoop& p;
@@ -1477,6 +1656,13 @@ struct LoopState : KernelState {
   bool reuse_primals = false;
   bool report_tape =
       std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
+  bool diagnostics =
+      std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
+  bool no_replay = std::getenv("STANLI_NO_STRUCTURED_REPLAY") != nullptr;
+  std::unique_ptr<Stream> stream;
+  std::unique_ptr<Stream> building;
+  bool last_replayed = false;
+  size_t respecialized = 0;
 
   explicit LoopState(const StructuredLoop& plan)
       : p(plan),
@@ -1666,6 +1852,42 @@ struct Execution {
     if (c.dyn_lengths) apply_dynamic_length(c);
   }
 
+  void log_call(const Node& n, const Op& op, const KernelCtx& c) {
+    if (!s.building) return;
+    FrozenCall f;
+    f.n = &n;
+    f.ctx.n_in = op.n_in;
+    f.ctx.variant = op.variant;
+    f.ctx.idata = op.idata;
+    f.ctx.n_idata = op.n_idata;
+    f.ctx.udata = op.udata;
+    f.ctx.dyn_capacity = op.dyn_capacity;
+    f.ctx.dyn_extent_in = op.dyn_extent_in;
+    f.ctx.dyn_lengths = op.dyn_lengths;
+    for (int k = 0; k < op.n_in; ++k) {
+      const int64_t len = p.body.slots[op.in[k]].len;
+      f.ctx.in[k] = Desc{c.in[k].data, len};
+      f.ctx.in_adj[k] = Desc{nullptr, len};
+    }
+    f.ctx.out = Desc{c.out.data, p.body.slots[op.out].len};
+    f.ctx.out_adj_vec = Desc{nullptr, p.body.slots[op.out].len};
+    if (op.out2 >= 0) f.ctx.out2 = Desc{c.out2.data, p.body.slots[op.out2].len};
+    f.ctx.scratch = c.scratch;
+    f.active = n.active;
+    f.reuse_primal = n.reuse_primal_output && s.reuse_primals;
+    if (n.active) {
+      for (int k = 0; k < op.n_in; ++k) f.in_version[k] = s.bindings[op.in[k]];
+      f.out_version = s.bindings[op.out];
+      if (op.out2 >= 0) f.out2_version = s.bindings[op.out2];
+    }
+    Stream& st = *s.building;
+    const uint32_t idx = static_cast<uint32_t>(st.calls.size());
+    st.program.push_back(StreamInstr{StreamInstr::Call, idx});
+    if (n.active)
+      st.backward_program.push_back(BackwardInstr{BackwardInstr::Kernel, idx});
+    st.calls.push_back(std::move(f));
+  }
+
   void run_transient(const Node& n, const Op& op, KernelCtx& c) {
     double* w = s.workspace.data() + n.workspace;
     c.out.data = w;
@@ -1679,6 +1901,7 @@ struct Execution {
     n.forward(c);
     s.bindings[op.out] = s.node_version[n.site];
     if (op.out2 >= 0) s.bindings[op.out2] = s.node_version2[n.site];
+    log_call(n, op, c);
   }
 
   void run_retained(const Node& n, const Op& op, KernelCtx& c) {
@@ -1713,6 +1936,7 @@ struct Execution {
     }
     if (n.active)
       s.records.push_back(Record{Record::Kernel, n.site, handles, out, -1});
+    log_call(n, op, c);
   }
 
   void run_in_place(const Node& n, const Op& op, KernelCtx& c) {
@@ -1731,6 +1955,19 @@ struct Execution {
           make_version(copy, needs_adjoint ? reserve_adjoint(len) : -1);
       s.owner[static_cast<size_t>(fresh)] = base_slot;
       s.records.push_back(Record{Record::Copy, n.site, 0, base, fresh});
+      if (s.building) {
+        Stream& st = *s.building;
+        FrozenCopy fc;
+        fc.src = s.versions[static_cast<size_t>(base)].value;
+        fc.dst = copy;
+        fc.len = len;
+        fc.from_version = base;
+        fc.to_version = fresh;
+        const uint32_t idx = static_cast<uint32_t>(st.copies.size());
+        st.program.push_back(StreamInstr{StreamInstr::Copy, idx});
+        st.backward_program.push_back(BackwardInstr{BackwardInstr::Copy, idx});
+        st.copies.push_back(fc);
+      }
       s.bindings[base_slot] = base = fresh;
     } else if (rhs_active &&
                s.versions[static_cast<size_t>(base)].adjoint == -1) {
@@ -1754,6 +1991,30 @@ struct Execution {
       selected_positions(spec, runtime, write);
     }
     s.records.push_back(Record{Record::InPlace, n.site, undo, base, rhs});
+    if (s.building) {
+      Stream& st = *s.building;
+      FrozenInPlace fi;
+      fi.n = &n;
+      fi.base = values;
+      fi.rhs = source;
+      fi.base_version = base;
+      fi.rhs_version = rhs;
+      fi.old_offset = st.inplace_old.size();
+      for (size_t k = static_cast<size_t>(undo); k < s.undo.size(); k += 2)
+        fi.positions.push_back(static_cast<int64_t>(s.undo[k]));
+      st.inplace_old.resize(st.inplace_old.size() + fi.positions.size());
+      const uint32_t idx = static_cast<uint32_t>(st.inplaces.size());
+      st.program.push_back(StreamInstr{StreamInstr::InPlace, idx});
+      st.backward_program.push_back(BackwardInstr{BackwardInstr::InPlace, idx});
+      st.inplaces.push_back(std::move(fi));
+    }
+  }
+
+  void log_guard(FrozenGuard g) {
+    Stream& st = *s.building;
+    st.program.push_back(
+        StreamInstr{StreamInstr::Guard, static_cast<uint32_t>(st.guards.size())});
+    st.guards.push_back(g);
   }
 
   int64_t read_trace() {
@@ -1765,8 +2026,15 @@ struct Execution {
   void bind_iterator(const Node& n, double at) {
     if (n.storage == Node::Transient) {
       const int64_t version = s.loop_version[n.loop_index];
-      *s.versions[static_cast<size_t>(version)].value = at;
+      double* cell = s.versions[static_cast<size_t>(version)].value;
+      *cell = at;
       s.bindings[n.iterator] = version;
+      if (s.building) {
+        Stream& st = *s.building;
+        const uint32_t idx = static_cast<uint32_t>(st.sets.size());
+        st.program.push_back(StreamInstr{StreamInstr::Set, idx});
+        st.sets.push_back(FrozenSet{cell, at});
+      }
       return;
     }
     double* cell = s.arena.allocate(1);
@@ -1873,8 +2141,13 @@ struct Execution {
         if (n.trace && s.memo_ready) {
           arm = static_cast<size_t>(read_trace());
         } else {
-          arm = value(n.condition)[0] != 0.0 ? 0 : 1;
-          if (n.trace) s.trace.push_back(static_cast<int64_t>(arm));
+          const double* cond = value(n.condition);
+          arm = cond[0] != 0.0 ? 0 : 1;
+          if (n.trace)
+            s.trace.push_back(static_cast<int64_t>(arm));
+          else if (s.building)
+            log_guard(FrozenGuard{FrozenGuard::If, cond, nullptr, cond[0], 0,
+                                  arm == 0});
         }
         return forward(n.children[arm]);
       }
@@ -1896,6 +2169,9 @@ struct Execution {
           throw std::logic_error("structured loop invalid integer bounds");
         const int64_t count = hi >= lo ? static_cast<int64_t>(hi - lo) + 1 : 0;
         if (!n.trace) {
+          if (s.building)
+            log_guard(FrozenGuard{FrozenGuard::For, value(n.lower),
+                                  value(n.upper), lo, hi, false});
           for (int64_t i = 0; i < count; ++i) {
             bind_iterator(n, lo + static_cast<double>(i));
             if (forward(n.children[0]) == Break) break;
@@ -1933,7 +2209,13 @@ struct Execution {
         int64_t count = 0;
         for (;;) {
           if (forward(n.children[0]) == Break) break;
-          if (value(n.condition)[0] == 0.0) break;
+          const double* cond = value(n.condition);
+          const bool taken = cond[0] != 0.0;
+          if (!n.trace && s.building)
+            log_guard(
+                FrozenGuard{FrozenGuard::While, cond, nullptr, cond[0], 0,
+                           taken});
+          if (!taken) break;
           ++count;
           if (forward(n.children[1]) == Break) break;
         }
@@ -1949,6 +2231,14 @@ struct Execution {
       case Node::Target:
         ++s.effects;
         s.target_refs.push_back(s.bindings[n.src]);
+        if (s.building) {
+          Stream& st = *s.building;
+          st.program.push_back(
+              StreamInstr{StreamInstr::Tgt,
+                         static_cast<uint32_t>(st.targets.size())});
+          st.targets.push_back(
+              FrozenTarget{value(n.src), s.bindings[n.src], -1});
+        }
         return Normal;
       case Node::Segment:
         run_segment(n, p.segments[static_cast<size_t>(n.segment)]);
@@ -1967,10 +2257,17 @@ struct Execution {
       for (const auto& in : segment.ins)
         s.handles.push_back(s.bindings[in.slot]);
     }
-    for (const auto& in : segment.ins) {
+    std::vector<SegmentInput> logged_ins;
+    if (s.building) logged_ins.reserve(segment.ins.size());
+    for (size_t k = 0; k < segment.ins.size(); ++k) {
+      const auto& in = segment.ins[k];
       const double* v = value(in.slot);
       double* r = frame + in.reg;
       for (int i = 0; i < in.len; ++i) r[i] = v[i];
+      if (s.building)
+        logged_ins.push_back(SegmentInput{
+            v, n.active ? s.handles[static_cast<size_t>(handles) + k] : -1,
+            in.reg, in.len});
     }
     run_program(program, frame, outer.eval_state);
     const int64_t base = n.active ? reserve_adjoint(program.adj.n_regs) : -1;
@@ -1983,6 +2280,20 @@ struct Execution {
       s.records.push_back(Record{Record::Segment,
                                  static_cast<uint32_t>(n.segment), handles,
                                  make_version(frame, -1), base});
+    if (s.building) {
+      Stream& st = *s.building;
+      FrozenSegment fs;
+      fs.n = &n;
+      fs.segment = &segment;
+      fs.frame = frame;
+      fs.ins = std::move(logged_ins);
+      fs.adjoint_base = base;
+      const uint32_t idx = static_cast<uint32_t>(st.segs.size());
+      st.program.push_back(StreamInstr{StreamInstr::Seg, idx});
+      if (n.active)
+        st.backward_program.push_back(BackwardInstr{BackwardInstr::Seg, idx});
+      st.segs.push_back(std::move(fs));
+    }
   }
 
   void backward() {
@@ -2069,6 +2380,229 @@ struct Execution {
   }
 };
 
+void freeze(LoopState& s, KernelCtx& ctx) {
+  const StructuredLoop& p = s.p;
+  Stream& st = *s.building;
+  s.arena.snapshot(st.arena);
+  const auto remap = [&](double* ptr) { return st.arena.remap(ptr); };
+  const auto remap_c = [&](const double* ptr) -> const double* {
+    return st.arena.remap(const_cast<double*>(ptr));
+  };
+  const auto adj_of = [&](int64_t version) -> int64_t {
+    return version < 0 ? -1 : s.versions[static_cast<size_t>(version)].adjoint;
+  };
+
+  for (auto& f : st.calls) {
+    for (int k = 0; k < f.ctx.n_in; ++k) f.ctx.in[k].data = remap(f.ctx.in[k].data);
+    f.ctx.out.data = remap(f.ctx.out.data);
+    f.ctx.out2.data = remap(f.ctx.out2.data);
+    f.ctx.scratch = remap(f.ctx.scratch);
+    if (f.active) {
+      for (int k = 0; k < f.ctx.n_in; ++k) f.in_adjoint[k] = adj_of(f.in_version[k]);
+      f.out_adjoint = adj_of(f.out_version);
+      f.out2_adjoint = adj_of(f.out2_version);
+    }
+  }
+  for (auto& fi : st.inplaces) {
+    fi.base = remap(fi.base);
+    fi.rhs = remap_c(fi.rhs);
+    fi.base_adjoint = adj_of(fi.base_version);
+    fi.rhs_adjoint = adj_of(fi.rhs_version);
+  }
+  for (auto& fc : st.copies) {
+    fc.src = remap_c(fc.src);
+    fc.dst = remap(fc.dst);
+    fc.from_adjoint = adj_of(fc.from_version);
+    fc.to_adjoint = adj_of(fc.to_version);
+  }
+  for (auto& fseg : st.segs) {
+    fseg.frame = remap(fseg.frame);
+    fseg.in_adjoint.resize(fseg.ins.size());
+    for (size_t k = 0; k < fseg.ins.size(); ++k) {
+      fseg.in_adjoint[k] = adj_of(fseg.ins[k].version);
+      fseg.ins[k].src = remap_c(fseg.ins[k].src);
+    }
+  }
+  for (auto& g : st.guards) {
+    g.a = remap_c(g.a);
+    g.b = remap_c(g.b);
+  }
+  for (auto& t : st.targets) {
+    t.value = remap_c(t.value);
+    t.adjoint = adj_of(t.version);
+  }
+  for (auto& set : st.sets) set.ptr = remap(set.ptr);
+  for (auto& imp : st.imports) imp.dst = remap(imp.dst);
+
+  st.output_value.clear();
+  st.output_len.clear();
+  st.output_adjoint.clear();
+  for (int slot : p.outputs) {
+    const int64_t v = s.bindings[slot];
+    st.output_value.push_back(remap_c(s.versions[static_cast<size_t>(v)].value));
+    st.output_len.push_back(p.body.slots[slot].len);
+    st.output_adjoint.push_back(adj_of(v));
+  }
+  st.adjoint_size = s.adjoint_size;
+  st.adjoints.assign(static_cast<size_t>(st.adjoint_size), 0.0);
+  st.target_work.resize(st.targets.size());
+  st.import_mask = import_activity_mask(p, ctx);
+
+  s.stream = std::move(s.building);
+  s.building.reset();
+}
+
+bool replay_forward(LoopState& s, KernelCtx& ctx) {
+  Stream& st = *s.stream;
+  const StructuredLoop& p = s.p;
+  if (import_activity_mask(p, ctx) != st.import_mask) return false;
+  for (auto& f : st.calls) f.ctx.eval_state = ctx.eval_state;
+  for (const auto& imp : st.imports)
+    std::copy_n(ctx.in[imp.input].data + imp.offset, imp.len, imp.dst);
+  for (const auto& instr : st.program) {
+    switch (instr.kind) {
+      case StreamInstr::Call: {
+        FrozenCall& f = st.calls[instr.index];
+        if (f.ctx.dyn_lengths) apply_dynamic_length(f.ctx);
+        f.n->forward(f.ctx);
+        break;
+      }
+      case StreamInstr::InPlace: {
+        FrozenInPlace& fi = st.inplaces[instr.index];
+        double* old = st.inplace_old.data() + fi.old_offset;
+        for (size_t k = 0; k < fi.positions.size(); ++k) {
+          const int64_t at = fi.positions[k];
+          old[k] = fi.base[at];
+          fi.base[at] = fi.rhs[k];
+        }
+        break;
+      }
+      case StreamInstr::Copy: {
+        const FrozenCopy& fc = st.copies[instr.index];
+        std::copy_n(fc.src, fc.len, fc.dst);
+        break;
+      }
+      case StreamInstr::Seg: {
+        FrozenSegment& fs = st.segs[instr.index];
+        for (const auto& in : fs.ins) {
+          double* r = fs.frame + in.reg;
+          for (int i = 0; i < in.len; ++i) r[i] = in.src[i];
+        }
+        run_program(fs.segment->program, fs.frame, ctx.eval_state);
+        break;
+      }
+      case StreamInstr::Guard: {
+        const FrozenGuard& g = st.guards[instr.index];
+        const bool ok = g.kind == FrozenGuard::For
+                           ? (g.a[0] == g.va && g.b[0] == g.vb)
+                           : ((g.a[0] != 0.0) == g.decision);
+        if (!ok) return false;
+        break;
+      }
+      case StreamInstr::Set:
+        *st.sets[instr.index].ptr = st.sets[instr.index].value;
+        break;
+      case StreamInstr::Tgt:
+        break;
+    }
+  }
+  int64_t pos = 0;
+  for (size_t i = 0; i < st.output_value.size(); ++i) {
+    std::copy_n(st.output_value[i], st.output_len[i], ctx.out.data + pos);
+    pos += st.output_len[i];
+  }
+  if (p.has_target) {
+    for (size_t i = 0; i < st.targets.size(); ++i)
+      st.target_work[i] = *st.targets[i].value;
+    ctx.out.data[pos++] = reduce_target(st.target_work);
+  }
+  return true;
+}
+
+void replay_backward(LoopState& s, KernelCtx& ctx) {
+  Stream& st = *s.stream;
+  const StructuredLoop& p = s.p;
+  std::fill(st.adjoints.begin(), st.adjoints.end(), 0.0);
+  int64_t pos = 0;
+  for (size_t i = 0; i < st.output_value.size(); ++i) {
+    if (double* a = resolve_adjoint(st.output_adjoint[i], st.adjoints.data(), p, ctx))
+      for (int64_t k = 0; k < st.output_len[i]; ++k)
+        a[k] += ctx.out_adj_vec.data[pos + k];
+    pos += st.output_len[i];
+  }
+  if (p.has_target)
+    for (const auto& t : st.targets)
+      if (double* a = resolve_adjoint(t.adjoint, st.adjoints.data(), p, ctx))
+        *a += ctx.out_adj_vec.data[pos];
+  for (size_t i = st.backward_program.size(); i-- > 0;) {
+    const BackwardInstr& instr = st.backward_program[i];
+    switch (instr.kind) {
+      case BackwardInstr::Kernel: {
+        FrozenCall& f = st.calls[instr.index];
+        for (int k = 0; k < f.ctx.n_in; ++k)
+          f.ctx.in_adj[k].data =
+              resolve_adjoint(f.in_adjoint[k], st.adjoints.data(), p, ctx);
+        f.ctx.out_adj_vec.data =
+            resolve_adjoint(f.out_adjoint, st.adjoints.data(), p, ctx);
+        if (f.reuse_primal) {
+          f.ctx.scratch = nullptr;
+          if (f.ctx.dyn_lengths) apply_dynamic_length(f.ctx);
+          if (f.ctx.out.len == 1 && f.ctx.out_adj_vec.data)
+            f.ctx.out_adj = f.ctx.out_adj_vec.data[0];
+          f.n->backward(f.ctx);
+          break;
+        }
+        if (f.ctx.out2.data) {
+          double* out2_adj = resolve_adjoint(f.out2_adjoint, st.adjoints.data(), p, ctx);
+          f.ctx.out2_adj = out2_adj ? *out2_adj : 0.0;
+        }
+        if (f.ctx.dyn_lengths) apply_dynamic_length(f.ctx);
+        if (f.ctx.out.len == 1 && f.ctx.out_adj_vec.data)
+          f.ctx.out_adj = f.ctx.out_adj_vec.data[0];
+        f.n->backward(f.ctx);
+        break;
+      }
+      case BackwardInstr::InPlace: {
+        FrozenInPlace& fi = st.inplaces[instr.index];
+        double* adj_base = resolve_adjoint(fi.base_adjoint, st.adjoints.data(), p, ctx);
+        double* adj_rhs = resolve_adjoint(fi.rhs_adjoint, st.adjoints.data(), p, ctx);
+        const double* old = st.inplace_old.data() + fi.old_offset;
+        for (size_t k = fi.positions.size(); k-- > 0;) {
+          const int64_t at = fi.positions[k];
+          if (adj_base) {
+            if (adj_rhs) adj_rhs[k] += adj_base[at];
+            adj_base[at] = 0;
+          }
+          fi.base[at] = old[k];
+        }
+        break;
+      }
+      case BackwardInstr::Copy: {
+        const FrozenCopy& fc = st.copies[instr.index];
+        double* from = resolve_adjoint(fc.from_adjoint, st.adjoints.data(), p, ctx);
+        double* to = resolve_adjoint(fc.to_adjoint, st.adjoints.data(), p, ctx);
+        if (from && to)
+          for (int64_t k = 0; k < fc.len; ++k) from[k] += to[k];
+        break;
+      }
+      case BackwardInstr::Seg: {
+        FrozenSegment& fs = st.segs[instr.index];
+        double* file = st.adjoints.data() + fs.adjoint_base;
+        run_adjoint(fs.segment->program, fs.segment->program.adj, fs.frame, file);
+        for (size_t k = 0; k < fs.ins.size(); ++k) {
+          double* dst = resolve_adjoint(fs.in_adjoint[k], st.adjoints.data(), p, ctx);
+          if (!dst) continue;
+          const auto& in = fs.ins[k];
+          for (int j = 0; j < in.len; ++j)
+            dst[j] += file[fs.segment->program.adj
+                               .adj_reg[static_cast<size_t>(in.reg + j)]];
+        }
+        break;
+      }
+    }
+  }
+}
+
 KernelState* make_loop_state(const Op& op, const Slot*) {
   return new LoopState(*static_cast<const StructuredLoop*>(op.udata));
 }
@@ -2107,14 +2641,48 @@ void StructuredLoop::prepare() {
   body.compact_idata();
 }
 
+void emit_replay_diagnostic(const LoopState& s, bool replayed,
+                            size_t instructions, size_t guards,
+                            size_t cells) {
+  emit_diagnostic("stanli_structured replay: replay=" +
+                  std::to_string(replayed ? 1 : 0) +
+                  " instructions=" + std::to_string(instructions) +
+                  " guards=" + std::to_string(guards) +
+                  " cells=" + std::to_string(cells) +
+                  " respecialized=" + std::to_string(s.respecialized));
+}
+
 void structured_loop_forward(KernelCtx& ctx) {
   LoopState& s = require_state(ctx);
   const StructuredLoop& p = s.p;
+  if (s.stream && !s.no_replay) {
+    s.arena = BlockArena{};
+    std::vector<Version>().swap(s.versions);
+    std::vector<int32_t>().swap(s.owner);
+    std::vector<int64_t>().swap(s.handles);
+    std::vector<double>().swap(s.undo);
+    std::vector<Record>().swap(s.records);
+    std::vector<int64_t>().swap(s.target_refs);
+    if (replay_forward(s, ctx)) {
+      s.last_replayed = true;
+      s.reverse_ready = true;
+      if (s.diagnostics)
+        emit_replay_diagnostic(s, true, s.stream->program.size(),
+                               s.stream->guards.size(),
+                               s.stream->arena.cells.size());
+      return;
+    }
+    s.stream.reset();
+    ++s.respecialized;
+  }
+  s.last_replayed = false;
   s.release();
   int64_t expected = p.has_target ? 1 : 0;
   for (int slot : p.outputs) expected += p.body.slots[slot].len;
   if (expected != ctx.out.len)
     throw std::logic_error("structured output size mismatch");
+  const bool replaying = s.memo_ready;
+  if (replaying && !s.no_replay) s.building = std::make_unique<Stream>();
   Execution e{p, s, ctx};
   double* initial = s.arena.allocate(p.initial_size);
   std::fill_n(initial, p.initial_size, 0.0);
@@ -2134,6 +2702,9 @@ void structured_loop_forward(KernelCtx& ctx) {
                 initial + slot.offset);
     s.versions[static_cast<size_t>(s.bindings[in.slot])].adjoint =
         ctx.in_adj[in.input].data ? -(static_cast<int64_t>(ordinal) + 2) : -1;
+    if (s.building)
+      s.building->imports.push_back(
+          FrozenImport{initial + slot.offset, slot.len, in.input, in.offset});
   }
   for (uint32_t site : s.transient_sites) {
     const Node& n = *s.sites[site];
@@ -2181,7 +2752,6 @@ void structured_loop_forward(KernelCtx& ctx) {
   } else {
     for (auto& version : s.memo_shared) version = e.make_version(nullptr, -1);
   }
-  const bool replaying = s.memo_ready;
   s.memo_restores = 0;
   for (auto& c : s.ctx) c.eval_state = ctx.eval_state;
 
@@ -2196,22 +2766,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     for (size_t i = 0; i < s.target_refs.size(); ++i)
       s.target_work[i] =
           s.versions[static_cast<size_t>(s.target_refs[i])].value[0];
-    size_t count = s.target_work.size();
-    while (count > 1) {
-      size_t next = 0;
-      for (size_t i = 0; i < count; i += 6) {
-        if (i + 1 == count) {
-          s.target_work[next++] = s.target_work[i];
-          continue;
-        }
-        double sum = 0;
-        for (size_t j = i; j < std::min(count, i + 6); ++j)
-          sum += s.target_work[j];
-        s.target_work[next++] = sum;
-      }
-      count = next;
-    }
-    ctx.out.data[pos++] = count ? s.target_work[0] : 0.0;
+    ctx.out.data[pos++] = reduce_target(s.target_work);
   }
   if (!replaying) {
     s.record_arena = std::max(s.record_arena, s.arena.used());
@@ -2250,6 +2805,12 @@ void structured_loop_forward(KernelCtx& ctx) {
         " record_arena=" + std::to_string(s.record_arena) +
         " record_versions=" + std::to_string(s.record_versions));
   }
+  if (s.building) freeze(s, ctx);
+  if (s.diagnostics)
+    emit_replay_diagnostic(
+        s, false, s.stream ? s.stream->program.size() : 0,
+        s.stream ? s.stream->guards.size() : 0,
+        s.stream ? s.stream->arena.cells.size() : 0);
   s.memo_ready = true;
   s.reverse_ready = true;
 }
@@ -2261,6 +2822,10 @@ void structured_loop_backward(KernelCtx& ctx) {
     throw std::logic_error(
         "structured reverse has no successful forward state");
   s.reverse_ready = false;
+  if (s.last_replayed) {
+    replay_backward(s, ctx);
+    return;
+  }
   struct Release {
     LoopState& state;
     ~Release() { state.release(); }
