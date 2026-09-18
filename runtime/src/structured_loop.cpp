@@ -1855,6 +1855,7 @@ struct Execution {
     s.version_peak = std::max(s.version_peak, s.versions.size());
     s.versions.resize(at.versions);
     s.owner.resize(at.versions);
+    s.version_const.resize(at.versions);
     const int64_t* kept = s.keep_version.data() + s.keep_version_base[m];
     for (size_t k = 0; k < n.memo_keep.size(); ++k)
       s.bindings[n.memo_keep[k]] = kept[k];
