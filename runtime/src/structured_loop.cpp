@@ -2728,6 +2728,89 @@ void StructuredLoop::prepare() {
   body.compact_idata();
 }
 
+template <typename T>
+void emit_pool_bytes(const char* name, const std::vector<T>& v) {
+  emit_diagnostic("stanli_structured freeze_bytes: pool=" +
+                  std::string(name) +
+                  " bytes=" + std::to_string(v.size() * sizeof(T)) +
+                  " capacity=" + std::to_string(v.capacity() * sizeof(T)));
+}
+
+void emit_freeze_breakdown(const LoopState& s) {
+  const Stream& st = *s.stream;
+  emit_pool_bytes("program", st.program);
+  emit_pool_bytes("backward_order", st.backward_order);
+  emit_pool_bytes("calls", st.calls);
+  emit_pool_bytes("inplaces", st.inplaces);
+  emit_pool_bytes("copies", st.copies);
+  emit_pool_bytes("segs", st.segs);
+  emit_pool_bytes("guards", st.guards);
+  emit_pool_bytes("targets", st.targets);
+  emit_pool_bytes("sets", st.sets);
+  emit_pool_bytes("call_ptrs", st.call_ptrs);
+  emit_pool_bytes("call_adj", st.call_adj);
+  emit_pool_bytes("inplace_pos", st.inplace_pos);
+  emit_pool_bytes("inplace_sel_ptr", st.inplace_sel_ptr);
+  emit_pool_bytes("inplace_sel_snapshot", st.inplace_sel_snapshot);
+  emit_pool_bytes("inplace_adj", st.inplace_adj);
+  emit_pool_bytes("copy_adj", st.copy_adj);
+  emit_pool_bytes("seg_in_src", st.seg_in_src);
+  emit_pool_bytes("seg_in_adj", st.seg_in_adj);
+  emit_pool_bytes("arena_cells", st.arena.cells);
+  emit_pool_bytes("arena_ranges", st.arena.ranges);
+  emit_pool_bytes("adjoints", st.adjoints);
+  emit_pool_bytes("inplace_old", st.inplace_old);
+  emit_pool_bytes("target_work", st.target_work);
+  emit_pool_bytes("imports", st.imports);
+  emit_pool_bytes("output_value", st.output_value);
+  emit_pool_bytes("output_len", st.output_len);
+  emit_pool_bytes("output_adjoint", st.output_adjoint);
+  emit_pool_bytes("state_bindings", s.bindings);
+  emit_pool_bytes("state_workspace", s.workspace);
+  emit_pool_bytes("state_ctx", s.ctx);
+  emit_pool_bytes("state_sites", s.sites);
+  emit_pool_bytes("state_transient_sites", s.transient_sites);
+  emit_pool_bytes("state_transient_loops", s.transient_loops);
+  emit_pool_bytes("state_version_const", s.version_const);
+  emit_pool_bytes("state_node_generation", s.node_generation);
+  emit_pool_bytes("state_node_version", s.node_version);
+  emit_pool_bytes("state_node_version2", s.node_version2);
+  emit_pool_bytes("state_loop_generation", s.loop_generation);
+  emit_pool_bytes("state_loop_version", s.loop_version);
+  {
+    size_t bytes = 0, cap = 0;
+    for (const auto& tape : s.memo_tape) {
+      bytes += tape.size() * sizeof(double);
+      cap += tape.capacity() * sizeof(double);
+    }
+    emit_diagnostic("stanli_structured freeze_bytes: pool=state_memo_tape bytes=" +
+                    std::to_string(bytes) + " capacity=" + std::to_string(cap));
+  }
+  emit_pool_bytes("state_memo_entries", s.memo_entries);
+  emit_pool_bytes("state_memo_stride", s.memo_stride);
+  emit_pool_bytes("state_memo_ordinal", s.memo_ordinal);
+  emit_pool_bytes("state_memo_nodes", s.memo_nodes);
+  emit_pool_bytes("state_memo_shared_base", s.memo_shared_base);
+  emit_pool_bytes("state_memo_shared", s.memo_shared);
+  {
+    size_t bytes = 0, cap = 0;
+    for (const auto& inv : s.memo_invariant) {
+      bytes += inv.size() * sizeof(uint32_t);
+      cap += inv.capacity() * sizeof(uint32_t);
+    }
+    emit_diagnostic(
+        "stanli_structured freeze_bytes: pool=state_memo_invariant bytes=" +
+        std::to_string(bytes) + " capacity=" + std::to_string(cap));
+  }
+  emit_pool_bytes("state_memo_release", s.memo_release);
+  emit_pool_bytes("state_keep_store", s.keep_store);
+  emit_pool_bytes("state_keep_version", s.keep_version);
+  emit_pool_bytes("state_keep_offset", s.keep_offset);
+  emit_pool_bytes("state_keep_store_base", s.keep_store_base);
+  emit_pool_bytes("state_keep_version_base", s.keep_version_base);
+  emit_pool_bytes("state_trace", s.trace);
+}
+
 void emit_replay_diagnostic(const LoopState& s, bool replayed,
                             size_t instructions, size_t guards,
                             size_t cells, size_t backward) {
@@ -2903,6 +2986,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     std::vector<Record>().swap(s.records);
     std::vector<int64_t>().swap(s.target_refs);
     if (s.stream) s.last_replayed = true;
+    if (s.diagnostics && s.stream) emit_freeze_breakdown(s);
   }
   if (s.diagnostics)
     emit_replay_diagnostic(
