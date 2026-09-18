@@ -1983,10 +1983,11 @@ struct Execution {
       fi.rhs = source;
       fi.old_offset = static_cast<uint32_t>(st.inplace_old.size());
       fi.pos_offset = static_cast<uint32_t>(st.inplace_pos.size());
-      for (size_t k = static_cast<size_t>(undo); k < s.undo.size(); k += 2)
+      for (size_t k = static_cast<size_t>(undo); k < s.undo.size(); k += 2) {
         st.inplace_pos.push_back(static_cast<int32_t>(s.undo[k]));
+        st.inplace_old.push_back(s.undo[k + 1]);
+      }
       fi.pos_count = static_cast<uint32_t>(st.inplace_pos.size()) - fi.pos_offset;
-      st.inplace_old.resize(st.inplace_old.size() + fi.pos_count);
       fi.sel_offset = static_cast<uint32_t>(st.inplace_sel_ptr.size());
       for (int k = 1; k < layout.rhs; ++k)
         for (int64_t i = 0; i < c.in[k].len; ++i) {
