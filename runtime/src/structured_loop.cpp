@@ -1469,56 +1469,29 @@ struct Record {
 static_assert(sizeof(Record) == 32, "records are the largest tape entry");
 
 struct FrozenCall {
-  const Node* n = nullptr;
-  KernelCtx ctx;
-  int64_t in_version[6] = {-1, -1, -1, -1, -1, -1};
-  int64_t out_version = -1;
-  int64_t out2_version = -1;
-  int64_t in_adjoint[6] = {-1, -1, -1, -1, -1, -1};
-  int64_t out_adjoint = -1;
-  int64_t out2_adjoint = -1;
-  bool active = false;
-  bool reuse_primal = false;
+  uint32_t site = 0;
+  uint32_t ptr_offset = 0;
+  uint32_t adj_offset = 0;
 };
 
 struct FrozenInPlace {
-  const Node* n = nullptr;
   double* base = nullptr;
   const double* rhs = nullptr;
-  std::vector<int64_t> positions;
-  size_t old_offset = 0;
-  int64_t base_version = -1;
-  int64_t rhs_version = -1;
-  int64_t base_adjoint = -1;
-  int64_t rhs_adjoint = -1;
-  std::vector<const double*> selector_ptr;
-  std::vector<int64_t> selector_len;
-  std::vector<double> selector_snapshot;
+  uint32_t pos_offset = 0, pos_count = 0;
+  uint32_t old_offset = 0;
+  uint32_t sel_offset = 0, sel_count = 0;
 };
 
 struct FrozenCopy {
   const double* src = nullptr;
   double* dst = nullptr;
   int64_t len = 0;
-  int64_t from_version = -1;
-  int64_t to_version = -1;
-  int64_t from_adjoint = -1;
-  int64_t to_adjoint = -1;
-};
-
-struct SegmentInput {
-  const double* src = nullptr;
-  int64_t version = -1;
-  int reg = 0;
-  int len = 0;
 };
 
 struct FrozenSegment {
-  const Node* n = nullptr;
   const Segment* segment = nullptr;
   double* frame = nullptr;
-  std::vector<SegmentInput> ins;
-  std::vector<int64_t> in_adjoint;
+  uint32_t in_offset = 0;
   int64_t adjoint_base = -1;
 };
 
@@ -1537,8 +1510,7 @@ struct FrozenGuard {
 
 struct FrozenTarget {
   const double* value = nullptr;
-  int64_t version = -1;
-  int64_t adjoint = -1;
+  int32_t adjoint = -1;
 };
 
 struct FrozenImport {
@@ -1553,11 +1525,6 @@ struct StreamInstr {
   uint32_t index = 0;
 };
 
-struct BackwardInstr {
-  enum Kind : uint8_t { Kernel, InPlace, Copy, Seg } kind;
-  uint32_t index = 0;
-};
-
 struct Stream {
   std::vector<StreamInstr> program;
   std::vector<FrozenCall> calls;
@@ -1566,8 +1533,22 @@ struct Stream {
   std::vector<FrozenSegment> segs;
   std::vector<FrozenGuard> guards;
   std::vector<FrozenTarget> targets;
+  std::vector<int64_t> target_adj_version;
   std::vector<FrozenSet> sets;
-  std::vector<BackwardInstr> backward_program;
+
+  std::vector<double*> call_ptrs;
+  std::vector<int32_t> call_adj;
+  std::vector<int64_t> call_adj_version;
+  std::vector<int32_t> inplace_pos;
+  std::vector<const double*> inplace_sel_ptr;
+  std::vector<double> inplace_sel_snapshot;
+  std::vector<int32_t> inplace_adj;
+  std::vector<int64_t> inplace_adj_version;
+  std::vector<int32_t> copy_adj;
+  std::vector<int64_t> copy_adj_version;
+  std::vector<const double*> seg_in_src;
+  std::vector<int32_t> seg_in_adj;
+  std::vector<int64_t> seg_in_adj_version;
 
   ArenaSnapshot arena;
   std::vector<double> adjoints;
@@ -1577,10 +1558,10 @@ struct Stream {
   std::vector<FrozenImport> imports;
   std::vector<const double*> output_value;
   std::vector<int64_t> output_len;
-  std::vector<int64_t> output_adjoint;
+  std::vector<int32_t> output_adjoint;
   int64_t adjoint_size = 0;
   uint64_t import_mask = 0;
-  size_t respecialized = 0;
+  bool reuse_primals = false;
 };
 
 double* resolve_adjoint(int64_t id, double* adjoints, const StructuredLoop& p,
@@ -1856,38 +1837,23 @@ struct Execution {
 
   void log_call(const Node& n, const Op& op, const KernelCtx& c) {
     if (!s.building) return;
-    FrozenCall f;
-    f.n = &n;
-    f.ctx.n_in = op.n_in;
-    f.ctx.variant = op.variant;
-    f.ctx.idata = op.idata;
-    f.ctx.n_idata = op.n_idata;
-    f.ctx.udata = op.udata;
-    f.ctx.dyn_capacity = op.dyn_capacity;
-    f.ctx.dyn_extent_in = op.dyn_extent_in;
-    f.ctx.dyn_lengths = op.dyn_lengths;
-    for (int k = 0; k < op.n_in; ++k) {
-      const int64_t len = p.body.slots[op.in[k]].len;
-      f.ctx.in[k] = Desc{c.in[k].data, len};
-      f.ctx.in_adj[k] = Desc{nullptr, len};
-    }
-    f.ctx.out = Desc{c.out.data, p.body.slots[op.out].len};
-    f.ctx.out_adj_vec = Desc{nullptr, p.body.slots[op.out].len};
-    if (op.out2 >= 0) f.ctx.out2 = Desc{c.out2.data, p.body.slots[op.out2].len};
-    f.ctx.scratch = c.scratch;
-    f.active = n.active;
-    f.reuse_primal = n.reuse_primal_output && s.reuse_primals;
-    if (n.active) {
-      for (int k = 0; k < op.n_in; ++k) f.in_version[k] = s.bindings[op.in[k]];
-      f.out_version = s.bindings[op.out];
-      if (op.out2 >= 0) f.out2_version = s.bindings[op.out2];
-    }
     Stream& st = *s.building;
+    const uint32_t ptr_offset = static_cast<uint32_t>(st.call_ptrs.size());
+    for (int k = 0; k < op.n_in; ++k) st.call_ptrs.push_back(c.in[k].data);
+    st.call_ptrs.push_back(c.out.data);
+    if (op.out2 >= 0) st.call_ptrs.push_back(c.out2.data);
+    st.call_ptrs.push_back(c.scratch);
+    uint32_t adj_offset = 0;
+    if (n.active) {
+      adj_offset = static_cast<uint32_t>(st.call_adj_version.size());
+      for (int k = 0; k < op.n_in; ++k)
+        st.call_adj_version.push_back(s.bindings[op.in[k]]);
+      st.call_adj_version.push_back(s.bindings[op.out]);
+      if (op.out2 >= 0) st.call_adj_version.push_back(s.bindings[op.out2]);
+    }
     const uint32_t idx = static_cast<uint32_t>(st.calls.size());
     st.program.push_back(StreamInstr{StreamInstr::Call, idx});
-    if (n.active)
-      st.backward_program.push_back(BackwardInstr{BackwardInstr::Kernel, idx});
-    st.calls.push_back(std::move(f));
+    st.calls.push_back(FrozenCall{n.site, ptr_offset, adj_offset});
   }
 
   void run_transient(const Node& n, const Op& op, KernelCtx& c) {
@@ -1959,16 +1925,12 @@ struct Execution {
       s.records.push_back(Record{Record::Copy, n.site, 0, base, fresh});
       if (s.building) {
         Stream& st = *s.building;
-        FrozenCopy fc;
-        fc.src = s.versions[static_cast<size_t>(base)].value;
-        fc.dst = copy;
-        fc.len = len;
-        fc.from_version = base;
-        fc.to_version = fresh;
+        st.copy_adj_version.push_back(base);
+        st.copy_adj_version.push_back(fresh);
         const uint32_t idx = static_cast<uint32_t>(st.copies.size());
         st.program.push_back(StreamInstr{StreamInstr::Copy, idx});
-        st.backward_program.push_back(BackwardInstr{BackwardInstr::Copy, idx});
-        st.copies.push_back(fc);
+        st.copies.push_back(FrozenCopy{s.versions[static_cast<size_t>(base)].value,
+                                       copy, len});
       }
       s.bindings[base_slot] = base = fresh;
     } else if (rhs_active &&
@@ -1996,25 +1958,26 @@ struct Execution {
     if (s.building) {
       Stream& st = *s.building;
       FrozenInPlace fi;
-      fi.n = &n;
       fi.base = values;
       fi.rhs = source;
-      fi.base_version = base;
-      fi.rhs_version = rhs;
-      fi.old_offset = st.inplace_old.size();
+      fi.old_offset = static_cast<uint32_t>(st.inplace_old.size());
+      fi.pos_offset = static_cast<uint32_t>(st.inplace_pos.size());
       for (size_t k = static_cast<size_t>(undo); k < s.undo.size(); k += 2)
-        fi.positions.push_back(static_cast<int64_t>(s.undo[k]));
-      st.inplace_old.resize(st.inplace_old.size() + fi.positions.size());
-      for (int k = 1; k < layout.rhs; ++k) {
-        fi.selector_ptr.push_back(c.in[k].data);
-        fi.selector_len.push_back(c.in[k].len);
-        fi.selector_snapshot.insert(fi.selector_snapshot.end(), c.in[k].data,
-                                    c.in[k].data + c.in[k].len);
-      }
+        st.inplace_pos.push_back(static_cast<int32_t>(s.undo[k]));
+      fi.pos_count = static_cast<uint32_t>(st.inplace_pos.size()) - fi.pos_offset;
+      st.inplace_old.resize(st.inplace_old.size() + fi.pos_count);
+      fi.sel_offset = static_cast<uint32_t>(st.inplace_sel_ptr.size());
+      for (int k = 1; k < layout.rhs; ++k)
+        for (int64_t i = 0; i < c.in[k].len; ++i) {
+          st.inplace_sel_ptr.push_back(c.in[k].data + i);
+          st.inplace_sel_snapshot.push_back(c.in[k].data[i]);
+        }
+      fi.sel_count = static_cast<uint32_t>(st.inplace_sel_ptr.size()) - fi.sel_offset;
+      st.inplace_adj_version.push_back(base);
+      st.inplace_adj_version.push_back(rhs);
       const uint32_t idx = static_cast<uint32_t>(st.inplaces.size());
       st.program.push_back(StreamInstr{StreamInstr::InPlace, idx});
-      st.backward_program.push_back(BackwardInstr{BackwardInstr::InPlace, idx});
-      st.inplaces.push_back(std::move(fi));
+      st.inplaces.push_back(fi);
     }
   }
 
@@ -2244,8 +2207,8 @@ struct Execution {
           st.program.push_back(
               StreamInstr{StreamInstr::Tgt,
                          static_cast<uint32_t>(st.targets.size())});
-          st.targets.push_back(
-              FrozenTarget{value(n.src), s.bindings[n.src], -1});
+          st.targets.push_back(FrozenTarget{value(n.src), -1});
+          st.target_adj_version.push_back(s.bindings[n.src]);
         }
         return Normal;
       case Node::Segment:
@@ -2265,17 +2228,19 @@ struct Execution {
       for (const auto& in : segment.ins)
         s.handles.push_back(s.bindings[in.slot]);
     }
-    std::vector<SegmentInput> logged_ins;
-    if (s.building) logged_ins.reserve(segment.ins.size());
+    const uint32_t seg_in_offset =
+        s.building ? static_cast<uint32_t>(s.building->seg_in_src.size()) : 0;
     for (size_t k = 0; k < segment.ins.size(); ++k) {
       const auto& in = segment.ins[k];
       const double* v = value(in.slot);
       double* r = frame + in.reg;
       for (int i = 0; i < in.len; ++i) r[i] = v[i];
-      if (s.building)
-        logged_ins.push_back(SegmentInput{
-            v, n.active ? s.handles[static_cast<size_t>(handles) + k] : -1,
-            in.reg, in.len});
+      if (s.building) {
+        Stream& st = *s.building;
+        st.seg_in_src.push_back(v);
+        st.seg_in_adj_version.push_back(
+            n.active ? s.handles[static_cast<size_t>(handles) + k] : -1);
+      }
     }
     run_program(program, frame, outer.eval_state);
     const int64_t base = n.active ? reserve_adjoint(program.adj.n_regs) : -1;
@@ -2290,17 +2255,9 @@ struct Execution {
                                  make_version(frame, -1), base});
     if (s.building) {
       Stream& st = *s.building;
-      FrozenSegment fs;
-      fs.n = &n;
-      fs.segment = &segment;
-      fs.frame = frame;
-      fs.ins = std::move(logged_ins);
-      fs.adjoint_base = base;
       const uint32_t idx = static_cast<uint32_t>(st.segs.size());
       st.program.push_back(StreamInstr{StreamInstr::Seg, idx});
-      if (n.active)
-        st.backward_program.push_back(BackwardInstr{BackwardInstr::Seg, idx});
-      st.segs.push_back(std::move(fs));
+      st.segs.push_back(FrozenSegment{&segment, frame, seg_in_offset, base});
     }
   }
 
@@ -2392,53 +2349,53 @@ void freeze(LoopState& s, KernelCtx& ctx) {
   const StructuredLoop& p = s.p;
   Stream& st = *s.building;
   s.arena.snapshot(st.arena);
+  s.arena = BlockArena{};
   const auto remap = [&](double* ptr) { return st.arena.remap(ptr); };
   const auto remap_c = [&](const double* ptr) -> const double* {
     return st.arena.remap(const_cast<double*>(ptr));
   };
-  const auto adj_of = [&](int64_t version) -> int64_t {
-    return version < 0 ? -1 : s.versions[static_cast<size_t>(version)].adjoint;
+  const auto adj_of = [&](int64_t version) -> int32_t {
+    return static_cast<int32_t>(
+        version < 0 ? -1 : s.versions[static_cast<size_t>(version)].adjoint);
+  };
+  const auto resolve_pool = [&](std::vector<int64_t>& versions,
+                                std::vector<int32_t>& ids) {
+    ids.resize(versions.size());
+    for (size_t i = 0; i < versions.size(); ++i) ids[i] = adj_of(versions[i]);
+    std::vector<int64_t>().swap(versions);
   };
 
-  for (auto& f : st.calls) {
-    for (int k = 0; k < f.ctx.n_in; ++k) f.ctx.in[k].data = remap(f.ctx.in[k].data);
-    f.ctx.out.data = remap(f.ctx.out.data);
-    f.ctx.out2.data = remap(f.ctx.out2.data);
-    f.ctx.scratch = remap(f.ctx.scratch);
-    if (f.active) {
-      for (int k = 0; k < f.ctx.n_in; ++k) f.in_adjoint[k] = adj_of(f.in_version[k]);
-      f.out_adjoint = adj_of(f.out_version);
-      f.out2_adjoint = adj_of(f.out2_version);
-    }
-  }
+  for (auto& ptr : st.call_ptrs) ptr = remap(ptr);
+  resolve_pool(st.call_adj_version, st.call_adj);
+
   for (auto& fi : st.inplaces) {
     fi.base = remap(fi.base);
     fi.rhs = remap_c(fi.rhs);
-    fi.base_adjoint = adj_of(fi.base_version);
-    fi.rhs_adjoint = adj_of(fi.rhs_version);
-    for (auto& ptr : fi.selector_ptr) ptr = remap_c(ptr);
   }
+  for (auto& ptr : st.inplace_sel_ptr) ptr = remap_c(ptr);
+  resolve_pool(st.inplace_adj_version, st.inplace_adj);
+
   for (auto& fc : st.copies) {
     fc.src = remap_c(fc.src);
     fc.dst = remap(fc.dst);
-    fc.from_adjoint = adj_of(fc.from_version);
-    fc.to_adjoint = adj_of(fc.to_version);
   }
-  for (auto& fseg : st.segs) {
-    fseg.frame = remap(fseg.frame);
-    fseg.in_adjoint.resize(fseg.ins.size());
-    for (size_t k = 0; k < fseg.ins.size(); ++k) {
-      fseg.in_adjoint[k] = adj_of(fseg.ins[k].version);
-      fseg.ins[k].src = remap_c(fseg.ins[k].src);
-    }
-  }
+  resolve_pool(st.copy_adj_version, st.copy_adj);
+
+  for (auto& fseg : st.segs) fseg.frame = remap(fseg.frame);
+  for (auto& ptr : st.seg_in_src) ptr = remap_c(ptr);
+  resolve_pool(st.seg_in_adj_version, st.seg_in_adj);
+
   for (auto& g : st.guards) {
     g.a = remap_c(g.a);
     g.b = remap_c(g.b);
   }
-  for (auto& t : st.targets) {
-    t.value = remap_c(t.value);
-    t.adjoint = adj_of(t.version);
+  for (size_t i = 0; i < st.targets.size(); ++i)
+    st.targets[i].value = remap_c(st.targets[i].value);
+  {
+    std::vector<int32_t> target_adj;
+    resolve_pool(st.target_adj_version, target_adj);
+    for (size_t i = 0; i < st.targets.size(); ++i)
+      st.targets[i].adjoint = target_adj[i];
   }
   for (auto& set : st.sets) set.ptr = remap(set.ptr);
   for (auto& imp : st.imports) imp.dst = remap(imp.dst);
@@ -2452,10 +2409,12 @@ void freeze(LoopState& s, KernelCtx& ctx) {
     st.output_len.push_back(p.body.slots[slot].len);
     st.output_adjoint.push_back(adj_of(v));
   }
+  std::vector<Version>().swap(s.versions);
   st.adjoint_size = s.adjoint_size;
   st.adjoints.assign(static_cast<size_t>(st.adjoint_size), 0.0);
   st.target_work.resize(st.targets.size());
   st.import_mask = import_activity_mask(p, ctx);
+  st.reuse_primals = s.reuse_primals;
 
   s.stream = std::move(s.building);
   s.building.reset();
@@ -2465,26 +2424,37 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
   Stream& st = *s.stream;
   const StructuredLoop& p = s.p;
   if (import_activity_mask(p, ctx) != st.import_mask) return false;
-  for (auto& f : st.calls) f.ctx.eval_state = ctx.eval_state;
+  for (auto& c : s.ctx) c.eval_state = ctx.eval_state;
   for (const auto& imp : st.imports)
     std::copy_n(ctx.in[imp.input].data + imp.offset, imp.len, imp.dst);
   for (const auto& instr : st.program) {
     switch (instr.kind) {
       case StreamInstr::Call: {
-        FrozenCall& f = st.calls[instr.index];
-        if (f.ctx.dyn_lengths) apply_dynamic_length(f.ctx);
-        f.n->forward(f.ctx);
+        const FrozenCall& f = st.calls[instr.index];
+        const Node* n = s.sites[f.site];
+        const Op& op = p.body.ops[n->op];
+        KernelCtx& c = s.ctx[f.site];
+        double** ptrs = st.call_ptrs.data() + f.ptr_offset;
+        c.n_in = op.n_in;
+        for (int k = 0; k < op.n_in; ++k) c.in[k].data = ptrs[k];
+        c.out.data = ptrs[op.n_in];
+        int next = op.n_in + 1;
+        if (op.out2 >= 0) c.out2.data = ptrs[next++];
+        c.scratch = ptrs[next];
+        if (c.dyn_lengths) apply_dynamic_length(c);
+        n->forward(c);
         break;
       }
       case StreamInstr::InPlace: {
-        FrozenInPlace& fi = st.inplaces[instr.index];
-        size_t at = 0;
-        for (size_t k = 0; k < fi.selector_ptr.size(); ++k)
-          for (int64_t j = 0; j < fi.selector_len[k]; ++j, ++at)
-            if (fi.selector_ptr[k][j] != fi.selector_snapshot[at]) return false;
+        const FrozenInPlace& fi = st.inplaces[instr.index];
+        for (uint32_t k = 0; k < fi.sel_count; ++k) {
+          const uint32_t at = fi.sel_offset + k;
+          if (*st.inplace_sel_ptr[at] != st.inplace_sel_snapshot[at])
+            return false;
+        }
         double* old = st.inplace_old.data() + fi.old_offset;
-        for (size_t k = 0; k < fi.positions.size(); ++k) {
-          const int64_t at = fi.positions[k];
+        for (uint32_t k = 0; k < fi.pos_count; ++k) {
+          const int64_t at = st.inplace_pos[fi.pos_offset + k];
           old[k] = fi.base[at];
           fi.base[at] = fi.rhs[k];
         }
@@ -2496,10 +2466,12 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
         break;
       }
       case StreamInstr::Seg: {
-        FrozenSegment& fs = st.segs[instr.index];
-        for (const auto& in : fs.ins) {
-          double* r = fs.frame + in.reg;
-          for (int i = 0; i < in.len; ++i) r[i] = in.src[i];
+        const FrozenSegment& fs = st.segs[instr.index];
+        const auto& ins = fs.segment->ins;
+        for (size_t k = 0; k < ins.size(); ++k) {
+          double* r = fs.frame + ins[k].reg;
+          const double* src = st.seg_in_src[fs.in_offset + k];
+          for (int i = 0; i < ins[k].len; ++i) r[i] = src[i];
         }
         run_program(fs.segment->program, fs.frame, ctx.eval_state);
         break;
@@ -2547,43 +2519,60 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
     for (const auto& t : st.targets)
       if (double* a = resolve_adjoint(t.adjoint, st.adjoints.data(), p, ctx))
         *a += ctx.out_adj_vec.data[pos];
-  for (size_t i = st.backward_program.size(); i-- > 0;) {
-    const BackwardInstr& instr = st.backward_program[i];
+  for (size_t i = st.program.size(); i-- > 0;) {
+    const StreamInstr& instr = st.program[i];
     switch (instr.kind) {
-      case BackwardInstr::Kernel: {
-        FrozenCall& f = st.calls[instr.index];
-        const int n_in = p.body.ops[f.n->op].n_in;
-        for (int k = 0; k < n_in; ++k)
-          f.ctx.in_adj[k].data =
-              resolve_adjoint(f.in_adjoint[k], st.adjoints.data(), p, ctx);
-        f.ctx.n_in = n_in;
-        f.ctx.out_adj_vec.data =
-            resolve_adjoint(f.out_adjoint, st.adjoints.data(), p, ctx);
-        if (f.reuse_primal) {
-          f.ctx.scratch = nullptr;
-          if (f.ctx.dyn_lengths) apply_dynamic_length(f.ctx);
-          if (f.ctx.out.len == 1 && f.ctx.out_adj_vec.data)
-            f.ctx.out_adj = f.ctx.out_adj_vec.data[0];
-          f.n->backward(f.ctx);
+      case StreamInstr::Guard:
+      case StreamInstr::Set:
+      case StreamInstr::Tgt:
+        break;
+      case StreamInstr::Call: {
+        const FrozenCall& f = st.calls[instr.index];
+        const Node* n = s.sites[f.site];
+        if (!n->active) break;
+        const Op& op = p.body.ops[n->op];
+        KernelCtx& c = s.ctx[f.site];
+        double** ptrs = st.call_ptrs.data() + f.ptr_offset;
+        const int32_t* adj = st.call_adj.data() + f.adj_offset;
+        c.n_in = op.n_in;
+        for (int k = 0; k < op.n_in; ++k) {
+          c.in[k].data = ptrs[k];
+          c.in_adj[k].data = resolve_adjoint(adj[k], st.adjoints.data(), p, ctx);
+        }
+        c.out.data = ptrs[op.n_in];
+        c.out_adj_vec.data =
+            resolve_adjoint(adj[op.n_in], st.adjoints.data(), p, ctx);
+        const bool reuse_primal = n->reuse_primal_output && st.reuse_primals;
+        if (reuse_primal) {
+          c.scratch = nullptr;
+          if (c.dyn_lengths) apply_dynamic_length(c);
+          if (c.out.len == 1 && c.out_adj_vec.data)
+            c.out_adj = c.out_adj_vec.data[0];
+          n->backward(c);
           break;
         }
-        if (f.ctx.out2.data) {
-          double* out2_adj = resolve_adjoint(f.out2_adjoint, st.adjoints.data(), p, ctx);
-          f.ctx.out2_adj = out2_adj ? *out2_adj : 0.0;
+        int next = op.n_in + 1;
+        if (op.out2 >= 0) {
+          c.out2.data = ptrs[next++];
+          double* out2_adj =
+              resolve_adjoint(adj[op.n_in + 1], st.adjoints.data(), p, ctx);
+          c.out2_adj = out2_adj ? *out2_adj : 0.0;
         }
-        if (f.ctx.dyn_lengths) apply_dynamic_length(f.ctx);
-        if (f.ctx.out.len == 1 && f.ctx.out_adj_vec.data)
-          f.ctx.out_adj = f.ctx.out_adj_vec.data[0];
-        f.n->backward(f.ctx);
+        c.scratch = ptrs[next];
+        if (c.dyn_lengths) apply_dynamic_length(c);
+        if (c.out.len == 1 && c.out_adj_vec.data)
+          c.out_adj = c.out_adj_vec.data[0];
+        n->backward(c);
         break;
       }
-      case BackwardInstr::InPlace: {
-        FrozenInPlace& fi = st.inplaces[instr.index];
-        double* adj_base = resolve_adjoint(fi.base_adjoint, st.adjoints.data(), p, ctx);
-        double* adj_rhs = resolve_adjoint(fi.rhs_adjoint, st.adjoints.data(), p, ctx);
+      case StreamInstr::InPlace: {
+        const FrozenInPlace& fi = st.inplaces[instr.index];
+        const int32_t* adj = st.inplace_adj.data() + instr.index * 2;
+        double* adj_base = resolve_adjoint(adj[0], st.adjoints.data(), p, ctx);
+        double* adj_rhs = resolve_adjoint(adj[1], st.adjoints.data(), p, ctx);
         const double* old = st.inplace_old.data() + fi.old_offset;
-        for (size_t k = fi.positions.size(); k-- > 0;) {
-          const int64_t at = fi.positions[k];
+        for (uint32_t k = fi.pos_count; k-- > 0;) {
+          const int64_t at = st.inplace_pos[fi.pos_offset + k];
           if (adj_base) {
             if (adj_rhs) adj_rhs[k] += adj_base[at];
             adj_base[at] = 0;
@@ -2592,25 +2581,28 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
         }
         break;
       }
-      case BackwardInstr::Copy: {
+      case StreamInstr::Copy: {
         const FrozenCopy& fc = st.copies[instr.index];
-        double* from = resolve_adjoint(fc.from_adjoint, st.adjoints.data(), p, ctx);
-        double* to = resolve_adjoint(fc.to_adjoint, st.adjoints.data(), p, ctx);
+        const int32_t* adj = st.copy_adj.data() + instr.index * 2;
+        double* from = resolve_adjoint(adj[0], st.adjoints.data(), p, ctx);
+        double* to = resolve_adjoint(adj[1], st.adjoints.data(), p, ctx);
         if (from && to)
           for (int64_t k = 0; k < fc.len; ++k) from[k] += to[k];
         break;
       }
-      case BackwardInstr::Seg: {
-        FrozenSegment& fs = st.segs[instr.index];
+      case StreamInstr::Seg: {
+        const FrozenSegment& fs = st.segs[instr.index];
+        if (fs.adjoint_base < 0) break;
+        const auto& ins = fs.segment->ins;
         double* file = st.adjoints.data() + fs.adjoint_base;
         run_adjoint(fs.segment->program, fs.segment->program.adj, fs.frame, file);
-        for (size_t k = 0; k < fs.ins.size(); ++k) {
-          double* dst = resolve_adjoint(fs.in_adjoint[k], st.adjoints.data(), p, ctx);
+        for (size_t k = 0; k < ins.size(); ++k) {
+          double* dst = resolve_adjoint(st.seg_in_adj[fs.in_offset + k],
+                                        st.adjoints.data(), p, ctx);
           if (!dst) continue;
-          const auto& in = fs.ins[k];
-          for (int j = 0; j < in.len; ++j)
+          for (int j = 0; j < ins[k].len; ++j)
             dst[j] += file[fs.segment->program.adj
-                               .adj_reg[static_cast<size_t>(in.reg + j)]];
+                               .adj_reg[static_cast<size_t>(ins[k].reg + j)]];
         }
         break;
       }
@@ -2671,13 +2663,6 @@ void structured_loop_forward(KernelCtx& ctx) {
   LoopState& s = require_state(ctx);
   const StructuredLoop& p = s.p;
   if (s.stream && !s.no_replay) {
-    s.arena = BlockArena{};
-    std::vector<Version>().swap(s.versions);
-    std::vector<int32_t>().swap(s.owner);
-    std::vector<int64_t>().swap(s.handles);
-    std::vector<double>().swap(s.undo);
-    std::vector<Record>().swap(s.records);
-    std::vector<int64_t>().swap(s.target_refs);
     if (replay_forward(s, ctx)) {
       s.last_replayed = true;
       s.reverse_ready = true;
@@ -2820,7 +2805,15 @@ void structured_loop_forward(KernelCtx& ctx) {
         " record_arena=" + std::to_string(s.record_arena) +
         " record_versions=" + std::to_string(s.record_versions));
   }
-  if (s.building) freeze(s, ctx);
+  if (s.building) {
+    std::vector<int32_t>().swap(s.owner);
+    std::vector<int64_t>().swap(s.handles);
+    std::vector<double>().swap(s.undo);
+    std::vector<Record>().swap(s.records);
+    std::vector<int64_t>().swap(s.target_refs);
+    freeze(s, ctx);
+    if (s.stream) s.last_replayed = true;
+  }
   if (s.diagnostics)
     emit_replay_diagnostic(
         s, false, s.stream ? s.stream->program.size() : 0,
