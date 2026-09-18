@@ -1571,7 +1571,6 @@ struct Stream {
   std::vector<int64_t> output_len;
   std::vector<int32_t> output_adjoint;
   int64_t adjoint_size = 0;
-  uint64_t import_mask = 0;
 };
 
 double* resolve_adjoint(int64_t id, double* adjoints, const StructuredLoop& p,
@@ -1595,14 +1594,6 @@ double* resolve_pooled_adjoint(double* slot, const StructuredLoop& p,
   const auto& in = p.imports[static_cast<size_t>(bits >> 1)];
   double* base = outer.in_adj[in.input].data;
   return base ? base + in.offset : nullptr;
-}
-
-uint64_t import_activity_mask(const StructuredLoop& p, KernelCtx& outer) {
-  if (p.imports.size() > 63) return std::numeric_limits<uint64_t>::max();
-  uint64_t mask = 0;
-  for (size_t i = 0; i < p.imports.size(); ++i)
-    if (outer.in_adj[p.imports[i].input].data) mask |= uint64_t{1} << i;
-  return mask;
 }
 
 double reduce_target(std::vector<double>& work) {
@@ -2375,7 +2366,7 @@ struct Execution {
   }
 };
 
-void freeze(LoopState& s, KernelCtx& ctx) {
+void freeze(LoopState& s) {
   const StructuredLoop& p = s.p;
   Stream& st = *s.building;
   s.arena.snapshot(st.arena);
@@ -2446,7 +2437,6 @@ void freeze(LoopState& s, KernelCtx& ctx) {
   }
   std::vector<Version>().swap(s.versions);
   st.target_work.resize(st.targets.size());
-  st.import_mask = import_activity_mask(p, ctx);
 
   st.backward_order.reserve(st.program.size());
   for (uint32_t i = 0; i < st.program.size(); ++i) {
@@ -2479,7 +2469,6 @@ void freeze(LoopState& s, KernelCtx& ctx) {
 bool replay_forward(LoopState& s, KernelCtx& ctx) {
   Stream& st = *s.stream;
   const StructuredLoop& p = s.p;
-  if (import_activity_mask(p, ctx) != st.import_mask) return false;
   for (auto& c : s.ctx) c.eval_state = ctx.eval_state;
   for (const auto& imp : st.imports)
     std::copy_n(ctx.in[imp.input].data + imp.offset, imp.len, imp.dst);
@@ -2749,7 +2738,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     std::copy_n(ctx.in[in.input].data + in.offset, slot.len,
                 initial + slot.offset);
     s.versions[static_cast<size_t>(s.bindings[in.slot])].adjoint =
-        ctx.in_adj[in.input].data ? -(static_cast<int64_t>(ordinal) + 2) : -1;
+        in.active ? -(static_cast<int64_t>(ordinal) + 2) : -1;
     if (s.building)
       s.building->imports.push_back(
           FrozenImport{initial + slot.offset, slot.len, in.input, in.offset});
@@ -2859,7 +2848,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     std::vector<double>().swap(s.undo);
     std::vector<Record>().swap(s.records);
     std::vector<int64_t>().swap(s.target_refs);
-    freeze(s, ctx);
+    freeze(s);
     if (s.stream) s.last_replayed = true;
   }
   if (s.diagnostics)

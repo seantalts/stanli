@@ -5073,6 +5073,62 @@ static void selector_guard_tests() {
   }
 }
 
+static void import_activity_independence_tests() {
+  const auto native = compile_fixture("structured_param_if", observed_data(24),
+                                      Mode::Force);
+  check(retained(native) != nullptr,
+        "import independence fixture retains OP_LOOP");
+  Executor a = diagnosed_executor(native.graph);
+  native.bind(a);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(native.graph);
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  native.bind(ref);
+  const std::vector<double> point = {.4, .2};
+  std::copy(point.begin(), point.end(), a.params_data());
+  for (int i = 0; i < 2; ++i) {
+    stanli_test::StdoutCapture captured(stderr);
+    a.run_forward_only();
+    captured.finish();
+  }
+  {
+    stanli_test::StdoutCapture captured(stderr);
+    a.run_forward_only();
+    const std::string diagnostics = captured.finish();
+    check(reported_field(diagnostics, "replay=") == 1,
+          "third value-only evaluation replays");
+    check(reported_field(diagnostics, "respecialized=") == 0,
+          "value-only replay after value-only recording does not "
+          "respecialize");
+  }
+  std::vector<double> grad(static_cast<size_t>(native.n_unconstrained));
+  std::vector<double> gref(grad.size());
+  std::copy(point.begin(), point.end(), ref.params_data());
+  const double vref = ref.gradient(gref.data());
+  {
+    stanli_test::StdoutCapture captured(stderr);
+    const double va = a.gradient(grad.data());
+    const std::string diagnostics = captured.finish();
+    check(reported_field(diagnostics, "replay=") == 1,
+          "a gradient after value-only evaluations replays");
+    check(reported_field(diagnostics, "respecialized=") == 0,
+          "a gradient after value-only evaluations does not respecialize");
+    check(va == vref, "gradient after value-only evaluations bitwise");
+    for (size_t k = 0; k < grad.size(); ++k)
+      check(grad[k] == gref[k],
+            "gradient after value-only evaluations bitwise");
+  }
+  {
+    stanli_test::StdoutCapture captured(stderr);
+    a.run_forward_only();
+    const std::string diagnostics = captured.finish();
+    check(reported_field(diagnostics, "replay=") == 1,
+          "a value-only evaluation after a gradient replays");
+    check(reported_field(diagnostics, "respecialized=") == 0,
+          "a value-only evaluation after a gradient does not respecialize");
+  }
+}
+
 int main() {
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
@@ -5114,6 +5170,7 @@ int main() {
   replay_parity_tests();
   replay_guard_flip_tests();
   selector_guard_tests();
+  import_activity_independence_tests();
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS");
   if (failures == 0) std::printf("test_structured_loop OK\n");
