@@ -1321,13 +1321,19 @@ struct ArenaSnapshot {
     size_t used;
     size_t offset;
   };
+  // Sorted by base: remap does a binary search, since a compact snapshot can
+  // hold many disjoint ranges rather than one per arena block.
   std::vector<Range> ranges;
   std::vector<double> cells;
   double* remap(double* p) {
     if (!p) return p;
-    for (const auto& r : ranges)
-      if (p >= r.base && p < r.base + r.used)
-        return cells.data() + r.offset + static_cast<size_t>(p - r.base);
+    auto it = std::upper_bound(
+        ranges.begin(), ranges.end(), p,
+        [](const double* q, const Range& r) { return q < r.base; });
+    if (it == ranges.begin()) return p;
+    --it;
+    if (p >= it->base && p < it->base + it->used)
+      return cells.data() + it->offset + static_cast<size_t>(p - it->base);
     return p;
   }
 };
@@ -1419,19 +1425,6 @@ struct BlockArena {
     cursor = closed = 0;
     open(0);
   }
-  void snapshot(ArenaSnapshot& out) const {
-    out.ranges.clear();
-    size_t total = 0;
-    for (size_t i = 0; i <= cursor && i < blocks.size(); ++i) {
-      const size_t used = i == cursor ? used_here() : blocks[i].used;
-      out.ranges.push_back(
-          ArenaSnapshot::Range{blocks[i].data.get(), used, total});
-      total += used;
-    }
-    out.cells.assign(total, 0.0);
-    for (const auto& r : out.ranges)
-      std::copy_n(r.base, r.used, out.cells.data() + r.offset);
-  }
 };
 
 template <class T>
@@ -1487,6 +1480,7 @@ struct FrozenCall {
 struct FrozenInPlace {
   double* base = nullptr;
   const double* rhs = nullptr;
+  int64_t len = 0;  // base's full extent, for the compact arena snapshot
   uint32_t pos_offset = 0, pos_count = 0;
   uint32_t old_offset = 0;
   uint32_t sel_offset = 0, sel_count = 0;
@@ -1925,7 +1919,7 @@ struct Execution {
 
   void run_retained(const Node& n, const Op& op, KernelCtx& c) {
     int64_t handles = -1;
-    if (n.active) {
+    if (n.active && !s.building) {
       handles = static_cast<int64_t>(s.handles.size());
       for (int k = 0; k < op.n_in; ++k)
         s.handles.push_back(s.bindings[op.in[k]]);
@@ -1954,7 +1948,7 @@ struct Execution {
                           n.active ? reserve_adjoint(out2_len) : -1, folded);
       s.bindings[op.out2] = out2;
     }
-    if (n.active)
+    if (n.active && !s.building)
       s.records.push_back(Record{Record::Kernel, n.site, handles, out, -1});
     if (!folded) log_call(n, op, c);
   }
@@ -2003,9 +1997,20 @@ struct Execution {
     c.out.data = values;
     const double* source = c.in[layout.rhs].data;
     const int64_t undo = static_cast<int64_t>(s.undo.size());
+    const uint32_t pos_offset =
+        s.building ? static_cast<uint32_t>(s.building->inplace_pos.size()) : 0;
     const auto write = [&](int64_t i, int64_t at) {
-      s.undo.push_back(static_cast<double>(at));
-      s.undo.push_back(values[at]);
+      if (write_const) {
+        // Nothing to undo: this write never reaches backward() or the
+        // stream, so its old value is never needed.
+      } else if (s.building) {
+        Stream& st = *s.building;
+        st.inplace_pos.push_back(static_cast<int32_t>(at));
+        st.inplace_old.push_back(values[at]);
+      } else {
+        s.undo.push_back(static_cast<double>(at));
+        s.undo.push_back(values[at]);
+      }
       values[at] = source[i];
     };
     const int64_t fixed = fixed_scalar_index(spec, c, true);
@@ -2015,20 +2020,18 @@ struct Execution {
       const IndexRuntime runtime = validate_index(spec, c, true);
       selected_positions(spec, runtime, write);
     }
-    s.records.push_back(Record{Record::InPlace, n.site, undo, base, rhs});
+    if (!s.building)
+      s.records.push_back(Record{Record::InPlace, n.site, undo, base, rhs});
     if (write_const) return;
     if (s.building) {
       Stream& st = *s.building;
       FrozenInPlace fi;
       fi.base = values;
       fi.rhs = materialize(rhs, c.in[layout.rhs].len);
-      fi.old_offset = static_cast<uint32_t>(st.inplace_old.size());
-      fi.pos_offset = static_cast<uint32_t>(st.inplace_pos.size());
-      for (size_t k = static_cast<size_t>(undo); k < s.undo.size(); k += 2) {
-        st.inplace_pos.push_back(static_cast<int32_t>(s.undo[k]));
-        st.inplace_old.push_back(s.undo[k + 1]);
-      }
-      fi.pos_count = static_cast<uint32_t>(st.inplace_pos.size()) - fi.pos_offset;
+      fi.len = len;
+      fi.old_offset = pos_offset;
+      fi.pos_offset = pos_offset;
+      fi.pos_count = static_cast<uint32_t>(st.inplace_pos.size()) - pos_offset;
       fi.sel_offset = static_cast<uint32_t>(st.inplace_sel_ptr.size());
       for (int k = 1; k < layout.rhs; ++k) {
         double* src = materialize(s.bindings[op.in[k]], c.in[k].len);
@@ -2269,6 +2272,8 @@ struct Execution {
         return Continue;
       case Node::Target:
         ++s.effects;
+        // Feeds this walk's own forward target value below, regardless of
+        // whether a stream is also being built.
         s.target_refs.push_back(s.bindings[n.src]);
         if (s.building) {
           Stream& st = *s.building;
@@ -2294,7 +2299,7 @@ struct Execution {
     for (const auto& in : segment.ins)
       folded = folded && is_const(s.bindings[in.slot]);
     int64_t handles = -1;
-    if (n.active) {
+    if (n.active && !s.building) {
       handles = static_cast<int64_t>(s.handles.size());
       for (const auto& in : segment.ins)
         s.handles.push_back(s.bindings[in.slot]);
@@ -2310,8 +2315,7 @@ struct Execution {
       if (log_inputs) {
         Stream& st = *s.building;
         st.seg_in_src.push_back(materialize(s.bindings[in.slot], in.len));
-        st.seg_in_adj_version.push_back(
-            n.active ? s.handles[static_cast<size_t>(handles) + k] : -1);
+        st.seg_in_adj_version.push_back(n.active ? s.bindings[in.slot] : -1);
       }
     }
     run_program(program, frame, outer.eval_state);
@@ -2322,7 +2326,7 @@ struct Execution {
           n.active ? base + program.adj.adj_reg[static_cast<size_t>(out.reg)]
                    : -1,
           folded);
-    if (n.active)
+    if (n.active && !s.building)
       s.records.push_back(Record{Record::Segment,
                                  static_cast<uint32_t>(n.segment), handles,
                                  make_version(frame, -1), base});
@@ -2418,10 +2422,98 @@ struct Execution {
   }
 };
 
+// Every arena range some kept pointer still needs, collected before the
+// arena that made them goes away: every input/output/scratch pointer a
+// logged call keeps, the InPlace base/rhs/selector pools, copies, segment
+// inputs and frames, guards, targets, imports and outputs, each with its
+// slot length. A dynamic-length operand's backing storage is dyn_capacity,
+// not its declared (logical, possibly smaller) slot length.
+void collect_live_ranges(LoopState& s, Stream& st,
+                         std::vector<std::pair<const double*, int64_t>>& live) {
+  const StructuredLoop& p = s.p;
+  const auto note = [&](const double* ptr, int64_t len) {
+    if (ptr && len > 0) live.emplace_back(ptr, len);
+  };
+  for (const auto& f : st.calls) {
+    const Node& n = *s.sites[f.site];
+    const Op& op = p.body.ops[n.op];
+    double** ptrs = st.call_ptrs.data() + f.ptr_offset;
+    const auto len_of = [&](int slot, int bit) {
+      return (op.dyn_lengths & (1u << bit)) ? op.dyn_capacity
+                                            : p.body.slots[slot].len;
+    };
+    for (int k = 0; k < f.n_in; ++k) note(ptrs[k], len_of(op.in[k], k));
+    int next = f.n_in;
+    note(ptrs[next++], len_of(op.out, 6));
+    if (f.flags & kFrozenCallHasOut2)
+      note(ptrs[next++], p.body.slots[op.out2].len);
+    note(ptrs[next], n.kernel_scratch);
+  }
+  for (const auto& fi : st.inplaces) {
+    note(fi.base, fi.len);
+    note(fi.rhs, static_cast<int64_t>(fi.pos_count));
+    for (uint32_t k = 0; k < fi.sel_count; ++k)
+      note(st.inplace_sel_ptr[fi.sel_offset + k], 1);
+  }
+  for (const auto& fc : st.copies) {
+    note(fc.src, fc.len);
+    note(fc.dst, fc.len);
+  }
+  for (const auto& fs : st.segs) {
+    note(fs.frame, fs.segment->program.n_regs);
+    for (size_t k = 0; k < fs.segment->ins.size(); ++k)
+      note(st.seg_in_src[fs.in_offset + k], fs.segment->ins[k].len);
+  }
+  for (const auto& g : st.guards) {
+    note(g.a, 1);
+    note(g.b, 1);
+  }
+  for (const auto& t : st.targets) note(t.value, 1);
+  for (const auto& imp : st.imports) note(imp.dst, imp.len);
+  for (int slot : p.outputs)
+    note(s.versions[static_cast<size_t>(s.bindings[slot])].value,
+        p.body.slots[slot].len);
+}
+
+// Packs only the referenced ranges into a contiguous buffer instead of
+// copying everything the arena ever used; folded calls whose output nothing
+// kept references contribute nothing here.
+void compact_snapshot(LoopState& s, ArenaSnapshot& out) {
+  Stream& st = *s.building;
+  std::vector<std::pair<const double*, int64_t>> live;
+  // Exact upper bound: one note per call_ptrs slot, two plus selectors per
+  // in-place, two per copy, one plus inputs per segment, two per guard, one
+  // per target/import/output. Avoids growth-doubling on a vector this large.
+  live.reserve(st.call_ptrs.size() + 2 * st.inplaces.size() +
+              st.inplace_sel_ptr.size() + 2 * st.copies.size() +
+              st.segs.size() + st.seg_in_src.size() + 2 * st.guards.size() +
+              st.targets.size() + st.imports.size() + s.p.outputs.size());
+  collect_live_ranges(s, st, live);
+  std::sort(live.begin(), live.end());
+  out.ranges.clear();
+  size_t total = 0;
+  for (size_t i = 0; i < live.size();) {
+    const double* base = live[i].first;
+    const double* end = base + live[i].second;
+    size_t j = i + 1;
+    while (j < live.size() && live[j].first <= end) {
+      end = std::max(end, live[j].first + live[j].second);
+      ++j;
+    }
+    const size_t used = static_cast<size_t>(end - base);
+    out.ranges.push_back(ArenaSnapshot::Range{base, used, total});
+    total += used;
+    i = j;
+  }
+  out.cells.assign(total, 0.0);
+  for (const auto& r : out.ranges)
+    std::copy_n(r.base, r.used, out.cells.data() + r.offset);
+}
+
 void freeze(LoopState& s) {
   const StructuredLoop& p = s.p;
   Stream& st = *s.building;
-  s.arena.snapshot(st.arena);
+  compact_snapshot(s, st.arena);
   s.arena = BlockArena{};
   const auto remap = [&](double* ptr) { return st.arena.remap(ptr); };
   const auto remap_c = [&](const double* ptr) -> const double* {
@@ -2513,6 +2605,31 @@ void freeze(LoopState& s) {
     if (live) st.backward_order.push_back(instr);
   }
   st.backward_order.shrink_to_fit();
+
+  // Smallest first, so a large pool's own reallocation has the freed space
+  // from every pool shrunk before it to grow into.
+  st.output_value.shrink_to_fit();
+  st.output_len.shrink_to_fit();
+  st.output_adjoint.shrink_to_fit();
+  st.imports.shrink_to_fit();
+  st.targets.shrink_to_fit();
+  st.sets.shrink_to_fit();
+  st.copies.shrink_to_fit();
+  st.copy_adj.shrink_to_fit();
+  st.segs.shrink_to_fit();
+  st.seg_in_src.shrink_to_fit();
+  st.seg_in_adj.shrink_to_fit();
+  st.guards.shrink_to_fit();
+  st.inplace_sel_ptr.shrink_to_fit();
+  st.inplace_sel_snapshot.shrink_to_fit();
+  st.inplace_pos.shrink_to_fit();
+  st.inplace_old.shrink_to_fit();
+  st.inplace_adj.shrink_to_fit();
+  st.inplaces.shrink_to_fit();
+  st.call_adj.shrink_to_fit();
+  st.calls.shrink_to_fit();
+  st.program.shrink_to_fit();
+  st.call_ptrs.shrink_to_fit();
 
   s.stream = std::move(s.building);
   s.building.reset();
