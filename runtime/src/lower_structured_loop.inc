@@ -8,6 +8,7 @@ std::map<std::string, IntRange> region_analysis_ints;
 int region_control_depth = 0;
 bool region_control_active = false;
 unsigned structured_outer_depth = 0;
+std::map<const mir::Expr*, std::optional<RealRange>> region_enumerated_cache;
 
 // Matches ostream's default floating-point formatting.
 static std::string fmt_g(double v) {
@@ -91,7 +92,14 @@ void region_alias(int dst, int src) {
 // scope.  This keeps reusable loop analysis compact: it visits the data
 // points, but never emits or unrolls the numerical loop body.
 std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
-  if (!e.data_only || expr_effectful(e)) return {};
+  if (auto cached = region_enumerated_cache.find(&e);
+      cached != region_enumerated_cache.end())
+    return cached->second;
+  auto memo = [&](std::optional<RealRange> result) {
+    region_enumerated_cache[&e] = result;
+    return result;
+  };
+  if (!e.data_only || expr_effectful(e)) return memo({});
   std::function<bool(const mir::Expr&)> calls_user =
       [&](const mir::Expr& value) {
         if (value.kind == mir::Expr::FunApp &&
@@ -101,7 +109,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
           if (calls_user(arg)) return true;
         return false;
       };
-  if (calls_user(e)) return {};
+  if (calls_user(e)) return memo({});
   std::map<std::string, IntRange> variables;
   std::function<bool(const mir::Expr&)> collect = [&](const mir::Expr& value) {
     if (value.kind == mir::Expr::Var) {
@@ -129,12 +137,12 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
       if (!collect(arg)) return false;
     return true;
   };
-  if (!collect(e)) return {};
+  if (!collect(e)) return memo({});
   uint64_t combinations = 1;
   for (const auto& variable : variables) {
     const uint64_t width =
         uint64_t(int64_t(variable.second.hi) - variable.second.lo + 1);
-    if (width == 0 || combinations > 1000000 / width) return {};
+    if (width == 0 || combinations > 1000000 / width) return memo({});
     combinations *= width;
   }
   struct Saved {
@@ -190,8 +198,8 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     else
       td.env().erase(item.name);
   }
-  if (!any) return {};
-  return result;
+  if (!any) return memo({});
+  return memo(result);
 }
 
 std::optional<RealRange> region_real_range(const mir::Expr& e) {
