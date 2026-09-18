@@ -385,6 +385,7 @@
     "student_t_lccdf",
     "student_t_lcdf",
     "student_t_lpdf",
+    "student_t_qf",
     "student_t_rng",
     "sub_col",
     "subtract",
@@ -713,11 +714,11 @@
         "square",
         "std_normal_log_qf",
         "student_t_lcdf",
-        "tgamma",
-        "uniform_lpdf",
-        "von_mises_lccdf",
-        "weibull_lcdf",
-        "yule_simon_lcdf"
+        "tanh",
+        "uniform_lcdf",
+        "von_mises_cdf",
+        "weibull_lccdf",
+        "yule_simon_lccdf"
       ],
       "parameters": 100,
       "signatures": [
@@ -765,11 +766,11 @@
         "square(real)=>real",
         "std_normal_log_qf(real)=>real",
         "student_t_lcdf(real,real,real,real)=>real",
-        "tgamma(real)=>real",
-        "uniform_lpdf(real,real,real)=>real",
-        "von_mises_lccdf(real,real,real)=>real",
-        "weibull_lcdf(real,real,real)=>real",
-        "yule_simon_lcdf(int,real)=>real"
+        "tanh(real)=>real",
+        "uniform_lcdf(real,real,real)=>real",
+        "von_mises_cdf(real,real,real)=>real",
+        "weibull_lccdf(real,real,real)=>real",
+        "yule_simon_lccdf(int,real)=>real"
       ]
     },
     "scalar_2": {
@@ -818,13 +819,13 @@
         "squared_distance",
         "std_normal_lpdf",
         "student_t_lpdf",
-        "trigamma",
-        "upper_bound_constrain",
-        "von_mises_lcdf",
-        "weibull_lpdf",
-        "yule_simon_lpmf"
+        "tgamma",
+        "uniform_lpdf",
+        "von_mises_lccdf",
+        "weibull_lcdf",
+        "yule_simon_lcdf"
       ],
-      "parameters": 101,
+      "parameters": 102,
       "signatures": [
         "Phi_approx(real)=>real",
         "asin(real)=>real",
@@ -870,11 +871,11 @@
         "squared_distance(real,real)=>real",
         "std_normal_lpdf(real)=>real",
         "student_t_lpdf(real,real,real,real)=>real",
-        "trigamma(real)=>real",
-        "upper_bound_constrain(real,real)=>real",
-        "von_mises_lcdf(real,real,real)=>real",
-        "weibull_lpdf(real,real,real)=>real",
-        "yule_simon_lpmf(int,real)=>real"
+        "tgamma(real)=>real",
+        "uniform_lpdf(real,real,real)=>real",
+        "von_mises_lccdf(real,real,real)=>real",
+        "weibull_lcdf(real,real,real)=>real",
+        "yule_simon_lcdf(int,real)=>real"
       ]
     },
     "scalar_3": {
@@ -922,13 +923,14 @@
         "skew_normal_lcdf",
         "std_normal_cdf",
         "std_normal_qf",
-        "subtract",
-        "uniform_cdf",
-        "upper_bound_jacobian",
-        "von_mises_lpdf",
-        "wiener_lpdf"
+        "student_t_qf",
+        "trigamma",
+        "upper_bound_constrain",
+        "von_mises_lcdf",
+        "weibull_lpdf",
+        "yule_simon_lpmf"
       ],
-      "parameters": 101,
+      "parameters": 100,
       "signatures": [
         "abs(real)=>real",
         "asinh(real)=>real",
@@ -973,11 +975,12 @@
         "skew_normal_lcdf(real,real,real,real)=>real",
         "std_normal_cdf(real)=>real",
         "std_normal_qf(real)=>real",
-        "subtract(real,real)=>real",
-        "uniform_cdf(real,real,real)=>real",
-        "upper_bound_jacobian(real,real)=>real",
-        "von_mises_lpdf(real,real,real)=>real",
-        "wiener_lpdf(real,real,real,real,real)=>real"
+        "student_t_qf(real,real,real,real)=>real",
+        "trigamma(real)=>real",
+        "upper_bound_constrain(real,real)=>real",
+        "von_mises_lcdf(real,real,real)=>real",
+        "weibull_lpdf(real,real,real)=>real",
+        "yule_simon_lpmf(int,real)=>real"
       ]
     },
     "scalar_4": {
@@ -1025,13 +1028,13 @@
         "skew_normal_lpdf",
         "std_normal_lccdf",
         "student_t_cdf",
-        "tan",
-        "uniform_lccdf",
-        "upper_bound_unconstrain",
-        "weibull_cdf",
-        "yule_simon_cdf"
+        "subtract",
+        "uniform_cdf",
+        "upper_bound_jacobian",
+        "von_mises_lpdf",
+        "wiener_lpdf"
       ],
-      "parameters": 106,
+      "parameters": 111,
       "signatures": [
         "acos(real)=>real",
         "atan(real)=>real",
@@ -1076,11 +1079,11 @@
         "skew_normal_lpdf(real,real,real,real)=>real",
         "std_normal_lccdf(real)=>real",
         "student_t_cdf(real,real,real,real)=>real",
-        "tan(real)=>real",
-        "uniform_lccdf(real,real,real)=>real",
-        "upper_bound_unconstrain(real,real)=>real",
-        "weibull_cdf(real,real,real)=>real",
-        "yule_simon_cdf(int,real)=>real"
+        "subtract(real,real)=>real",
+        "uniform_cdf(real,real,real)=>real",
+        "upper_bound_jacobian(real,real)=>real",
+        "von_mises_lpdf(real,real,real)=>real",
+        "wiener_lpdf(real,real,real,real,real)=>real"
       ]
     },
     "scalar_5": {
@@ -1128,13 +1131,13 @@
         "sqrt",
         "std_normal_lcdf",
         "student_t_lccdf",
-        "tanh",
-        "uniform_lcdf",
-        "von_mises_cdf",
-        "weibull_lccdf",
-        "yule_simon_lccdf"
+        "tan",
+        "uniform_lccdf",
+        "upper_bound_unconstrain",
+        "weibull_cdf",
+        "yule_simon_cdf"
       ],
-      "parameters": 94,
+      "parameters": 93,
       "signatures": [
         "acosh(real)=>real",
         "atan2(int,real)=>real",
@@ -1179,15 +1182,15 @@
         "sqrt(real)=>real",
         "std_normal_lcdf(real)=>real",
         "student_t_lccdf(real,real,real,real)=>real",
-        "tanh(real)=>real",
-        "uniform_lcdf(real,real,real)=>real",
-        "von_mises_cdf(real,real,real)=>real",
-        "weibull_lccdf(real,real,real)=>real",
-        "yule_simon_lccdf(int,real)=>real"
+        "tan(real)=>real",
+        "uniform_lccdf(real,real,real)=>real",
+        "upper_bound_unconstrain(real,real)=>real",
+        "weibull_cdf(real,real,real)=>real",
+        "yule_simon_cdf(int,real)=>real"
       ]
     }
   },
-  "name_count": 429,
+  "name_count": 430,
   "recognized_but_unsupported": {
     "gaussian_dlm_obs_lpdf": "Explicitly refused: seven inputs exceed the graph's six-input operation layout."
   },

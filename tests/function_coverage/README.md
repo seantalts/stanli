@@ -1,8 +1,8 @@
 # Integrated function coverage
 
-These ten small mother-style models cover 411 distinct names: supported Stan
+These ten small mother-style models cover 430 distinct names: supported Stan
 functions, higher-order solver variants, and five operators. Five models are
-generated from the smallest verified overload of each of 242 names in the
+generated from the smallest verified overload of each of 243 names in the
 conformance baseline. The other five cover containers, data-only functions,
 multivariate densities/GLMs, RNGs, and higher-order calls.
 

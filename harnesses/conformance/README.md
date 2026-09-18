@@ -181,6 +181,27 @@ and commit the result in the same PR as the work that earned it. A `.gz`
 path is written and read compressed; the baseline is one line per case over
 the whole inventory, 2.5 MB of mostly-repeated JSON and 0.09 MB gzipped.
 
+A stanc pin upgrade also requires refreshing this baseline. A completed
+nightly's aggregate artifact can supply the evidence without recompiling its
+reference models. First verify its commit and toolchain provenance, review
+`snapshot_delta` for lost or regressed cases, and confirm that metadata drift
+is its only gate failure. Then download `conformance-aggregate` and run:
+
+```sh
+.venv-conformance/bin/python harnesses/stan_conformance.py \
+  --report-only --input conformance-aggregate/conformance.json \
+  --baseline docs/conformance-baseline.json.gz --update-snapshot \
+  --output conformance-out/refreshed
+```
+
+Review the classification changes and update [coverage](../../docs/coverage.md)
+alongside the snapshot. Preserve the run URL and commit in the review so the
+baseline's numerical evidence can be traced back to the completed run.
+The integrated function models select verified names from this baseline:
+run `tools/gen_function_models.py`, and if their sources change, re-record
+their pinned CmdStan references and replay them using the commands in
+[the function-coverage README](../../tests/function_coverage/README.md).
+
 Other generated reports are build artifacts, not checked-in source. To
 freeze a run somewhere else, pass an explicit ignored or externally
 retained path:

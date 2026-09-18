@@ -267,39 +267,39 @@ functions {
       values[44] = contribution;
     }
     {
-      // trigamma(real)=>real
+      // tgamma(real)=>real
       real contribution = 0;
-      contribution += 1 * trigamma((1.3999999999999999 + 0.0625 * theta[92]));
+      contribution += 1 * tgamma((0.5 + 0.0625 * theta[92]));
       values[45] = contribution;
     }
     {
-      // upper_bound_constrain(real,real)=>real
+      // uniform_lpdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * upper_bound_constrain((0.5 + 0.0625 * theta[93]), (1.25 + 0.0625 * theta[94]));
+      contribution += 1 * uniform_lpdf((0.40000000000000002 + 0.0625 * theta[93]) | (-1 + 0.0625 * theta[94]), (1.5 + 0.0625 * theta[95]));
       values[46] = contribution;
     }
     {
-      // von_mises_lcdf(real,real,real)=>real
+      // von_mises_lccdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * von_mises_lcdf((0.40000000000000002 + 0.0625 * theta[95]) | (0.20000000000000001 + 0.0625 * theta[96]), (1.3 + 0.0625 * theta[97]));
+      contribution += 1 * von_mises_lccdf((0.40000000000000002 + 0.0625 * theta[96]) | (0.20000000000000001 + 0.0625 * theta[97]), (1.3 + 0.0625 * theta[98]));
       values[47] = contribution;
     }
     {
-      // weibull_lpdf(real,real,real)=>real
+      // weibull_lcdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * weibull_lpdf((1.3999999999999999 + 0.0625 * theta[98]) | (2 + 0.0625 * theta[99]), (1.3 + 0.0625 * theta[100]));
+      contribution += 1 * weibull_lcdf((1.3999999999999999 + 0.0625 * theta[99]) | (2 + 0.0625 * theta[100]), (1.3 + 0.0625 * theta[101]));
       values[48] = contribution;
     }
     {
-      // yule_simon_lpmf(int,real)=>real
+      // yule_simon_lcdf(int,real)=>real
       real contribution = 0;
-      contribution += 1 * yule_simon_lpmf(3 | (1.3 + 0.0625 * theta[101]));
+      contribution += 1 * yule_simon_lcdf(3 | (1.3 + 0.0625 * theta[102]));
       values[49] = contribution;
     }
     return values;
   }
 }
-parameters { vector[101] theta; }
+parameters { vector[102] theta; }
 transformed parameters {
   vector[49] observed = coverage_jacobian(theta);
 }

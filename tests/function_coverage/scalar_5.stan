@@ -261,39 +261,39 @@ functions {
       values[43] = contribution;
     }
     {
-      // tanh(real)=>real
+      // tan(real)=>real
       real contribution = 0;
-      contribution += 1 * tanh((0.5 + 0.0625 * theta[84]));
+      contribution += 1 * tan((0.5 + 0.0625 * theta[84]));
       values[44] = contribution;
     }
     {
-      // uniform_lcdf(real,real,real)=>real
+      // uniform_lccdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * uniform_lcdf((0.40000000000000002 + 0.0625 * theta[85]) | (-1 + 0.0625 * theta[86]), (1.5 + 0.0625 * theta[87]));
+      contribution += 1 * uniform_lccdf((0.40000000000000002 + 0.0625 * theta[85]) | (-1 + 0.0625 * theta[86]), (1.5 + 0.0625 * theta[87]));
       values[45] = contribution;
     }
     {
-      // von_mises_cdf(real,real,real)=>real
+      // upper_bound_unconstrain(real,real)=>real
       real contribution = 0;
-      contribution += 1 * von_mises_cdf((0.40000000000000002 + 0.0625 * theta[88]) | (0.20000000000000001 + 0.0625 * theta[89]), (1.3 + 0.0625 * theta[90]));
+      contribution += 1 * upper_bound_unconstrain((0.5 + 0.0625 * theta[88]), (1.25 + 0.0625 * theta[89]));
       values[46] = contribution;
     }
     {
-      // weibull_lccdf(real,real,real)=>real
+      // weibull_cdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * weibull_lccdf((1.3999999999999999 + 0.0625 * theta[91]) | (2 + 0.0625 * theta[92]), (1.3 + 0.0625 * theta[93]));
+      contribution += 1 * weibull_cdf((1.3999999999999999 + 0.0625 * theta[90]) | (2 + 0.0625 * theta[91]), (1.3 + 0.0625 * theta[92]));
       values[47] = contribution;
     }
     {
-      // yule_simon_lccdf(int,real)=>real
+      // yule_simon_cdf(int,real)=>real
       real contribution = 0;
-      contribution += 1 * yule_simon_lccdf(3 | (1.3 + 0.0625 * theta[94]));
+      contribution += 1 * yule_simon_cdf(3 | (1.3 + 0.0625 * theta[93]));
       values[48] = contribution;
     }
     return values;
   }
 }
-parameters { vector[94] theta; }
+parameters { vector[93] theta; }
 transformed parameters {
   vector[48] observed = coverage_jacobian(theta);
 }
