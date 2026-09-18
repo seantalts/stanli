@@ -11,7 +11,7 @@ test_that("the model delegates sampling options without introducing new defaults
     iter_sampling=31,init=list(a=.2),adapt_delta=.9,max_treedepth=8,
     seed=42,thin=3,refresh=0,save_warmup=TRUE)
   expect_identical(do.call(model$sample,c(args,list(threads_per_chain=1))),
-                   do.call(sample_cstan,c(list(model_code=code),args)))
+                   do.call(sample_cstan,c(list(model_code=code),args,list(threads_per_chain=1))))
   path <- tempfile()
   on.exit(unlink(path), add=TRUE)
   saveRDS(model,path)
@@ -27,7 +27,7 @@ test_that("invalid model and sampler options fail before preparation", {
   model <- cstan_model("invalid")
   for (threads in list(0,NA_real_,1.5,"1"))
     expect_error(model$sample(threads_per_chain=threads),"threads_per_chain")
-  expect_error(model$sample(threads_per_chain=2),"within-chain threading")
+  expect_error(model$sample(threads_per_chain=2),"unexpected preparation")
   expect_error(model$sample(cpp_options=list()),"unsupported.*cpp_options")
   expect_error(model$sample(iter_sampling=0),"iter_sampling must")
   expect_error(model$sample(save_warmup=NULL),"save_warmup")

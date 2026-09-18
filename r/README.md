@@ -306,7 +306,7 @@ provided by this adapter.
 ### Native model interface
 
 `cstan_model(code)$sample(...)` accepts the same arguments and defaults as
-`sample_cstan(code, ...)`, plus `threads_per_chain = 1`. This lets callers
+`sample_cstan(code, ...)`, including `threads_per_chain`. This lets callers
 reuse CmdStanR sampling calls by changing the model constructor. `$code()`
 returns the source and `$model_name()` returns `"stanli_model"`. Preparation
 happens at sampling time with the supplied data and seed. The native object
@@ -316,3 +316,13 @@ It requires neither CmdStanR nor RStan nor a C++ toolchain.
 For the optional S4 `as_stanfit()` adapter, load RStan before rethinking in a
 fresh R session to avoid rethinking's placeholder `stanfit` class. Native
 `as_cstanfit()` and `as_rfit()` are unaffected.
+
+Native within-chain parallelism is opt-in: pass `threads_per_chain = 4` to
+`sample_model()`, `sample_cstan()`, or `cstan_model(code)$sample()`. Combined with
+`parallel_chains = 2`, this uses up to eight active sampling threads. The default
+is one thread per chain. Eligible `reduce_sum` and `reduce_sum_static` calls use
+persistent worker teams; small or unsupported calls stay serial. The runtime
+must have thread support. Changing the thread setting prepares a new model and
+may change floating-point rounding and NUTS draws. `fit$model$reduce_sum_count`
+and `fit$model$reduce_sum_fallbacks` describe retained reductions and lowering
+refusals; use `fit$stanli_fit()$model` for a CmdStanR-style fit.

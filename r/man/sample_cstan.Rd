@@ -20,6 +20,7 @@ sample_cstan(
   refresh = 100,
   init_radius = 2,
   pathfinder_init = NULL,
+  threads_per_chain = 1,
   ...
 )
 }
@@ -56,6 +57,9 @@ use `init_radius` for random initialization. Extra non-parameter names
 
 \item{pathfinder_init}{Optional Pathfinder settings passed to [sample_model()].}
 
+\item{threads_per_chain}{Threads per chain for eligible native `reduce_sum`
+calls; see [sample_model()]. Defaults to 1.}
+
 \item{...}{Reserved. Unsupported options produce an error.}
 }
 \value{
@@ -67,7 +71,7 @@ This is a convenience interface; it does not install or call CmdStanR.
 }
 \details{
 Model preparation uses the sampling seed, including RNG calls in
-  transformed data. Within-chain threading and C++ compiler options are not
-  supported. Existing Stanli models and unconstrained initial values can be
+  transformed data. C++ compiler options are not supported. Existing Stanli
+  models and unconstrained initial values can be
   used through [sample_model()] followed by [as_cstanfit()].
 }

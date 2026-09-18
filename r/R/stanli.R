@@ -50,14 +50,17 @@ read_utf8_file <- function(path) {
 #' @param data A named list of data, or a path to a JSON data file.
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
+#' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
+#'   calls. Defaults to 1. Sampling uses its own setting; direct gradients use
+#'   the model's setting. Requires a thread-safe runtime for values above 1.
 #' @param seed The model-construction seed: RNG calls in transformed data
 #'   draw from it once, here, the way CmdStan's generated constructor does.
 #'   [sample_model()] and [optimize_model()] forward their own `seed` here
 #'   when transformed data drew from it, rebuilding the model for that run,
 #'   so one seed governs a whole run as it does in CmdStan. The rebuilt
 #'   model is the one the fit carries as `fit$model`; the object passed in
-#'   is unchanged. A model whose transformed data never draws is never
-#'   rebuilt.
+#'   is unchanged. Models are also rebuilt when sampling changes
+#'   `threads_per_chain`.
 #' @return An object of class `stanli_model` whose `columns` name every
 #'   output the way the posterior package reads them, `theta[1,2]` for an
 #'   indexed value. Warns, naming the part and the
@@ -67,7 +70,8 @@ read_utf8_file <- function(path) {
 #'   what to include in a bug report.
 #' @export
 stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
-                         seed = 1) {
+                         seed = 1, threads_per_chain = 1) {
+  cstan_integer(threads_per_chain, "threads_per_chain")
   load_runtime()
   if (is.null(code) && is.null(mir)) {
     if (is.null(file)) stop("provide file, code or mir", call. = FALSE)
@@ -93,7 +97,8 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
   model <- build_model(if (is_mir) mir else code, data_json, is_mir, seed,
     model_name = if (is.null(file)) "stanli_model" else
       tools::file_path_sans_ext(basename(file)),
-    model_code = if (is.null(code)) character(0) else code)
+    model_code = if (is.null(code)) character(0) else code,
+    threads_per_chain = threads_per_chain)
   note <- .Call("stanli_r_warnings", model$ptr)
   if (nzchar(note)) warning(note, call. = FALSE)
   model
@@ -105,9 +110,10 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
 # (`int k = poisson_rng(3);` then `vector[k] mu;`), which changes the free
 # vector length and the columns along with the draws.
 build_model <- function(code, data_json, is_mir, seed,
-                        model_name = "stanli_model", model_code = character(0)) {
+                        model_name = "stanli_model", model_code = character(0),
+                        threads_per_chain = 1) {
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
-               as.numeric(seed))
+               as.numeric(seed), as.integer(threads_per_chain))
   structure(list(ptr = ptr,
                  n_unconstrained = .Call("stanli_r_n_unconstrained", ptr),
                  columns = stan_variable_names(
@@ -116,21 +122,25 @@ build_model <- function(code, data_json, is_mir, seed,
                  model_code = model_code,
                  source = list(code = code, data_json = data_json,
                                is_mir = is_mir),
-                 seed = seed),
+                 seed = seed, threads_per_chain = threads_per_chain,
+                 reduce_sum_count = .Call("stanli_r_reduce_sum_count", ptr),
+                 reduce_sum_fallbacks = strsplit(
+                   .Call("stanli_r_reduce_sum_fallbacks", ptr), "\n", fixed = TRUE)[[1L]]),
             class = "stanli_model")
 }
 
 # CmdStan builds the model under the run seed, so transformed data that
 # draws from it follows that seed. Rebuild for this run only when a draw
-# happened and the seed differs; every other model is returned unchanged.
+# happened and the seed differs, or when the thread setting changes.
 # The rebuilt model is what the run uses and what the fit carries as
 # `fit$model`; the caller's own object is a value and keeps its seed.
-with_run_seed <- function(model, seed) {
-  if (seed == model$seed ||
-      !.Call("stanli_r_transformed_data_rng", model$ptr))
+with_run_seed <- function(model, seed, threads_per_chain = model$threads_per_chain) {
+  if (!.Call("stanli_r_transformed_data_rng", model$ptr)) seed <- model$seed
+  if (seed == model$seed && threads_per_chain == model$threads_per_chain)
     return(model)
   build_model(model$source$code, model$source$data_json,
-              model$source$is_mir, seed, model$model_name, model$model_code)
+              model$source$is_mir, seed, model$model_name, model$model_code,
+              threads_per_chain)
 }
 
 stan_variable_names <- function(x) {
@@ -211,6 +221,12 @@ unconstrain <- function(model, values) {
 #'   Pathfinder's own `init_radius` (2). Uses `seed`, returns one start per
 #'   chain, and cannot be combined with `init`. Single-path Pathfinder does
 #'   not perform PSIS resampling.
+#' @param threads_per_chain Positive thread count per chain for eligible native
+#'   `reduce_sum` calls, default 1. Small or unsupported calls stay serial.
+#'   Changing this setting prepares a new graph; reduction rounding and NUTS
+#'   draws can differ across thread counts. Active chains may each use this
+#'   many threads. `fit$model$reduce_sum_count` and `reduce_sum_fallbacks`
+#'   report retained reductions and graph-lowering refusals (not opaque regions).
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
@@ -230,7 +246,9 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          samples = 1000, thin = 1, delta = 0.8,
                          max_depth = 10, save_warmup = FALSE, init = NULL,
                          init_radius = 2, pathfinder_init = NULL,
-                         parallel_chains = NULL, refresh = 100) {
+                         parallel_chains = NULL, refresh = 100,
+                         threads_per_chain = 1) {
+  cstan_integer(threads_per_chain, "threads_per_chain")
   if (length(refresh) != 1L || !is.numeric(refresh) || is.na(refresh) ||
       !is.finite(refresh) || refresh < 0 || refresh != floor(refresh) ||
       refresh > .Machine$integer.max)
@@ -247,7 +265,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
     stop("chains must be a positive integer with Pathfinder initialization",
          call. = FALSE)
   load_runtime()
-  model <- with_run_seed(model, seed)
+  model <- with_run_seed(model, seed, threads_per_chain)
   if (is.null(parallel_chains)) parallel_chains <- chains
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),

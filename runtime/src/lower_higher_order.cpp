@@ -1,4 +1,6 @@
 #include "lower_internal.hpp"
+#include <stanli/reduce_sum.hpp>
+#include <stanli/detail/input_ranges.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -558,16 +560,195 @@ mir::Expr Lowering::slice_bound_literal(int64_t value, const std::string& raw) {
   literal.raw = raw;
   return literal;
 }
+// Only publish after every child has lowered and passed the fixed-range proof.
+// The ordinary UDF binder has already evaluated arguments and validation once;
+// refusal therefore proceeds with that exact same binding and parent graph.
+std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
+    const mir::Expr& call, const std::vector<UdfBinding>& binds, int64_t count,
+    int64_t grain, bool fixed_partition) {
+  if (compile_options.reduce_sum_threads <= 1) return std::nullopt;
+  const auto refuse = [&](const std::string& reason) -> std::optional<Val> {
+    const std::string note = call.name + ": " + reason;
+    if (std::find(out.reduce_sum_fallbacks.begin(),
+                  out.reduce_sum_fallbacks.end(),
+                  note) == out.reduce_sum_fallbacks.end())
+      out.reduce_sum_fallbacks.push_back(note);
+    return std::nullopt;
+  };
+#if !defined(STAN_THREADS) || defined(__EMSCRIPTEN__)
+  return refuse("within-chain workers require a TLS-safe native build");
+#endif
+  if (region_current || in_write_array)
+    return refuse("retained control-flow or write-array context");
+  if (count < compile_options.reduce_sum_min_elements)
+    return refuse("slice below reduce_sum_min_elements");
+  if (count <= 1) return refuse("slice has at most one element");
+  if (grain <= 0) return refuse("grainsize is not a known positive integer");
+  if (fun_effectful(call.name))
+    return refuse("callback has observable effects");
+  const int64_t needed = 1 + (count - 1) / grain;
+  const int64_t chunks =
+      fixed_partition
+          ? needed
+          : std::min<int64_t>(needed, compile_options.reduce_sum_threads);
+  if (chunks <= 1) return refuse("grainsize selects one chunk");
+  if (chunks > compile_options.reduce_sum_max_chunks)
+    return refuse("partition exceeds reduce_sum_max_chunks");
+  std::vector<Val> inputs;
+  std::map<int, int> parent_index;
+  for (const auto& bind : binds) {
+    if (bind.is_int) continue;
+    if (!bind.v.runtime_dims.empty() || bind.v.slot < 0)
+      return refuse("argument has runtime geometry");
+    auto found = parent_index.find(bind.v.slot);
+    if (found == parent_index.end()) {
+      parent_index[bind.v.slot] = static_cast<int>(inputs.size());
+      inputs.push_back(bind.v);
+    } else {
+      auto& value = inputs[found->second];
+      value.autodiff |= bind.v.autodiff;
+      value.si.param_free &= bind.v.si.param_free;
+    }
+  }
+  auto spec = std::make_shared<ReduceSumSpec>();
+  bool active = false, param_free = true;
+  try {
+    for (int64_t chunk = 0; chunk < chunks; ++chunk) {
+      const int64_t first =
+          fixed_partition ? chunk * grain : count * chunk / chunks;
+      const int64_t last = fixed_partition ? std::min(count, first + grain)
+                                           : count * (chunk + 1) / chunks;
+      Lowering trial = fork_region_trial();
+      trial.compile_options.reduce_sum_threads = 1;
+      trial.structured_policy = StructuredMode::Off;
+      std::vector<int> imported;
+      for (const auto& input : inputs)
+        imported.push_back(
+            trial.add_slot(g.slots[input.slot].len, input.autodiff));
+      mir::Expr invocation = call;
+      for (size_t i = 0; i < binds.size(); ++i) {
+        if (i == 1 || i == 2 || binds[i].is_int) {
+          invocation.args[i] = slice_bound_literal(i == 1   ? first + 1
+                                                   : i == 2 ? last
+                                                            : binds[i].iv,
+                                                   call.raw);
+          continue;
+        }
+        Val value = binds[i].v;
+        value.slot = imported.at(parent_index.at(value.slot));
+        const std::string name =
+            "(reduce_sum argument " + std::to_string(i) + ")";
+        trial.scope[name] = value;
+        trial.decls[name] =
+            DeclView{trial.g.slots[value.slot].len, value.autodiff, value.si};
+        if (binds[i].data) {
+          trial.td.env()[name] = *binds[i].data;
+          trial.observe(value, *binds[i].data);
+        }
+        auto arg = call.args[i];
+        arg.kind = mir::Expr::Var;
+        arg.name = name;
+        arg.args.clear();
+        if (i == 0) {
+          mir::Expr range;
+          range.kind = mir::Expr::FunApp;
+          range.name = "IndexBetween";
+          range.args = {slice_bound_literal(first + 1, call.raw),
+                        slice_bound_literal(last, call.raw)};
+          mir::Expr sliced = arg;
+          sliced.kind = mir::Expr::Indexed;
+          sliced.args = {arg, range};
+          arg = std::move(sliced);
+        }
+        invocation.args[i] = std::move(arg);
+      }
+      const Val result = trial.lower_call_udf(invocation);
+      if (!trial.target_terms.empty() || !trial.jac_slots.empty() ||
+          trial.g.slots[result.slot].len != 1)
+        return refuse(
+            "callback changes target/Jacobian state or returns a nonscalar");
+      active |= result.autodiff;
+      param_free &= result.si.param_free;
+      // Roots stay addressable through these ordinary graph passes. Opaque
+      // fallback programs and stateful kernels conservatively refuse below.
+      // Imported inactive inputs are runtime bindings, not initialized fills.
+      // Constant folding would evaluate their readers against zero storage.
+      trial.run_passes({result.slot}, PassPlan{false, true, true, true, false});
+      trial.g.result_slot = result.slot;
+      std::vector<detail::Import> parameter_map;
+      std::vector<int64_t> offsets;
+      std::string reason;
+      if (!detail::compact_imports(trial.g, trial.out.fills, parameter_map,
+                                   &offsets, &reason))
+        return refuse(reason);
+      ReduceSumSpec::Child child;
+      for (size_t i = 0; i < imported.size(); ++i)
+        if (trial.g.slots[imported[i]].len)
+          child.imports.push_back(
+              {imported[i], static_cast<int>(i), offsets[imported[i]]});
+      child.graph = std::move(trial.g);
+      child.fills = std::move(trial.out.fills);
+      spec->children.push_back(std::move(child));
+    }
+  } catch (const CompileError& error) {
+    return refuse(std::string("child lowering: ") + error.what());
+  }
+  // Drop unneeded operand bindings; argument evaluation has already happened.
+  std::vector<bool> used(inputs.size(), false);
+  for (const auto& child : spec->children)
+    for (const auto& in : child.imports) used[in.input] = true;
+  std::vector<int> remap(inputs.size(), -1);
+  std::vector<Val> live;
+  for (size_t i = 0; i < inputs.size(); ++i)
+    if (used[i]) {
+      remap[i] = static_cast<int>(live.size());
+      live.push_back(inputs[i]);
+    }
+  for (auto& child : spec->children)
+    for (auto& in : child.imports) in.input = remap[in.input];
+  // No semantic refusal after this point. Allocation failure aborts
+  // compilation.
+  if (live.size() > 6) {
+    const size_t packed_count = live.size() - 5;
+    std::vector<int64_t> offsets(packed_count, 0);
+    Val packed = live[0];
+    int64_t length = g.slots[packed.slot].len;
+    for (size_t i = 1; i < packed_count; ++i) {
+      offsets[i] = length;
+      if (g.slots[live[i].slot].len >
+          std::numeric_limits<int64_t>::max() - length)
+        throw std::length_error("reduce_sum packed input size overflow");
+      length += g.slots[live[i].slot].len;
+      packed = emit_value(OP_CONCAT2, {packed, live[i]}, length);
+    }
+    for (auto& child : spec->children)
+      for (auto& in : child.imports) {
+        if (size_t(in.input) < packed_count) {
+          in.offset += offsets[in.input];
+          in.input = 0;
+        } else
+          in.input -= static_cast<int>(packed_count - 1);
+      }
+    live.erase(live.begin(), live.begin() + packed_count);
+    live.insert(live.begin(), packed);
+  }
+  std::vector<int> slots;
+  for (const auto& in : live) slots.push_back(in.slot);
+  Val result = emit_raw(OP_REDUCE_SUM, slots, 1, view_of(call.type_));
+  result.autodiff = active;
+  result.si.param_free = param_free;
+  g.ops.back().udata = spec.get();
+  g.udata_pool.push_back(std::move(spec));
+  return result;
+}
 // reduce_sum(f, sliced, grainsize, shared...) sums f over the terms of a
 // partition of `sliced`, and its contract is that the partition is
 // unobservable: the terms must sum to the same value however the slice is
 // cut. Stan Math without STAN_THREADS takes that freedom to its limit and
 // makes exactly one call over the whole slice, returning zero for an empty
-// one (prim/functor/reduce_sum.hpp). stanli has no threading, so it lowers
-// to that same single call. That is not an approximation to be reconciled
-// later: it agrees with default CmdStan term for term, and it is also the
-// fastest shape available here, because cutting the slice would shorten
-// the callee's vectorized densities and buy nothing back.
+// one (prim/functor/reduce_sum.hpp). This remains Stanli's default and
+// conservative fallback. Opt-in native compilation may retain independently
+// lowered, compact children after the generic shape/effect checks above.
 //
 // Written out, the call is an ordinary user-function call, so this rewrites
 // it to f(sliced, 1, size(sliced), shared...) and hands that to the
@@ -589,9 +770,9 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   Val slice = actuals.at(1).value();
   if (!is_array(slice.si))
     fail("reduce_sum: the sliced argument is not an array", e.raw);
-  // Grainsize does not choose a partition here, but evaluating it and
-  // checking positivity are still observable. Do not swallow a failed
-  // compile-time probe or execute effectful expressions while lowering.
+  // Evaluating grainsize and checking positivity are observable even
+  // when this call keeps the whole-slice serial lowering. Do not swallow a
+  // failed compile-time probe or execute effectful expressions while lowering.
   // Keep pure data integer operations on the interpreter path: operations
   // such as divide(int, int) need not have a runtime graph kernel. Failed
   // folding still lowers (or refuses) the expression; it never drops it.
@@ -614,6 +795,8 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   };
   const int64_t n = array_shape(slice.si).dims.front();
   if (n == 0) {
+    if (compile_options.reduce_sum_threads > 1)
+      out.reduce_sum_fallbacks.push_back("reduce_sum: empty slice");
     // C++ evaluates shared arguments before reduce_sum can return zero.
     // Only the partial-sum body is skipped for an empty slice.
     for (size_t i = 3; i < actuals.size(); ++i) (void)actuals.at(i).value();
@@ -680,7 +863,20 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
 
   Val result{-1, false, {}};
   try {
-    result = lower_call_udf(call, check_grainsize);
+    int64_t grain = 0;
+    if (compile_options.reduce_sum_threads > 1 && folded_grainsize &&
+        !region_current && !in_write_array) {
+      const auto* observed = observation(*folded_grainsize);
+      if (observed && observed->r.size() == 1 && observed->r[0] >= 1 &&
+          observed->r[0] <= std::numeric_limits<int32_t>::max())
+        grain = static_cast<int64_t>(observed->r[0]);
+    }
+    result = lower_call_udf(
+        call, check_grainsize,
+        [&](const std::vector<UdfBinding>& binds) -> std::optional<Val> {
+          return try_lower_parallel_reduce_sum(call, binds, n, grain,
+                                               e.name == "reduce_sum_static");
+        });
   } catch (...) {
     scope.erase(bound);
     decls.erase(bound);

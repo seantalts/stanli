@@ -211,6 +211,8 @@ struct CompiledModel {
   // Each part of the model that has no compiled path and would run through
   // the MIR interpreter, with the lowering's reason.
   std::vector<std::string> interpreter_fallbacks;
+  // Reasons opt-in within-chain reduction sites kept ordinary lowering.
+  std::vector<std::string> reduce_sum_fallbacks;
   // Transformed data drew from the construction seed, so this model is a
   // function of that seed as well as of its data. A host that runs with one
   // seed the way CmdStan does rebuilds under the run seed when this is set,
@@ -224,8 +226,17 @@ struct CompiledModel {
 // a different seed means a different compiled model. Generated-quantities
 // draws are unrelated; those streams are the caller's (see wa_interp.hpp).
 // The default matches the reference drivers and BridgeStan's convention.
+// Native opt-in. Retained fixed-shape reductions reuse caller-owned teams;
+// unsupported/small calls keep whole-slice lowering. See reduce_sum.hpp.
+struct CompileOptions {
+  int reduce_sum_threads = 1;
+  int64_t reduce_sum_min_elements = 8192;
+  int reduce_sum_max_chunks = 1024;
+};
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed = 1);
+CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
+                            unsigned seed, const CompileOptions& options);
 
 // The warning a host shows once per model with interpreter_fallbacks, and
 // the compile error STANLI_NO_INTERPRETER turns it into. `probe_failure` is

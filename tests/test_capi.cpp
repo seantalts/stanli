@@ -1115,7 +1115,75 @@ void test_transformed_data_seed() {
   stanli_model_free(gq_only);
 }
 
+void test_reduce_sum_threads() {
+  // Validate counts before parsing, even without an embedded compiler.
+  char err[8192]{};
+  auto* invalid = stanli_model_new_threaded("", "{}", 1, 0, err, sizeof err);
+  expect_true(
+      "zero within-chain thread count rejected",
+      invalid == nullptr &&
+          std::string(err).find("threads_per_chain") != std::string::npos);
+  stanli_model_free(invalid);
+  const std::string mir = slurp("tests/fixtures/reduce_sum_bindings.tmir.sexp");
+  std::string data = "{\"N\":10000,\"y\":[0.5";
+  for (int i = 1; i < 10000; ++i) data += ",0.5";
+  data += "]}";
+  auto* serial =
+      stanli_model_new_seeded(mir.c_str(), data.c_str(), 1, err, sizeof err);
+  auto* parallel = stanli_model_new_threaded(mir.c_str(), data.c_str(), 1, 4,
+                                             err, sizeof err);
+  expect_true("serial ABI reduction construction", serial != nullptr);
+  if (!stanli_thread_safe()) {
+    expect_true("nonthreaded ABI rejects workers",
+                parallel == nullptr &&
+                    std::string(err).find("thread-safe") != std::string::npos);
+    stanli_model_free(serial);
+    stanli_model_free(parallel);
+    return;
+  }
+  expect_true("threaded ABI reduction construction", parallel != nullptr);
+  if (serial && parallel) {
+    expect_true("ABI serial reduction count",
+                stanli_reduce_sum_count(serial) == 0);
+    expect_true("ABI retained native reduction",
+                stanli_reduce_sum_count(parallel) == 1);
+    expect_eq("ABI accepted reduction has no refusal",
+              stanli_reduce_sum_fallbacks(parallel), "");
+    double q = 0.2, slp = 0, plp = 0, sg = 0, pg = 0;
+    expect_true("ABI serial gradient succeeds",
+                stanli_grad(serial, &q, &slp, &sg) == 0);
+    expect_true("ABI threaded gradient succeeds",
+                stanli_grad(parallel, &q, &plp, &pg) == 0);
+    expect_near("ABI reduction density", plp, slp);
+    expect_near("ABI reduction gradient", pg, sg);
+    expect_near("ABI reduction analytic gradient", pg, 5000 - 10001 * q);
+    stanli_sample_opts opts;
+    stanli_sample_opts_init(&opts);
+    opts.chains = 2;
+    opts.warmup = 20;
+    opts.samples = 5;
+    opts.max_depth = 5;
+    opts.num_threads = 2;
+    std::vector<double> a(10), b(10);
+    expect_true("ABI threaded sampling",
+                stanli_sample_multi(parallel, &opts, a.data(), nullptr, err,
+                                    sizeof err) == 0);
+    opts.num_threads = 1;
+    expect_true("ABI repeated sampling",
+                stanli_sample_multi(parallel, &opts, b.data(), nullptr, err,
+                                    sizeof err) == 0);
+    expect_true("ABI chain scheduling preserves draws", a == b);
+    // The model-owned team must still be live after sampling destroys clones.
+    expect_true("ABI team survives sample return",
+                stanli_grad(parallel, &q, &plp, &pg) == 0);
+    expect_near("ABI post-sampling gradient", pg, sg);
+  }
+  stanli_model_free(serial);
+  stanli_model_free(parallel);
+}
+
 int main() {
+  test_reduce_sum_threads();
   test_transformed_data_seed();
   expect_interpreter_policy("tests/fixtures/wanames.tmir.sexp", nullptr);
   expect_interpreter_policy("tests/fixtures/wa_literal_write.tmir.sexp",

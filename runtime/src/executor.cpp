@@ -273,6 +273,7 @@ void register_message_kernels();
 void register_rng_kernel();
 void register_island_kernel();
 void register_structured_loop_kernel();
+void register_reduce_sum_kernel();
 
 static void ensure_registered() {
   static const bool once = [] {
@@ -295,6 +296,7 @@ static void ensure_registered() {
     register_mixture_kernels();
     register_island_kernel();
     register_structured_loop_kernel();
+    register_reduce_sum_kernel();
     return true;
   }();
   (void)once;
@@ -628,9 +630,12 @@ std::string Executor::profile_report() const {
   return out;
 }
 
-void Executor::run_forward_only() { run_forward_only(EvalState{}); }
+void Executor::run_forward_only() {
+  run_forward_only(EvalState{nullptr, reduce_context_});
+}
 
 void Executor::run_forward_only(EvalState state) {
+  reverse_ready_ = false;
   struct RestoreState {
     EvalState& slot;
     EvalState previous;
@@ -675,8 +680,9 @@ void Executor::run_forward_only(EvalState state) {
 
 double Executor::forward_value_only() {
   struct ValuesOnly {
+    bool previous = g_values_only;
     ValuesOnly() { g_values_only = true; }
-    ~ValuesOnly() { g_values_only = false; }
+    ~ValuesOnly() { g_values_only = previous; }
   } guard;
   return forward();
 }
@@ -685,15 +691,35 @@ double Executor::forward() {
   run_forward_only();
   const Slot& r = graph_.slots[graph_.result_slot];
   assert(r.len == 1);
+  reverse_ready_ = !g_values_only;
   return slot_data_(graph_.result_slot)[0];
 }
 
 double Executor::gradient(double* grad_out) {
   ++n_grad_evals_;
+  struct FullGradient {
+    bool previous = g_values_only;
+    FullGradient() { g_values_only = false; }
+    ~FullGradient() { g_values_only = previous; }
+  } guard;
   const double v = forward();
+  reverse(grad_out, 1.0);
+  return v;
+}
+
+void Executor::reverse(double* grad_out, double seed) {
+  if (!reverse_ready_)
+    throw std::logic_error("reverse requires a fresh forward");
+  reverse_ready_ = false;
+  struct RestoreState {
+    EvalState& state;
+    EvalState previous;
+    ~RestoreState() { state = previous; }
+  } restore{eval_state_, eval_state_};
+  eval_state_.reduce = reduce_context_;
   std::memset(adjoints_.data(), 0, sizeof(double) * adjoints_.size());
   assert(result_adjoint_offset_ >= 0);
-  adjoints_[result_adjoint_offset_] = 1.0;
+  adjoints_[result_adjoint_offset_] = seed;
   if (profile_) {
     // Profile the exact bound backward plan. Each context belongs to ctx_,
     // so its index supplies opcode attribution without a second graph walk
@@ -711,8 +737,9 @@ double Executor::gradient(double* grad_out) {
               std::chrono::steady_clock::now() - t0)
               .count();
     }
-    std::memcpy(grad_out, adjoints_.data(), sizeof(double) * n_params_);
-    return v;
+    if (n_params_)
+      std::memcpy(grad_out, adjoints_.data(), sizeof(double) * n_params_);
+    return;
   }
   // Same unroll as the forward sweep (see run_forward_only).
   const auto step = [](const BwdStep& s) {
@@ -732,8 +759,8 @@ double Executor::gradient(double* grad_out) {
     step(bwd_[i + 3]);
   }
   for (; i < nb; ++i) step(bwd_[i]);
-  std::memcpy(grad_out, adjoints_.data(), sizeof(double) * n_params_);
-  return v;
+  if (n_params_)
+    std::memcpy(grad_out, adjoints_.data(), sizeof(double) * n_params_);
 }
 
 }  // namespace stanli

@@ -862,6 +862,7 @@ struct Lowering {
   // Names the reduce_sum rewrite binds its lowered slice under, kept
   // distinct so nested calls do not share one.
   int reduce_sum_slices = 0;
+  CompileOptions compile_options;
   // int_env as bind_data left it, before either section's locals and loop
   // variables were folded in; the write_array lowering starts from this.
   std::map<std::string, long> int_env_data;
@@ -1606,6 +1607,18 @@ struct Lowering {
   // never fold because their value is instantiation-dependent.
   bool expr_effectful(const mir::Expr& e);
 
+  struct UdfBinding {
+    bool is_int = false;
+    long iv = 0;
+    Val v{-1, false, {}};
+    std::optional<DataMap::Entry> data;
+    bool formal_data_only = false;
+  };
+  using UdfSpecialization =
+      std::function<std::optional<Val>(const std::vector<UdfBinding>&)>;
+  std::optional<Val> try_lower_parallel_reduce_sum(
+      const mir::Expr& call, const std::vector<UdfBinding>& binds,
+      int64_t count, int64_t grain, bool fixed_partition);
   bool reduce_sum_effectful(const mir::Expr& e) {
     if (e.args.empty() || e.args[0].kind != mir::Expr::Var) return true;
     bool propto = false;
@@ -1786,7 +1799,8 @@ struct Lowering {
   // scope, and the body lowers like any other statements (loops unroll,
   // data-only conditions resolve). Return throws the result value out.
   Val lower_call_udf(const mir::Expr& e,
-                     const std::function<void()>& before_body = {});
+                     const std::function<void()>& before_body = {},
+                     const UdfSpecialization& specialize = {});
 
   Val lower_multi_normal_rng(const mir::Expr& e, CallArguments& actuals);
 
@@ -1844,21 +1858,9 @@ struct Lowering {
 
   mir::Expr slice_bound_literal(int64_t value, const std::string& raw);
 
-  // reduce_sum(f, sliced, grainsize, shared...) sums f over the terms of a
-  // partition of `sliced`, and its contract is that the partition is
-  // unobservable: the terms must sum to the same value however the slice is
-  // cut. Stan Math without STAN_THREADS takes that freedom to its limit and
-  // makes exactly one call over the whole slice, returning zero for an empty
-  // one (prim/functor/reduce_sum.hpp). stanli has no threading, so it lowers
-  // to that same single call. That is not an approximation to be reconciled
-  // later: it agrees with default CmdStan term for term, and it is also the
-  // fastest shape available here, because cutting the slice would shorten
-  // the callee's vectorized densities and buy nothing back.
-  //
-  // Written out, the call is an ordinary user-function call, so this rewrites
-  // it to f(sliced, 1, size(sliced), shared...) and hands that to the
-  // inliner, which already owns argument binding, propto threading, and the
-  // data-only formal rules.
+  // Default/refused calls inline one whole-slice callback, preserving the
+  // ordinary binder's argument evaluation, propto and data-only rules.
+  // Native opt-in retains compact children after fixed-shape/effect proofs.
   Val lower_reduce_sum(const mir::Expr& e, CallArguments& actuals);
 
   Val lower_append_array(const mir::Expr& e, CallArguments& actuals);

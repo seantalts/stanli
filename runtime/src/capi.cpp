@@ -6,6 +6,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/reduce_sum.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -45,6 +46,11 @@ int64_t scalar_column_start(
 
 struct stanli_model {
   stanli::CompiledModel cm;  // graph moved out into ex
+  // Declared before ex so the executor dies before its borrowed team.
+  std::unique_ptr<stanli::ReduceExecutionContext> reduce_team;
+  int threads_per_chain = 1;
+  int reduce_sum_count = 0;
+  std::string reduce_sum_fallbacks;
   std::unique_ptr<stanli::Executor> ex;
   std::vector<std::string> flat_names;  // constrained, flattened
   int64_t n_con = 0;
@@ -89,12 +95,41 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
 stanli_model* stanli_model_new_seeded(const char* tmir_sexp,
                                       const char* data_json, uint32_t seed,
                                       char* err, size_t err_len) {
+  return stanli_model_new_threaded(tmir_sexp, data_json, seed, 1, err, err_len);
+}
+
+stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
+                                        const char* data_json, uint32_t seed,
+                                        int threads_per_chain, char* err,
+                                        size_t err_len) {
   try {
+    if (threads_per_chain < 1)
+      throw std::invalid_argument("threads_per_chain must be positive");
+    if (threads_per_chain > 1 && !stanli::thread_safe_build())
+      throw std::invalid_argument(
+          "threads_per_chain > 1 requires a thread-safe runtime");
     auto m = std::make_unique<stanli_model>();
+    m->threads_per_chain = threads_per_chain;
     stanli::DataMap data = stanli::DataMap::from_json(data_json);
-    m->cm = stanli::compile_model(tmir_sexp, data, seed);
+    stanli::CompileOptions options;
+    options.reduce_sum_threads = threads_per_chain;
+    m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
+    m->reduce_sum_count =
+        (int)std::count_if(m->cm.graph.ops.begin(), m->cm.graph.ops.end(),
+                           [](const stanli::Op& op) {
+                             return op.opcode == stanli::OP_REDUCE_SUM;
+                           });
+    for (const auto& reason : m->cm.reduce_sum_fallbacks) {
+      if (!m->reduce_sum_fallbacks.empty()) m->reduce_sum_fallbacks += "\n";
+      m->reduce_sum_fallbacks += reason;
+    }
     m->ex = std::make_unique<stanli::Executor>(std::move(m->cm.graph));
     m->cm.bind(*m->ex);
+    if (m->reduce_sum_count > 0) {
+      m->reduce_team =
+          std::make_unique<stanli::ReduceExecutionContext>(threads_per_chain);
+      m->ex->set_reduce_context(m->reduce_team.get());
+    }
     for (const auto& v : m->cm.views) m->n_con += v.len;
     m->flat_names = stanli::CompiledModel::csv_names(m->cm.views);
     std::string probe_failure;
@@ -163,6 +198,15 @@ stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
                                                 const char* data_json,
                                                 uint32_t seed, char* err,
                                                 size_t err_len) {
+  return stanli_model_new_from_stan_threaded(stan_code, data_json, seed, 1, err,
+                                             err_len);
+}
+
+stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
+                                                  const char* data_json,
+                                                  uint32_t seed,
+                                                  int threads_per_chain,
+                                                  char* err, size_t err_len) {
 #ifdef STANLI_EMBED_STANC
   char* res = stanli_stanc_model_tmir(stan_code);
   if (std::strncmp(res, "OK", 2) != 0) {
@@ -170,14 +214,15 @@ stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
     stanli_stanc_free(res);
     return nullptr;
   }
-  stanli_model* m =
-      stanli_model_new_seeded(res + 2, data_json, seed, err, err_len);
+  stanli_model* m = stanli_model_new_threaded(res + 2, data_json, seed,
+                                              threads_per_chain, err, err_len);
   stanli_stanc_free(res);
   return m;
 #else
   (void)stan_code;
   (void)data_json;
   (void)seed;
+  (void)threads_per_chain;
   put_err(err, err_len, "this build does not embed stanc3");
   return nullptr;
 #endif
@@ -505,6 +550,14 @@ int64_t stanli_n_stored_draws(const stanli_sample_opts* o) {
 
 int stanli_thread_safe(void) { return stanli::thread_safe_build() ? 1 : 0; }
 
+int stanli_reduce_sum_count(const stanli_model* m) {
+  return m->reduce_sum_count;
+}
+
+const char* stanli_reduce_sum_fallbacks(const stanli_model* m) {
+  return m->reduce_sum_fallbacks.c_str();
+}
+
 const char* stanli_sampler_column_name(int i) {
   static const char* kNames[STANLI_N_SAMPLER_COLS] = {
       "lp__",         "accept_stat__", "stepsize__", "treedepth__",
@@ -575,7 +628,16 @@ int stanli_sample_multi_write_array(
     // Chain 0 samples on the model's own executor; the rest get clones,
     // so a single-chain run allocates no second arena and behaves exactly
     // as stanli_sample always has.
+    // Teams outlive the clones that borrow them. Chain 0 already owns a team.
+    std::vector<std::unique_ptr<stanli::ReduceExecutionContext>> reduce_teams;
     auto clones = stanli::clone_executors(*m->ex, n_chains - 1);
+    if (m->reduce_sum_count > 0) {
+      for (auto& clone : clones) {
+        reduce_teams.push_back(std::make_unique<stanli::ReduceExecutionContext>(
+            m->threads_per_chain));
+        clone->set_reduce_context(reduce_teams.back().get());
+      }
+    }
     std::vector<stanli::Executor*> execs;
     execs.push_back(m->ex.get());
     for (auto& c : clones) execs.push_back(c.get());

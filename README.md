@@ -248,6 +248,11 @@ matched by formal name. The first version evaluates pure, value-returning
 functions on doubles; `_lp`, void, RNG, and autodiff entry points are not part
 of this surface.
 
+Native C++, C, Python, R and `stanli_run` support opt-in [within-chain `reduce_sum`
+parallelism](docs/native-reduce-sum.md), using reusable per-chain workers.
+Pass `threads_per_chain=N` to Python/R sampling, or `--threads-per-chain N`
+to the CLI; the default remains one.
+
 ## Python
 
 A ctypes wrapper over the shared library, published to PyPI as one

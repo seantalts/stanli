@@ -1129,6 +1129,91 @@ def test_build_id_is_stable_and_specific():
     assert a == stanli.build_id(), "build id is not stable within a process"
 
 
+REDUCE_SUM_SOURCE = (FIXTURES / "reduce_sum_bindings.stan").read_text()
+
+
+def test_reduce_sum_threads_per_chain():
+    data = {"N": 10000, "y": np.linspace(-1, 2, 10000).tolist()}
+    m = stanli.Model(stan_code=REDUCE_SUM_SOURCE, data=data)
+    assert m.threads_per_chain == 1 and m.reduce_sum_count == 0
+    baseline = m.log_prob_grad([0.2])
+    args = dict(chains=2, warmup=25, samples=10, refresh=0, seed=123,
+                max_depth=6)
+    serial = m.sample(**args)
+    for invalid in (0, -1, 1.5, True, "2", None, 2**40):
+        try:
+            m.sample(**args, threads_per_chain=invalid)
+        except (ValueError, TypeError, OverflowError) as e:
+            assert "threads_per_chain" in str(e)
+        else:
+            raise AssertionError(f"accepted invalid thread count {invalid!r}")
+    if not stanli.thread_safe():
+        try:
+            m.sample(**args, threads_per_chain=2)
+        except RuntimeError as e:
+            assert "thread-safe" in str(e)
+        else:
+            raise AssertionError("unsafe build accepted within-chain threads")
+        return
+    first = m.sample(**args, threads_per_chain=4, parallel_chains=2)
+    assert m.threads_per_chain == 4 and m.reduce_sum_count == 1
+    assert m.reduce_sum_fallbacks == []
+    lp, grad = m.log_prob_grad([0.2])
+    np.testing.assert_allclose(lp, baseline[0], rtol=2e-12)
+    np.testing.assert_allclose(grad, baseline[1], rtol=2e-12)
+    np.testing.assert_allclose(grad, [sum(data["y"]) - 10001 * 0.2], rtol=2e-12)
+    again = m.sample(**args, threads_per_chain=4, parallel_chains=1)
+    np.testing.assert_array_equal(first.draws(), again.draws())
+    # Returning to the default must restore the original serial graph.
+    restored = m.sample(**args)
+    assert m.threads_per_chain == 1 and m.reduce_sum_count == 0
+    np.testing.assert_array_equal(serial.draws(), restored.draws())
+    # Both source and portable MIR constructors must retain the native op.
+    mir = stanli.stan_to_mir(REDUCE_SUM_SOURCE)
+    cached = stanli.Model(mir=mir, data=data, threads_per_chain=2)
+    assert cached.reduce_sum_count == 1
+    np.testing.assert_allclose(cached.log_prob_grad([0.2])[1], baseline[1], rtol=2e-12)
+    static = stanli.Model(stan_code=REDUCE_SUM_SOURCE.replace("reduce_sum(", "reduce_sum_static("),
+                          data=data, threads_per_chain=4)
+    assert static.reduce_sum_count == 1
+    np.testing.assert_allclose(static.log_prob_grad([0.2])[1], baseline[1], rtol=2e-12)
+    small = stanli.Model(stan_code=REDUCE_SUM_SOURCE,
+                         data={"N": 3, "y": [0, 1, 2]}, threads_per_chain=4)
+    assert small.reduce_sum_count == 0 and small.reduce_sum_fallbacks
+    # Old runtime capability failures must leave the existing model usable.
+    constructor = ("stanli_model_new_from_stan_threaded"
+                   if stanli._lib.stanli_has_embedded_stanc()
+                   else "stanli_model_new_threaded")
+    with mock.patch.object(stanli._lib, constructor, None):
+        try:
+            m.sample(**args, threads_per_chain=2)
+        except RuntimeError as e:
+            assert "newer Stanli runtime" in str(e)
+        else:
+            raise AssertionError("missing native entrypoint was ignored")
+    assert m.threads_per_chain == 1
+    np.testing.assert_array_equal(m.log_prob_grad([0.2])[1], baseline[1])
+
+
+def test_reduce_sum_threads_preserve_transformed_data_seed():
+    if not stanli.thread_safe():
+        return
+    code = REDUCE_SUM_SOURCE.replace(
+        "parameters {", "transformed data { real shift = normal_rng(0, 1); } parameters {")
+    code = code.replace("mu ~ normal(0, 1)", "mu ~ normal(shift, 1)")
+    data = {"N": 10000, "y": [0.5] * 10000}
+    m = stanli.Model(stan_code=code, data=data, seed=2)
+    args = dict(chains=1, warmup=10, samples=5, seed=17, refresh=0,
+                max_depth=5, threads_per_chain=2)
+    first = m.sample(**args)
+    fresh = stanli.Model(stan_code=code, data=data, seed=17, threads_per_chain=2)
+    second = fresh.sample(**args)
+    assert m.reduce_sum_count == fresh.reduce_sum_count == 1
+    np.testing.assert_array_equal(first.draws(), second.draws())
+    np.testing.assert_array_equal(m.log_prob_grad([0.2])[1],
+                                  fresh.log_prob_grad([0.2])[1])
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

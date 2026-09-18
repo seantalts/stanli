@@ -51,11 +51,22 @@ post-warmup transition diverges or saturates the maximum treedepth, the final
 output also reports the aggregate count. Those counts cover all transitions,
 including transitions omitted by thinning.
 
+For models using `reduce_sum` or `reduce_sum_static`, opt into native
+within-chain parallelism with `model.sample(threads_per_chain=4,
+parallel_chains=2)`. This uses up to eight active sampling threads. The default
+is one thread per chain; small or unsupported reductions stay serial. Inspect
+`model.reduce_sum_count` and `model.reduce_sum_fallbacks` after sampling for
+retained reductions and graph-lowering refusals. Changing the thread setting
+rebuilds the prepared model and can change reduction rounding and NUTS draws.
+The runtime must have thread support. See the
+[native reduction guide](https://github.com/seantalts/stanli/blob/main/docs/native-reduce-sum.md)
+for eligibility and memory behavior.
+
 ## Chains and convergence
 
 Four chains by default, run in parallel, because R-hat needs more than
 one and a single-chain run cannot be checked for convergence at all.
-Eight schools does all four in about 70 ms. Threading changes nothing
+Eight schools does all four in about 70 ms. Scheduling chains changes nothing
 about the answer: each chain owns its executor and its RNG stream, so
 the draws come out byte-identical to a sequential run.
 

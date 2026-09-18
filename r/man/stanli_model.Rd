@@ -4,7 +4,14 @@
 \alias{stanli_model}
 \title{Compile a Stan model}
 \usage{
-stanli_model(file = NULL, code = NULL, data = NULL, mir = NULL, seed = 1)
+stanli_model(
+  file = NULL,
+  code = NULL,
+  data = NULL,
+  mir = NULL,
+  seed = 1,
+  threads_per_chain = 1
+)
 }
 \arguments{
 \item{file}{Path to a `.stan` file.}
@@ -22,8 +29,12 @@ draw from it once, here, the way CmdStan's generated constructor does.
 when transformed data drew from it, rebuilding the model for that run,
 so one seed governs a whole run as it does in CmdStan. The rebuilt
 model is the one the fit carries as `fit$model`; the object passed in
-is unchanged. A model whose transformed data never draws is never
-rebuilt.}
+is unchanged. Models are also rebuilt when sampling changes
+`threads_per_chain`.}
+
+\item{threads_per_chain}{Positive thread count for eligible native `reduce_sum`
+calls. Defaults to 1. Sampling uses its own setting; direct gradients use
+the model's setting. Requires a thread-safe runtime for values above 1.}
 }
 \value{
 An object of class `stanli_model` whose `columns` name every

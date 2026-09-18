@@ -196,6 +196,13 @@ class Executor {
   // forward() + reverse sweep. grad_out receives d result / d params in
   // param-slot declaration order. Returns the forward value.
   double gradient(double* grad_out);
+  // Consume a successful differentiable forward with the actual incoming
+  // scalar adjoint. Another forward/value-only call invalidates prior state.
+  void reverse(double* grad_out, double seed);
+  // Non-owning per-chain execution resource; clones start with no context.
+  void set_reduce_context(ReduceExecutionContext* context) {
+    reduce_context_ = context;
+  }
   int64_t n_grad_evals() const { return n_grad_evals_; }
 
   // Opt-in per-opcode accounting (calls, forward/backward ns, elements).
@@ -227,6 +234,8 @@ class Executor {
     int64_t elems = 0;  // output elements per forward call, summed
   };
 
+  ReduceExecutionContext* reduce_context_ = nullptr;
+  bool reverse_ready_ = false;
   Graph graph_;
   std::vector<double> values_;
   std::shared_ptr<std::vector<double>> data_;

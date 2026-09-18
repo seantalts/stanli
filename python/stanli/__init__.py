@@ -27,7 +27,7 @@ __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
            "SAMPLER_COLUMNS", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 
 _BIN = pathlib.Path(__file__).parent / "_bin"
 
@@ -135,6 +135,19 @@ def _load_lib():
                                                       ctypes.c_uint32,
                                                       ctypes.c_char_p,
                                                       ctypes.c_size_t]
+    # Optional additive ABI: serial callers can still use an older runtime.
+    for name in ("stanli_model_new_threaded", "stanli_model_new_from_stan_threaded"):
+        fn = getattr(lib, name, None)
+        if fn is not None:
+            fn.restype = ctypes.c_void_p
+            fn.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32,
+                           ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
+    for name, result in (("stanli_reduce_sum_count", ctypes.c_int),
+                         ("stanli_reduce_sum_fallbacks", ctypes.c_char_p)):
+        fn = getattr(lib, name, None)
+        if fn is not None:
+            fn.restype = result
+            fn.argtypes = [ctypes.c_void_p]
     # c_void_p, not c_char_p: ctypes converts a c_char_p result to bytes
     # and drops the pointer, which would leak the string stanli handed us
     # ownership of.
@@ -890,6 +903,20 @@ class OptimizeResult(dict):
         return True
 
 
+def _threads_per_chain(value):
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError("threads_per_chain must be a positive integer")
+    try:
+        value = operator.index(value)
+    except TypeError:
+        raise TypeError("threads_per_chain must be a positive integer") from None
+    if value < 1:
+        raise ValueError("threads_per_chain must be positive")
+    if value > 2 ** (8 * ctypes.sizeof(ctypes.c_int) - 1) - 1:
+        raise OverflowError("threads_per_chain does not fit in a C int")
+    return value
+
+
 class Model:
     """A compiled (model, data) pair.
 
@@ -901,23 +928,26 @@ class Model:
     run as it does in CmdStan. The rebuild replaces this object's model:
     afterwards ``log_prob_grad``, ``n_unconstrained`` and
     ``constrained_names`` all describe the model as built under the run
-    seed. A model whose transformed data never draws is never rebuilt.
+    seed. Models are also rebuilt when sampling changes ``threads_per_chain``.
+    ``threads_per_chain`` on construction configures direct gradient calls;
+    sampling uses its own setting, which defaults to 1.
     """
 
     def __init__(self, stan_file=None, data=None, stan_code=None, mir=None,
-                 seed=1):
+                 seed=1, threads_per_chain=1):
+        threads_per_chain = _threads_per_chain(threads_per_chain)
         if mir is None and stan_code is None:
             if stan_file is None:
                 raise ValueError("provide stan_file, stan_code, or mir")
             stan_code = _read_utf8_file(stan_file)
         self._source = (mir, stan_code, _data_to_json(data))
         self._m = None
-        self._adopt(self._construct(seed), seed)
+        self._adopt(self._construct(seed, threads_per_chain), seed, threads_per_chain)
         note = _lib.stanli_warnings(self._m)
         if note:
             warnings.warn(note.decode(), RuntimeWarning, stacklevel=2)
 
-    def _adopt(self, m, seed):
+    def _adopt(self, m, seed, threads_per_chain):
         # Everything this object caches about its model is derived from the
         # handle, so a rebuild under another seed must refresh all of it:
         # transformed data can size a parameter (`int k = poisson_rng(3);`
@@ -926,6 +956,7 @@ class Model:
         if self._m:
             _lib.stanli_model_free(self._m)
         self._m, self._seed = m, seed
+        self._threads_per_chain = threads_per_chain
         self.n_unconstrained = _lib.stanli_n_unconstrained(m)
         n_con = _lib.stanli_n_constrained(m)
         self.constrained_names = [
@@ -933,36 +964,55 @@ class Model:
             for i in range(n_con)
         ]
 
-    def _construct(self, seed):
+    def _construct(self, seed, threads_per_chain):
         mir, stan_code, data_json = self._source
         err = ctypes.create_string_buffer(8192)
         if mir is not None:
-            # Already-compiled MIR, from stan_to_mir or from
-            # `stanc --O1 --debug-optimized-mir`. Skips the compiler
-            # entirely, which is what a cached or shipped model wants.
-            m = _lib.stanli_model_new_seeded(
-                mir.encode(), data_json.encode(), seed, err, len(err))
+            text, name = mir, "stanli_model_new"
         elif _lib.stanli_has_embedded_stanc():
-            # Fully in-process: embedded stanc3 compiles the model.
-            m = _lib.stanli_model_new_from_stan_seeded(
-                stan_code.encode(), data_json.encode(), seed, err, len(err))
+            text, name = stan_code, "stanli_model_new_from_stan"
         else:
-            # Windows and other non-embedded builds use the bundled compiler
-            # executable as a short-lived subprocess.
-            m = _lib.stanli_model_new_seeded(
-                _subprocess_mir(stan_code).encode(), data_json.encode(), seed,
-                err, len(err))
+            text, name = _subprocess_mir(stan_code), "stanli_model_new"
+        args = [text.encode(), data_json.encode(), seed]
+        if threads_per_chain > 1:
+            fn = getattr(_lib, name + "_threaded", None)
+            if fn is None:
+                raise RuntimeError("threads_per_chain requires a newer Stanli runtime")
+            args.append(threads_per_chain)
+        else:
+            fn = getattr(_lib, name + "_seeded")
+        m = fn(*args, err, len(err))
         if not m:
             raise RuntimeError(err.value.decode())
         return m
 
+    @property
+    def threads_per_chain(self):
+        """Thread setting of the currently prepared model."""
+        return self._threads_per_chain
+
+    @property
+    def reduce_sum_count(self):
+        """Number of retained native parallel reductions in the prepared graph."""
+        fn = getattr(_lib, "stanli_reduce_sum_count", None)
+        return fn(self._m) if fn is not None else 0
+
+    @property
+    def reduce_sum_fallbacks(self):
+        """Graph-lowering refusal reasons; opaque runtime regions are not inventoried."""
+        fn = getattr(_lib, "stanli_reduce_sum_fallbacks", None)
+        return fn(self._m).decode().splitlines() if fn is not None else []
+
+    def _prepare_run(self, seed, threads_per_chain):
+        construction_seed = (seed if _lib.stanli_transformed_data_rng(self._m)
+                             else self._seed)
+        if (construction_seed != self._seed or
+                threads_per_chain != self.threads_per_chain):
+            m = self._construct(construction_seed, threads_per_chain)
+            self._adopt(m, construction_seed, threads_per_chain)
+
     def _forward_seed(self, seed):
-        # CmdStan builds the model under the run seed, so transformed data
-        # that draws from it follows that seed. Rebuild only when a draw
-        # happened and the seed differs; every other model is left alone.
-        if seed == self._seed or not _lib.stanli_transformed_data_rng(self._m):
-            return
-        self._adopt(self._construct(seed), seed)
+        self._prepare_run(seed, self.threads_per_chain)
 
     def __del__(self):
         if getattr(self, "_m", None):
@@ -1079,7 +1129,7 @@ class Model:
     def sample(self, *, chains=4, seed=1, warmup=1000, samples=1000,
                delta=0.8, max_depth=10, thin=1, save_warmup=False,
                inits=None, init_radius=2.0, pathfinder_init=None,
-               parallel_chains=None, refresh=100):
+               parallel_chains=None, refresh=100, threads_per_chain=1):
         """NUTS draws as a Fit.
 
         Four chains by default, because R-hat needs more than one and a
@@ -1107,6 +1157,15 @@ class Model:
         so it is on by default. A build without thread support clamps it
         to 1 (see ``thread_safe()``).
 
+        `threads_per_chain` defaults to 1. Larger values enable native
+        within-chain parallelism for eligible reduce_sum calls; small or
+        unsupported calls remain serial. Changing it rebuilds the prepared
+        model. Each active chain can use this many threads, including its
+        sampling thread: up to `parallel_chains * threads_per_chain` total. Changing the reduction
+        partition can change floating-point rounding and thus NUTS draws.
+        `model.reduce_sum_count` and `model.reduce_sum_fallbacks` describe
+        retained reductions and graph-lowering refusals.
+
         `refresh` is the number of transitions between CmdStan-shaped
         progress updates. The default is 100; zero disables all automatic
         progress, timing, and sampler-problem output. Reporting only observes
@@ -1117,7 +1176,8 @@ class Model:
         draws streamed per chain -- for models with a generate_quantities
         section, and the constrained parameters otherwise.
         """
-        self._forward_seed(seed)
+        threads_per_chain = _threads_per_chain(threads_per_chain)
+        self._prepare_run(seed, threads_per_chain)
         if isinstance(refresh, (bool, np.bool_)):
             raise TypeError("refresh must be a nonnegative integer")
         try:

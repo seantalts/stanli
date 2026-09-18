@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.0
+
+- Add opt-in native within-chain parallelism for eligible `reduce_sum` and
+  `reduce_sum_static` calls. Worker teams and compact child workspaces are
+  reused across gradients; shared gradients are combined in a fixed order.
+- Expose `threads_per_chain` in Python and R sampling, including R's
+  `sample_cstan()` and `cstan_model()$sample()`, plus native C/C++ configuration
+  and CLI `--threads-per-chain`. The default remains one thread; small or
+  unsupported reductions keep their serial path. Changing the partition may
+  change floating-point rounding and sampling trajectories.
+- Add retained-reduction counts and graph-lowering refusal diagnostics to the
+  C, Python, and R interfaces. Existing C ABI layouts remain compatible.
+
 ## 0.15.0
 
 Stanli now pins CmdStan and Stan 2.40.0, Stan Math 5.4.0 and stanc3

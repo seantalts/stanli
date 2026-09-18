@@ -18,7 +18,8 @@ sample_model(
   init_radius = 2,
   pathfinder_init = NULL,
   parallel_chains = NULL,
-  refresh = 100
+  refresh = 100,
+  threads_per_chain = 1
 )
 }
 \arguments{
@@ -55,6 +56,13 @@ not perform PSIS resampling.}
 \item{refresh}{Print a progress update every `refresh` transitions within
 each phase, plus the first and last transition of the phase. Set to 0 to
 suppress all automatic sampling output.}
+
+\item{threads_per_chain}{Positive thread count per chain for eligible native
+`reduce_sum` calls, default 1. Small or unsupported calls stay serial.
+Changing this setting prepares a new graph; reduction rounding and NUTS
+draws can differ across thread counts. Active chains may each use this
+many threads. `fit$model$reduce_sum_count` and `reduce_sum_fallbacks`
+report retained reductions and graph-lowering refusals (not opaque regions).}
 }
 \value{
 An object of class `stanli_fit`. Its `report` element contains
