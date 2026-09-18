@@ -328,6 +328,7 @@ template <bool Diagnostic>
 struct OracleRhs {
   const OdeSpec* spec;
   Breakdown* breakdown;
+  mutable stanli::RhsWorkspace workspace;
 
   template <typename T_y, typename T_param>
   Eigen::Matrix<stan::return_type_t<T_y, T_param>, Eigen::Dynamic, 1>
@@ -343,7 +344,7 @@ struct OracleRhs {
 
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(
         static_cast<Eigen::Index>(spec->prog.out_regs.size()));
-    std::vector<T>& registers = stanli::rhs_regs<T>();
+    std::vector<T>& registers = workspace.get<T>();
 
     TimePoint phase;
     if constexpr (Diagnostic) phase = Clock::now();
@@ -920,8 +921,9 @@ LocalResult local_oracle(const RhsProgram& rhs, double t,
   for (double value : y_values) y.emplace_back(value);
   for (double value : theta_values) theta.emplace_back(value);
   std::vector<var> outputs(rhs.out_regs.size());
+  std::vector<var> rhs_registers;
   stanli::run_rhs_into<var>(rhs, t, y.data(), theta.data(), theta.size(),
-                            x_r.data(), outputs.data());
+                            x_r.data(), outputs.data(), rhs_registers);
 
   LocalResult result;
   result.values.resize(outputs.size());

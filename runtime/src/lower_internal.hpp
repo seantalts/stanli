@@ -467,7 +467,37 @@ inline std::vector<double> graph_order(const DataMap::Entry& en,
   return graph_container_order(en.r, en.dims, outer_rank);
 }
 
+struct DeclView {
+  int64_t len = 0;
+  bool autodiff = false;
+  SlotInfo si;
+  bool int_array = false;
+  bool deferred_shape = false;
+  std::vector<int> runtime_dims;
+};
+
+// A lifetime-bound view of the prepared facts handed from the completed
+// log-probability lowering to write_array. The integer map is the one snapshot
+// bind_data retains; the other references preserve the established handoff
+// timing without another O(data bytes) copy.
+struct PreparedContext {
+  const WaRng& rng;
+  const std::shared_ptr<ShapeInterner>& shapes;
+  const std::map<std::string, DataMap::Entry>& environment;
+  const std::map<std::string, long>& integers;
+  const std::map<std::string, DeclView>& declarations;
+};
+
 struct Lowering {
+  // A bounded alternative is built in its own Lowering. Refusal discards that
+  // entire instance; no partially specialized graph is ever published.
+  struct SpecializationRefused {};
+  bool bounded_specialization = false;
+  uint64_t specialization_steps = 0;
+  uint64_t specialization_elements = 0;
+  static constexpr uint64_t specialization_step_limit = 131072;
+  static constexpr uint64_t specialization_slot_limit = 65536;
+  static constexpr uint64_t specialization_element_limit = 1048576;
   struct Val {
     int slot;
     bool autodiff = false;  // instantiated C++ scalar type carries var
@@ -756,10 +786,21 @@ struct Lowering {
   const char* prep_graph;
   const char* last_stage = "start";
   std::vector<int> last_roots;
+  // Transformed data's RNG stream. CmdStan's generated constructor seeds it
+  // with the run seed and chain 0 and runs the section once per model, so
+  // every chain sees the same draws; stanli evaluates the section once at
+  // load and bakes it into both graphs, which makes the seed a compile
+  // input like the data. The write_array lowering never runs prepare_data
+  // (it copies this lowering's environment), so its stream is never drawn.
+  WaRng td_rng;
   // The MIR interpreter instance for everything DataOnly: prepare_data,
   // data-only conditions, size expressions. Its environment doubles as the
   // lowering's view of transformed data. Hooks route FnReadData to the
-  // DataMap and unknown variables to the unrolled-loop int environment.
+  // DataMap, unknown variables to the unrolled-loop int environment, and
+  // RNG draws to td_rng through the same handler interpreted write_array
+  // uses. Compile-time folding of model and generated-quantities
+  // expressions goes through try_eval_interpreter, which refuses anything
+  // expr_effectful (every `_rng`), so those draws cannot reach this stream.
   MirInterp<double> td{
       fun_defs, "prepare_data",
       MirHooks{[this](const std::string& n) -> const DataMap::Entry* {
@@ -771,11 +812,16 @@ struct Lowering {
                  *out = it->second;
                  return true;
                },
-               [this](const mir::Expr& e, DataMap::Entry* out) {
+               [this](MirInterp<double>& in, const mir::Expr& e,
+                      DataMap::Entry* result) {
+                 if (interpreted_rng_call(in, e, result, td_rng)) {
+                   out.transformed_data_draws = true;
+                   return true;
+                 }
                  return evaluate_retained_higher_order(
                      fun_defs, e,
-                     [this](const mir::Expr& arg) { return td.eval(arg); },
-                     out);
+                     [&in](const mir::Expr& arg) { return in.eval(arg); },
+                     result);
                }}};
   Graph g;
   CompiledModel out;
@@ -804,6 +850,7 @@ struct Lowering {
   std::map<ObservationKey, DataMap::Entry> observations;
   std::vector<int> target_terms;
   std::vector<int> jac_slots;
+  std::vector<int> extra_roots;
   std::map<std::string, const mir::FunDef*> fun_defs;
   // A generic UDF keeps one scalar template type per formal. Locals and its
   // return use the promoted type, but a direct formal reference keeps its own.
@@ -818,6 +865,7 @@ struct Lowering {
   // int_env as bind_data left it, before either section's locals and loop
   // variables were folded in; the write_array lowering starts from this.
   std::map<std::string, long> int_env_data;
+  bool data_prepared = false;
   // Lowering generate_quantities rather than log_prob: parameters are columns
   // to emit, not values to differentiate.
   bool in_write_array = false;
@@ -842,6 +890,11 @@ struct Lowering {
   // its collapsed trip counts. TargetPE consumes the product at the edge,
   // so nested invariant loops still emit one scale rather than a MUL chain.
   double target_scale = 1.0;
+  // Automatic symbolic-lane probe: only the terminal unconditional model loop.
+  // False leaves ordinary lowering untouched; true handles the whole loop.
+  const mir::Stmt* symbolic_lane_tail = nullptr;
+  bool try_lower_symbolic_lane_tail(const mir::Stmt& s, int64_t first,
+                                    int64_t last);
   // OR of the actual real/container scalar types for the current inlined
   // UDF. Generic AutoDiffable locals and returns instantiate to this type.
   bool udf_autodiff_ctx = false;
@@ -856,8 +909,15 @@ struct Lowering {
 
   explicit Lowering(
       const DataMap& d, PrepTrace& p, PassDumper& dump_to,
-      const char* graph_name,
+      const char* graph_name, WaRng stream,
       std::shared_ptr<ShapeInterner> pool = std::make_shared<ShapeInterner>());
+  Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
+           const char* graph_name, const PreparedContext& prepared_context);
+  struct RegionTrialTag {};
+  Lowering(Lowering& parent, RegionTrialTag);
+
+  PreparedContext prepared_context();
+  Lowering fork_region_trial();
 
   void dump_named(const std::string& label, const std::string& name,
                   const std::vector<int>& roots, bool unfiltered);
@@ -908,7 +968,16 @@ struct Lowering {
     return it == observations.end() ? nullptr : &it->second;
   }
   void forget_observation(const Val& v) { observations.erase({v.slot, v.si}); }
-  int add_slot(int64_t len, bool is_param) { return g.add_slot(len, is_param); }
+  int add_slot(int64_t len, bool is_param) {
+    if (bounded_specialization) {
+      if (len < 0 || g.slots.size() >= specialization_slot_limit ||
+          uint64_t(len) >
+              specialization_element_limit - specialization_elements)
+        throw SpecializationRefused{};
+      specialization_elements += uint64_t(len);
+    }
+    return g.add_slot(len, is_param);
+  }
   void note_interpreter_fallback(const std::string& what,
                                  const std::string& why) {
     const std::string note = what + " (" + why + ")";
@@ -1252,6 +1321,8 @@ struct Lowering {
   }
   void sync_data_local(const std::string& name, const mir::Expr& rhs,
                        const Val& v);
+
+  void assign_plain(const mir::Stmt& s);
 
   void sync_indexed_data_local(const std::string& name, const Val& v) {
     td.env().erase(name);
@@ -1864,14 +1935,6 @@ struct Lowering {
 
   void lower_read_param(const mir::Stmt& s);
 
-  struct DeclView {
-    int64_t len = 0;
-    bool autodiff = false;
-    SlotInfo si;
-    bool int_array = false;
-    bool deferred_shape = false;
-    std::vector<int> runtime_dims;
-  };
   // The only name-keyed declaration protocol. Runtime values carry the same
   // static scalar type and SlotInfo in `scope`; this registry is needed only
   // before first binding.
@@ -1879,6 +1942,9 @@ struct Lowering {
 #include "lower_structured_loop.inc"
 
   void lower_stmt(const mir::Stmt& s) {
+    if (bounded_specialization &&
+        ++specialization_steps > specialization_step_limit)
+      throw SpecializationRefused{};
     if (region_current) {
       lower_region_stmt(s);
       return;

@@ -71,3 +71,9 @@ conformance-cache/
 model-census-cache
 model-census.json
 /tests/function_coverage/*.hpp
+
+# Compiler output beside generated teaching fixtures.
+tests/rethinking/*.hpp
+
+# Keep exploratory benchmark artifacts local; publish their summaries in docs/.
+/output/teaching-performance/followup-*/

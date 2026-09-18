@@ -26,6 +26,7 @@ namespace {
 
 struct MirSystem {
   const AlgebraSpec* spec;
+  mutable RhsWorkspace workspace;
 
   template <typename T_x, typename T_y>
   Eigen::Matrix<stan::return_type_t<typename T_x::Scalar, typename T_y::Scalar>,
@@ -39,7 +40,7 @@ struct MirSystem {
       // installed by lowering.  The remaining regions are exactly unknown,
       // parameters, and real data.
       run_rhs<T>(spec->prog, 0.0, x.data(), y.data(), (size_t)y.size(),
-                 x_r.data(), result);
+                 x_r.data(), result, workspace.get<T>());
     } else {
       const mir::FunDef* system = spec->system();
       if (!system)
@@ -63,6 +64,7 @@ struct MirSystem {
 
 struct MirVariadicSystem {
   const AlgebraSpec* spec;
+  mutable RhsWorkspace workspace;
 
   template <typename T_x, typename T_theta>
   Eigen::Matrix<
@@ -74,7 +76,7 @@ struct MirVariadicSystem {
     std::vector<T> result;
     if (spec->prog.ok) {
       run_rhs<T>(spec->prog, 0.0, x.data(), theta.data(), (size_t)theta.size(),
-                 spec->x_r.data(), result);
+                 spec->x_r.data(), result, workspace.get<T>());
     } else {
       const mir::FunDef* system = spec->system();
       if (!system) throw std::runtime_error("solve: missing algebraic system");

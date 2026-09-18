@@ -37,8 +37,11 @@ measured in ULPs; the default policy is within 2 ULP. Bitwise agreement is not
 a gate; a change that moves a model from bitwise to a small ULP band is
 accepted. Reassociation-class kernel changes (reductions, matvec, gather
 backward, softmax backward) may reach 10 ULP only when the change states that
-budget in its commit message and updates the baseline in the same commit.
-Anything beyond 10 ULP is a bug. Unit tests for individual operations and
+budget in its commit message and updates the baseline in the same commit. A
+density merged across loop lanes, where one call sums what CmdStan sums in
+one call per iteration, may reach 30 ULP; the models that use the budget are
+listed in `tools/corpus.py` with the measured value and its cause.
+Anything beyond those budgets is a bug. Unit tests for individual operations and
 the cross-path tests (stanli's own paths against each other) still use
 bitwise equality; a kernel change that widens one of them records the new
 limit at the assertion. Most corpus
@@ -59,12 +62,20 @@ signature suite adds all supported overloads and mixed argument activity.
 
 ## Overview of the checks
 
+The [educational corpus](tests/educational/README.md) adds 13 Aalto teaching
+models. CTest checks three-point CmdStan density/gradient/generated-output
+references and complete sampling CSVs. The separate
+`check_educational_performance` build target runs a live, repeated comparison
+against vectorized CmdStan and fails any model below 0.5 times its speed.
+Performance failures are reported individually without exclusions; see the
+corpus README for the measurement boundary and reproducible commands.
+
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | every pull request |
 | compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | every pull request |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | every pull request |
-| corpus comparison | Are 119 posteriordb models, 11 compiler-derived fixtures and 124 brms models consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | every pull request |
+| corpus comparison | Are 119 posteriordb models, 11 compiler-derived fixtures, 124 brms models and 62 rethinking fixtures consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | every pull request |
 | cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | every pull request, within CTest |
 | transformation A/B | Do selected graph optimizations preserve model results? | Optimizations enabled and disabled agree at the default point within 1e-11 | manually after optimization changes |
 | BridgeStan C-ABI comparison | Does the public C interface agree with reference BridgeStan? | Four fixture models must pass value, name, count, and output-shape checks | every pull request |
@@ -76,6 +87,7 @@ signature suite adds all supported overloads and mixed argument activity.
 | sampler trace | Is NUTS configured comparably to CmdStan? | Diagnostic summaries remain within limits chosen for large configuration errors | manually after sampler changes |
 | AddressSanitizer | Does ASan detect invalid memory access while CTest runs? | No sanitizer diagnostics | after merge and nightly |
 | WebAssembly replay | Does the browser runtime reproduce the recorded corpus? | Same numerical gates; 118 of 119 compiling posteriordb models fit in wasm32 | manually |
+| browser compiler on Safari 17 | Do the js_of_ocaml bundles keep `static` on the same line as the class element it modifies? | No line in either bundle ends in `static` | every pull request |
 | documentation and formatting | Do generated claims match their artifacts, and is C/C++ formatting current? | Exact generated-file and formatter checks | every pull request |
 
 ## MIR loop-vectorization measurement
@@ -87,7 +99,7 @@ once with it on; every later check consumes those exact portable MIR files
 through `stanli_check --mir`. All other source-pass choices are explicit and
 identical between the two cells.
 
-The complete run covers all 254 recorded models plus any posteriordb census
+The complete run covers all 316 recorded models plus any posteriordb census
 model without a recorded CmdStan row:
 
 ```sh
@@ -98,21 +110,44 @@ python3 harnesses/vectorize_ab.py deps/posteriordb \
 ```
 
 The "MIR vectorization A/B" workflow step runs the complete run on every
-push to main and on the schedule; a pull request runs a 35-model slice
-listed in the workflow, about 90 s, so the full run is a post-submit gate.
+push to main and on the schedule; a pull request runs a 44-model slice
+listed in the workflow, so the full run is a post-submit gate.
 The hard gates cover command/status consistency, result and write-array
 categories, error parity, per-element finite/NaN/infinity classes, shapes and
 names, and both pass modes against the existing CmdStan references. Finite
 bit differences that remain within those gates are listed separately with
-bit patterns and ULP distances.
+bit patterns and ULP distances. Preparation timings and, for a model whose
+portable MIR differs between the two cells, op counts are diagnostics only:
+the lowered log_prob graph growing, or the final log_prob graph growing by
+more than 10% (with the runtime reroll pass on), are listed in `summary.md`
+but never fail the run by themselves. The execution gate is gradient time on
+the fixed `GRADIENT_MODELS` set: a model whose pass-on/pass-off ratio
+exceeds 1.04 is re-measured with a fresh, independently interleaved run, and
+the job fails only if that re-run also exceeds the ratio, so isolated
+measurement noise does not fail a pull request.
+
+The op-count diagnostic and the gradient gate only ever compare a run's own
+pass-off cell against its pass-on cell, so a change that slows (or speeds
+up) the runtime itself, identically in both cells, is invisible to them.
+Passing `--baseline DIR` (a previous `--output-dir`) makes the harness also diff
+final ops, lowered ops, island regions, and slots for every matching cell
+against that directory's `graphs.jsonl`, and lists every model whose final
+ops grew or shrank at the top of `summary.md`. This comparison is
+report-only and never fails the run. On post-submit pushes to main, the
+"Fetch the main-branch vectorization baseline" workflow step downloads the
+`mir-vectorization-measurements` artifact from the most recent successful
+run on main and passes it as `--baseline`; when no such artifact is found
+(the first run, or one past its retention window) the step leaves the
+baseline directory absent and the harness skips the comparison rather than
+failing.
 
 The output directory contains `manifest.json`, `corpus.jsonl`,
 `graphs.jsonl`, `bench.tsv`, `summary.json`, and `summary.md`. The manifest
 records source pins, producer provenance, tool hashes, platform, toolchain,
-environment policy, and corpus scope. Compiler wall time, graph and
-preparation counts, separate log-density/write-array reroll dispositions, and
-auto-calibrated ABBA gradient timings are descriptive measurements; their
-ratios do not decide pass/fail. Missing or malformed measurement output does
+environment policy, and corpus scope. Compiler wall time, preparation
+timings, executor arena slot counts, each measured process's peak resident
+memory, and separate log-density/write-array reroll dispositions are
+descriptive measurements only. Missing or malformed measurement output does
 fail the run because it would make the report incomplete. The report labels
 CmdStan-referenced and A/B-only models separately; the latter have off/on
 category, error, shape, name, and value parity but no fabricated reference
@@ -124,7 +159,8 @@ report.
 [`tools/verify_refs.py`](tools/verify_refs.py) replays every referenced
 posteriordb model, plus the language-construct models in
 [`tests/stanc3/`](tests/stanc3/) and the brms models in
-[`tests/brms/`](tests/brms/), against CmdStan's recorded log density
+[`tests/brms/`](tests/brms/) and the teaching models in
+[`tests/rethinking/`](tests/rethinking/), against CmdStan's recorded log density
 and full unconstrained gradient. This is the broadest whole-model numerical
 comparison in the repository. It has found errors that isolated kernel tests
 did not reach, which is why it runs in addition to the unit-test suite.
@@ -132,10 +168,11 @@ did not reach, which is why it runs in addition to the unit-test suite.
 The reference artifact
 [`docs/corpus-refs.json.gz`](docs/corpus-refs.json.gz) contains:
 
-- 254 models at 3 deterministic unconstrained points each, 762 points in
-  total, holding 353,957 log-density and gradient values. The models are
+- 316 models at 3 deterministic unconstrained points each, 948 points in
+  total, holding 358,766 log-density and gradient values. The models are
   119 posteriordb models that evaluate, 11 language fixtures adapted
-  from stanc3's compiler tests, and 124 models generated by brms 2.23.0.
+  from stanc3's compiler tests, 124 models generated by brms 2.23.0,
+  and 62 rethinking fixtures (all 61 second-edition book calls plus a hurdle model).
 - Every value is the exact `%.17g` string CmdStan's driver printed
   ([`tools/ref_driver.cpp`](tools/ref_driver.cpp)), so the replay
   compares against the bits CmdStan produced rather than a rounded copy.
@@ -151,7 +188,7 @@ The reference artifact
   absent row means that output is not covered by this comparison. The
   primary-point counts for posteriordb models are in
   [`docs/corpus-status.md`](docs/corpus-status.md); the aggregate above also
-  includes the stanc3 fixtures, the brms models and all three points.
+  includes the stanc3, brms and rethinking fixtures and all three points.
 - Reference provenance recorded in the file: CmdStan
   2.40.0 at `d3d5df6a`, Stan `a6806ef8`, Math 5.4.0 at `5252d51d`, stanc3
   2.40.0 at `d58446e6`, posteriordb `28f8d3d6`, on Darwin arm64.
@@ -176,20 +213,18 @@ math library and the libraries used on other platforms. Known implementation
 errors detected by this comparison were much larger; for example, one
 in-place update error produced a scaled difference of 1.7e+05.
 
-Of the 762 recorded points, 697 have status `VERIFIED`, 48 have status
-`CMDSTAN_ONLY`, 11 have status `MISMATCH`, and 6 have status
-`REJECTED_BOTH`. The `CMDSTAN_ONLY` points are the three points of each
-of 16 brms models: 15 that stanli refused when their references were
-recorded and now matches at the recorded values, and the one named in
-`KNOWN_GAPS`; see [`tests/brms/README.md`](tests/brms/README.md). Three
-of the `MISMATCH` points belong to `kronecker_gp`, where two eigenvector
-gradients are sensitive to a nearly degenerate covariance whose smallest
-eigenvalue gap is 6.5e-17. Six are the `sdgp` and `lscale` gradients of
-`sw_gp`, `i320_gp_expquad` and `s2_gp_by_gr`, which flow through a
-Cholesky factorization whose smallest pivot is 1.1e-12, 3.7e-12 and
-1.8e-12. The last two are `s2_ar_cov`, whose `ar` gradient was zero where
-CmdStan's is not because `pow` reported a zero derivative at a zero
-base; the derivative is fixed and both points match the recorded values.
+Recorded points have status `VERIFIED`, `CMDSTAN_ONLY`, `MISMATCH`,
+or `REJECTED_BOTH`. The three `CMDSTAN_ONLY` points belong to
+`s2_com_poisson`, the model named in `KNOWN_GAPS`; see
+[`tests/brms/README.md`](tests/brms/README.md). Three `MISMATCH` points
+belong to `kronecker_gp`, where two eigenvector gradients are sensitive
+to a nearly degenerate covariance whose smallest eigenvalue gap is
+6.5e-17. Six are the `sdgp` and `lscale` gradients of `sw_gp`,
+`i320_gp_expquad` and `s2_gp_by_gr`, which flow through a Cholesky
+factorization whose smallest pivot is 1.1e-12, 3.7e-12 and 1.8e-12.
+The CmdStan 2.40 refresh verifies the formerly failing `s2_ar_cov`
+points and the other 15 brms models whose older references had status
+`CMDSTAN_ONLY`.
 
 Verified points use the standard 1e-9 gate, except in the models named in
 `ILL_CONDITIONED` ([`tools/verify_refs.py`](tools/verify_refs.py)). The
@@ -234,7 +269,11 @@ differ from `a+(b+c)` in the last bit.
 The policy is: agreement within 2 ULP by default. Reassociation-class kernel
 changes (reductions, matvec, gather backward, softmax backward) may use a 10
 ULP budget when the change is measured and that budget is stated in the commit
-message. Bitwise agreement is reported for information but is not a gate; if a
+message. Densities merged across loop lanes may use 30 ULP, recorded per
+model. A larger distance from CmdStan is acceptable when a high-precision
+reference shows stanli at least as close to the true value as CmdStan is;
+the reference measurement is recorded with the model, as dogs' is in
+`tools/corpus.py`. Bitwise agreement is reported for information but is not a gate; if a
 change improves performance by moving a model from bitwise to a small ULP band,
 that is an accepted trade. At their primary recorded point, 41 verified
 posteriordb models have 0 ULP difference with CmdStan. Eight additional language
@@ -311,9 +350,18 @@ that consumes them. To regenerate them explicitly, run:
 `.hpp` files that stanc also writes beside the models are removed. Neither the
 MIR nor the C++ output is checked in.
 
-Core `tools/dev_setup.sh` builds the compiler executable from the configured
-stanc3 source revision because both fixture generation and source-level lit
-tests use it. `--embed` additionally builds the in-process compiler object.
+Core `tools/dev_setup.sh` builds both compiler artifacts from the configured
+stanc3 source revision: the executable, which fixture generation and the
+signature model generators run, and the in-process compiler object, which
+`stanli_check` links. The source-level lit cases, the function model replay,
+and the signature model replay all compile through that in-process pipeline,
+the one `stanli_run` and the language packages ship, so they see the same
+source passes a user does. A build without the object (the Windows and
+AddressSanitizer CI jobs) runs the same pipeline through its executable,
+`stanli-compile`, which CMake copies from `deps/stanc3/` to sit beside
+`stanli_check`, the way the Windows wheel ships it beside the runtime.
+`stanli_check --stanc PATH` runs an external stanc instead, for A/B work and
+compiler bisects.
 
 Unit tests check the kernels and cases they explicitly construct. They do not
 by themselves establish that model lowering selects the intended kernel or
@@ -402,6 +450,15 @@ island's backward as a second instruction list at load time;
 `STANLI_NO_NATIVE_ADJ=1` restores the replay under stan-math's `var`,
 which is what [`tests/test_adjoint.cpp`](tests/test_adjoint.cpp) checks
 the generated program against.
+
+Replayed islands reuse executor-owned handle buffers only when a definite
+initialization proof covers every register read and live-out on every path.
+`STANLI_NO_REPLAY_REUSE=1` (set before executor creation) restores fresh buffers.
+`STANLI_NO_DEAD_CONSTANTS=1` disables local removal of overwritten constant
+initializers, and `STANLI_NO_FILL_SINK=1` disables delaying range initialization
+past unused branches; set these before compiling the model. `test_island`
+covers the proof's refusal paths, loops, indexed spans, nested evaluation,
+exceptions, copied executors, workers, and the fresh-buffer comparison.
 
 Native-adjoint islands can additionally select the shared three-lane softmax
 forward specialization. `STANLI_NO_ISLAND_SOFTMAX3=1` leaves the admitted

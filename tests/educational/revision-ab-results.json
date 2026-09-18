@@ -1,0 +1,777 @@
+{
+  "baseline_commit": "7d4f25ec4c815d9df969d08a5445b39fc40a9606",
+  "binary_sha256": {
+    "baseline": "a3596eb68c8b7a4232ef2ba0671956b6562fd1076e22261985fc4dfea5fe9bdf",
+    "candidate": "392095a0378cdb001b7ee556bd57d5a3a49342e8e176cb447907f6730663be3f"
+  },
+  "settings": {
+    "warmup": 1000,
+    "samples": 1000,
+    "repetitions": 3,
+    "warmup_pairs": 1,
+    "seeds": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "csv": "all columns; 17 significant digits; exact byte comparison"
+  },
+  "models": {
+    "aalto_bern": {
+      "seconds": {
+        "baseline": [
+          0.021495042000000006,
+          0.02092891700000002,
+          0.020905792000000006
+        ],
+        "candidate": [
+          0.017686875000000005,
+          0.017287667000000007,
+          0.017190457999999992
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.007676875,
+            "sample_s": 0.00308425,
+            "output_s": 0.004848041
+          },
+          {
+            "prep_s": 0.007567542,
+            "sample_s": 0.002781375,
+            "output_s": 0.00484675
+          },
+          {
+            "prep_s": 0.007577416,
+            "sample_s": 0.002773667,
+            "output_s": 0.004824542
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.007448791,
+            "sample_s": 0.003035667,
+            "output_s": 0.001303667
+          },
+          {
+            "prep_s": 0.007458709,
+            "sample_s": 0.002787958,
+            "output_s": 0.001309125
+          },
+          {
+            "prep_s": 0.007391,
+            "sample_s": 0.002755209,
+            "output_s": 0.001299708
+          }
+        ]
+      },
+      "csv_sha256": [
+        "deb3c2b6ef9952b9d0a2cfee07d21534093027c9ae3b17715bbecd263014fe72",
+        "460f6e0c425caa1f93ca0c76280871a7acf01632d01334c13df94071e68fc03f",
+        "7e510fcd8f32b6963ba8183907ff43d9e92a2045c27dd82e1a93ab3170086615",
+        "8cde525dac146d4af73d16847f724858273ee19dcef10d6ead0badf4d8687fc0"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.2106270325544801
+    },
+    "aalto_binom": {
+      "seconds": {
+        "baseline": [
+          0.015797667000000015,
+          0.01578279199999999,
+          0.015892125000000035
+        ],
+        "candidate": [
+          0.013401542000000044,
+          0.013290334000000015,
+          0.013559666999999997
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.00636925,
+            "sample_s": 0.002665209,
+            "output_s": 0.001522375
+          },
+          {
+            "prep_s": 0.006352417,
+            "sample_s": 0.00261225,
+            "output_s": 0.001502
+          },
+          {
+            "prep_s": 0.0063835,
+            "sample_s": 0.002698917,
+            "output_s": 0.001518583
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.005006791,
+            "sample_s": 0.002610209,
+            "output_s": 0.000471625
+          },
+          {
+            "prep_s": 0.005161666,
+            "sample_s": 0.002484625,
+            "output_s": 0.000494459
+          },
+          {
+            "prep_s": 0.005054416,
+            "sample_s": 0.002741667,
+            "output_s": 0.000484208
+          }
+        ]
+      },
+      "csv_sha256": [
+        "08e3bf4e8d23e129edd4476877d079a8ea546999bdc493a9139ebe29d5ac1124",
+        "7cab4a43a9a6f1daad3dd0d8ac56f2fd7b337276dad6c2f6504466eab0eae945",
+        "1a5b99855daebb331f09fe813e45aa9d3f854e9fc3e86ac99f2c349c254d663a",
+        "c4526fe42d774084916b27c165a8ad1c48b33f99468d7eb090e0ec8ec1e7d66a"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.1787947237713363
+    },
+    "aalto_binom2": {
+      "seconds": {
+        "baseline": [
+          0.01848537499999997,
+          0.018116291000000007,
+          0.017929958999999995
+        ],
+        "candidate": [
+          0.016502666,
+          0.016495291999999995,
+          0.01634195799999999
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.007199208,
+            "sample_s": 0.003821167,
+            "output_s": 0.002085833
+          },
+          {
+            "prep_s": 0.007079042,
+            "sample_s": 0.003725416,
+            "output_s": 0.002095584
+          },
+          {
+            "prep_s": 0.007116791,
+            "sample_s": 0.003545417,
+            "output_s": 0.002084208
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.006904958,
+            "sample_s": 0.003738917,
+            "output_s": 0.0006175
+          },
+          {
+            "prep_s": 0.006930042,
+            "sample_s": 0.003691542,
+            "output_s": 0.000629791
+          },
+          {
+            "prep_s": 0.00687225,
+            "sample_s": 0.003570208,
+            "output_s": 0.0006175
+          }
+        ]
+      },
+      "csv_sha256": [
+        "f937ee354b78ac5b6d0461a38be39b27c0737e4fd51ca3da82f5cffeda21ebc4",
+        "9cccf6d590a4057d51f5c5d5c4e9c8e7171a063907cf32c6e5075c1db771ba1b",
+        "f78ff43f208765e6e6f84ca758a590444436bfaaa5a8a38134ac0c3221ae4f99",
+        "8f9e0101ccc7d477d6130a7dcaa5b0238f4db277362edee0f333ea528ee7614b"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.0982704034581512
+    },
+    "aalto_binomb": {
+      "seconds": {
+        "baseline": [
+          0.016342250000000003,
+          0.01607462500000001,
+          0.01648237500000005
+        ],
+        "candidate": [
+          0.014718042000000042,
+          0.014955458000000088,
+          0.014882750000000056
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.006739667,
+            "sample_s": 0.002417875,
+            "output_s": 0.001812416
+          },
+          {
+            "prep_s": 0.006730083,
+            "sample_s": 0.002342,
+            "output_s": 0.001756917
+          },
+          {
+            "prep_s": 0.00677625,
+            "sample_s": 0.00244725,
+            "output_s": 0.001860584
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.006513125,
+            "sample_s": 0.00238775,
+            "output_s": 0.000514041
+          },
+          {
+            "prep_s": 0.006711542,
+            "sample_s": 0.002363916,
+            "output_s": 0.000535084
+          },
+          {
+            "prep_s": 0.006568083,
+            "sample_s": 0.002370667,
+            "output_s": 0.000531083
+          }
+        ]
+      },
+      "csv_sha256": [
+        "e3403cfe641b896e2e4390af1f858c603d828f29166801e79dff6debb5c373ab",
+        "8756791eaf3e52fe99dcd3377f6f31686f4749f971611e6fd5e7a4cfdf6f7aa7",
+        "8f8e6a7a1f68f59c3a12eb7ed3a6873a745f00e399df2058a6d5f59132a9b4da",
+        "a083fd9c3ae3851f92856354ad140aa0fbaf63bd1fc87185752d3daa7c7b2c2c"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.098066553560326
+    },
+    "aalto_gpareto": {
+      "seconds": {
+        "baseline": [
+          0.06735254200000007,
+          0.06399754099999999,
+          0.05995895800000017
+        ],
+        "candidate": [
+          0.05327650000000006,
+          0.047390749999999926,
+          0.04695487499999995
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.032571875,
+            "sample_s": 0.015802583,
+            "output_s": 0.013190667
+          },
+          {
+            "prep_s": 0.032315083,
+            "sample_s": 0.013891959,
+            "output_s": 0.011840041
+          },
+          {
+            "prep_s": 0.029222708,
+            "sample_s": 0.01351675,
+            "output_s": 0.011757125
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.026824792,
+            "sample_s": 0.015443541,
+            "output_s": 0.004983792
+          },
+          {
+            "prep_s": 0.024089375,
+            "sample_s": 0.013407,
+            "output_s": 0.004429458
+          },
+          {
+            "prep_s": 0.023983958,
+            "sample_s": 0.01311325,
+            "output_s": 0.00438875
+          }
+        ]
+      },
+      "csv_sha256": [
+        "d8f19c604be3d1854ef17bbac1af57616d04c91c6a1f336c7d70255f0f062cb2",
+        "debc13670d993a41f19d63ac7e0ec17a22d983fec726d7d0febb4ec97fa60daf",
+        "dbd1b52f37f8e127d78477c4a7468f43ca547f35d7dfcf40d9be7bb98c10c23b",
+        "dff5da5fbf1bcfbcc7bfe5b934e7d543c61943d5adea6cdd3aecfaf4c05311a7"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.350422624668318
+    },
+    "aalto_grp_aov": {
+      "seconds": {
+        "baseline": [
+          0.025687291999999973,
+          0.02478741699999998,
+          0.025574458000000133
+        ],
+        "candidate": [
+          0.023360708000000008,
+          0.023168999999999995,
+          0.02343887500000008
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.008303333,
+            "sample_s": 0.008876625,
+            "output_s": 0.002583875
+          },
+          {
+            "prep_s": 0.008199584,
+            "sample_s": 0.008212125,
+            "output_s": 0.002610916
+          },
+          {
+            "prep_s": 0.008223708,
+            "sample_s": 0.008779917,
+            "output_s": 0.002602708
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.007985583,
+            "sample_s": 0.008853542,
+            "output_s": 0.000729375
+          },
+          {
+            "prep_s": 0.008064375,
+            "sample_s": 0.008290708,
+            "output_s": 0.000731042
+          },
+          {
+            "prep_s": 0.007948833,
+            "sample_s": 0.008917,
+            "output_s": 0.000735
+          }
+        ]
+      },
+      "csv_sha256": [
+        "459a269a1cfb5650eea5f0a8a71d79e470a84d84555f03381b69fe048496b160",
+        "44506290640755cd1bf1a29d5a0b36d3205d0d370c6ef95efb79d4f6faf1529b",
+        "f4c0867ef39cf32e751ed6feffd0a240763cceb69129c8b1a1f1a8dc1340b5b2",
+        "7792d965747df5c09e37b42f69d7c2db6faa4868e401c5b2977e4caab4bf9114"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.0947638230827645
+    },
+    "aalto_grp_prior_mean": {
+      "seconds": {
+        "baseline": [
+          0.02917854200000014,
+          0.030829666000000033,
+          0.03340087500000011
+        ],
+        "candidate": [
+          0.02896454100000012,
+          0.028506750000000025,
+          0.03079570899999995
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.007968958,
+            "sample_s": 0.012897417,
+            "output_s": 0.002939833
+          },
+          {
+            "prep_s": 0.007934625,
+            "sample_s": 0.014703625,
+            "output_s": 0.002891792
+          },
+          {
+            "prep_s": 0.007928791,
+            "sample_s": 0.017173375,
+            "output_s": 0.002890792
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.008368959,
+            "sample_s": 0.01398825,
+            "output_s": 0.000795291
+          },
+          {
+            "prep_s": 0.007611541,
+            "sample_s": 0.014565625,
+            "output_s": 0.000807959
+          },
+          {
+            "prep_s": 0.007501958,
+            "sample_s": 0.0173975,
+            "output_s": 0.000805708
+          }
+        ]
+      },
+      "csv_sha256": [
+        "d043db1f701c7e218aed8607606a92f5d88b1b568b1a13a1b2b8c08027c6f6a7",
+        "ffd38c5a9d068e3b06b26947e5e083a8ff2b8e78d38c0c1fd742be1e22763f63",
+        "b9580be05514b9060ab0b398becdce34c4865f42b607c45ed6eef63d860e3feb",
+        "9dc5ced235960f93cf227c9395143b0c88b445316462fa5e9d82f478dc5f242b"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.064393390525329
+    },
+    "aalto_grp_prior_mean_var": {
+      "seconds": {
+        "baseline": [
+          0.075358292,
+          0.07204408399999984,
+          0.06107470899999967
+        ],
+        "candidate": [
+          0.07117533300000001,
+          0.06465204200000008,
+          0.05686058300000019
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.009816375,
+            "sample_s": 0.05542025,
+            "output_s": 0.004452041
+          },
+          {
+            "prep_s": 0.009722167,
+            "sample_s": 0.052148708,
+            "output_s": 0.004451708
+          },
+          {
+            "prep_s": 0.008826333,
+            "sample_s": 0.042760042,
+            "output_s": 0.004075458
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.009003125,
+            "sample_s": 0.055258209,
+            "output_s": 0.00114025
+          },
+          {
+            "prep_s": 0.009018291,
+            "sample_s": 0.048831125,
+            "output_s": 0.001049459
+          },
+          {
+            "prep_s": 0.008091416,
+            "sample_s": 0.042429625,
+            "output_s": 0.001028584
+          }
+        ]
+      },
+      "csv_sha256": [
+        "0e34173d3fec91829fa966bd96fd48bcbf3e9a787d24b9c2b76d7d94ca11e1c5",
+        "3bdc189ce16e49ecf7d1205341830cce7678f168bcf9af06ef04005d26344b56",
+        "77f8cc9d2d9d49df827aecdc2b63b1dd7b157b671be3f94f84ce5a0e5834299c",
+        "cd028711b3526e9e71cf93fac80be40cd3fa8198926b4935e2c42e59d24d0a4b"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.1143357854033404
+    },
+    "aalto_lin": {
+      "seconds": {
+        "baseline": [
+          0.03424245899999967,
+          0.0345499170000001,
+          0.03520466699999991
+        ],
+        "candidate": [
+          0.02670983299999996,
+          0.028694417000000083,
+          0.0292097499999997
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.0087715,
+            "sample_s": 0.01239875,
+            "output_s": 0.007735958
+          },
+          {
+            "prep_s": 0.009557958,
+            "sample_s": 0.011338709,
+            "output_s": 0.007635
+          },
+          {
+            "prep_s": 0.009458708,
+            "sample_s": 0.01224975,
+            "output_s": 0.007616334
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.008295125,
+            "sample_s": 0.01141175,
+            "output_s": 0.001713125
+          },
+          {
+            "prep_s": 0.009385584,
+            "sample_s": 0.011345541,
+            "output_s": 0.001934
+          },
+          {
+            "prep_s": 0.009280334,
+            "sample_s": 0.012102958,
+            "output_s": 0.001957167
+          }
+        ]
+      },
+      "csv_sha256": [
+        "44f4c99d19205957a5e7bd7cb42c756eb3f8a1b2e476bbcbea48b87ec65a0725",
+        "23d42084beaa6b2251047ff2a5cb0f088d95c31c2d9c576379f9defa83df54f0",
+        "4bb7359bdd3c549c5f67fd8693a76b8983fab4b5eedc5e05f349235f115444f0",
+        "9aaeb07e15452da3ca3e0a3c9e439b7a8555a0c5e8a715c4be52a479ce4d48ea"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.2040640867524857
+    },
+    "aalto_lin_std": {
+      "seconds": {
+        "baseline": [
+          0.03418941699999989,
+          0.03193666699999964,
+          0.03027554099999996
+        ],
+        "candidate": [
+          0.026267250000000075,
+          0.022954333000000382,
+          0.022868458000000036
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.010573583,
+            "sample_s": 0.007528542,
+            "output_s": 0.010354708
+          },
+          {
+            "prep_s": 0.01056875,
+            "sample_s": 0.006317167,
+            "output_s": 0.009263
+          },
+          {
+            "prep_s": 0.009492417,
+            "sample_s": 0.006148458,
+            "output_s": 0.0092855
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.010088125,
+            "sample_s": 0.007587916,
+            "output_s": 0.00256625
+          },
+          {
+            "prep_s": 0.0091645,
+            "sample_s": 0.006154917,
+            "output_s": 0.002307875
+          },
+          {
+            "prep_s": 0.00903875,
+            "sample_s": 0.006160792,
+            "output_s": 0.002277708
+          }
+        ]
+      },
+      "csv_sha256": [
+        "ccfdb5b00d2d9fdcfd0c8a3dca6639e8ecda31be3ef8687b79ce6c3d8ad98aff",
+        "590ac7dac6939a7484b432477b1543a4d5d3875a91884e1d475392139436deb6",
+        "0a17cf109caa0dda405a1e6d7c8a872179a6cc1fb9ec5d8d785ec4938c27b2c9",
+        "c4e94fc3cf7528c54d9b2f5fb921617192857b0ca8f4144dee93ca5c49b3c2fe"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.3913132217781763
+    },
+    "aalto_lin_std_t": {
+      "seconds": {
+        "baseline": [
+          0.05141979100000027,
+          0.056480584,
+          0.05652024999999972
+        ],
+        "candidate": [
+          0.02669850000000018,
+          0.029420541999999994,
+          0.02885333300000026
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.010571792,
+            "sample_s": 0.008748792,
+            "output_s": 0.026733708
+          },
+          {
+            "prep_s": 0.011417791,
+            "sample_s": 0.009561042,
+            "output_s": 0.0299395
+          },
+          {
+            "prep_s": 0.011565666,
+            "sample_s": 0.009342084,
+            "output_s": 0.029607083
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.009755625,
+            "sample_s": 0.008888125,
+            "output_s": 0.002653625
+          },
+          {
+            "prep_s": 0.01083625,
+            "sample_s": 0.009449375,
+            "output_s": 0.002954333
+          },
+          {
+            "prep_s": 0.010999667,
+            "sample_s": 0.00879675,
+            "output_s": 0.002993958
+          }
+        ]
+      },
+      "csv_sha256": [
+        "080c00cb5d8feba69f162b7a31fbd0fbb6b53c6565587aaa5e4693b1736a502f",
+        "f89f90392c50d8d43ec8a62d78f8ee22da28bd7c9c32591e7d3c46fd9cccf7cc",
+        "c7ee5a857df92e18d4a7b378a18d11665b526cdaba111ba1ec7eb1fe9fa535ad",
+        "8a7a180c44ba8432eee6ea11d0463b56f7fb6e08cf1f7adb75bb9cbc172b2065"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 1.9575063996939104
+    },
+    "aalto_poisson_hurdle": {
+      "seconds": {
+        "baseline": [
+          3.1935906659999995,
+          3.1631622079999993,
+          3.180319457999998
+        ],
+        "candidate": [
+          0.6639722500000005,
+          0.6698769999999996,
+          0.6762046250000004
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.018421542,
+            "sample_s": 0.025882958,
+            "output_s": 3.14293479
+          },
+          {
+            "prep_s": 0.020392792,
+            "sample_s": 0.028224375,
+            "output_s": 3.10762454
+          },
+          {
+            "prep_s": 0.020423125,
+            "sample_s": 0.025948125,
+            "output_s": 3.12731017
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.035582459,
+            "sample_s": 0.026122583,
+            "output_s": 0.596042542
+          },
+          {
+            "prep_s": 0.040116167,
+            "sample_s": 0.028961041,
+            "output_s": 0.5943515
+          },
+          {
+            "prep_s": 0.040093958,
+            "sample_s": 0.028620417,
+            "output_s": 0.600613083
+          }
+        ]
+      },
+      "csv_sha256": [
+        "7d981051e46feb77ae4858baa67880fd3558f132b6c5694d9fc14b20a587b7ba",
+        "a74f6c42294d1f633e5f519f8262a9d557b7e807aa8bff24de58ff56419d1468",
+        "339f0c071db4833dd228a51583a0c9f31828f5851c466a33450e6034536317ca",
+        "a634d4618f3c644a54f233bd1baea75df7a958f6302692070f3d20fd9c75b2a1"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 4.747617037157568
+    },
+    "aalto_poisson_simple": {
+      "seconds": {
+        "baseline": [
+          0.8546527499999996,
+          0.8398973339999998,
+          0.8332562080000017
+        ],
+        "candidate": [
+          0.0987290829999985,
+          0.10225083399999946,
+          0.09419999999999717
+        ]
+      },
+      "phases": {
+        "baseline": [
+          {
+            "prep_s": 0.007736875,
+            "sample_s": 0.009185417,
+            "output_s": 0.831289167
+          },
+          {
+            "prep_s": 0.006962667,
+            "sample_s": 0.008048208,
+            "output_s": 0.818528
+          },
+          {
+            "prep_s": 0.006963875,
+            "sample_s": 0.00799025,
+            "output_s": 0.812350291
+          }
+        ],
+        "candidate": [
+          {
+            "prep_s": 0.008258375,
+            "sample_s": 0.008173084,
+            "output_s": 0.076295083
+          },
+          {
+            "prep_s": 0.009216875,
+            "sample_s": 0.008889208,
+            "output_s": 0.077783792
+          },
+          {
+            "prep_s": 0.009085458,
+            "sample_s": 0.00880475,
+            "output_s": 0.070078125
+          }
+        ]
+      },
+      "csv_sha256": [
+        "6a0b0d4c3e9ff126edf44f834179d5e41d0d53c06cad486ea4b87c86c66fb946",
+        "e2d3a1c47f40912bc5176b496d4cb6ac246bc27a7d5d5f4f46442b6977968d7f",
+        "65abe8cfac4b06233b87f24e89b35488985e533a51505c8b8bb507a67b5af007",
+        "b4a8bb589bf34f355e096017bba5da64ad6dcdff50e6b5f59198edf96fbbdbb7"
+      ],
+      "csv_bitwise_equal": true,
+      "speedup": 8.507091410947396
+    }
+  },
+  "candidate_commit": "d28b13ae7929319bbd952023c29bc55123bdf309"
+}

@@ -73,9 +73,11 @@ static Graph make_graph(bool density, int* n_ops) {
 static void fill_inputs(Executor& ex) {
   ex.params_data()[0] = 0.3;  // mu
   ex.params_data()[1] = 1.2;  // sigma
-  // data slots follow the params in the arena; y_i deterministic
-  for (int i = 0; i < N; ++i)
-    ex.params_data()[2 + 2 * i] = 0.1 * ((i % 17) - 8);
+  // Address data by slot: immutable inputs live outside the parameter arena.
+  for (int i = 0; i < N; ++i) {
+    const double y = 0.1 * ((i % 17) - 8);
+    ex.set_values(ex.graph().ops[i].in[0], &y, 1);
+  }
 }
 
 template <typename F>

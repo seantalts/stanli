@@ -114,6 +114,7 @@ else
   cleanup_stancjs
   trap - EXIT
 fi
+tools/stanc_embed/fix_static_newline.sh "$STANCJS" "$PORTABLE_STANCJS"
 
 # js/ is the npm package: wrapper + worker + four artifacts.
 cp build-wasm/stanli.js build-wasm/stanli.wasm js/

@@ -20,8 +20,10 @@
 // renumbering only drops registers nothing names.
 #include <stanli/program.hpp>
 
+#include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace stanli {
@@ -53,6 +55,11 @@ void each_write(const Program& p, const Program::Instr& I, F fn) {
 
 template <typename F>
 void each_read(const Program& p, const Program::Instr& I, F fn) {
+  if (I.code == Program::DYN_INDEX) {
+    fn(Span{I.a + I.c, I.len});
+    fn(Span{I.b, 1});
+    return;
+  }
   if (I.code == Program::CALL) {
     const Program::Call& c = p.calls[(size_t)I.a];
     for (int j = 0; j < c.n_in; ++j) fn(Span{c.in[j], c.in_len[j]});
@@ -86,12 +93,11 @@ void each_read(const Program& p, const Program::Instr& I, F fn) {
       fn(Span{message.value_reg[k], message.value_len[k]});
     return;
   }
-  const ProgramOpSpec& spec = program_code_spec(I.code);
+  const ProgramOpSpec& spec = program_spec_of(I);
   if (spec.has(kProgramNoInputs)) return;
-  fn(Span{I.a, spec.has(kProgramRangeA) ? I.len : 1});
-  if (spec.has(kProgramReadB))
-    fn(Span{I.b, spec.has(kProgramRangeB) ? I.len : 1});
-  if (spec.has(kProgramReadC)) fn(Span{I.c, 1});
+  fn(Span{I.a, program_input_len(I, 0)});
+  if (spec.has(kProgramReadB)) fn(Span{I.b, program_input_len(I, 1)});
+  if (spec.has(kProgramReadC)) fn(Span{I.c, program_input_len(I, 2)});
 }
 
 void remap(Program::Call& c, const std::vector<int>& m) {
@@ -120,7 +126,7 @@ void remap(Program::Message& message, const std::vector<int>& m) {
 
 void remap(Program::Instr& I, const std::vector<int>& m) {
   if (I.code == Program::CALL || I.code == Program::TRANSFORM) return;
-  const ProgramOpSpec& spec = program_code_spec(I.code);
+  const ProgramOpSpec& spec = program_spec_of(I);
   if (program_output_len(I) > 0) I.dst = m[(size_t)I.dst];
   // DENSITY_VEC's `a` is a vec_densities index, not a register; its own
   // registers are remapped separately, by the table-level overload above.
@@ -145,15 +151,16 @@ bool overlaps(Span lhs, Span rhs) {
   return lhs.reg < rhs.reg + rhs.len && rhs.reg < lhs.reg + lhs.len;
 }
 
-bool forwardable_producer(Program::Code code) {
+bool forwardable_producer(const Program::Instr& I) {
   // Copies already have a dedicated aliasing pass below. CALL payloads carry
   // output and scratch ranges outside Instr. Instructions without a generated
   // adjoint are outside this experiment as well: the important saving is the
   // producer/copy pair in both the forward and generated reverse streams.
+  const Program::Code code = I.code;
   if (code == Program::MOV || code == Program::MOVR || code == Program::CALL ||
       code == Program::TRANSFORM)
     return false;
-  const ProgramOpSpec& spec = program_code_spec(code);
+  const ProgramOpSpec& spec = program_spec_of(I);
   return !spec.has(kProgramNoOutput) && !spec.has(kProgramNoAdjoint);
 }
 
@@ -208,7 +215,7 @@ bool forward_adjacent_copy_destinations(
   for (size_t i = 0; i + 1 < p.code.size(); ++i) {
     Program::Instr& producer = p.code[i];
     const Program::Instr& copy = p.code[i + 1];
-    if (!forwardable_producer(producer.code) ||
+    if (!forwardable_producer(producer) ||
         (copy.code != Program::MOV && copy.code != Program::MOVR))
       continue;
 
@@ -227,8 +234,7 @@ bool forward_adjacent_copy_destinations(
     // checkpoint copy and give the instruction straight back. Rules without
     // SaveOut consume the destination adjoint directly and may forward into a
     // repeatedly written state cell.
-    const bool saves_output =
-        program_code_spec(producer.code).has(kProgramSaveOut);
+    const bool saves_output = program_spec_of(producer).has(kProgramSaveOut);
     for (int k = 0; k < output_len && safe; ++k) {
       const size_t src = (size_t)(temporary.reg + k);
       const size_t dst = (size_t)(destination.reg + k);
@@ -257,7 +263,488 @@ bool forward_adjacent_copy_destinations(
   return true;
 }
 
+// inv_logit over a container, as the OP_INV_LOGIT kernel spells stan-math's
+// Matrix<var> overload: no sign branch, an inf guard.
+template <typename T>
+T inv_logit_range(const T& x) {
+  if constexpr (std::is_same_v<T, double>) {
+    const double e = std::exp(x);
+    return std::isinf(e) ? 1.0 : e / (1.0 + e);
+  } else {
+    const double v = inv_logit_range(stan::math::value_of(x));
+    T arg = x;
+    return stan::math::make_callback_var(v, [arg, v](auto&& vi) mutable {
+      arg.adj() += vi.adj() * v * (1.0 - v);
+    });
+  }
+}
+
+template <int32_t SA, int32_t SB, int32_t SC, typename T, typename Rule>
+void strided(const Program::Instr& I, T* reg, Rule rule) {
+  for (int32_t k = 0; k < I.len; ++k)
+    rule(reg[(size_t)(I.dst + k)], reg[(size_t)(I.a + SA * k)],
+         reg[(size_t)(I.b + SB * k)], reg[(size_t)(I.c + SC * k)]);
+}
+
+// The rule over the elements. Unit and zero strides are compile-time on the
+// double path, so the loops vectorize. The var replay takes one loop,
+// descending, so its tape unwinds a broadcast operand's adjoint ascending,
+// the order the graph kernels and stan-math's container overloads
+// accumulate in.
+template <int Arity, typename T, typename Rule>
+void each(const Program::Instr& I, T* reg, int32_t sa, int32_t sb, int32_t sc,
+          Rule rule) {
+  if constexpr (!std::is_same_v<T, double>) {
+    for (int32_t k = I.len; k-- > 0;)
+      rule(reg[(size_t)(I.dst + k)], reg[(size_t)(I.a + sa * k)],
+           reg[(size_t)(I.b + sb * k)], reg[(size_t)(I.c + sc * k)]);
+  } else if constexpr (Arity == 1) {
+    if (sa)
+      strided<1, 0, 0>(I, reg, rule);
+    else
+      strided<0, 0, 0>(I, reg, rule);
+  } else if constexpr (Arity == 2) {
+    switch (sa * 2 + sb) {
+      case 0:
+        return strided<0, 0, 0>(I, reg, rule);
+      case 1:
+        return strided<0, 1, 0>(I, reg, rule);
+      case 2:
+        return strided<1, 0, 0>(I, reg, rule);
+      default:
+        return strided<1, 1, 0>(I, reg, rule);
+    }
+  } else {
+    switch (sa * 4 + sb * 2 + sc) {
+      case 0:
+        return strided<0, 0, 0>(I, reg, rule);
+      case 1:
+        return strided<0, 0, 1>(I, reg, rule);
+      case 2:
+        return strided<0, 1, 0>(I, reg, rule);
+      case 3:
+        return strided<0, 1, 1>(I, reg, rule);
+      case 4:
+        return strided<1, 0, 0>(I, reg, rule);
+      case 5:
+        return strided<1, 0, 1>(I, reg, rule);
+      case 6:
+        return strided<1, 1, 0>(I, reg, rule);
+      default:
+        return strided<1, 1, 1>(I, reg, rule);
+    }
+  }
+}
+
+template <typename T>
+void run_range(const Program::Instr& I, T* reg) {
+  const int32_t sa = program_input_len(I, 0) > 1 ? 1 : 0;
+  const int32_t sb = program_reads(I, 1) && program_input_len(I, 1) > 1 ? 1 : 0;
+  const int32_t sc = program_reads(I, 2) && program_input_len(I, 2) > 1 ? 1 : 0;
+  const uint8_t law = I.law;
+  auto unary = [&](auto rule) { each<1>(I, reg, sa, sb, sc, rule); };
+  auto binary = [&](auto rule) { each<2>(I, reg, sa, sb, sc, rule); };
+  auto ternary = [&](auto rule) { each<3>(I, reg, sa, sb, sc, rule); };
+  switch (program_rule(I)) {
+    case Program::ADD:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a + b; });
+      break;
+    case Program::SUB:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a - b; });
+      break;
+    case Program::MUL:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a * b; });
+      break;
+    case Program::DIV:
+      binary([](T& o, const T& a, const T& b, const T&) { o = a / b; });
+      break;
+    case Program::POW:
+      binary([law](T& o, const T& a, const T& b, const T&) {
+        o = program_pow(law, a, b);
+      });
+      break;
+    case Program::FMAX:
+      binary([law](T& o, const T& a, const T& b, const T&) {
+        o = program_extremum(true, law, a, b);
+      });
+      break;
+    case Program::FMIN:
+      binary([law](T& o, const T& a, const T& b, const T&) {
+        o = program_extremum(false, law, a, b);
+      });
+      break;
+    case Program::NEG:
+      unary([](T& o, const T& a, const T&, const T&) { o = -a; });
+      break;
+    case Program::EXP:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = stan::math::exp(a); });
+      break;
+    case Program::LOG:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = stan::math::log(a); });
+      break;
+    case Program::SQRT:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::sqrt(a);
+      });
+      break;
+    case Program::SQUARE:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::square(a);
+      });
+      break;
+    case Program::INV:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = stan::math::inv(a); });
+      break;
+    case Program::FABS:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::fabs(a);
+      });
+      break;
+    case Program::INV_LOGIT:
+      unary(
+          [](T& o, const T& a, const T&, const T&) { o = inv_logit_range(a); });
+      break;
+    case Program::LOG1M:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::log1m(a);
+      });
+      break;
+    case Program::LOG1P_EXP:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::log1p_exp(a);
+      });
+      break;
+    case Program::TANH:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::tanh(a);
+      });
+      break;
+    case Program::LSE2:
+      binary([](T& o, const T& a, const T& b, const T&) {
+        o = stan::math::log_sum_exp(a, b);
+      });
+      break;
+    case Program::LOG_DIFF_EXP:
+      binary([](T& o, const T& a, const T& b, const T&) {
+        o = stan::math::log_diff_exp(a, b);
+      });
+      break;
+    case Program::LOG_MIX:
+      ternary([](T& o, const T& a, const T& b, const T& c) {
+        o = stan::math::log_mix(a, b, c);
+      });
+      break;
+    case Program::FMA:
+      ternary([](T& o, const T& a, const T& b, const T& c) {
+        o = stan::math::fma(a, b, c);
+      });
+      break;
+    default:
+      throw std::logic_error("run_range: unknown sub-opcode");
+  }
+}
+
 }  // namespace
+
+void run_elementwise_range(const Program::Instr& I, double* reg) {
+  run_range(I, reg);
+}
+
+void run_elementwise_range(const Program::Instr& I, stan::math::var* reg) {
+  run_range(I, reg);
+}
+
+std::vector<std::pair<int, int>> used_program_inputs(
+    const Program& p, const std::vector<std::pair<int, int>>& inputs) {
+  for (const auto& instr : p.code)
+    if (program_spec_of(instr).has(kProgramNoAdjoint) &&
+        instr.code != Program::JZ && instr.code != Program::JMP)
+      return inputs;
+  std::vector<char> read((size_t)p.n_regs, false);
+  for (const auto& instr : p.code)
+    each_read(p, instr, [&](Span span) {
+      for (int i = 0; i < span.len; ++i) read[(size_t)(span.reg + i)] = true;
+    });
+  for (int reg : p.out_regs) read[(size_t)reg] = true;
+  auto result = inputs;
+  for (auto& input : result) {
+    const int end = input.first + input.second;
+    int first = input.first, last = end;
+    while (first < last && !read[(size_t)first]) ++first;
+    while (last > first && !read[(size_t)(last - 1)]) --last;
+    // Keep entirely unread descriptors in this conservative optimization.
+    if (first < last) input = {first, last - first};
+  }
+  return result;
+}
+
+// Delay a constant range initialization until a path actually touches it.
+// Every read AND write constrains the destination: sinking across a partial
+// write would erase that write. Both positions must be outside cycles, so the
+// move cannot turn one initialization into one per iteration. No registers,
+// arithmetic, checks or effects are removed; all instruction targets remap.
+bool sink_program_fills(Program& p) {
+  if (std::getenv("STANLI_NO_FILL_SINK")) return false;
+  const int n = static_cast<int>(p.code.size());
+  if (n == 0 || n > 2048) return false;
+  std::vector<std::vector<int>> pred((size_t)n + 1);
+  std::vector<bool> cyclic((size_t)n + 1, false);
+  bool has_fill = false;
+  for (int pc = 0; pc < n; ++pc) {
+    const auto& I = p.code[(size_t)pc];
+    has_fill = has_fill || I.code == Program::FILL;
+    if (program_code_spec(I.code).has(kProgramNoAdjoint) &&
+        I.code != Program::JZ && I.code != Program::JMP &&
+        I.code != Program::IMOD && I.code != Program::IDIV &&
+        I.code != Program::DYN_SET && I.code != Program::DYN_LSE_RANGE &&
+        I.code != Program::DYN_INDEX && I.code != Program::PRINT &&
+        I.code != Program::REJECT)
+      return false;
+    if (branches(I.code)) {
+      if (I.dst < 0 || I.dst > n) return false;
+      pred[(size_t)I.dst].push_back(pc);
+      // Any cycle through an instruction crosses its position in at least
+      // one back edge. Marking the whole interval can only refuse extra moves.
+      if (I.dst <= pc)
+        std::fill(cyclic.begin() + I.dst, cyclic.begin() + pc + 1, true);
+    }
+    if (I.code != Program::JMP) pred[(size_t)pc + 1].push_back(pc);
+  }
+  if (!has_fill) return false;
+  const size_t words = ((size_t)n + 64) / 64;
+  using Bits = std::vector<uint64_t>;
+  const auto contains = [](const Bits& bits, int i) {
+    return (bits[(size_t)i / 64] & (uint64_t{1} << (i % 64))) != 0;
+  };
+  std::vector<Bits> dom((size_t)n + 1, Bits(words, ~uint64_t{0}));
+  std::fill(dom[0].begin(), dom[0].end(), 0);
+  dom[0][0] = 1;
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (int pc = 1; pc <= n; ++pc) {
+      Bits next(words, pred[(size_t)pc].empty() ? 0 : ~uint64_t{0});
+      for (int before : pred[(size_t)pc])
+        for (size_t w = 0; w < words; ++w) next[w] &= dom[(size_t)before][w];
+      next[(size_t)pc / 64] |= uint64_t{1} << (pc % 64);
+      if (next != dom[(size_t)pc]) {
+        dom[(size_t)pc] = std::move(next);
+        changed = true;
+      }
+    }
+  }
+  std::vector<int> destination((size_t)n, -1);
+  for (int pc = 0; pc < n; ++pc) {
+    const auto& I = p.code[(size_t)pc];
+    if (I.code != Program::FILL || I.len <= 1 || cyclic[(size_t)pc]) continue;
+    const Span range{I.dst, I.len};
+    Bits common(words, ~uint64_t{0});
+    bool touched = false, other_fill = false;
+    for (int use = 0; use < n; ++use) {
+      if (use == pc) continue;
+      bool touches = false;
+      const auto check = [&](Span s) {
+        touches = touches || overlaps(range, s);
+      };
+      each_read(p, p.code[(size_t)use], check);
+      each_write(p, p.code[(size_t)use], check);
+      if (!touches) continue;
+      other_fill = other_fill || p.code[(size_t)use].code == Program::FILL;
+      touched = true;
+      for (size_t w = 0; w < words; ++w) common[w] &= dom[(size_t)use][w];
+    }
+    for (int reg : p.out_regs) {
+      if (!overlaps(range, Span{reg, 1})) continue;
+      touched = true;
+      for (size_t w = 0; w < words; ++w) common[w] &= dom[(size_t)n][w];
+    }
+    // Overlapping initializers could otherwise invalidate independent moves.
+    // Unused initializations are left to a separate dead-store proof.
+    if (!touched || other_fill) continue;
+    for (int target = n; target > pc + 1; --target) {
+      if (!cyclic[(size_t)target] && contains(common, target) &&
+          contains(dom[(size_t)target], pc)) {
+        destination[(size_t)pc] = target;
+        break;
+      }
+    }
+  }
+  std::vector<std::vector<int>> before((size_t)n + 1);
+  bool moved = false;
+  for (int pc = 0; pc < n; ++pc)
+    if (destination[(size_t)pc] >= 0) {
+      before[(size_t)destination[(size_t)pc]].push_back(pc);
+      moved = true;
+    }
+  if (!moved) return false;
+  std::vector<int> new_pc((size_t)n + 1);
+  int at = 0;
+  for (int pc = 0; pc <= n; ++pc) {
+    new_pc[(size_t)pc] = at;
+    at += static_cast<int>(before[(size_t)pc].size());
+    if (pc < n && destination[(size_t)pc] < 0) ++at;
+  }
+  std::vector<Program::Instr> code;
+  code.reserve(p.code.size());
+  for (int pc = 0; pc <= n; ++pc) {
+    for (int init : before[(size_t)pc]) code.push_back(p.code[(size_t)init]);
+    if (pc == n || destination[(size_t)pc] >= 0) continue;
+    auto I = p.code[(size_t)pc];
+    if (branches(I.code)) I.dst = new_pc[(size_t)I.dst];
+    code.push_back(I);
+  }
+  p.code = std::move(code);
+  return true;
+}
+
+bool program_initializes_reads(const Program& p,
+                               const std::vector<std::pair<int, int>>& seeded) {
+  const size_t n = p.code.size();
+  if (p.n_regs < 0 || n > 2048) return false;
+  const size_t words = (static_cast<size_t>(p.n_regs) + 63) / 64;
+  // Bound proof cost; a refusal keeps fresh, null-initialized handles.
+  if (words > 1024 * 1024 / (n + 1)) return false;
+  using Bits = std::vector<uint64_t>;
+  const auto valid = [&](Span s) {
+    return s.reg >= 0 && s.len >= 0 && s.reg <= p.n_regs &&
+           s.len <= p.n_regs - s.reg;
+  };
+  const auto mark = [](Bits& bits, Span s) {
+    for (int r = s.reg; r < s.reg + s.len; ++r)
+      bits[(size_t)r / 64] |= uint64_t{1} << (r % 64);
+  };
+  Bits entry(words, 0);
+  for (const auto& seed : seeded) {
+    const Span s{seed.first, seed.second};
+    if (!valid(s)) return false;
+    mark(entry, s);
+  }
+  std::vector<std::vector<size_t>> pred(n + 1);
+  std::vector<std::vector<Span>> reads(n + 1);
+  std::vector<Bits> writes(n + 1, Bits(words, 0));
+  for (size_t pc = 0; pc < n; ++pc) {
+    const auto& I = p.code[pc];
+    // The proof is only as strong as the interpreter spans above. Keep
+    // unmodelled operations out; new opcodes need a span audit before reuse.
+    if (program_spec_of(I).has(kProgramNoAdjoint) && I.code != Program::JZ &&
+        I.code != Program::JMP && I.code != Program::IMOD &&
+        I.code != Program::IDIV && I.code != Program::DYN_SET &&
+        I.code != Program::DYN_INDEX && I.code != Program::DYN_LSE_RANGE &&
+        I.code != Program::PRINT && I.code != Program::REJECT)
+      return false;
+    if (I.code == Program::CALL && (I.a < 0 || (size_t)I.a >= p.calls.size()))
+      return false;
+    if ((I.code == Program::PRINT || I.code == Program::REJECT) &&
+        (I.a < 0 || (size_t)I.a >= p.messages.size()))
+      return false;
+    if (branches(I.code)) {
+      if (I.dst < 0 || (size_t)I.dst > n) return false;
+      pred[(size_t)I.dst].push_back(pc);
+    }
+    if (I.code != Program::JMP) pred[pc + 1].push_back(pc);
+    bool ok = true;
+    each_read(p, I, [&](Span s) {
+      ok = ok && valid(s);
+      reads[pc].push_back(s);
+    });
+    const auto write = [&](Span s) {
+      if (valid(s))
+        mark(writes[pc], s);
+      else
+        ok = false;
+    };
+    if (I.code == Program::CALL) {
+      const auto& call = p.calls[(size_t)I.a];
+      write(Span{call.out, call.out_len});
+    } else {
+      each_write(p, I, write);
+    }
+    if (!ok) return false;
+  }
+  for (int reg : p.out_regs) {
+    if (!valid(Span{reg, 1})) return false;
+    reads[n].push_back(Span{reg, 1});
+  }
+  std::vector<Bits> out(n + 1, Bits(words, ~uint64_t{0}));
+  const auto incoming = [&](size_t pc) {
+    Bits bits = pc == 0 ? entry : Bits(words, ~uint64_t{0});
+    if (pc != 0 && pred[pc].empty()) std::fill(bits.begin(), bits.end(), 0);
+    for (size_t before : pred[pc])
+      for (size_t w = 0; w < words; ++w) bits[w] &= out[before][w];
+    return bits;
+  };
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t pc = 0; pc <= n; ++pc) {
+      Bits bits = incoming(pc);
+      for (size_t w = 0; w < words; ++w) bits[w] |= writes[pc][w];
+      if (bits != out[pc]) {
+        out[pc] = std::move(bits);
+        changed = true;
+      }
+    }
+  }
+  for (size_t pc = 0; pc <= n; ++pc) {
+    const Bits bits = incoming(pc);
+    for (Span s : reads[pc])
+      for (int r = s.reg; r < s.reg + s.len; ++r)
+        if (!(bits[(size_t)r / 64] & (uint64_t{1} << (r % 64)))) return false;
+  }
+  return true;
+}
+
+bool elide_program_dead_constants(Program& p) {
+  if (std::getenv("STANLI_NO_DEAD_CONSTANTS")) return false;
+  const size_t n = p.code.size();
+  for (const auto& I : p.code)
+    if (branches(I.code) && (I.dst < 0 || (size_t)I.dst > n)) return false;
+  std::vector<bool> remove(n, false);
+  bool changed = false;
+  for (size_t pc = 0; pc < n; ++pc) {
+    const auto& initial = p.code[pc];
+    if (initial.code != Program::CONST) continue;
+    const Span cell{initial.dst, 1};
+    for (size_t next = pc + 1; next < n; ++next) {
+      const auto& I = p.code[next];
+      // Stop at control flow and instructions without fully modelled spans.
+      // Refusing extra instructions is cheap; no cross-block liveness needed.
+      if (program_spec_of(I).has(kProgramNoAdjoint)) break;
+      bool read = false, written = false;
+      each_read(p, I, [&](Span s) { read = read || overlaps(cell, s); });
+      if (read) break;
+      if (I.code == Program::CALL) {
+        // Replay stores CALL scratch privately; only its output is written
+        // into both the double and var register files.
+        const auto& call = p.calls[(size_t)I.a];
+        written = overlaps(cell, Span{call.out, call.out_len});
+      } else {
+        each_write(p, I,
+                   [&](Span s) { written = written || overlaps(cell, s); });
+      }
+      if (written) {
+        remove[pc] = changed = true;
+        break;
+      }
+    }
+  }
+  if (!changed) return false;
+  std::vector<int> new_pc(n + 1);
+  std::vector<Program::Instr> code;
+  code.reserve(n);
+  for (size_t pc = 0; pc < n; ++pc) {
+    new_pc[pc] = static_cast<int>(code.size());
+    if (!remove[pc]) code.push_back(p.code[pc]);
+  }
+  new_pc[n] = static_cast<int>(code.size());
+  for (auto& I : code)
+    if (branches(I.code)) I.dst = new_pc[(size_t)I.dst];
+  p.code = std::move(code);
+  return true;
+}
 
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {
   (void)compact_program_gated(p, seeded, true);
@@ -343,7 +830,8 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
   int next_branch = never;
   for (size_t i = n; i-- > 0;) {
     const Program::Instr& I = p.code[i];
-    if (I.code == Program::CONST || I.code == Program::CONSTR) {
+    if (I.code == Program::CONST || I.code == Program::CONSTR ||
+        I.code == Program::FILL) {
       bool dead = true;
       each_write(p, I, [&](Span s) {
         for (int k = 0; k < s.len; ++k) {

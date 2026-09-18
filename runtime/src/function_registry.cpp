@@ -548,6 +548,9 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("gumbel_rng", rng_builtin(ScalarRng::Gumbel));
     builtin("beta_binomial_rng", rng_builtin(ScalarRng::BetaBinomial));
     builtin("exponential_rng", rng_builtin(ScalarRng::Exponential));
+    builtin("poisson_rng", rng_builtin(ScalarRng::Poisson));
+    builtin("student_t_rng", rng_builtin(ScalarRng::StudentT));
+    builtin("bernoulli_logit_rng", rng_builtin(ScalarRng::BernoulliLogit));
 
     constexpr auto kInt = BuiltinArgumentKind::Integer;
     constexpr auto kReal = BuiltinArgumentKind::Real;

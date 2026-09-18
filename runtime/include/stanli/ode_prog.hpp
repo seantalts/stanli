@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace stanli {
@@ -87,23 +88,16 @@ RhsProgram compile_rhs(const mir::FunDef& f,
 std::shared_ptr<const IslandProg> make_rhs_adjoint_program(
     const RhsProgram& rhs, std::string* refusal = nullptr);
 
-// Evaluate. The register file is reused between calls (one per result scalar
-// type), which keeps the register-machine body allocation-free after first
-// use; the compiler guarantees every register is written before it is read,
-// so leftovers are never observed. y and theta may have different scalar
-// types: seed them straight into the result-typed registers instead of
-// allocating promoted vectors for every integrator callback.
-//
-// Promotions deliberately retain the old order: y, every source theta
-// (including an unused lowering placeholder), t, then x_r. Besides keeping
-// values identical, this preserves stan-math's var/nochain node creation order
-// from when y and theta were staged in vectors before the call.
-// Not reentrant, which is fine: an ODE right-hand side cannot solve an ODE.
-template <typename T>
-std::vector<T>& rhs_regs() {
-  static thread_local std::vector<T> reg;
-  return reg;
-}
+// A callback owns its registers for the solve, including deferred adjoint
+// callbacks. Copies own independent buffers; no storage survives thread exit.
+struct RhsWorkspace {
+  std::tuple<std::vector<double>, std::vector<stan::math::var>> registers;
+
+  template <typename T>
+  std::vector<T>& get() {
+    return std::get<std::vector<T>>(registers);
+  }
+};
 
 namespace detail {
 
@@ -141,8 +135,8 @@ template <typename T, typename T_time, typename T_y, typename T_yp,
           typename T_theta>
 std::vector<T>& eval_dae_regs(const RhsProgram& p, const T_time& t,
                               const T_y* y, const T_yp* yp, const T_theta* th,
-                              size_t n_th_source, const double* xr) {
-  std::vector<T>& reg = rhs_regs<T>();
+                              size_t n_th_source, const double* xr,
+                              std::vector<T>& reg) {
   seed_dae_regs<T>(p, t, y, yp, th, n_th_source, xr, reg);
   run_program(p, reg);
   return reg;
@@ -151,8 +145,8 @@ std::vector<T>& eval_dae_regs(const RhsProgram& p, const T_time& t,
 template <typename T, typename T_time, typename T_y, typename T_theta>
 std::vector<T>& eval_rhs_regs(const RhsProgram& p, const T_time& t,
                               const T_y* y, const T_theta* th,
-                              size_t n_th_source, const double* xr) {
-  std::vector<T>& reg = rhs_regs<T>();
+                              size_t n_th_source, const double* xr,
+                              std::vector<T>& reg) {
   seed_rhs_regs<T>(p, t, y, th, n_th_source, xr, reg);
 
   run_program(p, reg);
@@ -165,9 +159,9 @@ template <typename T, typename T_time, typename T_y, typename T_yp,
           typename T_theta>
 void run_dae_into(const RhsProgram& p, const T_time& t, const T_y* y,
                   const T_yp* yp, const T_theta* th, size_t n_th_source,
-                  const double* xr, T* out) {
+                  const double* xr, T* out, std::vector<T>& registers) {
   const std::vector<T>& reg =
-      detail::eval_dae_regs<T>(p, t, y, yp, th, n_th_source, xr);
+      detail::eval_dae_regs<T>(p, t, y, yp, th, n_th_source, xr, registers);
   for (size_t i = 0; i < p.out_regs.size(); ++i)
     out[i] = reg[(size_t)p.out_regs[i]];
 }
@@ -178,9 +172,9 @@ void run_dae_into(const RhsProgram& p, const T_time& t, const T_y* y,
 template <typename T, typename T_time, typename T_y, typename T_theta>
 void run_rhs_into(const RhsProgram& p, const T_time& t, const T_y* y,
                   const T_theta* th, size_t n_th_source, const double* xr,
-                  T* out) {
+                  T* out, std::vector<T>& registers) {
   const std::vector<T>& reg =
-      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr);
+      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr, registers);
   for (size_t i = 0; i < p.out_regs.size(); ++i)
     out[i] = reg[(size_t)p.out_regs[i]];
 }
@@ -188,9 +182,9 @@ void run_rhs_into(const RhsProgram& p, const T_time& t, const T_y* y,
 template <typename T, typename T_time, typename T_y, typename T_theta>
 void run_rhs(const RhsProgram& p, const T_time& t, const T_y* y,
              const T_theta* th, size_t n_th_source, const double* xr,
-             std::vector<T>& out) {
+             std::vector<T>& out, std::vector<T>& registers) {
   const std::vector<T>& reg =
-      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr);
+      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr, registers);
 
   // Keep resize after the program replay, as in the original adapter. Besides
   // retaining allocation behavior for existing callers, this leaves the
@@ -205,14 +199,16 @@ void run_rhs(const RhsProgram& p, const T_time& t, const T_y* y,
 // overload when lowering supplied an extra, deliberately unread placeholder.
 template <typename T, typename T_time, typename T_y, typename T_theta>
 void run_rhs(const RhsProgram& p, const T_time& t, const T_y* y,
-             const T_theta* th, const double* xr, std::vector<T>& out) {
-  run_rhs<T>(p, t, y, th, (size_t)p.n_th, xr, out);
+             const T_theta* th, const double* xr, std::vector<T>& out,
+             std::vector<T>& registers) {
+  run_rhs<T>(p, t, y, th, (size_t)p.n_th, xr, out, registers);
 }
 
 template <typename T, typename T_time, typename T_y, typename T_theta>
 void run_rhs_into(const RhsProgram& p, const T_time& t, const T_y* y,
-                  const T_theta* th, const double* xr, T* out) {
-  run_rhs_into<T>(p, t, y, th, (size_t)p.n_th, xr, out);
+                  const T_theta* th, const double* xr, T* out,
+                  std::vector<T>& registers) {
+  run_rhs_into<T>(p, t, y, th, (size_t)p.n_th, xr, out, registers);
 }
 
 }  // namespace stanli

@@ -3,6 +3,7 @@
 #define STANLI_PASS_UTIL_HPP
 
 #include <stanli/graph.hpp>
+#include <stanli/optable.hpp>
 
 #include <cstdint>
 #include <unordered_map>
@@ -12,6 +13,32 @@
 namespace stanli {
 
 using Fills = std::vector<std::pair<int, std::vector<double>>>;
+
+// The lane-fusing passes' shared currencies (island.cpp's dispatch cost
+// against its per-element cost): ~5 ns per graph op eliminated, against
+// ~1 ns per element a slice or gather copies or scatters, and ~6 op
+// dispatches to evaluate one density element. A fused region must beat
+// its unpacked cost by more than a rounding error, or it churns the graph
+// for nothing; kPartitionMargin is that margin.
+constexpr int64_t kLaneOpCost = 5;
+constexpr int64_t kLanePartitionMargin = 8 * kLaneOpCost;
+constexpr int64_t kLaneDensityElem = 6;
+
+// Densities whose elementwise form (densities_lpmf.cpp) costs per element
+// what their summed one does, so evaluating one elementwise instead of
+// vectorized costs nothing extra. Every other density trades one
+// vectorized call for W recorder calls, which this does price.
+inline bool lane_elt_costs_per_element(uint16_t opcode) {
+  switch (opcode) {
+    case OP_BERNOULLI_LPMF:
+    case OP_BERNOULLI_LOGIT_LPMF:
+    case OP_BINOMIAL_LPMF:
+    case OP_BINOMIAL_LOGIT_LPMF:
+      return false;
+    default:
+      return true;
+  }
+}
 
 inline bool is_element_store(const Op& op) {
   return (op.opcode == OP_SET_INDEX || op.opcode == OP_SET_INDEX_INPLACE) &&

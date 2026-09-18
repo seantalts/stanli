@@ -150,14 +150,14 @@ void run_call_var(const Program::Call& call, stan::math::var* reg) {
   total += call.scratch_len;
 
   ArenaDoubles values((size_t)total, 0.0);
-  ArenaDoubles adjoints((size_t)total, 0.0);
   ArenaVaris input_varis;
-  input_varis.reserve((size_t)out_offset);
+  const bool active = call.input_adjoint_mask != 0;
+  if (active) input_varis.reserve((size_t)out_offset);
   for (int k = 0; k < call.n_in; ++k) {
     for (int i = 0; i < call.in_len[k]; ++i) {
       const stan::math::var& x = reg[(size_t)(call.in[k] + i)];
       values[(size_t)(in_offset[(size_t)k] + i)] = x.val();
-      input_varis.push_back(x.vi_);
+      if (active) input_varis.push_back(x.vi_);
     }
   }
 
@@ -175,13 +175,17 @@ void run_call_var(const Program::Call& call, stan::math::var* reg) {
   ctx.udata = call.udata_owner.get();
   call.forward(ctx);
 
-  ArenaVaris output_varis((size_t)call.out_len);
+  ArenaVaris output_varis(active ? (size_t)call.out_len : 0);
   for (int i = 0; i < call.out_len; ++i) {
     reg[(size_t)(call.out + i)] =
         stan::math::var(values[(size_t)(out_offset + i)]);
-    output_varis[(size_t)i] = reg[(size_t)(call.out + i)].vi_;
+    if (active) output_varis[(size_t)i] = reg[(size_t)(call.out + i)].vi_;
   }
+  // Inactive calls still perform their forward computation and validation.
+  // Their fresh constant outputs have no reverse edges to retain.
+  if (!active) return;
 
+  ArenaDoubles adjoints((size_t)total, 0.0);
   const KernelFn backward = call.backward;
   const uint8_t variant = call.variant;
   const uint8_t input_adjoint_mask = call.input_adjoint_mask;
@@ -379,14 +383,13 @@ Executor::Executor(Graph g) : graph_(std::move(g)) {
   bind_();
 }
 
-Executor::Executor(const Executor& src) : graph_(src.graph_) {
+Executor::Executor(const Executor& src)
+    : graph_(src.graph_),
+      data_(src.data_pointer_exposed_
+                ? std::make_shared<std::vector<double>>(*src.data_)
+                : src.data_) {
   ensure_registered();
   bind_();
-  // bind_ zeroes the arena. The source's arena is where compile_model's
-  // data and constant fills went, and the slot layout is a deterministic
-  // function of the graph, so the two arenas agree element for element.
-  // Copying into the existing buffer rather than assigning the vector
-  // keeps the contexts' interior pointers valid by construction.
   std::copy(src.values_.begin(), src.values_.end(), values_.begin());
 }
 
@@ -398,9 +401,15 @@ void Executor::bind_() {
       throw std::length_error("executor arena size overflow");
     return a + b;
   };
-  // Parameters first so the gradient vector is contiguous in declaration
-  // order; then everything else.
-  int64_t off = 0;
+  // Only parameters and written slots need private value storage. Classify
+  // both outputs, including inactive writes: activity is not immutability.
+  std::vector<char> written(graph_.slots.size(), 0);
+  for (const auto& op : graph_.ops) {
+    written[op.out] = 1;
+    if (op.out2 >= 0) written[op.out2] = 1;
+  }
+  int64_t off = 0, data_size = 0;
+  data_offsets_.assign(graph_.slots.size(), -1);
   for (auto& s : graph_.slots) {
     if (s.is_param) {
       s.offset = off;
@@ -408,21 +417,21 @@ void Executor::bind_() {
     }
   }
   n_params_ = off;
-  for (auto& s : graph_.slots) {
-    if (!s.is_param) {
+  for (size_t i = 0; i < graph_.slots.size(); ++i) {
+    auto& s = graph_.slots[i];
+    if (s.is_param) continue;
+    if (written[i]) {
       s.offset = off;
       off = checked_size(off, s.len);
+    } else {
+      s.offset = data_size;
+      data_offsets_[i] = data_size;
+      data_size = checked_size(data_size, s.len);
     }
   }
   values_.assign(off, 0.0);
-
-  // A slot carries adjoint if it is a parameter or an op writes it. Slots
-  // that are neither are data: kernels see a null adjoint Desc and skip them.
-  std::vector<char> written(graph_.slots.size(), 0);
-  for (const auto& op : graph_.ops) {
-    written[op.out] = 1;
-    if (op.out2 >= 0) written[op.out2] = 1;
-  }
+  if (!data_) data_ = std::make_shared<std::vector<double>>(data_size, 0.0);
+  assert(static_cast<int64_t>(data_->size()) == data_size);
 
   // Adjoint addresses never escape the executor, so unlike values they do
   // not need a hole for every externally addressable data slot or for slots
@@ -486,9 +495,12 @@ void Executor::bind_() {
         make_ctx_(graph_.ops[i], scratch_offsets[i], written, adjoint_offsets);
     const Kernel& k = kernel(graph_.ops[i].opcode);
     if (k.make_state) {
-      kernel_states_.emplace_back(
+      std::unique_ptr<KernelState> state(
           k.make_state(graph_.ops[i], graph_.slots.data()));
-      ctx_[i].state = kernel_states_.back().get();
+      if (state) {
+        ctx_[i].state = state.get();
+        kernel_states_.push_back(std::move(state));
+      }
     }
     const int o2 = graph_.ops[i].out2;
     if (o2 >= 0) {
@@ -517,13 +529,13 @@ KernelCtx Executor::make_ctx_(const Op& op, int64_t scratch_offset,
   ctx.n_in = op.n_in;
   for (int i = 0; i < op.n_in; ++i) {
     const Slot& s = graph_.slots[op.in[i]];
-    ctx.in[i] = Desc{values_.data() + s.offset, s.len};
+    ctx.in[i] = Desc{slot_data_(op.in[i]), s.len};
   }
   const Slot& so = graph_.slots[op.out];
-  ctx.out = Desc{values_.data() + so.offset, so.len};
+  ctx.out = Desc{slot_data_(op.out), so.len};
   if (op.out2 >= 0) {
     const Slot& s2 = graph_.slots[op.out2];
-    ctx.out2 = Desc{values_.data() + s2.offset, s2.len};
+    ctx.out2 = Desc{slot_data_(op.out2), s2.len};
   }
   ctx.variant = op.variant;
   ctx.scratch = scratch_.empty() ? nullptr : scratch_.data() + scratch_offset;
@@ -548,6 +560,34 @@ KernelCtx Executor::make_ctx_(const Op& op, int64_t scratch_offset,
     ctx.out2_adj = adjoints_[adjoint_offsets[op.out2]];
   }
   return ctx;
+}
+
+void Executor::detach_data_() {
+  if (data_.unique()) return;
+  auto replacement = std::make_shared<std::vector<double>>(*data_);
+  data_ = std::move(replacement);
+  // Bound contexts hold input pointers. No output can belong to data_.
+  for (size_t k = 0; k < graph_.ops.size(); ++k)
+    for (int i = 0; i < graph_.ops[k].n_in; ++i) {
+      const int slot = graph_.ops[k].in[i];
+      if (data_offsets_[slot] >= 0) ctx_[k].in[i].data = slot_data_(slot);
+    }
+}
+
+double* Executor::value_ptr(int slot) {
+  if (data_offsets_[slot] >= 0) {
+    detach_data_();
+    data_pointer_exposed_ = true;
+  }
+  return slot_data_(slot);
+}
+
+void Executor::set_values(int slot, const double* data, size_t size) {
+  if (slot < 0 || static_cast<size_t>(slot) >= graph_.slots.size() ||
+      size > static_cast<uint64_t>(graph_.slots[slot].len))
+    throw std::out_of_range("executor fill exceeds slot");
+  if (data_offsets_[slot] >= 0) detach_data_();
+  if (size) std::copy_n(data, size, slot_data_(slot));
 }
 
 void Executor::set_profile(bool on) {
@@ -598,17 +638,16 @@ void Executor::run_forward_only(EvalState state) {
   } restore{eval_state_, eval_state_};
   eval_state_ = state;
   // The profiled path keeps the opcode-keyed loop (attribution needs the
-  // opcode anyway, and the timing calls dwarf dispatch cost). This bypasses
-  // resolve_forward_fn, so a variant-specialized op is timed through its
-  // canonical kernel. island.hpp requires the two forwards to leave bitwise-
-  // identical outputs and scratch; switch this loop to fwd_fn_ only when the
-  // executor's layout is next re-gated.
+  // opcode anyway, and the timing calls dwarf dispatch cost), but it must
+  // invoke the same bound function pointer as the fast path. The registry is
+  // mutable for extension kernels; consulting it here would make profiling
+  // change both variant specialization and post-bind kernel overrides.
   if (profile_) {
     const size_t np = graph_.ops.size();
     for (size_t i = 0; i < np; ++i) {
       const uint16_t op = graph_.ops[i].opcode;
       const auto t0 = std::chrono::steady_clock::now();
-      kernel(op).forward(ctx_[i]);
+      fwd_fn_[i](ctx_[i]);
       const auto t1 = std::chrono::steady_clock::now();
       ProfEntry& e = prof_[op];
       ++e.calls;
@@ -646,7 +685,7 @@ double Executor::forward() {
   run_forward_only();
   const Slot& r = graph_.slots[graph_.result_slot];
   assert(r.len == 1);
-  return values_[r.offset];
+  return slot_data_(graph_.result_slot)[0];
 }
 
 double Executor::gradient(double* grad_out) {
@@ -656,14 +695,17 @@ double Executor::gradient(double* grad_out) {
   assert(result_adjoint_offset_ >= 0);
   adjoints_[result_adjoint_offset_] = 1.0;
   if (profile_) {
-    for (size_t pi = graph_.ops.size(); pi-- > 0;) {
-      const Kernel& k = kernel(graph_.ops[pi].opcode);
-      if (!k.backward) continue;
-      KernelCtx& ctx = ctx_[pi];
+    // Profile the exact bound backward plan. Each context belongs to ctx_,
+    // so its index supplies opcode attribution without a second graph walk
+    // or extra fields in the fast-path BwdStep layout.
+    for (const BwdStep& step : bwd_) {
+      KernelCtx& ctx = *step.ctx;
+      const size_t pi = static_cast<size_t>(step.ctx - ctx_.data());
+      assert(pi < graph_.ops.size());
       if (ctx.out_adj_vec.len == 1) ctx.out_adj = ctx.out_adj_vec.data[0];
-      if (out2_adj_ptr_[pi]) ctx.out2_adj = *out2_adj_ptr_[pi];
+      if (step.out2_adj) ctx.out2_adj = *step.out2_adj;
       const auto t0 = std::chrono::steady_clock::now();
-      k.backward(ctx);
+      step.fn(ctx);
       prof_[graph_.ops[pi].opcode].bwd_ns +=
           std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::steady_clock::now() - t0)

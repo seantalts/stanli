@@ -47,7 +47,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # effect structures posteriordb does not contain (tests/brms/README.md).
 # They go through the same oracle as posteriordb, and a reference is keyed
 # on the file name either way.
-LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms")
+LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms",
+                REPO / "tests" / "rethinking")
 N_SAMPLER_COLS = 7
 REFS_PATH = REPO / "docs" / "corpus-refs.json.gz"
 # The reference file's format. Bumping this is a hard break on purpose:
@@ -90,11 +91,7 @@ QUARANTINED = {}
 # closes, the model matches its references, the replay reports GAP_CLOSED,
 # and the run stays red until the entry is deleted. A crash is never
 # excused: a segfault and a refusal are different bugs.
-KNOWN_GAPS = {
-    "s2_com_poisson": "parameter-dependent while with a runtime-length "
-                      "local; needs the structured executor to take a "
-                      "statement region the island refuses",
-}
+KNOWN_GAPS = {}
 
 # (model, point) pairs excused from probe_point's finite-gradient rule,
 # for points that carry no reference at all. Empty while every point is
@@ -799,7 +796,10 @@ def main():
         return check_wa_coverage(pdb, check_bin, args.models, args.filter,
                                  args.timeout, skip)
     refs, recorded = load_refs()
-    models = args.models or sorted(refs)
+    # A new teaching fixture without a reference must fail the default push
+    # gate. Iterating only the existing references would silently omit it.
+    teaching = {p.stem for p in (REPO / "tests" / "rethinking").glob("*.stan")}
+    models = args.models or sorted(set(refs) | teaching)
     models = [m for m in models if m not in skip]
     missing = [m for m in models if m not in refs]
     if missing:

@@ -24,7 +24,7 @@ EMBED_OBJECT=deps/stanc3/stanc_embed.o
 if [ -f "$EMBED_OBJECT" ] &&
    ! stanc_embed_artifact_matches "$EMBED_OBJECT" "$STANC3_SRC_SHA"; then
   echo "$EMBED_OBJECT has absent or mismatched provenance" >&2
-  echo "run ./tools/dev_setup.sh --embed --no-build to rebuild it" >&2
+  echo "run ./tools/dev_setup.sh --no-build to rebuild it" >&2
   exit 1
 fi
 
@@ -62,7 +62,7 @@ if [ ! -f "$EMBED_OBJECT" ]; then
   if [ ! -f deps/stanc3/stanc ] || [ ! -f deps/stanc3/stanc.src ] ||
      [ "$(cat deps/stanc3/stanc.src 2>/dev/null || true)" != "$STANC3_SRC_SHA" ]; then
     echo "wheel needs a compiler built from $STANC3_SRC_SHA" >&2
-    echo "run ./tools/dev_setup.sh --embed --no-build first" >&2
+    echo "run ./tools/dev_setup.sh --no-build first" >&2
     exit 1
   fi
   case "$(uname -s)" in

@@ -181,7 +181,11 @@ onmessage = async (e) => {
     const dataPtr = M.stringToNewUTF8(req.dataJson || "{}");
     const errLen = 8192;
     const errPtr = M._malloc(errLen);
-    const model = M._stanli_model_new(mirPtr, dataPtr, errPtr, errLen);
+    // The construction seed CmdStan would use: transformed data draws
+    // from it once, at build time, so every chain of this run shares them.
+    const model = M._stanli_model_new_seeded(mirPtr, dataPtr,
+                                            (req.seed ?? 1) >>> 0, errPtr,
+                                            errLen);
     M._free(mirPtr);
     M._free(dataPtr);
     if (!model) throw new Error(M.UTF8ToString(errPtr));

@@ -14,7 +14,7 @@
 # and a default of "latest" would silently pair a pinned binding with a runtime
 # that has moved. The release workflow asserts this equals the tag being cut,
 # so bumping one without the other fails there rather than at a user's install.
-stanli_runtime_release <- "v0.12.0"
+stanli_runtime_release <- "v0.14.4"
 
 runtime_filename <- function() {
   switch(Sys.info()[["sysname"]],
@@ -165,6 +165,8 @@ load_runtime <- function(path = stanli_runtime_path()) {
 }
 
 .onLoad <- function(libname, pkgname) {
+  register_ecosystem_methods()
+  register_stanfit_hook()
   # Load quietly when the runtime happens to be there; never download.
   p <- stanli_runtime_path()
   if (file.exists(p)) try(load_runtime(p), silent = TRUE)

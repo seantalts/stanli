@@ -97,6 +97,9 @@ void prepare_node(StructuredLoop& p, Node& n, unsigned depth,
   ++p.node_count;
   if (n.storage != Node::InPlace) n.storage = Node::Retained;
   n.active = false;
+  n.reuse_primal_output = false;
+  n.primal_contract_variant = 0;
+  n.primal_contract = nullptr;
   n.memo = false;
   n.memo_silent = false;
   n.trace = false;
@@ -792,13 +795,26 @@ void classify(StructuredLoop& p) {
   walk(p.root, loops, renumber);
 
   // Segments read their inputs from their own frame.
-  std::vector<char> inplace_base(slots, 0), active_reader(slots, 0);
+  std::vector<char> inplace_base(slots, 0), active_reader(slots, 0),
+      primal_reader(slots, 0);
   auto mark_readers = [&](Node& n, const std::vector<int>&) {
     if (n.kind != Node::KernelCall) return;
     const Op& op = p.body.ops[n.op];
     if (n.storage == Node::InPlace) inplace_base[op.in[0]] = 1;
-    if (n.active)
-      for (int k = 0; k < op.n_in; ++k) active_reader[op.in[k]] = 1;
+    if (!n.active) return;
+    const Kernel* registered = find_kernel(op.opcode);
+    const bool canonical = registered && registered->backward &&
+                           n.backward == registered->backward &&
+                           registered->primal_reads && !op.dyn_lengths;
+    n.primal_contract_variant = op.variant;
+    n.primal_contract = canonical ? registered->primal_reads : nullptr;
+    const BackwardPrimalReads reads =
+        canonical ? backward_primal_reads(registered, op.variant)
+                  : BackwardPrimalReads{};
+    for (int k = 0; k < op.n_in; ++k) {
+      active_reader[op.in[k]] = 1;
+      if (reads.input(k)) primal_reader[op.in[k]] = 1;
+    }
   };
   walk(p.root, loops, mark_readers);
 
@@ -834,6 +850,29 @@ void classify(StructuredLoop& p) {
             add(add(length(p, op.out), length(p, op.out2)), n.kernel_scratch));
   };
   walk(p.root, loops, classify_transient);
+
+  // This pilot only moves an active primary output when no historical
+  // backward can read it and the call has no adjacent output/scratch whose
+  // tape layout would also have to change.  Aliases and externally visible
+  // values retain their existing stable-address behavior.
+  auto classify_reusable_primal = [&](Node& n, const std::vector<int>&) {
+    if (n.kind != Node::KernelCall || !n.active ||
+        n.storage != Node::Retained || n.kernel_scratch != 0)
+      return;
+    const Op& op = p.body.ops[n.op];
+    if (op.out2 >= 0 || uses.alias[op.out] || uses.target[op.out] ||
+        uses.output[op.out] || inplace_base[op.out] || primal_reader[op.out])
+      return;
+    const Kernel* registered = find_kernel(op.opcode);
+    if (op.dyn_lengths || !registered || !registered->backward ||
+        !registered->primal_reads || n.backward != registered->backward ||
+        backward_primal_reads(registered, op.variant).output())
+      return;
+    n.reuse_primal_output = true;
+    n.workspace = p.workspace_size;
+    p.workspace_size = add(p.workspace_size, length(p, op.out));
+  };
+  walk(p.root, loops, classify_reusable_primal);
 }
 
 void compare_forward(KernelCtx& c) {
@@ -1159,8 +1198,38 @@ void selected_positions(const DynamicIndexSpec& p, const IndexRuntime& runtime,
   for (int64_t i = 0; i < runtime.selected; ++i)
     f(i, selected_position(p, runtime, i));
 }
+// The common vector[i] case needs one bounds check, not an arbitrary-rank
+// selection frame. Prove the complete fixed descriptor here; any near miss
+// goes through validate_index, including malformed metadata and dynamic sizes.
+// Return -1 only for refusal; an invalid runtime selector still throws.
+int64_t fixed_scalar_index(const DynamicIndexSpec& p, const KernelCtx& c,
+                           bool update) {
+  if (p.matrix_leaf || p.axes.size() != 1 || p.selected_size != 1) return -1;
+  const auto& a = p.axes[0];
+  const int expected = update ? 3 : 2;
+  if (c.n_in != expected || (p.input_count != 0 && p.input_count != expected) ||
+      p.rhs_input != (update && p.input_count != 0 ? 2 : -1) ||
+      a.kind != DynamicIndexSpec::Axis::Single || a.count != 1 ||
+      a.stride != 1 || a.extent < 0 || a.extent > exact_limit ||
+      a.extent != c.in[0].len || a.selector_input != 1 || a.input_offset < 0 ||
+      a.input_offset >= c.in[1].len || a.count_input_offset >= 0 ||
+      a.extent_input_offset >= 0 ||
+      (update ? (c.out.len != a.extent || c.in[2].len != 1) : c.out.len != 1))
+    return -1;
+  const double raw = c.in[1].data[a.input_offset];
+  if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
+      raw > a.extent)
+    index_out_of_range();
+  return static_cast<int64_t>(raw) - 1;
+}
+
 int64_t scalar_index_forward(KernelCtx& c) {
   const auto& p = *static_cast<const DynamicIndexSpec*>(c.udata);
+  const int64_t fixed = fixed_scalar_index(p, c, false);
+  if (fixed >= 0) {
+    c.out.data[0] = c.in[0].data[fixed];
+    return fixed;
+  }
   const IndexRuntime runtime = validate_index(p, c, false);
   if (p.selected_size != 1 || c.out.len != 1 || runtime.selected > 1)
     throw std::logic_error("invalid compact scalar index shape");
@@ -1185,6 +1254,11 @@ void index_forward(KernelCtx& c) {
 void index_backward(KernelCtx& c) {
   if (!c.in_adj[0].data) return;
   const auto& p = *static_cast<const DynamicIndexSpec*>(c.udata);
+  const int64_t fixed = fixed_scalar_index(p, c, false);
+  if (fixed >= 0) {
+    c.in_adj[0].data[fixed] += c.out_adj_vec.data[0];
+    return;
+  }
   const IndexRuntime runtime = validate_index(p, c, false);
   selected_positions(p, runtime, [&](int64_t i, int64_t at) {
     c.in_adj[0].data[at] += c.out_adj_vec.data[i];
@@ -1395,10 +1469,12 @@ struct LoopState : KernelState {
   size_t record_arena = 0, record_versions = 0;
   size_t trace_pos = 0;
   uint64_t effects = 0;
-  size_t memo_restores = 0, visits = 0;
+  size_t memo_restores = 0, visits = 0, reused_primal_cells = 0;
   int64_t adjoint_size = 0;
   bool reverse_ready = false;
   bool memo_ready = false;
+  bool has_reusable_primals = false;
+  bool reuse_primals = false;
   bool report_tape =
       std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
 
@@ -1435,6 +1511,7 @@ struct LoopState : KernelState {
       const Node* n = sites[site];
       if (!n) throw std::logic_error("structured loop site numbering is stale");
       const Op& op = p.body.ops[n->op];
+      has_reusable_primals |= n->reuse_primal_output;
       KernelCtx& c = ctx[site];
       c.n_in = op.n_in;
       c.variant = op.variant;
@@ -1613,8 +1690,13 @@ struct Execution {
     }
     const int64_t out_len = p.body.slots[op.out].len,
                   out2_len = op.out2 >= 0 ? c.out2.len : 0;
+    const bool reuse_primal = n.reuse_primal_output && s.reuse_primals;
+    if (reuse_primal && s.report_tape)
+      s.reused_primal_cells += static_cast<size_t>(out_len);
     double* block =
-        s.arena.allocate(add(add(out_len, out2_len), n.kernel_scratch));
+        reuse_primal
+            ? s.workspace.data() + n.workspace
+            : s.arena.allocate(add(add(out_len, out2_len), n.kernel_scratch));
     c.out.data = block;
     if (op.out2 >= 0) c.out2.data = block + out_len;
     c.scratch = block + out_len + out2_len;
@@ -1657,14 +1739,20 @@ struct Execution {
     bind_inputs(op, c);
     double* values = s.versions[static_cast<size_t>(base)].value;
     c.out.data = values;
-    const IndexRuntime runtime = validate_index(spec, c, true);
     const double* source = c.in[layout.rhs].data;
     const int64_t undo = static_cast<int64_t>(s.undo.size());
-    selected_positions(spec, runtime, [&](int64_t i, int64_t at) {
+    const auto write = [&](int64_t i, int64_t at) {
       s.undo.push_back(static_cast<double>(at));
       s.undo.push_back(values[at]);
       values[at] = source[i];
-    });
+    };
+    const int64_t fixed = fixed_scalar_index(spec, c, true);
+    if (fixed >= 0) {
+      write(0, fixed);
+    } else {
+      const IndexRuntime runtime = validate_index(spec, c, true);
+      selected_positions(spec, runtime, write);
+    }
     s.records.push_back(Record{Record::InPlace, n.site, undo, base, rhs});
   }
 
@@ -1914,6 +2002,14 @@ struct Execution {
           double* block = s.versions[static_cast<size_t>(r.out)].value;
           c.out.data = block;
           c.out_adj_vec.data = adj(r.out);
+          const bool reuse_primal = n.reuse_primal_output && s.reuse_primals;
+          if (reuse_primal) {
+            c.scratch = nullptr;
+            if (c.dyn_lengths) apply_dynamic_length(c);
+            if (c.out.len == 1) c.out_adj = c.out_adj_vec.data[0];
+            n.backward(c);
+            break;
+          }
           block += p.body.slots[op.out].len;
           if (op.out2 >= 0) {
             c.out2.data = block;
@@ -2058,6 +2154,26 @@ void structured_loop_forward(KernelCtx& ctx) {
   std::fill(s.memo_ordinal.begin(), s.memo_ordinal.end(), 0);
   s.trace_pos = 0;
   s.visits = 0;
+  s.reused_primal_cells = 0;
+  s.reuse_primals = s.has_reusable_primals;
+  if (s.has_reusable_primals) {
+    for (const Node* n : s.sites) {
+      if (!n || !n->active) continue;
+      // Null was the conservative contract during classification. It cannot
+      // invalidate reuse elsewhere because every one of this call's inputs
+      // was already marked as a historical primal reader.
+      if (!n->primal_contract) continue;
+      const Op& op = p.body.ops[n->op];
+      const Kernel* registered = find_kernel(op.opcode);
+      if (op.dyn_lengths || !registered || !registered->backward ||
+          !registered->primal_reads || n->backward != registered->backward ||
+          n->primal_contract != registered->primal_reads ||
+          n->primal_contract_variant != op.variant) {
+        s.reuse_primals = false;
+        break;
+      }
+    }
+  }
   if (!s.memo_ready) {
     for (auto& tape : s.memo_tape) tape.clear();
     s.trace.clear();
@@ -2123,6 +2239,7 @@ void structured_loop_forward(KernelCtx& ctx) {
         " copies=" + std::to_string(copies) +
         " targets=" + std::to_string(s.target_refs.size()) +
         " workspace=" + std::to_string(s.workspace.size()) +
+        " reused_primal_cells=" + std::to_string(s.reused_primal_cells) +
         " memo_nodes=" + std::to_string(p.memo_count) +
         " memo_restores=" + std::to_string(s.memo_restores) + " memo_tape=" +
         std::to_string(memo_tape) + " traces=" + std::to_string(p.trace_count) +
@@ -2168,7 +2285,8 @@ void register_structured_loop_kernel() {
                             nullptr, make_loop_state});
   register_kernel(OP_COMPARE, {compare_forward, nullptr, nullptr});
   register_kernel(OP_INT_ARITH, {int_forward, nullptr, nullptr});
-  register_kernel(OP_INDEX_DYNAMIC, {index_forward, index_backward, nullptr});
+  register_kernel(OP_INDEX_DYNAMIC, {index_forward, index_backward, nullptr,
+                                     nullptr, backward_reads_inputs_only});
   register_kernel(OP_SET_INDEX_DYNAMIC,
                   {set_index_forward, set_index_backward, set_index_scratch});
 }

@@ -29,6 +29,19 @@ int main() {
   check(d.at("sigma").dims.size() == 1 && d.at("sigma").dims[0] == 8,
         "sigma dims");
 
+  // Match CmdStan's streaming reader on malformed arrays and value types.
+  for (const char* bad :
+       {"{\"x\":[[1,2],[3]]}", "{\"x\":[1,[2]]}", "{\"x\":true}",
+        "{\"x\":null}", "{\"x\":1} garbage"}) {
+    bool rejected = false;
+    try {
+      DataMap::from_json(bad);
+    } catch (const std::exception&) {
+      rejected = true;
+    }
+    check(rejected, "malformed JSON data rejected");
+  }
+
   // Mixed int/real detection + matrices as nested arrays (row-major).
   DataMap m = DataMap::from_json(R"({
     "n": 3, "x": 2.5, "v": [1, 2, 3],

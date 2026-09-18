@@ -475,6 +475,49 @@ void test_constrain_interp() {
   bs_model_destruct(m);
 }
 
+// Transformed data draws come from the construction seed, once, when the
+// model is built: the same seed builds the same model, a different seed
+// different draws, and every draw reaches write_array like any other
+// generated quantity. The fixture spans interpreter-only, graph-native,
+// container, broadcast and user-function RNG spellings.
+void test_transformed_data_rng() {
+  const std::string mir = slurp("tests/fixtures/tdrng.tmir.sexp");
+  char* err = nullptr;
+  bs_model* a = bs_model_from_mir(mir.c_str(), "{}", 7, &err);
+  bs_model* b = bs_model_from_mir(mir.c_str(), "{}", 7, &err);
+  bs_model* c = bs_model_from_mir(mir.c_str(), "{}", 8, &err);
+  bs_rng* rng = bs_rng_construct(1, &err);
+  if (a == nullptr || b == nullptr || c == nullptr || rng == nullptr) {
+    fail(std::string("transformed-data RNG construct: ") +
+         (err ? err : "(no message)"));
+    bs_free_error_msg(err);
+  } else {
+    expect_eq_str("transformed-data RNG names", bs_param_names(a, true, true),
+                  "mu,td_z,td_k,td_d.1,td_d.2,td_d.3,td_mv.1,td_mv.2,td_g.1,"
+                  "td_g.2,td_u");
+    const double q[1] = {0.25};
+    std::vector<double> ra(11), rb(11), rc(11);
+    const int arc = bs_param_constrain(a, true, true, q, ra.data(), rng, &err);
+    const int brc = bs_param_constrain(b, true, true, q, rb.data(), rng, &err);
+    const int crc = bs_param_constrain(c, true, true, q, rc.data(), rng, &err);
+    if (arc != 0 || brc != 0 || crc != 0)
+      fail(std::string("transformed-data RNG constrain: ") +
+           (err ? err : "(no message)"));
+    if (ra != rb)
+      fail("same construction seed built different transformed data");
+    if (ra == rc)
+      fail("different construction seeds built the same transformed data");
+    if (ra[2] != std::floor(ra[2]) || ra[2] < 0.0)
+      fail("transformed-data poisson draw is not a count");
+    if (std::fabs(ra[3] + ra[4] + ra[5] - 1.0) > 1e-12)
+      fail("transformed-data dirichlet draw is not a simplex");
+  }
+  bs_rng_destruct(rng);
+  bs_model_destruct(a);
+  bs_model_destruct(b);
+  bs_model_destruct(c);
+}
+
 void test_constrain_compiled_rng() {
   const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
   char* err = nullptr;
@@ -1131,6 +1174,7 @@ int main() {
   test_constrain_graph();
   test_constrain_interp();
   test_constrain_compiled_rng();
+  test_transformed_data_rng();
   test_constrain_operators();
   test_unsupported();
   test_initialize();

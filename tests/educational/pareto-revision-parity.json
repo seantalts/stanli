@@ -1,0 +1,487 @@
+{
+  "baseline_commit": "4c25331f",
+  "baseline_binary_sha256": "392095a0378cdb001b7ee556bd57d5a3a49342e8e176cb447907f6730663be3f",
+  "candidate_binary_sha256": "f4134acf67005811065530e3ee6576a57bcaaedf45dcfa3d647590bc49f140a2",
+  "settings": {
+    "warmup": 1000,
+    "samples": 1000,
+    "seeds": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "init_radius": 0,
+    "comparison": "Complete byte-identical CSV including diagnostics and generated quantities"
+  },
+  "comparisons": [
+    {
+      "model": "aalto_bern",
+      "seed": 1,
+      "sha256": {
+        "baseline": "deb3c2b6ef9952b9d0a2cfee07d21534093027c9ae3b17715bbecd263014fe72",
+        "candidate": "deb3c2b6ef9952b9d0a2cfee07d21534093027c9ae3b17715bbecd263014fe72"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_bern",
+      "seed": 2,
+      "sha256": {
+        "baseline": "460f6e0c425caa1f93ca0c76280871a7acf01632d01334c13df94071e68fc03f",
+        "candidate": "460f6e0c425caa1f93ca0c76280871a7acf01632d01334c13df94071e68fc03f"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_bern",
+      "seed": 3,
+      "sha256": {
+        "baseline": "7e510fcd8f32b6963ba8183907ff43d9e92a2045c27dd82e1a93ab3170086615",
+        "candidate": "7e510fcd8f32b6963ba8183907ff43d9e92a2045c27dd82e1a93ab3170086615"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_bern",
+      "seed": 4,
+      "sha256": {
+        "baseline": "8cde525dac146d4af73d16847f724858273ee19dcef10d6ead0badf4d8687fc0",
+        "candidate": "8cde525dac146d4af73d16847f724858273ee19dcef10d6ead0badf4d8687fc0"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom",
+      "seed": 1,
+      "sha256": {
+        "baseline": "08e3bf4e8d23e129edd4476877d079a8ea546999bdc493a9139ebe29d5ac1124",
+        "candidate": "08e3bf4e8d23e129edd4476877d079a8ea546999bdc493a9139ebe29d5ac1124"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom",
+      "seed": 2,
+      "sha256": {
+        "baseline": "7cab4a43a9a6f1daad3dd0d8ac56f2fd7b337276dad6c2f6504466eab0eae945",
+        "candidate": "7cab4a43a9a6f1daad3dd0d8ac56f2fd7b337276dad6c2f6504466eab0eae945"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom",
+      "seed": 3,
+      "sha256": {
+        "baseline": "1a5b99855daebb331f09fe813e45aa9d3f854e9fc3e86ac99f2c349c254d663a",
+        "candidate": "1a5b99855daebb331f09fe813e45aa9d3f854e9fc3e86ac99f2c349c254d663a"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom",
+      "seed": 4,
+      "sha256": {
+        "baseline": "c4526fe42d774084916b27c165a8ad1c48b33f99468d7eb090e0ec8ec1e7d66a",
+        "candidate": "c4526fe42d774084916b27c165a8ad1c48b33f99468d7eb090e0ec8ec1e7d66a"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom2",
+      "seed": 1,
+      "sha256": {
+        "baseline": "f937ee354b78ac5b6d0461a38be39b27c0737e4fd51ca3da82f5cffeda21ebc4",
+        "candidate": "f937ee354b78ac5b6d0461a38be39b27c0737e4fd51ca3da82f5cffeda21ebc4"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom2",
+      "seed": 2,
+      "sha256": {
+        "baseline": "9cccf6d590a4057d51f5c5d5c4e9c8e7171a063907cf32c6e5075c1db771ba1b",
+        "candidate": "9cccf6d590a4057d51f5c5d5c4e9c8e7171a063907cf32c6e5075c1db771ba1b"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom2",
+      "seed": 3,
+      "sha256": {
+        "baseline": "f78ff43f208765e6e6f84ca758a590444436bfaaa5a8a38134ac0c3221ae4f99",
+        "candidate": "f78ff43f208765e6e6f84ca758a590444436bfaaa5a8a38134ac0c3221ae4f99"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binom2",
+      "seed": 4,
+      "sha256": {
+        "baseline": "8f9e0101ccc7d477d6130a7dcaa5b0238f4db277362edee0f333ea528ee7614b",
+        "candidate": "8f9e0101ccc7d477d6130a7dcaa5b0238f4db277362edee0f333ea528ee7614b"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binomb",
+      "seed": 1,
+      "sha256": {
+        "baseline": "e3403cfe641b896e2e4390af1f858c603d828f29166801e79dff6debb5c373ab",
+        "candidate": "e3403cfe641b896e2e4390af1f858c603d828f29166801e79dff6debb5c373ab"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binomb",
+      "seed": 2,
+      "sha256": {
+        "baseline": "8756791eaf3e52fe99dcd3377f6f31686f4749f971611e6fd5e7a4cfdf6f7aa7",
+        "candidate": "8756791eaf3e52fe99dcd3377f6f31686f4749f971611e6fd5e7a4cfdf6f7aa7"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binomb",
+      "seed": 3,
+      "sha256": {
+        "baseline": "8f8e6a7a1f68f59c3a12eb7ed3a6873a745f00e399df2058a6d5f59132a9b4da",
+        "candidate": "8f8e6a7a1f68f59c3a12eb7ed3a6873a745f00e399df2058a6d5f59132a9b4da"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_binomb",
+      "seed": 4,
+      "sha256": {
+        "baseline": "a083fd9c3ae3851f92856354ad140aa0fbaf63bd1fc87185752d3daa7c7b2c2c",
+        "candidate": "a083fd9c3ae3851f92856354ad140aa0fbaf63bd1fc87185752d3daa7c7b2c2c"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_gpareto",
+      "seed": 1,
+      "sha256": {
+        "baseline": "d8f19c604be3d1854ef17bbac1af57616d04c91c6a1f336c7d70255f0f062cb2",
+        "candidate": "d8f19c604be3d1854ef17bbac1af57616d04c91c6a1f336c7d70255f0f062cb2"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_gpareto",
+      "seed": 2,
+      "sha256": {
+        "baseline": "debc13670d993a41f19d63ac7e0ec17a22d983fec726d7d0febb4ec97fa60daf",
+        "candidate": "debc13670d993a41f19d63ac7e0ec17a22d983fec726d7d0febb4ec97fa60daf"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_gpareto",
+      "seed": 3,
+      "sha256": {
+        "baseline": "dbd1b52f37f8e127d78477c4a7468f43ca547f35d7dfcf40d9be7bb98c10c23b",
+        "candidate": "dbd1b52f37f8e127d78477c4a7468f43ca547f35d7dfcf40d9be7bb98c10c23b"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_gpareto",
+      "seed": 4,
+      "sha256": {
+        "baseline": "dff5da5fbf1bcfbcc7bfe5b934e7d543c61943d5adea6cdd3aecfaf4c05311a7",
+        "candidate": "dff5da5fbf1bcfbcc7bfe5b934e7d543c61943d5adea6cdd3aecfaf4c05311a7"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_aov",
+      "seed": 1,
+      "sha256": {
+        "baseline": "459a269a1cfb5650eea5f0a8a71d79e470a84d84555f03381b69fe048496b160",
+        "candidate": "459a269a1cfb5650eea5f0a8a71d79e470a84d84555f03381b69fe048496b160"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_aov",
+      "seed": 2,
+      "sha256": {
+        "baseline": "44506290640755cd1bf1a29d5a0b36d3205d0d370c6ef95efb79d4f6faf1529b",
+        "candidate": "44506290640755cd1bf1a29d5a0b36d3205d0d370c6ef95efb79d4f6faf1529b"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_aov",
+      "seed": 3,
+      "sha256": {
+        "baseline": "f4c0867ef39cf32e751ed6feffd0a240763cceb69129c8b1a1f1a8dc1340b5b2",
+        "candidate": "f4c0867ef39cf32e751ed6feffd0a240763cceb69129c8b1a1f1a8dc1340b5b2"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_aov",
+      "seed": 4,
+      "sha256": {
+        "baseline": "7792d965747df5c09e37b42f69d7c2db6faa4868e401c5b2977e4caab4bf9114",
+        "candidate": "7792d965747df5c09e37b42f69d7c2db6faa4868e401c5b2977e4caab4bf9114"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean",
+      "seed": 1,
+      "sha256": {
+        "baseline": "d043db1f701c7e218aed8607606a92f5d88b1b568b1a13a1b2b8c08027c6f6a7",
+        "candidate": "d043db1f701c7e218aed8607606a92f5d88b1b568b1a13a1b2b8c08027c6f6a7"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean",
+      "seed": 2,
+      "sha256": {
+        "baseline": "ffd38c5a9d068e3b06b26947e5e083a8ff2b8e78d38c0c1fd742be1e22763f63",
+        "candidate": "ffd38c5a9d068e3b06b26947e5e083a8ff2b8e78d38c0c1fd742be1e22763f63"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean",
+      "seed": 3,
+      "sha256": {
+        "baseline": "b9580be05514b9060ab0b398becdce34c4865f42b607c45ed6eef63d860e3feb",
+        "candidate": "b9580be05514b9060ab0b398becdce34c4865f42b607c45ed6eef63d860e3feb"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean",
+      "seed": 4,
+      "sha256": {
+        "baseline": "9dc5ced235960f93cf227c9395143b0c88b445316462fa5e9d82f478dc5f242b",
+        "candidate": "9dc5ced235960f93cf227c9395143b0c88b445316462fa5e9d82f478dc5f242b"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean_var",
+      "seed": 1,
+      "sha256": {
+        "baseline": "0e34173d3fec91829fa966bd96fd48bcbf3e9a787d24b9c2b76d7d94ca11e1c5",
+        "candidate": "0e34173d3fec91829fa966bd96fd48bcbf3e9a787d24b9c2b76d7d94ca11e1c5"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean_var",
+      "seed": 2,
+      "sha256": {
+        "baseline": "3bdc189ce16e49ecf7d1205341830cce7678f168bcf9af06ef04005d26344b56",
+        "candidate": "3bdc189ce16e49ecf7d1205341830cce7678f168bcf9af06ef04005d26344b56"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean_var",
+      "seed": 3,
+      "sha256": {
+        "baseline": "77f8cc9d2d9d49df827aecdc2b63b1dd7b157b671be3f94f84ce5a0e5834299c",
+        "candidate": "77f8cc9d2d9d49df827aecdc2b63b1dd7b157b671be3f94f84ce5a0e5834299c"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_grp_prior_mean_var",
+      "seed": 4,
+      "sha256": {
+        "baseline": "cd028711b3526e9e71cf93fac80be40cd3fa8198926b4935e2c42e59d24d0a4b",
+        "candidate": "cd028711b3526e9e71cf93fac80be40cd3fa8198926b4935e2c42e59d24d0a4b"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin",
+      "seed": 1,
+      "sha256": {
+        "baseline": "44f4c99d19205957a5e7bd7cb42c756eb3f8a1b2e476bbcbea48b87ec65a0725",
+        "candidate": "44f4c99d19205957a5e7bd7cb42c756eb3f8a1b2e476bbcbea48b87ec65a0725"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin",
+      "seed": 2,
+      "sha256": {
+        "baseline": "23d42084beaa6b2251047ff2a5cb0f088d95c31c2d9c576379f9defa83df54f0",
+        "candidate": "23d42084beaa6b2251047ff2a5cb0f088d95c31c2d9c576379f9defa83df54f0"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin",
+      "seed": 3,
+      "sha256": {
+        "baseline": "4bb7359bdd3c549c5f67fd8693a76b8983fab4b5eedc5e05f349235f115444f0",
+        "candidate": "4bb7359bdd3c549c5f67fd8693a76b8983fab4b5eedc5e05f349235f115444f0"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin",
+      "seed": 4,
+      "sha256": {
+        "baseline": "9aaeb07e15452da3ca3e0a3c9e439b7a8555a0c5e8a715c4be52a479ce4d48ea",
+        "candidate": "9aaeb07e15452da3ca3e0a3c9e439b7a8555a0c5e8a715c4be52a479ce4d48ea"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std",
+      "seed": 1,
+      "sha256": {
+        "baseline": "ccfdb5b00d2d9fdcfd0c8a3dca6639e8ecda31be3ef8687b79ce6c3d8ad98aff",
+        "candidate": "ccfdb5b00d2d9fdcfd0c8a3dca6639e8ecda31be3ef8687b79ce6c3d8ad98aff"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std",
+      "seed": 2,
+      "sha256": {
+        "baseline": "590ac7dac6939a7484b432477b1543a4d5d3875a91884e1d475392139436deb6",
+        "candidate": "590ac7dac6939a7484b432477b1543a4d5d3875a91884e1d475392139436deb6"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std",
+      "seed": 3,
+      "sha256": {
+        "baseline": "0a17cf109caa0dda405a1e6d7c8a872179a6cc1fb9ec5d8d785ec4938c27b2c9",
+        "candidate": "0a17cf109caa0dda405a1e6d7c8a872179a6cc1fb9ec5d8d785ec4938c27b2c9"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std",
+      "seed": 4,
+      "sha256": {
+        "baseline": "c4e94fc3cf7528c54d9b2f5fb921617192857b0ca8f4144dee93ca5c49b3c2fe",
+        "candidate": "c4e94fc3cf7528c54d9b2f5fb921617192857b0ca8f4144dee93ca5c49b3c2fe"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std_t",
+      "seed": 1,
+      "sha256": {
+        "baseline": "080c00cb5d8feba69f162b7a31fbd0fbb6b53c6565587aaa5e4693b1736a502f",
+        "candidate": "080c00cb5d8feba69f162b7a31fbd0fbb6b53c6565587aaa5e4693b1736a502f"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std_t",
+      "seed": 2,
+      "sha256": {
+        "baseline": "f89f90392c50d8d43ec8a62d78f8ee22da28bd7c9c32591e7d3c46fd9cccf7cc",
+        "candidate": "f89f90392c50d8d43ec8a62d78f8ee22da28bd7c9c32591e7d3c46fd9cccf7cc"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std_t",
+      "seed": 3,
+      "sha256": {
+        "baseline": "c7ee5a857df92e18d4a7b378a18d11665b526cdaba111ba1ec7eb1fe9fa535ad",
+        "candidate": "c7ee5a857df92e18d4a7b378a18d11665b526cdaba111ba1ec7eb1fe9fa535ad"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_lin_std_t",
+      "seed": 4,
+      "sha256": {
+        "baseline": "8a7a180c44ba8432eee6ea11d0463b56f7fb6e08cf1f7adb75bb9cbc172b2065",
+        "candidate": "8a7a180c44ba8432eee6ea11d0463b56f7fb6e08cf1f7adb75bb9cbc172b2065"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_hurdle",
+      "seed": 1,
+      "sha256": {
+        "baseline": "7d981051e46feb77ae4858baa67880fd3558f132b6c5694d9fc14b20a587b7ba",
+        "candidate": "7d981051e46feb77ae4858baa67880fd3558f132b6c5694d9fc14b20a587b7ba"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_hurdle",
+      "seed": 2,
+      "sha256": {
+        "baseline": "a74f6c42294d1f633e5f519f8262a9d557b7e807aa8bff24de58ff56419d1468",
+        "candidate": "a74f6c42294d1f633e5f519f8262a9d557b7e807aa8bff24de58ff56419d1468"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_hurdle",
+      "seed": 3,
+      "sha256": {
+        "baseline": "339f0c071db4833dd228a51583a0c9f31828f5851c466a33450e6034536317ca",
+        "candidate": "339f0c071db4833dd228a51583a0c9f31828f5851c466a33450e6034536317ca"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_hurdle",
+      "seed": 4,
+      "sha256": {
+        "baseline": "a634d4618f3c644a54f233bd1baea75df7a958f6302692070f3d20fd9c75b2a1",
+        "candidate": "a634d4618f3c644a54f233bd1baea75df7a958f6302692070f3d20fd9c75b2a1"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_simple",
+      "seed": 1,
+      "sha256": {
+        "baseline": "6a0b0d4c3e9ff126edf44f834179d5e41d0d53c06cad486ea4b87c86c66fb946",
+        "candidate": "6a0b0d4c3e9ff126edf44f834179d5e41d0d53c06cad486ea4b87c86c66fb946"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_simple",
+      "seed": 2,
+      "sha256": {
+        "baseline": "e2d3a1c47f40912bc5176b496d4cb6ac246bc27a7d5d5f4f46442b6977968d7f",
+        "candidate": "e2d3a1c47f40912bc5176b496d4cb6ac246bc27a7d5d5f4f46442b6977968d7f"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_simple",
+      "seed": 3,
+      "sha256": {
+        "baseline": "65abe8cfac4b06233b87f24e89b35488985e533a51505c8b8bb507a67b5af007",
+        "candidate": "65abe8cfac4b06233b87f24e89b35488985e533a51505c8b8bb507a67b5af007"
+      },
+      "exact": true
+    },
+    {
+      "model": "aalto_poisson_simple",
+      "seed": 4,
+      "sha256": {
+        "baseline": "b4a8bb589bf34f355e096017bba5da64ad6dcdff50e6b5f59198edf96fbbdbb7",
+        "candidate": "b4a8bb589bf34f355e096017bba5da64ad6dcdff50e6b5f59198edf96fbbdbb7"
+      },
+      "exact": true
+    }
+  ]
+}

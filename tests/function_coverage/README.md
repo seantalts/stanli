@@ -30,7 +30,9 @@ being supported in a declaration does not imply its named function is callable.
 Every case contributes to the log density and/or a retained output column.
 Nonuniform container projections expose element permutations. Data-only
 results multiply a parameter as well as appearing in output; RNGs are compared
-with the same seed and chain. CmdStan supplies all reference numbers. At three
+with the same seed and chain. Every RNG is also drawn in transformed data with
+data arguments, where CmdStan uses the model-construction stream (seed 1,
+chain 0); those draws enter the log density and are copied into the output. CmdStan supplies all reference numbers. At three
 fixed unconstrained points the gate compares the log density, every gradient,
 the full column schema, and every output value. It rejects nonfinite probes,
 missing output, compilation failures and shape differences. The numerical

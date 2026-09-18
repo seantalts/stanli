@@ -546,7 +546,56 @@ static void import_reference_tests() {
     close(gradient[i], expected[i], "import ordinals preserve outer gradient");
 }
 
+static void fixed_scalar_index_tests() {
+  const Kernel& kernel = *find_kernel(OP_INDEX_DYNAMIC);
+  for (int mutation = 0; mutation < 5; ++mutation) {
+    for (double at : {-1.0, 0.0, 1.0, 2.0, 4.0, 4.5, 5.0,
+                      std::numeric_limits<double>::infinity(),
+                      std::numeric_limits<double>::quiet_NaN()}) {
+      DynamicIndexSpec spec;
+      spec.axes = {{DynamicIndexSpec::Axis::Single, 4, 1, 1, 0}};
+      spec.selected_size = 1;
+      if (mutation == 1) spec.axes[0].stride = 2;
+      if (mutation == 2) spec.axes[0].input_offset = 1;
+      if (mutation == 3) spec.axes[0].extent = 3;
+      if (mutation == 4) spec.selected_size = 2;
+      double base[] = {0.2, -0.4, 1.7, 3.1};
+      double seed = -2.75;
+      double outputs[2] = {};
+      double adjoints[2][4] = {};
+      std::string errors[2];
+      for (int path = 0; path < 2; ++path) {
+        // An extra input forces the general descriptor path but has no
+        // numerical role. The selector, shape and error obligations agree.
+        spec.input_count = path ? 3 : 2;
+        KernelCtx c{};
+        c.n_in = spec.input_count;
+        c.in[0] = {base, 4};
+        c.in[1] = {&at, 1};
+        c.in[2] = {&at, 1};
+        c.in_adj[0] = {adjoints[path], 4};
+        c.out = {outputs + path, 1};
+        c.out_adj_vec = {&seed, 1};
+        c.udata = &spec;
+        try {
+          kernel.forward(c);
+          kernel.backward(c);
+        } catch (const std::out_of_range& error) {
+          errors[path] = std::string("range:") + error.what();
+        } catch (const std::logic_error& error) {
+          errors[path] = std::string("logic:") + error.what();
+        }
+      }
+      check(errors[0] == errors[1], "scalar index preserves validation errors");
+      check(outputs[0] == outputs[1], "scalar index preserves values");
+      check(std::memcmp(adjoints[0], adjoints[1], sizeof(adjoints[0])) == 0,
+            "scalar index preserves adjoints");
+    }
+  }
+}
+
 static void direct_index_kernel_tests() {
+  fixed_scalar_index_tests();
   const Kernel* dynamic_index = find_kernel(OP_INDEX_DYNAMIC);
   check(dynamic_index && dynamic_index->forward && dynamic_index->backward,
         "dynamic index kernel registered");
@@ -1533,6 +1582,96 @@ static std::shared_ptr<StructuredLoop> scalar_index_loop_plan(bool direct) {
   plan->outputs = {total};
   plan->prepare();
   return plan;
+}
+
+static void routed_add_backward(KernelCtx& context) {
+  find_kernel(OP_ADD)->backward(context);
+}
+
+// Select the same element on every trip. The alias that refreshes the
+// selector prevents loop-invariant hoisting, and the ADD consumer's backward
+// routes adjoints without rereading the selected primal.
+static std::shared_ptr<StructuredLoop> repeated_index_retention_plan(
+    bool alias_selected = false, bool replace_consumer_after_prepare = false) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const int base = plan->body.add_slot(1, false);
+  const int theta = plan->body.add_slot(1, false);
+  const int one = scalar(*plan, 1);
+  const int eight = scalar(*plan, 8);
+  const int iterator = plan->body.add_slot(1, false);
+  const int selector = plan->body.add_slot(1, false);
+  const int selected = plan->body.add_slot(1, false);
+  const int held = plan->body.add_slot(1, false);
+  const int term = plan->body.add_slot(1, false);
+  plan->imports = {{base, 0, 0, true}, {theta, 1, 0, true}};
+  Node index = call(*plan, OP_INDEX_DYNAMIC, {base, selector}, selected);
+  const int index_op = index.op;
+  attach(*plan, index.op, single_spec(1));
+  Node consume =
+      call(*plan, OP_ADD, {alias_selected ? held : selected, theta}, term);
+  const int consume_op = consume.op;
+  std::vector<Node> body{alias(selector, one), std::move(index)};
+  if (alias_selected) body.push_back(alias(held, selected));
+  body.push_back(std::move(consume));
+  body.push_back(target(term));
+  plan->root = counted(one, eight, iterator, sequence(std::move(body)));
+  plan->has_target = true;
+  prepare_kernels(*plan);
+  Node* indexed = find_call(plan->root, index_op);
+  check(indexed && indexed->reuse_primal_output == !alias_selected,
+        alias_selected ? "alias keeps indexed primal retained"
+                       : "repeated index reuses one primal workspace");
+  if (replace_consumer_after_prepare)
+    check(set_backward(plan->root, consume_op, routed_add_backward),
+          "replace retention consumer backward");
+  return plan;
+}
+
+static void primal_retention_tests() {
+  test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+  Executor executor(outer(repeated_index_retention_plan(), {1, 1}));
+  test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+  executor.params_data()[0] = 2;
+  executor.params_data()[1] = .5;
+  double gradient[2] = {};
+  stanli_test::StdoutCapture captured(stderr);
+  close(executor.gradient(gradient), 20,
+        "repeated index retained-primal result");
+  executor.params_data()[0] = 3;
+  close(executor.gradient(gradient), 28,
+        "reused primals refresh on next evaluation");
+  const std::string diagnostics = captured.finish();
+  check(diagnostics.find("reused_primal_cells=8") != std::string::npos,
+        "repeated index saves eight arena cells");
+  close(gradient[0], 8, "repeated index scatter accumulation");
+  close(gradient[1], 8, "value-free consumer adjoint accumulation");
+
+  Executor aliased(outer(repeated_index_retention_plan(true), {1, 1}));
+  aliased.params_data()[0] = 2;
+  aliased.params_data()[1] = .5;
+  std::fill(std::begin(gradient), std::end(gradient), 0.0);
+  close(aliased.gradient(gradient), 20, "aliased indexed primal result");
+  close(gradient[0], 8, "aliased indexed primal gradient");
+
+  // The plan was proved with the registered ADD backward, then mutated to a
+  // private callback. Runtime identity validation must disable workspace
+  // reuse while preserving the answer.
+  test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+  Executor replaced(outer(repeated_index_retention_plan(false, true), {1, 1}));
+  test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+  replaced.params_data()[0] = 2;
+  replaced.params_data()[1] = .5;
+  std::fill(std::begin(gradient), std::end(gradient), 0.0);
+  stanli_test::StdoutCapture fallback_captured(stderr);
+  close(replaced.gradient(gradient), 20,
+        "replaced consumer falls back to retained primals");
+  replaced.params_data()[0] = 3;
+  close(replaced.gradient(gradient), 28,
+        "fallback refreshes on next evaluation");
+  const std::string fallback_diagnostics = fallback_captured.finish();
+  check(fallback_diagnostics.find("reused_primal_cells=0") != std::string::npos,
+        "replaced consumer saves no arena cells");
+  close(gradient[0], 8, "replaced consumer fallback gradient");
 }
 
 static std::shared_ptr<StructuredLoop> zero_scalar_index_plan(bool invalid) {
@@ -4663,6 +4802,9 @@ static void segment_tests() {
 }
 
 int main() {
+  // This suite exercises retained plans, including their automatic selector.
+  // Whole-program specialization has its own differential tests in test_lower.
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0");
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
   test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
   segment_tests();
@@ -4677,6 +4819,7 @@ int main() {
   direct_index_kernel_tests();
   forced_control_tests();
   iterator_history_tests();
+  primal_retention_tests();
   scalar_index_tests();
   integer_result_tests();
   loop_invariant_reuse_tests();

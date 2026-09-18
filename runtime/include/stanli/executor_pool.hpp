@@ -32,22 +32,23 @@
 namespace stanli {
 
 class ExecutorPool {
+  struct Tape;
+
  public:
   // The prototype is cloned on demand and must outlive the pool. It is
   // never handed out itself, so the caller keeps using it if it wants.
-  explicit ExecutorPool(const Executor& proto) : proto_(&proto) {}
+  // Both out of line: the pooled tapes are an incomplete type here.
+  explicit ExecutorPool(const Executor& proto);
+  ~ExecutorPool();
 
   ExecutorPool(const ExecutorPool&) = delete;
   ExecutorPool& operator=(const ExecutorPool&) = delete;
 
   class Lease {
    public:
-    Lease(ExecutorPool& pool, std::unique_ptr<Executor> ex)
-        : pool_(&pool), ex_(std::move(ex)) {}
-    ~Lease() {
-      if (ex_) pool_->give_back(std::move(ex_));
-    }
-    Lease(Lease&& o) noexcept : pool_(o.pool_), ex_(std::move(o.ex_)) {}
+    Lease(ExecutorPool& pool, std::unique_ptr<Executor> ex);
+    ~Lease();
+    Lease(Lease&& o) noexcept;
     Lease& operator=(Lease&&) = delete;
     Lease(const Lease&) = delete;
     Lease& operator=(const Lease&) = delete;
@@ -58,11 +59,14 @@ class ExecutorPool {
    private:
     ExecutorPool* pool_;
     std::unique_ptr<Executor> ex_;
+    Tape* tape_;
   };
 
   // An executor for the duration of one evaluation. Also makes sure the
   // calling thread has an autodiff stack, which stan-math requires of
-  // every thread that builds a nested tape and does not create by itself.
+  // every thread that builds a nested tape and does not create by itself:
+  // a thread without one borrows a pooled tape for as long as it holds any
+  // lease, and must release every lease on the thread that acquired it.
   Lease acquire();
 
   // Clones currently in the free list, for tests and diagnostics.
@@ -77,8 +81,14 @@ class ExecutorPool {
     free_.push_back(std::move(ex));
   }
 
+  Tape* take_tape();
+  void give_back_tape(Tape* tape);
+
   mutable std::mutex mu_;
   std::vector<std::unique_ptr<Executor>> free_;
+  // Autodiff stacks for threads that arrive without one, pooled like the
+  // executors so a lease never allocates one after a thread's first.
+  std::vector<std::unique_ptr<Tape>> free_tapes_;
   const Executor* proto_;
 };
 

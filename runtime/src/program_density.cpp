@@ -224,9 +224,19 @@ int program_density_id_by_name(const std::string& name) {
 }
 
 int program_density_id_by_opcode(uint16_t opcode) {
-  for (int i = 0; i < kCount; ++i)
-    if (opcode == kDensities[i].opcode) return i;
-  return -1;
+  // The carver asks this for arithmetic and indexing ops as well as
+  // densities. Generate direct dispatch from the registry so a miss does
+  // not scan every probability function for every speculative partition.
+  switch (opcode) {
+#define STANLI_PD_OPCODE(opc, fn, arity, tier) \
+  case opc:                                    \
+    return kId_##fn;
+    STANLI_SCALAR_DENSITY_LIST(STANLI_PD_OPCODE)
+    STANLI_SCALAR_CDF_LIST(STANLI_PD_OPCODE)
+#undef STANLI_PD_OPCODE
+    default:
+      return -1;
+  }
 }
 
 bool program_density_container_capable(int id) {

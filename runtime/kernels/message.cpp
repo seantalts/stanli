@@ -305,6 +305,12 @@ bool native_scalar_probability(uint8_t variant) {
          (variant & kCategoricalArgAutodiff);
 }
 
+bool native_scalar_logit(uint8_t variant) {
+  return (variant & kCategoricalLogit) &&
+         (variant & kCategoricalScalarOutcome) &&
+         (variant & kCategoricalArgAutodiff);
+}
+
 int categorical_scalar_outcome(const KernelCtx& ctx) {
   if (ctx.in[0].len != 1)
     throw std::logic_error("categorical scalar outcome has wrong width");
@@ -324,6 +330,12 @@ void categorical_fwd(KernelCtx& ctx) {
     // With an active argument, both <true> and <false> retain this summand;
     // the double <false> body is the same value/check order without a tape.
     ctx.out.data[0] = stan::math::categorical_lpmf<false>(outcome, arg);
+    return;
+  }
+  if (native_scalar_logit(ctx.variant) && !values_only()) {
+    const int outcome = categorical_scalar_outcome(ctx);
+    const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
+    ctx.out.data[0] = stan::math::categorical_logit_lpmf<false>(outcome, arg);
     return;
   }
   const std::vector<int> outcomes = categorical_outcomes(ctx);
@@ -346,6 +358,25 @@ void categorical_bwd(KernelCtx& ctx) {
     const int outcome = categorical_scalar_outcome(ctx);
     ctx.in_adj[1].data[outcome - 1] +=
         ctx.out_adj / ctx.in[1].data[outcome - 1];
+    return;
+  }
+  if (native_scalar_logit(ctx.variant)) {
+    const int outcome = categorical_scalar_outcome(ctx);
+    const Eigen::Map<const Eigen::VectorXd> arg(ctx.in[1].data, ctx.in[1].len);
+    static constexpr const char* function = "categorical_logit_lpmf";
+    stan::math::check_bounded(function, "categorical outcome out of support",
+                              outcome, 1, arg.size());
+    stan::math::check_finite(function, "log odds parameter", arg);
+    const double normalizer = stan::math::log_sum_exp(arg);
+    // Mirror categorical_logit_lpmf's subtraction followed by the scalar
+    // AoS-var log_sum_exp callback (rev/fun/log_sum_exp.hpp). In particular,
+    // update the selected logit first, and form the negative seed with -=
+    // from zero. Packet exp changes low bits and must not replace std::exp.
+    ctx.in_adj[1].data[outcome - 1] += ctx.out_adj;
+    double normalizer_adj = 0.0;
+    normalizer_adj -= ctx.out_adj;
+    for (int64_t i = 0; i < arg.size(); ++i)
+      ctx.in_adj[1].data[i] += normalizer_adj * std::exp(arg(i) - normalizer);
     return;
   }
   stan::math::nested_rev_autodiff nested;

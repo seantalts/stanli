@@ -44,6 +44,10 @@ bool named(const Expr& e, std::initializer_list<const char*> names) {
 void validate_funapp_arity(const Expr& e) {
   if (e.fn_lib == Expr::Lib::UserDefined) return;
 
+  // log2 and log10 also have unary registry entries. Their nullary forms
+  // are language constants shared by all execution paths.
+  if (nullary_constant_kind(e)) return;
+
   // A call matching a registered overload's arity is structurally sound.
   // A registered name at another arity is not rejected here: some names have
   // legitimate arities outside the registry (one-argument log_sum_exp's
@@ -71,7 +75,7 @@ void validate_funapp_arity(const Expr& e) {
     return;
   }
 
-  if (named(e, {"pi", "e", "machine_precision", "negative_infinity",
+  if (named(e, {"pi", "e", "sqrt2", "machine_precision", "negative_infinity",
                 "positive_infinity", "not_a_number"})) {
     require_arity(e, 0);
     return;

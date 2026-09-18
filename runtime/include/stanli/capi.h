@@ -43,6 +43,19 @@ stanli_model* stanli_model_new(const char* mir_text, const char* data_json,
 stanli_model* stanli_model_new_from_stan(const char* stan_code,
                                          const char* data_json, char* err,
                                          size_t err_len);
+/* The seeded forms of the two constructors. seed is the model-construction
+ * seed: RNG calls in transformed data draw from create_rng(seed, 0) once,
+ * when the model is built, exactly as CmdStan's generated constructor does,
+ * so the same seed reproduces the same transformed data. The unseeded
+ * constructors use seed 1. Generated-quantities draws are separate; see
+ * stanli_wa_seed_chain. */
+stanli_model* stanli_model_new_seeded(const char* mir_text,
+                                      const char* data_json, uint32_t seed,
+                                      char* err, size_t err_len);
+stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
+                                                const char* data_json,
+                                                uint32_t seed, char* err,
+                                                size_t err_len);
 /* 1 if this build embeds stanc3, else 0. */
 int stanli_has_embedded_stanc(void);
 
@@ -438,6 +451,11 @@ int stanli_wa_row(stanli_model* m, const double* q, double* out);
  * the MIR interpreter. Then a message to show once per model: which parts,
  * why, and where to report it. Owned by the model. */
 const char* stanli_warnings(const stanli_model* m);
+/* 1 if transformed data drew from the construction seed, so this model is a
+ * function of that seed: a binding that runs everything under one seed the
+ * way CmdStan does rebuilds with the run seed when this is set, and never
+ * otherwise. Generated-quantities draws do not count. */
+int stanli_transformed_data_rng(const stanli_model* m);
 
 #ifdef __cplusplus
 }

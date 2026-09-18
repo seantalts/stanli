@@ -273,15 +273,11 @@ def row(path, **fields):
     return r
 
 
-# stanli_check shells out to stanc on every invocation and there is no
-# flag to hand it MIR it already has (tools/ is another agent's to change;
-# the wish is recorded in this harness's report instead). Three points per
-# model therefore means three more stanc runs on top of the one this
-# harness makes for classification -- and stanc --O1 takes 22 seconds on a
-# wiener model, of which there are 108. Standing in for stanc with a
+# Three points per model would mean three more stanc runs on top of the one
+# this harness makes for classification, and stanc --O1 takes 22 seconds on
+# a wiener model, of which there are 108. Handing stanli_check --stanc a
 # script that prints the MIR from the cache turns 4 compilations per model
-# into 0 on a warm cache. stanli_check reads $STANC ahead of --stanc, so
-# no flag has to change; the argv it passes is ignored.
+# into 0 on a warm cache; the script ignores stanc's arguments.
 #
 # What stanli lowers is byte-for-byte what `stanc --O1
 # --debug-optimized-mir` printed, so this is a cache, not a substitution.
@@ -390,10 +386,10 @@ def census_one(model, corpus, cache, check, stanc, shim, timeout):
     # Walk the points. A COMPILE_FAIL does not depend on the evaluation
     # point, so it settles the row immediately; an EVAL_FAIL might, so it
     # is only fatal once every point has produced one.
-    env = dict(os.environ, STANC=str(shim), STANLI_CENSUS_MIR=str(mir))
+    env = dict(os.environ, STANLI_CENSUS_MIR=str(mir))
     last_eval = ""
     for point in POINTS:
-        result = run([check, model, data, "--stanc", stanc,
+        result = run([check, model, data, "--stanc", shim,
                       "--point", point], timeout, cwd=REPO, env=env)
         if result is None:
             # Separate from `crashed` because the two point at different
@@ -577,11 +573,11 @@ def differential_one(entry, corpus, cache, check, stanc, shim, cmdstan, opt,
         return dict(cost, status=kind, detail=note)
 
     mir = cache / "mir" / entry["sha256"][:2] / f"{entry['sha256']}.sexp.gz"
-    env = dict(os.environ, STANC=str(shim), STANLI_CENSUS_MIR=str(mir))
+    env = dict(os.environ, STANLI_CENSUS_MIR=str(mir))
     worst_rel, worst_ulp, compared, agreed_refusals = 0.0, 0, 0, 0
     for point in POINTS:
         reference = _ok_values(record["points"].get(str(point), ""))
-        result = run([check, model, data, "--stanc", stanc,
+        result = run([check, model, data, "--stanc", shim,
                       "--point", point], timeout, cwd=REPO, env=env)
         kind, detail = status_line(result.stdout if result else "")
         # A timeout lands here as `ours = None`, indistinguishable from a

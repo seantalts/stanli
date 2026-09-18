@@ -27,7 +27,7 @@ __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
            "SAMPLER_COLUMNS", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
-__version__ = "0.12.0"
+__version__ = "0.14.4"
 
 _BIN = pathlib.Path(__file__).parent / "_bin"
 
@@ -103,9 +103,10 @@ _SamplePollCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 def _load_lib():
     names = {"darwin": "libstanli.dylib", "linux": "libstanli.so"}
     lib = ctypes.CDLL(str(_BIN / names.get(sys.platform, "stanli.dll")))
-    lib.stanli_model_new.restype = ctypes.c_void_p
-    lib.stanli_model_new.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
-                                     ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_model_new_seeded.restype = ctypes.c_void_p
+    lib.stanli_model_new_seeded.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+                                            ctypes.c_uint32, ctypes.c_char_p,
+                                            ctypes.c_size_t]
     lib.stanli_model_free.argtypes = [ctypes.c_void_p]
     lib.stanli_n_unconstrained.restype = ctypes.c_int64
     lib.stanli_n_unconstrained.argtypes = [ctypes.c_void_p]
@@ -128,11 +129,12 @@ def _load_lib():
                                      ctypes.POINTER(ctypes.c_double)]
     lib.stanli_has_embedded_stanc.restype = ctypes.c_int
     lib.stanli_exact_lp.restype = ctypes.c_int
-    lib.stanli_model_new_from_stan.restype = ctypes.c_void_p
-    lib.stanli_model_new_from_stan.argtypes = [ctypes.c_char_p,
-                                               ctypes.c_char_p,
-                                               ctypes.c_char_p,
-                                               ctypes.c_size_t]
+    lib.stanli_model_new_from_stan_seeded.restype = ctypes.c_void_p
+    lib.stanli_model_new_from_stan_seeded.argtypes = [ctypes.c_char_p,
+                                                      ctypes.c_char_p,
+                                                      ctypes.c_uint32,
+                                                      ctypes.c_char_p,
+                                                      ctypes.c_size_t]
     # c_void_p, not c_char_p: ctypes converts a c_char_p result to bytes
     # and drops the pointer, which would leak the string stanli handed us
     # ownership of.
@@ -148,6 +150,8 @@ def _load_lib():
     lib.stanli_wa_column_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_warnings.restype = ctypes.c_char_p
     lib.stanli_warnings.argtypes = [ctypes.c_void_p]
+    lib.stanli_transformed_data_rng.restype = ctypes.c_int
+    lib.stanli_transformed_data_rng.argtypes = [ctypes.c_void_p]
     lib.stanli_wa_seed.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
     lib.stanli_wa_seed_chain.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
                                          ctypes.c_uint32]
@@ -887,48 +891,78 @@ class OptimizeResult(dict):
 
 
 class Model:
-    """A compiled (model, data) pair."""
+    """A compiled (model, data) pair.
 
-    def __init__(self, stan_file=None, data=None, stan_code=None, mir=None):
-        data_json = _data_to_json(data)
+    ``seed`` is the model-construction seed: RNG calls in transformed data
+    draw from it once, here, the way CmdStan's generated constructor does,
+    so the same seed reproduces the same transformed data. ``sample`` and
+    ``optimize`` forward their own seed here when transformed data drew
+    from it, rebuilding the model for that run, so one seed governs a whole
+    run as it does in CmdStan. The rebuild replaces this object's model:
+    afterwards ``log_prob_grad``, ``n_unconstrained`` and
+    ``constrained_names`` all describe the model as built under the run
+    seed. A model whose transformed data never draws is never rebuilt.
+    """
+
+    def __init__(self, stan_file=None, data=None, stan_code=None, mir=None,
+                 seed=1):
+        if mir is None and stan_code is None:
+            if stan_file is None:
+                raise ValueError("provide stan_file, stan_code, or mir")
+            stan_code = _read_utf8_file(stan_file)
+        self._source = (mir, stan_code, _data_to_json(data))
+        self._m = None
+        self._adopt(self._construct(seed), seed)
+        note = _lib.stanli_warnings(self._m)
+        if note:
+            warnings.warn(note.decode(), RuntimeWarning, stacklevel=2)
+
+    def _adopt(self, m, seed):
+        # Everything this object caches about its model is derived from the
+        # handle, so a rebuild under another seed must refresh all of it:
+        # transformed data can size a parameter (`int k = poisson_rng(3);`
+        # then `vector[k] mu;`), which changes the free vector length and
+        # the column names along with the draws.
+        if self._m:
+            _lib.stanli_model_free(self._m)
+        self._m, self._seed = m, seed
+        self.n_unconstrained = _lib.stanli_n_unconstrained(m)
+        n_con = _lib.stanli_n_constrained(m)
+        self.constrained_names = [
+            _bracket(_lib.stanli_constrained_name(m, i).decode())
+            for i in range(n_con)
+        ]
+
+    def _construct(self, seed):
+        mir, stan_code, data_json = self._source
         err = ctypes.create_string_buffer(8192)
-
         if mir is not None:
             # Already-compiled MIR, from stan_to_mir or from
             # `stanc --O1 --debug-optimized-mir`. Skips the compiler
             # entirely, which is what a cached or shipped model wants.
-            self._m = _lib.stanli_model_new(mir.encode(), data_json.encode(),
-                                            err, len(err))
-            self._finish_init(err)
-            return
-        if stan_code is None:
-            if stan_file is None:
-                raise ValueError("provide stan_file, stan_code, or mir")
-            stan_code = _read_utf8_file(stan_file)
-
-        if _lib.stanli_has_embedded_stanc():
+            m = _lib.stanli_model_new_seeded(
+                mir.encode(), data_json.encode(), seed, err, len(err))
+        elif _lib.stanli_has_embedded_stanc():
             # Fully in-process: embedded stanc3 compiles the model.
-            self._m = _lib.stanli_model_new_from_stan(
-                stan_code.encode(), data_json.encode(), err, len(err))
+            m = _lib.stanli_model_new_from_stan_seeded(
+                stan_code.encode(), data_json.encode(), seed, err, len(err))
         else:
             # Windows and other non-embedded builds use the bundled compiler
             # executable as a short-lived subprocess.
-            self._m = _lib.stanli_model_new(_subprocess_mir(stan_code).encode(),
-                                            data_json.encode(), err, len(err))
-        self._finish_init(err)
-
-    def _finish_init(self, err):
-        if not self._m:
+            m = _lib.stanli_model_new_seeded(
+                _subprocess_mir(stan_code).encode(), data_json.encode(), seed,
+                err, len(err))
+        if not m:
             raise RuntimeError(err.value.decode())
-        self.n_unconstrained = _lib.stanli_n_unconstrained(self._m)
-        n_con = _lib.stanli_n_constrained(self._m)
-        self.constrained_names = [
-            _bracket(_lib.stanli_constrained_name(self._m, i).decode())
-            for i in range(n_con)
-        ]
-        note = _lib.stanli_warnings(self._m)
-        if note:
-            warnings.warn(note.decode(), RuntimeWarning, stacklevel=3)
+        return m
+
+    def _forward_seed(self, seed):
+        # CmdStan builds the model under the run seed, so transformed data
+        # that draws from it follows that seed. Rebuild only when a draw
+        # happened and the seed differs; every other model is left alone.
+        if seed == self._seed or not _lib.stanli_transformed_data_rng(self._m):
+            return
+        self._adopt(self._construct(seed), seed)
 
     def __del__(self):
         if getattr(self, "_m", None):
@@ -1005,6 +1039,7 @@ class Model:
         returning the other quantity -- the two differ for any
         constrained parameter, which is most models.
         """
+        self._forward_seed(seed)
         if not jacobian:
             raise NotImplementedError(
                 "stanli folds the Jacobian into the graph at lowering "
@@ -1082,6 +1117,7 @@ class Model:
         draws streamed per chain -- for models with a generate_quantities
         section, and the constrained parameters otherwise.
         """
+        self._forward_seed(seed)
         if isinstance(refresh, (bool, np.bool_)):
             raise TypeError("refresh must be a nonnegative integer")
         try:

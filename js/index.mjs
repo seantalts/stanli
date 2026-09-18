@@ -127,7 +127,8 @@ function pathfinderInitOptions(value) {
  *   `stanc --O1 --debug-optimized-mir` at build time). When given, neither
  *   browser compiler loads: the runtime alone is ~1.5 MB gzipped.
  * @param {Object|string} [opts.data]  Data as an object or JSON text.
- * @param {number} [opts.seed=1]       Chain seed (sampler and GQ RNG).
+ * @param {number} [opts.seed=1]       Run seed: transformed-data RNG at
+ *   model construction (as CmdStan seeds it), then sampler and GQ RNG.
  * @param {number} [opts.warmup=1000]
  * @param {number} [opts.samples=1000]
  * @param {number} [opts.delta=0.8]    Adaptation target acceptance (NUTS).

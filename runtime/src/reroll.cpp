@@ -25,6 +25,18 @@
 // terms for its OP_SUM_VEC; element stores marching through one vector at
 // a constant stride collapse into a single vector store -- or into the
 // fused value vector itself -- with every later reference renamed.
+// A lane may also be C elements wide. LaneLayout names the region's packing
+// convention (row-major or column-major, whichever its first wide row op
+// commits to): a SLICE or SLICE_STRIDED reading row `lane` of an invariant
+// base, lanes covering every row, elides to the base the same way a plain
+// OP_INDEX does; a row that does not cover the base, or an OP_GATHER whose
+// lanes' indices are together one affine run, packs through one OP_SLICE or
+// OP_GATHER instead; constants and lpmf outcomes pack in the region's
+// convention; an invariant operand as wide as the row tiles via OP_REP_MAT;
+// a density whose row-wide lp feeds another op folds back with one
+// OP_SUM_ROWS per lane (repacked first when the convention is column-major,
+// since OP_SUM_ROWS needs each lane's elements contiguous); and row stores
+// covering every row make the fused value the container.
 //
 // Failed classifications report the longest still-classifiable lane
 // prefix and retry with it. This is what handles block-structured data
@@ -34,11 +46,13 @@
 // never per-model: cross-lane reads (parameter recurrences), partial or
 // strided INDEX progressions, outputs escaping the lane, opcodes outside
 // the vocabulary.
+#include <stanli/builtin_registry.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/reroll.hpp>
 
 #include "pass_util.hpp"
 #include "reroll_profile.hpp"
+#include "reroll_plan.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -50,59 +64,158 @@
 namespace stanli {
 namespace {
 
-constexpr int64_t kMinLanes = 4;
-constexpr int kMaxPeriod = 32;
+constexpr int64_t kMinLanes = detail::kMinLanes;
+constexpr int kMaxPeriod = detail::kMaxPeriod;
 constexpr int kMaxClassifyAttempts = 6;
 
-enum class InKind { kInvariant, kConstLanes, kLaneLocal, kBad };
+using detail::reroll_plan::InKind;
+using detail::reroll_plan::LaneLayout;
+using detail::reroll_plan::Pos;
+using detail::reroll_plan::PosIn;
 
-struct PosIn {
-  InKind kind = InKind::kBad;
-  int producer_pos = -1;       // LANE_LOCAL: template position of producer
-  std::vector<double> values;  // CONST_LANES: one value per lane
-};
+bool is_row_read(const Op& op) {
+  return op.n_in == 1 && ((op.opcode == OP_SLICE && op.n_idata == 1) ||
+                          (op.opcode == OP_SLICE_STRIDED && op.n_idata == 2));
+}
 
-struct Pos {
-  std::vector<PosIn> ins;
-  bool index_elision = false;   // OP_INDEX, idata==lane, base len==lanes
-  bool hoist = false;           // all inputs + idata invariant: emit once
-  bool term_density = false;    // density, every lane's out a target term
-  bool elt_density = false;     // density, every lane's out consumed only
-                                //   inside its own lane -> variant bit 6,
-                                //   out[n] = lane n's lp
-  bool term_widen = false;      // widenable, every lane's out a target term
-                                //   -> widen + OP_SUM_VEC, swap the terms
-  int slice_start = -1;         // OP_INDEX over a contiguous window
-  std::vector<int> gather_idx;  // OP_INDEX with a data-driven index
-  int store_vec = -1;           // element write filling a window of this
-  int store_start = 0;          //   vector, starting here,
-  int store_stride = 1;         //   advancing by this much per lane
-  bool store_written_after = false;  // someone writes the vector later
-  std::vector<int> outcome_idata;    // lpmf: per-lane integer outcomes
-};
+bool is_row_store(const Op& op) {
+  if (op.n_in != 2) return false;
+  switch (op.opcode) {
+    case OP_SET_SLICE:
+    case OP_SET_SLICE_INPLACE:
+      return op.n_idata == 1;
+    case OP_SET_SLICE_STRIDED:
+    case OP_SET_SLICE_STRIDED_INPLACE:
+      return op.n_idata == 2;
+    default:
+      return false;
+  }
+}
+
+uint16_t inplace_form(uint16_t opcode) {
+  if (opcode == OP_SET_SLICE) return OP_SET_SLICE_INPLACE;
+  if (opcode == OP_SET_SLICE_STRIDED) return OP_SET_SLICE_STRIDED_INPLACE;
+  return opcode;
+}
+
+bool is_strided(uint16_t opcode) {
+  return opcode == OP_SLICE_STRIDED || opcode == OP_SET_SLICE_STRIDED ||
+         opcode == OP_SET_SLICE_STRIDED_INPLACE;
+}
+
+bool two_int_groups(uint16_t opcode) {
+  return opcode == OP_BINOMIAL_LPMF || opcode == OP_BINOMIAL_LOGIT_LPMF ||
+         opcode == OP_BETA_BINOMIAL_LPMF;
+}
 
 // Structural template match; idata may differ across lanes only for
-// OP_INDEX (checked as a progression during classification).
-bool ops_match(const Graph& g, const Op& a, const Op& b) {
-  if (a.opcode != b.opcode || a.variant != b.variant || a.n_in != b.n_in ||
-      a.out2 >= 0 || b.out2 >= 0 || is_effectful_op(a.opcode) ||
+// OP_INDEX (checked as a progression during classification). A row store
+// run starts with the functional write of the declaration and continues in
+// place.
+bool ops_match(const Graph& g, const Op& a, const Op& b,
+               int64_t lane_distance) {
+  // Opaque payloads can contain different programs, constants, or effects
+  // despite identical visible operands. Hoisting or widening needs a proof
+  // for that payload's semantics, which this matcher does not provide.
+  if (a.udata != nullptr || b.udata != nullptr) return false;
+  if (a.opcode != b.opcode) {
+    const bool maybe_row_store =
+        (a.opcode == OP_SET_SLICE && b.opcode == OP_SET_SLICE_INPLACE) ||
+        (a.opcode == OP_SET_SLICE_STRIDED &&
+         b.opcode == OP_SET_SLICE_STRIDED_INPLACE);
+    if (!maybe_row_store || !is_row_store(a)) return false;
+  }
+  if (a.variant != b.variant || a.n_in != b.n_in || a.out2 >= 0 ||
+      b.out2 >= 0 || is_effectful_op(a.opcode) ||
       has_op_trait(a.opcode, op_trait::kVariantGrouped))
     return false;
   for (int j = 0; j < a.n_in; ++j)
     if (g.slots[a.in[j]].len != g.slots[b.in[j]].len) return false;
   if (g.slots[a.out].len != g.slots[b.out].len) return false;
+  const bool a_row_store = is_row_store(a);
+  if (a_row_store && a.out != b.out) return false;
+  const bool a_row_read = a_row_store ? false : is_row_read(a);
+  if (a_row_read && a.in[0] != b.in[0]) return false;
   // Element writes carry their destination index the same way reads do, so
   // the immediate is allowed to advance across lanes for both; lpmf lanes
   // carry their integer outcome there and fuse by concatenating them.
   if (a.opcode == OP_INDEX || a.opcode == OP_SET_INDEX ||
       a.opcode == OP_SET_INDEX_INPLACE)
     return a.n_idata == 1 && b.n_idata == 1;
+  if (a_row_read) {
+    if (a.n_idata != b.n_idata) return false;
+    bool same = true;
+    for (int64_t k = 0; k < a.n_idata; ++k)
+      same = same && a.idata[k] == b.idata[k];
+    if (same) return true;
+    if (is_strided(a.opcode))
+      return b.idata[0] == a.idata[0] + lane_distance &&
+             b.idata[1] == a.idata[1];
+    return b.idata[0] == a.idata[0] + lane_distance * g.slots[a.out].len;
+  }
+  if (a_row_store) {
+    if (a.n_idata != b.n_idata) return false;
+    if (is_strided(a.opcode))
+      return b.idata[0] == a.idata[0] + lane_distance &&
+             b.idata[1] == a.idata[1];
+    return b.idata[0] == a.idata[0] + lane_distance * g.slots[a.in[1]].len;
+  }
+  // A gather's idata is an arbitrary index list, not a progression: any two
+  // gathers of the same width off the same base are the same template, and
+  // classification decides separately whether the lanes' concatenated
+  // indices are a shape it can pack.
+  if (a.opcode == OP_GATHER)
+    return a.in[0] == b.in[0] && a.n_idata == b.n_idata;
   if (has_op_trait(a.opcode, op_trait::kRerollIdataDensity))
     return a.n_idata == b.n_idata;
   if (a.n_idata != b.n_idata) return false;
   for (int64_t k = 0; k < a.n_idata; ++k)
     if (a.idata[k] != b.idata[k]) return false;
   return true;
+}
+
+uint64_t mix_u64(uint64_t h, uint64_t v) {
+  v += 0x9e3779b97f4a7c15ULL;
+  v ^= v >> 30;
+  v *= 0xbf58476d1ce4e5b9ULL;
+  v ^= v >> 27;
+  v *= 0x94d049bb133111ebULL;
+  v ^= v >> 31;
+  return (h ^ v) * 1099511628211ULL;
+}
+
+// A necessary condition for ops_match(g, a, b, L) at any lane distance L:
+// every field ops_match requires identical between a and b, folded into one
+// integer. Fields ops_match lets advance with the lane -- OP_INDEX and
+// element-write idata, the row-read/row-store idata offset -- are left out.
+uint64_t op_signature(const Graph& g, const Op& a) {
+  uint64_t h = 1469598103934665603ULL;
+  h = mix_u64(h, (uint64_t)inplace_form(a.opcode));
+  h = mix_u64(h, (uint64_t)a.variant);
+  h = mix_u64(h, (uint64_t)a.n_in);
+  for (int j = 0; j < a.n_in; ++j)
+    h = mix_u64(h, a.in[j] >= 0 ? (uint64_t)g.slots[a.in[j]].len : ~0ULL);
+  h = mix_u64(h, a.out >= 0 ? (uint64_t)g.slots[a.out].len : ~0ULL);
+  const bool row_store = is_row_store(a);
+  const bool row_read = row_store ? false : is_row_read(a);
+  const bool idx_family = a.opcode == OP_INDEX || a.opcode == OP_SET_INDEX ||
+                          a.opcode == OP_SET_INDEX_INPLACE;
+  if (row_store) {
+    h = mix_u64(h, (uint64_t)a.out);
+    h = mix_u64(h, (uint64_t)a.n_idata);
+  } else if (row_read) {
+    h = mix_u64(h, (uint64_t)a.in[0]);
+    h = mix_u64(h, (uint64_t)a.n_idata);
+  } else if (a.opcode == OP_GATHER) {
+    h = mix_u64(h, (uint64_t)a.in[0]);
+    h = mix_u64(h, (uint64_t)a.n_idata);
+  } else if (!idx_family) {
+    h = mix_u64(h, (uint64_t)a.n_idata);
+    if (!has_op_trait(a.opcode, op_trait::kRerollIdataDensity))
+      for (int64_t k = 0; k < a.n_idata; ++k)
+        h = mix_u64(h, (uint64_t)(uint32_t)a.idata[k]);
+  }
+  return h;
 }
 
 // LDA's likelihood is a small inner loop nested in a much larger document
@@ -492,6 +605,7 @@ static RerollStats reroll_impl(
   const auto is_candidate_op = [&](const Op& t) {
     const uint8_t traits = op_traits(t.opcode);
     return (traits & op_trait::kRerollAnyDensity) != 0 || is_element_store(t) ||
+           is_row_store(t) ||
            ((traits & op_trait::kRerollWidenable) != 0 &&
             term_set.count(t.out) != 0);
   };
@@ -531,6 +645,15 @@ static RerollStats reroll_impl(
   for (size_t u = 0; u < g.ops.size(); ++u) {
     if (g.ops[u].out >= 0) writers[(size_t)g.ops[u].out].push_back(u);
     if (g.ops[u].out2 >= 0) writers[(size_t)g.ops[u].out2].push_back(u);
+  }
+
+  // Vector constants, by index into `fills`.
+  std::unordered_map<int, size_t> vec_const;
+  for (size_t f = 0; f < fills.size(); ++f) {
+    const int s = fills[f].first;
+    if (fills[f].second.size() > 1 && s >= 0 && (size_t)s < writers.size() &&
+        writers[(size_t)s].empty())
+      vec_const[s] = f;
   }
 
   // Both lists are built by walking u upwards, so each one is sorted, and
@@ -576,8 +699,7 @@ static RerollStats reroll_impl(
   // replacement each time keeps lookups single-step.
   std::unordered_map<int, int> renamed;
   const auto resolve = [&renamed](int s) {
-    const auto it = renamed.find(s);
-    return it == renamed.end() ? s : it->second;
+    return detail::reroll_plan::resolve_slot(renamed, s);
   };
 
   // Slots read from outside the op graph (jacobian terms, constrained
@@ -596,6 +718,31 @@ static RerollStats reroll_impl(
   std::vector<size_t> fail_end((size_t)kMaxPeriod + 1, 0);
   std::vector<bool> hard_failed((size_t)kMaxPeriod + 1, false);
 
+  // sig[u] is op_signature(g.ops[u]); period_fwd(P)[k] is the largest L
+  // such that sig[k] == sig[k + P] == ... == sig[k + L * P], built once
+  // per P and cached.
+  const bool prefilter_off =
+      std::getenv("STANLI_NO_REROLL_PREFILTER") != nullptr;
+  std::vector<uint64_t> sig;
+  if (!prefilter_off) {
+    sig.resize(g.ops.size());
+    for (size_t u = 0; u < g.ops.size(); ++u)
+      sig[u] = op_signature(g, g.ops[u]);
+  }
+  std::vector<std::vector<int32_t>> period_fwd_cache((size_t)kMaxPeriod + 1);
+  const auto period_fwd = [&](int P) -> const std::vector<int32_t>& {
+    std::vector<int32_t>& fwd = period_fwd_cache[(size_t)P];
+    if (fwd.empty() && !g.ops.empty()) {
+      fwd.assign(g.ops.size(), 0);
+      for (size_t k = g.ops.size(); k-- > 0;) {
+        const size_t next = k + (size_t)P;
+        fwd[k] =
+            (next < g.ops.size() && sig[k] == sig[next]) ? fwd[next] + 1 : 0;
+      }
+    }
+    return fwd;
+  };
+
   std::vector<Op> result;
   result.reserve(g.ops.size());
   size_t i = 0;
@@ -612,11 +759,20 @@ static RerollStats reroll_impl(
       if (next_candidate[i] >= i + (size_t)P) continue;
 
       // Count template-matching lanes.
+      int64_t Lcap = std::numeric_limits<int64_t>::max();
+      if (!prefilter_off) {
+        const std::vector<int32_t>& fwd = period_fwd(P);
+        Lcap = fwd[i];
+        for (int p = 1; p < P && Lcap + 1 >= kMinLanes; ++p)
+          Lcap = std::min(Lcap, (int64_t)fwd[i + (size_t)p]);
+        if (Lcap + 1 < kMinLanes) continue;
+        Lcap += 1;
+      }
       int64_t L = 1;
-      while (i + ((size_t)L + 1) * P <= g.ops.size()) {
+      while (L <= Lcap && i + ((size_t)L + 1) * P <= g.ops.size()) {
         bool match = true;
         for (int p = 0; p < P && match; ++p)
-          match = ops_match(g, g.ops[i + p], g.ops[i + (size_t)L * P + p]);
+          match = ops_match(g, g.ops[i + p], g.ops[i + (size_t)L * P + p], L);
         if (!match) break;
         ++L;
       }
@@ -626,11 +782,34 @@ static RerollStats reroll_impl(
         return g.ops[i + (size_t)l * P + p];
       };
 
+      const auto rigid_diverges = [&](int64_t base) {
+        for (int p = 0; p < P; ++p) {
+          const Op& t0 = op_at(p, base);
+          if (t0.opcode == OP_INDEX || is_element_store(t0) ||
+              is_row_store(t0) || is_row_read(t0) ||
+              has_op_trait(t0.opcode, op_trait::kRerollAnyDensity) ||
+              has_op_trait(t0.opcode, op_trait::kRerollWidenable))
+            continue;
+          const Op& t1 = op_at(p, base + 1);
+          for (int j = 0; j < t0.n_in; ++j)
+            if (t0.in[j] != t1.in[j]) return true;
+        }
+        return false;
+      };
+      const bool doomed = rigid_diverges(0);
+      const bool doomed_next = doomed && L > kMinLanes && rigid_diverges(1);
+
       // ---- classify, shrinking to the reported prefix on failure ----
-      std::vector<Pos> pos;
-      int64_t Luse = L;
-      bool classified = false;
-      for (int attempt = 0; attempt < kMaxClassifyAttempts && Luse >= kMinLanes;
+      detail::reroll_plan::CandidatePlan plan;
+      std::vector<Pos>& pos = plan.positions;
+      bool layout_set = false;  // has the region committed to a convention
+      bool& layout_cols = plan.column_major;  // column-major, once committed
+      int64_t Luse = doomed ? 0 : L;
+      using SelectedPlan =
+          detail::reroll_plan::SelectedPlan<detail::reroll_plan::GraphSource>;
+      std::optional<SelectedPlan> selected;
+      for (int attempt = 0;
+           !doomed && attempt < kMaxClassifyAttempts && Luse >= kMinLanes;
            ++attempt) {
         int64_t prefix = Luse;
         pos.assign((size_t)P, Pos{});
@@ -640,13 +819,54 @@ static RerollStats reroll_impl(
         bool any_store = false;
         bool any_elt_density = false;
         bool any_term_widen = false;
+        layout_set = false;
         const size_t region_end = i + (size_t)P * (size_t)Luse;
+        const auto row_operands_ok = [&](Pos& ap, const Op& t) {
+          for (int j = 0; j < t.n_in; ++j) {
+            PosIn& in = ap.ins[j];
+            switch (in.kind) {
+              case InKind::kInvariant:
+                if (g.slots[t.in[j]].len == 1) break;
+                if (g.slots[t.in[j]].len == ap.width) {
+                  in.tile_wide = true;
+                  break;
+                }
+                return false;
+              case InKind::kLaneLocal: {
+                const Pos& prod = pos[(size_t)in.producer_pos];
+                if (prod.hoist) {
+                  const int64_t len =
+                      g.slots[op_at(in.producer_pos, 0).out].len;
+                  if (len == 1) break;
+                  if (len == ap.width) {
+                    in.tile_wide = true;
+                    break;
+                  }
+                  return false;
+                } else if (prod.width != ap.width) {
+                  return false;
+                }
+                break;
+              }
+              case InKind::kConstLanes:
+                if (in.width != 1 && in.width != ap.width) return false;
+                break;
+              case InKind::kBad:
+                return false;
+            }
+          }
+          return true;
+        };
         for (int p = 0; p < P; ++p) {
           const Op& t = op_at(p, 0);
           Pos& ap = pos[p];
           ap.ins.resize(t.n_in);
           bool all_inputs_invariant = true;
           for (int j = 0; j < t.n_in; ++j) {
+            if (j == 0 && is_row_store(t)) {
+              ap.ins[j].kind = InKind::kInvariant;
+              continue;
+            }
             // Longest lane prefix under each interpretation; pick the
             // interpretation valid for all Luse lanes, else bound prefix.
             int64_t br_inv = Luse;
@@ -676,23 +896,45 @@ static RerollStats reroll_impl(
               }
             }
             int64_t br_const = Luse;
+            const int64_t cw = g.slots[t.in[j]].len;
             std::vector<double> vals;
-            vals.reserve((size_t)Luse);
+            vals.reserve((size_t)(Luse * cw));
             for (int64_t l = 0; l < Luse; ++l) {
-              auto cit = const_val.find(op_at(p, l).in[j]);
-              if (cit == const_val.end()) {
-                br_const = l;
-                break;
+              const int s = op_at(p, l).in[j];
+              if (cw == 1) {
+                auto cit = const_val.find(s);
+                if (cit == const_val.end()) {
+                  br_const = l;
+                  break;
+                }
+                vals.push_back(cit->second);
+              } else {
+                auto vit = vec_const.find(s);
+                if (vit == vec_const.end() ||
+                    (int64_t)fills[vit->second].second.size() != cw) {
+                  br_const = l;
+                  break;
+                }
+                const std::vector<double>& row = fills[vit->second].second;
+                vals.insert(vals.end(), row.begin(), row.end());
               }
-              vals.push_back(cit->second);
             }
             if (br_const == Luse) {
               ap.ins[j].kind = InKind::kConstLanes;
               ap.ins[j].values = std::move(vals);
+              ap.ins[j].width = cw;
               continue;
             }
             ok = false;
             prefix = std::min(prefix, std::max({br_inv, br_local, br_const}));
+          }
+          for (int j = 0; j < t.n_in; ++j) {
+            const PosIn& in = ap.ins[j];
+            if (in.kind == InKind::kConstLanes)
+              ap.width = std::max(ap.width, in.width);
+            else if (in.kind == InKind::kLaneLocal &&
+                     !pos[(size_t)in.producer_pos].hoist)
+              ap.width = std::max(ap.width, pos[(size_t)in.producer_pos].width);
           }
 
           // Output discipline prefixes. A lane's out may be consumed only
@@ -720,6 +962,17 @@ static RerollStats reroll_impl(
               br_internal = l;
           }
 
+          const bool idata_density =
+              has_op_trait(t.opcode, op_trait::kRerollIdataDensity);
+          bool row_idata_varies = false;
+          if (is_row_read(t))
+            for (int64_t l = 1; l < Luse && !row_idata_varies; ++l)
+              for (int64_t k = 0; k < t.n_idata; ++k)
+                if (op_at(p, l).idata[k] != t.idata[k]) {
+                  row_idata_varies = true;
+                  break;
+                }
+
           // Position-level classification.
           if (t.opcode == OP_INDEX) {
             int64_t br_prog = Luse, br_iinv = Luse;
@@ -743,11 +996,12 @@ static RerollStats reroll_impl(
               ok = false;
               prefix = std::min(prefix, io_ok);
             } else if (br_prog == Luse && blen == Luse) {
-              ap.index_elision = true;  // reads the whole base, in order
+              ap.read.kind = LaneLayout::Kind::kElide;  // whole base, in order
             } else if (br_iinv == Luse) {
               ap.hoist = true;  // same element every lane
             } else if (br_run == Luse && t.idata[0] + Luse <= blen) {
-              ap.slice_start = t.idata[0];  // contiguous window -> OP_SLICE
+              ap.read.kind = LaneLayout::Kind::kSlice;  // contiguous window
+              ap.read.offset = t.idata[0];
             } else if (in_range) {
               // Arbitrary data-driven index (`alpha[county_idx[n]]`, the
               // hierarchical idiom) -> one OP_GATHER over the lane indices.
@@ -803,7 +1057,7 @@ static RerollStats reroll_impl(
               // while nobody writes it after the run, so a later writer
               // forces the store form.
               const Pos& prod = pos[(size_t)ap.ins[1].producer_pos];
-              if (prod.index_elision) {
+              if (prod.read.kind == LaneLayout::Kind::kElide) {
                 const int base = op_at(ap.ins[1].producer_pos, 0).in[0];
                 if (any_at_or_after(writers[(size_t)base], region_end,
                                     st.list_steps))
@@ -830,10 +1084,158 @@ static RerollStats reroll_impl(
               prefix = std::min(prefix, clean ? br_run : (int64_t)0);
             } else {
               ap.store_vec = vec;
+              ap.store_src = vec;
               ap.store_start = (int)t.idata[0];
               ap.store_stride = (int)stride;
               ap.store_written_after = written_after;
               any_store = true;
+            }
+          } else if (is_row_store(t)) {
+            // `p[j, :] = ...` under an unrolled loop: lane 0 writes the
+            // declaration functionally, later lanes in place.
+            const int vec = t.out;
+            const bool strided = is_strided(t.opcode);
+            const int64_t w = g.slots[t.in[1]].len;
+            const int64_t blen = g.slots[vec].len;
+            const int64_t rows = strided ? t.idata[1] : Luse;
+            int64_t br_row = Luse;
+            bool shape = true;
+            for (int64_t l = 0; l < Luse; ++l) {
+              const Op& o = op_at(p, l);
+              if (o.out != vec || (l > 0 && o.in[0] != vec)) shape = false;
+              const bool row_l = strided ? o.idata[0] == l && o.idata[1] == rows
+                                         : o.idata[0] == l * w;
+              if (!row_l && br_row == Luse) br_row = l;
+            }
+            const bool covering =
+                br_row == Luse && Luse == rows && blen == rows * w;
+            bool clean = shape && covering && !root_set.count(vec) &&
+                         !term_set.count(vec);
+            if (clean && w != 1) {
+              if (layout_set)
+                clean = layout_cols == strided;
+              else {
+                layout_set = true;
+                layout_cols = strided;
+              }
+            }
+            const PosIn& val = ap.ins[1];
+            if (val.kind == InKind::kLaneLocal) {
+              const Pos& prod = pos[(size_t)val.producer_pos];
+              if (prod.hoist || prod.width != w) clean = false;
+            } else if (val.kind != InKind::kConstLanes || val.width != w) {
+              clean = false;
+            }
+            bool written_after = false;
+            if (clean && val.kind == InKind::kLaneLocal) {
+              const Pos& prod = pos[(size_t)val.producer_pos];
+              if (prod.read.kind == LaneLayout::Kind::kElide) {
+                const int base = op_at(val.producer_pos, 0).in[0];
+                if (any_at_or_after(writers[(size_t)base], region_end,
+                                    st.list_steps))
+                  written_after = true;
+              }
+            }
+            if (clean) {
+              auto in_region_write = [&](size_t u) {
+                return u >= i && u < region_end &&
+                       (u - i) % (size_t)P == (size_t)p;
+              };
+              const std::vector<size_t>& vec_uses = uses[(size_t)vec];
+              const std::vector<size_t>& vec_writers = writers[(size_t)vec];
+              if (any_in_range_but(vec_uses, i, region_end, in_region_write) ||
+                  any_in_range_but(vec_writers, i, region_end, in_region_write))
+                clean = false;
+              if (any_at_or_after(vec_writers, region_end, st.list_steps))
+                written_after = true;
+            }
+            if (!clean) {
+              ok = false;
+              prefix = std::min(prefix,
+                                shape && br_row < Luse ? br_row : (int64_t)0);
+            } else {
+              ap.store_vec = vec;
+              ap.store_src = t.in[0];
+              ap.row_store = true;
+              ap.store_written_after = written_after;
+              any_store = true;
+            }
+          } else if (row_idata_varies) {
+            // Row `lane` of an invariant base, lanes covering every row:
+            // the fused consumer reads the base in place.
+            const bool strided = t.opcode == OP_SLICE_STRIDED;
+            const int64_t w = g.slots[t.out].len;
+            const int64_t blen = g.slots[t.in[0]].len;
+            const int64_t rows = strided ? t.idata[1] : Luse;
+            const int64_t io_ok = std::min(br_internal, br_nonterm);
+            int64_t br_row = Luse;
+            for (int64_t l = 0; l < Luse; ++l) {
+              const Op& o = op_at(p, l);
+              const bool row_l = strided ? o.idata[0] == l && o.idata[1] == rows
+                                         : o.idata[0] == l * w;
+              if (!row_l) {
+                br_row = l;
+                break;
+              }
+            }
+            if (ap.ins[0].kind != InKind::kInvariant || io_ok < Luse) {
+              ok = false;
+              prefix = std::min(prefix, io_ok);
+            } else if (br_row == Luse && Luse == rows && blen == rows * w) {
+              bool layout_ok = w == 1;
+              if (!layout_ok) {
+                if (layout_set) {
+                  layout_ok = layout_cols == strided;
+                } else {
+                  layout_set = true;
+                  layout_cols = strided;
+                  layout_ok = true;
+                }
+              }
+              if (layout_ok) {
+                ap.read.kind = LaneLayout::Kind::kElide;
+                ap.width = w;
+              } else {
+                ok = false;
+                prefix = std::min(prefix, br_row < Luse ? br_row : (int64_t)0);
+              }
+            } else {
+              ok = false;
+              prefix = std::min(prefix, br_row < Luse ? br_row : (int64_t)0);
+            }
+          } else if (t.opcode == OP_GATHER && t.n_in == 1) {
+            // A per-lane gather of an invariant base: lowering's read-side
+            // selector ladder does not cover a fixed index alongside a
+            // range on another axis (`m[i, 2:K]`), so a partial row falls
+            // to a plain per-lane gather instead of a strided window. Safe
+            // to pack only when every lane's gathered elements together are
+            // an exact permutation of one contiguous span of the base:
+            // sort the concatenation and classify it with the same
+            // primitive lowering's own selector classifier uses. A repeated
+            // or non-contiguous union is not this disposition; nothing else
+            // here combines OP_GATHER lanes into one op yet.
+            const int64_t io_ok = std::min(br_internal, br_nonterm);
+            if (ap.ins[0].kind != InKind::kInvariant || io_ok < Luse) {
+              ok = false;
+              prefix = std::min(prefix, io_ok);
+            } else {
+              std::vector<int64_t> offsets;
+              offsets.reserve((size_t)(Luse * t.n_idata));
+              for (int64_t l = 0; l < Luse; ++l) {
+                const Op& o = op_at(p, l);
+                for (int64_t k = 0; k < o.n_idata; ++k)
+                  offsets.push_back(o.idata[k]);
+              }
+              std::sort(offsets.begin(), offsets.end());
+              const FlatOffsetRun run = classify_flat_offsets(offsets);
+              if (run.kind == BuiltinSliceMap::Kind::Contiguous) {
+                ap.read.kind = LaneLayout::Kind::kSlice;
+                ap.read.offset = run.offset;
+                ap.width = t.n_idata;
+              } else {
+                ok = false;
+                prefix = 0;  // not a contiguous permutation: not ours to pack
+              }
             }
           } else if (has_op_trait(t.opcode, op_trait::kRerollAnyDensity)) {
             // Two fusable dispositions: every lane's out IS a target term
@@ -843,12 +1245,14 @@ static RerollStats reroll_impl(
             // idiom). Mixed lanes or escaping outputs bound the prefix.
             const bool all_terms = br_term == Luse;
             const bool no_terms = br_nonterm == Luse;
+            const bool row_outcomes = idata_density && ap.width > 1 &&
+                                      t.n_idata == ap.width &&
+                                      !two_int_groups(t.opcode);
             if (br_internal < Luse || (!all_terms && !no_terms)) {
               ok = false;
               prefix = std::min(
                   prefix, std::min(br_internal, std::max(br_term, br_nonterm)));
-            } else if (has_op_trait(t.opcode, op_trait::kRerollIdataDensity) &&
-                       t.n_idata != 1) {
+            } else if (idata_density && t.n_idata != 1 && !row_outcomes) {
               // More than one immediate: either already a vector op, or one
               // of the binomials, whose two integer groups only partition.cpp
               // concatenates. One lane still stands for all of them when the
@@ -866,6 +1270,10 @@ static RerollStats reroll_impl(
                 ok = false;
                 prefix = 0;
               }
+            } else if (ap.width > 1 && ((idata_density && !row_outcomes) ||
+                                        !row_operands_ok(ap, t))) {
+              ok = false;
+              prefix = 0;
             } else if (all_terms) {
               if (!uses[(size_t)t.out].empty()) {
                 ok = false;
@@ -891,6 +1299,10 @@ static RerollStats reroll_impl(
             } else {
               ap.elt_density = true;
               any_elt_density = true;
+              if (ap.width > 1) {
+                ap.rows = ap.width;
+                ap.width = 1;
+              }
             }
           } else if (all_inputs_invariant) {
             const int64_t io_ok = std::min(br_internal, br_nonterm);
@@ -901,7 +1313,11 @@ static RerollStats reroll_impl(
               prefix = std::min(prefix, io_ok);
             }
           } else if (has_op_trait(t.opcode, op_trait::kRerollWidenable)) {
-            if (br_term == Luse && br_internal == Luse) {
+            if (ap.width > 1 &&
+                (g.slots[t.out].len != ap.width || !row_operands_ok(ap, t))) {
+              ok = false;
+              prefix = 0;
+            } else if (br_term == Luse && br_internal == Luse) {
               // Every lane's out is a target term (log_mix under
               // `target +=`): widen the op, SUM_VEC the lanes, and swap
               // the N terms for the sum.
@@ -927,25 +1343,40 @@ static RerollStats reroll_impl(
           // The fused lpmf's outcome vector is the lanes' immediates. Only
           // the two fusing density dispositions need it; the hoist arm
           // above excludes idata-outcome densities.
-          if ((ap.term_density || ap.elt_density) &&
-              has_op_trait(t.opcode, op_trait::kRerollIdataDensity)) {
-            ap.outcome_idata.reserve((size_t)Luse);
+          if ((ap.term_density || ap.elt_density) && idata_density) {
+            ap.outcome_idata.reserve((size_t)(Luse * t.n_idata));
             for (int64_t l = 0; l < Luse; ++l)
-              ap.outcome_idata.push_back(op_at(p, l).idata[0]);
+              for (int64_t k = 0; k < t.n_idata; ++k)
+                ap.outcome_idata.push_back(op_at(p, l).idata[k]);
           }
           lane0_producer[t.out] = p;
         }
         if (ok && (any_term_density || any_store || any_elt_density ||
                    any_term_widen)) {
-          classified = true;
-          break;
+          // Price the fused form against staying scalar, in partition.cpp's
+          // currencies: kLaneOpCost per graph-op dispatch this region would
+          // eliminate, against kLaneOpCost per op it introduces plus
+          // kLaneDensityElem-scale per-element cost wherever a position
+          // actually copies or scatters elements (a slice, a gather, or a
+          // density with no native elementwise form), plus a charge for
+          // lanes CSE would already have merged into fewer than Luse ops.
+          // Elision, hoisting and a plain vector op or density call are not
+          // charged beyond their one dispatch: the scalar path would pay
+          // the same per-element work in Luse separate calls, so only the
+          // eliminated dispatches and the genuine copies are the region's
+          // net win.
+          plan.lanes = Luse;
+          selected = SelectedPlan::select(
+              g, plan, detail::reroll_plan::GraphSource{g.ops.data() + i, P});
+          if (selected) break;
+          ok = false;
         }
         if (ok) prefix = 0;                     // classifiable but useless
         if (prefix >= Luse) prefix = Luse - 1;  // guarantee progress
         Luse = prefix;
       }
 
-      if (!classified) {
+      if (!selected) {
         // Bookkeeping. Soft failures (positive prefix) re-attempt at the
         // reported boundary; hard failures (prefix 0) get one second
         // chance one lane in, then the whole run is skipped.
@@ -955,6 +1386,10 @@ static RerollStats reroll_impl(
           hard_failed[(size_t)P] = false;
         } else if (hard_failed[(size_t)P] && i < fail_end[(size_t)P]) {
           retry_at[(size_t)P] = fail_end[(size_t)P];
+        } else if (doomed_next) {
+          fail_end[(size_t)P] = run_end;
+          hard_failed[(size_t)P] = true;
+          retry_at[(size_t)P] = run_end;
         } else {
           fail_end[(size_t)P] = run_end;
           hard_failed[(size_t)P] = true;
@@ -963,234 +1398,14 @@ static RerollStats reroll_impl(
         continue;
       }
 
-      // ---- rewrite the classified prefix [i, i + P*Luse) ----
-      std::vector<int> pos_out((size_t)P, -1);
-      for (int p = 0; p < P; ++p) {
-        const Op& t = op_at(p, 0);
-        Pos& ap = pos[(size_t)p];
-        if (ap.index_elision) {
-          pos_out[(size_t)p] = resolve(t.in[0]);
-          continue;
-        }
-        if (ap.hoist) {
-          Op h = t;
-          for (int j = 0; j < h.n_in; ++j) h.in[j] = resolve(h.in[j]);
-          result.push_back(h);
-          pos_out[(size_t)p] = h.out;
-          continue;
-        }
-        if (ap.store_vec >= 0) {
-          // The lanes' values, as one vector.
-          int W = -1;
-          if (ap.ins[1].kind == InKind::kLaneLocal) {
-            W = pos_out[(size_t)ap.ins[1].producer_pos];
-          } else {
-            W = g.add_slot(Luse, false);
-            fills.emplace_back(W, ap.ins[1].values);
-          }
-          // Every lane writing the same scalar (the value chain stayed
-          // scalar because all its inputs were lane-invariant): the store
-          // wants a vector, so broadcast it into one.
-          if (g.slots[W].len == 1 && Luse > 1) {
-            Op rv;
-            rv.opcode = OP_REP_VEC;
-            rv.n_in = 1;
-            rv.in[0] = W;
-            rv.out = g.add_slot(Luse, false);
-            result.push_back(rv);
-            W = rv.out;
-          }
-          const int vec = ap.store_vec;
-          int replacement = W;
-          if (ap.store_written_after || ap.store_stride != 1 ||
-              ap.store_start != 0 || Luse != g.slots[vec].len) {
-            // A window (or a comb) rather than the whole vector: the
-            // untouched elements still have to come from somewhere, so this
-            // is a real store.
-            Op sv;
-            sv.opcode =
-                ap.store_stride == 1 ? OP_SET_SLICE : OP_SET_SLICE_STRIDED;
-            sv.n_in = 2;
-            sv.in[0] = resolve(vec);
-            sv.in[1] = W;
-            sv.out = g.add_slot(g.slots[vec].len, false);
-            std::vector<int> sidata{ap.store_start};
-            if (ap.store_stride != 1) sidata.push_back(ap.store_stride);
-            g.idata_pool.push_back(std::move(sidata));
-            sv.idata = g.idata_pool.back().data();
-            sv.n_idata = (int64_t)g.idata_pool.back().size();
-            result.push_back(sv);
-            replacement = sv.out;
-          }
-          // Every later reference to the vector -- read or write -- now
-          // means the fused value: recorded here, applied when those ops
-          // are emitted. Renaming the writes too is what lets interleaved
-          // runs chain: the next block's element writes still NAME the
-          // original vector, resolve to this block's store output when
-          // that block fuses in its turn, and repeat the process on a
-          // fresh slot. Ops before the region were emitted already; they
-          // saw the pre-write contents and still do.
-          renamed[vec] = replacement;
-          pos_out[(size_t)p] = replacement;
-          continue;
-        }
-        if (ap.slice_start >= 0 || !ap.gather_idx.empty()) {
-          // One vector read replaces the lanes' scalar reads. Both kernels
-          // scatter their adjoints back into the base, gather in ascending
-          // lane order so repeated indices accumulate like the var path.
-          Op rd;
-          rd.opcode = ap.slice_start >= 0 ? OP_SLICE : OP_GATHER;
-          rd.n_in = 1;
-          rd.in[0] = resolve(t.in[0]);
-          rd.out = g.add_slot(Luse, false);
-          std::vector<int> idata;
-          if (ap.slice_start >= 0)
-            idata.push_back(ap.slice_start);
-          else
-            idata = std::move(ap.gather_idx);
-          g.idata_pool.push_back(std::move(idata));
-          rd.idata = g.idata_pool.back().data();
-          rd.n_idata = (int64_t)g.idata_pool.back().size();
-          pos_out[(size_t)p] = rd.out;
-          result.push_back(rd);
-          continue;
-        }
-        Op op = t;  // opcode, variant, idata carry over
-        bool all_scalar = true;
-        for (int j = 0; j < t.n_in; ++j) {
-          switch (ap.ins[j].kind) {
-            case InKind::kInvariant:
-              op.in[j] = resolve(t.in[j]);
-              if (g.slots[t.in[j]].len != 1) all_scalar = false;
-              break;
-            case InKind::kLaneLocal:
-              op.in[j] = pos_out[(size_t)ap.ins[j].producer_pos];
-              if (g.slots[op.in[j]].len != 1) all_scalar = false;
-              break;
-            case InKind::kConstLanes: {
-              const int cs = g.add_slot(Luse, false);
-              fills.emplace_back(cs, ap.ins[j].values);
-              op.in[j] = cs;
-              all_scalar = false;
-              break;
-            }
-            case InKind::kBad:
-              break;  // unreachable: classification succeeded
-          }
-        }
-        // Swap the Luse lane terms for one replacement, at the first
-        // lane's position (term_density and term_widen both end here).
-        const auto swap_terms = [&](int new_term) {
-          std::unordered_set<int> dead;
-          for (int64_t l = 0; l < Luse; ++l) dead.insert(op_at(p, l).out);
-          std::vector<int> next_terms;
-          next_terms.reserve(target_terms.size());
-          bool placed = false;
-          for (int s : target_terms) {
-            if (dead.count(s)) {
-              if (!placed) {
-                next_terms.push_back(new_term);
-                placed = true;
-              }
-            } else {
-              next_terms.push_back(s);
-            }
-          }
-          target_terms = std::move(next_terms);
-          for (int s : dead) term_set.erase(s);
-          term_set.insert(new_term);
-        };
-        // The fused lpmf's outcome vector is the lanes' immediates.
-        const auto attach_idata = [&](Op& o, std::vector<int> outcome) {
-          if (outcome.empty()) return;
-          g.idata_pool.push_back(std::move(outcome));
-          o.idata = g.idata_pool.back().data();
-          o.n_idata = (int64_t)g.idata_pool.back().size();
-        };
-        // Every lane computes the same scalar: emit it once and multiply by
-        // L. Both callers are all-scalar term dispositions, whose positions
-        // have no op consumers at all (the classifier refuses otherwise), so
-        // pos_out here is bookkeeping nobody reads. Returns the new term.
-        const auto scalar_times_lanes = [&](const Op& scalar) {
-          result.push_back(scalar);  // scalar op, out = t.out
-          Op mul;
-          mul.opcode = OP_MUL;
-          mul.n_in = 2;
-          mul.in[0] = scalar.out;
-          const int lc = g.add_slot(1, false);
-          fills.emplace_back(lc, std::vector<double>{(double)Luse});
-          mul.in[1] = lc;
-          mul.out = g.add_slot(1, false);
-          result.push_back(mul);
-          pos_out[(size_t)p] = scalar.out;
-          return mul.out;
-        };
-        if (ap.elt_density) {
-          // One density op with variant bit 6: out[n] is lane n's lp, read
-          // by the lanes' (widened) consumers. An all-scalar real-arg
-          // density classified as hoist instead, so a vector input or a
-          // per-lane outcome exists here and the out is genuinely len-N.
-          op.variant = (uint8_t)(op.variant | 0x40u);
-          op.out = g.add_slot(Luse, false);
-          attach_idata(op, std::move(ap.outcome_idata));
-          pos_out[(size_t)p] = op.out;
-          result.push_back(op);
-          continue;
-        }
-        if (ap.term_widen) {
-          int term_slot;
-          if (all_scalar) {
-            // Every lane's term is the same scalar: one op, times L.
-            term_slot = scalar_times_lanes(op);
-          } else {
-            op.out = g.add_slot(Luse, false);
-            result.push_back(op);
-            Op sum;
-            sum.opcode = OP_SUM_VEC;
-            sum.n_in = 1;
-            sum.in[0] = op.out;
-            sum.out = g.add_slot(1, false);
-            result.push_back(sum);
-            term_slot = sum.out;
-            pos_out[(size_t)p] = op.out;
-          }
-          swap_terms(term_slot);
-          continue;
-        }
-        // A widened op whose mapped inputs are all len-1 computes the same
-        // value in every lane -- its lane-varying inputs came from HOISTED
-        // producers, which are scalars. Widening it anyway hands the kernels
-        // scalar inputs with a vector output, and their scalar-x-scalar
-        // paths write element 0 only (found by the corpus A/B on
-        // losscurve_sislob: a cohort's lm window filled with arena zeros).
-        // Keep it scalar; consumers broadcast, and the store materializes.
-        if (!ap.term_density && all_scalar) {
-          pos_out[(size_t)p] = op.out;  // t's own (lane 0) output slot
-          result.push_back(op);
-          continue;
-        }
-        if (ap.term_density) {
-          if (all_scalar && ap.outcome_idata.empty()) {
-            // Every lane's density is the same scalar (lane-varying inputs
-            // all came from hoisted producers): the target owes L copies of
-            // it, and L times one lane is that, exactly -- the density
-            // backward sees out_adj = L and scales its partials to match.
-            swap_terms(scalar_times_lanes(op));
-            continue;
-          }
-          op.out = g.add_slot(1, false);
-          attach_idata(op, std::move(ap.outcome_idata));
-          swap_terms(op.out);
-        } else {
-          op.out = g.add_slot(Luse, false);
-        }
-        pos_out[(size_t)p] = op.out;
-        result.push_back(op);
-      }
+      // Emit only the accepted plan; classification and pricing above have
+      // not changed graph storage, targets or lazy renaming.
+      std::move(*selected).emit(g, fills, target_terms, term_set, result,
+                                renamed);
       i += (size_t)P * (size_t)Luse;
       ++st.regions;
       if (dispositions) {
-        for (const Pos& committed : pos) {
+        for (const Pos& committed : selected->description().positions) {
           dispositions->term_density += committed.term_density;
           dispositions->element_density += committed.elt_density;
           dispositions->term_widen += committed.term_widen;
@@ -1229,6 +1444,24 @@ ProfiledRerollStats reroll_profiled(
   ProfiledRerollStats result;
   result.work =
       reroll_impl(g, fills, target_terms, extra_roots, &result.dispositions);
+  return result;
+}
+
+SignatureCheckResult check_signature_soundness(const Graph& g, int64_t window) {
+  SignatureCheckResult result;
+  std::vector<uint64_t> sig(g.ops.size());
+  for (size_t u = 0; u < g.ops.size(); ++u) sig[u] = op_signature(g, g.ops[u]);
+  for (size_t a = 0; a < g.ops.size(); ++a) {
+    const size_t hi = std::min(g.ops.size(), a + (size_t)window + 1);
+    for (size_t b = a + 1; b < hi; ++b) {
+      const int64_t direct = (int64_t)(b - a);
+      for (int64_t dist : {direct, (int64_t)1, kMinLanes}) {
+        ++result.pairs_checked;
+        if (sig[a] != sig[b] && ops_match(g, g.ops[a], g.ops[b], dist))
+          ++result.violations;
+      }
+    }
+  }
   return result;
 }
 

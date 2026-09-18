@@ -14,6 +14,11 @@ on:
     paths:
       - CMakeLists.txt
       - deps/fetch.sh
+      - compiler/native/**
+      - compiler/ocaml/**
+      - tools/stanc_embed/**
+      - tools/dev_setup.sh
+      - harnesses/conformance/build_stanc.sh
       - runtime/**
       - tests/**/*.cpp
       - tests/**/*.hpp
@@ -116,6 +121,40 @@ jobs:
           key: >-
             stanc-embed-v2-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
 
+      # Finished artifacts remain exact-keyed. On a miss, reuse the expensive
+      # OCaml switch independently of edits to our compiler overlay. Use an
+      # explicit root: HOME differs between container shells and JS actions.
+      - name: Identify the stanc3 build toolchain
+        if: steps.stanc-cache.outputs.cache-hit != 'true'
+        id: stanc-toolchain
+        shell: bash
+        run: |
+          echo "OPAMROOT=$GITHUB_WORKSPACE/.ci-opam" >> "$GITHUB_ENV"
+          fingerprint=$({ cc --version; ld --version; ldd --version; } | sha256sum | cut -d' ' -f1)
+          echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the OCaml toolchain
+        if: steps.stanc-cache.outputs.cache-hit != 'true'
+        id: opam-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-opam
+          key: >-
+            stanc-toolchain-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+
+      # Dune validates changed inputs itself. A prefix hit can reuse compiled
+      # upstream modules after an overlay edit, but never supplies final artifacts.
+      - name: Restore the incremental stanc3 build
+        if: steps.stanc-cache.outputs.cache-hit != 'true'
+        id: stanc-build-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: deps/stanc3-src
+          key: >-
+            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+          restore-keys: >-
+            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-
+
       - name: Install opam ${{ env.OPAM_VERSION }}
         if: steps.stanc-cache.outputs.cache-hit != 'true'
         run: |
@@ -142,6 +181,12 @@ jobs:
             deps/stanc3/stanc deps/stanc3/stanc.src \
             deps/stanc3/stanli-vectorize-probe \
             deps/stanc3/stanli-vectorize-probe.stamp
+          # Remove old untracked overlay sources (including deleted modules),
+          # retaining Dune's dependency-checked build state. The builder resets
+          # tracked sources to the exact upstream pin before applying this overlay.
+          if [ -d deps/stanc3-src/.git ]; then
+            git -C deps/stanc3-src clean -ffd -e _build
+          fi
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build
           mkdir -p deps/ocaml-include
@@ -170,6 +215,22 @@ jobs:
               exit 1
             }
           done
+
+      # Save as soon as compiler validation succeeds, even if later runtime
+      # tests fail or the job is cancelled. PR writes stay scoped to that PR.
+      - name: Save the OCaml toolchain
+        if: steps.stanc-cache.outputs.cache-hit != 'true' && steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-opam
+          key: ${{ steps.opam-cache.outputs.cache-primary-key }}
+
+      - name: Save the incremental stanc3 build
+        if: steps.stanc-cache.outputs.cache-hit != 'true' && steps.stanc-build-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: deps/stanc3-src
+          key: ${{ steps.stanc-build-cache.outputs.cache-primary-key }}
 
       - name: Compile the PR target graph
         shell: bash

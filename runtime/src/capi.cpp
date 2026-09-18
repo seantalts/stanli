@@ -21,6 +21,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -82,10 +83,16 @@ extern "C" {
 
 stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
                                char* err, size_t err_len) {
+  return stanli_model_new_seeded(tmir_sexp, data_json, 1, err, err_len);
+}
+
+stanli_model* stanli_model_new_seeded(const char* tmir_sexp,
+                                      const char* data_json, uint32_t seed,
+                                      char* err, size_t err_len) {
   try {
     auto m = std::make_unique<stanli_model>();
     stanli::DataMap data = stanli::DataMap::from_json(data_json);
-    m->cm = stanli::compile_model(tmir_sexp, data);
+    m->cm = stanli::compile_model(tmir_sexp, data, seed);
     m->ex = std::make_unique<stanli::Executor>(std::move(m->cm.graph));
     m->cm.bind(*m->ex);
     for (const auto& v : m->cm.views) m->n_con += v.len;
@@ -141,25 +148,36 @@ stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
 
 #ifdef STANLI_EMBED_STANC
 extern "C" char* stanli_stanc_tmir(const char* stan_code);
+extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
 extern "C" void stanli_stanc_free(char* p);
 #endif
 
 stanli_model* stanli_model_new_from_stan(const char* stan_code,
                                          const char* data_json, char* err,
                                          size_t err_len) {
+  return stanli_model_new_from_stan_seeded(stan_code, data_json, 1, err,
+                                           err_len);
+}
+
+stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
+                                                const char* data_json,
+                                                uint32_t seed, char* err,
+                                                size_t err_len) {
 #ifdef STANLI_EMBED_STANC
-  char* res = stanli_stanc_tmir(stan_code);
+  char* res = stanli_stanc_model_tmir(stan_code);
   if (std::strncmp(res, "OK", 2) != 0) {
     put_err(err, err_len, res + (std::strncmp(res, "ERR", 3) == 0 ? 3 : 0));
     stanli_stanc_free(res);
     return nullptr;
   }
-  stanli_model* m = stanli_model_new(res + 2, data_json, err, err_len);
+  stanli_model* m =
+      stanli_model_new_seeded(res + 2, data_json, seed, err, err_len);
   stanli_stanc_free(res);
   return m;
 #else
   (void)stan_code;
   (void)data_json;
+  (void)seed;
   put_err(err, err_len, "this build does not embed stanc3");
   return nullptr;
 #endif
@@ -620,7 +638,7 @@ int stanli_sample_multi_write_array(
             wa_ex.run_forward_only(stanli::EvalState{&rng});
             int64_t at = 0;
             for (const auto& col : m->wa_cols) {
-              const double* p = wa_ex.value_ptr(col.slot);
+              const double* p = std::as_const(wa_ex).value_ptr(col.slot);
               for (int64_t i = 0; i < col.len; ++i) out[at++] = p[i];
             }
           } else {
@@ -629,7 +647,7 @@ int stanli_sample_multi_write_array(
             main_ex.run_forward_only();
             int64_t at = 0;
             for (const auto& v : m->cm.views) {
-              const double* p = main_ex.value_ptr(v.slot);
+              const double* p = std::as_const(main_ex).value_ptr(v.slot);
               for (int64_t i = 0; i < v.len; ++i)
                 out[at++] = p[v.storage_index(i)];
             }
@@ -851,6 +869,10 @@ const char* stanli_warnings(const stanli_model* m) {
   return m->warnings.c_str();
 }
 
+int stanli_transformed_data_rng(const stanli_model* m) {
+  return m->cm.transformed_data_draws ? 1 : 0;
+}
+
 int64_t stanli_wa_n_generated_start(const stanli_model* m) {
   return m->wa_n > 0 ? m->wa_gq_start : 0;
 }
@@ -880,7 +902,7 @@ int stanli_wa_row(stanli_model* m, const double* q, double* out) {
       m->wa_ex->run_forward_only(stanli::EvalState{&m->wa_rng});
       int64_t at = 0;
       for (const auto& c : m->wa_cols) {
-        const double* p = m->wa_ex->value_ptr(c.slot);
+        const double* p = std::as_const(*m->wa_ex).value_ptr(c.slot);
         for (int64_t i = 0; i < c.len; ++i) out[at++] = p[i];
       }
       return 0;
@@ -901,7 +923,7 @@ int stanli_constrain(stanli_model* m, const double* q, double* out) {
   }
   int64_t k = 0;
   for (const auto& v : m->cm.views) {
-    const double* p = m->ex->value_ptr(v.slot);
+    const double* p = std::as_const(*m->ex).value_ptr(v.slot);
     for (int64_t i = 0; i < v.len; ++i) out[k++] = p[v.storage_index(i)];
   }
   return 0;

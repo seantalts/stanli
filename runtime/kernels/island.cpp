@@ -32,13 +32,54 @@
 namespace stanli {
 namespace {
 
+struct ReplayState : KernelState {
+  std::vector<stan::math::var> buffer;
+};
+
+// Cache constructed handles, not autodiff values. The Program contract writes
+// every register before reading it; assignment of a var replaces its pointer
+// without inspecting the old one. Taking ownership leaves the op's cache
+// empty, so a nested island gets a distinct buffer. Returning it by RAII also
+// covers exceptions. Nothing here owns or extends a vari's arena lifetime.
+class ReplayWorkspace {
+  using Buffer = std::vector<stan::math::var>;
+  ReplayState* cached_;
+  Buffer registers_;
+
+ public:
+  ReplayWorkspace(KernelState* state, size_t size)
+      : cached_(static_cast<ReplayState*>(state)) {
+    if (cached_) registers_.swap(cached_->buffer);
+    size =
+        std::max(size, size_t{1});  // Pointer offsets are valid even if empty.
+    if (registers_.size() < size) registers_.resize(size);
+  }
+  ~ReplayWorkspace() {
+    if (cached_) registers_.swap(cached_->buffer);
+  }
+  ReplayWorkspace(const ReplayWorkspace&) = delete;
+  ReplayWorkspace& operator=(const ReplayWorkspace&) = delete;
+  stan::math::var* data() { return registers_.data(); }
+};
+
+KernelState* island_state(const Op& op, const Slot*) {
+  const auto& p = *static_cast<const IslandProg*>(op.udata);
+  if (p.native_adj || std::getenv("STANLI_NO_REPLAY_REUSE")) return nullptr;
+  if (p.replay_initialized.has_value())
+    return *p.replay_initialized ? new ReplayState : nullptr;
+  std::vector<std::pair<int, int>> seeded;
+  for (const auto& input : p.ins) seeded.emplace_back(input.reg, input.len);
+  return program_initializes_reads(p, seeded) ? new ReplayState : nullptr;
+}
+
 int64_t island_scratch(const Op& op, const Slot* slots) {
   const auto& p = *static_cast<const IslandProg*>(op.udata);
   // The generated backward reads the whole register file, so the forward
   // runs in scratch and leaves it there. n_regs covers the live-ins, which
-  // occupy registers of their own. The replay only needs their snapshot.
-  if (p.native_adj) return p.n_regs;
-  return sum_in_lens(op, slots);
+  // occupy registers of their own. Backward has a separate adjoint region;
+  // replay uses an input snapshot followed by its forward registers.
+  if (p.native_adj) return (int64_t)p.n_regs + p.adj.n_regs;
+  return sum_in_lens(op, slots) + p.n_regs;
 }
 
 template <bool ReuseCallCtx>
@@ -66,16 +107,15 @@ void island_fwd_impl(KernelCtx& ctx) {
     in[k] = ctx.scratch + off;
     off += ctx.in[k].len;
   }
-  run_island<double>(p, in, ctx.out.data, ctx.eval_state);
+  run_island<double>(p, in, ctx.out.data, ctx.scratch + off, ctx.eval_state);
 }
 
 void island_fwd(KernelCtx& ctx) { island_fwd_impl<false>(ctx); }
 
 // The generated backward: seed the live-outs, sweep, harvest the live-ins.
 void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
-  static thread_local std::vector<double> adj;
-  if ((int64_t)adj.size() < p.adj.n_regs) adj.resize((size_t)p.adj.n_regs);
-  std::fill(adj.begin(), adj.begin() + p.adj.n_regs, 0.0);
+  double* adj = ctx.scratch + p.n_regs;
+  std::fill_n(adj, p.adj.n_regs, 0.0);
   // Through the sharing map, since a live-out register need not own its
   // adjoint cell. Descending, because two live-out slots can share a
   // register range (the carver aliases a dead copy-then-modify chain onto
@@ -83,7 +123,7 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
   const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += ctx.out_adj_vec.data[m];
-  run_adjoint(p, p.adj, ctx.scratch, adj.data());
+  run_adjoint(p, p.adj, ctx.scratch, adj);
   for (size_t k = 0; k < p.ins.size(); ++k) {
     const auto& li = p.ins[k];
     const int input = li.input >= 0 ? li.input : (int)k;
@@ -104,19 +144,22 @@ void island_bwd(KernelCtx& ctx) {
   using stan::math::var;
   int64_t total = 0;
   for (int k = 0; k < ctx.n_in; ++k) total += ctx.in[k].len;
-  std::vector<var> vin((size_t)total);
+  ReplayWorkspace workspace(ctx.state,
+                            (size_t)total + p.n_regs + p.out_regs.size());
+  var* const vin = workspace.data();
+  var* const reg = vin + total;
+  var* const vout = reg + p.n_regs;
   const var* in[6];
   int64_t off = 0;
   for (int k = 0; k < ctx.n_in; ++k) {
     for (int64_t i = 0; i < ctx.in[k].len; ++i)
       vin[(size_t)(off + i)] = ctx.scratch[off + i];
-    in[k] = vin.data() + off;
+    in[k] = vin + off;
     off += ctx.in[k].len;
   }
-  std::vector<var> vout(p.out_regs.size());
-  run_island<var>(p, in, vout.data());
+  run_island<var>(p, in, vout, reg);
   var j = 0.0;
-  for (size_t m = 0; m < vout.size(); ++m)
+  for (size_t m = 0; m < p.out_regs.size(); ++m)
     j += vout[m] * ctx.out_adj_vec.data[m];
   stan::math::grad(j.vi_);
   off = 0;
@@ -145,7 +188,8 @@ bool island_has_effect(const Program& p) {
 }
 
 void register_island_kernel() {
-  register_kernel(OP_ISLAND, Kernel{island_fwd, island_bwd, island_scratch});
+  register_kernel(OP_ISLAND,
+                  Kernel{island_fwd, island_bwd, island_scratch, island_state});
 }
 
 }  // namespace stanli

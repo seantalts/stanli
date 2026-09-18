@@ -4,13 +4,15 @@
 \alias{as_draws_array}
 \title{Convert a fit to a draws array}
 \usage{
-as_draws_array(x, include_sampler = FALSE)
+as_draws_array(x, include_sampler = FALSE, inc_warmup = FALSE)
 }
 \arguments{
 \item{x}{A `stanli_fit`.}
 
 \item{include_sampler}{Append the seven sampler columns (`lp__`,
 `accept_stat__`, ...), which is what a CSV reader would see.}
+
+\item{inc_warmup}{Include saved warmup draws. Defaults to `FALSE`.}
 }
 \value{
 A `draws_array`, or a plain array when posterior is absent.

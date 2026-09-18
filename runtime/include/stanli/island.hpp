@@ -36,6 +36,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -68,6 +69,10 @@ struct IslandProg : Program {
   // so the two backwards are compared over the SAME islands running the
   // SAME forward program, which is the only comparison worth having.
   bool native_adj = false;
+  // Set after necessity lowering has finalized code and live-in windows.
+  // Immutable once published; hand-built programs leave this unset and the
+  // workspace factory proves initialization when binding them.
+  std::optional<bool> replay_initialized;
 };
 
 // Payload used only by OP_ISLAND with kIslandSoftmax3Variant. Ordinary islands
@@ -84,8 +89,9 @@ struct Softmax3IslandProg : IslandProg {
 // IslandProg violates the tagged payload contract; the graph carver is the
 // only production producer. Its
 // forward must leave outputs and scratch bitwise-identical to OP_ISLAND's
-// canonical forward: the profiled executor and direct kernel-table callers
-// use that path, and the generated adjoint consumes either register file.
+// canonical forward: direct kernel-table callers use that path, and the
+// generated adjoint consumes either register file. Both executor modes use
+// the same bound specialized forward.
 // test_softmax3_double_exact enforces this contract.
 constexpr uint8_t kIslandSoftmax3Variant = 1;
 // Generic variant for a canonical IslandProg whose forward bytecode contains
@@ -127,12 +133,10 @@ std::shared_ptr<const Program> specialize_softmax3(const IslandProg& p,
 
 // Evaluate on T = double (forward) or stan::math::var (backward replay,
 // inside the caller's nested_rev_autodiff). The register file is reused
-// between calls. Not reentrant; islands cannot contain islands.
+// by the caller, which owns its lifetime.
 template <typename T>
-void run_island(const IslandProg& p, const T* const* in, T* out,
+void run_island(const IslandProg& p, const T* const* in, T* out, T* reg,
                 EvalState* state = nullptr) {
-  static thread_local std::vector<T> reg;
-  if ((int64_t)reg.size() < p.n_regs) reg.resize((size_t)p.n_regs);
   for (size_t k = 0; k < p.ins.size(); ++k) {
     const int input = p.ins[k].input >= 0 ? p.ins[k].input : (int)k;
     for (int i = 0; i < p.ins[k].len; ++i)

@@ -1072,7 +1072,51 @@ void expect_interpreter_policy(const char* fixture,
   stanli_model_free(model);
 }
 
+// The unseeded constructor builds with seed 1; only the same construction
+// seed reproduces a model's transformed data.
+void test_transformed_data_seed() {
+  const std::string mir = slurp("tests/fixtures/tdrng.tmir.sexp");
+  char err[8192]{};
+  stanli_model* one = stanli_model_new(mir.c_str(), "{}", err, sizeof err);
+  stanli_model* seeded =
+      stanli_model_new_seeded(mir.c_str(), "{}", 1, err, sizeof err);
+  stanli_model* other =
+      stanli_model_new_seeded(mir.c_str(), "{}", 2, err, sizeof err);
+  expect_true(std::string("transformed-data seed construction: ") + err,
+              one != nullptr && seeded != nullptr && other != nullptr);
+  if (one != nullptr && seeded != nullptr && other != nullptr) {
+    const double q[1] = {0.0};
+    const auto row = [&](stanli_model* m) {
+      std::vector<double> out((size_t)stanli_wa_n_columns(m));
+      expect_true("transformed-data seed wa_row",
+                  stanli_wa_row(m, q, out.data()) == 0);
+      return out;
+    };
+    const std::vector<double> r1 = row(one), r2 = row(seeded), r3 = row(other);
+    expect_true("transformed-data seed column count", r1.size() == 11);
+    expect_true("transformed data reports its draw",
+                stanli_transformed_data_rng(one) == 1);
+    expect_true("unseeded construction draws transformed data at seed 1",
+                r1 == r2);
+    expect_true("a different construction seed changes transformed data",
+                r1.size() == r3.size() && r1 != r3);
+  }
+  stanli_model_free(one);
+  stanli_model_free(seeded);
+  stanli_model_free(other);
+  // Generated-quantities draws do not make a model seed-dependent.
+  const std::string gq = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
+  stanli_model* gq_only = stanli_model_new(gq.c_str(), "{}", err, sizeof err);
+  expect_true("generated-quantities-only RNG model construction",
+              gq_only != nullptr);
+  if (gq_only != nullptr)
+    expect_true("generated-quantities draws are not construction draws",
+                stanli_transformed_data_rng(gq_only) == 0);
+  stanli_model_free(gq_only);
+}
+
 int main() {
+  test_transformed_data_seed();
   expect_interpreter_policy("tests/fixtures/wanames.tmir.sexp", nullptr);
   expect_interpreter_policy("tests/fixtures/wa_literal_write.tmir.sexp",
                             nullptr);

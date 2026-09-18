@@ -37,9 +37,53 @@ functions {
     for (i in 1:size(x)) out += (1 + i * 0.125) * probe(x[i]);
     return out;
   }
+  vector coverage_rng(vector theta) {
+    vector[2] x = [1 + 0.0625 * theta[1], 2 + 0.0625 * theta[2]]';
+    vector[3] v = [0.5 + 0.0625 * theta[3], 0.7 + 0.0625 * theta[4], 1.0 + 0.0625 * theta[5]]';
+    matrix[2,3] m = [[x[1], v[1], v[2]], [x[2], v[3], 0.25 + 0.0625 * theta[6]]];
+    matrix[2,2] s = [[2 + square(x[1]), 0.25], [0.25, 3 + square(x[2])]];
+    matrix[2,2] l = cholesky_decompose(s);
+    real rho = 0.2 + 0.01 * theta[7];
+    matrix[2,2] corr = [[1, rho], [rho, 1]];
+    matrix[2,2] lcorr = cholesky_decompose(corr);
+    vector[2] p = softmax(x);
+    vector[28] observed;
+    observed[1] = probe(normal_rng(theta[1], 1.3)); // normal_rng
+    observed[2] = probe(std_normal_rng()); // std_normal_rng
+    observed[3] = probe(lognormal_rng(theta[1], 1.3)); // lognormal_rng
+    observed[4] = probe(uniform_rng(-1.0, 2.0)); // uniform_rng
+    observed[5] = probe(gamma_rng(2.0, 1.3)); // gamma_rng
+    observed[6] = probe(inv_gamma_rng(2.0, 1.3)); // inv_gamma_rng
+    observed[7] = probe(beta_rng(2.0, 3.0)); // beta_rng
+    observed[8] = probe(exponential_rng(1.3)); // exponential_rng
+    observed[9] = probe(chi_square_rng(3.0)); // chi_square_rng
+    observed[10] = probe(cauchy_rng(theta[1], 1.3)); // cauchy_rng
+    observed[11] = probe(double_exponential_rng(theta[1], 1.3)); // double_exponential_rng
+    observed[12] = probe(logistic_rng(theta[1], 1.3)); // logistic_rng
+    observed[13] = probe(student_t_rng(4.0, theta[1], 1.3)); // student_t_rng
+    observed[14] = probe(weibull_rng(2.0, 1.3)); // weibull_rng
+    observed[15] = probe(bernoulli_rng(0.4)); // bernoulli_rng
+    observed[16] = probe(bernoulli_logit_rng(theta[1])); // bernoulli_logit_rng
+    observed[17] = probe(binomial_rng(3, 0.4)); // binomial_rng
+    observed[18] = probe(poisson_rng(2.0)); // poisson_rng
+    observed[19] = probe(poisson_log_rng(theta[1])); // poisson_log_rng
+    observed[20] = probe(neg_binomial_2_rng(2.0, 1.3)); // neg_binomial_2_rng
+    observed[21] = probe(neg_binomial_2_log_rng(theta[1], 1.3)); // neg_binomial_2_log_rng
+    observed[22] = probe(multi_normal_rng(x, s)); // multi_normal_rng
+    observed[23] = probe(multi_normal_cholesky_rng(x, l)); // multi_normal_cholesky_rng
+    observed[24] = probe(categorical_rng(p)); // categorical_rng
+    observed[25] = probe(categorical_logit_rng(x)); // categorical_logit_rng
+    observed[26] = probe(gumbel_rng(theta[1], 1.3)); // gumbel_rng
+    observed[27] = probe(dirichlet_rng(v)); // dirichlet_rng
+    observed[28] = probe(beta_binomial_rng(5, 2.0, 3.0)); // beta_binomial_rng
+    return observed;
+  }
+}
+transformed data {
+  vector[28] prepared = coverage_rng([0.1, -0.2, 0.3, 0.4, -0.5, 0.6, 0.7, -0.8]');
 }
 parameters { vector[8] theta; }
-model { target += dot_self(theta); }
+model { target += dot_self(theta) + theta[1] * sum(prepared); }
 generated quantities {
 
   vector[2] x = [1 + 0.0625 * theta[1], 2 + 0.0625 * theta[2]]';
@@ -80,4 +124,5 @@ generated quantities {
   observed[26] = probe(gumbel_rng(theta[1], 1.3)); // gumbel_rng
   observed[27] = probe(dirichlet_rng(v)); // dirichlet_rng
   observed[28] = probe(beta_binomial_rng(5, 2.0, 3.0)); // beta_binomial_rng
+  vector[28] values = prepared;
 }

@@ -223,7 +223,8 @@ Observation program(const std::string& name, double x, double seed) {
     stan::math::var t = 0, y = 1, theta = x;
     const double x_r = 1.25;
     std::vector<stan::math::var> out;
-    stanli::run_rhs(p, t, &y, &theta, &x_r, out);
+    std::vector<stan::math::var> rhs_registers;
+    stanli::run_rhs(p, t, &y, &theta, &x_r, out, rhs_registers);
     stan::math::grad(out.at(0).vi_);
     return std::pair{out[0].val(), theta.adj()};
   });

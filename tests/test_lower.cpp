@@ -431,11 +431,330 @@ static void reference(const double* q, double* lp_out, double* grad_out) {
   stan::math::recover_memory();
 }
 
+// Keep the planner's small-loop refusal and large-loop vector accumulation
+// decision exact. The cancellation inputs distinguish the two reverse orders.
+static void test_bounded_specialization() {
+  using namespace stanli;
+  const auto mir = slurp("tests/fixtures/bounded_control.tmir.sexp");
+  for (int mode : {0, 1})
+    for (int n : {0, 1, 40, 20000}) {
+      std::ostringstream json;
+      json << "{\"N\":" << n << ",\"mode\":" << mode << ",\"counts\":[";
+      for (int i = 0; i < n; ++i) {
+        if (i) json << ',';
+        json << i % 5;
+      }
+      json << "]}";
+      const auto data = DataMap::from_json(json.str());
+      const auto compile = [&](const char* flag) {
+        test_setenv("STANLI_BOUNDED_SPECIALIZATION", flag, 1);
+        if (n == 1 && mode == 0 && std::string(flag) == "0")
+          test_setenv("STANLI_STRUCTURED_LOOPS", "1", 1);
+        stanli_test::StdoutCapture output;
+        auto cm = compile_model(mir, data, 713);
+        test_unsetenv("STANLI_STRUCTURED_LOOPS");
+        const auto text = output.finish();
+        test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+        check(text == "prepared once\n", "specialization prepares data once");
+        check(cm.transformed_data_draws,
+              "specialization retains TD RNG metadata");
+        return cm;
+      };
+      auto a = compile("0"), b = compile("1");
+      if (mode == 1 || n == 20000)
+        check(same_graph_structure(a, b) && a.fills == b.fills,
+              "refused/budgeted specialization preserves original graph mode=" +
+                  std::to_string(mode) + " N=" + std::to_string(n));
+      if (mode == 0 && n == 40)
+        check(!same_graph_structure(a, b), "bounded data while specializes");
+      check(a.n_unconstrained == b.n_unconstrained &&
+                a.views.size() == b.views.size(),
+            "specialization preserves constrained parameter layout");
+      Executor ea(std::move(a.graph)), eb(std::move(b.graph));
+      a.bind(ea);
+      b.bind(eb);
+      for (double x : {-0.2, 0.0, 2.5})
+        for (int repeat = 0; repeat < 2; ++repeat) {
+          ea.params_data()[0] = eb.params_data()[0] = x;
+          double ga, gb;
+          const double la = ea.gradient(&ga), lb = eb.gradient(&gb);
+          check(std::abs(la - lb) <= 1e-12 * (1 + std::abs(la)) &&
+                    std::abs(ga - gb) <= 1e-12 * (1 + std::abs(ga)),
+                "bounded specialization agrees with retained-loop arithmetic");
+        }
+      check(a.write_array && b.write_array, "specialization keeps write_array");
+      if (a.write_array && b.write_array) {
+        auto& wa = *a.write_array;
+        auto& wb = *b.write_array;
+        Executor xa(std::move(wa.graph)), xb(std::move(wb.graph));
+        wa.bind(xa);
+        wb.bind(xb);
+        xa.params_data()[0] = xb.params_data()[0] = 0.7;
+        xa.run_forward_only();
+        xb.run_forward_only();
+        check(wa.columns.size() == wb.columns.size(),
+              "specialization keeps output columns");
+        for (size_t i = 0; i < wa.columns.size(); ++i)
+          expect_eq("specialization TD RNG shared with GQ",
+                    xa.value_ptr(wa.columns[i].slot)[0],
+                    xb.value_ptr(wb.columns[i].slot)[0]);
+      }
+    }
+  // Range reductions are outside the single-selector specialization proof.
+  const auto range_mir = slurp("tests/fixtures/dynslice.tmir.sexp");
+  const auto range_data =
+      DataMap::from_json(slurp("tests/fixtures/dynslice.json"));
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
+  const auto range_base = compile_model(range_mir, range_data);
+  test_setenv("STANLI_BOUNDED_SPECIALIZATION", "1", 1);
+  const auto range_trial = compile_model(range_mir, range_data);
+  test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+  check(same_graph_structure(range_base, range_trial) &&
+            range_base.fills == range_trial.fills,
+        "range/gather body keeps its original representation");
+}
+
+static void test_symbolic_lane_chain(const std::string& fixture) {
+  const std::string mir = slurp("tests/fixtures/" + fixture + ".tmir.sexp");
+  for (bool stress : {false, true}) {
+    for (int n : {0, 1, 3, 4, 5, 6, 8, 16, 33, 4096}) {
+      std::ostringstream json;
+      json << "{\"N\":" << n << ",\"y\":[";
+      for (int i = 0; i < n; ++i) {
+        if (i) json << ',';
+        if (!stress) {
+          const char* finite[] = {"-0.3", "0.1", "0.2", "0.0", "-0.0", "0.4"};
+          json << finite[i % 6];
+          continue;
+        }
+        json << (i % 4 == 0   ? "1e8"
+                 : i % 4 == 1 ? "-1e8"
+                 : i % 4 == 2 ? "0.2"
+                              : "0.3");
+      }
+      json << "]}";
+      const auto data = stanli::DataMap::from_json(json.str());
+      test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+      auto baseline = stanli::compile_model(mir, data);
+      test_unsetenv("STANLI_SYMBOLIC_LANES");
+      auto candidate = stanli::compile_model(mir, data);
+      test_unsetenv("STANLI_SYMBOLIC_LANES");
+      if (n == 16) {
+        test_setenv("STANLI_SYMBOLIC_LANES", "1", 1);
+        const auto explicit_on = stanli::compile_model(mir, data);
+        test_unsetenv("STANLI_SYMBOLIC_LANES");
+        check(same_graph_structure(candidate, explicit_on) &&
+                  candidate.fills == explicit_on.fills,
+              "automatic symbolic selection matches explicit enablement");
+        check(baseline.graph.slots.size() > candidate.graph.slots.size(),
+              "explicit zero disables the symbolic shortcut");
+        test_setenv("STANLI_SYMBOLIC_LANES", "unknown", 1);
+        const auto unknown = stanli::compile_model(mir, data);
+        test_unsetenv("STANLI_SYMBOLIC_LANES");
+        check(same_graph_structure(baseline, unknown) &&
+                  baseline.fills == unknown.fills,
+              "unknown symbolic policy conservatively disables the shortcut");
+      }
+      check(candidate.n_unconstrained == baseline.n_unconstrained &&
+                candidate.n_unconstrained == 2,
+            "symbolic lanes preserve parameter layout");
+      if (n >= 6) {
+        check(candidate.graph.ops.size() == 3 &&
+                  candidate.graph.slots.size() <= 12,
+              "symbolic lane metadata does not expand with trip count");
+        const auto& ops = candidate.graph.ops;
+        const auto& slots = candidate.graph.slots;
+        const auto anchor = fixture == "symbolic_lane_chain" ? stanli::OP_FMA
+                            : fixture == "symbolic_lane_add" ? stanli::OP_ADD
+                                                             : stanli::OP_MUL;
+        check(ops[0].opcode == anchor && ops[1].opcode == stanli::OP_EXPV &&
+                  ops[2].opcode == stanli::OP_SUM_VEC &&
+                  slots[ops[0].out].len == n && slots[ops[1].out].len == n &&
+                  slots[ops[2].out].len == 1 && ops[1].in[0] == ops[0].out &&
+                  ops[2].in[0] == ops[1].out,
+              "symbolic lanes use the existing ordered vector kernel chain");
+        const int varying = fixture == "symbolic_lane_add" ? 0 : 1;
+        check(slots[ops[0].in[varying]].len == n &&
+                  slots[ops[0].in[1 - varying]].is_param,
+              "symbolic lanes preserve parameter and read operand positions");
+      } else {
+        check(same_graph_structure(candidate, baseline) &&
+                  candidate.fills == baseline.fills,
+              "unprofitable symbolic lanes preserve graph and fills exactly");
+      }
+      stanli::Executor a(std::move(baseline.graph));
+      stanli::Executor b(std::move(candidate.graph));
+      baseline.bind(a);
+      candidate.bind(b);
+      check(a.n_params() == b.n_params() && b.n_params() == 2,
+            "virtual lane identities never become parameters");
+      for (const auto point :
+           {std::pair<double, double>{0.1, 0.0}, {0.0, 1e-9}, {-0.1, -1e-9}}) {
+        a.params_data()[0] = b.params_data()[0] = point.first;
+        a.params_data()[1] = b.params_data()[1] = point.second;
+        for (int repeat = 0; repeat < 2; ++repeat) {
+          double ga[2], gb[2];
+          const double la = a.gradient(ga), lb = b.gradient(gb);
+          check(std::memcmp(&la, &lb, sizeof(double)) == 0 &&
+                    std::memcmp(ga, gb, sizeof(ga)) == 0,
+                "symbolic lane LP/gradient matches existing selection bitwise");
+        }
+      }
+    }
+  }
+  stanli::DataMap data;
+  data.set_int("N", 16);
+  data.set_real_array("y", std::vector<double>(16, 0.2));
+  for (const char* flag :
+       {"STANLI_NO_REROLL", "STANLI_NO_CONSTFOLD", "STANLI_STRUCTURED_LOOPS"}) {
+    test_setenv(flag, "1", 1);
+    test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+    const auto baseline = stanli::compile_model(mir, data);
+    test_setenv("STANLI_SYMBOLIC_LANES", "1", 1);
+    const auto candidate = stanli::compile_model(mir, data);
+    test_unsetenv("STANLI_SYMBOLIC_LANES");
+    test_unsetenv(flag);
+    check(same_graph_structure(baseline, candidate) &&
+              baseline.fills == candidate.fills,
+          std::string("symbolic lane source respects ") + flag);
+  }
+}
+
+static void test_symbolic_lane_backing() {
+  const std::string mir =
+      slurp("tests/fixtures/symbolic_lane_backing.tmir.sexp");
+  for (int n : {4, 5, 6, 16}) {
+    stanli::DataMap data;
+    data.set_int("N", n);
+    data.set_int("M", 262144);
+    data.set_real_array("y", std::vector<double>(262144, 0.2));
+    data.set_real_array("unused", std::vector<double>(262144, -0.3));
+    test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+    auto baseline = stanli::compile_model(mir, data);
+    test_unsetenv("STANLI_SYMBOLIC_LANES");
+    auto candidate = stanli::compile_model(mir, data);
+    if (n <= 5) {
+      check(
+          same_graph_structure(baseline, candidate) &&
+              baseline.fills == candidate.fills,
+          "seed refusal retains ordinary graph/fills with large backing data");
+    } else {
+      check(
+          candidate.graph.ops.size() == 3 && candidate.graph.slots.size() <= 12,
+          "large backing or unrelated data does not prevent compact lowering");
+    }
+    stanli::Executor a(std::move(baseline.graph));
+    stanli::Executor b(std::move(candidate.graph));
+    baseline.bind(a);
+    candidate.bind(b);
+    for (double value : {-0.3, 0.0, 0.2}) {
+      a.params_data()[0] = b.params_data()[0] = 0.1;
+      a.params_data()[1] = b.params_data()[1] = value;
+      double ga[2], gb[2];
+      const double la = a.gradient(ga), lb = b.gradient(gb);
+      check(
+          std::memcmp(&la, &lb, sizeof(double)) == 0 &&
+              std::memcmp(ga, gb, sizeof(ga)) == 0,
+          "seed continuation and direct slicing preserve LP/gradient exactly");
+    }
+  }
+}
+
+static void test_symbolic_lane_executor_sharing() {
+  const std::string mir = slurp("tests/fixtures/symbolic_lane_chain.tmir.sexp");
+  stanli::DataMap data;
+  data.set_int("N", 16);
+  data.set_real_array("y", {-0.3, 0.1, 0.2, 0.0, -0.0, 0.4, -0.3, 0.1, 0.2, 0.0,
+                            -0.0, 0.4, -0.3, 0.1, 0.2, 0.0});
+
+  test_setenv("STANLI_SYMBOLIC_LANES", "0", 1);
+  auto ordinary = stanli::compile_model(mir, data);
+  test_unsetenv("STANLI_SYMBOLIC_LANES");
+  auto symbolic = stanli::compile_model(mir, data);
+  check(symbolic.graph.ops.size() == 3,
+        "symbolic sharing fixture selects the compact graph");
+  if (symbolic.graph.ops.size() != 3 || ordinary.graph.ops.empty()) return;
+
+  const stanli::Op& anchor = symbolic.graph.ops.front();
+  int packed = -1;
+  for (int j = 0; j < anchor.n_in; ++j) {
+    const auto& slot = symbolic.graph.slots[anchor.in[j]];
+    if (!slot.is_param && slot.len == 16) packed = anchor.in[j];
+  }
+  const auto ordinary_anchor = std::find_if(
+      ordinary.graph.ops.begin(), ordinary.graph.ops.end(),
+      [](const stanli::Op& op) { return op.opcode == stanli::OP_FMA; });
+  int ordinary_packed = -1;
+  if (ordinary_anchor != ordinary.graph.ops.end()) {
+    for (int j = 0; j < ordinary_anchor->n_in; ++j) {
+      const auto& slot = ordinary.graph.slots[ordinary_anchor->in[j]];
+      if (!slot.is_param && slot.len == 16)
+        ordinary_packed = ordinary_anchor->in[j];
+    }
+  }
+  if (packed < 0 || ordinary_packed < 0) {
+    check(false, "symbolic sharing fixture exposes packed ordinary data");
+    return;
+  }
+  const int anchor_out = anchor.out;
+  const int vector_out = symbolic.graph.ops[1].out;
+
+  stanli::Executor reference(std::move(ordinary.graph));
+  stanli::Executor prototype(std::move(symbolic.graph));
+  ordinary.bind(reference);
+  symbolic.bind(prototype);
+  reference.params_data()[0] = prototype.params_data()[0] = 0.1;
+  reference.params_data()[1] = prototype.params_data()[1] = -0.2;
+
+  stanli::Executor clone(prototype);
+  const stanli::Executor& const_prototype = prototype;
+  const stanli::Executor& const_clone = clone;
+  check(const_prototype.value_ptr(packed) == const_clone.value_ptr(packed),
+        "symbolic packed constant data is shared by executor clones");
+  check(const_prototype.value_ptr(anchor_out) !=
+                const_clone.value_ptr(anchor_out) &&
+            const_prototype.value_ptr(vector_out) !=
+                const_clone.value_ptr(vector_out),
+        "symbolic vector outputs remain private to each executor");
+
+  const double original = const_prototype.value_ptr(packed)[0];
+  double* clone_packed = clone.value_ptr(packed);
+  check(clone_packed != const_prototype.value_ptr(packed),
+        "writing a cloned symbolic constant detaches its data");
+  clone_packed[0] = original + 0.5;
+  check(const_prototype.value_ptr(packed)[0] == original,
+        "cloned symbolic data mutation leaves the prototype unchanged");
+
+  stanli::Executor changed_reference(reference);
+  changed_reference.value_ptr(ordinary_packed)[0] = original + 0.5;
+  double reference_grad[2], prototype_grad[2], changed_grad[2], clone_grad[2];
+  const double reference_lp = reference.gradient(reference_grad);
+  const double prototype_lp = prototype.gradient(prototype_grad);
+  const double changed_lp = changed_reference.gradient(changed_grad);
+  check(std::memcmp(&prototype_lp, &reference_lp, sizeof(double)) == 0,
+        "symbolic prototype kernels match the ordinary reference");
+  check(
+      std::memcmp(prototype_grad, reference_grad, sizeof(prototype_grad)) == 0,
+      "symbolic prototype gradients match the ordinary reference");
+  const double clone_lp = clone.gradient(clone_grad);
+  check(std::memcmp(&clone_lp, &changed_lp, sizeof(double)) == 0,
+        "mutated symbolic clone keeps vector kernels correct");
+  check(
+      std::memcmp(clone_grad, changed_grad, sizeof(clone_grad)) == 0 &&
+          std::memcmp(changed_grad, reference_grad, sizeof(changed_grad)) != 0,
+      "mutated symbolic clone observes its private data");
+}
+
 int main() {
   // These fixtures pin ULP-level parity with DEFAULT CmdStan, whose AoS
   // Matrix<var> paths run scalar libm per element; the packet path answers
   // to `stanc --O1` instead and is verified there.
   stanli::set_packet_math(false);
+  test_symbolic_lane_backing();
+  test_symbolic_lane_executor_sharing();
+  for (const char* fixture :
+       {"symbolic_lane_chain", "symbolic_lane_add", "symbolic_lane_multiply"})
+    test_symbolic_lane_chain(fixture);
   using namespace stanli;
 
   // Section A1's five reductions must lower in the autodiff model graph, not
@@ -1079,8 +1398,8 @@ int main() {
     expect_eq("ndlit lp", lp, wt * q[1] + s3 * q[2]);
   }
 
-  // A while loop keeps its loop form: a retained loop by default, a
-  // control island on the legacy path.
+  // This model also uses gathers, so whole-program specialization declines
+  // it. Its whiles retain their loop forms under the automatic policy.
   {
     const auto count_whiles = [](const CompiledModel& model) {
       size_t whiles = 0;
@@ -1092,7 +1411,7 @@ int main() {
         DataMap::from_json(slurp("tests/fixtures/whileloop.json"));
     CompiledModel lm =
         compile_model(slurp("tests/fixtures/whileloop.tmir.sexp"), d);
-    check(count_whiles(lm) == 3, "while loops lower as three retained loops");
+    check(count_whiles(lm) == 3, "gather-containing model retains three loops");
     Executor lex(std::move(lm.graph));
     lm.bind(lex);
     lex.params_data()[0] = 0.1;
@@ -1107,8 +1426,8 @@ int main() {
     expect_ulp("while lp", lp, -0.5 * 0.1 * 0.1 + sum * 0.1);
     expect_eq("while grad", grad, -0.1 + sum);
 
-    // Building a graph must not execute or replicate a data-controlled
-    // while.  This trip count is just beyond the old lowering-time cap; the
+    // Expansion is bounded and refusal preserves a compact runtime loop.
+    // This trip count is beyond the specialization budget; the
     // model is intentionally not run, because this assertion is about the
     // finite program representation rather than a million-step evaluation.
     DataMap long_d;
@@ -2121,6 +2440,56 @@ int main() {
       ctx.out_adj = 1.0;
       kernel->backward(ctx);  // active source type, but no graph adjoint edge
     }
+  }
+
+  // Scalar logits can bypass the var tape, but must retain the subtraction
+  // and scalar-exp reverse order even for prefilled or signed-zero adjoints.
+  {
+    const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+    const double inf = std::numeric_limits<double>::infinity();
+    const auto same_bits = [](double a, double b) {
+      return (std::isnan(a) && std::isnan(b)) ||
+             std::memcmp(&a, &b, sizeof(double)) == 0;
+    };
+    for (int n : {1, 2, 3, 8, 32})
+      for (int selected = 1; selected <= n; ++selected)
+        for (double scale : {0.0, 1.0, 1000.0, 1e308})
+          for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308, inf})
+            for (bool propto : {false, true}) {
+              stan::math::nested_rev_autodiff nested;
+              Eigen::VectorXd beta(n), adj(n);
+              Eigen::Matrix<stan::math::var, -1, 1> ref_beta(n);
+              for (int i = 0; i < n; ++i) {
+                beta(i) = scale * std::sin(i + 1.0);
+                ref_beta(i) = beta(i);
+                adj(i) = i % 2 ? -0.0 : 0.3125;
+                ref_beta(i).adj() = adj(i);
+              }
+              double outcome = selected, out = 0;
+              KernelCtx ctx{};
+              ctx.n_in = 2;
+              ctx.in[0] = Desc{&outcome, 1};
+              ctx.in[1] = Desc{beta.data(), n};
+              ctx.in_adj[1] = Desc{adj.data(), n};
+              ctx.out = Desc{&out, 1};
+              ctx.out_adj = weight;
+              ctx.variant = kCategoricalScalarOutcome | kCategoricalLogit |
+                            kCategoricalArgAutodiff | (propto ? 0x80u : 0u);
+              kernel->forward(ctx);
+              kernel->backward(ctx);
+              stan::math::var lp =
+                  propto ? stan::math::categorical_logit_lpmf<true>(selected,
+                                                                    ref_beta)
+                         : stan::math::categorical_logit_lpmf<false>(selected,
+                                                                     ref_beta);
+              stan::math::var ref = lp * weight;
+              stan::math::grad(ref.vi_);
+              check(same_bits(out * weight, ref.val()),
+                    "native scalar categorical logit value bits");
+              for (int i = 0; i < n; ++i)
+                check(same_bits(adj(i), ref_beta(i).adj()),
+                      "native scalar categorical logit gradient bits");
+            }
   }
 
   // Array outcomes add one callback contribution per observation. Preserve
@@ -3650,6 +4019,51 @@ int main() {
       expect_eq("whilegroup g" + std::to_string(i), ga[i], gb[i]);
   }
 
+  // The triangular pullback must match the old nested-tape weighted sum,
+  // including rectangular matrices, ignored upper entries, asymmetric seeds,
+  // overflow, and accumulation into existing input adjoints.
+  {
+    const Kernel* kernel = find_kernel(OP_MULT_LOWER_TRI_SELF_TRANSPOSE);
+    for (int nr : {1, 2, 3, 8})
+      for (int nc : {1, 2, 3, 8})
+        for (double scale : {0.0, 1.0, 1e-100, 1e100})
+          for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308,
+                                std::numeric_limits<double>::infinity()}) {
+            stan::math::nested_rev_autodiff nested;
+            Eigen::MatrixXd a(nr, nc), seed(nr, nr), adj(nr, nc);
+            for (int i = 0; i < a.size(); ++i) {
+              a.data()[i] = scale * std::sin(0.3 * (i + 1));
+              adj.data()[i] = i % 2 ? -0.0 : 0.3125;
+            }
+            for (int i = 0; i < seed.size(); ++i)
+              seed.data()[i] = (i % 3 == 0 ? -1.0 : 1.0) * weight;
+            auto ref_a = a.cast<stan::math::var>().eval();
+            auto result = stan::math::multiply_lower_tri_self_transpose(ref_a);
+            stan::math::var loss =
+                stan::math::sum(stan::math::elt_multiply(result, seed));
+            stan::math::grad(loss.vi_);
+            std::vector<double> expected(a.size());
+            for (int i = 0; i < a.size(); ++i)
+              expected[i] = adj.data()[i] + ref_a.data()[i].adj();
+            int idata[] = {nr, nc};
+            KernelCtx ctx{};
+            ctx.n_in = 1;
+            ctx.in[0] = Desc{a.data(), a.size()};
+            ctx.in_adj[0] = Desc{adj.data(), adj.size()};
+            ctx.out_adj_vec = Desc{seed.data(), seed.size()};
+            ctx.idata = idata;
+            ctx.n_idata = 2;
+            kernel->backward(ctx);
+            for (int i = 0; i < a.size(); ++i)
+              check((std::isnan(adj.data()[i]) && std::isnan(expected[i])) ||
+                        std::memcmp(&adj.data()[i], &expected[i],
+                                    sizeof(double)) == 0,
+                    "triangular native pullback bits");
+            ctx.in_adj[0].data = nullptr;
+            kernel->backward(ctx);
+          }
+  }
+
   // multiply_lower_tri_self_transpose on a matrix parameter whose upper
   // triangle is not zero (unsupported_multiply_lower_tri_self_transpose).
   // The graph used to spell it TRANSPOSE + GEMM, which is A * A' and reads
@@ -3752,6 +4166,30 @@ int main() {
     for (int k = 0; k < 14; ++k)
       expect_eq("tdintsize g" + std::to_string(k), grad[k], x(k).adj());
     stan::math::recover_memory();
+
+    check(lm.write_array && lm.write_array->truncated.empty(),
+          "tdintsize prepared write_array compiled");
+    if (lm.write_array && lm.write_array->truncated.empty()) {
+      Executor wx(std::move(lm.write_array->graph));
+      lm.write_array->bind(wx);
+      for (int k = 0; k < 14; ++k) wx.params_data()[k] = 0.1 * (k + 1) - 0.7;
+      wx.run_forward_only();
+      int found = 0;
+      for (const auto& col : lm.write_array->columns) {
+        if (col.name == "prepared_size") {
+          ++found;
+          expect_eq("tdintsize prepared integer", *wx.value_ptr(col.slot), 14);
+        } else if (col.name == "prepared_leaf") {
+          ++found;
+          check(col.len == 12 && col.rows == 3,
+                "tdintsize prepared leaf keeps matrix geometry");
+          for (int k = 0; k < 12; ++k)
+            expect_eq("tdintsize prepared leaf " + std::to_string(k),
+                      wx.value_ptr(col.slot)[col.storage_index(k)], 16);
+        }
+      }
+      check(found == 2, "tdintsize writes prepared integer and shaped leaf");
+    }
   }
 
   // profile("name") { ... } wraps ordinary statements purely for stanc's own
@@ -8563,6 +9001,7 @@ int main() {
     }
   }
 
+  test_bounded_specialization();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;
 }

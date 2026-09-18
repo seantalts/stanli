@@ -212,6 +212,21 @@ usual, and one summing op replaces the N per-lane target entries. A
 density whose inputs are the same buffer in every lane stays one scalar
 op instead.
 
+A lane may also be C elements wide (`LaneLayout`, the row-major/column-major
+convention one region's wide row ops must agree on). A row read covering
+its base elides to it the same way a scalar `OP_INDEX` does; a partial row
+or a per-lane gather packs through one `OP_SLICE` or `OP_GATHER` once its
+lanes' offsets are, together, one affine run (the same classifier
+`builtin_index_map` uses for a static selector, extracted so there is one
+place that decides what an affine window is); an invariant operand as wide
+as the row tiles via `OP_REP_MAT` instead of blocking the region; and a row
+density whose result feeds another op (a mixture over rows) folds back with
+one `OP_SUM_ROWS` per lane, repacking first when the region's convention is
+column-major, since `OP_SUM_ROWS` needs each lane's elements contiguous.
+Partition's `indexed_read` and its own wide-operand check share the same
+affine classifier and the same tiling, so a lane found by structure there
+or by period here is priced and packed the same way.
+
 Fixed-width row reductions get one deliberately narrower pre-pass. The LDA
 shape fills every element of a short `gamma` vector, then contributes
 `log_sum_exp(gamma)` once per document. Because K=2 is below the ordinary
@@ -247,6 +262,34 @@ candidate-free million-op LDA shape from 1.16 s to about 3.4 ms. The exact
 candidate-index, packed-row, and use-list work counters live in `RerollStats`
 and have deterministic scaling tests.
 
+A classified region still prices itself before committing, in the same
+currencies `partition.cpp` uses (`pass_util.hpp`'s `kLaneOpCost`,
+`kLaneDensityElem`, `kLanePartitionMargin`): elision and hoisting free, a
+slice or gather at their element count, a store only when it is not the
+whole-vector or write-chained form, and a CSE-collapse charge
+(`(Luse - distinct) * lane_elems`) for lanes distinguishable only by an
+immediate CSE would otherwise merge. A region that fails to clear its own
+cost declines through the same shrink-and-retry path a hard classification
+failure already takes.
+
+This matters most exactly where it looks least intuitive: a discrete
+idata-density region whose lanes carry mostly repeated outcomes (a
+capture-recapture model where most subjects share one of a handful of
+encounter histories) prices as `distinct` near 1 against `Luse` in the
+hundreds, so the vector form's per-element cost dominates the comparison and
+the region declines. Measured, not assumed: on `M0_model` and `Mt_model`
+(posteriordb), packing the shared-history subjects into one wide density call
+runs at 4600-4800 ns per gradient; declining it and letting each subject's
+identical scalar density collapse under CSE, feeding a short `ADD_N`
+reduction tree instead, runs at 1000-1100 ns, 4.3-4.6x faster, at 5 interleaved
+rounds each of N=50,000 gradient evaluations. `dogs_hierarchical`'s decline
+splits one 750-dog density into two 375-dog ones (a smaller regime of the
+same effect, its outcomes vary more so `distinct` stays close to `Luse`) and
+is cost-neutral, 11.1-11.8 us either way at 8 interleaved rounds of N=30,000.
+Prep time (compiling and binding the larger declined graph) grows by roughly
+a millisecond on both models, negligible against thousands of gradient
+evaluations per chain.
+
 ## Lane partitioning (`partition.cpp`, disable: `STANLI_NO_PARTITION=1`)
 
 Re-rolling asks whether a template repeats with period P, which requires
@@ -280,7 +323,11 @@ A bucket is rewritten in one of these forms:
 - One template, one bucket: each input becomes a slice when the lanes
   read a contiguous range, a gather when they do not, and a shared
   operand when every lane reads the same slot. Contiguity is a cost
-  question here, not a legality one.
+  question here, not a legality one, decided by the same affine-run
+  classifier reroll.cpp's row lanes use. An operand as wide as the
+  lane but shared by every lane instead tiles via `OP_REP_MAT`
+  (reroll.cpp's tiling exactly), hoisted once instead when every input
+  is shared, not only this one.
 - Density lanes whose outcomes ride along as immediates concatenate
   those immediates into the layout the vector kernel unpacks, group by
   group for the binomial family's `n`/`y` pairs and flat for everything
@@ -301,9 +348,11 @@ A bucket is rewritten in one of these forms:
   two scalars that refinement holds still.
 
 Fusing is not always a win, so each bucket is costed before it is
-emitted, in the currencies the island carver uses: about 5 ns per graph
-op against about 1 ns per element moved, with a density element charged
-six op dispatches. Two measured pessimizations live in that model rather
+emitted, in the currencies the island carver uses (`pass_util.hpp`'s
+`kOpCost`, `kDensityElem`, `kPartitionMargin`, the same ones reroll.cpp's
+own region pricing uses): about 5 ns per graph op against about 1 ns per
+element moved, with a density element charged six op dispatches. Two
+measured pessimizations live in that model rather
 than in the shipped graph. Lanes identical down to their immediates and
 their external slots are one op once CSE runs, so fusing them re-expands
 what CSE would collapse and the bucket is charged for every duplicate it
@@ -726,6 +775,15 @@ cost, and a cost-neutral correction for calls to graph kernels. This is the
 same layout the native island backward allocates and clears, rather than a
 fixed weight per forward register.
 
+The constants behind that estimate (5, 2, 3) are calibrated on corpus
+timing, not on instruction dispatch. A micro-benchmark of one graph op
+against one island instruction and of a live-in and a live-out element
+measured ratios of 1.458, 0.131 and 0.684, and setting the constants to
+those values (rounded to 1) lost 46 islands across a 254-model corpus run
+and made `iohmm_reg` 1.82x slower per gradient; the constants stand for what
+an island saves beyond dispatch, and the only recalibration that holds is a
+corpus sweep.
+
 On `iohmm_reg`, 95,424 forward register ids contain only 39,000 distinct
 adjoint classes, while 4,488 checkpoint registers are value-only. Correct
 accounting moves the estimate from 389,640 to 328,728 against a graph cost of
@@ -748,11 +806,11 @@ the estimate charges it accordingly. Vector-result ops still end runs.
 
 The pass still refuses outright: short runs (under 32 ops), regions with
 more than six distinct inputs, densities in the dropped-constants form
-(see the refusal above), and regions producing target entries. One more
-applies to the generated backward alone: a region with a branch on a
-parameter keeps the autodiff replay, because reversing a branch needs
-the nested if/else shape the flat instruction list has already thrown
-away.
+(see the refusal above), and regions producing target entries. The generated
+backward supports forward-only branches by recording which basic blocks ran
+and reversing only those blocks. Back edges, malformed jump targets,
+unsupported derivatives, and paths that can read an uninitialized register
+retain the autodiff replay.
 
 ### Shared three-lane softmax (`program_softmax.cpp`, disable: `STANLI_NO_ISLAND_SOFTMAX3=1`)
 
@@ -1445,6 +1503,21 @@ headline historical measurements follow:
   state draws confirm stream alignment. These targeted results do not refresh
   `docs/corpus-bench.tsv` or the current
   [full-corpus table](../../docs/benchmarks.md#full-corpus).
+- **Compiled scalar integer RNG control** extends the register-machine path
+  to generated-quantity branches, rejection loops and checked indices driven
+  by integer draws. Effectful integer initializers cannot run during lexical
+  constant discovery; draw-dependent extents still refuse to the interpreter.
+  Poisson, Student-t and Bernoulli-logit use the shared Stan Math draw kernel.
+  Tests compare repeated graph/interpreter/copy outputs and subsequent RNG
+  state bitwise, including empty loops, dynamic-size fallback and invalid
+  indices. In the 2026-09-14 educational revision A/B, together with compiler
+  procedure pruning and buffered 17-digit CLI formatting, hurdle-Poisson
+  improved 4.75x, simple Poisson 8.51x and Student-t regression 1.96x end to
+  end. All 52 complete CSVs (13 models, four seeds) matched the old binary
+  byte for byte. All 13 models clear the 0.5x vectorized CmdStan wall-time
+  floor, including Stanli source compilation. See the
+  [full educational results](../../tests/educational/RESULTS.md) for the
+  preparation tradeoff, phase measurements and raw observations.
 - **Allocation-free ODE right-hand-side input seeding** removes the promoted
   `y` and `theta` staging vectors built on every solver callback and seeds the
   reusable register file directly. A targeted 2026-08-24 Release A/B (seven
@@ -1623,10 +1696,11 @@ was 1.07e-14 away, and `iohmm_reg` is 3.46e-13 against the replay's
 Beyond the estimate, islands still refuse propto densities (their
 term-dropping depends on argument types, which the island's uniform
 binding cannot reproduce), runs under 32 ops, and regions producing
-target terms. `gen_adjoint` additionally refuses jumps, so the regions
-lowering emits for parameter-dependent control flow keep the replay:
-reversing control flow wants the structured form the flat instruction
-list has already lost.
+target terms. Parameter-dependent forward branches can use generated
+adjoints; recorded block flags preserve the executed path. Back edges and
+unsupported derivatives retain the replay. The branch tests in
+`tests/test_adjoint.cpp` cover reused frames, conditional overwrites, nested
+branches, kernel calls, and refusal of uninitialized joins.
 
 ### ODE models and preparation
 

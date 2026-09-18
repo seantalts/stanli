@@ -32,11 +32,13 @@
 // cumsum([0, ta - b_1, ...])[j] = j*t*a - sum_{i<=j} b_i. Buckets refine on
 // the subtracted vector -- the item -- and the slope is whichever of the two
 // scalars that refinement holds still.
+#include <stanli/builtin_registry.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/partition.hpp>
 
 #include "pass_util.hpp"
+#include "reroll_profile.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -47,16 +49,12 @@
 namespace stanli {
 namespace {
 
-constexpr int64_t kMinLanes = 4;
-// island.cpp's currencies: ~5 ns per graph op against ~1 ns per element
-// moved. A bucket must beat its gathers by more than a rounding error, or it
-// churns the graph for nothing.
-constexpr int64_t kOpCost = 5;
-constexpr int64_t kPartitionMargin = 8 * kOpCost;
-// A density element costs about six op dispatches to evaluate. It is the
-// term that decides whether re-evaluating a lane the CSE pass would have
-// collapsed, or trading a vector density call for W elementwise ones, pays.
-constexpr int64_t kDensityElem = 6;
+// The floor and the cost currencies are shared with reroll.cpp, which uses
+// the same ones.
+constexpr int64_t kMinLanes = detail::kMinLanes;
+constexpr int64_t kOpCost = kLaneOpCost;
+constexpr int64_t kPartitionMargin = kLanePartitionMargin;
+constexpr int64_t kDensityElem = kLaneDensityElem;
 // Splitting is bounded work, not a retry loop: each one costs a re-pass over
 // a bucket, and a graph that presents thousands of interleaved writers must
 // not turn that into a quadratic term.
@@ -94,20 +92,8 @@ bool has_int_groups(uint16_t opcode) {
 int64_t group_len(const int* p) { return p[0] == -1 ? 2 : 1 + p[0]; }
 int group_elem(const int* p, int64_t e) { return p[0] == -1 ? p[1] : p[1 + e]; }
 
-// These kernels have an elementwise form that costs per element what their
-// summed one does (densities_lpmf.cpp), so widening a lane costs them
-// nothing. Every other density trades one vectorized call for W recorder
-// calls.
 bool elt_costs_per_element(uint16_t opcode) {
-  switch (opcode) {
-    case OP_BERNOULLI_LPMF:
-    case OP_BERNOULLI_LOGIT_LPMF:
-    case OP_BINOMIAL_LPMF:
-    case OP_BINOMIAL_LOGIT_LPMF:
-      return false;
-    default:
-      return true;
-  }
+  return lane_elt_costs_per_element(opcode);
 }
 
 // Outcome elements per lane, or 0 when the immediates are not a layout this
@@ -139,6 +125,7 @@ struct PosIn {
   InKind kind = InKind::kInvariant;
   int producer = -1;           // kLaneLocal: position within the lane
   std::vector<double> values;  // kConstLanes: one value per lane
+  bool tile_wide = false;      // kInvariant/shared, len == width: OP_REP_MAT
 };
 
 enum class Emit {
@@ -665,9 +652,13 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       Pos& ap = pos[(size_t)p];
       ap.ins.resize((size_t)t.n_in);
       const bool is_term = term_set.count(t.out) != 0;
-      bool all_shared = true;    // this op computes one value for every lane
-      int64_t width = 0;         // per-lane elements of the varying inputs
-      bool wide_shared = false;  // a shared input the kernels cannot broadcast
+      bool all_shared = true;  // this op computes one value for every lane
+      int64_t width = 0;       // per-lane elements of the varying inputs
+      // A shared or invariant input the kernels cannot broadcast (len != 1):
+      // a candidate to tile via OP_REP_MAT once `width` is known, resolved
+      // after this loop and after the all-shared hoist below, so a fully
+      // shared position still hoists first regardless of its width.
+      std::vector<int> wide_candidates;
 
       for (int j = 0; j < t.n_in && ok; ++j) {
         PosIn& in = ap.ins[(size_t)j];
@@ -677,7 +668,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           in.producer = local->second;
           const Pos& prod = pos[(size_t)local->second];
           if (prod.shared) {
-            if (g.slots[(size_t)t.in[j]].len != 1) wide_shared = true;
+            if (g.slots[(size_t)t.in[j]].len != 1) wide_candidates.push_back(j);
           } else {
             all_shared = false;
             if (width && width != prod.width) ok = false;
@@ -693,7 +684,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           if (store_delim && p == k - 1 && j == 0) continue;
           if (!settled(t.in[j])) ok = false;
           if (t.in[j] >= 0 && g.slots[(size_t)t.in[j]].len != 1)
-            wide_shared = true;
+            wide_candidates.push_back(j);
           continue;
         }
         std::vector<double> vals;
@@ -739,7 +730,6 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         const int64_t step = strided_read ? t.idata[1] : 1;
         ap.width = w;
         ap.idx.reserve((size_t)(L * w));
-        bool run = step == 1;
         for (int64_t l = 0; l < L; ++l) {
           const Op& o = op_at(p, l);
           const int64_t start = o.idata[0];
@@ -748,16 +738,22 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
             ok = false;
             break;
           }
-          if (start != t.idata[0] + l * w) run = false;
           for (int64_t e = 0; e < w; ++e)
             ap.idx.push_back((int)(start + e * step));
         }
         if (!ok) break;
-        if (run && w == 1 && t.idata[0] == 0 && blen == L) {
+        // Every lane's window, concatenated in lane order: one contiguous
+        // run (any width, not only w==1) is a slice, or the whole base for
+        // free; anything else is a gather, which is always correct here
+        // since these came from `ap.idx` regardless of source stride.
+        std::vector<int64_t> flat(ap.idx.begin(), ap.idx.end());
+        const FlatOffsetRun run = classify_flat_offsets(flat);
+        if (run.kind == BuiltinSliceMap::Kind::Contiguous && run.offset == 0 &&
+            (int64_t)ap.idx.size() == blen) {
           ap.emit = Emit::kElide;
-        } else if (run && w == 1) {
+        } else if (run.kind == BuiltinSliceMap::Kind::Contiguous) {
           ap.emit = Emit::kSlice;
-          ap.idx.assign(1, t.idata[0]);
+          ap.idx.assign(1, (int)run.offset);
         } else {
           ap.emit = Emit::kGather;
         }
@@ -809,8 +805,19 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         ap.shared = true;
         continue;
       }
+      // A wide candidate that matches the position's own width tiles via
+      // OP_REP_MAT (mode chosen by the fused vector's packing order at
+      // emission); anything else is a width the kernels cannot broadcast
+      // and cannot pack.
+      bool wide_shared = false;
+      for (int j : wide_candidates) {
+        if (g.slots[(size_t)t.in[j]].len == width)
+          ap.ins[(size_t)j].tile_wide = true;
+        else
+          wide_shared = true;
+      }
       if (wide_shared) {
-        ok = false;  // the kernels broadcast len-1 arguments, nothing wider
+        ok = false;
         break;
       }
       // L lanes computing the identical scalar, each one a term: the const
@@ -894,6 +901,11 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     int64_t added = 0, ops_out = 0, lane_elems = 0;
     for (int p = 0; p < k; ++p) {
       const Pos& ap = pos[(size_t)p];
+      for (const PosIn& in : ap.ins)
+        if (in.tile_wide) {
+          ++ops_out;
+          added += L * ap.width;
+        }
       switch (ap.emit) {
         case Emit::kElide:
           break;
@@ -969,29 +981,49 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     for (int p = 0; p < k; ++p) {
       const Op& t = op_at(p, 0);
       Pos& ap = pos[(size_t)p];
-      if (ap.emit == Emit::kElide) {
-        ap.out = t.in[0];
-        continue;
-      }
-      if (ap.emit == Emit::kSlice || ap.emit == Emit::kGather) {
-        Op rd;
-        rd.opcode = ap.emit == Emit::kSlice ? OP_SLICE : OP_GATHER;
-        rd.n_in = 1;
-        rd.in[0] = t.in[0];
-        rd.out = g.add_slot(L * ap.width, false);
-        attach_idata(rd, std::move(ap.idx));
-        ap.out = rd.out;
-        out_ops.push_back(rd);
+      // The base's own read, materialized (a slice or a gather) or not
+      // (elision: the fused consumer reads the base directly).
+      if (ap.emit == Emit::kElide || ap.emit == Emit::kSlice ||
+          ap.emit == Emit::kGather) {
+        if (ap.emit == Emit::kElide) {
+          ap.out = t.in[0];
+        } else {
+          Op rd;
+          rd.opcode = ap.emit == Emit::kSlice ? OP_SLICE : OP_GATHER;
+          rd.n_in = 1;
+          rd.in[0] = t.in[0];
+          rd.out = g.add_slot(L * ap.width, false);
+          attach_idata(rd, std::move(ap.idx));
+          ap.out = rd.out;
+          out_ops.push_back(rd);
+        }
         continue;
       }
       Op op = t;  // opcode, variant and immediates carry over
+      // A wide shared operand tiled tail-to-tail across the fused vector's
+      // lane-major order: mode {width, count, 1} (rep_matrix's column-vector
+      // case, elementwise.cpp's rep_mat_fwd). partition's fused reads are
+      // always lane-major (an explicit index list or a lane-major base), so
+      // this is the only mode a bucket ever needs.
+      const auto tile_wide = [&](int base) {
+        Op rep;
+        rep.opcode = OP_REP_MAT;
+        rep.n_in = 1;
+        rep.in[0] = base;
+        rep.out = g.add_slot(L * ap.width, false);
+        attach_idata(rep, std::vector<int>{(int)ap.width, (int)L, 1});
+        out_ops.push_back(rep);
+        return rep.out;
+      };
       for (int j = 0; j < t.n_in; ++j) {
         const PosIn& in = ap.ins[(size_t)j];
         switch (in.kind) {
           case InKind::kInvariant:
+            if (in.tile_wide) op.in[j] = tile_wide(t.in[j]);
             break;
           case InKind::kLaneLocal:
             op.in[j] = pos[(size_t)in.producer].out;
+            if (in.tile_wide) op.in[j] = tile_wide(op.in[j]);
             break;
           case InKind::kConstLanes: {
             const int cs = g.add_slot(L, false);

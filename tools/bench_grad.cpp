@@ -5,6 +5,7 @@
 #include <stanli/model_adapter.hpp>
 
 #include <stan/math.hpp>
+#include "benchmark_timer.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -21,14 +22,17 @@ static std::string slurp(const char* p) {
   return ss.str();
 }
 
-int main(int argc, char** argv) {
+int benchmark_main(int argc, char** argv) {
   if (argc < 4) {
-    std::fprintf(stderr, "usage: bench_grad mir.sexp data.json N|--prep\n");
+    std::fprintf(stderr,
+                 "usage: bench_grad mir.sexp data.json N|--prep|--timed "
+                 "[--warmup-ms N --measure-ms N]\n");
     return 2;
   }
   const bool prep_only = std::string(argv[3]) == "--prep";
-  const int N = prep_only ? 0 : std::atoi(argv[3]);
-  if (!prep_only && N <= 0) {
+  const bool timed = std::string(argv[3]) == "--timed";
+  const int N = prep_only || timed ? 0 : std::atoi(argv[3]);
+  if (!prep_only && !timed && N <= 0) {
     std::fprintf(stderr, "bench_grad: N must be positive\n");
     return 2;
   }
@@ -117,32 +121,37 @@ int main(int argc, char** argv) {
   for (int64_t i = 0; i < n; ++i) q(i) = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
   Eigen::VectorXd grad(n);
   double sink = 0;
+  double lp = 0;
   stanli::ExecutorModel model(ex);
   stan::callbacks::logger logger;
-  const auto one = [&]() {
-    double f;
-    stan::model::gradient(model, q, f, grad, logger);
-    sink += f;
-  };
+  const auto one = [&]() { stan::model::gradient(model, q, lp, grad, logger); };
+  if (timed) {
+    const auto opts = stanli_benchmark::options(argc, argv, 4);
+    one();
+    if (!std::isfinite(lp) || !grad.allFinite())
+      throw std::runtime_error(
+          "benchmark point has non-finite density or gradient");
+    const auto warm = stanli_benchmark::window(one, opts.warmup_ns, 1, true);
+    const auto measured =
+        stanli_benchmark::window(one, opts.measure_ns, warm.batch);
+    stanli_benchmark::output(warm, measured, lp, grad);
+    return 0;
+  }
   // Warm up by time, not by count: 1000 evaluations is nothing on a scalar
   // model and 90 seconds on an ODE one.
   int warmup_evals = 0;
+  const auto legacy_one = [&]() {
+    one();
+    sink += lp;
+  };
   const Time warmup_start = prep_now();
-  {
-    auto w0 = std::chrono::steady_clock::now();
-    for (int i = 0; i < 1000; ++i) {
-      one();
-      ++warmup_evals;
-      if (std::chrono::steady_clock::now() - w0 >
-          std::chrono::milliseconds(200))
-        break;
-    }
-  }
+  warmup_evals = static_cast<int>(
+      stanli_benchmark::window(legacy_one, 200'000'000, 1, true).iterations);
   const int64_t warmup_ns = prep_ns(warmup_start);
   const int64_t driver_ns = prep_ns(driver_start);
   if (profile) ex.set_profile(true);
   auto t0 = std::chrono::steady_clock::now();
-  for (int i = 0; i < N; ++i) one();
+  for (int i = 0; i < N; ++i) legacy_one();
   auto t1 = std::chrono::steady_clock::now();
   if (profile) std::fprintf(stderr, "%s", ex.profile_report().c_str());
   const double ns =
@@ -158,4 +167,13 @@ int main(int argc, char** argv) {
   // tools/bench_models.py (which reads field 0 and the last field).
   std::printf("%.1f %.6g %.1f %lld\n", ns, sink, fwd_ns, (long long)n);
   return 0;
+}
+
+int main(int argc, char** argv) {
+  try {
+    return benchmark_main(argc, argv);
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "bench_grad: %s\n", error.what());
+    return 1;
+  }
 }

@@ -12,10 +12,24 @@ transformed data {
   int sumnt2 = 0;
   for (i in 1 : nots)
     sumnt2 += nts[i] * nts[i];
+  // Keep trailing geometry that cannot be recovered from a flattened empty
+  // value. The write-array lowering must receive the declaration facts from
+  // the same prepared handoff as sumnt2.
+  array[0, 2] matrix[3, 4] empty_tensor =
+      rep_array(rep_matrix(0, 3, 4), 0, 2);
+  array[1, 2] matrix[3, 4] shaped_tensor =
+      rep_array(rep_matrix(0, 3, 4), 1, 2);
+  for (j in 1 : 2)
+    shaped_tensor[1, j] = rep_matrix(sumnt2 + j, 3, 4);
 }
 parameters {
   vector[sumnt2] x;
 }
 model {
   x ~ normal(0, 1);
+}
+generated quantities {
+  int prepared_size = sumnt2;
+  array[0, 2] matrix[3, 4] empty_copy = empty_tensor;
+  matrix[3, 4] prepared_leaf = shaped_tensor[1, 2];
 }

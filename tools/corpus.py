@@ -31,6 +31,20 @@ VERIFY_JSON = REPO / "docs" / "verification.json"
 # Context for models that evaluate but do not match, so the reason is not
 # lost between runs.
 NOTES = {
+    "dogs":
+        "31 and 32 ULP from CmdStan at two of the three recorded points, "
+        "against a 30 ULP budget. Against a 60-digit reference both engines "
+        "are off by about as much: CmdStan sums the 750 Bernoulli terms one "
+        "at a time and lands 10 to 59 ULP from the true log density, stanli's "
+        "one merged call uses Eigen's packet reduction and vectorized "
+        "exp/log1p and lands 15 to 63 ULP off, and on the gradient each "
+        "engine is the closer one at a different point. Matching CmdStan "
+        "would mean adopting its order; pairwise summation would put the "
+        "merged call within 1 ULP of the reference at a larger distance from "
+        "CmdStan.",
+    "dogs_log":
+        "bitwise at the primary point and 25 ULP at another recorded "
+        "point, for the same reason as dogs, inside the 30 ULP budget.",
     "kronecker_gp":
         "lp matches CmdStan to 1e-13 and 436/438 gradients match; the two "
         "that flow through eigenvectors_sym differ by 0.7%. The covariance "
@@ -147,6 +161,10 @@ def main():
         v = ver[m]
         rel = "0 (bitwise)" if v["max_rel"] == 0 else f"{v['max_rel']:.1e}"
         md.append(f"| `{m}` | {v['n_values']} | {rel} | {v['max_ulp']} |")
+    noted = [m for m in verified if m in NOTES]
+    if noted:
+        md += ["", "Models over the default budget:", ""]
+        md += [f"- `{m}`: {NOTES[m]}" for m in noted]
     wa_refs = {}
     if REFS_PATH.exists():
         # Every point carries its own write_array reference; the table
@@ -195,7 +213,36 @@ def main():
     for model, (s, msg) in sorted(results.items()):
         if s != "OK":
             md.append(f"- `{model}`: {s} {msg}")
+    md += rethinking_status()
     (REPO / "docs" / "corpus-status.md").write_text("\n".join(md) + "\n")
+
+
+def rethinking_status():
+    """Keep the teaching corpus separate from posteriordb's denominator."""
+    directory = REPO / "tests" / "rethinking"
+    models = sorted(p.stem for p in directory.glob("*.stan"))
+    refs, _ = load_refs()
+    rows = []
+    for model in models:
+        points = refs.get(model, {}).get("points", {})
+        passed = sum(p.get("status") == "VERIFIED" for p in points.values())
+        worst = max((p.get("max_rel") or 0 for p in points.values()), default=0)
+        rows.append((model, passed, worst))
+    verified = sum(passed == 3 for _, passed, _ in rows)
+    md = ["", "## Rethinking teaching corpus", "",
+          f"Reference recording: {verified}/{len(models)} fixtures verified at all three CmdStan points. "
+          "The inventory covers all 61 ulam call sites in chapters 4–16 of the "
+          "second edition, plus a supplemental hurdle model. Counts here are "
+          "separate from posteriordb. These are the recorder's measurements; "
+          "`tools/verify_refs.py` replays them against the current build in CI.",
+          "", "See [the inventory and provenance](../tests/rethinking/README.md), and "
+          "[current-build replay and performance results](teaching-support.md). "
+          "Recording coverage is not a claim that the current build replays every fixture successfully.",
+          "", "| model | verified points | worst scaled error |",
+          "| --- | ---: | ---: |"]
+    md += [f"| `{model}` | {passed}/3 | {worst:.2e} |"
+           for model, passed, worst in rows]
+    return md
 
 
 if __name__ == "__main__":

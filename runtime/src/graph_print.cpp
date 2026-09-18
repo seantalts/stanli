@@ -65,6 +65,10 @@ void print_instr(std::string& out, const Program& p, size_t i,
     case Program::CONST:
       appendf(out, " r%d <- pool[%d] (=%g)", I.dst, I.a, p.pool[(size_t)I.a]);
       break;
+    case Program::FILL:
+      appendf(out, " r%d..r%d <- repeat(pool[%d]=%g)", I.dst, I.dst + I.len - 1,
+              I.a, p.pool[(size_t)I.a]);
+      break;
     case Program::CONSTR:
       appendf(out, " r%d..r%d <- pool[%d..] (=", I.dst, I.dst + I.len - 1, I.a);
       for (int k = 0; k < I.len; ++k)
@@ -132,6 +136,9 @@ void print_island_body(std::string& out, const Graph& g, size_t u, int n) {
   appendf(out,
           "\n  ADJOINT (reverse order; dst/a/b/c are adjoint cells, "
           "va/vb/vc/vd are value registers):\n");
+  for (const auto& segment : p.adj.segments)
+    appendf(out, "  when r%d: adjoint [%d, %d)\n", segment.guard, segment.begin,
+            segment.end);
   for (size_t i = 0; i < p.adj.code.size(); ++i) {
     const AdjInstr& A = p.adj.code[i];
     appendf(out,

@@ -1,0 +1,68 @@
+{
+  "date": "2026-09-14",
+  "runtime_commit": "e46e360f",
+  "platform": "Apple M3 Ultra, macOS arm64, Apple Clang 21, Release",
+  "method": "One warmed timed gradient loop per engine/model, with the corpus drivers at the same deterministic unconstrained point. CmdStan --O1. No sampling in this run.",
+  "command": "python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb build-rel/educational-corpus-suite.tsv --corpus educational --no-sample --stancflags --O1 --timeout 120",
+  "sha256": {
+    "build-rel/bench_grad": "ae56702798a38b92ddb0bf131bf830fb613ce048f6a4f954c5c1c7bb0d4e46f6",
+    "deps/stanc3/stanli-vectorize-probe": "4fa6a134a0c4cb52fd64d554640262e534bcd7423a9627b3012c1eb7ba1f66eb",
+    "tools/bench_grad.cpp": "2616041dbf7770773ba7a8f9107876e65d3cba4b9926eee3e8504e13f714cf55",
+    "tools/bench_cmdstan_grad.cpp": "e6c27ad37d610f6b94a8729edb0f7e529bd6e91274892894b9251623d4849135",
+    "docs/educational-bench-o1.tsv": "979d8d5fdf4f97450e3f5411c8b2fb81060d6a94c3ffac8c00972dd90f67449a"
+  },
+  "fixtures": {
+    "aalto_bern": {
+      "source_sha256": "7532ec21c55ae04570263343001060f3ec0e3d4c551f4077a89436a44ccddd1c",
+      "data_sha256": "92d2c77da07299cec3e03216e5d89824d59e94daf681dbd1eca1723dbc343954"
+    },
+    "aalto_binom": {
+      "source_sha256": "134393994a82bb459a93e1ab82a263a7ce3f434cbe6656c102c2d8a613783dce",
+      "data_sha256": "c51f498c1de15115da841e2fd45680fbaa675bb105a9289c24d7a770cf52005e"
+    },
+    "aalto_binom2": {
+      "source_sha256": "84608e8993aeb55e045d1845b80f78cf6496e56dd927559f2602f80c9d7d87bf",
+      "data_sha256": "9cd5eb460f002b4d6a7565b7d7b6df0c19966ba688e6e7a3d69d2957be5d0ffa"
+    },
+    "aalto_binomb": {
+      "source_sha256": "1f6704e45bad9b8d008428b4c4e1bdc9e94442da1c5439c3500d1f662b82095d",
+      "data_sha256": "369a429bdb72de6d3cfe58c43578323d1d940c10e6be576eb7e7b85308510177"
+    },
+    "aalto_gpareto": {
+      "source_sha256": "208c7a27d553abe8d8bebcbdd450c55649d6a9a0582afe4d2337b6f87f58681f",
+      "data_sha256": "9498e8d4dde1059d427e89224aa3f922913237959db24f6836cd376125192dc0"
+    },
+    "aalto_grp_aov": {
+      "source_sha256": "01c9f998a5fe37c64ab90cf4251a0d6609a808c1408e8cb5a34054014c46a225",
+      "data_sha256": "484956104ef0af16b98e65bd96cab281159bce880848127231b1a1370e0d78c6"
+    },
+    "aalto_grp_prior_mean": {
+      "source_sha256": "0900910d4ebf6dda2c05739121b95fbcb06017deaba2e9da453663f9576fad04",
+      "data_sha256": "484956104ef0af16b98e65bd96cab281159bce880848127231b1a1370e0d78c6"
+    },
+    "aalto_grp_prior_mean_var": {
+      "source_sha256": "37ee948d6d4cf3c3af6ae5372089110d0261a41496bbbaaf3525a05fca262994",
+      "data_sha256": "484956104ef0af16b98e65bd96cab281159bce880848127231b1a1370e0d78c6"
+    },
+    "aalto_lin": {
+      "source_sha256": "55e49d71535ddd0ba121bd5f2185fa3c9dfb96d1c0b97b27da5c9b24126f3c18",
+      "data_sha256": "eddb24dc3e3a6316d622cd4c553a3ac654914dcf1d111ad7820ab6cbc5c87c56"
+    },
+    "aalto_lin_std": {
+      "source_sha256": "4a8458298b14e0c712d92ad94561d8758ca030ef5f12dd30cb6c6ee5d5424e80",
+      "data_sha256": "eb7b70d5cb0289690fdec532de96ce2e6f080d13574c11f0708f2b3b2aa651d0"
+    },
+    "aalto_lin_std_t": {
+      "source_sha256": "3545e841d3e2a365d33da6f2292bc5a5d4bc41fa59e8e22256a330a614f1f2e8",
+      "data_sha256": "eb7b70d5cb0289690fdec532de96ce2e6f080d13574c11f0708f2b3b2aa651d0"
+    },
+    "aalto_poisson_hurdle": {
+      "source_sha256": "fc3267e6649478dd33bc656d07174567b035270f675464b6e6d211205441c215",
+      "data_sha256": "7ad593d032403a10fece31531ecb7a418909cf965970642285ce80240c07310d"
+    },
+    "aalto_poisson_simple": {
+      "source_sha256": "ff16a2d83a708bcc17b038f5ee21e015c587bdd435ff7cab8216b0785d81a19c",
+      "data_sha256": "7ad593d032403a10fece31531ecb7a418909cf965970642285ce80240c07310d"
+    }
+  }
+}

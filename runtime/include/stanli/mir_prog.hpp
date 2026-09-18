@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <map>
@@ -243,7 +244,8 @@ struct ProgramCompiler {
   // over a few arrays would otherwise carry hundreds of copies of 0.
   int pool_at(const double* v, int n) {
     for (size_t s = 0; s + (size_t)n <= p.pool.size(); ++s)
-      if (std::equal(v, v + n, p.pool.begin() + (long)s)) return (int)s;
+      if (std::memcmp(v, p.pool.data() + s, (size_t)n * sizeof(double)) == 0)
+        return (int)s;
     const int at = (int)p.pool.size();
     p.pool.insert(p.pool.end(), v, v + n);
     return at;
@@ -251,6 +253,14 @@ struct ProgramCompiler {
 
   // dst[0..n) = the given values, as one instruction.
   Program::Instr const_instr(int dst, const double* v, int n) {
+    // Broadcast immutable constants, never active registers. In var replay
+    // one leaf represents the fill; writes still replace individual handles.
+    // Compare bits to retain signed zero and NaN payloads exactly.
+    bool uniform = n > 1;
+    for (int k = 1; uniform && k < n; ++k)
+      uniform = std::memcmp(v, v + k, sizeof(double)) == 0;
+    if (uniform)
+      return Program::Instr{Program::FILL, dst, pool_at(v, 1), 0, 0, n};
     return Program::Instr{
         n == 1 ? Program::CONST : Program::CONSTR, dst, pool_at(v, n), 0, 0, n};
   }
@@ -660,7 +670,7 @@ struct ProgramCompiler {
     return e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int;
   }
 
-  double creal(const mir::Expr& e) {
+  std::optional<double> constant_real(const mir::Expr& e) {
     if (e.data_only && extern_real && e.type_ == "UReal") {
       double value = 0.0;
       if (extern_real(e, &value)) return value;
@@ -676,46 +686,54 @@ struct ProgramCompiler {
         auto integer = ints.find(e.name);
         if (integer != ints.end() && integer->second.size() == 1)
           return static_cast<double>(integer->second[0]);
-        bail("real " + e.name + " is not known at compile time");
+        return std::nullopt;
       }
       case mir::Expr::Promotion:
-        if (e.args.size() != 1) bail("real promotion form");
-        return creal(e.args[0]);
-      case mir::Expr::TernaryIf:
-        if (e.args.size() != 3) bail("real conditional form");
-        return creal(e.args[cint(e.args[0]) != 0 ? 1 : 2]);
+        return e.args.size() == 1 ? constant_real(e.args[0]) : std::nullopt;
+      case mir::Expr::TernaryIf: {
+        long condition;
+        if (e.args.size() != 3 || !try_cint(e.args[0], &condition))
+          return std::nullopt;
+        return constant_real(e.args[condition != 0 ? 1 : 2]);
+      }
       case mir::Expr::FunApp:
-        if (const auto value = mir::nullary_constant(e)) return *value;
-        if (e.args.size() == 1) {
-          if (e.name == "PMinus__" || e.name == "minus")
-            return -creal(e.args[0]);
-          if (e.name == "PPlus__" || e.name == "plus") return creal(e.args[0]);
+        if (const auto value = mir::nullary_constant(e)) return value;
+        if (e.args.size() == 1 && (e.name == "PMinus__" || e.name == "minus" ||
+                                   e.name == "PPlus__" || e.name == "plus")) {
+          const auto value = constant_real(e.args[0]);
+          if (!value) return std::nullopt;
+          return e.name == "PMinus__" || e.name == "minus" ? -*value : *value;
         }
         if (e.args.size() == 2) {
-          const double lhs = creal(e.args[0]);
-          const double rhs = creal(e.args[1]);
-          if (e.name == "Plus__" || e.name == "add") return lhs + rhs;
-          if (e.name == "Minus__" || e.name == "subtract") return lhs - rhs;
+          const auto lhs = constant_real(e.args[0]);
+          if (!lhs) return std::nullopt;
+          const auto rhs = constant_real(e.args[1]);
+          if (!rhs) return std::nullopt;
+          if (e.name == "Plus__" || e.name == "add") return *lhs + *rhs;
+          if (e.name == "Minus__" || e.name == "subtract") return *lhs - *rhs;
           if (e.name == "Times__" || e.name == "multiply" ||
               e.name == "elt_multiply")
-            return lhs * rhs;
+            return *lhs * *rhs;
           if (e.name == "Divide__" || e.name == "divide" ||
               e.name == "elt_divide")
-            return lhs / rhs;
+            return *lhs / *rhs;
         }
-        bail("real function " + e.name + " is not known at compile time");
+        return std::nullopt;
       default:
-        bail("real expression is not known at compile time");
+        return std::nullopt;
     }
   }
 
+  double creal(const mir::Expr& e) {
+    if (const auto value = constant_real(e)) return *value;
+    bail("real expression is not known at compile time");
+  }
+
   bool try_creal(const mir::Expr& e, double* out) {
-    try {
-      *out = creal(e);
-      return true;
-    } catch (Bail&) {
-      return false;
-    }
+    const auto value = constant_real(e);
+    if (!value) return false;
+    *out = *value;
+    return true;
   }
 
   long cint(const mir::Expr& e) {
@@ -903,6 +921,60 @@ struct ProgramCompiler {
   }
 
   bool try_cint(const mir::Expr& e, long* out) {
+    // Scalar runtime conditions are expected misses. Preserve the throwing
+    // evaluator for required geometry and uncommon forms, but do not unwind
+    // through the compiler just to learn that a scalar value is unavailable.
+    if (e.kind == mir::Expr::Var) {
+      const auto it = ints.find(e.name);
+      if (it == ints.end() || it->second.size() != 1) return false;
+      *out = it->second[0];
+      return true;
+    }
+    if (e.kind == mir::Expr::Promotion)
+      return e.args.size() == 1 && try_cint(e.args[0], out);
+    if (e.kind == mir::Expr::TernaryIf) {
+      long condition;
+      return e.args.size() == 3 && try_cint(e.args[0], &condition) &&
+             try_cint(e.args[condition != 0 ? 1 : 2], out);
+    }
+    if (e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) {
+      long lhs;
+      if (e.args.size() != 2 || !int_operand(e.args[0]) ||
+          !try_cint(e.args[0], &lhs))
+        return false;
+      const bool value = lhs != 0;
+      if (e.kind == mir::Expr::EAnd ? !value : value) {
+        *out = value;
+        return true;
+      }
+      long rhs;
+      if (!int_operand(e.args[1]) || !try_cint(e.args[1], &rhs)) return false;
+      *out = rhs != 0;
+      return true;
+    }
+    if (e.kind == mir::Expr::FunApp &&
+        (e.args.size() == 1 || e.args.size() == 2)) {
+      if (const BuiltinSpec* pred = shaped_builtin_spec(
+              e.name, e.args.size(), BuiltinShapePolicy::Predicate)) {
+        double args[2] = {};
+        const bool integer =
+            int_operand(e.args[0]) &&
+            (e.args.size() == 2
+                 ? int_operand(e.args[1])
+                 : pred->predicate == BuiltinPredicate::Negation);
+        for (size_t k = 0; k < e.args.size(); ++k) {
+          if (integer) {
+            long value;
+            if (!try_cint(e.args[k], &value)) return false;
+            args[k] = static_cast<double>(value);
+          } else if (!try_creal(e.args[k], &args[k]))
+            return false;
+        }
+        *out = evaluate_predicate_builtin(*pred, args[0], args[1]);
+        return true;
+      }
+    }
+
     try {
       *out = cint(e);
       return true;
@@ -1434,6 +1506,9 @@ struct ProgramCompiler {
         }
         if (e.args.empty()) bail("index form");
         const Range b = expr(e.args[0]);
+        // Index composition can erase every selector of a full span. The
+        // remaining base-only node is the identity, as in MirInterp.
+        if (e.args.size() == 1) return b;
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
         // General compile-time matrix selection. Registers are column-major,
         // so selected columns are outer and rows inner; this covers All,
@@ -2026,14 +2101,19 @@ struct ProgramCompiler {
     ViewKind out_kind = ViewKind::Flat;
     std::vector<int> idata;
     if (const ScalarRng* family = scalar_rng_family(e.name)) {
-      // An integer draw is runtime geometry: a size, an index or a branch
-      // condition the region has no way to know. That is the interpreter's
-      // remit, so leave the whole tranche there rather than quietly serving
-      // one out of a double register.
-      if (scalar_rng_is_int(*family))
-        bail(e.name + ": an integer draw stays on WaInterp");
+      // Stan ints fit exactly in double registers. Draws remain effectful
+      // runtime values: cint cannot fold them, shape demands still refuse,
+      // and dynamic indexing uses the existing checked register operations.
+      const auto leaf = scalar_rng_is_int(*family) ? mir::UnsizedLeaf::Int
+                                                   : mir::UnsizedLeaf::Real;
+      if (e.unsized.depth != 0 || e.unsized.leaf != leaf)
+        bail(e.name + ": result type does not match scalar RNG family");
       if (args.size() != scalar_rng_arity(*family))
         bail(e.name + ": wrong number of arguments");
+      if ((*family == ScalarRng::Binomial ||
+           *family == ScalarRng::BetaBinomial) &&
+          e.args[0].unsized.leaf != mir::UnsizedLeaf::Int)
+        bail(e.name + ": first argument must be int");
       for (const Range& a : args)
         if (!is_scalar(a))
           bail(e.name + ": container arguments stay on WaInterp");
@@ -2087,8 +2167,15 @@ struct ProgramCompiler {
     if (layout.integer_matrix_rows != 0)
       idata = {(int)layout.integer_matrix_rows,
                (int)layout.integer_matrix_cols};
-    return kernel_call(spec.opcode, args, out, 0, spec.activity_mask,
-                       std::move(idata), {}, e.name);
+    uint8_t activity = spec.activity_mask;
+    for (size_t k = 0; k < arity; ++k) {
+      // Runtime integers and data-only values still execute normally, but
+      // have no derivative. A promotion alone is not proof of inactivity.
+      if (e.args[k].data_only || int_operand(e.args[k]))
+        activity &= (uint8_t)~(1u << k);
+    }
+    return kernel_call(spec.opcode, args, out, 0, activity, std::move(idata),
+                       {}, e.name);
   }
 
   static std::optional<Program::Code> native_builtin_code(uint16_t opcode) {
@@ -2395,6 +2482,32 @@ struct ProgramCompiler {
   }
 
   Range fun(const mir::Expr& e) {
+    // A scalar reduction does not need a variable-width register result.
+    // Keep the source's fixed capacity and check both bounds when executed.
+    // Other dynamic slices retain their existing refusal; no array padding
+    // or unused tail values participate in the reduction or its derivative.
+    if (e.fn_lib == mir::Expr::Lib::StanLib && e.name == "log_sum_exp" &&
+        e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
+      const auto& slice = e.args[0];
+      if (slice.args.size() == 2 && slice.args[1].name == "IndexBetween" &&
+          slice.args[1].args.size() == 2 &&
+          (slice.args[0].type_ == "UVector" ||
+           slice.args[0].type_ == "URowVector")) {
+        long lo, hi;
+        if (!try_cint(slice.args[1].args[0], &lo) ||
+            !try_cint(slice.args[1].args[1], &hi)) {
+          const Range base = expr(slice.args[0]);
+          const Range lower = expr(slice.args[1].args[0]);
+          const Range upper = expr(slice.args[1].args[1]);
+          if (!is_scalar(lower) || !is_scalar(upper))
+            bail("non-scalar slice bound");
+          const int r = alloc(1);
+          emit(Program::DYN_LSE_RANGE, r, base.reg, lower.reg, upper.reg,
+               base.len);
+          return {r, 1};
+        }
+      }
+    }
     if (const auto intrinsic = mir::stateful_intrinsic_kind(e)) {
       switch (*intrinsic) {
         case mir::StatefulIntrinsicKind::Target: {
@@ -3142,6 +3255,8 @@ struct ProgramCompiler {
                e.name == "EltDivide__" || e.name == "divide" ||
                e.name == "elt_divide")
         c = e.type_ == "UInt" ? Program::IDIV : Program::DIV;
+      else if (e.name == "Modulo__")
+        c = Program::IMOD;
       else if (e.name == "Pow__" || e.name == "pow")
         c = Program::POW;
       else if (e.name == "fmax")
@@ -3521,11 +3636,13 @@ struct ProgramCompiler {
           // A conditional write must preserve the old value on the untaken
           // path, so it cannot be folded into the single compile-time copy.
           // Likewise, an unconditional assignment after a structured while
-          // may read loop-carried state that now lives in registers.  The
+          // may read loop-carried state, and a generated-quantities integer
+          // may receive an RNG draw before its first while. The
           // lowering can export scalar-int live-outs, so reify both cases
           // instead of refusing a representable integer recurrence.
           if (!fold_is_certain(s.lhs) ||
-              (structured_while_seen && !try_cint(s.rhs, &ignored)))
+              ((structured_while_seen || in_write_array) &&
+               !try_cint(s.rhs, &ignored)))
             reify_written_int(s.lhs);
         }
         if (ints.count(s.lhs) && s.lhs_idx.empty()) {
@@ -3736,6 +3853,20 @@ struct ProgramCompiler {
         if ((dst.kind == ViewKind::Vector || dst.kind == ViewKind::RowVector ||
              dst.kind == ViewKind::Flat) &&
             s.lhs_idx.size() == 1) {
+          long fixed_index;
+          if (s.lhs_idx[0].name == "IndexSingle" &&
+              s.lhs_idx[0].args.size() == 1 &&
+              !try_cint(s.lhs_idx[0].args[0], &fixed_index)) {
+            if (!is_scalar(v)) bail("element assignment from a container");
+            const Range index = expr(s.lhs_idx[0].args[0]);
+            if (!is_scalar(index)) bail("non-scalar assignment index");
+            // Reading and writing the full range in the opcode metadata
+            // preserves untouched cells through register compaction. Replay
+            // records the selected write, including an aliased RHS, normally.
+            emit(Program::DYN_SET, dst.reg, dst.reg, v.reg, index.reg, dst.len);
+            known_int_arrays.erase(s.lhs);
+            return;
+          }
           const std::vector<int64_t> positions =
               matrix_positions(s.lhs_idx[0], dst.len, "assignment vector");
           if (v.len != static_cast<int>(positions.size()))

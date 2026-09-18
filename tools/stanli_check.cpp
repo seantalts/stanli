@@ -8,20 +8,28 @@
 // Used by tools/corpus.py to build the coverage scoreboard, and by the
 // reference harness to compare against CmdStan at the same point.
 //
+// The model is compiled by the embedded stanc3 pipeline, the same one
+// stanli_run and the language packages use. A build without the embedded
+// object runs that pipeline's executable, stanli-compile, found beside this
+// binary or on PATH. Three explicit alternatives, mutually exclusive:
+//   --stanli-compile P  run the stanli-compile at P
+//   --stanc P           shell out to the stock stanc executable at P
+//   --mir P             read already-compiled MIR from P, keeping model.stan
+//                       as the report/ledger identity
+//
 // Two other modes, both stanli-against-itself rather than stanli against
 // CmdStan (tests/cross_path.hpp has the full account):
 //   --paths   which engines this model reaches -- islands, adjoints,
 //             write_array mode, ODE mode
 //   --cross   the cross-path agreement matrix: recompile once per engine
 //             configuration and demand the answers agree bitwise
-//   --mir P   read already-compiled MIR from P, keeping model.stan as the
-//             report/ledger identity; mutually exclusive with --stanc
 #include "../tests/cross_path.hpp"
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
 
 #include <cmath>
@@ -50,11 +58,6 @@ static double eval_point(int64_t i, int variant) {
   }
 }
 
-static std::string run_stanc(const std::string& stanc,
-                             const std::string& model) {
-  return stanli::tooling::run_stanc_process(stanc, model);
-}
-
 static std::string read_mir(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) throw std::runtime_error("cannot open MIR file " + path);
@@ -68,19 +71,16 @@ int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
-                 "[--stanc PATH | --mir PATH] [--point N] [--columns]\n"
+                 "[--stanli-compile PATH | --stanc PATH | --mir PATH]\n"
+                 "       [--point N] [--columns]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR]\n");
     return 2;
   }
-#ifdef _WIN32
-  std::string stanc = "deps/stanc3/stanc.exe";
-#else
-  std::string stanc = "deps/stanc3/stanc";
-#endif
+  std::string stanc;
+  std::string compiler;
   std::string mir_path;
-  bool stanc_arg = false;
   int variant = 0;
   bool columns_only = false;
   bool wa_values = false;
@@ -110,20 +110,21 @@ int main(int argc, char** argv) {
       draw_variant = std::atoi(argv[++i]);
     else if (a == "--ledger" && i + 1 < argc)
       ledger_path = argv[++i];
-    else if (a == "--stanc" && i + 1 < argc) {
+    else if (a == "--stanc" && i + 1 < argc)
       stanc = argv[++i];
-      stanc_arg = true;
-    } else if (a == "--mir" && i + 1 < argc)
+    else if (a == "--stanli-compile" && i + 1 < argc)
+      compiler = argv[++i];
+    else if (a == "--mir" && i + 1 < argc)
       mir_path = argv[++i];
     else if (a == "--point" && i + 1 < argc)
       variant = std::atoi(argv[++i]);
   }
-  if (stanc_arg && !mir_path.empty()) {
+  if (!stanc.empty() + !compiler.empty() + !mir_path.empty() > 1) {
     std::fprintf(stderr,
-                 "stanli_check: --stanc and --mir are mutually exclusive\n");
+                 "stanli_check: --stanc, --stanli-compile and --mir are "
+                 "mutually exclusive\n");
     return 2;
   }
-  if (const char* env = std::getenv("STANC")) stanc = env;
   if (!dump_stages.empty() || !dump_dir.empty()) {
     const std::string sink = dump_dir.empty() ? "-" : dump_dir;
 #ifdef _WIN32
@@ -139,15 +140,18 @@ int main(int argc, char** argv) {
 
   std::string mir;
   try {
-    mir = mir_path.empty() ? run_stanc(stanc, argv[1]) : read_mir(mir_path);
+    mir = mir_path.empty()
+              ? stanli::tooling::compile_source(stanc, compiler, argv[1])
+              : read_mir(mir_path);
     if (mir.empty()) {
       std::printf("COMPILE_FAIL %s produced no MIR\n",
-                  mir_path.empty() ? "stanc" : "MIR file");
+                  mir_path.empty() ? "the compiler" : "the MIR file");
       return 1;
     }
   } catch (const std::exception& e) {
-    std::printf("COMPILE_FAIL %s: %s\n",
-                mir_path.empty() ? "stanc" : "MIR file", e.what());
+    const std::string what = e.what();
+    std::fprintf(stderr, "%s\n", what.c_str());
+    std::printf("COMPILE_FAIL %s\n", what.substr(0, what.find('\n')).c_str());
     return 1;
   }
 

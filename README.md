@@ -30,16 +30,24 @@ and `remotes::install_github()` or a checkout installs from source (see
 keeping installation small and avoiding a local stan-math build.
 
 - Performance vs CmdStan: [docs/benchmarks.md](docs/benchmarks.md).
-  Median gradient <!--gen:corpus_median-->3.02x<!--/gen--> across
+  Median gradient <!--gen:corpus_median-->2.10x<!--/gen--> across
   <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models,
-  <!--gen:corpus_at_par-->117<!--/gen--> of them at or above CmdStan;
-  <!--gen:bench_span-->0.8x-10.9x<!--/gen--> across the representative slice;
+  <!--gen:corpus_at_par-->119<!--/gen--> of them at or above CmdStan;
+  <!--gen:bench_span-->1.0x-10.9x<!--/gen--> across the representative slice;
   the first Eight Schools run from source to CSV is roughly 100x faster.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models
   verified against CmdStan's log density and full gradient,
   <!--gen:corpus_bitwise-->53<!--/gen--> of them bitwise identical,
   worst relative deviation <!--gen:corpus_worst-->7.1e-13<!--/gen-->.
+- Rethinking coverage: [tests/rethinking/README.md](tests/rethinking/README.md).
+  All 61 book `ulam()` calls, plus a supplemental hurdle model;
+  <!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan
+  references. The latest replay completes all 62, with worst scaled error
+  1.48e-13 across 32,349 compared values.
+- Teaching support: [models, numerics, performance, and R workflows](docs/teaching-support.md)
+  for Rethinking, brms, and the educational collection; plus a
+  [cmdstanr migration guide](docs/from-cmdstanr.md).
 - Language coverage: [tests/stanc3/README.md](tests/stanc3/README.md).
   <!--gen:lang_verified-->11/11<!--/gen--> models lifted from stanc3's own
   test suite, for the type and language constructs no real posterior
@@ -113,7 +121,12 @@ NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
    become gathers, and N scalar density terms fuse into one summed
    vector density. `radon_pooled` goes from 27,670 ops to 8. Anything a
    pass cannot prove safe it leaves alone. `STANLI_NO_REROLL=1` disables
-   the main pass.
+   the main pass. A proven subset of terminal scalar loops (one indexed
+   real-data read, parameter addition/multiplication or FMA, then an
+   optional `exp`/`square` chain) is priced before expanding its iterations.
+   When profitable, lowering emits the same vector kernels directly.
+   `STANLI_SYMBOLIC_LANES=0` disables this shortcut; unset or `1` enables
+   automatic selection. Other values conservatively disable it.
 
 4. **Execution** (`runtime/src/executor.cpp`). The op graph is the AD
    tape. The forward sweep computes the log density and stashes each
@@ -356,7 +369,7 @@ python3 -m http.server -d web     # then open http://localhost:8000
 
 ## Build
 
-Developer C/C++ builds should use a C++17 Clang toolchain (`clang` and
+Linux/macOS developer C/C++ builds use a C++17 Clang toolchain (`clang` and
 `clang++`) to match pull-request validation. The shipped Linux and Windows
 release wheels retain their established GCC toolchains, while macOS uses
 AppleClang. Other GNU libraries and tools may remain installed for auxiliary
@@ -365,12 +378,48 @@ workflows.
 One-shot setup (fetches pinned deps, builds, runs tests):
 
 ```
-./tools/dev_setup.sh               # core build + tests + source-pinned stanc3
-./tools/dev_setup.sh --embed       # + in-process compiler
+./tools/dev_setup.sh               # core build + tests + source-pinned stanc3, embedded in the tools/library
+./tools/dev_setup.sh --no-embed    # use standalone stanli-compile (required on Windows ARM64)
 ./tools/dev_setup.sh --corpus      # + posteriordb and CmdStan
 ./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
 ./tools/dev_setup.sh --all
 ```
+
+On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
+Embedding is the default, keeping the tools self-contained and compilation
+in-process. `--embed` explicitly selects that default. Windows ARM64 requires
+`--no-embed`: its OCaml compiler runs under x64 emulation, while Stanli's
+numerical runtime is native ARM64. `--all` respects `--no-embed` in either order.
+With `--no-embed`, setup builds `stanli-compile` from the same Stanli pipeline
+and CMake copies it beside both `stanli_check` and `stanli_run`, including in
+`cmake --install` deployments. Keep those executables together when moving an
+installation. The tools also accept `--stanli-compile PATH`; stock stanc is
+used only when explicitly requested with `--stanc PATH` (or `STANC` for
+`stanli_run`). `--conformance` stages the standalone compiler with the Python
+library when embedding is disabled.
+Setup reuses the installation providing `pacman` on `PATH`, or checks
+`C:/msys64` and installs `MSYS2.MSYS2` with winget if absent. It prepends
+the UCRT64 directories on x86_64 or CLANGARM64 directories on ARM64 to `PATH`.
+Pacman provides Git, Python, make, Clang and CMake; missing opam uses winget.
+MinGW `RelWithDebInfo` builds use `-g1` to reduce object and `.exe.debug` sizes,
+retaining source lines and backtraces. Use `-DCMAKE_BUILD_TYPE=Debug` for full
+variable and type information.
+
+Full native Windows setup runs after pushes to `main` and on manual dispatch,
+covering x64 embedding and ARM64 standalone deployment. Pull requests run the
+fast setup contract tests in the existing static checks and retain Windows
+compiler parity coverage, without waiting for these full native builds.
+
+Windows CI saves the OCaml toolchain and validated compiler artifacts before
+building C++, then saves the C++ cache before running the full test suite.
+Its toolchain cache is keyed on the compiler versions and source pin, so
+unrelated workflow edits do not force an OCaml rebuild. ARM runners install the
+x64 MinGW dependencies used by OCaml before validating its restored cache. A
+failed compiler launch preserves the cache and reports the error; only a
+successfully reported incompatible version triggers switch replacement.
+CI uses `--no-build`
+for compiler preparation and `--no-test` to save the completed build before
+the separate test step; ordinary setup still builds and tests in one command.
 
 `--conformance` is what makes the differential Stan language sweep runnable
 here rather than only in the nightly; see

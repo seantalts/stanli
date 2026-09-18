@@ -298,12 +298,13 @@ static void check_error_parity(
 }
 
 // OdeSpec and its generated derivative payload are graph-owned and shared by
-// executor copies. The mutable direct-RK register/Jacobian buffers must remain
-// thread-local: otherwise two chains can agree in a serial test and corrupt
+// executor copies. The mutable register/Jacobian buffers must remain private
+// to each solve: otherwise two chains can agree in a serial test and corrupt
 // each other as soon as multiple chains evaluate the same model concurrently.
-static void check_shared_spec_threads(const stanli::OdeSpec& spec) {
+static void check_shared_spec_threads(const stanli::OdeSpec& spec,
+                                      bool use_direct) {
   stanli::OdeSpec direct_spec = spec;
-  direct_spec.direct_rk_enabled = true;
+  direct_spec.direct_rk_enabled = use_direct;
 
   constexpr int kThreads = 4;
   constexpr int kRepeats = 6;
@@ -327,6 +328,7 @@ static void check_shared_spec_threads(const stanli::OdeSpec& spec) {
   threads.reserve(kThreads);
   for (int thread = 0; thread < kThreads; ++thread) {
     threads.emplace_back([&, thread] {
+      stan::math::ChainableStack tape;
       ready.fetch_add(1, std::memory_order_release);
       while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
       try {
@@ -474,7 +476,8 @@ int main() {
     check_activity_case<false, true>(*rk45_spec, "data y/active theta");
     check_activity_case<true, true>(*rk45_spec, "active y/active theta");
     check_activity_case<false, false>(*rk45_spec, "data y/data theta");
-    check_shared_spec_threads(*rk45_spec);
+    check_shared_spec_threads(*rk45_spec, true);
+    check_shared_spec_threads(*rk45_spec, false);
 
     OdeSpec invalid = *rk45_spec;
     invalid.rtol = 0.0;
