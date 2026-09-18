@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <type_traits>
 
 namespace stanli {
 
@@ -77,6 +78,19 @@ class PathCollector : public stan::callbacks::structured_writer {
   // The service writes a dozen other keys through the base no-ops.
   using stan::callbacks::structured_writer::begin_record;
   using stan::callbacks::structured_writer::write;
+
+  // Stan 2.40 uses fixed-width writer overloads, while Pathfinder emits
+  // size_t/long too. On macOS those are distinct types: forward integrals
+  // explicitly so overload resolution remains unambiguous on every host.
+  template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
+  void write(const std::string& key, T value) {
+    if constexpr (std::is_signed_v<T>)
+      stan::callbacks::structured_writer::write(key,
+                                                static_cast<long long>(value));
+    else
+      stan::callbacks::structured_writer::write(key,
+                                                static_cast<uint64_t>(value));
+  }
 
   void begin_record(const std::string& key) override {
     record_ = std::atoi(key.c_str());

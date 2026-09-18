@@ -57,7 +57,7 @@ env:
   # Must match tools/dev_setup.sh. The embedded compiler cache is keyed on
   # the commit, so bumping it there and here invalidates the cache once.
   STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
-  STANC3_SRC_SHA: 8e154ac3454790cb5427ae72106c859b3fb8d90a
+  STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
   OCAML_VERSION: 5.5.0
   OPAM_VERSION: 2.5.2
   # Must match tools/dev_setup.sh; pins the corpus the reference check reads.

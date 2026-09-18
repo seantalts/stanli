@@ -23,9 +23,9 @@ cd "$(dirname "$0")/.."
 REPO=$PWD
 
 STANC3_SRC_REPO=https://github.com/stan-dev/stanc3.git
-STANC3_SRC_SHA=8e154ac3454790cb5427ae72106c859b3fb8d90a
+STANC3_SRC_SHA=d58446e631b02cacc5355e373defc6092a684554
 PDB_SHA=28f8d3d6e975315f42aa274a8399f21e07a43b30
-CMDSTAN_SHA=11cb052d3e1fc8c799e0fec559e2ee5452b38d27
+CMDSTAN_SHA=d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6
 OPAM_SWITCH=stanc3-55
 OCAML_VERSION=5.5.0
 source tools/stanc_embed/provenance.sh

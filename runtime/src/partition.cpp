@@ -597,7 +597,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
         if (!hit) return;
         const Op& o = op_at(at, 0);
         glm.chain.push_back(at);
-        hit = o.opcode == opcode && o.n_in == 1 &&
+        hit = o.opcode == opcode && o.n_in == 1 && o.n_idata == 0 &&
               (at = local_at(o.in[0], at)) >= 0;
       };
       if (hit && !(cat.variant & kCategoricalLogit)) step(OP_SOFTMAX);

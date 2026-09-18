@@ -3,8 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MATH_SHA=8f326d14599d3030c626c46532d8e8534c1cdbec
-STAN_SHA=c96d04115d35cb04f42e45c5a69a82f9704798f1
+MATH_SHA=5252d51d47c1d5e78005fc043ad996fad6dd8da8
+STAN_SHA=a6806ef8477a7b5f65b27449ec33528c162bc024
 
 fetch() { # name url sha sparse-paths...
   local name=$1 url=$2 sha=$3

@@ -837,7 +837,11 @@ class MirInterp {
             ? mir::pow_zero_base_law(e.args[0], e.args[1], !e.args[1].data_only)
             : 0;
     Value o;
-    o.r = run_kernel_call(e, spec.opcode, variant, activity, {},
+    std::vector<int> idata;
+    if (layout.groups >= 0)
+      idata = {static_cast<int>(layout.groups),
+               static_cast<int>(layout.group_width), 1};
+    o.r = run_kernel_call(e, spec.opcode, variant, activity, std::move(idata),
                           std::move(inputs), layout.lanes);
     if (spec.shape == BuiltinShapePolicy::Reduction) return o;
     o.dims = values[layout.result_argument].dims;

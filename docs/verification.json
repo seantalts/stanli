@@ -1,7 +1,7 @@
 {
  "2pl_latent_reg_irt": {
-  "max_rel": 8.759194908647637e-16,
-  "max_ulp": 64,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 532,
   "point": 0,
   "status": "VERIFIED"
@@ -161,8 +161,8 @@
   "status": "VERIFIED"
  },
  "bym2_offset_only": {
-  "max_rel": 2.0425123145886983e-15,
-  "max_ulp": 18,
+  "max_rel": 1.3235302085538967e-15,
+  "max_ulp": 8,
   "n_values": 3846,
   "point": 0,
   "status": "VERIFIED"
@@ -196,8 +196,8 @@
   "status": "VERIFIED"
  },
  "diamonds": {
-  "max_rel": 2.6015481865636527e-12,
-  "max_ulp": 16248,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 27,
   "point": 0,
   "status": "VERIFIED"
@@ -343,15 +343,15 @@
   "status": "VERIFIED"
  },
  "i319_gauss_re": {
-  "max_rel": 2.6962017371290446e-16,
-  "max_ulp": 2,
+  "max_rel": 1.124073050266679e-16,
+  "max_ulp": 1,
   "n_values": 67,
   "point": 0,
   "status": "VERIFIED"
  },
  "i319_negbin_fixed": {
-  "max_rel": 5.58735223821029e-16,
-  "max_ulp": 3,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 7,
   "point": 0,
   "status": "VERIFIED"
@@ -359,9 +359,9 @@
  "i319_negbin_re": {
   "max_rel": 0.0,
   "max_ulp": 0,
-  "n_values": 0,
+  "n_values": 67,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "i319_pois_fixed": {
   "max_rel": 0.0,
@@ -371,18 +371,18 @@
   "status": "VERIFIED"
  },
  "i319_pois_re": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 2.2965363360676365e-16,
+  "max_ulp": 2,
+  "n_values": 66,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "i319_pois_re2": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 1.7675024900337938e-16,
+  "max_ulp": 1,
+  "n_values": 303,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "i320_gp_expquad": {
   "max_rel": 2.832353129811338e-09,
@@ -392,18 +392,18 @@
   "status": "MISMATCH"
  },
  "i320_gp_matern32": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 3.636767893890477e-14,
+  "max_ulp": 256,
+  "n_values": 35,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "i320_mi_nhanes": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 1.3877787807814457e-17,
+  "max_ulp": 1,
+  "n_values": 28,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "i320_pois_trunc_both": {
   "max_rel": 1.6647214501283718e-15,
@@ -413,18 +413,18 @@
   "status": "VERIFIED"
  },
  "i320_pois_trunc_ub": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 1.6647214501283718e-15,
+  "max_ulp": 13,
+  "n_values": 5,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "i320_sratio_cs": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 1.8318679906315083e-15,
+  "max_ulp": 66,
+  "n_values": 9,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "i320_sratio_plain": {
   "max_rel": 1.4529228077417952e-15,
@@ -455,8 +455,8 @@
   "status": "VERIFIED"
  },
  "kidscore_interaction_c": {
-  "max_rel": 4.687140302713552e-14,
-  "max_ulp": 330,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
@@ -469,8 +469,8 @@
   "status": "VERIFIED"
  },
  "kidscore_interaction_z": {
-  "max_rel": 5.593884229701321e-14,
-  "max_ulp": 363,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
@@ -539,8 +539,8 @@
   "status": "VERIFIED"
  },
  "logearn_height": {
-  "max_rel": 4.2934293822456485e-16,
-  "max_ulp": 2,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -553,22 +553,22 @@
   "status": "VERIFIED"
  },
  "logearn_interaction": {
-  "max_rel": 2.6082673809169275e-16,
-  "max_ulp": 2,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
  },
  "logearn_interaction_z": {
-  "max_rel": 1.1343714804034292e-15,
-  "max_ulp": 9,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
  },
  "logearn_logheight_male": {
-  "max_rel": 2.119765286892635e-16,
-  "max_ulp": 1,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 5,
   "point": 0,
   "status": "VERIFIED"
@@ -581,36 +581,36 @@
   "status": "VERIFIED"
  },
  "logmesquite": {
-  "max_rel": 3.882708715150133e-16,
-  "max_ulp": 3,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 9,
   "point": 0,
   "status": "VERIFIED"
  },
  "logmesquite_logva": {
-  "max_rel": 1.285478096770169e-16,
-  "max_ulp": 1,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
  },
  "logmesquite_logvas": {
-  "max_rel": 1.9989188407240724e-16,
-  "max_ulp": 1,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 9,
   "point": 0,
   "status": "VERIFIED"
  },
  "logmesquite_logvash": {
-  "max_rel": 3.4423261026136313e-16,
-  "max_ulp": 2,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 8,
   "point": 0,
   "status": "VERIFIED"
  },
  "logmesquite_logvolume": {
-  "max_rel": 1.7384996146279896e-16,
-  "max_ulp": 1,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -1078,11 +1078,11 @@
   "status": "REJECTED_BOTH"
  },
  "s2_logistic_normal": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 3.4671059234716965e-16,
+  "max_ulp": 3,
+  "n_values": 8,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "s2_me2": {
   "max_rel": 1.3651161069134437e-16,
@@ -1106,7 +1106,7 @@
   "status": "VERIFIED"
  },
  "s2_mi_trunc_lb": {
-  "max_rel": 4.3910149549665273e-16,
+  "max_rel": 4.3910136404208904e-16,
   "max_ulp": 2,
   "n_values": 10,
   "point": 0,
@@ -1239,11 +1239,11 @@
   "status": "VERIFIED"
  },
  "s2_unstr": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 7.711911070902828e-16,
+  "max_ulp": 10,
+  "n_values": 32,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "s2_weights_trunc": {
   "max_rel": 1.2950123107660062e-16,
@@ -1379,8 +1379,8 @@
   "status": "VERIFIED"
  },
  "sw_bernoulli": {
-  "max_rel": 2.220446049250313e-16,
-  "max_ulp": 4,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -1407,8 +1407,8 @@
   "status": "VERIFIED"
  },
  "sw_cens": {
-  "max_rel": 3.0676908793921366e-16,
-  "max_ulp": 2,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -1421,11 +1421,11 @@
   "status": "VERIFIED"
  },
  "sw_cratio_cs": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 2.76167160784974e-13,
+  "max_ulp": 1528,
+  "n_values": 8,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "sw_cumulative": {
   "max_rel": 0.0,
@@ -1519,11 +1519,11 @@
   "status": "VERIFIED"
  },
  "sw_mi": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 1.2223079731599358e-16,
+  "max_ulp": 1,
+  "n_values": 10,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "sw_mixture": {
   "max_rel": 4.1660493898426127e-16,
@@ -1547,15 +1547,15 @@
   "status": "VERIFIED"
  },
  "sw_mv_rescor": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 0,
+  "max_rel": 2.626122360789915e-16,
+  "max_ulp": 2,
+  "n_values": 8,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "sw_negbinomial": {
-  "max_rel": 1.5543122344752192e-15,
-  "max_ulp": 14,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 5,
   "point": 0,
   "status": "VERIFIED"
@@ -1568,8 +1568,8 @@
   "status": "VERIFIED"
  },
  "sw_poisson": {
-  "max_rel": 4.440892098500626e-15,
-  "max_ulp": 40,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 4,
   "point": 0,
   "status": "VERIFIED"
@@ -1577,9 +1577,9 @@
  "sw_re_bern": {
   "max_rel": 0.0,
   "max_ulp": 0,
-  "n_values": 0,
+  "n_values": 9,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "sw_re_gauss": {
   "max_rel": 0.0,
@@ -1591,16 +1591,16 @@
  "sw_re_negbin": {
   "max_rel": 0.0,
   "max_ulp": 0,
-  "n_values": 0,
+  "n_values": 10,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "sw_re_pois": {
   "max_rel": 0.0,
   "max_ulp": 0,
-  "n_values": 0,
+  "n_values": 9,
   "point": 0,
-  "status": "REJECTED_BOTH"
+  "status": "VERIFIED"
  },
  "sw_re_slope": {
   "max_rel": 2.123301225335912e-16,
@@ -1645,8 +1645,8 @@
   "status": "VERIFIED"
  },
  "sw_student": {
-  "max_rel": 4.440892098500626e-16,
-  "max_ulp": 16,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
@@ -1722,22 +1722,22 @@
   "status": "VERIFIED"
  },
  "wells_daae_c_model": {
-  "max_rel": 8.561952644149155e-15,
-  "max_ulp": 55,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 7,
   "point": 0,
   "status": "VERIFIED"
  },
  "wells_dae_c_model": {
-  "max_rel": 9.154671126231747e-14,
-  "max_ulp": 446,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 6,
   "point": 0,
   "status": "VERIFIED"
  },
  "wells_dae_inter_model": {
-  "max_rel": 2.705742544770234e-14,
-  "max_ulp": 224,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 8,
   "point": 0,
   "status": "VERIFIED"
@@ -1771,8 +1771,8 @@
   "status": "VERIFIED"
  },
  "wells_interaction_c_model": {
-  "max_rel": 6.577085061717487e-15,
-  "max_ulp": 39,
+  "max_rel": 0.0,
+  "max_ulp": 0,
   "n_values": 5,
   "point": 0,
   "status": "VERIFIED"

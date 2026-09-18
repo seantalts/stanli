@@ -53,6 +53,8 @@ const char* layout(const stanli::FunctionSpec& spec) {
   switch (density.shape) {
     case stanli::DensityShape::Plain:
       return "density_plain";
+    case stanli::DensityShape::PoissonBinomial:
+      return "density_poisson_binomial";
     case stanli::DensityShape::Categorical:
       return "density_categorical";
     case stanli::DensityShape::FirstMatrixRows:

@@ -631,6 +631,38 @@ static HmmGraph build_softmax3_island() {
   return h;
 }
 
+// Group metadata must survive island carving, including one-element leaves.
+static void test_grouped_softmax_island_refusal() {
+  for (int width : {1, 3}) {
+    HmmGraph h;
+    const int logits = h.g.add_slot(2 * width, true);
+    const int probs = h.g.add_slot(2 * width, false);
+    h.g.add_op(OP_SOFTMAX, {logits}, probs, {2, width, 0});
+    int acc = h.g.add_slot(1, false);
+    h.g.add_op(OP_INDEX, {probs}, acc, {0});
+    for (int i = 0; i < 40; ++i) {
+      const int next = h.g.add_slot(1, false);
+      h.g.add_op(OP_SIN, {acc}, next);
+      acc = next;
+    }
+    h.g.result_slot = acc;
+    h.terms.push_back(acc);
+    const auto want = run_grad(h.g, h.fills);
+    test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
+    const int carved = carve_islands(h.g, h.fills, h.terms, {});
+    test_unsetenv("STANLI_ISLAND_ALWAYS");
+    expect("grouped softmax surrounding island carves", carved > 0);
+    int grouped = 0;
+    for (const auto& op : h.g.ops)
+      if (op.opcode == OP_SOFTMAX && op.n_idata == 3) ++grouped;
+    expect_eq("grouped softmax remains graph-visible", grouped, 1);
+    const auto got = run_grad_twice(std::move(h.g), h.fills);
+    expect("grouped softmax result size", got.size() == want.size());
+    for (size_t i = 0; i < got.size() && i < want.size(); ++i)
+      expect_exact("grouped softmax island value/gradient", got[i], want[i]);
+  }
+}
+
 static void test_softmax3_island_executor() {
   HmmGraph ref = build_softmax3_island();
   const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
@@ -1516,6 +1548,7 @@ int main() {
   test_unsetenv("STANLI_ISLAND_ALWAYS");
   test_wide_state_refused();
   test_vector_copies_carved();
+  test_grouped_softmax_island_refusal();
   test_softmax3_island_executor();
   test_softmax3_private_slot_stays_invalid_graph_ir();
   test_softmax3_payload_copy_lifetime();

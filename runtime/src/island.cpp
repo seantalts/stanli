@@ -152,8 +152,10 @@ bool in_vocab(const Graph& g, const Op& op) {
     case OP_DOT:
       return op.n_in == 2 && g.slots[op.in[0]].len == g.slots[op.in[1]].len;
     case OP_LOG_SUM_EXP:
-    case OP_SOFTMAX:
       return op.n_in == 1;
+    case OP_SOFTMAX:
+      // Program::SOFTMAX normalizes one vector, not an array of vectors.
+      return op.n_in == 1 && op.n_idata == 0;
     default:
       if (unary_code(op.opcode) >= 0)
         return g.slots[op.out].len == g.slots[op.in[0]].len;
@@ -416,7 +418,7 @@ struct Compiler {
         return ok;
       }
       case OP_SOFTMAX: {
-        if (out_len != g.slots[op.in[0]].len) return false;
+        if (op.n_idata != 0 || out_len != g.slots[op.in[0]].len) return false;
         const int a = read_reg(op.in[0]);
         emit(Program::SOFTMAX, write_reg(op.out), a, 0, 0, (int)out_len);
         return ok;

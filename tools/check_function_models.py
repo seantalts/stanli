@@ -110,20 +110,25 @@ def compare(name, reference, args):
 
 
 def main():
+    global FIXTURES, REFERENCE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=pathlib.Path, default=REPO / "build-rel")
     parser.add_argument("--stanc", type=pathlib.Path, default=REPO / "deps/stanc3/stanc")
     parser.add_argument("--cmdstan", type=pathlib.Path, default=REPO / "deps/cmdstan")
+    parser.add_argument("--fixtures", type=pathlib.Path, default=FIXTURES)
+    parser.add_argument("--manifest", type=pathlib.Path)
+    parser.add_argument("--reference", type=pathlib.Path, default=REFERENCE)
     parser.add_argument("--record", action="store_true")
     parser.add_argument("--jobs", type=int, default=2)
     args = parser.parse_args()
     args.build, args.stanc, args.cmdstan = (p.resolve() for p in
                                           (args.build, args.stanc, args.cmdstan))
-    args.data = FIXTURES / "empty.json"
-    manifest = json.loads((FIXTURES / "manifest.json").read_text())
+    FIXTURES, REFERENCE = args.fixtures.resolve(), args.reference.resolve()
+    args.data = REPO / "tests/function_coverage/empty.json"
+    manifest = json.loads((args.manifest or FIXTURES / "manifest.json").read_text())
     names = sorted(manifest["models"])
-    if len(names) != 10:
-        raise ValueError("Expected exactly ten function-coverage models")
+    if not names or (args.manifest is None and len(names) != 10):
+        raise ValueError("Expected a nonempty manifest (ten models for the default suite)")
     if args.record:
         args.toolchain = {
             "stanc_sha256": digest(args.stanc),

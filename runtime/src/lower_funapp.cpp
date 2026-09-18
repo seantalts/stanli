@@ -177,7 +177,8 @@ std::vector<int> Lowering::int_arg_values(LoweredArgument& actual) {
     if (int_env.count(oc.name)) return {static_cast<int>(int_env[oc.name])};
   }
   if (oc.kind == mir::Expr::LitInt) return {static_cast<int>(oc.lit_i)};
-  if (oc.kind == mir::Expr::Indexed) {
+  if (oc.kind == mir::Expr::Indexed ||
+      (oc.kind == mir::Expr::FunApp && oc.unsized.depth > 0)) {
     // May be a slice (y[i] on a 2-D array yields a whole row), so
     // evaluate through the data interpreter, not scalar eval_int.
     DataMap::Entry v = eval_pure(oc, "an integer density argument");
@@ -1203,6 +1204,19 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
   // their own policy dispatch further down.
   const bool elementwise_builtin =
       builtin != nullptr && builtin->shape == BuiltinShapePolicy::Elementwise;
+  if (elementwise_builtin && builtin->arity == 4) {
+    actuals.require_arity(4);
+    Val a = actuals.at(0).value(), b = actuals.at(1).value();
+    Val c = actuals.at(2).value(), d = actuals.at(3).value();
+    const std::vector<Val> values{a, b, c, d};
+    const auto layout = resolved_builtin_layout(e, *builtin, values);
+    SlotInfo si = view_of(e.type_);
+    si.param_free = a.si.param_free && b.si.param_free && c.si.param_free &&
+                    d.si.param_free;
+    return with_layout(
+        emit_value(builtin->opcode, {a, b, c, d}, layout.lanes, si),
+        elementwise_layout({a, b, c, d}));
+  }
   if (elementwise_builtin && builtin->arity == 2 &&
       builtin->arguments[0] == BuiltinArgumentKind::Real &&
       builtin->arguments[1] == BuiltinArgumentKind::Real) {
@@ -1567,7 +1581,16 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
             ? elementwise_layout({a})
             : owning_layout(si);
     return with_layout(
-        emit_value(builtin->opcode, {a}, g.slots[a.slot].len, si), layout);
+        emit_value(
+            builtin->opcode, {a}, g.slots[a.slot].len, si,
+            resolved.groups < 0
+                ? std::vector<int>{}
+                : std::vector<int>{checked_immediate(resolved.groups,
+                                                     "softmax groups"),
+                                   checked_immediate(resolved.group_width,
+                                                     "softmax width"),
+                                   0}),
+        layout);
   }
   // plus, and its operator spelling, are the identity on every shape.
   if (e.name == "PPlus__" || (e.name == "plus" && e.args.size() == 1)) {

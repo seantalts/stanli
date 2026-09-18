@@ -8,12 +8,59 @@
 namespace stanli {
 namespace {
 
+// Apply one vector operation per array leaf. Interpreted arrays use
+// first-index-fast storage; graph and register arrays use outer-major.
+template <typename F>
+void grouped_unary(KernelCtx& ctx, F&& f, bool backward) {
+  const int64_t groups = ctx.idata[0], width = ctx.idata[1];
+  const bool interleaved = ctx.idata[2] != 0;
+  const auto cell = [&](int64_t g, int64_t j) {
+    return interleaved ? j * groups + g : g * width + j;
+  };
+  for (int64_t g = 0; g < groups; ++g) {
+    Eigen::VectorXd input(width), output(width), adjoint(width),
+        upstream(width);
+    for (int64_t j = 0; j < width; ++j) input[j] = ctx.in[0].data[cell(g, j)];
+    KernelCtx leaf = ctx;
+    leaf.idata = nullptr;
+    leaf.n_idata = 0;
+    leaf.in[0] = {input.data(), width};
+    leaf.out = {output.data(), width};
+    if (backward) {
+      if (!ctx.in_adj[0].data) return;
+      adjoint.setZero();
+      for (int64_t j = 0; j < width; ++j)
+        upstream[j] =
+            ctx.out.len == 1 ? ctx.out_adj : ctx.out_adj_vec.data[cell(g, j)];
+      leaf.in_adj[0] = {adjoint.data(), width};
+      leaf.out_adj_vec = {upstream.data(), width};
+      if (width == 1) leaf.out_adj = upstream[0];
+      legacy_bwd_vec_in(leaf, f);
+      for (int64_t j = 0; j < width; ++j)
+        ctx.in_adj[0].data[cell(g, j)] += adjoint[j];
+    } else {
+      output = f(input);
+      for (int64_t j = 0; j < width; ++j) ctx.out.data[cell(g, j)] = output[j];
+    }
+  }
+}
+
 void softmax_fwd(KernelCtx& ctx) {
+  if (ctx.n_idata == 3) {
+    grouped_unary(
+        ctx, [](const auto& x) { return stan::math::softmax(x); }, false);
+    return;
+  }
   Eigen::Map<const Eigen::VectorXd> x(ctx.in[0].data, ctx.in[0].len);
   Eigen::Map<Eigen::VectorXd> out(ctx.out.data, ctx.out.len);
   out = stan::math::softmax(x);
 }
 void softmax_bwd(KernelCtx& ctx) {
+  if (ctx.n_idata == 3) {
+    grouped_unary(
+        ctx, [](const auto& x) { return stan::math::softmax(x); }, true);
+    return;
+  }
   legacy_bwd_vec_in(ctx, [](const auto& x) { return stan::math::softmax(x); });
 }
 
@@ -115,11 +162,21 @@ void dirichlet_bwd(KernelCtx& ctx) {
 }
 
 void log_softmax_fwd(KernelCtx& ctx) {
+  if (ctx.n_idata == 3) {
+    grouped_unary(
+        ctx, [](const auto& x) { return stan::math::log_softmax(x); }, false);
+    return;
+  }
   Eigen::Map<const Eigen::VectorXd> x(ctx.in[0].data, ctx.in[0].len);
   Eigen::Map<Eigen::VectorXd> out(ctx.out.data, ctx.out.len);
   out = stan::math::log_softmax(x);
 }
 void log_softmax_bwd(KernelCtx& ctx) {
+  if (ctx.n_idata == 3) {
+    grouped_unary(
+        ctx, [](const auto& x) { return stan::math::log_softmax(x); }, true);
+    return;
+  }
   legacy_bwd_vec_in(ctx,
                     [](const auto& x) { return stan::math::log_softmax(x); });
 }

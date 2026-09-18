@@ -252,6 +252,7 @@ void run_call(const Program::Call& call, double* reg, EvalState* state) {
 
 void register_elementwise_kernels();
 void register_density_kernels();
+void register_probability_fns_kernels();
 void register_legacy_kernels();
 void register_matrix_kernels();
 void register_algebra_kernels();
@@ -273,6 +274,7 @@ static void ensure_registered() {
   static const bool once = [] {
     register_elementwise_kernels();
     register_density_kernels();
+    register_probability_fns_kernels();
     register_legacy_kernels();
     register_matrix_kernels();
     register_algebra_kernels();

@@ -185,9 +185,9 @@ Nothing here ships on "looks close".
 **<!--gen:corpus_verified_of-->118 of 120<!--/gen--> posteriordb models**
 are differentially verified against CmdStan: same model, same data, same
 evaluation point, comparing the log density and every single gradient
-component. **<!--gen:corpus_bitwise-->36<!--/gen--> agree bitwise.** The
+component. **<!--gen:corpus_bitwise-->53<!--/gen--> agree bitwise.** The
 worst deviation across the entire corpus is
-**<!--gen:corpus_worst-->2.6e-12<!--/gen--> relative**.
+**<!--gen:corpus_worst-->7.1e-13<!--/gen--> relative**.
 
 The two exceptions are documented rather than hidden. `sir`'s ODE
 solution dips about 1e-9 below a declared lower bound at the shared

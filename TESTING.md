@@ -47,12 +47,22 @@ documented `kronecker_gp` points use limits based on measured deviations, and
 points rejected by CmdStan require matching rejection behavior. The sections
 below give the details and known exceptions.
 
+The CmdStan 2.40 upgrade also has focused fixtures in
+`tests/fixtures/stan240_*.stan`, with independent three-point CmdStan references
+in `tests/function_coverage/stan240_references.json.gz`. They cover the new
+quantile and Poisson-binomial functions, container conversions, grouped
+softmax, and normal-identity GLM design vectors across graph execution,
+runtime control, transformed data and generated quantities. `test_stan240`
+checks cross-path equality and direct Math values/gradients;
+`test_stan240_reference` replays the external references. The generated
+signature suite adds all supported overloads and mixed argument activity.
+
 ## Overview of the checks
 
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | every pull request |
-| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on seven successful models; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | every pull request |
+| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | every pull request |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | every pull request |
 | corpus comparison | Are 119 posteriordb models, 11 compiler-derived fixtures and 124 brms models consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | every pull request |
 | cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | every pull request, within CTest |
@@ -129,8 +139,8 @@ The reference artifact
 - Every value is the exact `%.17g` string CmdStan's driver printed
   ([`tools/ref_driver.cpp`](tools/ref_driver.cpp)), so the replay
   compares against the bits CmdStan produced rather than a rounded copy.
-- 232 models carry at least one complete row from Stan's per-draw output
-  routine, `write_array`, at the same points: 693 rows and 622,449 values
+- 251 models carry at least one complete row from Stan's per-draw output
+  routine, `write_array`, at the same points: 750 rows and 627,264 values
   covering constrained parameters, transformed parameters, and generated
   quantities. Column names are also compared exactly. Both direct
   `write_array` drivers start Stan's RNG with
@@ -143,8 +153,8 @@ The reference artifact
   [`docs/corpus-status.md`](docs/corpus-status.md); the aggregate above also
   includes the stanc3 fixtures, the brms models and all three points.
 - Reference provenance recorded in the file: CmdStan
-  2.39.0 at `11cb052d`, Stan `c96d0411`, Math `8f326d14`, stanc3
-  `8e154ac3`, posteriordb `28f8d3d6`, on Darwin arm64.
+  2.40.0 at `d3d5df6a`, Stan `a6806ef8`, Math 5.4.0 at `5252d51d`, stanc3
+  2.40.0 at `d58446e6`, posteriordb `28f8d3d6`, on Darwin arm64.
 
 The references were recorded by
 [`tools/verify_sample.py`](tools/verify_sample.py) against that CmdStan

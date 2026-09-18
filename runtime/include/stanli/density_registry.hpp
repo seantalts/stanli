@@ -20,6 +20,7 @@ enum class DensityShape : uint8_t {
   // idata.  This preserves data-only expressions and the scalar-vs-array
   // overload distinction while the vector argument stays one atomic value.
   Categorical,
+  PoissonBinomial,
   FirstMatrixRows,
   FirstMatrixDimensions,
   // Two or more vector/row_vector arguments, each of which may independently

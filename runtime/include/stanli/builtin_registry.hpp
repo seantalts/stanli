@@ -135,6 +135,8 @@ enum class BuiltinSlice : uint8_t {
   ToRowVector,
   ToMatrix,
   ToArray1d,
+  ToVectorArray,
+  ToRowVectorArray,
   // Expansions: broadcasts of one value or container, and two-container
   // concatenations mapped over the inputs' concatenated cell space.
   RepVector,
@@ -181,6 +183,9 @@ using BuiltinArgumentShape = FunctionArgumentShape;
 struct BuiltinLayout {
   int64_t lanes = 1;
   uint8_t result_argument = 0;
+  // Independent softmax leaves, -1 for ordinary ungrouped calls.
+  int64_t groups = -1;
+  int64_t group_width = 0;
   // Nonzero for the sole storage-order mismatch: an integer array paired
   // lane-wise with a real matrix (or array of matrices).
   int64_t integer_matrix_rows = 0;
@@ -283,7 +288,9 @@ struct BuiltinSliceMap {
 inline bool builtin_slice_is_reshape(BuiltinSlice slice) {
   return slice == BuiltinSlice::Transpose || slice == BuiltinSlice::ToVector ||
          slice == BuiltinSlice::ToRowVector ||
-         slice == BuiltinSlice::ToMatrix || slice == BuiltinSlice::ToArray1d;
+         slice == BuiltinSlice::ToMatrix || slice == BuiltinSlice::ToArray1d ||
+         slice == BuiltinSlice::ToVectorArray ||
+         slice == BuiltinSlice::ToRowVectorArray;
 }
 
 // Appends take two containers and map result cells over their concatenated

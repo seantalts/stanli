@@ -7,7 +7,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 
 | model | values compared | max rel diff | max ULP |
 | --- | ---: | ---: | ---: |
-| `2pl_latent_reg_irt` | 532 | 8.8e-16 | 64 |
+| `2pl_latent_reg_irt` | 532 | 0 (bitwise) | 0 |
 | `GLMM1_model` | 238 | 1.5e-14 | 104 |
 | `GLMM_Poisson_model` | 46 | 1.8e-15 | 16 |
 | `GLM_Binomial_model` | 4 | 0 (bitwise) | 0 |
@@ -30,10 +30,10 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `arma11` | 5 | 0 (bitwise) | 0 |
 | `blr` | 7 | 1.8e-16 | 1 |
 | `bones_model` | 14 | 1.5e-16 | 1 |
-| `bym2_offset_only` | 3846 | 2.0e-15 | 18 |
+| `bym2_offset_only` | 3846 | 1.3e-15 | 8 |
 | `covid19imperial_v2` | 52 | 8.2e-16 | 7 |
 | `covid19imperial_v3` | 52 | 8.2e-16 | 7 |
-| `diamonds` | 27 | 2.6e-12 | 16248 |
+| `diamonds` | 27 | 0 (bitwise) | 0 |
 | `dogs` | 4 | 5.3e-16 | 3 |
 | `dogs_hierarchical` | 3 | 1.2e-15 | 9 |
 | `dogs_log` | 3 | 0 (bitwise) | 0 |
@@ -57,9 +57,9 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `iohmm_reg` | 30 | 2.3e-14 | 2768 |
 | `irt_2pl` | 145 | 0 (bitwise) | 0 |
 | `kidscore_interaction` | 6 | 0 (bitwise) | 0 |
-| `kidscore_interaction_c` | 6 | 4.7e-14 | 330 |
+| `kidscore_interaction_c` | 6 | 0 (bitwise) | 0 |
 | `kidscore_interaction_c2` | 6 | 0 (bitwise) | 0 |
-| `kidscore_interaction_z` | 6 | 5.6e-14 | 363 |
+| `kidscore_interaction_z` | 6 | 0 (bitwise) | 0 |
 | `kidscore_mom_work` | 6 | 0 (bitwise) | 0 |
 | `kidscore_momhs` | 4 | 0 (bitwise) | 0 |
 | `kidscore_momhsiq` | 5 | 1.4e-16 | 1 |
@@ -68,17 +68,17 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `ldaK2` | 8 | 6.8e-14 | 452 |
 | `ldaK5` | 7715 | 7.1e-13 | 10698848 |
 | `log10earn_height` | 4 | 0 (bitwise) | 0 |
-| `logearn_height` | 4 | 4.3e-16 | 2 |
+| `logearn_height` | 4 | 0 (bitwise) | 0 |
 | `logearn_height_male` | 5 | 0 (bitwise) | 0 |
-| `logearn_interaction` | 6 | 2.6e-16 | 2 |
-| `logearn_interaction_z` | 6 | 1.1e-15 | 9 |
-| `logearn_logheight_male` | 5 | 2.1e-16 | 1 |
+| `logearn_interaction` | 6 | 0 (bitwise) | 0 |
+| `logearn_interaction_z` | 6 | 0 (bitwise) | 0 |
+| `logearn_logheight_male` | 5 | 0 (bitwise) | 0 |
 | `logistic_regression_rhs` | 3076 | 2.6e-15 | 2048 |
-| `logmesquite` | 9 | 3.9e-16 | 3 |
-| `logmesquite_logva` | 6 | 1.3e-16 | 1 |
-| `logmesquite_logvas` | 9 | 2.0e-16 | 1 |
-| `logmesquite_logvash` | 8 | 3.4e-16 | 2 |
-| `logmesquite_logvolume` | 4 | 1.7e-16 | 1 |
+| `logmesquite` | 9 | 0 (bitwise) | 0 |
+| `logmesquite_logva` | 6 | 0 (bitwise) | 0 |
+| `logmesquite_logvas` | 9 | 0 (bitwise) | 0 |
+| `logmesquite_logvash` | 8 | 0 (bitwise) | 0 |
+| `logmesquite_logvolume` | 4 | 0 (bitwise) | 0 |
 | `losscurve_sislob` | 16 | 4.8e-16 | 4 |
 | `lotka_volterra` | 9 | 4.3e-15 | 22 |
 | `low_dim_gauss_mix` | 6 | 0 (bitwise) | 0 |
@@ -116,14 +116,14 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `soil_incubation` | 7 | 1.6e-13 | 1241 |
 | `state_space_stochastic_level_stochastic_seasonal` | 390 | 5.8e-16 | 12 |
 | `surgical_model` | 15 | 0 (bitwise) | 0 |
-| `wells_daae_c_model` | 7 | 8.6e-15 | 55 |
-| `wells_dae_c_model` | 6 | 9.2e-14 | 446 |
-| `wells_dae_inter_model` | 8 | 2.7e-14 | 224 |
+| `wells_daae_c_model` | 7 | 0 (bitwise) | 0 |
+| `wells_dae_c_model` | 6 | 0 (bitwise) | 0 |
+| `wells_dae_inter_model` | 8 | 0 (bitwise) | 0 |
 | `wells_dae_model` | 5 | 0 (bitwise) | 0 |
 | `wells_dist` | 3 | 0 (bitwise) | 0 |
 | `wells_dist100_model` | 3 | 0 (bitwise) | 0 |
 | `wells_dist100ars_model` | 4 | 0 (bitwise) | 0 |
-| `wells_interaction_c_model` | 5 | 6.6e-15 | 39 |
+| `wells_interaction_c_model` | 5 | 0 (bitwise) | 0 |
 | `wells_interaction_model` | 5 | 0 (bitwise) | 0 |
 
 ## write_array references

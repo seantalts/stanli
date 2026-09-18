@@ -70,6 +70,9 @@ if (fallbackPath) {
 
 const models = [
   ["ordinary", "tests/fixtures/es.stan"],
+  ["stan240-functions", "tests/fixtures/stan240_functions.stan"],
+  ["stan240-containers", "tests/fixtures/stan240_containers.stan"],
+  ["stan240-glm", "tests/fixtures/stan240_glm.stan"],
   ["nested-udf", "tests/fixtures/view_udf_local_data_branch.stan"],
   ["loop-control", "tests/fixtures/paramcond_break.stan"],
   ["vectorized-loop", "tests/compiler/portable_vectorize_loop.stan"],

@@ -77,7 +77,7 @@ inline double bernoulli_logit_partial(int y, double theta) {
   const double sign = 2.0 * y - 1.0;
   const double z = sign * theta;
   const double exp_m_z = std::exp(-z);
-  if (z > 20.0) return -exp_m_z;
+  if (z > 20.0) return sign * exp_m_z;
   if (z >= -20.0) return sign * exp_m_z / (exp_m_z + 1.0);
   return sign;
 }
@@ -130,7 +130,7 @@ void bernoulli_logit_vector_fwd(KernelCtx& ctx) {
   }
   ntheta =
       (ntheta > cutoff)
-          .select(-exp_m_ntheta,
+          .select(signs * exp_m_ntheta,
                   (ntheta >= -cutoff)
                       .select(stan::math::promote_scalar<double>(
                                   signs * exp_m_ntheta / (exp_m_ntheta + 1)),
@@ -175,7 +175,7 @@ void bernoulli_logit_elt_vector_fwd(KernelCtx& ctx) {
   if (!bernoulli_arg_active(ctx)) return;
   Eigen::Map<Eigen::ArrayXd>(ctx.scratch, n) =
       (ntheta > cutoff)
-          .select(-exp_m_ntheta,
+          .select(signs * exp_m_ntheta,
                   (ntheta >= -cutoff)
                       .select(stan::math::promote_scalar<double>(
                                   signs * exp_m_ntheta / (exp_m_ntheta + 1)),

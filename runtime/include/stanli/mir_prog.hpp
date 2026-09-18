@@ -2081,6 +2081,9 @@ struct ProgramCompiler {
     Range out = args[layout.result_argument];
     out = typed(out, e.type_);
     std::vector<int> idata;
+    if (layout.groups >= 0)
+      idata = {static_cast<int>(layout.groups),
+               static_cast<int>(layout.group_width), 0};
     if (layout.integer_matrix_rows != 0)
       idata = {(int)layout.integer_matrix_rows,
                (int)layout.integer_matrix_cols};

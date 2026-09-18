@@ -971,8 +971,8 @@ double nid_glm_eval(KernelCtx& ctx) {
   for (int64_t j = 0; j < Xv.cols(); ++j)
     for (int64_t i = 0; i < Xv.rows(); ++i)
       Xv(i, j) = ctx.in[1].data[j * rows + i];
-  var y_scalar = ctx.in[0].data[0];
-  VarV yv(y_var && !one_y ? rows : 0);
+  var y_scalar = ctx.in[0].len ? ctx.in[0].data[0] : 0.0;
+  VarV yv(y_var && !one_y ? ctx.in[0].len : 0);
   for (int64_t i = 0; i < yv.size(); ++i) yv(i) = ctx.in[0].data[i];
   VarV alpha(ctx.in[2].len), beta(ctx.in[3].len), sigma(ctx.in[4].len);
   for (int64_t i = 0; i < ctx.in[2].len; ++i) alpha(i) = ctx.in[2].data[i];
@@ -994,11 +994,18 @@ double nid_glm_eval(KernelCtx& ctx) {
     else
       out = call(y, x, alpha, sigma);
   };
+  const bool row_x = ctx.n_idata >= 5 && ctx.idata[4] == 1;
   auto pick_x = [&](auto&& y) {
-    if (x_var)
+    if (row_x) {
+      if (x_var)
+        dispatch(y, Xv.row(0));
+      else
+        dispatch(y, Xd.row(0));
+    } else if (x_var) {
       dispatch(y, Xv);
-    else
+    } else {
       dispatch(y, Xd);
+    }
   };
   if (y_var) {
     if (one_y)

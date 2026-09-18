@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+Stanli now pins CmdStan and Stan 2.40.0, Stan Math 5.4.0 and stanc3
+2.40.0, including the bundled JavaScript compiler. New runtime support covers
+`student_t_qf`, the Poisson-binomial probability functions and RNG,
+`to_vector_array`, `to_row_vector_array`, `to_matrix(array[] vector)`,
+array and row-vector `softmax`/`log_softmax`, and the new `normal_id_glm_lpdf` design-vector
+overloads. Values, gradients, transformed data and generated quantities are
+checked against fresh CmdStan 2.40 references. The upgrade also adopts Math's
+corrected extreme-tail Bernoulli-logit gradient and normal tail calculations.
+The tuple-returning Laplace latent-solver helpers remain outside Stanli's
+supported runtime types.
+
 Generated quantities and transformed parameters are now written by each
 chain as it samples. The work happens on the chain's own thread as each
 draw is stored, so it runs in parallel across chains and inside the

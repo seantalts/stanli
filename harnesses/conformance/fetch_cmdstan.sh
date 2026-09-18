@@ -6,9 +6,9 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 cmdstan_dir=${1:-"$repo_root/deps/cmdstan"}
 
-cmdstan_sha=11cb052d3e1fc8c799e0fec559e2ee5452b38d27
-stan_sha=c96d04115d35cb04f42e45c5a69a82f9704798f1
-math_sha=8f326d14599d3030c626c46532d8e8534c1cdbec
+cmdstan_sha=d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6
+stan_sha=a6806ef8477a7b5f65b27449ec33528c162bc024
+math_sha=5252d51d47c1d5e78005fc043ad996fad6dd8da8
 bridgestan_sha=49e248f351d4dac18d7fd154dbc3a0ab39c5de10
 
 # The conformance stanc is built from source at STANC3_SRC_SHA -- the

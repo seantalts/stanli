@@ -70,6 +70,10 @@ const char* slice_function_name(BuiltinSlice slice) {
       return "to_row_vector";
     case BuiltinSlice::ToMatrix:
       return "to_matrix";
+    case BuiltinSlice::ToVectorArray:
+      return "to_vector_array";
+    case BuiltinSlice::ToRowVectorArray:
+      return "to_row_vector_array";
     case BuiltinSlice::ToArray1d:
       return "to_array_1d";
     case BuiltinSlice::RepVector:
@@ -242,6 +246,17 @@ BuiltinLayout builtin_layout(
 
   BuiltinLayout layout;
   layout.lanes = arguments[0].storage_size;
+  if ((spec.opcode == OP_SOFTMAX || spec.opcode == OP_LOG_SOFTMAX) &&
+      arguments[0].container == FunctionContainerKind::Array) {
+    const auto& a = arguments[0];
+    if (a.array_leaf != FunctionContainerKind::Vector &&
+        a.array_leaf != FunctionContainerKind::RowVector)
+      throw std::invalid_argument("softmax requires vector leaves");
+    layout.groups = 1;
+    for (size_t k = 0; k + 1 < a.dimensions.size(); ++k)
+      layout.groups *= a.dimensions[k];
+    layout.group_width = a.dimensions.back();
+  }
   if (spec.shape == BuiltinShapePolicy::Reduction) {
     if (spec.arity != 1)
       throw std::invalid_argument("unsupported reduction arity");
@@ -264,6 +279,23 @@ BuiltinLayout builtin_layout(
   if (spec.shape == BuiltinShapePolicy::Product ||
       spec.shape == BuiltinShapePolicy::Solve)
     throw std::logic_error("product and solve builtins have their own maps");
+  if (spec.arity > 2 && spec.shape == BuiltinShapePolicy::Elementwise) {
+    bool shaped = false;
+    for (size_t k = 0; k < arguments.size(); ++k) {
+      if (arguments[k].container == BuiltinContainerKind::Scalar) continue;
+      if (shaped &&
+          (spec.compatibility == BuiltinCompatibilityPolicy::LaneCount
+               ? arguments[layout.result_argument].storage_size !=
+                     arguments[k].storage_size
+               : !same_builtin_shape(arguments[layout.result_argument],
+                                     arguments[k])))
+        throw std::invalid_argument("incompatible logical views");
+      shaped = true;
+      layout.result_argument = static_cast<uint8_t>(k);
+    }
+    layout.lanes = arguments[layout.result_argument].storage_size;
+    return layout;
+  }
   if (spec.arity == 1) return layout;
   if (spec.arity != 2) throw std::invalid_argument("unsupported builtin arity");
 
@@ -493,6 +525,28 @@ BuiltinSliceMap builtin_slice_map(const BuiltinSpec& spec,
                                              : FunctionContainerKind::RowVector,
         input.storage_size));
   }
+  if (spec.slice == BuiltinSlice::ToVectorArray ||
+      spec.slice == BuiltinSlice::ToRowVectorArray) {
+    if (input.container != FunctionContainerKind::Matrix)
+      throw std::invalid_argument("expected a matrix");
+    const bool columns = spec.slice == BuiltinSlice::ToVectorArray;
+    const int64_t rows = input.dimensions[0], cols = input.dimensions[1];
+    const int64_t outer = columns ? cols : rows;
+    const int64_t width = columns ? rows : cols;
+    auto map = slice_identity_map(make_function_shape(
+        FunctionArgumentKind::Real, FunctionContainerKind::Array,
+        columns ? FunctionContainerKind::Vector
+                : FunctionContainerKind::RowVector,
+        {outer, width}, input.storage_size));
+    // Matrix inputs are column-major. Array storage varies by backend.
+    const bool identity = columns == (order == SliceStorageOrder::OuterMajor);
+    if (!identity) {
+      map.kind = BuiltinSliceMap::Kind::Gather;
+      for (int64_t i = 0; i < rows; ++i)
+        for (int64_t j = 0; j < cols; ++j) map.gather.push_back(j * rows + i);
+    }
+    return map;
+  }
   if (spec.slice == BuiltinSlice::ToMatrix) {
     if (spec.arity == 1) {
       if (input.container == FunctionContainerKind::Matrix)
@@ -507,23 +561,20 @@ BuiltinSliceMap builtin_slice_map(const BuiltinSpec& spec,
             FunctionArgumentKind::Real, FunctionContainerKind::Matrix,
             FunctionContainerKind::Scalar, {1, input.storage_size},
             input.storage_size));
-      // Two logical axes over scalar cells: array[,] and array[] row_vector
-      // per the language, plus array[] vector for legacy hand-built MIR
-      // (both prior backends accepted it with these same semantics).
       const bool matrix_shaped_array =
           input.container == FunctionContainerKind::Array &&
           input.dimensions.size() == 2 &&
           input.array_leaf != FunctionContainerKind::Matrix;
       if (!matrix_shaped_array)
         throw std::invalid_argument("cannot convert this shape to a matrix");
-      // Stan Math builds an empty matrix from an empty outer array,
-      // regardless of the declared suffix extent.
-      const int64_t rows = input.dimensions[0];
-      const int64_t columns = rows == 0 ? 0 : input.dimensions[1];
-      // The array's semantic cell (i, j) already sits at the column-major
-      // matrix position under first-index-fast storage; outer-major storage
-      // is the row-major spelling, i.e. the transpose of that.
-      if (order == SliceStorageOrder::FirstIndexFast)
+      const bool vectors = input.array_leaf == FunctionContainerKind::Vector;
+      const int64_t outer = input.dimensions[0];
+      const int64_t width = outer == 0 ? 0 : input.dimensions[1];
+      const int64_t rows = vectors ? width : outer;
+      const int64_t columns = vectors ? outer : width;
+      // Column vectors become columns; row vectors and scalar arrays become
+      // rows. An empty outer array loses its suffix extent in Stan Math.
+      if (vectors == (order == SliceStorageOrder::OuterMajor))
         return slice_identity_map(make_function_shape(
             FunctionArgumentKind::Real, FunctionContainerKind::Matrix,
             FunctionContainerKind::Scalar, {rows, columns},
