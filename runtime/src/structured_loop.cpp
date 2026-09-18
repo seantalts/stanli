@@ -2843,12 +2843,17 @@ void structured_loop_forward(KernelCtx& ctx) {
         " record_versions=" + std::to_string(s.record_versions));
   }
   if (s.building) {
+    try {
+      freeze(s);
+    } catch (...) {
+      s.building.reset();
+      throw;
+    }
     std::vector<int32_t>().swap(s.owner);
     std::vector<int64_t>().swap(s.handles);
     std::vector<double>().swap(s.undo);
     std::vector<Record>().swap(s.records);
     std::vector<int64_t>().swap(s.target_refs);
-    freeze(s);
     if (s.stream) s.last_replayed = true;
   }
   if (s.diagnostics)
