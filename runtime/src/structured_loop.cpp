@@ -1491,6 +1491,9 @@ struct FrozenInPlace {
   int64_t rhs_version = -1;
   int64_t base_adjoint = -1;
   int64_t rhs_adjoint = -1;
+  std::vector<const double*> selector_ptr;
+  std::vector<int64_t> selector_len;
+  std::vector<double> selector_snapshot;
 };
 
 struct FrozenCopy {
@@ -2002,6 +2005,12 @@ struct Execution {
       for (size_t k = static_cast<size_t>(undo); k < s.undo.size(); k += 2)
         fi.positions.push_back(static_cast<int64_t>(s.undo[k]));
       st.inplace_old.resize(st.inplace_old.size() + fi.positions.size());
+      for (int k = 1; k < layout.rhs; ++k) {
+        fi.selector_ptr.push_back(c.in[k].data);
+        fi.selector_len.push_back(c.in[k].len);
+        fi.selector_snapshot.insert(fi.selector_snapshot.end(), c.in[k].data,
+                                    c.in[k].data + c.in[k].len);
+      }
       const uint32_t idx = static_cast<uint32_t>(st.inplaces.size());
       st.program.push_back(StreamInstr{StreamInstr::InPlace, idx});
       st.backward_program.push_back(BackwardInstr{BackwardInstr::InPlace, idx});
@@ -2407,6 +2416,7 @@ void freeze(LoopState& s, KernelCtx& ctx) {
     fi.rhs = remap_c(fi.rhs);
     fi.base_adjoint = adj_of(fi.base_version);
     fi.rhs_adjoint = adj_of(fi.rhs_version);
+    for (auto& ptr : fi.selector_ptr) ptr = remap_c(ptr);
   }
   for (auto& fc : st.copies) {
     fc.src = remap_c(fc.src);
@@ -2468,6 +2478,10 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
       }
       case StreamInstr::InPlace: {
         FrozenInPlace& fi = st.inplaces[instr.index];
+        size_t at = 0;
+        for (size_t k = 0; k < fi.selector_ptr.size(); ++k)
+          for (int64_t j = 0; j < fi.selector_len[k]; ++j, ++at)
+            if (fi.selector_ptr[k][j] != fi.selector_snapshot[at]) return false;
         double* old = st.inplace_old.data() + fi.old_offset;
         for (size_t k = 0; k < fi.positions.size(); ++k) {
           const int64_t at = fi.positions[k];

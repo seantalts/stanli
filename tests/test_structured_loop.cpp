@@ -5044,6 +5044,35 @@ static void replay_guard_flip_tests() {
   }
 }
 
+static void selector_guard_tests() {
+  const auto native = compile_fixture("structured_param_index",
+                                      observed_data(24), Mode::Force);
+  check(retained(native) != nullptr, "selector guard fixture retains OP_LOOP");
+  Executor a = diagnosed_executor(native.graph);
+  native.bind(a);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(native.graph);
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  native.bind(ref);
+  std::vector<double> ga(static_cast<size_t>(native.n_unconstrained));
+  std::vector<double> gref(ga.size());
+  const std::vector<std::vector<double>> points = {{.4}, {.7}, {-.5}};
+  for (size_t i = 0; i < points.size(); ++i) {
+    std::copy(points[i].begin(), points[i].end(), ref.params_data());
+    const double vref = ref.gradient(gref.data());
+    std::copy(points[i].begin(), points[i].end(), a.params_data());
+    stanli_test::StdoutCapture captured(stderr);
+    const double va = a.gradient(ga.data());
+    const std::string diagnostics = captured.finish();
+    check(va == vref, "selector guard target bitwise");
+    for (size_t k = 0; k < ga.size(); ++k)
+      check(ga[k] == gref[k], "selector guard gradient bitwise");
+    if (i == 2)
+      check(reported_field(diagnostics, "respecialized=") >= 1,
+            "selector flip triggers a respecialization");
+  }
+}
+
 int main() {
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
@@ -5084,6 +5113,7 @@ int main() {
   memo_release_tests();
   replay_parity_tests();
   replay_guard_flip_tests();
+  selector_guard_tests();
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS");
   if (failures == 0) std::printf("test_structured_loop OK\n");
