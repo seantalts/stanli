@@ -172,22 +172,7 @@ static Graph outer(std::shared_ptr<StructuredLoop> plan,
   return graph;
 }
 
-// Plans whose tests observe individual kernel calls keep every call as its
-// own node; segment_tests covers the register-machine path.
-static void prepare_kernels(StructuredLoop& plan) {
-  test_setenv("STANLI_NO_STRUCTURED_SEGMENTS", "1");
-  plan.prepare();
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-}
-
-template <class Build>
-static std::shared_ptr<StructuredLoop> unsegmented(Build build) {
-  test_setenv("STANLI_NO_STRUCTURED_SEGMENTS", "1");
-  auto plan = build();
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-  check(plan->segments.empty(), "segments are off under the switch");
-  return plan;
-}
+static void prepare_kernels(StructuredLoop& plan) { plan.prepare(); }
 
 struct Evaluation {
   double value = 0;
@@ -2967,7 +2952,7 @@ static bool install_failure_callbacks(StructuredLoop& plan, Node& node) {
 }
 
 static void failure_tests() {
-  auto plan = unsegmented([] { return recurrence(8); });
+  auto plan = recurrence(8);
   check(install_failure_callbacks(*plan, plan->root),
         "failure test finds a native callback");
   Executor executor(outer(plan));
@@ -3466,45 +3451,38 @@ static void runtime_slice_tests() {
                                       "matrix_exp of a runtime submatrix"};
   std::vector<double> point(14);
   for (size_t i = 0; i < point.size(); ++i) point[i] = 0.2 * double(i) - 0.9;
-  for (int segments = 0; segments < 2; ++segments) {
-    if (segments)
-      test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-    else
-      test_setenv("STANLI_NO_STRUCTURED_SEGMENTS", "1");
-    for (int op = 1; op <= 10; ++op) {
-      const auto loop =
-          compile_fixture("dynslice", runtime_slice_data(op), Mode::Auto);
-      const auto flat =
-          compile_fixture("dynsliceflat", runtime_slice_data(op), Mode::Auto);
-      check(retained(loop) != nullptr, "runtime slice model runs the loop");
-      check(retained(flat) == nullptr, "flat runtime slice model has no loop");
-      Executor a(loop.graph), b(flat.graph);
-      loop.bind(a);
-      flat.bind(b);
-      std::vector<double> ga(14), gb(14);
-      for (int again = 0; again < 2; ++again) {
-        std::vector<double> at = point;
-        if (again)
-          for (double& q : at) q = 0.3 - q;
-        std::copy(at.begin(), at.end(), a.params_data());
-        std::copy(at.begin(), at.end(), b.params_data());
-        const double va = a.gradient(ga.data()), vb = b.gradient(gb.data());
-        if (va != vb) {
-          std::printf("  %s: %.17g != %.17g\n", names[op], va, vb);
-          check(false, "runtime slice value");
-        }
-        for (size_t i = 0; i < ga.size(); ++i)
-          if (!near(ga[i], gb[i])) {
-            std::printf("  %s g%zu: %.17g != %.17g\n", names[op], i, ga[i],
-                        gb[i]);
-            check(false, "runtime slice gradient");
-          }
-        close(written_s(loop, at), written_s(flat, at),
-              "runtime slice write_array");
+  for (int op = 1; op <= 10; ++op) {
+    const auto loop =
+        compile_fixture("dynslice", runtime_slice_data(op), Mode::Auto);
+    const auto flat =
+        compile_fixture("dynsliceflat", runtime_slice_data(op), Mode::Auto);
+    check(retained(loop) != nullptr, "runtime slice model runs the loop");
+    check(retained(flat) == nullptr, "flat runtime slice model has no loop");
+    Executor a(loop.graph), b(flat.graph);
+    loop.bind(a);
+    flat.bind(b);
+    std::vector<double> ga(14), gb(14);
+    for (int again = 0; again < 2; ++again) {
+      std::vector<double> at = point;
+      if (again)
+        for (double& q : at) q = 0.3 - q;
+      std::copy(at.begin(), at.end(), a.params_data());
+      std::copy(at.begin(), at.end(), b.params_data());
+      const double va = a.gradient(ga.data()), vb = b.gradient(gb.data());
+      if (va != vb) {
+        std::printf("  %s: %.17g != %.17g\n", names[op], va, vb);
+        check(false, "runtime slice value");
       }
+      for (size_t i = 0; i < ga.size(); ++i)
+        if (!near(ga[i], gb[i])) {
+          std::printf("  %s g%zu: %.17g != %.17g\n", names[op], i, ga[i],
+                      gb[i]);
+          check(false, "runtime slice gradient");
+        }
+      close(written_s(loop, at), written_s(flat, at),
+            "runtime slice write_array");
     }
   }
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
 
   // The series whose `while` advances k past two terms, against the value
   // CmdStan computes for it.
@@ -4408,376 +4386,6 @@ static void for_trace_tests() {
   }
 }
 
-static size_t count_kind(const Node& node, Node::Kind kind) {
-  size_t total = node.kind == kind ? 1 : 0;
-  for (const auto& child : node.children) total += count_kind(child, kind);
-  return total;
-}
-
-static bool binds_slot(const std::vector<SegmentBinding>& bindings, int slot) {
-  return std::any_of(bindings.begin(), bindings.end(),
-                     [&](const SegmentBinding& b) { return b.slot == slot; });
-}
-
-template <class Build>
-static void compare_segmented(Build build, const char* name,
-                              std::vector<int64_t> param_lens = {1, 1}) {
-  auto segmented = build();
-  auto plain = unsegmented(build);
-  Executor a(outer(segmented, param_lens)), b(outer(plain, param_lens));
-  int64_t n = 0;
-  for (int64_t len : param_lens) n += len;
-  std::vector<double> ga(static_cast<size_t>(n)), gb(ga);
-  for (double seed : {.1, -.2}) {
-    for (int64_t i = 0; i < n; ++i)
-      a.params_data()[i] = b.params_data()[i] =
-          seed + .3 * static_cast<double>(i);
-    close(a.gradient(ga.data()), b.gradient(gb.data()), name);
-    for (size_t i = 0; i < ga.size(); ++i) close(ga[i], gb[i], name);
-  }
-}
-
-// acc = sum_i sum(set_index(x, 1, acc * theta)) through one CALL per trip.
-static std::shared_ptr<StructuredLoop> call_segment_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 4);
-  const int iterator = plan->body.add_slot(1, false);
-  const int x = plan->body.add_slot(3, false);
-  plan->fills.push_back({x, {1, 2, 3}});
-  const int acc = plan->body.add_slot(1, false);
-  const int scaled = plan->body.add_slot(1, false);
-  const int updated = plan->body.add_slot(3, false);
-  const int total = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node set_index;
-  set_index.kind = Node::KernelCall;
-  set_index.op = plan->body.add_op(OP_SET_INDEX, {x, scaled}, updated, {1});
-  plan->root =
-      sequence({alias(acc, beta),
-                counted(lower, upper, iterator,
-                        sequence({call(*plan, OP_MUL, {acc, theta}, scaled),
-                                  std::move(set_index),
-                                  call(*plan, OP_SUM_VEC, {updated}, total),
-                                  alias(acc, total), alias(x, updated)}))});
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// x = acc * beta is read after the loop; acc = x + theta carries.
-static std::shared_ptr<StructuredLoop> alias_out_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {.5}});
-  const int x = plan->body.add_slot(1, false);
-  const int product = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product), alias(x, product),
-                call(*plan, OP_ADD, {x, theta}, sum), alias(acc, sum)}));
-  plan->outputs = {acc, x};
-  plan->prepare();
-  return plan;
-}
-
-// target += s * beta + theta with s carried only through its own cell.
-static std::shared_ptr<StructuredLoop> carried_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int s = plan->body.add_slot(1, false);
-  plan->fills.push_back({s, {.25}});
-  const int product = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  plan->has_target = true;
-  plan->root = counted(lower, upper, iterator,
-                       sequence({call(*plan, OP_MUL, {s, beta}, product),
-                                 call(*plan, OP_ADD, {product, theta}, sum),
-                                 alias(s, sum), target(sum)}));
-  plan->prepare();
-  return plan;
-}
-
-// base[i] = theta * i + 1 in place between two scalar runs.
-static std::shared_ptr<StructuredLoop> split_update_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int one = scalar(*plan, 1);
-  const int iterator = plan->body.add_slot(1, false);
-  const int base = plan->body.add_slot(3, false);
-  plan->fills.push_back({base, {1, 2, 3}});
-  const int acc = plan->body.add_slot(1, false);
-  const int rhs = plan->body.add_slot(1, false);
-  const int shifted = plan->body.add_slot(1, false);
-  const int updated = plan->body.add_slot(3, false);
-  const int sum = plan->body.add_slot(1, false);
-  const int scaled = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node update =
-      call(*plan, OP_SET_INDEX_DYNAMIC, {base, iterator, shifted}, updated);
-  attach(*plan, update.op, single_spec(3));
-  plan->root =
-      sequence({alias(acc, beta),
-                counted(lower, upper, iterator,
-                        sequence({call(*plan, OP_MUL, {theta, iterator}, rhs),
-                                  call(*plan, OP_ADD, {rhs, one}, shifted),
-                                  std::move(update), alias(base, updated),
-                                  call(*plan, OP_SUM_VEC, {base}, sum),
-                                  call(*plan, OP_MUL, {sum, acc}, scaled),
-                                  alias(acc, scaled)}))});
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-static std::shared_ptr<StructuredLoop> lone_kernel_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  const int product = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}};
-  plan->root = counted(lower, upper, iterator,
-                       sequence({call(*plan, OP_MUL, {theta, acc}, product),
-                                 alias(acc, product)}));
-  plan->fills.push_back({acc, {1}});
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// acc = 2 * check_lower(acc * beta + theta, -10): the check runs every trip.
-static std::shared_ptr<StructuredLoop> effect_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int bound = scalar(*plan, -10);
-  const int two = scalar(*plan, 2);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {1}});
-  const int product = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  const int checked = plan->body.add_slot(1, false);
-  const int doubled = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node check_node = call(*plan, OP_CHECK_LOWER, {sum, bound}, checked);
-  auto spec = std::make_shared<BoundCheckSpec>();
-  spec->name = "sum";
-  spec->bound_is_scalar = true;
-  spec->shapes_match = true;
-  plan->body.ops[static_cast<size_t>(check_node.op)].udata = spec.get();
-  plan->body.udata_pool.push_back(std::move(spec));
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product),
-                call(*plan, OP_ADD, {product, theta}, sum),
-                std::move(check_node), call(*plan, OP_MUL, {sum, two}, doubled),
-                alias(acc, doubled)}));
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// A dynamic index (outside the register vocabulary) between two scalar ops.
-static std::shared_ptr<StructuredLoop> foreign_op_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int table = plan->body.add_slot(3, false);
-  plan->fills.push_back({table, {2, 3, 5}});
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {1}});
-  const int product = plan->body.add_slot(1, false);
-  const int picked = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node index = call(*plan, OP_INDEX_DYNAMIC, {table, iterator}, picked);
-  attach(*plan, index.op, single_spec(3));
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product), std::move(index),
-                call(*plan, OP_ADD, {product, picked}, sum), alias(acc, sum)}));
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// A comparison with no backward feeds an active multiply.
-static std::shared_ptr<StructuredLoop> no_backward_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {1}});
-  const int product = plan->body.add_slot(1, false);
-  const int positive = plan->body.add_slot(1, false);
-  const int gated = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node compare = call(*plan, OP_COMPARE, {product, theta}, positive);
-  plan->body.ops[static_cast<size_t>(compare.op)].variant = 2;
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product), std::move(compare),
-                call(*plan, OP_MUL, {positive, theta}, gated),
-                call(*plan, OP_ADD, {product, gated}, sum), alias(acc, sum)}));
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-static void segment_tests() {
-  {
-    auto plan = recurrence(8);
-    check(plan->segments.size() == 1, "scalar recurrence forms one segment");
-    check(count_kind(plan->root, Node::Segment) == 1 &&
-              count_kind(plan->root, Node::KernelCall) == 0 &&
-              count_kind(plan->root, Node::Alias) == 1,
-          "recurrence body is one segment node");
-    const Node* loop = find_kind(plan->root, Node::For);
-    check(loop && loop->children[0].kind == Node::Segment,
-          "segment node replaces the loop body");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(segment.program.calls.empty(),
-            "scalar recurrence uses register instructions only");
-      check(segment.ins.size() == 3 && segment.outs.size() == 1 &&
-                binds_slot(segment.outs, 2),
-            "recurrence segment binds three live-ins and the carried cell");
-      check(!segment.program.adj.empty() && segment.program.native_adj,
-            "recurrence segment carries a generated adjoint");
-    }
-    compare_segmented([] { return recurrence(8); },
-                      "segmented recurrence matches the kernel executor");
-    compare_segmented([] { return recurrence(0); },
-                      "segmented zero-trip recurrence matches");
-  }
-  {
-    auto plan = call_segment_plan();
-    check(plan->segments.size() == 1, "call run forms one segment");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(segment.program.calls.size() == 1,
-            "vector kernel inside the run is a CALL");
-      check(binds_slot(segment.outs, 5) && binds_slot(segment.outs, 6),
-            "call segment publishes both aliased cells");
-    }
-    compare_segmented(call_segment_plan,
-                      "segment with a CALL matches the kernel executor");
-  }
-  {
-    auto plan = alias_out_plan();
-    check(plan->segments.size() == 1, "aliased run forms one segment");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(binds_slot(segment.outs, 6),
-            "alias read after the loop is a live-out");
-      check(segment.outs.size() == 2, "alias run publishes two cells");
-    }
-    compare_segmented(alias_out_plan,
-                      "aliased live-out matches the kernel executor");
-  }
-  {
-    auto plan = carried_plan();
-    check(plan->segments.size() == 1, "carried run forms one segment");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(binds_slot(segment.outs, 5), "loop-carried cell is a live-out");
-      check(binds_slot(segment.ins, 5), "loop-carried cell is a live-in");
-    }
-    compare_segmented(carried_plan,
-                      "loop-carried live-out matches the kernel executor");
-  }
-  {
-    auto plan = split_update_plan();
-    check(plan->segments.size() == 2, "in-place update splits the run");
-    const Node* update = find_kind(plan->root, Node::KernelCall);
-    check(update && update->storage == Node::InPlace &&
-              count_kind(plan->root, Node::KernelCall) == 1,
-          "in-place update stays a kernel call between segments");
-    compare_segmented(split_update_plan,
-                      "segments around an update match the kernel executor");
-  }
-  {
-    auto plan = lone_kernel_plan();
-    check(
-        plan->segments.empty() && count_kind(plan->root, Node::KernelCall) == 1,
-        "a lone kernel stays a kernel call");
-  }
-  {
-    auto plan = effect_plan();
-    check(plan->segments.size() == 1, "run before an effect is a segment");
-    const Node* effect = find_kind(plan->root, Node::KernelCall);
-    check(effect && plan->body.ops[effect->op].opcode == OP_CHECK_LOWER &&
-              count_kind(plan->root, Node::KernelCall) == 2,
-          "effect kernel stays a kernel call");
-    compare_segmented(effect_plan, "effect run matches the kernel executor");
-    Executor executor(outer(plan));
-    bool threw = false;
-    try {
-      evaluate(executor, -50, .5);
-    } catch (const std::domain_error&) {
-      threw = true;
-    }
-    check(threw, "effect kernel still runs inside the loop");
-  }
-  {
-    auto plan = foreign_op_plan();
-    check(
-        plan->segments.empty() && count_kind(plan->root, Node::KernelCall) == 3,
-        "op outside the vocabulary leaves the run as kernel calls");
-    compare_segmented(foreign_op_plan, "unsegmented run matches itself");
-  }
-  {
-    auto plan = no_backward_plan();
-    check(plan->segments.size() == 1,
-          "kernel without a backward joins the segment");
-    compare_segmented(no_backward_plan,
-                      "no-backward kernel drops its adjoint identically");
-    Executor executor(outer(plan));
-    const Evaluation result = evaluate(executor, .5, 2);
-    close(result.value, 11.5, "no-backward gated value");
-    close(result.gradient[0], 7, "no-backward gated theta gradient");
-    close(result.gradient[1], 14.5, "no-backward gated beta gradient");
-  }
-  {
-    auto plan = recurrence(3);
-    Executor executor(outer(plan));
-    const Evaluation first = evaluate(executor, .1, .7);
-    const Evaluation again = evaluate(executor, .1, .7);
-    check(std::memcmp(&first, &again, sizeof(Evaluation)) == 0,
-          "segmented evaluation is bitwise repeatable");
-  }
-}
-
 static void replay_parity_tests() {
   const char* fixtures[] = {"structured_param_if", "structured_nested",
                             "structured_exits",    "structured_counted",
@@ -5051,8 +4659,6 @@ int main() {
   // Whole-program specialization has its own differential tests in test_lower.
   test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0");
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-  segment_tests();
   transient_classification_tests();
   invariant_active_reuse_tests();
   inplace_import_base_tests();
