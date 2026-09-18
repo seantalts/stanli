@@ -1468,10 +1468,20 @@ struct Record {
 };
 static_assert(sizeof(Record) == 32, "records are the largest tape entry");
 
+enum FrozenCallFlag : uint8_t {
+  kFrozenCallHasOut2 = 1,
+  kFrozenCallActive = 2,
+  kFrozenCallReusePrimal = 4,
+};
+
 struct FrozenCall {
   uint32_t site = 0;
   uint32_t ptr_offset = 0;
   uint32_t adj_offset = 0;
+  uint16_t n_in = 0;
+  uint8_t flags = 0;
+  void (*forward_fn)(KernelCtx&) = nullptr;
+  void (*backward_fn)(KernelCtx&) = nullptr;
 };
 
 struct FrozenInPlace {
@@ -1527,6 +1537,7 @@ struct StreamInstr {
 
 struct Stream {
   std::vector<StreamInstr> program;
+  std::vector<StreamInstr> backward_order;
   std::vector<FrozenCall> calls;
   std::vector<FrozenInPlace> inplaces;
   std::vector<FrozenCopy> copies;
@@ -1537,17 +1548,17 @@ struct Stream {
   std::vector<FrozenSet> sets;
 
   std::vector<double*> call_ptrs;
-  std::vector<int32_t> call_adj;
+  std::vector<double*> call_adj;
   std::vector<int64_t> call_adj_version;
   std::vector<int32_t> inplace_pos;
   std::vector<const double*> inplace_sel_ptr;
   std::vector<double> inplace_sel_snapshot;
-  std::vector<int32_t> inplace_adj;
+  std::vector<double*> inplace_adj;
   std::vector<int64_t> inplace_adj_version;
-  std::vector<int32_t> copy_adj;
+  std::vector<double*> copy_adj;
   std::vector<int64_t> copy_adj_version;
   std::vector<const double*> seg_in_src;
-  std::vector<int32_t> seg_in_adj;
+  std::vector<double*> seg_in_adj;
   std::vector<int64_t> seg_in_adj_version;
 
   ArenaSnapshot arena;
@@ -1561,7 +1572,6 @@ struct Stream {
   std::vector<int32_t> output_adjoint;
   int64_t adjoint_size = 0;
   uint64_t import_mask = 0;
-  bool reuse_primals = false;
 };
 
 double* resolve_adjoint(int64_t id, double* adjoints, const StructuredLoop& p,
@@ -1569,6 +1579,20 @@ double* resolve_adjoint(int64_t id, double* adjoints, const StructuredLoop& p,
   if (id >= 0) return adjoints + id;
   if (id == -1) return nullptr;
   const auto& in = p.imports[static_cast<size_t>(-(id + 2))];
+  double* base = outer.in_adj[in.input].data;
+  return base ? base + in.offset : nullptr;
+}
+
+double* pack_import_adjoint(int64_t id) {
+  return reinterpret_cast<double*>(
+      (static_cast<uintptr_t>(-(id + 2)) << 1) | uintptr_t{1});
+}
+
+double* resolve_pooled_adjoint(double* slot, const StructuredLoop& p,
+                               KernelCtx& outer) {
+  const auto bits = reinterpret_cast<uintptr_t>(slot);
+  if (!(bits & uintptr_t{1})) return slot;
+  const auto& in = p.imports[static_cast<size_t>(bits >> 1)];
   double* base = outer.in_adj[in.input].data;
   return base ? base + in.offset : nullptr;
 }
@@ -1851,9 +1875,15 @@ struct Execution {
       st.call_adj_version.push_back(s.bindings[op.out]);
       if (op.out2 >= 0) st.call_adj_version.push_back(s.bindings[op.out2]);
     }
+    uint8_t flags = 0;
+    if (op.out2 >= 0) flags |= kFrozenCallHasOut2;
+    if (n.active) flags |= kFrozenCallActive;
+    if (n.reuse_primal_output && s.reuse_primals) flags |= kFrozenCallReusePrimal;
     const uint32_t idx = static_cast<uint32_t>(st.calls.size());
     st.program.push_back(StreamInstr{StreamInstr::Call, idx});
-    st.calls.push_back(FrozenCall{n.site, ptr_offset, adj_offset});
+    st.calls.push_back(FrozenCall{n.site, ptr_offset, adj_offset,
+                                  static_cast<uint16_t>(op.n_in), flags,
+                                  n.forward, n.backward});
   }
 
   void run_transient(const Node& n, const Op& op, KernelCtx& c) {
@@ -2354,14 +2384,22 @@ void freeze(LoopState& s, KernelCtx& ctx) {
   const auto remap_c = [&](const double* ptr) -> const double* {
     return st.arena.remap(const_cast<double*>(ptr));
   };
+  st.adjoint_size = s.adjoint_size;
+  st.adjoints.assign(static_cast<size_t>(st.adjoint_size), 0.0);
   const auto adj_of = [&](int64_t version) -> int32_t {
     return static_cast<int32_t>(
         version < 0 ? -1 : s.versions[static_cast<size_t>(version)].adjoint);
   };
+  const auto ptr_of = [&](int64_t version) -> double* {
+    const int32_t id = adj_of(version);
+    if (id >= 0) return st.adjoints.data() + id;
+    if (id == -1) return nullptr;
+    return pack_import_adjoint(id);
+  };
   const auto resolve_pool = [&](std::vector<int64_t>& versions,
-                                std::vector<int32_t>& ids) {
-    ids.resize(versions.size());
-    for (size_t i = 0; i < versions.size(); ++i) ids[i] = adj_of(versions[i]);
+                                std::vector<double*>& ptrs) {
+    ptrs.resize(versions.size());
+    for (size_t i = 0; i < versions.size(); ++i) ptrs[i] = ptr_of(versions[i]);
     std::vector<int64_t>().swap(versions);
   };
 
@@ -2391,12 +2429,9 @@ void freeze(LoopState& s, KernelCtx& ctx) {
   }
   for (size_t i = 0; i < st.targets.size(); ++i)
     st.targets[i].value = remap_c(st.targets[i].value);
-  {
-    std::vector<int32_t> target_adj;
-    resolve_pool(st.target_adj_version, target_adj);
-    for (size_t i = 0; i < st.targets.size(); ++i)
-      st.targets[i].adjoint = target_adj[i];
-  }
+  for (size_t i = 0; i < st.targets.size(); ++i)
+    st.targets[i].adjoint = adj_of(st.target_adj_version[i]);
+  std::vector<int64_t>().swap(st.target_adj_version);
   for (auto& set : st.sets) set.ptr = remap(set.ptr);
   for (auto& imp : st.imports) imp.dst = remap(imp.dst);
 
@@ -2410,11 +2445,32 @@ void freeze(LoopState& s, KernelCtx& ctx) {
     st.output_adjoint.push_back(adj_of(v));
   }
   std::vector<Version>().swap(s.versions);
-  st.adjoint_size = s.adjoint_size;
-  st.adjoints.assign(static_cast<size_t>(st.adjoint_size), 0.0);
   st.target_work.resize(st.targets.size());
   st.import_mask = import_activity_mask(p, ctx);
-  st.reuse_primals = s.reuse_primals;
+
+  st.backward_order.reserve(st.program.size());
+  for (uint32_t i = 0; i < st.program.size(); ++i) {
+    const StreamInstr& instr = st.program[i];
+    bool live = false;
+    switch (instr.kind) {
+      case StreamInstr::Call:
+        live = (st.calls[instr.index].flags & kFrozenCallActive) != 0;
+        break;
+      case StreamInstr::InPlace:
+      case StreamInstr::Copy:
+        live = true;
+        break;
+      case StreamInstr::Seg:
+        live = st.segs[instr.index].adjoint_base >= 0;
+        break;
+      case StreamInstr::Guard:
+      case StreamInstr::Set:
+      case StreamInstr::Tgt:
+        break;
+    }
+    if (live) st.backward_order.push_back(instr);
+  }
+  st.backward_order.shrink_to_fit();
 
   s.stream = std::move(s.building);
   s.building.reset();
@@ -2431,18 +2487,16 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
     switch (instr.kind) {
       case StreamInstr::Call: {
         const FrozenCall& f = st.calls[instr.index];
-        const Node* n = s.sites[f.site];
-        const Op& op = p.body.ops[n->op];
         KernelCtx& c = s.ctx[f.site];
         double** ptrs = st.call_ptrs.data() + f.ptr_offset;
-        c.n_in = op.n_in;
-        for (int k = 0; k < op.n_in; ++k) c.in[k].data = ptrs[k];
-        c.out.data = ptrs[op.n_in];
-        int next = op.n_in + 1;
-        if (op.out2 >= 0) c.out2.data = ptrs[next++];
+        c.n_in = f.n_in;
+        for (int k = 0; k < f.n_in; ++k) c.in[k].data = ptrs[k];
+        c.out.data = ptrs[f.n_in];
+        int next = f.n_in + 1;
+        if (f.flags & kFrozenCallHasOut2) c.out2.data = ptrs[next++];
         c.scratch = ptrs[next];
         if (c.dyn_lengths) apply_dynamic_length(c);
-        n->forward(c);
+        f.forward_fn(c);
         break;
       }
       case StreamInstr::InPlace: {
@@ -2519,8 +2573,8 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
     for (const auto& t : st.targets)
       if (double* a = resolve_adjoint(t.adjoint, st.adjoints.data(), p, ctx))
         *a += ctx.out_adj_vec.data[pos];
-  for (size_t i = st.program.size(); i-- > 0;) {
-    const StreamInstr& instr = st.program[i];
+  for (size_t oi = st.backward_order.size(); oi-- > 0;) {
+    const StreamInstr& instr = st.backward_order[oi];
     switch (instr.kind) {
       case StreamInstr::Guard:
       case StreamInstr::Set:
@@ -2528,48 +2582,42 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
         break;
       case StreamInstr::Call: {
         const FrozenCall& f = st.calls[instr.index];
-        const Node* n = s.sites[f.site];
-        if (!n->active) break;
-        const Op& op = p.body.ops[n->op];
         KernelCtx& c = s.ctx[f.site];
         double** ptrs = st.call_ptrs.data() + f.ptr_offset;
-        const int32_t* adj = st.call_adj.data() + f.adj_offset;
-        c.n_in = op.n_in;
-        for (int k = 0; k < op.n_in; ++k) {
+        double* const* adj = st.call_adj.data() + f.adj_offset;
+        c.n_in = f.n_in;
+        for (int k = 0; k < f.n_in; ++k) {
           c.in[k].data = ptrs[k];
-          c.in_adj[k].data = resolve_adjoint(adj[k], st.adjoints.data(), p, ctx);
+          c.in_adj[k].data = resolve_pooled_adjoint(adj[k], p, ctx);
         }
-        c.out.data = ptrs[op.n_in];
-        c.out_adj_vec.data =
-            resolve_adjoint(adj[op.n_in], st.adjoints.data(), p, ctx);
-        const bool reuse_primal = n->reuse_primal_output && st.reuse_primals;
-        if (reuse_primal) {
+        c.out.data = ptrs[f.n_in];
+        c.out_adj_vec.data = resolve_pooled_adjoint(adj[f.n_in], p, ctx);
+        if (f.flags & kFrozenCallReusePrimal) {
           c.scratch = nullptr;
           if (c.dyn_lengths) apply_dynamic_length(c);
           if (c.out.len == 1 && c.out_adj_vec.data)
             c.out_adj = c.out_adj_vec.data[0];
-          n->backward(c);
+          f.backward_fn(c);
           break;
         }
-        int next = op.n_in + 1;
-        if (op.out2 >= 0) {
+        int next = f.n_in + 1;
+        if (f.flags & kFrozenCallHasOut2) {
           c.out2.data = ptrs[next++];
-          double* out2_adj =
-              resolve_adjoint(adj[op.n_in + 1], st.adjoints.data(), p, ctx);
+          double* out2_adj = resolve_pooled_adjoint(adj[f.n_in + 1], p, ctx);
           c.out2_adj = out2_adj ? *out2_adj : 0.0;
         }
         c.scratch = ptrs[next];
         if (c.dyn_lengths) apply_dynamic_length(c);
         if (c.out.len == 1 && c.out_adj_vec.data)
           c.out_adj = c.out_adj_vec.data[0];
-        n->backward(c);
+        f.backward_fn(c);
         break;
       }
       case StreamInstr::InPlace: {
         const FrozenInPlace& fi = st.inplaces[instr.index];
-        const int32_t* adj = st.inplace_adj.data() + instr.index * 2;
-        double* adj_base = resolve_adjoint(adj[0], st.adjoints.data(), p, ctx);
-        double* adj_rhs = resolve_adjoint(adj[1], st.adjoints.data(), p, ctx);
+        double* const* adj = st.inplace_adj.data() + instr.index * 2;
+        double* adj_base = resolve_pooled_adjoint(adj[0], p, ctx);
+        double* adj_rhs = resolve_pooled_adjoint(adj[1], p, ctx);
         const double* old = st.inplace_old.data() + fi.old_offset;
         for (uint32_t k = fi.pos_count; k-- > 0;) {
           const int64_t at = st.inplace_pos[fi.pos_offset + k];
@@ -2583,22 +2631,20 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
       }
       case StreamInstr::Copy: {
         const FrozenCopy& fc = st.copies[instr.index];
-        const int32_t* adj = st.copy_adj.data() + instr.index * 2;
-        double* from = resolve_adjoint(adj[0], st.adjoints.data(), p, ctx);
-        double* to = resolve_adjoint(adj[1], st.adjoints.data(), p, ctx);
+        double* const* adj = st.copy_adj.data() + instr.index * 2;
+        double* from = resolve_pooled_adjoint(adj[0], p, ctx);
+        double* to = resolve_pooled_adjoint(adj[1], p, ctx);
         if (from && to)
           for (int64_t k = 0; k < fc.len; ++k) from[k] += to[k];
         break;
       }
       case StreamInstr::Seg: {
         const FrozenSegment& fs = st.segs[instr.index];
-        if (fs.adjoint_base < 0) break;
         const auto& ins = fs.segment->ins;
         double* file = st.adjoints.data() + fs.adjoint_base;
         run_adjoint(fs.segment->program, fs.segment->program.adj, fs.frame, file);
         for (size_t k = 0; k < ins.size(); ++k) {
-          double* dst = resolve_adjoint(st.seg_in_adj[fs.in_offset + k],
-                                        st.adjoints.data(), p, ctx);
+          double* dst = resolve_pooled_adjoint(st.seg_in_adj[fs.in_offset + k], p, ctx);
           if (!dst) continue;
           for (int j = 0; j < ins[k].len; ++j)
             dst[j] += file[fs.segment->program.adj
@@ -2650,12 +2696,13 @@ void StructuredLoop::prepare() {
 
 void emit_replay_diagnostic(const LoopState& s, bool replayed,
                             size_t instructions, size_t guards,
-                            size_t cells) {
+                            size_t cells, size_t backward) {
   emit_diagnostic("stanli_structured replay: replay=" +
                   std::to_string(replayed ? 1 : 0) +
                   " instructions=" + std::to_string(instructions) +
                   " guards=" + std::to_string(guards) +
                   " cells=" + std::to_string(cells) +
+                  " backward=" + std::to_string(backward) +
                   " respecialized=" + std::to_string(s.respecialized));
 }
 
@@ -2669,7 +2716,8 @@ void structured_loop_forward(KernelCtx& ctx) {
       if (s.diagnostics)
         emit_replay_diagnostic(s, true, s.stream->program.size(),
                                s.stream->guards.size(),
-                               s.stream->arena.cells.size());
+                               s.stream->arena.cells.size(),
+                               s.stream->backward_order.size());
       return;
     }
     s.stream.reset();
@@ -2818,7 +2866,8 @@ void structured_loop_forward(KernelCtx& ctx) {
     emit_replay_diagnostic(
         s, false, s.stream ? s.stream->program.size() : 0,
         s.stream ? s.stream->guards.size() : 0,
-        s.stream ? s.stream->arena.cells.size() : 0);
+        s.stream ? s.stream->arena.cells.size() : 0,
+        s.stream ? s.stream->backward_order.size() : 0);
   s.memo_ready = true;
   s.reverse_ready = true;
 }
