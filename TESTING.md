@@ -176,8 +176,8 @@ The reference artifact
 - Every value is the exact `%.17g` string CmdStan's driver printed
   ([`tools/ref_driver.cpp`](tools/ref_driver.cpp)), so the replay
   compares against the bits CmdStan produced rather than a rounded copy.
-- 251 models carry at least one complete row from Stan's per-draw output
-  routine, `write_array`, at the same points: 750 rows and 627,264 values
+- 314 models carry at least one complete row from Stan's per-draw output
+  routine, `write_array`, at the same points: 939 rows and 654,819 values
   covering constrained parameters, transformed parameters, and generated
   quantities. Column names are also compared exactly. Both direct
   `write_array` drivers start Stan's RNG with
@@ -213,30 +213,27 @@ math library and the libraries used on other platforms. Known implementation
 errors detected by this comparison were much larger; for example, one
 in-place update error produced a scaled difference of 1.7e+05.
 
-Recorded points have status `VERIFIED`, `CMDSTAN_ONLY`, `MISMATCH`,
-or `REJECTED_BOTH`. The three `CMDSTAN_ONLY` points belong to
-`s2_com_poisson`, the model named in `KNOWN_GAPS`; see
-[`tests/brms/README.md`](tests/brms/README.md). Three `MISMATCH` points
-belong to `kronecker_gp`, where two eigenvector gradients are sensitive
-to a nearly degenerate covariance whose smallest eigenvalue gap is
-6.5e-17. Six are the `sdgp` and `lscale` gradients of `sw_gp`,
-`i320_gp_expquad` and `s2_gp_by_gr`, which flow through a Cholesky
-factorization whose smallest pivot is 1.1e-12, 3.7e-12 and 1.8e-12.
-The CmdStan 2.40 refresh verifies the formerly failing `s2_ar_cov`
-points and the other 15 brms models whose older references had status
-`CMDSTAN_ONLY`.
+Of the 948 recorded points, 939 have status `VERIFIED`, six have status
+`REJECTED_BOTH`, and three have status `MISMATCH`. The CmdStan 2.40
+recording has no `CMDSTAN_ONLY` points. The three
+`MISMATCH` points belong to `kronecker_gp`, where two eigenvector
+gradients are sensitive to a nearly degenerate covariance whose smallest
+eigenvalue gap is 6.5e-17. The formerly failing `s2_ar_cov` points and
+all previously refused brms models, including `s2_com_poisson`, now
+verify against the recorded values.
 
 Verified points use the standard 1e-9 gate, except in the models named in
 `ILL_CONDITIONED` ([`tools/verify_refs.py`](tools/verify_refs.py)). The
-`MISMATCH` points use limits derived from their recorded deviations
-and measured cross-platform variation, and the three Gaussian-process
-models are held to that same limit at all three of their points. Which of
-their points comes out clean is a property of the machine that recorded
-the references: the third point of `sw_gp` and `i320_gp_expquad` was
-recorded clean on arm64 and deviates by 1.03e-7 and 6.38e-9 on the
-x86_64 runner, through the same Cholesky factorization. This keeps the
-known numerical limitations visible without disabling checks for other
-models.
+`MISMATCH` points use limits derived from their recorded deviations and
+measured cross-platform variation. The three brms Gaussian-process models
+`sw_gp`, `i320_gp_expquad` and `s2_gp_by_gr` retain their documented
+cross-platform limits at every point. Their smallest Cholesky pivots are
+1.1e-12, 3.7e-12 and 1.8e-12, respectively. All three now verify at every
+point on the recording machine; `sw_gp` and `i320_gp_expquad` match
+bitwise. Earlier references measured deviations of 1.03e-7 and 6.38e-9
+at their third points on the x86_64 runner despite clean arm64 results.
+Keeping these limits preserves the documented conditioning allowance
+without disabling checks for other models.
 
 A model in `KNOWN_GAPS` ([`tools/verify_refs.py`](tools/verify_refs.py))
 is one stanli refuses today. Its references are recorded like any other
@@ -272,10 +269,10 @@ ULP budget when the change is measured and that budget is stated in the commit
 message. Densities merged across loop lanes may use 30 ULP, recorded per
 model. A larger distance from CmdStan is acceptable when a high-precision
 reference shows stanli at least as close to the true value as CmdStan is;
-the reference measurement is recorded with the model, as dogs' is in
-`tools/corpus.py`. Bitwise agreement is reported for information but is not a gate; if a
+the reference measurement and its provenance must be recorded with the model.
+Bitwise agreement is reported for information but is not a gate; if a
 change improves performance by moving a model from bitwise to a small ULP band,
-that is an accepted trade. At their primary recorded point, 41 verified
+that is an accepted trade. At their primary recorded point, 55 verified
 posteriordb models have 0 ULP difference with CmdStan. Eight additional language
 fixtures have 0 ULP difference in [`docs/verification.json`](docs/verification.json).
 

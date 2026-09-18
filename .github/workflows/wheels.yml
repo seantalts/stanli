@@ -998,12 +998,26 @@ jobs:
             browser-compilers/stanli-compiler.js \
             "$STANC3_SRC_REPO" "$STANC3_SRC_SHA" stancjs
           cmp browser-compilers/stanli-compiler.js r/inst/js/stanc.js
-          {
-            cat browser-compilers/stanli-compiler.js.stamp
-            sha=$(sha256sum browser-compilers/stanli-compiler.js | cut -d' ' -f1)
-            echo "artifact_sha256=$sha"
-          } > /tmp/r-stanc.js.src
-          diff -u /tmp/r-stanc.js.src r/inst/js/stanc.js.src
+          # The checked-in artifact can be built on another host. Preserve its
+          # actual toolchain provenance while requiring the same producer and
+          # byte-identical output as this independent Linux build.
+          bundled=r/inst/js/stanc.js.src
+          built=browser-compilers/stanli-compiler.js.stamp
+          recorded() { _stanc_embed_stamp_value "$bundled" "$1"; }
+          for key in format stanc3_src_repo stanc3_src_sha ocaml_version \
+                     js_of_ocaml_version producer_inputs_sha256 \
+                     dune_profile dune_subst; do
+            [ -n "$(recorded "$key")" ]
+            [ "$(recorded "$key")" = \
+              "$(_stanc_embed_stamp_value "$built" "$key")" ]
+          done
+          [ "$(recorded ocaml_version)" = "$OCAML_VERSION" ]
+          [ "$(recorded js_of_ocaml_version)" = 6.4.1 ]
+          for key in opam_switch ocaml_target dune_version; do
+            [ -n "$(recorded "$key")" ]
+          done
+          sha=$(sha256sum r/inst/js/stanc.js | cut -d' ' -f1)
+          [ "$(recorded artifact_sha256)" = "$sha" ]
 
       - uses: actions/download-artifact@v4
         with:

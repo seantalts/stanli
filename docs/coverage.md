@@ -6,7 +6,7 @@ stanli implements most Stan probability functions, common scalar math
 functions, and the parameter transforms listed below, but not every Stan Math
 overload.
 
-In the pinned stanc inventory, 71 of 72 density names, all 105
+In the historical conformance inventory described below, 71 of 72 density names, all 105
 `_cdf`/`_lcdf`/`_lccdf` names, and 94 of 100 scalar-math names have no
 `unexpected_unsupported` signature. These are name-level regression counts,
 not counts of fully implemented functions. The classic five-argument

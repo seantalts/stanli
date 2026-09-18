@@ -12,10 +12,10 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `GLMM_Poisson_model` | 46 | 1.8e-15 | 16 |
 | `GLM_Binomial_model` | 4 | 0 (bitwise) | 0 |
 | `GLM_Poisson_model` | 5 | 2.2e-16 | 1 |
-| `M0_model` | 3 | 1.1e-14 | 62 |
+| `M0_model` | 3 | 9.6e-15 | 61 |
 | `Mb_model` | 4 | 4.9e-14 | 332 |
 | `Mh_model` | 389 | 5.5e-15 | 42 |
-| `Mt_model` | 5 | 1.8e-14 | 106 |
+| `Mt_model` | 5 | 2.3e-14 | 132 |
 | `Mtbh_model` | 155 | 9.7e-16 | 23 |
 | `Mth_model` | 395 | 3.4e-15 | 96 |
 | `Rate_1_model` | 2 | 0 (bitwise) | 0 |
@@ -34,22 +34,22 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `covid19imperial_v2` | 52 | 8.2e-16 | 7 |
 | `covid19imperial_v3` | 52 | 8.2e-16 | 7 |
 | `diamonds` | 27 | 0 (bitwise) | 0 |
-| `dogs` | 4 | 5.3e-16 | 3 |
-| `dogs_hierarchical` | 3 | 1.2e-15 | 9 |
+| `dogs` | 4 | 5.5e-15 | 31 |
+| `dogs_hierarchical` | 3 | 1.2e-15 | 7 |
 | `dogs_log` | 3 | 0 (bitwise) | 0 |
 | `dogs_nonhierarchical` | 66 | 6.9e-16 | 4 |
 | `dugongs_model` | 5 | 1.9e-16 | 1 |
 | `earn_height` | 4 | 0 (bitwise) | 0 |
 | `eight_schools_centered` | 11 | 0 (bitwise) | 0 |
 | `eight_schools_noncentered` | 11 | 0 (bitwise) | 0 |
-| `election88_full` | 91 | 9.8e-15 | 81 |
+| `election88_full` | 91 | 9.9e-15 | 82 |
 | `garch11` | 5 | 1.6e-15 | 8 |
-| `gp_pois_regr` | 14 | 3.9e-16 | 2 |
-| `gp_regr` | 4 | 1.2e-16 | 1 |
+| `gp_pois_regr` | 14 | 0 (bitwise) | 0 |
+| `gp_regr` | 4 | 0 (bitwise) | 0 |
 | `gpcm_latent_reg_irt` | 531 | 2.6e-13 | 4608 |
 | `grsm_latent_reg_irt` | 409 | 1.2e-14 | 81 |
 | `hier_2pl` | 670 | 0 (bitwise) | 0 |
-| `hierarchical_gp` | 934 | 8.9e-16 | 88 |
+| `hierarchical_gp` | 934 | 7.0e-16 | 88 |
 | `hmm_drive_0` | 7 | 6.2e-16 | 3 |
 | `hmm_drive_1` | 7 | 1.0e-15 | 8 |
 | `hmm_example` | 5 | 4.6e-16 | 4 |
@@ -79,7 +79,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `logmesquite_logvas` | 9 | 0 (bitwise) | 0 |
 | `logmesquite_logvash` | 8 | 0 (bitwise) | 0 |
 | `logmesquite_logvolume` | 4 | 0 (bitwise) | 0 |
-| `losscurve_sislob` | 16 | 4.8e-16 | 4 |
+| `losscurve_sislob` | 16 | 4.0e-16 | 2 |
 | `lotka_volterra` | 9 | 4.3e-15 | 22 |
 | `low_dim_gauss_mix` | 6 | 0 (bitwise) | 0 |
 | `low_dim_gauss_mix_collapse` | 6 | 0 (bitwise) | 0 |
@@ -126,10 +126,10 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `wells_interaction_c_model` | 5 | 0 (bitwise) | 0 |
 | `wells_interaction_model` | 5 | 0 (bitwise) | 0 |
 
-Historical CmdStan 2.39 measurements (before the 2.40 reference refresh):
+Numerical notes:
 
-- `dogs`: 31 and 32 ULP from CmdStan at two of the three recorded points, against a 30 ULP budget. Against a 60-digit reference both engines are off by about as much: CmdStan sums the 750 Bernoulli terms one at a time and lands 10 to 59 ULP from the true log density, stanli's one merged call uses Eigen's packet reduction and vectorized exp/log1p and lands 15 to 63 ULP off, and on the gradient each engine is the closer one at a different point. Matching CmdStan would mean adopting its order; pairwise summation would put the merged call within 1 ULP of the reference at a larger distance from CmdStan.
-- `dogs_log`: bitwise at the primary point and 25 ULP at another recorded point, for the same reason as dogs, inside the 30 ULP budget.
+- `dogs`: CmdStan sums Bernoulli terms one call per iteration; stanli's merged call uses Eigen reductions and vectorized exp/log1p. The different reduction order can change final rounding in the log density and gradient. Worst recorded deviation across all points: 32 ULP.
+- `dogs_log`: As for dogs, merging Bernoulli terms changes their reduction order and can change final rounding. The primary point need not have the largest deviation of the three probes. Worst recorded deviation across all points: 25 ULP.
 
 ## write_array references
 
@@ -299,8 +299,8 @@ See [the inventory and provenance](../tests/rethinking/README.md), and [current-
 | `ch11_m_pois` | 3/3 | 0.00e+00 |
 | `ch12_m12_1` | 3/3 | 3.36e-16 |
 | `ch12_m12_2` | 3/3 | 2.09e-16 |
-| `ch12_m12_3` | 3/3 | 9.10e-15 |
-| `ch12_m12_3_alt` | 3/3 | 1.81e-14 |
+| `ch12_m12_3` | 3/3 | 9.22e-15 |
+| `ch12_m12_3_alt` | 3/3 | 1.70e-14 |
 | `ch12_m12_4` | 3/3 | 6.50e-14 |
 | `ch12_m12_5` | 3/3 | 2.00e-14 |
 | `ch12_m12_6` | 3/3 | 2.90e-14 |
@@ -320,24 +320,24 @@ See [the inventory and provenance](../tests/rethinking/README.md), and [current-
 | `ch14_m14_11` | 3/3 | 1.48e-13 |
 | `ch14_m14_2` | 3/3 | 1.24e-15 |
 | `ch14_m14_3` | 3/3 | 1.28e-15 |
-| `ch14_m14_4` | 3/3 | 8.88e-16 |
-| `ch14_m14_4x` | 3/3 | 8.88e-16 |
-| `ch14_m14_5` | 3/3 | 8.88e-16 |
-| `ch14_m14_6` | 3/3 | 4.03e-15 |
-| `ch14_m14_6x` | 3/3 | 4.03e-15 |
+| `ch14_m14_4` | 3/3 | 3.33e-15 |
+| `ch14_m14_4x` | 3/3 | 3.33e-15 |
+| `ch14_m14_5` | 3/3 | 3.33e-15 |
+| `ch14_m14_6` | 3/3 | 5.08e-15 |
+| `ch14_m14_6x` | 3/3 | 5.08e-15 |
 | `ch14_m14_7` | 3/3 | 2.58e-15 |
 | `ch14_m14_8` | 3/3 | 3.00e-16 |
 | `ch14_m14_8nc` | 3/3 | 4.93e-16 |
-| `ch14_m14_9` | 3/3 | 5.55e-15 |
+| `ch14_m14_9` | 3/3 | 1.55e-15 |
 | `ch15_m15_1` | 3/3 | 2.64e-16 |
 | `ch15_m15_2` | 3/3 | 1.91e-16 |
 | `ch15_m15_3` | 3/3 | 0.00e+00 |
 | `ch15_m15_4` | 3/3 | 0.00e+00 |
-| `ch15_m15_5` | 3/3 | 1.11e-15 |
-| `ch15_m15_6` | 3/3 | 7.94e-16 |
+| `ch15_m15_5` | 3/3 | 9.16e-16 |
+| `ch15_m15_6` | 3/3 | 5.66e-16 |
 | `ch15_m15_7` | 3/3 | 4.00e-15 |
-| `ch15_m15_8` | 3/3 | 4.21e-15 |
-| `ch15_m15_9` | 3/3 | 4.21e-15 |
+| `ch15_m15_8` | 3/3 | 4.66e-15 |
+| `ch15_m15_9` | 3/3 | 4.66e-15 |
 | `ch16_m16_1` | 3/3 | 1.81e-15 |
 | `ch16_m16_4` | 3/3 | 1.71e-15 |
 | `extra_hurdle_poisson` | 3/3 | 2.17e-16 |
