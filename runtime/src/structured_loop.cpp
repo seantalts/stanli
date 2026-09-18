@@ -101,13 +101,7 @@ void prepare_node(StructuredLoop& p, Node& n, unsigned depth,
   n.primal_contract_variant = 0;
   n.primal_contract = nullptr;
   n.memo = false;
-  n.memo_silent = false;
-  n.trace = false;
   n.invariant_loop = -1;
-  n.memo_index = -1;
-  n.memo_outs.clear();
-  n.memo_fresh = 0;
-  n.memo_keep.clear();
   n.site = ~uint32_t{0};
   n.workspace = -1;
   n.loop_index = -1;
@@ -245,277 +239,6 @@ void fuse_updates(StructuredLoop& p, Node& n, SlotUses& uses) {
   }
   for (auto& c : n.children) fuse_updates(p, c, uses);
 }
-
-struct Memoizer {
-  StructuredLoop& p;
-  const SlotUses& uses;
-  std::vector<char> param_dep, escape;
-  std::vector<int> traced;
-  bool changed = false;
-
-  Memoizer(StructuredLoop& plan, const SlotUses& slot_uses)
-      : p(plan),
-        uses(slot_uses),
-        param_dep(plan.body.slots.size(), 0),
-        escape(plan.loop_count, 0),
-        traced(plan.body.slots.size(), 0) {
-    for (const auto& in : p.imports)
-      if (!in.data_only) param_dep[in.slot] = 1;
-  }
-
-  void mark(std::vector<char>& set, int i) {
-    if (!set[i]) set[i] = changed = true;
-  }
-  bool controlled(const Node& n) const {
-    switch (n.kind) {
-      case Node::If:
-        return param_dep[n.condition];
-      case Node::For:
-        return param_dep[n.lower] || param_dep[n.upper] || escape[n.loop_index];
-      case Node::While:
-        return param_dep[n.condition] || escape[n.loop_index];
-      default:
-        return false;
-    }
-  }
-
-  void propagate(const Node& n, bool ctrl, int loop) {
-    switch (n.kind) {
-      case Node::KernelCall: {
-        const Op& op = p.body.ops[n.op];
-        bool any = ctrl;
-        for (int k = 0; k < op.n_in; ++k) any |= param_dep[op.in[k]] != 0;
-        if (!any) return;
-        if (n.storage == Node::InPlace) {
-          mark(param_dep, op.in[0]);
-        } else {
-          mark(param_dep, op.out);
-          if (op.out2 >= 0) mark(param_dep, op.out2);
-        }
-        return;
-      }
-      case Node::Alias:
-        if (ctrl || param_dep[n.src]) mark(param_dep, n.dst);
-        return;
-      case Node::Break:
-      case Node::Continue:
-        if (ctrl) mark(escape, loop);
-        return;
-      case Node::Target:
-      case Node::Segment:
-        return;
-      case Node::Sequence:
-        for (const auto& c : n.children) propagate(c, ctrl, loop);
-        return;
-      case Node::If:
-        for (const auto& c : n.children)
-          propagate(c, ctrl || param_dep[n.condition], loop);
-        return;
-      case Node::For: {
-        const bool inner = ctrl || controlled(n);
-        if (inner) mark(param_dep, n.iterator);
-        propagate(n.children[0], inner, n.loop_index);
-        return;
-      }
-      case Node::While: {
-        const bool inner = ctrl || controlled(n);
-        for (const auto& c : n.children) propagate(c, inner, n.loop_index);
-        return;
-      }
-    }
-  }
-
-  bool memoizable(const Node& n, int loops) const {
-    switch (n.kind) {
-      case Node::Sequence:
-        return std::all_of(n.children.begin(), n.children.end(),
-                           [&](const Node& c) { return memoizable(c, loops); });
-      case Node::KernelCall: {
-        const Op& op = p.body.ops[n.op];
-        if (n.storage == Node::InPlace || is_effectful_op(op.opcode) ||
-            param_dep[op.out] || (op.out2 >= 0 && param_dep[op.out2]))
-          return false;
-        for (int k = 0; k < op.n_in; ++k)
-          if (param_dep[op.in[k]]) return false;
-        return true;
-      }
-      case Node::Alias:
-        return !param_dep[n.src] && !param_dep[n.dst];
-      case Node::If:
-        return !controlled(n) && memoizable(n.children[0], loops) &&
-               memoizable(n.children[1], loops);
-      case Node::For:
-        return !controlled(n) && !param_dep[n.iterator] &&
-               memoizable(n.children[0], loops + 1);
-      case Node::While:
-        return !controlled(n) && memoizable(n.children[0], loops + 1) &&
-               memoizable(n.children[1], loops + 1);
-      case Node::Break:
-      case Node::Continue:
-        return loops > 0;
-      case Node::Target:
-      case Node::Segment:
-        return false;
-    }
-    return false;
-  }
-
-  int outside(int s, const std::vector<int>& inside) const {
-    return uses.kernel[s] + uses.alias[s] + uses.control[s] + uses.target[s] -
-           inside[s];
-  }
-  bool data_controlled(const Node& n) const {
-    if (controlled(n)) return false;
-    return std::all_of(n.children.begin(), n.children.end(),
-                       [&](const Node& c) { return data_controlled(c); });
-  }
-  bool traceable(const Node& n) const {
-    if (controlled(n)) return false;
-    if (n.kind == Node::If) return true;
-    if (n.kind == Node::For) return data_controlled(n.children[0]);
-    if (n.kind != Node::While || !memoizable(n.children[0], 1)) return false;
-    std::vector<int> inside(p.body.slots.size(), 0), written;
-    reads(n.children[0], inside);
-    writes(n.children[0], written);
-    return std::none_of(written.begin(), written.end(), [&](int s) {
-      return uses.output[s] || outside(s, inside) > (s == n.condition ? 1 : 0);
-    });
-  }
-
-  void group(Node& n, bool ok) {
-    if (n.kind == Node::If || n.kind == Node::For || n.kind == Node::While) {
-      if (ok && memoizable(n, 0)) {
-        n.memo = true;
-        return;
-      }
-      if (ok && traceable(n)) {
-        n.trace = true;
-        ++p.trace_count;
-        if (n.kind == Node::For) {
-          ++traced[n.lower];
-          ++traced[n.upper];
-        } else {
-          ++traced[n.condition];
-        }
-      }
-      for (auto& c : n.children) group(c, ok && !controlled(n));
-      return;
-    }
-    if (n.kind != Node::Sequence) return;
-    std::vector<Node> grouped, run;
-    const auto flush = [&] {
-      if (run.empty()) return;
-      if (run.size() == 1 && run[0].kind != Node::KernelCall &&
-          run[0].kind != Node::Alias) {
-        run[0].memo = true;
-        grouped.push_back(std::move(run[0]));
-      } else {
-        Node block;
-        block.memo = true;
-        block.children = std::move(run);
-        grouped.push_back(std::move(block));
-        ++p.node_count;
-      }
-      run.clear();
-    };
-    for (auto& c : n.children) {
-      if (ok && memoizable(c, 0)) {
-        run.push_back(std::move(c));
-        continue;
-      }
-      flush();
-      group(c, ok);
-      grouped.push_back(std::move(c));
-    }
-    flush();
-    if (grouped.size() == 1 && grouped[0].kind == Node::Sequence &&
-        grouped[0].memo) {
-      n.memo = true;
-      n.children = std::move(grouped[0].children);
-      --p.node_count;
-    } else {
-      n.children = std::move(grouped);
-    }
-  }
-
-  void reads(const Node& n, std::vector<int>& count) const {
-    switch (n.kind) {
-      case Node::KernelCall: {
-        const Op& op = p.body.ops[n.op];
-        for (int k = 0; k < op.n_in; ++k) ++count[op.in[k]];
-        break;
-      }
-      case Node::Alias:
-        ++count[n.src];
-        break;
-      case Node::Target:
-        ++count[n.src];
-        break;
-      case Node::If:
-      case Node::While:
-        ++count[n.condition];
-        break;
-      case Node::For:
-        ++count[n.lower];
-        ++count[n.upper];
-        break;
-      default:
-        break;
-    }
-    for (const auto& c : n.children) reads(c, count);
-  }
-  void writes(const Node& n, std::vector<int>& out) const {
-    switch (n.kind) {
-      case Node::KernelCall: {
-        const Op& op = p.body.ops[n.op];
-        out.push_back(op.out);
-        if (op.out2 >= 0) out.push_back(op.out2);
-        break;
-      }
-      case Node::Alias:
-        out.push_back(n.dst);
-        break;
-      case Node::For:
-        out.push_back(n.iterator);
-        break;
-      default:
-        break;
-    }
-    for (const auto& c : n.children) writes(c, out);
-  }
-  void number(Node& n) {
-    if (n.memo) {
-      if (p.memo_count >= static_cast<size_t>(std::numeric_limits<int>::max()))
-        throw std::length_error("too many structured memo nodes");
-      n.memo_index = static_cast<int>(p.memo_count++);
-      std::vector<int> inside(p.body.slots.size(), 0), written;
-      reads(n, inside);
-      writes(n, written);
-      std::sort(written.begin(), written.end());
-      written.erase(std::unique(written.begin(), written.end()), written.end());
-      for (int s : written)
-        if (uses.output[s] || outside(s, inside) > traced[s])
-          n.memo_outs.push_back(s);
-      // A traced reader takes the recorded decision on replay but still reads
-      // the value while recording, so a silent node hands those slots on.
-      n.memo_silent = n.memo_outs.empty();
-      if (n.memo_silent)
-        for (int s : written)
-          if (traced[s]) n.memo_keep.push_back(s);
-      return;
-    }
-    for (auto& c : n.children) number(c);
-  }
-
-  void run() {
-    do {
-      changed = false;
-      propagate(p.root, false, -1);
-    } while (changed);
-    group(p.root, true);
-    number(p.root);
-  }
-};
 
 // Straight-line runs of kernel calls and aliases become one register
 // program each.
@@ -699,7 +422,6 @@ void classify(StructuredLoop& p) {
   };
   walk(p.root, loops, count_uses);
   fuse_updates(p, p.root, uses);
-  Memoizer(p, uses).run();
 
   std::vector<char> active(slots, 0);
   for (const auto& in : p.imports)
@@ -822,15 +544,6 @@ void classify(StructuredLoop& p) {
     return uses.alias[s] || uses.target[s] || uses.output[s] ||
            inplace_base[s] || active_reader[s];
   };
-  auto split_memo_outs = [&](Node& n, const std::vector<int>&) {
-    if (!n.memo) return;
-    n.memo_fresh =
-        static_cast<size_t>(std::stable_partition(n.memo_outs.begin(),
-                                                  n.memo_outs.end(), retained) -
-                            n.memo_outs.begin());
-  };
-  walk(p.root, loops, split_memo_outs);
-
   auto classify_transient = [&](Node& n, const std::vector<int>&) {
     if (n.kind == Node::For) {
       if (retained(n.iterator)) return;
@@ -1344,11 +1057,6 @@ struct BlockArena {
     size_t capacity = 0;
     size_t used = 0;
   };
-  struct Mark {
-    size_t block = 0;
-    size_t used = 0;
-    size_t live = 0;
-  };
   static constexpr size_t min_block = size_t{1} << 16;
   std::vector<Block> blocks;
   double* next = nullptr;
@@ -1405,12 +1113,6 @@ struct BlockArena {
                : static_cast<size_t>(next - blocks[cursor].data.get());
   }
   size_t used() const { return closed + used_here(); }
-  Mark mark() const { return Mark{cursor, used_here(), used()}; }
-  void rewind(const Mark& at) {
-    cursor = at.block;
-    if (!blocks.empty()) open(at.used);
-    closed = at.live - at.used;
-  }
   // One block sized for the evaluation just finished, so a steady-state
   // evaluation never pays block growth and never keeps the first
   // evaluation's larger recording footprint.
@@ -1646,21 +1348,10 @@ struct LoopState : KernelState {
   std::vector<const Node*> transient_loops;
   std::vector<double> adjoints;
   std::vector<double> target_work;
-  std::vector<std::vector<double>> memo_tape;
-  std::vector<int64_t> memo_entries, memo_stride, memo_ordinal;
-  std::vector<const Node*> memo_nodes;
-  std::vector<int64_t> memo_shared_base, memo_shared;
-  std::vector<std::vector<uint32_t>> memo_invariant;
-  std::vector<char> memo_release;
-  std::vector<double> keep_store;
-  std::vector<int64_t> keep_version, keep_offset;
-  std::vector<int64_t> keep_store_base, keep_version_base;
-  std::vector<int64_t> trace;
   size_t version_peak = 0;
   size_t record_arena = 0, record_versions = 0;
-  size_t trace_pos = 0;
   uint64_t effects = 0;
-  size_t memo_restores = 0, visits = 0, reused_primal_cells = 0;
+  size_t visits = 0, reused_primal_cells = 0;
   int64_t adjoint_size = 0;
   bool reverse_ready = false;
   bool memo_ready = false;
@@ -1684,26 +1375,8 @@ struct LoopState : KernelState {
         loop_generation(plan.loop_count, 0),
         loop_version(plan.loop_count, -1),
         ctx(plan.site_count),
-        sites(plan.site_count, nullptr),
-        memo_tape(plan.memo_count),
-        memo_entries(plan.memo_count, 0),
-        memo_stride(plan.memo_count, 0),
-        memo_ordinal(plan.memo_count, 0),
-        memo_nodes(plan.memo_count, nullptr),
-        memo_shared_base(plan.memo_count, 0),
-        memo_invariant(plan.memo_count),
-        memo_release(plan.memo_count, 0),
-        keep_store_base(plan.memo_count, 0),
-        keep_version_base(plan.memo_count, 0) {
-    collect(plan.root, -1);
-    int64_t shared = 0;
-    for (size_t m = 0; m < memo_nodes.size(); ++m) {
-      const Node* n = memo_nodes[m];
-      if (!n) throw std::logic_error("structured loop memo numbering is stale");
-      memo_shared_base[m] = shared;
-      shared += static_cast<int64_t>(n->memo_outs.size() - n->memo_fresh);
-    }
-    memo_shared.assign(static_cast<size_t>(shared), -1);
+        sites(plan.site_count, nullptr) {
+    collect(plan.root);
     for (size_t site = 0; site < sites.size(); ++site) {
       const Node* n = sites[site];
       if (!n) throw std::logic_error("structured loop site numbering is stale");
@@ -1731,53 +1404,15 @@ struct LoopState : KernelState {
     }
   }
 
-  // A subtree that leaves no value behind can give its storage back when it
-  // exits, unless a call inside it put something on the tape.
-  static bool releasable(const Node& n, bool& allocates) {
-    if (n.kind == Node::KernelCall) {
-      if (n.active) return false;
-      if (n.storage == Node::Retained) allocates = true;
-    }
-    if (n.kind == Node::For && n.storage != Node::Transient) allocates = true;
-    for (const auto& c : n.children)
-      if (!releasable(c, allocates)) return false;
-    return true;
-  }
-
-  void collect(const Node& n, int memo) {
+  void collect(const Node& n) {
     if (n.kind == Node::KernelCall) {
       if (n.site >= sites.size())
         throw std::logic_error("structured loop site numbering is stale");
       sites[n.site] = &n;
-      if (memo >= 0 && n.invariant_loop >= 0 && n.storage != Node::Transient)
-        memo_invariant[static_cast<size_t>(memo)].push_back(n.site);
-    }
-    if (n.memo) {
-      if (n.memo_index < 0 ||
-          static_cast<size_t>(n.memo_index) >= memo_stride.size())
-        throw std::logic_error("structured loop memo numbering is stale");
-      if (n.memo_silent) {
-        bool allocates = false;
-        const size_t m = static_cast<size_t>(n.memo_index);
-        memo_release[m] = releasable(n, allocates) && allocates;
-        if (memo_release[m]) {
-          keep_store_base[m] = static_cast<int64_t>(keep_store.size());
-          keep_version_base[m] = static_cast<int64_t>(keep_version.size());
-          for (int slot : n.memo_keep) {
-            keep_version.push_back(-1);
-            keep_offset.push_back(static_cast<int64_t>(keep_store.size()));
-            keep_store.resize(keep_store.size() +
-                              static_cast<size_t>(p.body.slots[slot].len));
-          }
-        }
-      }
-      memo_nodes[static_cast<size_t>(n.memo_index)] = &n;
-      int64_t& stride = memo_stride[static_cast<size_t>(n.memo_index)];
-      for (int slot : n.memo_outs) stride = add(stride, p.body.slots[slot].len);
     }
     if (n.kind == Node::For && n.storage == Node::Transient)
       transient_loops.push_back(&n);
-    for (const auto& c : n.children) collect(c, n.memo ? n.memo_index : memo);
+    for (const auto& c : n.children) collect(c);
   }
 
   void release() {
@@ -1843,34 +1478,6 @@ struct Execution {
     double* copy = s.arena.allocate(len);
     std::copy_n(v, len, copy);
     return copy;
-  }
-  struct Snapshot {
-    BlockArena::Mark arena;
-    size_t versions = 0;
-  };
-  Snapshot snapshot() const {
-    return Snapshot{s.arena.mark(), s.versions.size()};
-  }
-  // The kept slots move to fixed cells, the way a Transient result does: the
-  // reader takes the value before this node runs again.
-  void rewind(const Snapshot& at, const Node& n) {
-    const size_t m = static_cast<size_t>(n.memo_index);
-    s.record_arena = std::max(s.record_arena, s.arena.used());
-    double* store = s.keep_store.data() + s.keep_store_base[m];
-    for (int slot : n.memo_keep) {
-      const int64_t len = p.body.slots[slot].len;
-      std::copy_n(value(slot), len, store);
-      store += len;
-    }
-    s.arena.rewind(at.arena);
-    s.version_peak = std::max(s.version_peak, s.versions.size());
-    s.versions.resize(at.versions);
-    s.owner.resize(at.versions);
-    s.version_const.resize(at.versions);
-    const int64_t* kept = s.keep_version.data() + s.keep_version_base[m];
-    for (size_t k = 0; k < n.memo_keep.size(); ++k)
-      s.bindings[n.memo_keep[k]] = kept[k];
-    for (uint32_t site : s.memo_invariant[m]) s.node_generation[site] = -1;
   }
 
   int64_t reserve_adjoint(int64_t len) {
@@ -2118,12 +1725,6 @@ struct Execution {
     st.guards.push_back(g);
   }
 
-  int64_t read_trace() {
-    if (s.trace_pos >= s.trace.size())
-      throw std::logic_error("structured control trace mismatch");
-    return s.trace[s.trace_pos++];
-  }
-
   void bind_iterator(const Node& n, double at, bool constant) {
     if (n.storage == Node::Transient) {
       const int64_t version = s.loop_version[n.loop_index];
@@ -2144,57 +1745,7 @@ struct Execution {
     s.bindings[n.iterator] = make_version(cell, -1, constant);
   }
 
-  __attribute__((noinline)) Flow record_silent(const Node& n) {
-    const uint64_t effects = s.effects;
-    if (!s.memo_release[static_cast<size_t>(n.memo_index)] || s.building) {
-      const Flow flow = run(n);
-      s.effects = effects;
-      return flow;
-    }
-    const Snapshot at = snapshot();
-    const Flow flow = run(n);
-    s.effects = effects;
-    rewind(at, n);
-    return flow;
-  }
-
-  Flow forward(const Node& n) {
-    if (!n.memo) return run(n);
-    if (n.memo_silent) {
-      if (s.memo_ready) return Normal;
-      return record_silent(n);
-    }
-    ++s.effects;
-    const size_t m = static_cast<size_t>(n.memo_index);
-    const int64_t k = s.memo_ordinal[m]++;
-    std::vector<double>& tape = s.memo_tape[m];
-    if (!s.memo_ready) {
-      const Flow flow = run(n);
-      for (int slot : n.memo_outs) {
-        const double* v = value(slot);
-        tape.insert(tape.end(), v, v + p.body.slots[slot].len);
-      }
-      ++s.memo_entries[m];
-      return flow;
-    }
-    if (k >= s.memo_entries[m])
-      throw std::logic_error("structured memo trace mismatch");
-    double* v = tape.data() + k * s.memo_stride[m];
-    size_t j = 0;
-    for (; j < n.memo_fresh; ++j) {
-      s.bindings[n.memo_outs[j]] = make_version(v, -1);
-      v += p.body.slots[n.memo_outs[j]].len;
-    }
-    const int64_t* shared = s.memo_shared.data() + s.memo_shared_base[m];
-    for (; j < n.memo_outs.size(); ++j) {
-      const int64_t version = shared[j - n.memo_fresh];
-      s.versions[static_cast<size_t>(version)].value = v;
-      s.bindings[n.memo_outs[j]] = version;
-      v += p.body.slots[n.memo_outs[j]].len;
-    }
-    ++s.memo_restores;
-    return Normal;
-  }
+  Flow forward(const Node& n) { return run(n); }
 
   Flow run(const Node& n) {
     ++s.visits;
@@ -2239,29 +1790,15 @@ struct Execution {
         s.owner[static_cast<size_t>(s.bindings[n.src])] = -1;
         return Normal;
       case Node::If: {
-        size_t arm;
-        if (n.trace && s.memo_ready) {
-          arm = static_cast<size_t>(read_trace());
-        } else {
-          const double* cond = value(n.condition);
-          arm = cond[0] != 0.0 ? 0 : 1;
-          if (n.trace)
-            s.trace.push_back(static_cast<int64_t>(arm));
-          else if (s.building && !is_const(s.bindings[n.condition]))
-            log_guard(FrozenGuard{FrozenGuard::If, cond, nullptr, cond[0], 0,
-                                  arm == 0});
-        }
+        const double* cond = value(n.condition);
+        const size_t arm = cond[0] != 0.0 ? 0 : 1;
+        if (s.building && !is_const(s.bindings[n.condition]))
+          log_guard(
+              FrozenGuard{FrozenGuard::If, cond, nullptr, cond[0], 0, arm == 0});
         return forward(n.children[arm]);
       }
       case Node::For: {
         ++s.loop_generation[n.loop_index];
-        if (n.trace && s.memo_ready) {
-          for (int64_t left = read_trace(); left-- > 0;) {
-            bind_iterator(n, static_cast<double>(read_trace()), false);
-            if (forward(n.children[0]) == Break) break;
-          }
-          return Normal;
-        }
         const double lo = value(n.lower)[0], hi = value(n.upper)[0];
         if (!std::isfinite(lo) || !std::isfinite(hi) || std::trunc(lo) != lo ||
             std::trunc(hi) != hi || lo < std::numeric_limits<int32_t>::min() ||
@@ -2272,58 +1809,28 @@ struct Execution {
         const int64_t count = hi >= lo ? static_cast<int64_t>(hi - lo) + 1 : 0;
         const bool bounds_const = is_const(s.bindings[n.lower]) &&
                                   is_const(s.bindings[n.upper]);
-        if (!n.trace) {
-          if (s.building && !bounds_const)
-            log_guard(FrozenGuard{FrozenGuard::For, value(n.lower),
-                                  value(n.upper), lo, hi, false});
-          for (int64_t i = 0; i < count; ++i) {
-            bind_iterator(n, lo + static_cast<double>(i), bounds_const);
-            if (forward(n.children[0]) == Break) break;
-          }
-          return Normal;
-        }
-        const size_t start = s.trace.size();
-        s.trace.push_back(0);
-        int64_t effective = 0;
+        if (s.building && !bounds_const)
+          log_guard(FrozenGuard{FrozenGuard::For, value(n.lower),
+                                value(n.upper), lo, hi, false});
         for (int64_t i = 0; i < count; ++i) {
-          const double at = lo + static_cast<double>(i);
-          const size_t mark = s.trace.size();
-          const uint64_t effects = s.effects;
-          s.trace.push_back(static_cast<int64_t>(at));
-          bind_iterator(n, at, bounds_const);
-          const Flow flow = forward(n.children[0]);
-          if (s.effects == effects)
-            s.trace.resize(mark);
-          else
-            ++effective;
-          if (flow == Break) break;
+          bind_iterator(n, lo + static_cast<double>(i), bounds_const);
+          if (forward(n.children[0]) == Break) break;
         }
-        s.trace[start] = effective;
         return Normal;
       }
       case Node::While: {
         ++s.loop_generation[n.loop_index];
-        if (n.trace && s.memo_ready) {
-          for (int64_t left = read_trace(); left-- > 0;)
-            if (forward(n.children[1]) == Break) break;
-          return Normal;
-        }
-        const size_t start = s.trace.size();
-        if (n.trace) s.trace.push_back(0);
-        int64_t count = 0;
         for (;;) {
           if (forward(n.children[0]) == Break) break;
           const double* cond = value(n.condition);
           const bool taken = cond[0] != 0.0;
-          if (!n.trace && s.building && !is_const(s.bindings[n.condition]))
+          if (s.building && !is_const(s.bindings[n.condition]))
             log_guard(
                 FrozenGuard{FrozenGuard::While, cond, nullptr, cond[0], 0,
                            taken});
           if (!taken) break;
-          ++count;
           if (forward(n.children[1]) == Break) break;
         }
-        if (n.trace) s.trace[start] = count;
         return Normal;
       }
       case Node::Break:
@@ -2944,7 +2451,7 @@ void StructuredLoop::prepare() {
       throw std::invalid_argument("invalid structured import");
   }
   for (int s : outputs) slot(*this, s);
-  node_count = site_count = loop_count = memo_count = trace_count = 0;
+  node_count = site_count = loop_count = 0;
   workspace_size = 0;
   std::vector<char> out_seen(body.slots.size(), 0);
   prepare_node(*this, root, 0, 0, out_seen);
@@ -3004,38 +2511,6 @@ void emit_freeze_breakdown(const LoopState& s) {
   emit_pool_bytes("state_node_version2", s.node_version2);
   emit_pool_bytes("state_loop_generation", s.loop_generation);
   emit_pool_bytes("state_loop_version", s.loop_version);
-  {
-    size_t bytes = 0, cap = 0;
-    for (const auto& tape : s.memo_tape) {
-      bytes += tape.size() * sizeof(double);
-      cap += tape.capacity() * sizeof(double);
-    }
-    emit_diagnostic("stanli_structured freeze_bytes: pool=state_memo_tape bytes=" +
-                    std::to_string(bytes) + " capacity=" + std::to_string(cap));
-  }
-  emit_pool_bytes("state_memo_entries", s.memo_entries);
-  emit_pool_bytes("state_memo_stride", s.memo_stride);
-  emit_pool_bytes("state_memo_ordinal", s.memo_ordinal);
-  emit_pool_bytes("state_memo_nodes", s.memo_nodes);
-  emit_pool_bytes("state_memo_shared_base", s.memo_shared_base);
-  emit_pool_bytes("state_memo_shared", s.memo_shared);
-  {
-    size_t bytes = 0, cap = 0;
-    for (const auto& inv : s.memo_invariant) {
-      bytes += inv.size() * sizeof(uint32_t);
-      cap += inv.capacity() * sizeof(uint32_t);
-    }
-    emit_diagnostic(
-        "stanli_structured freeze_bytes: pool=state_memo_invariant bytes=" +
-        std::to_string(bytes) + " capacity=" + std::to_string(cap));
-  }
-  emit_pool_bytes("state_memo_release", s.memo_release);
-  emit_pool_bytes("state_keep_store", s.keep_store);
-  emit_pool_bytes("state_keep_version", s.keep_version);
-  emit_pool_bytes("state_keep_offset", s.keep_offset);
-  emit_pool_bytes("state_keep_store_base", s.keep_store_base);
-  emit_pool_bytes("state_keep_version_base", s.keep_version_base);
-  emit_pool_bytes("state_trace", s.trace);
 }
 
 void emit_replay_diagnostic(const LoopState& s, bool replayed,
@@ -3112,13 +2587,8 @@ void structured_loop_forward(KernelCtx& ctx) {
   for (const Node* n : s.transient_loops)
     s.loop_version[n->loop_index] =
         e.make_version(s.workspace.data() + n->workspace, -1);
-  for (size_t k = 0; k < s.keep_version.size(); ++k)
-    s.keep_version[k] =
-        e.make_version(s.keep_store.data() + s.keep_offset[k], -1);
   std::fill(s.node_generation.begin(), s.node_generation.end(), -1);
   std::fill(s.loop_generation.begin(), s.loop_generation.end(), 0);
-  std::fill(s.memo_ordinal.begin(), s.memo_ordinal.end(), 0);
-  s.trace_pos = 0;
   s.visits = 0;
   s.reused_primal_cells = 0;
   s.reuse_primals = s.has_reusable_primals;
@@ -3140,14 +2610,6 @@ void structured_loop_forward(KernelCtx& ctx) {
       }
     }
   }
-  if (!s.memo_ready) {
-    for (auto& tape : s.memo_tape) tape.clear();
-    s.trace.clear();
-    std::fill(s.memo_entries.begin(), s.memo_entries.end(), 0);
-  } else {
-    for (auto& version : s.memo_shared) version = e.make_version(nullptr, -1);
-  }
-  s.memo_restores = 0;
   for (auto& c : s.ctx) c.eval_state = ctx.eval_state;
 
   e.forward(p.root);
@@ -3170,15 +2632,13 @@ void structured_loop_forward(KernelCtx& ctx) {
   if (s.report_tape && !s.memo_ready) {
     s.report_tape = false;
     const size_t arena_used = s.arena.used();
-    size_t kernel_records = 0, copies = 0, updates = 0, memo_tape = 0,
-           segment_records = 0;
+    size_t kernel_records = 0, copies = 0, updates = 0, segment_records = 0;
     for (const auto& r : s.records) {
       kernel_records += r.kind == Record::Kernel;
       copies += r.kind == Record::Copy;
       updates += r.kind == Record::InPlace;
       segment_records += r.kind == Record::Segment;
     }
-    for (const auto& tape : s.memo_tape) memo_tape += tape.size();
     emit_diagnostic(
         "stanli_structured tape: arena=" + std::to_string(arena_used) +
         " adjoints=" + std::to_string(s.adjoint_size) +
@@ -3190,10 +2650,6 @@ void structured_loop_forward(KernelCtx& ctx) {
         " targets=" + std::to_string(s.target_refs.size()) +
         " workspace=" + std::to_string(s.workspace.size()) +
         " reused_primal_cells=" + std::to_string(s.reused_primal_cells) +
-        " memo_nodes=" + std::to_string(p.memo_count) +
-        " memo_restores=" + std::to_string(s.memo_restores) + " memo_tape=" +
-        std::to_string(memo_tape) + " traces=" + std::to_string(p.trace_count) +
-        " trace=" + std::to_string(s.trace.size()) +
         " visits=" + std::to_string(s.visits) +
         " segments=" + std::to_string(p.segments.size()) +
         " segment_records=" + std::to_string(segment_records) +
