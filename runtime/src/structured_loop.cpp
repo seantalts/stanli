@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -1033,12 +1034,14 @@ struct FrozenInPlace {
   uint32_t pos_offset = 0, pos_count = 0;
   uint32_t old_offset = 0;
   uint32_t sel_offset = 0, sel_count = 0;
+  uint32_t site = 0;
 };
 
 struct FrozenCopy {
   const double* src = nullptr;
   double* dst = nullptr;
   int64_t len = 0;
+  uint32_t site = 0;
 };
 
 struct FrozenSegment {
@@ -1085,10 +1088,25 @@ struct FrozenGather {
   uint32_t pos_offset = 0, pos_count = 0;
   uint32_t adj_offset = 0;
   uint8_t flags = 0;
+  uint32_t site = 0;
 };
 
 struct StreamInstr {
-  enum Kind : uint8_t { Call, InPlace, Copy, Seg, Guard, Tgt, Set, Gather } kind;
+  // Mark separates the frozen stream into prologue, per-trip iteration
+  // slices and epilogue: one Mark (index = trip ordinal) at the start of
+  // every trip of the plan's outer_loop_index loop, and one closing Mark
+  // (index = Execution::kMarkExit) once that loop's last trip finishes.
+  enum Kind : uint8_t {
+    Call,
+    InPlace,
+    Copy,
+    Seg,
+    Guard,
+    Tgt,
+    Set,
+    Gather,
+    Mark
+  } kind;
   uint32_t index = 0;
 };
 
@@ -1376,7 +1394,7 @@ struct Execution {
     st.program.push_back(StreamInstr{StreamInstr::Gather, idx});
     st.gathers.push_back(FrozenGather{src, c.out.data,
                                       p.body.slots[op.in[0]].len, pos_offset,
-                                      pos_count, adj_offset, flags});
+                                      pos_count, adj_offset, flags, n.site});
   }
 
   void log_call(const Node& n, const Op& op, const KernelCtx& c) {
@@ -1500,7 +1518,8 @@ struct Execution {
           st.copy_adj_version.push_back(fresh);
           const uint32_t idx = static_cast<uint32_t>(st.copies.size());
           st.program.push_back(StreamInstr{StreamInstr::Copy, idx});
-          st.copies.push_back(FrozenCopy{materialize(base, len), copy, len});
+          st.copies.push_back(
+              FrozenCopy{materialize(base, len), copy, len, n.site});
         }
       }
       s.bindings[base_slot] = base = fresh;
@@ -1557,6 +1576,7 @@ struct Execution {
         }
       }
       fi.sel_count = static_cast<uint32_t>(st.inplace_sel_ptr.size()) - fi.sel_offset;
+      fi.site = n.site;
       st.inplace_adj_version.push_back(base);
       st.inplace_adj_version.push_back(rhs);
       const uint32_t idx = static_cast<uint32_t>(st.inplaces.size());
@@ -1570,6 +1590,14 @@ struct Execution {
     st.program.push_back(
         StreamInstr{StreamInstr::Guard, static_cast<uint32_t>(st.guards.size())});
     st.guards.push_back(g);
+  }
+
+  static constexpr uint32_t kMarkExit = ~uint32_t{0};
+  void log_mark(uint32_t trip) {
+    s.building->program.push_back(StreamInstr{StreamInstr::Mark, trip});
+  }
+  void log_mark_exit() {
+    s.building->program.push_back(StreamInstr{StreamInstr::Mark, kMarkExit});
   }
 
   void bind_iterator(const Node& n, double at, bool constant) {
@@ -1659,15 +1687,22 @@ struct Execution {
         if (s.building && !bounds_const)
           log_guard(FrozenGuard{FrozenGuard::For, value(n.lower),
                                 value(n.upper), lo, hi, false});
+        const bool marked =
+            s.building && n.loop_index == p.outer_loop_index;
         for (int64_t i = 0; i < count; ++i) {
+          if (marked) log_mark(static_cast<uint32_t>(i));
           bind_iterator(n, lo + static_cast<double>(i), bounds_const);
           if (forward(n.children[0]) == Break) break;
         }
+        if (marked) log_mark_exit();
         return Normal;
       }
       case Node::While: {
         ++s.loop_generation[n.loop_index];
-        for (;;) {
+        const bool marked =
+            s.building && n.loop_index == p.outer_loop_index;
+        for (uint32_t trip = 0;; ++trip) {
+          if (marked) log_mark(trip);
           if (forward(n.children[0]) == Break) break;
           const double* cond = value(n.condition);
           const bool taken = cond[0] != 0.0;
@@ -1678,6 +1713,7 @@ struct Execution {
           if (!taken) break;
           if (forward(n.children[1]) == Break) break;
         }
+        if (marked) log_mark_exit();
         return Normal;
       }
       case Node::Break:
@@ -1931,9 +1967,200 @@ void compact_snapshot(LoopState& s, ArenaSnapshot& out) {
     std::copy_n(r.base, r.used, out.cells.data() + r.offset);
 }
 
+// A blob is one trip's fingerprint: kind/site/static-data per instruction,
+// plus for every pointer operand whether an earlier instruction in the same
+// trip produced it (tagged with that instruction's ordinal) or not.
+struct Blob {
+  std::vector<uint8_t> bytes;
+  template <class T>
+  void put(T v) {
+    const auto* p = reinterpret_cast<const uint8_t*>(&v);
+    bytes.insert(bytes.end(), p, p + sizeof(T));
+  }
+  void tag(const std::unordered_map<const void*, uint32_t>& produced,
+          const void* ptr) {
+    if (!ptr) {
+      put<uint8_t>(2);
+      return;
+    }
+    auto it = produced.find(ptr);
+    if (it == produced.end()) {
+      put<uint8_t>(0);
+    } else {
+      put<uint8_t>(1);
+      put<uint32_t>(it->second);
+    }
+  }
+};
+
+struct TemplateReport {
+  uint32_t prologue_instr = 0, epilogue_instr = 0;
+  uint32_t iterations = 0;
+  uint32_t templates = 0;
+  uint32_t max_group = 0;
+  uint32_t singleton_templates = 0;
+  // Same grouping with position/selector/guard *values* dropped from the
+  // blob (counts and everything else kept): how many templates there would
+  // be if data-dependent index values moved from the fingerprint into the
+  // per-iteration binding table instead of the template's own code.
+  uint32_t shape_templates = 0;
+};
+
+TemplateReport fingerprint_iterations(const Stream& st) {
+  TemplateReport rep;
+  // Trip-start marks (index != kMarkExit) in program order, plus the single
+  // exit mark (index == kMarkExit) closing the last trip.
+  std::vector<uint32_t> starts;
+  uint32_t exit_pos = static_cast<uint32_t>(st.program.size());
+  for (uint32_t i = 0; i < st.program.size(); ++i) {
+    if (st.program[i].kind != StreamInstr::Mark) continue;
+    if (st.program[i].index == Execution::kMarkExit) {
+      exit_pos = i;
+    } else {
+      starts.push_back(i);
+    }
+  }
+  if (starts.empty()) {
+    rep.prologue_instr = static_cast<uint32_t>(st.program.size());
+    return rep;
+  }
+  rep.iterations = static_cast<uint32_t>(starts.size());
+  rep.prologue_instr = starts.front();
+  rep.epilogue_instr = static_cast<uint32_t>(st.program.size()) - (exit_pos + 1);
+
+  // exact_values also folds in the actual position/selector/guard values;
+  // dropping them (exact_values=false) leaves only counts and shapes, i.e.
+  // what the fingerprint would be if those values were per-iteration
+  // bindings instead of part of the template.
+  const auto close_slice = [&](uint32_t start, uint32_t end,
+                               bool exact_values,
+                               std::unordered_map<std::string, uint32_t>& groups) {
+    std::unordered_map<const void*, uint32_t> produced;
+    Blob blob;
+    uint32_t ordinal = 0;
+    for (uint32_t i = start; i < end; ++i, ++ordinal) {
+      const StreamInstr& instr = st.program[i];
+      blob.put<uint8_t>(static_cast<uint8_t>(instr.kind));
+      switch (instr.kind) {
+        case StreamInstr::Call: {
+          const FrozenCall& f = st.calls[instr.index];
+          blob.put(f.site);
+          blob.put(f.n_in);
+          blob.put(f.flags);
+          const double* const* ptrs = st.call_ptrs.data() + f.ptr_offset;
+          for (int k = 0; k < f.n_in; ++k) blob.tag(produced, ptrs[k]);
+          produced[ptrs[f.n_in]] = ordinal;
+          if (f.flags & kFrozenCallHasOut2) produced[ptrs[f.n_in + 1]] = ordinal;
+          break;
+        }
+        case StreamInstr::InPlace: {
+          const FrozenInPlace& fi = st.inplaces[instr.index];
+          blob.put(fi.site);
+          blob.put(fi.pos_count);
+          blob.put(fi.sel_count);
+          if (exact_values) {
+            for (uint32_t k = 0; k < fi.pos_count; ++k)
+              blob.put(st.inplace_pos[fi.pos_offset + k]);
+            for (uint32_t k = 0; k < fi.sel_count; ++k)
+              blob.put(st.inplace_sel_snapshot[fi.sel_offset + k]);
+          }
+          blob.tag(produced, fi.base);
+          blob.tag(produced, fi.rhs);
+          produced[fi.base] = ordinal;
+          break;
+        }
+        case StreamInstr::Copy: {
+          const FrozenCopy& fc = st.copies[instr.index];
+          blob.put(fc.site);
+          blob.put(fc.len);
+          blob.tag(produced, fc.src);
+          produced[fc.dst] = ordinal;
+          break;
+        }
+        case StreamInstr::Seg: {
+          const FrozenSegment& fs = st.segs[instr.index];
+          blob.put(reinterpret_cast<uintptr_t>(fs.segment));
+          const size_t n = fs.segment->ins.size();
+          blob.put(n);
+          for (size_t k = 0; k < n; ++k)
+            blob.tag(produced, st.seg_in_src[fs.in_offset + k]);
+          produced[fs.frame] = ordinal;
+          break;
+        }
+        case StreamInstr::Guard: {
+          const FrozenGuard& g = st.guards[instr.index];
+          blob.put(g.kind);
+          if (exact_values) {
+            blob.put(g.va);
+            blob.put(g.vb);
+          }
+          blob.put(g.decision);
+          blob.tag(produced, g.a);
+          blob.tag(produced, g.b);
+          break;
+        }
+        case StreamInstr::Tgt: {
+          const FrozenTarget& t = st.targets[instr.index];
+          blob.tag(produced, t.value);
+          break;
+        }
+        case StreamInstr::Set: {
+          const FrozenSet& fset = st.sets[instr.index];
+          if (exact_values) blob.put(fset.value);
+          produced[fset.ptr] = ordinal;
+          break;
+        }
+        case StreamInstr::Gather: {
+          const FrozenGather& g = st.gathers[instr.index];
+          blob.put(g.site);
+          blob.put(g.pos_count);
+          if (exact_values)
+            for (uint32_t k = 0; k < g.pos_count; ++k)
+              blob.put(st.gather_pos[g.pos_offset + k]);
+          blob.tag(produced, g.src);
+          produced[g.dst] = ordinal;
+          break;
+        }
+        case StreamInstr::Mark:
+          break;
+      }
+    }
+    const std::string key(blob.bytes.begin(), blob.bytes.end());
+    ++groups[key];
+  };
+  std::unordered_map<std::string, uint32_t> exact_groups, shape_groups;
+  for (size_t t = 0; t < starts.size(); ++t) {
+    const uint32_t slice_start = starts[t] + 1;
+    const uint32_t slice_end =
+        t + 1 < starts.size() ? starts[t + 1] : exit_pos;
+    close_slice(slice_start, slice_end, true, exact_groups);
+    close_slice(slice_start, slice_end, false, shape_groups);
+  }
+  rep.templates = static_cast<uint32_t>(exact_groups.size());
+  rep.shape_templates = static_cast<uint32_t>(shape_groups.size());
+  for (const auto& kv : exact_groups) {
+    rep.max_group = std::max(rep.max_group, kv.second);
+    if (kv.second == 1) ++rep.singleton_templates;
+  }
+  return rep;
+}
+
 void freeze(LoopState& s) {
   const StructuredLoop& p = s.p;
   Stream& st = *s.building;
+  if (s.diagnostics) {
+    const TemplateReport rep = fingerprint_iterations(st);
+    emit_diagnostic(
+        "stanli_structured templates: outer_loop=" +
+        std::to_string(p.outer_loop_index) +
+        " prologue_instr=" + std::to_string(rep.prologue_instr) +
+        " epilogue_instr=" + std::to_string(rep.epilogue_instr) +
+        " iterations=" + std::to_string(rep.iterations) +
+        " templates=" + std::to_string(rep.templates) +
+        " shape_templates=" + std::to_string(rep.shape_templates) +
+        " max_group=" + std::to_string(rep.max_group) +
+        " singleton_templates=" + std::to_string(rep.singleton_templates));
+  }
   compact_snapshot(s, st.arena);
   s.arena = BlockArena{};
   const auto remap = [&](double* ptr) { return st.arena.remap(ptr); };
@@ -2029,6 +2256,7 @@ void freeze(LoopState& s) {
       case StreamInstr::Guard:
       case StreamInstr::Set:
       case StreamInstr::Tgt:
+      case StreamInstr::Mark:
         break;
     }
     if (live) st.backward_order.push_back(instr);
@@ -2144,6 +2372,7 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
         break;
       }
       case StreamInstr::Tgt:
+      case StreamInstr::Mark:
         break;
     }
   }
@@ -2181,6 +2410,7 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
       case StreamInstr::Guard:
       case StreamInstr::Set:
       case StreamInstr::Tgt:
+      case StreamInstr::Mark:
         break;
       case StreamInstr::Call: {
         const FrozenCall& f = st.calls[instr.index];
@@ -2304,6 +2534,23 @@ void StructuredLoop::prepare() {
   prepare_node(*this, root, 0, 0, out_seen);
   classify(*this);
   body.compact_idata();
+  std::function<bool(const Node&)> find_outer = [&](const Node& n) -> bool {
+    switch (n.kind) {
+      case Node::For:
+      case Node::While:
+        outer_loop_index = n.loop_index;
+        return true;
+      case Node::Sequence:
+        for (const auto& c : n.children)
+          if (find_outer(c)) return true;
+        return false;
+      case Node::If:
+        return find_outer(n.children[0]) || find_outer(n.children[1]);
+      default:
+        return false;
+    }
+  };
+  find_outer(root);
 }
 
 template <typename T>
