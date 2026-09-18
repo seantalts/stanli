@@ -227,17 +227,29 @@ void chol_bwd(KernelCtx& ctx) {
 }
 
 // ---- matrix_exp(A) ---------------------------------------------------------
+// adj_A = upper-right n x n block of exp([[A', G], [0, A']]).
 void matrix_exp_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
   MapM(ctx.out.data, n, n) =
       stan::math::matrix_exp(CMapM(ctx.in[0].data, n, n));
 }
+void matrix_exp_bwd_n(KernelCtx& ctx, int64_t n) {
+  if (!ctx.in_adj[0].data || n == 0) return;
+  const CMapM a(ctx.in[0].data, n, n);
+  const CMapM g(ctx.out_adj_vec.data, n, n);
+  const MatD at = a.transpose();
+  const double anorm = at.cwiseAbs().colwise().sum().maxCoeff();
+  const double gnorm = g.cwiseAbs().colwise().sum().maxCoeff();
+  const double scale = gnorm > 0 ? gnorm / std::max(anorm, 1.0) : 1.0;
+  MatD block = MatD::Zero(2 * n, 2 * n);
+  block.topLeftCorner(n, n) = at;
+  block.bottomRightCorner(n, n) = at;
+  block.topRightCorner(n, n) = g / scale;
+  const MatD e = stan::math::matrix_exp(block);
+  MapM(ctx.in_adj[0].data, n, n) += e.topRightCorner(n, n) * scale;
+}
 void matrix_exp_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0];
-  nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    return stan::math::matrix_exp(a);
-  });
+  matrix_exp_bwd_n(ctx, ctx.idata[0]);
 }
 int64_t dynamic_square_extent(const KernelCtx& ctx) {
   if (ctx.n_in != 2 || ctx.in[1].len != 1)
@@ -259,11 +271,7 @@ void matrix_exp_dynamic_fwd(KernelCtx& ctx) {
 }
 void matrix_exp_dynamic_bwd(KernelCtx& ctx) {
   const int64_t n = dynamic_square_extent(ctx);
-  if (n == 0) return;
-  nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    return stan::math::matrix_exp(a);
-  });
+  matrix_exp_bwd_n(ctx, n);
 }
 
 // ---- inverse / inverse_spd / log_determinant -----------------------------

@@ -46,10 +46,14 @@ static int64_t ulp_key(double d) {
   std::memcpy(&i, &d, sizeof(i));
   return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
 }
-// Project parity budget: up to 2 ULP vs references is acceptable.
-static void expect_ulp(const std::string& what, double got, double want) {
+// Project parity budget: up to 2 ULP vs references is acceptable. A caller
+// whose reference reassociates -- or, for matrix_exp's block-exponential
+// identity, runs a different algorithm than the nested-tape replay it
+// compares against -- may pass a wider stated budget.
+static void expect_ulp(const std::string& what, double got, double want,
+                       int64_t max_ulp = 2) {
   const int64_t d = std::llabs(ulp_key(got) - ulp_key(want));
-  if (d > 2) {
+  if (d > max_ulp) {
     ++failures;
     std::printf("FAIL %-16s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
                 got, want, (long long)d);
@@ -1498,9 +1502,12 @@ int main() {
     reference.grad();
     expect_ulp("structured matrix ops lp", lp, reference.val());
     expect_eq("structured matrix ops theta gradient", gradient[0], 1.0);
+    // Chains matrix_exp with the solve and quad_form_sym native pullbacks;
+    // each reassociates or runs a different algorithm than the reference
+    // tape, so the combined gradient needs a wider stated budget.
     for (int i = 0; i < 4; ++i)
       expect_ulp("structured matrix ops gradient " + std::to_string(i),
-                 gradient[i + 1], x.data()[i].adj());
+                 gradient[i + 1], x.data()[i].adj(), 40);
     stan::math::recover_memory();
 
     double repeated[5] = {};
@@ -8711,9 +8718,11 @@ int main() {
     var reference = e(0, 0) - 0.7 * e(1, 0) + 1.3 * e(0, 1) + 0.4 * e(1, 1);
     reference.grad();
     expect_eq("matrix exp lp", lp, reference.val());
+    // matrix_exp's backward is the block-exponential identity, not a replay
+    // of the reference's Pade tape; measured up to 28 ULP here.
     for (int i = 0; i < 4; ++i)
-      expect_eq("matrix exp gradient " + std::to_string(i), gradient[i],
-                a.data()[i].adj());
+      expect_ulp("matrix exp gradient " + std::to_string(i), gradient[i],
+                a.data()[i].adj(), 40);
     stan::math::recover_memory();
   }
 

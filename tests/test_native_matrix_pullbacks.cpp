@@ -3,8 +3,11 @@
 #include <stanli/optable.hpp>
 #include <stan/math.hpp>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
+#include <random>
 #include <vector>
 #include <string>
 
@@ -21,6 +24,25 @@ static void check(double got, double want, const char* tag,
       std::abs(got - want) <= 2e-12 * (1 + std::abs(want)))
     return;
   if (++failures < 12) std::printf("FAIL %s %.17g != %.17g\n", tag, got, want);
+}
+
+static int64_t ulp_key(double d) {
+  int64_t i;
+  std::memcpy(&i, &d, sizeof(i));
+  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
+}
+// A native pullback's own gate: bitwise, with a stated ULP allowance when
+// it reassociates or -- as with matrix_exp's block-exponential identity --
+// runs a different algorithm than the nested-tape replay it replaces.
+static void expect_ulp(const std::string& what, double got, double want,
+                       int64_t max_ulp) {
+  if (got == want || (std::isnan(got) && std::isnan(want))) return;
+  const int64_t dist = std::llabs(ulp_key(got) - ulp_key(want));
+  if (dist > max_ulp) {
+    if (++failures < 12)
+      std::printf("FAIL %-28s got %.17g want %.17g (%lld ulp)\n",
+                  what.c_str(), got, want, (long long)dist);
+  }
 }
 static void gp(int n, int d, int active, uint8_t variant, bool repeated,
                double rho = 0.7, double sigma = 1.3, double seed_scale = 0.7) {
@@ -135,6 +157,124 @@ static void chol(int n) {
   ctx.in_adj[0].data = nullptr;
   k.backward(ctx);
 }
+
+// A scaling-and-squaring matrix exponential coded independently of
+// stan-math, in long double, as a finite-difference oracle for matrix_exp's
+// block-identity backward. On this toolchain long double equals double, so
+// this checks a second algorithm rather than a higher-precision one.
+using MatLD = Eigen::Matrix<long double, -1, -1>;
+static MatLD expm_ld(const MatLD& a) {
+  const int n = (int)a.rows();
+  if (n == 0) return MatLD(0, 0);
+  long double norm = a.cwiseAbs().rowwise().sum().maxCoeff();
+  int squarings = 0;
+  long double scale = 1.0L;
+  while (norm * scale > 0.5L) {
+    scale *= 0.5L;
+    ++squarings;
+  }
+  const MatLD as = a * scale;
+  MatLD term = MatLD::Identity(n, n);
+  MatLD total = MatLD::Identity(n, n);
+  for (int k = 1; k <= 50; ++k) {
+    term = (term * as) / (long double)k;
+    total += term;
+  }
+  for (int i = 0; i < squarings; ++i) total = (total * total).eval();
+  return total;
+}
+
+// matrix_exp: differential check against the nested-tape replay this
+// kernel used to run, plus a directional finite-difference cross-check
+// against the independent long-double exponential above.
+double g_max_matrix_exp_ulp = 0;
+double g_max_matrix_exp_value_rel = 0;
+double g_max_matrix_exp_fd_rel = 0;
+double g_max_matrix_exp_tape_fd_rel = 0;
+static void matrix_exp_case(int n, bool active, unsigned seed_val,
+                            int64_t max_ulp) {
+  using namespace stanli;
+  std::mt19937 rng(seed_val);
+  std::uniform_real_distribution<double> coef(-0.6, 0.6);
+  Mat a(n, n), seed(n, n), out(n, n), adj = Mat::Constant(n, n, 0.125);
+  for (int i = 0; i < n * n; ++i) {
+    a.data()[i] = coef(rng);
+    seed.data()[i] = coef(rng);
+  }
+  KernelCtx ctx;
+  int dims[] = {n};
+  ctx.n_in = 1;
+  ctx.idata = dims;
+  ctx.n_idata = 1;
+  ctx.in[0] = {a.data(), n * n};
+  ctx.in_adj[0] = {active ? adj.data() : nullptr, n * n};
+  ctx.out = {out.data(), n * n};
+  ctx.out_adj_vec = {seed.data(), n * n};
+  const Kernel& k = *find_kernel(OP_MATRIX_EXP);
+  k.forward(ctx);
+  k.backward(ctx);
+  if (n == 0) return;
+
+  stan::math::nested_rev_autodiff scope;
+  Eigen::Matrix<Var, -1, -1> av(n, n);
+  for (int i = 0; i < n * n; ++i) av.data()[i] = a.data()[i];
+  Eigen::Matrix<Var, -1, -1> ex = stan::math::matrix_exp(av);
+  Var objective = stan::math::sum(stan::math::elt_multiply(ex, seed));
+  stan::math::grad(objective.vi_);
+
+  const std::string tag =
+      " n=" + std::to_string(n) + " seed=" + std::to_string(seed_val);
+  for (int i = 0; i < n * n; ++i) {
+    // Forward is unchanged (double CMapM vs Matrix<var> instantiate the
+    // same templated Pade/2x2 algorithm); Eigen picks different packet
+    // arithmetic for the two scalar types, same as the pre-existing GP and
+    // inverse_spd notes elsewhere in this file, so this is a relative check.
+    check(out.data()[i], ex.data()[i].val(), ("matrix_exp value" + tag).c_str());
+    const double want = ex.data()[i].val();
+    const double rel = std::abs(out.data()[i] - want) / (1 + std::abs(want));
+    g_max_matrix_exp_value_rel = std::max(g_max_matrix_exp_value_rel, rel);
+  }
+  if (!active) return;
+  for (int i = 0; i < n * n; ++i) {
+    const double want = 0.125 + av.data()[i].adj();
+    expect_ulp("matrix_exp adj" + tag + " i=" + std::to_string(i),
+              adj.data()[i], want, max_ulp);
+    const int64_t dist =
+        std::llabs(ulp_key(adj.data()[i]) - ulp_key(want));
+    g_max_matrix_exp_ulp = std::max(g_max_matrix_exp_ulp, (double)dist);
+  }
+
+  // Directional finite difference in the independent long-double exp.
+  MatLD ald(n, n), gld(n, n), dld(n, n);
+  std::uniform_real_distribution<double> dir(-1.0, 1.0);
+  for (int i = 0; i < n * n; ++i) {
+    ald.data()[i] = (long double)a.data()[i];
+    gld.data()[i] = (long double)seed.data()[i];
+    dld.data()[i] = (long double)dir(rng);
+  }
+  const long double h = 1e-6L;
+  const MatLD ep = expm_ld((ald + h * dld).eval());
+  const MatLD em = expm_ld((ald - h * dld).eval());
+  const MatLD fd = (ep - em) / (2 * h);
+  const long double fd_dot = (gld.array() * fd.array()).sum();
+  long double kernel_dot = 0, tape_dot = 0;
+  for (int i = 0; i < n * n; ++i) {
+    kernel_dot += (long double)(adj.data()[i] - 0.125) * dld.data()[i];
+    tape_dot += (long double)av.data()[i].adj() * dld.data()[i];
+  }
+  const long double scale = std::max(1.0L, std::abs(fd_dot));
+  const double kernel_rel = (double)(std::abs(kernel_dot - fd_dot) / scale);
+  const double tape_rel = (double)(std::abs(tape_dot - fd_dot) / scale);
+  g_max_matrix_exp_fd_rel = std::max(g_max_matrix_exp_fd_rel, kernel_rel);
+  g_max_matrix_exp_tape_fd_rel = std::max(g_max_matrix_exp_tape_fd_rel, tape_rel);
+  if (kernel_rel > 1e-6) {
+    ++failures;
+    std::printf(
+        "FAIL matrix_exp fd%s kernel_rel=%.3e tape_rel=%.3e fd=%.10Lg\n",
+        tag.c_str(), kernel_rel, tape_rel, fd_dot);
+  }
+}
+
 int main(int argc, char** argv) {
   // Optional local UBSan diagnostic: the pinned Stan Math blocked routine
   // itself binds an empty Eigen block reference at its final panel. The
@@ -163,6 +303,15 @@ int main(int argc, char** argv) {
   gp(4, 2, 6, stanli::kGpExpQuad, false, 0.7, 1e150, 1e100);
   for (int n : {0, 1, 5, 35, 36, 80})
     if (!unblocked_only || n <= 35) chol(n);
+  for (int n : {0, 1, 2, 5, 10, 20})
+    for (bool active : {false, true})
+      for (unsigned seed_val = 1; seed_val <= 4; ++seed_val)
+        matrix_exp_case(n, active, seed_val, 6000);
+  std::printf(
+      "matrix_exp: max adj ulp=%.0f max value rel=%.3e "
+      "max kernel fd_rel=%.3e max tape fd_rel=%.3e\n",
+      g_max_matrix_exp_ulp, g_max_matrix_exp_value_rel, g_max_matrix_exp_fd_rel,
+      g_max_matrix_exp_tape_fd_rel);
   if (!failures) std::puts("test_native_matrix_pullbacks OK");
   return failures ? 1 : 0;
 }
