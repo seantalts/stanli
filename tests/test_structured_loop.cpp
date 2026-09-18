@@ -5069,6 +5069,100 @@ static void import_activity_independence_tests() {
   }
 }
 
+// One Transient node visited three times inside a single retained loop: its
+// version id is reused every visit, so its constant bit must be recomputed
+// each time rather than carried over from an earlier one.
+static void transient_constancy_toggle_tests() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const int theta = plan->body.add_slot(1, false);
+  const int lower = scalar(*plan, 1);
+  const int upper = scalar(*plan, 3);
+  const int iterator = plan->body.add_slot(1, false);
+  const int two = scalar(*plan, 2);
+  const int zero = scalar(*plan, 0);
+  const int condition = plan->body.add_slot(1, false);
+  const int select = plan->body.add_slot(1, false);
+  const int term = plan->body.add_slot(1, false);
+  const int acc = plan->body.add_slot(1, false);
+  plan->fills.push_back({acc, {0}});
+  const int next = plan->body.add_slot(1, false);
+  plan->imports = {{theta, 0, 0, true, false}};
+  // OP_COMPARE's default variant is "less than": true only at iterator==1,
+  // so the constant arm runs first and the parameter arm runs on the later,
+  // repeated visits (iterator==2 and iterator==3).
+  Node compare = call(*plan, OP_COMPARE, {iterator, two}, condition);
+  plan->root = counted(
+      lower, upper, iterator,
+      sequence({std::move(compare),
+                branch(condition, sequence({alias(select, zero)}),
+                      sequence({alias(select, theta)})),
+                call(*plan, OP_MUL, {select, iterator}, term),
+                call(*plan, OP_ADD, {acc, term}, next), alias(acc, next)}));
+  plan->outputs = {acc};
+  prepare_kernels(*plan);
+  Executor executor = diagnosed_executor(outer(plan));
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(outer(plan));
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  stanli_test::StdoutCapture captured(stderr);
+  const Evaluation observed = evaluate(executor, .25, 0);
+  const std::string diagnostics = captured.finish();
+  const Evaluation reference = evaluate(ref, .25, 0);
+  close(observed.value, 1.25, "toggled transient visit value");
+  check(observed.gradient[0] == 5.0,
+        "toggled transient visit logs the parameter-dependent visits' "
+        "contribution");
+  check(observed.gradient[0] == reference.gradient[0],
+        "toggled transient visit gradient matches the no-replay walk");
+  check(reported_field(diagnostics, "instructions=") >= 1,
+        "the parameter-dependent visit is logged into the stream");
+}
+
+// A data-only array built one element at a time inside a retained loop, then
+// read by a parameter-dependent call. Every element write has a constant
+// base, rhs and selector, so none of them belongs in the replay stream.
+static void inplace_constant_base_tests() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const int theta = plan->body.add_slot(1, false);
+  const int base = plan->body.add_slot(3, false);
+  const int lower = scalar(*plan, 1);
+  const int upper = scalar(*plan, 3);
+  const int iterator = plan->body.add_slot(1, false);
+  const int updated = plan->body.add_slot(3, false);
+  const int total = plan->body.add_slot(1, false);
+  const int result = plan->body.add_slot(1, false);
+  plan->imports = {{theta, 0, 0, true, false}, {base, 2, 0, false, true}};
+  Node update =
+      call(*plan, OP_SET_INDEX_DYNAMIC, {base, iterator, iterator}, updated);
+  attach(*plan, update.op, single_spec(3));
+  plan->root =
+      sequence({counted(lower, upper, iterator,
+                        sequence({std::move(update), alias(base, updated)})),
+                call(*plan, OP_SUM_VEC, {base}, total),
+                call(*plan, OP_MUL, {theta, total}, result)});
+  plan->outputs = {result};
+  prepare_kernels(*plan);
+  Executor executor = diagnosed_executor(outer(plan, {1, 1}, {3}));
+  std::fill_n(executor.value_ptr(2), 3, 0.0);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(outer(plan, {1, 1}, {3}));
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  std::fill_n(ref.value_ptr(2), 3, 0.0);
+  stanli_test::StdoutCapture captured(stderr);
+  const Evaluation observed = evaluate(executor, 2, 0);
+  const std::string diagnostics = captured.finish();
+  const Evaluation reference = evaluate(ref, 2, 0);
+  close(observed.value, 12, "constant-base element writes value");
+  close(observed.gradient[0], 6, "constant-base element writes gradient");
+  check(observed.value == reference.value &&
+            observed.gradient[0] == reference.gradient[0],
+        "constant-base element writes gradient matches the no-replay walk");
+  check(reported_field(diagnostics, "pool=inplaces bytes=") == 0,
+        "constant-base element writes are not logged as InPlace");
+  check(reported_field(diagnostics, "pool=copies bytes=") == 0,
+        "constant-base element writes leave no logged copy either");
+}
+
 int main() {
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
@@ -5111,6 +5205,8 @@ int main() {
   replay_guard_flip_tests();
   selector_guard_tests();
   import_activity_independence_tests();
+  transient_constancy_toggle_tests();
+  inplace_constant_base_tests();
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS");
   if (failures == 0) std::printf("test_structured_loop OK\n");

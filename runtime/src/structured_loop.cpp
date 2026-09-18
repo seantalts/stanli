@@ -1967,24 +1967,34 @@ struct Execution {
     const int64_t rhs = s.bindings[op.in[layout.rhs]];
     const bool rhs_active = active(rhs);
     int64_t base = s.bindings[base_slot];
-    if (s.owner[static_cast<size_t>(base)] != base_slot) {
+    bool selectors_const = true;
+    for (int k = 1; k < layout.rhs; ++k)
+      selectors_const = selectors_const && is_const(s.bindings[op.in[k]]);
+    const bool write_const = is_const(base) && is_const(rhs) && selectors_const;
+    const bool owned_for_this_write =
+        s.owner[static_cast<size_t>(base)] == base_slot &&
+        is_const(base) == write_const;
+    if (!owned_for_this_write) {
       double* copy = s.arena.allocate(len);
       std::copy_n(s.versions[static_cast<size_t>(base)].value, len, copy);
-      const bool needs_adjoint = rhs_active || active(base);
+      const bool needs_adjoint = !write_const && (rhs_active || active(base));
       const int64_t fresh =
-          make_version(copy, needs_adjoint ? reserve_adjoint(len) : -1);
+          make_version(copy, needs_adjoint ? reserve_adjoint(len) : -1,
+                      write_const);
       s.owner[static_cast<size_t>(fresh)] = base_slot;
-      s.records.push_back(Record{Record::Copy, n.site, 0, base, fresh});
-      if (s.building) {
-        Stream& st = *s.building;
-        st.copy_adj_version.push_back(base);
-        st.copy_adj_version.push_back(fresh);
-        const uint32_t idx = static_cast<uint32_t>(st.copies.size());
-        st.program.push_back(StreamInstr{StreamInstr::Copy, idx});
-        st.copies.push_back(FrozenCopy{materialize(base, len), copy, len});
+      if (!write_const) {
+        s.records.push_back(Record{Record::Copy, n.site, 0, base, fresh});
+        if (s.building) {
+          Stream& st = *s.building;
+          st.copy_adj_version.push_back(base);
+          st.copy_adj_version.push_back(fresh);
+          const uint32_t idx = static_cast<uint32_t>(st.copies.size());
+          st.program.push_back(StreamInstr{StreamInstr::Copy, idx});
+          st.copies.push_back(FrozenCopy{materialize(base, len), copy, len});
+        }
       }
       s.bindings[base_slot] = base = fresh;
-    } else if (rhs_active &&
+    } else if (!write_const && rhs_active &&
                s.versions[static_cast<size_t>(base)].adjoint == -1) {
       s.versions[static_cast<size_t>(base)].adjoint = reserve_adjoint(len);
     }
@@ -2006,6 +2016,7 @@ struct Execution {
       selected_positions(spec, runtime, write);
     }
     s.records.push_back(Record{Record::InPlace, n.site, undo, base, rhs});
+    if (write_const) return;
     if (s.building) {
       Stream& st = *s.building;
       FrozenInPlace fi;
@@ -2048,13 +2059,14 @@ struct Execution {
     return s.trace[s.trace_pos++];
   }
 
-  void bind_iterator(const Node& n, double at) {
+  void bind_iterator(const Node& n, double at, bool constant) {
     if (n.storage == Node::Transient) {
       const int64_t version = s.loop_version[n.loop_index];
       double* cell = s.versions[static_cast<size_t>(version)].value;
       *cell = at;
       s.bindings[n.iterator] = version;
-      if (s.building) {
+      s.version_const[static_cast<size_t>(version)] = constant;
+      if (s.building && !constant) {
         Stream& st = *s.building;
         const uint32_t idx = static_cast<uint32_t>(st.sets.size());
         st.program.push_back(StreamInstr{StreamInstr::Set, idx});
@@ -2064,7 +2076,7 @@ struct Execution {
     }
     double* cell = s.arena.allocate(1);
     *cell = at;
-    s.bindings[n.iterator] = make_version(cell, -1);
+    s.bindings[n.iterator] = make_version(cell, -1, constant);
   }
 
   __attribute__((noinline)) Flow record_silent(const Node& n) {
@@ -2180,7 +2192,7 @@ struct Execution {
         ++s.loop_generation[n.loop_index];
         if (n.trace && s.memo_ready) {
           for (int64_t left = read_trace(); left-- > 0;) {
-            bind_iterator(n, static_cast<double>(read_trace()));
+            bind_iterator(n, static_cast<double>(read_trace()), false);
             if (forward(n.children[0]) == Break) break;
           }
           return Normal;
@@ -2193,13 +2205,14 @@ struct Execution {
             hi > std::numeric_limits<int32_t>::max())
           throw std::logic_error("structured loop invalid integer bounds");
         const int64_t count = hi >= lo ? static_cast<int64_t>(hi - lo) + 1 : 0;
+        const bool bounds_const = is_const(s.bindings[n.lower]) &&
+                                  is_const(s.bindings[n.upper]);
         if (!n.trace) {
-          if (s.building && !(is_const(s.bindings[n.lower]) &&
-                              is_const(s.bindings[n.upper])))
+          if (s.building && !bounds_const)
             log_guard(FrozenGuard{FrozenGuard::For, value(n.lower),
                                   value(n.upper), lo, hi, false});
           for (int64_t i = 0; i < count; ++i) {
-            bind_iterator(n, lo + static_cast<double>(i));
+            bind_iterator(n, lo + static_cast<double>(i), bounds_const);
             if (forward(n.children[0]) == Break) break;
           }
           return Normal;
@@ -2212,7 +2225,7 @@ struct Execution {
           const size_t mark = s.trace.size();
           const uint64_t effects = s.effects;
           s.trace.push_back(static_cast<int64_t>(at));
-          bind_iterator(n, at);
+          bind_iterator(n, at, bounds_const);
           const Flow flow = forward(n.children[0]);
           if (s.effects == effects)
             s.trace.resize(mark);
@@ -2981,6 +2994,7 @@ void structured_loop_forward(KernelCtx& ctx) {
       throw;
     }
     std::vector<int32_t>().swap(s.owner);
+    std::vector<uint8_t>().swap(s.version_const);
     std::vector<int64_t>().swap(s.handles);
     std::vector<double>().swap(s.undo);
     std::vector<Record>().swap(s.records);
