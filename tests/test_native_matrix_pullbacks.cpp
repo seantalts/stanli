@@ -382,6 +382,109 @@ static void solve_family(bool left, SolveKindTag kind, uint16_t opcode,
             solve_case(left, kind, opcode, n, k, vec, activity, s, max_ulp);
 }
 
+// quad_form / quad_form_sym: differential check against the nested-tape
+// replay these kernels used to run, for A/B activity combinations and both
+// vector and matrix B.
+double g_max_qf_ulp = 0;
+static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
+                    int activity, unsigned seed_val, int64_t max_ulp) {
+  using namespace stanli;
+  using stan::math::var;
+  std::mt19937 rng(seed_val);
+  std::uniform_real_distribution<double> off(-0.4, 0.4);
+  Mat a(n, n);
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < n; ++j) a(i, j) = off(rng);
+  if (sym) a = (a + a.transpose()).eval();
+  Mat b(n, m);
+  for (int i = 0; i < n * m; ++i) b.data()[i] = off(rng);
+  Mat out(m, m), seed(m, m);
+  for (int i = 0; i < m * m; ++i) seed.data()[i] = off(rng);
+  Mat a_adj = Mat::Constant(n, n, 0.125);
+  Mat b_adj = Mat::Constant(n, m, 0.125);
+  const bool a_var = activity != 2, b_var = activity != 1;
+
+  KernelCtx ctx;
+  int dims[] = {n, m};
+  ctx.n_in = 2;
+  ctx.idata = dims;
+  ctx.n_idata = 2;
+  ctx.in[0] = {a.data(), n * n};
+  ctx.in[1] = {b.data(), (int64_t)n * m};
+  ctx.in_adj[0] = {a_var ? a_adj.data() : nullptr, n * n};
+  ctx.in_adj[1] = {b_var ? b_adj.data() : nullptr, (int64_t)n * m};
+  ctx.variant = vec ? 1u : 0u;
+  if (vec) {
+    ctx.out = {out.data(), 1};
+    ctx.out_adj = seed.data()[0];
+  } else {
+    ctx.out = {out.data(), (int64_t)m * m};
+    ctx.out_adj_vec = {seed.data(), (int64_t)m * m};
+  }
+  const Kernel& kern = *find_kernel(opcode);
+  kern.forward(ctx);
+  kern.backward(ctx);
+
+  stan::math::nested_rev_autodiff scope;
+  Eigen::Matrix<var, -1, -1> av(n, n), bv(n, m);
+  for (int i = 0; i < n * n; ++i) av.data()[i] = a.data()[i];
+  for (int i = 0; i < n * m; ++i) bv.data()[i] = b.data()[i];
+  var objective;
+  std::vector<double> ref_val;
+  if (vec) {
+    Eigen::Matrix<var, -1, 1> bvec = bv.col(0);
+    var r = sym ? stan::math::quad_form_sym(av, bvec)
+                : stan::math::quad_form(av, bvec);
+    objective = r * seed.data()[0];
+    ref_val = {r.val()};
+  } else {
+    Eigen::Matrix<var, -1, -1> r =
+        sym ? stan::math::quad_form_sym(av, bv) : stan::math::quad_form(av, bv);
+    objective = stan::math::sum(
+        stan::math::elt_multiply(r, Eigen::Map<Mat>(seed.data(), m, m)));
+    ref_val.resize((size_t)r.size());
+    for (Eigen::Index i = 0; i < r.size(); ++i) ref_val[(size_t)i] = r.data()[i].val();
+  }
+  stan::math::grad(objective.vi_);
+
+  const std::string tag = " sym=" + std::to_string(sym) +
+                          " n=" + std::to_string(n) + " m=" + std::to_string(m) +
+                          " vec=" + std::to_string(vec) +
+                          " act=" + std::to_string(activity) +
+                          " seed=" + std::to_string(seed_val);
+  const int64_t out_len = vec ? 1 : m * m;
+  for (int i = 0; i < out_len; ++i)
+    check(out.data()[i], ref_val[i], ("qf value" + tag).c_str());
+  if (a_var)
+    for (int i = 0; i < n * n; ++i) {
+      const double want = 0.125 + av.data()[i].adj();
+      expect_ulp("qf A adj" + tag + " i=" + std::to_string(i), a_adj.data()[i],
+                want, max_ulp);
+      g_max_qf_ulp = std::max(
+          g_max_qf_ulp,
+          (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
+    }
+  if (b_var)
+    for (int i = 0; i < n * m; ++i) {
+      const double want = 0.125 + bv.data()[i].adj();
+      expect_ulp("qf B adj" + tag + " i=" + std::to_string(i), b_adj.data()[i],
+                want, max_ulp);
+      g_max_qf_ulp = std::max(
+          g_max_qf_ulp,
+          (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
+    }
+}
+
+static void qf_family(bool sym, uint16_t opcode, int64_t max_ulp) {
+  for (int n : {1, 2, 5, 10, 20})
+    for (int m : {1, n})
+      for (bool vec : (m == 1 ? std::vector<bool>{false, true}
+                              : std::vector<bool>{false}))
+        for (int activity : {1, 2, 3})
+          for (unsigned s = 1; s <= 2; ++s)
+            qf_case(sym, opcode, n, m, vec, activity, s, max_ulp);
+}
+
 int main(int argc, char** argv) {
   // Optional local UBSan diagnostic: the pinned Stan Math blocked routine
   // itself binds an empty Eigen block reference at its final panel. The
@@ -428,6 +531,10 @@ int main(int argc, char** argv) {
   solve_family(true, SolveKindTag::TriLow, OP_MDIVIDE_LEFT_TRI_LOW, 16);
   solve_family(false, SolveKindTag::TriLow, OP_MDIVIDE_RIGHT_TRI_LOW, 16);
   std::printf("solve: max adj ulp=%.0f\n", g_max_solve_ulp);
+
+  qf_family(false, OP_QUAD_FORM, 2);
+  qf_family(true, OP_QUAD_FORM_SYM, 2);
+  std::printf("quad_form: max adj ulp=%.0f\n", g_max_qf_ulp);
 
   if (!failures) std::puts("test_native_matrix_pullbacks OK");
   return failures ? 1 : 0;

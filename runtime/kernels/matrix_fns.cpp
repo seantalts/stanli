@@ -347,20 +347,27 @@ void qf_fwd(KernelCtx& ctx) {
   const MatD c = b.transpose() * a * b;
   ctx.out.data[0] = c(0, 0);
 }
-void qf_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0], m = ctx.idata[1];
-  if (ctx.variant & 1u) {
-    nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-      Eigen::Map<VarM> a(xs[0].data(), n, n);
-      return stan::math::quad_form(a, xs[1]);
-    });
-    return;
+// adj_A += B G B', adj_B += A B G' + A' B G.
+void qf_bwd_impl(KernelCtx& ctx, int64_t n, int64_t m, bool vec) {
+  if (!ctx.in_adj[0].data && !ctx.in_adj[1].data) return;
+  const CMapM a(ctx.in[0].data, n, n);
+  const CMapM b(ctx.in[1].data, n, m);
+  MatD g(m, m);
+  if (vec) {
+    g(0, 0) = ctx.out_adj;
+  } else {
+    g = CMapM(ctx.out_adj_vec.data, m, m);
   }
-  nary_bwd(ctx, [n, m](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    Eigen::Map<VarM> b(xs[1].data(), n, m);
-    return stan::math::quad_form(a, b);
-  });
+  if (ctx.in_adj[0].data)
+    MapM(ctx.in_adj[0].data, n, n) += b * g * b.transpose();
+  if (ctx.in_adj[1].data)
+    MapM(ctx.in_adj[1].data, n, m) +=
+        a * b * g.transpose() + a.transpose() * b * g;
+}
+void qf_bwd(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0];
+  const bool vec = ctx.variant & 1u;
+  qf_bwd_impl(ctx, n, vec ? 1 : ctx.idata[1], vec);
 }
 
 // ---- add_diag(A, d) -------------------------------------------------------
@@ -427,21 +434,12 @@ void qfs_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = c(0, 0);
 }
 void qfs_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0], m = ctx.idata[1];
-  // The rev overload is the one CmdStan reaches at either shape, so the
-  // replay needs no variant beyond the operand shape itself.
-  if (ctx.variant & 1u) {
-    nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-      Eigen::Map<VarM> a(xs[0].data(), n, n);
-      return stan::math::quad_form_sym(a, xs[1]);
-    });
-    return;
-  }
-  nary_bwd(ctx, [n, m](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    Eigen::Map<VarM> b(xs[1].data(), n, m);
-    return stan::math::quad_form_sym(a, b);
-  });
+  // The rev overload is the one CmdStan reaches at either shape, and it is
+  // the same accumulation quad_form's own vari uses (qf_bwd_impl above),
+  // so the replay needs no variant beyond the operand shape itself.
+  const int64_t n = ctx.idata[0];
+  const bool vec = ctx.variant & 1u;
+  qf_bwd_impl(ctx, n, vec ? 1 : ctx.idata[1], vec);
 }
 
 // Bind a slot as a var matrix or vector, and scatter the adjoints back
