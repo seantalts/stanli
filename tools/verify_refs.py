@@ -40,6 +40,8 @@ import sys
 import tempfile
 import zipfile
 
+from corpus_inventory import corpus_cases, local_cases, source_digest
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # Corpora carried in the tree, each a directory of model.stan next to
 # model.json: language and type constructs lifted from stanc3's own test
@@ -132,8 +134,8 @@ def load_refs(path=REFS_PATH):
     recorder, the lite-build cross-check and the corpus scoreboard, so a
     schema change cannot land in one and not the others. `models` maps a
     model name to {"data", "primary", "points": {"0": {...}, ...}};
-    `provenance` names the CmdStan/Stan/Math/stanc3/posteriordb revisions
-    the values were recorded against.
+    `provenance` is the default recording rig. An entry's `recorded` block
+    overrides it and preserves independently imported recording metadata.
     """
     blob = json.loads(gzip.decompress(path.read_bytes()))
     schema = blob.get("schema")
@@ -172,10 +174,11 @@ def model_files(model, ref, pdb, tmp):
     it is unpacked into tmp; the models carried in the tree have their data
     next to them and need no unpacking.
     """
-    for directory in LOCAL_CORPORA:
-        local = directory / f"{model}.stan"
-        if local.exists():
-            return local, directory / f"{model}.json"
+    case = local_cases().get(model)
+    if case is not None:
+        return case.source, case.data
+    # Keep the dataset the oracle recorded even if PDB adds an earlier
+    # posterior for the same model after the reference was generated.
     stan = pdb / "models" / "stan" / f"{model}.stan"
     dz = pdb / "data" / "data" / f"{ref['data']}.json.zip"
     if not stan.exists() or not dz.exists():
@@ -265,29 +268,18 @@ def accepted(fields):
 
 
 def corpus_models(pdb, wanted=(), contains="", excluded=()):
-    """Unique (model, data-name) pairs, in posteriordb order."""
-    wanted, excluded, seen = set(wanted), set(excluded), set()
-    for path in sorted((pdb / "posteriors").glob("*.json")):
-        meta = json.loads(path.read_text())
-        model = meta["model_name"]
-        if (model in seen or model in excluded
-                or (wanted and model not in wanted)
+    """Unique shared-corpus (model, data-name) pairs."""
+    wanted, excluded = set(wanted), set(excluded)
+    for model, case in corpus_cases(pdb, include_language=True).items():
+        if (model in excluded or (wanted and model not in wanted)
                 or (contains and contains not in model)):
             continue
-        seen.add(model)
-        yield model, meta["data_name"]
+        yield model, case.metadata.get("data_name")
 
 
 def corpus_input(pdb, tmp, model, data_name):
-    stan = pdb / "models" / "stan" / f"{model}.stan"
-    zipped = pdb / "data" / "data" / f"{data_name}.json.zip"
-    if not stan.exists() or not zipped.exists():
-        return None
-    data = tmp / f"{data_name}.json"
-    if not data.exists():
-        with zipfile.ZipFile(zipped) as archive:
-            data.write_bytes(archive.read(archive.namelist()[0]))
-    return stan, data
+    stan, data = model_files(model, {"data": data_name}, pdb, tmp)
+    return (stan, data) if stan.exists() and data.exists() else None
 
 
 def cmdstan_header(cmdstan, work, stan, data):
@@ -333,7 +325,9 @@ def check_wa_headers(pdb, check_bin, cmdstan, models, excluded=()):
         if ours.returncode != 0:
             skipped.append((model, ours.stdout.strip()[:110]))
             continue
-        theirs, why = cmdstan_header(cmdstan, tmp, stan, data)
+        work = tmp / model
+        work.mkdir()
+        theirs, why = cmdstan_header(cmdstan, work, stan, data)
         if theirs is None:
             skipped.append((model, why))
             continue
@@ -458,7 +452,7 @@ def worst_pair(rv, gv):
 
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                no_lp):
+                no_lp, strict=False):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
@@ -508,6 +502,8 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
     if len(rv) != len(gv):
         return ("SHAPE_FAIL", 0.0, 0, 0,
                 f"point {point}: {len(rv)} vs {len(gv)}")
+    if strict and not all(math.isfinite(x) for x in rv + gv):
+        return ("NONFINITE", 0.0, 0, 0, f"point {point}: lp/gradient is nonfinite")
     if no_lp:
         # Element 0 is lp. A STANLI_LITE_LP build computes the full
         # density where CmdStan's `~` drops constant terms, so its lp sits
@@ -547,6 +543,9 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         if len(wref) != len(wgot):
             return ("WA_SHAPE_FAIL", worst, worst_ulp, n,
                     f"point {point}: {len(wref)} vs {len(wgot)}")
+        if strict and not all(math.isfinite(x) for x in wref + wgot):
+            return ("WA_NONFINITE", worst, worst_ulp, n,
+                    f"point {point}: write_array is nonfinite")
         wworst, wulp = worst_pair(wref, wgot)
         worst, worst_ulp = max(worst, wworst), max(worst_ulp, wulp)
         n += len(wref)
@@ -588,6 +587,18 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     stan, dj = model_files(model, ref, pdb, tmp)
     if not stan.exists() or not dj.exists():
         return (model, "MISSING_INPUT", 0.0, 0, 0, str(stan), [])
+    for key, path in (("source_sha256", stan), ("data_sha256", dj)):
+        if key in ref and ref[key] != source_digest(path):
+            return (model, "INPUT_HASH_FAIL", 0.0, 0, 0, key, [])
+    strict = ref.get("strict", False)
+    if strict:
+        if set(ref.get("points", {})) != {str(p) for p in POINTS}:
+            return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
+                    "all deterministic reference points are required", [])
+        for pt in ref["points"].values():
+            if "values" not in pt or "wa" not in pt:
+                return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
+                        "lp/gradient and write_array references are required", [])
     worst, worst_ulp, total, notes = 0.0, 0, 0, []
     for point in POINTS:
         pt = ref["points"].get(str(point))
@@ -615,7 +626,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                          f"but nothing compared it against CmdStan")
             continue
         status, rel, ulp, n, detail = check_point(
-            model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp)
+            model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp, strict)
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
@@ -796,10 +807,11 @@ def main():
         return check_wa_coverage(pdb, check_bin, args.models, args.filter,
                                  args.timeout, skip)
     refs, recorded = load_refs()
-    # A new teaching fixture without a reference must fail the default push
-    # gate. Iterating only the existing references would silently omit it.
-    teaching = {p.stem for p in (REPO / "tests" / "rethinking").glob("*.stan")}
-    models = args.models or sorted(set(refs) | teaching)
+    # All local inventory additions must enter the default gate; iterating
+    # existing references alone silently omits fixtures that failed to record.
+    cases = corpus_cases(pdb, include_language=True)
+    local = {name for name, case in cases.items() if case.collection != "posteriordb"}
+    models = args.models or sorted(set(refs) | local)
     models = [m for m in models if m not in skip]
     missing = [m for m in models if m not in refs]
     if missing:
@@ -811,6 +823,9 @@ def main():
     print(f"references recorded against CmdStan "
           f"{recorded['cmdstan_version']} ({recorded['cmdstan'][:12]}), "
           f"math {recorded['math'][:12]}, on {recorded['platform']}")
+    overrides = sum("recorded" in refs[m] for m in models)
+    if overrides:
+        print(f"{overrides} models retain per-model recording provenance overrides")
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_refs_"))
     failures, values = [], 0
     worst_overall = ("", 0.0, 0)

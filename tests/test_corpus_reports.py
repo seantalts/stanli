@@ -1,5 +1,7 @@
 """Regression checks for censoring and selecting diagnostic parameter columns."""
 import importlib.util
+import hashlib
+import copy
 import json
 import math
 import pathlib
@@ -20,12 +22,85 @@ def module(name):
 
 with mock.patch.object(sys, 'path', [str(ROOT / 'tools'), *sys.path]):
     numerics = module('report_rethinking_numerics')
-report = module('report_teaching')
-jobs = module('teaching_diagnostic_jobs')
+sys.path.insert(0, str(ROOT / 'tools'))
+report = module('report_corpus')
+jobs = module('corpus_diagnostic_jobs')
 docs = module('gen_docs')
 
 
-class TeachingReports(unittest.TestCase):
+class CorpusReports(unittest.TestCase):
+    def test_full_corpus_export_preserves_sources_and_incomplete_runs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = pathlib.Path(temporary)
+            names = {'posterior_example': 'posteriordb', 'imported_example': 'educational',
+                     'generated_example': 'brms'}
+            config = dict(corpus='all', sampling=True, seeds=[1, 2], rounds=6,
+                          iter_warmup=100, iter_sampling=100,
+                          cmdstan_runtime_multiple=None, sample_timeout=900)
+            manifest = dict(run_id='one-complete-inventory', identity=dict(
+                config=config, inputs={name: dict(collection=group,
+                    stan=hashlib.sha256((name + '.stan').encode()).hexdigest(),
+                    data=hashlib.sha256((name + '.json').encode()).hexdigest())
+                    for name, group in names.items()},
+                machine=dict(platform='Linux', logical_cpus=4), stanli_source=dict(head='tested')))
+            (run / 'manifest.json').write_text(json.dumps(manifest))
+            (run / 'events.jsonl').write_text('')
+            diagnostics = {}
+            for name in names:
+                sampling = [dict(engine=engine, seed=seed, status='ok', elapsed_s=1.0)
+                            for engine in report.ENGINES for seed in config['seeds']]
+                if name == 'generated_example':
+                    sampling[-1]['status'] = 'timeout'
+                record = dict(model=name, status='ok', inputs={
+                    field: manifest['identity']['inputs'][name][field] for field in ('stan', 'data')},
+                    row=dict(run_id=manifest['run_id']), sampling=sampling)
+                (run / (name + '.result.json')).write_text(json.dumps(record))
+                diagnostics[name] = dict(run_id=manifest['run_id'], engines={
+                    engine: dict(status='complete', screening_flag=False)
+                    for engine in report.ENGINES})
+            diagnostic_path = run / 'diagnostics.json'
+            diagnostic_path.write_text(json.dumps(diagnostics))
+            output = run / 'report'
+            report.export(run, diagnostic_path, output)
+            result = json.loads((output / 'corpus-results.json').read_text())
+            self.assertEqual(set(result['collections']), set(names.values()))
+            self.assertEqual(result['summary']['fixtures'], 3)
+            self.assertEqual(result['summary']['completed_in_both'], 2)
+            self.assertEqual(result['summary']['cli_target_unmeasured'], 1)
+            self.assertEqual({row['model'] for row in result['rows']}, set(names))
+            self.assertIn('Engine order alternated', (output / 'README.md').read_text())
+            self.assertTrue((output / 'corpus-timings.csv').is_file())
+            # A copied result cannot manufacture another completed fixture.
+            (run / 'duplicate.result.json').write_text((run / 'posterior_example.result.json').read_text())
+            with self.assertRaisesRegex(ValueError, 'unfinished'):
+                report.export(run, diagnostic_path, output)
+
+    def test_export_rejects_other_run_results_and_changed_input_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = pathlib.Path(temporary)
+            hashes = dict(stan=hashlib.sha256(b'model').hexdigest(),
+                          data=hashlib.sha256(b'data').hexdigest())
+            manifest = dict(run_id='expected-run', identity=dict(
+                config=dict(sampling=True), inputs=dict(example=hashes)))
+            (run / 'manifest.json').write_text(json.dumps(manifest))
+            diagnostic_path = run / 'diagnostics.json'
+            diagnostic_path.write_text(json.dumps(dict(example=dict(run_id='expected-run'))))
+            valid = dict(model='example', inputs=hashes, row=dict(run_id='expected-run'))
+            invalid_records = []
+            for run_id in ('a-different-run', None):
+                invalid_records.append(({**valid, 'row': dict(run_id=run_id)}, 'different benchmark run'))
+            for field in ('stan', 'data'):
+                changed = copy.deepcopy(valid)
+                changed['inputs'][field] = hashlib.sha256(b'another input').hexdigest()
+                missing = copy.deepcopy(valid)
+                del missing['inputs'][field]
+                invalid_records.extend([(changed, 'hash does not match'), (missing, 'hash does not match')])
+            for record, message in invalid_records:
+                with self.subTest(record=record):
+                    (run / 'example.result.json').write_text(json.dumps(record))
+                    with self.assertRaisesRegex(ValueError, message):
+                        report.export(run, diagnostic_path, run / 'out')
+
     def test_new_run_does_not_inherit_audited_hardware_claims(self):
         manifest = dict(run_id='a-different-run', identity=dict(
             machine=dict(platform='Linux x86_64', logical_cpus=8),
@@ -76,6 +151,11 @@ class TeachingReports(unittest.TestCase):
         result = report.summarize_engine(runs, [1, 2, 3, 4])
         self.assertEqual(result, dict(status='incomplete', completed=3))
         self.assertNotIn('median_s', result)
+
+    def test_successful_runs_require_positive_finite_durations(self):
+        for elapsed in (0, -1, math.inf, math.nan):
+            with self.subTest(elapsed=elapsed), self.assertRaisesRegex(ValueError, 'positive'):
+                report.summarize_engine([dict(seed=1, status='ok', elapsed_s=elapsed)], [1])
 
     def test_missing_or_duplicate_seeds_are_incomplete(self):
         for seeds in ([1, 2, 3], [1, 2, 3, 3]):

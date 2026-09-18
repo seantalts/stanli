@@ -2,9 +2,11 @@
 
 The benchmark measures **warm gradient latency**. Full inference is a separate,
 explicit phase. A numerical comparison must pass before a timing pair is accepted.
-The completed [Rethinking sweep and report](../output/rethinking-report/README.md)
-retain their measured build identity. Exploratory measurements made with changing
-settings are excluded from the report.
+The shared [inventory](../tools/corpus_inventory.py) supplies application
+models from every source collection; language-conformance fixtures remain
+numerical tests. Collection selectors are optional provenance filters and do
+not change the measurement contract. Retained [historical runs](benchmark-history.md)
+keep their original revisions and protocols; they are not pooled into a new sweep.
 
 ## Fixed measurement contract
 
@@ -48,21 +50,42 @@ The runner uses the shipped vectorized compilation pipeline via
 `--cmdstan-stanc` (alias `--stanc`) and `--stancflags` select the reference
 header compiler; the generated header is shared by its gradient driver and
 sampler build. All compiler choices and executable hashes are in the manifest.
-The original report predates this integration and records its original explicit
-compiler commands; it must not be relabeled as a measurement of the merged build.
+Earlier reports retain their recorded compiler commands and hashes; their
+measurements must not be relabeled as results from the current build.
 
 ## Reproducible runs
 
 ```sh
 ./tools/dev_setup.sh --no-build       # builds the compiler and its probe
 cmake --build build-rel --target bench_grad stanli_run -j 4
-# New output path; gradients only, all default corpora:
+# New output path; gradients only, all application models:
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   /tmp/corpus-v3.tsv
-# Rethinking only (also available: brms, educational, teaching):
+# Optional source filter (also available: posteriordb, brms, educational):
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   /tmp/rethinking-v3.tsv --corpus rethinking
 ```
+
+The standard summary is rendered with:
+
+```sh
+python3 tools/corpus_table.py /tmp/corpus-v3.tsv
+```
+
+Complete sampling reports and diagnostic screens use
+[`tools/report_corpus.py`](../tools/report_corpus.py). Its source-collection
+column records provenance; every selected model follows the same acceptance
+and reporting rules. Run diagnostics after the timed sweep finishes:
+
+```sh
+python3 tools/corpus_diagnostic_jobs.py /tmp/corpus-v3.tsv.run /tmp/corpus-jobs.json
+Rscript tools/summarize_corpus_bench.R /tmp/corpus-jobs.json /tmp/corpus-diagnostics.json
+python3 tools/report_corpus.py /tmp/corpus-v3.tsv.run /tmp/corpus-diagnostics.json output/corpus-performance
+```
+
+These commands require a completed run with `--sampling`; they do not rerun
+benchmarks. The former collection-specific performance floors belong to the
+historical experiments that introduced them.
 
 A sibling `OUT.tsv.run/` contains:
 

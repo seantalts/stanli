@@ -1145,22 +1145,18 @@ add_test(NAME test_function COMMAND test_function
 # standalone runs on older Python use the Tomli backport in requirements.txt.
 find_package(Python3 3.11 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
-  add_test(NAME test_educational_harness
-           COMMAND ${Python3_EXECUTABLE} tests/test_educational.py
+  add_test(NAME test_corpus_sampling_harness
+           COMMAND ${Python3_EXECUTABLE} tests/test_corpus_sampling.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_educational_models
-           COMMAND ${Python3_EXECUTABLE} tools/check_educational.py
+  add_test(NAME test_historical_benchmarks
+           COMMAND ${Python3_EXECUTABLE} tests/test_historical_benchmarks.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_corpus_sampling
+           COMMAND ${Python3_EXECUTABLE} tools/check_corpus_sampling.py
                    --build ${CMAKE_CURRENT_BINARY_DIR}
-                   --output ${CMAKE_CURRENT_BINARY_DIR}/educational-ctest/results.json
+                   --output ${CMAKE_CURRENT_BINARY_DIR}/corpus-sampling/results.json
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  set_tests_properties(test_educational_models PROPERTIES TIMEOUT 180)
-  add_custom_target(check_educational_performance
-    COMMAND ${Python3_EXECUTABLE} tools/check_educational.py --benchmark
-            --build ${CMAKE_CURRENT_BINARY_DIR}
-            --output ${CMAKE_CURRENT_BINARY_DIR}/educational-benchmark/results.json
-    DEPENDS stanli_check stanli_run
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    USES_TERMINAL)
+  set_tests_properties(test_corpus_sampling PROPERTIES TIMEOUT 180)
   add_test(NAME test_run_timings
            COMMAND ${Python3_EXECUTABLE} tests/test_run_timings.py
                    $<TARGET_FILE:stanli_run>
@@ -1168,8 +1164,14 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_teaching_reports
-           COMMAND ${Python3_EXECUTABLE} tests/test_teaching_reports.py
+  add_test(NAME test_corpus_inventory
+           COMMAND ${Python3_EXECUTABLE} tests/test_corpus_inventory.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_corpus_diagnostics
+           COMMAND ${Python3_EXECUTABLE} tests/test_corpus_diagnostics.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_corpus_reports
+           COMMAND ${Python3_EXECUTABLE} tests/test_corpus_reports.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_gen_web_models
            COMMAND ${Python3_EXECUTABLE} tests/test_gen_web_models.py

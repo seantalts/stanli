@@ -284,20 +284,20 @@ class CorpusInventoryTests(unittest.TestCase):
 
 
 
-class EducationalResultsTests(unittest.TestCase):
+class HistoricalResultsTests(unittest.TestCase):
     def report(self):
         return json.loads((REPO / "tests/educational/pareto-benchmark-results.json").read_text())
 
     def render(self, report):
-        from tools.corpus_table import render_educational
+        from tools.corpus_table import render_historical_sampling
         result = io.StringIO()
         with contextlib.redirect_stdout(result):
-            render_educational(report)
+            render_historical_sampling(report)
         return result.getvalue()
 
     def test_results_page_matches_retained_measurements(self):
         rendered = self.render(self.report())
-        page = (REPO / "docs/benchmarks.md").read_text()
+        page = (REPO / "docs/benchmark-history.md").read_text()
         body = page.split("<!-- educational-results:start -->\n")[1].split(
             "<!-- educational-results:end -->")[0]
         self.assertEqual(rendered, body)
@@ -310,7 +310,7 @@ class EducationalResultsTests(unittest.TestCase):
         result = io.StringIO()
         with contextlib.redirect_stdout(result):
             render_gradients(rows, col)
-        body = (REPO / "docs/benchmarks.md").read_text().split(
+        body = (REPO / "docs/benchmark-history.md").read_text().split(
             "<!-- educational-gradients:start -->\n")[1].split(
             "<!-- educational-gradients:end -->")[0]
         self.assertEqual(result.getvalue(), body)

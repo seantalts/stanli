@@ -1,61 +1,96 @@
 # Performance measurements
 
-## Latest complete sweep (16 September 2026)
+The benchmark runner uses the same model inventory as numerical testing.
+Application models from every source collection participate in the default
+`--corpus all` run; language-conformance fixtures remain numerical tests.
+Collection names identify provenance and can be used as optional filters.
+The [corpus inventory](corpus-status.md) describes numerical coverage, and the
+[benchmark protocol](benchmark-protocol.md) defines each timed boundary.
 
-Fresh Release build on Apple M3 Ultra, 96 GiB RAM, macOS ARM64. Measured runtime/compiler revision
-`6e462c2e` includes the measured performance fixes; [the full appendix](../output/teaching-performance/README.md)
-records every one of the 199 fixtures, including failures and capped runs.
+| Measurement | What it answers | Timed work |
+| --- | --- | --- |
+| [Warm gradients](#warm-gradients) | How fast is repeated density and gradient evaluation? | Evaluation at a shared fixed point, after equal warmup windows. |
+| [Complete sampling](#complete-sampling) | How long does a fixed inference budget take? | CLI startup, Stanli preparation, adaptation, sampling, generated quantities and CSV output; CmdStan uses an already-built model. |
+| [Compilation and preparation](#compilation-and-preparation) | What does the first fit cost? | Report source compilation, preparation from existing MIR and complete execution separately. |
 
-| Collection | Completed in both | Lower Stanli CLI time | Median CLI sampling time ratio (CmdStan/Stanli) | Diagnostic screen clear in both |
+The measurements below retain their original dates, revisions and protocols.
+No complete sweep of the newly unified inventory has been run. Results from
+different runs are not pooled into a new aggregate.
+
+## Warm gradients
+
+The current protocol measures six alternating pairs, checks the full gradient
+before accepting each pair, and retains medians and median absolute deviations
+(MAD). The following mixed examples come from the **16 September 2026** run
+`fd5e0ecacddc7047`, measured at runtime/compiler revision `6e462c2e` on an Apple
+M3 Ultra, macOS ARM64. Each row's speedup is the median of its within-pair ratios.
+
+| model | source | Stanli gradient | CmdStan gradient | paired speedup |
+| --- | --- | ---: | ---: | ---: |
+| `aalto_gpareto` | Aalto | 0.386 us | 0.261 us | 0.69x ± 0.02 MAD |
+| `ch09_m9_1` | Rethinking | 1.020 us | 2.467 us | 2.41x ± 0.07 MAD |
+| `sw_gaussian` | brms | 0.358 us | 0.435 us | 1.21x ± 0.04 MAD |
+| `aalto_poisson_hurdle` | Aalto | 2.188 us | 58.565 us | 26.96x ± 0.80 MAD |
+| `ch12_m12_4` | Rethinking | 24.921 us | 2813.958 us | 111.93x ± 2.99 MAD |
+| `s2_gev` | brms | 13.829 us | 4.994 us | 0.37x ± 0.01 MAD |
+
+[Raw paired summaries](../output/teaching-performance/benchmark-summary.tsv),
+[run identity](../output/teaching-performance/benchmark-manifest.json), and the
+[full appendix](../output/teaching-performance/README.md) retain all 199 fixtures,
+including failures. These examples do not define a corpus-wide speedup.
+
+## Complete sampling
+
+The same September 16 run used four single-chain seeds per engine, with
+1,000 warmup iterations and 1,000 retained draws per seed. Each CLI duration
+includes generated quantities and CSV output. CmdStan compilation was timed
+separately. This is fixed-budget runtime, not time to equal inferential accuracy.
+
+| model | source | Stanli CLI median [range], seconds | CmdStan CLI median [range], seconds | CmdStan/Stanli | diagnostic screen, Stanli/CmdStan |
+| --- | --- | ---: | ---: | ---: | --- |
+| `aalto_gpareto` | Aalto | 0.027 [0.025–0.029] | 0.025 [0.022–0.228] | 0.939x | clear/clear |
+| `ch09_m9_1` | Rethinking | 0.029 [0.026–0.032] | 0.053 [0.046–0.252] | 1.82x | clear/clear |
+| `sw_gaussian` | brms | 0.020 [0.019–0.021] | 0.029 [0.022–0.201] | 1.49x | clear/clear |
+| `aalto_poisson_hurdle` | Aalto | 0.600 [0.589–0.602] | 0.827 [0.783–1.05] | 1.38x | clear/clear |
+| `ch12_m12_4` | Rethinking | 0.586 [0.558–0.600] | 86.06 [80.32–89.47] | 146.9x | clear/clear |
+| `s2_gev` | brms | 0.225 [0.219–0.247] | 0.095 [0.090–0.292] | 0.420x | clear/clear |
+| `sw_re_negbin` | brms | capped 1/4 seeds | 5.01 [0.216–5.84] | — | incomplete/review |
+
+Of 199 fixtures, 193 completed in both engines and 187 had lower Stanli CLI
+medians. The experiment's practical target was CmdStan/Stanli ≥ 0.8:
+189 met it, four fell below it, and six lacked a complete comparison.
+Failed or capped seeds prevent an aggregate time; diagnostic flags remain
+visible. The [appendix](../output/teaching-performance/README.md) defines the
+diagnostic screen and retains every model. Later fixes and their
+[separate measurements](brms-performance.md) do not change this frozen run.
+
+### Parallel chains
+
+Chains run concurrently by default, with one executor and RNG stream per
+chain. On an intentionally sequential 200-step ordered-logistic model, eight
+chains scaled like this:
+
+| worker threads | 1 | 2 | 4 | 8 |
 | --- | ---: | ---: | ---: | ---: |
-| Educational lessons | 13/13 | 12/13 | 1.32× | 10/13 |
-| Rethinking (including the supplement) | 62/62 | 62/62 | 1.54× | 50/62 |
-| brms | 118/124 | 113/118 | 1.45× | 76/118 |
+| eight chains, wall time | 2.89 s | 1.59 s | 0.86 s | 0.49 s |
 
-Each model contributes the median of four single-chain CLI runs, each with
-1,000 warmup and 1,000 retained draws. Ratios above one mean less elapsed time
-for Stanli. They summarize completed fixtures only, without removing diagnostic
-flags. Stanli preparation is included; CmdStan compilation is shown separately
-in the appendix. This is fixed-budget runtime, not time to equal inferential accuracy.
+Parallelism does not change the draws: an eight-chain run is byte-identical to
+the same chains run sequentially. This is checked across four models and
+asserted in `tests/test_multichain.cpp` and `tests/test_python.py`.
 
-Adding the measured CmdStan compilation stages gives a first-fit estimate.
-Stanli has the lower estimate for 13/13 educational, 62/62 completed Rethinking,
-and 118/118 completed brms comparisons. These are sums of measured stages, not
-directly timed four-chain R sessions.
+## Compilation and preparation
 
-The practical target is CmdStan/Stanli ≥ 0.8 for complete CLI elapsed time.
-Of all 199 fixtures, 189 meet it, four fall below it, and six lack a complete
-comparison. Failed or capped runs do not pass. Later GP fixes and their
-[separate validation](brms-performance.md#earlier-gp-and-inverse-gaussian-results)
-are not substituted into this sweep.
+Preparation from existing MIR excludes source compilation and first evaluation.
+A first-fit estimate that adds measured CmdStan compilation to a CLI duration
+must be labeled as a sum of stages. It is not a directly timed cold-cache fit.
+The [September 16 appendix](../output/teaching-performance/README.md) reports
+these stages per model; the [classroom guide](teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)
+records a separate fresh-R-session measurement.
 
-The four-page [Rethinking report](../output/rethinking-report/rethinking-report.md)
-covers all 61 book call sites and the separate hurdle fixture. The
-[classroom guide](teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)
-also records the separate fresh-R-session measurement.
+The following example is from the September 11 posteriordb run described in
+[Benchmark method](#benchmark-method).
 
-## Historical posteriordb measurements
-
-Across 119 posteriordb models, stanli evaluates a gradient **2.10x faster
-than CmdStan at the median**. It is at least as fast on 119 of the 119 models.
-Because stanli does not build a native C++ binary for each model, the first
-complete run is typically faster by more than the gradient ratio alone
-suggests. The [13 educational-model results](#educational-models) below
-also report complete runs against already-compiled CmdStan.
-
-## Measurement versions
-
-New corpus runs use the [paired benchmark protocol](benchmark-protocol.md):
-equal warmup windows, six alternating pairs, full-gradient numerical checks,
-median/MAD summaries, and retained run identities. Sampling is opt-in.
-The [Rethinking report](../output/rethinking-report/rethinking-report.md) includes
-all 61 book calls and a separate supplemental fixture, with the full timing appendix.
-
-The posteriordb tables below retain their historical measurements. They predate
-the paired protocol and do not provide its repeated-trial uncertainty estimates.
-The educational tables have their own documented measurement protocol.
-
-## Eight Schools: 1.6x faster gradients, roughly 100x faster to draws
+### Eight Schools: 1.6x faster gradients, roughly 100x faster to draws
 
 The non-centered Eight Schools model is a useful first result because it is
 small: there is little work over which either engine can hide overhead.
@@ -77,9 +112,19 @@ run is what a user waits for, but it is indicative rather than controlled
 because small numerical differences can send NUTS down different adaptation
 and leapfrog trajectories.
 
+## Historical posteriordb measurements
+
+Across 119 posteriordb models in the September 11 measurements, stanli evaluates
+a gradient **2.10x faster than CmdStan at the median**. It is at least as fast
+on 119 of the 119 measured models. The tables below retain that run's values;
+they predate the paired protocol and have no repeated-trial uncertainty estimates.
+They describe the posteriordb subset, not the complete current inventory.
+The [historical experiments archive](benchmark-history.md) retains additional
+September 14 sampling and gradient measurements with their own protocols.
+
 ## Representative models
 
-Here is a deliberately mixed slice of the corpus, spanning the range of measured
+Here is a deliberately mixed slice of that historical posteriordb run, spanning the range of measured
 gradient speedups. It includes IRT, regression, hierarchical,
 mixture, Gaussian-process, state-space, HMM, GARCH, and ODE models. Lower times
 are better; higher speedups are better.
@@ -108,6 +153,7 @@ Across all 117 models that completed a full run in both engines, the median
 source-to-CSV speedup is **about 8.6x**, including CmdStan's model build. 116 of 117
 finish at least as fast in stanli. As above, gradient speed is the controlled
 result; full-run speed also reflects the trajectory taken by each sampler.
+
 ## What tends to win, and where it does not
 
 **The largest wins are models with repeated independent work.** Regressions,
@@ -143,29 +189,19 @@ fallback. The [implementation report](superpowers/plans/2026-09-11-shared-data-n
 records matched before/after measurements and numerical checks; GP gradients
 can differ by rounding and are not claimed to be bitwise identical.
 
-## Parallel chains
-
-Chains run concurrently by default, with one executor and RNG stream per
-chain. On an intentionally sequential 200-step ordered-logistic model, eight
-chains scaled like this:
-
-| worker threads | 1 | 2 | 4 | 8 |
-| --- | ---: | ---: | ---: | ---: |
-| eight chains, wall time | 2.89 s | 1.59 s | 0.86 s | 0.49 s |
-
-Parallelism does not change the draws: an eight-chain run is byte-identical to
-the same chains run sequentially. This is checked across four models and
-asserted in `tests/test_multichain.cpp` and `tests/test_python.py`.
 
 ## Numerical agreement
 
-The performance results sit behind a differential oracle, not a separate
-approximation. 118 of 120 posteriordb models are verified against CmdStan's
-log density and complete gradient; 41 agree bitwise, and the worst relative
-deviation is 2.6e-12. See [the per-model accuracy table](corpus-status.md) for
-the two documented exceptions and every model's error bound.
+The shared [corpus replay](../TESTING.md#comparison-with-cmdstan-on-complete-models)
+compares recorded CmdStan log densities, every gradient component and available
+constrained/generated outputs at three deterministic points. It preserves
+matching domain refusals and documented ill-conditioned exceptions. See the
+[complete inventory and numerical results](corpus-status.md) for coverage.
+Benchmark timing pairs also have their own fixed-point numerical gate.
 
-## Full corpus
+<a id="full-corpus"></a>
+
+## Historical posteriordb model results
 
 Every completed posteriordb model is below, in the same high-to-low gradient
 order as the representative slice. `stanli source-to-CSV` times the complete
@@ -467,97 +503,9 @@ main table.
 | --- | ---: | ---: | ---: | --- |
 | `sir` | - | - | - | stanli's gradient probe threw at the benchmark point; the CmdStan gradient driver would not run; no stanli compile time; no stanli gradient |
 
-## Educational models
-
-All 13 supplied course models are included in the benchmark suite. The table
-below measures the complete Stanli command, including source compilation,
-JSON preparation, 1,000 NUTS warmup iterations, 1,000 saved draws, generated
-quantities and 17-digit CSV output. CmdStan uses an already-built executable
-with `--O1` and `-O3`; its build time is excluded from these speedups.
-
-Measured on 2026-09-14 on the Apple M3 Ultra with the Release implementation
-at `e46e360f`. Values are medians of five alternating pairs after one warmup
-pair, with the same seeds and initialization at unconstrained zero. These
-are the supplied teaching fixtures; seven use synthetic data.
-
-<!-- educational-results:start -->
-| model | stanli source-to-CSV | compiled CmdStan run | speedup | required floor |
-| --- | ---: | ---: | ---: | ---: |
-| `aalto_bern` | 12.08 ms | 16.25 ms | 1.345x | 0.5x |
-| `aalto_binom` | 11.24 ms | 12.94 ms | 1.151x | 0.5x |
-| `aalto_binom2` | 12.94 ms | 16.33 ms | 1.262x | 0.5x |
-| `aalto_binomb` | 10.94 ms | 12.92 ms | 1.181x | 0.5x |
-| `aalto_gpareto` | 30.75 ms | 32.97 ms | 1.072x | 1.0x |
-| `aalto_grp_aov` | 16.54 ms | 21.74 ms | 1.315x | 0.5x |
-| `aalto_grp_prior_mean` | 24.79 ms | 33.49 ms | 1.351x | 0.5x |
-| `aalto_grp_prior_mean_var` | 64.09 ms | 91.37 ms | 1.425x | 0.5x |
-| `aalto_lin` | 22.88 ms | 33.56 ms | 1.467x | 0.5x |
-| `aalto_lin_std` | 18.23 ms | 30.41 ms | 1.668x | 0.5x |
-| `aalto_lin_std_t` | 23.13 ms | 34.42 ms | 1.488x | 0.5x |
-| `aalto_poisson_hurdle` | 653.72 ms | 871.43 ms | 1.333x | 0.5x |
-| `aalto_poisson_simple` | 94.72 ms | 245.24 ms | 2.589x | 0.5x |
-<!-- educational-results:end -->
-
-Pareto's **1.072x** result has a modest margin: its median absolute deviation
-is 0.662 ms versus 0.445 ms for CmdStan. The performance gate requires Pareto
-at or above 1.0x and every other model at or above 0.5x. All 13 pass the
-three-point log-density/gradient/generated-output oracle and sampling checks.
-[Raw observations](../tests/educational/pareto-benchmark-results.json),
-[fixture provenance](../tests/educational/IMPORT_README.md), and the
-[detailed results](../tests/educational/RESULTS.md) retain methodology,
-uncertainty and correctness evidence. These end-to-end measurements are
-separate from the posteriordb gradient summaries above.
-
-### Educational gradients at a fixed point
-
-A separate run through the standard corpus drivers measures warmed gradients
-at the same deterministic unconstrained point, with CmdStan `--O1`. These
-are arithmetic means from one timed loop per engine/model, following the
-standard method below; no sampling or build time enters the gradient ratio.
-
-<!-- educational-gradients:start -->
-| model | parameters | stanli gradient | CmdStan gradient | gradient speedup |
-| --- | ---: | ---: | ---: | ---: |
-| `aalto_bern` | 1 | 75 ns | 103 ns | 1.37x |
-| `aalto_binom` | 1 | 70 ns | 114 ns | 1.63x |
-| `aalto_binom2` | 2 | 123 ns | 186 ns | 1.51x |
-| `aalto_binomb` | 1 | 66 ns | 90 ns | 1.36x |
-| `aalto_gpareto` | 2 | 361 ns | 231 ns | 0.64x |
-| `aalto_grp_aov` | 4 | 248 ns | 329 ns | 1.33x |
-| `aalto_grp_prior_mean` | 6 | 301 ns | 413 ns | 1.37x |
-| `aalto_grp_prior_mean_var` | 10 | 547 ns | 744 ns | 1.36x |
-| `aalto_lin` | 3 | 175 ns | 282 ns | 1.61x |
-| `aalto_lin_std` | 3 | 181 ns | 318 ns | 1.76x |
-| `aalto_lin_std_t` | 4 | 270 ns | 367 ns | 1.36x |
-| `aalto_poisson_hurdle` | 2 | 2.308 us | 58.015 us | 25.14x |
-| `aalto_poisson_simple` | 1 | 840 ns | 956 ns | 1.14x |
-<!-- educational-gradients:end -->
-
-Pareto measures **0.64x** CmdStan gradient throughput at this point, while
-its separately measured complete run reaches **1.072x**. Complete-run time
-also includes preparation and output, and the samplers can take different
-NUTS trajectories and gradient counts. The gradient result is not a claim
-that every phase beats CmdStan. [Raw gradient observations](educational-bench-o1.tsv),
-[compiler identities](educational-bench-o1.manifest.json), and
-[driver/fixture hashes](educational-bench-o1.metadata.json) are retained.
-
-The corpus runner discovers these models by default alongside posteriordb;
-use `--corpus educational` to select them or `--corpus posteriordb` to run only
-the historical collection. The stricter paired educational gate and its table
-can be reproduced with:
-
-```sh
-python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  educational-corpus.tsv --corpus educational --stancflags=--O1
-python3 tools/check_educational.py --benchmark --repetitions 5 \
-  --output build-rel/educational-benchmark/results.json
-python3 tools/corpus_table.py --educational \
-  tests/educational/pareto-benchmark-results.json
-```
-
 ## Benchmark method
 
-This section describes the method behind the tables above; the stanc3
+This section describes the September 11 posteriordb tables; the stanc3
 optimizer and loop vectorizer comparison uses the same host and driver, with
 its own build and stanc flags described in the previous section.
 
@@ -604,7 +552,7 @@ side, and their targeted A/B measurements, read
 
 ## New measurements
 
-Use a fresh output for paired measurements. The historical tables above remain
+Use a fresh output for paired measurements. The historical tables and archived experiments remain
 unchanged; the current runner cannot append to them or refresh only one engine.
 
 
@@ -613,8 +561,8 @@ unchanged; the current runner cannot append to them or refresh only one engine.
 cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
 cmake --build build-rel -j
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/corpus-v2.tsv --sampling --sample-timeout 900
-python3 tools/corpus_table.py /tmp/corpus-v2.tsv
+  /tmp/corpus-v3.tsv --sampling --sample-timeout 900
+python3 tools/corpus_table.py /tmp/corpus-v3.tsv
 python3 harnesses/ab_corpus.py deps/posteriordb
 ```
 
@@ -626,7 +574,7 @@ for where stanli's own pipeline does the same.
 
 ```sh
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/corpus-v2-o1vec.tsv --cmdstan-stanc PATH_TO_PATCHED_STANC \
+  /tmp/corpus-v3-o1vec.tsv --cmdstan-stanc PATH_TO_PATCHED_STANC \
   --stancflags=--O1 --gradient-timeout 900
-python3 tools/corpus_table.py /tmp/corpus-v2-o1vec.tsv
+python3 tools/corpus_table.py /tmp/corpus-v3-o1vec.tsv
 ```

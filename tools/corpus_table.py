@@ -15,8 +15,9 @@ Prints markdown to stdout; benchmarks.md is edited by hand around it.
 
 --gradients INPUT.tsv renders only the fixed-point gradient comparison.
 
---educational REPORT.json renders the paired end-to-end educational results:
-python3 tools/corpus_table.py --educational tests/educational/pareto-benchmark-results.json
+--historical-sampling REPORT.json renders the archived paired sampling experiment:
+python3 tools/corpus_table.py --historical-sampling tests/educational/pareto-benchmark-results.json
+The old --educational spelling remains an alias for archived commands.
 
 --o1vec renders docs/corpus-bench-o1vec.tsv instead: gradient and compile
 time only, no sampling columns, plus a compile+sample speedup that adds
@@ -283,9 +284,9 @@ def render_gradients(rows, col):
               f"| {fmt_ns(a)} | {fmt_ns(b)} | {ratio(a, b)} |")
 
 
-def render_educational(report):
+def render_historical_sampling(report):
     """Render the paired source-to-CSV gate without inventing gradient timings."""
-    from check_educational import inventory, speed_gate, MINIMUM_SPEEDUPS
+    from historical_benchmarks import inventory, speed_gate, MINIMUM_SPEEDUPS
     if set(report["models"]) != set(inventory()):
         raise ValueError("Educational result inventory differs from the fixtures")
     print("| model | stanli source-to-CSV | compiled CmdStan run | speedup | required floor |")
@@ -309,10 +310,11 @@ def main():
         path = sys.argv[sys.argv.index("--gradients") + 1]
         render_gradients(*load_rows(path))
         return
-    if "--educational" in sys.argv:
-        path = sys.argv[sys.argv.index("--educational") + 1]
+    if "--historical-sampling" in sys.argv or "--educational" in sys.argv:
+        flag = "--historical-sampling" if "--historical-sampling" in sys.argv else "--educational"
+        path = sys.argv[sys.argv.index(flag) + 1]
         with open(path) as stream:
-            render_educational(json.load(stream))
+            render_historical_sampling(json.load(stream))
         return
     o1vec = "--o1vec" in sys.argv
     path = [a for a in sys.argv[1:] if a != "--o1vec"][0]

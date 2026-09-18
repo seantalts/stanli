@@ -16,8 +16,8 @@ reproduces this directory byte for byte.
 These models go through the same oracle as the corpus: CmdStan's recorded
 log density and full gradient in `docs/corpus-refs.json.gz`, replayed by
 [`tools/verify_refs.py`](../../tools/verify_refs.py) in CI on every push.
-`tools/verify_refs.py` finds a model here by name before it looks in
-posteriordb, so nothing about the CI step changed.
+The shared [inventory](../../tools/corpus_inventory.py) resolves model names,
+source/data paths and provenance for numerical replay and benchmarks.
 
 ## What they cover
 
@@ -94,7 +94,7 @@ and uses Stan Math autodiff replay for those operations. The original failure
 and reduced examples are recorded in [#376](https://github.com/seantalts/stanli/issues/376).
 
 Numerical coverage does not imply matching sampling performance. The
-[teaching comparison](../../docs/teaching-support.md) retains the separately
+[performance report](../../docs/brms-performance.md) retains the separately
 measured performance gaps and sampler measurements.
 
 ## Regenerating and recording

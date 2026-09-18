@@ -6,7 +6,7 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
-from check_educational import parse_timings
+from check_corpus_sampling import parse_timings
 
 model = REPO / "tests/educational/models/aalto_bern"
 command = [sys.argv[1], str(model / "model.stan"), str(model / "data.json"),

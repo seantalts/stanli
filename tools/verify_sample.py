@@ -28,6 +28,7 @@ Usage: tools/verify_sample.py CMDSTAN_DIR PDB_DIR model1 model2 ...
 import argparse
 import concurrent.futures
 import gzip
+import hashlib
 import json
 import math
 import pathlib
@@ -36,6 +37,7 @@ import subprocess
 import tempfile
 import threading
 
+from corpus_inventory import corpus_cases, source_digest
 from cmdstan_ref import compile_cmd
 # The deviation arithmetic and the reference format live in the replay
 # script, not here, so a change to either cannot land in the recorder
@@ -72,7 +74,13 @@ def cmdstan_version(cs):
 def provenance(cs):
     """The revisions this run's numbers came out of."""
     p = {name: head_sha(path) for name, path in PINNED.items()}
+    p.update(cmdstan=head_sha(cs), stan=head_sha(cs / "stan"),
+             math=head_sha(cs / "stan/lib/stan_math"))
     p["cmdstan_version"] = cmdstan_version(cs)
+    p["stanc_sha256"] = hashlib.sha256((REPO / "deps/stanc3/stanc").read_bytes()).hexdigest()
+    p["compiler"] = subprocess.run(["clang++", "--version"], capture_output=True,
+                                    text=True, check=True).stdout.splitlines()[0]
+    p["reference_flags"] = "-O1 -ffp-contract=off; stanc default optimization"
     # The libm is part of the answer: transcendentals round differently
     # per platform, which is why the replay gate is 1e-9 and not 1e-10.
     p["platform"] = f"{platform.system()} {platform.machine()}"
@@ -115,14 +123,15 @@ def write_refs(refs, recorded, fresh=False):
     """Merge the raw CmdStan values into the committed reference file.
 
     tools/verify_refs.py replays these without CmdStan installed, which is
-    what lets CI run the differential corpus check on every push. Values
-    are stored as the exact %.17g strings ref_driver printed, so they
-    round-trip bitwise and diffs stay readable.
+    what lets CI run the differential corpus check on every push. New values
+    are stored as the exact %.17g strings ref_driver printed. Imported JSON
+    floats remain unchanged; both representations round-trip bitwise.
 
     A merge into a file recorded against different revisions is refused:
-    the provenance is one block for the whole file, and stamping this
+    legacy entries inherit the file-level provenance, and stamping this
     run's revisions onto values another CmdStan produced would make the
     file say something false about the models this run did not touch.
+    Explicit per-model overrides preserve independently imported rigs.
     A --from-refs run (fresh) re-records every model, so its first write
     under drift replaces the file instead.
     """
@@ -141,7 +150,10 @@ def write_refs(refs, recorded, fresh=False):
                     f"(--from-refs) rather than mixing two rigs in one "
                     f"file.")
             blob["models"] = prev["models"]
-    blob["models"].update(refs)
+    # Per-model overrides are authoritative for values imported from another
+    # recording rig. Never stamp the default rig over those retained values.
+    blob["models"].update({name: {**entry, "recorded": entry.get("recorded", recorded)}
+                           for name, entry in refs.items()})
     text = json.dumps(blob, indent=0, sort_keys=True).encode()
     REFS_PATH.write_bytes(gzip.compress(text, mtime=0))
 
@@ -149,11 +161,15 @@ def write_refs(refs, recorded, fresh=False):
 def build_ref(cs, work, model, stan):
     """Compile ref_driver against this model. (exe, error).
 
-    Cached on the path: recording the whole corpus is ~129 clang++ runs
-    over stan-math, which is nearly all of the wall time, and a re-record
-    after a recorder change should not pay it twice.
+    Cache identity includes source, driver, compiler, and dependency pins.
+    Compiling the corpus dominates recording time, but reusing an executable
+    from another source or rig would falsify the reference provenance.
     """
-    exe = work / f"{model}_ref"
+    identity = {"source": source_digest(stan),
+                "driver": source_digest(REPO / "tools/ref_driver.cpp"),
+                "rig": provenance(cs)}
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
+    exe = work / f"{model}_{key}_ref"
     if exe.exists():
         return exe, None
     hpp = work / f"{model}.hpp"
@@ -233,7 +249,20 @@ def record_wa(_stan, point_entry, ref_out, got_out):
     return f"; WA {len(wa[1])} values recorded (max rel {worst:.2e})"
 
 
-def record_model(model, stan, dj, exe, check_bin):
+def strict_outputs(model, point, ref, output):
+    """Require a complete finite CmdStan oracle independently of Stanli."""
+    wa = parse_wa(output)
+    if not accepted(ref) or wa is None:
+        raise ValueError(f"Incomplete CmdStan outputs: {model} point {point}")
+    names = wa[0].split(",") if wa[0] else []
+    if len(names) != len(wa[1]) or len(names) != len(set(names)):
+        raise ValueError(f"Invalid CmdStan output shape/names: {model} point {point}")
+    if not all(math.isfinite(float(v)) for v in ref[1:] + wa[1]):
+        raise ValueError(f"Nonfinite CmdStan outputs: {model} point {point}")
+    return {"names": wa[0], "values": wa[1]}
+
+
+def record_model(model, stan, dj, exe, check_bin, strict=False):
     """Every point of one model. (entry, result, lines).
 
     `entry` is the reference file's record for the model, `result` the
@@ -247,6 +276,7 @@ def record_model(model, stan, dj, exe, check_bin):
         except subprocess.TimeoutExpired:
             lines.append(f"  point {point}: TIMEOUT, not recorded")
             continue
+        full_wa = strict_outputs(model, point, ref, ref_out) if strict else None
         ref_ok, got_ok = accepted(ref), accepted(got)
         if not ref_ok:
             # CmdStan refuses the point. Recorded as a refusal rather than
@@ -259,6 +289,8 @@ def record_model(model, stan, dj, exe, check_bin):
                             if got_ok else ""))
             continue
         entry = {"values": ref[1:]}
+        if full_wa is not None:
+            entry["wa"] = full_wa
         points[str(point)] = entry
         if not got_ok:
             entry["status"] = "CMDSTAN_ONLY"
@@ -287,26 +319,44 @@ def record_model(model, stan, dj, exe, check_bin):
     if primary is None:
         primary = fallback
     if primary is None:
+        # CmdStan may have valid answers even when Stanli rejects every
+        # point. Preserve that disagreement in the scoreboard as well.
+        primary = next((int(p) for p, pt in points.items() if "values" in pt), None)
+    if primary is None:
         result = {"status": "REJECTED_BOTH", "max_rel": 0.0, "max_ulp": 0,
                   "n_values": 0, "point": POINTS[0]}
         return {"points": points}, result, lines
     pt = points[str(primary)]
     result = {"status": pt["status"], "max_rel": pt["max_rel"],
-              "max_ulp": pt["max_ulp"], "n_values": len(pt["values"]),
+              "max_ulp": pt.get("max_ulp", 0), "n_values": len(pt["values"]),
               "point": primary}
     return {"primary": primary, "points": points}, result, lines
 
 
-def one(model, cs, pdb, work, datas, check_bin):
+def one(model, cs, pdb, work, cases, check_bin):
     """(model, entry, result, lines) for one model, or entry None if it
     could not be built."""
-    stan, dj = model_files(model, {"data": datas.get(model)}, pdb, work)
+    case = cases[model]
+    stan, dj = model_files(model, {"data": case.metadata.get("data_name")}, pdb, work)
     exe, why = build_ref(cs, work, model, stan)
     if exe is None:
         return (model, None, None, [f"BUILD_FAIL {model}: {why}"])
-    entry, result, lines = record_model(model, stan, dj, exe, check_bin)
-    if model in datas:  # the posteriordb dataset; the language models
-        entry["data"] = datas[model]  # carry their own data file
+    entry, result, lines = record_model(model, stan, dj, exe, check_bin,
+                                         strict=case.metadata.get("sampling_smoke", False))
+    entry.update(source_sha256=source_digest(stan), data_sha256=source_digest(dj))
+    if case.collection == "posteriordb":
+        entry["data"] = case.metadata["data_name"]
+    if case.metadata.get("sampling_smoke"):
+        entry["strict"] = True
+        # Strict fixtures retain full output references even if Stanli fails.
+        # A recording must never turn its failure into missing coverage.
+        if set(entry["points"]) != {str(p) for p in POINTS}:
+            raise ValueError(f"Incomplete reference points: {model}")
+        info = subprocess.run([str(REPO / "deps/stanc3/stanc"), "--info", str(stan)],
+                              capture_output=True, text=True, check=True)
+        parameters = json.loads(info.stdout)["parameters"]
+        entry["parameter_names"] = [name for name in entry["points"]["0"]["wa"]["names"].split(",")
+                                    if name.split(".")[0] in parameters]
     return (model, entry, result, lines)
 
 
@@ -330,6 +380,7 @@ def main():
     models = list(args.models)
     if args.from_refs:
         models += sorted(load_refs()[0])
+    models = list(dict.fromkeys(models))
     if not models:
         ap.error("name at least one model, or pass --from-refs")
     work = args.work or pathlib.Path(
@@ -341,14 +392,14 @@ def main():
           f"({recorded['cmdstan'][:12]}), math {recorded['math'][:12]}, "
           f"on {recorded['platform']}")
 
-    datas = {}
-    for pj in sorted((pdb / "posteriors").glob("*.json")):
-        meta = json.loads(pj.read_text())
-        datas.setdefault(meta["model_name"], meta["data_name"])
+    cases = corpus_cases(pdb, include_language=True)
+    missing = sorted(set(models) - set(cases))
+    if missing:
+        ap.error("unknown corpus models: " + " ".join(missing))
 
     n_pass = 0
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        futs = [pool.submit(one, m, cs, pdb, work, datas, check_bin)
+        futs = [pool.submit(one, m, cs, pdb, work, cases, check_bin)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, entry, result, lines = fut.result()

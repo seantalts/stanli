@@ -62,20 +62,21 @@ signature suite adds all supported overloads and mixed argument activity.
 
 ## Overview of the checks
 
-The [educational corpus](tests/educational/README.md) adds 13 Aalto teaching
-models. CTest checks three-point CmdStan density/gradient/generated-output
-references and complete sampling CSVs. The separate
-`check_educational_performance` build target runs a live, repeated comparison
-against vectorized CmdStan and fails any model below 0.5 times its speed.
-Performance failures are reported individually without exclusions; see the
-corpus README for the measurement boundary and reproducible commands.
+The shared [corpus inventory](tools/corpus_inventory.py) supplies numerical
+replay, sampling smoke tests and benchmark discovery. Source collections remain
+provenance metadata and optional filters. Numerical replay covers all 329
+referenced models; sampling smoke tests select fixtures through inventory
+metadata, retaining complete output-name, draw-count and finiteness checks.
+Live performance measurements use the [common benchmark protocol](docs/benchmark-protocol.md)
+and are separate from CI correctness gates.
 
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | every pull request |
 | compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | every pull request |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | every pull request |
-| corpus comparison | Are 119 posteriordb models, 11 compiler-derived fixtures, 124 brms models and 62 rethinking fixtures consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | every pull request |
+| corpus comparison | Are 329 models from posteriordb, stanc3, brms, Rethinking and Aalto lessons consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | every pull request |
+| corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | every pull request, within CTest |
 | cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | every pull request, within CTest |
 | transformation A/B | Do selected graph optimizations preserve model results? | Optimizations enabled and disabled agree at the default point within 1e-11 | manually after optimization changes |
 | BridgeStan C-ABI comparison | Does the public C interface agree with reference BridgeStan? | Four fixture models must pass value, name, count, and output-shape checks | every pull request |
@@ -99,7 +100,7 @@ once with it on; every later check consumes those exact portable MIR files
 through `stanli_check --mir`. All other source-pass choices are explicit and
 identical between the two cells.
 
-The complete run covers all 316 recorded models plus any posteriordb census
+The complete run covers all 329 recorded models plus any posteriordb census
 model without a recorded CmdStan row:
 
 ```sh
@@ -157,38 +158,40 @@ report.
 ## Comparison with CmdStan on complete models
 
 [`tools/verify_refs.py`](tools/verify_refs.py) replays every referenced
-posteriordb model, plus the language-construct models in
-[`tests/stanc3/`](tests/stanc3/) and the brms models in
-[`tests/brms/`](tests/brms/) and the teaching models in
-[`tests/rethinking/`](tests/rethinking/), against CmdStan's recorded log density
-and full unconstrained gradient. This is the broadest whole-model numerical
+model in the shared [inventory](tools/corpus_inventory.py), including
+posteriordb, compiler fixtures, brms, Rethinking and Aalto sources, against
+CmdStan's recorded log density and full unconstrained gradient. This is the broadest whole-model numerical
 comparison in the repository. It has found errors that isolated kernel tests
 did not reach, which is why it runs in addition to the unit-test suite.
 
 The reference artifact
 [`docs/corpus-refs.json.gz`](docs/corpus-refs.json.gz) contains:
 
-- 316 models at 3 deterministic unconstrained points each, 948 points in
-  total, holding 358,766 log-density and gradient values. The models are
+- 329 models at 3 deterministic unconstrained points each, 987 points in
+  total, holding 358,925 log-density and gradient values. The models are
   119 posteriordb models that evaluate, 11 language fixtures adapted
   from stanc3's compiler tests, 124 models generated by brms 2.23.0,
-  and 62 rethinking fixtures (all 61 second-edition book calls plus a hurdle model).
-- Every value is the exact `%.17g` string CmdStan's driver printed
-  ([`tools/ref_driver.cpp`](tools/ref_driver.cpp)), so the replay
-  compares against the bits CmdStan produced rather than a rounded copy.
-- 314 models carry at least one complete row from Stan's per-draw output
-  routine, `write_array`, at the same points: 939 rows and 654,819 values
+  62 Rethinking fixtures (all 61 second-edition book calls plus a hurdle model),
+  and 13 Aalto lesson fixtures.
+- Values preserve the doubles emitted by CmdStan's driver
+  ([`tools/ref_driver.cpp`](tools/ref_driver.cpp)). Original records use its
+  exact `%.17g` strings; migrated records retain round-trippable JSON numbers
+  and their original recording provenance. Migration does not rerun the oracle
+  or change its numeric answers.
+- 327 models carry at least one complete row from Stan's per-draw output
+  routine, `write_array`, at the same points: 978 rows and 661,269 values
   covering constrained parameters, transformed parameters, and generated
   quantities. Column names are also compared exactly. Both direct
   `write_array` drivers start Stan's RNG with
   seed 1234 and chain 0, so generated-quantity draws are reproducible in
   this comparison. This is a controlled pointwise test; it does not claim
-  to reproduce the RNG state after a CmdStan sampling run. The recorder stores
-  an output row only after stanli matches its names, width, and values, so an
-  absent row means that output is not covered by this comparison. The
-  primary-point counts for posteriordb models are in
-  [`docs/corpus-status.md`](docs/corpus-status.md); the aggregate above also
-  includes the stanc3, brms and rethinking fixtures and all three points.
+  to reproduce the RNG state after a CmdStan sampling run. For ordinary
+  fixtures, the recorder stores an output row after stanli matches its names,
+  width, and values. Strict sampling-smoke fixtures retain complete finite
+  CmdStan outputs even if stanli fails, so recording cannot hide missing
+  coverage. An absent row means that output is not covered. The
+  per-model coverage is in [`docs/corpus-status.md`](docs/corpus-status.md);
+  the aggregate above includes every source collection and all three points.
 - Reference provenance recorded in the file: CmdStan
   2.40.0 at `d3d5df6a`, Stan `a6806ef8`, Math 5.4.0 at `5252d51d`, stanc3
   2.40.0 at `d58446e6`, posteriordb `28f8d3d6`, on Darwin arm64.
@@ -213,8 +216,11 @@ math library and the libraries used on other platforms. Known implementation
 errors detected by this comparison were much larger; for example, one
 in-place update error produced a scaled difference of 1.7e+05.
 
-Of the 948 recorded points, 939 have status `VERIFIED`, six have status
-`REJECTED_BOTH`, and three have status `MISMATCH`. The CmdStan 2.40
+Of the 987 recorded points, 939 have status `VERIFIED`, 39 imported oracle
+points have status `RECORDED`, six have status `REJECTED_BOTH`, and three have
+status `MISMATCH`. Imported points use the same numerical replay gate; their
+status preserves the distinction between recorded oracle answers and historical
+cross-engine comparisons. The CmdStan 2.40
 recording has no `CMDSTAN_ONLY` points. The three
 `MISMATCH` points belong to `kronecker_gp`, where two eigenvector
 gradients are sensitive to a nearly degenerate covariance whose smallest
@@ -253,10 +259,31 @@ This comparison covers complete models, but it does not cover every Stan
 function or type signature. The generated conformance sweep addresses that
 separate question.
 
+### Sampling-smoke coverage
+
+[`tools/check_corpus_sampling.py`](tools/check_corpus_sampling.py) uses the same
+inventory and reference archive. Its default selection is the fixtures with
+`sampling_smoke` metadata, currently all 13 imported Aalto models. Each source
+model runs 100 warmup iterations and 100 saved draws. The checker requires
+finite values, complete diagnostic columns, exact reference output names/order
+and the expected draw count. Missing fixtures or reference output names fail.
+This preserves coverage for transformed parameters and generated quantities.
+
+```sh
+python3 tools/check_corpus_sampling.py --build build-rel
+ctest --test-dir build-rel -R 'test_corpus_sampling|test_run_timings' --output-on-failure
+```
+
+Use `--models NAME ...` to check other corpus fixtures with committed output
+names. The short run tests execution and output completeness; convergence and
+sampler statistics have their own tests. Performance uses the common benchmark
+runner, with no collection-specific CI timing thresholds.
+
 ## How numerical agreement is measured
 
 [`docs/corpus-status.md`](docs/corpus-status.md) publishes the worst
-deviation for each posteriordb model as both scaled error and ULPs. A ULP is
+recorded deviations and replay coverage by model and source collection.
+Where available, deviations include scaled error and ULPs. A ULP is
 one step between adjacent representable floating-point numbers at a given
 magnitude. Close agreement is expected because stanli and CmdStan both call
 stan-math and use the same floating-point compiler flags. Evaluation order

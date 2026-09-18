@@ -1,4 +1,4 @@
-# Educational Stan models
+# Models from Aalto Stan lessons
 
 Thirteen Aalto teaching programs and their supplied JSON fixtures, imported
 unchanged from the user-supplied `stan_course_corpus.zip` on 2026-09-14.
@@ -6,101 +6,71 @@ unchanged from the user-supplied `stan_course_corpus.zip` on 2026-09-14.
 retain the archive's source attribution, BSD-3 notices and fixture hashes.
 Six fixtures use transcribed lesson data; seven are explicitly synthetic.
 The original archive report is `IMPORT_README.md`; its links to unbundled
-reports/scripts describe that archive, not this test integration. Its
-`not_run` fields are historical import metadata, not current test results.
+reports/scripts describe that archive. Its `not_run` fields are historical
+import metadata, not current test results.
 
-These are browser-transcribed teaching sources, not commit-pinned upstream
-copies. Source/data bytes are checked against the import manifest before
-every run. No teaching model is rewritten to make a test pass.
+These are browser-transcribed sources, not commit-pinned upstream copies.
+The shared [corpus inventory](../../tools/corpus_inventory.py) validates their
+source and data hashes against the import manifest. The files stay here to
+preserve attribution; they use the same numerical and benchmark paths as
+other application models.
 
-## Correctness on every CTest run
+## Numerical and sampling tests
+
+The common reference archive, [`docs/corpus-refs.json.gz`](../../docs/corpus-refs.json.gz),
+contains all 13 models at three deterministic points. The
+[corpus replay](../../tools/verify_refs.py) compares log density (proportional,
+with Jacobian), every unconstrained gradient, output names/order, constrained
+and transformed parameters, and generated quantities with recorded CmdStan
+answers. The scaled-error gate is `abs(a-b)/max(1, abs(a), abs(b)) <= 1e-9`.
+Missing points, names, outputs and nonfinite values fail. The migrated records
+retain compiler/toolchain identity and source/data hashes.
 
 ```sh
 cmake --build build-rel --target stanli_check stanli_run -j2
-ctest --test-dir build-rel -R 'test_educational|test_run_timings' --output-on-failure
+python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 4
+ctest --test-dir build-rel -R 'test_corpus_sampling|test_run_timings' --output-on-failure
 ```
 
-`tools/check_educational.py` runs the shipped source compiler and compares
-log density (proportional, with Jacobian), every unconstrained gradient,
-output names/order, constrained and transformed parameters, and generated
-quantities against actual CmdStan outputs at three deterministic points.
-The numerical gate is `abs(a-b)/max(1, abs(a), abs(b)) <= 1e-9`, matching the
-existing external corpus gate and allowing cross-platform libm rounding.
-All values must be finite; missing points, columns, models or outputs fail.
-The RNG streams for fixed-point generated quantities match the existing
-`ref_driver.cpp`/`stanli_check` contract, including rejection-sampling loops.
+All 13 fixtures opt into the generic sampling-smoke check through inventory
+metadata. Each runs 100 warmup iterations and 100 saved draws from source,
+requiring complete finite CSV output with exactly the reference output names
+and order. Run the same check directly with:
 
-Each model also runs 100 warmup + 100 saved draws from source, requiring
-complete finite CSV output including every generated quantity. This short
-run is a sampling smoke test, not a convergence claim. The existing sampler
+```sh
+python3 tools/check_corpus_sampling.py --build build-rel
+```
+
+This short run is a sampling smoke test, not a convergence claim. Sampler
 unit and statistical tests remain necessary. Generalized Pareto's unused
 CDF/LCDF definitions are not claimed as executed coverage.
 
-References are recorded independently of Stanli's answers. Regeneration is
-explicit, requires CmdStan, and must be reviewed; never regenerate to hide
-a discrepancy:
+References come from CmdStan, independently of Stanli's answers. Regeneration
+uses the [common recorder](../../tools/verify_sample.py) and is an explicit,
+reviewed operation; never regenerate to hide a discrepancy. To explicitly
+refresh the complete existing reference set:
 
 ```sh
-python3 tools/check_educational.py --record --build build-rel \
-  --cmdstan deps/cmdstan --stanc deps/stanc3/stanc
+python3 tools/verify_sample.py deps/cmdstan deps/posteriordb --from-refs --jobs 4
 ```
 
-The reference archive records toolchain commits, compiler flags, and
-source/data hashes. Ordinary CI needs neither CmdStan nor source downloads.
+Ordinary replay needs no CmdStan build or source download for these local fixtures.
 
-## Live performance gate
+## Benchmarks and retained experiments
 
-After `tools/dev_setup.sh --corpus --no-test` provides the Release build and
-CmdStan reference toolchain:
+The [common benchmark runner](../../harnesses/corpus_bench.py) includes these
+models by default. `--corpus educational` is an optional provenance filter.
+New runs use the same [measurement protocol](../../docs/benchmark-protocol.md)
+and reporting path as the rest of the application corpus:
 
 ```sh
-python3 tools/check_educational.py --benchmark --build build-rel \
-  --cmdstan deps/cmdstan --output build-rel/educational-benchmark/results.json
-# Or: cmake --build build-rel --target check_educational_performance
+python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
+  /tmp/corpus-v3.tsv --sampling
+python3 tools/corpus_table.py /tmp/corpus-v3.tsv
 ```
 
-Every model must achieve **CmdStan wall time / Stanli wall time >= 0.5**;
-**Pareto must achieve >= 1.0**.
-This is a per-model floor, never an average. Compilation errors, timeouts,
-malformed CSV, nonfinite outputs and missing timing evidence fail the run.
-Failures remain failures; there are no model exclusions or relaxed floors.
-
-Both engines run one chain, initialize at unconstrained zero, use the same
-seed and default NUTS adaptation settings, and save 1000 draws after 1000
-warmup iterations. After one untimed filesystem/process warmup pair, three
-paired repetitions alternate engine order. Both write all CSV outputs to
-disk at 17-digit precision within the timed interval. CmdStan uses `--O1`
-vectorization and `-O3`; Stanli must be built in Release mode. Run on an idle
-machine. Raw timings, medians, min/max, median absolute deviations, binary
-identities, settings, CSVs and stderr are retained beside the report.
-
-The gate compares complete CLI runs against **already compiled CmdStan**:
-Stanli source compilation, JSON preparation, adaptation, sampling, generated
-quantities and output are all included. CmdStan source compilation is
-reported separately and cannot subsidize a slow Stanli run. Stanli's
-`--timings` additionally separates preparation, NUTS, and output (including
-generated quantities); the enclosing wall timer also includes process
-startup/teardown. These phase numbers are diagnostic, not subtracted from
-the gate.
-
-Sampled parameter means are also compared using six combined batch-means
-Monte Carlo standard errors (20 contiguous batches per chain, with a floor
-from between-chain variation). This broad regression check allows distinct
-random trajectories; it does not certify convergence or effective sample
-size. Full fixed-point generated-output comparisons provide the stronger
-deterministic oracle for those computations.
-
-The live test is a separate build target because it compiles 13 CmdStan
-executables and timing on busy CI runners is not stable. Run it when changing
-compiler, sampler or output performance. Default CTest always runs the
-recorded correctness oracle and sampling smoke tests.
-
-
-## Main benchmark suite and results page
-
-The main [corpus runner](../../harnesses/corpus_bench.py) discovers all 13
-fixtures by default alongside posteriordb; `--corpus educational` selects
-only this collection. `--stanli-only` refreshes existing rows without adding
-new rows with missing CmdStan measurements. The [main results page](../../docs/benchmarks.md#educational-models)
-includes the paired end-to-end results, rendered from the retained JSON by
-`tools/corpus_table.py --educational REPORT.json`.
+The [main results page](../../docs/benchmarks.md) is organized by measurement.
+The [September 14 archive](../../docs/benchmark-history.md) and
+[detailed investigation](RESULTS.md) preserve the original collection-specific
+experiments, raw timings, posterior-mean comparisons and per-model performance
+floors. Those historical thresholds do not define a separate active test tier.
