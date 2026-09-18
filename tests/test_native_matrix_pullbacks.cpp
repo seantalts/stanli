@@ -275,6 +275,113 @@ static void matrix_exp_case(int n, bool active, unsigned seed_val,
   }
 }
 
+// mdivide_left / mdivide_right (Plain, Spd, TriLow): differential check
+// against the nested-tape replay these kernels used to run, for every
+// divisor/dividend activity combination and both vector and matrix
+// dividends.
+enum class SolveKindTag { Plain, Spd, TriLow };
+double g_max_solve_ulp = 0;
+static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
+                       int k, bool vec, int activity, unsigned seed_val,
+                       int64_t max_ulp) {
+  using namespace stanli;
+  using stan::math::var;
+  std::mt19937 rng(seed_val);
+  std::uniform_real_distribution<double> off(-0.3, 0.3);
+  Mat a(n, n);
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < n; ++j) a(i, j) = off(rng);
+  if (kind == SolveKindTag::Spd) {
+    a = (a * a.transpose()).eval();
+    a.diagonal().array() += n + 1.0;
+  } else {
+    a.diagonal().array() += n + 1.0;
+  }
+  const int64_t br = left ? n : k, bc = left ? k : n;
+  Mat b(br, bc);
+  for (int i = 0; i < br * bc; ++i) b.data()[i] = off(rng) + 0.4;
+  const int64_t outr = left ? n : k, outc = left ? k : n;
+  Mat out(outr, outc), seed(outr, outc);
+  for (int i = 0; i < outr * outc; ++i) seed.data()[i] = off(rng);
+  Mat a_adj = Mat::Constant(n, n, 0.125);
+  Mat b_adj = Mat::Constant(br, bc, 0.125);
+  const bool divisor_var = activity != 2, dividend_var = activity != 1;
+
+  KernelCtx ctx;
+  int dims[] = {n, k};
+  ctx.n_in = 2;
+  ctx.idata = dims;
+  ctx.n_idata = 2;
+  const int ai = left ? 0 : 1, bi = left ? 1 : 0;
+  ctx.in[ai] = {a.data(), n * n};
+  ctx.in[bi] = {b.data(), br * bc};
+  ctx.in_adj[ai] = {divisor_var ? a_adj.data() : nullptr, n * n};
+  ctx.in_adj[bi] = {dividend_var ? b_adj.data() : nullptr, br * bc};
+  ctx.out = {out.data(), outr * outc};
+  ctx.out_adj_vec = {seed.data(), outr * outc};
+  const uint8_t detail = activity == 1 ? 1u : activity == 2 ? 2u : 3u;
+  ctx.variant = 1u | (vec ? 2u : 0u) | (detail << 2);
+  const Kernel& kern = *find_kernel(opcode);
+  kern.forward(ctx);
+  kern.backward(ctx);
+
+  stan::math::nested_rev_autodiff scope;
+  Eigen::Matrix<var, -1, -1> av(n, n), bv(br, bc);
+  for (int i = 0; i < n * n; ++i) av.data()[i] = a.data()[i];
+  for (int i = 0; i < br * bc; ++i) bv.data()[i] = b.data()[i];
+  Eigen::Matrix<var, -1, -1> result;
+  if (kind == SolveKindTag::Plain)
+    result = left ? stan::math::mdivide_left(av, bv)
+                  : stan::math::mdivide_right(bv, av);
+  else if (kind == SolveKindTag::Spd)
+    result = left ? stan::math::mdivide_left_spd(av, bv)
+                  : stan::math::mdivide_right_spd(bv, av);
+  else
+    result = left ? stan::math::mdivide_left_tri_low(av, bv)
+                  : stan::math::mdivide_right_tri_low(bv, av);
+  var objective = stan::math::sum(
+      stan::math::elt_multiply(result, Eigen::Map<Mat>(seed.data(), outr, outc)));
+  stan::math::grad(objective.vi_);
+
+  const std::string tag = " left=" + std::to_string(left) +
+                          " kind=" + std::to_string((int)kind) +
+                          " n=" + std::to_string(n) + " k=" + std::to_string(k) +
+                          " vec=" + std::to_string(vec) +
+                          " act=" + std::to_string(activity) +
+                          " seed=" + std::to_string(seed_val);
+  for (int i = 0; i < outr * outc; ++i)
+    check(out.data()[i], result.data()[i].val(), ("solve value" + tag).c_str());
+  if (divisor_var)
+    for (int i = 0; i < n * n; ++i) {
+      const double want = 0.125 + av.data()[i].adj();
+      expect_ulp("solve A adj" + tag + " i=" + std::to_string(i),
+                a_adj.data()[i], want, max_ulp);
+      g_max_solve_ulp = std::max(
+          g_max_solve_ulp,
+          (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
+    }
+  if (dividend_var)
+    for (int i = 0; i < br * bc; ++i) {
+      const double want = 0.125 + bv.data()[i].adj();
+      expect_ulp("solve B adj" + tag + " i=" + std::to_string(i),
+                b_adj.data()[i], want, max_ulp);
+      g_max_solve_ulp = std::max(
+          g_max_solve_ulp,
+          (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
+    }
+}
+
+static void solve_family(bool left, SolveKindTag kind, uint16_t opcode,
+                         int64_t max_ulp) {
+  for (int n : {1, 2, 5, 10, 20})
+    for (int k : {1, n})
+      for (bool vec : (k == 1 ? std::vector<bool>{false, true}
+                              : std::vector<bool>{false}))
+        for (int activity : {1, 2, 3})
+          for (unsigned s = 1; s <= 2; ++s)
+            solve_case(left, kind, opcode, n, k, vec, activity, s, max_ulp);
+}
+
 int main(int argc, char** argv) {
   // Optional local UBSan diagnostic: the pinned Stan Math blocked routine
   // itself binds an empty Eigen block reference at its final panel. The
@@ -312,6 +419,16 @@ int main(int argc, char** argv) {
       "max kernel fd_rel=%.3e max tape fd_rel=%.3e\n",
       g_max_matrix_exp_ulp, g_max_matrix_exp_value_rel, g_max_matrix_exp_fd_rel,
       g_max_matrix_exp_tape_fd_rel);
+
+  using namespace stanli;
+  solve_family(true, SolveKindTag::Plain, OP_MDIVIDE_LEFT, 16);
+  solve_family(false, SolveKindTag::Plain, OP_MDIVIDE_RIGHT, 16);
+  solve_family(true, SolveKindTag::Spd, OP_MDIVIDE_LEFT_SPD, 16);
+  solve_family(false, SolveKindTag::Spd, OP_MDIVIDE_RIGHT_SPD, 16);
+  solve_family(true, SolveKindTag::TriLow, OP_MDIVIDE_LEFT_TRI_LOW, 16);
+  solve_family(false, SolveKindTag::TriLow, OP_MDIVIDE_RIGHT_TRI_LOW, 16);
+  std::printf("solve: max adj ulp=%.0f\n", g_max_solve_ulp);
+
   if (!failures) std::puts("test_native_matrix_pullbacks OK");
   return failures ? 1 : 0;
 }

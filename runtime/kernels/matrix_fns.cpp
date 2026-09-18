@@ -995,13 +995,12 @@ using Dividend = std::conditional_t<
     !Vec, Eigen::Matrix<T, -1, -1>,
     std::conditional_t<Left, Eigen::Matrix<T, -1, 1>, Eigen::Matrix<T, 1, -1>>>;
 
-// Replay the exact operand scalar types on a nested tape, write the value out,
-// and -- when the caller wants gradients -- seed the output adjoints and
-// scatter back. The mixed stan-math overloads are numerically distinct from
-// promoting their data operand to var, so the two activity flags are template
-// parameters rather than a single result-active flag.
+// Replay the exact operand scalar types on a nested tape and write the
+// value out. The mixed stan-math overloads are numerically distinct from
+// promoting their data operand to var, so the two activity flags are
+// template parameters rather than a single result-active flag.
 template <bool Left, SolveKind Kind, bool DivisorVar, bool DividendVar,
-          bool Vec, bool Grad>
+          bool Vec>
 void solve_var(KernelCtx& ctx) {
   using stan::math::var;
   static_assert(DivisorVar || DividendVar);
@@ -1018,25 +1017,69 @@ void solve_var(KernelCtx& ctx) {
   auto out = solve_at<Left, Kind>(a, b);
   for (Eigen::Index i = 0; i < out.size(); ++i)
     ctx.out.data[i] = out.data()[i].val();
-  if constexpr (Grad) {
-    // Seeding through stan-math ops rather than by copying keeps the tape
-    // connection, the same reason nary_bwd above does it this way.
-    MatD seed(out.rows(), out.cols());
-    for (Eigen::Index i = 0; i < out.size(); ++i)
-      seed.data()[i] = ctx.out_adj_vec.data[i];
-    var j = stan::math::sum(stan::math::elt_multiply(out, seed));
-    stan::math::grad(j.vi_);
-    if constexpr (DivisorVar) {
-      if (ctx.in_adj[ai].data)
-        for (int64_t i = 0; i < n * n; ++i)
-          ctx.in_adj[ai].data[i] += a.data()[i].adj();
+}
+
+// x = A \ b: adj_b += A^-T G, adj_A -= (A^-T G) x^T.
+template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower>
+void left_adjoint(const MatD& a, const MatD& x, const MatD& g,
+                  bool divisor_var, bool dividend_var, MatD* adj_a,
+                  MatD* adj_b) {
+  if constexpr (Kind == SolveKind::Spd) {
+    const Eigen::LLT<MatD> fac(a);
+    if (dividend_var) {
+      const MatD y = fac.solve(g);
+      if (adj_b) *adj_b += y;
+      if (divisor_var) *adj_a -= y * x.transpose();
+    } else if (divisor_var) {
+      *adj_a -= fac.solve(MatD(g * x.transpose()));
     }
-    if constexpr (DividendVar) {
-      if (ctx.in_adj[bi].data)
-        for (int64_t i = 0; i < br * bc; ++i)
-          ctx.in_adj[bi].data[i] += b.data()[i].adj();
+  } else if constexpr (Kind == SolveKind::TriLow) {
+    const auto tri = a.template triangularView<Tri>();
+    if (dividend_var) {
+      const MatD y = tri.transpose().solve(g);
+      if (adj_b) *adj_b += y;
+      if (divisor_var) {
+        MatD full = MatD::Zero(a.rows(), a.cols());
+        full.template triangularView<Tri>() = -(y * x.transpose());
+        *adj_a += full;
+      }
+    } else if (divisor_var) {
+      MatD full = MatD::Zero(a.rows(), a.cols());
+      full.template triangularView<Tri>() =
+          -MatD(tri.transpose().solve(MatD(g * x.transpose())));
+      *adj_a += full;
+    }
+  } else {
+    const Eigen::HouseholderQR<MatD> qr(a);
+    const MatD y = qr.householderQ() *
+        MatD(qr.matrixQR().template triangularView<Eigen::Upper>().transpose()
+                 .solve(g));
+    if (dividend_var && adj_b) *adj_b += y;
+    if (divisor_var) *adj_a -= y * x.transpose();
+  }
+}
+
+// b / A: a left solve of A' against b', x', G'.
+template <SolveKind Kind>
+void right_adjoint(const MatD& a, const MatD& x, const MatD& g,
+                   bool divisor_var, bool dividend_var, MatD* adj_a,
+                   MatD* adj_b) {
+  constexpr Eigen::UpLoType kFlipped =
+      Kind == SolveKind::TriLow ? Eigen::Upper : Eigen::Lower;
+  MatD adj_a_t = MatD::Zero(a.cols(), a.rows());
+  MatD adj_b_t = MatD::Zero(x.cols(), x.rows());
+  left_adjoint<Kind, kFlipped>(a.transpose(), x.transpose(), g.transpose(),
+                               divisor_var, dividend_var,
+                               divisor_var ? &adj_a_t : nullptr,
+                               dividend_var ? &adj_b_t : nullptr);
+  if (divisor_var) {
+    if constexpr (Kind == SolveKind::Spd) {
+      *adj_a += adj_a_t;
+    } else {
+      *adj_a += adj_a_t.transpose();
     }
   }
+  if (dividend_var) *adj_b += adj_b_t.transpose();
 }
 
 template <bool Left, SolveKind Kind, bool Vec>
@@ -1058,16 +1101,16 @@ void solve_active_fwd(KernelCtx& ctx, bool vec) {
   // for an in-memory graph built by an older caller.
   switch ((ctx.variant >> 2u) & 3u) {
     case 1u:
-      vec ? solve_var<Left, Kind, true, false, true, false>(ctx)
-          : solve_var<Left, Kind, true, false, false, false>(ctx);
+      vec ? solve_var<Left, Kind, true, false, true>(ctx)
+          : solve_var<Left, Kind, true, false, false>(ctx);
       return;
     case 2u:
-      vec ? solve_var<Left, Kind, false, true, true, false>(ctx)
-          : solve_var<Left, Kind, false, true, false, false>(ctx);
+      vec ? solve_var<Left, Kind, false, true, true>(ctx)
+          : solve_var<Left, Kind, false, true, false>(ctx);
       return;
     default:
-      vec ? solve_var<Left, Kind, true, true, true, false>(ctx)
-          : solve_var<Left, Kind, true, true, false, false>(ctx);
+      vec ? solve_var<Left, Kind, true, true, true>(ctx)
+          : solve_var<Left, Kind, true, true, false>(ctx);
       return;
   }
 }
@@ -1090,22 +1133,41 @@ void solve_fwd(KernelCtx& ctx) {
 
 template <bool Left, SolveKind Kind = SolveKind::Plain>
 void solve_bwd(KernelCtx& ctx) {
-  const bool vec = (ctx.variant & 2u) != 0;
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
+  const int64_t br = Left ? n : k, bc = Left ? k : n;
+  // Bit 0 was CmdStan's active-result flag through solve_fwd; bits 2-3
+  // (0 meaning "both", the legacy pre-detail encoding) select which operand
+  // stan-math would have typed `var`, same switch as solve_active_fwd.
+  bool divisor_var = true, dividend_var = true;
   switch ((ctx.variant >> 2u) & 3u) {
     case 1u:
-      vec ? solve_var<Left, Kind, true, false, true, true>(ctx)
-          : solve_var<Left, Kind, true, false, false, true>(ctx);
-      return;
+      dividend_var = false;
+      break;
     case 2u:
-      vec ? solve_var<Left, Kind, false, true, true, true>(ctx)
-          : solve_var<Left, Kind, false, true, false, true>(ctx);
-      return;
+      divisor_var = false;
+      break;
     default:
-      // Includes the legacy active encoding with neither detail bit set.
-      vec ? solve_var<Left, Kind, true, true, true, true>(ctx)
-          : solve_var<Left, Kind, true, true, false, true>(ctx);
-      return;
+      break;
   }
+  const CMapM a(ctx.in[ai].data, n, n);
+  const CMapM x(ctx.out.data, br, bc);
+  const CMapM g(ctx.out_adj_vec.data, br, bc);
+  MatD adj_a = MatD::Zero(n, n);
+  MatD adj_b = MatD::Zero(br, bc);
+  if constexpr (Left) {
+    left_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
+                       divisor_var ? &adj_a : nullptr,
+                       dividend_var ? &adj_b : nullptr);
+  } else {
+    right_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
+                        divisor_var ? &adj_a : nullptr,
+                        dividend_var ? &adj_b : nullptr);
+  }
+  if (divisor_var && ctx.in_adj[ai].data)
+    MapM(ctx.in_adj[ai].data, n, n) += adj_a;
+  if (dividend_var && ctx.in_adj[bi].data)
+    MapM(ctx.in_adj[bi].data, br, bc) += adj_b;
 }
 
 // ---- lkj_corr_cholesky_lpdf(L | eta) --------------------------------------
