@@ -1654,10 +1654,9 @@ struct LoopState : KernelState {
   bool memo_ready = false;
   bool has_reusable_primals = false;
   bool reuse_primals = false;
-  bool report_tape =
-      std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
   bool diagnostics =
       std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
+  bool report_tape = diagnostics;
   bool no_replay = std::getenv("STANLI_NO_STRUCTURED_REPLAY") != nullptr;
   std::unique_ptr<Stream> stream;
   std::unique_ptr<Stream> building;
@@ -2539,9 +2538,11 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
     switch (instr.kind) {
       case BackwardInstr::Kernel: {
         FrozenCall& f = st.calls[instr.index];
-        for (int k = 0; k < f.ctx.n_in; ++k)
+        const int n_in = p.body.ops[f.n->op].n_in;
+        for (int k = 0; k < n_in; ++k)
           f.ctx.in_adj[k].data =
               resolve_adjoint(f.in_adjoint[k], st.adjoints.data(), p, ctx);
+        f.ctx.n_in = n_in;
         f.ctx.out_adj_vec.data =
             resolve_adjoint(f.out_adjoint, st.adjoints.data(), p, ctx);
         if (f.reuse_primal) {
