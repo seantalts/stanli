@@ -3,6 +3,7 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/graph_print.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/wa_interp.hpp>
@@ -3166,6 +3167,65 @@ static void automatic_policy_tests() {
                     "top-level while gradient parity");
 }
 
+static std::string graph_text(const CompiledModel& cm) {
+  std::string text;
+  GraphPrintInfo info;
+  info.fills = &cm.fills;
+  print_graph(text, cm.graph, info);
+  return text;
+}
+
+static void region_range_cache_tests() {
+  struct Case {
+    const char* name;
+    Mode mode;
+    DataMap data;
+  };
+  auto counted = [](const char* n, int64_t v) {
+    DataMap d;
+    d.set_int(n, v);
+    return d;
+  };
+  std::vector<Case> cases;
+  cases.push_back({"structured_arrays", Mode::Auto,
+                   DataMap::from_json_file("tests/fixtures/structured_arrays.json")});
+  cases.push_back({"structured_checks", Mode::Auto,
+                   DataMap::from_json_file("tests/fixtures/structured_checks.json")});
+  cases.push_back({"structured_counted", Mode::Auto, counted("N", 64)});
+  cases.push_back({"structured_data_if", Mode::Auto, observed_data(64)});
+  cases.push_back(
+      {"structured_direct_index", Mode::Force, counted("N", 4)});
+  cases.push_back({"structured_exits", Mode::Force, counted("N", 6)});
+  cases.push_back({"structured_matrix_ops", Mode::Auto, DataMap{}});
+  cases.push_back({"structured_nested", Mode::Auto, counted("N", 32)});
+  cases.push_back({"structured_param_if", Mode::Auto, observed_data(64)});
+  cases.push_back(
+      {"structured_prefer_shape", Mode::Prefer,
+       DataMap::from_json_file("tests/fixtures/structured_prefer_shape.json")});
+  cases.push_back({"structured_while_top", Mode::Auto, counted("N", 40)});
+  cases.push_back(
+      {"structured_auto_refusal", Mode::Auto, counted("N", 32)});
+  {
+    DataMap d;
+    d.set_int("N", 40);
+    std::vector<int> gap(40);
+    for (int i = 0; i < 40; ++i) gap[static_cast<size_t>(i)] = ((i * 3 + 2) % 8) + 1;
+    d.set_int_array("gap", std::move(gap));
+    cases.push_back({"structured_carried_span", Mode::Auto, std::move(d)});
+  }
+
+  for (const auto& c : cases) {
+    test_unsetenv("STANLI_NO_REGION_RANGE_CACHE");
+    const auto cache_on = compile_fixture(c.name, c.data, c.mode);
+    test_setenv("STANLI_NO_REGION_RANGE_CACHE", "1");
+    const auto cache_off = compile_fixture(c.name, c.data, c.mode);
+    test_unsetenv("STANLI_NO_REGION_RANGE_CACHE");
+    check(graph_text(cache_on) == graph_text(cache_off),
+          (std::string("region range cache byte-identical: ") + c.name)
+              .c_str());
+  }
+}
+
 static void prefer_parent_tests() {
   DataMap data;
   data.set_int("N", 1);
@@ -4829,6 +4889,7 @@ int main() {
   failure_tests();
   refusal_tests();
   automatic_policy_tests();
+  region_range_cache_tests();
   prefer_parent_tests();
   direct_index_lowering_tests();
   runtime_slice_tests();

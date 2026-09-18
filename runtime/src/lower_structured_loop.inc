@@ -8,7 +8,8 @@ std::map<std::string, IntRange> region_analysis_ints;
 int region_control_depth = 0;
 bool region_control_active = false;
 unsigned structured_outer_depth = 0;
-std::map<const mir::Expr*, std::optional<RealRange>> region_enumerated_cache;
+std::map<std::pair<const mir::Expr*, std::string>, std::optional<RealRange>>
+    region_enumerated_cache;
 
 // Matches ostream's default floating-point formatting.
 static std::string fmt_g(double v) {
@@ -92,14 +93,7 @@ void region_alias(int dst, int src) {
 // scope.  This keeps reusable loop analysis compact: it visits the data
 // points, but never emits or unrolls the numerical loop body.
 std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
-  if (auto cached = region_enumerated_cache.find(&e);
-      cached != region_enumerated_cache.end())
-    return cached->second;
-  auto memo = [&](std::optional<RealRange> result) {
-    region_enumerated_cache[&e] = result;
-    return result;
-  };
-  if (!e.data_only || expr_effectful(e)) return memo({});
+  if (!e.data_only || expr_effectful(e)) return {};
   std::function<bool(const mir::Expr&)> calls_user =
       [&](const mir::Expr& value) {
         if (value.kind == mir::Expr::FunApp &&
@@ -109,7 +103,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
           if (calls_user(arg)) return true;
         return false;
       };
-  if (calls_user(e)) return memo({});
+  if (calls_user(e)) return {};
   std::map<std::string, IntRange> variables;
   std::function<bool(const mir::Expr&)> collect = [&](const mir::Expr& value) {
     if (value.kind == mir::Expr::Var) {
@@ -137,13 +131,65 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
       if (!collect(arg)) return false;
     return true;
   };
-  if (!collect(e)) return memo({});
+  if (!collect(e)) return {};
+  const auto unresolvable = [&](const auto& self, const mir::Expr& value) -> bool {
+    if (value.kind == mir::Expr::Var)
+      return !variables.count(value.name) && !data.has(value.name) &&
+             !int_env.count(value.name) && !td.find(value.name);
+    if (value.kind == mir::Expr::EAnd || value.kind == mir::Expr::EOr ||
+        value.kind == mir::Expr::TernaryIf)
+      return !value.args.empty() && self(self, value.args[0]);
+    for (const auto& arg : value.args)
+      if (self(self, arg)) return true;
+    return false;
+  };
+  if (unresolvable(unresolvable, e)) return {};
   uint64_t combinations = 1;
   for (const auto& variable : variables) {
     const uint64_t width =
         uint64_t(int64_t(variable.second.hi) - variable.second.lo + 1);
-    if (width == 0 || combinations > 1000000 / width) return memo({});
+    if (width == 0 || combinations > 1000000 / width) return {};
     combinations *= width;
+  }
+  bool cacheable = !std::getenv("STANLI_NO_REGION_RANGE_CACHE");
+  std::string key;
+  if (cacheable) {
+    std::set<std::string> seen;
+    std::function<void(const mir::Expr&)> walk = [&](const mir::Expr& value) {
+      if (!cacheable) return;
+      if (value.kind == mir::Expr::Var && seen.insert(value.name).second) {
+        if (const auto grid = variables.find(value.name);
+            grid != variables.end()) {
+          key += "G" + value.name + ":" + std::to_string(grid->second.lo) +
+                 "," + std::to_string(grid->second.hi) + ";";
+        } else if (!data.has(value.name)) {
+          if (const auto local = int_env.find(value.name);
+              local != int_env.end()) {
+            key += "N" + value.name + ":" + std::to_string(local->second) +
+                   ";";
+          } else if (DataMap::Entry* entry = td.find(value.name)) {
+            if (!entry->is_int || entry->i.size() > 64) {
+              cacheable = false;
+              return;
+            }
+            key += "V" + value.name + ":";
+            for (int x : entry->i) key += std::to_string(x) + ",";
+            key += ";";
+          } else {
+            cacheable = false;
+            return;
+          }
+        }
+      }
+      for (const auto& arg : value.args) walk(arg);
+    };
+    walk(e);
+  }
+  std::pair<const mir::Expr*, std::string> cache_key{&e, std::move(key)};
+  if (cacheable) {
+    if (auto cached = region_enumerated_cache.find(cache_key);
+        cached != region_enumerated_cache.end())
+      return cached->second;
   }
   struct Saved {
     std::string name;
@@ -198,8 +244,10 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     else
       td.env().erase(item.name);
   }
-  if (!any) return memo({});
-  return memo(result);
+  std::optional<RealRange> outcome;
+  if (any) outcome = result;
+  if (cacheable) region_enumerated_cache[std::move(cache_key)] = outcome;
+  return outcome;
 }
 
 std::optional<RealRange> region_real_range(const mir::Expr& e) {
