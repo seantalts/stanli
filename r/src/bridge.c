@@ -115,6 +115,12 @@ static void* g_lib = NULL;
 
 /* Every entry point the R side uses. */
 static int (*p_abi_version)(void);
+static void* (*p_model_new_threaded)(const char*, const char*, uint32_t, int,
+                                     char*, size_t);
+static void* (*p_model_new_from_stan_threaded)(const char*, const char*,
+                                               uint32_t, int, char*, size_t);
+static int (*p_reduce_sum_count)(const void*);
+static const char* (*p_reduce_sum_fallbacks)(const void*);
 static void* (*p_model_new_from_stan)(const char*, const char*, char*, size_t);
 static void* (*p_model_new)(const char*, const char*, char*, size_t);
 /* The seeded constructors are additive: an older runtime has neither, and
@@ -216,6 +222,12 @@ SEXP stanli_bridge_load(SEXP path) {
 
   BIND("stanli_model_new_from_stan", p_model_new_from_stan);
   BIND("stanli_model_new", p_model_new);
+  *(void**)(&p_model_new_threaded) = dl_sym(g_lib, "stanli_model_new_threaded");
+  *(void**)(&p_model_new_from_stan_threaded) =
+      dl_sym(g_lib, "stanli_model_new_from_stan_threaded");
+  *(void**)(&p_reduce_sum_count) = dl_sym(g_lib, "stanli_reduce_sum_count");
+  *(void**)(&p_reduce_sum_fallbacks) =
+      dl_sym(g_lib, "stanli_reduce_sum_fallbacks");
   *(void**)(&p_model_new_from_stan_seeded) =
       dl_sym(g_lib, "stanli_model_new_from_stan_seeded");
   *(void**)(&p_model_new_seeded) = dl_sym(g_lib, "stanli_model_new_seeded");
@@ -287,7 +299,8 @@ static void* model_ptr(SEXP ext) {
   return m;
 }
 
-SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed) {
+SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
+                        SEXP threads_per_chain) {
   require_loaded();
   char err[8192];
   err[0] = '\0';
@@ -295,7 +308,17 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed) {
   const char* text = CHAR(STRING_ELT(code, 0));
   const char* data = CHAR(STRING_ELT(data_json, 0));
   const uint32_t construction_seed = (uint32_t)asReal(seed);
-  if (asLogical(is_mir))
+  const int threads = asInteger(threads_per_chain);
+  if (threads < 1) error("threads_per_chain must be positive");
+  if (threads > 1) {
+    if (p_model_new_threaded == NULL || p_model_new_from_stan_threaded == NULL)
+      error("threads_per_chain requires a newer Stanli runtime");
+    m = asLogical(is_mir)
+            ? p_model_new_threaded(text, data, construction_seed, threads, err,
+                                   sizeof err)
+            : p_model_new_from_stan_threaded(text, data, construction_seed,
+                                             threads, err, sizeof err);
+  } else if (asLogical(is_mir))
     m = p_model_new_seeded != NULL
             ? p_model_new_seeded(text, data, construction_seed, err, sizeof err)
             : p_model_new(text, data, err, sizeof err);
@@ -309,6 +332,17 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed) {
   R_RegisterCFinalizerEx(ext, model_finalizer, TRUE);
   UNPROTECT(1);
   return ext;
+}
+
+SEXP stanli_r_reduce_sum_count(SEXP m) {
+  require_loaded();
+  return ScalarInteger(p_reduce_sum_count ? p_reduce_sum_count(model_ptr(m))
+                                          : 0);
+}
+SEXP stanli_r_reduce_sum_fallbacks(SEXP m) {
+  require_loaded();
+  return mkString(p_reduce_sum_fallbacks ? p_reduce_sum_fallbacks(model_ptr(m))
+                                         : "");
 }
 
 SEXP stanli_r_has_embedded_stanc(void) {

@@ -12,6 +12,7 @@
 namespace stanli {
 
 class WaRng;
+class ReduceExecutionContext;
 
 // Mutable state owned by one bound Executor and one operation. Most kernels
 // need none; the retained loop keeps its tape here.
@@ -24,6 +25,7 @@ struct KernelState {
 // belongs to one chain/drawing thread, never to a compiled model or executor.
 struct EvalState {
   WaRng* wa_rng = nullptr;
+  ReduceExecutionContext* reduce = nullptr;
 };
 
 // A view of one contiguous buffer. len == 1 means scalar.

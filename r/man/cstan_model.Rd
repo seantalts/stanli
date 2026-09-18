@@ -11,8 +11,8 @@ cstan_model(model_code)
 }
 \value{
 A \code{stanli_cstanmodel} with \verb{$sample(...)}, \verb{$code()}, and
-\verb{$model_name()} methods. \verb{$sample()} also accepts \code{threads_per_chain = 1};
-larger values are unsupported. Use \code{parallel_chains} for concurrency.
+\verb{$model_name()} methods. \verb{$sample()} accepts \code{threads_per_chain} for native
+within-chain parallelism and \code{parallel_chains} for concurrent chains.
 }
 \description{
 Retain Stan source in a native model object. Its \verb{$sample()} method accepts

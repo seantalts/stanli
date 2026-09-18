@@ -7,8 +7,8 @@
 #'
 #' @param model_code A single string of Stan program source.
 #' @return A `stanli_cstanmodel` with `$sample(...)`, `$code()`, and
-#'   `$model_name()` methods. `$sample()` also accepts `threads_per_chain = 1`;
-#'   larger values are unsupported. Use `parallel_chains` for concurrency.
+#'   `$model_name()` methods. `$sample()` accepts `threads_per_chain` for native
+#'   within-chain parallelism and `parallel_chains` for concurrent chains.
 #' @details Defaults and validation are delegated to [sample_cstan()]. Neither
 #'   cmdstanr, rstan, CmdStan, nor a C++ toolchain is needed. This object provides
 #'   the sampling subset of the CmdStanR model interface, with its own class;
@@ -28,12 +28,7 @@ cstan_model <- function(model_code) {
   structure(list(
     code = function() model_code,
     model_name = function() "stanli_model",
-    sample = function(..., threads_per_chain = 1) {
-      cstan_integer(threads_per_chain, "threads_per_chain")
-      if (threads_per_chain != 1)
-        stop("within-chain threading is not supported; use parallel_chains", call. = FALSE)
-      sample_cstan(model_code = model_code, ...)
-    }
+    sample = function(...) sample_cstan(model_code = model_code, ...)
   ), class = "stanli_cstanmodel")
 }
 

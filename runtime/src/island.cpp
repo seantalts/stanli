@@ -162,6 +162,7 @@ bool callable(const Graph& g, const Op& op) {
   if (has_op_trait(op.opcode, op_trait::kVariantGrouped)) return false;
   switch (op.opcode) {
     case OP_ISLAND:
+    case OP_REDUCE_SUM:
     case OP_ODE:
     case OP_DAE:
     case OP_ODE_ADJOINT:

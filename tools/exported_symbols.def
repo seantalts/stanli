@@ -13,6 +13,10 @@ EXPORTS
   stanli_model_new_from_stan
   stanli_model_new_seeded
   stanli_model_new_from_stan_seeded
+  stanli_model_new_threaded
+  stanli_model_new_from_stan_threaded
+  stanli_reduce_sum_count
+  stanli_reduce_sum_fallbacks
   stanli_has_embedded_stanc
   stanli_stan_to_mir
   stanli_string_free

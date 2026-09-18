@@ -39,6 +39,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag)
     : Lowering(parent.data, parent.prep, parent.dumper, parent.prep_graph,
                parent.td_rng,
                std::make_shared<ShapeInterner>(*parent.shape_pool)) {
+  compile_options = parent.compile_options;
   fun_defs = parent.fun_defs;
   decls = parent.decls;
   td.env() = parent.td.env();
@@ -917,6 +918,7 @@ std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
   lo.bind_data(p);
   Lowering trial(lo.data, lo.prep, lo.dumper, "bounded_log_prob",
                  lo.prepared_context());
+  trial.compile_options = lo.compile_options;
   trial.shape_pool = std::make_shared<ShapeInterner>(*lo.shape_pool);
   trial.int_env_data = lo.int_env_data;
   trial.data_prepared = true;
@@ -955,6 +957,13 @@ std::string report_request() {
 
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed) {
+  return compile_model(mir_text, data, seed, CompileOptions{});
+}
+CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
+                            unsigned seed, const CompileOptions& options) {
+  if (options.reduce_sum_threads < 1 || options.reduce_sum_min_elements < 0 ||
+      options.reduce_sum_max_chunks < 1)
+    throw std::invalid_argument("invalid reduce_sum compilation options");
   const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
   PrepTrace prep(prep_env && prep_env[0] != '0');
   PassDumper dumper(std::getenv("STANLI_DUMP_PASSES"),
@@ -969,6 +978,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
+  lo.compile_options = options;
   auto specialized = try_bounded_specialization(lo, *prog);
   CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
   if (!prog->generate_quantities.empty()) {

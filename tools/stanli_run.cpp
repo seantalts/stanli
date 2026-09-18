@@ -5,7 +5,8 @@
 // Usage: stanli_run model.stan data.json [--seed N] [--warmup N]
 //        [--samples N] [--delta X] [--max-depth N]
 //        [--stanli-compile PATH | --stanc PATH]
-//        [--sampler-stats] [--chains N] [--num-threads N] [--thin N]
+//        [--sampler-stats] [--chains N] [--num-threads N] [--threads-per-chain
+//        N] [--thin N]
 //        [--save-warmup] [--init-radius X] [--summary] [--timings]
 //
 // --chains runs N chains and concatenates their draws in chain order, so
@@ -27,6 +28,9 @@
 #include <stanli/compile.hpp>
 #include <stanli/diagnose.hpp>
 #include <stanli/nuts.hpp>
+#include <stanli/reduce_sum.hpp>
+#include <stanli/optable.hpp>
+#include <algorithm>
 #include <stanli/wa_interp.hpp>
 
 #include "csv_writer.hpp"
@@ -43,13 +47,14 @@
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(stderr,
-                 "usage: stanli_run model.stan data.json [--seed N] "
-                 "[--warmup N] [--samples N] [--delta X] "
-                 "[--max-depth N] [--stanli-compile PATH | --stanc PATH] "
-                 "[--sampler-stats] "
-                 "[--chains N] [--num-threads N] [--thin N] "
-                 "[--save-warmup] [--init-radius X] [--summary] [--timings]\n");
+    std::fprintf(
+        stderr,
+        "usage: stanli_run model.stan data.json [--seed N] "
+        "[--warmup N] [--samples N] [--delta X] "
+        "[--max-depth N] [--stanli-compile PATH | --stanc PATH] "
+        "[--sampler-stats] "
+        "[--chains N] [--num-threads N] [--threads-per-chain N] [--thin N] "
+        "[--save-warmup] [--init-radius X] [--summary] [--timings]\n");
     return 2;
   }
   std::string model = argv[1], datafile = argv[2];
@@ -68,6 +73,7 @@ int main(int argc, char** argv) {
   // sequential run -- so there is nothing to opt into.
   int n_threads = 0;
   bool threads_asked = false;
+  int threads_per_chain = 1;
   for (int i = 3; i < argc; ++i) {
     const std::string k = argv[i];
     if (k == "--timings") {
@@ -103,7 +109,9 @@ int main(int argc, char** argv) {
     else if (k == "--num-threads") {
       n_threads = std::stoi(v);
       threads_asked = true;
-    } else if (k == "--thin")
+    } else if (k == "--threads-per-chain")
+      threads_per_chain = std::stoi(v);
+    else if (k == "--thin")
       cfg.thin = std::stoi(v);
     else if (k == "--init-radius")
       cfg.init_radius = std::stod(v);
@@ -111,6 +119,16 @@ int main(int argc, char** argv) {
       stanc = v;
     else if (k == "--stanli-compile")
       compiler = v;
+  }
+  if (threads_per_chain < 1) {
+    std::fprintf(stderr, "stanli_run: --threads-per-chain must be positive\n");
+    return 2;
+  }
+  if (threads_per_chain > 1 && !stanli::thread_safe_build()) {
+    std::fprintf(stderr,
+                 "stanli_run: within-chain threading requires a TLS-safe "
+                 "native build\n");
+    return 2;
   }
   if (n_chains < 1) n_chains = 1;
   if (n_threads <= 0) n_threads = n_chains;
@@ -142,7 +160,14 @@ int main(int argc, char** argv) {
         stanli::tooling::compile_source(stanc, compiler, model);
     if (mir.empty())
       throw std::runtime_error("the compiler produced no MIR (compile error?)");
-    stanli::CompiledModel cm = stanli::compile_model(mir, data, cfg.seed);
+    stanli::CompileOptions compile_options;
+    compile_options.reduce_sum_threads = threads_per_chain;
+    stanli::CompiledModel cm =
+        stanli::compile_model(mir, data, cfg.seed, compile_options);
+    const auto reductions = std::count_if(
+        cm.graph.ops.begin(), cm.graph.ops.end(), [](const stanli::Op& op) {
+          return op.opcode == stanli::OP_REDUCE_SUM;
+        });
     stanli::Executor ex(std::move(cm.graph));
     cm.bind(ex);
     // STANLI_PROFILE=1: per-opcode accounting for the whole sampling run,
@@ -156,6 +181,27 @@ int main(int argc, char** argv) {
     auto clones = stanli::clone_executors(ex, n_chains - 1);
     std::vector<stanli::Executor*> execs{&ex};
     for (auto& c : clones) execs.push_back(c.get());
+    // Only retained reductions need worker teams. Each executor owns its
+    // mutable child state and borrows one persistent per-chain team.
+    std::vector<std::unique_ptr<stanli::ReduceExecutionContext>> reduce_teams;
+    if (threads_per_chain > 1) {
+      std::fprintf(stderr,
+                   "stanli_run: %td retained reductions; up to %lld active "
+                   "sampling threads\n",
+                   reductions,
+                   static_cast<long long>(std::min(n_threads, n_chains)) *
+                       (reductions ? threads_per_chain : 1));
+      for (const auto& reason : cm.reduce_sum_fallbacks)
+        std::fprintf(stderr, "stanli_run: serial reduce_sum: %s\n",
+                     reason.c_str());
+      if (reductions)
+        for (auto* executor : execs) {
+          reduce_teams.push_back(
+              std::make_unique<stanli::ReduceExecutionContext>(
+                  threads_per_chain));
+          executor->set_reduce_context(reduce_teams.back().get());
+        }
+    }
     const auto prepared = want_timings ? Clock::now() : Clock::time_point{};
     auto chain_res = stanli::run_nuts_chains(execs, cfg, n_threads);
     const auto sampled = want_timings ? Clock::now() : Clock::time_point{};

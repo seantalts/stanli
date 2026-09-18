@@ -6,7 +6,9 @@
 
 extern SEXP stanli_bridge_load(SEXP);
 extern SEXP stanli_bridge_loaded(void);
-extern SEXP stanli_r_model_new(SEXP, SEXP, SEXP, SEXP);
+extern SEXP stanli_r_model_new(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP stanli_r_reduce_sum_count(SEXP);
+extern SEXP stanli_r_reduce_sum_fallbacks(SEXP);
 extern SEXP stanli_r_has_embedded_stanc(void);
 extern SEXP stanli_r_exact_lp(void);
 extern SEXP stanli_r_thread_safe(void);
@@ -30,7 +32,10 @@ extern SEXP stanli_r_log_prob(SEXP, SEXP);
 static const R_CallMethodDef CallEntries[] = {
     {"stanli_bridge_load", (DL_FUNC)&stanli_bridge_load, 1},
     {"stanli_bridge_loaded", (DL_FUNC)&stanli_bridge_loaded, 0},
-    {"stanli_r_model_new", (DL_FUNC)&stanli_r_model_new, 4},
+    {"stanli_r_model_new", (DL_FUNC)&stanli_r_model_new, 5},
+    {"stanli_r_reduce_sum_count", (DL_FUNC)&stanli_r_reduce_sum_count, 1},
+    {"stanli_r_reduce_sum_fallbacks", (DL_FUNC)&stanli_r_reduce_sum_fallbacks,
+     1},
     {"stanli_r_has_embedded_stanc", (DL_FUNC)&stanli_r_has_embedded_stanc, 0},
     {"stanli_r_exact_lp", (DL_FUNC)&stanli_r_exact_lp, 0},
     {"stanli_r_thread_safe", (DL_FUNC)&stanli_r_thread_safe, 0},

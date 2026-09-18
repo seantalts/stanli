@@ -158,7 +158,7 @@ test_that("sample_cstan translates initialization and sampling options", {
 })
 
 test_that("sample_cstan refuses unsupported options before preparing a model", {
-  expect_error(sample_cstan("invalid",threads_per_chain=2),"unsupported.*threads_per_chain")
+  expect_error(sample_cstan("invalid",threads_per_chain=0),"threads_per_chain")
   expect_error(sample_cstan("invalid",chains=0),"chains")
   expect_error(sample_cstan("invalid",iter_sampling=0),"iter_sampling")
   expect_error(sample_cstan("invalid",thin=1.5),"thin")

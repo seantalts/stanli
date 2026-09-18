@@ -344,6 +344,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/lower_funapp.cpp
   runtime/src/lower_higher_order.cpp
   runtime/src/structured_loop.cpp
+  runtime/src/reduce_sum.cpp
   runtime/src/init_interp.cpp
   runtime/src/unconstrain.cpp
   runtime/src/wa_interp.cpp
@@ -913,6 +914,11 @@ if(NOT WIN32)
     tools/bench_executor_data.cpp tests/tbb_stub.cpp)
   target_link_libraries(bench_executor_data PRIVATE stanli)
 endif()
+# Within-chain feasibility probes and matched native integration benchmarks.
+add_executable(bench_reduce_sum EXCLUDE_FROM_ALL
+  tools/bench_reduce_sum.cpp tests/tbb_stub.cpp)
+target_link_libraries(bench_reduce_sum PRIVATE stanli)
+add_dependencies(bench_reduce_sum stanli_mir_fixtures)
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
@@ -1205,6 +1211,12 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
                    --build ${CMAKE_CURRENT_BINARY_DIR}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  if(STANLI_THREADS)
+    add_test(NAME test_reduce_sum_cli
+             COMMAND ${Python3_EXECUTABLE} tests/test_reduce_sum_cli.py
+                     $<TARGET_FILE:stanli_run>
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   add_test(NAME test_vectorize_ab
            COMMAND ${Python3_EXECUTABLE} tests/test_vectorize_ab.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

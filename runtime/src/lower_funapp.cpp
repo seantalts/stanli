@@ -129,6 +129,7 @@ bool Lowering::fun_effectful(const std::string& name) {
   };
 
   visit_expr = [&](const mir::Expr& e) {
+    if (mir::stateful_intrinsic_kind(e)) return true;
     if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
         e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
       return true;
@@ -149,6 +150,7 @@ bool Lowering::fun_effectful(const std::string& name) {
   };
 
   visit_stmt = [&](const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::TargetPE) return true;
     if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name)) return true;
     for (const auto& e : s.fn_args)
       if (visit_expr(e)) return true;
@@ -396,21 +398,15 @@ Lowering::Val Lowering::free_transform(uint16_t opcode,
 // in the caller's scope, bound under the parameter names in a shadowed
 // scope, and the body lowers like any other statements (loops unroll,
 // data-only conditions resolve). Return throws the result value out.
-Lowering::Val Lowering::lower_call_udf(
-    const mir::Expr& e, const std::function<void()>& before_body) {
+Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
+                                       const std::function<void()>& before_body,
+                                       const UdfSpecialization& specialize) {
   auto it = fun_defs.find(e.name);
   if (it == fun_defs.end()) fail("unknown function " + e.name, e.raw);
   const mir::FunDef& f = *it->second;
   CallArguments actuals(*this, e);
   actuals.require_arity(f.arg_names.size());
-  struct Binding {
-    bool is_int = false;
-    long iv = 0;
-    Val v{-1, false, {}};
-    std::optional<DataMap::Entry> data;
-    bool formal_data_only = false;
-  };
-  std::vector<Binding> binds(actuals.size());
+  std::vector<UdfBinding> binds(actuals.size());
   for (size_t i = 0; i < actuals.size(); ++i) {
     LoweredArgument& actual = actuals.at(i);
     const mir::Expr& a = actual.expr();
@@ -435,6 +431,8 @@ Lowering::Val Lowering::lower_call_udf(
   // Higher-order calls may validate after evaluating all actual arguments
   // but before entering the user body (reduce_sum's grainsize check).
   if (before_body) before_body();
+  if (specialize)
+    if (auto result = specialize(binds)) return *result;
   if (++udf_depth > 64) {
     --udf_depth;
     fail("UDF recursion too deep in " + e.name);

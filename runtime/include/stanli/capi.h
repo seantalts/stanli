@@ -85,6 +85,27 @@ const char* stanli_build_id(void);
  * seed and expect the same bytes, should check this. */
 int stanli_exact_lp(void);
 
+/* Threaded constructors: seed has the same meaning as in the seeded forms.
+ * threads_per_chain must be positive; >1 requires stanli_thread_safe().
+ * Eligible reduce_sum calls compile to partitioned graphs, with a persistent
+ * worker team owned by this handle. Sampling clones get their own teams.
+ * One thread retains the existing serial graph. Ineligible calls stay serial.
+ * Additive: all existing constructors and option layouts are unchanged. */
+stanli_model* stanli_model_new_threaded(const char* mir_text,
+                                        const char* data_json, uint32_t seed,
+                                        int threads_per_chain, char* err,
+                                        size_t err_len);
+stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
+                                                  const char* data_json,
+                                                  uint32_t seed,
+                                                  int threads_per_chain,
+                                                  char* err, size_t err_len);
+/* Retained native reduction count and newline-separated lowering refusals.
+ * Diagnostics cover graph lowering, not calls inside opaque runtime regions.
+ * The string is owned by the model. */
+int stanli_reduce_sum_count(const stanli_model* m);
+const char* stanli_reduce_sum_fallbacks(const stanli_model* m);
+
 void stanli_model_free(stanli_model* m);
 
 int64_t stanli_n_unconstrained(const stanli_model* m);
