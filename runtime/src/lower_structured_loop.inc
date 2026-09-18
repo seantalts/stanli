@@ -222,6 +222,10 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     }
     try {
       DataMap::Entry value = td.eval(e);
+      if (td.probe_failed()) {
+        td.clear_probe_failed();
+        return;
+      }
       if (value.r.size() != 1 || !std::isfinite(value.r[0])) return;
       if (!any)
         result = {value.r[0], value.r[0]};
@@ -237,6 +241,11 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
       // Other reachable failures remain runtime failures.
     }
   };
+  td.set_probe(true);
+  struct RestoreProbe {
+    MirInterp<double>& interp;
+    ~RestoreProbe() { interp.set_probe(false); }
+  } restore_probe{td};
   enumerate(0);
   for (auto& item : saved) {
     if (item.value)
