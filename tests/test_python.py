@@ -1181,7 +1181,10 @@ def test_reduce_sum_threads_per_chain():
                          data={"N": 3, "y": [0, 1, 2]}, threads_per_chain=4)
     assert small.reduce_sum_count == 0 and small.reduce_sum_fallbacks
     # Old runtime capability failures must leave the existing model usable.
-    with mock.patch.object(stanli._lib, "stanli_model_new_from_stan_threaded", None):
+    constructor = ("stanli_model_new_from_stan_threaded"
+                   if stanli._lib.stanli_has_embedded_stanc()
+                   else "stanli_model_new_threaded")
+    with mock.patch.object(stanli._lib, constructor, None):
         try:
             m.sample(**args, threads_per_chain=2)
         except RuntimeError as e:
