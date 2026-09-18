@@ -1528,6 +1528,7 @@ struct FrozenImport {
   int64_t len = 0;
   int input = 0;
   int64_t offset = 0;
+  bool data_only = false;
 };
 
 struct StreamInstr {
@@ -1619,6 +1620,7 @@ struct LoopState : KernelState {
   BlockArena arena;
   std::vector<double> workspace;
   std::vector<Version> versions;
+  std::vector<uint8_t> version_const;
   std::vector<int64_t> bindings;
   std::vector<int64_t> handles;
   std::vector<double> undo;
@@ -1772,6 +1774,7 @@ struct LoopState : KernelState {
     version_peak = std::max(version_peak, versions.size());
     right_size(versions, version_peak);
     right_size(owner, version_peak);
+    right_size(version_const, version_peak);
     version_peak = 0;
     right_size(handles);
     right_size(undo);
@@ -1806,10 +1809,29 @@ struct Execution {
     return outer.in_adj[p.imports[static_cast<size_t>(-(a + 2))].input].data !=
            nullptr;
   }
-  int64_t make_version(double* value, int64_t adjoint) {
+  int64_t make_version(double* value, int64_t adjoint, bool constant = false) {
     s.versions.push_back(Version{value, adjoint});
     s.owner.push_back(-1);
+    s.version_const.push_back(constant);
     return static_cast<int64_t>(s.versions.size()) - 1;
+  }
+  bool in_workspace(const double* ptr) const {
+    return ptr >= s.workspace.data() && ptr < s.workspace.data() + s.workspace.size();
+  }
+  bool is_const(int64_t version) const {
+    return s.version_const[static_cast<size_t>(version)] != 0;
+  }
+  bool inputs_const(const Op& op) const {
+    for (int k = 0; k < op.n_in; ++k)
+      if (!is_const(s.bindings[op.in[k]])) return false;
+    return true;
+  }
+  double* materialize(int64_t version, int64_t len) {
+    double* v = s.versions[static_cast<size_t>(version)].value;
+    if (!is_const(version) || !in_workspace(v)) return v;
+    double* copy = s.arena.allocate(len);
+    std::copy_n(v, len, copy);
+    return copy;
   }
   struct Snapshot {
     BlockArena::Mark arena;
@@ -1854,7 +1876,9 @@ struct Execution {
     if (!s.building) return;
     Stream& st = *s.building;
     const uint32_t ptr_offset = static_cast<uint32_t>(st.call_ptrs.size());
-    for (int k = 0; k < op.n_in; ++k) st.call_ptrs.push_back(c.in[k].data);
+    for (int k = 0; k < op.n_in; ++k)
+      st.call_ptrs.push_back(
+          materialize(s.bindings[op.in[k]], p.body.slots[op.in[k]].len));
     st.call_ptrs.push_back(c.out.data);
     if (op.out2 >= 0) st.call_ptrs.push_back(c.out2.data);
     st.call_ptrs.push_back(c.scratch);
@@ -1888,9 +1912,14 @@ struct Execution {
     c.scratch = w;
     bind_inputs(op, c);
     n.forward(c);
+    const bool folded = inputs_const(op);
     s.bindings[op.out] = s.node_version[n.site];
-    if (op.out2 >= 0) s.bindings[op.out2] = s.node_version2[n.site];
-    log_call(n, op, c);
+    s.version_const[static_cast<size_t>(s.node_version[n.site])] = folded;
+    if (op.out2 >= 0) {
+      s.bindings[op.out2] = s.node_version2[n.site];
+      s.version_const[static_cast<size_t>(s.node_version2[n.site])] = folded;
+    }
+    if (!folded) log_call(n, op, c);
   }
 
   void run_retained(const Node& n, const Op& op, KernelCtx& c) {
@@ -1914,18 +1943,19 @@ struct Execution {
     c.scratch = block + out_len + out2_len;
     bind_inputs(op, c);
     n.forward(c);
+    const bool folded = inputs_const(op);
     const int64_t out =
-        make_version(block, n.active ? reserve_adjoint(out_len) : -1);
+        make_version(block, n.active ? reserve_adjoint(out_len) : -1, folded);
     s.bindings[op.out] = out;
     int64_t out2 = -1;
     if (op.out2 >= 0) {
       out2 = make_version(block + out_len,
-                          n.active ? reserve_adjoint(out2_len) : -1);
+                          n.active ? reserve_adjoint(out2_len) : -1, folded);
       s.bindings[op.out2] = out2;
     }
     if (n.active)
       s.records.push_back(Record{Record::Kernel, n.site, handles, out, -1});
-    log_call(n, op, c);
+    if (!folded) log_call(n, op, c);
   }
 
   void run_in_place(const Node& n, const Op& op, KernelCtx& c) {
@@ -1950,8 +1980,7 @@ struct Execution {
         st.copy_adj_version.push_back(fresh);
         const uint32_t idx = static_cast<uint32_t>(st.copies.size());
         st.program.push_back(StreamInstr{StreamInstr::Copy, idx});
-        st.copies.push_back(FrozenCopy{s.versions[static_cast<size_t>(base)].value,
-                                       copy, len});
+        st.copies.push_back(FrozenCopy{materialize(base, len), copy, len});
       }
       s.bindings[base_slot] = base = fresh;
     } else if (rhs_active &&
@@ -1980,7 +2009,7 @@ struct Execution {
       Stream& st = *s.building;
       FrozenInPlace fi;
       fi.base = values;
-      fi.rhs = source;
+      fi.rhs = materialize(rhs, c.in[layout.rhs].len);
       fi.old_offset = static_cast<uint32_t>(st.inplace_old.size());
       fi.pos_offset = static_cast<uint32_t>(st.inplace_pos.size());
       for (size_t k = static_cast<size_t>(undo); k < s.undo.size(); k += 2) {
@@ -1989,11 +2018,13 @@ struct Execution {
       }
       fi.pos_count = static_cast<uint32_t>(st.inplace_pos.size()) - fi.pos_offset;
       fi.sel_offset = static_cast<uint32_t>(st.inplace_sel_ptr.size());
-      for (int k = 1; k < layout.rhs; ++k)
+      for (int k = 1; k < layout.rhs; ++k) {
+        double* src = materialize(s.bindings[op.in[k]], c.in[k].len);
         for (int64_t i = 0; i < c.in[k].len; ++i) {
-          st.inplace_sel_ptr.push_back(c.in[k].data + i);
-          st.inplace_sel_snapshot.push_back(c.in[k].data[i]);
+          st.inplace_sel_ptr.push_back(src + i);
+          st.inplace_sel_snapshot.push_back(src[i]);
         }
+      }
       fi.sel_count = static_cast<uint32_t>(st.inplace_sel_ptr.size()) - fi.sel_offset;
       st.inplace_adj_version.push_back(base);
       st.inplace_adj_version.push_back(rhs);
@@ -2037,7 +2068,7 @@ struct Execution {
 
   __attribute__((noinline)) Flow record_silent(const Node& n) {
     const uint64_t effects = s.effects;
-    if (!s.memo_release[static_cast<size_t>(n.memo_index)]) {
+    if (!s.memo_release[static_cast<size_t>(n.memo_index)] || s.building) {
       const Flow flow = run(n);
       s.effects = effects;
       return flow;
@@ -2138,7 +2169,7 @@ struct Execution {
           arm = cond[0] != 0.0 ? 0 : 1;
           if (n.trace)
             s.trace.push_back(static_cast<int64_t>(arm));
-          else if (s.building)
+          else if (s.building && !is_const(s.bindings[n.condition]))
             log_guard(FrozenGuard{FrozenGuard::If, cond, nullptr, cond[0], 0,
                                   arm == 0});
         }
@@ -2162,7 +2193,8 @@ struct Execution {
           throw std::logic_error("structured loop invalid integer bounds");
         const int64_t count = hi >= lo ? static_cast<int64_t>(hi - lo) + 1 : 0;
         if (!n.trace) {
-          if (s.building)
+          if (s.building && !(is_const(s.bindings[n.lower]) &&
+                              is_const(s.bindings[n.upper])))
             log_guard(FrozenGuard{FrozenGuard::For, value(n.lower),
                                   value(n.upper), lo, hi, false});
           for (int64_t i = 0; i < count; ++i) {
@@ -2204,7 +2236,7 @@ struct Execution {
           if (forward(n.children[0]) == Break) break;
           const double* cond = value(n.condition);
           const bool taken = cond[0] != 0.0;
-          if (!n.trace && s.building)
+          if (!n.trace && s.building && !is_const(s.bindings[n.condition]))
             log_guard(
                 FrozenGuard{FrozenGuard::While, cond, nullptr, cond[0], 0,
                            taken});
@@ -2244,22 +2276,26 @@ struct Execution {
   void run_segment(const Node& n, const Segment& segment) {
     const IslandProg& program = segment.program;
     double* frame = s.arena.allocate(program.n_regs);
+    bool folded = true;
+    for (const auto& in : segment.ins)
+      folded = folded && is_const(s.bindings[in.slot]);
     int64_t handles = -1;
     if (n.active) {
       handles = static_cast<int64_t>(s.handles.size());
       for (const auto& in : segment.ins)
         s.handles.push_back(s.bindings[in.slot]);
     }
+    const bool log_inputs = s.building && !folded;
     const uint32_t seg_in_offset =
-        s.building ? static_cast<uint32_t>(s.building->seg_in_src.size()) : 0;
+        log_inputs ? static_cast<uint32_t>(s.building->seg_in_src.size()) : 0;
     for (size_t k = 0; k < segment.ins.size(); ++k) {
       const auto& in = segment.ins[k];
       const double* v = value(in.slot);
       double* r = frame + in.reg;
       for (int i = 0; i < in.len; ++i) r[i] = v[i];
-      if (s.building) {
+      if (log_inputs) {
         Stream& st = *s.building;
-        st.seg_in_src.push_back(v);
+        st.seg_in_src.push_back(materialize(s.bindings[in.slot], in.len));
         st.seg_in_adj_version.push_back(
             n.active ? s.handles[static_cast<size_t>(handles) + k] : -1);
       }
@@ -2270,12 +2306,13 @@ struct Execution {
       s.bindings[out.slot] = make_version(
           frame + out.reg,
           n.active ? base + program.adj.adj_reg[static_cast<size_t>(out.reg)]
-                   : -1);
+                   : -1,
+          folded);
     if (n.active)
       s.records.push_back(Record{Record::Segment,
                                  static_cast<uint32_t>(n.segment), handles,
                                  make_version(frame, -1), base});
-    if (s.building) {
+    if (s.building && !folded) {
       Stream& st = *s.building;
       const uint32_t idx = static_cast<uint32_t>(st.segs.size());
       st.program.push_back(StreamInstr{StreamInstr::Seg, idx});
@@ -2471,8 +2508,14 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
   Stream& st = *s.stream;
   const StructuredLoop& p = s.p;
   for (auto& c : s.ctx) c.eval_state = ctx.eval_state;
-  for (const auto& imp : st.imports)
-    std::copy_n(ctx.in[imp.input].data + imp.offset, imp.len, imp.dst);
+  for (const auto& imp : st.imports) {
+    const double* src = ctx.in[imp.input].data + imp.offset;
+    if (imp.data_only) {
+      if (!std::equal(src, src + imp.len, imp.dst)) return false;
+    } else {
+      std::copy_n(src, imp.len, imp.dst);
+    }
+  }
   for (const auto& instr : st.program) {
     switch (instr.kind) {
       case StreamInstr::Call: {
@@ -2719,14 +2762,14 @@ void structured_loop_forward(KernelCtx& ctx) {
   for (int slot : p.outputs) expected += p.body.slots[slot].len;
   if (expected != ctx.out.len)
     throw std::logic_error("structured output size mismatch");
-  const bool replaying = s.memo_ready;
-  if (replaying && !s.no_replay) s.building = std::make_unique<Stream>();
+  if (!s.no_replay) s.building = std::make_unique<Stream>();
   Execution e{p, s, ctx};
   double* initial = s.arena.allocate(p.initial_size);
   std::fill_n(initial, p.initial_size, 0.0);
   s.bindings.resize(p.body.slots.size());
   for (size_t slot = 0; slot < p.body.slots.size(); ++slot)
-    s.bindings[slot] = e.make_version(initial + p.body.slots[slot].offset, -1);
+    s.bindings[slot] =
+        e.make_version(initial + p.body.slots[slot].offset, -1, true);
   for (const auto& fill : p.fills)
     std::copy(fill.second.begin(), fill.second.end(),
               initial + p.body.slots[fill.first].offset);
@@ -2738,11 +2781,14 @@ void structured_loop_forward(KernelCtx& ctx) {
       throw std::logic_error("structured import exceeds graph input");
     std::copy_n(ctx.in[in.input].data + in.offset, slot.len,
                 initial + slot.offset);
-    s.versions[static_cast<size_t>(s.bindings[in.slot])].adjoint =
+    const int64_t bound = s.bindings[in.slot];
+    s.versions[static_cast<size_t>(bound)].adjoint =
         in.active ? -(static_cast<int64_t>(ordinal) + 2) : -1;
+    if (!in.data_only) s.version_const[static_cast<size_t>(bound)] = 0;
     if (s.building)
-      s.building->imports.push_back(
-          FrozenImport{initial + slot.offset, slot.len, in.input, in.offset});
+      s.building->imports.push_back(FrozenImport{initial + slot.offset,
+                                                  slot.len, in.input,
+                                                  in.offset, in.data_only});
   }
   for (uint32_t site : s.transient_sites) {
     const Node& n = *s.sites[site];
@@ -2806,11 +2852,11 @@ void structured_loop_forward(KernelCtx& ctx) {
           s.versions[static_cast<size_t>(s.target_refs[i])].value[0];
     ctx.out.data[pos++] = reduce_target(s.target_work);
   }
-  if (!replaying) {
+  if (!s.memo_ready) {
     s.record_arena = std::max(s.record_arena, s.arena.used());
     s.record_versions = std::max(s.version_peak, s.versions.size());
   }
-  if (s.report_tape && (replaying || p.memo_count == 0)) {
+  if (s.report_tape && !s.memo_ready) {
     s.report_tape = false;
     const size_t arena_used = s.arena.used();
     size_t kernel_records = 0, copies = 0, updates = 0, memo_tape = 0,
