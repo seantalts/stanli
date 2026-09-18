@@ -597,7 +597,7 @@ inputs or return integers. `.^` was outside the function-call inventory.
 None of those classifications established support on the graph, transformed
 data, or generated-quantity paths. The focused fixtures now run in CTest, with
 Stan Math value/gradient checks and cross-path comparisons. In addition,
-[ten integrated function models](tests/function_coverage/README.md) cover 411
+[ten integrated function models](tests/function_coverage/README.md) cover 430
 names, including data-only helpers, RNGs, solvers and five operators, against
 recorded CmdStan values, gradients and complete outputs on every PR. They
 cover supported forms per name rather than every overload. Nonuniform matrix

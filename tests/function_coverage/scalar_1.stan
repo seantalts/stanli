@@ -267,33 +267,33 @@ functions {
       values[44] = contribution;
     }
     {
-      // tgamma(real)=>real
+      // tanh(real)=>real
       real contribution = 0;
-      contribution += 1 * tgamma((0.5 + 0.0625 * theta[90]));
+      contribution += 1 * tanh((0.5 + 0.0625 * theta[90]));
       values[45] = contribution;
     }
     {
-      // uniform_lpdf(real,real,real)=>real
+      // uniform_lcdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * uniform_lpdf((0.40000000000000002 + 0.0625 * theta[91]) | (-1 + 0.0625 * theta[92]), (1.5 + 0.0625 * theta[93]));
+      contribution += 1 * uniform_lcdf((0.40000000000000002 + 0.0625 * theta[91]) | (-1 + 0.0625 * theta[92]), (1.5 + 0.0625 * theta[93]));
       values[46] = contribution;
     }
     {
-      // von_mises_lccdf(real,real,real)=>real
+      // von_mises_cdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * von_mises_lccdf((0.40000000000000002 + 0.0625 * theta[94]) | (0.20000000000000001 + 0.0625 * theta[95]), (1.3 + 0.0625 * theta[96]));
+      contribution += 1 * von_mises_cdf((0.40000000000000002 + 0.0625 * theta[94]) | (0.20000000000000001 + 0.0625 * theta[95]), (1.3 + 0.0625 * theta[96]));
       values[47] = contribution;
     }
     {
-      // weibull_lcdf(real,real,real)=>real
+      // weibull_lccdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * weibull_lcdf((1.3999999999999999 + 0.0625 * theta[97]) | (2 + 0.0625 * theta[98]), (1.3 + 0.0625 * theta[99]));
+      contribution += 1 * weibull_lccdf((1.3999999999999999 + 0.0625 * theta[97]) | (2 + 0.0625 * theta[98]), (1.3 + 0.0625 * theta[99]));
       values[48] = contribution;
     }
     {
-      // yule_simon_lcdf(int,real)=>real
+      // yule_simon_lccdf(int,real)=>real
       real contribution = 0;
-      contribution += 1 * yule_simon_lcdf(3 | (1.3 + 0.0625 * theta[100]));
+      contribution += 1 * yule_simon_lccdf(3 | (1.3 + 0.0625 * theta[100]));
       values[49] = contribution;
     }
     return values;

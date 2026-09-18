@@ -197,6 +197,10 @@ is its only gate failure. Then download `conformance-aggregate` and run:
 Review the classification changes and update [coverage](../../docs/coverage.md)
 alongside the snapshot. Preserve the run URL and commit in the review so the
 baseline's numerical evidence can be traced back to the completed run.
+The integrated function models select verified names from this baseline:
+run `tools/gen_function_models.py`, and if their sources change, re-record
+their pinned CmdStan references and replay them using the commands in
+[the function-coverage README](../../tests/function_coverage/README.md).
 
 Other generated reports are build artifacts, not checked-in source. To
 freeze a run somewhere else, pass an explicit ignored or externally

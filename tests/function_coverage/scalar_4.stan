@@ -261,39 +261,39 @@ functions {
       values[43] = contribution;
     }
     {
-      // tan(real)=>real
+      // subtract(real,real)=>real
       real contribution = 0;
-      contribution += 1 * tan((0.5 + 0.0625 * theta[97]));
+      contribution += 1 * subtract((0.5 + 0.0625 * theta[97]), (1.25 + 0.0625 * theta[98]));
       values[44] = contribution;
     }
     {
-      // uniform_lccdf(real,real,real)=>real
+      // uniform_cdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * uniform_lccdf((0.40000000000000002 + 0.0625 * theta[98]) | (-1 + 0.0625 * theta[99]), (1.5 + 0.0625 * theta[100]));
+      contribution += 1 * uniform_cdf((0.40000000000000002 + 0.0625 * theta[99]) | (-1 + 0.0625 * theta[100]), (1.5 + 0.0625 * theta[101]));
       values[45] = contribution;
     }
     {
-      // upper_bound_unconstrain(real,real)=>real
+      // upper_bound_jacobian(real,real)=>real
       real contribution = 0;
-      contribution += 1 * upper_bound_unconstrain((0.5 + 0.0625 * theta[101]), (1.25 + 0.0625 * theta[102]));
+      contribution += 1 * upper_bound_jacobian((0.5 + 0.0625 * theta[102]), (1.25 + 0.0625 * theta[103]));
       values[46] = contribution;
     }
     {
-      // weibull_cdf(real,real,real)=>real
+      // von_mises_lpdf(real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * weibull_cdf((1.3999999999999999 + 0.0625 * theta[103]) | (2 + 0.0625 * theta[104]), (1.3 + 0.0625 * theta[105]));
+      contribution += 1 * von_mises_lpdf((0.40000000000000002 + 0.0625 * theta[104]) | (0.20000000000000001 + 0.0625 * theta[105]), (1.3 + 0.0625 * theta[106]));
       values[47] = contribution;
     }
     {
-      // yule_simon_cdf(int,real)=>real
+      // wiener_lpdf(real,real,real,real,real)=>real
       real contribution = 0;
-      contribution += 1 * yule_simon_cdf(3 | (1.3 + 0.0625 * theta[106]));
+      contribution += 1 * wiener_lpdf((1.5 + 0.03125 * theta[107]) | (1.2 + 0.03125 * theta[108]), (0.20000000000000001 + 0.03125 * theta[109]), (0.45000000000000001 + 0.03125 * theta[110]), (0.10000000000000001 + 0.03125 * theta[111]));
       values[48] = contribution;
     }
     return values;
   }
 }
-parameters { vector[106] theta; }
+parameters { vector[111] theta; }
 transformed parameters {
   vector[48] observed = coverage_jacobian(theta);
 }
