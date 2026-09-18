@@ -6,12 +6,12 @@ stanli implements most Stan probability functions, common scalar math
 functions, and the parameter transforms listed below, but not every Stan Math
 overload.
 
-In the historical conformance inventory described below, 71 of 72 density names, all 105
+In the conformance inventory described below, 72 of 73 density names, all 108
 `_cdf`/`_lcdf`/`_lccdf` names, and 94 of 100 scalar-math names have no
 `unexpected_unsupported` signature. These are name-level regression counts,
 not counts of fully implemented functions. The classic five-argument
 `wiener_lpdf` is implemented, for example, but its extended overloads are not.
-`gaussian_dlm_obs_lpdf` has no verified overload, yet does not reduce the 71/72
+`gaussian_dlm_obs_lpdf` has no verified overload, yet does not reduce the 72/73
 count because its cases remain generator gaps.
 
 stanli refuses unsupported forms rather than substituting an approximation.
@@ -29,17 +29,21 @@ not a complete language-coverage table. See [model coverage](corpus-status.md),
 ## Coverage at a glance
 
 The checked-in classification baseline was produced with
-`stanc3 v2.39.0-76-gac69570 (Unix)` and contains 24,246 Stan Math
-signatures plus 31 language-construct cases. These historical classification
-counts have not been refreshed for the current stanc3 2.40.0 pin (`d58446e6`).
+`stanc3 v2.40.0 (Unix)` and contains 24,291 Stan Math signatures plus 31
+language-construct cases. It comes from the complete
+[September 18, 2026 nightly run](https://github.com/seantalts/stanli/actions/runs/35342035622)
+at main commit `2d7e417d`, using the stanc3 2.40.0 pin (`d58446e6`).
+That run verified 19,009 cases with no mismatches, crashes, harness errors,
+or regressions from previously verified cases. Its only gate failure was
+the old baseline's compiler and inventory metadata, refreshed here.
 The separate generated signature replay has been refreshed against CmdStan
 2.40.0: 7,386 builtin and 12,131 density signatures, exercised as 66,675
 cases across 73 models, including mixed data/parameter arguments.
 
 | family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| densities (`_lpdf`, `_lpmf`) | 71 / 72 | 3,852 | 6 | 170 | 9 |
-| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 105 / 105 | 8,068 | 0 | 0 | 24 |
+| densities (`_lpdf`, `_lpmf`) | 72 / 73 | 3,852 | 6 | 188 | 9 |
+| distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 108 / 108 | 8,068 | 0 | 18 | 24 |
 | scalar math | 94 / 100 | 89 | 6 | 0 | 5 |
 
 The name metric counts names with no `unexpected_unsupported` signature; the
@@ -52,7 +56,8 @@ The scalar-math row counts a name if it has a signature with one to five
 `real` arguments and a `real` result. It excludes densities, distribution
 functions, RNGs, and quantiles (`_qf` and `_log_qf`). The six missing names
 are listed under [known unsupported forms](#known-unsupported-forms).
-`student_t_qf` is also not implemented, but quantiles are outside this metric.
+The baseline verifies all 256 `student_t_qf` overloads; quantiles are outside
+this metric.
 
 ### How to read the classifications
 
@@ -112,7 +117,7 @@ The headline ratios hide several important gaps:
   extended signatures and two generator gaps.
 - **`gaussian_dlm_obs_lpdf`:** all calls are refused. The function takes seven
   arguments, but each graph operation stores at most six input slots. Its two
-  inventory rows are generator gaps, so the 71/72 metric does not show this
+  inventory rows are generator gaps, so the 72/73 metric does not show this
   gap.
 - **`discrete_range_cdf`, `discrete_range_lcdf`, and
   `discrete_range_lccdf`:** these are not lowered onto the log-density graph.
@@ -123,8 +128,6 @@ The headline ratios hide several important gaps:
   `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`,
   `wiener_lcdf_unnorm`, and `wiener_lccdf_unnorm` are refused because no graph
   operation is registered.
-- **`student_t_qf`:** this quantile is refused and lies outside the scalar-math
-  count. It has no graph operation.
 - **`gp_periodic_cov`:** this covariance is refused. It has no graph
   operation. The exponentiated-quadratic, Matern 3/2, Matern 5/2 and
   exponential kernels are supported.
@@ -356,8 +359,8 @@ PY
 Expected output for the current baseline:
 
 ```text
-densities (71, 72)
-distribution functions (105, 105)
+densities (72, 73)
+distribution functions (108, 108)
 scalar math (94, 100)
 ```
 
