@@ -1525,8 +1525,21 @@ struct FrozenImport {
   bool data_only = false;
 };
 
+// A read whose selector is constant: the position of every output element
+// is fixed for the life of the frozen stream, so replay is a plain gather
+// (forward) or scatter-add (backward), with no index validation at all.
+enum FrozenGatherFlag : uint8_t { kFrozenGatherActive = 1 };
+struct FrozenGather {
+  const double* src = nullptr;
+  double* dst = nullptr;
+  int64_t src_len = 0;  // src's full extent, for the compact arena snapshot
+  uint32_t pos_offset = 0, pos_count = 0;
+  uint32_t adj_offset = 0;
+  uint8_t flags = 0;
+};
+
 struct StreamInstr {
-  enum Kind : uint8_t { Call, InPlace, Copy, Seg, Guard, Tgt, Set } kind;
+  enum Kind : uint8_t { Call, InPlace, Copy, Seg, Guard, Tgt, Set, Gather } kind;
   uint32_t index = 0;
 };
 
@@ -1541,6 +1554,7 @@ struct Stream {
   std::vector<FrozenTarget> targets;
   std::vector<int64_t> target_adj_version;
   std::vector<FrozenSet> sets;
+  std::vector<FrozenGather> gathers;
 
   std::vector<double*> call_ptrs;
   std::vector<double*> call_adj;
@@ -1555,6 +1569,9 @@ struct Stream {
   std::vector<const double*> seg_in_src;
   std::vector<double*> seg_in_adj;
   std::vector<int64_t> seg_in_adj_version;
+  std::vector<int64_t> gather_pos;
+  std::vector<double*> gather_adj;
+  std::vector<int64_t> gather_adj_version;
 
   ArenaSnapshot arena;
   std::vector<double> adjoints;
@@ -1867,8 +1884,53 @@ struct Execution {
     if (c.dyn_lengths) apply_dynamic_length(c);
   }
 
+  // A logged index read whose selector cells are all constant always picks
+  // the same positions; log_call diverts those into a plain gather instead.
+  bool gather_eligible(const Node& n, const Op& op) const {
+    if (n.forward != index_forward || op.out2 >= 0 || op.dyn_lengths ||
+        !op.udata)
+      return false;
+    for (int k = 1; k < op.n_in; ++k)
+      if (!is_const(s.bindings[op.in[k]])) return false;
+    return true;
+  }
+
+  void log_gather(const Node& n, const Op& op, const KernelCtx& c) {
+    Stream& st = *s.building;
+    const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
+    const uint32_t pos_offset = static_cast<uint32_t>(st.gather_pos.size());
+    const int64_t fixed = fixed_scalar_index(spec, c, false);
+    if (fixed >= 0) {
+      st.gather_pos.push_back(fixed);
+    } else {
+      const IndexRuntime runtime = validate_index(spec, c, false);
+      selected_positions(spec, runtime,
+                         [&](int64_t, int64_t at) { st.gather_pos.push_back(at); });
+    }
+    const uint32_t pos_count =
+        static_cast<uint32_t>(st.gather_pos.size()) - pos_offset;
+    double* src = materialize(s.bindings[op.in[0]], p.body.slots[op.in[0]].len);
+    uint32_t adj_offset = 0;
+    uint8_t flags = 0;
+    if (n.active) {
+      flags |= kFrozenGatherActive;
+      adj_offset = static_cast<uint32_t>(st.gather_adj_version.size());
+      st.gather_adj_version.push_back(s.bindings[op.in[0]]);
+      st.gather_adj_version.push_back(s.bindings[op.out]);
+    }
+    const uint32_t idx = static_cast<uint32_t>(st.gathers.size());
+    st.program.push_back(StreamInstr{StreamInstr::Gather, idx});
+    st.gathers.push_back(FrozenGather{src, c.out.data,
+                                      p.body.slots[op.in[0]].len, pos_offset,
+                                      pos_count, adj_offset, flags});
+  }
+
   void log_call(const Node& n, const Op& op, const KernelCtx& c) {
     if (!s.building) return;
+    if (gather_eligible(n, op)) {
+      log_gather(n, op, c);
+      return;
+    }
     Stream& st = *s.building;
     const uint32_t ptr_offset = static_cast<uint32_t>(st.call_ptrs.size());
     for (int k = 0; k < op.n_in; ++k)
@@ -2468,6 +2530,10 @@ void collect_live_ranges(LoopState& s, Stream& st,
     note(g.a, 1);
     note(g.b, 1);
   }
+  for (const auto& fg : st.gathers) {
+    note(fg.src, fg.src_len);
+    note(fg.dst, static_cast<int64_t>(fg.pos_count));
+  }
   for (const auto& t : st.targets) note(t.value, 1);
   for (const auto& imp : st.imports) note(imp.dst, imp.len);
   for (int slot : p.outputs)
@@ -2487,7 +2553,8 @@ void compact_snapshot(LoopState& s, ArenaSnapshot& out) {
   live.reserve(st.call_ptrs.size() + 2 * st.inplaces.size() +
               st.inplace_sel_ptr.size() + 2 * st.copies.size() +
               st.segs.size() + st.seg_in_src.size() + 2 * st.guards.size() +
-              st.targets.size() + st.imports.size() + s.p.outputs.size());
+              st.targets.size() + st.imports.size() + s.p.outputs.size() +
+              2 * st.gathers.size());
   collect_live_ranges(s, st, live);
   std::sort(live.begin(), live.end());
   out.ranges.clear();
@@ -2562,6 +2629,11 @@ void freeze(LoopState& s) {
     g.a = remap_c(g.a);
     g.b = remap_c(g.b);
   }
+  for (auto& fg : st.gathers) {
+    fg.src = remap_c(fg.src);
+    fg.dst = remap(fg.dst);
+  }
+  resolve_pool(st.gather_adj_version, st.gather_adj);
   for (size_t i = 0; i < st.targets.size(); ++i)
     st.targets[i].value = remap_c(st.targets[i].value);
   for (size_t i = 0; i < st.targets.size(); ++i)
@@ -2597,6 +2669,9 @@ void freeze(LoopState& s) {
       case StreamInstr::Seg:
         live = st.segs[instr.index].adjoint_base >= 0;
         break;
+      case StreamInstr::Gather:
+        live = (st.gathers[instr.index].flags & kFrozenGatherActive) != 0;
+        break;
       case StreamInstr::Guard:
       case StreamInstr::Set:
       case StreamInstr::Tgt:
@@ -2620,6 +2695,9 @@ void freeze(LoopState& s) {
   st.seg_in_src.shrink_to_fit();
   st.seg_in_adj.shrink_to_fit();
   st.guards.shrink_to_fit();
+  st.gather_pos.shrink_to_fit();
+  st.gather_adj.shrink_to_fit();
+  st.gathers.shrink_to_fit();
   st.inplace_sel_ptr.shrink_to_fit();
   st.inplace_sel_snapshot.shrink_to_fit();
   st.inplace_pos.shrink_to_fit();
@@ -2705,6 +2783,12 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
       case StreamInstr::Set:
         *st.sets[instr.index].ptr = st.sets[instr.index].value;
         break;
+      case StreamInstr::Gather: {
+        const FrozenGather& g = st.gathers[instr.index];
+        for (uint32_t i = 0; i < g.pos_count; ++i)
+          g.dst[i] = g.src[st.gather_pos[g.pos_offset + i]];
+        break;
+      }
       case StreamInstr::Tgt:
         break;
     }
@@ -2816,6 +2900,16 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
         }
         break;
       }
+      case StreamInstr::Gather: {
+        const FrozenGather& g = st.gathers[instr.index];
+        double* const* adj = st.gather_adj.data() + g.adj_offset;
+        double* src_adj = resolve_pooled_adjoint(adj[0], p, ctx);
+        double* dst_adj = resolve_pooled_adjoint(adj[1], p, ctx);
+        if (src_adj && dst_adj)
+          for (uint32_t i = 0; i < g.pos_count; ++i)
+            src_adj[st.gather_pos[g.pos_offset + i]] += dst_adj[i];
+        break;
+      }
     }
   }
 }
@@ -2877,6 +2971,9 @@ void emit_freeze_breakdown(const LoopState& s) {
   emit_pool_bytes("guards", st.guards);
   emit_pool_bytes("targets", st.targets);
   emit_pool_bytes("sets", st.sets);
+  emit_pool_bytes("gathers", st.gathers);
+  emit_pool_bytes("gather_pos", st.gather_pos);
+  emit_pool_bytes("gather_adj", st.gather_adj);
   emit_pool_bytes("call_ptrs", st.call_ptrs);
   emit_pool_bytes("call_adj", st.call_adj);
   emit_pool_bytes("inplace_pos", st.inplace_pos);
