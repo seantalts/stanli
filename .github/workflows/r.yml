@@ -78,7 +78,8 @@ jobs:
           [ "$(recorded format)" = stanli-portable-stancjs-v3 ]
           [ "$(recorded stanc3_src_repo)" = "$expected_repo" ]
           [ "$(recorded stanc3_src_sha)" = "$expected_revision" ]
-          [ "$(recorded opam_switch)" = stancjs ]
+          # Switch names are local labels; compiler versions below identify the toolchain.
+          [ -n "$(recorded opam_switch)" ]
           [ "$(recorded ocaml_version)" = \
             "$(stanc_embed_read_setup OCAML_VERSION)" ]
           [ -n "$(recorded ocaml_target)" ]

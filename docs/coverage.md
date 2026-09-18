@@ -6,7 +6,7 @@ stanli implements most Stan probability functions, common scalar math
 functions, and the parameter transforms listed below, but not every Stan Math
 overload.
 
-In the pinned stanc inventory, 71 of 72 density names, all 105
+In the historical conformance inventory described below, 71 of 72 density names, all 105
 `_cdf`/`_lcdf`/`_lccdf` names, and 94 of 100 scalar-math names have no
 `unexpected_unsupported` signature. These are name-level regression counts,
 not counts of fully implemented functions. The classic five-argument
@@ -29,12 +29,12 @@ not a complete language-coverage table. See [model coverage](corpus-status.md),
 ## Coverage at a glance
 
 The checked-in classification baseline was produced with
-`stanc3 v2.39.0-76-gac69570 (Unix)`. The current embedded-compiler pin is a
-newer revision (`5b824ee`), but its signature dump has the same SHA-256
-(`7ae665c2d1ea5f49084cb3d4b5eff41791d4a465cedd5728519c9782d2fe77a1`)
-and contains the same 24,246 Stan Math signatures. The baseline also contains
-31 language-construct cases. A new full run is still needed to refresh the
-compiler metadata recorded in the baseline.
+`stanc3 v2.39.0-76-gac69570 (Unix)` and contains 24,246 Stan Math
+signatures plus 31 language-construct cases. These historical classification
+counts have not been refreshed for the current stanc3 2.40.0 pin (`d58446e6`).
+The separate generated signature replay has been refreshed against CmdStan
+2.40.0: 7,386 builtin and 12,131 density signatures, exercised as 66,675
+cases across 73 models, including mixed data/parameter arguments.
 
 | family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -258,8 +258,8 @@ layout.
 The same vector-layout policy covers `dirichlet_lpdf` when either argument is
 an array of vectors, and the ordered-logistic/probit densities when cutpoints
 are supplied as one vector per observation.
-Generated source fixtures instantiate all 12,095 density signatures the
-pinned `stanc --dump-stan-math-signatures` reports for the 173 registered
+Generated source fixtures instantiate all 12,131 density signatures the
+pinned `stanc --dump-stan-math-signatures` reports for the 177 registered
 probability functions (the eight `wiener_lpdf` signatures are excluded),
 execute them in transformed data, ordinary autodiff, parameter-dependent
 runtime control, and generated quantities, and are checked for dump drift by

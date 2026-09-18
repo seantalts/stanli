@@ -50,6 +50,16 @@ documented `kronecker_gp` points use limits based on measured deviations, and
 points rejected by CmdStan require matching rejection behavior. The sections
 below give the details and known exceptions.
 
+The CmdStan 2.40 upgrade also has focused fixtures in
+`tests/fixtures/stan240_*.stan`, with independent three-point CmdStan references
+in `tests/function_coverage/stan240_references.json.gz`. They cover the new
+quantile and Poisson-binomial functions, container conversions, grouped
+softmax, and normal-identity GLM design vectors across graph execution,
+runtime control, transformed data and generated quantities. `test_stan240`
+checks cross-path equality and direct Math values/gradients;
+`test_stan240_reference` replays the external references. The generated
+signature suite adds all supported overloads and mixed argument activity.
+
 ## Overview of the checks
 
 The [educational corpus](tests/educational/README.md) adds 13 Aalto teaching
@@ -63,7 +73,7 @@ corpus README for the measurement boundary and reproducible commands.
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | every pull request |
-| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on seven successful models; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | every pull request |
+| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | every pull request |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | every pull request |
 | corpus comparison | Are 119 posteriordb models, 11 compiler-derived fixtures, 124 brms models and 62 rethinking fixtures consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | every pull request |
 | cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | every pull request, within CTest |
@@ -166,8 +176,8 @@ The reference artifact
 - Every value is the exact `%.17g` string CmdStan's driver printed
   ([`tools/ref_driver.cpp`](tools/ref_driver.cpp)), so the replay
   compares against the bits CmdStan produced rather than a rounded copy.
-- 294 models carry at least one complete row from Stan's per-draw output
-  routine, `write_array`, at the same points: 879 rows and 649,989 values
+- 314 models carry at least one complete row from Stan's per-draw output
+  routine, `write_array`, at the same points: 939 rows and 654,819 values
   covering constrained parameters, transformed parameters, and generated
   quantities. Column names are also compared exactly. Both direct
   `write_array` drivers start Stan's RNG with
@@ -180,8 +190,8 @@ The reference artifact
   [`docs/corpus-status.md`](docs/corpus-status.md); the aggregate above also
   includes the stanc3, brms and rethinking fixtures and all three points.
 - Reference provenance recorded in the file: CmdStan
-  2.39.0 at `11cb052d`, Stan `c96d0411`, Math `8f326d14`, stanc3
-  `8e154ac3`, posteriordb `28f8d3d6`, on Darwin arm64.
+  2.40.0 at `d3d5df6a`, Stan `a6806ef8`, Math 5.4.0 at `5252d51d`, stanc3
+  2.40.0 at `d58446e6`, posteriordb `28f8d3d6`, on Darwin arm64.
 
 The references were recorded by
 [`tools/verify_sample.py`](tools/verify_sample.py) against that CmdStan
@@ -203,32 +213,27 @@ math library and the libraries used on other platforms. Known implementation
 errors detected by this comparison were much larger; for example, one
 in-place update error produced a scaled difference of 1.7e+05.
 
-Of the 948 recorded points, 883 have status `VERIFIED`, 48 have status
-`CMDSTAN_ONLY`, 11 have status `MISMATCH`, and 6 have status
-`REJECTED_BOTH`. The `CMDSTAN_ONLY` points are the three points of each
-of 16 brms models: 15 that stanli refused when their references were
-recorded and now matches at the recorded values, and the one named in
-`KNOWN_GAPS`; see [`tests/brms/README.md`](tests/brms/README.md). Three
-of the `MISMATCH` points belong to `kronecker_gp`, where two eigenvector
+Of the 948 recorded points, 939 have status `VERIFIED`, six have status
+`REJECTED_BOTH`, and three have status `MISMATCH`. The CmdStan 2.40
+recording has no `CMDSTAN_ONLY` points. The three
+`MISMATCH` points belong to `kronecker_gp`, where two eigenvector
 gradients are sensitive to a nearly degenerate covariance whose smallest
-eigenvalue gap is 6.5e-17. Six are the `sdgp` and `lscale` gradients of
-`sw_gp`, `i320_gp_expquad` and `s2_gp_by_gr`, which flow through a
-Cholesky factorization whose smallest pivot is 1.1e-12, 3.7e-12 and
-1.8e-12. The last two are `s2_ar_cov`, whose `ar` gradient was zero where
-CmdStan's is not because `pow` reported a zero derivative at a zero
-base; the derivative is fixed and both points match the recorded values.
+eigenvalue gap is 6.5e-17. The formerly failing `s2_ar_cov` points and
+all previously refused brms models, including `s2_com_poisson`, now
+verify against the recorded values.
 
 Verified points use the standard 1e-9 gate, except in the models named in
 `ILL_CONDITIONED` ([`tools/verify_refs.py`](tools/verify_refs.py)). The
-`MISMATCH` points use limits derived from their recorded deviations
-and measured cross-platform variation, and the three Gaussian-process
-models are held to that same limit at all three of their points. Which of
-their points comes out clean is a property of the machine that recorded
-the references: the third point of `sw_gp` and `i320_gp_expquad` was
-recorded clean on arm64 and deviates by 1.03e-7 and 6.38e-9 on the
-x86_64 runner, through the same Cholesky factorization. This keeps the
-known numerical limitations visible without disabling checks for other
-models.
+`MISMATCH` points use limits derived from their recorded deviations and
+measured cross-platform variation. The three brms Gaussian-process models
+`sw_gp`, `i320_gp_expquad` and `s2_gp_by_gr` retain their documented
+cross-platform limits at every point. Their smallest Cholesky pivots are
+1.1e-12, 3.7e-12 and 1.8e-12, respectively. All three now verify at every
+point on the recording machine; `sw_gp` and `i320_gp_expquad` match
+bitwise. Earlier references measured deviations of 1.03e-7 and 6.38e-9
+at their third points on the x86_64 runner despite clean arm64 results.
+Keeping these limits preserves the documented conditioning allowance
+without disabling checks for other models.
 
 A model in `KNOWN_GAPS` ([`tools/verify_refs.py`](tools/verify_refs.py))
 is one stanli refuses today. Its references are recorded like any other
@@ -264,10 +269,10 @@ ULP budget when the change is measured and that budget is stated in the commit
 message. Densities merged across loop lanes may use 30 ULP, recorded per
 model. A larger distance from CmdStan is acceptable when a high-precision
 reference shows stanli at least as close to the true value as CmdStan is;
-the reference measurement is recorded with the model, as dogs' is in
-`tools/corpus.py`. Bitwise agreement is reported for information but is not a gate; if a
+the reference measurement and its provenance must be recorded with the model.
+Bitwise agreement is reported for information but is not a gate; if a
 change improves performance by moving a model from bitwise to a small ULP band,
-that is an accepted trade. At their primary recorded point, 41 verified
+that is an accepted trade. At their primary recorded point, 55 verified
 posteriordb models have 0 ULP difference with CmdStan. Eight additional language
 fixtures have 0 ULP difference in [`docs/verification.json`](docs/verification.json).
 

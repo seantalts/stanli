@@ -119,10 +119,10 @@ committing: a `MISMATCH` on a new model is a finding.
 
 ## What these found
 
-`sw_gp` and `i320_gp_expquad` are recorded as `MISMATCH` at two of their
-three points. Their log density and every gradient are bitwise identical
+Earlier recordings marked `sw_gp` and `i320_gp_expquad` as `MISMATCH`
+at two of their three points. Their log density and every gradient were bitwise identical
 to CmdStan except for the two GP hyperparameters, `sdgp` and `lscale`,
-which differ by 1.2e-8 and 2.8e-9 relative. Both flow through
+which differed by 1.2e-8 and 2.8e-9 relative. Both flow through
 `cholesky_decompose` of the exponentiated-quadratic covariance, which
 brms holds up with a 1e-12 jitter on the diagonal. The smallest Cholesky
 pivot of that covariance is 1.1e-12 for `sw_gp` and 3.7e-12 for
@@ -133,7 +133,7 @@ corpus.
 
 The third point sets every unconstrained value to zero, which zeroes the
 latent GP variables and with them the `sdgp` and `lscale` adjoints, so
-both models record it clean on the arm64 machine the references come
+both models recorded it clean on the arm64 machine those references came
 from. The amplification lands in the latent-GP gradients there instead:
 moving the GP covariates by one ulp on arm64 moves those gradients by
 1.9e-7 and 4.7e-8 relative, and the x86_64 CI runner measures 1.03e-7 and
@@ -146,14 +146,20 @@ their points is held to the limit a `MISMATCH` point gets.
 `s2_gp_by_gr` is the third. `gp(x, by = g, gr = TRUE)` builds one
 covariance per level of `g`, five of them over eight distinct covariate
 values each, and factors each one the same way. Its smallest pivot is
-1.8e-12, and its `sdgp` and `lscale` gradients deviate by up to 4.15e-7
+1.8e-12, and its `sdgp` and `lscale` gradients previously deviated by up to 4.15e-7
 at the first point and 4.66e-8 at the second. It is listed alongside the
 other two.
+
+The CmdStan 2.40 refresh verifies all three models at all three points on
+the recording machine. `sw_gp` and `i320_gp_expquad` match bitwise;
+`s2_gp_by_gr` stays within 4.44e-16 scaled error. Their documented
+cross-platform limits remain in place because the covariance conditioning
+has not changed.
 
 `s2_ar_cov` found a live bug. `ar(tt, g, cov = TRUE)` builds the AR(1)
 correlation factor from `pow(ar, i - 1)`, and the second and third
 evaluation points put the unconstrained `ar` at zero, where stanli
-reports a zero derivative for `pow` and CmdStan reports
+reported a zero derivative for `pow` and CmdStan reported
 -4.1658099670210404 and -4.1935902986959563. The log density is bitwise
 identical at both points and the other three gradients are within one
 ulp. Two lines reproduce it without brms:

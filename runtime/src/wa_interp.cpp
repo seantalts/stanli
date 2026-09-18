@@ -342,6 +342,18 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
     return true;
   }
 
+  // Poisson-binomial RNG consumes one complete probability vector.
+  if (base == "poisson_binomial") {
+    const auto& a = av.at(0);
+    Eigen::VectorXd theta(a.r.size());
+    for (size_t i = 0; i < a.r.size(); ++i) theta[i] = a.r[i];
+    const int draw = stan::math::poisson_binomial_rng(theta, g);
+    out->is_int = true;
+    out->i = {draw};
+    out->r = {static_cast<double>(draw)};
+    return true;
+  }
+
   // Whole-vector argument, one categorical draw.
   if (base == "categorical" || base == "categorical_logit") {
     int k = 0;

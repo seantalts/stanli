@@ -163,6 +163,11 @@ def render():
             "integrate_1d_gauss_kronrod_tol",
         )
     }
+    for name in ("student_t_qf", "poisson_binomial_lpmf", "poisson_binomial_cdf",
+                 "poisson_binomial_lcdf", "poisson_binomial_lccdf", "poisson_binomial_rng"):
+        focused[name] = "tests/fixtures/stan240_functions.stan; fresh CmdStan 2.40 references in stan240_references.json.gz"
+    for name in ("to_vector_array", "to_row_vector_array"):
+        focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
     focused["integrate_ode"] = (
         "tests/fixtures/higher_order_all_contexts.stan exercises transformed-data, "
         "graph, runtime-control, and interpreted write_array execution"

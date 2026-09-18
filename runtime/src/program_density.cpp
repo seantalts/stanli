@@ -300,6 +300,17 @@ template stan::math::var program_density_vec<stan::math::var>(
 
 bool program_density_partials(int id, unsigned mask, const double* args,
                               double* partials) {
+  if (id == kId_normal_lccdf || id == kId_std_normal_lccdf) {
+    const bool normal = id == kId_normal_lccdf;
+    double reflected[3] = {-args[0], normal ? -args[1] : 0.0,
+                           normal ? args[2] : 1.0};
+    const bool connected =
+        program_density_partials(normal ? kId_normal_lcdf : kId_std_normal_lcdf,
+                                 mask, reflected, partials);
+    if (mask & 1u) partials[0] = -partials[0];
+    if (normal && (mask & 2u)) partials[1] = -partials[1];
+    return connected;
+  }
   const int n = program_density_arity(id);
   sink s;
   for (int k = 0; k < n; ++k) {
@@ -329,7 +340,8 @@ bool program_density_partials(int id, unsigned mask, const double* args,
       });                                                                 \
     });                                                                   \
     break;
-    STANLI_SCALAR_CDF_LIST(STANLI_PCDF_PARTIALS)
+    STANLI_SCALAR_CDF_LIST_A(STANLI_PCDF_PARTIALS)
+    STANLI_SCALAR_CDF_LIST_B(STANLI_PCDF_PARTIALS)
 #undef STANLI_PCDF_PARTIALS
     default:
       break;

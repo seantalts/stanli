@@ -304,6 +304,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/densities_rest_b.cpp
   runtime/kernels/densities_cdf_a.cpp
   runtime/kernels/densities_cdf_b.cpp
+  runtime/kernels/probability_fns.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
   runtime/kernels/scalar_binary.cpp
@@ -1083,7 +1084,7 @@ endif()
 
 set(STANLI_TESTS
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
-  test_mnc
+  test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp
   test_model_adapter
   test_mir test_mir_decode test_transforms test_eltwise test_scalar_binary
@@ -1179,6 +1180,15 @@ if(Python3_Interpreter_FOUND)
                    --stanc ${STANLI_STANC_EXECUTABLE}
                    --registry $<TARGET_FILE:dump_function_specs> --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_stan240_reference
+           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+             --stanc ${STANLI_STANC_EXECUTABLE}
+             --fixtures tests/fixtures
+             --manifest tests/function_coverage/stan240_manifest.json
+             --reference tests/function_coverage/stan240_references.json.gz)
+  set_tests_properties(test_stan240_reference PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_builtin_signature_model_generation
            COMMAND ${Python3_EXECUTABLE}
                    tools/generate_builtin_signature_models.py

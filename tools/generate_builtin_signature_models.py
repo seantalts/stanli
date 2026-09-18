@@ -72,6 +72,8 @@ def scalar_profile(signature: Signature, descriptor: RegistrySpec) \
     centers, _, perturbation, profile_data, _ = scalar_values(collapsed)
     if signature.name == "binary_log_loss":
         centers = (1, 0.4)
+    elif signature.name == "student_t_qf":
+        centers = (0.3, 5.0, 0.1, 1.2)
     elif signature.name == "choose":
         centers = (5, 2)
     elif descriptor.layout == "constructor":
@@ -292,22 +294,9 @@ def generate(stanc: pathlib.Path, registry: pathlib.Path,
     # instantiations the all-active call never reaches. An overload with
     # fewer than two would only repeat its all-active instantiation.
     #
-    # stan-math's columns_dot_product segfaults when its first matrix is
-    # data and the second is a parameter (reproduced on the pinned 2.39
-    # checkout and on develop math 29e4630d93; the vector and row_vector
-    # overloads and the reversed order are fine, and stanli evaluates the
-    # case correctly), so no CmdStan reference exists for it. The pinned
-    # stan-math predates to_matrix(array[] vector) (math bf25cddfee), which
-    # the pinned stanc already lists. Delete an entry when the pin moves
-    # past its problem.
-    cmdstan_crashes = {
-        "columns_dot_product(matrix,matrix)=>row_vector@1":
-            "cmdstan reference segfaults: stan-math "
-            "columns_dot_product(data matrix, var matrix)",
-        "to_matrix(array[]vector)=>matrix":
-            "cmdstan reference does not compile: the pinned stan-math has "
-            "no to_matrix(array[] vector)",
-    }
+    # Math 5.4 fixes columns_dot_product(data matrix, var matrix) and adds
+    # to_matrix(array[] vector), so neither needs an oracle exclusion.
+    cmdstan_crashes = {}
     rendered: list[tuple[str, Callable[[int], str]]] = []
     for signature, descriptor in selected:
         positions = activity_positions(signature, descriptor)

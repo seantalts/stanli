@@ -258,8 +258,8 @@
         "normal_lccdf",
         "normal_lcdf"
       ],
-      "source_bytes": 407622,
-      "source_sha256": "0a7cb8df674a57889cc535393bd395c0d02faa5e850ef3c5d98975cd6df58b53"
+      "source_bytes": 408897,
+      "source_sha256": "3d953ec6b239dd6fe9dad000f89806db000682b4d41924c5ae4571259bdcb676"
     },
     {
       "case_count": 1440,
@@ -273,21 +273,21 @@
         "pareto_cdf",
         "pareto_lccdf",
         "pareto_lcdf",
-        "pareto_lpdf",
-        "pareto_type_2_cdf"
+        "pareto_lpdf"
       ],
-      "source_bytes": 440360,
-      "source_sha256": "42c4794a7d52b6dafd3f50b44d8068e55b876199a0ae2695058844f46f0e4c9e"
+      "source_bytes": 434465,
+      "source_sha256": "87a18240aa810de939fbd79d662ceaff1238a4c2d2b160511f68d9d9c4a4989b"
     },
     {
       "case_count": 1440,
       "file": "tests/fixtures/density_signatures_17.stan",
       "functions": [
+        "pareto_lpdf",
         "pareto_type_2_cdf",
         "pareto_type_2_lccdf"
       ],
-      "source_bytes": 507933,
-      "source_sha256": "99943fb3102615478625d31206ac8707f04bdbb69f97c2cb164e98fc507d8760"
+      "source_bytes": 507480,
+      "source_sha256": "a9828ad3b55594d325e28442fb93613594e3eb0b4fdae42f0867c7382f5c2901"
     },
     {
       "case_count": 1440,
@@ -296,8 +296,8 @@
         "pareto_type_2_lccdf",
         "pareto_type_2_lcdf"
       ],
-      "source_bytes": 512396,
-      "source_sha256": "a90d0cc12173659d3eb1e049c9da62f4f5005e67441af787fb96da5fc648ff47"
+      "source_bytes": 513905,
+      "source_sha256": "ef6acc75fc465388ee1b5eb5fd126c1a0aca8148fb7c94f2e503b3314e92c3fc"
     },
     {
       "case_count": 1440,
@@ -306,14 +306,18 @@
         "pareto_type_2_lcdf",
         "pareto_type_2_lpdf"
       ],
-      "source_bytes": 504417,
-      "source_sha256": "92bc4d623bc0e33873cec59a867b4e15848afce4de593a1ec17fd873fd03e401"
+      "source_bytes": 505492,
+      "source_sha256": "c0397c1122c71f920923fc016c75398c68b718a2faf229e559db19b108ed2677"
     },
     {
       "case_count": 1440,
       "file": "tests/fixtures/density_signatures_20.stan",
       "functions": [
         "pareto_type_2_lpdf",
+        "poisson_binomial_cdf",
+        "poisson_binomial_lccdf",
+        "poisson_binomial_lcdf",
+        "poisson_binomial_lpmf",
         "poisson_cdf",
         "poisson_lccdf",
         "poisson_lcdf",
@@ -327,8 +331,8 @@
         "scaled_inv_chi_square_cdf",
         "scaled_inv_chi_square_lccdf"
       ],
-      "source_bytes": 469184,
-      "source_sha256": "18ab3cdf145e74d8197d16d9675d268d884d9b8e264782d2e0378460156f4513"
+      "source_bytes": 469576,
+      "source_sha256": "3b8cfeedb2348f4f7c1d95a174059138d61a55fc291b9ccd5fcc67f482e1aed1"
     },
     {
       "case_count": 1440,
@@ -339,8 +343,8 @@
         "scaled_inv_chi_square_lpdf",
         "skew_double_exponential_cdf"
       ],
-      "source_bytes": 472349,
-      "source_sha256": "beef03da9299bd439056c152ab46559427c394fd250700403e1ec009a002fbb7"
+      "source_bytes": 469631,
+      "source_sha256": "4e7650226d2ced8f91fafe7a720a9b0711980fa1c8cbbcc93f919b62ad51e79f"
     },
     {
       "case_count": 1440,
@@ -349,8 +353,8 @@
         "skew_double_exponential_cdf",
         "skew_double_exponential_lccdf"
       ],
-      "source_bytes": 493425,
-      "source_sha256": "20ce089b70624027bdb21170f0303850e43564d016539c8c3013cf5ace980f72"
+      "source_bytes": 491877,
+      "source_sha256": "9a18900a1a270375b7419f5a6db79c14c92cce41f79b52fbf44e5e2e5b56136e"
     },
     {
       "case_count": 1440,
@@ -359,29 +363,29 @@
         "skew_double_exponential_lccdf",
         "skew_double_exponential_lcdf"
       ],
-      "source_bytes": 490601,
-      "source_sha256": "47c9a3f116c5788e12e4dc6712551ba766bbf91a662eb53f2c5a0feaa4502c34"
+      "source_bytes": 492028,
+      "source_sha256": "5a6964f5c798688ea60c8f6f6d8bb2e5082598948c58a0983077ec80ad511227"
     },
     {
       "case_count": 1440,
       "file": "tests/fixtures/density_signatures_24.stan",
       "functions": [
         "skew_double_exponential_lcdf",
-        "skew_double_exponential_lpdf",
-        "skew_normal_cdf"
+        "skew_double_exponential_lpdf"
       ],
-      "source_bytes": 488579,
-      "source_sha256": "3a8aa6575d2752fe2bf3fab57c7e18123024b8dc04d4b6b7cb19e557db8e6606"
+      "source_bytes": 490465,
+      "source_sha256": "f8604787c4cde06ae1f2f5189c7b74759c9c1346a5cde14ce57a30750d6fc761"
     },
     {
       "case_count": 1440,
       "file": "tests/fixtures/density_signatures_25.stan",
       "functions": [
+        "skew_double_exponential_lpdf",
         "skew_normal_cdf",
         "skew_normal_lccdf"
       ],
-      "source_bytes": 428446,
-      "source_sha256": "f4fb0d2a6fdb076dc7d78717837ee972b0ea4e38305f210a0b8ce9d3b7a5bbe3"
+      "source_bytes": 429652,
+      "source_sha256": "ea4a4326f98f08abd82a234441ec7e6e8641affc856bd95e785eeca2788ee865"
     },
     {
       "case_count": 1440,
@@ -390,8 +394,8 @@
         "skew_normal_lccdf",
         "skew_normal_lcdf"
       ],
-      "source_bytes": 432867,
-      "source_sha256": "af2a33ce7849ce7ed41239ff144a3cd81e8833075bf1d11914087f2c84456166"
+      "source_bytes": 433673,
+      "source_sha256": "0cf23fb51962f65d224c95f1b89b67ce9ff47a63e980df94e64d3b9deccdf96e"
     },
     {
       "case_count": 1440,
@@ -400,8 +404,8 @@
         "skew_normal_lcdf",
         "skew_normal_lpdf"
       ],
-      "source_bytes": 426322,
-      "source_sha256": "65f1b5aba0935aa3799116704340219c0b0b5f442db9ab041bfc37dd0e184803"
+      "source_bytes": 428288,
+      "source_sha256": "14c66517fbc01fda68d9dd49e2f216f6612c88aa17417b695c587c0974192dfa"
     },
     {
       "case_count": 1440,
@@ -414,8 +418,8 @@
         "std_normal_lpdf",
         "student_t_cdf"
       ],
-      "source_bytes": 439902,
-      "source_sha256": "66e370648cf218069c91bc8e7ad47dca0d52c3d390b694d4808a572110e1fc4e"
+      "source_bytes": 437070,
+      "source_sha256": "f010e7729a7808348c881caa023c304ab4b0a702e6873127beeaaac1280d54ab"
     },
     {
       "case_count": 1440,
@@ -424,8 +428,8 @@
         "student_t_cdf",
         "student_t_lccdf"
       ],
-      "source_bytes": 462697,
-      "source_sha256": "875d53cdd360c04f0bb5a8523cb845cc4619ae824a0f688106c790f726f9d909"
+      "source_bytes": 461770,
+      "source_sha256": "46e865b366c4e5be4962366a55e41d6d64249469b1f767f7ddf6d658faa0ee47"
     },
     {
       "case_count": 1440,
@@ -434,8 +438,8 @@
         "student_t_lccdf",
         "student_t_lcdf"
       ],
-      "source_bytes": 464408,
-      "source_sha256": "975069150810330f23bb61f0f337dff7195d9ae05e32d99dc6691001b93e925a"
+      "source_bytes": 463683,
+      "source_sha256": "6b3a74a4797197ed23e24524a691356d1b91b66e27691f17bfe3ff2ea0e7e4a1"
     },
     {
       "case_count": 1440,
@@ -444,8 +448,8 @@
         "student_t_lcdf",
         "student_t_lpdf"
       ],
-      "source_bytes": 442432,
-      "source_sha256": "cf46e2c04c7c7fc38085355c7b7666656cc10d0e1c854ad45518790d2d37f4b4"
+      "source_bytes": 445635,
+      "source_sha256": "261c0424638d36f05c71323c07116c2ee9fb5a7dd9bd3658c9c64323e067cefa"
     },
     {
       "case_count": 1440,
@@ -456,16 +460,16 @@
         "uniform_lccdf",
         "uniform_lcdf",
         "uniform_lpdf",
-        "von_mises_cdf",
-        "von_mises_lccdf"
+        "von_mises_cdf"
       ],
-      "source_bytes": 459397,
-      "source_sha256": "52fade2c77bf37c0d5b27906e14aa04e6b59e0a1790a0e54397d94920f99485c"
+      "source_bytes": 460587,
+      "source_sha256": "6cf738dcdc148d1f5e4620709f786439bda565d28e6ef47319c3b5233ea57427"
     },
     {
       "case_count": 1440,
       "file": "tests/fixtures/density_signatures_33.stan",
       "functions": [
+        "von_mises_cdf",
         "von_mises_lccdf",
         "von_mises_lcdf",
         "von_mises_lpdf",
@@ -473,8 +477,8 @@
         "weibull_lccdf",
         "weibull_lcdf"
       ],
-      "source_bytes": 406819,
-      "source_sha256": "44e85284266f2fd5edeb23b99f1203969f5c83e8e4adb1e6ee0bf2cf1d49f8cd"
+      "source_bytes": 406090,
+      "source_sha256": "dcbe9219d819189abf32adad625263207111eaf7ac6a94965017df299246e031"
     },
     {
       "case_count": 1440,
@@ -484,8 +488,8 @@
         "weibull_lpdf",
         "wiener_lpdf"
       ],
-      "source_bytes": 516864,
-      "source_sha256": "1c9f7f8371439c7cdb3ac9c3c57f0d53efea60a83bb20199aa83c8c449c0e958"
+      "source_bytes": 506747,
+      "source_sha256": "c396cf9c112c330c49add9ce0553f68af499ec84fbff68e0c7c1dad1ed5e142e"
     },
     {
       "case_count": 1440,
@@ -493,8 +497,8 @@
       "functions": [
         "wiener_lpdf"
       ],
-      "source_bytes": 513911,
-      "source_sha256": "3873aeef6eb06a8a2c8301a79ebc3cd18c6c25f359a972d51e95d4bd0c26dde7"
+      "source_bytes": 517259,
+      "source_sha256": "f0a08b7205e709b592d4a97374d326361c610f7c37c2d29f5161def7a1616e29"
     },
     {
       "case_count": 1440,
@@ -502,8 +506,8 @@
       "functions": [
         "wiener_lpdf"
       ],
-      "source_bytes": 528739,
-      "source_sha256": "3c3de30727b8fa2add330e23f9015a7fee7825ad5718d23d977ae2dda5c4bec5"
+      "source_bytes": 527355,
+      "source_sha256": "d21b92050b05edf56b5245ed24d3cd9b3bbef9b8af2ec509194ce5b81e9a650f"
     },
     {
       "case_count": 1440,
@@ -511,11 +515,11 @@
       "functions": [
         "wiener_lpdf"
       ],
-      "source_bytes": 539647,
-      "source_sha256": "88c99bcc1117fa5fd604eaa5890624805cacfffc5f217de5405fa124b38be4ba"
+      "source_bytes": 538862,
+      "source_sha256": "021661cad0b0dff102e48d376a1867bf95ad2fe5fe87bd2eca2eca2ae38bdd9c"
     },
     {
-      "case_count": 737,
+      "case_count": 833,
       "file": "tests/fixtures/density_signatures_38.stan",
       "functions": [
         "wiener_lpdf",
@@ -526,19 +530,19 @@
         "yule_simon_lcdf",
         "yule_simon_lpmf"
       ],
-      "source_bytes": 275940,
-      "source_sha256": "d181d630070c2986202290f30adc9efddf4997f910ec508f227fb69c2d307b23"
+      "source_bytes": 311998,
+      "source_sha256": "13481861221a10a11c67a239622c89030aeef38c8662737e7afc85aae826142c"
     }
   ],
   "partial": false,
   "partially_excluded_registry_names": [
     "wiener_lpdf"
   ],
-  "registry_name_count": 173,
-  "signature_dump_sha256": "06e94846cf9530eb88549fc86ac3f6b7ac9291f9d3085f5c7424f6268f08f692",
-  "stanc_build_id": "stanc3 v2.39.0-174-g8e154ac",
-  "tested_case_count": 54017,
-  "tested_registry_name_count": 173,
+  "registry_name_count": 177,
+  "signature_dump_sha256": "acc42ed71be9740fb5c4b644954c04fa250063f01e81372e8dc1eaeadef5aaee",
+  "stanc_build_id": "stanc3 v2.40.0",
+  "tested_case_count": 54113,
+  "tested_registry_name_count": 177,
   "tested_registry_names": [
     "bernoulli_cdf",
     "bernoulli_lccdf",
@@ -664,6 +668,10 @@
     "pareto_type_2_lccdf",
     "pareto_type_2_lcdf",
     "pareto_type_2_lpdf",
+    "poisson_binomial_cdf",
+    "poisson_binomial_lccdf",
+    "poisson_binomial_lcdf",
+    "poisson_binomial_lpmf",
     "poisson_cdf",
     "poisson_lccdf",
     "poisson_lcdf",
@@ -714,6 +722,6 @@
     "yule_simon_lcdf",
     "yule_simon_lpmf"
   ],
-  "tested_signature_count": 12095,
+  "tested_signature_count": 12131,
   "unaccounted_registry_names": []
 }

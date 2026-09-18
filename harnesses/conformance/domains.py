@@ -113,6 +113,7 @@ PROFILES = (
             (("real", "real", "real"), (0.0, -1.0, 1.0)),
         ),
     ),
+    DomainProfile("student-t-quantile", ("student_t_qf",), (0.3, 5.0, 0.1, 1.2)),
     DomainProfile("log-probability", ("std_normal_log_qf",), (-0.5,)),
     DomainProfile("bessel", ("bessel_first_kind", "bessel_second_kind",
                               "modified_bessel_first_kind",

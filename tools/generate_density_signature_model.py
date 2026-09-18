@@ -174,6 +174,7 @@ def role(name: str, index: int) -> str:
         "pareto": ("pareto_y", "pareto_min", "positive"),
         "pareto_type_2": ("pareto2_y", "pareto2_min", "positive", "positive"),
         "poisson": ("count", "positive"),
+        "poisson_binomial": ("count_zero", "prob"),
         "poisson_log": ("count", "any"),
         "poisson_log_glm": ("count", "design", "any", "any"),
         "rayleigh": ("positive", "positive"),
@@ -486,6 +487,8 @@ def render_case(signature: Signature, active_index: int | None,
                         arguments[index] = "{" + expression("int", role(name, index)) + "}"
                     elif type_name == "array[] real":
                         arguments[index] = "{" + expression("real", role(name, index)) + "}"
+        if base == "normal_id_glm" and argument_types[1] == "vector":
+            arguments[3] = "v_any_one"
         # The scalar location overload broadcasts only when the cutpoints are
         # shared. If the cutpoints themselves use the array overload, make it
         # a one-observation array while retaining the exact language types.

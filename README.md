@@ -38,8 +38,8 @@ keeping installation small and avoiding a local stan-math build.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models
   verified against CmdStan's log density and full gradient,
-  <!--gen:corpus_bitwise-->36<!--/gen--> of them bitwise identical,
-  worst relative deviation <!--gen:corpus_worst-->2.6e-12<!--/gen-->.
+  <!--gen:corpus_bitwise-->55<!--/gen--> of them bitwise identical,
+  worst relative deviation <!--gen:corpus_worst-->7.1e-13<!--/gen-->.
 - Rethinking coverage: [tests/rethinking/README.md](tests/rethinking/README.md).
   All 61 book `ulam()` calls, plus a supplemental hurdle model;
   <!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan

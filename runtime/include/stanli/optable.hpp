@@ -187,7 +187,9 @@ namespace stanli {
   X(OP_CROSSPROD)                     \
   X(OP_MULT_LOWER_TRI_SELF_TRANSPOSE) \
   X(OP_DAE)                           \
-  X(OP_ODE_ADJOINT)
+  X(OP_ODE_ADJOINT)                   \
+  X(OP_STUDENT_T_QF)                  \
+  X(OP_POISSON_BINOMIAL)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry
@@ -368,7 +370,6 @@ namespace stanli {
   X(OP_LOGNORMAL_LCCDF, lognormal_lccdf, 3, 0)                             \
   X(OP_LOGNORMAL_LCDF, lognormal_lcdf, 3, 0)                               \
   X(OP_NORMAL_CDF, normal_cdf, 3, 0)                                       \
-  X(OP_NORMAL_LCCDF, normal_lccdf, 3, 0)                                   \
   X(OP_NORMAL_LCDF, normal_lcdf, 3, 0)                                     \
   X(OP_PARETO_CDF, pareto_cdf, 3, 0)                                       \
   X(OP_PARETO_LCCDF, pareto_lccdf, 3, 0)                                   \
@@ -386,7 +387,6 @@ namespace stanli {
   X(OP_SKEW_NORMAL_LCCDF, skew_normal_lccdf, 4, 0)                         \
   X(OP_SKEW_NORMAL_LCDF, skew_normal_lcdf, 4, 0)                           \
   X(OP_STD_NORMAL_CDF, std_normal_cdf, 1, 0)                               \
-  X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1, 0)                           \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_CDF, skew_double_exponential_cdf, 4, 0)     \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_LCDF, skew_double_exponential_lcdf, 4, 0)   \
   X(OP_SKEW_DOUBLE_EXPONENTIAL_LCCDF, skew_double_exponential_lccdf, 4, 0) \
@@ -401,9 +401,14 @@ namespace stanli {
   X(OP_WEIBULL_LCCDF, weibull_lccdf, 3, 0)                                 \
   X(OP_WEIBULL_LCDF, weibull_lcdf, 3, 0)
 
+#define STANLI_REFLECTED_CDF_LIST(X)     \
+  X(OP_NORMAL_LCCDF, normal_lccdf, 3, 0) \
+  X(OP_STD_NORMAL_LCCDF, std_normal_lccdf, 1, 0)
+
 #define STANLI_SCALAR_CDF_LIST(X) \
   STANLI_SCALAR_CDF_LIST_A(X)     \
-  STANLI_SCALAR_CDF_LIST_B(X)
+  STANLI_SCALAR_CDF_LIST_B(X)     \
+  STANLI_REFLECTED_CDF_LIST(X)
 
 // The same, for distributions whose outcome is an integer: the count
 // rides in idata exactly as it does for the lpmfs, and the real
