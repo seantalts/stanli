@@ -1326,9 +1326,9 @@ struct Lowering {
   void assign_plain(const mir::Stmt& s);
 
   void sync_indexed_data_local(const std::string& name, const Val& v) {
-    td.env().erase(name);
+    td_erase(name);
     if (!v.si.param_free) return;
-    if (const DataMap::Entry* en = observation(v)) td.env()[name] = *en;
+    if (const DataMap::Entry* en = observation(v)) td_assign(name, *en);
   }
   void observe_indexed_rhs(const mir::Expr& rhs, const Val& v);
 
@@ -1941,6 +1941,91 @@ struct Lowering {
   // static scalar type and SlotInfo in `scope`; this registry is needed only
   // before first binding.
   std::map<std::string, DeclView> decls;
+
+  std::vector<std::pair<std::string, std::optional<DataMap::Entry>>> td_journal;
+  void td_erase(const std::string& name) {
+    auto it = td.env().find(name);
+    if (it == td.env().end()) return;
+    if (in_write_array) td_journal.emplace_back(name, it->second);
+    td.env().erase(it);
+  }
+  void td_assign(const std::string& name, DataMap::Entry value) {
+    if (in_write_array) {
+      auto it = td.env().find(name);
+      td_journal.emplace_back(name,
+                              it == td.env().end()
+                                  ? std::nullopt
+                                  : std::optional<DataMap::Entry>(it->second));
+    }
+    td.env()[name] = std::move(value);
+  }
+  void td_rollback(size_t mark) {
+    while (td_journal.size() > mark) {
+      auto& [name, prior] = td_journal.back();
+      if (prior)
+        td.env()[name] = std::move(*prior);
+      else
+        td.env().erase(name);
+      td_journal.pop_back();
+    }
+  }
+
+  // Fills only grow and are truncated back, the graph is untouched, and the
+  // data environment is journaled, so none of them is copied.
+  struct WaSnapshot {
+    std::map<std::string, Val> scope;
+    std::map<std::string, DeclView> decls;
+    std::map<std::string, long> int_env;
+    std::set<std::string> int_locals;
+    std::optional<size_t> n_tp_start, n_gq_start;
+    CompiledModel out;
+    std::map<int, IntRange> int_ranges;
+    std::map<int, RealRange> real_ranges;
+    size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, td_mark = 0;
+  };
+  WaSnapshot wa_snapshot() {
+    WaSnapshot s;
+    s.scope = scope;
+    s.decls = decls;
+    s.int_env = int_env;
+    s.int_locals = int_locals;
+    s.n_tp_start = n_tp_start;
+    s.n_gq_start = n_gq_start;
+    auto fills = std::move(out.fills);
+    auto graph = std::move(out.graph);
+    s.out = out;
+    out.fills = std::move(fills);
+    out.graph = std::move(graph);
+    s.n_fills = out.fills.size();
+    s.int_ranges = int_ranges;
+    s.real_ranges = real_ranges;
+    s.n_ops = g.ops.size();
+    s.n_slots = g.slots.size();
+    s.n_idata = g.idata_pool.size();
+    s.td_mark = td_journal.size();
+    return s;
+  }
+  void wa_restore(WaSnapshot& s) {
+    scope = std::move(s.scope);
+    decls = std::move(s.decls);
+    int_env = std::move(s.int_env);
+    int_locals = std::move(s.int_locals);
+    n_tp_start = s.n_tp_start;
+    n_gq_start = s.n_gq_start;
+    auto fills = std::move(out.fills);
+    auto graph = std::move(out.graph);
+    out = std::move(s.out);
+    out.fills = std::move(fills);
+    out.graph = std::move(graph);
+    out.fills.erase(out.fills.begin() + (std::ptrdiff_t)s.n_fills,
+                    out.fills.end());
+    int_ranges = std::move(s.int_ranges);
+    real_ranges = std::move(s.real_ranges);
+    g.ops.resize(s.n_ops);
+    g.slots.resize(s.n_slots);
+    g.idata_pool.resize(s.n_idata);
+    td_rollback(s.td_mark);
+  }
 #include "lower_structured_loop.inc"
 
   void lower_stmt(const mir::Stmt& s) {

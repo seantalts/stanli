@@ -215,7 +215,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
         entry.is_int = true;
         entry.i = {static_cast<int>(value)};
         entry.r = {static_cast<double>(value)};
-        td.env()[ordered[at].first] = std::move(entry);
+        td_assign(ordered[at].first, std::move(entry));
         enumerate(at + 1);
       }
       return;
@@ -249,9 +249,9 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
   enumerate(0);
   for (auto& item : saved) {
     if (item.value)
-      td.env()[item.name] = std::move(*item.value);
+      td_assign(item.name, std::move(*item.value));
     else
-      td.env().erase(item.name);
+      td_erase(item.name);
   }
   std::optional<RealRange> outcome;
   if (any) outcome = result;
@@ -464,7 +464,7 @@ std::optional<IntRange> region_range(const mir::Expr& e) {
 void region_forget(const std::string& name) {
   int_env.erase(name);
   int_locals.erase(name);
-  td.env().erase(name);
+  td_erase(name);
 }
 Val region_cell(const std::string& name) {
   auto cell = region_cells.find(name);
@@ -1180,7 +1180,7 @@ void bind_runtime_int(const std::string& name, const mir::Expr& e,
   decls[name] = DeclView{1, false, expected};
   int_env.erase(name);
   int_locals.erase(name);
-  td.env().erase(name);
+  td_erase(name);
 }
 
 // These kernels also serve consumers outside a retained region. Integer
@@ -1463,7 +1463,7 @@ void lower_region_stmt(const mir::Stmt& s) {
         entry.is_int = true;
         entry.i = {lo->lo};
         entry.r = {static_cast<double>(lo->lo)};
-        td.env()[s.loopvar] = std::move(entry);
+        td_assign(s.loopvar, std::move(entry));
         for (const auto& child : s.body) lower_stmt(child);
         if (saved_iterator)
           scope[s.loopvar] = *saved_iterator;
@@ -1474,9 +1474,9 @@ void lower_region_stmt(const mir::Stmt& s) {
         else
           int_env.erase(s.loopvar);
         if (saved_entry)
-          td.env()[s.loopvar] = *saved_entry;
+          td_assign(s.loopvar, *saved_entry);
         else
-          td.env().erase(s.loopvar);
+          td_erase(s.loopvar);
         region_cells.erase(s.loopvar);
         return;
       }

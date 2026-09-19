@@ -449,6 +449,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   auto decls_saved = std::move(decls);
   auto il_saved = std::move(int_locals);
   auto env_saved = std::move(td.env());
+  auto journal_saved = std::move(td_journal);
   scope.clear();
   udf_formal_autodiff.clear();
   int_env.clear();
@@ -478,6 +479,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     decls = std::move(decls_saved);
     int_locals = std::move(il_saved);
     td.env() = std::move(env_saved);
+    td_journal = std::move(journal_saved);
     --udf_depth;
   };
   try {

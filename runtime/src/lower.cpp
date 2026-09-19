@@ -74,21 +74,21 @@ void Lowering::dump_named(const std::string& label, const std::string& name,
 void Lowering::sync_data_local(const std::string& name, const mir::Expr& rhs,
                                const Val& v) {
   if (!v.si.param_free) {
-    td.env().erase(name);
+    td_erase(name);
     return;
   }
   if (const DataMap::Entry* en = observation(v)) {
-    td.env()[name] = *en;
+    td_assign(name, *en);
     return;
   }
   // Evaluate before erasing the old binding: `x = x + data_step` reads the
   // previous x, and data-only while loops depend on retaining that value for
   // their next condition.
   auto evaluated = try_eval_pure(rhs);
-  td.env().erase(name);
+  td_erase(name);
   if (evaluated) {
     DataMap::Entry en = std::move(*evaluated);
-    td.env()[name] = en;
+    td_assign(name, en);
     observe(v, std::move(en));
   }
 }
@@ -758,36 +758,12 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
   for (const auto& s : p.generate_quantities) {
-    const auto saved_scope = scope;
-    const auto saved_decls = decls;
-    const auto saved_int_env = int_env;
-    const auto saved_int_locals = int_locals;
-    const auto saved_td_env = td.env();
-    const auto saved_n_tp_start = n_tp_start;
-    const auto saved_n_gq_start = n_gq_start;
-    const auto saved_out = out;
-    const auto saved_int_ranges = int_ranges;
-    const auto saved_real_ranges = real_ranges;
-    const size_t saved_ops = g.ops.size();
-    const size_t saved_slots = g.slots.size();
-    const size_t saved_idata = g.idata_pool.size();
+    auto snapshot = wa_snapshot();
     const auto fail_section = [&](const std::string& what) {
-      scope = saved_scope;
-      decls = saved_decls;
-      int_env = saved_int_env;
-      int_locals = saved_int_locals;
-      td.env() = saved_td_env;
-      n_tp_start = saved_n_tp_start;
-      n_gq_start = saved_n_gq_start;
-      out = saved_out;
-      int_ranges = saved_int_ranges;
-      real_ranges = saved_real_ranges;
-      g.ops.resize(saved_ops);
-      g.slots.resize(saved_slots);
-      g.idata_pool.resize(saved_idata);
-      const char* section = saved_n_gq_start   ? "generated quantities"
-                            : saved_n_tp_start ? "transformed parameters"
-                                               : "write_array";
+      const char* section = snapshot.n_gq_start   ? "generated quantities"
+                            : snapshot.n_tp_start ? "transformed parameters"
+                                                  : "write_array";
+      wa_restore(snapshot);
       // Keep the valid prefix for diagnostics, but drivers select WaInterp
       // whenever this marker is set and it evaluates the whole section from
       // statement zero. There is no continuation frame for an arbitrary

@@ -625,7 +625,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
       decls[name] = DeclView{1, false, si};
       int_env.erase(name);
       int_locals.erase(name);
-      td.env().erase(name);
+      td_erase(name);
       continue;
     }
     bool shaped_outside = false;
@@ -944,7 +944,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         // read win over the compile-time literal installed below.
         scope.erase(s.decl_id);
         decls.erase(s.decl_id);
-        td.env().erase(s.decl_id);
+        td_erase(s.decl_id);
         int_env.erase(s.decl_id);
         int_locals.erase(s.decl_id);
         // Only compile-time integers belong in int_env. MIR's DataOnly
@@ -981,7 +981,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           scope[s.decl_id] = v;
           sync_data_local(s.decl_id, s.init, v);
         } else {
-          td.env().erase(s.decl_id);
+          td_erase(s.decl_id);
         }
         decls[s.decl_id] = sh;
       } else {
@@ -1013,7 +1013,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         if (s.has_init)
           sync_data_local(s.decl_id, s.init, scope.at(s.decl_id));
         else
-          td.env().erase(s.decl_id);
+          td_erase(s.decl_id);
       }
       return;
     case mir::Stmt::Assignment: {
@@ -1254,45 +1254,23 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
     case mir::Stmt::SList: {
       if (!write_array_known_static && in_write_array &&
           needs_runtime_control(s)) {
-        const auto saved_scope = scope;
-        const auto saved_decls = decls;
-        const auto saved_int_env = int_env;
-        const auto saved_int_locals = int_locals;
-        const auto saved_td_env = td.env();
-        const auto saved_n_tp_start = n_tp_start;
-        const auto saved_n_gq_start = n_gq_start;
-        const auto saved_out = out;
-        const auto saved_int_ranges = int_ranges;
-        const auto saved_real_ranges = real_ranges;
-        const size_t saved_ops = g.ops.size();
-        const size_t saved_slots = g.slots.size();
-        const size_t saved_idata = g.idata_pool.size();
+        auto snapshot = wa_snapshot();
+        try {
+          lower_runtime_ifelse(s);
+          return;
+        } catch (const CompileError&) {
+        } catch (const std::logic_error&) {
+        }
+        wa_restore(snapshot);
         const bool outer_known_static = write_array_known_static;
         write_array_known_static = true;
-        bool ok = true;
         try {
           for (const auto& k : s.body) lower_stmt(k);
-        } catch (const CompileError&) {
-          ok = false;
-        } catch (const std::logic_error&) {
-          ok = false;
+        } catch (...) {
+          write_array_known_static = outer_known_static;
+          throw;
         }
         write_array_known_static = outer_known_static;
-        if (ok) return;
-        scope = saved_scope;
-        decls = saved_decls;
-        int_env = saved_int_env;
-        int_locals = saved_int_locals;
-        td.env() = saved_td_env;
-        n_tp_start = saved_n_tp_start;
-        n_gq_start = saved_n_gq_start;
-        out = saved_out;
-        int_ranges = saved_int_ranges;
-        real_ranges = saved_real_ranges;
-        g.ops.resize(saved_ops);
-        g.slots.resize(saved_slots);
-        g.idata_pool.resize(saved_idata);
-        lower_runtime_ifelse(s);
         return;
       }
       const bool outer_known_static = write_array_known_static;
