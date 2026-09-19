@@ -14,8 +14,12 @@ read triangle for TriLow), evaluated at 60 digits rather than double.
 Random cases (fixed seed) are written to a text file, `hp_adjoint_dump`
 (built from tools/hp_adjoint_dump.cpp) computes both the old nested-tape
 adjoint and the new native adjoint at double precision for each case, and
-this script compares both against the mpmath reference and reports ULP
-distance, per element, max and median, old vs new.
+this script compares both against the mpmath reference and reports, old vs
+new, the per-element ULP distance (max and median, with the size of the
+worst entry relative to the matrix's largest entry) and the largest absolute
+error relative to that largest entry. Per-element ULP inflates on entries
+near zero, where both methods lose the same digits to cancellation; the
+scale-relative error is the comparable measure.
 
 Usage: tools/matrix_pullback_hp_check.py [--dump-bin PATH]
 """
@@ -48,11 +52,24 @@ def ulp(got: float, want_mp) -> int:
   return abs(_key(got) - _key(want))
 
 
-def report(name: str, old_ulp, new_ulp):
-  print(f"{name}: old max={max(old_ulp):.0f} median={statistics.median(old_ulp):.0f}"
-        f"  new max={max(new_ulp):.0f} median={statistics.median(new_ulp):.0f}"
-        f"  ({len(old_ulp)} elements)")
+def report(name: str, old, new, rel):
+  def summary(pairs):
+    worst = max(pairs)
+    return (f"max={worst[0]:.0f} median={statistics.median(u for u, _ in pairs):.0f}"
+            f" worst entry {worst[1]:.0e} of scale")
+  print(f"{name}: old {summary(old)}  new {summary(new)}"
+        f"  scale-rel old={rel[0]:.1e} new={rel[1]:.1e}")
 
+def scale_of(ref, n_rows, n_cols):
+  return max(abs(ref[i, j]) for i in range(n_rows) for j in range(n_cols))
+
+
+def scale_rel(got, ref, n_rows, n_cols):
+  # Largest absolute error over the matrix, relative to its largest entry.
+  scale = scale_of(ref, n_rows, n_cols)
+  err = max(abs(got[i * n_cols + j] - ref[i, j])
+            for i in range(n_rows) for j in range(n_cols))
+  return float(err / scale)
 
 def matrix_exp_reference(a_mp, g_mp):
   n = a_mp.rows
@@ -150,11 +167,14 @@ def check_matrix_exp(dump_bin, rng):
     a_mp = mpmath.matrix([[mpmath.mpf(repr(x)) for x in row] for row in a])
     g_mp = mpmath.matrix([[mpmath.mpf(repr(x)) for x in row] for row in g])
     ref = matrix_exp_reference(a_mp, g_mp)
-    old_u, new_u = by_n.setdefault(n, ([], []))
+    old_u, new_u, rel = by_n.setdefault(n, ([], [], [0.0, 0.0]))
+    rel[0] = max(rel[0], scale_rel(old, ref, n, n))
+    rel[1] = max(rel[1], scale_rel(new, ref, n, n))
+    sc = scale_of(ref, n, n)
     for i in range(n):
       for j in range(n):
-        old_u.append(ulp(old[i * n + j], ref[i, j]))
-        new_u.append(ulp(new[i * n + j], ref[i, j]))
+        old_u.append((ulp(old[i * n + j], ref[i, j]), float(abs(ref[i, j]) / sc)))
+        new_u.append((ulp(new[i * n + j], ref[i, j]), float(abs(ref[i, j]) / sc)))
 
   for n in sorted(by_n):
     report(f"matrix_exp n={n}", *by_n[n])
@@ -214,15 +234,25 @@ def check_solve(dump_bin, rng):
     adj_a_ref, adj_b_ref = solve_reference(kind, a_mp, x_mp, g_mp, n, left)
 
     key = (names[kind], "left" if left else "right", n)
-    old_u, new_u = by_kind.setdefault(key, ([], []))
+    old_u, new_u, rel = by_kind.setdefault(key, ([], [], [0.0, 0.0]))
+    rel[0] = max(rel[0], scale_rel(old_a, adj_a_ref, n, n),
+                 scale_rel(old_b, adj_b_ref, br, bc))
+    rel[1] = max(rel[1], scale_rel(new_a, adj_a_ref, n, n),
+                 scale_rel(new_b, adj_b_ref, br, bc))
+    sc_a = scale_of(adj_a_ref, n, n)
+    sc_b = scale_of(adj_b_ref, br, bc)
     for i in range(n):
       for j in range(n):
-        old_u.append(ulp(old_a[i * n + j], adj_a_ref[i, j]))
-        new_u.append(ulp(new_a[i * n + j], adj_a_ref[i, j]))
+        old_u.append((ulp(old_a[i * n + j], adj_a_ref[i, j]),
+                       float(abs(adj_a_ref[i, j]) / sc_a)))
+        new_u.append((ulp(new_a[i * n + j], adj_a_ref[i, j]),
+                       float(abs(adj_a_ref[i, j]) / sc_a)))
     for i in range(br):
       for j in range(bc):
-        old_u.append(ulp(old_b[i * bc + j], adj_b_ref[i, j]))
-        new_u.append(ulp(new_b[i * bc + j], adj_b_ref[i, j]))
+        old_u.append((ulp(old_b[i * bc + j], adj_b_ref[i, j]),
+                       float(abs(adj_b_ref[i, j]) / sc_b)))
+        new_u.append((ulp(new_b[i * bc + j], adj_b_ref[i, j]),
+                       float(abs(adj_b_ref[i, j]) / sc_b)))
 
   for key in sorted(by_kind):
     report(f"solve {key[0]:7s} {key[1]:5s} n={key[2]}", *by_kind[key])
