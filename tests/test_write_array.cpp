@@ -1317,6 +1317,86 @@ void test_write_array_block_order() {
   }
 }
 
+// normal_rng(vector, vector) and normal_rng(vector, real) both return
+// array[] real. The scalar RNG lowering has to broadcast each argument
+// (scalar or vector-length) and draw one element at a time from the same
+// stream order the interpreter's vectorized fallback uses.
+void test_write_array_vector_rng() {
+  using namespace stanli;
+  const int k = 4;
+  DataMap data;
+  data.set_int("K", k);
+  const std::string text = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL gqrng_vector did not compile completely: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  }
+
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+  CompiledModel cm_no_loops = compile_model(text, data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  if (!cm_no_loops.write_array || cm_no_loops.write_array->interp ||
+      !cm_no_loops.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL gqrng_vector with STANLI_STRUCTURED_LOOPS=0 did not compile "
+        "completely: %s\n",
+        cm_no_loops.write_array ? cm_no_loops.write_array->truncated.c_str()
+                                : "no write_array");
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL gqrng_vector: no interpreter attached for cross-check\n");
+    return;
+  }
+
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+
+  std::vector<std::vector<double>> graph_rows;
+  for (int draw = 0; draw < 3; ++draw) {
+    for (int64_t j = 0; j < pex.n_params(); ++j)
+      pex.params_data()[j] = 0.2 * static_cast<double>(draw + 1) +
+                             0.1 * static_cast<double>(j);
+    pex.run_forward_only();
+    for (int64_t j = 0; j < wex.n_params(); ++j)
+      wex.params_data()[j] = 0.2 * static_cast<double>(draw + 1) +
+                             0.1 * static_cast<double>(j);
+    WaRng graph_rng(11 + draw);
+    wex.run_forward_only(EvalState{&graph_rng});
+    std::vector<double> row;
+    for (const auto& c : cross.write_array->columns) {
+      const double* p = wex.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    WaRng interp_rng(11 + draw);
+    const std::vector<double> interp_row =
+        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+    if (!same_double_bytes(row, interp_row)) {
+      ++failures;
+      std::printf("FAIL gqrng_vector: graph/interp rows differ at draw %d\n",
+                  draw);
+    }
+    graph_rows.push_back(std::move(row));
+  }
+  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
+    ++failures;
+    std::printf("FAIL gqrng_vector: draws did not vary\n");
+  }
+}
+
 // A generated quantity the optimizer folds to a constant: --O1 replaces
 // the FnWriteParam's variable reference with the literal value, so the
 // column's name has to come from the program's output_vars instead. Both
@@ -5332,6 +5412,7 @@ int main() {
   test_transformed_parameter_checks();
   test_write_array_retained_loop();
   test_write_array_block_order();
+  test_write_array_vector_rng();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
 }
