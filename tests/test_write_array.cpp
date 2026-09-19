@@ -13,10 +13,12 @@
 #include "env_helpers.hpp"
 
 #include <stanli/compile.hpp>
+#include <stanli/graph.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/sexp.hpp>
+#include <stanli/structured_loop.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <stan/math.hpp>
@@ -1135,6 +1137,185 @@ void test_transformed_parameter_checks() {
 }
 
 }  // namespace
+
+namespace {
+const stanli::StructuredLoop* find_retained_loop(const stanli::Graph& g) {
+  for (const auto& op : g.ops)
+    if (op.opcode == stanli::OP_LOOP)
+      return static_cast<const stanli::StructuredLoop*>(op.udata);
+  return nullptr;
+}
+}  // namespace
+
+// A data-bounded for loop, large enough that one iteration's if/else island
+// alone exceeds mir_prog.hpp's register cap, computes a transformed
+// parameter vector in the model log_prob already retains as OP_LOOP under
+// the default automatic policy. write_array has to retain the same loop
+// rather than fall back to the per-draw interpreter.
+void test_write_array_retained_loop() {
+  using namespace stanli;
+  const int n = 32;
+  DataMap data;
+  data.set_int("N", n);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i) y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  const std::string text = slurp("tests/fixtures/structured_wa_region.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (find_retained_loop(cm.graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_region: log_prob did not retain the "
+        "transformed-parameter loop\n");
+  }
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL structured_wa_region: no write_array\n");
+    return;
+  }
+  if (!cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL structured_wa_region write_array truncated: %s\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (find_retained_loop(cm.write_array->graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_region: write_array did not lower the loop as a "
+        "retained region\n");
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_region: no interpreter attached for cross-check\n");
+    return;
+  }
+
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+
+  const std::vector<double> mus = {1.3, -0.7, 0.05};
+  std::vector<std::vector<double>> graph_rows;
+  for (double mu : mus) {
+    pex.params_data()[0] = mu;
+    pex.run_forward_only();
+    wex.params_data()[0] = mu;
+    WaRng graph_rng(7);
+    wex.run_forward_only(EvalState{&graph_rng});
+    std::vector<double> row;
+    for (const auto& c : cross.write_array->columns) {
+      const double* p = wex.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    WaRng interp_rng(7);
+    const std::vector<double> interp_row =
+        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+    if (!same_double_bytes(row, interp_row)) {
+      ++failures;
+      std::printf("FAIL structured_wa_region: graph/interp rows differ at mu=%g\n",
+                  mu);
+    }
+    graph_rows.push_back(std::move(row));
+  }
+  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
+    ++failures;
+    std::printf("FAIL structured_wa_region: draws did not vary\n");
+  }
+}
+
+// The transformed-parameter block carries a data-only sibling statement
+// (an is_nan check on a value a preceding while loop produced, so it is
+// not foldable) beside the 32-plus-trip parameter-branching loop. That
+// sibling forced the whole block through one register-program island
+// before write_array tried the loop as its own region.
+void test_write_array_block_order() {
+  using namespace stanli;
+  const int n = 32;
+  DataMap data;
+  data.set_int("N", n);
+  data.set_int("lim", 3);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i) y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  const std::string text = slurp("tests/fixtures/structured_wa_block_order.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (find_retained_loop(cm.graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_block_order: log_prob did not retain the "
+        "transformed-parameter loop\n");
+  }
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL structured_wa_block_order: no write_array\n");
+    return;
+  }
+  if (!cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL structured_wa_block_order write_array truncated: %s\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (find_retained_loop(cm.write_array->graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_block_order: write_array did not lower the loop "
+        "as a retained region\n");
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_block_order: no interpreter attached for "
+        "cross-check\n");
+    return;
+  }
+
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+
+  const std::vector<double> mus = {1.3, -0.7, 0.05};
+  std::vector<std::vector<double>> graph_rows;
+  for (double mu : mus) {
+    pex.params_data()[0] = mu;
+    pex.run_forward_only();
+    wex.params_data()[0] = mu;
+    WaRng graph_rng(7);
+    wex.run_forward_only(EvalState{&graph_rng});
+    std::vector<double> row;
+    for (const auto& c : cross.write_array->columns) {
+      const double* p = wex.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    WaRng interp_rng(7);
+    const std::vector<double> interp_row =
+        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+    if (!same_double_bytes(row, interp_row)) {
+      ++failures;
+      std::printf(
+          "FAIL structured_wa_block_order: graph/interp rows differ at "
+          "mu=%g\n",
+          mu);
+    }
+    graph_rows.push_back(std::move(row));
+  }
+  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
+    ++failures;
+    std::printf("FAIL structured_wa_block_order: draws did not vary\n");
+  }
+}
 
 // A generated quantity the optimizer folds to a constant: --O1 replaces
 // the FnWriteParam's variable reference with the literal value, so the
@@ -5149,6 +5330,8 @@ int main() {
   test_stan_rng_stream_contract();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
+  test_write_array_retained_loop();
+  test_write_array_block_order();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
 }

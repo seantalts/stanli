@@ -1135,11 +1135,12 @@ static bool runtime_scalar_form(const mir::Expr& e) {
          runtime_int_arithmetic().count(e.name);
 }
 
+bool write_array_unregioned() const { return in_write_array && !region_current; }
 bool runtime_only(const mir::Expr& e) {
-  return !in_write_array && needs_runtime_value(e) && !try_eval_pure(e);
+  return !write_array_unregioned() && needs_runtime_value(e) && !try_eval_pure(e);
 }
 bool runtime_int_expression(const mir::Expr& e) {
-  if (in_write_array || !runtime_scalar_form(e)) return false;
+  if (write_array_unregioned() || !runtime_scalar_form(e)) return false;
   bool found = false;
   const auto integer_reads = [&](const auto& self, const mir::Expr& x) -> bool {
     if (x.kind == mir::Expr::Var || x.kind == mir::Expr::Indexed) {
@@ -1162,7 +1163,7 @@ std::optional<long> static_int(const mir::Expr& e) {
   try {
     return eval_int(e);
   } catch (const CompileError&) {
-    if (in_write_array || !needs_runtime_value(e)) throw;
+    if (write_array_unregioned() || !needs_runtime_value(e)) throw;
     return std::nullopt;
   }
 }
@@ -1174,7 +1175,7 @@ void bind_runtime_int(const std::string& name, const mir::Expr& e,
   require_binding(v, 1, expected, name, raw);
   v.autodiff = false;
   v.si = expected;
-  if (in_write_array) v.si.param_free = false;
+  if (write_array_unregioned()) v.si.param_free = false;
   scope[name] = v;
   decls[name] = DeclView{1, false, expected};
   int_env.erase(name);
@@ -2030,7 +2031,7 @@ bool try_lower_region(
     const mir::Stmt& s,
     std::optional<std::pair<int64_t, int64_t>> exact_bounds = std::nullopt) {
   const StructuredMode mode = structured_policy;
-  if (in_write_array || mode == StructuredMode::Off) return false;
+  if (mode == StructuredMode::Off) return false;
   // Make the representation decision before constructing a trial graph.
   // In auto mode, incomplete cost information is evidence for nothing.
   if (mode == StructuredMode::Auto && !region_auto_profitable(s, exact_bounds))
@@ -2064,6 +2065,7 @@ bool try_lower_region(
       // its mutable interpreter and shape state until every refusal point has
       // passed; only the shape interner is published below.
       Lowering trial = fork_region_trial();
+      trial.in_write_array = in_write_array;
       auto p = std::make_shared<StructuredLoop>();
       trial.region_current = &p->root;
       std::map<int, int> imported;
@@ -2176,6 +2178,11 @@ bool try_lower_region(
       if (std::any_of(p->body.ops.begin(), p->body.ops.end(),
                       [](const Op& op) { return op.opcode == OP_ISLAND; }))
         fail("structured body requires register-program fallback");
+      if (std::any_of(p->body.ops.begin(), p->body.ops.end(), [](const Op& op) {
+            return op.opcode == OP_RNG || op.opcode == OP_PRINT ||
+                   op.opcode == OP_REJECT;
+          }))
+        fail("structured body requires the per-draw fallback for a stateful call");
       if (mode == StructuredMode::Auto) {
         const auto retains_control = [&](const auto& self,
                                          const RegionNode& node) -> bool {
