@@ -1158,9 +1158,11 @@ void test_write_array_retained_loop() {
   DataMap data;
   data.set_int("N", n);
   std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i) y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
   data.set_real_array("y", y);
-  const std::string text = slurp("tests/fixtures/structured_wa_region.tmir.sexp");
+  const std::string text =
+      slurp("tests/fixtures/structured_wa_region.tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);
   if (find_retained_loop(cm.graph) == nullptr) {
@@ -1219,8 +1221,8 @@ void test_write_array_retained_loop() {
         cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
     if (!same_double_bytes(row, interp_row)) {
       ++failures;
-      std::printf("FAIL structured_wa_region: graph/interp rows differ at mu=%g\n",
-                  mu);
+      std::printf(
+          "FAIL structured_wa_region: graph/interp rows differ at mu=%g\n", mu);
     }
     graph_rows.push_back(std::move(row));
   }
@@ -1242,10 +1244,12 @@ void test_write_array_block_order() {
   data.set_int("N", n);
   data.set_int("lim", 3);
   std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i) y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
   data.set_real_array("y", y);
   data.set_int_array("whenmat", std::vector<int>(40, 1), {8, 5});
-  const std::string text = slurp("tests/fixtures/structured_wa_block_order.tmir.sexp");
+  const std::string text =
+      slurp("tests/fixtures/structured_wa_block_order.tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);
   if (find_retained_loop(cm.graph) == nullptr) {
@@ -1356,8 +1360,7 @@ void test_write_array_vector_rng() {
   test_unsetenv("STANLI_WA_FORCE_INTERP");
   if (!cross.write_array || !cross.write_array->interp) {
     ++failures;
-    std::printf(
-        "FAIL gqrng_vector: no interpreter attached for cross-check\n");
+    std::printf("FAIL gqrng_vector: no interpreter attached for cross-check\n");
     return;
   }
 
@@ -1369,12 +1372,12 @@ void test_write_array_vector_rng() {
   std::vector<std::vector<double>> graph_rows;
   for (int draw = 0; draw < 3; ++draw) {
     for (int64_t j = 0; j < pex.n_params(); ++j)
-      pex.params_data()[j] = 0.2 * static_cast<double>(draw + 1) +
-                             0.1 * static_cast<double>(j);
+      pex.params_data()[j] =
+          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
     pex.run_forward_only();
     for (int64_t j = 0; j < wex.n_params(); ++j)
-      wex.params_data()[j] = 0.2 * static_cast<double>(draw + 1) +
-                             0.1 * static_cast<double>(j);
+      wex.params_data()[j] =
+          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
     WaRng graph_rng(11 + draw);
     wex.run_forward_only(EvalState{&graph_rng});
     std::vector<double> row;
@@ -1409,7 +1412,8 @@ void test_write_array_partial_fallback() {
   std::vector<int> trials(static_cast<size_t>(k));
   for (int i = 0; i < k; ++i) trials[static_cast<size_t>(i)] = 5 + i;
   data.set_int_array("trials", trials);
-  const std::string text = slurp("tests/fixtures/gq_partial_fallback.tmir.sexp");
+  const std::string text =
+      slurp("tests/fixtures/gq_partial_fallback.tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);
   if (!cm.write_array) {
@@ -1430,31 +1434,34 @@ void test_write_array_partial_fallback() {
     return;
   }
   expect_eq("gq_partial_fallback graph columns",
-           joined(cm.write_array->columns), "p.1,p.2,p.3,mu,sigma,tp_val");
+            joined(cm.write_array->columns), "p.1,p.2,p.3,mu,sigma,tp_val");
   expect_idx("gq_partial_fallback n_gq_start", cm.write_array->n_gq_start,
-            cm.write_array->columns.size());
+             cm.write_array->columns.size());
 
   Executor pex(cm.graph);
   cm.bind(pex);
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
-  for (int64_t j = 0; j < pex.n_params(); ++j) pex.params_data()[j] = 0.1 * (j + 1);
+  for (int64_t j = 0; j < pex.n_params(); ++j)
+    pex.params_data()[j] = 0.1 * (j + 1);
   pex.run_forward_only();
-  for (int64_t j = 0; j < wex.n_params(); ++j) wex.params_data()[j] = 0.1 * (j + 1);
+  for (int64_t j = 0; j < wex.n_params(); ++j)
+    wex.params_data()[j] = 0.1 * (j + 1);
   wex.run_forward_only();
   std::vector<double> graph_row;
   for (const auto& c : cm.write_array->columns) {
     const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) graph_row.push_back(p[c.storage_index(i)]);
+    for (int64_t i = 0; i < c.len; ++i)
+      graph_row.push_back(p[c.storage_index(i)]);
   }
   WaRng interp_rng(3);
   const std::vector<double> interp_row =
       cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
   if (interp_row.size() < graph_row.size() ||
-      !same_double_bytes(
-          graph_row, std::vector<double>(interp_row.begin(),
-                                         interp_row.begin() +
-                                             (int64_t)graph_row.size()))) {
+      !same_double_bytes(graph_row,
+                         std::vector<double>(
+                             interp_row.begin(),
+                             interp_row.begin() + (int64_t)graph_row.size()))) {
     ++failures;
     std::printf(
         "FAIL gq_partial_fallback: compiled transformed-parameter prefix "
@@ -1547,7 +1554,8 @@ void test_write_array_selected_loop_overflow() {
   DataMap data;
   data.set_int("N", n);
   std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i) y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
   data.set_real_array("y", y);
   const std::string text =
       slurp("tests/fixtures/gq_selected_loop_overflow.tmir.sexp");

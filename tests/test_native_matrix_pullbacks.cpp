@@ -40,8 +40,8 @@ static void expect_ulp(const std::string& what, double got, double want,
   const int64_t dist = std::llabs(ulp_key(got) - ulp_key(want));
   if (dist > max_ulp) {
     if (++failures < 12)
-      std::printf("FAIL %-28s got %.17g want %.17g (%lld ulp)\n",
-                  what.c_str(), got, want, (long long)dist);
+      std::printf("FAIL %-28s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
+                  got, want, (long long)dist);
   }
 }
 static void gp(int n, int d, int active, uint8_t variant, bool repeated,
@@ -229,7 +229,8 @@ static void matrix_exp_case(int n, bool active, unsigned seed_val,
     // same templated Pade/2x2 algorithm); Eigen picks different packet
     // arithmetic for the two scalar types, same as the pre-existing GP and
     // inverse_spd notes elsewhere in this file, so this is a relative check.
-    check(out.data()[i], ex.data()[i].val(), ("matrix_exp value" + tag).c_str());
+    check(out.data()[i], ex.data()[i].val(),
+          ("matrix_exp value" + tag).c_str());
     const double want = ex.data()[i].val();
     const double rel = std::abs(out.data()[i] - want) / (1 + std::abs(want));
     g_max_matrix_exp_value_rel = std::max(g_max_matrix_exp_value_rel, rel);
@@ -238,9 +239,8 @@ static void matrix_exp_case(int n, bool active, unsigned seed_val,
   for (int i = 0; i < n * n; ++i) {
     const double want = 0.125 + av.data()[i].adj();
     expect_ulp("matrix_exp adj" + tag + " i=" + std::to_string(i),
-              adj.data()[i], want, max_ulp);
-    const int64_t dist =
-        std::llabs(ulp_key(adj.data()[i]) - ulp_key(want));
+               adj.data()[i], want, max_ulp);
+    const int64_t dist = std::llabs(ulp_key(adj.data()[i]) - ulp_key(want));
     g_max_matrix_exp_ulp = std::max(g_max_matrix_exp_ulp, (double)dist);
   }
 
@@ -266,7 +266,8 @@ static void matrix_exp_case(int n, bool active, unsigned seed_val,
   const double kernel_rel = (double)(std::abs(kernel_dot - fd_dot) / scale);
   const double tape_rel = (double)(std::abs(tape_dot - fd_dot) / scale);
   g_max_matrix_exp_fd_rel = std::max(g_max_matrix_exp_fd_rel, kernel_rel);
-  g_max_matrix_exp_tape_fd_rel = std::max(g_max_matrix_exp_tape_fd_rel, tape_rel);
+  g_max_matrix_exp_tape_fd_rel =
+      std::max(g_max_matrix_exp_tape_fd_rel, tape_rel);
   if (kernel_rel > 1e-6) {
     ++failures;
     std::printf(
@@ -339,23 +340,22 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
   else
     result = left ? stan::math::mdivide_left_tri_low(av, bv)
                   : stan::math::mdivide_right_tri_low(bv, av);
-  var objective = stan::math::sum(
-      stan::math::elt_multiply(result, Eigen::Map<Mat>(seed.data(), outr, outc)));
+  var objective = stan::math::sum(stan::math::elt_multiply(
+      result, Eigen::Map<Mat>(seed.data(), outr, outc)));
   stan::math::grad(objective.vi_);
 
-  const std::string tag = " left=" + std::to_string(left) +
-                          " kind=" + std::to_string((int)kind) +
-                          " n=" + std::to_string(n) + " k=" + std::to_string(k) +
-                          " vec=" + std::to_string(vec) +
-                          " act=" + std::to_string(activity) +
-                          " seed=" + std::to_string(seed_val);
+  const std::string tag =
+      " left=" + std::to_string(left) + " kind=" + std::to_string((int)kind) +
+      " n=" + std::to_string(n) + " k=" + std::to_string(k) +
+      " vec=" + std::to_string(vec) + " act=" + std::to_string(activity) +
+      " seed=" + std::to_string(seed_val);
   for (int i = 0; i < outr * outc; ++i)
     check(out.data()[i], result.data()[i].val(), ("solve value" + tag).c_str());
   if (divisor_var)
     for (int i = 0; i < n * n; ++i) {
       const double want = 0.125 + av.data()[i].adj();
       expect_ulp("solve A adj" + tag + " i=" + std::to_string(i),
-                a_adj.data()[i], want, max_ulp);
+                 a_adj.data()[i], want, max_ulp);
       g_max_solve_ulp = std::max(
           g_max_solve_ulp,
           (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
@@ -364,7 +364,7 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
     for (int i = 0; i < br * bc; ++i) {
       const double want = 0.125 + bv.data()[i].adj();
       expect_ulp("solve B adj" + tag + " i=" + std::to_string(i),
-                b_adj.data()[i], want, max_ulp);
+                 b_adj.data()[i], want, max_ulp);
       g_max_solve_ulp = std::max(
           g_max_solve_ulp,
           (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
@@ -375,8 +375,8 @@ static void solve_family(bool left, SolveKindTag kind, uint16_t opcode,
                          int64_t max_ulp) {
   for (int n : {1, 2, 5, 10, 20})
     for (int k : {1, n})
-      for (bool vec : (k == 1 ? std::vector<bool>{false, true}
-                              : std::vector<bool>{false}))
+      for (bool vec :
+           (k == 1 ? std::vector<bool>{false, true} : std::vector<bool>{false}))
         for (int activity : {1, 2, 3})
           for (unsigned s = 1; s <= 2; ++s)
             solve_case(left, kind, opcode, n, k, vec, activity, s, max_ulp);
@@ -443,15 +443,15 @@ static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
     objective = stan::math::sum(
         stan::math::elt_multiply(r, Eigen::Map<Mat>(seed.data(), m, m)));
     ref_val.resize((size_t)r.size());
-    for (Eigen::Index i = 0; i < r.size(); ++i) ref_val[(size_t)i] = r.data()[i].val();
+    for (Eigen::Index i = 0; i < r.size(); ++i)
+      ref_val[(size_t)i] = r.data()[i].val();
   }
   stan::math::grad(objective.vi_);
 
-  const std::string tag = " sym=" + std::to_string(sym) +
-                          " n=" + std::to_string(n) + " m=" + std::to_string(m) +
-                          " vec=" + std::to_string(vec) +
-                          " act=" + std::to_string(activity) +
-                          " seed=" + std::to_string(seed_val);
+  const std::string tag =
+      " sym=" + std::to_string(sym) + " n=" + std::to_string(n) +
+      " m=" + std::to_string(m) + " vec=" + std::to_string(vec) +
+      " act=" + std::to_string(activity) + " seed=" + std::to_string(seed_val);
   const int64_t out_len = vec ? 1 : m * m;
   for (int i = 0; i < out_len; ++i)
     check(out.data()[i], ref_val[i], ("qf value" + tag).c_str());
@@ -459,7 +459,7 @@ static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
     for (int i = 0; i < n * n; ++i) {
       const double want = 0.125 + av.data()[i].adj();
       expect_ulp("qf A adj" + tag + " i=" + std::to_string(i), a_adj.data()[i],
-                want, max_ulp);
+                 want, max_ulp);
       g_max_qf_ulp = std::max(
           g_max_qf_ulp,
           (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
@@ -468,7 +468,7 @@ static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
     for (int i = 0; i < n * m; ++i) {
       const double want = 0.125 + bv.data()[i].adj();
       expect_ulp("qf B adj" + tag + " i=" + std::to_string(i), b_adj.data()[i],
-                want, max_ulp);
+                 want, max_ulp);
       g_max_qf_ulp = std::max(
           g_max_qf_ulp,
           (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
@@ -478,8 +478,8 @@ static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
 static void qf_family(bool sym, uint16_t opcode, int64_t max_ulp) {
   for (int n : {1, 2, 5, 10, 20})
     for (int m : {1, n})
-      for (bool vec : (m == 1 ? std::vector<bool>{false, true}
-                              : std::vector<bool>{false}))
+      for (bool vec :
+           (m == 1 ? std::vector<bool>{false, true} : std::vector<bool>{false}))
         for (int activity : {1, 2, 3})
           for (unsigned s = 1; s <= 2; ++s)
             qf_case(sym, opcode, n, m, vec, activity, s, max_ulp);

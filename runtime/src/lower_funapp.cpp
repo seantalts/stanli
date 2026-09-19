@@ -693,22 +693,20 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
     for (const Val& v : args) {
       const int64_t len = g.slots[v.slot].len;
       call_args.push_back(
-          len == 1 ? v
-                   : with_layout(emit_value(OP_INDEX, {v}, 1,
-                                            view_of(scalar_type),
-                                            {checked_immediate(
-                                                i, "rng argument offset")}),
-                                ExpressionLayout::scalar()));
+          len == 1
+              ? v
+              : with_layout(
+                    emit_value(OP_INDEX, {v}, 1, view_of(scalar_type),
+                               {checked_immediate(i, "rng argument offset")}),
+                    ExpressionLayout::scalar()));
     }
     Val draw = with_layout(
-        arity == 1
-            ? emit_value(OP_RNG, {call_args[0]}, 1, view_of(scalar_type))
+        arity == 1 ? emit_value(OP_RNG, {call_args[0]}, 1, view_of(scalar_type))
         : arity == 2
             ? emit_value(OP_RNG, {call_args[0], call_args[1]}, 1,
-                        view_of(scalar_type))
-            : emit_value(OP_RNG,
-                        {call_args[0], call_args[1], call_args[2]}, 1,
-                        view_of(scalar_type)),
+                         view_of(scalar_type))
+            : emit_value(OP_RNG, {call_args[0], call_args[1], call_args[2]}, 1,
+                         view_of(scalar_type)),
         ExpressionLayout::scalar());
     g.ops.back().variant = static_cast<uint8_t>(family);
     // An effect is never a graph constant, even when all distribution

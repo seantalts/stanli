@@ -785,7 +785,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
       g.ops.resize(saved_ops);
       g.slots.resize(saved_slots);
       g.idata_pool.resize(saved_idata);
-      const char* section = saved_n_gq_start ? "generated quantities"
+      const char* section = saved_n_gq_start   ? "generated quantities"
                             : saved_n_tp_start ? "transformed parameters"
                                                : "write_array";
       // Keep the valid prefix for diagnostics, but drivers select WaInterp

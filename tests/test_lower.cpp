@@ -8722,7 +8722,7 @@ int main() {
     // of the reference's Pade tape; measured up to 28 ULP here.
     for (int i = 0; i < 4; ++i)
       expect_ulp("matrix exp gradient " + std::to_string(i), gradient[i],
-                a.data()[i].adj(), 40);
+                 a.data()[i].adj(), 40);
     stan::math::recover_memory();
   }
 

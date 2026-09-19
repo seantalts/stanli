@@ -3166,7 +3166,7 @@ static void probe_mode_tests() {
   mir::Expr expr;
   expr.kind = mir::Expr::Indexed;
   expr.args = {var_expr("x", mir::UnsizedLeaf::Vector),
-              index_single(var_expr("i", mir::UnsizedLeaf::Int))};
+               index_single(var_expr("i", mir::UnsizedLeaf::Int))};
   expr.type_ = "UReal";
   expr.unsized = {0, mir::UnsizedLeaf::Real};
   expr.data_only = true;
@@ -3259,14 +3259,15 @@ static void region_range_cache_tests() {
     return d;
   };
   std::vector<Case> cases;
-  cases.push_back({"structured_arrays", Mode::Auto,
-                   DataMap::from_json_file("tests/fixtures/structured_arrays.json")});
-  cases.push_back({"structured_checks", Mode::Auto,
-                   DataMap::from_json_file("tests/fixtures/structured_checks.json")});
+  cases.push_back(
+      {"structured_arrays", Mode::Auto,
+       DataMap::from_json_file("tests/fixtures/structured_arrays.json")});
+  cases.push_back(
+      {"structured_checks", Mode::Auto,
+       DataMap::from_json_file("tests/fixtures/structured_checks.json")});
   cases.push_back({"structured_counted", Mode::Auto, counted("N", 64)});
   cases.push_back({"structured_data_if", Mode::Auto, observed_data(64)});
-  cases.push_back(
-      {"structured_direct_index", Mode::Force, counted("N", 4)});
+  cases.push_back({"structured_direct_index", Mode::Force, counted("N", 4)});
   cases.push_back({"structured_exits", Mode::Force, counted("N", 6)});
   cases.push_back({"structured_matrix_ops", Mode::Auto, DataMap{}});
   cases.push_back({"structured_nested", Mode::Auto, counted("N", 32)});
@@ -3275,13 +3276,13 @@ static void region_range_cache_tests() {
       {"structured_prefer_shape", Mode::Prefer,
        DataMap::from_json_file("tests/fixtures/structured_prefer_shape.json")});
   cases.push_back({"structured_while_top", Mode::Auto, counted("N", 40)});
-  cases.push_back(
-      {"structured_auto_refusal", Mode::Auto, counted("N", 32)});
+  cases.push_back({"structured_auto_refusal", Mode::Auto, counted("N", 32)});
   {
     DataMap d;
     d.set_int("N", 40);
     std::vector<int> gap(40);
-    for (int i = 0; i < 40; ++i) gap[static_cast<size_t>(i)] = ((i * 3 + 2) % 8) + 1;
+    for (int i = 0; i < 40; ++i)
+      gap[static_cast<size_t>(i)] = ((i * 3 + 2) % 8) + 1;
     d.set_int_array("gap", std::move(gap));
     cases.push_back({"structured_carried_span", Mode::Auto, std::move(d)});
   }
@@ -3292,9 +3293,9 @@ static void region_range_cache_tests() {
     test_setenv("STANLI_NO_REGION_RANGE_CACHE", "1");
     const auto cache_off = compile_fixture(c.name, c.data, c.mode);
     test_unsetenv("STANLI_NO_REGION_RANGE_CACHE");
-    check(graph_text(cache_on) == graph_text(cache_off),
-          (std::string("region range cache byte-identical: ") + c.name)
-              .c_str());
+    check(
+        graph_text(cache_on) == graph_text(cache_off),
+        (std::string("region range cache byte-identical: ") + c.name).c_str());
   }
 }
 
@@ -4388,16 +4389,16 @@ static void for_trace_tests() {
 
 static void replay_parity_tests() {
   const char* fixtures[] = {"structured_param_if", "structured_nested",
-                            "structured_exits",    "structured_counted",
+                            "structured_exits", "structured_counted",
                             "structured_direct_index"};
   for (const char* name : fixtures) {
     const bool needs_y = std::strcmp(name, "structured_param_if") == 0;
-    const auto native = needs_y
-                            ? compile_fixture(name, observed_data(24), Mode::Force)
-                            : compile_fixture(name, 24, Mode::Force);
-    const auto legacy = needs_y
-                            ? compile_fixture(name, observed_data(24), Mode::Off)
-                            : compile_fixture(name, 24, Mode::Off);
+    const auto native =
+        needs_y ? compile_fixture(name, observed_data(24), Mode::Force)
+                : compile_fixture(name, 24, Mode::Force);
+    const auto legacy =
+        needs_y ? compile_fixture(name, observed_data(24), Mode::Off)
+                : compile_fixture(name, 24, Mode::Off);
     check(retained(native) != nullptr, name);
     Executor a = diagnosed_executor(native.graph);
     native.bind(a);
@@ -4410,12 +4411,11 @@ static void replay_parity_tests() {
     std::vector<double> ga(static_cast<size_t>(native.n_unconstrained));
     std::vector<double> gref(ga.size());
     std::vector<double> gb(static_cast<size_t>(legacy.n_unconstrained));
-    std::vector<std::vector<double>> points(3,
-                                            std::vector<double>(ga.size()));
+    std::vector<std::vector<double>> points(3, std::vector<double>(ga.size()));
     for (size_t p = 0; p < points.size(); ++p)
       for (size_t k = 0; k < ga.size(); ++k)
-        points[p][k] = .3 + .1 * static_cast<double>(p) +
-                      .05 * static_cast<double>(k);
+        points[p][k] =
+            .3 + .1 * static_cast<double>(p) + .05 * static_cast<double>(k);
     int call_index = 0;
     for (const auto& point : points) {
       std::copy(point.begin(), point.end(), ref.params_data());
@@ -4476,8 +4476,8 @@ static void replay_guard_flip_tests() {
 }
 
 static void selector_guard_tests() {
-  const auto native = compile_fixture("structured_param_index",
-                                      observed_data(24), Mode::Force);
+  const auto native =
+      compile_fixture("structured_param_index", observed_data(24), Mode::Force);
   check(retained(native) != nullptr, "selector guard fixture retains OP_LOOP");
   Executor a = diagnosed_executor(native.graph);
   native.bind(a);
@@ -4505,8 +4505,8 @@ static void selector_guard_tests() {
 }
 
 static void import_activity_independence_tests() {
-  const auto native = compile_fixture("structured_param_if", observed_data(24),
-                                      Mode::Force);
+  const auto native =
+      compile_fixture("structured_param_if", observed_data(24), Mode::Force);
   check(retained(native) != nullptr,
         "import independence fixture retains OP_LOOP");
   Executor a = diagnosed_executor(native.graph);
@@ -4586,7 +4586,7 @@ static void transient_constancy_toggle_tests() {
       lower, upper, iterator,
       sequence({std::move(compare),
                 branch(condition, sequence({alias(select, zero)}),
-                      sequence({alias(select, theta)})),
+                       sequence({alias(select, theta)})),
                 call(*plan, OP_MUL, {select, iterator}, term),
                 call(*plan, OP_ADD, {acc, term}, next), alias(acc, next)}));
   plan->outputs = {acc};

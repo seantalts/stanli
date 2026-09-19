@@ -59,8 +59,7 @@ void run_matrix_exp(std::istream& in) {
     for (int64_t i = 0; i < n; ++i)
       for (int64_t j = 0; j < n; ++j) av(i, j) = a(i, j);
     VarM out = stan::math::matrix_exp(av);
-    var obj = stan::math::sum(stan::math::elt_multiply(
-        out, MatD(g)));
+    var obj = stan::math::sum(stan::math::elt_multiply(out, MatD(g)));
     stan::math::grad(obj.vi_);
     for (int64_t i = 0; i < n; ++i)
       for (int64_t j = 0; j < n; ++j) old_adj(i, j) = av(i, j).adj();
@@ -110,14 +109,14 @@ uint16_t solve_opcode(bool left, int kind) {
 VarM solve_at_kind(bool left, int kind, const VarM& a, const VarM& b) {
   if (kind == 1) {
     return left ? VarM(stan::math::mdivide_left_spd(a, b))
-               : VarM(stan::math::mdivide_right_spd(b, a));
+                : VarM(stan::math::mdivide_right_spd(b, a));
   }
   if (kind == 2) {
     return left ? VarM(stan::math::mdivide_left_tri_low(a, b))
-               : VarM(stan::math::mdivide_right_tri_low(b, a));
+                : VarM(stan::math::mdivide_right_tri_low(b, a));
   }
   return left ? VarM(stan::math::mdivide_left(a, b))
-             : VarM(stan::math::mdivide_right(b, a));
+              : VarM(stan::math::mdivide_right(b, a));
 }
 
 void run_solve(std::istream& in) {

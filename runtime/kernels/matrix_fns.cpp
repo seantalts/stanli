@@ -248,9 +248,7 @@ void matrix_exp_bwd_n(KernelCtx& ctx, int64_t n) {
   const MatD e = stan::math::matrix_exp(block);
   MapM(ctx.in_adj[0].data, n, n) += e.topRightCorner(n, n) * scale;
 }
-void matrix_exp_bwd(KernelCtx& ctx) {
-  matrix_exp_bwd_n(ctx, ctx.idata[0]);
-}
+void matrix_exp_bwd(KernelCtx& ctx) { matrix_exp_bwd_n(ctx, ctx.idata[0]); }
 int64_t dynamic_square_extent(const KernelCtx& ctx) {
   if (ctx.n_in != 2 || ctx.in[1].len != 1)
     throw std::logic_error("dynamic matrix_exp extent is not scalar");
@@ -1019,9 +1017,8 @@ void solve_var(KernelCtx& ctx) {
 
 // x = A \ b: adj_b += A^-T G, adj_A -= (A^-T G) x^T.
 template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower>
-void left_adjoint(const MatD& a, const MatD& x, const MatD& g,
-                  bool divisor_var, bool dividend_var, MatD* adj_a,
-                  MatD* adj_b) {
+void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
+                  bool dividend_var, MatD* adj_a, MatD* adj_b) {
   if constexpr (Kind == SolveKind::Spd) {
     const Eigen::LLT<MatD> fac(a);
     if (dividend_var) {
@@ -1049,9 +1046,11 @@ void left_adjoint(const MatD& a, const MatD& x, const MatD& g,
     }
   } else {
     const Eigen::HouseholderQR<MatD> qr(a);
-    const MatD y = qr.householderQ() *
-        MatD(qr.matrixQR().template triangularView<Eigen::Upper>().transpose()
-                 .solve(g));
+    const MatD y =
+        qr.householderQ() * MatD(qr.matrixQR()
+                                     .template triangularView<Eigen::Upper>()
+                                     .transpose()
+                                     .solve(g));
     if (dividend_var && adj_b) *adj_b += y;
     if (divisor_var) *adj_a -= y * x.transpose();
   }
@@ -1066,10 +1065,9 @@ void right_adjoint(const MatD& a, const MatD& x, const MatD& g,
       Kind == SolveKind::TriLow ? Eigen::Upper : Eigen::Lower;
   MatD adj_a_t = MatD::Zero(a.cols(), a.rows());
   MatD adj_b_t = MatD::Zero(x.cols(), x.rows());
-  left_adjoint<Kind, kFlipped>(a.transpose(), x.transpose(), g.transpose(),
-                               divisor_var, dividend_var,
-                               divisor_var ? &adj_a_t : nullptr,
-                               dividend_var ? &adj_b_t : nullptr);
+  left_adjoint<Kind, kFlipped>(
+      a.transpose(), x.transpose(), g.transpose(), divisor_var, dividend_var,
+      divisor_var ? &adj_a_t : nullptr, dividend_var ? &adj_b_t : nullptr);
   if (divisor_var) {
     if constexpr (Kind == SolveKind::Spd) {
       *adj_a += adj_a_t;
