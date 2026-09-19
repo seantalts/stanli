@@ -1244,6 +1244,7 @@ void test_write_array_block_order() {
   std::vector<double> y(static_cast<size_t>(n));
   for (int i = 0; i < n; ++i) y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
   data.set_real_array("y", y);
+  data.set_int_array("whenmat", std::vector<int>(40, 1), {8, 5});
   const std::string text = slurp("tests/fixtures/structured_wa_block_order.tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);

@@ -2,6 +2,7 @@ data {
   int<lower=0> N;
   vector[N] y;
   int<lower=0> lim;
+  array[8, 5] int whenmat;
 }
 parameters {
   real mu;
@@ -13,7 +14,7 @@ transformed parameters {
     while (acc < lim) acc += 1;
     for (n in 1:N) {
       real step;
-      if (mu * y[n] > 0) {
+      if (mu * y[n] > 0 && sum(whenmat[8, {5, 1}]) > 0) {
         matrix[1100, 1000] big = rep_matrix(mu, 1100, 1000);
         step = big[1, 1] + acc;
       } else {
