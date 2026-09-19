@@ -13,10 +13,12 @@
 #include "env_helpers.hpp"
 
 #include <stanli/compile.hpp>
+#include <stanli/graph.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/sexp.hpp>
+#include <stanli/structured_loop.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <stan/math.hpp>
@@ -1135,6 +1137,446 @@ void test_transformed_parameter_checks() {
 }
 
 }  // namespace
+
+namespace {
+const stanli::StructuredLoop* find_retained_loop(const stanli::Graph& g) {
+  for (const auto& op : g.ops)
+    if (op.opcode == stanli::OP_LOOP)
+      return static_cast<const stanli::StructuredLoop*>(op.udata);
+  return nullptr;
+}
+}  // namespace
+
+// A data-bounded for loop, large enough that one iteration's if/else island
+// alone exceeds mir_prog.hpp's register cap, computes a transformed
+// parameter vector in the model log_prob already retains as OP_LOOP under
+// the default automatic policy. write_array has to retain the same loop
+// rather than fall back to the per-draw interpreter.
+void test_write_array_retained_loop() {
+  using namespace stanli;
+  const int n = 32;
+  DataMap data;
+  data.set_int("N", n);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  const std::string text =
+      slurp("tests/fixtures/structured_wa_region.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (find_retained_loop(cm.graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_region: log_prob did not retain the "
+        "transformed-parameter loop\n");
+  }
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL structured_wa_region: no write_array\n");
+    return;
+  }
+  if (!cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL structured_wa_region write_array truncated: %s\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (find_retained_loop(cm.write_array->graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_region: write_array did not lower the loop as a "
+        "retained region\n");
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_region: no interpreter attached for cross-check\n");
+    return;
+  }
+
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+
+  const std::vector<double> mus = {1.3, -0.7, 0.05};
+  std::vector<std::vector<double>> graph_rows;
+  for (double mu : mus) {
+    pex.params_data()[0] = mu;
+    pex.run_forward_only();
+    wex.params_data()[0] = mu;
+    WaRng graph_rng(7);
+    wex.run_forward_only(EvalState{&graph_rng});
+    std::vector<double> row;
+    for (const auto& c : cross.write_array->columns) {
+      const double* p = wex.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    WaRng interp_rng(7);
+    const std::vector<double> interp_row =
+        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+    if (!same_double_bytes(row, interp_row)) {
+      ++failures;
+      std::printf(
+          "FAIL structured_wa_region: graph/interp rows differ at mu=%g\n", mu);
+    }
+    graph_rows.push_back(std::move(row));
+  }
+  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
+    ++failures;
+    std::printf("FAIL structured_wa_region: draws did not vary\n");
+  }
+}
+
+// The transformed-parameter block carries a data-only sibling statement
+// (an is_nan check on a value a preceding while loop produced, so it is
+// not foldable) beside the 32-plus-trip parameter-branching loop. That
+// sibling forced the whole block through one register-program island
+// before write_array tried the loop as its own region.
+void test_write_array_block_order() {
+  using namespace stanli;
+  const int n = 32;
+  DataMap data;
+  data.set_int("N", n);
+  data.set_int("lim", 3);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  data.set_int_array("whenmat", std::vector<int>(40, 1), {8, 5});
+  const std::string text =
+      slurp("tests/fixtures/structured_wa_block_order.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (find_retained_loop(cm.graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_block_order: log_prob did not retain the "
+        "transformed-parameter loop\n");
+  }
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL structured_wa_block_order: no write_array\n");
+    return;
+  }
+  if (!cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL structured_wa_block_order write_array truncated: %s\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (find_retained_loop(cm.write_array->graph) == nullptr) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_block_order: write_array did not lower the loop "
+        "as a retained region\n");
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL structured_wa_block_order: no interpreter attached for "
+        "cross-check\n");
+    return;
+  }
+
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+
+  const std::vector<double> mus = {1.3, -0.7, 0.05};
+  std::vector<std::vector<double>> graph_rows;
+  for (double mu : mus) {
+    pex.params_data()[0] = mu;
+    pex.run_forward_only();
+    wex.params_data()[0] = mu;
+    WaRng graph_rng(7);
+    wex.run_forward_only(EvalState{&graph_rng});
+    std::vector<double> row;
+    for (const auto& c : cross.write_array->columns) {
+      const double* p = wex.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    WaRng interp_rng(7);
+    const std::vector<double> interp_row =
+        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+    if (!same_double_bytes(row, interp_row)) {
+      ++failures;
+      std::printf(
+          "FAIL structured_wa_block_order: graph/interp rows differ at "
+          "mu=%g\n",
+          mu);
+    }
+    graph_rows.push_back(std::move(row));
+  }
+  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
+    ++failures;
+    std::printf("FAIL structured_wa_block_order: draws did not vary\n");
+  }
+}
+
+// normal_rng(vector, vector) and normal_rng(vector, real) both return
+// array[] real. The scalar RNG lowering has to broadcast each argument
+// (scalar or vector-length) and draw one element at a time from the same
+// stream order the interpreter's vectorized fallback uses.
+void test_write_array_vector_rng() {
+  using namespace stanli;
+  const int k = 4;
+  DataMap data;
+  data.set_int("K", k);
+  const std::string text = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array || cm.write_array->interp ||
+      !cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL gqrng_vector did not compile completely: %s\n",
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  }
+
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+  CompiledModel cm_no_loops = compile_model(text, data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  if (!cm_no_loops.write_array || cm_no_loops.write_array->interp ||
+      !cm_no_loops.write_array->truncated.empty()) {
+    ++failures;
+    std::printf(
+        "FAIL gqrng_vector with STANLI_STRUCTURED_LOOPS=0 did not compile "
+        "completely: %s\n",
+        cm_no_loops.write_array ? cm_no_loops.write_array->truncated.c_str()
+                                : "no write_array");
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gqrng_vector: no interpreter attached for cross-check\n");
+    return;
+  }
+
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+
+  std::vector<std::vector<double>> graph_rows;
+  for (int draw = 0; draw < 3; ++draw) {
+    for (int64_t j = 0; j < pex.n_params(); ++j)
+      pex.params_data()[j] =
+          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
+    pex.run_forward_only();
+    for (int64_t j = 0; j < wex.n_params(); ++j)
+      wex.params_data()[j] =
+          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
+    WaRng graph_rng(11 + draw);
+    wex.run_forward_only(EvalState{&graph_rng});
+    std::vector<double> row;
+    for (const auto& c : cross.write_array->columns) {
+      const double* p = wex.value_ptr(c.slot);
+      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+    }
+    WaRng interp_rng(11 + draw);
+    const std::vector<double> interp_row =
+        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+    if (!same_double_bytes(row, interp_row)) {
+      ++failures;
+      std::printf("FAIL gqrng_vector: graph/interp rows differ at draw %d\n",
+                  draw);
+    }
+    graph_rows.push_back(std::move(row));
+  }
+  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
+    ++failures;
+    std::printf("FAIL gqrng_vector: draws did not vary\n");
+  }
+}
+
+// binomial_rng with an int-array population-count argument is not part of
+// the vectorized RNG tranche. Its transformed-parameter block lowers
+// cleanly; only generated quantities should fall back.
+void test_write_array_partial_fallback() {
+  using namespace stanli;
+  const int k = 3;
+  DataMap data;
+  data.set_int("K", k);
+  std::vector<int> trials(static_cast<size_t>(k));
+  for (int i = 0; i < k; ++i) trials[static_cast<size_t>(i)] = 5 + i;
+  data.set_int_array("trials", trials);
+  const std::string text =
+      slurp("tests/fixtures/gq_partial_fallback.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL gq_partial_fallback: no write_array\n");
+    return;
+  }
+  if (cm.write_array->truncated.empty() ||
+      cm.write_array->truncated.find("generated quantities") ==
+          std::string::npos) {
+    ++failures;
+    std::printf("FAIL gq_partial_fallback: truncated message is [%s]\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (!cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gq_partial_fallback: no interpreter attached\n");
+    return;
+  }
+  expect_eq("gq_partial_fallback graph columns",
+            joined(cm.write_array->columns), "p.1,p.2,p.3,mu,sigma,tp_val");
+  expect_idx("gq_partial_fallback n_gq_start", cm.write_array->n_gq_start,
+             cm.write_array->columns.size());
+
+  Executor pex(cm.graph);
+  cm.bind(pex);
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  for (int64_t j = 0; j < pex.n_params(); ++j)
+    pex.params_data()[j] = 0.1 * (j + 1);
+  pex.run_forward_only();
+  for (int64_t j = 0; j < wex.n_params(); ++j)
+    wex.params_data()[j] = 0.1 * (j + 1);
+  wex.run_forward_only();
+  std::vector<double> graph_row;
+  for (const auto& c : cm.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    for (int64_t i = 0; i < c.len; ++i)
+      graph_row.push_back(p[c.storage_index(i)]);
+  }
+  WaRng interp_rng(3);
+  const std::vector<double> interp_row =
+      cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
+  if (interp_row.size() < graph_row.size() ||
+      !same_double_bytes(graph_row,
+                         std::vector<double>(
+                             interp_row.begin(),
+                             interp_row.begin() + (int64_t)graph_row.size()))) {
+    ++failures;
+    std::printf(
+        "FAIL gq_partial_fallback: compiled transformed-parameter prefix "
+        "does not match the interpreter\n");
+  }
+}
+
+// A loop region_auto_profitable selects (32-plus trips, a nested while so
+// region_runtime_control sees retained control despite write_array's
+// DataOnly-everywhere MIR) whose body calls normal_rng -- a region always
+// refuses a stateful call. The refused trial must fall back to one
+// whole-loop island rather than per-iteration unrolling: with the fix the
+// op count does not grow with N, and it did before it.
+void test_write_array_selected_loop_refused() {
+  using namespace stanli;
+  const std::string text =
+      slurp("tests/fixtures/gq_selected_loop_refused.tmir.sexp");
+  const auto compile_at = [&](int n) {
+    DataMap data;
+    data.set_int("N", n);
+    std::vector<double> y(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+    data.set_real_array("y", y);
+    return compile_model(text, data);
+  };
+  CompiledModel small = compile_at(32);
+  CompiledModel large = compile_at(64);
+  if (!small.write_array || !large.write_array) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_refused: no write_array\n");
+    return;
+  }
+  if (!small.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_refused: truncated at N=32: %s\n",
+                small.write_array->truncated.c_str());
+  }
+  const size_t small_ops = small.write_array->graph.ops.size();
+  const size_t large_ops = large.write_array->graph.ops.size();
+  if (large_ops > small_ops + small_ops / 2) {
+    ++failures;
+    std::printf(
+        "FAIL gq_selected_loop_refused: op count scales with N (N=32 "
+        "ops=%zu, N=64 ops=%zu)\n",
+        small_ops, large_ops);
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_at(32);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL gq_selected_loop_refused: no interpreter attached for "
+        "cross-check\n");
+    return;
+  }
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+  pex.params_data()[0] = 0.4;
+  pex.run_forward_only();
+  wex.params_data()[0] = 0.4;
+  WaRng graph_rng(9);
+  wex.run_forward_only(EvalState{&graph_rng});
+  std::vector<double> row;
+  for (const auto& c : cross.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+  }
+  WaRng interp_rng(9);
+  const std::vector<double> interp_row =
+      cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+  if (!same_double_bytes(row, interp_row)) {
+    ++failures;
+    std::printf(
+        "FAIL gq_selected_loop_refused: graph and interpreter rows differ\n");
+  }
+}
+
+// The same shape, but the refused loop's body also declares a
+// register-program-sized local. The whole-loop island fallback then
+// overflows too, and write_array has to fall back to the interpreter for
+// generated quantities specifically rather than raise a compile error.
+void test_write_array_selected_loop_overflow() {
+  using namespace stanli;
+  const int n = 32;
+  DataMap data;
+  data.set_int("N", n);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  const std::string text =
+      slurp("tests/fixtures/gq_selected_loop_overflow.tmir.sexp");
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_overflow: no write_array\n");
+    return;
+  }
+  if (cm.write_array->truncated.empty() ||
+      cm.write_array->truncated.find("generated quantities") ==
+          std::string::npos) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_overflow: truncated message is [%s]\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (!cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_overflow: no interpreter attached\n");
+  }
+}
 
 // A generated quantity the optimizer folds to a constant: --O1 replaces
 // the FnWriteParam's variable reference with the literal value, so the
@@ -5149,6 +5591,12 @@ int main() {
   test_stan_rng_stream_contract();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
+  test_write_array_retained_loop();
+  test_write_array_block_order();
+  test_write_array_vector_rng();
+  test_write_array_partial_fallback();
+  test_write_array_selected_loop_refused();
+  test_write_array_selected_loop_overflow();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
 }

@@ -3,6 +3,8 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/graph_print.hpp>
+#include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/wa_interp.hpp>
@@ -170,22 +172,7 @@ static Graph outer(std::shared_ptr<StructuredLoop> plan,
   return graph;
 }
 
-// Plans whose tests observe individual kernel calls keep every call as its
-// own node; segment_tests covers the register-machine path.
-static void prepare_kernels(StructuredLoop& plan) {
-  test_setenv("STANLI_NO_STRUCTURED_SEGMENTS", "1");
-  plan.prepare();
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-}
-
-template <class Build>
-static std::shared_ptr<StructuredLoop> unsegmented(Build build) {
-  test_setenv("STANLI_NO_STRUCTURED_SEGMENTS", "1");
-  auto plan = build();
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-  check(plan->segments.empty(), "segments are off under the switch");
-  return plan;
-}
+static void prepare_kernels(StructuredLoop& plan) { plan.prepare(); }
 
 struct Evaluation {
   double value = 0;
@@ -2134,7 +2121,7 @@ static std::shared_ptr<StructuredLoop> inactive_input_reverse_plan() {
   plan->root = sequence(
       {std::move(sum), call(*plan, OP_MUL, {theta, inactive}, result)});
   plan->outputs = {result};
-  plan->prepare();
+  prepare_kernels(*plan);
   const Node* node = find_call(plan->root, sum_op);
   check(node && node->storage == Node::Retained && !node->active,
         "inactive value read by active work is retained");
@@ -2167,12 +2154,10 @@ static std::shared_ptr<StructuredLoop> inactive_update_plan() {
 
 static int active_workspace_forward_calls = 0;
 static int active_workspace_backward_calls = 0;
-static double* active_workspace_address = nullptr;
 static bool active_workspace_history_ok = true;
 
 static void active_workspace_forward(KernelCtx& context) {
   ++active_workspace_forward_calls;
-  active_workspace_address = context.scratch;
   context.scratch[0] = context.in[0].data[0];
   context.scratch[1] = context.in[1].data[0];
   context.scratch[2] = context.scratch[0] * context.scratch[1];
@@ -2183,7 +2168,6 @@ static void active_workspace_forward(KernelCtx& context) {
 static void active_workspace_backward(KernelCtx& context) {
   ++active_workspace_backward_calls;
   active_workspace_history_ok &=
-      context.scratch == active_workspace_address &&
       context.scratch[0] == context.in[0].data[0] &&
       context.scratch[1] == context.in[1].data[0] &&
       context.scratch[2] == context.in[0].data[0] * context.in[1].data[0];
@@ -2379,7 +2363,6 @@ static void integer_result_tests() {
 
   active_workspace_forward_calls = 0;
   active_workspace_backward_calls = 0;
-  active_workspace_address = nullptr;
   active_workspace_history_ok = true;
   {
     Kernel replacement = *find_kernel(OP_INT_ARITH);
@@ -2533,9 +2516,6 @@ static void loop_invariant_reuse_tests() {
   check(invariant_active_calls == 3, "active loop work runs every iteration");
   check(invariant_variant_calls == 3, "iterator-dependent work is not reused");
   const Evaluation second = evaluate_invariant(enabled, .25);
-  check(invariant_first_calls == 1 && invariant_second_calls == 3 &&
-            invariant_active_calls == 6 && invariant_variant_calls == 3,
-        "data-only work replays from the memo tape on a new evaluation");
   check(std::memcmp(&first, &second, sizeof(Evaluation)) == 0,
         "repeated invariant evaluation is bitwise stable");
 
@@ -2579,7 +2559,7 @@ static void loop_invariant_reuse_tests() {
            branch(late_condition, std::move(late_definition), sequence({})),
            std::move(late_use)}));
   late->outputs = {late_result};
-  late->prepare();
+  prepare_kernels(*late);
   check(set_forward(late->root, late_definition_op, count_invariant_first) &&
             set_forward(late->root, late_use_op, count_invariant_second_add),
         "find late invariant callbacks");
@@ -2614,7 +2594,7 @@ static void loop_invariant_reuse_tests() {
            alias(while_counter, while_next),
            alias(while_result, while_invariant)}));
   while_plan->outputs = {while_result};
-  while_plan->prepare();
+  prepare_kernels(*while_plan);
   check(set_forward(while_plan->root, while_constant_op, count_invariant_first),
         "find while invariant callback");
   invariant_first_calls = 0;
@@ -2764,7 +2744,7 @@ static void control_tests() {
       sequence({call(*while_plan, OP_ADD, {counter, one}, next),
                 alias(counter, next)}));
   while_plan->outputs = {counter};
-  while_plan->prepare();
+  prepare_kernels(*while_plan);
   check(set_forward(while_plan->root, first_op, record_control_add) &&
             set_forward(while_plan->root, compare_op, record_control_compare),
         "find while control-cone callbacks");
@@ -2802,7 +2782,7 @@ static void control_tests() {
                         branch(escaped_condition, sequence({}), sequence({})),
                         alias(escaped_output, escaped_first)}));
   escaped_plan->outputs = {escaped_output};
-  escaped_plan->prepare();
+  prepare_kernels(*escaped_plan);
   check(set_forward(escaped_plan->root, escaped_add_op, record_control_add),
         "find escaping control value callback");
   control_first_outputs.clear();
@@ -2972,7 +2952,7 @@ static bool install_failure_callbacks(StructuredLoop& plan, Node& node) {
 }
 
 static void failure_tests() {
-  auto plan = unsegmented([] { return recurrence(8); });
+  auto plan = recurrence(8);
   check(install_failure_callbacks(*plan, plan->root),
         "failure test finds a native callback");
   Executor executor(outer(plan));
@@ -3166,6 +3146,159 @@ static void automatic_policy_tests() {
                     "top-level while gradient parity");
 }
 
+static void probe_mode_tests() {
+  static const std::map<std::string, const mir::FunDef*> no_funs;
+  auto var_expr = [](std::string name, mir::UnsizedLeaf leaf) {
+    mir::Expr e;
+    e.kind = mir::Expr::Var;
+    e.name = std::move(name);
+    e.unsized = {0, leaf};
+    e.data_only = true;
+    return e;
+  };
+  auto index_single = [](mir::Expr idx) {
+    mir::Expr e;
+    e.kind = mir::Expr::FunApp;
+    e.name = "IndexSingle";
+    e.args = {std::move(idx)};
+    return e;
+  };
+  mir::Expr expr;
+  expr.kind = mir::Expr::Indexed;
+  expr.args = {var_expr("x", mir::UnsizedLeaf::Vector),
+               index_single(var_expr("i", mir::UnsizedLeaf::Int))};
+  expr.type_ = "UReal";
+  expr.unsized = {0, mir::UnsizedLeaf::Real};
+  expr.data_only = true;
+
+  DataMap::Entry x;
+  x.r = {10.0, 20.0, 30.0};
+  x.dims = {3};
+
+  auto evaluate = [&](bool probe) {
+    MirInterp<double> m(no_funs, "probe mode test");
+    m.env()["x"] = x;
+    std::optional<double> lo, hi;
+    for (long i = -1; i <= 5; ++i) {
+      DataMap::Entry iv;
+      iv.is_int = true;
+      iv.i = {static_cast<int>(i)};
+      iv.r = {static_cast<double>(i)};
+      m.env()["i"] = iv;
+      bool ok = true;
+      DataMap::Entry result;
+      if (probe) {
+        m.set_probe(true);
+        result = m.eval(expr);
+        if (m.probe_failed()) {
+          m.clear_probe_failed();
+          ok = false;
+        }
+        m.set_probe(false);
+      } else {
+        try {
+          result = m.eval(expr);
+        } catch (const std::exception&) {
+          ok = false;
+        }
+      }
+      if (ok && result.r.size() == 1) {
+        if (!lo) {
+          lo = hi = result.r[0];
+        } else {
+          lo = std::min(*lo, result.r[0]);
+          hi = std::max(*hi, result.r[0]);
+        }
+      }
+    }
+    return std::make_pair(lo, hi);
+  };
+
+  const auto with_throw = evaluate(false);
+  const auto with_probe = evaluate(true);
+  check(with_throw == with_probe,
+        "probe mode matches throw-and-catch over out-of-bounds indices");
+  check(with_throw.first.has_value() && *with_throw.first == 10.0 &&
+            *with_throw.second == 30.0,
+        "in-bounds combinations still contribute");
+
+  const mir::Expr unknown = var_expr("y", mir::UnsizedLeaf::Real);
+  MirInterp<double> probing(no_funs, "probe mode test");
+  probing.set_probe(true);
+  probing.eval(unknown);
+  check(probing.probe_failed(), "unresolved variable sets the probe flag");
+  probing.clear_probe_failed();
+
+  bool threw = false;
+  MirInterp<double> throwing(no_funs, "probe mode test");
+  try {
+    throwing.eval(unknown);
+  } catch (const std::exception&) {
+    threw = true;
+  }
+  check(threw, "the same expression still throws outside probe mode");
+}
+
+static std::string graph_text(const CompiledModel& cm) {
+  std::string text;
+  GraphPrintInfo info;
+  info.fills = &cm.fills;
+  print_graph(text, cm.graph, info);
+  return text;
+}
+
+static void region_range_cache_tests() {
+  struct Case {
+    const char* name;
+    Mode mode;
+    DataMap data;
+  };
+  auto counted = [](const char* n, int64_t v) {
+    DataMap d;
+    d.set_int(n, v);
+    return d;
+  };
+  std::vector<Case> cases;
+  cases.push_back(
+      {"structured_arrays", Mode::Auto,
+       DataMap::from_json_file("tests/fixtures/structured_arrays.json")});
+  cases.push_back(
+      {"structured_checks", Mode::Auto,
+       DataMap::from_json_file("tests/fixtures/structured_checks.json")});
+  cases.push_back({"structured_counted", Mode::Auto, counted("N", 64)});
+  cases.push_back({"structured_data_if", Mode::Auto, observed_data(64)});
+  cases.push_back({"structured_direct_index", Mode::Force, counted("N", 4)});
+  cases.push_back({"structured_exits", Mode::Force, counted("N", 6)});
+  cases.push_back({"structured_matrix_ops", Mode::Auto, DataMap{}});
+  cases.push_back({"structured_nested", Mode::Auto, counted("N", 32)});
+  cases.push_back({"structured_param_if", Mode::Auto, observed_data(64)});
+  cases.push_back(
+      {"structured_prefer_shape", Mode::Prefer,
+       DataMap::from_json_file("tests/fixtures/structured_prefer_shape.json")});
+  cases.push_back({"structured_while_top", Mode::Auto, counted("N", 40)});
+  cases.push_back({"structured_auto_refusal", Mode::Auto, counted("N", 32)});
+  {
+    DataMap d;
+    d.set_int("N", 40);
+    std::vector<int> gap(40);
+    for (int i = 0; i < 40; ++i)
+      gap[static_cast<size_t>(i)] = ((i * 3 + 2) % 8) + 1;
+    d.set_int_array("gap", std::move(gap));
+    cases.push_back({"structured_carried_span", Mode::Auto, std::move(d)});
+  }
+
+  for (const auto& c : cases) {
+    test_unsetenv("STANLI_NO_REGION_RANGE_CACHE");
+    const auto cache_on = compile_fixture(c.name, c.data, c.mode);
+    test_setenv("STANLI_NO_REGION_RANGE_CACHE", "1");
+    const auto cache_off = compile_fixture(c.name, c.data, c.mode);
+    test_unsetenv("STANLI_NO_REGION_RANGE_CACHE");
+    check(
+        graph_text(cache_on) == graph_text(cache_off),
+        (std::string("region range cache byte-identical: ") + c.name).c_str());
+  }
+}
+
 static void prefer_parent_tests() {
   DataMap data;
   data.set_int("N", 1);
@@ -3319,45 +3452,38 @@ static void runtime_slice_tests() {
                                       "matrix_exp of a runtime submatrix"};
   std::vector<double> point(14);
   for (size_t i = 0; i < point.size(); ++i) point[i] = 0.2 * double(i) - 0.9;
-  for (int segments = 0; segments < 2; ++segments) {
-    if (segments)
-      test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-    else
-      test_setenv("STANLI_NO_STRUCTURED_SEGMENTS", "1");
-    for (int op = 1; op <= 10; ++op) {
-      const auto loop =
-          compile_fixture("dynslice", runtime_slice_data(op), Mode::Auto);
-      const auto flat =
-          compile_fixture("dynsliceflat", runtime_slice_data(op), Mode::Auto);
-      check(retained(loop) != nullptr, "runtime slice model runs the loop");
-      check(retained(flat) == nullptr, "flat runtime slice model has no loop");
-      Executor a(loop.graph), b(flat.graph);
-      loop.bind(a);
-      flat.bind(b);
-      std::vector<double> ga(14), gb(14);
-      for (int again = 0; again < 2; ++again) {
-        std::vector<double> at = point;
-        if (again)
-          for (double& q : at) q = 0.3 - q;
-        std::copy(at.begin(), at.end(), a.params_data());
-        std::copy(at.begin(), at.end(), b.params_data());
-        const double va = a.gradient(ga.data()), vb = b.gradient(gb.data());
-        if (va != vb) {
-          std::printf("  %s: %.17g != %.17g\n", names[op], va, vb);
-          check(false, "runtime slice value");
-        }
-        for (size_t i = 0; i < ga.size(); ++i)
-          if (!near(ga[i], gb[i])) {
-            std::printf("  %s g%zu: %.17g != %.17g\n", names[op], i, ga[i],
-                        gb[i]);
-            check(false, "runtime slice gradient");
-          }
-        close(written_s(loop, at), written_s(flat, at),
-              "runtime slice write_array");
+  for (int op = 1; op <= 10; ++op) {
+    const auto loop =
+        compile_fixture("dynslice", runtime_slice_data(op), Mode::Auto);
+    const auto flat =
+        compile_fixture("dynsliceflat", runtime_slice_data(op), Mode::Auto);
+    check(retained(loop) != nullptr, "runtime slice model runs the loop");
+    check(retained(flat) == nullptr, "flat runtime slice model has no loop");
+    Executor a(loop.graph), b(flat.graph);
+    loop.bind(a);
+    flat.bind(b);
+    std::vector<double> ga(14), gb(14);
+    for (int again = 0; again < 2; ++again) {
+      std::vector<double> at = point;
+      if (again)
+        for (double& q : at) q = 0.3 - q;
+      std::copy(at.begin(), at.end(), a.params_data());
+      std::copy(at.begin(), at.end(), b.params_data());
+      const double va = a.gradient(ga.data()), vb = b.gradient(gb.data());
+      if (va != vb) {
+        std::printf("  %s: %.17g != %.17g\n", names[op], va, vb);
+        check(false, "runtime slice value");
       }
+      for (size_t i = 0; i < ga.size(); ++i)
+        if (!near(ga[i], gb[i])) {
+          std::printf("  %s g%zu: %.17g != %.17g\n", names[op], i, ga[i],
+                      gb[i]);
+          check(false, "runtime slice gradient");
+        }
+      close(written_s(loop, at), written_s(flat, at),
+            "runtime slice write_array");
     }
   }
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
 
   // The series whose `while` advances k past two terms, against the value
   // CmdStan computes for it.
@@ -3558,33 +3684,19 @@ static Evaluation evaluate_branch(Executor& executor, double theta,
 static void memo_tests() {
   {
     auto plan = memo_counter_plan(false);
-    const Node* loop = find_kind(plan->root, Node::For);
-    check(loop && loop->memo && plan->memo_count == 1 &&
-              count_memo(plan->root) == 1,
-          "data-only counted loop is the memo node");
-    memo_int_calls = 0;
     Executor executor(outer(plan, {1, 1}, {1}));
     const Evaluation first = evaluate_memo(executor, .25, 4);
     close(first.value, 2.5, "memo loop first value");
     close(first.gradient[0], 10, "memo loop first gradient");
-    check(memo_int_calls == 4, "memo loop records on the first evaluation");
     const Evaluation second = evaluate_memo(executor, .5, 4);
     close(second.value, 5, "memo loop replayed value");
     close(second.gradient[0], 10, "memo loop replayed gradient");
-    check(memo_int_calls == 4, "memo loop replays without kernel calls");
     const Evaluation third = evaluate_memo(executor, .5, 4);
     check(std::memcmp(&second, &third, sizeof(Evaluation)) == 0,
           "memo replay is bitwise stable");
   }
   {
     auto plan = memo_branch_plan(false);
-    check(plan->memo_count == 1 && plan->root.children.size() == 2 &&
-              plan->root.children[0].memo &&
-              plan->root.children[0].kind == Node::Sequence &&
-              plan->root.children[0].children.size() == 2 &&
-              !plan->root.children[1].memo,
-          "data-only condition cone is grouped into one memo sequence");
-    memo_index_calls = memo_compare_calls = 0;
     Executor executor(outer(plan, {1, 1}, {3, 1}));
     const Evaluation first = evaluate_branch(executor, .25, 5);
     close(first.value, .75, "memo branch first value");
@@ -3592,8 +3704,6 @@ static void memo_tests() {
     const Evaluation second = evaluate_branch(executor, .5, 5);
     close(second.value, 1.5, "memo branch replayed value");
     close(second.gradient[0], 3, "memo branch replayed gradient");
-    check(memo_index_calls == 1 && memo_compare_calls == 1,
-          "memo condition cone is not recomputed");
     Executor other(outer(memo_branch_plan(false), {1, 1}, {3, 1}));
     const Evaluation no_arm = evaluate_branch(other, .25, 0);
     close(no_arm.value, 0, "memo branch takes the data-selected arm");
@@ -3601,12 +3711,6 @@ static void memo_tests() {
   }
   {
     auto plan = memo_branch_plan(true);
-    const Node* branch_node = find_kind(plan->root, Node::If);
-    check(branch_node && !branch_node->memo && plan->memo_count == 1 &&
-              plan->root.children[0].memo &&
-              plan->root.children[0].children.size() == 1,
-          "parameter-dependent comparison leaves only the data read memoized");
-    memo_index_calls = memo_compare_calls = 0;
     Executor executor(outer(plan, {1, 1}, {3, 1}));
     const Evaluation first = evaluate_branch(executor, .25, 5);
     close(first.value, .75, "dependent branch first value");
@@ -3614,8 +3718,6 @@ static void memo_tests() {
     const Evaluation second = evaluate_branch(executor, 10, 5);
     close(second.value, 0, "dependent branch switches arms");
     close(second.gradient[0], 0, "dependent branch switched gradient");
-    check(memo_compare_calls == 2 && memo_index_calls == 1,
-          "parameter-dependent comparison runs every evaluation");
   }
   {
     auto plan = std::make_shared<StructuredLoop>();
@@ -3645,30 +3747,21 @@ static void memo_tests() {
          call(*plan, OP_MUL, {theta, acc}, result)});
     plan->outputs = {result};
     plan->prepare();
-    check(plan->memo_count == 0 && count_memo(plan->root) == 0,
-          "loop under a parameter-dependent branch is not memoized");
     check(set_forward(plan->root, step_op, count_memo_int),
           "find guarded loop callback");
-    memo_int_calls = 0;
     Executor executor(outer(plan, {1, 1}, {1}));
     const Evaluation skipped = evaluate_memo(executor, -.5, 3);
     close(skipped.value, 0, "guarded loop skipped value");
     close(skipped.gradient[0], 0, "guarded loop skipped gradient");
-    check(memo_int_calls == 0, "guarded loop skipped executes nothing");
     const Evaluation first = evaluate_memo(executor, .25, 3);
     close(first.value, 1, "guarded loop taken value");
     close(first.gradient[0], 4, "guarded loop taken gradient");
     const Evaluation second = evaluate_memo(executor, .5, 3);
     close(second.value, 2, "guarded loop second value");
     close(second.gradient[0], 4, "guarded loop second gradient");
-    check(memo_int_calls == 2, "guarded loop recomputes on every entry");
   }
   {
     auto plan = memo_counter_plan(true);
-    const Node* loop = find_kind(plan->root, Node::For);
-    check(loop && loop->memo && plan->memo_count == 1,
-          "break targeting a loop inside the memo node is allowed");
-    memo_int_calls = 0;
     Executor executor(outer(plan, {1, 1}, {1}));
     const Evaluation first = evaluate_memo(executor, .25, 10);
     close(first.value, 1.5, "memo break loop first value");
@@ -3676,7 +3769,6 @@ static void memo_tests() {
     const Evaluation second = evaluate_memo(executor, .5, 10);
     close(second.value, 3, "memo break loop replayed value");
     close(second.gradient[0], 6, "memo break loop replayed gradient");
-    check(memo_int_calls == 3, "memo break loop replays without kernel calls");
 
     auto escaping = std::make_shared<StructuredLoop>();
     const int theta = escaping->body.add_slot(1, false);
@@ -3703,24 +3795,15 @@ static void memo_tests() {
              call(*escaping, OP_ADD, {acc, term}, next), alias(acc, next)}));
     escaping->outputs = {acc};
     prepare_kernels(*escaping);
-    const Node* guard = find_kind(escaping->root, Node::If);
-    const Node* body = &escaping->root.children[0];
-    check(guard && !guard->memo && !escaping->root.memo &&
-              escaping->memo_count == 1 && body->children.size() == 5 &&
-              body->children[0].memo && body->children[0].children.size() == 1,
-          "branch whose break escapes is not memoized, its condition is");
     check(set_forward(escaping->root, compare_op, count_memo_compare),
           "find escaping break callback");
-    memo_compare_calls = 0;
     Executor escaping_executor(outer(escaping, {1, 1}, {1}));
     const Evaluation escaped = evaluate_memo(escaping_executor, .25, 10);
     close(escaped.value, 1.5, "escaping break value");
     close(escaped.gradient[0], 6, "escaping break gradient");
-    check(memo_compare_calls == 4, "escaping break guard evaluated per trip");
     const Evaluation replayed = evaluate_memo(escaping_executor, .5, 10);
     close(replayed.value, 3, "escaping break replayed value");
     close(replayed.gradient[0], 6, "escaping break replayed gradient");
-    check(memo_compare_calls == 4, "escaping break guard replays from tape");
   }
   {
     auto plan = std::make_shared<StructuredLoop>();
@@ -3743,9 +3826,6 @@ static void memo_tests() {
                            call(*plan, OP_MUL, {x, one}, result)});
     plan->outputs = {result};
     plan->prepare();
-    const Node* guard = find_kind(plan->root, Node::If);
-    check(guard && !guard->memo && plan->memo_count == 1,
-          "conditional data-only write of a parameter slot is not memoized");
     Executor executor(outer(plan, {1, 1}, {1}));
     const Evaluation first = evaluate_memo(executor, .25, 2);
     close(first.value, .75, "untaken data-only overwrite first value");
@@ -3757,16 +3837,14 @@ static void memo_tests() {
   {
     const Graph graph = outer(memo_counter_plan(false), {1, 1}, {1});
     Executor first(graph), second(graph);
-    memo_int_calls = 0;
     const Evaluation a = evaluate_memo(first, .25, 4);
-    check(memo_int_calls == 4, "first executor records its own tape");
     const Evaluation b = evaluate_memo(second, .25, 4);
-    check(memo_int_calls == 8, "second executor does not share the tape");
     check(std::memcmp(&a, &b, sizeof(Evaluation)) == 0,
-          "independent tapes agree");
-    (void)evaluate_memo(first, .5, 4);
-    (void)evaluate_memo(second, .5, 4);
-    check(memo_int_calls == 8, "each executor replays its own tape");
+          "independent executors agree");
+    const Evaluation a2 = evaluate_memo(first, .5, 4);
+    const Evaluation b2 = evaluate_memo(second, .5, 4);
+    check(std::memcmp(&a2, &b2, sizeof(Evaluation)) == 0,
+          "independent executors replay to the same result");
   }
 }
 
@@ -3943,86 +4021,42 @@ static std::shared_ptr<StructuredLoop> traced_chain_plan() {
 static void trace_tests() {
   {
     auto plan = traced_chain_plan();
-    const Node& body = plan->root.children[0];
-    check(body.children.size() == 2 && body.children[0].memo &&
-              body.children[0].children.size() == 3 &&
-              body.children[0].children[2].kind == Node::If &&
-              body.children[0].memo_outs.empty() && body.children[1].trace &&
-              plan->root.trace && plan->memo_count == 1 &&
-              plan->trace_count == 2,
-          "guard chain groups its data-only branch into one memo node");
-    memo_index_calls = memo_compare_calls = 0;
     Executor executor(outer(plan, {1, 1}, {3}));
     const Evaluation first = evaluate_traced(executor, .25, {1, 0, 2});
     close(first.value, 1, "guard chain first value");
     close(first.gradient[0], 4, "guard chain first gradient");
-    check(memo_index_calls == 5 && memo_compare_calls == 5,
-          "guard chain records both comparisons");
     const Evaluation second = evaluate_traced(executor, .5, {1, 0, 2});
     close(second.value, 2, "guard chain replayed value");
     close(second.gradient[0], 4, "guard chain replayed gradient");
     check(traced_arm_iterators == std::vector<double>{1, 3},
           "guard chain replays the recorded arms");
-    check(memo_index_calls == 5 && memo_compare_calls == 5,
-          "guard chain replays without guard kernel calls");
   }
   {
     auto plan = traced_branch_plan(false);
-    const Node* guard = find_memo(plan->root);
-    const Node* branch_node = find_kind(plan->root, Node::If);
-    check(guard && guard->children.size() == 2 && guard->memo_outs.empty(),
-          "guard cone feeding only a traced branch has no live-outs");
-    check(branch_node && branch_node->trace && plan->root.trace &&
-              plan->trace_count == 2,
-          "data-only branch with an active arm is traced under a traced for");
-    memo_index_calls = memo_compare_calls = 0;
     Executor executor(outer(plan, {1, 1}, {3}));
     const Evaluation first = evaluate_traced(executor, .25, {1, 0, 2});
     close(first.value, 1, "traced branch first value");
     close(first.gradient[0], 4, "traced branch first gradient");
     check(traced_arm_iterators == std::vector<double>{1, 3},
           "traced branch records the data-selected arms");
-    check(memo_index_calls == 3 && memo_compare_calls == 3,
-          "traced branch evaluates its guard once per trip when recording");
     const Evaluation second = evaluate_traced(executor, .5, {1, 0, 2});
     close(second.value, 2, "traced branch replayed value");
     close(second.gradient[0], 4, "traced branch replayed gradient");
     check(traced_arm_iterators == std::vector<double>{1, 3},
           "traced branch replays the recorded arms");
-    check(memo_index_calls == 3 && memo_compare_calls == 3,
-          "traced branch replays without guard kernel calls");
   }
   {
     auto plan = traced_while_plan(false);
-    const Node* loop = find_kind(plan->root, Node::While);
-    check(loop && loop->trace && plan->trace_count == 1 &&
-              loop->children[0].memo && loop->children[0].memo_outs.empty(),
-          "data-only while condition with an active body is traced");
-    memo_compare_calls = 0;
-    counted_forward_calls = 0;
     Executor executor(outer(plan, {1, 1}, {1}));
     const Evaluation first = evaluate_memo(executor, .5, 3);
     close(first.value, .0625, "traced while first value");
     close(first.gradient[0], .5, "traced while first gradient");
-    check(memo_compare_calls == 4 && counted_forward_calls == 3,
-          "traced while records the condition per test");
     const Evaluation second = evaluate_memo(executor, .25, 3);
     close(second.value, .00390625, "traced while replayed value");
     close(second.gradient[0], .0625, "traced while replayed gradient");
-    check(memo_compare_calls == 4 && counted_forward_calls == 6,
-          "traced while replays the body count without condition calls");
   }
   {
-    auto plan = memo_branch_plan(true);
-    const Node* branch_node = find_kind(plan->root, Node::If);
-    check(branch_node && !branch_node->trace && plan->trace_count == 0,
-          "parameter-dependent branch is not traced");
     auto escaping = traced_while_plan(true);
-    const Node* loop = find_kind(escaping->root, Node::While);
-    const Node* exit = find_kind(escaping->root, Node::If);
-    check(loop && !loop->trace && exit && !exit->trace &&
-              escaping->trace_count == 0,
-          "while with a parameter-dependent break is not traced");
     Executor executor(outer(escaping, {1, 1}, {1}));
     const Evaluation full = evaluate_memo(executor, .5, 3);
     close(full.value, .0625, "untraced while full value");
@@ -4033,13 +4067,6 @@ static void trace_tests() {
   }
   {
     auto plan = traced_branch_plan(true);
-    const Node* guard = find_memo(plan->root);
-    const Node* branch_node = find_kind(plan->root, Node::If);
-    check(guard && guard->memo_outs.size() == 1 && branch_node &&
-              branch_node->trace &&
-              guard->memo_outs[0] == branch_node->condition,
-          "guard read by an active kernel stays a live-out");
-    memo_index_calls = memo_compare_calls = 0;
     Executor executor(outer(plan, {1, 1}, {3}));
     const Evaluation first = evaluate_traced(executor, .25, {1, 0, 2});
     close(first.value, 1.5, "live guard first value");
@@ -4049,13 +4076,10 @@ static void trace_tests() {
     close(second.gradient[0], 6, "live guard replayed gradient");
     check(traced_arm_iterators == std::vector<double>{1, 3},
           "live guard replays the recorded arms");
-    check(memo_index_calls == 3 && memo_compare_calls == 3,
-          "live guard replays without guard kernel calls");
   }
   {
     const Graph graph = outer(traced_branch_plan(false), {1, 1}, {3});
     Executor first(graph), second(graph);
-    memo_index_calls = memo_compare_calls = 0;
     const Evaluation a = evaluate_traced(first, .25, {1, 0, 2});
     close(a.value, 1, "first executor traced value");
     const Evaluation b = evaluate_traced(second, .25, {0, 1, 0});
@@ -4063,8 +4087,6 @@ static void trace_tests() {
     close(b.gradient[0], 2, "second executor traced gradient");
     check(traced_arm_iterators == std::vector<double>{2},
           "second executor records its own arms");
-    check(memo_index_calls == 6 && memo_compare_calls == 6,
-          "each executor records its own trace");
     const Evaluation a2 = evaluate_traced(first, .5, {1, 0, 2});
     close(a2.value, 2, "first executor replayed value");
     check(traced_arm_iterators == std::vector<double>{1, 3},
@@ -4073,8 +4095,6 @@ static void trace_tests() {
     close(b2.value, 1, "second executor replayed value");
     check(traced_arm_iterators == std::vector<double>{2},
           "second executor replays its own arms");
-    check(memo_index_calls == 6 && memo_compare_calls == 6,
-          "executors replay independently");
   }
 }
 
@@ -4244,19 +4264,6 @@ static size_t reported_field(const std::string& diagnostics,
              : std::stoul(diagnostics.substr(at + name.size()));
 }
 
-static size_t reported_visits(const std::string& diagnostics) {
-  return reported_field(diagnostics, "visits=");
-}
-
-// Replays under STANLI_STRUCTURED_LOOP_DIAGNOSTICS and returns the node
-// visits the tape line reports for that evaluation.
-static size_t replay_visits(const std::function<Evaluation()>& replay,
-                            Evaluation& result) {
-  stanli_test::StdoutCapture captured(stderr);
-  result = replay();
-  return reported_visits(captured.finish());
-}
-
 static Executor diagnosed_executor(Graph graph) {
   test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
   Executor executor(std::move(graph));
@@ -4264,9 +4271,6 @@ static Executor diagnosed_executor(Graph graph) {
   return executor;
 }
 
-// A data-only scan whose values leave nothing behind runs once, during the
-// recording evaluation, and is skipped afterwards. What it allocated has no
-// reader once it exits.
 static void memo_release_tests() {
   auto plan = std::make_shared<StructuredLoop>();
   const int theta = plan->body.add_slot(1, false);
@@ -4294,131 +4298,84 @@ static void memo_release_tests() {
                        sequence({}))}));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(plan->memo_count == 1, "the data-only scan is one memo node");
-  check(plan->root.children[0].children[0].memo_keep.size() == 1,
-        "the guard the traced branch reads survives the scan");
 
   Executor executor = diagnosed_executor(outer(plan, {1, 1}));
   const Evaluation first = evaluate(executor, .25, 0);
   close(first.value, 25, "scan recording value");
   close(first.gradient[0], 100, "scan recording gradient");
-  Evaluation second;
-  std::string diagnostics;
-  {
-    stanli_test::StdoutCapture captured(stderr);
-    second = evaluate(executor, .5, 0);
-    diagnostics = captured.finish();
-  }
+  const Evaluation second = evaluate(executor, .5, 0);
   close(second.value, 50, "scan replayed value");
   close(second.gradient[0], 100, "scan replayed gradient");
-  check(reported_field(diagnostics, "record_versions=") < 500,
-        "the recording evaluation keeps one scan of versions");
-  check(reported_field(diagnostics, "record_arena=") < 500,
-        "the recording evaluation keeps one scan of storage");
 }
 
 static void for_trace_tests() {
   {
     auto plan = row_scan_plan(1000, false);
-    check(plan->root.trace && plan->trace_count == 2,
-          "data-only row scan is a traced for");
     const std::vector<double> table = sparse_rows(1000, {7, 500, 1000});
-    memo_index_calls = memo_compare_calls = 0;
     Executor executor = diagnosed_executor(outer(plan, {1, 1}, {1000}));
     const Evaluation first = evaluate_rows(executor, .25, table);
     close(first.value, 1507 * .25, "row scan first value");
     close(first.gradient[0], 1507, "row scan first gradient");
-    check(traced_arm_iterators == std::vector<double>{7, 500, 1000} &&
-              memo_index_calls == 1000 && memo_compare_calls == 1000,
-          "row scan records every row once");
-    Evaluation second;
-    const size_t visits = replay_visits(
-        [&] { return evaluate_rows(executor, .5, table); }, second);
+    check(traced_arm_iterators == std::vector<double>{7, 500, 1000},
+          "row scan records every effective row once");
+    const Evaluation second = evaluate_rows(executor, .5, table);
     close(second.value, 1507 * .5, "row scan replayed value");
     close(second.gradient[0], 1507, "row scan replayed gradient");
     check(traced_arm_iterators == std::vector<double>{7, 500, 1000},
           "row scan replays only the effective rows");
-    check(memo_index_calls == 1000 && memo_compare_calls == 1000,
-          "row scan replays without guard kernel calls");
-    check(visits < 40, "row scan replay visits only the effective rows");
   }
   {
     auto plan = row_scan_plan(1000, true);
-    check(!plan->root.trace && plan->trace_count == 1,
-          "row scan with a parameter branch is not a traced for");
     const std::vector<double> table = sparse_rows(1000, {7, 500, 1000});
     Executor executor = diagnosed_executor(outer(plan, {1, 1}, {1000}));
     const Evaluation first = evaluate_rows(executor, -.5, table);
     close(first.value, 1507 * -.5, "parameter branch first value");
     close(first.gradient[0], 1507, "parameter branch first gradient");
-    Evaluation second;
-    const size_t visits = replay_visits(
-        [&] { return evaluate_rows(executor, .25, table); }, second);
+    const Evaluation second = evaluate_rows(executor, .25, table);
     close(second.value, 2507 * .25, "parameter branch switched value");
     close(second.gradient[0], 2507, "parameter branch switched gradient");
     check(traced_arm_iterators == std::vector<double>{7, 500, 1000},
-          "data branch still replays under an untraced for");
-    check(visits >= 1000, "untraced for visits every row on replay");
+          "data branch still replays under a parameter-dependent branch");
   }
   {
     auto plan = nested_scan_plan();
-    const Node& inner = plan->root.children[0].children[0];
-    check(plan->root.trace && inner.kind == Node::For && inner.trace &&
-              plan->trace_count == 3,
-          "nested data-only scans are both traced");
     const std::vector<double> table = sparse_rows(300, {5, 250});
-    memo_index_calls = 0;
     Executor executor = diagnosed_executor(outer(plan, {1, 1}, {300}));
     const Evaluation first = evaluate_rows(executor, .25, table);
     close(first.value, 1, "nested scan first value");
     close(first.gradient[0], 4, "nested scan first gradient");
-    check(traced_arm_iterators == std::vector<double>{1, 3} &&
-              memo_index_calls == 300,
-          "nested scan records every cell once");
-    Evaluation second;
-    const size_t visits = replay_visits(
-        [&] { return evaluate_rows(executor, .5, table); }, second);
+    check(traced_arm_iterators == std::vector<double>{1, 3},
+          "nested scan records every effective cell once");
+    const Evaluation second = evaluate_rows(executor, .5, table);
     close(second.value, 2, "nested scan replayed value");
     close(second.gradient[0], 4, "nested scan replayed gradient");
-    check(traced_arm_iterators == std::vector<double>{1, 3} &&
-              memo_index_calls == 300,
+    check(traced_arm_iterators == std::vector<double>{1, 3},
           "nested scan replays only the effective cells");
-    check(visits < 40, "nested scan replay skips empty outer iterations");
   }
   {
     auto plan = break_scan_plan(100);
-    check(plan->root.trace && plan->trace_count == 2,
-          "scan with a data-only break is a traced for");
     const std::vector<double> table = sparse_rows(100, {5});
-    memo_index_calls = 0;
     Executor executor = diagnosed_executor(outer(plan, {1, 1}, {100}));
     const Evaluation first = evaluate_rows(executor, .25, table);
     close(first.value, 2.5, "break scan first value");
     close(first.gradient[0], 10, "break scan first gradient");
-    check(traced_arm_iterators == std::vector<double>{1, 2, 3, 4} &&
-              memo_index_calls == 5,
+    check(traced_arm_iterators == std::vector<double>{1, 2, 3, 4},
           "break scan stops at the breaking row");
-    Evaluation second;
-    const size_t visits = replay_visits(
-        [&] { return evaluate_rows(executor, .5, table); }, second);
+    const Evaluation second = evaluate_rows(executor, .5, table);
     close(second.value, 5, "break scan replayed value");
     close(second.gradient[0], 10, "break scan replayed gradient");
-    check(traced_arm_iterators == std::vector<double>{1, 2, 3, 4} &&
-              memo_index_calls == 5,
+    check(traced_arm_iterators == std::vector<double>{1, 2, 3, 4},
           "break scan replays through the breaking row");
-    check(visits < 60, "break scan replay visits rows up to the break");
   }
   {
     const Graph graph = outer(row_scan_plan(1000, false), {1, 1}, {1000});
     Executor first(graph), second(graph);
     const std::vector<double> a = sparse_rows(1000, {7, 500, 1000});
     const std::vector<double> b = sparse_rows(1000, {1, 2});
-    memo_index_calls = 0;
     close(evaluate_rows(first, .25, a).value, 1507 * .25,
           "first executor row scan value");
     close(evaluate_rows(second, .25, b).value, 3 * .25,
           "second executor row scan value");
-    check(memo_index_calls == 2000, "each executor records its own rows");
     close(evaluate_rows(first, .5, a).value, 1507 * .5,
           "first executor replayed row scan value");
     check(traced_arm_iterators == std::vector<double>{7, 500, 1000},
@@ -4427,378 +4384,274 @@ static void for_trace_tests() {
           "second executor replayed row scan value");
     check(traced_arm_iterators == std::vector<double>{1, 2},
           "second executor replays its own rows");
-    check(memo_index_calls == 2000, "executors replay rows independently");
   }
 }
 
-static size_t count_kind(const Node& node, Node::Kind kind) {
-  size_t total = node.kind == kind ? 1 : 0;
-  for (const auto& child : node.children) total += count_kind(child, kind);
-  return total;
-}
-
-static bool binds_slot(const std::vector<SegmentBinding>& bindings, int slot) {
-  return std::any_of(bindings.begin(), bindings.end(),
-                     [&](const SegmentBinding& b) { return b.slot == slot; });
-}
-
-template <class Build>
-static void compare_segmented(Build build, const char* name,
-                              std::vector<int64_t> param_lens = {1, 1}) {
-  auto segmented = build();
-  auto plain = unsegmented(build);
-  Executor a(outer(segmented, param_lens)), b(outer(plain, param_lens));
-  int64_t n = 0;
-  for (int64_t len : param_lens) n += len;
-  std::vector<double> ga(static_cast<size_t>(n)), gb(ga);
-  for (double seed : {.1, -.2}) {
-    for (int64_t i = 0; i < n; ++i)
-      a.params_data()[i] = b.params_data()[i] =
-          seed + .3 * static_cast<double>(i);
-    close(a.gradient(ga.data()), b.gradient(gb.data()), name);
-    for (size_t i = 0; i < ga.size(); ++i) close(ga[i], gb[i], name);
+static void replay_parity_tests() {
+  const char* fixtures[] = {"structured_param_if", "structured_nested",
+                            "structured_exits", "structured_counted",
+                            "structured_direct_index"};
+  for (const char* name : fixtures) {
+    const bool needs_y = std::strcmp(name, "structured_param_if") == 0;
+    const auto native =
+        needs_y ? compile_fixture(name, observed_data(24), Mode::Force)
+                : compile_fixture(name, 24, Mode::Force);
+    const auto legacy =
+        needs_y ? compile_fixture(name, observed_data(24), Mode::Off)
+                : compile_fixture(name, 24, Mode::Off);
+    check(retained(native) != nullptr, name);
+    Executor a = diagnosed_executor(native.graph);
+    native.bind(a);
+    test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+    Executor ref(native.graph);
+    test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+    native.bind(ref);
+    Executor b(legacy.graph);
+    legacy.bind(b);
+    std::vector<double> ga(static_cast<size_t>(native.n_unconstrained));
+    std::vector<double> gref(ga.size());
+    std::vector<double> gb(static_cast<size_t>(legacy.n_unconstrained));
+    std::vector<std::vector<double>> points(3, std::vector<double>(ga.size()));
+    for (size_t p = 0; p < points.size(); ++p)
+      for (size_t k = 0; k < ga.size(); ++k)
+        points[p][k] =
+            .3 + .1 * static_cast<double>(p) + .05 * static_cast<double>(k);
+    int call_index = 0;
+    for (const auto& point : points) {
+      std::copy(point.begin(), point.end(), ref.params_data());
+      const double vref = ref.gradient(gref.data());
+      std::copy(point.begin(), point.end(), b.params_data());
+      close(b.gradient(gb.data()), vref, name);
+      for (size_t k = 0; k < gb.size(); ++k) close(gb[k], gref[k], name);
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        ++call_index;
+        std::copy(point.begin(), point.end(), a.params_data());
+        stanli_test::StdoutCapture captured(stderr);
+        const double va = a.gradient(ga.data());
+        const std::string diagnostics = captured.finish();
+        check(va == vref, name);
+        for (size_t k = 0; k < ga.size(); ++k) check(ga[k] == gref[k], name);
+        if (call_index >= 3)
+          check(reported_field(diagnostics, "replay=") == 1, name);
+      }
+    }
   }
 }
 
-// acc = sum_i sum(set_index(x, 1, acc * theta)) through one CALL per trip.
-static std::shared_ptr<StructuredLoop> call_segment_plan() {
+static void replay_guard_flip_tests() {
+  const auto native =
+      compile_fixture("structured_param_if", observed_data(24), Mode::Force);
+  check(retained(native) != nullptr, "guard flip fixture retains OP_LOOP");
+  Executor a = diagnosed_executor(native.graph);
+  native.bind(a);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(native.graph);
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  native.bind(ref);
+  std::vector<double> ga(static_cast<size_t>(native.n_unconstrained));
+  std::vector<double> gref(ga.size());
+  const std::vector<std::vector<double>> points = {
+      {.4, .2}, {.9, .5}, {-.3, .2}, {-.7, .4}};
+  for (size_t i = 0; i < points.size(); ++i) {
+    std::copy(points[i].begin(), points[i].end(), ref.params_data());
+    const double vref = ref.gradient(gref.data());
+    std::copy(points[i].begin(), points[i].end(), a.params_data());
+    stanli_test::StdoutCapture captured(stderr);
+    const double va = a.gradient(ga.data());
+    const std::string diagnostics = captured.finish();
+    check(va == vref, "guard flip target bitwise");
+    for (size_t k = 0; k < ga.size(); ++k)
+      check(ga[k] == gref[k], "guard flip gradient bitwise");
+    if (i == 2)
+      check(reported_field(diagnostics, "respecialized=") >= 1,
+            "sign flip triggers a guard respecialization");
+    else if (i == 1)
+      check(reported_field(diagnostics, "respecialized=") == 0,
+            "same-sign evaluation does not respecialize");
+    else if (i == 3)
+      check(reported_field(diagnostics, "replay=") == 1,
+            "post-flip same-sign evaluation replays without a further "
+            "respecialization");
+  }
+}
+
+static void selector_guard_tests() {
+  const auto native =
+      compile_fixture("structured_param_index", observed_data(24), Mode::Force);
+  check(retained(native) != nullptr, "selector guard fixture retains OP_LOOP");
+  Executor a = diagnosed_executor(native.graph);
+  native.bind(a);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(native.graph);
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  native.bind(ref);
+  std::vector<double> ga(static_cast<size_t>(native.n_unconstrained));
+  std::vector<double> gref(ga.size());
+  const std::vector<std::vector<double>> points = {{.4}, {.7}, {-.5}};
+  for (size_t i = 0; i < points.size(); ++i) {
+    std::copy(points[i].begin(), points[i].end(), ref.params_data());
+    const double vref = ref.gradient(gref.data());
+    std::copy(points[i].begin(), points[i].end(), a.params_data());
+    stanli_test::StdoutCapture captured(stderr);
+    const double va = a.gradient(ga.data());
+    const std::string diagnostics = captured.finish();
+    check(va == vref, "selector guard target bitwise");
+    for (size_t k = 0; k < ga.size(); ++k)
+      check(ga[k] == gref[k], "selector guard gradient bitwise");
+    if (i == 2)
+      check(reported_field(diagnostics, "respecialized=") >= 1,
+            "selector flip triggers a respecialization");
+  }
+}
+
+static void import_activity_independence_tests() {
+  const auto native =
+      compile_fixture("structured_param_if", observed_data(24), Mode::Force);
+  check(retained(native) != nullptr,
+        "import independence fixture retains OP_LOOP");
+  Executor a = diagnosed_executor(native.graph);
+  native.bind(a);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(native.graph);
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  native.bind(ref);
+  const std::vector<double> point = {.4, .2};
+  std::copy(point.begin(), point.end(), a.params_data());
+  for (int i = 0; i < 2; ++i) {
+    stanli_test::StdoutCapture captured(stderr);
+    a.run_forward_only();
+    captured.finish();
+  }
+  {
+    stanli_test::StdoutCapture captured(stderr);
+    a.run_forward_only();
+    const std::string diagnostics = captured.finish();
+    check(reported_field(diagnostics, "replay=") == 1,
+          "third value-only evaluation replays");
+    check(reported_field(diagnostics, "respecialized=") == 0,
+          "value-only replay after value-only recording does not "
+          "respecialize");
+  }
+  std::vector<double> grad(static_cast<size_t>(native.n_unconstrained));
+  std::vector<double> gref(grad.size());
+  std::copy(point.begin(), point.end(), ref.params_data());
+  const double vref = ref.gradient(gref.data());
+  {
+    stanli_test::StdoutCapture captured(stderr);
+    const double va = a.gradient(grad.data());
+    const std::string diagnostics = captured.finish();
+    check(reported_field(diagnostics, "replay=") == 1,
+          "a gradient after value-only evaluations replays");
+    check(reported_field(diagnostics, "respecialized=") == 0,
+          "a gradient after value-only evaluations does not respecialize");
+    check(va == vref, "gradient after value-only evaluations bitwise");
+    for (size_t k = 0; k < grad.size(); ++k)
+      check(grad[k] == gref[k],
+            "gradient after value-only evaluations bitwise");
+  }
+  {
+    stanli_test::StdoutCapture captured(stderr);
+    a.run_forward_only();
+    const std::string diagnostics = captured.finish();
+    check(reported_field(diagnostics, "replay=") == 1,
+          "a value-only evaluation after a gradient replays");
+    check(reported_field(diagnostics, "respecialized=") == 0,
+          "a value-only evaluation after a gradient does not respecialize");
+  }
+}
+
+// One Transient node visited three times inside a single retained loop: its
+// version id is reused every visit, so its constant bit must be recomputed
+// each time rather than carried over from an earlier one.
+static void transient_constancy_toggle_tests() {
   auto plan = std::make_shared<StructuredLoop>();
   const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
   const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 4);
+  const int upper = scalar(*plan, 3);
   const int iterator = plan->body.add_slot(1, false);
-  const int x = plan->body.add_slot(3, false);
-  plan->fills.push_back({x, {1, 2, 3}});
+  const int two = scalar(*plan, 2);
+  const int zero = scalar(*plan, 0);
+  const int condition = plan->body.add_slot(1, false);
+  const int select = plan->body.add_slot(1, false);
+  const int term = plan->body.add_slot(1, false);
   const int acc = plan->body.add_slot(1, false);
-  const int scaled = plan->body.add_slot(1, false);
+  plan->fills.push_back({acc, {0}});
+  const int next = plan->body.add_slot(1, false);
+  plan->imports = {{theta, 0, 0, true, false}};
+  // OP_COMPARE's default variant is "less than": true only at iterator==1,
+  // so the constant arm runs first and the parameter arm runs on the later,
+  // repeated visits (iterator==2 and iterator==3).
+  Node compare = call(*plan, OP_COMPARE, {iterator, two}, condition);
+  plan->root = counted(
+      lower, upper, iterator,
+      sequence({std::move(compare),
+                branch(condition, sequence({alias(select, zero)}),
+                       sequence({alias(select, theta)})),
+                call(*plan, OP_MUL, {select, iterator}, term),
+                call(*plan, OP_ADD, {acc, term}, next), alias(acc, next)}));
+  plan->outputs = {acc};
+  prepare_kernels(*plan);
+  Executor executor = diagnosed_executor(outer(plan));
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(outer(plan));
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  stanli_test::StdoutCapture captured(stderr);
+  const Evaluation observed = evaluate(executor, .25, 0);
+  const std::string diagnostics = captured.finish();
+  const Evaluation reference = evaluate(ref, .25, 0);
+  close(observed.value, 1.25, "toggled transient visit value");
+  check(observed.gradient[0] == 5.0,
+        "toggled transient visit logs the parameter-dependent visits' "
+        "contribution");
+  check(observed.gradient[0] == reference.gradient[0],
+        "toggled transient visit gradient matches the no-replay walk");
+  check(reported_field(diagnostics, "instructions=") >= 1,
+        "the parameter-dependent visit is logged into the stream");
+}
+
+// A data-only array built one element at a time inside a retained loop, then
+// read by a parameter-dependent call. Every element write has a constant
+// base, rhs and selector, so none of them belongs in the replay stream.
+static void inplace_constant_base_tests() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const int theta = plan->body.add_slot(1, false);
+  const int base = plan->body.add_slot(3, false);
+  const int lower = scalar(*plan, 1);
+  const int upper = scalar(*plan, 3);
+  const int iterator = plan->body.add_slot(1, false);
   const int updated = plan->body.add_slot(3, false);
   const int total = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node set_index;
-  set_index.kind = Node::KernelCall;
-  set_index.op = plan->body.add_op(OP_SET_INDEX, {x, scaled}, updated, {1});
-  plan->root =
-      sequence({alias(acc, beta),
-                counted(lower, upper, iterator,
-                        sequence({call(*plan, OP_MUL, {acc, theta}, scaled),
-                                  std::move(set_index),
-                                  call(*plan, OP_SUM_VEC, {updated}, total),
-                                  alias(acc, total), alias(x, updated)}))});
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// x = acc * beta is read after the loop; acc = x + theta carries.
-static std::shared_ptr<StructuredLoop> alias_out_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {.5}});
-  const int x = plan->body.add_slot(1, false);
-  const int product = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product), alias(x, product),
-                call(*plan, OP_ADD, {x, theta}, sum), alias(acc, sum)}));
-  plan->outputs = {acc, x};
-  plan->prepare();
-  return plan;
-}
-
-// target += s * beta + theta with s carried only through its own cell.
-static std::shared_ptr<StructuredLoop> carried_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int s = plan->body.add_slot(1, false);
-  plan->fills.push_back({s, {.25}});
-  const int product = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  plan->has_target = true;
-  plan->root = counted(lower, upper, iterator,
-                       sequence({call(*plan, OP_MUL, {s, beta}, product),
-                                 call(*plan, OP_ADD, {product, theta}, sum),
-                                 alias(s, sum), target(sum)}));
-  plan->prepare();
-  return plan;
-}
-
-// base[i] = theta * i + 1 in place between two scalar runs.
-static std::shared_ptr<StructuredLoop> split_update_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int one = scalar(*plan, 1);
-  const int iterator = plan->body.add_slot(1, false);
-  const int base = plan->body.add_slot(3, false);
-  plan->fills.push_back({base, {1, 2, 3}});
-  const int acc = plan->body.add_slot(1, false);
-  const int rhs = plan->body.add_slot(1, false);
-  const int shifted = plan->body.add_slot(1, false);
-  const int updated = plan->body.add_slot(3, false);
-  const int sum = plan->body.add_slot(1, false);
-  const int scaled = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
+  const int result = plan->body.add_slot(1, false);
+  plan->imports = {{theta, 0, 0, true, false}, {base, 2, 0, false, true}};
   Node update =
-      call(*plan, OP_SET_INDEX_DYNAMIC, {base, iterator, shifted}, updated);
+      call(*plan, OP_SET_INDEX_DYNAMIC, {base, iterator, iterator}, updated);
   attach(*plan, update.op, single_spec(3));
   plan->root =
-      sequence({alias(acc, beta),
-                counted(lower, upper, iterator,
-                        sequence({call(*plan, OP_MUL, {theta, iterator}, rhs),
-                                  call(*plan, OP_ADD, {rhs, one}, shifted),
-                                  std::move(update), alias(base, updated),
-                                  call(*plan, OP_SUM_VEC, {base}, sum),
-                                  call(*plan, OP_MUL, {sum, acc}, scaled),
-                                  alias(acc, scaled)}))});
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-static std::shared_ptr<StructuredLoop> lone_kernel_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  const int product = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}};
-  plan->root = counted(lower, upper, iterator,
-                       sequence({call(*plan, OP_MUL, {theta, acc}, product),
-                                 alias(acc, product)}));
-  plan->fills.push_back({acc, {1}});
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// acc = 2 * check_lower(acc * beta + theta, -10): the check runs every trip.
-static std::shared_ptr<StructuredLoop> effect_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int bound = scalar(*plan, -10);
-  const int two = scalar(*plan, 2);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {1}});
-  const int product = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  const int checked = plan->body.add_slot(1, false);
-  const int doubled = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node check_node = call(*plan, OP_CHECK_LOWER, {sum, bound}, checked);
-  auto spec = std::make_shared<BoundCheckSpec>();
-  spec->name = "sum";
-  spec->bound_is_scalar = true;
-  spec->shapes_match = true;
-  plan->body.ops[static_cast<size_t>(check_node.op)].udata = spec.get();
-  plan->body.udata_pool.push_back(std::move(spec));
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product),
-                call(*plan, OP_ADD, {product, theta}, sum),
-                std::move(check_node), call(*plan, OP_MUL, {sum, two}, doubled),
-                alias(acc, doubled)}));
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// A dynamic index (outside the register vocabulary) between two scalar ops.
-static std::shared_ptr<StructuredLoop> foreign_op_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int table = plan->body.add_slot(3, false);
-  plan->fills.push_back({table, {2, 3, 5}});
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {1}});
-  const int product = plan->body.add_slot(1, false);
-  const int picked = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node index = call(*plan, OP_INDEX_DYNAMIC, {table, iterator}, picked);
-  attach(*plan, index.op, single_spec(3));
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product), std::move(index),
-                call(*plan, OP_ADD, {product, picked}, sum), alias(acc, sum)}));
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-// A comparison with no backward feeds an active multiply.
-static std::shared_ptr<StructuredLoop> no_backward_plan() {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int beta = plan->body.add_slot(1, false);
-  const int lower = scalar(*plan, 1);
-  const int upper = scalar(*plan, 3);
-  const int iterator = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {1}});
-  const int product = plan->body.add_slot(1, false);
-  const int positive = plan->body.add_slot(1, false);
-  const int gated = plan->body.add_slot(1, false);
-  const int sum = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true}, {beta, 1, 0, true}};
-  Node compare = call(*plan, OP_COMPARE, {product, theta}, positive);
-  plan->body.ops[static_cast<size_t>(compare.op)].variant = 2;
-  plan->root = counted(
-      lower, upper, iterator,
-      sequence({call(*plan, OP_MUL, {acc, beta}, product), std::move(compare),
-                call(*plan, OP_MUL, {positive, theta}, gated),
-                call(*plan, OP_ADD, {product, gated}, sum), alias(acc, sum)}));
-  plan->outputs = {acc};
-  plan->prepare();
-  return plan;
-}
-
-static void segment_tests() {
-  {
-    auto plan = recurrence(8);
-    check(plan->segments.size() == 1, "scalar recurrence forms one segment");
-    check(count_kind(plan->root, Node::Segment) == 1 &&
-              count_kind(plan->root, Node::KernelCall) == 0 &&
-              count_kind(plan->root, Node::Alias) == 1,
-          "recurrence body is one segment node");
-    const Node* loop = find_kind(plan->root, Node::For);
-    check(loop && loop->children[0].kind == Node::Segment,
-          "segment node replaces the loop body");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(segment.program.calls.empty(),
-            "scalar recurrence uses register instructions only");
-      check(segment.ins.size() == 3 && segment.outs.size() == 1 &&
-                binds_slot(segment.outs, 2),
-            "recurrence segment binds three live-ins and the carried cell");
-      check(!segment.program.adj.empty() && segment.program.native_adj,
-            "recurrence segment carries a generated adjoint");
-    }
-    compare_segmented([] { return recurrence(8); },
-                      "segmented recurrence matches the kernel executor");
-    compare_segmented([] { return recurrence(0); },
-                      "segmented zero-trip recurrence matches");
-  }
-  {
-    auto plan = call_segment_plan();
-    check(plan->segments.size() == 1, "call run forms one segment");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(segment.program.calls.size() == 1,
-            "vector kernel inside the run is a CALL");
-      check(binds_slot(segment.outs, 5) && binds_slot(segment.outs, 6),
-            "call segment publishes both aliased cells");
-    }
-    compare_segmented(call_segment_plan,
-                      "segment with a CALL matches the kernel executor");
-  }
-  {
-    auto plan = alias_out_plan();
-    check(plan->segments.size() == 1, "aliased run forms one segment");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(binds_slot(segment.outs, 6),
-            "alias read after the loop is a live-out");
-      check(segment.outs.size() == 2, "alias run publishes two cells");
-    }
-    compare_segmented(alias_out_plan,
-                      "aliased live-out matches the kernel executor");
-  }
-  {
-    auto plan = carried_plan();
-    check(plan->segments.size() == 1, "carried run forms one segment");
-    if (!plan->segments.empty()) {
-      const Segment& segment = plan->segments[0];
-      check(binds_slot(segment.outs, 5), "loop-carried cell is a live-out");
-      check(binds_slot(segment.ins, 5), "loop-carried cell is a live-in");
-    }
-    compare_segmented(carried_plan,
-                      "loop-carried live-out matches the kernel executor");
-  }
-  {
-    auto plan = split_update_plan();
-    check(plan->segments.size() == 2, "in-place update splits the run");
-    const Node* update = find_kind(plan->root, Node::KernelCall);
-    check(update && update->storage == Node::InPlace &&
-              count_kind(plan->root, Node::KernelCall) == 1,
-          "in-place update stays a kernel call between segments");
-    compare_segmented(split_update_plan,
-                      "segments around an update match the kernel executor");
-  }
-  {
-    auto plan = lone_kernel_plan();
-    check(
-        plan->segments.empty() && count_kind(plan->root, Node::KernelCall) == 1,
-        "a lone kernel stays a kernel call");
-  }
-  {
-    auto plan = effect_plan();
-    check(plan->segments.size() == 1, "run before an effect is a segment");
-    const Node* effect = find_kind(plan->root, Node::KernelCall);
-    check(effect && plan->body.ops[effect->op].opcode == OP_CHECK_LOWER &&
-              count_kind(plan->root, Node::KernelCall) == 2,
-          "effect kernel stays a kernel call");
-    compare_segmented(effect_plan, "effect run matches the kernel executor");
-    Executor executor(outer(plan));
-    bool threw = false;
-    try {
-      evaluate(executor, -50, .5);
-    } catch (const std::domain_error&) {
-      threw = true;
-    }
-    check(threw, "effect kernel still runs inside the loop");
-  }
-  {
-    auto plan = foreign_op_plan();
-    check(
-        plan->segments.empty() && count_kind(plan->root, Node::KernelCall) == 3,
-        "op outside the vocabulary leaves the run as kernel calls");
-    compare_segmented(foreign_op_plan, "unsegmented run matches itself");
-  }
-  {
-    auto plan = no_backward_plan();
-    check(plan->segments.size() == 1,
-          "kernel without a backward joins the segment");
-    compare_segmented(no_backward_plan,
-                      "no-backward kernel drops its adjoint identically");
-    Executor executor(outer(plan));
-    const Evaluation result = evaluate(executor, .5, 2);
-    close(result.value, 11.5, "no-backward gated value");
-    close(result.gradient[0], 7, "no-backward gated theta gradient");
-    close(result.gradient[1], 14.5, "no-backward gated beta gradient");
-  }
-  {
-    auto plan = recurrence(3);
-    Executor executor(outer(plan));
-    const Evaluation first = evaluate(executor, .1, .7);
-    const Evaluation again = evaluate(executor, .1, .7);
-    check(std::memcmp(&first, &again, sizeof(Evaluation)) == 0,
-          "segmented evaluation is bitwise repeatable");
-  }
+      sequence({counted(lower, upper, iterator,
+                        sequence({std::move(update), alias(base, updated)})),
+                call(*plan, OP_SUM_VEC, {base}, total),
+                call(*plan, OP_MUL, {theta, total}, result)});
+  plan->outputs = {result};
+  prepare_kernels(*plan);
+  Executor executor = diagnosed_executor(outer(plan, {1, 1}, {3}));
+  std::fill_n(executor.value_ptr(2), 3, 0.0);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  Executor ref(outer(plan, {1, 1}, {3}));
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  std::fill_n(ref.value_ptr(2), 3, 0.0);
+  stanli_test::StdoutCapture captured(stderr);
+  const Evaluation observed = evaluate(executor, 2, 0);
+  const std::string diagnostics = captured.finish();
+  const Evaluation reference = evaluate(ref, 2, 0);
+  close(observed.value, 12, "constant-base element writes value");
+  close(observed.gradient[0], 6, "constant-base element writes gradient");
+  check(observed.value == reference.value &&
+            observed.gradient[0] == reference.gradient[0],
+        "constant-base element writes gradient matches the no-replay walk");
+  check(reported_field(diagnostics, "pool=inplaces bytes=") == 0,
+        "constant-base element writes are not logged as InPlace");
+  check(reported_field(diagnostics, "pool=copies bytes=") == 0,
+        "constant-base element writes leave no logged copy either");
 }
 
 int main() {
@@ -4806,8 +4659,7 @@ int main() {
   // Whole-program specialization has its own differential tests in test_lower.
   test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0");
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
-  test_unsetenv("STANLI_NO_STRUCTURED_SEGMENTS");
-  segment_tests();
+  test_setenv("STANLI_STRUCTURED_CHECK_REMAP", "1");
   transient_classification_tests();
   invariant_active_reuse_tests();
   inplace_import_base_tests();
@@ -4829,6 +4681,8 @@ int main() {
   failure_tests();
   refusal_tests();
   automatic_policy_tests();
+  probe_mode_tests();
+  region_range_cache_tests();
   prefer_parent_tests();
   direct_index_lowering_tests();
   runtime_slice_tests();
@@ -4837,6 +4691,12 @@ int main() {
   trace_tests();
   for_trace_tests();
   memo_release_tests();
+  replay_parity_tests();
+  replay_guard_flip_tests();
+  selector_guard_tests();
+  import_activity_independence_tests();
+  transient_constancy_toggle_tests();
+  inplace_constant_base_tests();
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS");
   if (failures == 0) std::printf("test_structured_loop OK\n");

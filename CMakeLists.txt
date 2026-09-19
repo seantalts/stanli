@@ -941,6 +941,13 @@ target_link_libraries(bench_ode_ceiling PRIVATE stanli)
 add_executable(bench_ode_cvodes_ceiling EXCLUDE_FROM_ALL
   tools/bench_ode_cvodes_ceiling.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_ode_cvodes_ceiling PRIVATE stanli)
+# Developer-only bridge for tools/matrix_pullback_hp_check.py: dumps the
+# pre-native nested-tape adjoint and the native kernel's adjoint for
+# matrix_exp and the solve kernels so they can both be checked against an
+# arbitrary-precision reference.
+add_executable(hp_adjoint_dump EXCLUDE_FROM_ALL
+  tools/hp_adjoint_dump.cpp tests/tbb_stub.cpp)
+target_link_libraries(hp_adjoint_dump PRIVATE stanli)
 add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)

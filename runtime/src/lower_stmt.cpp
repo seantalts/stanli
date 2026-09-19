@@ -1254,6 +1254,44 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
     case mir::Stmt::SList: {
       if (!write_array_known_static && in_write_array &&
           needs_runtime_control(s)) {
+        const auto saved_scope = scope;
+        const auto saved_decls = decls;
+        const auto saved_int_env = int_env;
+        const auto saved_int_locals = int_locals;
+        const auto saved_td_env = td.env();
+        const auto saved_n_tp_start = n_tp_start;
+        const auto saved_n_gq_start = n_gq_start;
+        const auto saved_out = out;
+        const auto saved_int_ranges = int_ranges;
+        const auto saved_real_ranges = real_ranges;
+        const size_t saved_ops = g.ops.size();
+        const size_t saved_slots = g.slots.size();
+        const size_t saved_idata = g.idata_pool.size();
+        const bool outer_known_static = write_array_known_static;
+        write_array_known_static = true;
+        bool ok = true;
+        try {
+          for (const auto& k : s.body) lower_stmt(k);
+        } catch (const CompileError&) {
+          ok = false;
+        } catch (const std::logic_error&) {
+          ok = false;
+        }
+        write_array_known_static = outer_known_static;
+        if (ok) return;
+        scope = saved_scope;
+        decls = saved_decls;
+        int_env = saved_int_env;
+        int_locals = saved_int_locals;
+        td.env() = saved_td_env;
+        n_tp_start = saved_n_tp_start;
+        n_gq_start = saved_n_gq_start;
+        out = saved_out;
+        int_ranges = saved_int_ranges;
+        real_ranges = saved_real_ranges;
+        g.ops.resize(saved_ops);
+        g.slots.resize(saved_slots);
+        g.idata_pool.resize(saved_idata);
         lower_runtime_ifelse(s);
         return;
       }
@@ -1527,6 +1565,11 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         return;
       }
       if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi})) return;
+      if (in_write_array && structured_policy != StructuredMode::Off &&
+          region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi})) {
+        lower_runtime_ifelse(s);
+        return;
+      }
       // runtime_loop_control evaluates data-only conditions while looking
       // for a parameter-selected break/continue. Scan under the same loop
       // binding that ordinary unrolling will use: without it, an indexed

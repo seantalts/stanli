@@ -232,13 +232,22 @@ void matrix_exp_fwd(KernelCtx& ctx) {
   MapM(ctx.out.data, n, n) =
       stan::math::matrix_exp(CMapM(ctx.in[0].data, n, n));
 }
-void matrix_exp_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0];
-  nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    return stan::math::matrix_exp(a);
-  });
+void matrix_exp_bwd_n(KernelCtx& ctx, int64_t n) {
+  if (!ctx.in_adj[0].data || n == 0) return;
+  const CMapM a(ctx.in[0].data, n, n);
+  const CMapM g(ctx.out_adj_vec.data, n, n);
+  const MatD at = a.transpose();
+  const double anorm = at.cwiseAbs().colwise().sum().maxCoeff();
+  const double gnorm = g.cwiseAbs().colwise().sum().maxCoeff();
+  const double scale = gnorm > 0 ? gnorm / std::max(anorm, 1.0) : 1.0;
+  MatD block = MatD::Zero(2 * n, 2 * n);
+  block.topLeftCorner(n, n) = at;
+  block.bottomRightCorner(n, n) = at;
+  block.topRightCorner(n, n) = g / scale;
+  const MatD e = stan::math::matrix_exp(block);
+  MapM(ctx.in_adj[0].data, n, n) += e.topRightCorner(n, n) * scale;
 }
+void matrix_exp_bwd(KernelCtx& ctx) { matrix_exp_bwd_n(ctx, ctx.idata[0]); }
 int64_t dynamic_square_extent(const KernelCtx& ctx) {
   if (ctx.n_in != 2 || ctx.in[1].len != 1)
     throw std::logic_error("dynamic matrix_exp extent is not scalar");
@@ -259,11 +268,7 @@ void matrix_exp_dynamic_fwd(KernelCtx& ctx) {
 }
 void matrix_exp_dynamic_bwd(KernelCtx& ctx) {
   const int64_t n = dynamic_square_extent(ctx);
-  if (n == 0) return;
-  nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    return stan::math::matrix_exp(a);
-  });
+  matrix_exp_bwd_n(ctx, n);
 }
 
 // ---- inverse / inverse_spd / log_determinant -----------------------------
@@ -339,20 +344,26 @@ void qf_fwd(KernelCtx& ctx) {
   const MatD c = b.transpose() * a * b;
   ctx.out.data[0] = c(0, 0);
 }
-void qf_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0], m = ctx.idata[1];
-  if (ctx.variant & 1u) {
-    nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-      Eigen::Map<VarM> a(xs[0].data(), n, n);
-      return stan::math::quad_form(a, xs[1]);
-    });
-    return;
+void qf_bwd_impl(KernelCtx& ctx, int64_t n, int64_t m, bool vec) {
+  if (!ctx.in_adj[0].data && !ctx.in_adj[1].data) return;
+  const CMapM a(ctx.in[0].data, n, n);
+  const CMapM b(ctx.in[1].data, n, m);
+  MatD g(m, m);
+  if (vec) {
+    g(0, 0) = ctx.out_adj;
+  } else {
+    g = CMapM(ctx.out_adj_vec.data, m, m);
   }
-  nary_bwd(ctx, [n, m](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    Eigen::Map<VarM> b(xs[1].data(), n, m);
-    return stan::math::quad_form(a, b);
-  });
+  if (ctx.in_adj[0].data)
+    MapM(ctx.in_adj[0].data, n, n) += b * g * b.transpose();
+  if (ctx.in_adj[1].data)
+    MapM(ctx.in_adj[1].data, n, m) +=
+        a * b * g.transpose() + a.transpose() * b * g;
+}
+void qf_bwd(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0];
+  const bool vec = ctx.variant & 1u;
+  qf_bwd_impl(ctx, n, vec ? 1 : ctx.idata[1], vec);
 }
 
 // ---- add_diag(A, d) -------------------------------------------------------
@@ -419,21 +430,9 @@ void qfs_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = c(0, 0);
 }
 void qfs_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0], m = ctx.idata[1];
-  // The rev overload is the one CmdStan reaches at either shape, so the
-  // replay needs no variant beyond the operand shape itself.
-  if (ctx.variant & 1u) {
-    nary_bwd(ctx, [n](std::vector<VarV>& xs) {
-      Eigen::Map<VarM> a(xs[0].data(), n, n);
-      return stan::math::quad_form_sym(a, xs[1]);
-    });
-    return;
-  }
-  nary_bwd(ctx, [n, m](std::vector<VarV>& xs) {
-    Eigen::Map<VarM> a(xs[0].data(), n, n);
-    Eigen::Map<VarM> b(xs[1].data(), n, m);
-    return stan::math::quad_form_sym(a, b);
-  });
+  const int64_t n = ctx.idata[0];
+  const bool vec = ctx.variant & 1u;
+  qf_bwd_impl(ctx, n, vec ? 1 : ctx.idata[1], vec);
 }
 
 // Bind a slot as a var matrix or vector, and scatter the adjoints back
@@ -987,13 +986,12 @@ using Dividend = std::conditional_t<
     !Vec, Eigen::Matrix<T, -1, -1>,
     std::conditional_t<Left, Eigen::Matrix<T, -1, 1>, Eigen::Matrix<T, 1, -1>>>;
 
-// Replay the exact operand scalar types on a nested tape, write the value out,
-// and -- when the caller wants gradients -- seed the output adjoints and
-// scatter back. The mixed stan-math overloads are numerically distinct from
-// promoting their data operand to var, so the two activity flags are template
-// parameters rather than a single result-active flag.
+// Replay the exact operand scalar types on a nested tape and write the
+// value out. The mixed stan-math overloads are numerically distinct from
+// promoting their data operand to var, so the two activity flags are
+// template parameters rather than a single result-active flag.
 template <bool Left, SolveKind Kind, bool DivisorVar, bool DividendVar,
-          bool Vec, bool Grad>
+          bool Vec>
 void solve_var(KernelCtx& ctx) {
   using stan::math::var;
   static_assert(DivisorVar || DividendVar);
@@ -1010,25 +1008,67 @@ void solve_var(KernelCtx& ctx) {
   auto out = solve_at<Left, Kind>(a, b);
   for (Eigen::Index i = 0; i < out.size(); ++i)
     ctx.out.data[i] = out.data()[i].val();
-  if constexpr (Grad) {
-    // Seeding through stan-math ops rather than by copying keeps the tape
-    // connection, the same reason nary_bwd above does it this way.
-    MatD seed(out.rows(), out.cols());
-    for (Eigen::Index i = 0; i < out.size(); ++i)
-      seed.data()[i] = ctx.out_adj_vec.data[i];
-    var j = stan::math::sum(stan::math::elt_multiply(out, seed));
-    stan::math::grad(j.vi_);
-    if constexpr (DivisorVar) {
-      if (ctx.in_adj[ai].data)
-        for (int64_t i = 0; i < n * n; ++i)
-          ctx.in_adj[ai].data[i] += a.data()[i].adj();
+}
+
+template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower>
+void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
+                  bool dividend_var, MatD* adj_a, MatD* adj_b) {
+  if constexpr (Kind == SolveKind::Spd) {
+    const Eigen::LLT<MatD> fac(a);
+    if (dividend_var) {
+      const MatD y = fac.solve(g);
+      if (adj_b) *adj_b += y;
+      if (divisor_var) *adj_a -= y * x.transpose();
+    } else if (divisor_var) {
+      *adj_a -= fac.solve(MatD(g * x.transpose()));
     }
-    if constexpr (DividendVar) {
-      if (ctx.in_adj[bi].data)
-        for (int64_t i = 0; i < br * bc; ++i)
-          ctx.in_adj[bi].data[i] += b.data()[i].adj();
+  } else if constexpr (Kind == SolveKind::TriLow) {
+    const auto tri = a.template triangularView<Tri>();
+    if (dividend_var) {
+      const MatD y = tri.transpose().solve(g);
+      if (adj_b) *adj_b += y;
+      if (divisor_var) {
+        MatD full = MatD::Zero(a.rows(), a.cols());
+        full.template triangularView<Tri>() = -(y * x.transpose());
+        *adj_a += full;
+      }
+    } else if (divisor_var) {
+      MatD full = MatD::Zero(a.rows(), a.cols());
+      full.template triangularView<Tri>() =
+          -MatD(tri.transpose().solve(MatD(g * x.transpose())));
+      *adj_a += full;
+    }
+  } else {
+    const Eigen::HouseholderQR<MatD> qr(a);
+    const MatD y =
+        qr.householderQ() * MatD(qr.matrixQR()
+                                     .template triangularView<Eigen::Upper>()
+                                     .transpose()
+                                     .solve(g));
+    if (dividend_var && adj_b) *adj_b += y;
+    if (divisor_var) *adj_a -= y * x.transpose();
+  }
+}
+
+template <SolveKind Kind>
+void right_adjoint(const MatD& a, const MatD& x, const MatD& g,
+                   bool divisor_var, bool dividend_var, MatD* adj_a,
+                   MatD* adj_b) {
+  constexpr Eigen::UpLoType kFlipped =
+      Kind == SolveKind::TriLow ? Eigen::Upper : Eigen::Lower;
+  MatD adj_a_t = MatD::Zero(a.cols(), a.rows());
+  MatD adj_b_t = MatD::Zero(x.cols(), x.rows());
+  left_adjoint<Kind, kFlipped>(
+      a.transpose(), x.transpose(), g.transpose(), divisor_var, dividend_var,
+      divisor_var ? &adj_a_t : nullptr, dividend_var ? &adj_b_t : nullptr);
+  if (divisor_var) {
+    if constexpr (Kind == SolveKind::Spd) {
+      *adj_a += adj_a_t;
+    } else {
+      *adj_a += adj_a_t.transpose();
     }
   }
+  if (dividend_var) *adj_b += adj_b_t.transpose();
 }
 
 template <bool Left, SolveKind Kind, bool Vec>
@@ -1050,16 +1090,16 @@ void solve_active_fwd(KernelCtx& ctx, bool vec) {
   // for an in-memory graph built by an older caller.
   switch ((ctx.variant >> 2u) & 3u) {
     case 1u:
-      vec ? solve_var<Left, Kind, true, false, true, false>(ctx)
-          : solve_var<Left, Kind, true, false, false, false>(ctx);
+      vec ? solve_var<Left, Kind, true, false, true>(ctx)
+          : solve_var<Left, Kind, true, false, false>(ctx);
       return;
     case 2u:
-      vec ? solve_var<Left, Kind, false, true, true, false>(ctx)
-          : solve_var<Left, Kind, false, true, false, false>(ctx);
+      vec ? solve_var<Left, Kind, false, true, true>(ctx)
+          : solve_var<Left, Kind, false, true, false>(ctx);
       return;
     default:
-      vec ? solve_var<Left, Kind, true, true, true, false>(ctx)
-          : solve_var<Left, Kind, true, true, false, false>(ctx);
+      vec ? solve_var<Left, Kind, true, true, true>(ctx)
+          : solve_var<Left, Kind, true, true, false>(ctx);
       return;
   }
 }
@@ -1082,22 +1122,38 @@ void solve_fwd(KernelCtx& ctx) {
 
 template <bool Left, SolveKind Kind = SolveKind::Plain>
 void solve_bwd(KernelCtx& ctx) {
-  const bool vec = (ctx.variant & 2u) != 0;
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
+  const int64_t br = Left ? n : k, bc = Left ? k : n;
+  bool divisor_var = true, dividend_var = true;
   switch ((ctx.variant >> 2u) & 3u) {
     case 1u:
-      vec ? solve_var<Left, Kind, true, false, true, true>(ctx)
-          : solve_var<Left, Kind, true, false, false, true>(ctx);
-      return;
+      dividend_var = false;
+      break;
     case 2u:
-      vec ? solve_var<Left, Kind, false, true, true, true>(ctx)
-          : solve_var<Left, Kind, false, true, false, true>(ctx);
-      return;
+      divisor_var = false;
+      break;
     default:
-      // Includes the legacy active encoding with neither detail bit set.
-      vec ? solve_var<Left, Kind, true, true, true, true>(ctx)
-          : solve_var<Left, Kind, true, true, false, true>(ctx);
-      return;
+      break;
   }
+  const CMapM a(ctx.in[ai].data, n, n);
+  const CMapM x(ctx.out.data, br, bc);
+  const CMapM g(ctx.out_adj_vec.data, br, bc);
+  MatD adj_a = MatD::Zero(n, n);
+  MatD adj_b = MatD::Zero(br, bc);
+  if constexpr (Left) {
+    left_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
+                       divisor_var ? &adj_a : nullptr,
+                       dividend_var ? &adj_b : nullptr);
+  } else {
+    right_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
+                        divisor_var ? &adj_a : nullptr,
+                        dividend_var ? &adj_b : nullptr);
+  }
+  if (divisor_var && ctx.in_adj[ai].data)
+    MapM(ctx.in_adj[ai].data, n, n) += adj_a;
+  if (dividend_var && ctx.in_adj[bi].data)
+    MapM(ctx.in_adj[bi].data, br, bc) += adj_b;
 }
 
 // ---- lkj_corr_cholesky_lpdf(L | eta) --------------------------------------

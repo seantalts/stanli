@@ -116,11 +116,22 @@ class MirInterp {
     return it == env_.end() ? nullptr : &it->second;
   }
 
+  void set_probe(bool on) {
+    probe_ = on;
+    probe_failed_ = false;
+  }
+  bool probe_failed() const { return probe_failed_; }
+  void clear_probe_failed() const { probe_failed_ = false; }
+
   // Evaluate and coerce to a compile-time integer.
   long as_int(const mir::Expr& e) {
     Value v = eval(e);
     if (v.is_int && v.i.size() == 1) return v.i[0];
     if (v.r.size() == 1) return (long)val(v.r[0]);
+    if (probe_) {
+      probe_failed_ = true;
+      return 0;
+    }
     fail("expected int scalar", e.raw);
   }
 
@@ -209,6 +220,10 @@ class MirInterp {
           r.is_int = true;
           r.i = {(int)iv};
           r.r = {T((double)iv)};
+          return r;
+        }
+        if (probe_) {
+          probe_failed_ = true;
           return r;
         }
         fail("unknown variable " + e.name + " (type " + e.type_ + ")", e.raw);
@@ -1044,6 +1059,8 @@ class MirInterp {
   std::map<std::string, std::vector<int64_t>> decl_dims_;
   int udf_depth_ = 0;
   bool propto_ctx_ = true;
+  bool probe_ = false;
+  mutable bool probe_failed_ = false;
 
   [[noreturn]] void fail(const std::string& msg,
                          const std::string& raw = "") const {
@@ -1055,10 +1072,15 @@ class MirInterp {
   // std::out_of_range("vector"); check first so an out-of-range index
   // names the index and the extent instead.
   void bounds(long i, int64_t n, const mir::Expr& e) const {
-    if (i < 1 || i > n)
+    if (i < 1 || i > n) {
+      if (probe_) {
+        probe_failed_ = true;
+        return;
+      }
       fail("index " + std::to_string(i) + " out of bounds for size " +
                std::to_string(n),
            e.raw);
+    }
   }
 
   static double val(const T& x) { return stan::math::value_of(x); }
@@ -1383,6 +1405,7 @@ class MirInterp {
         base.dims.size() <= 1) {
       const long ix = as_int(e.args[1].args[0]);
       bounds(ix, (int64_t)base.r.size(), e);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
       if (base.is_int) r.i = {base.i.at(ix - 1)};
       r.r = {base.r.at(ix - 1)};
@@ -1397,6 +1420,7 @@ class MirInterp {
       const long i = as_int(e.args[1].args[0]);
       const int64_t R = base.dims[0], C = base.dims[1];
       bounds(i, R, e);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
       r.dims = {C};
       for (int64_t j = 0; j < C; ++j) {
@@ -1416,6 +1440,7 @@ class MirInterp {
         for (size_t d = 0; d < base.dims.size(); ++d) {
           const long ixd = as_int(e.args[1 + d].args[0]);
           bounds(ixd, base.dims[d], e);
+          if (probe_failed_) return r;
           flatpos += (ixd - 1) * stride;
           stride *= base.dims[d];
         }
@@ -1431,6 +1456,7 @@ class MirInterp {
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
       bounds(j, base.dims[1], e);
+      if (probe_failed_) return r;
       r.is_int = base.is_int;
       r.dims = {R};
       r.r.assign(base.r.begin() + (j - 1) * R, base.r.begin() + j * R);
@@ -1453,6 +1479,7 @@ class MirInterp {
         for (size_t d = 0; d < n_indices; ++d) {
           const long i = as_int(e.args[1 + d].args[0]);
           bounds(i, base.dims[d], e);
+          if (probe_failed_) return r;
           offset += (i - 1) * prefix_stride;
           prefix_stride *= base.dims[d];
         }
@@ -1478,6 +1505,7 @@ class MirInterp {
       for (size_t k = 0; k < n; ++k) {
         const long p = k < ix.i.size() ? ix.i[k] : (long)val(ix.r.at(k));
         bounds(p, (int64_t)base.r.size(), e);
+        if (probe_failed_) return r;
         r.r.push_back(base.r.at((size_t)(p - 1)));
         if (base.is_int) r.i.push_back(base.i.at((size_t)(p - 1)));
       }
@@ -1490,7 +1518,9 @@ class MirInterp {
       const long b = as_int(e.args[1].args[1]);
       if (b >= a) {
         bounds(a, (int64_t)base.r.size(), e);
+        if (probe_failed_) return r;
         bounds(b, (int64_t)base.r.size(), e);
+        if (probe_failed_) return r;
       }
       r.is_int = base.is_int;
       r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
@@ -1508,9 +1538,12 @@ class MirInterp {
       const long b = as_int(e.args[2].args[1]);
       const int64_t R = base.dims[0];
       bounds(i, R, e);
+      if (probe_failed_) return r;
       if (b >= a) {
         bounds(a, base.dims[1], e);
+        if (probe_failed_) return r;
         bounds(b, base.dims[1], e);
+        if (probe_failed_) return r;
       }
       r.is_int = base.is_int;
       r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
@@ -1528,9 +1561,12 @@ class MirInterp {
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
       bounds(j, base.dims[1], e);
+      if (probe_failed_) return r;
       if (b >= a) {
         bounds(a, R, e);
+        if (probe_failed_) return r;
         bounds(b, R, e);
+        if (probe_failed_) return r;
       }
       r.is_int = base.is_int;
       r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
@@ -1556,6 +1592,7 @@ class MirInterp {
         if (index.name == "IndexSingle") {
           const long i = as_int(index.args[0]);
           bounds(i, extent, e);
+          if (probe_failed_) return r;
           selected[d].push_back(i - 1);
           drops[d] = true;
         } else if (index.name == "IndexAll") {
@@ -1570,6 +1607,7 @@ class MirInterp {
                                ? positions.i[k]
                                : static_cast<long>(val(positions.r.at(k)));
             bounds(i, extent, e);
+            if (probe_failed_) return r;
             selected[d].push_back(i - 1);
           }
         } else if (index.name == "IndexBetween") {
@@ -1577,13 +1615,16 @@ class MirInterp {
           const long hi = as_int(index.args[1]);
           if (hi >= lo) {
             bounds(lo, extent, e);
+            if (probe_failed_) return r;
             bounds(hi, extent, e);
+            if (probe_failed_) return r;
           }
           selected[d].reserve(static_cast<size_t>(hi >= lo ? hi - lo + 1 : 0));
           for (long i = lo; i <= hi; ++i) selected[d].push_back(i - 1);
         } else if (index.name == "IndexUpfrom") {
           const long lo = as_int(index.args[0]);
           bounds(lo, extent, e);
+          if (probe_failed_) return r;
           selected[d].reserve(static_cast<size_t>(extent - lo + 1));
           for (long i = lo; i <= extent; ++i) selected[d].push_back(i - 1);
         } else {

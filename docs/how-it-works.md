@@ -489,7 +489,7 @@ This is the same information a hand-written tape would keep, and it is what a
 compiled loop body will need: each node's storage is known before the first
 iteration runs.
 
-### Data-only work runs once
+### The first evaluation is recorded and replayed
 
 Much of a real model's loop body is bookkeeping on data: finding a subject's
 rows, scanning a setup table, deciding which of several matrices to update.
@@ -497,17 +497,33 @@ The unrolled path evaluates all of it at compile time. A retained loop would
 otherwise repeat it on every gradient; on ctsem it was 97% of the kernel
 calls.
 
-The executor therefore records the first evaluation. A subtree whose inputs,
-writes and control depend only on data is replaced, from the second
-evaluation on, by the values that left it. Branch and loop decisions that
-depend only on data are replayed from a trace instead of recomputed, and an
-iteration of a data-controlled loop in which nothing observable happened is
-skipped altogether. Parameter-dependent control still runs every time.
+The executor therefore records the first evaluation. While the tree walk
+runs, every kernel call, in-place write and container read is appended to a
+stream. A call whose inputs are all data is evaluated once and its result
+kept as a constant instead of being recorded, and a branch or loop condition
+that depends only on data leaves nothing in the stream. When the walk
+finishes, the stream is frozen: the records move into compact pools and every
+operand becomes a pointer bound once. Later gradients replay the frozen
+stream forward and backward without visiting the tree.
 
-On ctsem with 33 rows, one gradient went from 415 ms to 27 ms and from
-11 million kernel calls to about 300,000; at 400 rows, from 4.4 s to 0.32 s.
-The log density and all 580 gradients are bitwise identical to the previous
-retained executor's.
+Parameter-dependent control still runs every time. Each branch, loop
+condition and in-place index that depended on a parameter during recording
+carries a guard holding the value it took. A replay checks each guard where
+it occurs; the first mismatch stops the replay, discards the stream and
+records again.
+`STANLI_NO_STRUCTURED_REPLAY=1` keeps the tree walk for every evaluation,
+for A/B tests.
+
+`write_array` retains the same loops, forward only, so those loops no longer
+run on the MIR interpreter for every saved draw.
+
+On ctsem with 33 rows, one gradient takes 4.8 ms, against 28.5 ms for the
+tree walk and 7.5 ms for CmdStan; at 400 rows, 57 ms against 320 ms and
+89 ms; at 4000 rows, 589 ms against 3.2 s and 903 ms. Preparation takes
+about 1 s instead of 9 s. The log density and gradient are bitwise identical
+to the tree walk's. Recording costs memory once: at 4000 rows the first
+evaluation peaks at 9.9 GB against 8.5 GB for the tree walk, and the frozen
+stream is smaller than the tree walk's tape afterwards.
 
 ## Measured behavior and limits
 

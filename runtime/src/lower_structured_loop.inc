@@ -8,6 +8,8 @@ std::map<std::string, IntRange> region_analysis_ints;
 int region_control_depth = 0;
 bool region_control_active = false;
 unsigned structured_outer_depth = 0;
+std::map<std::pair<const mir::Expr*, std::string>, std::optional<RealRange>>
+    region_enumerated_cache;
 
 // Matches ostream's default floating-point formatting.
 static std::string fmt_g(double v) {
@@ -130,12 +132,64 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     return true;
   };
   if (!collect(e)) return {};
+  const auto unresolvable = [&](const auto& self, const mir::Expr& value) -> bool {
+    if (value.kind == mir::Expr::Var)
+      return !variables.count(value.name) && !data.has(value.name) &&
+             !int_env.count(value.name) && !td.find(value.name);
+    if (value.kind == mir::Expr::EAnd || value.kind == mir::Expr::EOr ||
+        value.kind == mir::Expr::TernaryIf)
+      return !value.args.empty() && self(self, value.args[0]);
+    for (const auto& arg : value.args)
+      if (self(self, arg)) return true;
+    return false;
+  };
+  if (unresolvable(unresolvable, e)) return {};
   uint64_t combinations = 1;
   for (const auto& variable : variables) {
     const uint64_t width =
         uint64_t(int64_t(variable.second.hi) - variable.second.lo + 1);
     if (width == 0 || combinations > 1000000 / width) return {};
     combinations *= width;
+  }
+  bool cacheable = !std::getenv("STANLI_NO_REGION_RANGE_CACHE");
+  std::string key;
+  if (cacheable) {
+    std::set<std::string> seen;
+    std::function<void(const mir::Expr&)> walk = [&](const mir::Expr& value) {
+      if (!cacheable) return;
+      if (value.kind == mir::Expr::Var && seen.insert(value.name).second) {
+        if (const auto grid = variables.find(value.name);
+            grid != variables.end()) {
+          key += "G" + value.name + ":" + std::to_string(grid->second.lo) +
+                 "," + std::to_string(grid->second.hi) + ";";
+        } else if (!data.has(value.name)) {
+          if (const auto local = int_env.find(value.name);
+              local != int_env.end()) {
+            key += "N" + value.name + ":" + std::to_string(local->second) +
+                   ";";
+          } else if (DataMap::Entry* entry = td.find(value.name)) {
+            if (!entry->is_int || entry->i.size() > 64) {
+              cacheable = false;
+              return;
+            }
+            key += "V" + value.name + ":";
+            for (int x : entry->i) key += std::to_string(x) + ",";
+            key += ";";
+          } else {
+            cacheable = false;
+            return;
+          }
+        }
+      }
+      for (const auto& arg : value.args) walk(arg);
+    };
+    walk(e);
+  }
+  std::pair<const mir::Expr*, std::string> cache_key{&e, std::move(key)};
+  if (cacheable) {
+    if (auto cached = region_enumerated_cache.find(cache_key);
+        cached != region_enumerated_cache.end())
+      return cached->second;
   }
   struct Saved {
     std::string name;
@@ -168,6 +222,10 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     }
     try {
       DataMap::Entry value = td.eval(e);
+      if (td.probe_failed()) {
+        td.clear_probe_failed();
+        return;
+      }
       if (value.r.size() != 1 || !std::isfinite(value.r[0])) return;
       if (!any)
         result = {value.r[0], value.r[0]};
@@ -183,6 +241,11 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
       // Other reachable failures remain runtime failures.
     }
   };
+  td.set_probe(true);
+  struct RestoreProbe {
+    MirInterp<double>& interp;
+    ~RestoreProbe() { interp.set_probe(false); }
+  } restore_probe{td};
   enumerate(0);
   for (auto& item : saved) {
     if (item.value)
@@ -190,8 +253,10 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     else
       td.env().erase(item.name);
   }
-  if (!any) return {};
-  return result;
+  std::optional<RealRange> outcome;
+  if (any) outcome = result;
+  if (cacheable) region_enumerated_cache[std::move(cache_key)] = outcome;
+  return outcome;
 }
 
 std::optional<RealRange> region_real_range(const mir::Expr& e) {
@@ -1070,11 +1135,12 @@ static bool runtime_scalar_form(const mir::Expr& e) {
          runtime_int_arithmetic().count(e.name);
 }
 
+bool write_array_unregioned() const { return in_write_array && !region_current; }
 bool runtime_only(const mir::Expr& e) {
-  return !in_write_array && needs_runtime_value(e) && !try_eval_pure(e);
+  return !write_array_unregioned() && needs_runtime_value(e) && !try_eval_pure(e);
 }
 bool runtime_int_expression(const mir::Expr& e) {
-  if (in_write_array || !runtime_scalar_form(e)) return false;
+  if (write_array_unregioned() || !runtime_scalar_form(e)) return false;
   bool found = false;
   const auto integer_reads = [&](const auto& self, const mir::Expr& x) -> bool {
     if (x.kind == mir::Expr::Var || x.kind == mir::Expr::Indexed) {
@@ -1097,7 +1163,7 @@ std::optional<long> static_int(const mir::Expr& e) {
   try {
     return eval_int(e);
   } catch (const CompileError&) {
-    if (in_write_array || !needs_runtime_value(e)) throw;
+    if (write_array_unregioned() || !needs_runtime_value(e)) throw;
     return std::nullopt;
   }
 }
@@ -1109,7 +1175,7 @@ void bind_runtime_int(const std::string& name, const mir::Expr& e,
   require_binding(v, 1, expected, name, raw);
   v.autodiff = false;
   v.si = expected;
-  if (in_write_array) v.si.param_free = false;
+  if (write_array_unregioned()) v.si.param_free = false;
   scope[name] = v;
   decls[name] = DeclView{1, false, expected};
   int_env.erase(name);
@@ -1965,7 +2031,7 @@ bool try_lower_region(
     const mir::Stmt& s,
     std::optional<std::pair<int64_t, int64_t>> exact_bounds = std::nullopt) {
   const StructuredMode mode = structured_policy;
-  if (in_write_array || mode == StructuredMode::Off) return false;
+  if (mode == StructuredMode::Off) return false;
   // Make the representation decision before constructing a trial graph.
   // In auto mode, incomplete cost information is evidence for nothing.
   if (mode == StructuredMode::Auto && !region_auto_profitable(s, exact_bounds))
@@ -1999,6 +2065,7 @@ bool try_lower_region(
       // its mutable interpreter and shape state until every refusal point has
       // passed; only the shape interner is published below.
       Lowering trial = fork_region_trial();
+      trial.in_write_array = in_write_array;
       auto p = std::make_shared<StructuredLoop>();
       trial.region_current = &p->root;
       std::map<int, int> imported;
@@ -2111,6 +2178,11 @@ bool try_lower_region(
       if (std::any_of(p->body.ops.begin(), p->body.ops.end(),
                       [](const Op& op) { return op.opcode == OP_ISLAND; }))
         fail("structured body requires register-program fallback");
+      if (std::any_of(p->body.ops.begin(), p->body.ops.end(), [](const Op& op) {
+            return op.opcode == OP_RNG || op.opcode == OP_PRINT ||
+                   op.opcode == OP_REJECT;
+          }))
+        fail("structured body requires the per-draw fallback for a stateful call");
       if (mode == StructuredMode::Auto) {
         const auto retains_control = [&](const auto& self,
                                          const RegionNode& node) -> bool {
