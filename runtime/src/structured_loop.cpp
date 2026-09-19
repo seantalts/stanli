@@ -1155,6 +1155,7 @@ struct FrozenInPlace {
   uint32_t old_offset = 0;
   uint32_t sel_offset = 0, sel_count = 0;
   uint32_t site = 0;
+  int32_t shift = 0;
 };
 
 struct FrozenCopy {
@@ -1209,6 +1210,7 @@ struct FrozenGather {
   uint32_t adj_offset = 0;
   uint8_t flags = 0;
   uint32_t site = 0;
+  int32_t shift = 0;
 };
 
 struct StreamInstr {
@@ -1771,6 +1773,7 @@ struct Execution {
       fi.pos_count = static_cast<uint32_t>(st.inplace_pos.size()) - pos_offset;
       fi.sel_offset = static_cast<uint32_t>(st.inplace_sel_ptr.size());
       for (int k = 1; k < layout.rhs; ++k) {
+        if (is_const(s.bindings[op.in[k]])) continue;
         double* src = materialize(s.bindings[op.in[k]], c.in[k].len);
         for (int64_t i = 0; i < c.in[k].len; ++i) {
           st.inplace_sel_ptr.push_back(src + i);
@@ -2658,6 +2661,86 @@ void check_no_stale_arena_pointers(Stream& st, const ArenaBlockRanges& ranges) {
   for (auto* ptr : st.output_value) check(ptr, "output_value");
 }
 
+template <class T>
+struct ArrayIntern {
+  std::unordered_map<std::string, uint32_t> table;
+  std::vector<T> data;
+  uint32_t intern(const T* src, uint32_t count) {
+    std::string key(reinterpret_cast<const char*>(src), count * sizeof(T));
+    const auto [it, fresh] = table.try_emplace(
+        std::move(key), static_cast<uint32_t>(data.size()));
+    if (fresh) data.insert(data.end(), src, src + count);
+    return it->second;
+  }
+};
+
+template <class T>
+struct Canonical {
+  T shift;
+  uint32_t offset;
+};
+
+template <class T>
+Canonical<T> canonicalize_and_intern(ArrayIntern<T>& intern,
+                                     std::vector<T>& scratch, const T* src,
+                                     uint32_t count) {
+  if (count == 0) return {0, 0};
+  T mn = src[0];
+  for (uint32_t i = 1; i < count; ++i) mn = std::min(mn, src[i]);
+  scratch.assign(src, src + count);
+  for (T& v : scratch) v -= mn;
+  return {mn, intern.intern(scratch.data(), count)};
+}
+
+void dedup_gather_positions(Stream& st) {
+  ArrayIntern<int64_t> intern;
+  std::vector<int64_t> scratch;
+  for (auto& fg : st.gathers) {
+    const auto c = canonicalize_and_intern(
+        intern, scratch, st.gather_pos.data() + fg.pos_offset, fg.pos_count);
+    fg.pos_offset = c.offset;
+    fg.src += c.shift;
+    fg.shift = static_cast<int32_t>(c.shift);
+  }
+  st.gather_pos = std::move(intern.data);
+}
+
+void dedup_inplace_positions(Stream& st) {
+  ArrayIntern<int32_t> intern;
+  std::vector<int32_t> scratch;
+  for (auto& fi : st.inplaces) {
+    const auto c = canonicalize_and_intern(
+        intern, scratch, st.inplace_pos.data() + fi.pos_offset, fi.pos_count);
+    fi.pos_offset = c.offset;
+    fi.base += c.shift;
+    fi.shift = c.shift;
+  }
+  st.inplace_pos = std::move(intern.data);
+}
+
+struct SelEntry {
+  const double* ptr;
+  double val;
+};
+
+void dedup_inplace_selectors(Stream& st) {
+  ArrayIntern<SelEntry> intern;
+  std::vector<SelEntry> scratch;
+  for (auto& fi : st.inplaces) {
+    scratch.resize(fi.sel_count);
+    for (uint32_t k = 0; k < fi.sel_count; ++k)
+      scratch[k] = SelEntry{st.inplace_sel_ptr[fi.sel_offset + k],
+                            st.inplace_sel_snapshot[fi.sel_offset + k]};
+    fi.sel_offset = intern.intern(scratch.data(), fi.sel_count);
+  }
+  st.inplace_sel_ptr.resize(intern.data.size());
+  st.inplace_sel_snapshot.resize(intern.data.size());
+  for (size_t i = 0; i < intern.data.size(); ++i) {
+    st.inplace_sel_ptr[i] = intern.data[i].ptr;
+    st.inplace_sel_snapshot[i] = intern.data[i].val;
+  }
+}
+
 void freeze(LoopState& s) {
   const StructuredLoop& p = s.p;
   Stream& st = *s.building;
@@ -2772,6 +2855,9 @@ void freeze(LoopState& s) {
   if (check_remap) check_no_stale_arena_pointers(st, arena_ranges);
   s.arena = BlockArena{};
   s.versions.reset();
+  dedup_gather_positions(st);
+  dedup_inplace_positions(st);
+  dedup_inplace_selectors(st);
   st.target_work.resize(st.targets.size());
 
   st.backward_order.reserve(st.program.size());
@@ -2989,6 +3075,7 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
         const FrozenInPlace& fi = st.inplaces[instr.index];
         double* const* adj = st.inplace_adj.data() + instr.index * 2;
         double* adj_base = resolve_pooled_adjoint(adj[0], p, ctx);
+        if (adj_base) adj_base += fi.shift;
         double* adj_rhs = resolve_pooled_adjoint(adj[1], p, ctx);
         const double* old = st.inplace_old.data() + fi.old_offset;
         for (uint32_t k = fi.pos_count; k-- > 0;) {
@@ -3028,6 +3115,7 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
         const FrozenGather& g = st.gathers[instr.index];
         double* const* adj = st.gather_adj.data() + g.adj_offset;
         double* src_adj = resolve_pooled_adjoint(adj[0], p, ctx);
+        if (src_adj) src_adj += g.shift;
         double* dst_adj = resolve_pooled_adjoint(adj[1], p, ctx);
         if (src_adj && dst_adj)
           for (uint32_t i = 0; i < g.pos_count; ++i)
