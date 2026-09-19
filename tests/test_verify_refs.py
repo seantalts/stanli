@@ -15,6 +15,7 @@ exercised without a build.
 from __future__ import annotations
 
 import pathlib
+import copy
 import stat
 import sys
 import tempfile
@@ -30,6 +31,8 @@ from verify_refs import (ILL_CONDITIONED, KNOWN_GAPS,  # noqa: E402
                          probe_point)
 from cmdstan_ref import _result_line  # noqa: E402
 import verify_sample  # noqa: E402
+import verify_refs  # noqa: E402
+from corpus_inventory import local_cases, source_digest
 from verify_sample import evaluate, record_wa, write_refs  # noqa: E402
 
 # A model that exists under tests/stanc3, so model_files resolves real
@@ -307,6 +310,69 @@ class LocalCorpusTest(unittest.TestCase):
                 self.assertEqual(data, stan.with_suffix(".json"))
 
 
+class SharedHeaderWorkTest(unittest.TestCase):
+    def test_equal_source_basenames_use_separate_model_build_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            with unittest.mock.patch("verify_refs.tempfile.mkdtemp", return_value=tmp), \
+                 unittest.mock.patch("verify_refs.corpus_models", return_value=[("a", None), ("b", None)]), \
+                 unittest.mock.patch("verify_refs.corpus_input", return_value=(root / "model.stan", root / "data.json")), \
+                 unittest.mock.patch("verify_refs.subprocess.run", return_value=unittest.mock.Mock(returncode=0, stdout="theta", stderr="")), \
+                 unittest.mock.patch("verify_refs.cmdstan_header", return_value=(["theta"], "")) as header:
+                self.assertEqual(verify_refs.check_wa_headers(root, root / "check", root / "cmdstan", []), 0)
+            self.assertEqual([call.args[1] for call in header.call_args_list], [root / "a", root / "b"])
+
+
+class StrictReferenceTest(unittest.TestCase):
+    """Full-output fixtures retain their stronger oracle after consolidation."""
+
+    REF = {**REF, "strict": True,
+           "points": {str(p): {**VALUES, "wa": {"names": "a", "values": ["1"]}}
+                      for p in POINTS}}
+
+    run_check = CheckModelPointsTest.run_check
+
+    def test_missing_point_fails_instead_of_probing(self):
+        ref = copy.deepcopy(self.REF)
+        del ref["points"]["1"]
+        self.assertEqual(self.run_check('echo "OK -3.5 1 -2"', ref)[1],
+                         "REFERENCE_INCOMPLETE")
+
+    def test_missing_output_reference_fails(self):
+        ref = copy.deepcopy(self.REF)
+        del ref["points"]["1"]["wa"]
+        self.assertEqual(self.run_check('echo "OK -3.5 1 -2"', ref)[1],
+                         "REFERENCE_INCOMPLETE")
+
+    def test_matching_nonfinite_values_still_fail(self):
+        ref = copy.deepcopy(self.REF)
+        for pt in ref["points"].values():
+            pt["values"] = ["-3.5", "nan", "-2"]
+        self.assertEqual(self.run_check('echo "OK -3.5 nan -2"', ref)[1], "NONFINITE")
+
+    def test_matching_nonfinite_outputs_still_fail(self):
+        ref = copy.deepcopy(self.REF)
+        for pt in ref["points"].values():
+            pt["wa"]["values"] = ["nan"]
+        result = self.run_check('echo "WANAMES a"; echo "WAVALS nan"; echo "OK -3.5 1 -2"',
+                                ref, wa=False)
+        self.assertEqual(result[1], "WA_NONFINITE")
+
+    def test_output_name_order_is_exact(self):
+        result = self.run_check('echo "WANAMES b"; echo "WAVALS 1"; echo "OK -3.5 1 -2"',
+                                wa=False)
+        self.assertEqual(result[1], "WA_NAMES_FAIL")
+
+    def test_output_width_is_exact(self):
+        result = self.run_check('echo "WANAMES a"; echo "WAVALS 1 2"; echo "OK -3.5 1 -2"',
+                                wa=False)
+        self.assertEqual(result[1], "WA_SHAPE_FAIL")
+
+    def test_input_hash_drift_fails(self):
+        self.assertEqual(self.run_check('echo "OK -3.5 1 -2"',
+                         {**self.REF, "source_sha256": "wrong"})[1], "INPUT_HASH_FAIL")
+
+
 class RecorderEvaluateTest(unittest.TestCase):
     """The recorder extracts both engines' statuses from full stdout."""
 
@@ -338,6 +404,36 @@ class RecorderEvaluateTest(unittest.TestCase):
         self.assertIn("1 values recorded", note)
 
 
+class StrictRecorderTest(unittest.TestCase):
+    def test_valid_oracle_is_independent_of_runtime_output(self):
+        entry, result, _ = None, None, None
+        ref = ["OK", "-3.5", "1", "-2"]
+        output = "WANAMES a\nWAVALS 1\nOK -3.5 1 -2\n"
+        with unittest.mock.patch("verify_sample.evaluate", return_value=(
+                ref, output, ["EVAL_FAIL"], "EVAL_FAIL broken")):
+            entry, result, _ = verify_sample.record_model(
+                "fixture", pathlib.Path("fixture.stan"), pathlib.Path("fixture.json"),
+                pathlib.Path("ref"), pathlib.Path("check"), strict=True)
+        self.assertEqual(result["status"], "CMDSTAN_ONLY")
+        self.assertEqual(len(entry["points"]), 3)
+        for pt in entry["points"].values():
+            self.assertEqual(pt["values"], ref[1:])
+            self.assertEqual(pt["wa"], {"names": "a", "values": ["1"]})
+            self.assertEqual(pt["status"], "CMDSTAN_ONLY")
+
+    def test_missing_nonfinite_ragged_or_duplicate_outputs_fail(self):
+        cases = ["OK -3.5 1 -2", "WANAMES a\nWAVALS nan",
+                 "WANAMES a,b\nWAVALS 1", "WANAMES a,a\nWAVALS 1 2"]
+        for output in cases:
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                verify_sample.strict_outputs("fixture", 0, ["OK", "-3.5", "1", "-2"], output)
+
+    def test_refusal_or_nonfinite_gradient_is_not_a_strict_reference(self):
+        for fields in (["EVAL_FAIL"], ["OK", "-3.5", "nan"]):
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                verify_sample.strict_outputs("fixture", 0, fields, "WANAMES a\nWAVALS 1")
+
+
 class SchemaTest(unittest.TestCase):
     """The committed reference file, and what happens to an older one."""
 
@@ -354,9 +450,25 @@ class SchemaTest(unittest.TestCase):
         # The replay iterates the reference file, so a model that failed to
         # record is not a failure anywhere: it is simply never run.
         models = load_refs()[0]
-        for directory in LOCAL_CORPORA:
-            for stan in sorted(directory.glob("*.stan")):
-                self.assertIn(stan.stem, models)
+        self.assertFalse(set(local_cases()) - set(models))
+
+    def test_imported_references_retain_identity_outputs_and_original_rig(self):
+        models, _ = load_refs()
+        imported = [case for case in local_cases().values()
+                    if case.metadata.get("sampling_smoke")]
+        self.assertTrue(imported)
+        for case in imported:
+            ref = models[case.name]
+            self.assertTrue(ref["strict"])
+            self.assertEqual(ref["source_sha256"], source_digest(case.source))
+            self.assertEqual(ref["data_sha256"], source_digest(case.data))
+            self.assertTrue(ref["parameter_names"])
+            self.assertIn("compiler", ref["recorded"])
+            self.assertIn("reference_flags", ref["recorded"])
+            for pt in ref["points"].values():
+                names = pt["wa"]["names"].split(",")
+                self.assertEqual(len(names), len(pt["wa"]["values"]))
+                self.assertFalse(set(ref["parameter_names"]) - set(names))
 
     def test_an_older_schema_is_refused_not_half_read(self):
         # Reading schema 1's one-point entries as if they were this format
@@ -396,6 +508,13 @@ class WriteRefsTest(unittest.TestCase):
         import gzip
         import json
         return json.loads(gzip.decompress(self.path.read_bytes()))["models"]
+
+    def test_merging_keeps_per_model_recording_provenance(self):
+        imported = {**REF, "recorded": {"compiler": "another compiler"}}
+        write_refs({"imported": imported}, self.old)
+        write_refs({"m1": REF}, self.old)
+        self.assertEqual(self.models()["imported"]["recorded"], imported["recorded"])
+        self.assertEqual(self.models()["m1"]["recorded"], self.old)
 
     def test_a_partial_run_under_drift_is_refused(self):
         with self.assertRaises(SystemExit):

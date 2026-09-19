@@ -16,6 +16,32 @@ import vectorize_ab  # noqa: E402
 
 
 class VectorizeAbTest(unittest.TestCase):
+    def test_shared_inventory_keeps_pdb_census_and_source_counts_distinct(self):
+        # Imported/local fixtures belong in selection, but not the PDB census.
+        with tempfile.TemporaryDirectory() as temp:
+            pdb = pathlib.Path(temp)
+            (pdb / "posteriors").mkdir()
+            for filename, model, data in (
+                    ("01", "covid19imperial_v3", "ecdc0401"),
+                    ("02", "covid19imperial_v3", "other"),
+                    ("03", "sir", "sir_data")):
+                (pdb / "posteriors" / f"{filename}.json").write_text(json.dumps(
+                    {"model_name": model, "data_name": data}))
+            cases, pdb_entries = vectorize_ab.corpus_inventory(pdb)
+        self.assertEqual(pdb_entries, {"covid19imperial_v3": "ecdc0401", "sir": "sir_data"})
+        self.assertGreater(len(cases), len(pdb_entries))
+        representatives = [next(name for name, case in cases.items()
+                                if case.collection == collection)
+                           for collection in ("brms", "rethinking", "educational", "stanc3")]
+        counts = vectorize_ab.selection_collections(
+            ["covid19imperial_v3", "sir", *representatives], cases)
+        self.assertEqual(counts, {"posteriordb": 2, "brms": 1, "rethinking": 1,
+                                  "educational": 1, "stanc3": 1})
+        refs, _ = vectorize_ab.load_refs()
+        selected = vectorize_ab.default_selection(refs, pdb_entries, known_gaps={})
+        self.assertEqual(set(selected), set(refs) | {"sir"})
+        self.assertEqual(selected, sorted(selected))
+
     def test_git_identity_scopes_the_checkout_as_safe(self):
         expected = str(vectorize_ab.REPO.resolve())
         with mock.patch.object(

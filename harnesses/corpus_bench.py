@@ -29,6 +29,7 @@ import threading
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import compile_cmd
+from corpus_inventory import corpus_cases
 
 PROTOCOL = "stanli-corpus-v3"
 BENCH = REPO / "build-rel/bench_grad"
@@ -294,30 +295,9 @@ def open_run(output, expected, resume):
 
 
 def benchmark_cases(pdb, corpus="all"):
-    """Return source/data paths; keep the established first dataset per PDB model."""
-    if corpus not in {"all", "posteriordb", "educational", "rethinking", "brms", "teaching"}:
-        raise ValueError(f"Unknown benchmark corpus: {corpus}")
-    cases = {}
-    if corpus in {"all", "posteriordb"}:
-        for pj in sorted((pdb / "posteriors").glob("*.json")):
-            meta = json.loads(pj.read_text())
-            model = meta["model_name"]
-            cases.setdefault(model, (
-                pdb / "models" / "stan" / f"{model}.stan",
-                pdb / "data" / "data" / f"{meta['data_name']}.json.zip"))
-    if corpus in {"all", "teaching", "educational"}:
-        from check_educational import files, inventory
-        for model in inventory():
-            if model in cases:
-                raise ValueError(f"Duplicate benchmark model: {model}")
-            cases[model] = files(model)
-    for collection in ("rethinking", "brms"):
-        if corpus in {"all", "teaching", collection}:
-            for source in sorted((REPO / "tests" / collection).glob("*.stan")):
-                if source.stem in cases:
-                    raise ValueError(f"Duplicate benchmark model: {source.stem}")
-                cases[source.stem] = (source, source.with_suffix(".json"))
-    return cases
+    """Benchmark views of the shared numerical/benchmark fixture inventory."""
+    return {name: (case.source, case.data)
+            for name, case in corpus_cases(pdb, corpus).items()}
 
 
 def materialize_data(source, destination):
@@ -502,7 +482,9 @@ def main(argv=None):
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-bench-inputs-") as cache:
         inputs = {}
-        for name, (stan, data_source) in sorted(benchmark_cases(args.pdb / "posterior_database", args.corpus).items()):
+        cases = corpus_cases(args.pdb, args.corpus)
+        for name, case in sorted(cases.items()):
+            stan, data_source = case.source, case.data
             if args.filter and args.filter not in name:
                 continue
             data = pathlib.Path(cache) / f"{name}.json"
@@ -515,7 +497,8 @@ def main(argv=None):
         identities = {str(p.relative_to(REPO)): sha(p) for p in (
             REPO / "harnesses/corpus_bench.py", REPO / "tools/benchmark_timer.hpp",
             REPO / "tools/bench_grad.cpp", REPO / "tools/bench_cmdstan_grad.cpp",
-            REPO / "tools/cmdstan_ref.py", REPO / "tools/verify_refs.py")}
+            REPO / "tools/cmdstan_ref.py", REPO / "tools/verify_refs.py",
+            REPO / "tools/corpus_inventory.py")}
         expected = dict(protocol=PROTOCOL, config=config,
                         machine=dict(platform=platform.platform(), host=platform.node(),
                                      processor=platform.processor(), logical_cpus=os.cpu_count()),
@@ -533,7 +516,9 @@ def main(argv=None):
                                     "clang_sha256": sha(shutil.which("clang++")),
                                     "build_environment": {k: os.getenv(k) for k in
                                         ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "MAKEFLAGS")}},
-                        inputs={m: {"stan": sha(s), "data": sha(d)} for m, (s, d) in inputs.items()})
+                        inputs={m: {"stan": sha(s), "data": sha(d),
+                                    "collection": cases[m].collection}
+                                for m, (s, d) in inputs.items()})
         try:
             directory, manifest = open_run(args.output, expected, args.resume)
         except ValueError as exc:

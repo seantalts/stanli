@@ -1,7 +1,12 @@
-# Educational corpus results — 2026-09-14
+# Historical Aalto fixture experiment — 2026-09-14
+
+This page records the experiment at revision `e46e360f` and its preceding
+comparisons. The measured values, protocol and validation counts below belong
+to those revisions. New numerical replay, sampling smoke tests and benchmarks
+use the [common corpus paths](README.md).
 
 **Pareto reaches 1.072x vectorized CmdStan end to end. All 13 models pass.**
-The live gate now requires Pareto >= 1.0x and every other model >= 0.5x.
+The experiment required Pareto >= 1.0x and every other model >= 0.5x.
 The three-point CmdStan oracle checks 6,609 scalar values, with worst scaled
 error 8.30e-15; all generated-output, sampling CSV and posterior mean checks pass.
 
@@ -13,7 +18,7 @@ NUTS and generated quantities. CmdStan's executable is already compiled;
 its fresh build time is recorded separately. No models or output phases are
 excluded. These are the supplied teaching fixtures, seven with synthetic data.
 
-[Current observations](pareto-benchmark-results.json) include hashes, raw
+[Final observations](pareto-benchmark-results.json) include hashes, raw
 samples, dispersion, phase measurements and toolchain identities. The previous
 PR results are retained in [optimized observations](optimized-benchmark-results.json),
 and the original pre-fix baseline in [baseline observations](benchmark-results.json).
@@ -73,7 +78,7 @@ Poisson/Student-t/Bernoulli-logit RNG kernels, unused-procedure pruning after
 inlining, and buffered exact 17-digit CSV formatting. Their original evidence
 is preserved in [the first investigation](../../docs/superpowers/plans/2026-09-14-educational-performance.md).
 
-## Validation and reproduction
+## Recorded validation and historical reproduction
 
 - 247/247 Release CTests, plus the updated performance-floor unit test.
 - 254/254 corpus models, 976,394 values under the existing numerical policy.
@@ -86,6 +91,10 @@ is preserved in [the first investigation](../../docs/superpowers/plans/2026-09-1
   overwritten conditions/values, kernel calls, four-argument densities, dead
   invalid expressions, rejects, active-extrema refusal and 256 dyadic path cases.
 
+The commands below require the recorded revision `e46e360f`; the specialized
+runner and performance target have since been retired. They are retained to
+identify how this experiment was produced, not as current instructions.
+
 ```sh
 python3 tools/check_educational.py --benchmark --repetitions 5 \
   --output build-rel/educational-pareto-final/results.json
@@ -94,7 +103,7 @@ python3 tools/verify_refs.py deps/posteriordb \
   --check build-rel/stanli_check --jobs 4
 ```
 
-Default CTest uses recorded references; `check_educational_performance` requires
-CmdStan and a quiet machine. See the [Pareto research ledger](../../docs/superpowers/plans/2026-09-14-pareto-parity.md)
+At that revision, CTest used recorded references and the separate
+`check_educational_performance` target required CmdStan and a quiet machine. See the [Pareto research ledger](../../docs/superpowers/plans/2026-09-14-pareto-parity.md)
 for proof obligations, ablations and conservative fallbacks. These fixtures
 and smoke tests do not establish full-size course-data performance or convergence.

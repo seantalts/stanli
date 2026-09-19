@@ -44,7 +44,8 @@
       "data_sha256": "92d2c77da07299cec3e03216e5d89824d59e94daf681dbd1eca1723dbc343954",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_binom",
@@ -85,7 +86,8 @@
       "data_sha256": "c51f498c1de15115da841e2fd45680fbaa675bb105a9289c24d7a770cf52005e",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_binomb",
@@ -127,7 +129,8 @@
       "data_sha256": "369a429bdb72de6d3cfe58c43578323d1d940c10e6be576eb7e7b85308510177",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_binom2",
@@ -170,7 +173,8 @@
       "data_sha256": "9cd5eb460f002b4d6a7565b7d7b6df0c19966ba688e6e7a3d69d2957be5d0ffa",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_lin",
@@ -214,7 +218,8 @@
       "data_sha256": "eddb24dc3e3a6316d622cd4c553a3ac654914dcf1d111ad7820ab6cbc5c87c56",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_lin_std",
@@ -259,7 +264,8 @@
       "data_sha256": "eb7b70d5cb0289690fdec532de96ce2e6f080d13574c11f0708f2b3b2aa651d0",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_lin_std_t",
@@ -305,7 +311,8 @@
       "data_sha256": "eb7b70d5cb0289690fdec532de96ce2e6f080d13574c11f0708f2b3b2aa651d0",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_grp_aov",
@@ -347,7 +354,8 @@
       "data_sha256": "484956104ef0af16b98e65bd96cab281159bce880848127231b1a1370e0d78c6",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_grp_prior_mean",
@@ -390,7 +398,8 @@
       "data_sha256": "484956104ef0af16b98e65bd96cab281159bce880848127231b1a1370e0d78c6",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_grp_prior_mean_var",
@@ -434,7 +443,8 @@
       "data_sha256": "484956104ef0af16b98e65bd96cab281159bce880848127231b1a1370e0d78c6",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_poisson_simple",
@@ -479,7 +489,8 @@
       "data_sha256": "7ad593d032403a10fece31531ecb7a418909cf965970642285ce80240c07310d",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_poisson_hurdle",
@@ -528,7 +539,8 @@
       "data_sha256": "7ad593d032403a10fece31531ecb7a418909cf965970642285ce80240c07310d",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     },
     {
       "model_id": "aalto_gpareto",
@@ -581,7 +593,8 @@
       "data_sha256": "9498e8d4dde1059d427e89224aa3f922913237959db24f6836cd376125192dc0",
       "normalization": "lexical token sequence; ignore whitespace/comments; no semantic deduplication",
       "upstream_driver_included": false,
-      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here"
+      "adapter_provided": "New generic CmdStanR and CmdStanPy runners; neither executed here",
+      "sampling_smoke": true
     }
   ],
   "counts": {

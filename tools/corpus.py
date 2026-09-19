@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Corpus coverage harness: run stanli_check over every posteriordb
-(model, dataset) pair and histogram the failures by missing feature.
+"""Corpus coverage harness: run stanli_check over the shared model/data
+inventory and histogram the failures by missing feature.
 
 Usage: tools/corpus.py PDB_DIR [--filter SUBSTR]
 PDB_DIR is a posteriordb checkout containing posterior_database/.
@@ -13,12 +13,12 @@ import re
 import subprocess
 import sys
 import tempfile
-import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from verify_refs import (LOCAL_CORPORA, REFS_PATH,  # noqa: E402
-                         default_check_bin, load_refs, parse_status)
+from corpus_inventory import corpus_cases, materialize_data  # noqa: E402
+from verify_refs import (REFS_PATH, default_check_bin, load_refs,
+                         parse_status)  # noqa: E402
 
 CHECK = default_check_bin()
 
@@ -61,27 +61,19 @@ def load_verification():
 def main():
     pdb = pathlib.Path(sys.argv[1]) / "posterior_database"
     filt = sys.argv[sys.argv.index("--filter") + 1] if "--filter" in sys.argv else ""
-    posteriors = sorted((pdb / "posteriors").glob("*.json"))
+    cases = corpus_cases(pdb, include_language=True)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_corpus_"))
 
-    seen_models = set()
     results = {}
     reasons = collections.Counter()
-    for pj in posteriors:
-        meta = json.loads(pj.read_text())
-        model = meta["model_name"]
-        if model in seen_models or (filt and filt not in model):
+    for model, case in cases.items():
+        if filt and filt not in model:
             continue
-        seen_models.add(model)
-        stan = pdb / "models" / "stan" / f"{model}.stan"
-        dz = pdb / "data" / "data" / f"{meta['data_name']}.json.zip"
-        if not stan.exists() or not dz.exists():
+        stan = case.source
+        if not stan.exists() or not case.data.exists():
             results[model] = ("SKIP", "missing files")
             continue
-        dj = tmp / f"{meta['data_name']}.json"
-        if not dj.exists():
-            with zipfile.ZipFile(dz) as z:
-                dj.write_bytes(z.read(z.namelist()[0]))
+        dj = materialize_data(case, tmp)
         try:
             # Same point walk as verify_sample/ref_driver: a model can be
             # legitimately out of support at one probe point (dogs_log's
@@ -117,14 +109,9 @@ def main():
                     key = f"unsupported {m.group(1)}"
             reasons[key] += 1
 
+    refs = load_refs()[0] if REFS_PATH.exists() else {}
     ver = load_verification()
-    # The models carried in the tree go through the same oracle but are
-    # separate corpora: language constructs no real posterior happens to
-    # use, and brms output. This doc reports the posteriordb sweep, so
-    # drop them before anything is counted or tabulated
-    # (tools/gen_docs.py splits them the same way).
-    ver = {m: v for m, v in ver.items()
-           if not any((d / f"{m}.stan").exists() for d in LOCAL_CORPORA)}
+    ver = {m: v for m, v in ver.items() if m in results}
     ok = sorted(m for m, (s, _) in results.items() if s == "OK")
     verified = [m for m in ok
                 if ver.get(m, {}).get("status") == "VERIFIED"]
@@ -137,26 +124,39 @@ def main():
     for k, c in reasons.most_common(30):
         print(f"  {c:3d}  {k}")
 
+    imported = [m for m in ok if m not in ver and m in refs]
     md = ["# Corpus status", "",
           f"Evaluating: {len(ok)}/{len(results)}",
-          f"Differentially verified against CmdStan: "
-          f"{len(verified)}/{len(results)}", "",
+          f"CmdStan reference coverage: {sum(m in refs for m in results)}/{len(results)} models, "
+          f"{sum(len(refs.get(m, {}).get('points', {})) for m in results)} evaluation points.", "",
+          "The shared corpus includes posteriordb, generated brms models, "
+          "imported teaching models, and language fixtures. Collection labels "
+          "retain their source provenance; all references use the same replay "
+          "in `tools/verify_refs.py`.", "",
+          f"Recording-time primary-point comparison metrics retained for {len(verified)} "
+          "verified models are shown below. Imported references retain their original "
+          "answers and per-model recording provenance, without inventing historical "
+          "comparison metrics. Reference coverage is separate from a current-build "
+          "numerical replay result.", "",
           "A model counts as passing only when tools/verify_sample.py "
           "matches CmdStan's log_prob and full gradient at the shared "
           "deterministic point. Accuracy below is the worst deviation "
           "over lp and every gradient component: relative, and in ULPs "
           "(0 = bitwise identical to CmdStan). Bitwise counts are "
-          "reported for information; the numeric policy gate is the ULP "
-          "budget. Models that evaluate but are not verified are listed "
+          "reported for information; the replay uses a 1e-9 scaled-error "
+          "gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed "
           "separately and are not counted.",
           "",
-          "| model | values compared | max rel diff | max ULP |",
-          "| --- | ---: | ---: | ---: |"]
-    for m in verified:
-        v = ver[m]
-        rel = "0 (bitwise)" if v["max_rel"] == 0 else f"{v['max_rel']:.1e}"
-        md.append(f"| `{m}` | {v['n_values']} | {rel} | {v['max_ulp']} |")
-    refs = load_refs()[0] if REFS_PATH.exists() else {}
+          "| model | source collection | values compared | max rel diff | max ULP |",
+          "| --- | --- | ---: | ---: | ---: |"]
+    for m in sorted(verified + imported):
+        if m in imported:
+            pt = refs[m]["points"][str(refs[m]["primary"])]
+            md.append(f"| `{m}` | {cases[m].collection} | {len(pt['values'])} | not recorded | not recorded |")
+        else:
+            v = ver[m]
+            rel = "0 (bitwise)" if v["max_rel"] == 0 else f"{v['max_rel']:.1e}"
+            md.append(f"| `{m}` | {cases[m].collection} | {v['n_values']} | {rel} | {v['max_ulp']} |")
     noted = [m for m in verified if m in NOTES]
     if noted:
         md += ["", "Numerical notes:", ""]
@@ -174,7 +174,7 @@ def main():
         refs = load_refs()[0]
         for m, v in refs.items():
             pt = v["points"].get(str(v.get("primary")), {})
-            if "wa" in pt and m in ver:
+            if "wa" in pt and m in results:
                 wa_refs[m] = len(pt["wa"]["values"])
     if wa_refs:
         md += ["", "## write_array references", "",
@@ -200,7 +200,7 @@ def main():
                "instance), so there is nothing to compare. Agreement, not "
                "a gap, but not counted as verified either.", ""]
         md += [f"- `{m}`" for m in sorted(rejected)]
-    unver = [m for m in ok if m not in verified and m not in rejected]
+    unver = [m for m in ok if m not in verified and m not in rejected and m not in imported]
     if unver:
         md += ["", "## Evaluate but not verified", ""]
         for m in unver:
@@ -214,36 +214,7 @@ def main():
     for model, (s, msg) in sorted(results.items()):
         if s != "OK":
             md.append(f"- `{model}`: {s} {msg}")
-    md += rethinking_status()
     (REPO / "docs" / "corpus-status.md").write_text("\n".join(md) + "\n")
-
-
-def rethinking_status():
-    """Keep the teaching corpus separate from posteriordb's denominator."""
-    directory = REPO / "tests" / "rethinking"
-    models = sorted(p.stem for p in directory.glob("*.stan"))
-    refs, _ = load_refs()
-    rows = []
-    for model in models:
-        points = refs.get(model, {}).get("points", {})
-        passed = sum(p.get("status") == "VERIFIED" for p in points.values())
-        worst = max((p.get("max_rel") or 0 for p in points.values()), default=0)
-        rows.append((model, passed, worst))
-    verified = sum(passed == 3 for _, passed, _ in rows)
-    md = ["", "## Rethinking teaching corpus", "",
-          f"Reference recording: {verified}/{len(models)} fixtures verified at all three CmdStan points. "
-          "The inventory covers all 61 ulam call sites in chapters 4–16 of the "
-          "second edition, plus a supplemental hurdle model. Counts here are "
-          "separate from posteriordb. These are the recorder's measurements; "
-          "`tools/verify_refs.py` replays them against the current build in CI.",
-          "", "See [the inventory and provenance](../tests/rethinking/README.md), and "
-          "[current-build replay and performance results](teaching-support.md). "
-          "Recording coverage is not a claim that the current build replays every fixture successfully.",
-          "", "| model | verified points | worst scaled error |",
-          "| --- | ---: | ---: |"]
-    md += [f"| `{model}` | {passed}/3 | {worst:.2e} |"
-           for model, passed, worst in rows]
-    return md
 
 
 if __name__ == "__main__":

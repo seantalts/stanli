@@ -63,8 +63,9 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
+from corpus_inventory import corpus_cases  # noqa: E402
 from verify_refs import (KNOWN_GAPS, POINTS, accepted, corpus_input,  # noqa: E402
-                         corpus_models, gate_for, load_refs, model_files,
+                         gate_for, load_refs, model_files,
                          pair_dev, parse_status, parse_wa, worst_pair)
 
 VECTORIZE_LOOPS = "vectorize-loops"
@@ -620,6 +621,24 @@ def compile_source(compiler, source, output, candidate_pass, enabled,
             "sha256": sha256_file(output),
         })
     return proc, info
+
+
+def corpus_inventory(pdb):
+    """Shared fixtures plus the actual PDB census, kept distinct in reports."""
+    cases = corpus_cases(pdb, include_language=True)
+    pdb_entries = {name: case.metadata["data_name"]
+                   for name, case in cases.items()
+                   if case.collection == "posteriordb"}
+    return cases, pdb_entries
+
+
+def selection_collections(selected, cases):
+    """Attribute each selected source to its recorded collection."""
+    counts = {}
+    for model in selected:
+        collection = cases[model].collection if model in cases else "unknown"
+        counts[collection] = counts.get(collection, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def default_selection(refs, pdb_entries, known_gaps=KNOWN_GAPS):
@@ -1430,7 +1449,7 @@ def main():
     pdb_checkout = args.pdb.resolve()
     pdb = pdb_checkout / "posterior_database"
     refs, recorded = load_refs()
-    pdb_entries = dict(corpus_models(pdb))
+    cases, pdb_entries = corpus_inventory(pdb)
     selected = args.models or default_selection(refs, pdb_entries)
     missing_models = [
         model for model in selected
@@ -1446,13 +1465,7 @@ def main():
         parser.error("reference provenance does not match PDB_SHA")
     if pdb_revision is not None and pdb_revision != pdb_pin:
         parser.error("posteriordb checkout does not match PDB_SHA")
-    language_models = [
-        model for model in selected
-        if (REPO / "tests" / "stanc3" / f"{model}.stan").is_file()
-    ]
-    selected_pdb_models = [
-        model for model in selected if model not in language_models
-    ]
+    selected_collections = selection_collections(selected, cases)
     selected_referenced = [model for model in selected if model in refs]
     selected_ab_only = [model for model in selected if model not in refs]
     available_pdb_models = len(pdb_entries)
@@ -1485,8 +1498,9 @@ def main():
             "kind": selection_kind,
             "models": selected,
             "selected_models": len(selected),
-            "selected_posteriordb_models": len(selected_pdb_models),
-            "selected_language_models": len(language_models),
+            "selected_posteriordb_models": selected_collections.get("posteriordb", 0),
+            "selected_language_models": selected_collections.get("stanc3", 0),
+            "selected_collection_models": selected_collections,
             "selected_referenced_models": len(selected_referenced),
             "selected_ab_only_models": len(selected_ab_only),
             "ab_only_models": selected_ab_only,

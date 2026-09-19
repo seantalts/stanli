@@ -36,7 +36,9 @@ keeping installation small and avoiding a local stan-math build.
   <!--gen:bench_span-->1.0x-10.9x<!--/gen--> across the representative slice;
   the first Eight Schools run from source to CSV is roughly 100x faster.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
-  <!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models
+  <!--gen:corpus_reference_models-->329<!--/gen--> models share one three-point
+  CmdStan reference replay. Within the posteriordb subset,
+  <!--gen:corpus_verified-->118/120<!--/gen--> models are
   verified against CmdStan's log density and full gradient,
   <!--gen:corpus_bitwise-->55<!--/gen--> of them bitwise identical,
   worst relative deviation <!--gen:corpus_worst-->7.1e-13<!--/gen-->.
@@ -45,9 +47,8 @@ keeping installation small and avoiding a local stan-math build.
   <!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan
   references. The latest replay completes all 62, with worst scaled error
   1.48e-13 across 32,349 compared values.
-- Teaching support: [models, numerics, performance, and R workflows](docs/teaching-support.md)
-  for Rethinking, brms, and the educational collection; plus a
-  [cmdstanr migration guide](docs/from-cmdstanr.md).
+- R workflows: [brms, Rethinking and classroom examples](docs/teaching-support.md),
+  plus a [cmdstanr migration guide](docs/from-cmdstanr.md).
 - Language coverage: [tests/stanc3/README.md](tests/stanc3/README.md).
   <!--gen:lang_verified-->11/11<!--/gen--> models lifted from stanc3's own
   test suite, for the type and language constructs no real posterior
@@ -536,8 +537,8 @@ Nothing ships on "looks close". Kernel gradients are bitwise-tested
 against stan-math's var path at fixed points; whole models are
 differentially verified against CmdStan at the same deterministic
 evaluation point (`tools/verify_sample.py`). The corpus scoreboard
-(`tools/corpus.py`) tracks which posteriordb models compile, evaluate,
-and verify. Details in [docs/corpus-status.md](docs/corpus-status.md).
+(`tools/corpus.py`) tracks source collections, recorded reference coverage
+and numerical comparison results across the shared inventory. Details in [docs/corpus-status.md](docs/corpus-status.md).
 
 ## Status
 

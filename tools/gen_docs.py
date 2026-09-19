@@ -19,6 +19,7 @@ the marked spans with values computed from the artifacts.
 The prose around the markers is hand-written; only the numbers move.
 """
 import csv
+import gzip
 import json
 import pathlib
 import re
@@ -107,8 +108,10 @@ def compute():
     rethinking = {p.stem for p in (REPO / "tests" / "rethinking").glob("*.stan")}
     rethinking_verified = sum(ver.get(k, {}).get("status") == "VERIFIED"
                              for k in rethinking)
+    imported = {p.name for p in (REPO / "tests/educational/models").iterdir() if p.is_dir()}
     ver = {k: v for k, v in ver.items()
-           if k not in lang and k not in brms and k not in rethinking}
+           if k not in lang and k not in brms and k not in rethinking and k not in imported}
+    references = json.loads(gzip.decompress((REPO / "docs/corpus-refs.json.gz").read_bytes()))["models"]
     verified = {k: v for k, v in ver.items() if v["status"] == "VERIFIED"}
     bitwise = sum(1 for v in verified.values() if v["max_ulp"] == 0)
     worst = max(v["max_rel"] for v in verified.values())
@@ -134,6 +137,8 @@ def compute():
         table.append(f"| `{name}` | {us(sns)} | {us(cns)} | {spd} |")
 
     return {
+        "corpus_reference_models": str(len(references)),
+        "corpus_reference_points": str(sum(len(row["points"]) for row in references.values())),
         "corpus_verified": f"{len(verified)}/{n_total}",
         "corpus_verified_of": f"{len(verified)} of {n_total}",
         "corpus_verified_n": str(len(verified)),
@@ -215,7 +220,7 @@ def benchmark_table_problems():
         0, "| model | stanli gradient | CmdStan gradient | gradient speedup | "
            "what stopped it |")
 
-    full = page.split("## Full corpus", 1)[1].split(
+    full = page.split("## Historical posteriordb model results", 1)[1].split(
         "### Runs that did not complete", 1)[0]
     stuck = page.split("### Runs that did not complete", 1)[1].split(
         "## Benchmark method", 1)[0]
