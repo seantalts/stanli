@@ -106,7 +106,8 @@ class InventoryTest(unittest.TestCase):
 
     def test_windows_newlines_do_not_change_fixture_identity(self):
         path = self.imported / "models/import_a/model.stan"
-        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        text = path.read_bytes().replace(b"\r\n", b"\n")
+        path.write_bytes(text.replace(b"\n", b"\r\n"))
         self.assertIn("import_a", inventory.local_cases())
 
     def test_missing_provenance_fails(self):

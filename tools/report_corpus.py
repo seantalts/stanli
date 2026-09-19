@@ -186,7 +186,8 @@ def export(run, diagnostics, output):
                    'ess_tail_min', 'divergences', 'max_depth_hits', 'ebfmi_min')]
     fields += ['stanli_ns_grad', 'stanli_ns_grad_mad', 'cmdstan_ns_grad', 'cmdstan_ns_grad_mad',
                'paired_speedup', 'paired_speedup_mad']
-    with (output / 'corpus-timings.csv').open('w', newline='') as stream:
+    with (output / 'corpus-timings.csv').open('w', newline='',
+                                               encoding='utf-8') as stream:
         writer = csv.DictWriter(stream, fieldnames=fields, lineterminator='\n')
         writer.writeheader()
         for row in rows:
@@ -282,7 +283,7 @@ def export(run, diagnostics, output):
            'python3 tools/report_corpus.py RUN_DIRECTORY /tmp/corpus-diagnostics.json output/corpus-performance',
            '```', '', 'The jobs file contains absolute CSV paths; regenerate it after relocating the evidence directory. '
            'The exporter refuses an unfinished sweep. See the [benchmark protocol](../../docs/benchmark-protocol.md).', '']
-    (output / 'README.md').write_text('\n'.join(md))
+    (output / 'README.md').write_text('\n'.join(md), encoding='utf-8')
     return groups
 
 

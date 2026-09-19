@@ -10,6 +10,37 @@ and the [September 16, 199-fixture appendix](../output/teaching-performance/READ
 The latter retains its original collection-oriented report and all failures.
 Do not pool these runs into a single median or substitute later results into them.
 
+## ctsem retained-loop replay: 19 September 2026
+
+The ctsem model from [issue #248](https://github.com/seantalts/stanli/issues/248),
+a continuous-time structural equation model whose likelihood is a Kalman
+filter in a retained loop, with its data cut to 33, 400 and 4000 rows.
+Measured on 2026-09-19 on the Apple M3 Ultra: Stanli 0.16.0 and Stanli at
+`2a243547`, both Release builds at default settings through `bench_grad`,
+and CmdStan 2.40 through a harness that calls the compiled model's
+`log_prob` gradient. Gradient times are the mean of a timed loop after
+warmup; preparation is model load to the first gradient; peak RSS is from
+`/usr/bin/time -l`. These are single runs, not the five-pair protocol.
+Stanli's log density and gradients are bitwise identical between the replay
+and the tree walk it replaces.
+
+| rows | stanli 0.16.0 | stanli 2a243547 | CmdStan 2.40 | vs 0.16.0 | vs CmdStan |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 33 | 28.5 ms | 4.8 ms | 7.5 ms | 5.9x faster | 1.6x faster |
+| 400 | 320 ms | 56 ms | 89 ms | 5.7x faster | 1.6x faster |
+| 4000 | 3190 ms | 589 ms | 903 ms | 5.4x faster | 1.5x faster |
+
+| rows | prep 0.16.0 | prep 2a243547 | peak RSS 0.16.0 | peak RSS 2a243547 | peak RSS CmdStan |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 33 | 9.2 s | 1.0 s | 130 MB | 177 MB | 34 MB |
+| 400 | 9.8 s | 1.4 s | 893 MB | 1.13 GB | 345 MB |
+| 4000 | 9.0 s | 1.1 s | 8.5 GB | 9.9 GB | 3.4 GB |
+
+CmdStan's model compile is not included. A NUTS run of 30 warmup and 30
+saved draws at 33 rows, where both samplers ran at the maximum tree depth
+throughout: 0.16.0 358 s, 2a243547 248 s, CmdStan 354 s. Each saved draw's
+`write_array` cost 6 s in 0.16.0 and costs 36 ms now.
+
 ## Complete CLI sampling: 14 September 2026
 
 This 13-model run used the Aalto source collection. The table

@@ -300,7 +300,7 @@ bool Lowering::try_lower_symbolic_lane_tail(const mir::Stmt& s, int64_t first,
   for (const auto& local : proof.locals) {
     scope.erase(local.first);
     decls.erase(local.first);
-    td.env().erase(local.first);
+    td_erase(local.first);
   }
   for (auto it = scope.begin(); it != scope.end();) {
     if (it->second.slot >= static_cast<int>(parameter_slots))
