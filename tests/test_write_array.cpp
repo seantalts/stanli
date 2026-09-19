@@ -1462,6 +1462,114 @@ void test_write_array_partial_fallback() {
   }
 }
 
+// A loop region_auto_profitable selects (32-plus trips, a nested while so
+// region_runtime_control sees retained control despite write_array's
+// DataOnly-everywhere MIR) whose body calls normal_rng -- a region always
+// refuses a stateful call. The refused trial must fall back to one
+// whole-loop island rather than per-iteration unrolling: with the fix the
+// op count does not grow with N, and it did before it.
+void test_write_array_selected_loop_refused() {
+  using namespace stanli;
+  const std::string text =
+      slurp("tests/fixtures/gq_selected_loop_refused.tmir.sexp");
+  const auto compile_at = [&](int n) {
+    DataMap data;
+    data.set_int("N", n);
+    std::vector<double> y(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+    data.set_real_array("y", y);
+    return compile_model(text, data);
+  };
+  CompiledModel small = compile_at(32);
+  CompiledModel large = compile_at(64);
+  if (!small.write_array || !large.write_array) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_refused: no write_array\n");
+    return;
+  }
+  if (!small.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_refused: truncated at N=32: %s\n",
+                small.write_array->truncated.c_str());
+  }
+  const size_t small_ops = small.write_array->graph.ops.size();
+  const size_t large_ops = large.write_array->graph.ops.size();
+  if (large_ops > small_ops + small_ops / 2) {
+    ++failures;
+    std::printf(
+        "FAIL gq_selected_loop_refused: op count scales with N (N=32 "
+        "ops=%zu, N=64 ops=%zu)\n",
+        small_ops, large_ops);
+  }
+
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cross = compile_at(32);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cross.write_array || !cross.write_array->interp) {
+    ++failures;
+    std::printf(
+        "FAIL gq_selected_loop_refused: no interpreter attached for "
+        "cross-check\n");
+    return;
+  }
+  Executor pex(cross.graph);
+  cross.bind(pex);
+  Executor wex(std::move(cross.write_array->graph));
+  cross.write_array->bind(wex);
+  pex.params_data()[0] = 0.4;
+  pex.run_forward_only();
+  wex.params_data()[0] = 0.4;
+  WaRng graph_rng(9);
+  wex.run_forward_only(EvalState{&graph_rng});
+  std::vector<double> row;
+  for (const auto& c : cross.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+  }
+  WaRng interp_rng(9);
+  const std::vector<double> interp_row =
+      cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
+  if (!same_double_bytes(row, interp_row)) {
+    ++failures;
+    std::printf(
+        "FAIL gq_selected_loop_refused: graph and interpreter rows differ\n");
+  }
+}
+
+// The same shape, but the refused loop's body also declares a
+// register-program-sized local. The whole-loop island fallback then
+// overflows too, and write_array has to fall back to the interpreter for
+// generated quantities specifically rather than raise a compile error.
+void test_write_array_selected_loop_overflow() {
+  using namespace stanli;
+  const int n = 32;
+  DataMap data;
+  data.set_int("N", n);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i) y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  const std::string text =
+      slurp("tests/fixtures/gq_selected_loop_overflow.tmir.sexp");
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_overflow: no write_array\n");
+    return;
+  }
+  if (cm.write_array->truncated.empty() ||
+      cm.write_array->truncated.find("generated quantities") ==
+          std::string::npos) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_overflow: truncated message is [%s]\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (!cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gq_selected_loop_overflow: no interpreter attached\n");
+  }
+}
+
 // A generated quantity the optimizer folds to a constant: --O1 replaces
 // the FnWriteParam's variable reference with the literal value, so the
 // column's name has to come from the program's output_vars instead. Both
@@ -5479,6 +5587,8 @@ int main() {
   test_write_array_block_order();
   test_write_array_vector_rng();
   test_write_array_partial_fallback();
+  test_write_array_selected_loop_refused();
+  test_write_array_selected_loop_overflow();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
 }

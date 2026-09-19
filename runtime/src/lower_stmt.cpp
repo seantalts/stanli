@@ -1565,6 +1565,11 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         return;
       }
       if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi})) return;
+      if (in_write_array && structured_policy != StructuredMode::Off &&
+          region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi})) {
+        lower_runtime_ifelse(s);
+        return;
+      }
       // runtime_loop_control evaluates data-only conditions while looking
       // for a parameter-selected break/continue. Scan under the same loop
       // binding that ordinary unrolling will use: without it, an indexed
