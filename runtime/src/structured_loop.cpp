@@ -3094,43 +3094,69 @@ void StructuredLoop::prepare() {
 }
 
 template <class V>
-void emit_pool_bytes(const char* name, const V& v) {
+void emit_pool_bytes(const char* name, const V& v, size_t per_instr = 0) {
   using T = typename V::value_type;
-  emit_diagnostic("stanli_structured freeze_bytes: pool=" +
-                  std::string(name) +
-                  " bytes=" + std::to_string(v.size() * sizeof(T)) +
-                  " capacity=" + std::to_string(v.capacity() * sizeof(T)));
+  const size_t bytes = v.size() * sizeof(T);
+  std::string line = "stanli_structured freeze_bytes: pool=" +
+                     std::string(name) + " bytes=" + std::to_string(bytes) +
+                     " capacity=" + std::to_string(v.capacity() * sizeof(T));
+  if (per_instr)
+    line += " bytes_per_instr=" + std::to_string(bytes / per_instr);
+  emit_diagnostic(line);
+}
+
+void emit_frozen_sizeof() {
+  emit_diagnostic(
+      "stanli_structured frozen_sizeof: FrozenCall=" +
+      std::to_string(sizeof(FrozenCall)) +
+      " FrozenInPlace=" + std::to_string(sizeof(FrozenInPlace)) +
+      " FrozenCopy=" + std::to_string(sizeof(FrozenCopy)) +
+      " FrozenSegment=" + std::to_string(sizeof(FrozenSegment)) +
+      " FrozenGuard=" + std::to_string(sizeof(FrozenGuard)) +
+      " FrozenTarget=" + std::to_string(sizeof(FrozenTarget)) +
+      " FrozenImport=" + std::to_string(sizeof(FrozenImport)) +
+      " FrozenGather=" + std::to_string(sizeof(FrozenGather)) +
+      " FrozenSet=" + std::to_string(sizeof(FrozenSet)) +
+      " StreamInstr=" + std::to_string(sizeof(StreamInstr)) +
+      " Record=" + std::to_string(sizeof(Record)) +
+      " Version=" + std::to_string(sizeof(Version)));
 }
 
 void emit_freeze_breakdown(const LoopState& s) {
   const Stream& st = *s.stream;
-  emit_pool_bytes("program", st.program);
-  emit_pool_bytes("backward_order", st.backward_order);
-  emit_pool_bytes("calls", st.calls);
-  emit_pool_bytes("inplaces", st.inplaces);
-  emit_pool_bytes("copies", st.copies);
-  emit_pool_bytes("segs", st.segs);
-  emit_pool_bytes("guards", st.guards);
-  emit_pool_bytes("targets", st.targets);
-  emit_pool_bytes("sets", st.sets);
-  emit_pool_bytes("gathers", st.gathers);
-  emit_pool_bytes("gather_pos", st.gather_pos);
-  emit_pool_bytes("gather_adj", st.gather_adj);
-  emit_pool_bytes("call_ptrs", st.call_ptrs);
-  emit_pool_bytes("call_adj", st.call_adj);
-  emit_pool_bytes("inplace_pos", st.inplace_pos);
-  emit_pool_bytes("inplace_sel_ptr", st.inplace_sel_ptr);
-  emit_pool_bytes("inplace_sel_snapshot", st.inplace_sel_snapshot);
-  emit_pool_bytes("inplace_adj", st.inplace_adj);
-  emit_pool_bytes("copy_adj", st.copy_adj);
-  emit_pool_bytes("seg_in_src", st.seg_in_src);
-  emit_pool_bytes("seg_in_adj", st.seg_in_adj);
+  emit_frozen_sizeof();
+  const size_t n_call = st.calls.size(), n_inplace = st.inplaces.size(),
+              n_copy = st.copies.size(), n_seg = st.segs.size(),
+              n_guard = st.guards.size(), n_target = st.targets.size(),
+              n_set = st.sets.size(), n_gather = st.gathers.size(),
+              n_import = st.imports.size(), n_program = st.program.size();
+  emit_pool_bytes("program", st.program, n_program);
+  emit_pool_bytes("backward_order", st.backward_order, n_program);
+  emit_pool_bytes("calls", st.calls, n_call);
+  emit_pool_bytes("inplaces", st.inplaces, n_inplace);
+  emit_pool_bytes("copies", st.copies, n_copy);
+  emit_pool_bytes("segs", st.segs, n_seg);
+  emit_pool_bytes("guards", st.guards, n_guard);
+  emit_pool_bytes("targets", st.targets, n_target);
+  emit_pool_bytes("sets", st.sets, n_set);
+  emit_pool_bytes("gathers", st.gathers, n_gather);
+  emit_pool_bytes("gather_pos", st.gather_pos, n_gather);
+  emit_pool_bytes("gather_adj", st.gather_adj, n_gather);
+  emit_pool_bytes("call_ptrs", st.call_ptrs, n_call);
+  emit_pool_bytes("call_adj", st.call_adj, n_call);
+  emit_pool_bytes("inplace_pos", st.inplace_pos, n_inplace);
+  emit_pool_bytes("inplace_sel_ptr", st.inplace_sel_ptr, n_inplace);
+  emit_pool_bytes("inplace_sel_snapshot", st.inplace_sel_snapshot, n_inplace);
+  emit_pool_bytes("inplace_adj", st.inplace_adj, n_inplace);
+  emit_pool_bytes("copy_adj", st.copy_adj, n_copy);
+  emit_pool_bytes("seg_in_src", st.seg_in_src, n_seg);
+  emit_pool_bytes("seg_in_adj", st.seg_in_adj, n_seg);
   emit_pool_bytes("arena_cells", st.arena.cells);
   emit_pool_bytes("arena_ranges", st.arena.ranges);
   emit_pool_bytes("adjoints", st.adjoints);
-  emit_pool_bytes("inplace_old", st.inplace_old);
-  emit_pool_bytes("target_work", st.target_work);
-  emit_pool_bytes("imports", st.imports);
+  emit_pool_bytes("inplace_old", st.inplace_old, n_inplace);
+  emit_pool_bytes("target_work", st.target_work, n_target);
+  emit_pool_bytes("imports", st.imports, n_import);
   emit_pool_bytes("output_value", st.output_value);
   emit_pool_bytes("output_len", st.output_len);
   emit_pool_bytes("output_adjoint", st.output_adjoint);
