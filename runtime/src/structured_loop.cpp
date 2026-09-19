@@ -14,8 +14,22 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#elif defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 namespace stanli {
 namespace {
+
+void release_freed_memory_to_os() {
+#if defined(__APPLE__)
+  malloc_zone_pressure_relief(nullptr, 0);
+#elif defined(__linux__) && defined(__GLIBC__)
+  malloc_trim(0);
+#endif
+}
 
 constexpr int64_t exact_limit = int64_t{1} << 52;
 int64_t add(int64_t a, int64_t b) {
@@ -2535,6 +2549,7 @@ void freeze(LoopState& s) {
   st.gather_pos.shrink_to_fit();
   st.gather_adj.shrink_to_fit();
   st.gathers.shrink_to_fit();
+  st.arena.ranges.shrink_to_fit();
   st.inplace_sel_ptr.shrink_to_fit();
   st.inplace_sel_snapshot.shrink_to_fit();
   st.inplace_pos.shrink_to_fit();
@@ -3018,6 +3033,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     std::vector<double>().swap(s.undo);
     std::vector<Record>().swap(s.records);
     std::vector<int64_t>().swap(s.target_refs);
+    release_freed_memory_to_os();
     if (s.stream) s.last_replayed = true;
     if (s.diagnostics && s.stream) emit_freeze_breakdown(s);
   }
