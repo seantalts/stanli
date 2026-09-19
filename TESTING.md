@@ -50,6 +50,15 @@ documented `kronecker_gp` points use limits based on measured deviations, and
 points rejected by CmdStan require matching rejection behavior. The sections
 below give the details and known exceptions.
 
+A kernel that replaces a nested-tape backward with a closed form is held to a
+higher-precision reference rather than to the tape.
+[`tools/matrix_pullback_hp_check.py`](tools/matrix_pullback_hp_check.py)
+evaluates the `matrix_exp` and matrix-solve adjoints at 60 decimal digits and
+reports the largest error relative to each matrix's largest entry, old against
+new. It also prints per-element ULP distance, but on entries near zero both
+methods lose the same digits to cancellation, so the scale-relative error is
+the measure a change must not worsen.
+
 The CmdStan 2.40 upgrade also has focused fixtures in
 `tests/fixtures/stan240_*.stan`, with independent three-point CmdStan references
 in `tests/function_coverage/stan240_references.json.gz`. They cover the new
