@@ -2763,8 +2763,10 @@ void freeze(LoopState& s) {
   st.output_adjoint.clear();
   for (int slot : p.outputs) {
     const int64_t v = s.bindings[slot];
-    st.output_value.push_back(remap_c(s.versions[static_cast<size_t>(v)].value));
-    st.output_len.push_back(p.body.slots[slot].len);
+    const int64_t len = p.body.slots[slot].len;
+    st.output_value.push_back(
+        len > 0 ? remap_c(s.versions[static_cast<size_t>(v)].value) : nullptr);
+    st.output_len.push_back(len);
     st.output_adjoint.push_back(adj_of(v));
   }
   if (check_remap) check_no_stale_arena_pointers(st, arena_ranges);
