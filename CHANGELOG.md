@@ -6,7 +6,9 @@ Retained loops now replay a recorded instruction stream. On ctsem, the model
 from issue #248, one gradient is 5.5x faster than in 0.16.0 and 1.5x faster
 than CmdStan at 33, 400 and 4000 rows; preparation takes 1 s instead of 9 s,
 and each saved draw takes 36 ms instead of 6 s. A run of 30 warmup and 30
-saved draws at 33 rows takes 248 s against 354 s for CmdStan. The
+saved draws at 33 rows takes 248 s against 354 s for CmdStan. Across the
+316 other corpus models that evaluate, warm-gradient latency is unchanged
+against 0.16.0 (median ratio 0.999) and preparation is within 3%. The
 measurements are in [docs/benchmark-history.md](docs/benchmark-history.md).
 
 - Retained loops replay a recorded instruction stream instead of walking the
