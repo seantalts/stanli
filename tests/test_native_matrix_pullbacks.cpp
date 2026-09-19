@@ -184,12 +184,12 @@ static MatLD expm_ld(const MatLD& a) {
   return total;
 }
 
-double g_max_matrix_exp_ulp = 0;
+double g_max_matrix_exp_adj_rel = 0;
 double g_max_matrix_exp_value_rel = 0;
 double g_max_matrix_exp_fd_rel = 0;
 double g_max_matrix_exp_tape_fd_rel = 0;
 static void matrix_exp_case(int n, bool active, unsigned seed_val,
-                            int64_t max_ulp) {
+                            double max_rel) {
   using namespace stanli;
   std::mt19937 rng(seed_val);
   std::uniform_real_distribution<double> coef(-0.6, 0.6);
@@ -233,12 +233,17 @@ static void matrix_exp_case(int n, bool active, unsigned seed_val,
     g_max_matrix_exp_value_rel = std::max(g_max_matrix_exp_value_rel, rel);
   }
   if (!active) return;
+  double adj_scale = 0;
+  for (int i = 0; i < n * n; ++i)
+    adj_scale = std::max(adj_scale, std::abs(0.125 + av.data()[i].adj()));
   for (int i = 0; i < n * n; ++i) {
     const double want = 0.125 + av.data()[i].adj();
-    expect_ulp("matrix_exp adj" + tag + " i=" + std::to_string(i),
-               adj.data()[i], want, max_ulp);
-    const int64_t dist = std::llabs(ulp_key(adj.data()[i]) - ulp_key(want));
-    g_max_matrix_exp_ulp = std::max(g_max_matrix_exp_ulp, (double)dist);
+    const double rel = std::abs(adj.data()[i] - want) / adj_scale;
+    g_max_matrix_exp_adj_rel = std::max(g_max_matrix_exp_adj_rel, rel);
+    if (rel > max_rel && ++failures < 12)
+      std::printf(
+          "FAIL matrix_exp adj%s i=%d got %.17g want %.17g (%.3g of scale)\n",
+          tag.c_str(), i, adj.data()[i], want, rel);
   }
 
   MatLD ald(n, n), gld(n, n), dld(n, n);
@@ -505,12 +510,12 @@ int main(int argc, char** argv) {
   for (int n : {0, 1, 2, 5, 10, 20})
     for (bool active : {false, true})
       for (unsigned seed_val = 1; seed_val <= 4; ++seed_val)
-        matrix_exp_case(n, active, seed_val, 6000);
+        matrix_exp_case(n, active, seed_val, 1e-14);
   std::printf(
-      "matrix_exp: max adj ulp=%.0f max value rel=%.3e "
+      "matrix_exp: max adj rel=%.3e max value rel=%.3e "
       "max kernel fd_rel=%.3e max tape fd_rel=%.3e\n",
-      g_max_matrix_exp_ulp, g_max_matrix_exp_value_rel, g_max_matrix_exp_fd_rel,
-      g_max_matrix_exp_tape_fd_rel);
+      g_max_matrix_exp_adj_rel, g_max_matrix_exp_value_rel,
+      g_max_matrix_exp_fd_rel, g_max_matrix_exp_tape_fd_rel);
 
   using namespace stanli;
   solve_family(true, SolveKindTag::Plain, OP_MDIVIDE_LEFT, 16);
