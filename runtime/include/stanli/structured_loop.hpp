@@ -101,7 +101,6 @@ struct StructuredLoop {
   int64_t workspace_size = 0;
   size_t node_count = 0, site_count = 0, loop_count = 0;
   // The first For/While reached from root without crossing another loop.
-  // Its trips mark the frozen stream's iteration boundaries.
   int outer_loop_index = -1;
 
   // Validate, number sites and loops, and decide every KernelCall's storage
