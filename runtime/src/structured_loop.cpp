@@ -1310,6 +1310,88 @@ struct LoopState : KernelState {
   }
 };
 
+constexpr int64_t kReservePrefixTrips = 8;
+
+struct RecordingPoolSizes {
+  size_t program = 0, gather_pos = 0, gather_adj_version = 0, gathers = 0,
+        call_ptrs = 0, call_adj_version = 0, calls = 0, copy_adj_version = 0,
+        copies = 0, inplace_pos = 0, inplace_old = 0, inplace_sel_ptr = 0,
+        inplace_sel_snapshot = 0, inplace_adj_version = 0, inplaces = 0,
+        guards = 0, sets = 0, targets = 0, target_adj_version = 0,
+        seg_in_src = 0, seg_in_adj_version = 0, segs = 0;
+};
+
+RecordingPoolSizes recording_pool_sizes(const Stream& st) {
+  return RecordingPoolSizes{
+      st.program.size(),          st.gather_pos.size(),
+      st.gather_adj_version.size(), st.gathers.size(),
+      st.call_ptrs.size(),        st.call_adj_version.size(),
+      st.calls.size(),            st.copy_adj_version.size(),
+      st.copies.size(),           st.inplace_pos.size(),
+      st.inplace_old.size(),      st.inplace_sel_ptr.size(),
+      st.inplace_sel_snapshot.size(), st.inplace_adj_version.size(),
+      st.inplaces.size(),         st.guards.size(),
+      st.sets.size(),             st.targets.size(),
+      st.target_adj_version.size(), st.seg_in_src.size(),
+      st.seg_in_adj_version.size(), st.segs.size()};
+}
+
+template <class T>
+void shrink_if_loose(std::vector<T>& v) {
+  if (v.capacity() > v.size() + v.size() / 16) v.shrink_to_fit();
+}
+
+template <class T>
+void reserve_for_remaining(std::vector<T>& v, size_t before, size_t after,
+                           int64_t prefix_trips, int64_t remaining_trips) {
+  if (after <= before || remaining_trips <= 0 || prefix_trips <= 0) return;
+  const int64_t grown = static_cast<int64_t>(after - before);
+  const int64_t projected = mul(grown, remaining_trips) / prefix_trips;
+  const size_t want = add(static_cast<int64_t>(after), projected);
+  if (v.capacity() < want) v.reserve(want);
+}
+
+void reserve_remaining_trips(Stream& st, const RecordingPoolSizes& before,
+                             const RecordingPoolSizes& after,
+                             int64_t prefix_trips, int64_t remaining_trips) {
+  reserve_for_remaining(st.program, before.program, after.program, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.gather_pos, before.gather_pos, after.gather_pos,
+                        prefix_trips, remaining_trips);
+  reserve_for_remaining(st.gather_adj_version, before.gather_adj_version,
+                        after.gather_adj_version, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.gathers, before.gathers, after.gathers, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.call_ptrs, before.call_ptrs, after.call_ptrs,
+                        prefix_trips, remaining_trips);
+  reserve_for_remaining(st.call_adj_version, before.call_adj_version,
+                        after.call_adj_version, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.calls, before.calls, after.calls, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.copy_adj_version, before.copy_adj_version,
+                        after.copy_adj_version, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.copies, before.copies, after.copies, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.inplace_pos, before.inplace_pos, after.inplace_pos,
+                        prefix_trips, remaining_trips);
+  reserve_for_remaining(st.inplace_old, before.inplace_old, after.inplace_old,
+                        prefix_trips, remaining_trips);
+  reserve_for_remaining(st.inplace_sel_ptr, before.inplace_sel_ptr,
+                        after.inplace_sel_ptr, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.inplace_sel_snapshot, before.inplace_sel_snapshot,
+                        after.inplace_sel_snapshot, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.inplace_adj_version, before.inplace_adj_version,
+                        after.inplace_adj_version, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.inplaces, before.inplaces, after.inplaces,
+                        prefix_trips, remaining_trips);
+  reserve_for_remaining(st.guards, before.guards, after.guards, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.sets, before.sets, after.sets, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.targets, before.targets, after.targets, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.target_adj_version, before.target_adj_version,
+                        after.target_adj_version, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.seg_in_src, before.seg_in_src, after.seg_in_src,
+                        prefix_trips, remaining_trips);
+  reserve_for_remaining(st.seg_in_adj_version, before.seg_in_adj_version,
+                        after.seg_in_adj_version, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.segs, before.segs, after.segs, prefix_trips, remaining_trips);
+}
+
 struct Execution {
   const StructuredLoop& p;
   LoopState& s;
@@ -1703,10 +1785,18 @@ struct Execution {
                                 value(n.upper), lo, hi, false});
         const bool marked =
             s.building && n.loop_index == p.outer_loop_index;
+        const int64_t prefix =
+            marked && count > kReservePrefixTrips ? kReservePrefixTrips : 0;
+        RecordingPoolSizes pools_before;
+        if (prefix > 0) pools_before = recording_pool_sizes(*s.building);
         for (int64_t i = 0; i < count; ++i) {
           if (marked) log_mark(static_cast<uint32_t>(i));
           bind_iterator(n, lo + static_cast<double>(i), bounds_const);
           if (forward(n.children[0]) == Break) break;
+          if (i + 1 == prefix)
+            reserve_remaining_trips(*s.building, pools_before,
+                                    recording_pool_sizes(*s.building), prefix,
+                                    count - prefix);
         }
         if (marked) log_mark_exit();
         return Normal;
@@ -2530,36 +2620,36 @@ void freeze(LoopState& s) {
     }
     if (live) st.backward_order.push_back(instr);
   }
-  st.backward_order.shrink_to_fit();
+  shrink_if_loose(st.backward_order);
 
   // Smallest first, so a large pool's own reallocation has the freed space
   // from every pool shrunk before it to grow into.
-  st.output_value.shrink_to_fit();
-  st.output_len.shrink_to_fit();
-  st.output_adjoint.shrink_to_fit();
-  st.imports.shrink_to_fit();
-  st.targets.shrink_to_fit();
-  st.sets.shrink_to_fit();
-  st.copies.shrink_to_fit();
-  st.copy_adj.shrink_to_fit();
-  st.segs.shrink_to_fit();
-  st.seg_in_src.shrink_to_fit();
-  st.seg_in_adj.shrink_to_fit();
-  st.guards.shrink_to_fit();
-  st.gather_pos.shrink_to_fit();
-  st.gather_adj.shrink_to_fit();
-  st.gathers.shrink_to_fit();
-  st.arena.ranges.shrink_to_fit();
-  st.inplace_sel_ptr.shrink_to_fit();
-  st.inplace_sel_snapshot.shrink_to_fit();
-  st.inplace_pos.shrink_to_fit();
-  st.inplace_old.shrink_to_fit();
-  st.inplace_adj.shrink_to_fit();
-  st.inplaces.shrink_to_fit();
-  st.call_adj.shrink_to_fit();
-  st.calls.shrink_to_fit();
-  st.program.shrink_to_fit();
-  st.call_ptrs.shrink_to_fit();
+  shrink_if_loose(st.output_value);
+  shrink_if_loose(st.output_len);
+  shrink_if_loose(st.output_adjoint);
+  shrink_if_loose(st.imports);
+  shrink_if_loose(st.targets);
+  shrink_if_loose(st.sets);
+  shrink_if_loose(st.copies);
+  shrink_if_loose(st.copy_adj);
+  shrink_if_loose(st.segs);
+  shrink_if_loose(st.seg_in_src);
+  shrink_if_loose(st.seg_in_adj);
+  shrink_if_loose(st.guards);
+  shrink_if_loose(st.gather_pos);
+  shrink_if_loose(st.gather_adj);
+  shrink_if_loose(st.gathers);
+  shrink_if_loose(st.arena.ranges);
+  shrink_if_loose(st.inplace_sel_ptr);
+  shrink_if_loose(st.inplace_sel_snapshot);
+  shrink_if_loose(st.inplace_pos);
+  shrink_if_loose(st.inplace_old);
+  shrink_if_loose(st.inplace_adj);
+  shrink_if_loose(st.inplaces);
+  shrink_if_loose(st.call_adj);
+  shrink_if_loose(st.calls);
+  shrink_if_loose(st.program);
+  shrink_if_loose(st.call_ptrs);
 
   s.stream = std::move(s.building);
   s.building.reset();
