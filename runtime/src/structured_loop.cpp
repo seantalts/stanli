@@ -2153,9 +2153,8 @@ void collect_live_ranges(LoopState& s, Stream& st,
   }
   for (const auto& t : st.targets) note(t.value, 1);
   for (const auto& imp : st.imports) note(imp.dst, imp.len);
-  for (int slot : p.outputs)
-    note(s.versions[static_cast<size_t>(s.bindings[slot])].value,
-        p.body.slots[slot].len);
+  for (size_t i = 0; i < st.output_value.size(); ++i)
+    note(st.output_value[i], st.output_len[i]);
 }
 
 // Packs only the referenced ranges into a contiguous buffer instead of
@@ -2813,16 +2812,6 @@ void freeze(LoopState& s) {
         " guard_identical=" + std::to_string(cov.guard_identical) +
         " guard_varying=" + std::to_string(cov.guard_varying));
   }
-  compact_snapshot(s, st.arena);
-  std::vector<int64_t>().swap(st.inplace_base_len);
-  std::vector<int64_t>().swap(st.gather_src_len);
-  const bool check_remap = check_remap_enabled();
-  const ArenaBlockRanges arena_ranges =
-      check_remap ? capture_arena_ranges(s.arena) : ArenaBlockRanges{};
-  const auto remap = [&](double* ptr) { return st.arena.remap(ptr); };
-  const auto remap_c = [&](const double* ptr) -> const double* {
-    return st.arena.remap(const_cast<double*>(ptr));
-  };
   st.adjoint_size = s.adjoint_size;
   st.adjoints.assign(static_cast<size_t>(st.adjoint_size), 0.0);
   const auto adj_of = [&](int64_t version) -> int32_t {
@@ -2841,27 +2830,53 @@ void freeze(LoopState& s) {
     for (size_t i = 0; i < versions.size(); ++i) ptrs[i] = ptr_of(versions[i]);
     std::vector<int64_t>().swap(versions);
   };
+  resolve_pool(st.call_adj_version, st.call_adj);
+  resolve_pool(st.inplace_adj_version, st.inplace_adj);
+  resolve_pool(st.copy_adj_version, st.copy_adj);
+  resolve_pool(st.seg_in_adj_version, st.seg_in_adj);
+  resolve_pool(st.gather_adj_version, st.gather_adj);
+  for (size_t i = 0; i < st.targets.size(); ++i)
+    st.targets[i].adjoint = adj_of(st.target_adj_version[i]);
+  std::vector<int64_t>().swap(st.target_adj_version);
+
+  st.output_value.clear();
+  st.output_len.clear();
+  st.output_adjoint.clear();
+  for (int slot : p.outputs) {
+    const int64_t v = s.bindings[slot];
+    const int64_t len = p.body.slots[slot].len;
+    st.output_value.push_back(
+        len > 0 ? s.versions[static_cast<size_t>(v)].value : nullptr);
+    st.output_len.push_back(len);
+    st.output_adjoint.push_back(adj_of(v));
+  }
+  s.versions.reset();
+  s.owner.reset();
+  s.version_const.reset();
+
+  compact_snapshot(s, st.arena);
+  std::vector<int64_t>().swap(st.inplace_base_len);
+  std::vector<int64_t>().swap(st.gather_src_len);
+  const bool check_remap = check_remap_enabled();
+  const ArenaBlockRanges arena_ranges =
+      check_remap ? capture_arena_ranges(s.arena) : ArenaBlockRanges{};
+  const auto remap = [&](double* ptr) { return st.arena.remap(ptr); };
+  const auto remap_c = [&](const double* ptr) -> const double* {
+    return st.arena.remap(const_cast<double*>(ptr));
+  };
 
   for (auto& ptr : st.call_ptrs) ptr = remap(ptr);
-  resolve_pool(st.call_adj_version, st.call_adj);
-
   for (auto& fi : st.inplaces) {
     fi.base = remap(fi.base);
     fi.rhs = remap_c(fi.rhs);
   }
   for (auto& ptr : st.inplace_sel_ptr) ptr = remap_c(ptr);
-  resolve_pool(st.inplace_adj_version, st.inplace_adj);
-
   for (auto& fc : st.copies) {
     fc.src = remap_c(fc.src);
     fc.dst = remap(fc.dst);
   }
-  resolve_pool(st.copy_adj_version, st.copy_adj);
-
   for (auto& fseg : st.segs) fseg.frame = remap(fseg.frame);
   for (auto& ptr : st.seg_in_src) ptr = remap_c(ptr);
-  resolve_pool(st.seg_in_adj_version, st.seg_in_adj);
-
   for (auto& g : st.guards_if) g.a = remap_c(g.a);
   for (auto& g : st.guards_for) {
     g.a = remap_c(g.a);
@@ -2871,29 +2886,14 @@ void freeze(LoopState& s) {
     fg.src = remap_c(fg.src);
     fg.dst = remap(fg.dst);
   }
-  resolve_pool(st.gather_adj_version, st.gather_adj);
   for (size_t i = 0; i < st.targets.size(); ++i)
     st.targets[i].value = remap_c(st.targets[i].value);
-  for (size_t i = 0; i < st.targets.size(); ++i)
-    st.targets[i].adjoint = adj_of(st.target_adj_version[i]);
-  std::vector<int64_t>().swap(st.target_adj_version);
   for (auto& set : st.sets) set.ptr = remap(set.ptr);
   for (auto& imp : st.imports) imp.dst = remap(imp.dst);
+  for (auto& ptr : st.output_value) ptr = remap_c(ptr);
 
-  st.output_value.clear();
-  st.output_len.clear();
-  st.output_adjoint.clear();
-  for (int slot : p.outputs) {
-    const int64_t v = s.bindings[slot];
-    const int64_t len = p.body.slots[slot].len;
-    st.output_value.push_back(
-        len > 0 ? remap_c(s.versions[static_cast<size_t>(v)].value) : nullptr);
-    st.output_len.push_back(len);
-    st.output_adjoint.push_back(adj_of(v));
-  }
   if (check_remap) check_no_stale_arena_pointers(st, arena_ranges);
   s.arena = BlockArena{};
-  s.versions.reset();
   dedup_gather_positions(st);
   dedup_inplace_positions(st);
   dedup_inplace_selectors(st);
@@ -3460,8 +3460,6 @@ void structured_loop_forward(KernelCtx& ctx) {
       s.building.reset();
       throw;
     }
-    s.owner.reset();
-    s.version_const.reset();
     std::vector<int64_t>().swap(s.handles);
     std::vector<double>().swap(s.undo);
     std::vector<Record>().swap(s.records);
