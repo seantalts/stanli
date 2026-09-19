@@ -2145,6 +2145,241 @@ TemplateReport fingerprint_iterations(const Stream& st) {
   return rep;
 }
 
+// Within each shape-group (iterations with an identical shape blob), checks
+// whether each position-bearing instruction's data is identical across the
+// group, a constant per-iteration shift of iteration 0's positions, or
+// neither -- the question that decides whether commit 2's "positions become
+// a pre-shifted invariant pointer" case covers the bulk of ctsem or not.
+struct ShiftCoverage {
+  uint32_t gather_identical = 0, gather_shift = 0, gather_other = 0;
+  uint64_t gather_identical_pos = 0, gather_shift_pos = 0, gather_other_pos = 0;
+  uint32_t inplace_pos_identical = 0, inplace_pos_shift = 0, inplace_pos_other = 0;
+  uint64_t inplace_pos_identical_n = 0, inplace_pos_shift_n = 0,
+          inplace_pos_other_n = 0;
+  uint32_t sel_identical = 0, sel_varying = 0;
+  uint32_t guard_identical = 0, guard_varying = 0;
+};
+
+// Classifies one instruction's position/selector data across a shape-group's
+// members: identical (same values everywhere), shift (member i's values are
+// member 0's plus one constant per member), or other (fallback: becomes a
+// per-iteration binding with no positions sharing).
+enum class Coverage { Identical, Shift, Other };
+Coverage classify_positions(const std::vector<int64_t>& base,
+                            const std::vector<std::vector<int64_t>>& members) {
+  bool identical = true, shift = true;
+  for (const auto& m : members) {
+    if (m.size() != base.size()) return Coverage::Other;
+    int64_t c = m.empty() ? 0 : m[0] - base[0];
+    for (size_t k = 0; k < base.size(); ++k) {
+      if (m[k] != base[k]) identical = false;
+      if (m[k] != base[k] + c) shift = false;
+    }
+    if (!identical && !shift) return Coverage::Other;
+  }
+  return identical ? Coverage::Identical : shift ? Coverage::Shift : Coverage::Other;
+}
+
+ShiftCoverage compute_shift_coverage(const Stream& st) {
+  ShiftCoverage cov;
+  std::vector<uint32_t> starts;
+  uint32_t exit_pos = static_cast<uint32_t>(st.program.size());
+  for (uint32_t i = 0; i < st.program.size(); ++i) {
+    if (st.program[i].kind != StreamInstr::Mark) continue;
+    if (st.program[i].index == Execution::kMarkExit)
+      exit_pos = i;
+    else
+      starts.push_back(i);
+  }
+  if (starts.empty()) return cov;
+
+  const auto shape_blob = [&](uint32_t start, uint32_t end) {
+    std::unordered_map<const void*, uint32_t> produced;
+    Blob blob;
+    uint32_t ordinal = 0;
+    for (uint32_t i = start; i < end; ++i, ++ordinal) {
+      const StreamInstr& instr = st.program[i];
+      blob.put<uint8_t>(static_cast<uint8_t>(instr.kind));
+      switch (instr.kind) {
+        case StreamInstr::Call: {
+          const FrozenCall& f = st.calls[instr.index];
+          blob.put(f.site);
+          blob.put(f.n_in);
+          blob.put(f.flags);
+          const double* const* ptrs = st.call_ptrs.data() + f.ptr_offset;
+          for (int k = 0; k < f.n_in; ++k) blob.tag(produced, ptrs[k]);
+          produced[ptrs[f.n_in]] = ordinal;
+          if (f.flags & kFrozenCallHasOut2) produced[ptrs[f.n_in + 1]] = ordinal;
+          break;
+        }
+        case StreamInstr::InPlace: {
+          const FrozenInPlace& fi = st.inplaces[instr.index];
+          blob.put(fi.site);
+          blob.put(fi.pos_count);
+          blob.put(fi.sel_count);
+          blob.tag(produced, fi.base);
+          blob.tag(produced, fi.rhs);
+          produced[fi.base] = ordinal;
+          break;
+        }
+        case StreamInstr::Copy: {
+          const FrozenCopy& fc = st.copies[instr.index];
+          blob.put(fc.site);
+          blob.put(fc.len);
+          blob.tag(produced, fc.src);
+          produced[fc.dst] = ordinal;
+          break;
+        }
+        case StreamInstr::Seg: {
+          const FrozenSegment& fs = st.segs[instr.index];
+          blob.put(reinterpret_cast<uintptr_t>(fs.segment));
+          const size_t n = fs.segment->ins.size();
+          blob.put(n);
+          for (size_t k = 0; k < n; ++k)
+            blob.tag(produced, st.seg_in_src[fs.in_offset + k]);
+          produced[fs.frame] = ordinal;
+          break;
+        }
+        case StreamInstr::Guard: {
+          const FrozenGuard& g = st.guards[instr.index];
+          blob.put(g.kind);
+          blob.put(g.decision);
+          blob.tag(produced, g.a);
+          blob.tag(produced, g.b);
+          break;
+        }
+        case StreamInstr::Tgt: {
+          const FrozenTarget& t = st.targets[instr.index];
+          blob.tag(produced, t.value);
+          break;
+        }
+        case StreamInstr::Set: {
+          const FrozenSet& fset = st.sets[instr.index];
+          produced[fset.ptr] = ordinal;
+          break;
+        }
+        case StreamInstr::Gather: {
+          const FrozenGather& g = st.gathers[instr.index];
+          blob.put(g.site);
+          blob.put(g.pos_count);
+          blob.tag(produced, g.src);
+          produced[g.dst] = ordinal;
+          break;
+        }
+        case StreamInstr::Mark:
+          break;
+      }
+    }
+    return std::string(blob.bytes.begin(), blob.bytes.end());
+  };
+
+  std::unordered_map<std::string, std::vector<size_t>> groups;
+  for (size_t t = 0; t < starts.size(); ++t) {
+    const uint32_t slice_start = starts[t] + 1;
+    const uint32_t slice_end =
+        t + 1 < starts.size() ? starts[t + 1] : exit_pos;
+    groups[shape_blob(slice_start, slice_end)].push_back(t);
+  }
+
+  for (const auto& kv : groups) {
+    const auto& trips = kv.second;
+    if (trips.size() < 2) continue;
+    const uint32_t base_start = starts[trips[0]] + 1;
+    const uint32_t base_end =
+        trips[0] + 1 < starts.size() ? starts[trips[0] + 1] : exit_pos;
+    const uint32_t len = base_end - base_start;
+    for (uint32_t ordinal = 0; ordinal < len; ++ordinal) {
+      const StreamInstr& base_instr = st.program[base_start + ordinal];
+      if (base_instr.kind == StreamInstr::Gather) {
+        const FrozenGather& bg = st.gathers[base_instr.index];
+        std::vector<int64_t> base(st.gather_pos.begin() + bg.pos_offset,
+                                  st.gather_pos.begin() + bg.pos_offset +
+                                      bg.pos_count);
+        std::vector<std::vector<int64_t>> members;
+        for (size_t m = 1; m < trips.size(); ++m) {
+          const uint32_t ms = starts[trips[m]] + 1;
+          const FrozenGather& mg =
+              st.gathers[st.program[ms + ordinal].index];
+          members.emplace_back(st.gather_pos.begin() + mg.pos_offset,
+                               st.gather_pos.begin() + mg.pos_offset +
+                                   mg.pos_count);
+        }
+        const Coverage c = classify_positions(base, members);
+        const uint64_t weight =
+            static_cast<uint64_t>(bg.pos_count) * trips.size();
+        if (c == Coverage::Identical) {
+          ++cov.gather_identical;
+          cov.gather_identical_pos += weight;
+        } else if (c == Coverage::Shift) {
+          ++cov.gather_shift;
+          cov.gather_shift_pos += weight;
+        } else {
+          ++cov.gather_other;
+          cov.gather_other_pos += weight;
+        }
+      } else if (base_instr.kind == StreamInstr::InPlace) {
+        const FrozenInPlace& bi = st.inplaces[base_instr.index];
+        std::vector<int64_t> base(st.inplace_pos.begin() + bi.pos_offset,
+                                  st.inplace_pos.begin() + bi.pos_offset +
+                                      bi.pos_count);
+        std::vector<std::vector<int64_t>> members;
+        std::vector<double> sel_base(
+            st.inplace_sel_snapshot.begin() + bi.sel_offset,
+            st.inplace_sel_snapshot.begin() + bi.sel_offset + bi.sel_count);
+        bool sel_identical = true;
+        for (size_t m = 1; m < trips.size(); ++m) {
+          const uint32_t ms = starts[trips[m]] + 1;
+          const FrozenInPlace& mi =
+              st.inplaces[st.program[ms + ordinal].index];
+          members.emplace_back(st.inplace_pos.begin() + mi.pos_offset,
+                               st.inplace_pos.begin() + mi.pos_offset +
+                                   mi.pos_count);
+          if (mi.sel_count != bi.sel_count) {
+            sel_identical = false;
+          } else {
+            for (uint32_t k = 0; k < mi.sel_count; ++k)
+              if (st.inplace_sel_snapshot[mi.sel_offset + k] != sel_base[k])
+                sel_identical = false;
+          }
+        }
+        const Coverage c = classify_positions(base, members);
+        const uint64_t weight =
+            static_cast<uint64_t>(bi.pos_count) * trips.size();
+        if (c == Coverage::Identical) {
+          ++cov.inplace_pos_identical;
+          cov.inplace_pos_identical_n += weight;
+        } else if (c == Coverage::Shift) {
+          ++cov.inplace_pos_shift;
+          cov.inplace_pos_shift_n += weight;
+        } else {
+          ++cov.inplace_pos_other;
+          cov.inplace_pos_other_n += weight;
+        }
+        if (bi.sel_count > 0) {
+          if (sel_identical)
+            ++cov.sel_identical;
+          else
+            ++cov.sel_varying;
+        }
+      } else if (base_instr.kind == StreamInstr::Guard) {
+        const FrozenGuard& bg = st.guards[base_instr.index];
+        bool identical = true;
+        for (size_t m = 1; m < trips.size(); ++m) {
+          const uint32_t ms = starts[trips[m]] + 1;
+          const FrozenGuard& mg =
+              st.guards[st.program[ms + ordinal].index];
+          if (mg.va != bg.va || mg.vb != bg.vb) identical = false;
+        }
+        if (identical)
+          ++cov.guard_identical;
+        else
+          ++cov.guard_varying;
+      }
+    }
+  }
+  return cov;
+}
+
 void freeze(LoopState& s) {
   const StructuredLoop& p = s.p;
   Stream& st = *s.building;
@@ -2160,6 +2395,26 @@ void freeze(LoopState& s) {
         " shape_templates=" + std::to_string(rep.shape_templates) +
         " max_group=" + std::to_string(rep.max_group) +
         " singleton_templates=" + std::to_string(rep.singleton_templates));
+    const ShiftCoverage cov = compute_shift_coverage(st);
+    emit_diagnostic(
+        "stanli_structured shift_coverage: gather_identical=" +
+        std::to_string(cov.gather_identical) + "/" +
+        std::to_string(cov.gather_identical_pos) +
+        " gather_shift=" + std::to_string(cov.gather_shift) + "/" +
+        std::to_string(cov.gather_shift_pos) +
+        " gather_other=" + std::to_string(cov.gather_other) + "/" +
+        std::to_string(cov.gather_other_pos) +
+        " inplace_pos_identical=" +
+        std::to_string(cov.inplace_pos_identical) + "/" +
+        std::to_string(cov.inplace_pos_identical_n) +
+        " inplace_pos_shift=" + std::to_string(cov.inplace_pos_shift) + "/" +
+        std::to_string(cov.inplace_pos_shift_n) +
+        " inplace_pos_other=" + std::to_string(cov.inplace_pos_other) + "/" +
+        std::to_string(cov.inplace_pos_other_n) +
+        " sel_identical=" + std::to_string(cov.sel_identical) +
+        " sel_varying=" + std::to_string(cov.sel_varying) +
+        " guard_identical=" + std::to_string(cov.guard_identical) +
+        " guard_varying=" + std::to_string(cov.guard_varying));
   }
   compact_snapshot(s, st.arena);
   s.arena = BlockArena{};
