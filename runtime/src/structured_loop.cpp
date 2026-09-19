@@ -20,6 +20,15 @@
 #include <malloc.h>
 #endif
 
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+#endif
+
 namespace stanli {
 namespace {
 
@@ -913,9 +922,106 @@ struct ArenaSnapshot {
   }
 };
 
+template <class T>
+class MappedBuffer {
+ public:
+  MappedBuffer() = default;
+  MappedBuffer(const MappedBuffer&) = delete;
+  MappedBuffer& operator=(const MappedBuffer&) = delete;
+  MappedBuffer(MappedBuffer&& other) noexcept
+      : data_(other.data_), capacity_(other.capacity_) {
+    other.data_ = nullptr;
+    other.capacity_ = 0;
+  }
+  MappedBuffer& operator=(MappedBuffer&& other) noexcept {
+    if (this != &other) {
+      release();
+      data_ = other.data_;
+      capacity_ = other.capacity_;
+      other.data_ = nullptr;
+      other.capacity_ = 0;
+    }
+    return *this;
+  }
+  ~MappedBuffer() { release(); }
+
+  static MappedBuffer allocate(size_t n) {
+    MappedBuffer buf;
+    if (n == 0) return buf;
+    const size_t bytes = n * sizeof(T);
+#if defined(_WIN32)
+    void* p = VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE,
+                           PAGE_READWRITE);
+    if (!p) throw std::bad_alloc();
+#else
+    void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) throw std::bad_alloc();
+#endif
+    buf.data_ = static_cast<T*>(p);
+    buf.capacity_ = n;
+    return buf;
+  }
+
+  T* data() const { return data_; }
+  size_t capacity() const { return capacity_; }
+
+ private:
+  void release() {
+    if (!data_) return;
+#if defined(_WIN32)
+    VirtualFree(data_, 0, MEM_RELEASE);
+#else
+    munmap(data_, capacity_ * sizeof(T));
+#endif
+    data_ = nullptr;
+    capacity_ = 0;
+  }
+  T* data_ = nullptr;
+  size_t capacity_ = 0;
+};
+
+template <class T>
+class MappedVector {
+ public:
+  using value_type = T;
+  size_t size() const { return size_; }
+  size_t capacity() const { return buf_.capacity(); }
+  T* data() { return buf_.data(); }
+  const T* data() const { return buf_.data(); }
+  T& operator[](size_t i) { return buf_.data()[i]; }
+  const T& operator[](size_t i) const { return buf_.data()[i]; }
+
+  void push_back(const T& v) {
+    if (size_ == buf_.capacity()) grow(std::max<size_t>(buf_.capacity() * 2, 64));
+    buf_.data()[size_++] = v;
+  }
+  void clear() { size_ = 0; }
+  void reset() {
+    buf_ = MappedBuffer<T>{};
+    size_ = 0;
+  }
+  void right_size(size_t used) {
+    if (used == 0) return;
+    const size_t want = used + used / 8;
+    if (buf_.capacity() > 2 * want || buf_.capacity() < want)
+      buf_ = MappedBuffer<T>::allocate(want);
+    size_ = 0;
+  }
+
+ private:
+  void grow(size_t want) {
+    MappedBuffer<T> fresh = MappedBuffer<T>::allocate(want);
+    if (size_) std::copy_n(buf_.data(), size_, fresh.data());
+    buf_ = std::move(fresh);
+  }
+  MappedBuffer<T> buf_;
+  size_t size_ = 0;
+};
+
 struct BlockArena {
   struct Block {
-    std::unique_ptr<double[]> data;
+    MappedBuffer<double> data;
     size_t capacity = 0;
     size_t used = 0;
   };
@@ -927,10 +1033,10 @@ struct BlockArena {
 
   static Block make(size_t capacity) {
     Block block;
-    block.data.reset(new double[capacity]);
+    block.data = MappedBuffer<double>::allocate(capacity);
     block.capacity = capacity;
 #ifndef NDEBUG
-    std::fill_n(block.data.get(), capacity,
+    std::fill_n(block.data.data(), capacity,
                 std::numeric_limits<double>::quiet_NaN());
 #endif
     return block;
@@ -966,13 +1072,13 @@ struct BlockArena {
     open(0);
   }
   void open(size_t at) {
-    next = blocks[cursor].data.get() + at;
-    limit = blocks[cursor].data.get() + blocks[cursor].capacity;
+    next = blocks[cursor].data.data() + at;
+    limit = blocks[cursor].data.data() + blocks[cursor].capacity;
   }
   size_t used_here() const {
     return blocks.empty()
                ? 0
-               : static_cast<size_t>(next - blocks[cursor].data.get());
+               : static_cast<size_t>(next - blocks[cursor].data.data());
   }
   size_t used() const { return closed + used_here(); }
   // One block sized for the evaluation just finished, so a steady-state
@@ -1211,14 +1317,14 @@ struct LoopState : KernelState {
   const StructuredLoop& p;
   BlockArena arena;
   std::vector<double> workspace;
-  std::vector<Version> versions;
-  std::vector<uint8_t> version_const;
+  MappedVector<Version> versions;
+  MappedVector<uint8_t> version_const;
   std::vector<int64_t> bindings;
   std::vector<int64_t> handles;
   std::vector<double> undo;
   std::vector<Record> records;
   std::vector<int64_t> target_refs;
-  std::vector<int32_t> owner;
+  MappedVector<int32_t> owner;
   std::vector<int64_t> node_generation, node_version, node_version2;
   std::vector<int64_t> loop_generation, loop_version;
   std::vector<KernelCtx> ctx;
@@ -1297,9 +1403,9 @@ struct LoopState : KernelState {
   void release() {
     arena.clear();
     version_peak = std::max(version_peak, versions.size());
-    right_size(versions, version_peak);
-    right_size(owner, version_peak);
-    right_size(version_const, version_peak);
+    versions.right_size(version_peak);
+    owner.right_size(version_peak);
+    version_const.right_size(version_peak);
     version_peak = 0;
     right_size(handles);
     right_size(undo);
@@ -2591,7 +2697,7 @@ void freeze(LoopState& s) {
     st.output_len.push_back(p.body.slots[slot].len);
     st.output_adjoint.push_back(adj_of(v));
   }
-  std::vector<Version>().swap(s.versions);
+  s.versions.reset();
   st.target_work.resize(st.targets.size());
 
   st.backward_order.reserve(st.program.size());
@@ -2913,8 +3019,9 @@ void StructuredLoop::prepare() {
   find_outer(root);
 }
 
-template <typename T>
-void emit_pool_bytes(const char* name, const std::vector<T>& v) {
+template <class V>
+void emit_pool_bytes(const char* name, const V& v) {
+  using T = typename V::value_type;
   emit_diagnostic("stanli_structured freeze_bytes: pool=" +
                   std::string(name) +
                   " bytes=" + std::to_string(v.size() * sizeof(T)) +
@@ -3117,8 +3224,8 @@ void structured_loop_forward(KernelCtx& ctx) {
       s.building.reset();
       throw;
     }
-    std::vector<int32_t>().swap(s.owner);
-    std::vector<uint8_t>().swap(s.version_const);
+    s.owner.reset();
+    s.version_const.reset();
     std::vector<int64_t>().swap(s.handles);
     std::vector<double>().swap(s.undo);
     std::vector<Record>().swap(s.records);
