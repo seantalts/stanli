@@ -51,7 +51,6 @@ void run_matrix_exp(std::istream& in) {
   const MatD a = read_rm(in, n, n);
   const MatD g = read_rm(in, n, n);
 
-  // Old: nested-tape replay, matching the pre-native matrix_exp_bwd.
   MatD old_adj = MatD::Zero(n, n);
   {
     stan::math::nested_rev_autodiff nested;
@@ -65,7 +64,6 @@ void run_matrix_exp(std::istream& in) {
       for (int64_t j = 0; j < n; ++j) old_adj(i, j) = av(i, j).adj();
   }
 
-  // New: the native kernel.
   MatD new_adj = MatD::Zero(n, n);
   {
     std::vector<double> a_cm(n * n), g_cm(n * n), out_v(n * n),

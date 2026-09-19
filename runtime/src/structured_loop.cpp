@@ -1954,8 +1954,6 @@ struct Execution {
         return Continue;
       case Node::Target:
         ++s.effects;
-        // Feeds this walk's own forward target value below, regardless of
-        // whether a stream is also being built.
         s.target_refs.push_back(s.bindings[n.src]);
         if (s.building) {
           Stream& st = *s.building;
@@ -2103,12 +2101,6 @@ struct Execution {
   }
 };
 
-// Every arena range some kept pointer still needs, collected before the
-// arena that made them goes away: every input/output/scratch pointer a
-// logged call keeps, the InPlace base/rhs/selector pools, copies, segment
-// inputs and frames, guards, targets, imports and outputs, each with its
-// slot length. A dynamic-length operand's backing storage is dyn_capacity,
-// not its declared (logical, possibly smaller) slot length.
 void collect_live_ranges(LoopState& s, Stream& st,
                          std::vector<std::pair<const double*, int64_t>>& live) {
   const StructuredLoop& p = s.p;
@@ -2162,15 +2154,9 @@ void collect_live_ranges(LoopState& s, Stream& st,
     note(st.output_value[i], st.output_len[i]);
 }
 
-// Packs only the referenced ranges into a contiguous buffer instead of
-// copying everything the arena ever used; folded calls whose output nothing
-// kept references contribute nothing here.
 void compact_snapshot(LoopState& s, ArenaSnapshot& out) {
   Stream& st = *s.building;
   std::vector<std::pair<const double*, int64_t>> live;
-  // Exact upper bound: one note per call_ptrs slot, two plus selectors per
-  // in-place, two per copy, one plus inputs per segment, two per guard, one
-  // per target/import/output. Avoids growth-doubling on a vector this large.
   live.reserve(st.call_ptrs.size() + 2 * st.inplaces.size() +
                st.inplace_sel_ptr.size() + 2 * st.copies.size() +
                st.segs.size() + st.seg_in_src.size() + st.guards_if.size() +

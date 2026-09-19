@@ -184,9 +184,6 @@ static MatLD expm_ld(const MatLD& a) {
   return total;
 }
 
-// matrix_exp: differential check against the nested-tape replay this
-// kernel used to run, plus a directional finite-difference cross-check
-// against the independent long-double exponential above.
 double g_max_matrix_exp_ulp = 0;
 double g_max_matrix_exp_value_rel = 0;
 double g_max_matrix_exp_fd_rel = 0;
@@ -244,7 +241,6 @@ static void matrix_exp_case(int n, bool active, unsigned seed_val,
     g_max_matrix_exp_ulp = std::max(g_max_matrix_exp_ulp, (double)dist);
   }
 
-  // Directional finite difference in the independent long-double exp.
   MatLD ald(n, n), gld(n, n), dld(n, n);
   std::uniform_real_distribution<double> dir(-1.0, 1.0);
   for (int i = 0; i < n * n; ++i) {
@@ -276,10 +272,6 @@ static void matrix_exp_case(int n, bool active, unsigned seed_val,
   }
 }
 
-// mdivide_left / mdivide_right (Plain, Spd, TriLow): differential check
-// against the nested-tape replay these kernels used to run, for every
-// divisor/dividend activity combination and both vector and matrix
-// dividends.
 enum class SolveKindTag { Plain, Spd, TriLow };
 double g_max_solve_ulp = 0;
 static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
@@ -382,9 +374,6 @@ static void solve_family(bool left, SolveKindTag kind, uint16_t opcode,
             solve_case(left, kind, opcode, n, k, vec, activity, s, max_ulp);
 }
 
-// quad_form / quad_form_sym: differential check against the nested-tape
-// replay these kernels used to run, for A/B activity combinations and both
-// vector and matrix B.
 double g_max_qf_ulp = 0;
 static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
                     int activity, unsigned seed_val, int64_t max_ulp) {

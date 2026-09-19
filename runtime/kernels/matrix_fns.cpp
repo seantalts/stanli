@@ -227,7 +227,6 @@ void chol_bwd(KernelCtx& ctx) {
 }
 
 // ---- matrix_exp(A) ---------------------------------------------------------
-// adj_A = upper-right n x n block of exp([[A', G], [0, A']]).
 void matrix_exp_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
   MapM(ctx.out.data, n, n) =
@@ -345,7 +344,6 @@ void qf_fwd(KernelCtx& ctx) {
   const MatD c = b.transpose() * a * b;
   ctx.out.data[0] = c(0, 0);
 }
-// adj_A += B G B', adj_B += A B G' + A' B G.
 void qf_bwd_impl(KernelCtx& ctx, int64_t n, int64_t m, bool vec) {
   if (!ctx.in_adj[0].data && !ctx.in_adj[1].data) return;
   const CMapM a(ctx.in[0].data, n, n);
@@ -432,9 +430,6 @@ void qfs_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = c(0, 0);
 }
 void qfs_bwd(KernelCtx& ctx) {
-  // The rev overload is the one CmdStan reaches at either shape, and it is
-  // the same accumulation quad_form's own vari uses (qf_bwd_impl above),
-  // so the replay needs no variant beyond the operand shape itself.
   const int64_t n = ctx.idata[0];
   const bool vec = ctx.variant & 1u;
   qf_bwd_impl(ctx, n, vec ? 1 : ctx.idata[1], vec);
@@ -1015,7 +1010,6 @@ void solve_var(KernelCtx& ctx) {
     ctx.out.data[i] = out.data()[i].val();
 }
 
-// x = A \ b: adj_b += A^-T G, adj_A -= (A^-T G) x^T.
 template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower>
 void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
                   bool dividend_var, MatD* adj_a, MatD* adj_b) {
@@ -1056,7 +1050,6 @@ void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
   }
 }
 
-// b / A: a left solve of A' against b', x', G'.
 template <SolveKind Kind>
 void right_adjoint(const MatD& a, const MatD& x, const MatD& g,
                    bool divisor_var, bool dividend_var, MatD* adj_a,
@@ -1132,9 +1125,6 @@ void solve_bwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0], k = ctx.idata[1];
   const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
   const int64_t br = Left ? n : k, bc = Left ? k : n;
-  // Bit 0 was CmdStan's active-result flag through solve_fwd; bits 2-3
-  // (0 meaning "both", the legacy pre-detail encoding) select which operand
-  // stan-math would have typed `var`, same switch as solve_active_fwd.
   bool divisor_var = true, dividend_var = true;
   switch ((ctx.variant >> 2u) & 3u) {
     case 1u:
