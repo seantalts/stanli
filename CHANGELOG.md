@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- Retained loops replay a recorded instruction stream instead of walking the
+  loop body on every gradient. The first evaluation records the kernel calls
+  that ran and folds the data-only work into constants; later gradients
+  replay the frozen stream. Parameter-dependent branches, loop bounds and
+  in-place indices are guarded and trigger a new recording when they change.
+  `STANLI_NO_STRUCTURED_REPLAY=1` restores the tree walk. On ctsem the
+  gradient is 5.5x faster at 33, 400 and 4000 rows and preparation drops
+  from 9 s to about 1 s; the first evaluation at 4000 rows peaks at 9.9 GB
+  against 8.5 GB before.
+- `write_array` retains the same loops, forward only, and lowers vectorized
+  scalar `_rng` calls, so those loops no longer run on the MIR interpreter
+  for every saved draw. Interpreter fallback is now per section.
+- `matrix_exp`, the `mdivide_*` solves and `quad_form`/`quad_form_sym`
+  compute their adjoints in closed form instead of replaying Stan Math on a
+  nested tape.
+- Preparing a loop region no longer enumerates data ranges by throwing and
+  catching exceptions.
+
 ## 0.16.0
 
 - Add opt-in native within-chain parallelism for eligible `reduce_sum` and
