@@ -4659,6 +4659,7 @@ int main() {
   // Whole-program specialization has its own differential tests in test_lower.
   test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0");
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+  test_setenv("STANLI_STRUCTURED_CHECK_REMAP", "1");
   transient_classification_tests();
   invariant_active_reuse_tests();
   inplace_import_base_tests();

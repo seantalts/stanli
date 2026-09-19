@@ -1671,7 +1671,7 @@ struct Execution {
             : s.arena.allocate(add(add(out_len, out2_len), n.kernel_scratch));
     c.out.data = block;
     if (op.out2 >= 0) c.out2.data = block + out_len;
-    c.scratch = block + out_len + out2_len;
+    c.scratch = n.kernel_scratch ? block + out_len + out2_len : nullptr;
     bind_inputs(op, c);
     n.forward(c);
     const bool folded = inputs_const(op);
@@ -2590,6 +2590,74 @@ ShiftCoverage compute_shift_coverage(const Stream& st) {
   return cov;
 }
 
+struct ArenaBlockRanges {
+  std::vector<std::pair<const double*, const double*>> ranges;
+  const double* lo = nullptr;
+  const double* hi = nullptr;
+  bool contains(const void* p) const {
+    const auto* dp = static_cast<const double*>(p);
+    if (dp < lo || dp >= hi) return false;
+    auto it = std::upper_bound(
+        ranges.begin(), ranges.end(), dp,
+        [](const double* q, const auto& r) { return q < r.first; });
+    if (it == ranges.begin()) return false;
+    --it;
+    return dp >= it->first && dp < it->second;
+  }
+};
+
+ArenaBlockRanges capture_arena_ranges(const BlockArena& arena) {
+  ArenaBlockRanges out;
+  out.ranges.reserve(arena.blocks.size());
+  for (const auto& b : arena.blocks)
+    out.ranges.emplace_back(b.data.data(), b.data.data() + b.capacity);
+  std::sort(out.ranges.begin(), out.ranges.end());
+  if (!out.ranges.empty()) {
+    out.lo = out.ranges.front().first;
+    out.hi = out.ranges.back().second;
+    for (const auto& r : out.ranges) out.hi = std::max(out.hi, r.second);
+  }
+  return out;
+}
+
+bool check_remap_enabled() {
+  return std::getenv("STANLI_STRUCTURED_CHECK_REMAP") != nullptr ||
+         std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
+}
+
+void check_no_stale_arena_pointers(Stream& st, const ArenaBlockRanges& ranges) {
+  const auto check = [&](const void* p, const char* kind) {
+    if (p && ranges.contains(p))
+      throw std::logic_error(
+          std::string("structured loop freeze left a stale arena pointer in ") +
+          kind);
+  };
+  for (auto* ptr : st.call_ptrs) check(ptr, "call_ptrs");
+  for (auto& fi : st.inplaces) {
+    check(fi.base, "inplace.base");
+    check(fi.rhs, "inplace.rhs");
+  }
+  for (auto* ptr : st.inplace_sel_ptr) check(ptr, "inplace_sel_ptr");
+  for (auto& fc : st.copies) {
+    check(fc.src, "copy.src");
+    check(fc.dst, "copy.dst");
+  }
+  for (auto& fseg : st.segs) check(fseg.frame, "seg.frame");
+  for (auto* ptr : st.seg_in_src) check(ptr, "seg_in_src");
+  for (auto& g : st.guards) {
+    check(g.a, "guard.a");
+    check(g.b, "guard.b");
+  }
+  for (auto& fg : st.gathers) {
+    check(fg.src, "gather.src");
+    check(fg.dst, "gather.dst");
+  }
+  for (auto& t : st.targets) check(t.value, "target.value");
+  for (auto& set : st.sets) check(set.ptr, "set.ptr");
+  for (auto& imp : st.imports) check(imp.dst, "import.dst");
+  for (auto* ptr : st.output_value) check(ptr, "output_value");
+}
+
 void freeze(LoopState& s) {
   const StructuredLoop& p = s.p;
   Stream& st = *s.building;
@@ -2627,7 +2695,9 @@ void freeze(LoopState& s) {
         " guard_varying=" + std::to_string(cov.guard_varying));
   }
   compact_snapshot(s, st.arena);
-  s.arena = BlockArena{};
+  const bool check_remap = check_remap_enabled();
+  const ArenaBlockRanges arena_ranges =
+      check_remap ? capture_arena_ranges(s.arena) : ArenaBlockRanges{};
   const auto remap = [&](double* ptr) { return st.arena.remap(ptr); };
   const auto remap_c = [&](const double* ptr) -> const double* {
     return st.arena.remap(const_cast<double*>(ptr));
@@ -2697,6 +2767,8 @@ void freeze(LoopState& s) {
     st.output_len.push_back(p.body.slots[slot].len);
     st.output_adjoint.push_back(adj_of(v));
   }
+  if (check_remap) check_no_stale_arena_pointers(st, arena_ranges);
+  s.arena = BlockArena{};
   s.versions.reset();
   st.target_work.resize(st.targets.size());
 
