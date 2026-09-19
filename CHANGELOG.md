@@ -1,16 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.17.0
+
+Retained loops now replay a recorded instruction stream. On ctsem, the model
+from issue #248, one gradient is 5.5x faster than in 0.16.0 and 1.5x faster
+than CmdStan at 33, 400 and 4000 rows; preparation takes 1 s instead of 9 s,
+and each saved draw takes 36 ms instead of 6 s. A run of 30 warmup and 30
+saved draws at 33 rows takes 248 s against 354 s for CmdStan. The
+measurements are in [docs/benchmark-history.md](docs/benchmark-history.md).
 
 - Retained loops replay a recorded instruction stream instead of walking the
   loop body on every gradient. The first evaluation records the kernel calls
   that ran and folds the data-only work into constants; later gradients
   replay the frozen stream. Parameter-dependent branches, loop bounds and
   in-place indices are guarded and trigger a new recording when they change.
-  `STANLI_NO_STRUCTURED_REPLAY=1` restores the tree walk. On ctsem the
-  gradient is 5.5x faster at 33, 400 and 4000 rows and preparation drops
-  from 9 s to about 1 s; the first evaluation at 4000 rows peaks at 9.9 GB
-  against 8.5 GB before.
+  `STANLI_NO_STRUCTURED_REPLAY=1` restores the tree walk. The first
+  evaluation of ctsem at 4000 rows peaks at 9.9 GB against 8.5 GB before;
+  steady state is below it.
 - `write_array` retains the same loops, forward only, and lowers vectorized
   scalar `_rng` calls, so those loops no longer run on the MIR interpreter
   for every saved draw. Interpreter fallback is now per section.
@@ -19,6 +25,14 @@
   nested tape.
 - Preparing a loop region no longer enumerates data ranges by throwing and
   catching exceptions.
+- Fold the Aalto teaching fixtures into the common corpus: the replay now
+  covers 329 models at three points, and inventory, diagnostics and benchmark
+  reports share one path. Retained historical measurements moved to
+  `docs/benchmark-history.md`.
+- Refresh the Stan conformance baseline for Stan 2.40: 256 `student_t_qf`
+  overloads verified, 12 new `normal_id_glm_lpdf` signatures recorded as
+  generator gaps, and the integrated function probes regenerated against
+  fresh CmdStan references.
 
 ## 0.16.0
 
