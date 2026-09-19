@@ -1143,14 +1143,11 @@ struct FrozenCall {
   uint32_t adj_offset = 0;
   uint16_t n_in = 0;
   uint8_t flags = 0;
-  void (*forward_fn)(KernelCtx&) = nullptr;
-  void (*backward_fn)(KernelCtx&) = nullptr;
 };
 
 struct FrozenInPlace {
   double* base = nullptr;
   const double* rhs = nullptr;
-  int64_t len = 0;  // base's full extent, for the compact arena snapshot
   uint32_t pos_offset = 0, pos_count = 0;
   uint32_t old_offset = 0;
   uint32_t sel_offset = 0, sel_count = 0;
@@ -1177,12 +1174,15 @@ struct FrozenSet {
   double value = 0;
 };
 
-struct FrozenGuard {
-  enum Kind : uint8_t { If, While, For } kind;
+struct FrozenGuardIf {
+  const double* a = nullptr;
+  bool decision = false;
+};
+
+struct FrozenGuardFor {
   const double* a = nullptr;
   const double* b = nullptr;
   double va = 0, vb = 0;
-  bool decision = false;
 };
 
 struct FrozenTarget {
@@ -1205,7 +1205,6 @@ enum FrozenGatherFlag : uint8_t { kFrozenGatherActive = 1 };
 struct FrozenGather {
   const double* src = nullptr;
   double* dst = nullptr;
-  int64_t src_len = 0;  // src's full extent, for the compact arena snapshot
   uint32_t pos_offset = 0, pos_count = 0;
   uint32_t adj_offset = 0;
   uint8_t flags = 0;
@@ -1223,7 +1222,8 @@ struct StreamInstr {
     InPlace,
     Copy,
     Seg,
-    Guard,
+    GuardIf,
+    GuardFor,
     Tgt,
     Set,
     Gather,
@@ -1239,7 +1239,8 @@ struct Stream {
   std::vector<FrozenInPlace> inplaces;
   std::vector<FrozenCopy> copies;
   std::vector<FrozenSegment> segs;
-  std::vector<FrozenGuard> guards;
+  std::vector<FrozenGuardIf> guards_if;
+  std::vector<FrozenGuardFor> guards_for;
   std::vector<FrozenTarget> targets;
   std::vector<int64_t> target_adj_version;
   std::vector<FrozenSet> sets;
@@ -1261,6 +1262,9 @@ struct Stream {
   std::vector<int64_t> gather_pos;
   std::vector<double*> gather_adj;
   std::vector<int64_t> gather_adj_version;
+
+  std::vector<int64_t> inplace_base_len;
+  std::vector<int64_t> gather_src_len;
 
   ArenaSnapshot arena;
   std::vector<double> adjoints;
@@ -1425,8 +1429,9 @@ struct RecordingPoolSizes {
         call_ptrs = 0, call_adj_version = 0, calls = 0, copy_adj_version = 0,
         copies = 0, inplace_pos = 0, inplace_old = 0, inplace_sel_ptr = 0,
         inplace_sel_snapshot = 0, inplace_adj_version = 0, inplaces = 0,
-        guards = 0, sets = 0, targets = 0, target_adj_version = 0,
-        seg_in_src = 0, seg_in_adj_version = 0, segs = 0;
+        guards_if = 0, guards_for = 0, sets = 0, targets = 0,
+        target_adj_version = 0, seg_in_src = 0, seg_in_adj_version = 0,
+        segs = 0;
 };
 
 RecordingPoolSizes recording_pool_sizes(const Stream& st) {
@@ -1438,10 +1443,11 @@ RecordingPoolSizes recording_pool_sizes(const Stream& st) {
       st.copies.size(),           st.inplace_pos.size(),
       st.inplace_old.size(),      st.inplace_sel_ptr.size(),
       st.inplace_sel_snapshot.size(), st.inplace_adj_version.size(),
-      st.inplaces.size(),         st.guards.size(),
-      st.sets.size(),             st.targets.size(),
-      st.target_adj_version.size(), st.seg_in_src.size(),
-      st.seg_in_adj_version.size(), st.segs.size()};
+      st.inplaces.size(),         st.guards_if.size(),
+      st.guards_for.size(),       st.sets.size(),
+      st.targets.size(),          st.target_adj_version.size(),
+      st.seg_in_src.size(),       st.seg_in_adj_version.size(),
+      st.segs.size()};
 }
 
 template <class T>
@@ -1488,7 +1494,10 @@ void reserve_remaining_trips(Stream& st, const RecordingPoolSizes& before,
                         after.inplace_adj_version, prefix_trips, remaining_trips);
   reserve_for_remaining(st.inplaces, before.inplaces, after.inplaces,
                         prefix_trips, remaining_trips);
-  reserve_for_remaining(st.guards, before.guards, after.guards, prefix_trips, remaining_trips);
+  reserve_for_remaining(st.guards_if, before.guards_if, after.guards_if,
+                        prefix_trips, remaining_trips);
+  reserve_for_remaining(st.guards_for, before.guards_for, after.guards_for,
+                        prefix_trips, remaining_trips);
   reserve_for_remaining(st.sets, before.sets, after.sets, prefix_trips, remaining_trips);
   reserve_for_remaining(st.targets, before.targets, after.targets, prefix_trips, remaining_trips);
   reserve_for_remaining(st.target_adj_version, before.target_adj_version,
@@ -1596,9 +1605,9 @@ struct Execution {
     }
     const uint32_t idx = static_cast<uint32_t>(st.gathers.size());
     st.program.push_back(StreamInstr{StreamInstr::Gather, idx});
-    st.gathers.push_back(FrozenGather{src, c.out.data,
-                                      p.body.slots[op.in[0]].len, pos_offset,
-                                      pos_count, adj_offset, flags, n.site});
+    st.gather_src_len.push_back(p.body.slots[op.in[0]].len);
+    st.gathers.push_back(FrozenGather{src, c.out.data, pos_offset, pos_count,
+                                      adj_offset, flags, n.site});
   }
 
   void log_call(const Node& n, const Op& op, const KernelCtx& c) {
@@ -1630,8 +1639,7 @@ struct Execution {
     const uint32_t idx = static_cast<uint32_t>(st.calls.size());
     st.program.push_back(StreamInstr{StreamInstr::Call, idx});
     st.calls.push_back(FrozenCall{n.site, ptr_offset, adj_offset,
-                                  static_cast<uint16_t>(op.n_in), flags,
-                                  n.forward, n.backward});
+                                  static_cast<uint16_t>(op.n_in), flags});
   }
 
   void run_transient(const Node& n, const Op& op, KernelCtx& c) {
@@ -1767,7 +1775,7 @@ struct Execution {
       FrozenInPlace fi;
       fi.base = values;
       fi.rhs = materialize(rhs, c.in[layout.rhs].len);
-      fi.len = len;
+      st.inplace_base_len.push_back(len);
       fi.old_offset = pos_offset;
       fi.pos_offset = pos_offset;
       fi.pos_count = static_cast<uint32_t>(st.inplace_pos.size()) - pos_offset;
@@ -1790,11 +1798,18 @@ struct Execution {
     }
   }
 
-  void log_guard(FrozenGuard g) {
+  void log_guard_if(const double* a, bool decision) {
     Stream& st = *s.building;
-    st.program.push_back(
-        StreamInstr{StreamInstr::Guard, static_cast<uint32_t>(st.guards.size())});
-    st.guards.push_back(g);
+    st.program.push_back(StreamInstr{StreamInstr::GuardIf,
+                                     static_cast<uint32_t>(st.guards_if.size())});
+    st.guards_if.push_back(FrozenGuardIf{a, decision});
+  }
+
+  void log_guard_for(const double* a, const double* b, double va, double vb) {
+    Stream& st = *s.building;
+    st.program.push_back(StreamInstr{StreamInstr::GuardFor,
+                                     static_cast<uint32_t>(st.guards_for.size())});
+    st.guards_for.push_back(FrozenGuardFor{a, b, va, vb});
   }
 
   static constexpr uint32_t kMarkExit = ~uint32_t{0};
@@ -1873,8 +1888,7 @@ struct Execution {
         const double* cond = value(n.condition);
         const size_t arm = cond[0] != 0.0 ? 0 : 1;
         if (s.building && !is_const(s.bindings[n.condition]))
-          log_guard(
-              FrozenGuard{FrozenGuard::If, cond, nullptr, cond[0], 0, arm == 0});
+          log_guard_if(cond, arm == 0);
         return forward(n.children[arm]);
       }
       case Node::For: {
@@ -1890,8 +1904,7 @@ struct Execution {
         const bool bounds_const = is_const(s.bindings[n.lower]) &&
                                   is_const(s.bindings[n.upper]);
         if (s.building && !bounds_const)
-          log_guard(FrozenGuard{FrozenGuard::For, value(n.lower),
-                                value(n.upper), lo, hi, false});
+          log_guard_for(value(n.lower), value(n.upper), lo, hi);
         const bool marked =
             s.building && n.loop_index == p.outer_loop_index;
         const int64_t prefix =
@@ -1920,9 +1933,7 @@ struct Execution {
           const double* cond = value(n.condition);
           const bool taken = cond[0] != 0.0;
           if (s.building && !is_const(s.bindings[n.condition]))
-            log_guard(
-                FrozenGuard{FrozenGuard::While, cond, nullptr, cond[0], 0,
-                           taken});
+            log_guard_if(cond, taken);
           if (!taken) break;
           if (forward(n.children[1]) == Break) break;
         }
@@ -2114,8 +2125,9 @@ void collect_live_ranges(LoopState& s, Stream& st,
       note(ptrs[next++], p.body.slots[op.out2].len);
     note(ptrs[next], n.kernel_scratch);
   }
-  for (const auto& fi : st.inplaces) {
-    note(fi.base, fi.len);
+  for (size_t i = 0; i < st.inplaces.size(); ++i) {
+    const auto& fi = st.inplaces[i];
+    note(fi.base, st.inplace_base_len[i]);
     note(fi.rhs, static_cast<int64_t>(fi.pos_count));
     for (uint32_t k = 0; k < fi.sel_count; ++k)
       note(st.inplace_sel_ptr[fi.sel_offset + k], 1);
@@ -2129,12 +2141,14 @@ void collect_live_ranges(LoopState& s, Stream& st,
     for (size_t k = 0; k < fs.segment->ins.size(); ++k)
       note(st.seg_in_src[fs.in_offset + k], fs.segment->ins[k].len);
   }
-  for (const auto& g : st.guards) {
+  for (const auto& g : st.guards_if) note(g.a, 1);
+  for (const auto& g : st.guards_for) {
     note(g.a, 1);
     note(g.b, 1);
   }
-  for (const auto& fg : st.gathers) {
-    note(fg.src, fg.src_len);
+  for (size_t i = 0; i < st.gathers.size(); ++i) {
+    const auto& fg = st.gathers[i];
+    note(fg.src, st.gather_src_len[i]);
     note(fg.dst, static_cast<int64_t>(fg.pos_count));
   }
   for (const auto& t : st.targets) note(t.value, 1);
@@ -2155,9 +2169,9 @@ void compact_snapshot(LoopState& s, ArenaSnapshot& out) {
   // per target/import/output. Avoids growth-doubling on a vector this large.
   live.reserve(st.call_ptrs.size() + 2 * st.inplaces.size() +
               st.inplace_sel_ptr.size() + 2 * st.copies.size() +
-              st.segs.size() + st.seg_in_src.size() + 2 * st.guards.size() +
-              st.targets.size() + st.imports.size() + s.p.outputs.size() +
-              2 * st.gathers.size());
+              st.segs.size() + st.seg_in_src.size() + st.guards_if.size() +
+              2 * st.guards_for.size() + st.targets.size() +
+              st.imports.size() + s.p.outputs.size() + 2 * st.gathers.size());
   collect_live_ranges(s, st, live);
   std::sort(live.begin(), live.end());
   out.ranges.clear();
@@ -2300,14 +2314,18 @@ TemplateReport fingerprint_iterations(const Stream& st) {
           produced[fs.frame] = ordinal;
           break;
         }
-        case StreamInstr::Guard: {
-          const FrozenGuard& g = st.guards[instr.index];
-          blob.put(g.kind);
+        case StreamInstr::GuardIf: {
+          const FrozenGuardIf& g = st.guards_if[instr.index];
+          blob.put(g.decision);
+          blob.tag(produced, g.a);
+          break;
+        }
+        case StreamInstr::GuardFor: {
+          const FrozenGuardFor& g = st.guards_for[instr.index];
           if (exact_values) {
             blob.put(g.va);
             blob.put(g.vb);
           }
-          blob.put(g.decision);
           blob.tag(produced, g.a);
           blob.tag(produced, g.b);
           break;
@@ -2453,10 +2471,14 @@ ShiftCoverage compute_shift_coverage(const Stream& st) {
           produced[fs.frame] = ordinal;
           break;
         }
-        case StreamInstr::Guard: {
-          const FrozenGuard& g = st.guards[instr.index];
-          blob.put(g.kind);
+        case StreamInstr::GuardIf: {
+          const FrozenGuardIf& g = st.guards_if[instr.index];
           blob.put(g.decision);
+          blob.tag(produced, g.a);
+          break;
+        }
+        case StreamInstr::GuardFor: {
+          const FrozenGuardFor& g = st.guards_for[instr.index];
           blob.tag(produced, g.a);
           blob.tag(produced, g.b);
           break;
@@ -2574,13 +2596,26 @@ ShiftCoverage compute_shift_coverage(const Stream& st) {
           else
             ++cov.sel_varying;
         }
-      } else if (base_instr.kind == StreamInstr::Guard) {
-        const FrozenGuard& bg = st.guards[base_instr.index];
+      } else if (base_instr.kind == StreamInstr::GuardIf) {
+        const FrozenGuardIf& bg = st.guards_if[base_instr.index];
         bool identical = true;
         for (size_t m = 1; m < trips.size(); ++m) {
           const uint32_t ms = starts[trips[m]] + 1;
-          const FrozenGuard& mg =
-              st.guards[st.program[ms + ordinal].index];
+          const FrozenGuardIf& mg =
+              st.guards_if[st.program[ms + ordinal].index];
+          if (mg.decision != bg.decision) identical = false;
+        }
+        if (identical)
+          ++cov.guard_identical;
+        else
+          ++cov.guard_varying;
+      } else if (base_instr.kind == StreamInstr::GuardFor) {
+        const FrozenGuardFor& bg = st.guards_for[base_instr.index];
+        bool identical = true;
+        for (size_t m = 1; m < trips.size(); ++m) {
+          const uint32_t ms = starts[trips[m]] + 1;
+          const FrozenGuardFor& mg =
+              st.guards_for[st.program[ms + ordinal].index];
           if (mg.va != bg.va || mg.vb != bg.vb) identical = false;
         }
         if (identical)
@@ -2647,7 +2682,8 @@ void check_no_stale_arena_pointers(Stream& st, const ArenaBlockRanges& ranges) {
   }
   for (auto& fseg : st.segs) check(fseg.frame, "seg.frame");
   for (auto* ptr : st.seg_in_src) check(ptr, "seg_in_src");
-  for (auto& g : st.guards) {
+  for (auto& g : st.guards_if) check(g.a, "guard.a");
+  for (auto& g : st.guards_for) {
     check(g.a, "guard.a");
     check(g.b, "guard.b");
   }
@@ -2778,6 +2814,8 @@ void freeze(LoopState& s) {
         " guard_varying=" + std::to_string(cov.guard_varying));
   }
   compact_snapshot(s, st.arena);
+  std::vector<int64_t>().swap(st.inplace_base_len);
+  std::vector<int64_t>().swap(st.gather_src_len);
   const bool check_remap = check_remap_enabled();
   const ArenaBlockRanges arena_ranges =
       check_remap ? capture_arena_ranges(s.arena) : ArenaBlockRanges{};
@@ -2824,7 +2862,8 @@ void freeze(LoopState& s) {
   for (auto& ptr : st.seg_in_src) ptr = remap_c(ptr);
   resolve_pool(st.seg_in_adj_version, st.seg_in_adj);
 
-  for (auto& g : st.guards) {
+  for (auto& g : st.guards_if) g.a = remap_c(g.a);
+  for (auto& g : st.guards_for) {
     g.a = remap_c(g.a);
     g.b = remap_c(g.b);
   }
@@ -2878,7 +2917,8 @@ void freeze(LoopState& s) {
       case StreamInstr::Gather:
         live = (st.gathers[instr.index].flags & kFrozenGatherActive) != 0;
         break;
-      case StreamInstr::Guard:
+      case StreamInstr::GuardIf:
+      case StreamInstr::GuardFor:
       case StreamInstr::Set:
       case StreamInstr::Tgt:
       case StreamInstr::Mark:
@@ -2901,7 +2941,8 @@ void freeze(LoopState& s) {
   shrink_if_loose(st.segs);
   shrink_if_loose(st.seg_in_src);
   shrink_if_loose(st.seg_in_adj);
-  shrink_if_loose(st.guards);
+  shrink_if_loose(st.guards_if);
+  shrink_if_loose(st.guards_for);
   shrink_if_loose(st.gather_pos);
   shrink_if_loose(st.gather_adj);
   shrink_if_loose(st.gathers);
@@ -2946,7 +2987,7 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
         if (f.flags & kFrozenCallHasOut2) c.out2.data = ptrs[next++];
         c.scratch = ptrs[next];
         if (c.dyn_lengths) apply_dynamic_length(c);
-        f.forward_fn(c);
+        s.sites[f.site]->forward(c);
         break;
       }
       case StreamInstr::InPlace: {
@@ -2980,12 +3021,14 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
         run_program(fs.segment->program, fs.frame, ctx.eval_state);
         break;
       }
-      case StreamInstr::Guard: {
-        const FrozenGuard& g = st.guards[instr.index];
-        const bool ok = g.kind == FrozenGuard::For
-                           ? (g.a[0] == g.va && g.b[0] == g.vb)
-                           : ((g.a[0] != 0.0) == g.decision);
-        if (!ok) return false;
+      case StreamInstr::GuardIf: {
+        const FrozenGuardIf& g = st.guards_if[instr.index];
+        if ((g.a[0] != 0.0) != g.decision) return false;
+        break;
+      }
+      case StreamInstr::GuardFor: {
+        const FrozenGuardFor& g = st.guards_for[instr.index];
+        if (g.a[0] != g.va || g.b[0] != g.vb) return false;
         break;
       }
       case StreamInstr::Set:
@@ -3033,7 +3076,8 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
   for (size_t oi = st.backward_order.size(); oi-- > 0;) {
     const StreamInstr& instr = st.backward_order[oi];
     switch (instr.kind) {
-      case StreamInstr::Guard:
+      case StreamInstr::GuardIf:
+      case StreamInstr::GuardFor:
       case StreamInstr::Set:
       case StreamInstr::Tgt:
       case StreamInstr::Mark:
@@ -3055,7 +3099,7 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
           if (c.dyn_lengths) apply_dynamic_length(c);
           if (c.out.len == 1 && c.out_adj_vec.data)
             c.out_adj = c.out_adj_vec.data[0];
-          f.backward_fn(c);
+          s.sites[f.site]->backward(c);
           break;
         }
         int next = f.n_in + 1;
@@ -3068,7 +3112,7 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
         if (c.dyn_lengths) apply_dynamic_length(c);
         if (c.out.len == 1 && c.out_adj_vec.data)
           c.out_adj = c.out_adj_vec.data[0];
-        f.backward_fn(c);
+        s.sites[f.site]->backward(c);
         break;
       }
       case StreamInstr::InPlace: {
@@ -3200,7 +3244,8 @@ void emit_frozen_sizeof() {
       " FrozenInPlace=" + std::to_string(sizeof(FrozenInPlace)) +
       " FrozenCopy=" + std::to_string(sizeof(FrozenCopy)) +
       " FrozenSegment=" + std::to_string(sizeof(FrozenSegment)) +
-      " FrozenGuard=" + std::to_string(sizeof(FrozenGuard)) +
+      " FrozenGuardIf=" + std::to_string(sizeof(FrozenGuardIf)) +
+      " FrozenGuardFor=" + std::to_string(sizeof(FrozenGuardFor)) +
       " FrozenTarget=" + std::to_string(sizeof(FrozenTarget)) +
       " FrozenImport=" + std::to_string(sizeof(FrozenImport)) +
       " FrozenGather=" + std::to_string(sizeof(FrozenGather)) +
@@ -3215,16 +3260,19 @@ void emit_freeze_breakdown(const LoopState& s) {
   emit_frozen_sizeof();
   const size_t n_call = st.calls.size(), n_inplace = st.inplaces.size(),
               n_copy = st.copies.size(), n_seg = st.segs.size(),
-              n_guard = st.guards.size(), n_target = st.targets.size(),
-              n_set = st.sets.size(), n_gather = st.gathers.size(),
-              n_import = st.imports.size(), n_program = st.program.size();
+              n_guard_if = st.guards_if.size(),
+              n_guard_for = st.guards_for.size(),
+              n_target = st.targets.size(), n_set = st.sets.size(),
+              n_gather = st.gathers.size(), n_import = st.imports.size(),
+              n_program = st.program.size();
   emit_pool_bytes("program", st.program, n_program);
   emit_pool_bytes("backward_order", st.backward_order, n_program);
   emit_pool_bytes("calls", st.calls, n_call);
   emit_pool_bytes("inplaces", st.inplaces, n_inplace);
   emit_pool_bytes("copies", st.copies, n_copy);
   emit_pool_bytes("segs", st.segs, n_seg);
-  emit_pool_bytes("guards", st.guards, n_guard);
+  emit_pool_bytes("guards_if", st.guards_if, n_guard_if);
+  emit_pool_bytes("guards_for", st.guards_for, n_guard_for);
   emit_pool_bytes("targets", st.targets, n_target);
   emit_pool_bytes("sets", st.sets, n_set);
   emit_pool_bytes("gathers", st.gathers, n_gather);
@@ -3282,10 +3330,10 @@ void structured_loop_forward(KernelCtx& ctx) {
       s.last_replayed = true;
       s.reverse_ready = true;
       if (s.diagnostics)
-        emit_replay_diagnostic(s, true, s.stream->program.size(),
-                               s.stream->guards.size(),
-                               s.stream->arena.cells.size(),
-                               s.stream->backward_order.size());
+        emit_replay_diagnostic(
+            s, true, s.stream->program.size(),
+            s.stream->guards_if.size() + s.stream->guards_for.size(),
+            s.stream->arena.cells.size(), s.stream->backward_order.size());
       return;
     }
     s.stream.reset();
@@ -3425,7 +3473,8 @@ void structured_loop_forward(KernelCtx& ctx) {
   if (s.diagnostics)
     emit_replay_diagnostic(
         s, false, s.stream ? s.stream->program.size() : 0,
-        s.stream ? s.stream->guards.size() : 0,
+        s.stream ? s.stream->guards_if.size() + s.stream->guards_for.size()
+                 : 0,
         s.stream ? s.stream->arena.cells.size() : 0,
         s.stream ? s.stream->backward_order.size() : 0);
   s.memo_ready = true;
