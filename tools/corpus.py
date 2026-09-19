@@ -214,7 +214,8 @@ def main():
     for model, (s, msg) in sorted(results.items()):
         if s != "OK":
             md.append(f"- `{model}`: {s} {msg}")
-    (REPO / "docs" / "corpus-status.md").write_text("\n".join(md) + "\n")
+    (REPO / "docs" / "corpus-status.md").write_text("\n".join(md) + "\n",
+                                                    encoding="utf-8")
 
 
 if __name__ == "__main__":
