@@ -1397,6 +1397,70 @@ void test_write_array_vector_rng() {
   }
 }
 
+// binomial_rng with an int-array population-count argument is not part of
+// the vectorized RNG tranche. Its transformed-parameter block lowers
+// cleanly; only generated quantities should fall back.
+void test_write_array_partial_fallback() {
+  using namespace stanli;
+  const int k = 3;
+  DataMap data;
+  data.set_int("K", k);
+  std::vector<int> trials(static_cast<size_t>(k));
+  for (int i = 0; i < k; ++i) trials[static_cast<size_t>(i)] = 5 + i;
+  data.set_int_array("trials", trials);
+  const std::string text = slurp("tests/fixtures/gq_partial_fallback.tmir.sexp");
+
+  CompiledModel cm = compile_model(text, data);
+  if (!cm.write_array) {
+    ++failures;
+    std::printf("FAIL gq_partial_fallback: no write_array\n");
+    return;
+  }
+  if (cm.write_array->truncated.empty() ||
+      cm.write_array->truncated.find("generated quantities") ==
+          std::string::npos) {
+    ++failures;
+    std::printf("FAIL gq_partial_fallback: truncated message is [%s]\n",
+                cm.write_array->truncated.c_str());
+  }
+  if (!cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gq_partial_fallback: no interpreter attached\n");
+    return;
+  }
+  expect_eq("gq_partial_fallback graph columns",
+           joined(cm.write_array->columns), "p.1,p.2,p.3,mu,sigma,tp_val");
+  expect_idx("gq_partial_fallback n_gq_start", cm.write_array->n_gq_start,
+            cm.write_array->columns.size());
+
+  Executor pex(cm.graph);
+  cm.bind(pex);
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  for (int64_t j = 0; j < pex.n_params(); ++j) pex.params_data()[j] = 0.1 * (j + 1);
+  pex.run_forward_only();
+  for (int64_t j = 0; j < wex.n_params(); ++j) wex.params_data()[j] = 0.1 * (j + 1);
+  wex.run_forward_only();
+  std::vector<double> graph_row;
+  for (const auto& c : cm.write_array->columns) {
+    const double* p = wex.value_ptr(c.slot);
+    for (int64_t i = 0; i < c.len; ++i) graph_row.push_back(p[c.storage_index(i)]);
+  }
+  WaRng interp_rng(3);
+  const std::vector<double> interp_row =
+      cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
+  if (interp_row.size() < graph_row.size() ||
+      !same_double_bytes(
+          graph_row, std::vector<double>(interp_row.begin(),
+                                         interp_row.begin() +
+                                             (int64_t)graph_row.size()))) {
+    ++failures;
+    std::printf(
+        "FAIL gq_partial_fallback: compiled transformed-parameter prefix "
+        "does not match the interpreter\n");
+  }
+}
+
 // A generated quantity the optimizer folds to a constant: --O1 replaces
 // the FnWriteParam's variable reference with the literal value, so the
 // column's name has to come from the program's output_vars instead. Both
@@ -5413,6 +5477,7 @@ int main() {
   test_write_array_retained_loop();
   test_write_array_block_order();
   test_write_array_vector_rng();
+  test_write_array_partial_fallback();
   if (failures == 0) std::printf("test_write_array OK\n");
   return failures == 0 ? 0 : 1;
 }

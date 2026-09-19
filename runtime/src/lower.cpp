@@ -757,14 +757,52 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   CompiledModel::WriteArray wa;
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
-  try {
-    for (const auto& s : p.generate_quantities) lower_stmt(s);
-  } catch (const CompileError& e) {
-    // Keep the valid prefix for diagnostics, but drivers select WaInterp
-    // whenever this marker is set and it evaluates the whole section from
-    // statement zero. There is no continuation frame for an arbitrary
-    // nested failure or its lexical live-outs.
-    wa.truncated = e.what();
+  for (const auto& s : p.generate_quantities) {
+    const auto saved_scope = scope;
+    const auto saved_decls = decls;
+    const auto saved_int_env = int_env;
+    const auto saved_int_locals = int_locals;
+    const auto saved_td_env = td.env();
+    const auto saved_n_tp_start = n_tp_start;
+    const auto saved_n_gq_start = n_gq_start;
+    const auto saved_out = out;
+    const auto saved_int_ranges = int_ranges;
+    const auto saved_real_ranges = real_ranges;
+    const size_t saved_ops = g.ops.size();
+    const size_t saved_slots = g.slots.size();
+    const size_t saved_idata = g.idata_pool.size();
+    const auto fail_section = [&](const std::string& what) {
+      scope = saved_scope;
+      decls = saved_decls;
+      int_env = saved_int_env;
+      int_locals = saved_int_locals;
+      td.env() = saved_td_env;
+      n_tp_start = saved_n_tp_start;
+      n_gq_start = saved_n_gq_start;
+      out = saved_out;
+      int_ranges = saved_int_ranges;
+      real_ranges = saved_real_ranges;
+      g.ops.resize(saved_ops);
+      g.slots.resize(saved_slots);
+      g.idata_pool.resize(saved_idata);
+      const char* section = saved_n_gq_start ? "generated quantities"
+                            : saved_n_tp_start ? "transformed parameters"
+                                               : "write_array";
+      // Keep the valid prefix for diagnostics, but drivers select WaInterp
+      // whenever this marker is set and it evaluates the whole section from
+      // statement zero. There is no continuation frame for an arbitrary
+      // nested failure or its lexical live-outs.
+      wa.truncated = std::string(section) + " (" + what + ")";
+    };
+    try {
+      lower_stmt(s);
+    } catch (const CompileError& e) {
+      fail_section(e.what());
+      break;
+    } catch (const std::logic_error& e) {
+      fail_section(e.what());
+      break;
+    }
   }
   std::vector<int> roots = jac_slots;
   for (const auto& v : out.views) roots.push_back(v.slot);
@@ -1027,10 +1065,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     }
     cm.write_array = std::move(w);
     if (!cm.write_array->truncated.empty())
-      add_interpreter_fallback(cm,
-                               "transformed parameters and generated "
-                               "quantities (" +
-                                   cm.write_array->truncated + ")");
+      add_interpreter_fallback(cm, cm.write_array->truncated);
   }
   if (prog->has_transform_inits) {
     // The inverse parameter transforms. Nothing is interpreted here: the
