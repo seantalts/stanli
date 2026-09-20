@@ -320,8 +320,27 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
   const uint8_t detail = static_cast<uint8_t>(activity);
   ctx.variant = 1u | (vec ? 2u : 0u) | (detail << 2);
   const Kernel& kern = *find_kernel(opcode);
+  Op shape;
+  shape.variant = ctx.variant;
+  shape.idata = dims;
+  shape.n_idata = 2;
+  std::vector<double> scratch(kern.scratch_size
+                                 ? kern.scratch_size(shape, nullptr) : 0);
+  ctx.scratch = scratch.empty() ? nullptr : scratch.data();
   kern.forward(ctx);
   kern.backward(ctx);
+  if (!scratch.empty()) {
+    const Mat cached_a = a_adj, cached_b = b_adj;
+    a_adj.setConstant(0.125);
+    b_adj.setConstant(0.125);
+    ctx.scratch = nullptr;
+    kern.backward(ctx);
+    if (std::memcmp(cached_a.data(), a_adj.data(), n * n * sizeof(double)) ||
+        std::memcmp(cached_b.data(), b_adj.data(), br * bc * sizeof(double))) {
+      ++failures;
+      std::printf("FAIL saved QR differs from recomputation n=%d k=%d\n", n, k);
+    }
+  }
 
   stan::math::nested_rev_autodiff scope;
   Eigen::Matrix<var, -1, -1> av(n, n), bv(br, bc);

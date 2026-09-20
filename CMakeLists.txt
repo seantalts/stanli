@@ -140,6 +140,7 @@ if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     runtime/kernels/densities_cdf_a.cpp
     runtime/kernels/densities_cdf_b.cpp
     runtime/kernels/matrix_fns.cpp
+    runtime/kernels/matrix_solve.cpp
     APPEND PROPERTY COMPILE_OPTIONS -fmath-errno)
 endif()
 
@@ -307,6 +308,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/probability_fns.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
+  runtime/kernels/matrix_solve.cpp
   runtime/kernels/scalar_binary.cpp
   runtime/kernels/scalar_unary_ad.cpp
   runtime/kernels/algebra.cpp
@@ -1112,7 +1114,7 @@ set(STANLI_TESTS
   test_constfold test_cse test_graph_print test_pass_dump
   test_function_registry test_function_shape
   test_partition
-  test_solve test_solve_forwards test_cross_path
+  test_solve test_solve_forwards test_solve_reuse test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
   test_odevariadic test_algebra test_estimate test_brmsmono
