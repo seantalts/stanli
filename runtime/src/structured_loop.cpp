@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -1346,10 +1347,15 @@ struct LoopFrame {
 // Reused only while building the frame tape. Every field is overwritten or
 // cleared before the next seal, and this scratch is released before replay.
 struct FrameSealScratch {
+  struct Layout {
+    std::shared_ptr<const FrameCode> code;
+    size_t instructions;
+  };
   std::vector<int64_t> live_ids, remap, lengths;
   std::vector<std::pair<const double*, int64_t>> ranges;
   ArenaSnapshot snapshot;
   std::vector<Version> versions;
+  std::vector<Layout> layouts;
 };
 struct FrameTape {
   std::unique_ptr<FrameSealScratch> sealing;
@@ -1364,6 +1370,7 @@ struct FrameTape {
   std::unordered_map<int64_t, int64_t> promotion_links;
   int64_t adjoint_base = 0;
   size_t version_peak = 0, recording_cells = 0;
+  size_t layout_attempts = 0, layout_matches = 0;
   bool ready = false;
 };
 
@@ -1436,6 +1443,7 @@ struct LoopState : KernelState {
   size_t visits = 0, reused_primal_cells = 0;
   int64_t adjoint_size = 0;
   bool reverse_ready = false;
+  bool frame_clone_ready = false;
   bool memo_ready = false;
   bool has_reusable_primals = false;
   bool reuse_primals = false;
@@ -1450,8 +1458,16 @@ struct LoopState : KernelState {
   std::unique_ptr<FrameTape> frames;
   bool frame_mode = false;
   bool frame_auto = false;
+  bool frame_layout =
+      std::getenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
+  bool check_frame_layout =
+      std::getenv("STANLI_STRUCTURED_CHECK_FRAME_LAYOUT") != nullptr;
+  bool frame_clone =
+      std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool last_replayed = false;
   size_t respecialized = 0;
+
+  bool clone_from(const KernelState& source) override;
 
   explicit LoopState(const StructuredLoop& plan)
       : p(plan),
@@ -3242,10 +3258,12 @@ void structured_loop_forward(KernelCtx& ctx) {
   LoopState& s = require_state(ctx);
   const StructuredLoop& p = s.p;
   s.reverse_ready = false;
+  s.frame_clone_ready = false;
   if (s.frames && !s.frames->ready) s.frames.reset();
   if (s.frames && s.frames->ready) {
     if (frames_forward(s, ctx)) {
       s.reverse_ready = true;
+      s.frame_clone_ready = true;
       return;
     }
     s.frames.reset();
@@ -3371,6 +3389,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     }
     finish_frames(s, ctx);
     s.reverse_ready = true;
+    s.frame_clone_ready = true;
     return;
   }
   int64_t pos = 0;
@@ -3448,8 +3467,10 @@ void structured_loop_backward(KernelCtx& ctx) {
     throw std::logic_error(
         "structured reverse has no successful forward state");
   s.reverse_ready = false;
+  s.frame_clone_ready = false;
   if (s.frames && s.frames->ready) {
     frames_backward(s, ctx);
+    s.frame_clone_ready = true;
     return;
   }
   if (s.last_replayed) {

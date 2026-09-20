@@ -34,6 +34,9 @@ double* frame_adjoint_ptr(const FrameAdjoint& a, FrameTape& tape,
   return ptr ? ptr + a.shift : nullptr;
 }
 
+// Matching consumes the same recorded operands as canonical encoding. Only
+// fresh bindings/literals are written; a mismatch leaves the Stream intact.
+template <bool Matching = false>
 struct FrameEncoder {
   LoopState& s;
   LoopFrame& frame;
@@ -42,6 +45,36 @@ struct FrameEncoder {
   std::unordered_map<const double*, int64_t> external;
   std::unordered_map<FrameAdjoint, int64_t, FrameAdjointHash> external_adj;
   ArrayIntern<int64_t> positions;
+  const FrameCode* expected = nullptr;
+  size_t cursor = 0;
+  size_t backward_cursor = 0;
+  bool matched = true;
+
+  FrameEncoder(LoopState& state, LoopFrame& target,
+               const ArenaSnapshot& arena, const FrameCode* layout = nullptr)
+      : s(state), frame(target), snapshot(arena), expected(layout) {}
+
+  uint64_t peek() {
+    if (cursor < expected->words.size()) return expected->words[cursor];
+    matched = false;
+    return 0;
+  }
+  template <typename T>
+  int64_t bind(std::vector<T>& bindings, const T& value) {
+    const int64_t ref = static_cast<int64_t>(peek());
+    if (ref >= 0 || ref == frame_null) {
+      matched = false;
+      return frame_null;
+    }
+    const uint64_t index = static_cast<uint64_t>(-(ref + 1));
+    if (index == bindings.size())
+      bindings.push_back(value);
+    else if (index > bindings.size() || !(bindings[index] == value))
+      matched = false;
+    // Distinct external indices may now alias. Each operand still resolves
+    // to its current address/identity, so instruction order preserves aliasing.
+    return ref;
+  }
 
   int64_t local(const double* ptr) const {
     auto it =
@@ -60,6 +93,8 @@ struct FrameEncoder {
     if (!ptr || len == 0) return frame_null;
     const auto offset = local(ptr);
     if (offset != frame_null) return offset;
+    if constexpr (Matching)
+      return bind(frame.bindings, const_cast<double*>(ptr));
     auto [entry, inserted] = external.emplace(ptr, frame.bindings.size());
     if (inserted) frame.bindings.push_back(const_cast<double*>(ptr));
     return -entry->second - 1;
@@ -70,6 +105,7 @@ struct FrameEncoder {
       if (a.id == -1) return frame_null;
       if (a.id >= frame.adjoint_base) return a.id - frame.adjoint_base + shift;
     }
+    if constexpr (Matching) return bind(frame.adj_bindings, a);
     auto [entry, inserted] = external_adj.emplace(a, frame.adj_bindings.size());
     if (inserted) frame.adj_bindings.push_back(a);
     return -entry->second - 1;
@@ -78,15 +114,49 @@ struct FrameEncoder {
     frame.literals.push_back(v);
     return frame.literals.size() - 1;
   }
-  void word(int64_t v) { code.words.push_back(static_cast<uint64_t>(v)); }
+  void word(int64_t v) {
+    if constexpr (Matching) {
+      matched &= peek() == static_cast<uint64_t>(v);
+      ++cursor;
+    } else {
+      code.words.push_back(static_cast<uint64_t>(v));
+    }
+  }
 
-  void encode(const Stream& st) {
+  template <typename Int>
+  int64_t index_positions(const std::vector<Int>& pool, size_t offset,
+                          size_t count, int64_t shift) {
+    if constexpr (Matching) {
+      const uint64_t at = peek();
+      if (at > expected->positions.size() ||
+          count > expected->positions.size() - at) {
+        matched = false;
+        return 0;
+      }
+      for (size_t k = 0; k < count; ++k)
+        matched &= pool[offset + k] - shift == expected->positions[at + k];
+      return static_cast<int64_t>(at);
+    } else {
+      std::vector<int64_t> pos(count);
+      for (size_t k = 0; k < count; ++k) pos[k] = pool[offset + k] - shift;
+      return positions.intern(pos.data(), pos.size());
+    }
+  }
+
+  bool encode(const Stream& st) {
     for (const auto& instruction : st.program) {
       if (instruction.kind == StreamInstr::Tgt) continue;
-      const size_t start = code.words.size();
+      const size_t start = Matching ? cursor : code.words.size();
       if (start > std::numeric_limits<uint32_t>::max())
         throw std::length_error("structured frame program overflow");
-      word(instruction.kind);
+      uint64_t header = 0;
+      if constexpr (Matching) {
+        header = peek();
+        if (!matched || (header & 255) != instruction.kind) return false;
+        ++cursor;
+      } else {
+        word(instruction.kind);
+      }
       bool backward = false;
       switch (instruction.kind) {
         case StreamInstr::Call: {
@@ -119,11 +189,8 @@ struct FrameEncoder {
         case StreamInstr::InPlace: {
           const auto& f = st.inplaces[instruction.index];
           const int64_t shift = f.pos_count ? st.inplace_pos[f.pos_offset] : 0;
-          std::vector<int64_t> pos(f.pos_count);
-          for (size_t i = 0; i < pos.size(); ++i)
-            pos[i] = st.inplace_pos[f.pos_offset + i] - shift;
           word(f.pos_count);
-          word(positions.intern(pos.data(), pos.size()));
+          word(index_positions(st.inplace_pos, f.pos_offset, f.pos_count, shift));
           word(f.old_offset);
           word(value(f.base + shift, st.inplace_base_len[instruction.index]));
           word(value(f.rhs, f.pos_count));
@@ -150,11 +217,8 @@ struct FrameEncoder {
         case StreamInstr::Gather: {
           const auto& f = st.gathers[instruction.index];
           const int64_t shift = f.pos_count ? st.gather_pos[f.pos_offset] : 0;
-          std::vector<int64_t> pos(f.pos_count);
-          for (size_t i = 0; i < pos.size(); ++i)
-            pos[i] = st.gather_pos[f.pos_offset + i] - shift;
           word(f.pos_count);
-          word(positions.intern(pos.data(), pos.size()));
+          word(index_positions(st.gather_pos, f.pos_offset, f.pos_count, shift));
           word(value(f.src + shift, st.gather_src_len[instruction.index]));
           word(value(f.dst, f.pos_count));
           backward = (f.flags & kFrozenGatherActive) != 0;
@@ -190,13 +254,135 @@ struct FrameEncoder {
         case StreamInstr::Tgt:
           break;
       }
-      code.words[start] |= static_cast<uint64_t>(code.words.size() - start)
-                           << 8;
-      if (backward) code.backward.push_back(static_cast<uint32_t>(start));
+      if constexpr (Matching) {
+        if (!matched || (header >> 8) != cursor - start) return false;
+        if (backward) {
+          if (backward_cursor == expected->backward.size() ||
+              expected->backward[backward_cursor++] != start)
+            return false;
+        } else if (backward_cursor < expected->backward.size() &&
+                   expected->backward[backward_cursor] == start) {
+          return false;
+        }
+      } else {
+        code.words[start] |= static_cast<uint64_t>(code.words.size() - start)
+                             << 8;
+        if (backward) code.backward.push_back(static_cast<uint32_t>(start));
+      }
     }
-    code.positions = std::move(positions.data);
+    if constexpr (Matching) {
+      return matched && cursor == expected->words.size() &&
+             backward_cursor == expected->backward.size();
+    } else {
+      code.positions = std::move(positions.data);
+      return true;
+    }
   }
 };
+
+// Optional differential proof check. Canonical encoding may use different
+// external indices or interned position offsets, so compare resolved operands
+// and backward order, rather than requiring identical representation bytes.
+void check_frame_layout(LoopState& s, const Stream& st,
+                         const ArenaSnapshot& snapshot, const LoopFrame& frame) {
+  LoopFrame oracle;
+  oracle.adjoint_base = frame.adjoint_base;
+  FrameEncoder<false> encoder{s, oracle, snapshot};
+  encoder.encode(st);
+  const auto& a = *frame.code;
+  const auto& b = encoder.code;
+  const auto require = [](bool ok) {
+    if (!ok) throw std::logic_error("structured frame layout proof mismatch");
+  };
+  require(a.words.size() == b.words.size() && a.backward == b.backward);
+  const auto value = [&](const LoopFrame& f, uint64_t raw) -> const double* {
+    const int64_t ref = static_cast<int64_t>(raw);
+    if (ref == frame_null) return nullptr;
+    if (ref >= 0) {
+      require(static_cast<size_t>(ref) < frame.values.size());
+      return frame.values.data() + ref;
+    }
+    require(static_cast<uint64_t>(-(ref + 1)) < f.bindings.size());
+    return f.bindings[-ref - 1];
+  };
+  const auto adjoint = [&](const LoopFrame& f, uint64_t raw) {
+    const int64_t ref = static_cast<int64_t>(raw);
+    if (ref == frame_null) return FrameAdjoint{};
+    if (ref >= 0) return FrameAdjoint{f.adjoint_base + ref, 0, -1};
+    require(static_cast<uint64_t>(-(ref + 1)) < f.adj_bindings.size());
+    auto result = f.adj_bindings[-ref - 1];
+    if (result.promotion < 0 && result.id >= 0) {
+      result.id += result.shift;
+      result.shift = 0;
+    }
+    return result;
+  };
+  const auto v = [&](uint64_t x, uint64_t y) {
+    require(value(frame, x) == value(oracle, y));
+  };
+  const auto d = [&](uint64_t x, uint64_t y) {
+    require(adjoint(frame, x) == adjoint(oracle, y));
+  };
+  const auto literal = [&](uint64_t x, uint64_t y) {
+    require(x < frame.literals.size() && y < oracle.literals.size());
+    require(std::memcmp(&frame.literals[x], &oracle.literals[y],
+                        sizeof(double)) == 0);
+  };
+  const auto positions = [&](uint64_t x, uint64_t y, uint64_t count) {
+    require(x <= a.positions.size() && count <= a.positions.size() - x &&
+            y <= b.positions.size() && count <= b.positions.size() - y);
+    for (size_t k = 0; k < count; ++k)
+      require(a.positions[x + k] == b.positions[y + k]);
+  };
+  for (size_t pc = 0; pc < a.words.size();) {
+    require(a.words[pc] == b.words[pc]);
+    const auto header = a.words[pc];
+    const auto* x = a.words.data() + pc + 1;
+    const auto* y = b.words.data() + pc + 1;
+    pc += header >> 8;
+    switch (header & 255) {
+      case StreamInstr::Call: {
+        require(x[0] == y[0] && x[1] == y[1] && x[2] == y[2]);
+        size_t at = 3;
+        const size_t operands = x[2] + 1 + ((x[1] & kFrozenCallHasOut2) != 0);
+        for (size_t k = 0; k < operands + 1; ++k, ++at) v(x[at], y[at]);
+        if (x[1] & kFrozenCallActive)
+          for (size_t k = 0; k < operands; ++k, ++at) d(x[at], y[at]);
+        break;
+      }
+      case StreamInstr::InPlace:
+        require(x[0] == y[0] && x[2] == y[2] && x[7] == y[7]);
+        positions(x[1], y[1], x[0]);
+        v(x[3], y[3]); v(x[4], y[4]);
+        d(x[5], y[5]); d(x[6], y[6]);
+        for (size_t k = 0; k < x[7]; ++k) {
+          v(x[8 + 2 * k], y[8 + 2 * k]);
+          literal(x[9 + 2 * k], y[9 + 2 * k]);
+        }
+        break;
+      case StreamInstr::Copy:
+        require(x[0] == y[0]);
+        v(x[1], y[1]); v(x[2], y[2]);
+        d(x[3], y[3]); d(x[4], y[4]);
+        break;
+      case StreamInstr::Gather:
+        require(x[0] == y[0]);
+        positions(x[1], y[1], x[0]);
+        v(x[2], y[2]); v(x[3], y[3]);
+        d(x[4], y[4]); d(x[5], y[5]);
+        break;
+      case StreamInstr::GuardIf:
+        v(x[0], y[0]); require(x[1] == y[1]); break;
+      case StreamInstr::GuardFor:
+        v(x[0], y[0]); v(x[1], y[1]);
+        literal(x[2], y[2]); literal(x[3], y[3]); break;
+      case StreamInstr::Set:
+        v(x[0], y[0]); literal(x[1], y[1]); break;
+      default:
+        require(false);
+    }
+  }
+}
 
 void seal_frame(LoopState& s) {
   FrameTape& tape = *s.frames;
@@ -289,26 +475,56 @@ void seal_frame(LoopState& s) {
     std::copy_n(r.base, r.used, frame->values.data() + r.offset);
   frame->adjoint_base = tape.adjoint_base;
   frame->old = std::move(st.inplace_old);
-  FrameEncoder encoder{s, *frame, snapshot, {}, {}, {}, {}};
-  encoder.encode(st);
-  size_t hash = 0;
-  const auto hash_words = [&](const auto& words) {
-    for (auto word : words)
-      hash ^= std::hash<uint64_t>{}(word) + 0x9e3779b97f4a7c15ULL +
-              (hash << 6) + (hash >> 2);
-  };
-  hash_words(encoder.code.words);
-  hash_words(encoder.code.positions);
-  auto& bucket = tape.codes[hash];
-  for (const auto& code : bucket)
-    if (code->words == encoder.code.words &&
-        code->positions == encoder.code.positions) {
-      frame->code = code;
-      break;
+  FrameEncoder<false> encoder{s, *frame, snapshot};
+  if (s.frame_layout && !scratch.layouts.empty()) {
+    ++tape.layout_attempts;
+    for (const auto& layout : scratch.layouts) {
+      if (layout.instructions != st.program.size()) continue;
+      FrameEncoder<true> matcher{s, *frame, snapshot, layout.code.get()};
+      if (matcher.encode(st)) {
+        frame->code = layout.code;
+        ++tape.layout_matches;
+        if (s.check_frame_layout) check_frame_layout(s, st, snapshot, *frame);
+        break;
+      }
+      frame->bindings.clear();
+      frame->adj_bindings.clear();
+      frame->literals.clear();
     }
+  }
   if (!frame->code) {
-    frame->code = std::make_shared<FrameCode>(std::move(encoder.code));
-    bucket.push_back(frame->code);
+    encoder.encode(st);
+    size_t hash = 0;
+    const auto hash_words = [&](const auto& words) {
+      for (auto word : words)
+        hash ^= std::hash<uint64_t>{}(word) + 0x9e3779b97f4a7c15ULL +
+                (hash << 6) + (hash >> 2);
+    };
+    hash_words(encoder.code.words);
+    hash_words(encoder.code.positions);
+    auto& bucket = tape.codes[hash];
+    for (const auto& code : bucket)
+      if (code->words == encoder.code.words &&
+          code->positions == encoder.code.positions) {
+        frame->code = code;
+        break;
+      }
+    if (!frame->code) {
+      frame->code = std::make_shared<FrameCode>(std::move(encoder.code));
+      bucket.push_back(frame->code);
+    }
+  }
+  if (s.frame_layout) {
+    auto& layouts = scratch.layouts;
+    const auto found = std::find_if(layouts.begin(), layouts.end(),
+                                   [&](const auto& layout) {
+                                     return layout.code == frame->code;
+                                   });
+    if (found != layouts.end()) layouts.erase(found);
+    // A bounded cache controls comparison cost. Every cache entry still
+    // requires the full certificate; eviction only selects the slow fallback.
+    if (layouts.size() == 4) layouts.pop_back();
+    layouts.insert(layouts.begin(), {frame->code, st.program.size()});
   }
   const auto relocate = [&](const double* ptr) -> double* {
     const auto ref = encoder.local(ptr);
@@ -499,6 +715,90 @@ struct FrameExecution {
   }
 };
 
+bool LoopState::clone_from(const KernelState& source) {
+  const auto* src = dynamic_cast<const LoopState*>(&source);
+  if (!frame_clone || no_replay || !(frame_mode || frame_auto) || !src ||
+      &p != &src->p || !src->frame_clone_ready || src->building ||
+      !src->frames || !src->frames->ready)
+    return false;
+
+  // Build privately. Only immutable FrameCode is shared. Contexts come from
+  // the fresh LoopState constructor; its next forward binds new outer inputs
+  // and evaluation resources and validates the inherited guards.
+  const auto& old = *src->frames;
+  auto next = std::make_unique<FrameTape>();
+  std::vector<double> next_workspace = src->workspace;
+  struct Range {
+    uintptr_t first, end;
+    double* destination;
+  };
+  std::vector<Range> ranges;
+  const auto add = [&](const std::vector<double>& from,
+                       std::vector<double>& to) {
+    if (from.empty()) return;
+    const auto first = reinterpret_cast<uintptr_t>(from.data());
+    ranges.push_back({first, first + from.size() * sizeof(double), to.data()});
+  };
+  add(src->workspace, next_workspace);
+  next->frames.reserve(old.frames.size());
+  for (const auto& frame : old.frames) {
+    auto copy = std::make_unique<LoopFrame>(*frame);
+    add(frame->values, copy->values);
+    add(frame->old, copy->old);
+    add(frame->literals, copy->literals);
+    next->frames.push_back(std::move(copy));
+  }
+  std::sort(ranges.begin(), ranges.end(),
+            [](const Range& a, const Range& b) { return a.first < b.first; });
+  bool closed = true;
+  const auto relocate = [&](const double* ptr, int64_t len) -> double* {
+    if (len == 0) return nullptr;
+    if (ptr && len > 0) {
+      const auto address = reinterpret_cast<uintptr_t>(ptr);
+      auto it = std::upper_bound(
+          ranges.begin(), ranges.end(), address,
+          [](uintptr_t p, const Range& r) { return p < r.first; });
+      if (it != ranges.begin()) {
+        --it;
+        const auto bytes = address - it->first;
+        if (address < it->end && bytes % sizeof(double) == 0 &&
+            static_cast<uint64_t>(len) <= (it->end - address) / sizeof(double))
+          return it->destination + bytes / sizeof(double);
+      }
+    }
+    closed = false;
+    return nullptr;
+  };
+  for (auto& frame : next->frames)
+    for (auto& ptr : frame->bindings) ptr = relocate(ptr, 1);
+  next->imports = old.imports;
+  for (auto& in : next->imports) in.dst = relocate(in.dst, in.len);
+  next->outputs = old.outputs;
+  for (size_t k = 0; k < next->outputs.size(); ++k)
+    next->outputs[k] = relocate(next->outputs[k], p.body.slots[p.outputs[k]].len);
+  next->targets = old.targets;
+  for (auto& ptr : next->targets) ptr = relocate(ptr, 1);
+  if (!closed) return false;
+
+  next->codes = old.codes;
+  next->output_adjoints = old.output_adjoints;
+  next->target_adjoints = old.target_adjoints;
+  next->promotions = old.promotions;
+  next->promotion_links = old.promotion_links;
+  next->adjoint_base = old.adjoint_base;
+  next->adjoints.resize(old.adjoints.size());
+  next->target_work.resize(old.targets.size());
+  next->ready = true;
+  workspace.swap(next_workspace);
+  frames = std::move(next);
+  reverse_ready = false;
+  frame_clone_ready = true;
+  if (diagnostics)
+    emit_diagnostic("stanli_structured frame_clone: frames=" +
+                    std::to_string(frames->frames.size()));
+  return true;
+}
+
 void frame_outputs(LoopState& s, KernelCtx& ctx) {
   FrameTape& tape = *s.frames;
   int64_t at = 0;
@@ -548,6 +848,8 @@ void finish_frames(LoopState& s, KernelCtx& ctx) {
                     " code_words=" + std::to_string(code_words) +
                     " cells=" + std::to_string(cells) +
                     " bindings=" + std::to_string(bindings) +
+                    " layout_attempts=" + std::to_string(tape.layout_attempts) +
+                    " layout_matches=" + std::to_string(tape.layout_matches) +
                     " peak_versions=" + std::to_string(tape.version_peak) +
                     " recording_cells=" + std::to_string(tape.recording_cells));
   }
