@@ -1,0 +1,67 @@
+{
+  "date": "2026-09-20",
+  "upstream_base": "680a4763b256764476bca72b7916ad312c910701",
+  "validated_implementation_parent": "bb6b6b293477b750c8848241fd224153d3b0be20",
+  "final_changes": "clang-format 22.1.8 cleanup and final plan status; no behavioral changes",
+  "source_sha256": {
+    "CMakeLists.txt": "a88efcd64d01ef243c8a7dcb3a86fd215cefa074d30eba3eb86a2fd838a88817",
+    "runtime/include/stanli/kernel_types.hpp": "b8ba5a4dff0382237ce061ac0f0071e5463d91be75386a933e75444c4e0fb389",
+    "runtime/kernels/matrix_fns.cpp": "415759fea4105f93e6632df3753cc2274c908a059260391a6594636b9aaf0a53",
+    "runtime/kernels/matrix_solve.cpp": "6df9e84eba7b915bc80d2affd1429702ba45f33ec3c8be29ada975f6722a58ff",
+    "runtime/src/executor.cpp": "1a92a9aaa78218853ab3ec82b1a56edee918de26b41c1f6cbacce1cc3ac06730",
+    "runtime/src/structured_frames.inc": "926215fe9d607f7cd129279ed21279b6e254857194388c979a8c9eb57e3b3048",
+    "runtime/src/structured_loop.cpp": "e07324cbad464639665de26284e3d4e0f83b14c120bd8b2751835c2d12b1d63e",
+    "runtime/src/structured_recording.inc": "753435891e845bbb961bc19e9830e15db4ba1c6d4e688833b82d04b427b6f508",
+    "tests/test_native_matrix_pullbacks.cpp": "2e3c5e4a30816ebe859618c6d84236db3a89ebbff70934de444fd1291491598b",
+    "tests/test_solve_forwards.cpp": "78b4d1021aad749a0c985b5b7b6c720276945081649d28ae461ee4cd24ad98d8",
+    "tests/test_solve_reuse.cpp": "ce02272146226c2e3c78f8e7fc93e00fedf747a612fb297b8e2167bc8d8166c6",
+    "tests/test_structured_loop.cpp": "bad7dcdbf38a4097120390fd41df9c4fc727814b2febc3ddfcbf4fecd8718fb7"
+  },
+  "measured_library_sha256": "26f166f929fb1b31be25a46ff027670c5ed26037dfeffe47819b87561ca564d1",
+  "rebuilt_library_sha256": "9002c69f19fd3812ff992ff5afbba836bcd63db57005312df25a35fb27a2a2ab",
+  "archive_comparison": {
+    "member_count": 70,
+    "differences": [],
+    "all_object_members_byte_identical": true,
+    "archive_metadata_changed": true,
+    "conclusion": "Measured runtime object contents are preserved; timing reruns are unnecessary for this formatting-only rebuild."
+  },
+  "commands": [
+    "./tools/format.sh --check",
+    "cmake --build build-rel --parallel 24",
+    "ctest --test-dir build-rel --output-on-failure -j 24",
+    "python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 2",
+    "STANLI_STRUCTURED_CHECK_FRAME_LAYOUT=1 ctest --test-dir build-rel --output-on-failure -R ^test_structured_loop$"
+  ],
+  "format": {
+    "version": "22.1.8",
+    "passed": true
+  },
+  "build": {
+    "passed": true
+  },
+  "ctest": {
+    "total": 264,
+    "passed": 262,
+    "unchanged_baseline_failures": [
+      "test_density_signature_model_generation",
+      "test_builtin_signature_model_generation"
+    ],
+    "log_sha256": "041b35e8f17d2d9eed0045d8e32010ca6beabb17fa9ba013511ba426e3ad8426"
+  },
+  "references": {
+    "models": 329,
+    "passed": 329,
+    "points": 3,
+    "values": 1020194,
+    "tolerance": 1e-09,
+    "worst_scaled_error": 9.38e-13,
+    "output": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n13 models retain per-model recording provenance overrides\n\n329/329 models within 1e-09 of the CmdStan references at all 3 evaluation points (1020194 values compared); worst gpcm_latent_reg_irt at 9.38e-13 (7040 ulp)\n"
+  },
+  "layout_and_clone_oracles": {
+    "passed": true,
+    "output": "Test project /Users/xitrium/.codex/worktrees/37de58da-630b-4c00-b5ad-33da13a92eb3/stanrt/build-rel\n    Start 49: test_structured_loop\n1/1 Test #49: test_structured_loop .............   Passed    0.38 sec\n\n100% tests passed, 0 tests failed out of 1\n\nTotal Test time (real) =   0.38 sec\n"
+  },
+  "prior_scorecard": "notes/performance/2026-09-20-ctsem-proof-packets.json",
+  "artifacts": ".cache/ctsem-pr"
+}

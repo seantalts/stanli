@@ -393,6 +393,9 @@ Executor::Executor(const Executor& src)
   ensure_registered();
   bind_();
   std::copy(src.values_.begin(), src.values_.end(), values_.begin());
+  for (size_t i = 0; i < ctx_.size(); ++i)
+    if (ctx_[i].state && src.ctx_[i].state)
+      ctx_[i].state->clone_from(*src.ctx_[i].state);
 }
 
 void Executor::bind_() {

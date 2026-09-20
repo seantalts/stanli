@@ -317,11 +317,30 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
   ctx.in_adj[bi] = {dividend_var ? b_adj.data() : nullptr, br * bc};
   ctx.out = {out.data(), outr * outc};
   ctx.out_adj_vec = {seed.data(), outr * outc};
-  const uint8_t detail = activity == 1 ? 1u : activity == 2 ? 2u : 3u;
+  const uint8_t detail = static_cast<uint8_t>(activity);
   ctx.variant = 1u | (vec ? 2u : 0u) | (detail << 2);
   const Kernel& kern = *find_kernel(opcode);
+  Op shape;
+  shape.variant = ctx.variant;
+  shape.idata = dims;
+  shape.n_idata = 2;
+  std::vector<double> scratch(
+      kern.scratch_size ? kern.scratch_size(shape, nullptr) : 0);
+  ctx.scratch = scratch.empty() ? nullptr : scratch.data();
   kern.forward(ctx);
   kern.backward(ctx);
+  if (!scratch.empty()) {
+    const Mat cached_a = a_adj, cached_b = b_adj;
+    a_adj.setConstant(0.125);
+    b_adj.setConstant(0.125);
+    ctx.scratch = nullptr;
+    kern.backward(ctx);
+    if (std::memcmp(cached_a.data(), a_adj.data(), n * n * sizeof(double)) ||
+        std::memcmp(cached_b.data(), b_adj.data(), br * bc * sizeof(double))) {
+      ++failures;
+      std::printf("FAIL saved QR differs from recomputation n=%d k=%d\n", n, k);
+    }
+  }
 
   stan::math::nested_rev_autodiff scope;
   Eigen::Matrix<var, -1, -1> av(n, n), bv(br, bc);
@@ -347,6 +366,9 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
       " vec=" + std::to_string(vec) + " act=" + std::to_string(activity) +
       " seed=" + std::to_string(seed_val);
   for (int i = 0; i < outr * outc; ++i)
+    // This legacy gradient oracle promotes both operands to var matrices.
+    // test_solve_forwards separately enforces bitwise values with the exact
+    // activity and vector/matrix types, which can differ from this oracle.
     check(out.data()[i], result.data()[i].val(), ("solve value" + tag).c_str());
   if (divisor_var)
     for (int i = 0; i < n * n; ++i) {
@@ -374,7 +396,7 @@ static void solve_family(bool left, SolveKindTag kind, uint16_t opcode,
     for (int k : {1, n})
       for (bool vec :
            (k == 1 ? std::vector<bool>{false, true} : std::vector<bool>{false}))
-        for (int activity : {1, 2, 3})
+        for (int activity : {0, 1, 2, 3})
           for (unsigned s = 1; s <= 2; ++s)
             solve_case(left, kind, opcode, n, k, vec, activity, s, max_ulp);
 }

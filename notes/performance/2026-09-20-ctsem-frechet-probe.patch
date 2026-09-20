@@ -1,0 +1,129 @@
+--- /dev/null
++++ b/.cache/ctsem-remaining/frechet.hpp
+@@ -0,0 +1,45 @@
++#pragma once
++#include <Eigen/Dense>
++#include <algorithm>
++#include <cmath>
++// Experimental Al-Mohy/Higham (2009), Algorithm 6.4, equations 3.3 and
++// 6.11-6.13. No production caller. See https://eprints.maths.manchester.ac.uk/1218/.
++// Input A is already transposed for an adjoint; E is its scaled direction.
++inline Eigen::MatrixXd frechet_exp(Eigen::MatrixXd a, Eigen::MatrixXd e) {
++  using M=Eigen::MatrixXd;
++  const auto n=a.rows();if(n==0)return M(0,0);
++  const double norm=a.cwiseAbs().colwise().sum().maxCoeff();
++  const int m=norm<=0.0108?3:norm<=0.2?5:norm<=0.783?7:norm<=1.78?9:13;
++  const int s=m==13?std::max(0,static_cast<int>(std::ceil(std::log2(norm/4.74)))):0;
++  a*=std::ldexp(1.0,-s);e*=std::ldexp(1.0,-s);
++  M a2=a*a, d2=a*e+e*a, u,v,du,dv;
++  const M eye=M::Identity(n,n);
++  if(m<13) {
++    const double b3[]={120,60,12,1};
++    const double b5[]={30240,15120,3360,420,30,1};
++    const double b7[]={17297280,8648640,1995840,277200,25200,1512,56,1};
++    const double b9[]={17643225600.,8821612800.,2075673600.,302702400.,30270240.,2162160.,110880.,3960.,90.,1.};
++    const double* b=m==3?b3:m==5?b5:m==7?b7:b9;
++    M p[5],d[5];p[1]=a2;d[1]=d2;
++    if(m>=5){p[2]=a2*a2;d[2]=a2*d2+d2*a2;}
++    if(m>=7){p[3]=a2*p[2];d[3]=d2*p[2]+a2*d[2];}
++    if(m>=9){p[4]=p[2]*p[2];d[4]=d[2]*p[2]+p[2]*d[2];}
++    M w=b[1]*eye,dw=M::Zero(n,n);v=b[0]*eye;dv=M::Zero(n,n);
++    for(int j=1;j<=m/2;++j){w+=b[2*j+1]*p[j];dw+=b[2*j+1]*d[j];v+=b[2*j]*p[j];dv+=b[2*j]*d[j];}
++    u=a*w;du=e*w+a*dw;
++  } else {
++    const double b[]={64764752532480000.,32382376266240000.,7771770303897600.,1187353796428800.,129060195264000.,10559470521600.,670442572800.,33522128640.,1323241920.,40840800.,960960.,16380.,182.,1.};
++    const M a4=a2*a2,d4=a2*d2+d2*a2,a6=a2*a4,d6=d2*a4+a2*d4;
++    const M w1=b[13]*a6+b[11]*a4+b[9]*a2;
++    const M z1=b[12]*a6+b[10]*a4+b[8]*a2;
++    const M w=a6*w1+b[7]*a6+b[5]*a4+b[3]*a2+b[1]*eye;
++    const M dw=a6*(b[13]*d6+b[11]*d4+b[9]*d2)+d6*w1+b[7]*d6+b[5]*d4+b[3]*d2;
++    u=a*w;du=e*w+a*dw;
++    v=a6*z1+b[6]*a6+b[4]*a4+b[2]*a2+b[0]*eye;
++    dv=a6*(b[12]*d6+b[10]*d4+b[8]*d2)+d6*z1+b[6]*d6+b[4]*d4+b[2]*d2;
++  }
++  const Eigen::PartialPivLU<M> factor(v-u);
++  M r=factor.solve(v+u),l=factor.solve(du+dv+(du-dv)*r);
++  for(int i=0;i<s;++i){l=(r*l+l*r).eval();r=(r*r).eval();}
++  return l;
++}
+--- /dev/null
++++ b/.cache/ctsem-remaining/frechet-probe.cpp
+@@ -0,0 +1,37 @@
++#include "frechet.hpp"
++#include <stan/math/prim/fun/matrix_exp.hpp>
++#include <chrono>
++#include <cstdio>
++#include <fstream>
++#include <string>
++#include <vector>
++using M=Eigen::MatrixXd;
++static M block_method(const M& a,const M& g) {
++  const auto n=a.rows();if(!n)return M(0,0);
++  const M at=a.transpose();
++  const double anorm=at.cwiseAbs().colwise().sum().maxCoeff(),gnorm=g.cwiseAbs().colwise().sum().maxCoeff();
++  const double scale=gnorm>0?gnorm/std::max(anorm,1.):1.;
++  M block=M::Zero(2*n,2*n);block.topLeftCorner(n,n)=at;block.bottomRightCorner(n,n)=at;block.topRightCorner(n,n)=g/scale;
++  return M(stan::math::matrix_exp(block).topRightCorner(n,n)*scale);
++}
++static M direct_method(const M& a,const M& g) {
++  const auto n=a.rows();if(!n)return M(0,0);
++  const M at=a.transpose();
++  const double anorm=at.cwiseAbs().colwise().sum().maxCoeff(),gnorm=g.cwiseAbs().colwise().sum().maxCoeff();
++  const double scale=gnorm>0?gnorm/std::max(anorm,1.):1.;
++  return M(frechet_exp(at,g/scale)*scale);
++}
++static M read(std::istream& in,int n){M x(n,n);for(int i=0;i<n;++i)for(int j=0;j<n;++j)in>>x(i,j);return x;}
++static void print(const M& x){for(int i=0;i<x.rows();++i)for(int j=0;j<x.cols();++j)std::printf("%.17g\n",x(i,j));}
++int main(int argc,char** argv) {
++  if(argc!=2)return 2;
++  std::ifstream in(argv[1]);int count;in>>count;
++  for(int t=0;t<count;++t){std::string kind;int n;in>>kind>>n;if(kind!="matrix_exp")return 3;M a=read(in,n),g=read(in,n);
++    if(std::getenv("FRECHET_TIMING")){
++      for(int pair=0;pair<6;++pair)for(int turn=0;turn<2;++turn){const int candidate=(pair+turn)%2;int it=0;double sink=0;auto start=std::chrono::steady_clock::now();long long ns;
++        do{auto x=candidate?direct_method(a,g):block_method(a,g);sink+=x.size()?x(0,0):0;++it;ns=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-start).count();}while(ns<200000000);
++        std::printf("{\"case\":%d,\"n\":%d,\"pair\":%d,\"candidate\":%d,\"ns\":%.9g,\"sink\":%.9g}\n",t,n,pair,candidate,double(ns)/it,sink);
++      }
++    }else{print(block_method(a,g));print(direct_method(a,g));}
++  }
++}
+--- /dev/null
++++ b/.cache/ctsem-remaining/frechet-oracle.py
+@@ -0,0 +1,38 @@
++from pathlib import Path
++import sys,subprocess,json,random,math,statistics,importlib.util
++root=Path.cwd();c=root/'.cache/ctsem-remaining';out=c/'frechet';out.mkdir(exist_ok=True)
++spec=importlib.util.spec_from_file_location('hp',root/'tools/matrix_pullback_hp_check.py');hp=importlib.util.module_from_spec(spec);spec.loader.exec_module(hp);mp=hp.mpmath
++rng=random.Random(20260920);cases=[]
++def append(name,a,g):cases.append({'name':name,'n':len(a),'a':a,'g':g})
++def eye(n,value):return [[value if i==j else 0. for j in range(n)] for i in range(n)]
++for n in [1,2,5,10,20]:
++ for scale in [0.01,0.5,4.]:
++  append(f'random-{n}-{scale}',[[rng.uniform(-scale,scale) for j in range(n)]for i in range(n)],[[rng.uniform(-.5,.5)for j in range(n)]for i in range(n)])
++for n in [1,2,5,10]:
++ for off in [1.,100.,10000.]:
++  a=eye(n,-1.);g=[[rng.uniform(-.5,.5)for j in range(n)]for i in range(n)]
++  for i in range(n-1):a[i][i+1]=off
++  append(f'jordan-{n}-{off}',a,g)
++ for diagonal in [0.,-100.,100.]:
++  append(f'diagonal-{n}-{diagonal}',eye(n,diagonal),[[rng.uniform(-.5,.5)for j in range(n)]for i in range(n)])
++ append(f'zero-seed-{n}',eye(n,1.),eye(n,0.))
++ append(f'nilpotent-{n}',[[1. if j==i+1 else 0. for j in range(n)]for i in range(n)],eye(n,1.))
++(out/'cases.json').write_text(json.dumps(cases,indent=2))
++p=out/'cases.txt'
++with p.open('w')as f:
++ f.write(str(len(cases))+'\n')
++ for x in cases:
++  f.write(f"matrix_exp {x['n']}\n")
++  for a in [x['a'],x['g']]:
++   for row in a:f.write(' '.join(repr(v) for v in row)+'\n')
++r=subprocess.run([str(c/'frechet-probe'),str(p)],capture_output=True,text=True,check=True);(out/'dump.txt').write_text(r.stdout)
++values=list(map(float,r.stdout.split()));idx=0;rows=[]
++for case in cases:
++ n=case['n'];old=values[idx:idx+n*n];new=values[idx+n*n:idx+2*n*n];idx+=2*n*n
++ # Use exact binary64 inputs for the high precision calculation.
++ ref=hp.matrix_exp_reference(mp.matrix(case['a']),mp.matrix(case['g']));scale=max(abs(v)for v in ref);den=scale or mp.mpf(1)
++ errs=[float(max(abs(mp.mpf(xs[i*n+j])-ref[i,j])for i in range(n)for j in range(n))/den)for xs in [old,new]]
++ internal=max(abs(a-b)/(1+max(abs(a),abs(b)))for a,b in zip(old,new))
++ row={'name':case['name'],'n':n,'block_scale_error':errs[0],'frechet_scale_error':errs[1],'max_scaled_internal_error':internal,'internal_1e14_gate':internal<=1e-14,'frechet_no_worse_scale_error':errs[1]<=errs[0]}
++ rows.append(row);print(row,flush=True);(out/'oracle.json').write_text(json.dumps(rows,indent=2))
++assert idx==len(values)

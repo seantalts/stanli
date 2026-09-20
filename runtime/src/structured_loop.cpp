@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -1118,6 +1119,8 @@ void right_size(std::vector<T>& v) {
 struct Version {
   double* value;
   int64_t adjoint;  // >= 0 offset; -1 inactive; <= -2 import -(adjoint + 2)
+  int32_t owner = -1;
+  bool constant = false;
 };
 
 struct Record {
@@ -1272,6 +1275,52 @@ struct Stream {
   std::vector<int64_t> output_len;
   std::vector<int32_t> output_adjoint;
   int64_t adjoint_size = 0;
+
+  // A sealed frame owns all saved values and code. These vectors only stage
+  // the next frame, so clear their contents while retaining recording capacity.
+  // finish_frames destroys this Stream; replay retains none of this storage.
+  void clear_frame_recording() {
+    program.clear();
+    backward_order.clear();
+    calls.clear();
+    inplaces.clear();
+    copies.clear();
+    segs.clear();
+    guards_if.clear();
+    guards_for.clear();
+    targets.clear();
+    target_adj_version.clear();
+    sets.clear();
+    gathers.clear();
+    call_ptrs.clear();
+    call_adj.clear();
+    call_adj_version.clear();
+    inplace_pos.clear();
+    inplace_sel_ptr.clear();
+    inplace_sel_snapshot.clear();
+    inplace_adj.clear();
+    inplace_adj_version.clear();
+    copy_adj.clear();
+    copy_adj_version.clear();
+    seg_in_src.clear();
+    seg_in_adj.clear();
+    seg_in_adj_version.clear();
+    gather_pos.clear();
+    gather_adj.clear();
+    gather_adj_version.clear();
+    inplace_base_len.clear();
+    gather_src_len.clear();
+    adjoints.clear();
+    inplace_old.clear();
+    target_work.clear();
+    imports.clear();
+    output_value.clear();
+    output_len.clear();
+    output_adjoint.clear();
+    arena.ranges.clear();
+    arena.cells.clear();
+    adjoint_size = 0;
+  }
 };
 
 // The experimental frame path seals a bounded recording at each outer trip.
@@ -1295,7 +1344,21 @@ struct LoopFrame {
   std::vector<FrameAdjoint> adj_bindings;
   int64_t adjoint_base = 0;
 };
+// Reused only while building the frame tape. Every field is overwritten or
+// cleared before the next seal, and this scratch is released before replay.
+struct FrameSealScratch {
+  struct Layout {
+    std::shared_ptr<const FrameCode> code;
+    size_t instructions;
+  };
+  std::vector<int64_t> live_ids, remap, lengths;
+  std::vector<std::pair<const double*, int64_t>> ranges;
+  ArenaSnapshot snapshot;
+  std::vector<Version> versions;
+  std::vector<Layout> layouts;
+};
 struct FrameTape {
+  std::unique_ptr<FrameSealScratch> sealing;
   std::vector<std::unique_ptr<LoopFrame>> frames;
   std::unordered_map<size_t, std::vector<std::shared_ptr<const FrameCode>>>
       codes;
@@ -1307,6 +1370,7 @@ struct FrameTape {
   std::unordered_map<int64_t, int64_t> promotion_links;
   int64_t adjoint_base = 0;
   size_t version_peak = 0, recording_cells = 0;
+  size_t layout_attempts = 0, layout_matches = 0;
   bool ready = false;
 };
 
@@ -1356,7 +1420,6 @@ struct LoopState : KernelState {
   BlockArena arena;
   std::vector<double> workspace;
   MappedVector<Version> versions;
-  MappedVector<uint8_t> version_const;
   // Recording-only provenance, conditional on the stream's guards, for
   // containers with constant and varying cells. Keys are versions, so
   // copy-on-write aliases keep their own facts.
@@ -1366,7 +1429,6 @@ struct LoopState : KernelState {
   std::vector<double> undo;
   std::vector<Record> records;
   std::vector<int64_t> target_refs;
-  MappedVector<int32_t> owner;
   std::vector<int64_t> node_generation, node_version, node_version2;
   std::vector<int64_t> loop_generation, loop_version;
   std::vector<KernelCtx> ctx;
@@ -1381,6 +1443,7 @@ struct LoopState : KernelState {
   size_t visits = 0, reused_primal_cells = 0;
   int64_t adjoint_size = 0;
   bool reverse_ready = false;
+  bool frame_clone_ready = false;
   bool memo_ready = false;
   bool has_reusable_primals = false;
   bool reuse_primals = false;
@@ -1395,8 +1458,15 @@ struct LoopState : KernelState {
   std::unique_ptr<FrameTape> frames;
   bool frame_mode = false;
   bool frame_auto = false;
+  bool frame_layout =
+      std::getenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
+  bool check_frame_layout =
+      std::getenv("STANLI_STRUCTURED_CHECK_FRAME_LAYOUT") != nullptr;
+  bool frame_clone = std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool last_replayed = false;
   size_t respecialized = 0;
+
+  bool clone_from(const KernelState& source) override;
 
   explicit LoopState(const StructuredLoop& plan)
       : p(plan),
@@ -1458,8 +1528,6 @@ struct LoopState : KernelState {
     arena.clear();
     version_peak = std::max(version_peak, versions.size());
     versions.right_size(version_peak);
-    owner.right_size(version_peak);
-    version_const.right_size(version_peak);
     version_peak = 0;
     right_size(handles);
     right_size(undo);
@@ -1481,8 +1549,7 @@ constexpr int64_t kReservePrefixTrips = 8;
 bool prefer_frames(const LoopState& s, int64_t trips, int64_t sampled) {
   constexpr double max_version_bytes = 128.0 * 1024 * 1024;
   constexpr size_t min_instructions_per_trip = 128;
-  constexpr size_t version_bytes =
-      sizeof(Version) + sizeof(int32_t) + sizeof(uint8_t);
+  constexpr size_t version_bytes = sizeof(Version);
   return s.frame_auto &&
          static_cast<double>(s.versions.size()) * version_bytes *
                  (static_cast<double>(trips) / sampled) >
@@ -1628,9 +1695,7 @@ struct Execution {
            nullptr;
   }
   int64_t make_version(double* value, int64_t adjoint, bool constant = false) {
-    s.versions.push_back(Version{value, adjoint});
-    s.owner.push_back(-1);
-    s.version_const.push_back(constant);
+    s.versions.push_back(Version{value, adjoint, -1, constant});
     return static_cast<int64_t>(s.versions.size()) - 1;
   }
   bool in_workspace(const double* ptr) const {
@@ -1638,7 +1703,7 @@ struct Execution {
            ptr < s.workspace.data() + s.workspace.size();
   }
   bool is_const(int64_t version) const {
-    return s.version_const[static_cast<size_t>(version)] != 0;
+    return s.versions[static_cast<size_t>(version)].constant != 0;
   }
   bool inputs_const(const Op& op) const {
     for (int k = 0; k < op.n_in; ++k)
@@ -1773,10 +1838,11 @@ struct Execution {
     n.forward(c);
     const bool folded = inputs_const(op) || selected_cells_const(n, op, c);
     s.bindings[op.out] = s.node_version[n.site];
-    s.version_const[static_cast<size_t>(s.node_version[n.site])] = folded;
+    s.versions[static_cast<size_t>(s.node_version[n.site])].constant = folded;
     if (op.out2 >= 0) {
       s.bindings[op.out2] = s.node_version2[n.site];
-      s.version_const[static_cast<size_t>(s.node_version2[n.site])] = folded;
+      s.versions[static_cast<size_t>(s.node_version2[n.site])].constant =
+          folded;
     }
     if (!folded) log_call(n, op, c);
   }
@@ -1830,7 +1896,7 @@ struct Execution {
       selectors_const = selectors_const && is_const(s.bindings[op.in[k]]);
     const bool write_const = is_const(base) && is_const(rhs) && selectors_const;
     const bool owned_for_this_write =
-        s.owner[static_cast<size_t>(base)] == base_slot &&
+        s.versions[static_cast<size_t>(base)].owner == base_slot &&
         is_const(base) == write_const;
     if (!owned_for_this_write) {
       double* copy = s.arena.allocate(len);
@@ -1846,7 +1912,7 @@ struct Execution {
           s.constant_cells.emplace(fresh, it->second);
         }
       }
-      s.owner[static_cast<size_t>(fresh)] = base_slot;
+      s.versions[static_cast<size_t>(fresh)].owner = base_slot;
       if (!write_const) {
         s.records.push_back(Record{Record::Copy, n.site, 0, base, fresh});
         if (s.building) {
@@ -1966,7 +2032,7 @@ struct Execution {
       double* cell = s.versions[static_cast<size_t>(version)].value;
       *cell = at;
       s.bindings[n.iterator] = version;
-      s.version_const[static_cast<size_t>(version)] = constant;
+      s.versions[static_cast<size_t>(version)].constant = constant;
       if (s.building && !constant) {
         Stream& st = *s.building;
         const uint32_t idx = static_cast<uint32_t>(st.sets.size());
@@ -2015,7 +2081,7 @@ struct Execution {
   void execute_alias(const Node& n) {
     ++s.effects;
     s.bindings[n.dst] = s.bindings[n.src];
-    s.owner[static_cast<size_t>(s.bindings[n.src])] = -1;
+    s.versions[static_cast<size_t>(s.bindings[n.src])].owner = -1;
   }
 
   void execute_target(const Node& n) {
@@ -2293,10 +2359,27 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
         if (!instruction.jump) {
           const auto version = s.node_version[n.site];
           s.bindings[op.out] = version;
-          s.version_const[static_cast<size_t>(version)] = 1;
+          s.versions[static_cast<size_t>(version)].constant = 1;
           instruction.jump = 1;
         }
         ++pc;
+        break;
+      }
+      case RecordingProgram::DataBranchFresh:
+      case RecordingProgram::DataBranch: {
+        const Node& n = *instruction.node;
+        const auto& op = p.body.ops[n.op];
+        auto& context = s.ctx[n.site];
+        for (int k = 0; k < op.n_in; ++k) context.in[k].data = value(op.in[k]);
+        n.forward(context);
+        ++s.effects;
+        if (instruction.kind == RecordingProgram::DataBranchFresh) {
+          const auto version = s.node_version[n.site];
+          s.bindings[op.out] = version;
+          s.versions[static_cast<size_t>(version)].constant = 1;
+          instruction.kind = RecordingProgram::DataBranch;
+        }
+        pc = context.out.data[0] != 0.0 ? pc + 2 : instruction.jump;
         break;
       }
       case RecordingProgram::DataIndex: {
@@ -2308,7 +2391,7 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
           n.forward(context);
           const auto version = s.node_version[n.site];
           s.bindings[op.out] = version;
-          s.version_const[static_cast<size_t>(version)] = 1;
+          s.versions[static_cast<size_t>(version)].constant = 1;
           instruction.jump = 1;
         } else {
           // Successful first use proved immutable descriptor/slot geometry.
@@ -2701,8 +2784,6 @@ void freeze(LoopState& s) {
     st.output_adjoint.push_back(adj_of(v));
   }
   s.versions.reset();
-  s.owner.reset();
-  s.version_const.reset();
   decltype(s.constant_cells){}.swap(s.constant_cells);
 
   compact_snapshot(s, st.arena);
@@ -3154,7 +3235,6 @@ void emit_freeze_breakdown(const LoopState& s) {
   emit_pool_bytes("state_sites", s.sites);
   emit_pool_bytes("state_transient_sites", s.transient_sites);
   emit_pool_bytes("state_transient_loops", s.transient_loops);
-  emit_pool_bytes("state_version_const", s.version_const);
   emit_pool_bytes("state_node_generation", s.node_generation);
   emit_pool_bytes("state_node_version", s.node_version);
   emit_pool_bytes("state_node_version2", s.node_version2);
@@ -3177,10 +3257,12 @@ void structured_loop_forward(KernelCtx& ctx) {
   LoopState& s = require_state(ctx);
   const StructuredLoop& p = s.p;
   s.reverse_ready = false;
+  s.frame_clone_ready = false;
   if (s.frames && !s.frames->ready) s.frames.reset();
   if (s.frames && s.frames->ready) {
     if (frames_forward(s, ctx)) {
       s.reverse_ready = true;
+      s.frame_clone_ready = true;
       return;
     }
     s.frames.reset();
@@ -3229,7 +3311,7 @@ void structured_loop_forward(KernelCtx& ctx) {
     const int64_t bound = s.bindings[in.slot];
     s.versions[static_cast<size_t>(bound)].adjoint =
         in.active ? -(static_cast<int64_t>(ordinal) + 2) : -1;
-    if (!in.data_only) s.version_const[static_cast<size_t>(bound)] = 0;
+    if (!in.data_only) s.versions[static_cast<size_t>(bound)].constant = 0;
     if (s.building)
       s.building->imports.push_back(FrozenImport{
           initial + slot.offset, slot.len, in.input, in.offset, in.data_only});
@@ -3274,14 +3356,22 @@ void structured_loop_forward(KernelCtx& ctx) {
   if (s.frames) {
     if (s.diagnostics) {
       size_t spans = 0, published = 0, indices = 0, index_prepared = 0,
-             iterators = 0;
+             iterators = 0, branches = 0;
       for (const auto& program : e.recording) {
         if (!program) continue;
         for (const auto& instruction : program->code) {
-          const bool data = instruction.kind == RecordingProgram::DataKernel ||
-                            instruction.kind == RecordingProgram::DataIndex;
+          const bool data =
+              instruction.kind == RecordingProgram::DataKernel ||
+              instruction.kind == RecordingProgram::DataIndex ||
+              instruction.kind == RecordingProgram::DataBranchFresh ||
+              instruction.kind == RecordingProgram::DataBranch;
           spans += data;
-          published += data && instruction.jump != 0;
+          const bool branch =
+              instruction.kind == RecordingProgram::DataBranch ||
+              instruction.kind == RecordingProgram::DataBranchFresh;
+          branches += branch;
+          published += branch ? instruction.kind == RecordingProgram::DataBranch
+                              : data && instruction.jump != 0;
           iterators += instruction.kind == RecordingProgram::DataForNext;
           indices += instruction.kind == RecordingProgram::DataIndex;
           index_prepared += instruction.kind == RecordingProgram::DataIndex &&
@@ -3293,10 +3383,12 @@ void structured_loop_forward(KernelCtx& ctx) {
                       " data_published=" + std::to_string(published) +
                       " index_sites=" + std::to_string(indices) +
                       " index_prepared=" + std::to_string(index_prepared) +
-                      " data_iterators=" + std::to_string(iterators));
+                      " data_iterators=" + std::to_string(iterators) +
+                      " data_branches=" + std::to_string(branches));
     }
     finish_frames(s, ctx);
     s.reverse_ready = true;
+    s.frame_clone_ready = true;
     return;
   }
   int64_t pos = 0;
@@ -3374,8 +3466,10 @@ void structured_loop_backward(KernelCtx& ctx) {
     throw std::logic_error(
         "structured reverse has no successful forward state");
   s.reverse_ready = false;
+  s.frame_clone_ready = false;
   if (s.frames && s.frames->ready) {
     frames_backward(s, ctx);
+    s.frame_clone_ready = true;
     return;
   }
   if (s.last_replayed) {

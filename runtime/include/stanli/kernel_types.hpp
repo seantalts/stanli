@@ -18,6 +18,10 @@ class ReduceExecutionContext;
 // need none; the retained loop keeps its tape here.
 struct KernelState {
   virtual ~KernelState() = default;
+  // Called on fresh state when copying an Executor. Reuse is optional: a
+  // refusal must leave the destination fresh and the source untouched.
+  // Implementations must relocate every mutable pointer into private storage.
+  virtual bool clone_from(const KernelState&) { return false; }
 };
 
 // Per-evaluation resources that are neither graph structure nor arena state.

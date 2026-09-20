@@ -1,0 +1,69 @@
+--- a/runtime/src/structured_frames.inc
++++ b/runtime/src/structured_frames.inc
+@@ -518,3 +518,58 @@
++// Diagnostic experiment only. Conservative reference closure is not a proof
++// that prefix/workspace storage is read-only, nor permission to run in parallel.
++void inspect_frame_dependencies(const LoopState& s) {
++  const auto& tape=*s.frames;
++  struct Range { uintptr_t begin, end; size_t owner; };
++  std::vector<Range> ranges;
++  for(size_t i=0;i<tape.frames.size();++i) {
++    const auto& f=*tape.frames[i];
++    for(const auto* v:{&f.values,&f.old,&f.literals}) if(!v->empty()) {
++      auto base=reinterpret_cast<uintptr_t>(v->data());
++      ranges.push_back({base,base+sizeof(double)*v->size(),i});
++    }
++  }
++  std::sort(ranges.begin(),ranges.end(),[](auto a,auto b){return a.begin<b.begin;});
++  std::vector<int64_t> cuts(tape.frames.size()+1);
++  size_t value_prefix=0,value_workspace=0,value_other=0,value_unknown=0,value_local=0;
++  size_t adj_import=0,adj_prefix=0,adj_other=0,adj_unknown=0,adj_local=0,max_distance=0;
++  const auto edge=[&](size_t i,size_t j){
++    if(!i||!j||i==j)return;
++    size_t lo=std::min(i,j),hi=std::max(i,j);
++    ++cuts[lo];--cuts[hi];max_distance=std::max(max_distance,hi-lo);
++  };
++  const auto workspace=reinterpret_cast<uintptr_t>(s.workspace.data());
++  for(size_t i=0;i<tape.frames.size();++i) {
++    const auto& f=*tape.frames[i];
++    for(const auto* ptr:f.bindings) {
++      const auto raw=reinterpret_cast<uintptr_t>(ptr);
++      if(raw>=workspace&&raw<workspace+sizeof(double)*s.workspace.size()) {++value_workspace;continue;}
++      auto it=std::upper_bound(ranges.begin(),ranges.end(),raw,[](auto p,auto r){return p<r.begin;});
++      if(it==ranges.begin()||raw>=(--it)->end){++value_unknown;continue;}
++      if(it->owner==i)++value_local;
++      else if(!it->owner)++value_prefix;
++      else {++value_other;edge(i,it->owner);}
++    }
++    for(auto a:f.adj_bindings) {
++      const auto id=a.promotion>=0?tape.promotions[a.promotion]:a.id;
++      if(id<0){++adj_import;continue;}
++      auto it=std::upper_bound(tape.frames.begin(),tape.frames.end(),id,[](auto v,const auto& frame){return v<frame->adjoint_base;});
++      if(it==tape.frames.begin()||id>=static_cast<int64_t>(tape.adjoints.size())){++adj_unknown;continue;}
++      size_t owner=std::distance(tape.frames.begin(),it)-1;
++      if(owner==i)++adj_local;
++      else if(!owner)++adj_prefix;
++      else {++adj_other;edge(i,owner);}
++    }
++  }
++  size_t runs=tape.frames.size()>1?1:0,coupled=0;int64_t active=0;
++  for(size_t i=1;i+1<tape.frames.size();++i){active+=cuts[i];if(active)++coupled;else ++runs;}
++  emit_diagnostic("FRAME_DEPENDENCIES frames="+std::to_string(tape.frames.size())+
++    " value_prefix="+std::to_string(value_prefix)+" value_workspace="+std::to_string(value_workspace)+
++    " value_other="+std::to_string(value_other)+" value_unknown="+std::to_string(value_unknown)+" value_local="+std::to_string(value_local)+
++    " adj_import="+std::to_string(adj_import)+" adj_prefix="+std::to_string(adj_prefix)+" adj_other="+std::to_string(adj_other)+
++    " adj_unknown="+std::to_string(adj_unknown)+" adj_local="+std::to_string(adj_local)+" max_distance="+std::to_string(max_distance)+
++    " conservative_runs="+std::to_string(runs)+" coupled_cuts="+std::to_string(coupled));
++}
++
+ void finish_frames(LoopState& s, KernelCtx& ctx) {
+   FrameTape& tape = *s.frames;
+   for (int slot : s.p.outputs) {
+@@ -524,6 +579,7 @@
+   }
+   seal_frame(s);
+   tape.adjoints.resize(s.adjoint_size);
++  if (s.diagnostics) inspect_frame_dependencies(s);
+   tape.ready = true;
+   frame_outputs(s, ctx);
+   s.building.reset();

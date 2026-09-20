@@ -5295,6 +5295,9 @@ static void data_recording_tests() {
               std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
           "data recording preserves values and gradients across guard changes");
       if (step == 0) {
+        check(reported_field(diagnostics, "data_branches=") ==
+                  (mode == 0 ? 1 : 0),
+              "data branches fuse only adjacent proven immutable producers");
         check(reported_field(diagnostics, "data_kernels=") ==
                   (mode == 0                ? 2
                    : mode == 1 || mode == 4 ? 1
@@ -5329,6 +5332,91 @@ static void data_recording_tests() {
     const auto retried = evaluate(candidate, -.5, 0);
     check(std::memcmp(&expected, &retried, sizeof(Evaluation)) == 0,
           "data recording retries after a partially evaluated block");
+  }
+  test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
+  test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
+}
+
+static void data_branch_entry_tests() {
+  for (int mode : {0, 1}) {
+    auto plan = std::make_shared<StructuredLoop>();
+    const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+    const int theta = fresh(), beta = fresh(), row = fresh();
+    const int table = plan->body.add_slot(5, false);
+    const int condition = fresh();
+    const int zero = scalar(*plan, 0), one = scalar(*plan, 1);
+    const int five = scalar(*plan, 5);
+    plan->imports = {{theta, 0, 0, true, false},
+                     {beta, 1, 0, true, false},
+                     {table, 2, 0, false, true}};
+    Node body;
+    if (mode == 0) {
+      const int choose = fresh(), minus_two = scalar(*plan, -2);
+      Node read = call(*plan, OP_INDEX_DYNAMIC, {table, row}, choose);
+      attach(*plan, read.op, single_spec(5));
+      // The then-arm jumps directly into the retained sibling Branch,
+      // both before the producer's first publication and on later trips.
+      body = sequence({std::move(read),
+                       branch(choose, sequence({}),
+                              call(*plan, OP_ADD, {row, minus_two}, condition)),
+                       branch(condition, target(theta), sequence({}))});
+    } else {
+      const int counter = fresh(), next = fresh(), skip = fresh();
+      const int three = scalar(*plan, 3);
+      Node skip_test = call(*plan, OP_COMPARE, {counter, one}, skip);
+      plan->body.ops[skip_test.op].variant = 4;
+      Node test = call(*plan, OP_COMPARE, {counter, three}, condition);
+      plan->body.ops[test.op].variant = 0;
+      Node skip_condition;
+      skip_condition.kind = Node::Continue;
+      // Continue in the condition block enters the retained WhileTest
+      // directly, reusing the true condition from counter == 0.
+      body = sequence(
+          {alias(counter, zero),
+           while_loop(condition,
+                      sequence({std::move(skip_test),
+                                branch(skip, skip_condition, sequence({})),
+                                std::move(test)}),
+                      sequence({target(theta),
+                                call(*plan, OP_ADD, {counter, one}, next),
+                                alias(counter, next)}))});
+    }
+    plan->root = counted(one, five, row, std::move(body));
+    plan->has_target = true;
+    plan->prepare();
+    const auto graph = outer(plan, {1, 1}, {5});
+    test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+    Executor candidate = diagnosed_executor(graph), baseline(graph);
+    test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+    Executor tree(graph);
+    test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+    test_setenv("STANLI_STRUCTURED_COMPILED_RECORDING", "1");
+    for (int step = 0; step < 4; ++step) {
+      for (auto* ex : {&candidate, &baseline, &tree})
+        for (int i = 0; i < 5; ++i)
+          ex->value_ptr(2)[i] = (i + (step >= 2)) % 2 == 0;
+      const double theta_value = step % 2 == 0 ? .25 : -.5;
+      const auto expected = evaluate(tree, theta_value, 0);
+      const int count = mode == 1 ? 15 : step < 2 ? 2 : 5;
+      close(expected.value, count * theta_value,
+            "branch-entry fixture visits the expected targets");
+      close(expected.gradient[0], count,
+            "branch-entry fixture has the expected gradient");
+      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "0");
+      const auto flat = evaluate(baseline, theta_value, 0);
+      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "1");
+      stanli_test::StdoutCapture capture(stderr);
+      const auto actual = evaluate(candidate, theta_value, 0);
+      const auto diagnostics = capture.finish();
+      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
+                std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+            "fused data branches preserve independent control-flow entries");
+      if (step == 0)
+        check(reported_field(diagnostics, "data_branches=") ==
+                  (mode == 0 ? 1 : 2),
+              "branch-entry fixture fuses its Branch and WhileTest producers");
+    }
   }
   test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
   test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
@@ -5770,6 +5858,292 @@ static void prepared_iterator_tests() {
   test_unsetenv("STANLI_STRUCTURED_PREPARED_ITERATOR");
 }
 
+static void frame_layout_tests() {
+  for (int mode : {0, 1, 2}) {
+    auto plan = std::make_shared<StructuredLoop>();
+    const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+    const int theta = fresh(), beta = fresh(), row = fresh(), choose = fresh();
+    const int table = plan->body.add_slot(6, false);
+    const int one = scalar(*plan, 1), six = scalar(*plan, 6);
+    plan->imports = {{theta, 0, 0, true, false},
+                     {beta, 1, 0, true, false},
+                     {table, 2, 0, false, true}};
+    Node read = call(*plan, OP_INDEX_DYNAMIC, {table, row}, choose);
+    attach(*plan, read.op, single_spec(6));
+    std::vector<Node> body{std::move(read)};
+    if (mode == 0) {
+      const int rhs = fresh(), sum = fresh();
+      // The same external binding first serves both operands, then splits.
+      // The reverse transition safely permits two external indices to alias.
+      body.push_back(branch(choose, alias(rhs, theta), alias(rhs, beta)));
+      body.push_back(call(*plan, OP_ADD, {theta, rhs}, sum));
+      body.push_back(target(sum));
+    } else {
+      const int initial = plan->body.add_slot(3, false);
+      const int current = plan->body.add_slot(3, false);
+      const int updated = plan->body.add_slot(3, false);
+      const int selectors = plan->body.add_slot(2, false);
+      const int first = plan->body.add_slot(2, false);
+      const int second = plan->body.add_slot(2, false);
+      const int picked = plan->body.add_slot(2, false), sum = fresh();
+      plan->fills.push_back({initial, {4, 5, 6}});
+      plan->fills.push_back({first, {1, 2}});
+      plan->fills.push_back({second, mode == 1 ? std::vector<double>{1, 3}
+                                               : std::vector<double>{2, 3}});
+      Node write =
+          call(*plan, OP_SET_INDEX_DYNAMIC, {current, one, theta}, updated);
+      attach(*plan, write.op, single_spec(3));
+      Node gather = call(*plan, OP_INDEX_DYNAMIC, {current, selectors}, picked);
+      auto spec = std::make_shared<DynamicIndexSpec>();
+      spec->axes = {{DynamicIndexSpec::Axis::Multi, 3, 1, 2, 0}};
+      spec->selected_size = 2;
+      attach(*plan, gather.op, spec);
+      body.push_back(alias(current, initial));
+      body.push_back(std::move(write));
+      body.push_back(alias(current, updated));
+      body.push_back(
+          branch(choose, alias(selectors, first), alias(selectors, second)));
+      body.push_back(std::move(gather));
+      body.push_back(call(*plan, OP_SUM_VEC, {picked}, sum));
+      body.push_back(target(sum));
+    }
+    plan->root = counted(one, six, row, sequence(std::move(body)));
+    plan->has_target = true;
+    plan->prepare();
+    const auto graph = outer(plan, {1, 1}, {6});
+    test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+    Executor candidate = diagnosed_executor(graph);
+    test_setenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT", "1");
+    Executor baseline = diagnosed_executor(graph);
+    test_unsetenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT");
+    test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+    Executor tree(graph);
+    test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+    for (int step = 0; step < 4; ++step) {
+      for (auto* ex : {&candidate, &baseline, &tree})
+        for (int i = 0; i < 6; ++i)
+          ex->value_ptr(2)[i] = (i / 2 + step / 2) % 2 == 0;
+      const double theta_value = step % 2 ? -.5 : .25;
+      const auto expected = evaluate(tree, theta_value, 2);
+      stanli_test::StdoutCapture baseline_capture(stderr);
+      const auto flat = evaluate(baseline, theta_value, 2);
+      const auto base_diagnostics = baseline_capture.finish();
+      stanli_test::StdoutCapture capture(stderr);
+      const auto actual = evaluate(candidate, theta_value, 2);
+      const auto diagnostics = capture.finish();
+      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
+                std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+            "checked layouts preserve alias splits, merges and index geometry");
+      if (step == 0) {
+        const auto attempts = reported_field(diagnostics, "layout_attempts=");
+        const auto matches = reported_field(diagnostics, "layout_matches=");
+        // Prefix establishes the empty code, the first row establishes one
+        // body layout, and the changed alias/geometry establishes another.
+        // Four body trips and the empty epilogue then reuse certified layouts.
+        const bool exercised = attempts == 7 && matches == 5;
+        if (!exercised)
+          std::printf("layout mode=%d attempts=%zu matches=%zu\n", mode,
+                      attempts, matches);
+        check(exercised,
+              "layout fixtures exercise both successful binding and refusal");
+        check(reported_field(base_diagnostics, "layout_attempts=") == 0,
+              "layout-disabled comparator uses canonical encoding only");
+      }
+      candidate.run_forward_only();
+      const auto repeated = evaluate(candidate, theta_value, 2);
+      check(std::memcmp(&repeated, &expected, sizeof(Evaluation)) == 0,
+            "checked layouts retain state after a forward-only call");
+    }
+    Executor copied(candidate);
+    const auto expected = evaluate(tree, .75, 2);
+    const auto actual = evaluate(copied, .75, 2);
+    check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0,
+          "checked layouts do not share mutable bindings across copies");
+  }
+}
+
+static double frame_foreign_scratch = 0;
+static void frame_foreign_scratch_mul(KernelCtx& ctx) {
+  find_kernel(OP_MUL)->forward(ctx);
+  // Emulate an extension kernel that publishes storage outside the tape.
+  // Multiplication ignores scratch, so the numerical oracle is unchanged.
+  ctx.scratch = &frame_foreign_scratch;
+}
+static int frame_backward_calls = 100;
+static void frame_failing_tanh_backward(KernelCtx& ctx) {
+  find_kernel(OP_TANHV)->backward(ctx);
+  if (++frame_backward_calls == 2)
+    throw std::runtime_error("injected frame backward failure");
+}
+
+static void frame_clone_tests() {
+  const auto same = [](const Evaluation& a, const Evaluation& b) {
+    return std::memcmp(&a, &b, sizeof(Evaluation)) == 0;
+  };
+  const auto copy = [](const Executor& source, bool expected,
+                       bool automatic = false) {
+    if (automatic)
+      test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    else
+      test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+    test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+    stanli_test::StdoutCapture capture(stderr);
+    auto clone = std::make_unique<Executor>(source);
+    const auto diagnostic = capture.finish();
+    test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+    test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    check((diagnostic.find("frame_clone:") != std::string::npos) == expected,
+          "recorded clone accepts only a completed owned frame tape");
+    return clone;
+  };
+  for (int mode : {0, 1, 2, 3}) {
+    const auto graph = outer(mixed_cell_plan(mode), {1, 1}, {3});
+    test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+    auto source = std::make_unique<Executor>(graph);
+    test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+    Executor tree(graph);
+    test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+    const double data[] = {4, 5, 6};
+    for (auto* ex : {source.get(), &tree})
+      std::copy_n(data, 3, ex->value_ptr(2));
+    auto cold = copy(*source, false);
+    const auto expected = evaluate(tree, .25, 2);
+    check(same(evaluate(*source, .25, 2), expected), "clone source oracle");
+    if (mode % 2) source->run_forward_only();
+    auto clone = copy(*source, true);
+    auto chain = copy(*clone, true);
+    stanli_test::StdoutCapture capture(stderr);
+    const auto actual = evaluate(*clone, .25, 2);
+    const auto diagnostics = capture.finish();
+    check(same(actual, expected) &&
+              diagnostics.find("frames:") == std::string::npos,
+          "recorded clone replays its first gradient without recording");
+    check(same(evaluate(*chain, .25, 2), expected),
+          "copy of an unused recorded copy relocates every binding again");
+    test_setenv("STANLI_NO_STRUCTURED_FRAME_CLONE", "1");
+    auto refused = copy(*source, false);
+    test_unsetenv("STANLI_NO_STRUCTURED_FRAME_CLONE");
+    check(same(evaluate(*refused, .25, 2), expected),
+          "disabled recorded cloning retains the fresh-recording fallback");
+
+    // Mutating and destroying the source cannot invalidate the copied tape.
+    source->value_ptr(2)[1] = -3;
+    (void)evaluate(*source, -.5, 1);
+    source.reset();
+    check(same(evaluate(*clone, .25, 2), expected),
+          "recorded copy outlives source mutation and destruction");
+    for (auto* ex : {clone.get(), &tree}) ex->value_ptr(2)[1] = -7;
+    const auto changed = evaluate(tree, -.5, 1);
+    check(same(evaluate(*clone, -.5, 1), changed),
+          "changed data and guards re-record only the copied tape");
+    check(same(evaluate(*chain, .25, 2), expected),
+          "guard fallback leaves another copy independent");
+
+    // Copies execute with private values, undo history, scratch and adjoints.
+    auto concurrent = copy(*clone, true);
+    const auto a_expected = evaluate(tree, -.25, 1);
+    const auto b_expected = evaluate(tree, -.75, 1);
+    Evaluation a{}, b{};
+    stanli_test::StdoutCapture replay_capture(stderr);
+    std::thread first([&] { a = evaluate(*clone, -.25, 1); });
+    std::thread second([&] { b = evaluate(*concurrent, -.75, 1); });
+    first.join();
+    second.join();
+    const auto replay_diagnostics = replay_capture.finish();
+    check(same(a, a_expected) && same(b, b_expected) &&
+              replay_diagnostics.find("frames:") == std::string::npos,
+          "recorded copies replay independently on concurrent threads");
+  }
+
+  // A replay can throw after modifying private values. Such a partially
+  // evaluated source must not publish its tape to a copy.
+  auto plan = recurrence(20);
+  plan->prepare();
+  for (const auto& op : plan->body.ops)
+    if (op.opcode == OP_TANHV)
+      check(set_forward(plan->root, &op - plan->body.ops.data(),
+                        frame_late_failure),
+            "install recorded-clone failure injection");
+  test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+  Executor failed(outer(plan));
+  test_unsetenv("STANLI_STRUCTURED_FRAMES");
+  frame_failure_calls = 100;
+  (void)evaluate(failed, .1, .7);
+  frame_failure_calls = 0;
+  bool threw = false;
+  try {
+    (void)evaluate(failed, .1, .7);
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  check(threw, "clone fixture reaches a failure during recorded replay");
+  auto recovered = copy(failed, false);
+  frame_failure_calls = 100;
+  Executor oracle(outer(recurrence(20)));
+  check(same(evaluate(*recovered, .1, .7), evaluate(oracle, .1, .7)),
+        "copy of failed replay starts from fresh state");
+
+  auto backward_plan = recurrence(4);
+  for (size_t i = 0; i < backward_plan->body.ops.size(); ++i)
+    if (backward_plan->body.ops[i].opcode == OP_TANHV)
+      check(set_backward(backward_plan->root, static_cast<int>(i),
+                         frame_failing_tanh_backward),
+            "install recorded-clone backward failure injection");
+  test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+  Executor backward_failed(outer(backward_plan));
+  test_unsetenv("STANLI_STRUCTURED_FRAMES");
+  const auto backward_expected = evaluate(backward_failed, .1, .7);
+  frame_backward_calls = 0;
+  threw = false;
+  try {
+    (void)evaluate(backward_failed, .1, .7);
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  check(threw, "clone fixture reaches a partially executed backward pass");
+  auto backward_recovered = copy(backward_failed, false);
+  frame_backward_calls = 100;
+  check(same(evaluate(*backward_recovered, .1, .7), backward_expected),
+        "copy of failed backward starts from fresh state");
+
+  auto foreign_plan = recurrence(4);
+  for (size_t i = 0; i < foreign_plan->body.ops.size(); ++i)
+    if (foreign_plan->body.ops[i].opcode == OP_MUL) {
+      auto* node = find_call(foreign_plan->root, static_cast<int>(i));
+      node->kernel_scratch = 1;
+      node->forward = frame_foreign_scratch_mul;
+      check(!node->reuse_primal_output,
+            "foreign-pointer fixture allocates retained scratch");
+    }
+  test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+  Executor foreign(outer(foreign_plan));
+  test_unsetenv("STANLI_STRUCTURED_FRAMES");
+  const auto foreign_expected = evaluate(foreign, .1, .7);
+  auto refused_foreign = copy(foreign, false);
+  check(same(evaluate(*refused_foreign, .1, .7), foreign_expected) &&
+            same(evaluate(foreign, .1, .7), foreign_expected),
+        "unknown pointer refuses transactionally without changing the source");
+
+  Executor streamed(outer(recurrence(4)));
+  const auto streamed_expected = evaluate(streamed, .1, .7);
+  auto refused_stream = copy(streamed, false);
+  check(same(evaluate(*refused_stream, .1, .7), streamed_expected),
+        "stream source remains on the fresh-recording path");
+  // The copied stream is now a completed frame tape. Destination policy still
+  // controls admission, and non-target outputs must relocate like targets.
+  auto output_copy = copy(*refused_stream, true);
+  auto automatic_copy = copy(*refused_stream, true, true);
+  test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+  auto no_replay_copy = copy(*refused_stream, false);
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+  const auto output_expected = evaluate(*no_replay_copy, .2, .3);
+  check(same(evaluate(*output_copy, .2, .3), output_expected) &&
+            same(evaluate(*automatic_copy, .2, .3), output_expected),
+        "recorded output relocation agrees with destination replay refusal");
+}
+
 static void recording_shape_tests() {
   auto plan = std::make_shared<StructuredLoop>();
   const auto fresh = [&]() { return plan->body.add_slot(1, false); };
@@ -5867,8 +6241,11 @@ int main() {
   inplace_constant_base_tests();
   mixed_cell_replay_tests();
   frame_program_tests();
+  frame_layout_tests();
+  frame_clone_tests();
   compiled_recording_tests();
   data_recording_tests();
+  data_branch_entry_tests();
   conditional_data_recording_tests();
   mutable_data_recording_tests();
   prepared_index_tests();
