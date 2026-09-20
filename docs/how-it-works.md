@@ -506,6 +506,76 @@ finishes, the stream is frozen: the records move into compact pools and every
 operand becomes a pointer bound once. Later gradients replay the frozen
 stream forward and backward without visiting the tree.
 
+Recording also tracks which cells of an updated container still contain data.
+Writing a parameter into one cell does not make a read of an untouched data
+cell depend on that parameter. A read with constant indices folds when every
+selected cell is data; overlapping or parameter-selected reads remain in the
+stream. Copy-on-write preserves those facts for aliases, and changing write
+indices still trigger the existing guards. This metadata is discarded when
+recording finishes. `STANLI_NO_STRUCTURED_CELL_CONSTANTS=1` disables this
+per-cell proof for comparisons.
+
+Large recordings use numerical frames. After the existing eight-iteration
+sample, a counted loop whose projected version table exceeds 128 MiB and
+whose sampled replay averages at least 128 instructions per trip seals the
+recorded prefix into a frame, then seals each subsequent iteration as it
+completes. The work floor keeps mostly folded loops on ordinary replay.
+Sealing copies the live numerical ranges, preserves aliases
+and cached values, and replaces the working version table with its live
+bindings. Historical derivative identities are independent of those working
+handles, including when a later indexed write makes an inactive container
+active.
+
+A frame's program uses offsets into its numerical storage and a table of
+external bindings. Indexed positions are normalized relative to their first
+position; the shift travels with the binding. Frames share a program only
+when the complete normalized instructions and position tables match. Every
+iteration is still executed and checked during recording; sharing does not
+infer an unexecuted row's behavior. Forward and backward use the same kernel
+functions and accumulation order as ordinary replay.
+
+Small recordings keep the ordinary stream. `STANLI_STRUCTURED_FRAMES=0`
+disables frames, and `=1` forces them on eligible retained plans, including
+outer `while` loops. Plans containing register segments keep the established
+stream. This choice adds no whole-model preparation pass. The first recording
+starts with the control tree. Once frames are selected, the executor compiles
+that loop's body into a temporary instruction program with explicit branches
+and loop jumps. This avoids repeated recursive tree dispatch while recording.
+The program is discarded when recording finishes or throws; warmed replay
+continues to use the same frames.
+
+The temporary program also specializes proven data-only transient calls.
+A conservative fixed point follows all possible kernel, alias, iterator and
+in-place writes from parameter imports. Eligible calls still bind their
+current inputs and execute validated operations in the same order,
+but skip repeated constant checks and recording bookkeeping. Their output
+binding is published only on the first successful execution, so an earlier
+read or an untaken branch still sees the original value. Every control guard
+remains in place, including a parameter branch choosing between two data
+values. Custom or effectful kernels and outputs with alternate writers do
+not take this path. `STANLI_STRUCTURED_COMPILED_RECORDING=0` disables the
+temporary program; `STANLI_STRUCTURED_DATA_RECORDING=0` disables its data
+specialization alone. Both are constructed only after frame admission and
+add no analysis or retained storage to ordinary models.
+
+Within that program, canonical data-only point reads with fixed index
+geometry validate the complete descriptor on their first successful use.
+Later uses refresh the input bindings, check every current selector in the
+original validation order, and compute the scalar position directly from
+the validated strides. Dynamic extents/counts, other selector kinds and
+custom kernels keep the general path. No data address or extra metadata is
+cached, and an untaken read cannot throw during program construction.
+`STANLI_STRUCTURED_PREPARED_INDEX=0` disables this specialization.
+
+Transient iterators with data-valued bounds and exactly one writer also
+reuse their first binding within each loop entry. Subsequent iterations
+update only the workspace value. The entry still validates the bounds;
+alias/kernel writes, reused iterator slots, parameter-valued bounds and
+retained iterators keep ordinary rebinding. Existing branch guards also
+cover parameter-controlled choices between data-valued bounds.
+`STANLI_STRUCTURED_PREPARED_ITERATOR=0` disables this specialization. Both
+proofs run only after frame admission and retain no state after recording.
+
 Parameter-dependent control still runs every time. Each branch, loop
 condition and in-place index that depended on a parameter during recording
 carries a guard holding the value it took. A replay checks each guard where
@@ -517,13 +587,30 @@ for A/B tests.
 `write_array` retains the same loops, forward only, so those loops no longer
 run on the MIR interpreter for every saved draw.
 
-On ctsem with 33 rows, one gradient takes 4.8 ms, against 28.5 ms for the
-tree walk and 7.5 ms for CmdStan; at 400 rows, 57 ms against 320 ms and
-89 ms; at 4000 rows, 589 ms against 3.2 s and 903 ms. Preparation takes
-about 1 s instead of 9 s. The log density and gradient are bitwise identical
-to the tree walk's. Recording costs memory once: at 4000 rows the first
-evaluation peaks at 9.9 GB against 8.5 GB for the tree walk, and the frozen
-stream is smaller than the tree walk's tape afterwards.
+Before the recording-program optimization, six alternating fresh-process
+comparisons with PR391 showed that the mixed-cell
+proof and numerical frames reduce ctsem's warmed gradient time from
+4.59 to 3.66 ms at 33 rows, 56.88 to 49.09 ms at 400 rows, and 587.01 to
+498.87 ms at 4000 rows. At 4000 rows, process peak RSS falls from 10.425 to
+1.522 GB, and the first gradient falls from 31.59 to 26.97 seconds. MIR
+preparation takes 1.377 seconds in both revisions. Density and gradients
+are bitwise identical to PR391 at all three checked parameter points.
+In a separate six-pair comparison against that frame implementation, the
+temporary recording program cuts the first gradient from 2.71 to 1.96 seconds
+at 400 rows and from 26.87 to 19.24 seconds at 4000 rows. Warmed gradients and
+preparation remain consistent with parity; live allocation bytes and counts
+are exactly equal in every pair after prep, first gradient and replay.
+The subsequent index/iterator specializations reduce first gradients from
+1.963 to 1.569 seconds at 400 rows and from 19.367 to 15.273 seconds at 4000
+rows in another matched six-pair experiment. Preparation, warmed gradients
+and peak RSS remain consistent with parity, with identical live bytes and
+allocation counts. The [recording-site experiment](superpowers/plans/2026-09-20-ctsem-index-recording.md)
+documents the proofs, refusal tests and measurements.
+The [experiment record](superpowers/plans/2026-09-19-ctsem-memory.md)
+includes smaller cases, ordinary-model controls, build identities and the
+remaining first-recording limitation. Detailed ordinary-model timing and
+RSS follow-up is archived in [research notes](../notes/performance/2026-09-20-ctsem-ordinary-model-controls.md)
+and deferred at the user's request.
 
 ## Measured behavior and limits
 
