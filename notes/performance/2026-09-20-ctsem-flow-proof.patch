@@ -1,0 +1,228 @@
+--- a/runtime/src/structured_loop.cpp
++++ b/runtime/src/structured_loop.cpp
+@@ -0,0 +1 @@
++#include <map>
+--- a/runtime/src/structured_frames.inc
++++ b/runtime/src/structured_frames.inc
+@@ -517,0 +518,219 @@
++// Diagnostic only: inspect the actual operands of the canonical frame code.
++// Ownership edges are execution hazards, not yet mathematical dependencies.
++void inspect_frame_witnesses(LoopState& s, KernelCtx& ctx) {
++  const auto& tape = *s.frames;
++  struct Range { uintptr_t first, end; int owner; size_t cell = 0; };
++  std::vector<Range> ranges;
++  for (size_t i = 0; i < tape.frames.size(); ++i)
++    for (const auto* v : {&tape.frames[i]->values, &tape.frames[i]->old,
++                          &tape.frames[i]->literals})
++      if (!v->empty()) {
++        const auto p = reinterpret_cast<uintptr_t>(v->data());
++        ranges.push_back({p, p + sizeof(double) * v->size(), int(i)});
++      }
++  if (!s.workspace.empty()) {
++    const auto p = reinterpret_cast<uintptr_t>(s.workspace.data());
++    ranges.push_back({p, p + sizeof(double) * s.workspace.size(), -2});
++  }
++  std::sort(ranges.begin(), ranges.end(), [](auto a, auto b) { return a.first < b.first; });
++  size_t cell_count = 0;
++  for (auto& r : ranges) { r.cell = cell_count; cell_count += (r.end-r.first)/sizeof(double); }
++  std::vector<int32_t> last_writer(cell_count, -1), last_reader(cell_count, -1);
++  std::vector<int64_t> raw_cuts(tape.frames.size()+1), waw_cuts(tape.frames.size()+1), war_cuts(tape.frames.size()+1);
++  const auto locate = [&](const double* ptr, int64_t len) -> Range {
++    const auto p = reinterpret_cast<uintptr_t>(ptr);
++    auto it = std::upper_bound(ranges.begin(), ranges.end(), p,
++                              [](auto p, auto r) { return p < r.first; });
++    if (it != ranges.begin()) {
++      --it;
++      if (p >= it->first && p < it->end &&
++          static_cast<uint64_t>(len) <= (it->end - p) / sizeof(double)) return *it;
++    }
++    return {0, 0, -3};
++  };
++  struct Count { size_t uses = 0, cells = 0, frame = 0; int owner = 0; uint64_t offset = 0; };
++  std::map<std::string, Count> histogram;
++  std::vector<int64_t> value_cuts(tape.frames.size() + 1),
++                       adjoint_cuts(tape.frames.size() + 1);
++  const auto record = [&](size_t f, int owner, uint64_t offset, int64_t len,
++                          const std::string& key, bool adjoint) {
++    if (owner == int(f) || len == 0) return;
++    const std::string scope = owner == -3 ? "unknown" : owner == -2 ? "workspace"
++                              : owner == -1 ? "import" : owner == 0 ? "prefix" : "prior_frame";
++    auto& c = histogram[key + "/" + scope];
++    if (!c.uses) { c.frame = f; c.owner = owner; c.offset = offset; }
++    ++c.uses; c.cells += len;
++    if (owner > 0 && f > 0) {
++      auto& cuts = adjoint ? adjoint_cuts : value_cuts;
++      ++cuts[std::min(f, size_t(owner))]; --cuts[std::max(f, size_t(owner))];
++    }
++  };
++  const auto access = [&](size_t f, const double* ptr, int64_t len, bool write, const std::string& key) {
++    if (!ptr || len <= 0) return;
++    const auto r = locate(ptr, len); if (r.owner == -3) return;
++    const size_t offset = (reinterpret_cast<uintptr_t>(ptr)-r.first)/sizeof(double);
++    const auto conflict = [&](int previous, size_t cell, const char* kind, auto& cuts) {
++      if (previous < 0 || previous == int(f)) return;
++      auto& c = histogram[std::string(kind)+"/"+key+(previous ? "/from_body" : "/from_prefix")];
++      if (!c.uses) { c.frame=f; c.owner=previous; c.offset=cell; }
++      ++c.uses; ++c.cells;
++      if (previous > 0 && f > 0) { ++cuts[std::min(f,size_t(previous))]; --cuts[std::max(f,size_t(previous))]; }
++    };
++    for (size_t k=0; k<size_t(len); ++k) {
++      const auto at = r.cell+offset+k;
++      if (write) {
++        conflict(last_writer[at],offset+k,"WAW",waw_cuts);
++        conflict(last_reader[at],offset+k,"WAR",war_cuts);
++        last_writer[at]=int32_t(f); last_reader[at]=-1;
++      } else {
++        conflict(last_writer[at],offset+k,"RAW",raw_cuts);
++        last_reader[at]=int32_t(f);
++      }
++    }
++  };
++  const size_t prefix_adjoints = tape.frames.size()>1 ? tape.frames[1]->adjoint_base : 0;
++  std::vector<int32_t> prefix_adjoint_writer(prefix_adjoints, -1);
++  std::vector<bool> prefix_adjoint_shared(prefix_adjoints, false);
++  for (size_t f = 0; f < tape.frames.size(); ++f) {
++    auto& frame = *tape.frames[f];
++    FrameExecution execution{s, ctx, frame};
++    const auto value = [&](uint64_t raw, int64_t len, const std::string& key) {
++      const double* ptr = execution.value(raw);
++      if (!ptr || !len) return;
++      access(f, ptr, len, key.find("write") != std::string::npos, key);
++      const auto r = locate(ptr, len);
++      record(f, r.owner, r.owner == -3 ? 0 :
++             (reinterpret_cast<uintptr_t>(ptr) - r.first) / sizeof(double), len, key, false);
++    };
++    const auto adjoint = [&](uint64_t raw, int64_t len, const std::string& key,
++                             int64_t extra = 0) {
++      const int64_t ref = static_cast<int64_t>(raw);
++      if (ref == frame_null || !len) return;
++      int64_t id = 0, shift = 0;
++      if (ref >= 0) id = frame.adjoint_base + ref;
++      else {
++        const auto a = frame.adj_bindings[-ref - 1];
++        id = a.promotion >= 0 ? tape.promotions[a.promotion] : a.id;
++        shift = a.shift;
++      }
++      if (id == -1) return;
++      if (id < -1) { record(f, -1, shift + extra, len, key, true); return; }
++      id += shift + extra;
++      if (f>0 && key.find("add") != std::string::npos && id>=0 && uint64_t(id+len)<=prefix_adjoints)
++        for(int64_t k=0;k<len;++k) {
++          auto& writer = prefix_adjoint_writer[id+k];
++          if(writer>=0 && writer!=int32_t(f)) prefix_adjoint_shared[id+k]=true;
++          writer=int32_t(f);
++        }
++      auto it = std::upper_bound(tape.frames.begin(), tape.frames.end(), id,
++                 [](auto p, const auto& x) { return p < x->adjoint_base; });
++      if (it == tape.frames.begin() || id + len > int64_t(tape.adjoints.size())) {
++        record(f, -3, 0, len, key, true); return;
++      }
++      const int owner = int((--it) - tape.frames.begin());
++      record(f, owner, id - (*it)->adjoint_base, len, key, true);
++    };
++    const auto& code = *frame.code;
++    for (size_t pc = 0; pc < code.words.size();) {
++      const auto header = code.words[pc];
++      const auto* w = code.words.data() + pc + 1;
++      pc += header >> 8;
++      switch (header & 255) {
++        case StreamInstr::Call: {
++          const size_t site = w[0], flags = w[1], count = w[2];
++          const auto& node = *s.sites[site];
++          const auto& op = s.p.body.ops[node.op];
++          const std::string key = "call/" + std::string(opcode_name(op.opcode)) +
++                                  "/site" + std::to_string(site);
++          const auto len = [&](int slot, int bit) {
++            return (op.dyn_lengths & (1u << bit)) ? op.dyn_capacity : s.p.body.slots[slot].len;
++          };
++          size_t at = 3;
++          for (size_t k = 0; k < count; ++k)
++            value(w[at++], len(op.in[k], k), key + "/forward_read" + std::to_string(k));
++          value(w[at++], len(op.out, 6), key + "/forward_write");
++          if (flags & kFrozenCallHasOut2)
++            value(w[at++], s.p.body.slots[op.out2].len, key + "/forward_write2");
++          value(w[at++], node.kernel_scratch, key + "/scratch_write");
++          if (flags & kFrozenCallActive) {
++            for (size_t k = 0; k < count; ++k)
++              adjoint(w[at++], len(op.in[k], k), key + "/adjoint_add" + std::to_string(k));
++            adjoint(w[at++], len(op.out, 6), key + "/adjoint_read");
++            if (flags & kFrozenCallHasOut2)
++              adjoint(w[at], 1, key + "/adjoint_read2");
++          }
++          break;
++        }
++        case StreamInstr::InPlace:
++          for (size_t k = 0; k < w[7]; ++k) value(w[8 + 2*k], 1, "inplace/selector_read");
++          for (size_t k = 0; k < w[0]; ++k) {
++            const int64_t pos = code.positions[w[1] + k];
++            const double* ptr = execution.value(w[3]) + pos;
++            access(f, ptr, 1, false, "inplace/save_old");
++            access(f, execution.value(w[4])+k, 1, false, "inplace/rhs_read");
++            access(f, ptr, 1, true, "inplace/write");
++            const auto r = locate(ptr, 1);
++            record(f, r.owner, r.owner == -3 ? 0 :
++                   (reinterpret_cast<uintptr_t>(ptr) - r.first) / sizeof(double),
++                   1, "inplace/save_old_write_restore", false);
++            adjoint(w[5], 1, "inplace/base_adjoint_read_zero", pos);
++          }
++
++          adjoint(w[6], w[0], "inplace/rhs_adjoint_add");
++          break;
++        case StreamInstr::Copy:
++          value(w[1], w[0], "copy/source_read"); value(w[2], w[0], "copy/destination_write");
++          adjoint(w[3], w[0], "copy/source_adjoint_add"); adjoint(w[4], w[0], "copy/destination_adjoint_read");
++          break;
++        case StreamInstr::Gather:
++          for (size_t k = 0; k < w[0]; ++k) {
++            const int64_t pos = code.positions[w[1] + k];
++            const double* ptr = execution.value(w[2]) + pos;
++            access(f, ptr, 1, false, "gather/source_read");
++            access(f, execution.value(w[3])+k, 1, true, "gather/destination_write");
++            const auto r = locate(ptr, 1);
++            record(f, r.owner, r.owner == -3 ? 0 :
++                   (reinterpret_cast<uintptr_t>(ptr) - r.first) / sizeof(double),
++                   1, "gather/source_read", false);
++            adjoint(w[4], 1, "gather/source_adjoint_add", pos);
++          }
++
++          adjoint(w[5], w[0], "gather/destination_adjoint_read");
++          break;
++        case StreamInstr::GuardIf: value(w[0], 1, "guard_if/read"); break;
++        case StreamInstr::GuardFor:
++          value(w[0], 1, "guard_for/lower_read"); value(w[1], 1, "guard_for/upper_read"); break;
++        case StreamInstr::Set: value(w[0], 1, "set/write"); break;
++        default: throw std::logic_error("unclassified frame proof instruction");
++      }
++    }
++  }
++  for (const auto& [key, c] : histogram)
++    emit_diagnostic("FRAME_WITNESS group=" + key + " uses=" + std::to_string(c.uses) +
++                    " cells=" + std::to_string(c.cells) + " first_frame=" + std::to_string(c.frame) +
++                    " owner=" + std::to_string(c.owner) + " offset=" + std::to_string(c.offset));
++  const auto cuts = [](const auto& values) {
++    size_t coupled = 0; int64_t active = 0;
++    for (size_t i = 1; i + 1 < values.size(); ++i) { active += values[i]; coupled += active > 0; }
++    return coupled;
++  };
++  size_t owned = 0, unknown = 0;
++  const auto check = [&](const double* p, int64_t n) {
++    if (!p || !n) return;
++    if (locate(p, n).owner == -3) ++unknown; else ++owned;
++  };
++  for (const auto& f : tape.frames) for (const auto* p : f->bindings) check(p, 1);
++  for (const auto& in : tape.imports) check(in.dst, in.len);
++  for (const auto* p : tape.targets) check(p, 1);
++  for (size_t i = 0; i < tape.outputs.size(); ++i) check(tape.outputs[i], s.p.body.slots[s.p.outputs[i]].len);
++  emit_diagnostic("FRAME_PROOF frames=" + std::to_string(tape.frames.size()) +
++                  " value_coupled_cuts=" + std::to_string(cuts(value_cuts)) +
++                  " adjoint_coupled_cuts=" + std::to_string(cuts(adjoint_cuts)) +
++                  " raw_cuts=" + std::to_string(cuts(raw_cuts)) +
++                  " waw_cuts=" + std::to_string(cuts(waw_cuts)) +
++                  " war_cuts=" + std::to_string(cuts(war_cuts)) +
++                  " shared_prefix_adjoint_cells=" + std::to_string(std::count(prefix_adjoint_shared.begin(),prefix_adjoint_shared.end(),true)) +
++                  " relocatable_pointers=" + std::to_string(owned) +
++                  " unknown_pointers=" + std::to_string(unknown));
++}
++
+@@ -526,0 +746 @@
++  if (s.diagnostics) inspect_frame_witnesses(s, ctx);

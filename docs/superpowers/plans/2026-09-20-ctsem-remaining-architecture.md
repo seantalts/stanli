@@ -1,5 +1,10 @@
 # Remaining ctsem architecture work
 
+Follow-up: [the proof packets](2026-09-20-ctsem-proof-packets.md) implement checked
+layout reuse and recorded-executor relocation in `f70ba0f7`. The earlier clone
+and layout deferrals below describe the state before those proofs. Parallel
+replay and the Fréchet replacement remain deferred/rejected as documented.
+
 Authorization: the user asked to execute the remaining promising parts of the
 plan. The earlier numerical-kernel iteration is a checkpoint, not completion
 of this broader work. This record tracks the remaining hypotheses through
