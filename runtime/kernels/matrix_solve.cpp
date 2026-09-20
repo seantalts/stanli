@@ -81,7 +81,7 @@ using Dividend = std::conditional_t<
 // select different Eigen paths even when the mathematical result is equal.
 template <SolveKind Kind, bool DividendVar, typename B>
 auto solve_active_left_values(const MatD& a, const B& b,
-                               double* qr_scratch = nullptr) {
+                              double* qr_scratch = nullptr) {
   using Result = typename B::PlainObject;
   if constexpr (Kind == SolveKind::Spd) {
     constexpr const char* function = "mdivide_left_spd";
@@ -217,8 +217,9 @@ void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
     }
   } else {
     const auto solve_transpose = [&](const auto& q, const auto& qr) -> MatD {
-      return q * MatD(qr.template triangularView<Eigen::Upper>()
-                          .transpose().solve(g));
+      return q *
+             MatD(qr.template triangularView<Eigen::Upper>().transpose().solve(
+                 g));
     };
     MatD y;
     if (qr_scratch) {

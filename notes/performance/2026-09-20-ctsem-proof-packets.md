@@ -197,3 +197,13 @@ refusal and concurrent-replay tests are included and pass. The Fréchet
 replacement remains rejected under the previously recorded non-normal matrix
 accuracy evidence. No end-to-end sampling improvement is claimed: normal sampler
 copies still start from an unrecorded executor.
+
+
+## PR preparation verification
+
+The final CI formatting cleanup uses clang-format 22.1.8. A Release rebuild
+preserves all 70 runtime archive members byte for byte; only archive metadata
+changes. Fresh validation again passes all 329 reference models and the layout
+and clone adversaries, with full CTest still 262/264 and exactly the two known
+baseline failures. The [PR readiness record](2026-09-20-ctsem-pr-readiness.json)
+links the final source hashes and rebuilt archive to the measured implementation.

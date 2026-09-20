@@ -17,8 +17,8 @@ static int failures = 0, cases = 0;
 
 template <bool Left, bool Vector, typename T>
 using Dividend = std::conditional_t<
-    Vector, std::conditional_t<Left, Eigen::Matrix<T, -1, 1>,
-                               Eigen::Matrix<T, 1, -1>>,
+    Vector,
+    std::conditional_t<Left, Eigen::Matrix<T, -1, 1>, Eigen::Matrix<T, 1, -1>>,
     Eigen::Matrix<T, -1, -1>>;
 
 template <bool Left, typename A, typename B>
@@ -55,12 +55,11 @@ void compare(Kind kind, Mat a, Mat b, int fixture) {
   ++cases;
   const int n = a.rows(), k = Left ? b.cols() : b.rows();
   const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
-  const uint16_t op = kind == Kind::Plain
-                          ? (Left ? OP_MDIVIDE_LEFT : OP_MDIVIDE_RIGHT)
-                      : kind == Kind::Spd
-                          ? (Left ? OP_MDIVIDE_LEFT_SPD : OP_MDIVIDE_RIGHT_SPD)
-                          : (Left ? OP_MDIVIDE_LEFT_TRI_LOW
-                                  : OP_MDIVIDE_RIGHT_TRI_LOW);
+  const uint16_t op =
+      kind == Kind::Plain ? (Left ? OP_MDIVIDE_LEFT : OP_MDIVIDE_RIGHT)
+      : kind == Kind::Spd
+          ? (Left ? OP_MDIVIDE_LEFT_SPD : OP_MDIVIDE_RIGHT_SPD)
+          : (Left ? OP_MDIVIDE_LEFT_TRI_LOW : OP_MDIVIDE_RIGHT_TRI_LOW);
   auto got = evaluate([&]() -> Mat {
     Mat result(b.rows(), b.cols());
     int dims[] = {n, k};
@@ -77,8 +76,8 @@ void compare(Kind kind, Mat a, Mat b, int fixture) {
     shape.variant = ctx.variant;
     shape.idata = dims;
     shape.n_idata = 2;
-    std::vector<double> scratch(kernel.scratch_size
-                                   ? kernel.scratch_size(shape, nullptr) : 0);
+    std::vector<double> scratch(
+        kernel.scratch_size ? kernel.scratch_size(shape, nullptr) : 0);
     ctx.scratch = scratch.empty() ? nullptr : scratch.data();
     kernel.forward(ctx);
     return result;
@@ -107,10 +106,11 @@ void compare(Kind kind, Mat a, Mat b, int fixture) {
     }
   }
   if (!ok && ++failures <= 12)
-    std::printf("FAIL %s kind=%d vector=%d activity=%d n=%d k=%d fixture=%d\n"
-                "  got %s\n  want %s\n", Left ? "left" : "right", int(kind),
-                Vector, Activity, n, k, fixture, got.error.c_str(),
-                want.error.c_str());
+    std::printf(
+        "FAIL %s kind=%d vector=%d activity=%d n=%d k=%d fixture=%d\n"
+        "  got %s\n  want %s\n",
+        Left ? "left" : "right", int(kind), Vector, Activity, n, k, fixture,
+        got.error.c_str(), want.error.c_str());
 }
 
 template <bool Left, bool Vector>
@@ -152,14 +152,17 @@ int main() {
         for (int j = 0; j < n; ++j)
           for (int i = 0; i < n; ++i) a(i, j) = 1.0 / (i + j + 1.0);
         for (int i = 0; i < n; ++i) b(i, 0) = (i % 2 ? -1 : 1) * (i + 1);
-        if (fixture == 1) a(0, 0) = -1;  // non-positive definite
+        if (fixture == 1) a(0, 0) = -1;               // non-positive definite
         if (fixture == 2 && n > 1) a(0, 1) += 1e-10;  // accepted asymmetry
-        if (fixture == 3 && n > 1) a(0, 1) += 0.5;  // rejected by SPD only
+        if (fixture == 3 && n > 1) a(0, 1) += 0.5;    // rejected by SPD only
         if (fixture == 4) a(0, 0) = std::numeric_limits<double>::quiet_NaN();
         if (fixture == 5 && n > 1)
           a(0, 1) = std::numeric_limits<double>::quiet_NaN();  // ignored by tri
         if (fixture == 6) b(0, 0) = std::numeric_limits<double>::infinity();
-        if (fixture == 7) { a.setIdentity(); b.setConstant(-0.0); }
+        if (fixture == 7) {
+          a.setIdentity();
+          b.setConstant(-0.0);
+        }
         if (fixture == 8) a.setZero();  // singular / division by zero
         both_sides(kind, a, b, 10 + fixture);
       }

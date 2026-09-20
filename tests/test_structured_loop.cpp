@@ -5356,11 +5356,10 @@ static void data_branch_entry_tests() {
       attach(*plan, read.op, single_spec(5));
       // The then-arm jumps directly into the retained sibling Branch,
       // both before the producer's first publication and on later trips.
-      body = sequence(
-          {std::move(read),
-           branch(choose, sequence({}),
-                  call(*plan, OP_ADD, {row, minus_two}, condition)),
-           branch(condition, target(theta), sequence({}))});
+      body = sequence({std::move(read),
+                       branch(choose, sequence({}),
+                              call(*plan, OP_ADD, {row, minus_two}, condition)),
+                       branch(condition, target(theta), sequence({}))});
     } else {
       const int counter = fresh(), next = fresh(), skip = fresh();
       const int three = scalar(*plan, 3);
@@ -5374,14 +5373,13 @@ static void data_branch_entry_tests() {
       // directly, reusing the true condition from counter == 0.
       body = sequence(
           {alias(counter, zero),
-           while_loop(
-               condition,
-               sequence({std::move(skip_test),
-                         branch(skip, skip_condition, sequence({})),
-                         std::move(test)}),
-               sequence({target(theta),
-                         call(*plan, OP_ADD, {counter, one}, next),
-                         alias(counter, next)}))});
+           while_loop(condition,
+                      sequence({std::move(skip_test),
+                                branch(skip, skip_condition, sequence({})),
+                                std::move(test)}),
+                      sequence({target(theta),
+                                call(*plan, OP_ADD, {counter, one}, next),
+                                alias(counter, next)}))});
     }
     plan->root = counted(one, five, row, std::move(body));
     plan->has_target = true;
@@ -5891,9 +5889,9 @@ static void frame_layout_tests() {
       plan->fills.push_back({initial, {4, 5, 6}});
       plan->fills.push_back({first, {1, 2}});
       plan->fills.push_back({second, mode == 1 ? std::vector<double>{1, 3}
-                                             : std::vector<double>{2, 3}});
-      Node write = call(*plan, OP_SET_INDEX_DYNAMIC,
-                        {current, one, theta}, updated);
+                                               : std::vector<double>{2, 3}});
+      Node write =
+          call(*plan, OP_SET_INDEX_DYNAMIC, {current, one, theta}, updated);
       attach(*plan, write.op, single_spec(3));
       Node gather = call(*plan, OP_INDEX_DYNAMIC, {current, selectors}, picked);
       auto spec = std::make_shared<DynamicIndexSpec>();
@@ -5903,8 +5901,8 @@ static void frame_layout_tests() {
       body.push_back(alias(current, initial));
       body.push_back(std::move(write));
       body.push_back(alias(current, updated));
-      body.push_back(branch(choose, alias(selectors, first),
-                            alias(selectors, second)));
+      body.push_back(
+          branch(choose, alias(selectors, first), alias(selectors, second)));
       body.push_back(std::move(gather));
       body.push_back(call(*plan, OP_SUM_VEC, {picked}, sum));
       body.push_back(target(sum));
@@ -5985,8 +5983,10 @@ static void frame_clone_tests() {
   };
   const auto copy = [](const Executor& source, bool expected,
                        bool automatic = false) {
-    if (automatic) test_unsetenv("STANLI_STRUCTURED_FRAMES");
-    else test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+    if (automatic)
+      test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    else
+      test_setenv("STANLI_STRUCTURED_FRAMES", "1");
     test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
     stanli_test::StdoutCapture capture(stderr);
     auto clone = std::make_unique<Executor>(source);
@@ -6006,7 +6006,8 @@ static void frame_clone_tests() {
     Executor tree(graph);
     test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
     const double data[] = {4, 5, 6};
-    for (auto* ex : {source.get(), &tree}) std::copy_n(data, 3, ex->value_ptr(2));
+    for (auto* ex : {source.get(), &tree})
+      std::copy_n(data, 3, ex->value_ptr(2));
     auto cold = copy(*source, false);
     const auto expected = evaluate(tree, .25, 2);
     check(same(evaluate(*source, .25, 2), expected), "clone source oracle");
@@ -6016,7 +6017,8 @@ static void frame_clone_tests() {
     stanli_test::StdoutCapture capture(stderr);
     const auto actual = evaluate(*clone, .25, 2);
     const auto diagnostics = capture.finish();
-    check(same(actual, expected) && diagnostics.find("frames:") == std::string::npos,
+    check(same(actual, expected) &&
+              diagnostics.find("frames:") == std::string::npos,
           "recorded clone replays its first gradient without recording");
     check(same(evaluate(*chain, .25, 2), expected),
           "copy of an unused recorded copy relocates every binding again");
@@ -6061,7 +6063,8 @@ static void frame_clone_tests() {
   plan->prepare();
   for (const auto& op : plan->body.ops)
     if (op.opcode == OP_TANHV)
-      check(set_forward(plan->root, &op - plan->body.ops.data(), frame_late_failure),
+      check(set_forward(plan->root, &op - plan->body.ops.data(),
+                        frame_late_failure),
             "install recorded-clone failure injection");
   test_setenv("STANLI_STRUCTURED_FRAMES", "1");
   Executor failed(outer(plan));
@@ -6070,8 +6073,11 @@ static void frame_clone_tests() {
   (void)evaluate(failed, .1, .7);
   frame_failure_calls = 0;
   bool threw = false;
-  try { (void)evaluate(failed, .1, .7); }
-  catch (const std::runtime_error&) { threw = true; }
+  try {
+    (void)evaluate(failed, .1, .7);
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
   check(threw, "clone fixture reaches a failure during recorded replay");
   auto recovered = copy(failed, false);
   frame_failure_calls = 100;
@@ -6091,8 +6097,11 @@ static void frame_clone_tests() {
   const auto backward_expected = evaluate(backward_failed, .1, .7);
   frame_backward_calls = 0;
   threw = false;
-  try { (void)evaluate(backward_failed, .1, .7); }
-  catch (const std::runtime_error&) { threw = true; }
+  try {
+    (void)evaluate(backward_failed, .1, .7);
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
   check(threw, "clone fixture reaches a partially executed backward pass");
   auto backward_recovered = copy(backward_failed, false);
   frame_backward_calls = 100;

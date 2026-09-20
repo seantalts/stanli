@@ -102,8 +102,8 @@ arithmetic change with factor retention before each is independently measured.
 | Isolate solves and retain plain-left QR | Implemented | Exact arithmetic and lifetime gates pass; warm target improves 13–15% beyond direct forwards. Ordinary timing uncertainty is recorded in the scorecard. |
 | Reuse recording buffers and combine version metadata | Implemented | No frame-layout assumption; temporary storage released before replay. |
 | Reduce recording dispatch | Implemented | Profile-guided fusion of proven data calls with adjacent branches; independent branch entries retained. |
-| Emit frames from an established layout | Deferred | Equal encoded programs do not prove equal allocation geometry or reference ownership. A layout-proof and safe fallback remain prerequisites; the smaller dispatcher change addresses the measured hot path. |
-| Reuse a recorded clone | Measured and deferred | Normal sampler/pool prototypes have not recorded. A useful implementation needs a changed recording boundary plus mutable-cell relocation, followed by a sampling/startup measurement. |
+| Emit frames from an established layout | Implemented in the proof follow-up | Every use certifies operand bindings, geometry, literal values and reverse order; mismatch uses canonical encoding. N4000 first-gradient time improves another 9.4%. |
+| Reuse a recorded clone | Implemented for completed frame tapes | Transactional relocation keeps mutable storage private. Recorded copy plus first gradient improves about 25×; changing the normal sampler’s unrecorded-source boundary remains deferred, with no sampling-speed claim. |
 | Automatically parallelize subjects | Measured and deferred | Actual frame dependencies couple 3,992 of 3,994 boundaries. A generic reset/independence proof and private workspace/adjoint reductions are prerequisites. |
 | Dedicated exponential Fréchet derivative | Prototyped and rejected for general replacement | Faster microcases, but worsened oracle accuracy on non-normal inputs under the unchanged gate. |
 

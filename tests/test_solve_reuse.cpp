@@ -17,7 +17,10 @@ using Node = StructuredLoop::Node;
 static Kernel original;
 static int failures = 0;
 static void check(bool ok, const char* message) {
-  if (!ok) { ++failures; std::printf("FAIL %s\n", message); }
+  if (!ok) {
+    ++failures;
+    std::printf("FAIL %s\n", message);
+  }
 }
 static void recompute_forward(KernelCtx& ctx) {
   KernelCtx copy = ctx;
@@ -92,8 +95,8 @@ static Graph graph(int n, int k, int rows, bool vec) {
 static std::vector<double> evaluate(Executor& ex, int n, int k, int point) {
   for (int j = 0; j < n; ++j)
     for (int i = 0; i < n; ++i)
-      ex.params_data()[j * n + i] = i == j ? n + 1.0 + 0.1 * point
-                                          : 0.01 * (i - 2 * j + point);
+      ex.params_data()[j * n + i] =
+          i == j ? n + 1.0 + 0.1 * point : 0.01 * (i - 2 * j + point);
   for (int i = 0; i < n * k; ++i)
     ex.params_data()[n * n + i] = 0.02 * (i % 7 - point);
   std::vector<double> result(1 + ex.n_params());
@@ -167,9 +170,9 @@ static Graph call_graph(int n, int k, int path) {
   } else {
     p->pool = {0, 1, 3, .125};
     p->code = {{Program::CONST, total, 0}, {Program::CONST, count, 0},
-               {Program::CONST, one, 1}, {Program::CONST, limit, 2},
-               {Program::CONST, step, 3}, {Program::CALL, 0, 0},
-               {Program::CALL, 0, 1}, {Program::ADD, total, total, sum}};
+               {Program::CONST, one, 1},   {Program::CONST, limit, 2},
+               {Program::CONST, step, 3},  {Program::CALL, 0, 0},
+               {Program::CALL, 0, 1},      {Program::ADD, total, total, sum}};
     for (int i = 0; i < n; ++i)
       p->code.push_back({Program::ADD, i * (n + 1), i * (n + 1), step});
     p->code.push_back({Program::ADD, count, count, one});
@@ -208,11 +211,9 @@ static void direct_and_island_calls() {
                 "CALL value-only interleave preserves prim arithmetic");
         }
         Executor copy(actual);
-        check(identical(evaluate(copy, n, k, 3),
-                        evaluate(expected, n, k, 3)),
+        check(identical(evaluate(copy, n, k, 3), evaluate(expected, n, k, 3)),
               "top-level and island copies own their factors");
-        check(identical(evaluate(actual, n, k, 4),
-                        evaluate(expected, n, k, 4)),
+        check(identical(evaluate(actual, n, k, 4), evaluate(expected, n, k, 4)),
               "CALL copy evaluation leaves source factors independent");
       }
 }
@@ -249,15 +250,15 @@ int main() {
                   "value-only retains the prim solve arithmetic");
           }
           Executor copy(actual);
-          check(identical(evaluate(copy, n, k, 3),
-                          evaluate(expected, n, k, 3)),
+          check(identical(evaluate(copy, n, k, 3), evaluate(expected, n, k, 3)),
                 "copied executor independently records factors");
-          check(identical(evaluate(actual, n, k, 4),
-                          evaluate(expected, n, k, 4)),
-                "copy leaves the original factor storage independent");
+          check(
+              identical(evaluate(actual, n, k, 4), evaluate(expected, n, k, 4)),
+              "copy leaves the original factor storage independent");
           const auto diagnostics = captured.finish();
           if (frames && rows == 33)
-            check(diagnostics.find("stanli_structured frames:") != std::string::npos,
+            check(diagnostics.find("stanli_structured frames:") !=
+                      std::string::npos,
                   "factor lifetime check reaches numerical frames");
           if (rows > 0) {
             // Frames return before the stream's respecialized counter is
@@ -265,13 +266,15 @@ int main() {
             // recording plus the two parameter-controlled branch changes.
             size_t recordings = 0, position = 0;
             while ((position = diagnostics.find("stanli_structured frames:",
-                                                 position)) != std::string::npos) {
+                                                position)) !=
+                   std::string::npos) {
               ++recordings;
               ++position;
             }
-            const bool respecialized = frames
-                ? recordings >= 3
-                : diagnostics.find("respecialized=2") != std::string::npos;
+            const bool respecialized =
+                frames
+                    ? recordings >= 3
+                    : diagnostics.find("respecialized=2") != std::string::npos;
             if (!respecialized && failures < 2)
               std::printf("n=%d k=%d rows=%d frames=%d\n%s\n", n, k, rows,
                           frames, diagnostics.c_str());

@@ -324,8 +324,8 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
   shape.variant = ctx.variant;
   shape.idata = dims;
   shape.n_idata = 2;
-  std::vector<double> scratch(kern.scratch_size
-                                 ? kern.scratch_size(shape, nullptr) : 0);
+  std::vector<double> scratch(
+      kern.scratch_size ? kern.scratch_size(shape, nullptr) : 0);
   ctx.scratch = scratch.empty() ? nullptr : scratch.data();
   kern.forward(ctx);
   kern.backward(ctx);

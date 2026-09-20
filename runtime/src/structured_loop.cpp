@@ -1462,8 +1462,7 @@ struct LoopState : KernelState {
       std::getenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
   bool check_frame_layout =
       std::getenv("STANLI_STRUCTURED_CHECK_FRAME_LAYOUT") != nullptr;
-  bool frame_clone =
-      std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
+  bool frame_clone = std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool last_replayed = false;
   size_t respecialized = 0;
 
@@ -1550,8 +1549,7 @@ constexpr int64_t kReservePrefixTrips = 8;
 bool prefer_frames(const LoopState& s, int64_t trips, int64_t sampled) {
   constexpr double max_version_bytes = 128.0 * 1024 * 1024;
   constexpr size_t min_instructions_per_trip = 128;
-  constexpr size_t version_bytes =
-      sizeof(Version);
+  constexpr size_t version_bytes = sizeof(Version);
   return s.frame_auto &&
          static_cast<double>(s.versions.size()) * version_bytes *
                  (static_cast<double>(trips) / sampled) >
@@ -1843,7 +1841,8 @@ struct Execution {
     s.versions[static_cast<size_t>(s.node_version[n.site])].constant = folded;
     if (op.out2 >= 0) {
       s.bindings[op.out2] = s.node_version2[n.site];
-      s.versions[static_cast<size_t>(s.node_version2[n.site])].constant = folded;
+      s.versions[static_cast<size_t>(s.node_version2[n.site])].constant =
+          folded;
     }
     if (!folded) log_call(n, op, c);
   }
@@ -3361,18 +3360,18 @@ void structured_loop_forward(KernelCtx& ctx) {
       for (const auto& program : e.recording) {
         if (!program) continue;
         for (const auto& instruction : program->code) {
-          const bool data = instruction.kind == RecordingProgram::DataKernel ||
-                            instruction.kind == RecordingProgram::DataIndex ||
-                            instruction.kind == RecordingProgram::DataBranchFresh ||
-                            instruction.kind == RecordingProgram::DataBranch;
+          const bool data =
+              instruction.kind == RecordingProgram::DataKernel ||
+              instruction.kind == RecordingProgram::DataIndex ||
+              instruction.kind == RecordingProgram::DataBranchFresh ||
+              instruction.kind == RecordingProgram::DataBranch;
           spans += data;
           const bool branch =
               instruction.kind == RecordingProgram::DataBranch ||
               instruction.kind == RecordingProgram::DataBranchFresh;
           branches += branch;
-          published += branch
-                           ? instruction.kind == RecordingProgram::DataBranch
-                           : data && instruction.jump != 0;
+          published += branch ? instruction.kind == RecordingProgram::DataBranch
+                              : data && instruction.jump != 0;
           iterators += instruction.kind == RecordingProgram::DataForNext;
           indices += instruction.kind == RecordingProgram::DataIndex;
           index_prepared += instruction.kind == RecordingProgram::DataIndex &&
