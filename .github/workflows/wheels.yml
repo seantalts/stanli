@@ -1189,7 +1189,9 @@ jobs:
           echo "STANLI_RUN=$cli_path" >> "$GITHUB_ENV"
       - uses: r-lib/actions/setup-r@v2
         with:
-          use-public-rspm: true
+          # `true` is restricted to selected owners on macOS. Posit's gzip
+          # binaries avoid pak's lack of zstd support (r-lib/pkgdepends#485).
+          use-public-rspm: always
           extra-repositories: https://stan-dev.r-universe.dev
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
