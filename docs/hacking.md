@@ -479,16 +479,26 @@ turn an architecture disagreement into a tolerance.
 ## The sampler
 
 stanli does not reimplement NUTS.
-[`nuts.cpp`](../runtime/src/nuts.cpp) is short (about 240 lines)
-because Stan's own classes do the sampling: it instantiates the same
-`adapt_diag_e_nuts` CmdStan uses. What those lines actually do is
-reproduce CmdStan's *configuration*: the same RNG streams consumed in
-the same order, the same rules for accepting or rejecting an initial
-point, the same adaptation schedule.
+[`nuts.cpp`](../runtime/src/nuts.cpp) delegates sampling to Stan's classes:
+it instantiates the same
+`adapt_diag_e_nuts` CmdStan uses. The driver reproduces CmdStan's initial
+step size, dual-averaging center, initialization acceptance rules and
+adaptation schedule. In particular, initial dual averaging is centered
+on the requested step size before the step-size search.
+
+[`test_sampler_parity`](../tests/test_sampler_parity.cpp) compares every
+draw and diagnostic bitwise with Stan's actual sampling service, using
+the same executor for numerical evaluation in both drivers. It covers
+short and metric-adapting warmup, thinning, saved warmup, different chain
+IDs and zero initialization. This isolates configuration from compiler
+numerics. Cross-compiler traces can still split after tiny numerical
+differences. Random generated quantities also remain a stream-scheduling
+gap: CmdStan evaluates them on the sampler's RNG between saved draws;
+Stanli's output drivers use separate RNG streams.
 
 Configuration bugs are invisible to every gradient test: the gradient
 can be perfect at every point while the chain visits different points.
-The oracle is [`tools/sampler_trace.py`](../tools/sampler_trace.py):
+The broader oracle is [`tools/sampler_trace.py`](../tools/sampler_trace.py):
 run the same model with the same seed under stanli and CmdStan, and
 compare the sampler diagnostic columns distributionally.
 

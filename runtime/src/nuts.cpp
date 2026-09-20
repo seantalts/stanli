@@ -62,14 +62,19 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   }
   sampler.seed(q);
 
-  sampler.init_stepsize(logger);
+  // Match CmdStan's service defaults, not base_hmc's 0.1 step size.
+  // Initial dual averaging is centered on the requested step size BEFORE
+  // init_stepsize searches; recentering on the result changes adaptation.
+  constexpr double initial_stepsize = 1.0;
+  sampler.set_nominal_stepsize(initial_stepsize);
   sampler.set_stepsize_jitter(0.0);
   sampler.get_stepsize_adaptation().set_mu(
-      std::log(10.0 * sampler.get_nominal_stepsize()));
+      std::log(10.0 * initial_stepsize));
   sampler.get_stepsize_adaptation().set_delta(cfg.delta);
   sampler.set_max_depth(cfg.max_depth);
   sampler.set_window_params(cfg.warmup, 75, 50, 25, logger);
   sampler.engage_adaptation();
+  sampler.init_stepsize(logger);
 
   stan::mcmc::sample s(q, 0, 0);
 
