@@ -121,7 +121,9 @@ jobs:
         with:
           r-version: ${{ matrix.r }}
           http-user-agent: ${{ matrix.r == 'devel' && 'release' || 'default' }}
-          use-public-rspm: true
+          # `true` is restricted to selected owners on macOS. Posit's gzip
+          # binaries avoid pak's lack of zstd support (r-lib/pkgdepends#485).
+          use-public-rspm: always
           extra-repositories: https://stan-dev.r-universe.dev
 
       - uses: r-lib/actions/setup-tinytex@v2
