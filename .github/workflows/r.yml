@@ -6,8 +6,8 @@
 # tests skip here and say so. They run for real in wheels.yml, against the .so
 # that build job just produced, and that job fails if they skip.
 #
-# What does run here is the JavaScript compiler path: stanc3 through V8,
-# which is the source-compilation path with no runtime dependency.
+# The full platform/R-version matrix is post-submit. PRs keep the inexpensive
+# ABI/provenance job here and the installed R/runtime integration in wheels.yml.
 name: R
 
 on:
@@ -94,6 +94,7 @@ jobs:
 
   check:
     name: ${{ matrix.os }} (${{ matrix.r }})
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

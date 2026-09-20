@@ -32,6 +32,11 @@ compares the shipped, optimized graph with CmdStan; a separate A/B test
 compares that graph with versions in which selected optimizations are
 disabled.
 
+The project goal is agreement with CmdStan within 10 ULP most of the time,
+with measured and explained exceptions. The checks below include tighter
+local contracts and broader scaled-error gates; passing a scaled-error gate
+does not establish a 10-ULP bound.
+
 The numerical criterion depends on the comparison. Agreement with CmdStan is
 measured in ULPs; the default policy is within 2 ULP. Bitwise agreement is not
 a gate; a change that moves a model from bitwise to a small ULP band is
@@ -81,23 +86,25 @@ and are separate from CI correctness gates.
 
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
-| unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | every pull request |
-| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | every pull request |
-| MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | every pull request |
-| corpus comparison | Are 329 models from posteriordb, stanc3, brms, Rethinking and Aalto lessons consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | every pull request |
-| corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | every pull request, within CTest |
-| cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | every pull request, within CTest |
+| unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | source-changing PRs |
+| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | native/JS on source-changing PRs; Windows after merge and on demand |
+| MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | after merge, nightly, and on demand |
+| corpus comparison | Are 329 models from posteriordb, stanc3, brms, Rethinking and Aalto lessons consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
+| corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | source-changing PRs, within CTest |
+| cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | source-changing PRs, within CTest |
 | transformation A/B | Do selected graph optimizations preserve model results? | Optimizations enabled and disabled agree at the default point within 1e-11 | manually after optimization changes |
-| BridgeStan C-ABI comparison | Does the public C interface agree with reference BridgeStan? | Four fixture models must pass value, name, count, and output-shape checks | every pull request |
+| MIR vectorization A/B | What changes when the compiler's loop-vectorization pass is disabled? | Both modes pass numerical/reference checks; confirmed gradient-time regressions fail the run | after merge, nightly, and on demand |
+| installed client checks | Do the built packages work through Python, BridgeStan's transport, and R? | Install the built artifacts; exercise APIs, sampling, outputs, the R compiler, and ecosystem consumers without missing-runtime skips | source-changing PRs |
+| BridgeStan C-ABI comparison | Does the public C interface agree with reference BridgeStan? | Four fixture models must pass value, name, count, and output-shape checks | after merge, nightly, and on demand |
 | downstream `stanr` embedding | Can the R package vendor this checkout and use Stanli through its `model_base` adapter? | `stanr` must build, then its Stanli-backend construction, derivative, sampling, data, output, init, and cache tests must pass | every version release and on demand |
 | generated conformance sweep | For cases that both systems evaluate, do results agree, and which generated cases remain unsupported? | 10 ULP by default; reviewed per-case policy where needed | nightly and on demand |
 | coverage baseline | Did a previously verified generated case stop verifying? | No loss of a verified case; obsolete policy exceptions must be removed | within the nightly sweep |
-| integrated function models | Do ten mother-style models exercise supported function names and match CmdStan, including data-only and generated outputs? | Source/name coverage gate; log density, full gradients, names and every output at three points within scaled error 1e-9 | every pull request, within CTest |
+| integrated function models | Do ten mother-style models exercise supported function names and match CmdStan, including data-only and generated outputs? | Source/name coverage gate; log density, full gradients, names and every output at three points within scaled error 1e-9 | source-changing PRs, within CTest |
 | model census | Do stanc3's 1,231 integration models still compile into stanli's runtime representation and, where checked, agree with CmdStan? | No decrease in per-model classification | manually, on demand |
 | sampler trace | Is NUTS configured comparably to CmdStan? | Diagnostic summaries remain within limits chosen for large configuration errors | manually after sampler changes |
 | AddressSanitizer | Does ASan detect invalid memory access while CTest runs? | No sanitizer diagnostics | after merge and nightly |
 | WebAssembly replay | Does the browser runtime reproduce the recorded corpus? | Same numerical gates; 118 of 119 compiling posteriordb models fit in wasm32 | manually |
-| browser compiler on Safari 17 | Do the js_of_ocaml bundles keep `static` on the same line as the class element it modifies? | No line in either bundle ends in `static` | every pull request |
+| browser compiler on Safari 17 | Do the js_of_ocaml bundles keep `static` on the same line as the class element it modifies? | No line in either bundle ends in `static` | source-changing PRs |
 | documentation and formatting | Do generated claims match their artifacts, and is C/C++ formatting current? | Exact generated-file and formatter checks | every pull request |
 
 ## MIR loop-vectorization measurement
@@ -119,9 +126,13 @@ python3 harnesses/vectorize_ab.py deps/posteriordb \
   --dump build-rel/dump_ops --output-dir build-rel/vectorize-ab
 ```
 
-The "MIR vectorization A/B" workflow step runs the complete run on every
-push to main and on the schedule; a pull request runs a 44-model slice
-listed in the workflow, so the full run is a post-submit gate.
+The "MIR vectorization A/B" workflow step runs the complete corpus after
+merge, nightly, on release tags, and on manual dispatch. PRs run the shipped
+configuration once against all recorded CmdStan references, plus focused
+compiler and runtime regression tests. They do not repeat the corpus through
+the pass-off configuration or gate on timing ratios. The broader A/B sweep
+remains useful for diagnosing a compiler pass and covering models without
+CmdStan references; those are complementary post-submit checks.
 The hard gates cover command/status consistency, result and write-array
 categories, error parity, per-element finite/NaN/infinity classes, shapes and
 names, and both pass modes against the existing CmdStan references. Finite
@@ -134,7 +145,7 @@ but never fail the run by themselves. The execution gate is gradient time on
 the fixed `GRADIENT_MODELS` set: a model whose pass-on/pass-off ratio
 exceeds 1.04 is re-measured with a fresh, independently interleaved run, and
 the job fails only if that re-run also exceeds the ratio, so isolated
-measurement noise does not fail a pull request.
+measurement noise does not fail the post-submit run.
 
 The op-count diagnostic and the gradient gate only ever compare a run's own
 pass-off cell against its pass-on cell, so a change that slows (or speeds
@@ -415,15 +426,17 @@ expression where pristine stanc3's host-width-dependent folds disagree. A
 focused worker harness proves the preferred custom
 import and the missing-artifact fallback import. The tested JavaScript
 artifacts are the ones consumed by the Pages and npm jobs. The manylinux gate
-then decodes the same typed-producer output directly with `bench_mir_decode`,
+then checks the typed-producer output with `test_mir_decode`,
 produced by the probe with `vectorize_loops` off since `stanc --O1` has no
 switch for it.
-For Eight Schools, compact v2 must take no more than half the legacy decoder's
+Post-submit measurements use `bench_mir_decode`. For Eight Schools, compact v2
+must take no more than half the legacy decoder's
 median time across 51 repetitions and no more than half its raw bytes. Gzip and
 complete preparation timings remain descriptive measurements in the uploaded
 artifact.
 
-The same gate covers the Windows producer on every pull request. The
+The same parity check covers the Windows producer after merge, nightly,
+on release tags, and on demand. The
 `stanc-windows` job cross-builds pristine `stanc.exe` before applying the
 stanli overlay, then cross-builds `stanli-compile.exe` and records its source
 and core-toolchain stamp. The `windows-compiler` job executes both PE
@@ -744,7 +757,7 @@ runtime object library with `-DSTANLI_NO_STDIO`, builds it, and scans every
 object file's undefined symbols for that list, failing with the offending
 file and symbol if any appear. The `no-stdio` job in
 [`.github/workflows/wheels.yml`](.github/workflows/wheels.yml) runs it on
-every pull request.
+main pushes, nightly runs, release tags, and manual dispatches.
 
 ## Memory safety
 
@@ -777,52 +790,56 @@ repeat-evaluation tests are needed for that case.
 
 ## Checks run before and after merge
 
-The full source-change path in the pull-request workflows requires the
-following checks, as defined in
+PRs use one representative native build and one complete external model
+oracle. Focused tests cover individual kernels, compiler contracts, execution
+paths, and clients; broad alternative-configuration sweeps and platform
+matrices run post-submit. The source-change path is defined in
 [`.github/workflows/wheels.yml`](.github/workflows/wheels.yml) and
 [`.github/workflows/lint.yml`](.github/workflows/lint.yml):
 
-- one platform build, `manylinux_2_28_x86_64`;
-- the compiler-only Windows cross-build and executable parity gate described
-  above;
-- the full ctest suite, which includes the cross-path matrix and the
-  pass-safety fuzz;
-- the CmdStan corpus comparison at all three points;
-- `tools/gen_docs.py --check`;
-- `tools/gen_web_models.py --check`, which requires every demo model to
-  carry a hand-written description;
-- the manylinux tag check: the highest `GLIBC_*` symbol the library
-  imports must be at or below `GLIBC_2.28`, and no dynamic `libstdc++`
-  may have leaked in;
-- the wheel build, then `tests/test_python.py` and
-  `tests/test_bridgestan_embed.py` against the installed wheel in a clean
-  venv;
-- [`tools/bs_conformance.py`](tools/bs_conformance.py) against reference
-  BridgeStan on four fixtures. This checks stanli's interpretation of the
-  public `bs_` interface against an implementation built from the reference
-  source rather than only against stanli's own interface tests;
-- the R package's tests under `R CMD check` against the library that
-  build produced, with a missing-runtime skip treated as a failure;
-- `clang-format` over tracked project-owned C/C++ files, excluding vendored
-  dependencies and third-party code. The formatter version is pinned because
-  output can differ across major versions.
+- Static checks: generated documentation, development-setup contracts,
+  browser syntax, Windows exports, CI routing, and pinned C/C++ formatting.
+- One Linux x86_64 Clang build: the full CTest suite, including focused
+  cross-path and pass-safety tests, and every recorded CmdStan model at all
+  three points. Numerical thresholds and the reference corpus are unchanged.
+- Installed wheel checks: Python and BridgeStan transport tests in a clean
+  environment, truthful manylinux tags, and the binary-size artifact.
+- Shared compiler checks: native/JavaScript producer parity, typed/legacy
+  MIR decoding, source/artifact provenance, and demo-model metadata.
+- One Linux R integration job using that runtime: `R CMD check`, compilation
+  through V8, and ecosystem acceptance with missing-runtime or acceptance
+  skips treated as failures. The R workflow also retains its inexpensive
+  ABI/provenance job on relevant PRs.
 
 Pull requests whose changes are limited to allowlisted Markdown/license files
-or `web/index.html` instead run the generated-document checks and JavaScript
-syntax checks. The required `manylinux_2_28_x86_64` gate remains present; an
-unknown path fails closed onto the full source-change path.
+including `AGENTS.md`, research material under `notes/`, or `web/index.html`
+instead run static checks and formatting. Executable code and test fixtures
+must not live under the documentation-only `notes/` directory. The required
+`manylinux_2_28_x86_64` status remains present for every PR. It checks static
+validation and, for source changes, the native build, shared compiler, and R
+integration. A failed, cancelled, or unexpectedly skipped prerequisite cannot
+produce a green gate; unknown file paths select the full source-change path.
 
-Source-changing pull requests run the Linux x86_64 wheel job and the Windows
-compiler-only gate. The other three wheel platforms (macOS arm64, macOS
-x86_64, and manylinux aarch64), the full Windows C++ matrix, the ASan job, the
-WebAssembly build with its eight-schools sampling test under Node, and the
-webR side-module load test run on every push to `main`, nightly, and on
-release tags. The full
-Windows job builds the runtime and CTest suite, packages `stanli.dll`,
+Main pushes, nightly runs, release tags, and manual dispatches additionally
+run the full vectorization A/B corpus, portable-MIR cost measurements, live
+reference BridgeStan comparisons, cross-release R compatibility, first-posterior
+timings, no-stdio configuration, Windows compiler parity, the other native
+platforms, WebAssembly, and webR. ASan and TSan run on the same non-PR events
+except release tags. The standalone R platform/version matrix runs on relevant
+main pushes, release tags, and manual dispatches. Rethinking regeneration runs
+after relevant main pushes, nightly, and on demand.
+
+The full Windows job builds the runtime and CTest suite, packages `stanli.dll`,
 `stanli-compile.exe`, and pristine `stanc.exe`, then runs the installed-wheel
 Python tests through source compilation, errors, lowering, gradients, sampling,
-and generated quantities. These full platform checks report issues after a
-pull request has merged rather than blocking that merge.
+and generated quantities. These checks report failures for prompt follow-up
+after merge and preserve the existing release dependencies. If a change needs
+specific platform or optimization evidence before landing, run the relevant
+focused check or dispatch the full workflow on its branch:
+
+```sh
+gh workflow run wheels.yml --ref my-change
+```
 
 The nightly conformance sweep and its ratchet, the signature watch, and the
 manually run model census are monitored separately from pull-request gates.

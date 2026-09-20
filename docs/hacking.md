@@ -679,11 +679,15 @@ The merge happens when CI goes green. Release tags (`v*`, `npm-v*`)
 are not gated by this; they point at commits that already passed on
 main.
 
-Every pull request cross-builds and executes the Windows compiler and compares
-its portable bytes with the JavaScript producer. That gate does not build the
-C++ runtime. If a change plausibly touches Windows C++ (build files, the C ABI
-surface, `tools/exported_symbols.def`), run the full wheel job on the branch
-before merging:
+Pull requests keep one Linux native build, CTest, recorded CmdStan replay,
+installed Python/R checks, and native/JavaScript compiler parity. The broad
+vectorization A/B sweep, performance comparisons, Windows/compiler and browser
+runtime builds, and full R-version matrix run after merge. See
+[`TESTING.md`](../TESTING.md#checks-run-before-and-after-merge) for the exact
+split and [`AGENTS.md`](../AGENTS.md) for project priorities.
+
+When a change needs additional platform or optimization evidence before
+landing, run its focused check or dispatch the full workflow on the branch:
 
 ```
 gh workflow run wheels.yml --ref my-change
