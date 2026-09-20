@@ -737,10 +737,10 @@ void expect_interruptible_sampling() {
   stanli_model_free(model);
 }
 
-// Writing the CSV columns on each chain's own thread as the draws land must
-// produce exactly what the post-hoc loop over the same draws produces, and
-// must leave the sampler's own output alone.
-void expect_in_worker_write_array_on(const char* label, stanli_model* model) {
+// Full-output sampling consumes the live chain RNG. Only RNG-free outputs
+// agree with a parameter-only run followed by standalone generated quantities.
+void expect_in_worker_write_array_on(const char* label, stanli_model* model,
+                                     bool random = false) {
   stanli_sample_opts opts;
   stanli_sample_opts_init(&opts);
   opts.seed = 7;
@@ -755,6 +755,7 @@ void expect_in_worker_write_array_on(const char* label, stanli_model* model) {
   const size_t n_stats = (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS);
   const size_t n_values = (size_t)(opts.chains * rows * width);
   char err[8192]{};
+  std::vector<double> serial_draws, serial_stats, serial_values;
   for (int threads : {1, 2}) {
     opts.num_threads = threads;
     const std::string mode = std::string(" [") + label +
@@ -794,10 +795,20 @@ void expect_in_worker_write_array_on(const char* label, stanli_model* model) {
         nullptr, nullptr, nullptr, &interrupted, reports, err, sizeof err);
     expect_true("in-worker write_array sampling succeeds" + mode,
                 rc == 0 && interrupted == 0);
-    expect_true("in-worker write_array leaves the sampler alone" + mode,
-                draws == want_draws && stats == want_stats);
-    expect_true("in-worker write_array matches the post-hoc loop" + mode,
-                values == want_values);
+    expect_true("live RNG changes only random-output trajectories" + mode,
+                random ? draws != want_draws && stats != want_stats
+                       : draws == want_draws && stats == want_stats);
+    expect_true("only RNG-free output agrees with the post-hoc loop" + mode,
+                (values != want_values) == random);
+    if (threads == 1) {
+      serial_draws = draws;
+      serial_stats = stats;
+      serial_values = values;
+    } else {
+      expect_true("serial and parallel full-output runs agree" + mode,
+                  draws == serial_draws && stats == serial_stats &&
+                      values == serial_values);
+    }
 
     std::vector<double> null_draws(n_draws, -1.0), null_stats(n_stats, -1.0);
     err[0] = '\0';
@@ -830,8 +841,17 @@ void expect_in_worker_write_array() {
   expect_true("in-worker write_array interpreted model builds",
               interp != nullptr);
   if (interp != nullptr) {
-    expect_in_worker_write_array_on("interpreted", interp);
+    expect_in_worker_write_array_on("interpreted", interp, true);
     stanli_model_free(interp);
+  }
+
+  stanli_model* random =
+      stanli_model_new(slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(),
+                       "{}", err, sizeof err);
+  expect_true("random compiled write_array model builds", random != nullptr);
+  if (random) {
+    expect_in_worker_write_array_on("random graph", random, true);
+    stanli_model_free(random);
   }
 
   err[0] = '\0';
@@ -860,11 +880,14 @@ void expect_in_worker_write_array() {
   const int rc = stanli_sample_multi_write_array(
       reject, &opts, 0, draws.data(), stats.data(), values.data(), nullptr,
       nullptr, nullptr, nullptr, &interrupted, reports, err, sizeof err);
-  const std::string message(err);
-  expect_true("a rejected row fails its chain",
-              rc == 1 && interrupted == 0 &&
-                  message.find("chain 1") != std::string::npos &&
-                  message.find("draw") != std::string::npos);
+  expect_true("a rejected output row does not stop the chain",
+              rc == 0 && interrupted == 0 &&
+                  std::all_of(draws.begin(), draws.end(),
+                              [](double x) { return std::isfinite(x); }) &&
+                  std::all_of(stats.begin(), stats.end(),
+                              [](double x) { return std::isfinite(x); }) &&
+                  std::any_of(values.begin(), values.end(),
+                              [](double x) { return std::isnan(x); }));
   stanli_model_free(reject);
 }
 

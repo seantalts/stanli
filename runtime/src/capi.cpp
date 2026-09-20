@@ -657,14 +657,9 @@ int stanli_sample_multi_write_array(
       poll_fn = [poll, poll_user] { return poll(poll_user) != 0; };
 
     const int64_t width = m->wa_n > 0 ? m->wa_n : m->n_con;
-    std::vector<stanli::WaRng> wa_rngs;
     std::vector<std::unique_ptr<stanli::Executor>> wa_clones;
     std::vector<stanli::Executor*> wa_execs;
     if (values != nullptr) {
-      wa_rngs.reserve((size_t)n_chains);
-      for (int c = 0; c < n_chains; ++c)
-        wa_rngs.emplace_back((unsigned)opts->seed,
-                             (unsigned)(cfg.chain_id + c));
       if (m->wa_ex) {
         wa_execs.push_back(m->wa_ex.get());
         for (int c = 1; c < n_chains; ++c) {
@@ -676,11 +671,11 @@ int stanli_sample_multi_write_array(
 
     stanli::StoredDrawWriter writer;
     if (values != nullptr)
-      writer = [&](int c, int64_t row, const double* q) {
+      writer = [&](int c, int64_t row, const double* q, stanli::WaRng& rng,
+                   const stanli::SamplerRow&) {
         if (row >= n_stored) return;
         double* out = values + ((int64_t)c * n_stored + row) * width;
         stanli::Executor& main_ex = *execs[(size_t)c];
-        stanli::WaRng& rng = wa_rngs[(size_t)c];
         try {
           if (m->wa_interp) {
             std::memcpy(main_ex.params_data(), q,
@@ -714,6 +709,10 @@ int stanli_sample_multi_write_array(
                 out[at++] = p[v.storage_index(i)];
             }
           }
+        } catch (const std::domain_error&) {
+          // Match the CLI: a rejected output row does not discard the chain
+          // or restore any randomness consumed before the rejection.
+          std::fill(out, out + width, std::numeric_limits<double>::quiet_NaN());
         } catch (const std::exception& e) {
           throw std::runtime_error("write_array failed on draw " +
                                    std::to_string(row) + ": " + e.what());
@@ -739,8 +738,10 @@ int stanli_sample_multi_write_array(
         cc.stop = &stop;
         cc.poll = poll_fn;
         if (writer)
-          cc.on_stored = [&writer, c](int64_t row, const double* q) {
-            writer(c, row, q);
+          cc.on_stored = [&writer, c](int64_t row, const double* q,
+                                      stanli::WaRng& rng,
+                                      const stanli::SamplerRow& stats) {
+            writer(c, row, q, rng, stats);
           };
         try {
           stanli::ProgressObserver one_progress;

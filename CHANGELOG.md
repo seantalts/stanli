@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Full-output NUTS sampling now runs generated quantities on the live chain
+  RNG between saved transitions, matching CmdStan's stream ordering. Seeded
+  trajectories change for models with random generated quantities; numerical
+  differences between compilers can still produce different trajectories.
+- A generated-quantity domain error writes a NaN output row and continues
+  sampling, keeping any randomness consumed before the error. The C API now
+  follows the CLI's behavior. Parameter-only sampling and standalone
+  generated-quantity APIs keep their separate contracts.
+- The CLI formats output during sampling, with bounded temporary CSV files
+  for subsequent chains. `--timings` includes generated quantities and CSV
+  formatting in `sample_s`; `output_s` covers copying and the final flush.
+
 ## 0.17.0
 
 Retained loops now replay a recorded instruction stream. On ctsem, the model
