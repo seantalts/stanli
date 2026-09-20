@@ -1,5 +1,9 @@
 # ctsem solve-kernel results after PR392
 
+Follow-up: [remaining architecture results](2026-09-20-ctsem-remaining-architecture.md)
+record the later isolated QR and recording implementation. This report
+preserves the earlier direct-forward checkpoint and its rejected prototypes.
+
 The final patch removes unused reverse-tape construction from eligible active
 solve forwards while preserving their numerical algorithms. At 4,000 ctsem
 rows, warmed gradients fall from 501.4 to 473.6 ms. The median paired reduction
