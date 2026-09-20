@@ -9,6 +9,8 @@ struct RecordingProgram {
     Target,
     DataKernel,
     DataIndex,
+    DataBranchFresh,
+    DataBranch,
     Branch,
     ForEnter,
     ForNext,
@@ -225,6 +227,20 @@ void RecordingProgram::compile_data(LoopState& s) {
         instruction.kind = DataIndex;
     }
     ++kernels;
+  }
+  // Both instructions still execute in their original order. Keep the branch
+  // in the program because another jump may enter it directly; skip its
+  // dispatch only when arriving through this proven data-only producer.
+  // A separate initial kind tracks publication without overloading the target.
+  for (size_t i = 0; i + 1 < code.size(); ++i) {
+    auto& instruction = code[i];
+    const auto& branch = code[i + 1];
+    if (instruction.kind == DataKernel &&
+        (branch.kind == Branch || branch.kind == WhileTest) &&
+        p.body.ops[instruction.node->op].out == branch.node->condition) {
+      instruction.kind = DataBranchFresh;
+      instruction.jump = branch.jump;
+    }
   }
   if (s.diagnostics)
     emit_diagnostic("stanli_structured data_recording: kernels=" +

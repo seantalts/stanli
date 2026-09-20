@@ -206,9 +206,14 @@ void seal_frame(LoopState& s) {
 
   // Retain only versions still reachable through a binding or a memo cell.
   // Historical derivative identities are offsets, not these working handles.
-  std::vector<int64_t> live_ids;
-  std::vector<int64_t> remap(s.versions.size(), -1),
-      lengths(s.versions.size(), 0);
+  if (!tape.sealing) tape.sealing = std::make_unique<FrameSealScratch>();
+  auto& scratch = *tape.sealing;
+  auto& live_ids = scratch.live_ids;
+  auto& remap = scratch.remap;
+  auto& lengths = scratch.lengths;
+  live_ids.clear();
+  remap.assign(s.versions.size(), -1);
+  lengths.assign(s.versions.size(), 0);
   const auto live = [&](int64_t id, int64_t len) {
     if (id < 0) return;
     lengths[id] = std::max(lengths[id], len);
@@ -240,14 +245,15 @@ void seal_frame(LoopState& s) {
   }
   for (int64_t id : s.loop_version) live(id, 1);
   for (int64_t id : live_ids) {
-    if (s.owner[id] >= 0 && s.versions[id].adjoint == -1 &&
+    if (s.versions[id].owner >= 0 && s.versions[id].adjoint == -1 &&
         !s.frames->promotion_links.count(id)) {
       tape.promotion_links.emplace(id, tape.promotions.size());
       tape.promotions.push_back(-1);
     }
   }
 
-  std::vector<std::pair<const double*, int64_t>> ranges;
+  auto& ranges = scratch.ranges;
+  ranges.clear();
   collect_live_ranges(s, st, ranges);
   for (int64_t id : live_ids)
     if (lengths[id] && s.versions[id].value)
@@ -261,7 +267,8 @@ void seal_frame(LoopState& s) {
                    [&](const auto& r) { return !allocated.contains(r.first); }),
                ranges.end());
   std::sort(ranges.begin(), ranges.end());
-  ArenaSnapshot snapshot;
+  auto& snapshot = scratch.snapshot;
+  snapshot.ranges.clear();
   size_t total = 0;
   for (size_t i = 0; i < ranges.size();) {
     const double* base = ranges[i].first;
@@ -319,17 +326,14 @@ void seal_frame(LoopState& s) {
   s.target_refs.clear();
   for (auto& ptr : tape.outputs) ptr = relocate(ptr);
 
-  std::vector<Version> versions;
-  std::vector<int32_t> owners;
-  std::vector<uint8_t> constants;
+  auto& versions = scratch.versions;
+  versions.clear();
   decltype(s.constant_cells) cells;
   decltype(tape.promotion_links) promotions;
   for (int64_t id : live_ids) {
     auto version = s.versions[id];
     version.value = lengths[id] ? relocate(version.value) : nullptr;
     versions.push_back(version);
-    owners.push_back(s.owner[id]);
-    constants.push_back(s.version_const[id]);
     if (auto it = s.constant_cells.find(id); it != s.constant_cells.end())
       cells.emplace(remap[id], std::move(it->second));
     if (auto it = tape.promotion_links.find(id);
@@ -345,12 +349,8 @@ void seal_frame(LoopState& s) {
   rebind(s.node_version2);
   rebind(s.loop_version);
   s.versions.clear();
-  s.owner.clear();
-  s.version_const.clear();
   for (size_t i = 0; i < versions.size(); ++i) {
     s.versions.push_back(versions[i]);
-    s.owner.push_back(owners[i]);
-    s.version_const.push_back(constants[i]);
   }
   s.constant_cells = std::move(cells);
   tape.promotion_links = std::move(promotions);
@@ -358,7 +358,7 @@ void seal_frame(LoopState& s) {
   tape.frames.push_back(std::move(frame));
   s.arena.clear();
   s.records.clear();
-  s.building = std::make_unique<Stream>();
+  st.clear_frame_recording();
 }
 
 struct FrameExecution {
@@ -527,9 +527,8 @@ void finish_frames(LoopState& s, KernelCtx& ctx) {
   tape.ready = true;
   frame_outputs(s, ctx);
   s.building.reset();
+  tape.sealing.reset();
   s.versions.reset();
-  s.owner.reset();
-  s.version_const.reset();
   decltype(s.constant_cells){}.swap(s.constant_cells);
   s.arena = BlockArena{};
   if (s.diagnostics) {

@@ -5295,6 +5295,9 @@ static void data_recording_tests() {
               std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
           "data recording preserves values and gradients across guard changes");
       if (step == 0) {
+        check(reported_field(diagnostics, "data_branches=") ==
+                  (mode == 0 ? 1 : 0),
+              "data branches fuse only adjacent proven immutable producers");
         check(reported_field(diagnostics, "data_kernels=") ==
                   (mode == 0                ? 2
                    : mode == 1 || mode == 4 ? 1
@@ -5329,6 +5332,93 @@ static void data_recording_tests() {
     const auto retried = evaluate(candidate, -.5, 0);
     check(std::memcmp(&expected, &retried, sizeof(Evaluation)) == 0,
           "data recording retries after a partially evaluated block");
+  }
+  test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
+  test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
+}
+
+static void data_branch_entry_tests() {
+  for (int mode : {0, 1}) {
+    auto plan = std::make_shared<StructuredLoop>();
+    const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+    const int theta = fresh(), beta = fresh(), row = fresh();
+    const int table = plan->body.add_slot(5, false);
+    const int condition = fresh();
+    const int zero = scalar(*plan, 0), one = scalar(*plan, 1);
+    const int five = scalar(*plan, 5);
+    plan->imports = {{theta, 0, 0, true, false},
+                     {beta, 1, 0, true, false},
+                     {table, 2, 0, false, true}};
+    Node body;
+    if (mode == 0) {
+      const int choose = fresh(), minus_two = scalar(*plan, -2);
+      Node read = call(*plan, OP_INDEX_DYNAMIC, {table, row}, choose);
+      attach(*plan, read.op, single_spec(5));
+      // The then-arm jumps directly into the retained sibling Branch,
+      // both before the producer's first publication and on later trips.
+      body = sequence(
+          {std::move(read),
+           branch(choose, sequence({}),
+                  call(*plan, OP_ADD, {row, minus_two}, condition)),
+           branch(condition, target(theta), sequence({}))});
+    } else {
+      const int counter = fresh(), next = fresh(), skip = fresh();
+      const int three = scalar(*plan, 3);
+      Node skip_test = call(*plan, OP_COMPARE, {counter, one}, skip);
+      plan->body.ops[skip_test.op].variant = 4;
+      Node test = call(*plan, OP_COMPARE, {counter, three}, condition);
+      plan->body.ops[test.op].variant = 0;
+      Node skip_condition;
+      skip_condition.kind = Node::Continue;
+      // Continue in the condition block enters the retained WhileTest
+      // directly, reusing the true condition from counter == 0.
+      body = sequence(
+          {alias(counter, zero),
+           while_loop(
+               condition,
+               sequence({std::move(skip_test),
+                         branch(skip, skip_condition, sequence({})),
+                         std::move(test)}),
+               sequence({target(theta),
+                         call(*plan, OP_ADD, {counter, one}, next),
+                         alias(counter, next)}))});
+    }
+    plan->root = counted(one, five, row, std::move(body));
+    plan->has_target = true;
+    plan->prepare();
+    const auto graph = outer(plan, {1, 1}, {5});
+    test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+    Executor candidate = diagnosed_executor(graph), baseline(graph);
+    test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
+    Executor tree(graph);
+    test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
+    test_setenv("STANLI_STRUCTURED_COMPILED_RECORDING", "1");
+    for (int step = 0; step < 4; ++step) {
+      for (auto* ex : {&candidate, &baseline, &tree})
+        for (int i = 0; i < 5; ++i)
+          ex->value_ptr(2)[i] = (i + (step >= 2)) % 2 == 0;
+      const double theta_value = step % 2 == 0 ? .25 : -.5;
+      const auto expected = evaluate(tree, theta_value, 0);
+      const int count = mode == 1 ? 15 : step < 2 ? 2 : 5;
+      close(expected.value, count * theta_value,
+            "branch-entry fixture visits the expected targets");
+      close(expected.gradient[0], count,
+            "branch-entry fixture has the expected gradient");
+      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "0");
+      const auto flat = evaluate(baseline, theta_value, 0);
+      test_setenv("STANLI_STRUCTURED_DATA_RECORDING", "1");
+      stanli_test::StdoutCapture capture(stderr);
+      const auto actual = evaluate(candidate, theta_value, 0);
+      const auto diagnostics = capture.finish();
+      check(std::memcmp(&actual, &expected, sizeof(Evaluation)) == 0 &&
+                std::memcmp(&actual, &flat, sizeof(Evaluation)) == 0,
+            "fused data branches preserve independent control-flow entries");
+      if (step == 0)
+        check(reported_field(diagnostics, "data_branches=") ==
+                  (mode == 0 ? 1 : 2),
+              "branch-entry fixture fuses its Branch and WhileTest producers");
+    }
   }
   test_unsetenv("STANLI_STRUCTURED_COMPILED_RECORDING");
   test_unsetenv("STANLI_STRUCTURED_DATA_RECORDING");
@@ -5869,6 +5959,7 @@ int main() {
   frame_program_tests();
   compiled_recording_tests();
   data_recording_tests();
+  data_branch_entry_tests();
   conditional_data_recording_tests();
   mutable_data_recording_tests();
   prepared_index_tests();
