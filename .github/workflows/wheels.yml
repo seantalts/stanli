@@ -1,11 +1,11 @@
 # Build the platform wheels, and publish them to PyPI on a version tag.
 #
-# Pull requests build the representative manylinux target with Clang, compile
-# the runtime for wasm32, run the full runtime and corpus tests, and gate the
-# bounded Windows compiler cross-build. Shipped Linux and Windows builds retain
-# their established GCC toolchains. Every release target also builds after
-# merge, nightly, and on version tags; publishing is gated on the tag and all
-# of those builds.
+# Pull requests build the representative manylinux target with Clang, run
+# CTest and the recorded CmdStan oracle, and check installed Python/R packages
+# and the shared native/JavaScript compiler. Performance comparisons and the
+# extra platform builds run after merge, nightly, on demand, and on tags.
+# Shipped Linux and Windows builds retain their established GCC toolchains.
+# Publishing is gated on the tag and its platform builds.
 #
 # Not cibuildwheel: it exists to build one wheel per CPython version, and
 # stanli ships a ctypes-loaded shared library with no extension module, so
@@ -72,7 +72,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       heavy: ${{ steps.scope.outputs.heavy }}
-      vectorize: ${{ steps.scope.outputs.vectorize }}
     steps:
       - uses: actions/checkout@v4
       - name: Select the validation scope
@@ -82,34 +81,23 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           heavy=true
-          vectorize=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             git fetch --no-tags --depth=1 origin "$BASE_SHA"
             changed_files="$RUNNER_TEMP/stanli-changed-files"
             git diff --no-renames --name-only "$BASE_SHA" HEAD \
               > "$changed_files"
             heavy=false
-            vectorize=false
             while IFS= read -r path; do
               case "$path" in
-                README.md|TESTING.md|CHANGELOG.md|THIRD_PARTY_LICENSES.md|LICENSE|docs/*.md|web/index.html)
+                AGENTS.md|README.md|TESTING.md|CHANGELOG.md|THIRD_PARTY_LICENSES.md|LICENSE|docs/*.md|notes/**|web/index.html)
                   ;;
                 *)
                   heavy=true
                   ;;
               esac
-              # Gate the MIR vectorization A/B check on compiler/runtime/harness changes.
-              # It must run whenever anything that could affect lowering or the MIR
-              # output might have changed, to catch silent semantic drift.
-              case "$path" in
-                compiler/**|runtime/**|harnesses/vectorize_ab.py|tools/stanc_embed/**|tools/dev_setup.sh|CMakeLists.txt|deps/fetch.sh|.github/workflows/wheels.yml)
-                  vectorize=true
-                  ;;
-              esac
             done < "$changed_files"
           fi
           echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
-          echo "vectorize=$vectorize" | tee -a "$GITHUB_OUTPUT"
 
   # This is intentionally independent of the compiled runtime. In particular,
   # generated prose and the web index should not need a 30-minute C++ build to
@@ -125,8 +113,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: python3 -m pip install --disable-pip-version-check 'readme_renderer[md]'
+      - run: python3 -m pip install --disable-pip-version-check 'readme_renderer[md]' PyYAML
       - run: python3 tools/gen_docs.py --check
+      - name: Check PR validation routing
+        run: python3 tests/test_ci_policy.py
       - name: Check static packaging inputs
         run: test -s LICENSE && test -s THIRD_PARTY_LICENSES.md
       - name: Check development setup contracts
@@ -160,10 +150,10 @@ jobs:
           node --check "$inline"
           node --check web/index.mjs
 
-  # Any runtime file can regress this, so it runs unconditionally rather
-  # than behind the `changes` classification.
+  # Extra build configuration for downstream embedding; run after merge.
   no-stdio:
     name: runtime without stdio
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -595,12 +585,9 @@ jobs:
       # Semantic/reference parity gates the job; graph sizes, re-roll
       # dispositions, and preparation timings are published as measurements.
       #
-      # Gated on compiler/runtime/harness changes to avoid several minutes of
-      # overhead on every PR, especially docs-only ones. The check catches
-      # silent semantic drift from lowering and source-pass changes, so it
-      # must run on anything that could alter MIR or the compiled output; see
-      # changes.vectorize for paths. Pull requests run a bounded slice; pushes
-      # to main and scheduled runs cover every recorded model.
+      # The shipped configuration already runs against every recorded CmdStan
+      # reference above. Keep the broader pass-off diagnosis and comparative
+      # performance gate post-submit, including models without references.
       # Preparation uses the harness's standard 300-second budget, also used
       # by reference replay. Large teaching-model graphs exceed 30 seconds on
       # the release GCC runner. Numerical and gradient-ratio gates are unchanged;
@@ -608,8 +595,7 @@ jobs:
       - name: MIR vectorization A/B
         if: >-
           matrix.runtime == 'linux-x86_64' &&
-          (github.event_name != 'pull_request' ||
-           needs.changes.outputs.vectorize == 'true')
+          github.event_name != 'pull_request'
         timeout-minutes: 60
         shell: bash
         run: |
@@ -618,22 +604,6 @@ jobs:
           stanc_embed_artifact_matches \
             deps/stanc3/stanli-vectorize-probe \
             "$STANC3_SRC_SHA" stanc3-55
-          models=()
-          if [ "${{ github.event_name }}" = pull_request ]; then
-            models=(eight_schools_noncentered normal_mixture radon_pooled
-              soil_incubation arK low_dim_gauss_mix hmm_example
-              election88_full iohmm_reg log10earn_height losscurve_sislob
-              lsat_model pilots radon_county
-              gpcm_latent_reg_irt dogs GLM_Poisson_model Mth_model
-              logistic_regression_rhs lotka_volterra garch11 hierarchical_gp
-              gp_regr one_comp_mm_elim_abs bym2_offset_only kronecker_gp
-              multi_occupancy state_space_stochastic_level_stochastic_seasonal
-              mother multidim_var_param_ar45_mat23 reductions_allowed
-              s2_ar_cov s2_invgaussian s2_logistic_normal sw_mv_rescor
-              2pl_latent_reg_irt covid19imperial_v2 covid19imperial_v3
-              dogs_log grsm_latent_reg_irt s2_car s2_nlf surgical_model
-              sw_nonlinear sw_sratio ch14_m14_11)
-          fi
           baseline_args=()
           if [ -f /tmp/vectorize-baseline/graphs.jsonl ]; then
             baseline_args=(--baseline /tmp/vectorize-baseline)
@@ -643,15 +613,14 @@ jobs:
             --check build-rel/stanli_check \
             --bench build-rel/bench_grad --dump build-rel/dump_ops \
             --timeout 300 --gradient-timeout 20 --prep-samples 2 \
-            --output-dir build-rel/vectorize-ab "${models[@]}" \
+            --output-dir build-rel/vectorize-ab \
             "${baseline_args[@]}"
 
       - name: Publish MIR vectorization measurements
         if: >-
           always() &&
           matrix.runtime == 'linux-x86_64' &&
-          (github.event_name != 'pull_request' ||
-           needs.changes.outputs.vectorize == 'true')
+          github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: mir-vectorization-measurements
@@ -747,7 +716,7 @@ jobs:
             /tmp/stanli-mother.portable-mir
 
       - name: Measure portable MIR size and preparation cost
-        if: matrix.runtime == 'linux-x86_64'
+        if: matrix.runtime == 'linux-x86_64' && github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -788,7 +757,7 @@ jobs:
           } 2>&1 | tee /tmp/portable-mir-measurements.txt
 
       - uses: actions/upload-artifact@v4
-        if: matrix.runtime == 'linux-x86_64'
+        if: matrix.runtime == 'linux-x86_64' && github.event_name != 'pull_request'
         with:
           name: portable-mir-measurements
           path: /tmp/portable-mir-measurements.txt
@@ -812,7 +781,7 @@ jobs:
       # after PyPI resolves a new bridgestan release.
       - name: Install reference BridgeStan
         id: bs-pkg
-        if: matrix.plat == 'manylinux_2_28_x86_64'
+        if: matrix.plat == 'manylinux_2_28_x86_64' && github.event_name != 'pull_request'
         run: |
           /tmp/wheeltest/bin/pip install bridgestan
           version=$(/tmp/wheeltest/bin/python \
@@ -833,7 +802,7 @@ jobs:
       # a deps/math bump here would just evict a cache entry that was
       # never invalidated in the first place.
       - name: Restore BridgeStan sources and shared build objects
-        if: matrix.plat == 'manylinux_2_28_x86_64'
+        if: matrix.plat == 'manylinux_2_28_x86_64' && github.event_name != 'pull_request'
         uses: actions/cache@v4
         with:
           path: ~/.bridgestan
@@ -852,7 +821,7 @@ jobs:
       # same reason as the cache above.
       - name: Restore compiled BridgeStan conformance models
         id: bs-models
-        if: matrix.plat == 'manylinux_2_28_x86_64'
+        if: matrix.plat == 'manylinux_2_28_x86_64' && github.event_name != 'pull_request'
         uses: actions/cache@v4
         with:
           path: |
@@ -882,7 +851,7 @@ jobs:
       # dependency first, only on an exact hit -- a bare touch on a miss
       # would create empty files in place of the real build inputs.
       - name: Advance restored model timestamps past their sources
-        if: matrix.plat == 'manylinux_2_28_x86_64' && steps.bs-models.outputs.cache-hit == 'true'
+        if: matrix.plat == 'manylinux_2_28_x86_64' && github.event_name != 'pull_request' && steps.bs-models.outputs.cache-hit == 'true'
         run: |
           touch tests/fixtures/es.hpp tests/fixtures/simp.hpp \
             tests/fixtures/newtrans.hpp tests/fixtures/conj.hpp
@@ -892,7 +861,7 @@ jobs:
             tests/fixtures/newtrans_model.so tests/fixtures/conj_model.so
 
       - name: Conformance against reference BridgeStan
-        if: matrix.plat == 'manylinux_2_28_x86_64'
+        if: matrix.plat == 'manylinux_2_28_x86_64' && github.event_name != 'pull_request'
         run: |
           # bridgestan downloads its own C++ sources from github the first
           # time a model is compiled, inside the first conformance run. A
@@ -1034,6 +1003,7 @@ jobs:
           echo "STANLI_RUN=$PWD/r-oracle-cli/stanli_run" >> "$GITHUB_ENV"
 
       - name: Fetch the previous release and the legacy anchor
+        if: github.event_name != 'pull_request'
         run: |
           mkdir -p previous-release/runtime legacy-release
           previous=https://github.com/seantalts/stanli/releases/download/v0.14.1
@@ -1101,18 +1071,25 @@ jobs:
           R_LIBS_USER="$current_library${R_LIBS_USER:+:$R_LIBS_USER}" \
             Rscript ../tests/test_r_portable_compiler.R
 
-      - name: R ecosystem acceptance (no skips) and fresh-session timing
+      - name: R ecosystem acceptance (no skips)
         run: |
           export R_LIBS_USER="$PWD/r-current-library${R_LIBS_USER:+:$R_LIBS_USER}"
           Rscript tools/test_r_ecosystem.R
+
+      - name: Measure fresh-session time to first posterior
+        if: github.event_name != 'pull_request'
+        run: |
+          export R_LIBS_USER="$PWD/r-current-library${R_LIBS_USER:+:$R_LIBS_USER}"
           Rscript tools/bench_r_first_posterior.R r-first-posterior-linux.csv
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: r-first-posterior-linux
           path: r-first-posterior-linux.csv
 
       - name: Both cross-release compiler and runtime directions
+        if: github.event_name != 'pull_request'
         working-directory: r
         run: |
           current_library="$PWD/../r-current-library"
@@ -1217,10 +1194,7 @@ jobs:
   # Linux-to-Windows recipe. Their provenance is checked before packaging.
   stanc-windows:
     name: cross-build Windows compilers
-    needs: changes
-    if: >-
-      github.event_name != 'pull_request' ||
-      needs.changes.outputs.heavy == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     env:
       WINDOWS_DUNE_VERSION: 3.24.2
@@ -1339,11 +1313,11 @@ jobs:
           if-no-files-found: error
           path: windows-compilers/
 
-  # Unlike the multi-hour C++ build below, the compiler cross-build is bounded
-  # enough to gate pull requests. Run the PE executable on Windows and compare
-  # it byte for byte with the same JS producer that the Linux-native check uses.
+  # After merge, run the PE executable on Windows and compare it byte for byte
+  # with the same JS producer that the Linux-native PR check uses.
   windows-compiler:
     name: Windows compiler parity
+    if: github.event_name != 'pull_request'
     needs: [stanc-windows, browser-compiler]
     runs-on: windows-2022
     defaults:
@@ -1805,17 +1779,12 @@ jobs:
           ctest --test-dir build-tsan --output-on-failure
           -R '^(test_capi|test_pool|test_multichain)$'
 
-  # Pull requests compile the complete runtime for wasm32, catching portable
-  # ABI and type-width failures without paying for the final Emscripten link.
-  # Pushes and tags finish the module and publish the artifact used by the
-  # Pages and release jobs below. Those jobs run the end-to-end source compile
-  # and sampling smoke test with the matching browser compiler artifact.
+  # Build and link the browser runtime after merge, nightly, on demand, and
+  # on tags. Pages and release jobs consume the artifact and run end-to-end
+  # source compilation and sampling with the matching browser compiler.
   wasm:
     name: wasm (browser build)
-    needs: changes
-    if: >-
-      github.event_name != 'pull_request' ||
-      needs.changes.outputs.heavy == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1874,14 +1843,9 @@ jobs:
           emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            cmake --build build-wasm -j4 --target stanli
-          else
-            cmake --build build-wasm -j4
-          fi
+          cmake --build build-wasm -j4
           ccache -s
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'pull_request'
         with:
           name: wasm
           path: |
@@ -2133,12 +2097,13 @@ jobs:
           path: /tmp/portable-mir-browser-measurements.txt
 
   # Branch protection requires this exact check name. It follows the heavy
-  # manylinux build for source PRs and succeeds after the static checks for a
-  # docs-only PR; a failed or unexpectedly skipped heavy build still fails.
+  # native build, shared compiler, and installed R checks for source PRs.
+  # Docs-only PRs require static checks and the expected skips; unexpected
+  # failures, cancellations, missing scope, or skips must not pass this gate.
   pr-gate:
     name: manylinux_2_28_x86_64
     if: always() && github.event_name == 'pull_request'
-    needs: [changes, static_checks, build]
+    needs: [changes, static_checks, build, browser-compiler, r-tests]
     runs-on: ubuntu-latest
     steps:
       - name: Verify the required validation path
@@ -2147,14 +2112,20 @@ jobs:
           STATIC_RESULT: ${{ needs.static_checks.result }}
           HEAVY: ${{ needs.changes.outputs.heavy }}
           BUILD_RESULT: ${{ needs.build.result }}
+          COMPILER_RESULT: ${{ needs.browser-compiler.result }}
+          R_RESULT: ${{ needs.r-tests.result }}
         run: |
           test "$CHANGE_RESULT" = success
           test "$STATIC_RESULT" = success
           if [ "$HEAVY" = true ]; then
             test "$BUILD_RESULT" = success
+            test "$COMPILER_RESULT" = success
+            test "$R_RESULT" = success
           else
             test "$HEAVY" = false
             test "$BUILD_RESULT" = skipped
+            test "$COMPILER_RESULT" = skipped
+            test "$R_RESULT" = skipped
           fi
 
   # The public demo: web/ plus the runtime and compiler artifacts, deployed
