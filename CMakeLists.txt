@@ -1170,6 +1170,10 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tests/test_run_timings.py
                    $<TARGET_FILE:stanli_run>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_run_rng
+           COMMAND ${Python3_EXECUTABLE} tests/test_run_rng.py
+                   $<TARGET_FILE:stanli_run> $<TARGET_FILE:stanli_shared>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

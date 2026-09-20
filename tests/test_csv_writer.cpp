@@ -1,4 +1,4 @@
-#include "../tools/csv_writer.hpp"
+#include "../tools/chain_csv.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -6,6 +6,48 @@
 #include <limits>
 #include <random>
 #include <vector>
+
+bool check_spools() {
+  stanli::tooling::ChainCsv first(false), second(false), empty(false);
+  std::string expected;
+  char nan[32];
+  std::snprintf(nan, sizeof(nan), "%.17g",
+                std::numeric_limits<double>::quiet_NaN());
+  // Failed rows before column discovery, with and without sampler stats.
+  first.writer().value(42);
+  first.writer().end_row();
+  expected = "42," + std::string(nan) + "," + nan + "\n";
+  for (int i = 0; i < 20000; ++i) {
+    first.writer().value(i);
+    first.writer().value(-i);
+    first.writer().end_row();
+    expected += std::to_string(i) + "," + std::to_string(-i) + "\n";
+  }
+  second.writer().end_row();
+  expected += std::string(nan) + "," + nan + "\n";
+  second.writer().value(123);
+  second.writer().value(456);
+  second.writer().end_row();
+  expected += "123,456\n";
+  first.finish();
+  second.finish();
+  empty.finish();
+  std::FILE* file = std::tmpfile();
+  if (!file) return false;
+  first.copy_to(file, 1, 2);
+  empty.copy_to(file, 0, 2);
+  second.copy_to(file, 1, 2);
+  std::rewind(file);
+  std::string actual(expected.size(), '\0');
+  const size_t n = std::fread(actual.data(), 1, actual.size(), file);
+  const bool pass =
+      n == expected.size() && actual == expected && std::fgetc(file) == EOF;
+  std::fclose(file);
+  if (!pass)
+    std::fprintf(stderr,
+                 "chain CSV ordering or rejected-prefix padding failed\n");
+  return pass;
+}
 
 int main() {
   using Limits = std::numeric_limits<double>;
@@ -69,5 +111,5 @@ int main() {
                  "expected %.80s\n",
                  i, actual.c_str() + i, expected.c_str() + i);
   }
-  return pass ? 0 : 1;
+  return pass && check_spools() ? 0 : 1;
 }

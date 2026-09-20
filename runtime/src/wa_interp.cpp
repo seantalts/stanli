@@ -159,6 +159,14 @@ WaInterp::WaInterp(std::shared_ptr<const mir::Program> prog,
 
 std::vector<double> WaInterp::eval(
     const std::map<std::string, DataMap::Entry>& params, WaRng& rng) {
+  if (!have_cols_) {
+    // A failed discovery may have emitted a prefix. Start the next attempt
+    // afresh; otherwise retries duplicate columns before their first success.
+    cols_.clear();
+    n_tp_start_ = n_gq_start_ = 0;
+    saw_tp_ = saw_gq_ = false;
+    last_written_.clear();
+  }
   std::vector<double> row;
   MirInterp<double>* cur = nullptr;
   MirHooks h;

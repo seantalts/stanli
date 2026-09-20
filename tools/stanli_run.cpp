@@ -33,7 +33,7 @@
 #include <algorithm>
 #include <stanli/wa_interp.hpp>
 
-#include "csv_writer.hpp"
+#include "chain_csv.hpp"
 #include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
 
@@ -202,160 +202,203 @@ int main(int argc, char** argv) {
           executor->set_reduce_context(reduce_teams.back().get());
         }
     }
+    // Discover interpreted columns with a scratch stream, never the sampler's
+    // RNG. Once discovered, WaInterp evaluation has no shared mutable state.
+    auto wi = cm.write_array ? cm.write_array->interp : nullptr;
+    const bool have_wa =
+        !wi && cm.write_array && !cm.write_array->columns.empty();
+    const std::string note = stanli::interpreter_warning(cm);
+    if (!note.empty()) std::fprintf(stderr, "%s\n", note.c_str());
+    bool columns_known = !wi;
+    if (wi) {
+      for (int variant = 0; variant < 3 && !columns_known; ++variant) {
+        for (int64_t i = 0; i < ex.n_params(); ++i)
+          ex.params_data()[i] = stanli::wa_probe_point(i, variant);
+        try {
+          ex.run_forward_only();
+          stanli::WaRng probe_rng(1);
+          wi->eval(cm.constrained_env(ex), probe_rng);
+          columns_known = true;
+        } catch (const std::exception&) {
+          // The real chain may reach support where all probe points fail.
+          // Such chains discover their columns independently on their first
+          // successful row; failed prefixes stay in bounded CSV spools.
+        }
+      }
+    }
+    std::vector<std::string> col_names =
+        columns_known ? stanli::CompiledModel::csv_names(
+                            wi ? wi->columns()
+                               : have_wa ? cm.write_array->columns : cm.views)
+                      : std::vector<std::string>{};
+    const auto print_header = [&] {
+      std::string header;
+      if (want_stats)
+        header = "lp__,accept_stat__,stepsize__,treedepth__,n_leapfrog__,"
+                 "divergent__,energy__";
+      for (const auto& name : col_names) {
+        if (!header.empty()) header += ',';
+        header += name;
+      }
+      std::printf("%s\n", header.c_str());
+    };
+    if (columns_known) print_header();
+
+    std::vector<std::unique_ptr<stanli::Executor>> wa_execs;
+    if (have_wa) {
+      wa_execs.push_back(std::make_unique<stanli::Executor>(
+          std::move(cm.write_array->graph)));
+      cm.write_array->bind(*wa_execs[0]);
+      for (int c = 1; c < n_chains; ++c)
+        wa_execs.push_back(std::make_unique<stanli::Executor>(*wa_execs[0]));
+    }
+    struct ChainOutput {
+      std::shared_ptr<stanli::WaInterp> interp;
+      std::unique_ptr<stanli::tooling::ChainCsv> csv;
+      std::vector<double> row;
+      std::vector<std::string> names;
+      std::vector<double> late_summary;
+      bool known = false;
+      size_t pending_errors = 0;
+      size_t errors = 0;
+      int64_t stored = 0;
+      std::string first_error;
+    };
+    const int64_t thin = std::max(1, cfg.thin);
+    const int64_t expected = ((int64_t)cfg.samples + thin - 1) / thin
+                            + (cfg.save_warmup
+                                   ? ((int64_t)cfg.warmup + thin - 1) / thin
+                                   : 0);
+    std::vector<double> summary_draws;
+    if (want_summary && columns_known)
+      summary_draws.resize((size_t)n_chains * expected * col_names.size());
+    std::vector<ChainOutput> output((size_t)n_chains);
+    for (int c = 0; c < n_chains; ++c) {
+      auto& o = output[(size_t)c];
+      o.known = columns_known;
+      o.names = col_names;
+      o.interp = wi && !columns_known
+                     ? std::make_shared<stanli::WaInterp>(*wi)
+                     : wi;
+      o.csv = std::make_unique<stanli::tooling::ChainCsv>(columns_known && c == 0);
+    }
+    const stanli::StoredDrawWriter write =
+        [&](int c, int64_t index, const double* q, stanli::WaRng& rng,
+            const stanli::SamplerRow& stats) {
+          auto& o = output[(size_t)c];
+          ++o.stored;
+          stanli::Executor& model_ex = *execs[(size_t)c];
+          bool stream_arena = false;
+          try {
+            if (o.interp) {
+              std::copy_n(q, model_ex.n_params(), model_ex.params_data());
+              model_ex.run_forward_only();
+              o.row = o.interp->eval(cm.constrained_env(model_ex), rng);
+              if (!o.known) {
+                o.names = stanli::CompiledModel::csv_names(o.interp->columns());
+                o.known = true;
+                if (want_summary)
+                  o.late_summary.assign(o.pending_errors * o.names.size(),
+                                        std::numeric_limits<double>::quiet_NaN());
+              }
+            } else {
+              stanli::Executor& out = have_wa ? *wa_execs[(size_t)c] : model_ex;
+              std::copy_n(q, out.n_params(), out.params_data());
+              out.run_forward_only(stanli::EvalState{&rng});
+              // CSV can read a completed graph's values directly. Materialize
+              // a row only when a summary also needs to retain those values.
+              stream_arena = !want_summary;
+              if (!stream_arena) {
+                o.row.clear();
+                const auto& cols = have_wa ? cm.write_array->columns : cm.views;
+                for (const auto& v : cols) {
+                  const double* p = std::as_const(out).value_ptr(v.slot);
+                  for (int64_t i = 0; i < v.len; ++i)
+                    o.row.push_back(p[v.storage_index(i)]);
+                }
+              }
+            }
+            if (!stream_arena && o.row.size() != o.names.size())
+              throw std::domain_error("write_array changed its output width");
+          } catch (const std::domain_error& e) {
+            if (o.errors++ == 0) o.first_error = e.what();
+            if (!o.known) ++o.pending_errors;
+            o.row.assign(o.names.size(), std::numeric_limits<double>::quiet_NaN());
+          }
+          auto& csv = o.csv->writer();
+          if (want_stats)
+            for (double value : stats) csv.value(value);
+          if (stream_arena) {
+            const stanli::Executor& out = have_wa ? *wa_execs[(size_t)c] : model_ex;
+            const auto& cols = have_wa ? cm.write_array->columns : cm.views;
+            for (const auto& v : cols) {
+              const double* p = out.value_ptr(v.slot);
+              for (int64_t i = 0; i < v.len; ++i)
+                csv.value(p[v.storage_index(i)]);
+            }
+          } else {
+            for (double value : o.row) csv.value(value);
+          }
+          csv.end_row();
+          if (want_summary && o.known) {
+            if (columns_known)
+              std::copy(o.row.begin(), o.row.end(),
+                        summary_draws.begin() +
+                            ((int64_t)c * expected + index) * col_names.size());
+            else
+              o.late_summary.insert(o.late_summary.end(), o.row.begin(), o.row.end());
+          }
+        };
+
     const auto prepared = want_timings ? Clock::now() : Clock::time_point{};
-    auto chain_res = stanli::run_nuts_chains(execs, cfg, n_threads);
+    cfg.retain_draws = false;  // the callback already writes/retains all output
+    auto chain_res = stanli::run_nuts_chains(execs, cfg, n_threads, {}, {}, 1, {}, write);
     const auto sampled = want_timings ? Clock::now() : Clock::time_point{};
-    for (size_t c = 0; c < chain_res.size(); ++c)
+    for (size_t c = 0; c < chain_res.size(); ++c) {
+      output[c].csv->finish();
       if (!chain_res[c].error.empty())
         throw std::runtime_error("chain " + std::to_string(cfg.chain_id + c) +
                                  ": " + chain_res[c].error);
-
-    // The CSV concatenates the chains in order, which is what the
-    // single-chain readers already expect; --summary is where the chain
-    // structure is actually used.
-    std::vector<std::vector<double>> draws;
-    stanli::SamplerStats stats;
-    for (const auto& r : chain_res) {
-      draws.insert(draws.end(), r.draws.begin(), r.draws.end());
-      stats.rows.insert(stats.rows.end(), r.stats.rows.begin(),
-                        r.stats.rows.end());
     }
     const int64_t per_chain =
-        chain_res.empty() ? 0 : (int64_t)chain_res[0].draws.size();
-
-    // Draws are written through the write_array graph when there is one --
-    // that is what supplies transformed parameters and generated quantities,
-    // and it fixes the column order to CmdStan's. When the graph could not
-    // express the whole section, the per-draw interpreter produces every
-    // column instead (slower, but generated quantities run once per stored
-    // draw). Without either we still report the constrained parameters the
-    // log_prob graph already computes.
-    stanli::WaInterp* wi = cm.write_array && cm.write_array->interp
-                               ? cm.write_array->interp.get()
-                               : nullptr;
-    const bool have_wa =
-        !wi && cm.write_array && !cm.write_array->columns.empty();
-    {
-      const std::string note = stanli::interpreter_warning(cm);
-      if (!note.empty()) std::fprintf(stderr, "%s\n", note.c_str());
-    }
-    std::unique_ptr<stanli::Executor> wex;
-    if (have_wa) {
-      wex =
-          std::make_unique<stanli::Executor>(std::move(cm.write_array->graph));
-      cm.write_array->bind(*wex);
-    }
-
-    // Interpreted rows are computed up front: the header needs the first
-    // evaluation's column discovery. Each chain gets the same
-    // create_rng(seed, chain_id) stream identity as its sampler; this is a
-    // fresh write-array stream, not the sampler's already-advanced state.
-    const auto constrained_by_name = [&](const std::vector<double>& q) {
-      for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i];
-      ex.run_forward_only();
-      return cm.constrained_env(ex);
-    };
-    std::vector<std::vector<double>> irows;
-    stanli::WaRng wa_rng(cfg.seed, (unsigned int)cfg.chain_id);
-    if (wi) {
-      irows.reserve(draws.size());
-      // A draw whose generated quantities cannot be evaluated is written
-      // as NaNs and the run continues, which is what CmdStan does
-      // (mcmc_writer.hpp catches domain_error, logs it, and pads the row).
-      // Aborting instead threw away every draw of an otherwise good run:
-      // one lognormal_rng on a marginal ODE solution took out the whole
-      // CSV.
-      size_t n_bad = 0;
-      std::string first_bad;
-      for (size_t d = 0; d < draws.size(); ++d) {
-        if (per_chain > 0 && d % (size_t)per_chain == 0)
-          wa_rng.seed(cfg.seed,
-                      (unsigned int)(cfg.chain_id + d / (size_t)per_chain));
-        const auto& q = draws[d];
-        try {
-          irows.push_back(wi->eval(constrained_by_name(q), wa_rng));
-        } catch (const std::domain_error& e) {
-          if (n_bad++ == 0) first_bad = e.what();
-          irows.emplace_back();  // widened to nan below, once cols is known
+        output.empty() ? 0 : output[0].stored;
+    if (!columns_known) {
+      bool discovered = false;
+      for (const auto& o : output)
+        if (o.known) {
+          col_names = o.names;
+          discovered = true;
+          break;
         }
-      }
-      if (n_bad)
+      if (!discovered && per_chain > 0)
+        throw std::runtime_error(
+            "write_array column discovery failed on every probe and stored draw");
+      print_header();
+    }
+    stanli::SamplerStats stats;
+    for (size_t c = 0; c < output.size(); ++c) {
+      auto& o = output[c];
+      if (o.known && o.names != col_names)
+        throw std::runtime_error("write_array column names differ between chains");
+      o.csv->copy_to(stdout, o.pending_errors, col_names.size());
+      if (o.errors)
         std::fprintf(stderr,
-                     "stanli_run: %zu of %zu draws could not produce "
+                     "stanli_run: chain %zu: %zu of %zu draws could not produce "
                      "generated quantities, written as nan: %s\n",
-                     n_bad, draws.size(), first_bad.c_str());
-    }
-
-    const auto& cols =
-        wi ? wi->columns() : (have_wa ? cm.write_array->columns : cm.views);
-    stanli::Executor& out = have_wa ? *wex : ex;
-    if (wi) {
-      const size_t w = stanli::CompiledModel::csv_names(cols).size();
-      for (auto& r : irows)
-        if (r.size() != w)
-          r.assign(w, std::numeric_limits<double>::quiet_NaN());
-    }
-
-    std::string hdr;
-    if (want_stats)
-      hdr =
-          "lp__,accept_stat__,stepsize__,treedepth__,n_leapfrog__,"
-          "divergent__,energy__";
-    for (const auto& n : stanli::CompiledModel::csv_names(cols)) {
-      if (!hdr.empty()) hdr += ',';
-      hdr += n;
-    }
-    std::printf("%s\n", hdr.c_str());
-    const std::vector<std::string> col_names =
-        stanli::CompiledModel::csv_names(cols);
-    // Only materialized for --summary: on the largest corpus models the
-    // full draw matrix is hundreds of megabytes, and streaming is why the
-    // default path can print them at all.
-    std::vector<double> summary_draws;
-    if (want_summary) summary_draws.reserve(draws.size() * col_names.size());
-
-    std::vector<double> row;
-    stanli::tooling::CsvWriter csv(stdout);
-    size_t graph_bad = 0;
-    std::string first_graph_bad;
-    for (size_t d = 0; d < draws.size(); ++d) {
-      row.clear();
-      if (wi) {
-        row = irows[d];
-      } else {
-        if (per_chain > 0 && d % (size_t)per_chain == 0)
-          wa_rng.seed(cfg.seed,
-                      (unsigned int)(cfg.chain_id + d / (size_t)per_chain));
-        const auto& q = draws[d];
-        for (size_t i = 0; i < q.size(); ++i) out.params_data()[i] = q[i];
-        try {
-          out.run_forward_only(stanli::EvalState{&wa_rng});
-          for (const auto& v : cols) {
-            const double* p = out.value_ptr(v.slot);
-            for (int64_t i = 0; i < v.len; ++i)
-              row.push_back(p[v.storage_index(i)]);
-          }
-        } catch (const std::domain_error& e) {
-          if (!have_wa) throw;
-          if (graph_bad++ == 0) first_graph_bad = e.what();
-          row.assign(col_names.size(),
-                     std::numeric_limits<double>::quiet_NaN());
+                     cfg.chain_id + c, o.errors, (size_t)o.stored,
+                     o.first_error.c_str());
+      if (want_summary) {
+        stats.rows.insert(stats.rows.end(), chain_res[c].stats.rows.begin(),
+                          chain_res[c].stats.rows.end());
+        if (!columns_known) {
+          if (!o.known)
+            o.late_summary.assign(o.stored * col_names.size(),
+                                  std::numeric_limits<double>::quiet_NaN());
+          summary_draws.insert(summary_draws.end(), o.late_summary.begin(),
+                               o.late_summary.end());
         }
       }
-      if (want_stats) {
-        for (double v : stats.rows[d]) csv.value(v);
-      }
-      for (double v : row) csv.value(v);
-      csv.end_row();
-      if (want_summary)
-        summary_draws.insert(summary_draws.end(), row.begin(), row.end());
     }
-    csv.flush();
-    if (graph_bad)
-      std::fprintf(stderr,
-                   "stanli_run: %zu of %zu draws could not produce generated "
-                   "quantities, written as nan: %s\n",
-                   graph_bad, draws.size(), first_graph_bad.c_str());
 
     if (want_summary && per_chain > 0) {
       // The draws were concatenated chain by chain above, which is
@@ -381,7 +424,8 @@ int main(int argc, char** argv) {
     const std::string prof = ex.profile_report();
     if (!prof.empty()) std::fprintf(stderr, "%s", prof.c_str());
     if (want_timings) {
-      // Include CSV flushing in output time; no clocks in the gradient loop.
+      // Generated quantities and CSV formatting now run during sampling.
+      // Output time covers ordered spool copying and the final flush.
       std::fflush(stdout);
       const auto written = Clock::now();
       const auto seconds = [](auto duration) {

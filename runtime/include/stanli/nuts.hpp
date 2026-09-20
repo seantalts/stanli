@@ -13,6 +13,9 @@
 
 namespace stanli {
 
+class WaRng;
+using SamplerRow = std::array<double, 7>;
+
 struct NutsConfig {
   uint32_t seed = 0;
   // CmdStan's chain id, which is what makes chain c of a run a different
@@ -52,10 +55,16 @@ struct NutsConfig {
   // `stop` and ends the run.
   std::atomic<bool>* stop = nullptr;
   std::function<bool()> poll;
+  // Streaming consumers can omit the returned unconstrained draw matrix.
+  // Diagnostics and on_stored still receive every kept transition.
+  bool retain_draws = true;
   // Called on the chain's own thread right after a draw is stored, with the
-  // zero-based stored row index and the unconstrained point. A throw fails
-  // the chain.
-  std::function<void(int64_t row, const double* q)> on_stored;
+  // zero-based stored row index, unconstrained point, live chain RNG and
+  // sampler diagnostics. Generated quantities advance this same RNG before
+  // the next transition, as in CmdStan. A throw fails the chain.
+  std::function<void(int64_t row, const double* q, WaRng& rng,
+                     const SamplerRow& stats)>
+      on_stored;
 };
 
 // One row per stored draw, in CmdStan's column order:
@@ -66,7 +75,7 @@ struct NutsConfig {
 // max tree depth, a wrong adaptation target) that pointwise gradient
 // verification is structurally blind to.
 struct SamplerStats {
-  std::vector<std::array<double, 7>> rows;
+  std::vector<SamplerRow> rows;
 };
 
 // Per-chain information that belongs to the run rather than to one stored
@@ -121,7 +130,8 @@ using ChainProgressObserver =
 
 // Called on the chain's OWN thread as each draw is stored, for every chain.
 using StoredDrawWriter =
-    std::function<void(int chain, int64_t row, const double* q)>;
+    std::function<void(int chain, int64_t row, const double* q, WaRng& rng,
+                       const SamplerRow& stats)>;
 
 // CmdStan-style refresh selection. `i` is zero-based within the phase. The
 // first transition, every `refresh`-th transition within the phase, and the
