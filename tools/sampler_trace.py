@@ -11,12 +11,13 @@ every gradient still verified.
 
 This is the oracle for that class. Same model, same data, same seed,
 same warmup and sample counts; compare the distributions of the sampler
-columns CmdStan writes. Compiler numerics and the separate RNG stream used
-for Stanli's random generated quantities can split trajectories, so this
-comparison is distributional: total leapfrogs, mean and max tree depth,
-adapted stepsize, divergence rate, and the lp__ distribution. The C++
+columns CmdStan writes. RNG scheduling matches, but compiler numerics can
+still split trajectories, so this comparison is distributional: total
+leapfrogs, mean and max tree depth, adapted stepsize, divergence rate,
+and the lp__ distribution. The C++
 test_sampler_parity checks driver configuration bitwise against Stan's
-service with identical model numerics and no random generated quantities.
+service with identical model numerics, including random generated
+quantities, thinning, saved warmup, and generated-quantity error continuation.
 
 Usage:
   tools/sampler_trace.py CMDSTAN_DIR PDB_DIR model [model ...]

@@ -70,8 +70,7 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   constexpr double initial_stepsize = 1.0;
   sampler.set_nominal_stepsize(initial_stepsize);
   sampler.set_stepsize_jitter(0.0);
-  sampler.get_stepsize_adaptation().set_mu(
-      std::log(10.0 * initial_stepsize));
+  sampler.get_stepsize_adaptation().set_mu(std::log(10.0 * initial_stepsize));
   sampler.get_stepsize_adaptation().set_delta(cfg.delta);
   sampler.set_max_depth(cfg.max_depth);
   sampler.set_window_params(cfg.warmup, 75, 50, 25, logger);
@@ -100,7 +99,8 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
     // A report covers every post-warmup transition even when thinning drops
     // the row. Fetch the sampler parameters once when either consumer needs
     // them; this is observational and does not touch the sampler RNG.
-    const bool inspect = (keep && (stats || cfg.on_stored)) || (!warmup && report);
+    const bool inspect =
+        (keep && (stats || cfg.on_stored)) || (!warmup && report);
     if (inspect) {
       sp.clear();
       sampler.get_sampler_params(sp);
@@ -110,13 +110,15 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
       if (stats || cfg.on_stored) {
         // get_sampler_params yields stepsize__, treedepth__, n_leapfrog__,
         // divergent__, energy__ in that order (stan::mcmc::base_nuts).
-        const SamplerRow row{
-            s.log_prob(), s.accept_stat(), sp.size() > 0 ? sp[0] : 0.0,
-            sp.size() > 1 ? sp[1] : 0.0, sp.size() > 2 ? sp[2] : 0.0,
-            sp.size() > 3 ? sp[3] : 0.0, sp.size() > 4 ? sp[4] : 0.0};
+        const SamplerRow row{s.log_prob(),
+                             s.accept_stat(),
+                             sp.size() > 0 ? sp[0] : 0.0,
+                             sp.size() > 1 ? sp[1] : 0.0,
+                             sp.size() > 2 ? sp[2] : 0.0,
+                             sp.size() > 3 ? sp[3] : 0.0,
+                             sp.size() > 4 ? sp[4] : 0.0};
         if (stats) stats->rows.push_back(row);
-        if (cfg.on_stored)
-          cfg.on_stored(stored, qd.data(), chain_rng, row);
+        if (cfg.on_stored) cfg.on_stored(stored, qd.data(), chain_rng, row);
       }
       ++stored;
     }

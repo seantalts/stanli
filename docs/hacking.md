@@ -490,11 +490,13 @@ on the requested step size before the step-size search.
 draw and diagnostic bitwise with Stan's actual sampling service, using
 the same executor for numerical evaluation in both drivers. It covers
 short and metric-adapting warmup, thinning, saved warmup, different chain
-IDs and zero initialization. This isolates configuration from compiler
-numerics. Cross-compiler traces can still split after tiny numerical
-differences. Random generated quantities also remain a stream-scheduling
-gap: CmdStan evaluates them on the sampler's RNG between saved draws;
-Stanli's output drivers use separate RNG streams.
+IDs, zero initialization, random generated quantities and continuation
+after generated-quantity domain errors. The CLI and full-output C API
+evaluate generated quantities on the sampler's RNG between saved draws,
+matching CmdStan's stream schedule. Parameter-only APIs skip generated
+quantities and can therefore follow different trajectories. This isolates
+configuration from compiler numerics. Cross-compiler traces can still
+split after tiny numerical differences.
 
 Configuration bugs are invisible to every gradient test: the gradient
 can be perfect at every point while the chain visits different points.

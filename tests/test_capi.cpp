@@ -740,7 +740,7 @@ void expect_interruptible_sampling() {
 // Full-output sampling consumes the live chain RNG. Only RNG-free outputs
 // agree with a parameter-only run followed by standalone generated quantities.
 void expect_in_worker_write_array_on(const char* label, stanli_model* model,
-                                    bool random = false) {
+                                     bool random = false) {
   stanli_sample_opts opts;
   stanli_sample_opts_init(&opts);
   opts.seed = 7;
@@ -845,8 +845,9 @@ void expect_in_worker_write_array() {
     stanli_model_free(interp);
   }
 
-  stanli_model* random = stanli_model_new(
-      slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(), "{}", err, sizeof err);
+  stanli_model* random =
+      stanli_model_new(slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(),
+                       "{}", err, sizeof err);
   expect_true("random compiled write_array model builds", random != nullptr);
   if (random) {
     expect_in_worker_write_array_on("random graph", random, true);

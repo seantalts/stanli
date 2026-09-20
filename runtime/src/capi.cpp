@@ -672,7 +672,7 @@ int stanli_sample_multi_write_array(
     stanli::StoredDrawWriter writer;
     if (values != nullptr)
       writer = [&](int c, int64_t row, const double* q, stanli::WaRng& rng,
-                     const stanli::SamplerRow&) {
+                   const stanli::SamplerRow&) {
         if (row >= n_stored) return;
         double* out = values + ((int64_t)c * n_stored + row) * width;
         stanli::Executor& main_ex = *execs[(size_t)c];
@@ -739,8 +739,8 @@ int stanli_sample_multi_write_array(
         cc.poll = poll_fn;
         if (writer)
           cc.on_stored = [&writer, c](int64_t row, const double* q,
-                                       stanli::WaRng& rng,
-                                       const stanli::SamplerRow& stats) {
+                                      stanli::WaRng& rng,
+                                      const stanli::SamplerRow& stats) {
             writer(c, row, q, rng, stats);
           };
         try {
