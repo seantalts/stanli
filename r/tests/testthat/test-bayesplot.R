@@ -50,16 +50,24 @@ test_that("bayesplot tables match CmdStanMCMC and posterior draw indices", {
                setNames(s$ess_bulk[s$variable == "mu"] / 4000, "mu"))
   expect_error(bayesplot::rhat(fit, pars = "unknown"), "unknown variable")
 
-  # All tutorial acceptance calls must construct plots without warnings.
+  # Plot rendering needs at least two points in each divergence group.
+  # A real seeded trajectory can have exactly one divergence on a platform,
+  # which legitimately warns in ggplot's density estimate. Keep the sampled
+  # diagnostic parity assertions above, but fix the plot-only flags so both
+  # groups are exercised and the no-warning check is independent of sampling.
+  plot_np <- np
+  divergent <- plot_np$Parameter == "divergent__"
+  plot_np$Value[divergent] <- as.integer(
+    plot_np$Chain[divergent] == 1L & plot_np$Iteration[divergent] <= 2L)
   expect_warning(plots <- list(
-    bayesplot::mcmc_nuts_divergence(np, lp),
-    bayesplot::mcmc_nuts_energy(np),
-    bayesplot::mcmc_nuts_acceptance(np, lp),
-    bayesplot::mcmc_nuts_treedepth(np, lp),
-    bayesplot::mcmc_parcoord(as_draws_array(fit), np = np),
+    bayesplot::mcmc_nuts_divergence(plot_np, lp),
+    bayesplot::mcmc_nuts_energy(plot_np),
+    bayesplot::mcmc_nuts_acceptance(plot_np, lp),
+    bayesplot::mcmc_nuts_treedepth(plot_np, lp),
+    bayesplot::mcmc_parcoord(as_draws_array(fit), np = plot_np),
     bayesplot::mcmc_rhat(bayesplot::rhat(fit)),
     bayesplot::mcmc_neff(bayesplot::neff_ratio(fit)),
-    bayesplot::mcmc_trace(as_draws_array(fit), pars = "mu", np = np)
+    bayesplot::mcmc_trace(as_draws_array(fit), pars = "mu", np = plot_np)
   ), NA)
   # These three upstream functions return composite grids, including for
   # CmdStanMCMC. The remaining acceptance calls return ggplot objects.

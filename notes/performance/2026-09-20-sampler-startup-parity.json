@@ -1,0 +1,93 @@
+{
+  "base": "c260534bed071775fc703ce765a096273b21dee7",
+  "protocol": "One warmup transition, saved; zero post-warmup transitions; depth 1; seed 1; chain 1; N=4000. Startup diagnostic, not an inference benchmark.",
+  "compared_columns": 7946,
+  "total_columns": 8736,
+  "bitwise_numeric_equal_columns": 1493,
+  "max_scaled_error": 1.108464985173096e-11,
+  "worst_column": "pop_asymDIFFUSIONcov.1.1",
+  "tolerance": 1e-09,
+  "passes": true,
+  "diagnostics": {
+    "stanli": {
+      "lp__": -167980.20995970254,
+      "accept_stat__": 1.0,
+      "stepsize__": 0.0078125,
+      "treedepth__": 1.0,
+      "n_leapfrog__": 1.0,
+      "divergent__": 0.0,
+      "energy__": 180700.94518516652
+    },
+    "cmdstan": {
+      "lp__": -167980.20995970268,
+      "accept_stat__": 1.0,
+      "stepsize__": 0.0078125,
+      "treedepth__": 1.0,
+      "n_leapfrog__": 1.0,
+      "divergent__": 0.0,
+      "energy__": 180700.94518516713
+    }
+  },
+  "commands": {
+    "stanli": {
+      "command": [
+        "/Users/xitrium/.codex/worktrees/37de58da-630b-4c00-b5ad-33da13a92eb3/stanrt/build-rel/stanli_run",
+        "/Users/xitrium/.codex/worktrees/37de58da-630b-4c00-b5ad-33da13a92eb3/stanrt/.cache/ctsem-e2e-20260920/inputs/ctsm.stan",
+        "/Users/xitrium/.codex/worktrees/37de58da-630b-4c00-b5ad-33da13a92eb3/stanrt/.cache/ctsem-e2e-20260920/inputs/ctsem-4000.json",
+        "--seed",
+        "1",
+        "--warmup",
+        "1",
+        "--samples",
+        "0",
+        "--max-depth",
+        "1",
+        "--delta",
+        "0.8",
+        "--init-radius",
+        "2",
+        "--chains",
+        "1",
+        "--num-threads",
+        "1",
+        "--sampler-stats",
+        "--timings",
+        "--save-warmup"
+      ],
+      "binary_sha256": "ede77e2a2e7130c2fa6f9a9b42c5dae6df10b1ae56f178ce1816291a76714a55",
+      "returncode": 0
+    },
+    "cmdstan": {
+      "command": [
+        "/Users/xitrium/.codex/worktrees/37de58da-630b-4c00-b5ad-33da13a92eb3/stanrt/.cache/ctsem-e2e-20260920/inputs/ctsm",
+        "sample",
+        "num_warmup=1",
+        "num_samples=0",
+        "save_warmup=1",
+        "thin=1",
+        "adapt",
+        "engaged=1",
+        "delta=0.8",
+        "algorithm=hmc",
+        "engine=nuts",
+        "max_depth=1",
+        "metric=diag_e",
+        "stepsize=1",
+        "stepsize_jitter=0",
+        "data",
+        "file=/Users/xitrium/.codex/worktrees/37de58da-630b-4c00-b5ad-33da13a92eb3/stanrt/.cache/ctsem-e2e-20260920/inputs/ctsem-4000.json",
+        "init=2",
+        "id=1",
+        "random",
+        "seed=1",
+        "output",
+        "file=/Users/xitrium/.codex/worktrees/37de58da-630b-4c00-b5ad-33da13a92eb3/stanrt/.cache/nuts-startup-parity-20260920/cmdstan.csv",
+        "sig_figs=17",
+        "refresh=0",
+        "num_threads=1"
+      ],
+      "binary_sha256": "59aa95711a349a88e209cac882734bafa3a2e93cc2f5adb749b8911f8ce8f862",
+      "returncode": 0
+    }
+  }
+}

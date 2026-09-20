@@ -1101,7 +1101,7 @@ set(STANLI_TESTS
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp
-  test_model_adapter
+  test_model_adapter test_sampler_parity
   test_mir test_mir_decode test_transforms test_eltwise test_scalar_binary
   test_lower
   test_lower_views
@@ -1169,6 +1169,10 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_run_timings
            COMMAND ${Python3_EXECUTABLE} tests/test_run_timings.py
                    $<TARGET_FILE:stanli_run>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_run_rng
+           COMMAND ${Python3_EXECUTABLE} tests/test_run_rng.py
+                   $<TARGET_FILE:stanli_run> $<TARGET_FILE:stanli_shared>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py

@@ -1137,6 +1137,12 @@ class Model:
         uses CmdStan's stream for (seed, chain id c+1), so a matched seed
         means a matched stream per chain.
 
+        Generated quantities consume that live stream between saved draws,
+        including saved warmup; thinned-away transitions do not run them.
+        Numerical differences between model implementations can still change
+        trajectories. A generated-quantity domain error fills its output row
+        with NaN and sampling continues with the already advanced RNG.
+
         `inits` is on the UNCONSTRAINED scale: one vector shared by every
         chain, or one row per chain. Start from constrained values by
         passing them through `unconstrain()` first -- one scale here means

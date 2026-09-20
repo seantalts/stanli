@@ -1,6 +1,7 @@
 #include <stanli/nuts.hpp>
 
 #include <stanli/model_adapter.hpp>
+#include <stanli/wa_interp.hpp>
 
 #include "initialize.hpp"
 
@@ -39,7 +40,8 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   // initial point is the same one CmdStan starts from.
   using rng_t = stan::rng_t;
   ExecutorModel model(ex);
-  rng_t rng = stan::services::util::create_rng(cfg.seed, cfg.chain_id);
+  WaRng chain_rng(cfg.seed, cfg.chain_id);
+  rng_t& rng = chain_rng.gen();
   stan::mcmc::adapt_diag_e_nuts<ExecutorModel, rng_t> sampler(model, rng);
   stan::callbacks::logger logger;
 
@@ -62,22 +64,28 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   }
   sampler.seed(q);
 
-  sampler.init_stepsize(logger);
+  // Match CmdStan's service defaults, not base_hmc's 0.1 step size.
+  // Initial dual averaging is centered on the requested step size BEFORE
+  // init_stepsize searches; recentering on the result changes adaptation.
+  constexpr double initial_stepsize = 1.0;
+  sampler.set_nominal_stepsize(initial_stepsize);
   sampler.set_stepsize_jitter(0.0);
-  sampler.get_stepsize_adaptation().set_mu(
-      std::log(10.0 * sampler.get_nominal_stepsize()));
+  sampler.get_stepsize_adaptation().set_mu(std::log(10.0 * initial_stepsize));
   sampler.get_stepsize_adaptation().set_delta(cfg.delta);
   sampler.set_max_depth(cfg.max_depth);
   sampler.set_window_params(cfg.warmup, 75, 50, 25, logger);
   sampler.engage_adaptation();
+  sampler.init_stepsize(logger);
 
   stan::mcmc::sample s(q, 0, 0);
 
   const int thin = cfg.thin > 0 ? cfg.thin : 1;
   std::vector<std::vector<double>> draws;
-  draws.reserve((size_t)((cfg.save_warmup ? cfg.warmup : 0) + cfg.samples) /
-                    (size_t)thin +
-                1);
+  if (cfg.retain_draws)
+    draws.reserve((size_t)((cfg.save_warmup ? cfg.warmup : 0) + cfg.samples) /
+                      (size_t)thin +
+                  1);
+  int64_t stored = 0;
   if (stats) stats->rows.clear();
 
   Eigen::VectorXd qd(n);
@@ -91,22 +99,28 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
     // A report covers every post-warmup transition even when thinning drops
     // the row. Fetch the sampler parameters once when either consumer needs
     // them; this is observational and does not touch the sampler RNG.
-    const bool inspect = (keep && stats) || (!warmup && report);
+    const bool inspect =
+        (keep && (stats || cfg.on_stored)) || (!warmup && report);
     if (inspect) {
       sp.clear();
       sampler.get_sampler_params(sp);
     }
     if (keep) {
-      draws.emplace_back(qd.data(), qd.data() + n);
-      if (stats) {
+      if (cfg.retain_draws) draws.emplace_back(qd.data(), qd.data() + n);
+      if (stats || cfg.on_stored) {
         // get_sampler_params yields stepsize__, treedepth__, n_leapfrog__,
         // divergent__, energy__ in that order (stan::mcmc::base_nuts).
-        stats->rows.push_back(
-            {s.log_prob(), s.accept_stat(), sp.size() > 0 ? sp[0] : 0.0,
-             sp.size() > 1 ? sp[1] : 0.0, sp.size() > 2 ? sp[2] : 0.0,
-             sp.size() > 3 ? sp[3] : 0.0, sp.size() > 4 ? sp[4] : 0.0});
+        const SamplerRow row{s.log_prob(),
+                             s.accept_stat(),
+                             sp.size() > 0 ? sp[0] : 0.0,
+                             sp.size() > 1 ? sp[1] : 0.0,
+                             sp.size() > 2 ? sp[2] : 0.0,
+                             sp.size() > 3 ? sp[3] : 0.0,
+                             sp.size() > 4 ? sp[4] : 0.0};
+        if (stats) stats->rows.push_back(row);
+        if (cfg.on_stored) cfg.on_stored(stored, qd.data(), chain_rng, row);
       }
-      if (cfg.on_stored) cfg.on_stored((int64_t)draws.size() - 1, qd.data());
+      ++stored;
     }
     if (!warmup && report) {
       if (sp.size() > 3 && sp[3] != 0.0) ++report->n_divergent;
@@ -218,8 +232,9 @@ std::vector<ChainResult> run_nuts_chains(const std::vector<Executor*>& execs,
     cc.stop = stop;
     cc.poll = chain_poll;
     if (write)
-      cc.on_stored = [&write, c](int64_t row, const double* q) {
-        write((int)c, row, q);
+      cc.on_stored = [&write, c](int64_t row, const double* q, WaRng& rng,
+                                 const SamplerRow& stats) {
+        write((int)c, row, q, rng, stats);
       };
     try {
       out[c].draws = run_nuts(*execs[c], cc, &out[c].stats,
