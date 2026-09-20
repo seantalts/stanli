@@ -1,0 +1,332 @@
+--- a/runtime/kernels/matrix_fns.cpp
++++ b/runtime/kernels/matrix_fns.cpp
+@@ -991,7 +991,8 @@
+ // dividend's Eigen shape and the vv/dv versus vd evaluation style: these
+ // select different Eigen paths even when the mathematical result is equal.
+ template <SolveKind Kind, bool DividendVar, typename B>
+-auto solve_active_left_values(const MatD& a, const B& b) {
++auto solve_active_left_values(const MatD& a, const B& b,
++                               double* qr_scratch = nullptr) {
+   using Result = typename B::PlainObject;
+   if constexpr (Kind == SolveKind::Spd) {
+     constexpr const char* function = "mdivide_left_spd";
+@@ -1013,6 +1014,7 @@
+     constexpr const char* function = "mdivide_left_tri";
+     stan::math::check_square(function, "A", a);
+     stan::math::check_multiplicable(function, "A", a, "b", b);
++    if (a.rows() == 0) return MatD(0, b.cols());
+     // The rev overload always solves into a dynamic matrix map, including
+     // vector dividends. Its vd overload instead reads the original B type.
+     MatD result(b.rows(), b.cols());
+@@ -1030,7 +1032,14 @@
+     stan::math::check_square(function, "A", a);
+     stan::math::check_multiplicable(function, "A", a, "B", b);
+     if (a.size() == 0) return Result(0, b.cols());
+-    return Result(a.householderQr().solve(b));
++    const Eigen::HouseholderQR<MatD> factor(a);
++    if (qr_scratch) {
++      // Per-execution scratch is retained and rebound by the executor and
++      // numerical frames. It must not be shared by repeated calls at a site.
++      MapM(qr_scratch, a.rows(), a.cols()) = factor.matrixQR();
++      Eigen::Map<VecD>(qr_scratch + a.size(), a.rows()) = factor.hCoeffs();
++    }
++    return Result(factor.solve(b));
+   }
+ }
+ 
+@@ -1043,7 +1052,8 @@
+   const Dividend<Left, Vec, double> b =
+       CMapM(ctx.in[bi].data, Left ? n : k, Left ? k : n);
+   if constexpr (Left) {
+-    const auto result = solve_active_left_values<Kind, DividendVar>(a, b);
++    const auto result =
++        solve_active_left_values<Kind, DividendVar>(a, b, ctx.scratch);
+     std::copy_n(result.data(), result.size(), ctx.out.data);
+   } else {
+     // The right-SPD wrapper checks under its own name, then invokes the
+@@ -1089,7 +1099,8 @@
+ 
+ template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower>
+ void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
+-                  bool dividend_var, MatD* adj_a, MatD* adj_b) {
++                  bool dividend_var, MatD* adj_a, MatD* adj_b,
++                  const double* qr_scratch = nullptr) {
+   if constexpr (Kind == SolveKind::Spd) {
+     const Eigen::LLT<MatD> fac(a);
+     if (dividend_var) {
+@@ -1116,12 +1127,21 @@
+       *adj_a += full;
+     }
+   } else {
+-    const Eigen::HouseholderQR<MatD> qr(a);
+-    const MatD y =
+-        qr.householderQ() * MatD(qr.matrixQR()
+-                                     .template triangularView<Eigen::Upper>()
+-                                     .transpose()
+-                                     .solve(g));
++    const auto solve_transpose = [&](const auto& q, const auto& qr) -> MatD {
++      return q * MatD(qr.template triangularView<Eigen::Upper>()
++                          .transpose().solve(g));
++    };
++    MatD y;
++    if (qr_scratch) {
++      const MatD qr = CMapM(qr_scratch, a.rows(), a.cols());
++      const VecD coefficients = CMapV(qr_scratch + a.size(), a.rows());
++      y = solve_transpose(Eigen::householderSequence(qr, coefficients), qr);
++    } else {
++      // Right plain solves and direct kernel callers without scratch keep
++      // the established recomputation path.
++      const Eigen::HouseholderQR<MatD> qr(a);
++      y = solve_transpose(qr.householderQ(), qr.matrixQR());
++    }
+     if (dividend_var && adj_b) *adj_b += y;
+     if (divisor_var) *adj_a -= y * x.transpose();
+   }
+@@ -1221,7 +1241,8 @@
+   if constexpr (Left) {
+     left_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
+                        divisor_var ? &adj_a : nullptr,
+-                       dividend_var ? &adj_b : nullptr);
++                       dividend_var ? &adj_b : nullptr,
++                       (ctx.variant & 1u) && n > 0 ? ctx.scratch : nullptr);
+   } else {
+     right_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
+                         divisor_var ? &adj_a : nullptr,
+@@ -1231,6 +1252,12 @@
+     MapM(ctx.in_adj[ai].data, n, n) += adj_a;
+   if (dividend_var && ctx.in_adj[bi].data)
+     MapM(ctx.in_adj[bi].data, br, bc) += adj_b;
++}
++
++int64_t left_solve_scratch(const Op& op, const Slot*) {
++  const int64_t n = op.idata[0];
++  // Inactive/value-only plain solves use LU and have no QR to retain.
++  return (op.variant & 1u) && n > 0 ? n * (n + 1) : 0;
+ }
+ 
+ // ---- lkj_corr_cholesky_lpdf(L | eta) --------------------------------------
+@@ -2216,7 +2243,7 @@
+       OP_MULT_LOWER_TRI_SELF_TRANSPOSE,
+       Kernel{mlt_self_transpose_fwd, mlt_self_transpose_bwd, nullptr});
+   register_kernel(OP_MDIVIDE_LEFT,
+-                  Kernel{solve_fwd<true>, solve_bwd<true>, nullptr});
++                  Kernel{solve_fwd<true>, solve_bwd<true>, left_solve_scratch});
+   register_kernel(OP_MDIVIDE_RIGHT,
+                   Kernel{solve_fwd<false>, solve_bwd<false>, nullptr});
+   register_kernel(OP_MDIVIDE_LEFT_SPD,
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1112,7 +1112,7 @@
+   test_constfold test_cse test_graph_print test_pass_dump
+   test_function_registry test_function_shape
+   test_partition
+-  test_solve test_solve_forwards test_cross_path
++  test_solve test_solve_forwards test_solve_reuse test_cross_path
+   test_write_array test_pool test_bridgestan test_mixture test_island
+   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
+   test_odevariadic test_algebra test_estimate test_brmsmono
+--- a/tests/test_native_matrix_pullbacks.cpp
++++ b/tests/test_native_matrix_pullbacks.cpp
+@@ -320,8 +320,27 @@
+   const uint8_t detail = static_cast<uint8_t>(activity);
+   ctx.variant = 1u | (vec ? 2u : 0u) | (detail << 2);
+   const Kernel& kern = *find_kernel(opcode);
++  Op shape;
++  shape.variant = ctx.variant;
++  shape.idata = dims;
++  shape.n_idata = 2;
++  std::vector<double> scratch(kern.scratch_size
++                                 ? kern.scratch_size(shape, nullptr) : 0);
++  ctx.scratch = scratch.empty() ? nullptr : scratch.data();
+   kern.forward(ctx);
+   kern.backward(ctx);
++  if (!scratch.empty()) {
++    const Mat cached_a = a_adj, cached_b = b_adj;
++    a_adj.setConstant(0.125);
++    b_adj.setConstant(0.125);
++    ctx.scratch = nullptr;
++    kern.backward(ctx);
++    if (std::memcmp(cached_a.data(), a_adj.data(), n * n * sizeof(double)) ||
++        std::memcmp(cached_b.data(), b_adj.data(), br * bc * sizeof(double))) {
++      ++failures;
++      std::printf("FAIL saved QR differs from recomputation n=%d k=%d\n", n, k);
++    }
++  }
+ 
+   stan::math::nested_rev_autodiff scope;
+   Eigen::Matrix<var, -1, -1> av(n, n), bv(br, bc);
+--- /dev/null
++++ b/tests/test_solve_reuse.cpp
+@@ -0,0 +1,172 @@
++// The same solve site executes with a different divisor on every iteration.
++// Compare retained factors with recomputation across replay, frames and clones.
++#include "env_helpers.hpp"
++#include "stdout_capture.hpp"
++#include <stanli/graph.hpp>
++#include <stanli/optable.hpp>
++#include <stanli/structured_loop.hpp>
++#include <Eigen/Dense>
++#include <cstdio>
++#include <cstring>
++#include <memory>
++#include <vector>
++
++using namespace stanli;
++using Node = StructuredLoop::Node;
++static Kernel original;
++static int failures = 0;
++static void check(bool ok, const char* message) {
++  if (!ok) { ++failures; std::printf("FAIL %s\n", message); }
++}
++static void recompute_forward(KernelCtx& ctx) {
++  KernelCtx copy = ctx;
++  copy.scratch = nullptr;
++  original.forward(copy);
++}
++static void recompute_backward(KernelCtx& ctx) {
++  KernelCtx copy = ctx;
++  copy.scratch = nullptr;
++  original.backward(copy);
++}
++
++static Graph graph(int n, int k, int rows, bool vec) {
++  auto plan = std::make_shared<StructuredLoop>();
++  auto slot = [&](int len) { return plan->body.add_slot(len, false); };
++  const int a = slot(n * n), b = slot(n * k), next = slot(n * n);
++  const int delta = slot(n * n), solved = slot(n * k), total = slot(1);
++  const int lo = slot(1), hi = slot(1), iterator = slot(1);
++  const int first = slot(1), zero = slot(1), condition = slot(1);
++  const int alternate = slot(n * n);
++  std::vector<double> d(n * n, 0.0);
++  for (int i = 0; i < n; ++i) d[i * (n + 1)] = 0.125;
++  plan->fills = {{delta, d}, {lo, {1}}, {hi, {double(rows)}}, {zero, {0}}};
++  plan->imports = {{a, 0, 0, true, false}, {b, 1, 0, true, false}};
++  const auto call = [&](uint16_t opcode, std::initializer_list<int> ins,
++                        int out, std::initializer_list<int> dims = {}) {
++    Node node;
++    node.kind = Node::KernelCall;
++    node.op = plan->body.add_op(opcode, ins, out, dims);
++    return node;
++  };
++  Node add = call(OP_ADD, {a, delta}, next);
++  Node update;
++  update.kind = Node::Alias;
++  update.dst = a;
++  update.src = next;
++  Node read = call(OP_INDEX, {b}, first, {0});
++  Node compare = call(OP_COMPARE, {first, zero}, condition);  // variant 0: <
++  Node extra = call(OP_ADD, {a, delta}, alternate);
++  Node extra_update = update;
++  extra_update.src = alternate;
++  Node yes;
++  yes.children = {extra, extra_update};
++  Node branch;
++  branch.kind = Node::If;
++  branch.condition = condition;
++  branch.children = {yes, Node{}};
++  Node solve = call(OP_MDIVIDE_LEFT, {a, b}, solved, {n, k});
++  plan->body.ops[solve.op].variant = 13u | (vec ? 2u : 0u);
++  Node sum = call(OP_SUM_VEC, {solved}, total);
++  Node target;
++  target.kind = Node::Target;
++  target.src = total;
++  Node body;
++  body.children = {add, update, read, compare, branch, solve, sum, target};
++  plan->root.kind = Node::For;
++  plan->root.lower = lo;
++  plan->root.upper = hi;
++  plan->root.iterator = iterator;
++  plan->root.children = {body};
++  plan->has_target = true;
++  plan->prepare();
++  Graph outer;
++  const int pa = outer.add_slot(n * n, true), pb = outer.add_slot(n * k, true);
++  outer.result_slot = outer.add_slot(1, false);
++  outer.add_op(OP_LOOP, {pa, pb}, outer.result_slot);
++  outer.ops.back().udata = plan.get();
++  outer.udata_pool.push_back(plan);
++  return outer;
++}
++
++static std::vector<double> evaluate(Executor& ex, int n, int k, int point) {
++  for (int j = 0; j < n; ++j)
++    for (int i = 0; i < n; ++i)
++      ex.params_data()[j * n + i] = i == j ? n + 1.0 + 0.1 * point
++                                          : 0.01 * (i - 2 * j + point);
++  for (int i = 0; i < n * k; ++i)
++    ex.params_data()[n * n + i] = 0.02 * (i % 7 - point);
++  std::vector<double> result(1 + ex.n_params());
++  result[0] = ex.gradient(result.data() + 1);
++  return result;
++}
++static bool identical(const std::vector<double>& a,
++                      const std::vector<double>& b) {
++  return a.size() == b.size() &&
++         std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0;
++}
++
++int main() {
++  original = *find_kernel(OP_MDIVIDE_LEFT);
++  check(original.scratch_size != nullptr, "plain-left solve retains its QR");
++  for (int n : {2, 10, 55})
++    for (int k : {1, 3})
++      for (int rows : {0, 1, 33})
++        for (bool frames : {false, true}) {
++          Kernel without = original;
++          without.forward = recompute_forward;
++          without.backward = recompute_backward;
++          without.scratch_size = nullptr;
++          register_kernel(OP_MDIVIDE_LEFT, without);
++          const Graph reference = graph(n, k, rows, k == 1);
++          register_kernel(OP_MDIVIDE_LEFT, original);
++          const Graph candidate = graph(n, k, rows, k == 1);
++          test_setenv("STANLI_STRUCTURED_FRAMES", frames ? "1" : "0");
++          Executor expected(reference);
++          test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
++          Executor actual(candidate);
++          test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
++          stanli_test::StdoutCapture captured(stderr);
++          for (int point : {0, 1, 2, 0}) {
++            check(identical(evaluate(actual, n, k, point),
++                            evaluate(expected, n, k, point)),
++                  "each backward reads its own forward factor");
++            const double v = actual.forward_value_only();
++            const double w = expected.forward_value_only();
++            check(std::memcmp(&v, &w, sizeof(double)) == 0,
++                  "value-only retains the prim solve arithmetic");
++          }
++          Executor copy(actual);
++          check(identical(evaluate(copy, n, k, 3),
++                          evaluate(expected, n, k, 3)),
++                "copied executor independently records factors");
++          check(identical(evaluate(actual, n, k, 4),
++                          evaluate(expected, n, k, 4)),
++                "copy leaves the original factor storage independent");
++          const auto diagnostics = captured.finish();
++          if (frames && rows == 33)
++            check(diagnostics.find("stanli_structured frames:") != std::string::npos,
++                  "factor lifetime check reaches numerical frames");
++          if (rows > 0) {
++            // Frames return before the stream's respecialized counter is
++            // printed. Count their completed recordings instead: the first
++            // recording plus the two parameter-controlled branch changes.
++            size_t recordings = 0, position = 0;
++            while ((position = diagnostics.find("stanli_structured frames:",
++                                                 position)) != std::string::npos) {
++              ++recordings;
++              ++position;
++            }
++            const bool respecialized = frames
++                ? recordings >= 3
++                : diagnostics.find("respecialized=2") != std::string::npos;
++            if (!respecialized && failures < 2)
++              std::printf("n=%d k=%d rows=%d frames=%d\n%s\n", n, k, rows,
++                          frames, diagnostics.c_str());
++            check(respecialized,
++                  "changed branches re-record factors at least twice");
++          }
++          test_unsetenv("STANLI_STRUCTURED_FRAMES");
++        }
++  std::printf("test_solve_reuse: %d failures\n", failures);
++  return failures ? 1 : 0;
++}

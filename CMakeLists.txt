@@ -1112,7 +1112,7 @@ set(STANLI_TESTS
   test_constfold test_cse test_graph_print test_pass_dump
   test_function_registry test_function_shape
   test_partition
-  test_solve test_cross_path
+  test_solve test_solve_forwards test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
   test_odevariadic test_algebra test_estimate test_brmsmono

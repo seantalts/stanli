@@ -986,13 +986,90 @@ using Dividend = std::conditional_t<
     !Vec, Eigen::Matrix<T, -1, -1>,
     std::conditional_t<Left, Eigen::Matrix<T, -1, 1>, Eigen::Matrix<T, 1, -1>>>;
 
+// Numerical part of the pinned Matrix<var> left overloads. In particular,
+// calling the prim plain solve here would change QR to LU. Keep both the
+// dividend's Eigen shape and the vv/dv versus vd evaluation style: these
+// select different Eigen paths even when the mathematical result is equal.
+template <SolveKind Kind, bool DividendVar, typename B>
+auto solve_active_left_values(const MatD& a, const B& b) {
+  using Result = typename B::PlainObject;
+  if constexpr (Kind == SolveKind::Spd) {
+    constexpr const char* function = "mdivide_left_spd";
+    stan::math::check_multiplicable(function, "A", a, "b", b);
+    stan::math::check_symmetric(function, "A", a);
+    stan::math::check_not_nan(function, "A", a);
+    if (a.size() == 0) return Result(0, b.cols());
+    const Eigen::LLT<MatD> factor(a);
+    stan::math::check_pos_definite(function, "A", factor);
+    Result result;
+    if constexpr (DividendVar) {
+      result = b;
+      factor.solveInPlace(result);
+    } else {
+      result = factor.solve(b);
+    }
+    return result;
+  } else if constexpr (Kind == SolveKind::TriLow) {
+    constexpr const char* function = "mdivide_left_tri";
+    stan::math::check_square(function, "A", a);
+    stan::math::check_multiplicable(function, "A", a, "b", b);
+    // The rev overload always solves into a dynamic matrix map, including
+    // vector dividends. Its vd overload instead reads the original B type.
+    MatD result(b.rows(), b.cols());
+    MapM out(result.data(), result.rows(), result.cols());
+    const CMapM divisor(a.data(), a.rows(), a.cols());
+    if constexpr (DividendVar) {
+      out = b;
+      out = divisor.template triangularView<Eigen::Lower>().solve(out);
+    } else {
+      out = divisor.template triangularView<Eigen::Lower>().solve(b);
+    }
+    return result;
+  } else {
+    constexpr const char* function = "mdivide_left";
+    stan::math::check_square(function, "A", a);
+    stan::math::check_multiplicable(function, "A", a, "B", b);
+    if (a.size() == 0) return Result(0, b.cols());
+    return Result(a.householderQr().solve(b));
+  }
+}
+
+template <bool Left, SolveKind Kind, bool DividendVar, bool Vec>
+void solve_active_values(KernelCtx& ctx) {
+  static_assert(Left || Kind == SolveKind::Spd);
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
+  const MatD a = CMapM(ctx.in[ai].data, n, n);
+  const Dividend<Left, Vec, double> b =
+      CMapM(ctx.in[bi].data, Left ? n : k, Left ? k : n);
+  if constexpr (Left) {
+    const auto result = solve_active_left_values<Kind, DividendVar>(a, b);
+    std::copy_n(result.data(), result.size(), ctx.out.data);
+  } else {
+    // The right-SPD wrapper checks under its own name, then invokes the
+    // left-SPD rev overload with A unchanged and the dividend transposed.
+    constexpr const char* function = "mdivide_right_spd";
+    stan::math::check_multiplicable(function, "b", b, "A", a);
+    stan::math::check_symmetric(function, "A", a);
+    stan::math::check_not_nan(function, "A", a);
+    if (a.size() == 0) return;
+    const Dividend<true, Vec, double> bt = b.transpose();
+    const auto result = solve_active_left_values<Kind, DividendVar>(a, bt);
+    MapM(ctx.out.data, k, n) = result.transpose();
+  }
+}
+
 // Replay the exact operand scalar types on a nested tape and write the
-// value out. The mixed stan-math overloads are numerically distinct from
-// promoting their data operand to var, so the two activity flags are
-// template parameters rather than a single result-active flag.
+// value out only for the right plain/triangular templates, which perform
+// scalar-var arithmetic. Eligible left/SPD overloads already factor doubles;
+// execute that numerical work without constructing an unused reverse tape.
 template <bool Left, SolveKind Kind, bool DivisorVar, bool DividendVar,
           bool Vec>
 void solve_var(KernelCtx& ctx) {
+  if constexpr (Left || Kind == SolveKind::Spd) {
+    solve_active_values<Left, Kind, DividendVar, Vec>(ctx);
+    return;
+  }
   using stan::math::var;
   static_assert(DivisorVar || DividendVar);
   using DivisorScalar = std::conditional_t<DivisorVar, var, double>;
