@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -1205,7 +1206,50 @@ void test_reduce_sum_threads() {
   stanli_model_free(parallel);
 }
 
+void test_source_include_paths() {
+  char err[8192]{};
+  expect_true("null include array is rejected",
+              stanli_stan_to_mir_with_includes("model {}", nullptr, 1, err,
+                                               sizeof err) == nullptr);
+  expect_true("null include array names the error",
+              std::strstr(err, "include_paths") != nullptr);
+  const char* null_path[] = {nullptr};
+  expect_true("null include element is rejected",
+              stanli_stan_to_mir_with_includes("model {}", null_path, 1, err,
+                                               sizeof err) == nullptr);
+  if (!stanli_has_embedded_stanc()) return;
+
+  // Enough copied path strings to collect while marshalling under a small
+  // OCaml minor heap. All arguments must remain live until the callback ends.
+  const std::vector<const char*> paths(1024, "tests/compiler");
+  const char* code = "#include portable_include.stan\n";
+  char* mir = stanli_stan_to_mir_with_includes(code, paths.data(), paths.size(),
+                                               err, sizeof err);
+  expect_true(std::string("embedded nested includes: ") + err, mir != nullptr);
+  if (mir) {
+    stanli_model* model = stanli_model_new(mir, "{}", err, sizeof err);
+    stanli_string_free(mir);
+    expect_true(std::string("included MIR loads: ") + err, model != nullptr);
+    if (model) {
+      double q = 0.5, lp = 0, grad = 0;
+      expect_true("included gradient succeeds",
+                  stanli_grad(model, &q, &lp, &grad) == 0);
+      expect_true("included gradient is exact", grad == -0.5);
+      stanli_model_free(model);
+    }
+  }
+  mir = stanli_stan_to_mir(code, err, sizeof err);
+  expect_true("include paths do not leak to old entry point", mir == nullptr);
+  stanli_string_free(mir);
+  expect_true("missing include keeps its filename",
+              std::strstr(err, "portable_include.stan") != nullptr);
+  mir = stanli_stan_to_mir("model {}", err, sizeof err);
+  expect_true("compiler recovers after include error", mir != nullptr);
+  stanli_string_free(mir);
+}
+
 int main() {
+  test_source_include_paths();
   test_reduce_sum_threads();
   test_transformed_data_seed();
   expect_interpreter_policy("tests/fixtures/wanames.tmir.sexp", nullptr);

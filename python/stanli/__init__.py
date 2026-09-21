@@ -154,6 +154,11 @@ def _load_lib():
     lib.stanli_stan_to_mir.restype = ctypes.c_void_p
     lib.stanli_stan_to_mir.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
                                        ctypes.c_size_t]
+    if hasattr(lib, "stanli_stan_to_mir_with_includes"):
+        lib.stanli_stan_to_mir_with_includes.restype = ctypes.c_void_p
+        lib.stanli_stan_to_mir_with_includes.argtypes = [
+            ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
+            ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_string_free.argtypes = [ctypes.c_void_p]
     lib.stanli_build_id.restype = ctypes.c_char_p
     lib.stanli_build_id.argtypes = []
@@ -397,26 +402,31 @@ def _pathfinder_init_options(value):
     return out
 
 
-def _compiler_command(model_path: pathlib.Path):
+def _compiler_command(model_path: pathlib.Path, include_paths=()):
     """The packaged compiler argv, preferring stanli's portable producer."""
     suffix = ".exe" if sys.platform == "win32" else ""
     portable = _BIN / ("stanli-compile" + suffix)
     if portable.is_file():
-        return [str(portable), str(model_path)]
+        flags = [arg for path in include_paths for arg in ("--include-path", path)]
+        return [str(portable), *flags, str(model_path)]
 
     # One-cycle rollback path: pristine stanc3 emits the legacy s-expression
     # that the runtime continues to accept. Only absence selects it. A broken
     # portable compiler must fail loudly rather than being hidden by a retry.
     stanc = _BIN / ("stanc" + suffix)
     if stanc.is_file():
-        return [str(stanc), "--O1", "--debug-optimized-mir", str(model_path)]
+        if any("," in path for path in include_paths):
+            raise ValueError("the legacy stanc compiler cannot use include_paths "
+                             "containing commas")
+        flags = ["--include-paths=" + ",".join(include_paths)] if include_paths else []
+        return [str(stanc), "--O1", "--debug-optimized-mir", *flags, str(model_path)]
     raise RuntimeError(
         "the bundled Stan compiler is missing "
         f"(expected {portable.name} or {stanc.name} in {_BIN})")
 
 
-def _stanc_mir(model_path: pathlib.Path) -> str:
-    argv = _compiler_command(model_path)
+def _stanc_mir(model_path: pathlib.Path, include_paths=()) -> str:
+    argv = _compiler_command(model_path, include_paths)
     try:
         r = subprocess.run(argv, capture_output=True, text=True,
                            encoding="utf-8")
@@ -428,7 +438,7 @@ def _stanc_mir(model_path: pathlib.Path) -> str:
     return r.stdout
 
 
-def _subprocess_mir(stan_code: str) -> str:
+def _subprocess_mir(stan_code: str, include_paths=()) -> str:
     """Compile source in an isolated directory and remove every side effect."""
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-compile-") as tmpdir:
@@ -437,7 +447,7 @@ def _subprocess_mir(stan_code: str) -> str:
         # of text-mode files on Windows. Stock stanc also writes model.hpp next
         # to this file; TemporaryDirectory removes that rollback-path artifact.
         source.write_bytes(stan_code.encode("utf-8"))
-        return _stanc_mir(source)
+        return _stanc_mir(source, include_paths) if include_paths else _stanc_mir(source)
 
 
 def _read_utf8_file(path) -> str:
@@ -445,7 +455,41 @@ def _read_utf8_file(path) -> str:
     return pathlib.Path(path).read_bytes().decode("utf-8")
 
 
-def stan_to_mir(stan_code: str) -> str:
+def _include_paths(include_paths, stan_file=None):
+    """Snapshot an ordered search path without changing the process directory."""
+    if include_paths is None:
+        include_paths = []
+    elif isinstance(include_paths, (str, os.PathLike)):
+        include_paths = [include_paths]
+    paths = []
+    for path in include_paths:
+        if not isinstance(path, (str, os.PathLike)):
+            raise TypeError("include_paths must contain directory paths")
+        raw = os.fspath(path)
+        if not isinstance(raw, str) or not raw or "\0" in raw:
+            raise ValueError("include_paths must contain nonempty paths without NUL")
+        directory = pathlib.Path(raw).expanduser().resolve()
+        if not directory.is_dir():
+            raise ValueError(f"include_paths directory does not exist: {directory}")
+        paths.append(str(directory))
+    paths.append(str(pathlib.Path(stan_file).resolve().parent
+                     if stan_file is not None else pathlib.Path.cwd()))
+    return list(dict.fromkeys(paths))
+
+
+def _read_stan_source(stan_file, stan_code, include_paths):
+    if stan_code is None:
+        if stan_file is None:
+            raise ValueError("provide stan_file, stan_code, or mir")
+        stan_code = _read_utf8_file(stan_file)
+    else:
+        stan_file = None
+    paths = (_include_paths(include_paths, stan_file)
+             if include_paths is not None or "#include" in stan_code else [])
+    return stan_code, paths
+
+
+def stan_to_mir(stan_code: str, include_paths=None) -> str:
     """Stan source to optimized-MIR text, without building a model.
 
     The first half of compiling a model, on its own. Useful when the MIR
@@ -454,11 +498,32 @@ def stan_to_mir(stan_code: str) -> str:
     bundled compiler return stanli's versioned portable format. The one-cycle
     stock-compiler fallback returns a legacy stanc3 s-expression, which the
     runtime also accepts.
+
+    ``include_paths`` is a directory or an iterable of directories searched
+    in order for ``#include`` files, followed by the current directory.
+    Nested includes use the same search path.
     """
+    stan_code, paths = _read_stan_source(None, stan_code, include_paths)
+    return _compile_stan(stan_code, paths)
+
+
+def _compile_stan(stan_code, include_paths):
+    # Source without an include keeps the original compiler entry point, also
+    # allowing these bindings to work with older embedded runtimes.
+    include_paths = include_paths if "#include" in stan_code else []
     if not _lib.stanli_has_embedded_stanc():
-        return _subprocess_mir(stan_code)
+        return (_subprocess_mir(stan_code, include_paths) if include_paths
+                else _subprocess_mir(stan_code))
     err = ctypes.create_string_buffer(8192)
-    p = _lib.stanli_stan_to_mir(stan_code.encode(), err, len(err))
+    if include_paths:
+        compile_includes = getattr(_lib, "stanli_stan_to_mir_with_includes", None)
+        if compile_includes is None:
+            raise RuntimeError("Stan includes require a newer Stanli runtime")
+        paths = (ctypes.c_char_p * len(include_paths))(
+            *(path.encode("utf-8") for path in include_paths))
+        p = compile_includes(stan_code.encode(), paths, len(paths), err, len(err))
+    else:
+        p = _lib.stanli_stan_to_mir(stan_code.encode(), err, len(err))
     if not p:
         raise RuntimeError(err.value.decode())
     try:
@@ -476,21 +541,18 @@ def _runtime_lib_path() -> pathlib.Path:
                    else "stanli.dll")
 
 
-def _resolve_program(stan_file, stan_code, mir, name):
+def _resolve_program(stan_file, stan_code, mir, name, include_paths=None):
     """(mir, name) from whichever form the caller has, compiling if needed."""
     if mir is None:
-        if stan_code is None:
-            if stan_file is None:
-                raise ValueError("provide stan_file, stan_code, or mir")
-            stan_code = _read_utf8_file(stan_file)
-        mir = stan_to_mir(stan_code)
+        stan_code, paths = _read_stan_source(stan_file, stan_code, include_paths)
+        mir = _compile_stan(stan_code, paths)
     if name is None:
         name = pathlib.Path(stan_file).stem if stan_file else "stanli_model"
     return mir, name
 
 
 def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
-                     name=None, **kw):
+                     name=None, include_paths=None, **kw):
     """A ``bridgestan.StanModel`` for this program, with nothing written.
 
     The model travels inside the data argument: the manifest rides under
@@ -503,10 +565,11 @@ def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
 
     ``bridgestan`` is imported lazily and is not a stanli dependency.
     Extra keyword arguments pass through to ``bridgestan.StanModel``.
+    ``include_paths`` has the same search order as ``Model``.
     """
     import bridgestan
 
-    mir, name = _resolve_program(stan_file, stan_code, mir, name)
+    mir, name = _resolve_program(stan_file, stan_code, mir, name, include_paths)
     payload = json.loads(_data_to_json(data))
     if not isinstance(payload, dict):
         raise ValueError("data must be a JSON object")
@@ -931,15 +994,21 @@ class Model:
     seed. Models are also rebuilt when sampling changes ``threads_per_chain``.
     ``threads_per_chain`` on construction configures direct gradient calls;
     sampling uses its own setting, which defaults to 1.
+
+    ``include_paths`` accepts a directory or an iterable of directories for
+    Stan ``#include`` files. These are searched in order, then the directory
+    containing ``stan_file`` (or the current directory for ``stan_code``).
+    Nested includes use the same search path. Included source is compiled
+    once and retained for later sampling, even if its files change or move.
     """
 
     def __init__(self, stan_file=None, data=None, stan_code=None, mir=None,
-                 seed=1, threads_per_chain=1):
+                 seed=1, threads_per_chain=1, include_paths=None):
         threads_per_chain = _threads_per_chain(threads_per_chain)
-        if mir is None and stan_code is None:
-            if stan_file is None:
-                raise ValueError("provide stan_file, stan_code, or mir")
-            stan_code = _read_utf8_file(stan_file)
+        if mir is None:
+            stan_code, paths = _read_stan_source(stan_file, stan_code, include_paths)
+            if "#include" in stan_code:
+                mir = _compile_stan(stan_code, paths)
         self._source = (mir, stan_code, _data_to_json(data))
         self._m = None
         self._adopt(self._construct(seed, threads_per_chain), seed, threads_per_chain)

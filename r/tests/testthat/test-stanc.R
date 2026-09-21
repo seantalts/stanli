@@ -92,7 +92,7 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
   expect_identical(calls$classic, 0L)
-  expect_identical(calls$arguments, 2L)
+  expect_identical(calls$arguments, 3L)
   expect_identical(calls$name, enc2utf8("portable_π"))
   expect_identical(calls$source, source)
 
@@ -125,7 +125,7 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$classic, 1L)
-  expect_identical(calls$fallback_arguments, 3L)
+  expect_identical(calls$fallback_arguments, 4L)
   expect_identical(calls$fallback_flags,
                    c("O1", "debug-optimized-mir"))
 })
@@ -327,7 +327,7 @@ test_that("the webR helper selects by presence and never retries errors", {
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
   expect_identical(calls$classic, 0L)
-  expect_identical(calls$arguments, 2L)
+  expect_identical(calls$arguments, 3L)
   expect_identical(calls$name, model_name)
   expect_identical(calls$source, source)
   expect_identical(calls$warnings, 1L)
@@ -362,7 +362,7 @@ test_that("the webR helper selects by presence and never retries errors", {
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$classic, 1L)
-  expect_identical(calls$arguments, 3L)
+  expect_identical(calls$arguments, 4L)
   expect_identical(calls$fallback_flags,
                    c("O1", "debug-optimized-mir"))
 })

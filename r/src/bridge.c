@@ -132,6 +132,9 @@ static void* (*p_model_new_seeded)(const char*, const char*, uint32_t, char*,
                                    size_t);
 static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
+static char* (*p_stan_to_mir_with_includes)(const char*, const char* const*,
+                                            size_t, char*, size_t);
+static void (*p_string_free)(char*);
 static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
 static int64_t (*p_n_unconstrained)(const void*);
@@ -233,6 +236,9 @@ SEXP stanli_bridge_load(SEXP path) {
   *(void**)(&p_model_new_seeded) = dl_sym(g_lib, "stanli_model_new_seeded");
   BIND("stanli_model_free", p_model_free);
   BIND("stanli_has_embedded_stanc", p_has_embedded_stanc);
+  *(void**)(&p_stan_to_mir_with_includes) =
+      dl_sym(g_lib, "stanli_stan_to_mir_with_includes");
+  *(void**)(&p_string_free) = dl_sym(g_lib, "stanli_string_free");
   BIND("stanli_exact_lp", p_exact_lp);
   BIND("stanli_thread_safe", p_thread_safe);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
@@ -348,6 +354,24 @@ SEXP stanli_r_reduce_sum_fallbacks(SEXP m) {
 SEXP stanli_r_has_embedded_stanc(void) {
   require_loaded();
   return ScalarLogical(p_has_embedded_stanc());
+}
+
+SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths) {
+  require_loaded();
+  if (p_stan_to_mir_with_includes == NULL || p_string_free == NULL)
+    error("Stan includes require a newer Stanli runtime; run stanli_install()");
+  const size_t count = (size_t)XLENGTH(include_paths);
+  const char** paths = (const char**)R_alloc(count, sizeof(char*));
+  for (size_t i = 0; i < count; ++i)
+    paths[i] = Rf_translateCharUTF8(STRING_ELT(include_paths, i));
+  char err[8192] = {0};
+  char* mir = p_stan_to_mir_with_includes(
+      Rf_translateCharUTF8(STRING_ELT(code, 0)), paths, count, err, sizeof err);
+  if (mir == NULL) error("%s", err[0] ? err : "Stan source compilation failed");
+  SEXP result = PROTECT(ScalarString(mkCharCE(mir, CE_UTF8)));
+  p_string_free(mir);
+  UNPROTECT(1);
+  return result;
 }
 SEXP stanli_r_exact_lp(void) {
   require_loaded();

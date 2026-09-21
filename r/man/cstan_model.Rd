@@ -4,10 +4,14 @@
 \alias{cstan_model}
 \title{Native CmdStanR-style model interface}
 \usage{
-cstan_model(model_code)
+cstan_model(model_code, include_paths = NULL)
 }
 \arguments{
 \item{model_code}{A single string of Stan program source.}
+
+\item{include_paths}{Directories searched for Stan \verb{#include} files; see
+\code{\link[=stanli_model]{stanli_model()}}. Resolved when the model object is created; files are read
+when \verb{$sample()} prepares the model.}
 }
 \value{
 A \code{stanli_cstanmodel} with \verb{$sample(...)}, \verb{$code()}, and

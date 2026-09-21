@@ -418,6 +418,15 @@ js_of_ocaml, then
 byte-for-byte compact-v2 equality for an ordinary model, nested UDFs, the
 mother model, an O1-folded binary64 literal, checked int32 overflow/no-fold
 behavior, Unicode text, and an in-memory include.
+The Python and installed R interface tests also exercise filesystem includes:
+automatic source-directory lookup, ordered `include_paths`, nested and repeated
+includes, filenames with spaces and Unicode, missing files and cycles, and exact
+gradient/draw agreement with equivalent single-file models. They verify that
+changing the sampling seed still works after the include files are deleted.
+R checks the real bundled JavaScript compiler through V8 and the webR file
+transport; subprocess checks exercise the portable and stock compilers when
+available. `test_capi` covers the embedded include entry point in native and
+sanitizer builds.
 It also checks repeat determinism, source-bearing error objects, warning
 parity, the normal `stanc()` JavaScript API against stock stancjs on ordinary
 inputs, and final-newline behavior. The overflow fixture is excluded from that
