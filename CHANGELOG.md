@@ -14,6 +14,13 @@
 - The CLI formats output during sampling, with bounded temporary CSV files
   for subsequent chains. `--timings` includes generated quantities and CSV
   formatting in `sample_s`; `output_s` covers copying and the final flush.
+- Reorganize the public documentation. `docs/benchmark-protocol.md` and
+  `docs/benchmark-appendix.md` are folded into `docs/benchmarks.md`;
+  `docs/lite-lp.md` and `docs/compact-densities.md` become
+  `docs/lp-constant.md`; `docs/teaching-support.md` is merged into
+  `docs/teaching.md`; the release process moves from `README.md` to
+  `RELEASING.md`; and the dated benchmark, brms, build-latency,
+  density-pack and stanfit validation reports move under `notes/`.
 
 ## 0.17.0
 
