@@ -1,7 +1,7 @@
 # Teaching Bayesian workflow with stanli
 
-For model coverage, numerical evidence, performance results, and examples
-using brms or Rethinking, see [Teaching support](teaching-support.md).
+For brms and Rethinking examples, see [Generated models and R workflows](teaching-support.md).
+Model coverage and numerical evidence are in the shared [corpus inventory](corpus-status.md).
 
 ## Before the first class
 

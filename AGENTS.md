@@ -28,10 +28,12 @@ changes against all of these priorities:
   conventions and working C, Python, and R interfaces, including BridgeStan,
   CmdStanR/RStan-style workflows and consumers such as posterior, loo, and
   bayesplot. Compatibility means exercising real clients and artifacts.
-- **Fast teaching models.** Treat interactive time to a first useful
-  posterior as a primary use case, including Eight Schools, Rethinking,
-  and Aalto lesson models on modest machines and in the browser. Warm
-  gradient throughput alone does not describe this experience.
+- **Interactive model development.** Treat time to a first useful posterior
+  as a primary use case, including small and medium models on modest
+  machines and in the browser. Warm gradient throughput alone does not
+  describe this experience. Present model collections as sources within
+  the shared benchmark and numerical corpus; keep collection-specific
+  coverage detail in provenance, fixture documentation, and historical reports.
 - **Reuse upstream Stan.** Prefer Stan's algorithms, Stan Math, and stanc3
   over independent reimplementations. Keep source pins and artifact
   provenance explicit. Custom kernels or compiler/runtime machinery should

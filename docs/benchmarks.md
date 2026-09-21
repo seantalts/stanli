@@ -84,8 +84,8 @@ Preparation from existing MIR excludes source compilation and first evaluation.
 A first-fit estimate that adds measured CmdStan compilation to a CLI duration
 must be labeled as a sum of stages. It is not a directly timed cold-cache fit.
 The [September 16 appendix](../output/teaching-performance/README.md) reports
-these stages per model; the [classroom guide](teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)
-records a separate fresh-R-session measurement.
+these stages per model; a [separate fresh-R-session measurement](teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)
+includes package startup and the first fit.
 
 The following example is from the September 11 posteriordb run described in
 [Benchmark method](#benchmark-method).

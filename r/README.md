@@ -111,7 +111,7 @@ from `as_draws_array()` and ecosystem methods; use `inc_warmup = TRUE` to includ
 it in the array. `summary(fit)` continues to summarize the raw stored draws.
 
 See [Coming from cmdstanr](../docs/from-cmdstanr.md) for the API translation,
-plotting, LOO, and saving fits, and the [course quickstart](../docs/teaching.md)
+plotting, LOO, and saving fits, and the [Eight Schools quickstart](../docs/teaching.md)
 for binary installation, offline labs, and a self-contained example. These
 are plain Markdown guides so package checks need no runtime to build vignettes.
 
@@ -231,9 +231,10 @@ the graph when the model is lowered.
 
 ## Generated models and migration
 
-See [Teaching with Stanli](../docs/teaching-support.md) for brms and Rethinking
-workflows, classroom examples and links to the shared corpus evidence. The [cmdstanr translation table](../docs/from-cmdstanr.md) covers
-common operations and differences.
+See [Generated models and R workflows](../docs/teaching-support.md) for brms
+and Rethinking inputs, fit conversion and plotting. The
+[cmdstanr translation table](../docs/from-cmdstanr.md) covers common operations
+and differences.
 
 ## Native R-style fit methods without RStan
 
