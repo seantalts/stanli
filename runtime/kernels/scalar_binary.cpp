@@ -64,13 +64,14 @@ void binary_bwd_typed(KernelCtx& ctx, F&& f) {
     if (!s1) b.emplace_back(ctx.in[1].data[i]);
     y.push_back(f(a[s0 ? 0 : i], b[s1 ? 0 : i]));
   }
-  // Seed each lane with its upstream adjoint. The products and the sum
-  // deposit exactly dout[i] into y[i]'s adjoint (their callbacks multiply
-  // by an adjoint of 1.0), then the lane callbacks run.
-  var seeded = 0.0;
+  // Seed the existing tape directly, without building sum(y[i] * dout[i]).
+  // That graph's reverse sweep deposits dout[i] in descending lane order
+  // before any function callbacks run. Preserve both the order (selection
+  // functions can return the same broadcast var in several lanes) and +=
+  // semantics (including signed zero), then run Stan's own reverse sweep.
   const double* dout = n == 1 ? &ctx.out_adj : ctx.out_adj_vec.data;
-  for (int64_t i = 0; i < n; ++i) seeded += y[i] * dout[i];
-  stan::math::grad(seeded.vi_);
+  for (int64_t i = n; i-- > 0;) y[i].adj() += dout[i];
+  stan::math::grad();
   if constexpr (A0) {
     for (size_t i = 0; i < a.size(); ++i) ctx.in_adj[0].data[i] += a[i].adj();
   }
