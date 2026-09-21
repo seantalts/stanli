@@ -12,14 +12,19 @@
 //
 // Usage: node tests/test_webr.mjs build-wasm-side/libstanli.so \
 //          r/inst/js/stanc.js
+// The compiler-only mode runs the same R helper checks on pull requests
+// without building a side module:
+//   node tests/test_webr.mjs --compiler-only r/inst/js/stanc.js
 import { WebR } from 'webr';
 import fs from 'node:fs';
 
 const soPath = process.argv[2];
 const compilerPath = process.argv[3];
-if (!soPath) {
+const compilerOnly = soPath === '--compiler-only';
+if (!soPath || (compilerOnly && !compilerPath)) {
   console.error(
-      'usage: node tests/test_webr.mjs <libstanli.so> [stanli-compiler.js]');
+      'usage: node tests/test_webr.mjs <libstanli.so> [stanli-compiler.js]\n' +
+      '   or: node tests/test_webr.mjs --compiler-only <stanli-compiler.js>');
   process.exit(2);
 }
 
@@ -31,23 +36,25 @@ if (arch !== 'wasm32') {
   process.exit(1);
 }
 
-await webR.FS.writeFile('/tmp/libstanli.so',
-                        new Uint8Array(fs.readFileSync(soPath)));
+if (!compilerOnly) {
+  await webR.FS.writeFile('/tmp/libstanli.so',
+                          new Uint8Array(fs.readFileSync(soPath)));
 
-// The symbols the R bridge dlsyms, stanli_abi_version first: it is the
-// handshake, and the one a hand-kept export list forgot once already.
-const res = await webR.evalR(`
-  dyn.load('/tmp/libstanli.so')
-  syms <- c('stanli_abi_version', 'stanli_model_new', 'stanli_exact_lp',
-            'stanli_grad', 'stanli_sample_multi',
-            'stanli_sample_multi_progress', 'stanli_optimize',
-            'stanli_diagnose_text', 'stanli_wa_row')
-  syms[!vapply(syms, is.loaded, logical(1))]
-`);
-const missing = (await res.toJs()).values;
-if (missing.length > 0) {
-  console.error('FAIL symbols missing from the side module:', missing.join(' '));
-  process.exit(1);
+  // The symbols the R bridge dlsyms, stanli_abi_version first: it is the
+  // handshake, and the one a hand-kept export list forgot once already.
+  const res = await webR.evalR(`
+    dyn.load('/tmp/libstanli.so')
+    syms <- c('stanli_abi_version', 'stanli_model_new', 'stanli_exact_lp',
+              'stanli_grad', 'stanli_sample_multi',
+              'stanli_sample_multi_progress', 'stanli_optimize',
+              'stanli_diagnose_text', 'stanli_wa_row')
+    syms[!vapply(syms, is.loaded, logical(1))]
+  `);
+  const missing = (await res.toJs()).values;
+  if (missing.length > 0) {
+    console.error('FAIL symbols missing from the side module:', missing.join(' '));
+    process.exit(1);
+  }
 }
 
 if (compilerPath) {
@@ -57,6 +64,9 @@ if (compilerPath) {
   await webR.FS.writeFile(
       '/tmp/stanli-stanc.R',
       new Uint8Array(fs.readFileSync('r/R/stanc.R')));
+  await webR.FS.writeFile(
+      '/tmp/stanli.R',
+      new Uint8Array(fs.readFileSync('r/R/stanli.R')));
   await webR.FS.writeFile(
       '/tmp/portable-unicode.stan',
       new Uint8Array(fs.readFileSync('tests/compiler/portable_unicode.stan')));
@@ -71,6 +81,7 @@ if (compilerPath) {
     eval_js <- get0("eval_js", envir = asNamespace("webr"))
     if (!is.function(eval_js)) stop("webR has no eval_js host bridge")
     source("/tmp/stanli-stanc.R", local = .GlobalEnv)
+    source("/tmp/stanli.R", local = .GlobalEnv)
     stanc_js_path <- function() "/tmp/stanli-compiler.js"
 
     # A browser worker has no Node process global. The npm webR harness runs
@@ -116,6 +127,33 @@ if (compilerPath) {
         unicode_ok
       }
 
+      # Exercise the actual webR filesystem and eval_js bridge for nested
+      # includes, including spaces and Unicode in directories and filenames.
+      include_dir <- tempfile("stanli includes π ")
+      dir.create(include_dir)
+      dir.create(file.path(include_dir, "nested"))
+      write_utf8_file(file.path(include_dir, "priors.stan"),
+                      '#include "nested/prior π.stan"\n')
+      write_utf8_file(file.path(include_dir, "nested", "prior π.stan"),
+                      "x ~ normal(0, 1);\n")
+      include_source <- paste0("parameters { real x; }\nmodel {\n",
+                                "#include priors.stan\n}\n")
+      check_includes <- function(prefix) {
+        included_mir <- mir_from_webr(eval_js, include_source, "webr_includes",
+                                      include_paths = include_dir)
+        if (!startsWith(included_mir, prefix))
+          return("FAIL nested includes produced no MIR")
+        missing_message <- tryCatch({
+          mir_from_webr(eval_js, "#include absent.stan\n", "webr_missing",
+                         include_paths = include_dir)
+          "FAIL missing include compiled"
+        }, error = function(e) conditionMessage(e))
+        if (!grepl("absent.stan", missing_message, fixed = TRUE))
+          return("FAIL missing include lost its filename")
+        "ok"
+      }
+      portable_includes <- check_includes("STANLI2:")
+
       instrumented <- eval_js('(() => {
         const portable = globalThis.stanli_compile;
         const classic = globalThis.stanc;
@@ -123,7 +161,7 @@ if (compilerPath) {
           return "FAIL compiler exports missing";
         globalThis.__stanli_helper_calls = {
           portable: 0, classic: 0, warnings: 0,
-          classic_arguments: 0, classic_flags: []
+          classic_arguments: 0, classic_flags: [], classic_includes: null
         };
         globalThis.stanli_compile = function() {
           globalThis.__stanli_helper_calls.portable += 1;
@@ -136,6 +174,8 @@ if (compilerPath) {
           globalThis.__stanli_helper_calls.classic += 1;
           globalThis.__stanli_helper_calls.classic_arguments = arguments.length;
           globalThis.__stanli_helper_calls.classic_flags = arguments[2];
+          globalThis.__stanli_helper_calls.classic_includes =
+            arguments[3] && Object.keys(arguments[3]).sort();
           return classic.apply(this, arguments);
         };
         return "ok";
@@ -177,15 +217,18 @@ if (compilerPath) {
       fallback <- if (!startsWith(legacy_mir, "((functions_block")) {
         "FAIL absent portable export did not select legacy stanc"
       } else if (!grepl('"classic":1', fallback_calls, fixed = TRUE) ||
-                 !grepl('"classic_arguments":3', fallback_calls,
+                 !grepl('"classic_arguments":4', fallback_calls,
                         fixed = TRUE) ||
                  !grepl('"classic_flags":["O1","debug-optimized-mir"]',
-                        fallback_calls, fixed = TRUE)) {
+                        fallback_calls, fixed = TRUE) ||
+                 !grepl('"classic_includes":[]', fallback_calls, fixed = TRUE)) {
         "FAIL legacy fallback received the wrong call shape"
       } else {
         "ok"
       }
-      c(good, instrumented, warning_ok, bad, fallback)
+      legacy_includes <- check_includes("((functions_block")
+      c(good, portable_includes, instrumented, warning_ok, bad, fallback,
+        legacy_includes)
     }, finally = restore_process())
     statuses
   `);
@@ -197,7 +240,9 @@ if (compilerPath) {
   }
 }
 
-console.log(compilerPath
+console.log(compilerOnly
+  ? 'webr compiler helper OK: portable and legacy includes resolve'
+  : compilerPath
   ? 'webr load OK: runtime symbols and R portable helper resolve'
   : 'webr load OK: side module loads and the bridge symbols resolve');
 process.exit(0);

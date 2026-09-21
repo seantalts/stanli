@@ -115,7 +115,8 @@ class CiPolicyTest(unittest.TestCase):
             "r-tests": ("Build and check",
                         "Bundled portable compiler through V8 and the current runtime",
                         "R ecosystem acceptance (no skips)"),
-            "browser-compiler": ("Native and JavaScript compilers emit identical bytes",),
+            "browser-compiler": ("Native and JavaScript compilers emit identical bytes",
+                                 "R compiler helper in webR"),
         }.items():
             for name in names:
                 with self.subTest(job=job, step=name):

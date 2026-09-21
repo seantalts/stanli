@@ -427,9 +427,13 @@ R checks the real bundled JavaScript compiler through V8 and the webR file
 transport; subprocess checks exercise the portable and stock compilers when
 available. `test_capi` covers the embedded include entry point in native and
 sanitizer builds.
-It also checks repeat determinism, source-bearing error objects, warning
-parity, the normal `stanc()` JavaScript API against stock stancjs on ordinary
-inputs, and final-newline behavior. The overflow fixture is excluded from that
+The PR compiler job also runs `tests/test_webr.mjs --compiler-only` in real
+webR, checking nested includes and missing-file diagnostics through both the
+portable compiler and legacy fallback. The side-module load check stays
+post-submit.
+The portable compiler suite also checks repeat determinism, source-bearing
+error objects, warning parity, the normal `stanc()` JavaScript API against
+stock stancjs on ordinary inputs, and final-newline behavior. The overflow fixture is excluded from that
 API comparison because the checked producer policy deliberately retains an
 expression where pristine stanc3's host-width-dependent folds disagree. A
 focused worker harness proves the preferred custom
