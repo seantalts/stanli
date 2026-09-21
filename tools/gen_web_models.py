@@ -9,7 +9,7 @@ models all read radon_all.json, so it is written once and fetched once.
 
 The notes are hand written and live in tools/model_notes.json, keyed by
 model name. Everything else on the card is derived: parameter count and
-per-gradient speedup come from docs/corpus-bench.tsv, keywords from
+paired gradient ratio come from the validated current benchmark, keywords from
 posteriordb, so no number here can drift from the measured artifacts.
 
 Usage: tools/gen_web_models.py [PDB_DIR] [--out DIR] [--check]
@@ -18,37 +18,25 @@ Usage: tools/gen_web_models.py [PDB_DIR] [--out DIR] [--check]
 note and no note is orphaned, which is the part CI can enforce without a
 browser.
 """
-import csv
 import json
 import pathlib
 import sys
 import zipfile
 
+from gen_docs import current_benchmark
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 NOTES = REPO / "tools" / "model_notes.json"
 VERIFY_JSON = REPO / "docs" / "verification.json"
-BENCH_TSV = REPO / "docs" / "corpus-bench.tsv"
 
 # nn_rbm1bJ100 reads all of MNIST: 179 MB of JSON for one model, against
 # 7.8 MB for the other 117 put together. Nothing else comes close, so the
 # cap is a backstop rather than a knob.
 MAX_DATA_BYTES = 2.5 * 1024 * 1024
 
-# Draw counts scale to the model, from the reference single-chain time for
-# 1000 warmup + 1000 draws in docs/corpus-bench.tsv. A demo that looks hung
-# is a worse demo than a short chain, and the browser is slower than the
-# machine that produced these numbers.
-DRAWS = [(5, 1000), (20, 500), (60, 250)]
+# Browser-chain defaults are independent of native benchmark timing. A fixed
+# gradient budget does not predict NUTS's gradient count or sampling duration.
 DRAWS_MIN = 100
-
-
-def draws_for(sample_s):
-    if sample_s is None:
-        return DRAWS_MIN
-    for limit, n in DRAWS:
-        if sample_s <= limit:
-            return n
-    return DRAWS_MIN
 
 
 def num(row, key):
@@ -56,6 +44,20 @@ def num(row, key):
         return float(row[key])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def benchmark_fields(row):
+    """Native benchmark metadata; a missing paired ratio stays missing."""
+    fields = {"warmup": DRAWS_MIN, "samples": DRAWS_MIN}
+    if row.get("params"):
+        fields["params"] = int(row["params"])
+    ns = num(row, "stanli_ns_grad")
+    if ns is not None:
+        fields["us"] = round(ns / 1000, 2)
+    paired = num(row, "paired_speedup")
+    if paired is not None:
+        fields["speedup"] = round(paired, 2)
+    return fields
 
 
 def eligible(pdb):
@@ -117,10 +119,8 @@ def main():
     if missing:
         sys.exit(1)
 
-    bench = {}
-    if BENCH_TSV.exists():
-        with BENCH_TSV.open() as f:
-            bench = {r["model"]: r for r in csv.DictReader(f, delimiter="\t")}
+    _, benchmark_rows, _ = current_benchmark()
+    bench = {row["model"]: row for row in benchmark_rows}
 
     data_dir = out_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -136,9 +136,6 @@ def main():
             (data_dir / f"{dn}.json").write_bytes(raw)
             written.add(dn)
         row = bench.get(model, {})
-        sample_s = num(row, "stanli_sample_s")
-        us = num(row, "stanli_ns_grad")
-        cm = num(row, "cmdstan_ns_grad")
         entry = {
             "name": model,
             "data": dn,
@@ -146,15 +143,8 @@ def main():
             "keywords": sorted({
                 k.lower() for k in (meta.get("keywords") or [])
                 if isinstance(k, str)}),
-            "warmup": draws_for(sample_s),
-            "samples": draws_for(sample_s),
+            **benchmark_fields(row),
         }
-        if row.get("params"):
-            entry["params"] = int(row["params"])
-        if us:
-            entry["us"] = round(us / 1000, 2)
-        if us and cm:
-            entry["speedup"] = round(cm / us, 2)
         index.append(entry)
 
     (out_dir / "index.json").write_text(

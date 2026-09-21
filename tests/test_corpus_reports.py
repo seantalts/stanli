@@ -111,20 +111,13 @@ class CorpusReports(unittest.TestCase):
         self.assertNotIn('Apple', note)
         self.assertNotIn('2ae6c1d0', note)
 
-    def test_teaching_rows_do_not_change_posteriordb_headline(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary)
-            (root / 'docs').mkdir()
-            rows = ['model\tstanli_ns_grad\tcmdstan_ns_grad', 'pdb_a\t1\t2', 'pdb_b\t1\t4']
-            for group in ('rethinking', 'brms', 'educational', 'stanc3'):
-                directory = (root / 'tests/educational/models' / group if group == 'educational'
-                             else root / 'tests' / group)
-                directory.mkdir(parents=True)
-                (directory / ('model.stan' if group == 'educational' else group + '.stan')).touch()
-                rows.append(group + '\t1\t1000')
-            (root / 'docs' / 'corpus-bench.tsv').write_text('\n'.join(rows) + '\n')
-            with mock.patch.object(docs, 'REPO', root):
-                self.assertEqual(docs.corpus_stats(), (2, 3, 2))
+    def test_current_headline_includes_all_application_collections(self):
+        rows = [dict(model='pdb_a', paired_speedup='2'),
+                dict(model='pdb_b', paired_speedup='4')]
+        rows.extend(dict(model=group, paired_speedup='10')
+                    for group in ('rethinking', 'brms', 'educational'))
+        rows.append(dict(model='failed', paired_speedup=''))
+        self.assertEqual(docs.corpus_stats(rows), (5, 10, 5))
 
     def test_real_fixture_directory_layouts(self):
         self.assertEqual(report.collection('aalto_bern'), 'educational')

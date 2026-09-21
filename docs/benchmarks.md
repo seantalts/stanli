@@ -5,9 +5,10 @@ build. During sampling, it reuses a prepared autodiff graph and batches
 independent work. This can shorten the first fit and repeated gradient
 evaluations; the gain depends on the model.
 
-The current comparison covers **319 application models** using one build and
-one measurement protocol. **Current sweep: results pending.**
-The table will report the completed experiment, including failures and timeouts.
+The current comparison covers **<!--gen:benchmark_models-->319<!--/gen--> application
+models**. Across <!--gen:corpus_n_grad-->pending<!--/gen--> accepted gradient
+comparisons, the median paired speedup is **<!--gen:corpus_median-->pending<!--/gen-->**.
+The table includes every model, including failures and timeouts.
 
 <a id="benchmark-method"></a>
 
@@ -19,12 +20,10 @@ unconstrained point. After warmup, six alternating pairs give a median
 speedup and median absolute deviation (MAD). Every accepted pair must pass
 its numerical comparison.
 
-**Complete sampling includes startup, preparation, adaptation, generated
-quantities and CSV output.** Each engine runs four seeds with 1,000 warmup
-iterations and 1,000 saved draws per seed. The table reports median CLI time;
-CmdStan model compilation is measured separately. This is a fixed sampling
-budget, not time to equal effective sample size. Diagnostic warnings and
-incomplete runs remain visible.
+**Estimated time = setup + 20,000 × median warm gradient time.** Stanli setup
+includes source-to-MIR compilation and lowering/binding; CmdStan setup includes
+stanc translation and the ordinary C++ model build. This fixed-work estimate
+excludes sampler/output overhead. Full sampling is not run in this benchmark.
 
 See the [experiment details](benchmark-appendix.md) and independent
 [numerical checks](../TESTING.md#comparison-with-cmdstan-on-complete-models).
@@ -53,14 +52,14 @@ Stanli slower; the per-model measurements show where that happens.
 
 Every application fixture uses the same run settings. Language-conformance
 fixtures belong to the [numerical corpus](corpus-status.md) and are not timed
-here. Missing timings will include their failure or timeout reason.
+here. Missing timings include their failure or timeout reason.
 
 <details>
-<summary>Show all 319 models, timings, and diagnostic notes</summary>
+<summary>Show all <!--gen:benchmark_models-->319<!--/gen--> models, timings, and notes</summary>
 
 <!--gen:benchmark_catalog-->
 Current corpus sweep pending. Timings will be published after all selected
-models have a recorded outcome and sampling diagnostics have been processed.
+models have a recorded outcome.
 <!--/gen-->
 
 </details>
@@ -68,5 +67,6 @@ models have a recorded outcome and sampling diagnostics have been processed.
 ## Appendix
 
 The [benchmark appendix](benchmark-appendix.md) specifies this experiment's
-build identity, phase boundaries, numerical checks, sampling diagnostics,
-retained artifacts and reproduction commands.
+build identity, phase boundaries, numerical checks, retained artifacts and
+reproduction commands. It also contains one full-corpus gradient table against
+CmdStan with stanc3 loop vectorization enabled.

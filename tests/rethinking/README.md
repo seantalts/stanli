@@ -192,13 +192,13 @@ references; the default replay includes newly added rethinking fixtures
 rather than silently skipping ones without a record. Output columns and
 values are compared as well as log density and the full gradient.
 
-The default benchmark suite includes this directory. The [version-3
-protocol](../../docs/benchmark-protocol.md) measures gradients by default;
-full inference is a separate opt-in phase. To measure this corpus alone:
+The default benchmark suite includes this directory. The [version-4
+protocol](../../docs/benchmark-protocol.md) measures setup and warm gradients
+and estimates setup plus 20,000 gradient evaluations. To measure this corpus alone:
 
 ```sh
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/rethinking-v2.tsv --corpus rethinking
+  /tmp/rethinking-v4.tsv --corpus rethinking
 python3 tools/corpus.py deps/posteriordb
 python3 tools/gen_docs.py
 ```

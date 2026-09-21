@@ -2,7 +2,8 @@
 """Paired, reproducible corpus benchmarks. See docs/benchmark-protocol.md.
 
 python3 harnesses/corpus_bench.py CMDSTAN PDB fresh.tsv [--corpus rethinking]
-Defaults to gradient measurements. Add --sampling for full inference runs.
+Measures source/setup costs and warm gradients. Setup plus 20,000 gradients
+is a fixed-work proxy, not measured HMC or sampling time.
 A sibling fresh.tsv.run directory holds the frozen manifest and raw evidence.
 --resume requires identical inputs, binaries and settings. Historical TSVs are
 never appended to, and candidate-only refreshes cannot create paired results.
@@ -31,25 +32,19 @@ sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
 
-PROTOCOL = "stanli-corpus-v3"
+PROTOCOL = "stanli-corpus-v4"
+GRADIENT_BUDGET = 20000
 BENCH = REPO / "build-rel/bench_grad"
-RUN = REPO / "build-rel/stanli_run"
 STANC = REPO / "deps/stanc3/stanc"
 VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
-COLS = ["model", "params", "stanli_prep_s", "stanli_ns_grad",
-        "stanli_sample_s", "stanli_grads", "cmdstan_build_s",
-        "cmdstan_ns_grad", "cmdstan_sample_s", "stanli_ns_grad_mad",
-        "cmdstan_ns_grad_mad", "paired_speedup", "paired_speedup_mad",
-        "paired_rounds", "run_id", "note"]
+COLS = ["model", "params", "stanli_compile_s", "stanli_prep_s",
+        "cmdstan_stanc_s", "cmdstan_build_s", "stanli_ns_grad", "cmdstan_ns_grad",
+        "stanli_ns_grad_mad", "cmdstan_ns_grad_mad", "paired_speedup",
+        "paired_speedup_mad", "paired_rounds", "gradient_budget",
+        "stanli_estimated_s", "cmdstan_estimated_s", "run_id", "note"]
 THREAD_ENV = {k: "1" for k in ("STAN_NUM_THREADS", "OMP_NUM_THREADS",
                                "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
                                "VECLIB_MAXIMUM_THREADS")}
-
-
-def parse_grad_count(stderr_text):
-    import re
-    found = re.search(r"stanli_run: (\d+) gradient evaluations", stderr_text or "")
-    return found.group(1) if found else ""
 
 
 def row_line(row):
@@ -234,47 +229,6 @@ def summarize_pairs(pairs):
     return result
 
 
-def validate_draws(path, expected_rows):
-    """A zero exit status alone does not establish a complete sampling run."""
-    try:
-        with path.open() as stream:
-            rows = csv.reader(line for line in stream if line.strip() and not line.startswith("#"))
-            header = next(rows)
-            if "lp__" not in header or len(set(header)) != len(header):
-                raise ValueError("missing sampler density or duplicate columns")
-            count = 0
-            for row in rows:
-                if len(row) != len(header) or not all(math.isfinite(float(v)) for v in row):
-                    raise ValueError("invalid or non-finite draw")
-                count += 1
-            if count != expected_rows:
-                raise ValueError(f"expected {expected_rows} draws, found {count}")
-    except (OSError, StopIteration, ValueError) as exc:
-        raise PhaseFailure(f"invalid sampling CSV: {exc}") from exc
-
-
-def summarize_sampling(events, seeds):
-    result = {}
-    for engine in ("stanli", "cmdstan"):
-        selected = [e for e in events if e["engine"] == engine]
-        if (len(selected) == len(seeds) and {e["seed"] for e in selected} == set(seeds)
-                and all(e["status"] == "ok" for e in selected)):
-            result[engine + "_sample_s"] = statistics.median(e["elapsed_s"] for e in selected)
-    return result
-
-
-def sampling_order(round_index, cmdstan_multiple):
-    return ("cmdstan", "stanli") if cmdstan_multiple is not None else paired_order(round_index)
-
-
-def sampling_limit(engine, absolute_limit, cmdstan_multiple, reference):
-    if engine == "cmdstan" or cmdstan_multiple is None:
-        return absolute_limit
-    if reference is None or reference["status"] != "ok":
-        return None
-    return min(absolute_limit, cmdstan_multiple * reference["elapsed_s"])
-
-
 def open_run(output, expected, resume):
     directory = output.with_suffix(output.suffix + ".run")
     manifest_path = directory / "manifest.json"
@@ -308,14 +262,24 @@ def materialize_data(source, destination):
         destination.write_bytes(source.read_bytes())
 
 
-def build_model(name, stan, data, work, runner, args):
+def setup_phase(runner, setup, key, phase, argv, timeout, cwd=None):
+    """Keep attempted setup events, including failures, separate from gradients."""
+    event = runner.run(phase, argv, timeout, cwd)
+    setup[key] = event
+    if event["status"] != "ok":
+        raise PhaseFailure(f"{phase}: {event['status']} (event {event['id']})")
+    return event
+
+
+def build_model(name, stan, data, work, runner, args, setup=None):
+    setup = {} if setup is None else setup
     work.mkdir(exist_ok=True)
     source, hpp, mir = work / f"{name}.stan", work / f"{name}.hpp", work / "model.sexp"
     source.write_bytes(stan.read_bytes())
-    runner.require(f"{name}/stanli-mir",
+    setup_phase(runner, setup, "stanli_compile", f"{name}/stanli-mir",
         [args.vectorize_probe, "--vectorize-loops", "on", "--output", mir, source],
         args.build_timeout)
-    runner.require(f"{name}/stanc-cpp",
+    setup_phase(runner, setup, "cmdstan_stanc", f"{name}/stanc-cpp",
         [args.stanc, source, f"--o={hpp}", *shlex.split(args.stancflags)], args.build_timeout)
     gradient = work / "gradbench"
     runner.require(f"{name}/gradient-driver-build",
@@ -325,13 +289,32 @@ def build_model(name, stan, data, work, runner, args):
     return executables, source
 
 
+def setup_estimates(row, setup):
+    """Populate measured setup and fixed-work estimates only with all components."""
+    for key in ("stanli_compile", "cmdstan_stanc", "cmdstan_build"):
+        event = setup.get(key, {})
+        if event.get("status") == "ok":
+            elapsed = event["elapsed_s"]
+            if not math.isfinite(elapsed) or elapsed < 0:
+                raise ValueError(f"invalid setup duration: {key}")
+            row[key + "_s"] = elapsed
+    for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
+                           ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
+        grad = row.get(engine + "_ns_grad")
+        if grad is not None and all(field in row for field in fields):
+            row[engine + "_estimated_s"] = (sum(row[field] for field in fields)
+                                            + GRADIENT_BUDGET * grad / 1e9)
+
+
 def measure_model(name, stan, data, directory, manifest, runner, args):
-    row = dict(model=name, run_id=manifest["run_id"])
+    row = dict(model=name, run_id=manifest["run_id"], gradient_budget=GRADIENT_BUDGET)
     record = dict(model=name, inputs={"stan": sha(stan), "data": sha(data)}, row=row,
-                  gradients=[], sampling=[], status="failed")
+                  gradients=[], setup={}, preparation_s=[], status="failed")
     notes = []
+    source = directory / name / f"{name}.stan"
     try:
-        commands, source = build_model(name, stan, data, directory / name, runner, args)
+        commands, source = build_model(name, stan, data, directory / name, runner, args,
+                                       record["setup"])
         record["executables"] = {engine: sha(command[0]) for engine, command in commands.items()}
         for round_index in range(args.rounds):
             pair = {}
@@ -346,8 +329,7 @@ def measure_model(name, stan, data, directory, manifest, runner, args):
             record["gradients"].append(dict(pair, order=list(order), max_scaled_error=deviation))
         row.update(summarize_pairs(record["gradients"]))
         row["params"] = len(record["gradients"][0]["stanli"]["values"]) - 1
-        # File-to-bound-executor preparation is a distinct metric; it excludes stanc.
-        preparations = []
+        # Binding existing MIR excludes the separately measured source compiler.
         for i in range(args.rounds):
             event = runner.require(f"{name}/prepare/{i}", commands["stanli"] + ["--prep"],
                                    args.gradient_timeout)
@@ -355,55 +337,30 @@ def measure_model(name, stan, data, directory, manifest, runner, args):
                 duration = float(runner.text(event).splitlines()[-1].split()[0])
                 if not math.isfinite(duration) or duration < 0:
                     raise ValueError("non-finite or negative duration")
-                preparations.append(duration)
+                record["preparation_s"].append(duration)
             except (IndexError, ValueError) as exc:
                 raise PhaseFailure(f"invalid preparation output: {exc}") from exc
-        row["stanli_prep_s"] = statistics.median(preparations)
-        record["preparation_s"] = preparations
-        if args.sampling:
-            exe = source.with_suffix("")
-            event = runner.require(f"{name}/cmdstan-build", ["make", exe], args.build_timeout,
-                                   args.cmdstan)
-            row["cmdstan_build_s"] = event["elapsed_s"]
-            record["sampling_executables"] = {"stanli": sha(args.run), "cmdstan": sha(exe)}
-            for i, seed in enumerate(args.seeds):
-                reference = None
-                for engine in sampling_order(i, args.cmdstan_runtime_multiple):
-                    timeout = sampling_limit(engine, args.sample_timeout,
-                                             args.cmdstan_runtime_multiple, reference)
-                    if timeout is None:
-                        record["sampling"].append(dict(engine=engine, seed=seed,
-                            status="not_run", reason="matching CmdStan run did not finish successfully"))
-                        notes.append(f"stanli_sample_not_run(seed={seed}; reference unavailable)")
-                        continue
-                    command = ([args.run, stan, data, "--warmup", str(args.iter_warmup),
-                                "--samples", str(args.iter_sampling), "--seed", str(seed),
-                                "--sampler-stats"]
-                               if engine == "stanli" else
-                               [exe, "sample", f"num_warmup={args.iter_warmup}",
-                                f"num_samples={args.iter_sampling}", "random", f"seed={seed}",
-                                "data", f"file={data}", "output", f"file={directory/name}/sample-{seed}.csv"])
-                    event = runner.run(f"{name}/sample/{seed}/{engine}", command, timeout)
-                    if event["status"] == "ok":
-                        csv_path = (directory / event["stdout"] if engine == "stanli" else
-                                    directory / name / f"sample-{seed}.csv")
-                        try:
-                            validate_draws(csv_path, args.iter_sampling)
-                        except PhaseFailure as exc:
-                            event = dict(event, status="failed", validation_error=str(exc))
-                    record["sampling"].append(dict(engine=engine, seed=seed, **event))
-                    if engine == "cmdstan":
-                        reference = event
-                    if event["status"] != "ok":
-                        notes.append(f"{engine}_sample_{event['status']}({timeout:.6g}s, seed={seed})")
-            # No median over surviving seeds: a timeout censors the whole summary.
-            row.update(summarize_sampling(record["sampling"], args.seeds))
-        else:
-            notes.append("sampling_not_requested")
-        record["status"] = ("failed" if any("failed" in n for n in notes) else
-                            "censored" if any("timeout" in n for n in notes) else "ok")
+        row["stanli_prep_s"] = statistics.median(record["preparation_s"])
     except (PhaseFailure, ValueError) as exc:
         notes.append(str(exc))
+    # An ordinary CmdStan executable is setup for the fixed-work proxy. Build
+    # it independently of gradient/preparation success, without executing it.
+    # Its failure must not discard already accepted gradient measurements.
+    if record["setup"].get("cmdstan_stanc", {}).get("status") == "ok":
+        try:
+            exe = source.with_suffix("")
+            setup_phase(runner, record["setup"], "cmdstan_build", f"{name}/cmdstan-build",
+                        ["make", exe, f"STANC={args.stanc}", f"STANCFLAGS={args.stancflags}"],
+                        args.build_timeout, args.cmdstan)
+            record["cmdstan_executable_sha256"] = sha(exe)
+        except (PhaseFailure, ValueError) as exc:
+            notes.append(str(exc))
+    try:
+        setup_estimates(row, record["setup"])
+    except ValueError as exc:
+        notes.append(str(exc))
+    record["status"] = ("ok" if not notes else
+                        "censored" if all(": timeout (event " in note for note in notes) else "failed")
     row["note"] = "; ".join(notes)
     atomic_json(directory / f"{name}.result.json", record)
     return record
@@ -428,42 +385,23 @@ def main(argv=None):
     parser.add_argument("--measure-ms", type=int, default=250)
     parser.add_argument("--gradient-timeout", type=float, default=60)
     parser.add_argument("--build-timeout", type=float, default=900)
-    parser.add_argument("--sampling", action="store_true")
-    parser.add_argument("--sample-timeout", type=float, default=900)
-    parser.add_argument("--cmdstan-runtime-multiple", type=float,
-                        help="run CmdStan first per seed; cap stanli at this multiple of its runtime, "
-                             "also bounded by --sample-timeout")
-    parser.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3, 4])
-    parser.add_argument("--iter-warmup", type=int, default=1000)
-    parser.add_argument("--iter-sampling", type=int, default=1000)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--bench", type=pathlib.Path, default=BENCH)
-    parser.add_argument("--run", type=pathlib.Path, default=RUN)
     parser.add_argument("--stanc", "--cmdstan-stanc", type=pathlib.Path, default=STANC,
                         help="compiler for the CmdStan model header")
     parser.add_argument("--stancflags", default="", help="flags for CmdStan header generation")
     parser.add_argument("--vectorize-probe", type=pathlib.Path, default=VECTORIZE_PROBE)
     args = parser.parse_args(argv)
-    if args.cmdstan_runtime_multiple is not None:
-        if not args.sampling:
-            parser.error("--cmdstan-runtime-multiple requires --sampling")
-        if not math.isfinite(args.cmdstan_runtime_multiple) or args.cmdstan_runtime_multiple <= 0:
-            parser.error("--cmdstan-runtime-multiple must be finite and positive")
     if args.rounds < 2 or args.rounds % 2:
         parser.error("--rounds must be even and at least two for balanced engine order")
     if not all(1 <= n <= 60000 for n in (args.warmup_ms, args.measure_ms)):
         parser.error("timing windows must be 1..60000 milliseconds")
     if not all(math.isfinite(n) and n > 0 for n in
-               (args.gradient_timeout, args.build_timeout, args.sample_timeout)):
+               (args.gradient_timeout, args.build_timeout)):
         parser.error("phase timeouts must be finite and positive")
     if args.gradient_timeout <= (args.warmup_ms + args.measure_ms) / 1000:
         parser.error("gradient timeout must exceed warmup plus measurement")
-    if args.iter_warmup < 0 or args.iter_sampling < 1 or any(s < 1 for s in args.seeds):
-        parser.error("invalid sampling iterations or seeds")
-    if args.sampling and (len(args.seeds) < 2 or len(args.seeds) % 2 or
-                          len(set(args.seeds)) != len(args.seeds)):
-        parser.error("sampling requires an even number of distinct seeds for balanced order")
-    for key in ("cmdstan", "pdb", "output", "bench", "run", "stanc", "vectorize_probe"):
+    for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe"):
         setattr(args, key, getattr(args, key).absolute())
     if any(os.getenv(k, "0") != "0" for k in ("STANLI_PROFILE", "STANLI_PROFILE_PREP")):
         parser.error("disable profiling for comparative measurements")
@@ -494,6 +432,7 @@ def main(argv=None):
             parser.error("no models selected")
         config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
                   if k not in ("resume", "output")}
+        config["gradient_budget"] = GRADIENT_BUDGET
         identities = {str(p.relative_to(REPO)): sha(p) for p in (
             REPO / "harnesses/corpus_bench.py", REPO / "tools/benchmark_timer.hpp",
             REPO / "tools/bench_grad.cpp", REPO / "tools/bench_cmdstan_grad.cpp",
@@ -505,7 +444,7 @@ def main(argv=None):
                         threads=THREAD_ENV, sources=identities,
                         stanli_source=checkout_identity(REPO),
                         executables={k: sha(getattr(args, k)) for k in
-                                     (("bench", "stanc", "vectorize_probe", "run") if args.sampling else ("bench", "stanc", "vectorize_probe"))},
+                                     ("bench", "stanc", "vectorize_probe")},
                         toolchains={"cmdstan": checkout_identity(args.cmdstan),
                                     "stan": checkout_identity(args.cmdstan / "stan"),
                                     "math": checkout_identity(args.cmdstan / "stan/lib/stan_math"),
@@ -544,7 +483,7 @@ def main(argv=None):
                 records[name] = measure_model(name, stan, data, directory, manifest, runner, args)
             write_summary(args.output, records)
             print(f"{name}: {records[name]['status']} {records[name]['row']['note']}", flush=True)
-        return int(any(r["status"] == "failed" for r in records.values()))
+        return int(any(r["status"] != "ok" for r in records.values()))
 
 
 if __name__ == "__main__":

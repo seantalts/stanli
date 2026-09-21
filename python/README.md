@@ -14,9 +14,9 @@ pip install stanli
 
 That is the whole install. No compiler, no `make`, no CmdStan checkout,
 no multi-minute first-run build. One wheel, one shared library, under
-eight megabytes. In the current Eight Schools benchmark, a first complete
-1,000-warmup, 1,000-draw run takes 0.03 s in stanli versus 3.4 s to build and
-run the model with CmdStan - roughly 100x faster from source to CSV.
+eight megabytes. Models run without a per-model C++ build; see the
+[current benchmark](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
+for measured gradients and setup-plus-20,000-gradient time estimates.
 
 ```python
 import stanli
@@ -226,47 +226,21 @@ Full per-model accuracy table:
 
 ## Performance
 
-Per-gradient latency against CmdStan, same models, same evaluation
-point, both sides `-O3` with FP contraction pinned off:
+In the <!--gen:benchmark_date-->pending<!--/gen--> native run,
+<!--gen:corpus_n_grad-->pending<!--/gen--> of
+<!--gen:benchmark_models-->pending<!--/gen--> models produced paired gradient
+measurements. The median CmdStan/Stanli ratio was
+<!--gen:corpus_median-->pending<!--/gen-->, with
+<!--gen:corpus_at_par-->pending<!--/gen--> at or above parity.
 
-<!--gen:bench_table_us-->
-| model | stanli | CmdStan | speedup |
-| --- | ---: | ---: | ---: |
-| `gpcm_latent_reg_irt` | 122.6 us | 1337.7 us | **10.9x** |
-| `dogs` | 6.2 us | 62.2 us | **10.1x** |
-| `radon_pooled` | 43.7 us | 321.6 us | **7.4x** |
-| `GLM_Poisson_model` | 0.36 us | 0.99 us | **2.8x** |
-| `state_space_stochastic_level_stochastic_seasonal` | 6.4 us | 19.6 us | **3.1x** |
-| `eight_schools_noncentered` | 0.21 us | 0.35 us | **1.6x** |
-| `logistic_regression_rhs` | 39.7 us | 96.5 us | **2.4x** |
-| `soil_incubation` | 30.8 us | 58.9 us | **1.9x** |
-| `normal_mixture` | 42.4 us | 87.6 us | **2.1x** |
-| `lotka_volterra` | 21.6 us | 40.8 us | **1.9x** |
-| `hmm_example` | 16.1 us | 26.2 us | **1.6x** |
-| `garch11` | 6.9 us | 7.9 us | **1.2x** |
-| `hierarchical_gp` | 19.6 us | 41.1 us | **2.1x** |
-| `one_comp_mm_elim_abs` | 459.1 us | 462.8 us | **1.0x** |
-| `diamonds` | 31.1 us | 31.9 us | **1.0x** |
-| `gp_regr` | 2.7 us | 3.3 us | **1.2x** |
-| `gp_pois_regr` | 2.3 us | 2.7 us | **1.2x** |
-<!--/gen-->
+Stanli avoids a per-model C++ build and can combine repeated work into fewer
+runtime operations. Dense kernels and serial dependencies offer fewer such
+opportunities; the model and data determine the result.
 
-The wins come from op granularity. CmdStan's var tape allocates, walks,
-and frees one node per scalar operation per leapfrog step; stanli pays
-a fixed cost per *op*, and a vectorized statement over N elements
-amortizes that to nothing. Across the whole posteriordb corpus the
-median is <!--gen:corpus_median-->2.10x<!--/gen--> and
-<!--gen:corpus_at_par-->119<!--/gen--> of
-<!--gen:corpus_n_grad-->119<!--/gen--> models are at or above CmdStan.
-
-Repeated independent work produces the largest wins. Dense kernels and serial
-recurrences land closer to parity because there is less work to fuse, though
-the measured HMM, ARMA, and GARCH gradients are now all at least as fast as
-CmdStan. The only gradient losses are the three ODE models at 0.87-0.90x;
-their first complete runs still win once CmdStan's model build is included.
-
-Method and full table:
-[docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
+The [current full table and method](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
+include every model, failed or capped measurement, and the explicit cost-estimate formula.
+The [optimized-reference appendix](https://github.com/seantalts/stanli/blob/main/docs/benchmark-appendix.md)
+compares against CmdStan with stanc3 O1 and loop vectorization enabled.
 
 ## API
 
