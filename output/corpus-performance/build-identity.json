@@ -1,0 +1,46 @@
+{
+  "runtime_base": "2c9d67b98b196e800dc051460aaaf653ac811ace",
+  "files": {
+    "build/bench_grad": "843734f5af4b44f7d432c73a1c513730ef847cbc1faf410c7a080a9a0889a1cd",
+    "build/stanli_run": "9ca3a98cca411d0e0b5dd27c7571f83d2937c14b3e948f490fa46ba211df911a",
+    "build/stanli_check": "a604d7ae7e8fb7687ed641b5bd58f14ff6e3a3875242cdd78ca95891fb28b688",
+    "build/CMakeCache.txt": "2d7c8c9c04824d4d7b498fcc818b435902ec40bbd27577702500e4745f57af66",
+    "deps/stanc3/stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "deps/stanc3/stanc_embed.o": "2930649e33aa2a8539042d47b6e64eabe48d16632b6b31cc2bda7d6eec75b425",
+    "deps/stanc3/stanc_embed.o.stamp": "94185cea19ffdb072e2587ee6368651745a6f478fa97431f6491c299ad76678c",
+    "deps/stanc3/stanli-vectorize-probe": "cf1a7bf76c647668047a886610281d5a0d4a83a8ec560eb37480ecd1a9596acb",
+    "deps/stanc3/stanli-vectorize-probe.stamp": "94185cea19ffdb072e2587ee6368651745a6f478fa97431f6491c299ad76678c"
+  },
+  "configuration": [
+    "CMAKE_BUILD_TYPE:STRING=Release",
+    "CMAKE_CXX_COMPILER:UNINITIALIZED=clang++",
+    "CMAKE_CXX_FLAGS:STRING=",
+    "CMAKE_CXX_FLAGS_DEBUG:STRING=-g",
+    "CMAKE_CXX_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG",
+    "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG",
+    "CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG",
+    "CMAKE_OSX_ARCHITECTURES:STRING=",
+    "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=11.0",
+    "CMAKE_OSX_SYSROOT:STRING=",
+    "STANLI_LITE_LP:BOOL=OFF",
+    "STANLI_LIT_JOBS:STRING=24",
+    "STANLI_OCAML_STDLIB:PATH=/Users/xitrium/.opam/stanc3-55/lib/ocaml",
+    "STANLI_PORTABLE_COMPILER:FILEPATH=",
+    "STANLI_SANITIZE:STRING=",
+    "STANLI_SHARED_TEST_RUNTIME:BOOL=ON",
+    "STANLI_STANC_EMBED_OBJ:FILEPATH=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/deps/stanc3/stanc_embed.o",
+    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/deps/stanc3/stanc",
+    "STANLI_THREADS:BOOL=ON",
+    "STANLI_WASM_SIDE:BOOL=OFF",
+    "CMAKE_CXX_FLAGS-ADVANCED:INTERNAL=1",
+    "CMAKE_CXX_FLAGS_DEBUG-ADVANCED:INTERNAL=1",
+    "CMAKE_CXX_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1",
+    "CMAKE_CXX_FLAGS_RELEASE-ADVANCED:INTERNAL=1",
+    "CMAKE_CXX_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1"
+  ],
+  "host": [
+    "Apple M3 Ultra",
+    "103079215104"
+  ],
+  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n13 models retain per-model recording provenance overrides\n\n329/329 models within 1e-09 of the CmdStan references at all 3 evaluation points (1020194 values compared); worst gpcm_latent_reg_irt at 9.38e-13 (7040 ulp)\n"
+}

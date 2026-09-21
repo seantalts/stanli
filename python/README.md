@@ -212,7 +212,7 @@ Nothing here ships on "looks close".
 are differentially verified against CmdStan: same model, same data, same
 evaluation point, comparing the log density and every single gradient
 component. **<!--gen:corpus_bitwise-->55<!--/gen--> agree bitwise.** The
-worst deviation across the entire corpus is
+worst deviation among these verified posteriordb models is
 **<!--gen:corpus_worst-->7.1e-13<!--/gen--> relative**.
 
 The two exceptions are documented rather than hidden. `sir`'s ODE
@@ -226,12 +226,12 @@ Full per-model accuracy table:
 
 ## Performance
 
-In the <!--gen:benchmark_date-->pending<!--/gen--> native run,
-<!--gen:corpus_n_grad-->pending<!--/gen--> of
-<!--gen:benchmark_models-->pending<!--/gen--> models produced paired gradient
+In the <!--gen:benchmark_date-->2026-09-21<!--/gen--> native run,
+<!--gen:corpus_n_grad-->315<!--/gen--> of
+<!--gen:benchmark_models-->319<!--/gen--> models produced paired gradient
 measurements. The median CmdStan/Stanli ratio was
-<!--gen:corpus_median-->pending<!--/gen-->, with
-<!--gen:corpus_at_par-->pending<!--/gen--> at or above parity.
+<!--gen:corpus_median-->1.72x<!--/gen-->, with
+<!--gen:corpus_at_par-->302<!--/gen--> at or above parity.
 
 Stanli avoids a per-model C++ build and can combine repeated work into fewer
 runtime operations. Dense kernels and serial dependencies offer fewer such

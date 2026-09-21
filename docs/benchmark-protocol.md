@@ -49,8 +49,8 @@ Python/R model construction.
 CmdStan translation uses the selected stanc compiler and flags. Its ordinary
 model executable is built separately from the gradient driver. Common CmdStan
 dependencies and precompiled headers are prepared in advance; per-model
-executables are fresh. Gradient-driver compilation is retained as setup
-evidence but is not charged to the estimate.
+executables are fresh. CmdStan data/model initialization is not added to the estimate. Gradient-driver
+compilation is retained as setup evidence but is not charged to the estimate.
 
 Each compilation phase is measured once per model, with normal filesystem
 caches. The estimate sums measured stages; it is not a timed cold-cache first

@@ -30,12 +30,12 @@ and `remotes::install_github()` or a checkout installs from source (see
 keeping installation small and avoiding a local stan-math build.
 
 - Performance vs CmdStan: [full benchmark and method](docs/benchmarks.md).
-  In the <!--gen:benchmark_date-->pending<!--/gen--> native run,
-  <!--gen:corpus_n_grad-->pending<!--/gen--> of
-  <!--gen:benchmark_models-->pending<!--/gen--> models produced paired gradient
+  In the <!--gen:benchmark_date-->2026-09-21<!--/gen--> native run,
+  <!--gen:corpus_n_grad-->315<!--/gen--> of
+  <!--gen:benchmark_models-->319<!--/gen--> models produced paired gradient
   measurements: median CmdStan/Stanli ratio
-  <!--gen:corpus_median-->pending<!--/gen-->, with
-  <!--gen:corpus_at_par-->pending<!--/gen--> at or above parity.
+  <!--gen:corpus_median-->1.72x<!--/gen-->, with
+  <!--gen:corpus_at_par-->302<!--/gen--> at or above parity.
   Failed or capped runs remain in the full table.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_reference_models-->329<!--/gen--> models share one three-point

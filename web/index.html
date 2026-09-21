@@ -1760,14 +1760,14 @@ Stanli has its own lowering and optimization passes that run in tens of millisec
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
 it works</a></p>
 <p><b>How does it perform?</b> In the
-<!--gen:benchmark_date-->pending<!--/gen--> native run,
-<!--gen:corpus_n_grad-->pending<!--/gen--> of
-<!--gen:benchmark_models-->pending<!--/gen--> models produced paired gradient
+<!--gen:benchmark_date-->2026-09-21<!--/gen--> native run,
+<!--gen:corpus_n_grad-->315<!--/gen--> of
+<!--gen:benchmark_models-->319<!--/gen--> models produced paired gradient
 measurements. The median CmdStan/Stanli ratio was
-<!--gen:corpus_median-->pending<!--/gen-->, with
-<!--gen:corpus_at_par-->pending<!--/gen--> at or above parity.
+<!--gen:corpus_median-->1.72x<!--/gen-->, with
+<!--gen:corpus_at_par-->302<!--/gen--> at or above parity.
 See the <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">current full benchmark</a>
-for the protocol, complete model inventory, failed or capped runs, and diagnostics.
+for the protocol, complete model inventory, failed or capped runs, and numerical checks.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
 </p>
