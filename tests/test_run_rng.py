@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """CLI CSV and the shipped C ABI must share the same full-output RNG schedule."""
 import csv
-import ctypes as C
 import io
 import math
 import os
@@ -13,31 +12,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 cli = str(Path(sys.argv[1]).resolve())
-lib = C.CDLL(str(Path(sys.argv[2]).resolve()))
-Ptr = C.POINTER(C.c_double)
-
-
-class Options(C.Structure):
-    _fields_ = [("seed", C.c_uint32), ("chains", C.c_int),
-                ("chain_id", C.c_int), ("warmup", C.c_int),
-                ("samples", C.c_int), ("thin", C.c_int),
-                ("delta", C.c_double), ("max_depth", C.c_int),
-                ("save_warmup", C.c_int), ("init_radius", C.c_double),
-                ("inits", Ptr), ("num_threads", C.c_int)]
-
-
-lib.stanli_model_new.argtypes = [C.c_char_p, C.c_char_p, C.c_char_p, C.c_size_t]
-lib.stanli_model_new.restype = C.c_void_p
-lib.stanli_model_free.argtypes = [C.c_void_p]
-lib.stanli_sample_opts_init.argtypes = [C.POINTER(Options)]
-for name in ("stanli_wa_n_columns", "stanli_n_unconstrained"):
-    fn = getattr(lib, name)
-    fn.argtypes = [C.c_void_p]
-    fn.restype = C.c_int64
-lib.stanli_sample_multi_write_array.argtypes = [
-    C.c_void_p, C.POINTER(Options), C.c_int, Ptr, Ptr, Ptr,
-    C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p, C.c_void_p,
-    C.c_void_p, C.c_char_p, C.c_size_t]
+capi = str(Path(sys.argv[2]).resolve())
 
 
 def equal(a, b):
@@ -55,64 +30,43 @@ with tempfile.TemporaryDirectory() as directory:
             os.environ.pop("STANLI_WA_FORCE_INTERP", None)
         for fixture in ("gq_scalar_rng", "gq_rng_stream", "gq_rng_stream_reject"):
             mir = ROOT / "tests/fixtures" / (fixture + ".tmir.sexp")
-            err = C.create_string_buffer(8192)
-            model = lib.stanli_model_new(mir.read_bytes(), b"{}", err, len(err))
-            assert model, err.value.decode()
-            try:
-                width = lib.stanli_wa_n_columns(model)
-                n = lib.stanli_n_unconstrained(model)
+            serial = None
+            for threads in (1, 2):
+                reference = subprocess.run([capi, str(mir), str(threads)],
+                                           capture_output=True, timeout=60)
+                assert reference.returncode == 0, reference.stderr.decode()
+                expected = list(csv.reader(io.StringIO(reference.stdout.decode())))
+                rows = (30 + 2) // 3 + (41 + 2) // 3
+                count = 2 * rows
+                assert len(expected) == count
+                width = len(expected[0]) - 7
                 assert width > 0
-                serial = None
-                for threads in (1, 2):
-                    opts = Options()
-                    lib.stanli_sample_opts_init(C.byref(opts))
-                    opts.seed, opts.chains = 23, 2
-                    opts.warmup, opts.samples = 30, 41
-                    opts.thin, opts.save_warmup = 3, 1
-                    opts.max_depth, opts.num_threads = 5, threads
-                    opts.init_radius = 0
-                    # Exercise the explicit-inits path as well as random-init
-                    # dispatch; zero radius is the equivalent CLI start.
-                    inits = (C.c_double * (opts.chains * n))()
-                    opts.inits = inits
-                    rows = (opts.warmup + 2) // 3 + (opts.samples + 2) // 3
-                    count = opts.chains * rows
-                    q = (C.c_double * (count * n))()
-                    stats = (C.c_double * (count * 7))()
-                    values = (C.c_double * (count * width))()
-                    rc = lib.stanli_sample_multi_write_array(
-                        model, C.byref(opts), 0, q, stats, values,
-                        None, None, None, None, None, None, err, len(err))
-                    assert rc == 0, err.value.decode()
-                    source = mir.with_name(fixture + ".stan")
-                    command = [cli, str(source), str(data), "--seed", "23",
-                               "--chains", "2", "--num-threads", str(threads),
-                               "--warmup", "30", "--samples", "41", "--thin", "3",
-                               "--save-warmup", "--max-depth", "5", "--init-radius", "0",
-                               "--sampler-stats"]
-                    if fixture != "gq_rng_stream_reject":
-                        command.append("--summary")
-                    result = subprocess.run(command, capture_output=True, timeout=60)
-                    assert result.returncode == 0, result.stderr.decode()
-                    records = list(csv.reader(io.StringIO(result.stdout.decode())))
-                    assert len(records) == count + 1
-                    assert len(records[0]) == width + 7
-                    for i, record in enumerate(records[1:]):
-                        want = list(stats[i * 7:(i + 1) * 7]) + list(values[i * width:(i + 1) * width])
-                        assert all(equal(float(a), b) for a, b in zip(record, want)), (fixture, interpreted, threads, i)
-                        assert len(record) == len(want)
-                    if serial is None:
-                        serial = result.stdout
-                    else:
-                        assert result.stdout == serial, "parallel output changed chain ordering or RNG"
-                    # Stats and summary flags must be observational.
-                    bare_command = [x for x in command if x not in ("--sampler-stats", "--summary")]
-                    bare = subprocess.run(bare_command, capture_output=True, check=True, timeout=60)
-                    stripped = list(csv.reader(io.StringIO(bare.stdout.decode())))
-                    assert stripped == [row[7:] for row in records]
-                print(f"PASS CLI/C API RNG: {fixture}, interpreted={interpreted}")
-            finally:
-                lib.stanli_model_free(model)
+                source = mir.with_name(fixture + ".stan")
+                command = [cli, str(source), str(data), "--seed", "23",
+                           "--chains", "2", "--num-threads", str(threads),
+                           "--warmup", "30", "--samples", "41", "--thin", "3",
+                           "--save-warmup", "--max-depth", "5", "--init-radius", "0",
+                           "--sampler-stats"]
+                if fixture != "gq_rng_stream_reject":
+                    command.append("--summary")
+                result = subprocess.run(command, capture_output=True, timeout=60)
+                assert result.returncode == 0, result.stderr.decode()
+                records = list(csv.reader(io.StringIO(result.stdout.decode())))
+                assert len(records) == count + 1
+                assert len(records[0]) == width + 7
+                for i, (record, want) in enumerate(zip(records[1:], expected)):
+                    assert len(record) == len(want) == width + 7
+                    assert all(equal(float(a), float(b)) for a, b in zip(record, want)), (fixture, interpreted, threads, i)
+                if serial is None:
+                    serial = result.stdout
+                else:
+                    assert result.stdout == serial, "parallel output changed chain ordering or RNG"
+                # Stats and summary flags must be observational.
+                bare_command = [x for x in command if x not in ("--sampler-stats", "--summary")]
+                bare = subprocess.run(bare_command, capture_output=True, check=True, timeout=60)
+                stripped = list(csv.reader(io.StringIO(bare.stdout.decode())))
+                assert stripped == [row[7:] for row in records]
+            print(f"PASS CLI/C API RNG: {fixture}, interpreted={interpreted}")
 
     # All header probes reject. The CLI must discover the schema at a later
     # real draw, pad earlier failures, and preserve the reference RNG schedule.
