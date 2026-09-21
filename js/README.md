@@ -71,13 +71,10 @@ When there are no generated quantities, `generatedStart === fit.names.length`.
 The heavy work runs in a worker the package owns, so the page never
 blocks; calls queue and run one at a time.
 
-The preferred compiler, `stanli-compiler.js`, is 2,988,001 bytes raw and
-424,607 bytes gzipped in the current measured build. For one rollback cycle
-the package also contains stock `stancjs.bc.js` (2,966,778 bytes raw, 417,857
-bytes gzipped). The worker loads the stock compiler only if the portable
-compiler is unavailable; its O1 legacy MIR remains accepted by the runtime.
-Carrying both temporarily doubles the compiler portion of the installed and
-downloaded package.
+The preferred compiler, `stanli-compiler.js`, is about 3 MB raw and 425 KB
+gzipped. The package also contains stock `stancjs.bc.js` of about the same
+size; the worker loads it only if the portable compiler is unavailable, and
+its O1 legacy MIR is accepted by the runtime.
 
 The compiler loads lazily, only when a call passes Stan source. `preload()`
 starts the compiler and WASM loads in the background; call it at page idle so
@@ -86,11 +83,9 @@ can precompile it at build time (`stanc --O1 --debug-optimized-mir model.stan`)
 and pass `mir` instead of `code`; neither browser compiler loads, and the WASM
 runtime alone is ~1.5 MB gzipped.
 
-On Eight Schools, compact portable MIR is 6,932 bytes (1,793 gzipped), compared
-with 33,320 bytes (2,000 gzipped) for legacy MIR. Across 51 fresh processes on
-the same Apple arm64 release build, median decoder parsing was 0.074 ms versus
-0.293 ms, and complete preparation was 0.278 ms versus 0.682 ms. These are
-one-time preparation measurements; source compilation still dominates that
+On Eight Schools, compact portable MIR is 6.9 KB (1.8 KB gzipped) against
+33 KB (2.0 KB gzipped) for legacy MIR, and decodes about four times faster.
+These are one-time preparation costs; source compilation still dominates that
 path.
 
 118 of 119 posteriordb corpus models verify against CmdStan's log

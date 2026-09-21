@@ -609,8 +609,135 @@ Everything else takes four steps:
    the same stan-math call on `var` (the house pattern is in
    [`test_lower.cpp`](../tests/test_lower.cpp)).
 4. Run `build-rel/dump_ops model.stan data.json` and read what
-   actually lowered. The passes rewrite aggressively, and the op list
-   is the only ground truth.
+   lowered. The passes rewrite aggressively, and the op list is the only
+   ground truth.
+
+## C++ entry points
+
+Native builds with embedded stanc expose a value-only function entry
+point. `Function` compiles the source once; later calls bind named
+`DataMap` arguments to the Stan formals and return a `DataMap::Entry`
+with integer identity and logical dimensions.
+
+```cpp
+#include <stanli/function.hpp>
+
+const std::string source = R"stan(
+functions {
+  vector affine(vector x, real a, real b) {
+    return a * x + b;
+  }
+}
+model {}
+)stan";
+
+stanli::Function affine(source, "affine");
+stanli::DataMap args;
+args.set_real_array("x", {1, 2, 4});
+args.set_real("a", 2.5);
+args.set_real("b", -1);
+stanli::DataMap::Entry result = affine(args);  // {1.5, 4, 9}
+```
+
+`Function::from_mir(mir, name)` skips source compilation for cached MIR
+and works in builds without embedded stanc. This surface evaluates pure,
+value-returning functions on doubles; `_lp`, void, RNG, and autodiff
+entry points are not part of it. Within-chain `reduce_sum` parallelism
+from C++ is described in [`docs/native-reduce-sum.md`](native-reduce-sum.md).
+
+## Binary size
+
+The shipped library is about 30 MB installed and 11 MB compressed,
+measured on the manylinux_2_28_x86_64 wheel. The per-symbol breakdown
+rides with every build as the `binary-size` artifact, written by
+`tools/binary_size.py` during `tools/build_wheel.sh`. It has to be
+measured there: the shipped library exports a few hundred C ABI names
+and carries no static symbol table, so the attribution can only be taken
+from the object a moment before the strip. It is not checked in because
+a number nothing recomputes drifts. Run `tools/binary_size.py` on an
+unstripped build for it locally.
+
+The densities dominate. A distribution is instantiated once per activity
+mask (which arguments are autodiff), twice for propto, and again for the
+elementwise form: `4 * 2^N` templates per distribution, about 630 KB of
+object each. CmdStan instantiates only the combination a model uses and
+pays for it with a per-model compile. Each density chooses how much of
+that ladder to instantiate (`STANLI_SCALAR_DENSITY_LIST` in
+[`optable.hpp`](../runtime/include/stanli/optable.hpp)): the thirteen
+distributions models lean on take all of it, the long tail takes less,
+and the 72 distribution functions take one instantiation each.
+`-DSTANLI_LITE_LP=ON` drops the propto family; see
+[`docs/lp-constant.md`](lp-constant.md).
+
+The interpreter and NUTS together are about 410 KB. Shrinking further
+was measured and declined: dead-code stripping cannot reach inside the
+OCaml object, and compiling stanc3 to bytecode saves 3.7 MB at about 8x
+slower model compilation.
+
+The browser build is a different binary, with no embedded stanc3,
+because the compiler ships separately as JavaScript. `stanli-compiler.js`
+(stanc3 plus the shared stanli pipeline) is about 3 MB raw and 425 KB
+gzipped. The package also carries stock `stancjs.bc.js` of about the
+same size, loaded only if the portable compiler is unavailable; it
+emits O1 legacy MIR, which the runtime still decodes. A page that ships
+precompiled MIR fetches neither. `stanli.wasm` is 5.8 MB raw and 1.5 MB
+gzipped, and densities are 55% of the compressed payload. Loading the
+uncommon densities on demand was built and removed; the measurements
+and the emscripten limitation that blocks it are in
+[`notes/density-pack.md`](../notes/density-pack.md).
+
+## Building
+
+Developer builds on Linux and macOS use `clang` and `clang++` with
+C++17, matching pull-request validation. The Linux and Windows release
+wheels keep their GCC toolchains and macOS uses AppleClang. One command
+fetches the pinned dependencies, builds, and runs the tests:
+
+```
+./tools/dev_setup.sh               # build + tests + source-pinned stanc3, embedded in the library
+./tools/dev_setup.sh --no-embed    # standalone stanli-compile instead (required on Windows ARM64)
+./tools/dev_setup.sh --corpus      # + posteriordb and CmdStan
+./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
+./tools/dev_setup.sh --all
+```
+
+Embedding the compiler is the default. With `--no-embed`, setup builds
+`stanli-compile` from the same pipeline and CMake copies it beside
+`stanli_check` and `stanli_run`, including in `cmake --install`
+deployments; keep those executables together when moving an
+installation. The tools also accept `--stanli-compile PATH`, and use
+stock stanc only when asked with `--stanc PATH` (or `STANC` for
+`stanli_run`). `--conformance` makes the differential Stan language
+sweep runnable locally; see
+[`harnesses/conformance/README.md`](../harnesses/conformance/README.md).
+
+On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
+Setup reuses the installation providing `pacman` on `PATH`, or checks
+`C:/msys64` and installs MSYS2 with winget; pacman provides Git, Python,
+make, Clang and CMake, and a missing opam comes from winget. Windows
+ARM64 needs `--no-embed` because its OCaml compiler runs under x64
+emulation while the runtime is native ARM64. MinGW `RelWithDebInfo`
+builds use `-g1`; use `-DCMAKE_BUILD_TYPE=Debug` for full debug
+information. Full native Windows setup runs in CI after pushes to `main`
+and on manual dispatch, with the OCaml toolchain and compiler artifacts
+cached by compiler version and source pin.
+
+Or manually:
+
+```
+./tools/dev_setup.sh --no-build
+build_jobs=$(tools/build_jobs.sh)
+cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build build --parallel "$build_jobs"
+ctest --test-dir build --parallel "$build_jobs"
+```
+
+`tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB
+per concurrent Stan Math compile on macOS and Windows, 6 GiB elsewhere,
+with container limits honored. Override the result with `STANLI_JOBS=12`,
+or raise the per-job budget with `STANLI_JOB_MEMORY_GIB` (the
+AddressSanitizer recipe below uses 12 GiB). The measured scaling curve is
+in [`notes/performance/2026-08-28-build-performance.md`](../notes/performance/2026-08-28-build-performance.md).
 
 ## Verifying a change
 
@@ -654,7 +781,7 @@ lands inside a live allocation and reports nothing.
 
 If the change touches a density tier or anything about propto, also
 check the lite build, the smaller build variant that reports lp only
-up to a constant ([`docs/lite-lp.md`](lite-lp.md)). CI does not cover
+up to a constant ([`docs/lp-constant.md`](lp-constant.md)). CI does not cover
 it, because that would mean a second full stan-math compile:
 
 ```
@@ -705,5 +832,4 @@ landing, run its focused check or dispatch the full workflow on the branch:
 gh workflow run wheels.yml --ref my-change
 ```
 
-Release process and CI layout: [`README.md`](../README.md) under
-"Releasing".
+Release process and CI layout: [`RELEASING.md`](../RELEASING.md).

@@ -13,8 +13,8 @@ pip install stanli
 ```
 
 That is the whole install. No compiler, no `make`, no CmdStan checkout,
-no multi-minute first-run build. One wheel, one shared library, under
-eight megabytes. Models run without a per-model C++ build; see the
+no multi-minute first-run build. One wheel, one shared library, about
+11 MB compressed. Models run without a per-model C++ build; see the
 [current benchmark](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
 for measured gradients and setup-plus-20,000-gradient time estimates.
 
@@ -36,12 +36,11 @@ model = stanli.Model(stan_file="models/model.stan", data="data.json",
                      include_paths=["shared", "vendor/stan"])
 ```
 
-Explicit directories are searched in order, then the input file's directory.
-For `stan_code`, the final search directory is the current directory. Nested
-includes use the same search path; for example, `#include nested/helper.stan`
-looks beneath each search directory. `Function`, `stan_to_mir`, and
-`bridgestan_model` also accept `include_paths`. Constructed models retain the
-compiled includes, so later sampling does not reread files that may have changed.
+Explicit directories are searched in order, then the input file's directory
+(the current directory for `stan_code`). Nested includes use the same search
+path, and `Function`, `stan_to_mir`, and `bridgestan_model` accept
+`include_paths` too. A constructed model keeps its compiled includes, so later
+sampling does not reread the files.
 
 Sampling reports CmdStan-shaped progress every 100 transitions by default,
 followed by per-chain warm-up, sampling, and total times:
@@ -57,25 +56,21 @@ Chain [1] Elapsed Time: 0.821 seconds (Warm-up)
                         0.990 seconds (Total)
 ```
 
-Set `refresh=0` for a completely quiet run, or another positive integer to
-change the update interval. Progress is written through Python's `sys.stdout`,
-so notebook output and `contextlib.redirect_stdout()` work normally. Reporting
-only observes completed transitions: changing `refresh` does not change draws,
-sampler statistics, generated-quantity RNG streams, or reproducibility. If any
-post-warmup transition diverges or saturates the maximum treedepth, the final
-output also reports the aggregate count. Those counts cover all transitions,
-including transitions omitted by thinning.
+Set `refresh=0` for a quiet run, or another positive integer to change the
+interval. Progress goes through Python's `sys.stdout`, so notebooks and
+`contextlib.redirect_stdout()` work. Reporting only observes completed
+transitions and never changes draws, sampler statistics, or RNG streams. If
+any post-warmup transition diverges or saturates the maximum treedepth, the
+final output reports the count over all transitions, thinned ones included.
 
-For models using `reduce_sum` or `reduce_sum_static`, opt into native
-within-chain parallelism with `model.sample(threads_per_chain=4,
-parallel_chains=2)`. This uses up to eight active sampling threads. The default
-is one thread per chain; small or unsupported reductions stay serial. Inspect
-`model.reduce_sum_count` and `model.reduce_sum_fallbacks` after sampling for
-retained reductions and graph-lowering refusals. Changing the thread setting
-rebuilds the prepared model and can change reduction rounding and NUTS draws.
-The runtime must have thread support. See the
-[native reduction guide](https://github.com/seantalts/stanli/blob/main/docs/native-reduce-sum.md)
-for eligibility and memory behavior.
+For models using `reduce_sum` or `reduce_sum_static`,
+`model.sample(threads_per_chain=4, parallel_chains=2)` opts into native
+within-chain parallelism, up to eight sampling threads here. The default is
+one thread per chain; small or unsupported reductions stay serial, and
+`model.reduce_sum_count` and `model.reduce_sum_fallbacks` report what was
+retained. Changing the thread setting rebuilds the prepared model and can
+change reduction rounding and NUTS draws. See the
+[native reduction guide](https://github.com/seantalts/stanli/blob/main/docs/native-reduce-sum.md).
 
 ## Chains and convergence
 
@@ -113,9 +108,9 @@ Tail ESS is at least 100 per chain for every parameter (worst 1874, tau).
 No problems detected.
 ```
 
-Those are the checks a Bayesian workflow actually turns on, including
-E-BFMI, the one that catches a badly explored heavy tail, which R-hat
-and ESS are both blind to. The pieces are reachable individually too:
+These are the checks a Bayesian workflow turns on, including E-BFMI,
+which catches a badly explored heavy tail that R-hat and ESS both miss.
+The pieces are reachable individually too:
 `fit.divergences`, `fit.max_treedepth_hits`, `fit.stepsize` and
 `fit.ebfmi()` are per-chain arrays, and `fit.to_arviz()` hands off an
 InferenceData with the sampler stats attached.
@@ -156,53 +151,20 @@ affine(x=[1, 2, 4], a=2.5, b=-1)  # array([1.5, 4.0, 9.0])
 ```
 
 Use `stan_file="functions.stan"` instead of `stan_code`, or pass
-`mir=stanli.stan_to_mir(source)` to reuse cached compilation. Calls take
-keyword arguments or one mapping, such as `affine({"x": x, "a": 2.5, "b": -1})`.
-Scalars return Python `float`/`int`; vectors, matrices, and arrays return owned
-NumPy arrays with the same logical shape. Inputs can be rectangular lists or
-NumPy arrays, including strided views. The adapter uses typed numeric buffers,
-not JSON.
+`mir=stanli.stan_to_mir(source)` to reuse a cached compilation. Calls take
+keyword arguments or one mapping. Scalars return `float`/`int`; vectors,
+matrices, and arrays return NumPy arrays with the declared shape, and inputs
+may be lists or NumPy arrays. Integers must fit Stan's 32-bit range and
+promote to real formals; select an ambiguous overload by resolved name such
+as `f(real,vector)`, and pass an integer-dtype array for an empty integer
+argument. This is the value-only interpreter: complex, void, RNG, and `_lp`
+entry points are outside it.
 
-Integer inputs must fit Stan's 32-bit integers and promote to real formals.
-Overloads are selected using argument names, rank, and numeric type; select an
-ambiguous overload explicitly with a resolved name such as `f(real,vector)`.
-For empty integer arguments, supply an integer-dtype NumPy array (`[]` defaults
-to real). This is the native value-only interpreter, not autodiff: complex,
-void, RNG, and `_lp` entry points are outside this interface.
-
-From a repository checkout, compare an installed wheel's steady-state calls
-with plain Python and NumPy:
-
-```sh
-python tools/bench_python_function.py
-```
-
-For a development build, stage the Release library in `python/stanli/_bin/`
-and prefix the command with `PYTHONPATH=python`.
-The benchmark excludes one-time compilation from call latency, checks the
-answers first, alternates implementations, and reports medians and IQRs.
-
-Reuse a `Function` handle across calls: its native function lookup tables are
-cached at construction. Exact Python `float` and `int` arguments use a direct
-scalar path; NumPy scalars and other array-like values retain NumPy conversion.
-Overload selection, integer bounds, and shape validation still apply on every
-call. See the [optimization measurements and four-way A/B command](../docs/superpowers/plans/2026-08-30-python-function-overhead.md)
-for separate measurements of scalar packing and native lookup caching.
-
-## How it works
-
-Every Stan model is a composition of a fixed vocabulary of operations:
-densities, constraint transforms, linear algebra, elementwise math.
-stanli ships those precompiled and turns each model into *data*, a
-static graph of ops over flat preallocated buffers, instead of
-generating and compiling C++ per model. The graph doubles as the
-autodiff tape, so a reverse sweep is a backwards loop over an array,
-and steady-state gradient evaluation allocates nothing.
-
-Two things are not reimplemented, which is what makes the results
-trustworthy: the compiler is the real stanc3 plus the stanli OCaml pipeline,
-embedded in the runtime on macOS and Linux and packaged as an executable on
-Windows, and the math is unmodified stan-math, the same code CmdStan runs.
+Reuse a `Function` handle across calls: its native lookup tables are cached
+at construction, and exact Python `float` and `int` arguments take a direct
+scalar path. From a repository checkout,
+`python tools/bench_python_function.py` compares an installed wheel's
+steady-state calls with plain Python and NumPy.
 
 ## Correctness
 
@@ -283,31 +245,24 @@ The other supported options are `history_size` and Pathfinder's own
 `init_radius`. `pathfinder_init` and explicit `inits` are mutually exclusive;
 single-path Pathfinder does not perform PSIS resampling.
 
-`data` accepts a path to a JSON file or a dict of Python scalars,
-lists, and numpy arrays. `sample` returns every column CmdStan's CSV
-would carry (constrained parameters, transformed parameters, generated
-quantities, with RNG draws streamed per chain); a `theta` declared as
-`vector[8]` gets columns `theta[1]` through `theta[8]`, the way CmdStanPy
-names them. Indexing by the variable name, `fit["theta"]`, returns an
-array with the declared shape; dot names like `theta.1` are still
-accepted when indexing. Sampler columns (`lp__`, `divergent__`, ...) are
-reachable by name too.
+`data` accepts a path to a JSON file or a dict of Python scalars, lists,
+and numpy arrays. `sample` returns every column CmdStan's CSV would carry,
+named the way CmdStanPy names them: a `theta` declared as `vector[8]` gets
+`theta[1]` through `theta[8]`, and `fit["theta"]` returns an array with the
+declared shape. Sampler columns (`lp__`, `divergent__`, ...) are reachable
+by name too.
 
 ## Platforms
 
 Wheels for macOS (arm64 and x86_64), Linux (x86_64 and aarch64,
 manylinux_2_28) and Windows (x86_64). The Windows wheel is built under
 mingw-w64, because stan-math does not build under MSVC (the same reason
-RStan ships through RTools). Windows wheels built from this revision run
-`stanli-compile.exe` as a short-lived subprocess and keep pristine `stanc.exe`
-beside it for one rollback cycle; there is no OCaml compiler DLL. Python
-prefers `stanli-compile.exe` whenever
-it is present and selects `stanc.exe` only when it is absent. Launch errors,
-compiler errors, and empty output are reported; an invalid portable result is
-rejected when decoded. None causes an automatic retry through stock stanc. The
-public API works the same way as the embedded compiler path.
+RStan ships through RTools). The Windows wheel runs `stanli-compile.exe` as
+a short-lived subprocess and falls back to the stock `stanc.exe` beside it
+only when the preferred executable is absent; compiler failures are reported
+without retrying the other path.
 
-The installed library is 29.7 MB: over half of it is the density
+The installed library is about 30 MB: over half of it is the density
 kernels, about a quarter the embedded stanc3, and the interpreter and
 NUTS together are about 410 KB. That is the trade this design makes:
 ship the compiler and every kernel once, so nothing is ever built on
