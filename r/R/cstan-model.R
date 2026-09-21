@@ -6,6 +6,9 @@
 #' and seed, including RNG calls in transformed data.
 #'
 #' @param model_code A single string of Stan program source.
+#' @param include_paths Directories searched for Stan `#include` files; see
+#'   [stanli_model()]. Resolved when the model object is created; files are read
+#'   when `$sample()` prepares the model.
 #' @return A `stanli_cstanmodel` with `$sample(...)`, `$code()`, and
 #'   `$model_name()` methods. `$sample()` accepts `threads_per_chain` for native
 #'   within-chain parallelism and `parallel_chains` for concurrent chains.
@@ -21,14 +24,19 @@
 #'                                    iter_sampling = 20, seed = 1, refresh = 0)
 #' @md
 #' @export
-cstan_model <- function(model_code) {
+cstan_model <- function(model_code, include_paths = NULL) {
   if (!is.character(model_code) || length(model_code) != 1L ||
       is.na(model_code) || !nzchar(trimws(model_code)))
     stop("model_code must be a single nonempty string of Stan source", call. = FALSE)
+  paths <- if (!is.null(include_paths) || grepl("#include", model_code, fixed = TRUE))
+    stan_include_paths(include_paths) else NULL
   structure(list(
     code = function() model_code,
     model_name = function() "stanli_model",
-    sample = function(...) sample_cstan(model_code = model_code, ...)
+    sample = function(..., include_paths = paths) {
+      if (is.null(include_paths)) sample_cstan(model_code = model_code, ...) else
+        sample_cstan(model_code = model_code, include_paths = include_paths, ...)
+    }
   ), class = "stanli_cstanmodel")
 }
 

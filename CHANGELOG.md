@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `include_paths` to Python and R, with automatic lookup beside Stan files.
 - Full-output NUTS sampling now runs generated quantities on the live chain
   RNG between saved transitions, matching CmdStan's stream ordering. Seeded
   trajectories change for models with random generated quantities; numerical

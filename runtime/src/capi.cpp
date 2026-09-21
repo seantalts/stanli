@@ -183,6 +183,9 @@ stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
 
 #ifdef STANLI_EMBED_STANC
 extern "C" char* stanli_stanc_tmir(const char* stan_code);
+extern "C" char* stanli_stanc_tmir_with_includes(
+    const char* stan_code, const char* const* include_paths,
+    size_t include_path_count);
 extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
 extern "C" void stanli_stanc_free(char* p);
 #endif
@@ -229,8 +232,33 @@ stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
 }
 
 char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len) {
+  return stanli_stan_to_mir_with_includes(stan_code, nullptr, 0, err, err_len);
+}
+
+char* stanli_stan_to_mir_with_includes(const char* stan_code,
+                                       const char* const* include_paths,
+                                       size_t include_path_count, char* err,
+                                       size_t err_len) {
+  if (stan_code == nullptr ||
+      (include_path_count && include_paths == nullptr)) {
+    put_err(err, err_len, "Stan source or include_paths is null");
+    return nullptr;
+  }
+  for (size_t i = 0; i < include_path_count; ++i) {
+    if (include_paths[i] == nullptr) {
+      put_err(err, err_len, "include_paths contains a null path");
+      return nullptr;
+    }
+  }
 #ifdef STANLI_EMBED_STANC
-  char* res = stanli_stanc_tmir(stan_code);
+  char* res = include_path_count
+                  ? stanli_stanc_tmir_with_includes(stan_code, include_paths,
+                                                    include_path_count)
+                  : stanli_stanc_tmir(stan_code);
+  if (res == nullptr) {
+    put_err(err, err_len, "out of memory");
+    return nullptr;
+  }
   if (std::strncmp(res, "OK", 2) != 0) {
     put_err(err, err_len, res + (std::strncmp(res, "ERR", 3) == 0 ? 3 : 0));
     stanli_stanc_free(res);

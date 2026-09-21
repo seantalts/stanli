@@ -10,7 +10,8 @@ stanli_model(
   data = NULL,
   mir = NULL,
   seed = 1,
-  threads_per_chain = 1
+  threads_per_chain = 1,
+  include_paths = NULL
 )
 }
 \arguments{
@@ -35,6 +36,12 @@ is unchanged. Models are also rebuilt when sampling changes
 \item{threads_per_chain}{Positive thread count for eligible native `reduce_sum`
 calls. Defaults to 1. Sampling uses its own setting; direct gradients use
 the model's setting. Requires a thread-safe runtime for values above 1.}
+
+\item{include_paths}{Character vector of directories searched in order for
+Stan `#include` files, followed by the directory containing `file` (or the
+current directory for `code`). Nested includes use the same search path.
+Included source is compiled once and retained when sampling rebuilds the
+model, even if the files later change or move. Ignored when `mir` is supplied.}
 }
 \value{
 An object of class `stanli_model` whose `columns` name every

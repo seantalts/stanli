@@ -13,6 +13,7 @@ import ctypes
 import json
 import pathlib
 import sys
+import tempfile
 
 import stanli
 
@@ -130,6 +131,18 @@ def test_bridgestan_model_sugar():
     check("bridgestan_model density matches stanli.Model",
           model.log_density(np.array([0.5]), propto=True,
                             jacobian=True) == want)
+    with tempfile.TemporaryDirectory(prefix="stanli includes π ") as tmp:
+        root = pathlib.Path(tmp)
+        source = root / "model.stan"
+        (root / "body.stan").write_text(NORMAL, encoding="utf-8")
+        source.write_text('#include body.stan\n', encoding="utf-8")
+        for kwargs in (dict(stan_file=source),
+                       dict(stan_code='#include body.stan\n', include_paths=root)):
+            included = stanli.bridgestan_model(**kwargs)
+            reference = stanli.Model(stan_code=NORMAL)
+            check("bridgestan_model resolves Stan includes",
+                  included.log_density(np.array([0.5]), propto=True, jacobian=True)
+                  == reference.log_prob_grad([0.5])[0])
 
 
 def main():

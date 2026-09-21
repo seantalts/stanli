@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
-from . import _lib, _read_utf8_file, stan_to_mir
+from . import _lib, _resolve_program
 
 
 _INT_MIN = np.iinfo(np.intc).min
@@ -86,21 +86,16 @@ class Function:
     Like the native Function API, this evaluates pure, value-returning UDFs
     using doubles, not autodiff. RNG, void, and _lp functions are outside
     this interface. No C++ compiler is needed.
+    ``include_paths`` uses the same directory search order as ``Model``.
     """
 
-    def __init__(self, name, *, stan_file=None, stan_code=None, mir=None):
+    def __init__(self, name, *, stan_file=None, stan_code=None, mir=None,
+                 include_paths=None):
         self._function = None
         if not isinstance(name, str) or not name or "\0" in name:
             raise ValueError("function name must be a nonempty string without NUL")
         self.name = name
-        if mir is None:
-            if stan_code is None:
-                if stan_file is None:
-                    raise ValueError("provide stan_file, stan_code, or mir")
-                stan_code = _read_utf8_file(stan_file)
-            # Uses the bundled subprocess compiler on non-embedded builds
-            # (notably Windows), just like Model.
-            mir = stan_to_mir(stan_code)
+        mir, _ = _resolve_program(stan_file, stan_code, mir, None, include_paths)
         err = ctypes.create_string_buffer(8192)
         self._function = _lib.stanli_function_new_from_mir(
             mir.encode(), name.encode(), err, len(err))

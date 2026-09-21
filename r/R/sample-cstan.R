@@ -23,6 +23,8 @@
 #' @param refresh Progress interval; zero suppresses progress.
 #' @param init_radius Radius for random initialization on the unconstrained scale.
 #' @param pathfinder_init Optional Pathfinder settings passed to [sample_model()].
+#' @param include_paths Directories searched for Stan `#include` files; see
+#'   [stanli_model()].
 #' @param ... Reserved. Unsupported options produce an error.
 #' @return A native `stanli_cstanfit`.
 #' @details Model preparation uses the sampling seed, including RNG calls in
@@ -35,7 +37,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
                          init = NULL, adapt_delta = 0.8, max_treedepth = 10,
                          thin = 1, save_warmup = FALSE, refresh = 100,
                          init_radius = 2, pathfinder_init = NULL,
-                         threads_per_chain = 1, ...) {
+                         threads_per_chain = 1, include_paths = NULL, ...) {
   if (length(list(...))) stop("unsupported sample_cstan arguments: ",
                              paste(names(list(...)), collapse = ", "), call. = FALSE)
   for (name in c("chains", "parallel_chains", "threads_per_chain", "iter_sampling", "max_treedepth", "thin"))
@@ -55,7 +57,8 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
   if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1)
   cstan_integer(seed, "seed", 0)
   model <- stanli_model(code = model_code, data = data, seed = seed,
-                        threads_per_chain = threads_per_chain)
+                        threads_per_chain = threads_per_chain,
+                        include_paths = include_paths)
   unconstrained <- NULL
   if (!is.null(init)) {
     declared <- unique(sub("\\..*$", "", .Call("stanli_r_parameter_columns", model$ptr)))

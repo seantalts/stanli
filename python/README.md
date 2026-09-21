@@ -28,6 +28,21 @@ fit["mu"].mean()        # every draw of a column, chains concatenated
 fit.draws("mu")         # (chains, draws), for a trace plot
 ```
 
+Stan `#include` directives automatically search the directory containing
+`stan_file`. Add shared directories with `include_paths`:
+
+```python
+model = stanli.Model(stan_file="models/model.stan", data="data.json",
+                     include_paths=["shared", "vendor/stan"])
+```
+
+Explicit directories are searched in order, then the input file's directory.
+For `stan_code`, the final search directory is the current directory. Nested
+includes use the same search path; for example, `#include nested/helper.stan`
+looks beneath each search directory. `Function`, `stan_to_mir`, and
+`bridgestan_model` also accept `include_paths`. Constructed models retain the
+compiled includes, so later sampling does not reread files that may have changed.
+
 Sampling reports CmdStan-shaped progress every 100 transitions by default,
 followed by per-chain warm-up, sampling, and total times:
 
