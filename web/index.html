@@ -1759,13 +1759,14 @@ which takes several seconds even for small models after the precompiled headers 
 Stanli has its own lowering and optimization passes that run in tens of milliseconds and then just interprets that high level result rather than using a compiler.
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
 it works</a></p>
-<p><b>Not just faster to start up, but usually faster gradients and sampling??</b> Median
-<!--gen:corpus_median-->2.10x<!--/gen--> CmdStan across
+<p><b>How does it perform?</b> In the September 11, 2026 native measurements,
+warm gradients were a median
+<!--gen:corpus_median-->2.10x<!--/gen--> faster than CmdStan across
 <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
-<!--gen:corpus_at_par-->119<!--/gen--> of them at or above it. We benchmark every posteriordb model and explain why some are slower:
-<a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>.
-The suite also includes <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md#educational-models">13 educational models with complete-run comparisons</a>
-against already-compiled CmdStan.
+<!--gen:corpus_at_par-->119<!--/gen--> at least as fast. Our shared model corpus
+supports measurements of gradients, complete sampling runs, and preparation.
+See the <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>
+for each experiment's models, protocol, and results.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
 </p>
@@ -1774,13 +1775,12 @@ compiled to WebAssembly instead of native costs about 1.5x to 2x per
 gradient. The figures in the paragraph
 above are native ones, so the margin over CmdStan in here is nearer par
 than 2x. For heavy work, <code>pip install stanli</code> to run the native build.</p>
-<p><b>Numerically accurate and consistent with CmdStan</b>
-<!--gen:corpus_verified-->118/120<!--/gen--> posteriordb models are
-replayed against the log density, the full gradient and the generated
-quantities CmdStan actually printed, and
-<!--gen:corpus_bitwise-->55<!--/gen--> agree to the last bit. Worst
-disagreement anywhere is
-<!--gen:corpus_worst-->7.1e-13<!--/gen--> relative. Per-model results:
+<p><b>Checked against CmdStan.</b> The shared corpus contains
+<!--gen:corpus_reference_models-->329<!--/gen--> models with recorded CmdStan
+references at three fixed inputs. The replay checks log densities, full
+gradients, and available per-draw output references, including generated
+quantities. See the <a href="https://github.com/seantalts/stanli/blob/main/TESTING.md">numerical
+checks and documented exceptions</a>, and per-model coverage in
 <a href="https://github.com/seantalts/stanli/blob/main/docs/corpus-status.md">corpus
 status</a>.</p>
 <p><b>Interested in learning more, or even contributing?</b> Check out <a href="https://github.com/seantalts/stanli/blob/main/docs/hacking.md">hacking.md</a> :) </p>
