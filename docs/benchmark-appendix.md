@@ -55,8 +55,8 @@ unequal widths, failed commands and numerical mismatches produce no speedup.
 The broader [reference replay](../TESTING.md#comparison-with-cmdstan-on-complete-models)
 independently checks three points and recorded output values. Before timing,
 all 329 referenced models passed that replay at three points, comparing
-1,020,194 values under its existing numerical policy. The largest observed
-scaled error was `9.38e-13`, and the largest ULP deviation was 7,040; this
+1,020,194 values under its existing numerical policy. The worst scaled-error model had
+scaled error `9.38e-13` and a maximum ULP deviation of 7,040; this
 is not a claim that every comparison falls within a fixed 10-ULP bound.
 
 The reported gradient ratio is the median of the six within-pair
@@ -110,8 +110,8 @@ excluding difficult models from the results.
 
 ## Artifacts and reproduction
 
-The runner writes `build/corpus-current/benchmark-summary.tsv` and its sibling
-`benchmark-summary.tsv.run/` directory. Published summaries and diagnostics
+The runner writes `build/corpus-current/benchmark-summary-v2.tsv` and its sibling
+`benchmark-summary-v2.tsv.run/` directory. Published summaries and diagnostics
 will be retained in `output/corpus-performance/`. The artifact set will contain:
 
 - The immutable run manifest and retained Stan/data inputs.
@@ -128,17 +128,17 @@ sweep finishes.
 
 ```sh
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  build/corpus-current/benchmark-summary.tsv \
+  build/corpus-current/benchmark-summary-v2.tsv \
   --bench build/bench_grad --run build/stanli_run \
   --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
   --sampling --seeds 1 2 3 4 --iter-warmup 1000 --iter-sampling 1000 \
   --gradient-timeout 60 --build-timeout 900 --sample-timeout 900
 python3 tools/corpus_diagnostic_jobs.py \
-  build/corpus-current/benchmark-summary.tsv.run build/corpus-current/diagnostic-jobs.json
+  build/corpus-current/benchmark-summary-v2.tsv.run build/corpus-current/diagnostic-jobs.json
 Rscript tools/summarize_corpus_bench.R \
   build/corpus-current/diagnostic-jobs.json build/corpus-current/sampling-diagnostics.json
 python3 tools/report_corpus.py \
-  build/corpus-current/benchmark-summary.tsv.run \
+  build/corpus-current/benchmark-summary-v2.tsv.run \
   build/corpus-current/sampling-diagnostics.json output/corpus-performance
 ```
 
