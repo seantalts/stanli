@@ -28,13 +28,10 @@ Four mechanisms provide most of the speedup:
    let stanli recover broadcasts, slices, gathers, and independent batches
    from scalar loops.
 
-In the current 120-model snapshot, 119 models have gradient measurements from
-both runtimes. The median warmed-gradient speedup is 2.91x, and 116 of those
-119 models are at or above CmdStan. Models with large vector operations, or
-scalar loops stanli can turn back into vector operations, gain the most.
-Models dominated by one large Stan Math kernel are usually near parity, and
-the measured ODE models remain slightly slower. Full results are in
-[benchmarks.md](benchmarks.md).
+Models with large vector operations, or scalar loops Stanli can turn back into
+vector operations, gain the most. Models dominated by one large Stan Math
+kernel have less interpreter overhead to remove. The [full corpus benchmark](benchmarks.md)
+reports the measured effects with numerical checks and sampling diagnostics.
 
 ## Scale of the four effects
 
@@ -379,14 +376,14 @@ before and after transformation.
 Two models show the scale of the structural changes:
 
 - `radon_pooled` falls from 27,670 graph ops to 8. In the targeted re-roll A/B,
-  it moved from 0.91x to 6.18x CmdStan; the current full-corpus benchmark is
-  7.07x.
-- `election88_full` falls from 289,165 ops to 65. Its current benchmark is
-  3.52x CmdStan.
+  it moved from 0.91x to 6.18x CmdStan; the September 11 snapshot records
+  7.35x for the complete system.
+- `election88_full` falls from 289,165 ops to 65. The September 11 snapshot
+  records 4.16x CmdStan.
 
-The targeted A/B isolates one optimization. The current corpus rows in
-[benchmarks.md](benchmarks.md) report absolute performance for the complete
-system.
+The targeted A/B isolates one optimization. The [archived corpus rows](benchmark-2026-09-11.md#historical-posteriordb-model-results)
+record those complete-system measurements. The [current benchmark](benchmarks.md)
+measures the current build separately.
 
 Re-rolling can change the association order of floating-point reductions, so
 the optimized and scalar graphs may differ in their last few bits even though
@@ -436,9 +433,10 @@ there, so that path uses nested-autodiff replay.
 ODE right-hand sides accepted by the register compiler use a related program,
 because the solver calls them at times chosen during integration. The state
 solve runs on doubles; the Jacobian path uses Stan Math autodiff. Unsupported
-right-hand sides use the fallback described in the appendix. CmdStan remains
-faster on the measured ODEs because its right-hand side is inlined native
-code, whereas stanli pays register dispatch on every solver callback.
+right-hand sides use the fallback described in the appendix. Stanli pays
+register dispatch on each solver callback, whereas CmdStan can inline native
+right-hand-side code. This cost alone does not determine total gradient time;
+the [corpus table](benchmarks.md#full-corpus) reports the resulting timings.
 
 ## Retained loops
 
@@ -614,42 +612,30 @@ and deferred at the user's request.
 
 ## Measured behavior and limits
 
-The 2026-08-25 native benchmark snapshot contains 120 posteriordb models, 119
-with gradient measurements from both runtimes. It ran on an Apple M3 Ultra
-with both sides built at `-O3` and the same floating-point contraction
-setting. The median warmed-gradient speedup is 2.91x, and 116 of 119 models
-are at or above CmdStan. These are fixed-point gradient timings, not
-whole-sampler timings.
+The [benchmark page](benchmarks.md) reports warm gradients and complete CLI
+runs across the application corpus. The [experiment details](benchmark-appendix.md)
+separate model compilation, executor preparation and sampling, and describe
+the numerical gates, dispersion and diagnostic warnings.
 
 Computation shape matters more than parameter count:
 
-- Vectorized statements and independent scalar loops that can be re-rolled
-  usually gain the most.
-- Large dense kernels are often near parity because both runtimes spend most
-  of the time in the same Stan Math implementation.
-- Sequential models are generally near parity or modestly faster after
-  generated island adjoints, but still pay scalar instruction dispatch.
-- The three ODE models in the snapshot run at 0.87x, 0.90x, and 0.90x CmdStan.
-  They are the only slower models in this snapshot.
+- Large vector operations and independent observations amortize dispatch.
+- Dense linear algebra and ODEs share substantial Stan Math work.
+- Sequential models retain scalar dispatch and have less work to batch.
 
-End-to-end latency is a separate measurement. For non-centered Eight Schools,
-a complete 1,000-warmup plus 1,000-draw run takes about 0.03 s from source to
-CSV in stanli, versus about 3.4 s for a CmdStan build and run: roughly 100x.
-Across the 117 models with complete runs from both engines, the median
-source-to-CSV speedup is about 6.8x, and 115 finish at least as fast in stanli.
-These compare complete jobs, not identical sampler trajectories, so they are
-less controlled than the fixed-point gradient measurements.
+Gradient timing isolates repeated evaluation at a common point. Complete
+sampling also depends on adaptation, leapfrog counts and generated quantities;
+a faster fixed iteration budget does not establish equal inference quality.
 
-Skipping model-specific compilation shifts work into the distributed runtime.
 The shared library contains stanc and the precompiled operation vocabulary, so
 it is larger than a runtime containing one model. The current size breakdown
 is in the [`README.md`](../README.md#binary-size).
 
-Performance is not the numerical oracle. The current snapshot verifies 118 of
-120 posteriordb models against CmdStan's log density and complete gradient; 41
-are bitwise identical at the primary test point, and the worst relative
-deviation among the verified models is 2.6e-12. Where available, the comparison
-also covers complete `write_array` output, including generated quantities.
+Performance is not the numerical oracle. The shared [corpus replay](corpus-status.md)
+compares recorded CmdStan log density and every gradient component, with
+matching domain refusals and documented ill-conditioned exceptions. Where
+available, it also compares complete `write_array` output, including generated
+quantities.
 Cross-path tests compare graph, register-machine, and MIR/write-array
 interpreter configurations. Evidence and known limits are in
 [`TESTING.md`](../TESTING.md).

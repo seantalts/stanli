@@ -335,5 +335,149 @@ class HistoricalResultsTests(unittest.TestCase):
             self.render(failed)
 
 
+
+class BenchmarkCatalogTests(unittest.TestCase):
+    def setUp(self):
+        from tools.corpus_table import render_catalog
+        self.render_catalog = render_catalog
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = pathlib.Path(self.temp.name)
+        self.paths = (root / "summary.tsv", root / "report.json", root / "manifest.json")
+        self.manifest = {"run_id": "one-current-run", "started_utc": "2026-09-21T00:00:00Z",
+                         "identity": {"config": {"corpus": "all", "filter": "", "sampling": True,
+                                                "rounds": 6, "seeds": [1, 2],
+                                                "iter_warmup": 1000, "iter_sampling": 1000},
+                                      "inputs": {}}}
+        self.rows, details = [], []
+        for name in ("z_capped", "a_complete", "m_failed"):
+            inputs = {"stan": name + "-source-hash", "data": name + "-data-hash"}
+            self.manifest["identity"]["inputs"][name] = inputs
+            row = {"model": name, "run_id": "one-current-run", "stanli_ns_grad": 100,
+                   "cmdstan_ns_grad": 200, "paired_speedup": 1.8, "paired_speedup_mad": .1,
+                   "paired_rounds": 6, "stanli_sample_s": 4, "cmdstan_sample_s": 10,
+                   "cmdstan_build_s": 900, "note": ""}
+            detail = {"model": name, "inputs": inputs, "status": "ok", "failure_reason": "",
+                      "gradient": {key: row[key] for key in
+                                   ("stanli_ns_grad", "cmdstan_ns_grad", "paired_speedup", "paired_speedup_mad")},
+                      "engines": {}, "runs": []}
+            for engine, elapsed in (("stanli", 4), ("cmdstan", 10)):
+                detail["engines"][engine] = {"status": "complete", "median_s": elapsed,
+                    "diagnostics": {"status": "complete", "screening_flag": False,
+                                    "draws": 2000, "divergences": 0}}
+                detail['runs'] += [{"engine": engine, "seed": seed, "status": "ok", "elapsed_s": elapsed + seed * 2 - 3}
+                                   for seed in (1, 2)]
+            if name == "z_capped":
+                row['note'] = detail['failure_reason'] = "stanli_sample_timeout(0.6s, seed=2)"
+                row['stanli_sample_s'] = ""
+                detail['status'] = "censored"
+                detail['engines']['stanli'] = {"status": "incomplete", "diagnostics": {"status": "incomplete"}}
+                detail['runs'][1]['status'] = "timeout"
+                detail['engines']['cmdstan']['diagnostics']['screening_flag'] = True
+            elif name == "m_failed":
+                row['note'] = detail['failure_reason'] = "density/gradient mismatch"
+                detail['status'] = "failed"
+                detail['gradient'] = {}
+                detail['runs'] = []
+                for key in ('stanli_ns_grad', 'cmdstan_ns_grad', 'paired_speedup', 'paired_speedup_mad',
+                            'stanli_sample_s', 'cmdstan_sample_s'):
+                    row[key] = ""
+                detail['engines'] = {engine: {"status": "incomplete", "diagnostics": {"status": "incomplete"}}
+                                     for engine in ('stanli', 'cmdstan')}
+            self.rows.append(row)
+            details.append(detail)
+        self.report = {"run_id": "one-current-run", "manifest": self.manifest, "rows": details}
+
+    def render(self):
+        with self.paths[0].open('w', newline='') as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(self.rows[0]), delimiter='\t')
+            writer.writeheader()
+            writer.writerows(self.rows)
+        self.paths[1].write_text(json.dumps(self.report))
+        self.paths[2].write_text(json.dumps(self.manifest))
+        return self.render_catalog(*self.paths)
+
+    def cells(self):
+        result = self.render()
+        return {cells[0].strip('`'): cells for line in result.splitlines() if line.startswith('| `')
+                for cells in [[cell.strip() for cell in line.split('|')[1:-1]]]}
+
+    def test_one_complete_inventory_is_alphabetical_without_run_column(self):
+        result = self.render()
+        rows = self.cells()
+        self.assertEqual(list(rows), ['a_complete', 'm_failed', 'z_capped'])
+        self.assertNotIn('| Run |', result)
+        self.assertIn('Run `one-current-run` (2026-09-21)', result)
+        self.assertIn('6 paired gradient rounds and 2 sampling seeds', result)
+        self.assertEqual(rows['a_complete'][1:4], ['1.80x ± 0.10', '4', '10'])
+        self.assertNotIn('910', rows['a_complete'])  # Never add CmdStan compilation.
+
+    def test_failures_caps_and_current_diagnostics_remain_visible(self):
+        rows = self.cells()
+        self.assertEqual(rows['m_failed'][1:4], ['—', '—', '—'])
+        self.assertIn('density/gradient mismatch', rows['m_failed'][4])
+        self.assertEqual(rows['z_capped'][2], '—')
+        self.assertIn('stanli_sample_timeout(0.6s, seed=2)', rows['z_capped'][4])
+        self.assertIn('CmdStan diagnostics flagged', rows['z_capped'][4])
+
+    def test_incomparable_cli_warning_comes_from_current_draws_not_model_name(self):
+        diagnostic = self.report['rows'][1]['engines']['cmdstan']['diagnostics']
+        diagnostic.update(screening_flag=True, divergences=2000)
+        self.assertIn('all retained CmdStan draws divergent', self.cells()['a_complete'][4])
+
+    def test_missing_artifacts_never_fall_back_to_old_runs(self):
+        with self.assertRaises(FileNotFoundError):
+            self.render_catalog(*self.paths)
+        self.assertTrue(all('output/corpus-performance/' in str(path)
+                            for path in self.render_catalog.__defaults__))
+
+    def test_missing_failed_row_is_rejected_by_manifest_inventory(self):
+        self.rows = [row for row in self.rows if row['model'] != 'm_failed']
+        self.report['rows'] = [row for row in self.report['rows'] if row['model'] != 'm_failed']
+        with self.assertRaisesRegex(ValueError, 'inventories must match'):
+            self.render()
+
+    def test_duplicate_model_is_rejected(self):
+        self.rows.append(copy.deepcopy(self.rows[0]))
+        with self.assertRaisesRegex(ValueError, 'Duplicate model'):
+            self.render()
+
+    def test_mixed_run_id_is_rejected(self):
+        self.rows[0]['run_id'] = 'an-older-run'
+        with self.assertRaisesRegex(ValueError, 'run identities differ'):
+            self.render()
+
+    def test_embedded_manifest_must_equal_external_manifest(self):
+        self.report['manifest'] = copy.deepcopy(self.manifest)
+        self.report['manifest']['started_utc'] = '2026-09-11T00:00:00Z'
+        with self.assertRaisesRegex(ValueError, 'same run and manifest'):
+            self.render()
+
+    def test_input_identity_drift_is_rejected(self):
+        self.report['rows'][0]['inputs'] = {'stan': 'changed-source', 'data': 'changed-data'}
+        with self.assertRaisesRegex(ValueError, 'input hashes differ'):
+            self.render()
+
+    def test_filtered_corpus_is_not_a_complete_catalog(self):
+        self.manifest['identity']['config']['corpus'] = 'teaching'
+        with self.assertRaisesRegex(ValueError, 'unfiltered full-corpus'):
+            self.render()
+
+    def test_tsv_and_report_numerical_disagreement_is_rejected(self):
+        self.report['rows'][1]['gradient']['paired_speedup'] = 9
+        with self.assertRaisesRegex(ValueError, 'artifacts disagree'):
+            self.render()
+
+    def test_failed_seed_cannot_supply_completed_cli_median(self):
+        self.report['rows'][1]['runs'][0]['status'] = 'timeout'
+        with self.assertRaisesRegex(ValueError, 'Incomplete sampling seeds'):
+            self.render()
+
+    def test_partial_gradient_rounds_are_not_presented_as_full_measurement(self):
+        self.rows[1]['paired_rounds'] = 2
+        with self.assertRaisesRegex(ValueError, 'round count differs'):
+            self.render()
+
+
 if __name__ == "__main__":
     unittest.main()

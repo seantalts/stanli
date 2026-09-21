@@ -3,11 +3,12 @@
 
 Every headline number in README.md, python/README.md and the demo page
 (counts, bitwise counts, worst deviation, benchmark span, the PyPI page's
-benchmark table) is derived from three artifacts:
+benchmark table) is derived from recorded artifacts:
 
   docs/verification.json   written by tools/verify_sample.py
   docs/corpus-bench.tsv    written by harnesses/corpus_bench.py
-  docs/benchmarks.md       chooses the representative benchmark rows
+  docs/benchmark-2026-09-11.md  chooses legacy representative rows
+  output/corpus-performance/  one current full-corpus benchmark
 
 The docs carry <!--gen:key-->...<!--/gen--> markers; this script replaces
 the marked spans with values computed from the artifacts.
@@ -28,11 +29,14 @@ import subprocess
 import sys
 import warnings
 
+from corpus_table import render_catalog
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # The demo page carries headline numbers too, and its markers are HTML
 # comments, so the same substitution works there.
 TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
-           REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md"]
+           REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md",
+           REPO / "docs" / "benchmarks.md"]
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 
@@ -40,7 +44,7 @@ def bench_rows():
     """Representative (model, stanli_ns, cmdstan_ns, speedup)."""
     with (REPO / "docs" / "corpus-bench.tsv").open(newline="") as f:
         corpus = {row["model"]: row for row in csv.DictReader(f, delimiter="\t")}
-    text = (REPO / "docs" / "benchmarks.md").read_text()
+    text = (REPO / "docs" / "benchmark-2026-09-11.md").read_text()
     section = text.split("## Representative models", 1)[1]
     rows = []
     # Only the first table in the section. The benchmark page owns the
@@ -62,7 +66,7 @@ def bench_rows():
         cmdstan_ns = float(measured["cmdstan_ns_grad"])
         rows.append((model, stanli_ns, cmdstan_ns, cmdstan_ns / stanli_ns))
     if not rows:
-        raise SystemExit("no benchmark table found in docs/benchmarks.md")
+        raise SystemExit("no benchmark table found in docs/benchmark-2026-09-11.md")
     return rows
 
 
@@ -137,6 +141,7 @@ def compute():
         table.append(f"| `{name}` | {us(sns)} | {us(cns)} | {spd} |")
 
     return {
+        "benchmark_catalog": render_catalog().rstrip(),
         "corpus_reference_models": str(len(references)),
         "corpus_reference_points": str(sum(len(row["points"]) for row in references.values())),
         "corpus_verified": f"{len(verified)}/{n_total}",
@@ -198,7 +203,7 @@ def render_problems(path):
 
 def benchmark_table_problems():
     """Require the hand-edited benchmark tables to match their generator."""
-    page = (REPO / "docs" / "benchmarks.md").read_text()
+    page = (REPO / "docs" / "benchmark-2026-09-11.md").read_text()
     generated = subprocess.check_output(
         [sys.executable, str(REPO / "tools" / "corpus_table.py"),
          str(REPO / "docs" / "corpus-bench.tsv")], text=True)
@@ -226,9 +231,9 @@ def benchmark_table_problems():
         "## Benchmark method", 1)[0]
     problems = []
     if first_table(full) != generated_main:
-        problems.append("docs/benchmarks.md: full corpus table is stale")
+        problems.append("docs/benchmark-2026-09-11.md: full corpus table is stale")
     if first_table(stuck) != generated_stuck:
-        problems.append("docs/benchmarks.md: incomplete-runs table is stale")
+        problems.append("docs/benchmark-2026-09-11.md: incomplete-runs table is stale")
 
     representative = first_table(page.split("## Representative models", 1)[1])
     generated_by_model = {
@@ -242,7 +247,7 @@ def benchmark_table_problems():
                     if source else None)
         if cells != expected:
             problems.append(
-                f"docs/benchmarks.md: representative row {cells[0]} is stale")
+                f"docs/benchmark-2026-09-11.md: representative row {cells[0]} is stale")
     return problems
 
 

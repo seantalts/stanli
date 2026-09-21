@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render docs/corpus-bench.tsv as the markdown tables docs/benchmarks.md
-embeds.
+"""Render the benchmark catalog and detailed historical appendix tables.
 
-Two tables. The first is every model both engines measured end to end,
+--catalog renders one complete, current benchmark run for benchmarks.md.
+The original TSV mode emits two tables for docs/benchmark-appendix.md. The first is every model both engines measured end to end,
 sorted by per-gradient speedup. It shows both engines' absolute gradient
 times and the wall time from Stan source to a completed 1,000-warmup,
 1,000-draw run. stanli_sample_s already includes the whole stanli process;
@@ -11,7 +11,10 @@ run. The second table holds models the run could not complete, with what
 stopped them. Missing numbers sort to the bottom because missing is not slow.
 
 Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
-Prints markdown to stdout; benchmarks.md is edited by hand around it.
+Prints markdown to stdout; the appendix is edited by hand around it.
+
+--catalog requires the current full-corpus summary, diagnostics, and manifest under
+output/corpus-performance; it never substitutes historical measurements.
 
 --gradients INPUT.tsv renders only the fixed-point gradient comparison.
 
@@ -28,6 +31,8 @@ import csv
 import re
 import json
 import math
+import statistics
+from pathlib import Path
 import sys
 
 # The harness's machine tags, in the words a reader needs. The per-model
@@ -305,7 +310,149 @@ def render_historical_sampling(report):
               f"| {measured['speedup']:.3f}x | {minimum:.1f}x |")
 
 
+CATALOG_ROOT = Path(__file__).resolve().parents[1]
+CATALOG_SUMMARY = CATALOG_ROOT / "output/corpus-performance/benchmark-summary.tsv"
+CATALOG_REPORT = CATALOG_ROOT / "output/corpus-performance/corpus-results.json"
+CATALOG_MANIFEST = CATALOG_ROOT / "output/corpus-performance/benchmark-manifest.json"
+
+
+def _catalog_rows(path):
+    with open(path, newline="") as stream:
+        rows = list(csv.DictReader(stream, delimiter="\t"))
+    names = [row["model"] for row in rows]
+    if len(set(names)) != len(names):
+        raise ValueError(f"Duplicate model in benchmark artifact: {path}")
+    return rows
+
+
+def _catalog_number(row, field):
+    value = row.get(field, "")
+    if value is None or str(value).strip() == "":
+        return None
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"Invalid {field} for {row['model']}: {value}")
+    return number
+
+
+def _catalog_agrees(model, field, actual, expected):
+    if ((actual is None) != (expected is None)
+            or (actual is not None and not math.isclose(actual, expected,
+                                                        rel_tol=1e-12, abs_tol=1e-15))):
+        raise ValueError(f"Benchmark artifacts disagree: {model} {field}")
+
+
+def _catalog_cell(value):
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def render_catalog(summary_path=CATALOG_SUMMARY, report_path=CATALOG_REPORT,
+                   manifest_path=CATALOG_MANIFEST):
+    """Return an alphabetical table from one complete full-corpus run.
+
+    All three artifacts must identify the same run and complete manifest
+    inventory. Reported CLI medians require every declared seed to finish;
+    missing/capped measurements and current diagnostic flags stay visible.
+    CmdStan model compilation is excluded from its CLI column. Historical
+    artifacts are never used as a fallback when current outputs are absent.
+    """
+    rows = _catalog_rows(summary_path)
+    with open(report_path) as stream:
+        report = json.load(stream)
+    with open(manifest_path) as stream:
+        manifest = json.load(stream)
+    run_id = manifest["run_id"]
+    if not run_id or report["run_id"] != run_id or report["manifest"] != manifest:
+        raise ValueError("Benchmark artifacts must identify the same run and manifest")
+    config = manifest["identity"]["config"]
+    if config.get("corpus") != "all" or config.get("filter") or not config.get("sampling"):
+        raise ValueError("Catalog requires an unfiltered full-corpus sampling run")
+    seeds = config["seeds"]
+    if not seeds or len(seeds) != len(set(seeds)):
+        raise ValueError("Benchmark manifest must declare distinct sampling seeds")
+    expected_inputs = manifest["identity"]["inputs"]
+    details = {row["model"]: row for row in report["rows"]}
+    if (not expected_inputs or len(details) != len(report["rows"])
+            or set(details) != set(expected_inputs)
+            or {row["model"] for row in rows} != set(expected_inputs)):
+        raise ValueError("Run is incomplete: summary/report inventories must match every manifest input")
+    output = [
+        f"Run `{_catalog_cell(run_id)}` ({_catalog_cell(manifest['started_utc'][:10])}): "
+        f"{config['rounds']} paired gradient rounds and {len(seeds)} sampling seeds, "
+        f"each with {config['iter_warmup']:,} warmup iterations and {config['iter_sampling']:,} retained draws.",
+        "",
+        "Gradient ratio is CmdStan/Stanli, reported as the median paired ratio ± MAD. "
+        "CLI times are median seconds across all declared seeds, exclude CmdStan model "
+        "compilation, and include Stanli source preparation. “Complete” describes execution, "
+        "not convergence; diagnostic flags and failed or capped runs remain visible. "
+        "Missing measurements are —.",
+        "",
+        "| Model | Gradient ratio | Stanli CLI (s) | CmdStan CLI (s) | Notes |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
+    for row in sorted(rows, key=lambda item: item["model"]):
+        model = row["model"]
+        detail = details[model]
+        if row.get("run_id") != run_id:
+            raise ValueError(f"Benchmark run identities differ: {model}")
+        for field in ("stan", "data"):
+            value = expected_inputs[model].get(field)
+            if not value or detail.get("inputs", {}).get(field) != value:
+                raise ValueError(f"Benchmark input hashes differ: {model} {field}")
+        note = row.get("note", "").strip()
+        notes = [note] if note else []
+        failure = detail.get("failure_reason", "")
+        if failure and failure != note:
+            notes.append(failure)
+        if detail["status"] != "ok" and not notes:
+            notes.append(detail["status"])
+        times = {engine: _catalog_number(row, engine + "_sample_s")
+                 for engine in ("stanli", "cmdstan")}
+        speedup = _catalog_number(row, "paired_speedup")
+        mad = _catalog_number(row, "paired_speedup_mad")
+        for field in ("stanli_ns_grad", "cmdstan_ns_grad", "paired_speedup", "paired_speedup_mad"):
+            value = _catalog_number(row, field)
+            _catalog_agrees(model, field, value, detail.get("gradient", {}).get(field))
+            if value == 0 and field != "paired_speedup_mad":
+                raise ValueError(f"Zero gradient measurement for {model}: {field}")
+        if (speedup is None) != (mad is None):
+            raise ValueError(f"Incomplete paired gradient summary: {model}")
+        if speedup is not None and int(row["paired_rounds"]) != config["rounds"]:
+            raise ValueError(f"Gradient round count differs from manifest: {model}")
+        gradient = f"{speedup:.2f}x ± {mad:.2f}" if speedup is not None else "—"
+        for engine, label in (("stanli", "Stanli"), ("cmdstan", "CmdStan")):
+            result = detail["engines"][engine]
+            expected = result.get("median_s") if result["status"] == "complete" else None
+            _catalog_agrees(model, engine + "_sample_s", times[engine], expected)
+            if result["status"] == "complete":
+                runs = [run for run in detail["runs"] if run["engine"] == engine]
+                if (len(runs) != len(seeds) or {run['seed'] for run in runs} != set(seeds)
+                        or any(run["status"] != "ok" for run in runs)):
+                    raise ValueError(f"Incomplete sampling seeds cannot supply a CLI median: {model} {engine}")
+                _catalog_agrees(model, engine + "_sample_s", times[engine],
+                                statistics.median(run['elapsed_s'] for run in runs))
+            diagnostics = result.get("diagnostics", {})
+            if diagnostics.get("status") == "complete":
+                if diagnostics.get("draws", 0) > 0 and diagnostics.get("divergences", 0) >= diagnostics['draws']:
+                    notes.append(f"CLI comparison invalid: all retained {label} draws divergent")
+                elif diagnostics.get("screening_flag"):
+                    notes.append(label + " diagnostics flagged")
+            elif result["status"] == "complete":
+                notes.append(label + " diagnostics unavailable")
+        if not notes and (any(value is None for value in times.values()) or gradient == "—"):
+            notes.append("incomplete measurements")
+        cells = [f"`{model}`", gradient,
+                 *(f"{times[engine]:.4g}" if times[engine] is not None else "—"
+                   for engine in ("stanli", "cmdstan")),
+                 "; ".join(notes) or "complete"]
+        output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+    return "\n".join(output) + "\n"
+
+
 def main():
+    if "--catalog" in sys.argv:
+        print(render_catalog(), end="")
+        return
     if "--gradients" in sys.argv:
         path = sys.argv[sys.argv.index("--gradients") + 1]
         render_gradients(*load_rows(path))
