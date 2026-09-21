@@ -18,10 +18,9 @@ from types import SimpleNamespace
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from harnesses.corpus_bench import (COLS, parse_grad_count, row_line,
+from harnesses.corpus_bench import (COLS, GRADIENT_BUDGET, PROTOCOL, row_line,
     upgrade_header, Runner, PhaseFailure, parse_timing, check_pair,
-    summarize_pairs, paired_order, open_run, validate_draws, summarize_sampling,
-    sampling_order, sampling_limit,
+    summarize_pairs, paired_order, open_run, measure_model,
     benchmark_cases, materialize_data, build_model)
 
 
@@ -55,13 +54,13 @@ class RowLineTests(unittest.TestCase):
         self.assertTrue(row_line(row).endswith("\tstanli_sample_timeout\n"))
         self.assertEqual(self.parse(row)["note"], "stanli_sample_timeout")
 
-    def test_old_row_without_stanli_grads_round_trips(self):
-        old_cols = [c for c in COLS if c != "stanli_grads"]
+    def test_missing_preparation_duration_stays_missing(self):
+        old_cols = [c for c in COLS if c != "stanli_prep_s"]
         text = ("\t".join(old_cols) + "\n"
                 + "\t".join("m" if c == "model" else "" for c in old_cols)
                 + "\n")
         old_row = next(csv.DictReader(io.StringIO(text), delimiter="\t"))
-        self.assertEqual(self.parse(old_row)["stanli_grads"], "")
+        self.assertEqual(self.parse(old_row)["stanli_prep_s"], "")
 
 
 class UpgradeHeaderTests(unittest.TestCase):
@@ -69,22 +68,11 @@ class UpgradeHeaderTests(unittest.TestCase):
         self.assertIsNone(upgrade_header(COLS, {}))
 
     def test_rewrites_old_header_to_current_cols(self):
-        old_cols = [c for c in COLS if c != "stanli_grads"]
+        old_cols = [c for c in COLS if c != "stanli_prep_s"]
         rows = {"m": {**{c: "" for c in old_cols}, "model": "m"}}
         text = upgrade_header(old_cols, rows)
         header = text.splitlines()[0]
         self.assertEqual(header, "\t".join(COLS))
-
-
-class ParseGradCountTests(unittest.TestCase):
-    def test_extracts_count_from_stderr(self):
-        stderr = ("stanli_run: 3 of 1000 draws could not produce generated "
-                  "quantities, written as nan: bad\n"
-                  "stanli_run: 12345 gradient evaluations\n")
-        self.assertEqual(parse_grad_count(stderr), "12345")
-
-    def test_empty_when_absent(self):
-        self.assertEqual(parse_grad_count("stanli_run: boom\n"), "")
 
 
 class TimingTests(unittest.TestCase):
@@ -164,7 +152,8 @@ class ManifestTests(unittest.TestCase):
             identity = dict(protocol="v2", warmup_ms=200, binary="a", data="b")
             _, original = open_run(output, identity, False)
             self.assertEqual(open_run(output, identity, True)[1], original)
-            for change in (dict(warmup_ms=100), dict(binary="new"), dict(data="new")):
+            for change in (dict(warmup_ms=100), dict(binary="new"), dict(data="new"),
+                           dict(protocol="stanli-corpus-v4"), dict(gradient_budget=20000)):
                 with self.subTest(change=change), self.assertRaises(ValueError):
                     open_run(output, dict(identity, **change), True)
 
@@ -179,47 +168,140 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(output.read_text(), "historical data\n")
 
 
-class SamplingTests(unittest.TestCase):
-    def test_relative_cap_uses_matching_reference_and_keeps_absolute_limit(self):
-        self.assertEqual(sampling_order(0, 3), ("cmdstan", "stanli"))
-        self.assertEqual(sampling_order(1, 3), ("cmdstan", "stanli"))
-        self.assertEqual(sampling_order(0, None), ("stanli", "cmdstan"))
-        self.assertEqual(sampling_limit("cmdstan", 900, 3, None), 900)
-        self.assertEqual(sampling_limit("stanli", 900, 3, dict(status="ok", elapsed_s=12)), 36)
-        self.assertEqual(sampling_limit("stanli", 900, 3, dict(status="ok", elapsed_s=400)), 900)
-        self.assertEqual(sampling_limit("stanli", 900, None, None), 900)
-        for reference in (None, dict(status="timeout"), dict(status="failed")):
-            self.assertIsNone(sampling_limit("stanli", 900, 3, reference))
+class SetupEstimateTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        self.source, self.data = self.root / "input.stan", self.root / "input.json"
+        self.source.write_text("parameters { real x; } model { x ~ normal(0,1); }")
+        self.data.write_text("{}")
+        self.args = SimpleNamespace(vectorize_probe=self.root / "probe",
+            stanc=self.root / "stanc", stancflags="--O1", build_timeout=900,
+            gradient_timeout=60, rounds=2, warmup_ms=200, measure_ms=250,
+            cmdstan=self.root / "cmdstan", bench=self.root / "bench")
+        self.events, self.failures = [], {}
+        self.preparation = iter(["0.25 s", "0.75 s"])
+        self.mismatch = False
+        self.runner = mock.Mock()
+        self.runner.run.side_effect = self.run_command
+        self.runner.require.side_effect = self.require
+        self.runner.text.side_effect = self.text
 
-    def test_relative_cap_terminates_a_slow_candidate(self):
-        with tempfile.TemporaryDirectory() as temp:
-            runner = Runner(pathlib.Path(temp))
-            limit = sampling_limit("stanli", 900, 3, dict(status="ok", elapsed_s=0.05))
-            result = runner.run("candidate", [sys.executable, "-c", "import time; time.sleep(10)"], limit)
-            self.assertEqual(result["status"], "timeout")
-            self.assertAlmostEqual(result["timeout_s"], 0.15)
+    def run_command(self, phase, argv, timeout, cwd=None):
+        elapsed = {"stanli-mir": 2.0, "stanc-cpp": 3.0, "cmdstan-build": 5.0,
+                   "gradient-driver-build": 999.0}.get(phase.split("/")[-1], 1.0)
+        event = dict(id=len(self.events), phase=phase, argv=list(map(str, argv)),
+                     status=self.failures.get(phase, "ok"), elapsed_s=elapsed)
+        self.events.append(event)
+        return event
 
-    def test_rejects_incomplete_and_nonfinite_csv(self):
-        with tempfile.TemporaryDirectory() as temp:
-            path = pathlib.Path(temp) / "draws.csv"
-            path.write_text("# configuration\nlp__,mu\n-2,1\n-3,2\n# timing\n")
-            validate_draws(path, 2)
-            with self.assertRaises(PhaseFailure):
-                validate_draws(path, 3)
-            for text in ("", "mu\n1\n", "lp__,mu\n-2,nan\n", "lp__,mu\n-2\n"):
-                path.write_text(text)
-                with self.assertRaises(PhaseFailure):
-                    validate_draws(path, 1)
+    def require(self, phase, argv, timeout, cwd=None):
+        event = self.run_command(phase, argv, timeout, cwd)
+        if event["status"] != "ok":
+            raise PhaseFailure(f"{phase}: {event['status']} (event {event['id']})")
+        return event
 
-    def test_one_censored_seed_prevents_survivor_average(self):
-        events = [dict(engine=e, seed=s, status="ok", elapsed_s=s)
-                  for e in ("stanli", "cmdstan") for s in (1, 2)]
-        self.assertEqual(summarize_sampling(events, [1, 2])["stanli_sample_s"], 1.5)
-        for status in ("timeout", "failed"):
-            events[0]["status"] = status
-            result = summarize_sampling(events, [1, 2])
-            self.assertNotIn("stanli_sample_s", result)
-            self.assertEqual(result["cmdstan_sample_s"], 1.5)
+    def text(self, event):
+        if "/prepare/" in event["phase"]:
+            return next(self.preparation)
+        cmdstan = event["phase"].endswith("/cmdstan")
+        return json.dumps(dict(protocol="stanli-gradient-v2", iterations=1000,
+            elapsed_ns=500000000 if cmdstan else 250000000, batch=8,
+            warmup_iterations=5000, warmup_elapsed_ns=200000000,
+            values=[-3.0, 20.0 if self.mismatch and cmdstan else 2.0]))
+
+    def measure(self):
+        with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]), \
+             mock.patch("harnesses.corpus_bench.sha", return_value="test-hash"):
+            return measure_model("m", self.source, self.data, self.root,
+                                 {"run_id": "test-run"}, self.runner, self.args)
+
+    def test_proxy_includes_each_setup_component_but_not_driver_build(self):
+        record = self.measure()
+        row = record["row"]
+        self.assertEqual(PROTOCOL, "stanli-corpus-v4")
+        self.assertEqual(record["status"], "ok")
+        self.assertEqual(GRADIENT_BUDGET, 20000)
+        self.assertEqual(row["gradient_budget"], 20000)
+        self.assertEqual(row["stanli_compile_s"], 2)
+        self.assertEqual(row["stanli_prep_s"], .5)
+        self.assertEqual(row["cmdstan_stanc_s"], 3)
+        self.assertEqual(row["cmdstan_build_s"], 5)
+        self.assertEqual(row["stanli_estimated_s"], 2 + .5 + 20000 * 250000 / 1e9)
+        self.assertEqual(row["cmdstan_estimated_s"], 3 + 5 + 20000 * 500000 / 1e9)
+        self.assertEqual(record["preparation_s"], [.25, .75])
+        self.assertEqual(set(record["setup"]), {"stanli_compile", "cmdstan_stanc", "cmdstan_build"})
+        self.assertNotIn("sampling", record)
+        self.assertTrue(all("sample" not in event["argv"] for event in self.events))
+        build = record["setup"]["cmdstan_build"]["argv"]
+        self.assertEqual(build[0], "make")
+        self.assertIn("STANCFLAGS=--O1", build)
+        self.assertEqual(json.loads((self.root / "m.result.json").read_text()), record)
+
+    def test_ordinary_build_failure_preserves_accepted_gradients_and_stanli_proxy(self):
+        self.failures["m/cmdstan-build"] = "failed"
+        record = self.measure()
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["row"]["paired_rounds"], 2)
+        self.assertEqual(record["row"]["paired_speedup"], 2)
+        self.assertIn("stanli_estimated_s", record["row"])
+        self.assertNotIn("cmdstan_build_s", record["row"])
+        self.assertNotIn("cmdstan_estimated_s", record["row"])
+        self.assertEqual(record["setup"]["cmdstan_build"]["status"], "failed")
+
+    def test_timed_out_build_is_censored_without_an_estimate(self):
+        self.failures["m/cmdstan-build"] = "timeout"
+        record = self.measure()
+        self.assertEqual(record["status"], "censored")
+        self.assertNotIn("cmdstan_estimated_s", record["row"])
+        self.assertIn("timeout", record["row"]["note"])
+
+    def test_partial_preparation_does_not_create_a_survivor_median(self):
+        self.preparation = iter(["0.25 s", "nan s"])
+        record = self.measure()
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["preparation_s"], [.25])
+        self.assertNotIn("stanli_prep_s", record["row"])
+        self.assertNotIn("stanli_estimated_s", record["row"])
+        self.assertIn("cmdstan_estimated_s", record["row"])
+        self.assertEqual(record["row"]["paired_rounds"], 2)
+
+    def test_numerical_failure_has_no_gradient_proxy_but_keeps_setup_measurements(self):
+        self.mismatch = True
+        record = self.measure()
+        self.assertEqual(record["status"], "failed")
+        self.assertNotIn("paired_speedup", record["row"])
+        self.assertNotIn("stanli_estimated_s", record["row"])
+        self.assertNotIn("cmdstan_estimated_s", record["row"])
+        self.assertEqual(record["row"]["cmdstan_build_s"], 5)
+
+    def test_source_compile_failure_keeps_event_without_setup_estimate(self):
+        self.failures["m/stanli-mir"] = "failed"
+        record = self.measure()
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(record["setup"]["stanli_compile"]["status"], "failed")
+        self.assertNotIn("stanli_compile_s", record["row"])
+        self.assertNotIn("stanli_estimated_s", record["row"])
+
+    def test_partial_gradient_rounds_cannot_supply_an_estimate(self):
+        self.failures["m/gradient/1/cmdstan"] = "timeout"
+        record = self.measure()
+        self.assertEqual(record["status"], "censored")
+        self.assertEqual(len(record["gradients"]), 1)
+        self.assertNotIn("stanli_ns_grad", record["row"])
+        self.assertNotIn("stanli_estimated_s", record["row"])
+        self.assertNotIn("cmdstan_estimated_s", record["row"])
+        self.assertEqual(record["row"]["cmdstan_build_s"], 5)
+
+    def test_sampling_options_are_no_longer_operational(self):
+        from harnesses.corpus_bench import main
+        for option in ("--sampling", "--sample-timeout", "--cmdstan-runtime-multiple",
+                       "--seeds", "--iter-warmup", "--iter-sampling", "--run"):
+            with self.subTest(option=option), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                main(["unused-cmdstan", "unused-pdb", "unused.tsv", option])
+            self.assertEqual(raised.exception.code, 2)
 
 
 class CompilerSelectionTests(unittest.TestCase):
@@ -232,10 +314,11 @@ class CompilerSelectionTests(unittest.TestCase):
                 stancflags="--O1 --vectorize-loops", build_timeout=900,
                 cmdstan=root / "cmdstan", bench=root / "bench")
             runner = mock.Mock()
+            runner.run.return_value = dict(status="ok", elapsed_s=1)
             with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]):
                 commands, _ = build_model("m", source, root / "data.json",
                                            root / "build", runner, args)
-            calls = runner.require.call_args_list
+            calls = runner.run.call_args_list
             self.assertEqual(calls[0].args[1][:3],
                              [args.vectorize_probe, "--vectorize-loops", "on"])
             self.assertEqual(calls[1].args[1][0], args.stanc)
@@ -281,6 +364,46 @@ class CorpusInventoryTests(unittest.TestCase):
             for source in [plain, zipped]:
                 materialize_data(source, result)
                 self.assertEqual(result.read_bytes(), payload)
+
+
+
+class TriageTests(unittest.TestCase):
+    def render(self, rows):
+        from harnesses.triage_bench import main
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp) / "bench.tsv"
+            with path.open("w", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=list(rows[0]), delimiter="\t")
+                writer.writeheader()
+                writer.writerows(rows)
+            output = io.StringIO()
+            with mock.patch.object(sys, "argv", ["triage_bench.py", str(path), "--all"]), \
+                    contextlib.redirect_stdout(output):
+                main()
+            return output.getvalue()
+
+    def test_current_estimates_use_paired_ratio_and_keep_missing_estimates_visible(self):
+        row = dict(model="valid", stanli_ns_grad=100, cmdstan_ns_grad=200,
+                   paired_speedup=1.25, gradient_budget=20000,
+                   stanli_estimated_s=.1, cmdstan_estimated_s=.2, note="")
+        missing = dict(row, model="missing", stanli_estimated_s="", cmdstan_estimated_s="",
+                       note="ordinary build failed")
+        result = self.render([row, missing])
+        self.assertIn("20,000 warm gradients (proxy, not HMC time)", result)
+        self.assertNotIn("Historical sampling", result)
+        measured = next(line.split() for line in result.splitlines() if line.lstrip().startswith("valid "))
+        self.assertEqual(measured[-4:], ["1.25x", "0.10", "0.20", "2.00x"])
+        absent = next(line.split() for line in result.splitlines() if line.lstrip().startswith("missing "))
+        self.assertEqual(absent[-3:], ["-", "-", "-"])
+        self.assertIn("ordinary build failed", result)
+
+    def test_historical_sampling_remains_explicitly_labeled(self):
+        result = self.render([dict(model="old", stanli_ns_grad=100, cmdstan_ns_grad=200,
+                                   stanli_sample_s=3, cmdstan_sample_s=9, note="")])
+        self.assertIn("Historical sampling seconds", result)
+        self.assertNotIn("Estimated seconds", result)
+        measured = next(line.split() for line in result.splitlines() if line.lstrip().startswith("old "))
+        self.assertEqual(measured[-4:], ["2.00x", "3.00", "9.00", "3.00x"])
 
 
 
@@ -333,6 +456,211 @@ class HistoricalResultsTests(unittest.TestCase):
         failed["models"]["aalto_gpareto"]["benchmark"]["seconds"]["stanli"] = [100] * 5
         with self.assertRaises(ValueError):
             self.render(failed)
+
+
+
+class BenchmarkCatalogTests(unittest.TestCase):
+    def setUp(self):
+        from tools.corpus_table import render_catalog
+        from benchmark_artifact_fixture import artifact_fixture
+        self.render_catalog = render_catalog
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = pathlib.Path(self.temp.name)
+        self.paths = (root / "summary.tsv", root / "records.json.gz", root / "manifest.json")
+        self.manifest, self.records, self.rows = artifact_fixture()
+
+    def render(self):
+        from benchmark_artifact_fixture import write_artifacts
+        write_artifacts(*self.paths, self.rows, self.records, self.manifest)
+        return self.render_catalog(*self.paths)
+
+    def update_row(self, **values):
+        self.rows[0].update(values)
+        self.records[0]["row"].update(values)
+
+    def test_proxy_uses_all_setup_terms_and_twenty_thousand_gradients(self):
+        rendered = self.render()
+        self.assertIn("1.42x ±", rendered)
+        self.assertNotIn("2.00x", rendered)
+        self.assertIn("| 0.127 | 2.214 |", rendered)
+        self.assertIn("not measured HMC sampling time", rendered)
+        self.assertIn("20,000", rendered)
+        self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
+
+    def test_missing_failed_row_is_not_complete_inventory(self):
+        self.rows.pop()
+        self.records.pop()
+        with self.assertRaisesRegex(ValueError, "inventory"):
+            self.render()
+
+    def test_duplicate_tsv_rows_are_rejected(self):
+        self.rows.append(self.rows[0])
+        with self.assertRaisesRegex(ValueError, "Duplicate model"):
+            self.render()
+
+    def test_duplicate_raw_records_are_rejected(self):
+        self.records.append(self.records[0])
+        with self.assertRaisesRegex(ValueError, "inventory"):
+            self.render()
+
+    def test_run_id_mismatch_is_rejected(self):
+        self.update_row(run_id="other")
+        with self.assertRaisesRegex(ValueError, "run identity"):
+            self.render()
+
+    def test_source_hash_drift_is_rejected(self):
+        self.records[0]["inputs"]["stan"] = "different"
+        with self.assertRaisesRegex(ValueError, "input hashes"):
+            self.render()
+
+    def test_tsv_must_agree_with_raw_row(self):
+        self.rows[0]["paired_speedup"] = 99
+        with self.assertRaisesRegex(ValueError, "TSV/raw"):
+            self.render()
+
+    def test_raw_pairs_must_support_summary(self):
+        self.update_row(paired_speedup=99)
+        with self.assertRaisesRegex(ValueError, "artifacts disagree"):
+            self.render()
+
+    def test_incomplete_pairs_are_rejected(self):
+        self.records[0]["gradients"].pop()
+        with self.assertRaisesRegex(ValueError, "Incomplete paired"):
+            self.render()
+
+    def test_failed_ordinary_build_preserves_gradients_and_stanli_estimate(self):
+        self.records[0]["status"] = "failed"
+        self.records[0]["setup"]["cmdstan_build"]["status"] = "failed"
+        self.update_row(cmdstan_build_s="", cmdstan_estimated_s="", note="ordinary build failed")
+        rendered = self.render()
+        self.assertIn("1.42x ±", rendered)
+        self.assertIn("| 0.127 | — | failed; ordinary build failed", rendered)
+
+    def test_partial_preparation_preserves_gradient_and_reference_estimate(self):
+        self.records[0]["status"] = "censored"
+        self.records[0]["preparation_s"].pop()
+        self.update_row(stanli_prep_s="", stanli_estimated_s="", note="prepare timed out")
+        self.assertIn("| — | 2.214 | censored; prepare timed out", self.render())
+
+    def test_failed_setup_cannot_supply_a_duration(self):
+        self.records[0]["setup"]["cmdstan_build"]["status"] = "failed"
+        with self.assertRaisesRegex(ValueError, "artifacts disagree"):
+            self.render()
+
+    def test_successful_setup_requires_exit_status_zero(self):
+        self.records[0]["setup"]["cmdstan_build"]["returncode"] = 1
+        with self.assertRaisesRegex(ValueError, "exit status zero"):
+            self.render()
+
+    def test_plain_tsv_cli_cannot_render_current_unvalidated_estimates(self):
+        from tools.corpus_table import main
+        self.render()
+        for flags in ([], ["--gradients"], ["--o1vec"]):
+            with self.subTest(flags=flags), mock.patch.object(sys, "argv", ["corpus_table", *flags, str(self.paths[0])]):
+                with self.assertRaisesRegex(SystemExit, "raw evidence validation"):
+                    main()
+
+    def test_setup_phase_cannot_be_substituted_with_gradient_driver_build(self):
+        self.records[0]["setup"]["cmdstan_build"]["phase"] = "good/gradient-driver-build"
+        with self.assertRaisesRegex(ValueError, "Invalid setup event"):
+            self.render()
+
+    def test_proxy_is_recomputed_not_trusted(self):
+        self.update_row(stanli_estimated_s=.12 + 2000 * 350 / 1e9)
+        with self.assertRaisesRegex(ValueError, "artifacts disagree"):
+            self.render()
+
+    def test_wrong_budget_or_old_sampling_protocol_is_rejected(self):
+        for field, value in (("gradient_budget", 2000), ("sampling", True), ("filter", "good")):
+            config = copy.deepcopy(self.manifest["identity"]["config"])
+            self.manifest["identity"]["config"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "unfiltered v4"):
+                self.render()
+            self.manifest["identity"]["config"] = config
+        self.manifest["identity"]["protocol"] = "stanli-corpus-v3"
+        with self.assertRaises(ValueError):
+            self.render()
+
+    def test_nonfinite_measurement_is_rejected(self):
+        self.update_row(stanli_ns_grad=float("nan"))
+        with self.assertRaisesRegex(ValueError, "Invalid stanli_ns_grad"):
+            self.render()
+
+    def test_numerical_mismatch_is_not_timing_evidence(self):
+        self.records[0]["gradients"][0]["cmdstan"]["values"] = [-10, 2]
+        with self.assertRaisesRegex(ValueError, "numerical gate"):
+            self.render()
+
+    def test_missing_artifacts_have_no_historical_fallback(self):
+        with self.assertRaises(FileNotFoundError):
+            self.render_catalog(*self.paths)
+        self.assertTrue(all("corpus-performance" in str(path)
+                            for path in self.render_catalog.__defaults__))
+
+
+class VectorizedCatalogTests(unittest.TestCase):
+    def setUp(self):
+        from tools.corpus_table import render_gradient_catalog
+        from benchmark_artifact_fixture import artifact_fixture
+        self.render_catalog = render_gradient_catalog
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = pathlib.Path(self.temp.name)
+        self.paths = [root / name for name in ("summary.tsv", "manifest.json",
+                      "models.json.gz", "compiler.json", "default.json")]
+        self.manifest, self.records, self.rows = artifact_fixture()
+        self.baseline = copy.deepcopy(self.manifest)
+        self.manifest["identity"]["config"]["stancflags"] = "--O1"
+        self.provenance = dict(source_sha="a" * 40, binary_sha256="b" * 64,
+            patch_sha256="c" * 64, optimization="O1 plus vectorize_loops",
+            build_commands=["opam exec -- dune build"])
+
+    def render(self):
+        from benchmark_artifact_fixture import write_artifacts
+        write_artifacts(self.paths[0], self.paths[2], self.paths[1],
+                        self.rows, self.records, self.manifest)
+        self.paths[3].write_text(json.dumps(self.provenance))
+        self.paths[4].write_text(json.dumps(self.baseline))
+        return self.render_catalog(*self.paths)
+
+    def test_paired_ratio_mad_and_failures_are_retained(self):
+        rendered = self.render()
+        self.assertIn("1.42x ±", rendered)
+        self.assertNotIn("2.00x", rendered)
+        self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
+        self.assertIn("| Stanli µs | CmdStan O1+vec µs |", rendered)
+
+    def test_default_inputs_and_executables_must_match(self):
+        for field in ("inputs", "bench", "vectorize_probe"):
+            baseline = copy.deepcopy(self.baseline)
+            if field == "inputs":
+                self.baseline["identity"]["inputs"]["good"]["data"] = "changed"
+            else:
+                self.baseline["identity"]["executables"][field] = "changed"
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "differ"):
+                self.render()
+            self.baseline = baseline
+
+    def test_compiler_provenance_must_match(self):
+        for field, value in (("binary_sha256", "d" * 64), ("patch_sha256", ""),
+                             ("source_sha", ""), ("build_commands", []),
+                             ("optimization", "O1 only")):
+            provenance = copy.deepcopy(self.provenance)
+            self.provenance[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "compiler provenance"):
+                self.render()
+            self.provenance = provenance
+
+    def test_default_and_optimized_protocols_must_match(self):
+        self.baseline["identity"]["config"]["rounds"] = 5
+        with self.assertRaisesRegex(ValueError, "configuration differs"):
+            self.render()
+
+    def test_current_optimized_flags_are_required(self):
+        self.manifest["identity"]["config"]["stancflags"] = ""
+        with self.assertRaisesRegex(ValueError, "requires O1"):
+            self.render()
 
 
 if __name__ == "__main__":

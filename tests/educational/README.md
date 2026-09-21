@@ -65,8 +65,8 @@ and reporting path as the rest of the application corpus:
 
 ```sh
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/corpus-v3.tsv --sampling
-python3 tools/corpus_table.py /tmp/corpus-v3.tsv
+  /tmp/corpus-v4.tsv
+python3 tools/publish_corpus_bench.py /tmp/corpus-v4.tsv /tmp/corpus-v4-report
 ```
 
 The [main results page](../../docs/benchmarks.md) is organized by measurement.

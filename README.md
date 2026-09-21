@@ -29,12 +29,14 @@ and `remotes::install_github()` or a checkout installs from source (see
 [R](#r) below). The package downloads its matching runtime on first use,
 keeping installation small and avoiding a local stan-math build.
 
-- Performance vs CmdStan: [docs/benchmarks.md](docs/benchmarks.md).
-  Median gradient <!--gen:corpus_median-->2.10x<!--/gen--> across
-  <!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models,
-  <!--gen:corpus_at_par-->119<!--/gen--> of them at or above CmdStan;
-  <!--gen:bench_span-->1.0x-10.9x<!--/gen--> across the representative slice;
-  the first Eight Schools run from source to CSV is roughly 100x faster.
+- Performance vs CmdStan: [full benchmark and method](docs/benchmarks.md).
+  In the <!--gen:benchmark_date-->2026-09-21<!--/gen--> native run,
+  <!--gen:corpus_n_grad-->315<!--/gen--> of
+  <!--gen:benchmark_models-->319<!--/gen--> models produced paired gradient
+  measurements: median CmdStan/Stanli ratio
+  <!--gen:corpus_median-->1.72x<!--/gen-->, with
+  <!--gen:corpus_at_par-->302<!--/gen--> at or above parity.
+  Failed or capped runs remain in the full table.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_reference_models-->329<!--/gen--> models share one three-point
   CmdStan reference replay. Within the posteriordb subset,

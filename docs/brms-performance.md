@@ -260,10 +260,10 @@ to either upstream implementation is applied.
   this work and is unrelated to these models.
 
 The [benchmark protocol](benchmark-protocol.md) documents the runner, numerical
-gate, thread settings, retained failures, and per-seed cap. For a fresh run,
-use `harnesses/corpus_bench.py` with `--corpus brms --filter s2_com_poisson
---sampling --cmdstan-runtime-multiple 3`, recording executable preconditioning
-as described above. [TESTING.md](../TESTING.md) covers build setup and validation:
+gate, thread settings and retained failures. Current runs measure setup and warm gradients and
+report an explicit setup-plus-20,000-gradient time estimate; the sampling evidence
+above belongs to this historical experiment. For a fresh run, use
+`harnesses/corpus_bench.py` with `--corpus brms --filter s2_com_poisson`. [TESTING.md](../TESTING.md) covers build setup and validation:
 
 ```sh
 ctest --test-dir build-rel --output-on-failure

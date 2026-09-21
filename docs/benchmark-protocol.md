@@ -1,175 +1,121 @@
-# Corpus benchmark protocol, version 3
+# Corpus benchmark protocol, version 4
 
-The benchmark measures **warm gradient latency**. Full inference is a separate,
-explicit phase. A numerical comparison must pass before a timing pair is accepted.
+The benchmark measures setup and warm gradient latency, then calculates a
+**setup + 20,000-gradient time estimate**. It does not run full sampling.
 The shared [inventory](../tools/corpus_inventory.py) supplies application
 models from every source collection; language-conformance fixtures remain
-numerical tests. Collection selectors are optional provenance filters and do
-not change the measurement contract. Retained [historical runs](benchmark-history.md)
-keep their original revisions and protocols; they are not pooled into a new sweep.
+numerical tests. Collection selectors only filter provenance.
 
-## Fixed measurement contract
+## Gradients and numerical acceptance
 
-Both engines use the same model, data, unconstrained parameter vector, sampling
-log density (`propto=true`) and Jacobian adjustment. At coordinate `i`, the fixed
-point is `0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`. Every accepted pair compares
-log density and **every gradient coordinate** using the existing scaled-error
-gate `abs(a-b) / max(abs(a), abs(b), 1) <= 1e-9`. Non-finite results, unequal
-widths and failed commands produce no speed result.
+Both engines use the same source, data, unconstrained parameter vector,
+sampling log density (`propto=true`) and Jacobian adjustment. Coordinate `i`
+is `0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`. Every accepted pair compares log
+density and every gradient coordinate using scaled error
+`abs(a-b) / max(abs(a), abs(b), 1) <= 1e-9`. Non-finite values, unequal widths
+and failed commands produce no accepted pair. This is a numerical acceptance
+gate, not a fixed ULP bound or proof of complete sampler conformance.
 
-The two C++ drivers share `tools/benchmark_timer.hpp`:
+The drivers share [benchmark_timer.hpp](../tools/benchmark_timer.hpp):
 
-1. Construct and bind the model outside the timed window; evaluate once to
-   reject invalid points before measurement.
-2. Warm for at least **200 ms**. Small batches grow during warmup to amortize
-   clock reads. There is no limit based on parameter count or 1,000 evaluations.
-3. Measure batches for at least **250 ms**, recording the actual elapsed
-   nanoseconds and evaluation count. An evaluation that exceeds the window is
-   measured in full; reported time is never clipped to the requested window.
-4. Start a fresh process for each measurement. Collect **six paired rounds**,
-   alternating stanli/CmdStan and CmdStan/stanli order. Both binaries are built
-   before the paired phase. One engine runs at a time.
+1. Construct/bind the model and validate the point outside the timed window.
+2. Warm for at least 200 ms; grow small batches to amortize clock reads.
+3. Measure batches for at least 250 ms, retaining elapsed nanoseconds and
+   evaluation count. A slow evaluation is measured in full, never clipped.
+4. Use a fresh process for each measurement and collect six pairs, alternating
+   Stanli/CmdStan and CmdStan/Stanli order. Only one engine runs at a time.
 
-These defaults are measurement settings, not a threshold for declaring a
-performance win. They can be changed before starting a run, and then become
-part of its immutable identity. Gradient process timeouts, build timeouts and
-sampling timeouts are separate settings.
+Report each engine's median latency and median absolute deviation (MAD), and
+the median/MAD of the within-pair CmdStan/Stanli ratios. Ratios above one favor
+Stanli. A small difference must be read with its dispersion; confirming a
+marginal improvement requires a separate predetermined experiment.
 
-Report each engine's median nanoseconds per gradient and median absolute
-deviation (MAD). Also report the median and MAD of the **within-pair speedup
-ratios**. Preserve every raw measurement. A marginal difference needs an A/A
-control and a predetermined confirmation experiment; it is not established by
-one favorable row.
+## Setup and the 20,000-gradient estimate
 
-Preparation from existing MIR is measured separately, excluding stanc and
-model evaluation. It is not labeled source-to-model compilation. A gradient
-driver's C++ build time is a setup event, not a user's CmdStan model-build time.
+The fixed budget of **20,000 gradient evaluations** is recorded in the manifest.
+With gradient latencies in seconds:
 
-The runner uses the shipped vectorized compilation pipeline via
-`deps/stanc3/stanli-vectorize-probe` for gradients and the CLI's default compiler for sampling.
-`--cmdstan-stanc` (alias `--stanc`) and `--stancflags` select the reference
-header compiler; the generated header is shared by its gradient driver and
-sampler build. All compiler choices and executable hashes are in the manifest.
-Earlier reports retain their recorded compiler commands and hashes; their
-measurements must not be relabeled as results from the current build.
+```text
+Stanli estimate  = source-to-MIR + preparation + 20,000 × median gradient time
+CmdStan estimate = stanc translation + C++ build + 20,000 × median gradient time
+```
 
-## Reproducible runs
+Stanli source-to-MIR time is the elapsed compiler-probe process using the
+shipped vectorization pipeline, including process startup. Preparation is the
+median of six fresh-process measurements from existing MIR and JSON to a bound
+executor, excluding gradient evaluation. This boundary differs from in-process
+Python/R model construction.
+
+CmdStan translation uses the selected stanc compiler and flags. Its ordinary
+model executable is built separately from the gradient driver. Common CmdStan
+dependencies and precompiled headers are prepared in advance; per-model
+executables are fresh. CmdStan data/model initialization is not added to the estimate. Gradient-driver
+compilation is retained as setup evidence but is not charged to the estimate.
+
+Each compilation phase is measured once per model, with normal filesystem
+caches. The estimate sums measured stages; it is not a timed cold-cache first
+fit. Missing or invalid components produce no estimate. Accepted gradients
+remain visible if a later ordinary-model build fails.
+
+The fixed workload corresponds to an assumption of 2,000 iterations at ten
+gradient evaluations each. It excludes adaptation, tree building, generated
+quantities and output, and does not predict a particular model's NUTS runtime.
+Numerical and sampler correctness remain covered independently by
+[TESTING.md](../TESTING.md).
+
+## Running the experiment
 
 ```sh
-./tools/dev_setup.sh --no-build       # builds the compiler and its probe
-cmake --build build-rel --target bench_grad stanli_run -j 4
-# New output path; gradients only, all application models:
+./tools/dev_setup.sh --no-build
+cmake --build build-rel --target bench_grad -j 4
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/corpus-v3.tsv
-# Optional source filter (also available: posteriordb, brms, educational):
-python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  /tmp/rethinking-v3.tsv --corpus rethinking
+  /tmp/corpus-v4.tsv --bench build-rel/bench_grad \
+  --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
+  --gradient-timeout 60 --build-timeout 900
 ```
 
-The standard summary is rendered with:
+`--corpus` selects a source collection; `--filter` selects matching model IDs.
+`--stanc` (alias `--cmdstan-stanc`) and `--stancflags` select the reference
+compiler. Stanli uses `deps/stanc3/stanli-vectorize-probe` by default.
+A distinct output path is required for each changed configuration.
+
+The sibling `OUT.tsv.run/` retains:
+
+- An immutable manifest: source/input/executable hashes, protocol, machine,
+  threads, compiler choices, upstream checkouts, library hashes and build flags.
+- Frozen Stan/data inputs, exact commands, load averages, elapsed times, exit
+  status, timeout reasons and stdout/stderr logs.
+- Per-model raw paired observations, numerical deviations, preparation
+  observations, compilation events and the derived summary row.
+
+`OUT.tsv` is derived from these records. `--resume` requires identical inputs,
+binaries, sources and settings. Failures stay in the inventory. Timeouts kill
+the command's process group and never become a completed observation at the
+limit. Gradient commands default to 60 seconds and builds to 900 seconds.
+The runner requests one thread for Stan, OpenMP and common BLAS libraries.
+Run timed sweeps serially, and record whether the host is shared or idle.
+
+Publish complete runs, then regenerate public pages:
 
 ```sh
-python3 tools/corpus_table.py /tmp/corpus-v3.tsv
+python3 tools/publish_corpus_bench.py /tmp/corpus-v4.tsv output/corpus-performance
+python3 tools/gen_docs.py
 ```
 
-Complete sampling reports and diagnostic screens use
-[`tools/report_corpus.py`](../tools/report_corpus.py). Its source-collection
-column records provenance; every selected model follows the same acceptance
-and reporting rules. Run diagnostics after the timed sweep finishes:
+Documentation generation also requires the optimized-reference artifacts
+specified in the [appendix](benchmark-appendix.md). The current table validates the entire
+inventory, raw pairs and recomputed estimates before publishing.
+It never fills missing cells from historical measurements.
 
-```sh
-python3 tools/corpus_diagnostic_jobs.py /tmp/corpus-v3.tsv.run /tmp/corpus-jobs.json
-Rscript tools/summarize_corpus_bench.R /tmp/corpus-jobs.json /tmp/corpus-diagnostics.json
-python3 tools/report_corpus.py /tmp/corpus-v3.tsv.run /tmp/corpus-diagnostics.json output/corpus-performance
-```
+## Earlier protocols and validation
 
-These commands require a completed run with `--sampling`; they do not rerun
-benchmarks. The former collection-specific performance floors belong to the
-historical experiments that introduced them.
+Version 3 optionally measured full sampling across four seeds. Its retained
+reports and diagnostic tools remain interpretable as historical evidence.
+Version 4 removes that phase and its sampling flags. Version 3 introduced
+direct process-exit timing; version 2's timeout polling could add observer
+delay to short commands. Measurements from these protocols are not pooled.
 
-A sibling `OUT.tsv.run/` contains:
-
-- `manifest.json`: protocol settings, machine, thread settings, hashes of
-  inputs, executables and driver sources, and CmdStan/Stan/Math checkout
-  identities, including tracked diffs, linked TBB/Sundials build products and
-  local make configuration;
-- `inputs/`: retained model and data bytes;
-- `events.jsonl` and `logs/`: exact command lines, order, exit codes, phase
-  durations, process timeouts, load averages, stdout and stderr;
-- per-model `.result.json`: raw paired samples, numerical comparisons,
-  preparation measurements and optional sampling results.
-
-`OUT.tsv` is a derived summary of that run. `--resume` accepts only the same
-inputs, binaries and protocol settings. An existing unversioned TSV is rejected.
-There is no candidate-only refresh that combines a fresh measurement with an
-old comparator. Historical version-1 data stays separate until a reviewed
-version-3 run replaces it.
-
-Version 3 waits directly for process exit and enforces deadlines with a
-separate timer. Version 2 used timeout polling, which could add up to 50 ms
-of observer delay to short runs. Its wall times are retained as historical
-evidence and must not be mixed with new measurements.
-
-The command runner distinguishes failure from timeout, keeps logs on both,
-and kills the process group on timeout on POSIX hosts. Failed measurements
-cannot be interpreted as successful command output. The runner requests one
-thread for Stan, OpenMP and the common BLAS implementations for both engines.
-
-## Optional inference measurements
-
-Add `--sampling` to run 1,000 warmup iterations and 1,000 retained draws for each
-of seeds 1, 2, 3 and 4. Engine order alternates by seed. The seed list must have
-an even number of distinct seeds; the list, iteration counts and timeout are
-frozen in the manifest. The default sampling timeout is 900 seconds per command.
-
-CSV validation checks the retained draw count, column widths and finite values
-before accepting a successful exit. These are observed CLI wall times, including
-CSV output at each CLI's default precision (CmdStan 2.39 uses eight significant
-digits; stanli uses 17). Output formatting costs are therefore part of each
-engine's measured user path. The independent numerical oracle uses high-precision
-values, not these sampling CSVs. These timings do not measure
-ESS per second or establish mixing quality. CmdStan's ordinary model binary is
-built separately with `make`; its model-build duration is recorded separately.
-If any seed fails or times out, that engine has no aggregate sampling time:
-there is no average over the seeds that happened to finish. Timeouts are
-explicitly censored observations with their actual limits and logs retained.
-No dataset is shortened and no sampling budget is changed mid-run.
-
-### Optional cap relative to CmdStan
-
-`--sampling --cmdstan-runtime-multiple 3` runs CmdStan first for each seed,
-then limits stanli to the smaller of three times that matching CmdStan CLI
-runtime and the absolute `--sample-timeout`. C++ compilation is excluded from
-the reference runtime. If CmdStan fails, produces invalid draws or times out,
-the corresponding stanli run is recorded as not run because no valid reference
-duration exists. A stanli timeout is retained as a censored result, never as
-a completed run at the cap.
-
-This sampling policy uses a fixed reference-first order instead of alternating
-order; that limitation must accompany its results. Gradient trials still
-alternate. The multiplier is frozen in the manifest, and changing to this
-policy requires a fresh run. Earlier runs remain separate.
-
-## Validation before a corpus sweep
-
-- Deterministic-clock tests cover tiny work, slow work, batching and overshoot.
-- Runner tests inject nonzero exits, timeouts and invalid driver output.
-- Manifest tests reject changed inputs, binaries, settings and legacy appends.
-- Focused real-model measurements cover a scalar, a hierarchical model and
-  an ordered regression with many observations, plus an identical-binary A/A
-  control. No full sampling sweep is needed to test the measurement protocol.
-
-### Local validation
-
-On Apple M3 Ultra (macOS ARM64), a fresh Release build passed the timer and
-preparation checks and all 17 recorder tests. Six paired rounds each passed
-for `ch09_mp`, `eight_schools_noncentered` and `ch12_m12_5`; the worst scaled
-density/gradient error was `1.83e-14`.
-
-Identical-binary controls returned paired median ratios of 1.002 (scalar stanli)
-and 1.004 (ordered-model CmdStan), with ratio MADs of 0.039 and 0.013. These
-controls demonstrate why small differences require further measurement.
-A separate scalar sampling smoke test completed two seeds per engine, with
-50 warmup and 50 retained draws per seed. An unchanged resume reused its records;
-a changed measurement window was rejected. These checks validate the harness,
-not a new corpus performance claim.
+Focused tests cover timer batching/overshoot, numerical gates, invalid output,
+nonzero exits/timeouts, immutable manifests, estimate arithmetic, missing
+components and report provenance. Existing model replay and sampler smoke
+checks remain separate from performance measurements.

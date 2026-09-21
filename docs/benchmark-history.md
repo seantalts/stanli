@@ -5,7 +5,7 @@ They are not a new sweep of the unified corpus. New measurements use the
 [common benchmark runner and protocol](benchmark-protocol.md); source collection
 names are provenance and optional filters.
 
-Other retained runs include the [September 11 posteriordb tables](benchmarks.md#historical-posteriordb-measurements)
+Other retained runs include the [September 11 posteriordb tables](benchmark-2026-09-11.md#historical-posteriordb-measurements)
 and the [September 16, 199-fixture appendix](../output/teaching-performance/README.md).
 The latter retains its original collection-oriented report and all failures.
 Do not pool these runs into a single median or substitute later results into them.
@@ -80,14 +80,14 @@ three-point log-density/gradient/generated-output oracle and sampling checks.
 [fixture provenance](../tests/educational/IMPORT_README.md), and the
 [detailed results](../tests/educational/RESULTS.md) retain methodology,
 uncertainty and correctness evidence. These end-to-end measurements are
-separate from the posteriordb measurements on the [main page](benchmarks.md).
+separate from the [archived posteriordb measurements](benchmark-2026-09-11.md).
 
 ## Fixed-point gradients: 14 September 2026
 
 A separate run through the standard corpus drivers measures warmed gradients
 at the same deterministic unconstrained point, with CmdStan `--O1`. These
 are arithmetic means from one timed loop per engine/model, following the
-[historical gradient method](benchmarks.md#benchmark-method); no sampling or build time enters the gradient ratio.
+[historical gradient method](benchmark-2026-09-11.md#benchmark-method); no sampling or build time enters the gradient ratio.
 
 <!-- educational-gradients:start -->
 | model | parameters | stanli gradient | CmdStan gradient | gradient speedup |

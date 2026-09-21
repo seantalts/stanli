@@ -401,7 +401,7 @@ function highlight(name, q) {
 
 const meta = (m) => [
   m.params != null ? `${m.params} par${m.params === 1 ? "" : "s"}` : "",
-  m.speedup ? `${m.speedup}x` : "",
+  m.speedup ? `${m.speedup}x native` : "",
 ].filter(Boolean).join(" · ");
 
 let shown = [], active = -1, selected = null;
@@ -470,7 +470,7 @@ async function choose(m) {
   $("err").textContent = "";
   const stats = [
     m.params != null ? `${m.params} parameter${m.params === 1 ? "" : "s"}` : "",
-    m.speedup ? `${m.speedup}x CmdStan per gradient` : "",
+    m.speedup ? `${m.speedup}x native CmdStan/Stanli gradient ratio` : "",
   ].filter(Boolean).join(" · ");
   $("note").innerHTML = `<b>${esc(m.name)}</b>. ${esc(m.note)}` +
       (stats ? ` <span class="stats">(${esc(stats)})</span>` : "");
@@ -1759,22 +1759,21 @@ which takes several seconds even for small models after the precompiled headers 
 Stanli has its own lowering and optimization passes that run in tens of milliseconds and then just interprets that high level result rather than using a compiler.
 <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
 it works</a></p>
-<p><b>How does it perform?</b> In the September 11, 2026 native measurements,
-warm gradients were a median
-<!--gen:corpus_median-->2.10x<!--/gen--> faster than CmdStan across
-<!--gen:corpus_n_grad-->119<!--/gen--> posteriordb models, with
-<!--gen:corpus_at_par-->119<!--/gen--> at least as fast. Our shared model corpus
-supports measurements of gradients, complete sampling runs, and preparation.
-See the <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">benchmarks</a>
-for each experiment's models, protocol, and results.
+<p><b>How does it perform?</b> In the
+<!--gen:benchmark_date-->2026-09-21<!--/gen--> native run,
+<!--gen:corpus_n_grad-->315<!--/gen--> of
+<!--gen:benchmark_models-->319<!--/gen--> models produced paired gradient
+measurements. The median CmdStan/Stanli ratio was
+<!--gen:corpus_median-->1.72x<!--/gen-->, with
+<!--gen:corpus_at_par-->302<!--/gen--> at or above parity.
+See the <a href="https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md">current full benchmark</a>
+for the protocol, complete model inventory, failed or capped runs, and numerical checks.
 The biggest architectural win is that Stanli analyzes the model graph and pre-allocates a linear array for gradient storage for everything except for ODE UDFs and conditionals on parameters.
 The other graph optimizations are explained <a href="https://github.com/seantalts/stanli/blob/main/runtime/src/OPTIMIZATIONS.md">here</a>.
 </p>
-<p><b>This tab is the slow way to run Stanli, though.</b> The same source
-compiled to WebAssembly instead of native costs about 1.5x to 2x per
-gradient. The figures in the paragraph
-above are native ones, so the margin over CmdStan in here is nearer par
-than 2x. For heavy work, <code>pip install stanli</code> to run the native build.</p>
+<p><b>This tab runs WebAssembly.</b> The figures above and the model-card
+ratios measure the native build; browser performance depends on your device
+and browser. For heavy work, <code>pip install stanli</code> to run the native build.</p>
 <p><b>Checked against CmdStan.</b> The shared corpus contains
 <!--gen:corpus_reference_models-->329<!--/gen--> models with recorded CmdStan
 references at three fixed inputs. The replay checks log densities, full

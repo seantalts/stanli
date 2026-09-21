@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render docs/corpus-bench.tsv as the markdown tables docs/benchmarks.md
-embeds.
+"""Render the benchmark catalog and detailed historical appendix tables.
 
-Two tables. The first is every model both engines measured end to end,
+--catalog renders one complete, current benchmark run for benchmarks.md.
+The original TSV mode emits two tables for docs/benchmark-appendix.md. The first is every model both engines measured end to end,
 sorted by per-gradient speedup. It shows both engines' absolute gradient
 times and the wall time from Stan source to a completed 1,000-warmup,
 1,000-draw run. stanli_sample_s already includes the whole stanli process;
@@ -11,7 +11,11 @@ run. The second table holds models the run could not complete, with what
 stopped them. Missing numbers sort to the bottom because missing is not slow.
 
 Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
-Prints markdown to stdout; benchmarks.md is edited by hand around it.
+Prints markdown to stdout; the appendix is edited by hand around it.
+
+--catalog requires the current full-corpus v4 summary, raw model records and
+manifest under output/corpus-performance; it never substitutes historical measurements.
+Its setup-plus-20,000-gradients estimate is a fixed-work proxy, not measured sampling.
 
 --gradients INPUT.tsv renders only the fixed-point gradient comparison.
 
@@ -25,9 +29,13 @@ time only, no sampling columns, plus a compile+sample speedup that adds
 python3 tools/corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec
 """
 import csv
+import gzip
+import shlex
 import re
 import json
 import math
+import statistics
+from pathlib import Path
 import sys
 
 # The harness's machine tags, in the words a reader needs. The per-model
@@ -213,7 +221,8 @@ def render_main(rows, col):
             status = col(r, "note").replace("sampling_not_requested", "gradients only") or "complete"
             print(f"| `{col(r, 'model')}` | {times[0]} | {times[1]} | {speedup} "
                   f"| {col(r, 'paired_rounds') or '-'} | {status} |")
-        if any(col(r, "stanli_sample_s") or col(r, "cmdstan_sample_s") for r in rows):
+        if "stanli_sample_s" in col.columns and any(
+                col(r, "stanli_sample_s") or col(r, "cmdstan_sample_s") for r in rows):
             print("\n| model | stanli CLI median | CmdStan build | CmdStan CLI median |")
             print("| --- | ---: | ---: | ---: |")
             for r in rows:
@@ -305,10 +314,292 @@ def render_historical_sampling(report):
               f"| {measured['speedup']:.3f}x | {minimum:.1f}x |")
 
 
+CATALOG_ROOT = Path(__file__).resolve().parents[1]
+CATALOG_SUMMARY = CATALOG_ROOT / "output/corpus-performance/benchmark-summary.tsv"
+CATALOG_RECORDS = CATALOG_ROOT / "output/corpus-performance/model-results.json.gz"
+CATALOG_MANIFEST = CATALOG_ROOT / "output/corpus-performance/benchmark-manifest.json"
+VECTORIZED_ROOT = CATALOG_ROOT / "output/corpus-performance-vectorized"
+GRADIENT_FIELDS = ("stanli_ns_grad", "stanli_ns_grad_mad", "cmdstan_ns_grad",
+                   "cmdstan_ns_grad_mad", "paired_speedup", "paired_speedup_mad")
+SETUP_PHASES = {"stanli_compile": "stanli-mir", "cmdstan_stanc": "stanc-cpp",
+                "cmdstan_build": "cmdstan-build"}
+
+
+def _catalog_rows(path):
+    with open(path, newline="") as stream:
+        rows = list(csv.DictReader(stream, delimiter="\t"))
+    names = [row["model"] for row in rows]
+    if len(set(names)) != len(names):
+        raise ValueError(f"Duplicate model in benchmark artifact: {path}")
+    return rows
+
+
+def _catalog_number(row, field):
+    value = row.get(field, "")
+    if value is None or str(value).strip() == "":
+        return None
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise ValueError(f"Invalid {field} for {row['model']}: {value}")
+    return number
+
+
+def _catalog_agrees(model, field, actual, expected):
+    if ((actual is None) != (expected is None)
+            or (actual is not None and not math.isclose(actual, expected,
+                                                        rel_tol=1e-12, abs_tol=1e-15))):
+        raise ValueError(f"Benchmark artifacts disagree: {model} {field}")
+
+
+def _catalog_cell(value):
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _catalog_config(manifest):
+    identity = manifest["identity"]
+    config = identity["config"]
+    if (not manifest.get("run_id") or identity.get("protocol") != "stanli-corpus-v4"
+            or config.get("corpus") != "all" or config.get("filter")
+            or type(config.get("rounds")) is not int or config["rounds"] <= 0
+            or type(config.get("gradient_budget")) is not int or config["gradient_budget"] != 20000
+            or any(key in config for key in ("sampling", "seeds", "iter_sampling", "iter_warmup", "run"))):
+        raise ValueError("Catalog requires an unfiltered v4 setup/gradient run with budget 20000")
+    for key in ("warmup_ms", "measure_ms"):
+        value = config.get(key)
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"Invalid gradient configuration: {key}")
+    return config
+
+
+def _catalog_pairs(model, record, row, config):
+    """Validate the raw paired oracle and recompute every published statistic."""
+    rounds = config["rounds"]
+    values = {key: _catalog_number(row, key) for key in GRADIENT_FIELDS}
+    measured = any(value is not None for value in values.values())
+    pairs = record["gradients"]
+    if (not isinstance(pairs, list) or len(pairs) > rounds
+            or (measured and (len(pairs) != rounds or any(value is None for value in values.values())
+                             or _catalog_number(row, "paired_rounds") != rounds))
+            or (not measured and (record["status"] == "ok" or row.get("paired_rounds")))):
+        raise ValueError(f"Incomplete paired gradient summary: {model}")
+    times = {engine: [] for engine in ("stanli", "cmdstan")}
+    width = None
+    for index, pair in enumerate(pairs):
+        order = ["stanli", "cmdstan"] if index % 2 == 0 else ["cmdstan", "stanli"]
+        if pair.get("order") != order:
+            raise ValueError(f"Gradient order differs: {model}")
+        for engine in times:
+            trial = pair[engine]
+            counters = ("iterations", "elapsed_ns", "warmup_elapsed_ns", "warmup_iterations", "batch")
+            vector = trial.get("values")
+            if (trial.get("protocol") != "stanli-gradient-v2"
+                    or any(type(trial.get(key)) is not int or trial[key] <= 0 for key in counters)
+                    or trial["warmup_elapsed_ns"] < config["warmup_ms"] * 1e6
+                    or trial["elapsed_ns"] < config["measure_ms"] * 1e6
+                    or not isinstance(vector, list) or not vector
+                    or any(type(v) not in (int, float) or not math.isfinite(v) for v in vector)):
+                raise ValueError(f"Invalid raw gradient trial: {model}")
+            if width is not None and len(vector) != width:
+                raise ValueError(f"Gradient widths differ: {model}")
+            width = len(vector)
+            times[engine].append(trial["elapsed_ns"] / trial["iterations"])
+        a, b = pair["stanli"]["values"], pair["cmdstan"]["values"]
+        worst = max(abs(x-y) / max(abs(x), abs(y), 1) for x, y in zip(a, b))
+        if worst > 1e-9 or pair.get("max_scaled_error") != worst:
+            raise ValueError(f"Gradient numerical gate differs: {model}")
+    if measured:
+        if _catalog_number(row, "params") != width - 1:
+            raise ValueError(f"Gradient parameter count differs: {model}")
+        series = {engine + "_ns_grad": samples for engine, samples in times.items()}
+        series["paired_speedup"] = [c/s for s, c in zip(times["stanli"], times["cmdstan"])]
+        for field, samples in series.items():
+            median = statistics.median(samples)
+            mad = statistics.median(abs(value-median) for value in samples)
+            _catalog_agrees(model, field, values[field], median)
+            _catalog_agrees(model, field + "_mad", values[field + "_mad"], mad)
+    return values
+
+
+def _catalog_setup(model, record, row, config, gradients):
+    """Each setup cell requires a successful event; estimates require all terms."""
+    setup = record.get("setup", {})
+    if not isinstance(setup, dict) or set(setup) - set(SETUP_PHASES):
+        raise ValueError(f"Invalid setup evidence: {model}")
+    values = {}
+    for key, phase in SETUP_PHASES.items():
+        event = setup.get(key)
+        expected = None
+        if event is not None:
+            duration = event.get("elapsed_s")
+            if (event.get("status") not in ("ok", "failed", "timeout", "interrupted") or event.get("phase") != f"{model}/{phase}"
+                    or type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0):
+                raise ValueError(f"Invalid setup event: {model} {key}")
+            if event["status"] == "ok" and event.get("returncode") != 0:
+                raise ValueError(f"Successful setup event lacks exit status zero: {model} {key}")
+            expected = duration if event["status"] == "ok" else None
+        field = key + "_s"
+        values[field] = _catalog_number(row, field)
+        _catalog_agrees(model, field, values[field], expected)
+    preparations = record.get("preparation_s", [])
+    if (not isinstance(preparations, list) or len(preparations) > config["rounds"]
+            or any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in preparations)):
+        raise ValueError(f"Invalid preparation evidence: {model}")
+    values["stanli_prep_s"] = _catalog_number(row, "stanli_prep_s")
+    _catalog_agrees(model, "stanli_prep_s", values["stanli_prep_s"],
+                    statistics.median(preparations) if len(preparations) == config["rounds"] else None)
+    if _catalog_number(row, "gradient_budget") != config["gradient_budget"]:
+        raise ValueError(f"Gradient budget differs: {model}")
+    for engine, keys in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
+                         ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
+        components = [values[key] for key in keys] + [gradients[engine + "_ns_grad"]]
+        expected = (components[0] + components[1] + config["gradient_budget"] * components[2] / 1e9
+                    if all(value is not None for value in components) else None)
+        field = engine + "_estimated_s"
+        values[field] = _catalog_number(row, field)
+        _catalog_agrees(model, field, values[field], expected)
+    if record["status"] == "ok" and any(value is None for value in values.values()):
+        raise ValueError(f"Successful record lacks setup measurements: {model}")
+    return values
+
+
+def validated_catalog(summary_path, records_path, manifest_path):
+    """Return a complete current v4 inventory with validated raw evidence."""
+    rows = _catalog_rows(summary_path)
+    manifest = json.loads(Path(manifest_path).read_text())
+    config = _catalog_config(manifest)
+    with gzip.open(records_path, "rt") as stream:
+        records = json.load(stream)
+    if not isinstance(records, list):
+        raise ValueError("Raw model results must be a JSON array")
+    details = {record["model"]: record for record in records}
+    inputs = manifest["identity"]["inputs"]
+    if (not inputs or len(details) != len(records) or set(details) != set(inputs)
+            or {row["model"] for row in rows} != set(inputs)):
+        raise ValueError("Summary/raw result inventory must match every manifest input")
+    for row in rows:
+        model = row["model"]
+        record = details[model]
+        raw = record["row"]
+        if row.get("run_id") != manifest["run_id"] or raw.get("run_id") != manifest["run_id"]:
+            raise ValueError(f"Gradient run identity differs: {model}")
+        if any(not inputs[model].get(key) or record["inputs"].get(key) != inputs[model][key]
+               for key in ("stan", "data")):
+            raise ValueError(f"Gradient input hashes differ: {model}")
+        if any(value != str(raw.get(key, "")) for key, value in row.items()):
+            raise ValueError(f"TSV/raw result row differs: {model}")
+        if (record.get("status") not in ("ok", "failed", "censored") or "sampling" in record
+                or any(key in row for key in ("stanli_sample_s", "cmdstan_sample_s"))):
+            raise ValueError(f"Invalid v4 gradient/setup record: {model}")
+        gradients = _catalog_pairs(model, record, row, config)
+        _catalog_setup(model, record, row, config, gradients)
+    return rows, manifest, details
+
+
+def _catalog_notes(row, record):
+    notes = [part.strip() for part in row.get("note", "").split(";") if part.strip()]
+    if record["status"] != "ok":
+        notes.insert(0, record["status"])
+    return "; ".join(notes) or "complete"
+
+
+def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
+                   manifest_path=CATALOG_MANIFEST):
+    """One current setup-plus-fixed-gradient proxy table, never sampling time."""
+    rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path)
+    config = manifest["identity"]["config"]
+    output = [
+        f"Run `{_catalog_cell(manifest['run_id'])}` ({_catalog_cell(manifest['started_utc'][:10])}): "
+        f"{len(rows)} models, {config['rounds']} alternating gradient pairs.", "",
+        "Gradient ratio is the median paired CmdStan/Stanli ratio ± MAD. "
+        "Estimated seconds are measured setup plus 20,000 × median gradient latency; "
+        "this fixed-work proxy is not measured HMC sampling time. Missing components "
+        "leave estimates blank; failures remain visible.", "",
+        "| Model | Paired gradient ratio ± MAD | Stanli setup + 20,000 gradients (s) | CmdStan equivalent (s) | Notes |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
+    for row in sorted(rows, key=lambda item: item["model"]):
+        speedup, mad = (_catalog_number(row, key) for key in ("paired_speedup", "paired_speedup_mad"))
+        gradient = f"{speedup:.2f}x ± {mad:.2f}" if speedup is not None else "—"
+        estimates = [_catalog_number(row, engine + "_estimated_s") for engine in ("stanli", "cmdstan")]
+        cells = [f"`{row['model']}`", gradient,
+                 *(f"{value:.4g}" if value is not None else "—" for value in estimates),
+                 _catalog_notes(row, details[row["model"]])]
+        output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+    return "\n".join(output) + "\n"
+
+
+def render_gradient_catalog(summary_path=VECTORIZED_ROOT / "benchmark-summary.tsv",
+                            manifest_path=VECTORIZED_ROOT / "benchmark-manifest.json",
+                            records_path=VECTORIZED_ROOT / "model-results.json.gz",
+                            provenance_path=VECTORIZED_ROOT / "compiler-provenance.json",
+                            default_manifest_path=CATALOG_MANIFEST):
+    """Current O1+vectorization gradients with the same runtime and inputs."""
+    rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path)
+    baseline = json.loads(Path(default_manifest_path).read_text())
+    default_config = _catalog_config(baseline)
+    provenance = json.loads(Path(provenance_path).read_text())
+    identity, default = manifest["identity"], baseline["identity"]
+    config = identity["config"]
+    if "--O1" not in shlex.split(config.get("stancflags", "")):
+        raise ValueError("Vectorized catalog requires O1 compiler flags")
+    if identity["inputs"] != default["inputs"]:
+        raise ValueError("Vectorized/default input inventories differ")
+    for name in ("bench", "vectorize_probe"):
+        digest = identity["executables"].get(name)
+        if not digest or digest != default["executables"].get(name):
+            raise ValueError(f"Vectorized/default executable hashes differ: {name}")
+    for key in ("rounds", "warmup_ms", "measure_ms", "gradient_timeout", "gradient_budget"):
+        if config.get(key) != default_config.get(key):
+            raise ValueError(f"Vectorized/default gradient configuration differs: {key}")
+    if identity.get("threads") != default.get("threads"):
+        raise ValueError("Vectorized/default thread settings differ")
+    if (provenance.get("optimization") != "O1 plus vectorize_loops"
+            or provenance.get("binary_sha256") != identity["executables"].get("stanc")
+            or not re.fullmatch(r"[0-9a-f]{40}", provenance.get("source_sha", ""))
+            or any(not re.fullmatch(r"[0-9a-f]{64}", provenance.get(key, ""))
+                   for key in ("binary_sha256", "patch_sha256"))
+            or not isinstance(provenance.get("build_commands"), list) or not provenance["build_commands"]
+            or not all(isinstance(command, str) and command.strip() for command in provenance["build_commands"])):
+        raise ValueError("Invalid optimized compiler provenance")
+    output = [
+        f"Run `{_catalog_cell(manifest['run_id'])}`: {len(rows)} models, {config['rounds']} alternating pairs. "
+        "Gradient latencies are microseconds (median ± MAD); speedup is the median "
+        "within-pair CmdStan/Stanli ratio ± MAD. Missing measurements are —.", "",
+        "| Model | Stanli µs | CmdStan O1+vec µs | Paired speedup ± MAD | Notes |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
+    for row in sorted(rows, key=lambda item: item["model"]):
+        speedup = _catalog_number(row, "paired_speedup")
+        if speedup is not None:
+            cells = [f"{_catalog_number(row, engine + '_ns_grad')/1000:.4g} ± "
+                     f"{_catalog_number(row, engine + '_ns_grad_mad')/1000:.3g}" for engine in ("stanli", "cmdstan")]
+            speed = f"{speedup:.2f}x ± {_catalog_number(row, 'paired_speedup_mad'):.2f}"
+        else:
+            cells, speed = ["—", "—"], "—"
+        cells = [f"`{row['model']}`", *cells, speed, _catalog_notes(row, details[row["model"]])]
+        output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+    return "\n".join(output) + "\n"
+
+
+def require_historical_tsv(col):
+    if "gradient_budget" in col.columns:
+        raise SystemExit("Current v4 TSVs require raw evidence validation: publish with "
+                         "tools/publish_corpus_bench.py, then use tools/corpus_table.py --catalog "
+                         "(or --vectorized-catalog). Plain TSV mode is historical only.")
+
+
 def main():
+    if "--vectorized-catalog" in sys.argv:
+        print(render_gradient_catalog(), end="")
+        return
+    if "--catalog" in sys.argv:
+        print(render_catalog(), end="")
+        return
     if "--gradients" in sys.argv:
         path = sys.argv[sys.argv.index("--gradients") + 1]
-        render_gradients(*load_rows(path))
+        rows, col = load_rows(path)
+        require_historical_tsv(col)
+        render_gradients(rows, col)
         return
     if "--historical-sampling" in sys.argv or "--educational" in sys.argv:
         flag = "--historical-sampling" if "--historical-sampling" in sys.argv else "--educational"
@@ -319,6 +610,7 @@ def main():
     o1vec = "--o1vec" in sys.argv
     path = [a for a in sys.argv[1:] if a != "--o1vec"][0]
     rows, col = load_rows(path)
+    require_historical_tsv(col)
     if o1vec:
         render_o1vec(rows, col)
     else:

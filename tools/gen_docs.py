@@ -2,12 +2,13 @@
 """Stamp the measured numbers into the docs, so they cannot go stale.
 
 Every headline number in README.md, python/README.md and the demo page
-(counts, bitwise counts, worst deviation, benchmark span, the PyPI page's
-benchmark table) is derived from three artifacts:
+(counts, bitwise counts, worst deviation, and current benchmark summaries)
+is derived from recorded artifacts:
 
   docs/verification.json   written by tools/verify_sample.py
-  docs/corpus-bench.tsv    written by harnesses/corpus_bench.py
-  docs/benchmarks.md       chooses the representative benchmark rows
+  docs/corpus-bench.tsv    historical archive validation only
+  docs/benchmark-2026-09-11.md  historical archive validation only
+  output/corpus-performance/  one current full-corpus benchmark
 
 The docs carry <!--gen:key-->...<!--/gen--> markers; this script replaces
 the marked spans with values computed from the artifacts.
@@ -28,70 +29,40 @@ import subprocess
 import sys
 import warnings
 
+from corpus_table import render_catalog, render_gradient_catalog
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # The demo page carries headline numbers too, and its markers are HTML
 # comments, so the same substitution works there.
 TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
-           REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md"]
+           REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md",
+           REPO / "docs" / "benchmarks.md", REPO / "docs" / "benchmark-appendix.md"]
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 
-def bench_rows():
-    """Representative (model, stanli_ns, cmdstan_ns, speedup)."""
-    with (REPO / "docs" / "corpus-bench.tsv").open(newline="") as f:
-        corpus = {row["model"]: row for row in csv.DictReader(f, delimiter="\t")}
-    text = (REPO / "docs" / "benchmarks.md").read_text()
-    section = text.split("## Representative models", 1)[1]
-    rows = []
-    # Only the first table in the section. The benchmark page owns the
-    # editorial choice of representative models; the TSV owns every measured
-    # value.
-    for line in section.splitlines():
-        if not line.startswith("|"):
-            if rows:
-                break
-            continue
-        if not line.startswith("| `"):
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        model = cells[0].strip("`")
-        if model not in corpus:
-            raise SystemExit(f"representative benchmark missing from TSV: {model}")
-        measured = corpus[model]
-        stanli_ns = float(measured["stanli_ns_grad"])
-        cmdstan_ns = float(measured["cmdstan_ns_grad"])
-        rows.append((model, stanli_ns, cmdstan_ns, cmdstan_ns / stanli_ns))
-    if not rows:
-        raise SystemExit("no benchmark table found in docs/benchmarks.md")
-    return rows
+def current_benchmark():
+    """Validated current table, rows, and manifest shared by public summaries.
 
-
-def corpus_stats():
-    """(n, median speedup, models at or above parity) from the corpus TSV.
-
-    The benchmark table above is a shape slice, chosen to show the range;
-    summarizing the engine from it would be summarizing the choice. These
-    are every model the corpus run measured on both sides.
+    Validate the complete inventory, provenance, and measurement evidence
+    before deriving any headline or browser-card value. Never fall back to
+    historical measurements when a current artifact is missing or invalid.
     """
-    rows = (REPO / "docs" / "corpus-bench.tsv").read_text().splitlines()
-    idx = {name: k for k, name in enumerate(rows[0].split("\t"))}
-    ratios = []
-    for line in rows[1:]:
-        c = line.split("\t")
-        if ((REPO / "tests/educational/models" / c[idx['model']] / "model.stan").exists()
-                or any((REPO / "tests" / group / f"{c[idx['model']]}.stan").exists()
-                       for group in ("rethinking", "brms", "stanc3"))):
-            continue  # Headline here explicitly describes posteriordb.
-        s, cm = c[idx["stanli_ns_grad"]], c[idx["cmdstan_ns_grad"]]
-        if s.strip() and cm.strip():
-            ratios.append(float(cm) / float(s))
-    ratios.sort()
-    return len(ratios), statistics.median(ratios), sum(r >= 1.0 for r in ratios)
+    directory = REPO / "output" / "corpus-performance"
+    summary = directory / "benchmark-summary.tsv"
+    records = directory / "model-results.json.gz"
+    manifest_path = directory / "benchmark-manifest.json"
+    catalog = render_catalog(summary, records, manifest_path).rstrip()
+    with summary.open(newline="") as stream:
+        rows = list(csv.DictReader(stream, delimiter="\t"))
+    manifest = json.loads(manifest_path.read_text())
+    return catalog, rows, manifest
 
 
-def us(ns):
-    v = ns / 1000.0
-    return f"{v:.2f} us" if v < 1 else f"{v:.1f} us"
+def corpus_stats(rows):
+    """Current per-model paired ratios; all source collections participate."""
+    ratios = [float(row["paired_speedup"]) for row in rows if row.get("paired_speedup")]
+    return (len(ratios), statistics.median(ratios) if ratios else None,
+            sum(ratio >= 1.0 for ratio in ratios))
 
 
 def compute():
@@ -118,25 +89,14 @@ def compute():
     n_total = len(ver)
     lang_verified = sum(1 for v in lang.values() if v["status"] == "VERIFIED")
 
-    c_n, c_med, c_par = corpus_stats()
-    rows = bench_rows()
-    # A model counts as a win when its speedup rounds to at least 1.0x,
-    # matching how the table has always been summarized.
-    wins = [r for r in rows if round(r[3], 1) >= 1.0]
-    losses = [r for r in rows if round(r[3], 1) < 1.0]
-    span = (f"{min(round(r[3], 1) for r in rows):.1f}x-"
-            f"{max(round(r[3], 1) for r in rows):.1f}x")
-    loss_strs = [f"{r[3]:.2f}x" for r in sorted(losses, key=lambda r: -r[3])]
-    loss_text = (" and ".join(loss_strs) if len(loss_strs) <= 2
-                 else ", ".join(loss_strs[:-1]) + ", and " + loss_strs[-1])
-
-    table = ["| model | stanli | CmdStan | speedup |",
-             "| --- | ---: | ---: | ---: |"]
-    for name, sns, cns, sp in rows:
-        spd = f"**{sp:.1f}x**" if round(sp, 1) >= 1.0 else f"{sp:.2f}x"
-        table.append(f"| `{name}` | {us(sns)} | {us(cns)} | {spd} |")
+    catalog, benchmark_rows, manifest = current_benchmark()
+    c_n, c_med, c_par = corpus_stats(benchmark_rows)
 
     return {
+        "benchmark_catalog": catalog,
+        "benchmark_models": str(len(manifest["identity"]["inputs"])),
+        "benchmark_date": manifest["started_utc"][:10],
+        "benchmark_vectorized_catalog": render_gradient_catalog().rstrip(),
         "corpus_reference_models": str(len(references)),
         "corpus_reference_points": str(sum(len(row["points"]) for row in references.values())),
         "corpus_verified": f"{len(verified)}/{n_total}",
@@ -148,11 +108,7 @@ def compute():
         "lang_n": str(len(lang)),
         "rethinking_n": str(len(rethinking)),
         "rethinking_verified": f"{rethinking_verified}/{len(rethinking)}",
-        "bench_span": span,
-        "bench_wins": f"{len(wins)} of the {len(rows)}",
-        "bench_losses": loss_text,
-        "bench_table_us": "\n".join(table),
-        "corpus_median": f"{c_med:.2f}x",
+        "corpus_median": f"{c_med:.2f}x" if c_med is not None else "unavailable",
         "corpus_n_grad": str(c_n),
         "corpus_at_par": str(c_par),
     }
@@ -198,7 +154,7 @@ def render_problems(path):
 
 def benchmark_table_problems():
     """Require the hand-edited benchmark tables to match their generator."""
-    page = (REPO / "docs" / "benchmarks.md").read_text()
+    page = (REPO / "docs" / "benchmark-2026-09-11.md").read_text()
     generated = subprocess.check_output(
         [sys.executable, str(REPO / "tools" / "corpus_table.py"),
          str(REPO / "docs" / "corpus-bench.tsv")], text=True)
@@ -226,9 +182,9 @@ def benchmark_table_problems():
         "## Benchmark method", 1)[0]
     problems = []
     if first_table(full) != generated_main:
-        problems.append("docs/benchmarks.md: full corpus table is stale")
+        problems.append("docs/benchmark-2026-09-11.md: full corpus table is stale")
     if first_table(stuck) != generated_stuck:
-        problems.append("docs/benchmarks.md: incomplete-runs table is stale")
+        problems.append("docs/benchmark-2026-09-11.md: incomplete-runs table is stale")
 
     representative = first_table(page.split("## Representative models", 1)[1])
     generated_by_model = {
@@ -242,7 +198,7 @@ def benchmark_table_problems():
                     if source else None)
         if cells != expected:
             problems.append(
-                f"docs/benchmarks.md: representative row {cells[0]} is stale")
+                f"docs/benchmark-2026-09-11.md: representative row {cells[0]} is stale")
     return problems
 
 
