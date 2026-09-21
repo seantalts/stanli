@@ -2,7 +2,8 @@
 """Render the benchmark catalog and detailed historical appendix tables.
 
 --catalog renders one complete, current benchmark run for benchmarks.md.
-The original TSV mode emits two tables for docs/benchmark-appendix.md. The first is every model both engines measured end to end,
+The original TSV mode emits two tables for the archived September 11 run
+(notes/performance/2026-09-11-posteriordb-benchmark.md). The first is every model both engines measured end to end,
 sorted by per-gradient speedup. It shows both engines' absolute gradient
 times and the wall time from Stan source to a completed 1,000-warmup,
 1,000-draw run. stanli_sample_s already includes the whole stanli process;
@@ -11,7 +12,7 @@ run. The second table holds models the run could not complete, with what
 stopped them. Missing numbers sort to the bottom because missing is not slow.
 
 Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
-Prints markdown to stdout; the appendix is edited by hand around it.
+Prints markdown to stdout.
 
 --catalog requires the current full-corpus v4 summary, raw model records and
 manifest under output/corpus-performance; it never substitutes historical measurements.

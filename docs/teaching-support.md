@@ -94,7 +94,7 @@ sample sizes before using elapsed time to compare useful inference. A short
 sampling smoke test checks execution and complete output, not convergence.
 The common benchmark settings do not reproduce every book model's tuning choices.
 
-**Performance:** the [common protocol](benchmark-protocol.md) separates
+**Performance:** the [benchmark method](benchmarks.md#how-we-measure) separates
 compilation, preparation, warm gradients and complete CLI runs. Failed or capped
 seeds remain failures rather than contributing a partial average. Historical
 reports retain their original protocols and revisions; later fixes do not

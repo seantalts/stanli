@@ -5,7 +5,7 @@ Application models from every source collection participate in the default
 `--corpus all` run; language-conformance fixtures remain numerical tests.
 Collection names identify provenance and can be used as optional filters.
 The [corpus inventory](../../docs/corpus-status.md) describes numerical coverage, and the
-[benchmark protocol](../../docs/benchmark-protocol.md) defines each timed boundary.
+[benchmark protocol](../../docs/benchmarks.md#how-we-measure) defines each timed boundary.
 
 | Measurement | What it answers | Timed work |
 | --- | --- | --- |

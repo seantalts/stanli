@@ -613,7 +613,7 @@ and deferred at the user's request.
 ## Measured behavior and limits
 
 The [benchmark page](benchmarks.md) reports warm gradients and complete CLI
-runs across the application corpus. The [experiment details](benchmark-appendix.md)
+runs across the application corpus. The [benchmark page](benchmarks.md)
 separate model compilation, executor preparation and sampling, and describe
 the numerical gates, dispersion and diagnostic warnings.
 

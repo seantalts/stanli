@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paired, reproducible corpus benchmarks. See docs/benchmark-protocol.md.
+"""Paired, reproducible corpus benchmarks. See docs/benchmarks.md#how-we-measure.
 
 python3 harnesses/corpus_bench.py CMDSTAN PDB fresh.tsv [--corpus rethinking]
 Measures source/setup costs and warm gradients. Setup plus 20,000 gradients

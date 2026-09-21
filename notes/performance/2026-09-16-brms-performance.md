@@ -259,7 +259,7 @@ to either upstream implementation is applied.
   adjoint ODE initialization patch in [deps/fetch.sh](../../deps/fetch.sh) predates
   this work and is unrelated to these models.
 
-The [benchmark protocol](../../docs/benchmark-protocol.md) documents the runner, numerical
+The [benchmark protocol](../../docs/benchmarks.md#how-we-measure) documents the runner, numerical
 gate, thread settings and retained failures. Current runs measure setup and warm gradients and
 report an explicit setup-plus-20,000-gradient time estimate; the sampling evidence
 above belongs to this historical experiment. For a fresh run, use

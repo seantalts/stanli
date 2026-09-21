@@ -60,7 +60,7 @@ Ordinary replay needs no CmdStan build or source download for these local fixtur
 
 The [common benchmark runner](../../harnesses/corpus_bench.py) includes these
 models by default. `--corpus educational` is an optional provenance filter.
-New runs use the same [measurement protocol](../../docs/benchmark-protocol.md)
+New runs use the same [measurement protocol](../../docs/benchmarks.md#how-we-measure)
 and reporting path as the rest of the application corpus:
 
 ```sh

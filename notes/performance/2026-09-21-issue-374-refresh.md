@@ -31,7 +31,7 @@ in the local ignored directory `.cache/issue374-20260921/`.
 - Apple M3 Ultra, 96 GiB, 32 logical CPUs, macOS 26.6.2 arm64; fresh Release
   build, `-O3`, `-ffp-contract=off`, Stanli threads enabled but one runtime thread.
   Other host work was present; this was not an isolated machine.
-- Unmodified [corpus v3 protocol](../../docs/benchmark-protocol.md): six
+- Unmodified [corpus v3 protocol](../../docs/benchmarks.md#how-we-measure): six
   alternating gradient pairs, 200 ms warmup and 250 ms measurement per process;
   complete density/gradient comparison before accepting each pair. Preparation
   from existing MIR is separate from source compilation.

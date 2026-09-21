@@ -34,7 +34,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # comments, so the same substitution works there.
 TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
            REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md",
-           REPO / "docs" / "benchmarks.md", REPO / "docs" / "benchmark-appendix.md"]
+           REPO / "docs" / "benchmarks.md"]
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 

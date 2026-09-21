@@ -63,7 +63,7 @@ change specifically needs that evidence; do not add every broad sweep to
 every PR. Preserve release validation dependencies.
 
 [`TESTING.md`](TESTING.md) documents the actual numerical gates, exceptions,
-and CI coverage; [`docs/benchmark-protocol.md`](docs/benchmark-protocol.md)
+and CI coverage; [`docs/benchmarks.md`](docs/benchmarks.md#how-we-measure)
 defines performance measurements. Distinguish these measured contracts from
 project goals, and report the limits of the evidence.
 

@@ -239,7 +239,7 @@ opportunities; the model and data determine the result.
 
 The [current full table and method](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
 include every model, failed or capped measurement, and the explicit cost-estimate formula.
-The [optimized-reference appendix](https://github.com/seantalts/stanli/blob/main/docs/benchmark-appendix.md)
+The [loop-vectorized comparison](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md#against-cmdstan-with-loop-vectorization)
 compares against CmdStan with stanc3 O1 and loop vectorization enabled.
 
 ## API

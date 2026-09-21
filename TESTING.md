@@ -81,7 +81,7 @@ replay, sampling smoke tests and benchmark discovery. Source collections remain
 provenance metadata and optional filters. Numerical replay covers all 329
 referenced models; sampling smoke tests select fixtures through inventory
 metadata, retaining complete output-name, draw-count and finiteness checks.
-Live performance measurements use the [common benchmark protocol](docs/benchmark-protocol.md)
+Live performance measurements use the [benchmark method](docs/benchmarks.md#how-we-measure)
 and are separate from CI correctness gates.
 
 | check | question | acceptance rule | schedule |

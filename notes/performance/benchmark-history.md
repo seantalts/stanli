@@ -2,7 +2,7 @@
 
 These retained measurements describe their recorded revisions, inputs and protocols.
 They are not a new sweep of the unified corpus. New measurements use the
-[common benchmark runner and protocol](../../docs/benchmark-protocol.md); source collection
+[common benchmark runner and protocol](../../docs/benchmarks.md#how-we-measure); source collection
 names are provenance and optional filters.
 
 Other retained runs include the [September 11 posteriordb tables](2026-09-11-posteriordb-benchmark.md#historical-posteriordb-measurements)

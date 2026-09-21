@@ -261,4 +261,4 @@ Rscript tools/summarize_rethinking_bench.R /tmp/teaching-jobs.json /tmp/teaching
 python3 tools/report_teaching.py RUN_DIRECTORY /tmp/teaching-diagnostics.json output/teaching-performance
 ```
 
-The jobs file contains absolute CSV paths; regenerate it after relocating the evidence directory. The exporter refuses an unfinished sweep. See the [benchmark protocol](../../docs/benchmark-protocol.md).
+The jobs file contains absolute CSV paths; regenerate it after relocating the evidence directory. The exporter refuses an unfinished sweep. See the [benchmark method](../../docs/benchmarks.md#how-we-measure).

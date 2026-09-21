@@ -282,7 +282,7 @@ def export(run, diagnostics, output):
            'Rscript tools/summarize_corpus_bench.R /tmp/corpus-jobs.json /tmp/corpus-diagnostics.json',
            'python3 tools/report_corpus.py RUN_DIRECTORY /tmp/corpus-diagnostics.json output/corpus-performance',
            '```', '', 'The jobs file contains absolute CSV paths; regenerate it after relocating the evidence directory. '
-           'The exporter refuses an unfinished sweep. See the [benchmark protocol](../../docs/benchmark-protocol.md).', '']
+           'The exporter refuses an unfinished sweep. See the [benchmark method](../../docs/benchmarks.md#how-we-measure).', '']
     (output / 'README.md').write_text('\n'.join(md), encoding='utf-8')
     return groups
 
