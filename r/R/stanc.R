@@ -26,6 +26,62 @@
 
 stanc_js_ctx <- new.env(parent = emptyenv())
 
+stan_include_paths <- function(include_paths = NULL, file = NULL) {
+  if (is.null(include_paths)) include_paths <- character()
+  if (!is.character(include_paths) || anyNA(include_paths) ||
+      any(!nzchar(include_paths)))
+    stop("include_paths must be a character vector of nonempty directory paths",
+         call. = FALSE)
+  if (any(!dir.exists(path.expand(include_paths))))
+    stop("include_paths directory does not exist: ",
+         paste(include_paths[!dir.exists(path.expand(include_paths))], collapse = ", "),
+         call. = FALSE)
+  fallback <- if (is.null(file)) getwd() else
+    dirname(normalizePath(file, winslash = "/", mustWork = TRUE))
+  unique(normalizePath(c(include_paths, fallback), winslash = "/", mustWork = TRUE))
+}
+
+# stanc.js accepts an in-memory filename -> source map. Discover candidate
+# dependencies without expanding or rewriting source; Stan's own preprocessor
+# still handles nesting, repeated includes, cycles, and source locations.
+# Skip comments and string literals using the pinned Stan lexer's token forms.
+# Missing files stay absent so the compiler reports the include's location.
+stan_include_sources <- function(code, include_paths) {
+  if (!grepl("#include", code, fixed = TRUE)) return(list())
+  # OCamllex chooses the longest token. A quoted/bracketed name can beat the
+  # bare form only if it contains whitespace; otherwise match the entire bare
+  # token first and remove delimiters only when they enclose that whole token.
+  tokens <- paste0('(?s)/\\*.*?(?:\\*/|$)|//[^\\r\\n]*|"[^"\\r\\n]*"|',
+    '#include[ \\t\\f\\r\\n]+(?:"[^"\\r\\n]*[ \\t\\f][^"\\r\\n]*"|',
+    '<[^>\\r\\n]*[ \\t\\f][^>\\r\\n]*>|[^ \\t\\f\\r\\n]*)')
+  sources <- list()
+  pending <- list(code)
+  seen <- character()
+  while (length(pending)) {
+    text <- pending[[1L]]
+    pending <- pending[-1L]
+    matches <- regmatches(text, gregexpr(tokens, text, perl = TRUE))[[1L]]
+    for (token in matches[startsWith(matches, "#include")]) {
+      name <- sub("^#include[ \\t\\f\\r\\n]+", "", token, perl = TRUE)
+      if (grepl('^("[^"\\r\\n]*"|<[^>\\r\\n]*>)$', name, perl = TRUE))
+        name <- substring(name, 2L, nchar(name) - 1L)
+      if (!nzchar(name) || name %in% seen) next
+      seen <- c(seen, name)
+      for (directory in include_paths) {
+        # Concatenation matches stanc's search, including absolute-looking names.
+        path <- paste0(directory, "/", name)
+        if (!file.exists(path) || dir.exists(path)) next
+        source <- tryCatch(read_utf8_file(path), error = function(e) NULL)
+        if (is.null(source)) next
+        sources[[name]] <- source
+        pending[[length(pending) + 1L]] <- source
+        break
+      }
+    }
+  }
+  sources
+}
+
 stanc_js_path <- function() {
   system.file("js", "stanc.js", package = "stanli")
 }
@@ -49,10 +105,11 @@ stanc_js <- function() {
   ctx
 }
 
-mir_from_js <- function(code, name = "stanli_model") {
+mir_from_js <- function(code, name = "stanli_model", include_paths = character()) {
   ctx <- stanc_js()
   ctx$assign("stanli_src", enc2utf8(code))
   ctx$assign("stanli_name", name)
+  ctx$assign("stanli_includes", stan_include_sources(code, include_paths))
   # Prefer the portable producer by export presence. Once selected, its
   # diagnostics are final: a bad model must not be compiled again through the
   # legacy producer and accidentally turn a real error into different output.
@@ -78,9 +135,9 @@ mir_from_js <- function(code, name = "stanli_model") {
          return JSON.stringify({e: 'export is not a function', c: compiler});
        try {
          var r = portable_export.present
-           ? selected.value(stanli_name, stanli_src)
+           ? selected.value(stanli_name, stanli_src, stanli_includes)
            : selected.value(stanli_name, stanli_src,
-                            ['O1', 'debug-optimized-mir']);
+                            ['O1', 'debug-optimized-mir'], stanli_includes);
          if (!r || typeof r !== 'object')
            return JSON.stringify({e: 'compiler returned no result object',
                                   c: compiler});
@@ -154,7 +211,7 @@ js_string_literal <- function(value) {
 }
 
 mir_from_binary <- function(compiler, code, portable = FALSE,
-                            run_stanc = system2) {
+                            run_stanc = system2, include_paths = character()) {
   work <- tempfile("stanli-compile-")
   if (!dir.create(work))
     stop("could not create a temporary compiler directory", call. = FALSE)
@@ -165,7 +222,13 @@ mir_from_binary <- function(compiler, code, portable = FALSE,
 
   stdout_file <- file.path(work, "stdout")
   stderr_file <- file.path(work, "stderr")
-  args <- c(if (!portable) c("--O1", "--debug-optimized-mir"),
+  if (!portable && any(grepl(",", include_paths, fixed = TRUE)))
+    stop("the legacy stanc compiler cannot use include_paths containing commas",
+         call. = FALSE)
+  include_args <- if (!length(include_paths)) character() else if (portable)
+    as.vector(rbind("--include-path", shQuote(include_paths))) else
+    shQuote(paste0("--include-paths=", paste(include_paths, collapse = ",")))
+  args <- c(if (!portable) c("--O1", "--debug-optimized-mir"), include_args,
             shQuote(source))
   status <- tryCatch(
     suppressWarnings(run_stanc(compiler, args, stdout = stdout_file,
@@ -202,7 +265,8 @@ webr_eval_js <- function() {
   if (is.function(f)) f else NULL
 }
 
-mir_from_webr <- function(eval_js, code, name = "stanli_model") {
+mir_from_webr <- function(eval_js, code, name = "stanli_model",
+                          include_paths = character()) {
   if (is.null(stanc_js_ctx$webr_loaded)) {
     js <- stanc_js_path()
     if (!nzchar(js) || !file.exists(js))
@@ -215,11 +279,24 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model") {
   mirf <- tempfile(fileext = ".mir")
   on.exit(unlink(c(src, mirf)), add = TRUE)
   write_utf8_file(src, code)
+  includes <- stan_include_sources(code, include_paths)
+  # Keep the existing file transport for potentially large source mappings too.
+  incfiles <- character()
+  on.exit(unlink(incfiles), add = TRUE)
+  include_js <- vapply(names(includes), function(name) {
+    path <- tempfile(fileext = ".stan")
+    incfiles <<- c(incfiles, path)
+    write_utf8_file(path, includes[[name]])
+    sprintf("includes[%s] = Module.FS.readFile(%s, {encoding: 'utf8'});",
+            js_string_literal(name), js_string_literal(path))
+  }, character(1))
   src_js <- js_string_literal(src)
   name_js <- js_string_literal(name)
   mirf_js <- js_string_literal(mirf)
   status <- eval_js(sprintf("(() => {
     const src = Module.FS.readFile(%s, {encoding: 'utf8'});
+    const includes = Object.create(null);
+    %s
     function exported(name) {
       if (Object.prototype.hasOwnProperty.call(globalThis, name))
         return {present: true, value: globalThis[name]};
@@ -238,8 +315,8 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model") {
       return 'ERR:' + compiler + ': export is not a function';
     try {
       const r = portableExport.present
-        ? selected.value(%s, src)
-        : selected.value(%s, src, ['O1', 'debug-optimized-mir']);
+        ? selected.value(%s, src, includes)
+        : selected.value(%s, src, ['O1', 'debug-optimized-mir'], includes);
       if (!r || typeof r !== 'object')
         return 'ERR:' + compiler + ': compiler returned no result object';
       if (r.errors) return 'ERR:' + compiler + ': ' + String(r.errors);
@@ -250,18 +327,19 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model") {
     } catch (e) {
       return 'ERR:' + compiler + ': ' + String(e);
     }
-  })()", src_js, name_js, name_js, mirf_js))
+  })()", src_js, paste(include_js, collapse = "\n"), name_js, name_js, mirf_js))
   if (!identical(status, "ok"))
     stop(sub("^ERR:", "", status), call. = FALSE)
   read_compiler_output(mirf)
 }
 
-stanc_mir <- function(code) {
+stanc_mir <- function(code, include_paths = character()) {
   compiler <- find_native_compiler()
   if (!is.null(compiler))
     return(mir_from_binary(compiler$path, code,
-                           portable = compiler$portable))
+                           portable = compiler$portable,
+                           include_paths = include_paths))
   ejs <- webr_eval_js()
-  if (!is.null(ejs)) return(mir_from_webr(ejs, code))
-  mir_from_js(code)
+  if (!is.null(ejs)) return(mir_from_webr(ejs, code, include_paths = include_paths))
+  mir_from_js(code, include_paths = include_paths)
 }

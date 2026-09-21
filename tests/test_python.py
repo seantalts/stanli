@@ -64,7 +64,7 @@ def test_function_source_file_and_cached_mir():
             from_file({"x": [1., 2., 4.], "a": 2.5, "b": -1.}), [1.5, 4, 9])
     mir = stanli.stan_to_mir(FUNCTION_SOURCE)
     # A cached function must never re-enter either compiler path.
-    with mock.patch("stanli._function.stan_to_mir", side_effect=AssertionError):
+    with mock.patch("stanli._compile_stan", side_effect=AssertionError):
         cached = stanli.Function("constant", mir=mir)
         assert cached() == 3.5
     with mock.patch.object(stanli._lib, "stanli_has_embedded_stanc", return_value=0), \
@@ -936,6 +936,145 @@ def test_stan_to_mir_reports_syntax_errors():
     except RuntimeError:
         return
     raise AssertionError("expected RuntimeError for a syntax error")
+
+
+@contextlib.contextmanager
+def include_fixture():
+    with tempfile.TemporaryDirectory(prefix="stanli includes π ") as tmp:
+        root = pathlib.Path(tmp)
+        (root / "nested").mkdir()
+        (root / "helpers.stanfunctions").write_text(
+            '#include <nested/center.stanfunctions>\n', encoding="utf-8")
+        (root / "nested/center.stanfunctions").write_text(
+            'real center() { return 2.0; }\n', encoding="utf-8")
+        prior = "theta ~ normal(shift + center(), 1);\n"
+        (root / "prior.stan").write_text(prior, encoding="utf-8")
+        prefix = ('functions {\n#include "helpers.stanfunctions"\n'
+                  '#include helpers.stanfunctions\n}\n'
+                  'transformed data { real shift = normal_rng(0, 1); }\n'
+                  'parameters { real theta; }\nmodel {\n')
+        code = prefix + '#include prior.stan\n}\n'
+        expanded = ('functions { real center() { return 2.0; } }\n'
+                    'transformed data { real shift = normal_rng(0, 1); }\n'
+                    'parameters { real theta; }\nmodel {\n' + prior + '}\n')
+        source = root / "model.stan"
+        source.write_text(code, encoding="utf-8")
+        yield root, source, code, expanded
+
+
+def test_stan_includes_files_inline_functions_and_search_order():
+    with include_fixture() as (root, source, code, expanded):
+        expected = stanli.Model(stan_code=expanded, seed=41).log_prob_grad([0.3])
+        # The input directory is found even though cwd is elsewhere.
+        assert pathlib.Path.cwd() != root
+        for model in (stanli.Model(stan_file=source, seed=41),
+                      stanli.Model(stan_code=code, include_paths=root, seed=41),
+                      stanli.Model(mir=stanli.stan_to_mir(
+                          code, include_paths=[root]), seed=41)):
+            got = model.log_prob_grad([0.3])
+            assert got[0] == expected[0]
+            np.testing.assert_array_equal(got[1], expected[1])
+        assert stanli.Function("center", stan_file=source)() == 2.
+        assert stanli.Function("center", stan_code=code, include_paths=root)() == 2.
+
+        first, second = root / "first", root / "second"
+        first.mkdir()
+        second.mkdir()
+        (first / "prior.stan").write_text("theta ~ normal(shift + center(), 2);\n")
+        (second / "prior.stan").write_text("theta ~ normal(shift + center(), 3);\n")
+        for paths, scale in (([first, second], 2), ([second, first], 3)):
+            got = stanli.Model(stan_file=source, include_paths=paths, seed=41)
+            ref = stanli.Model(stan_code=expanded.replace(
+                "shift + center(), 1", f"shift + center(), {scale}"), seed=41)
+            assert got.log_prob_grad([0.3])[0] == ref.log_prob_grad([0.3])[0]
+            np.testing.assert_array_equal(got.log_prob_grad([0.3])[1],
+                                          ref.log_prob_grad([0.3])[1])
+
+
+def test_stan_includes_are_retained_for_seed_rebuilds():
+    with include_fixture() as (root, source, code, expanded):
+        model = stanli.Model(stan_file=source, seed=1)
+    # Includes have now been deleted. A changed run seed rebuilds transformed
+    # data from the retained MIR, with identical draws and diagnostics.
+    ref = stanli.Model(stan_code=expanded, seed=1)
+    opts = dict(seed=7, chains=1, warmup=20, samples=21, refresh=0, init_radius=0)
+    got, want = model.sample(**opts), ref.sample(**opts)
+    np.testing.assert_array_equal(got.draws(), want.draws())
+    np.testing.assert_array_equal(got.sampler_stats, want.sampler_stats)
+
+
+def test_include_paths_are_isolated_across_threads():
+    ready = threading.Barrier(4)
+
+    def compile_worker(worker):
+        with include_fixture() as (root, source, code, expanded):
+            (root / "nested/center.stanfunctions").write_text(
+                f"real center() {{ return {worker}.0; }}\n", encoding="utf-8")
+            ready.wait()
+            for _ in range(3):
+                assert stanli.Function("center", stan_file=source)() == worker
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(compile_worker, range(4)))
+
+
+def test_stan_include_errors_comments_and_compiler_state():
+    with include_fixture() as (root, source, code, expanded):
+        cases = [('#include missing.stan\n', "missing.stan"),
+                 ('#include cycle.stan\n', "recursively included"),
+                 ('#include bad.stan\n', "bad.stan")]
+        (root / "cycle.stan").write_text('#include cycle.stan\n')
+        (root / "bad.stan").write_text('parameters { real theta }\nmodel {}\n')
+        for invalid, message in cases:
+            try:
+                stanli.stan_to_mir(invalid, include_paths=root)
+            except RuntimeError as exc:
+                assert message in str(exc), str(exc)
+            else:
+                raise AssertionError("invalid include was accepted")
+        harmless = ('/* #include missing.stan */\n// #include missing.stan\n'
+                    'model { print("#include missing.stan"); }')
+        assert stanli.stan_to_mir(harmless, include_paths=root)
+        # Search paths are per invocation, including following a compiler error.
+        try:
+            stanli.stan_to_mir(code)
+        except RuntimeError as exc:
+            assert "helpers.stanfunctions" in str(exc)
+        else:
+            raise AssertionError("include search path leaked into the next compile")
+        assert stanli.stan_to_mir(code, include_paths=root)
+        for paths in ([root / "absent"], [""], [None], [source]):
+            try:
+                stanli.Model(stan_code="model {}", include_paths=paths)
+            except (ValueError, TypeError):
+                pass
+            else:
+                raise AssertionError("invalid include_paths was accepted")
+
+
+def test_packaged_subprocess_includes():
+    suffix = ".exe" if sys.platform == "win32" else ""
+    available = [stanli._BIN / (name + suffix) for name in ("stanli-compile", "stanc")]
+    # Installed Windows wheels provide these; local builds can stage them too.
+    for compiler in available:
+        if not compiler.is_file():
+            continue
+        with tempfile.TemporaryDirectory() as tmp, include_fixture() as fixture:
+            root, source, code, expanded = fixture
+            shutil.copy2(compiler, pathlib.Path(tmp) / compiler.name)
+            expected = stanli.Model(stan_code=expanded, seed=41).log_prob_grad([0.3])
+            with mock.patch.object(stanli, "_BIN", pathlib.Path(tmp)), \
+                    mock.patch.object(stanli._lib, "stanli_has_embedded_stanc", return_value=0):
+                got = stanli.Model(stan_file=source, seed=41).log_prob_grad([0.3])
+                assert got[0] == expected[0]
+                np.testing.assert_array_equal(got[1], expected[1])
+                assert stanli.Function("center", stan_code=code, include_paths=root)() == 2.
+                try:
+                    stanli.stan_to_mir("#include absent.stan\n", include_paths=root)
+                except RuntimeError as exc:
+                    assert "absent.stan" in str(exc)
+                else:
+                    raise AssertionError("subprocess accepted a missing include")
 
 
 def test_subprocess_compiler_preference_and_rollback_contract():

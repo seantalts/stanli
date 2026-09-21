@@ -66,6 +66,16 @@ int stanli_has_embedded_stanc(void);
  * stanli_string_free. Needs a build that embeds stanc3. */
 char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len);
 
+/* As above, with directories searched in order for Stan #include directives.
+ * No implicit directory is added. Paths and source are UTF-8; the array and
+ * its strings are borrowed for this call only. A null array is valid only
+ * when include_path_count is zero. Nested includes use the same search path.
+ * Stan's preprocessor owns expansion, cycle detection, and diagnostics. */
+char* stanli_stan_to_mir_with_includes(const char* stan_code,
+                                       const char* const* include_paths,
+                                       size_t include_path_count, char* err,
+                                       size_t err_len);
+
 /* Frees a string this library returned ownership of. */
 void stanli_string_free(char* p);
 

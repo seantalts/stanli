@@ -61,6 +61,11 @@ read_utf8_file <- function(path) {
 #'   model is the one the fit carries as `fit$model`; the object passed in
 #'   is unchanged. Models are also rebuilt when sampling changes
 #'   `threads_per_chain`.
+#' @param include_paths Character vector of directories searched in order for
+#'   Stan `#include` files, followed by the directory containing `file` (or the
+#'   current directory for `code`). Nested includes use the same search path.
+#'   Included source is compiled once and retained when sampling rebuilds the
+#'   model, even if the files later change or move. Ignored when `mir` is supplied.
 #' @return An object of class `stanli_model` whose `columns` name every
 #'   output the way the posterior package reads them, `theta[1,2]` for an
 #'   indexed value. Warns, naming the part and the
@@ -70,12 +75,24 @@ read_utf8_file <- function(path) {
 #'   what to include in a bug report.
 #' @export
 stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
-                         seed = 1, threads_per_chain = 1) {
+                         seed = 1, threads_per_chain = 1, include_paths = NULL) {
   cstan_integer(threads_per_chain, "threads_per_chain")
   load_runtime()
-  if (is.null(code) && is.null(mir)) {
-    if (is.null(file)) stop("provide file, code or mir", call. = FALSE)
-    code <- read_utf8_file(file)
+  if (is.null(mir)) {
+    source_file <- NULL
+    if (is.null(code)) {
+      if (is.null(file)) stop("provide file, code or mir", call. = FALSE)
+      code <- read_utf8_file(file)
+      source_file <- file
+    }
+    has_includes <- grepl("#include", code, fixed = TRUE)
+    if (has_includes || !is.null(include_paths))
+      paths <- stan_include_paths(include_paths, source_file)
+    if (has_includes) {
+      mir <- if (.Call("stanli_r_has_embedded_stanc"))
+        .Call("stanli_r_stan_to_mir", code, paths) else
+        stanc_mir(code, include_paths = paths)
+    }
   }
   data_json <- if (is.null(data)) {
     "{}"

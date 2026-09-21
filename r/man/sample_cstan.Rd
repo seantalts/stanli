@@ -21,6 +21,7 @@ sample_cstan(
   init_radius = 2,
   pathfinder_init = NULL,
   threads_per_chain = 1,
+  include_paths = NULL,
   ...
 )
 }
@@ -59,6 +60,9 @@ use `init_radius` for random initialization. Extra non-parameter names
 
 \item{threads_per_chain}{Threads per chain for eligible native `reduce_sum`
 calls; see [sample_model()]. Defaults to 1.}
+
+\item{include_paths}{Directories searched for Stan `#include` files; see
+[stanli_model()].}
 
 \item{...}{Reserved. Unsupported options produce an error.}
 }

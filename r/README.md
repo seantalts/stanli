@@ -58,6 +58,23 @@ stanli_diagnose(fit)  # divergences, treedepth, E-BFMI, R-hat, ESS
 as_draws_array(fit)   # a posterior::draws_array
 ```
 
+Stan `#include` directives automatically search the directory containing
+`file`. Add shared directories with `include_paths`:
+
+```r
+m <- stanli_model(file = "models/model.stan", data = data,
+                   include_paths = c("shared", "vendor/stan"))
+```
+
+Explicit directories are searched in order, then the input file's directory.
+For `code`, the final search directory is the current directory. Nested includes
+use the same search path; for example, `#include nested/helper.stan` looks beneath
+each search directory. `sample_cstan()` and `cstan_model()` also accept
+`include_paths`. A constructed `stanli_model` retains its compiled includes for
+later sampling; `cstan_model()` reads them when its `$sample()` method prepares
+the model. This works with the embedded, native subprocess, and JavaScript
+compilers, including webR's filesystem.
+
 Sampling prints periodic per-chain progress, elapsed warmup and sampling
 times, and any divergent-transition or maximum-treedepth warnings. Set
 `refresh = 0` for a quiet run. Exact per-chain times and problem counts are
