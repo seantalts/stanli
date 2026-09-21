@@ -19,6 +19,7 @@ EXPORTS
   stanli_reduce_sum_fallbacks
   stanli_has_embedded_stanc
   stanli_stan_to_mir
+  stanli_stan_to_mir_with_includes
   stanli_string_free
   stanli_function_new_from_stan
   stanli_function_new_from_mir
