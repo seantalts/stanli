@@ -1170,9 +1170,15 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tests/test_run_timings.py
                    $<TARGET_FILE:stanli_run>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  # A native process supplies the sanitizer runtime when it loads the shipped
+  # C ABI library. Loading that instrumented library into an ordinary Python
+  # interpreter with ctypes leaves ASan symbols unresolved on Linux.
+  add_executable(capi_rng_reference tests/capi_rng_reference.cpp)
+  target_link_libraries(capi_rng_reference PRIVATE stanli_shared)
+  add_dependencies(capi_rng_reference stanli_mir_fixtures)
   add_test(NAME test_run_rng
            COMMAND ${Python3_EXECUTABLE} tests/test_run_rng.py
-                   $<TARGET_FILE:stanli_run> $<TARGET_FILE:stanli_shared>
+                   $<TARGET_FILE:stanli_run> $<TARGET_FILE:capi_rng_reference>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_bench
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_bench.py
