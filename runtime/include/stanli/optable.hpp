@@ -712,7 +712,7 @@ inline void div_partials(double u, double b, double out, double* da,
 // cost of an lp__ that differs from CmdStan's by a per-model constant on
 // every `~` statement. Gradients are untouched to the bit; the chain a
 // seed produces is not, because a shifted lp rounds differently inside
-// the Hamiltonian (docs/lite-lp.md)
+// the Hamiltonian (docs/lp-constant.md)
 // -- which is why the browser build takes this and the wheel does not.
 constexpr int density_tier(int listed) {
 #ifdef STANLI_LITE_LP

@@ -64,7 +64,7 @@ def grad_of(stan, dj, env, timeout):
 
 
 def ns_grad(sexp, dj, n_params, env, timeout):
-    """Minimum of three runs: a single run is noise (docs/lite-lp.md)."""
+    """Minimum of three runs: a single run is noise (docs/lp-constant.md)."""
     best = None
     for _ in range(3):
         g = run([str(BENCH), str(sexp), str(dj), str(evals_for(n_params))],

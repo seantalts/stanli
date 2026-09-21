@@ -726,6 +726,154 @@ did. One list now
 with the MIR interpreter and with the generated derivatives, so a
 density added to the runtime arrives in all three at once.
 
+<a id="retained-loops"></a>
+
+## Retained loops (`OP_LOOP`, disable: `STANLI_STRUCTURED_LOOPS=0`)
+
+A loop whose body carries a `while` or a branch on a parameter cannot be
+unrolled into the flat graph without every iteration becoming its own
+runtime island: ctsem's Kalman loop at 200 rows compiled to 347,000
+operations and took 80 seconds to prepare that way. Such a loop is kept as
+one graph operation whose payload is the body as a tree of control nodes
+(sequence, if, for, while, break, continue) over ordinary graph kernels.
+[`docs/how-it-works.md`](../../docs/how-it-works.md#retained-loops) has the
+short version; this section holds the selector, the recording pipeline, the
+switches, and the measurements.
+
+**Selector.** A top-level `while`, or a top-level counted loop of at least
+32 trips whose body (including any user function it calls) contains a
+`while` or a branch on a parameter, is retained. A loop the unroller can
+fold or vectorize stays unrolled: retaining a loop costs about 25 ns of
+bookkeeping per kernel call, which a vector kernel over the same data beats
+by an order of magnitude. `STANLI_STRUCTURED_LOOPS=0` turns retention off
+and `=1` retains every loop, for A/B tests.
+
+**What the tape remembers.** Decided at compile time, per kernel call in the
+body:
+
+- A call whose result has no reverse pass and is only read by other such
+  calls, or by a branch or loop condition, writes into one fixed cell and is
+  overwritten on the next visit.
+- A call that feeds a reverse pass appends its inputs' handles, its output
+  and any kernel scratch to a growing arena and pushes a record.
+- `x[i] = v` on a container the loop owns mutates the container in place and
+  logs the overwritten values. The reverse pass undoes the log in order, so
+  earlier reads of the container see the values they read. A container that
+  arrived from outside the loop, or that another name still refers to, is
+  copied once before the first write.
+- A call whose inputs no iteration of the enclosing loop writes runs once per
+  entry of that loop and is reused afterwards.
+
+**Recording and replay.** Much of a real model's loop body is bookkeeping on
+data: finding a subject's rows, scanning a setup table, deciding which of
+several matrices to update. On ctsem it was 97% of the kernel calls. The
+executor therefore records the first evaluation. While the tree walk runs,
+every kernel call, in-place write and container read is appended to a
+stream. A call whose inputs are all data is evaluated once and its result
+kept as a constant instead of being recorded, and a branch or loop condition
+that depends only on data leaves nothing in the stream. When the walk
+finishes, the stream is frozen: the records move into compact pools and every
+operand becomes a pointer bound once. Later gradients replay the frozen
+stream forward and backward without visiting the tree.
+
+Parameter-dependent control still runs every time. Each branch, loop
+condition and in-place index that depended on a parameter during recording
+carries a guard holding the value it took. A replay checks each guard where
+it occurs; the first mismatch stops the replay, discards the stream and
+records again. `STANLI_NO_STRUCTURED_REPLAY=1` keeps the tree walk for every
+evaluation. `write_array` retains the same loops, forward only, so those
+loops no longer run on the MIR interpreter for every saved draw.
+
+Recording also tracks which cells of an updated container still contain
+data. Writing a parameter into one cell does not make a read of an untouched
+data cell depend on that parameter. A read with constant indices folds when
+every selected cell is data; overlapping or parameter-selected reads remain
+in the stream. Copy-on-write preserves those facts for aliases, and changing
+write indices still trigger the existing guards. This metadata is discarded
+when recording finishes. `STANLI_NO_STRUCTURED_CELL_CONSTANTS=1` disables
+the per-cell proof.
+
+**Numerical frames** (`STANLI_STRUCTURED_FRAMES=0` disables, `=1` forces
+them on eligible retained plans, including outer `while` loops). After the
+eight-iteration sample, a counted loop whose projected version table exceeds
+128 MiB and whose sampled replay averages at least 128 instructions per trip
+seals the recorded prefix into a frame, then seals each subsequent iteration
+as it completes. The work floor keeps mostly folded loops on ordinary replay.
+Sealing copies the live numerical ranges, preserves aliases and cached
+values, and replaces the working version table with its live bindings.
+Historical derivative identities are independent of those working handles,
+including when a later indexed write makes an inactive container active.
+
+A frame's program uses offsets into its numerical storage and a table of
+external bindings. Indexed positions are normalized relative to their first
+position; the shift travels with the binding. Frames share a program only
+when the complete normalized instructions and position tables match. Every
+iteration is still executed and checked during recording; sharing does not
+infer an unexecuted row's behavior. Forward and backward use the same kernel
+functions and accumulation order as ordinary replay. Small recordings keep
+the ordinary stream, and plans containing register segments keep the
+established stream. None of this adds a whole-model preparation pass.
+
+**Compiled recording** (`STANLI_STRUCTURED_COMPILED_RECORDING=0` disables;
+`STANLI_STRUCTURED_DATA_RECORDING=0` disables only its data
+specialization). Once frames are selected, the executor compiles that loop's
+body into a temporary instruction program with explicit branches and loop
+jumps, avoiding repeated recursive tree dispatch while recording. The
+program is discarded when recording finishes or throws; warmed replay uses
+the frames. The program also specializes proven data-only transient calls: a
+conservative fixed point follows all possible kernel, alias, iterator and
+in-place writes from parameter imports, and eligible calls still bind their
+current inputs and execute validated operations in order but skip repeated
+constant checks and recording bookkeeping. Their output binding is published
+only on the first successful execution, so an earlier read or an untaken
+branch still sees the original value. Every control guard remains in place,
+including a parameter branch choosing between two data values. Custom or
+effectful kernels and outputs with alternate writers do not take this path.
+Both are constructed only after frame admission and add no analysis or
+retained storage to ordinary models.
+
+**Prepared index reads** (`STANLI_STRUCTURED_PREPARED_INDEX=0` disables).
+Within the compiled recording program, canonical data-only point reads with
+fixed index geometry validate the complete descriptor on their first
+successful use. Later uses refresh the input bindings, check every current
+selector in the original validation order, and compute the scalar position
+directly from the validated strides. Dynamic extents and counts, other
+selector kinds and custom kernels keep the general path. No data address or
+extra metadata is cached, and an untaken read cannot throw during program
+construction.
+
+**Prepared iterators** (`STANLI_STRUCTURED_PREPARED_ITERATOR=0` disables).
+Transient iterators with data-valued bounds and exactly one writer reuse
+their first binding within each loop entry; subsequent iterations update
+only the workspace value. The entry still validates the bounds. Alias or
+kernel writes, reused iterator slots, parameter-valued bounds and retained
+iterators keep ordinary rebinding. Existing branch guards also cover
+parameter-controlled choices between data-valued bounds. Both proofs run
+only after frame admission and retain no state after recording.
+
+**Measured.** Six alternating fresh-process comparisons against PR391: the
+mixed-cell proof and numerical frames reduce ctsem's warmed gradient from
+4.59 to 3.66 ms at 33 rows, 56.88 to 49.09 ms at 400 rows, and 587.01 to
+498.87 ms at 4000 rows. At 4000 rows, process peak RSS falls from 10.425 to
+1.522 GB, and the first gradient falls from 31.59 to 26.97 s. MIR
+preparation takes 1.377 s in both revisions. Density and gradients are
+bitwise identical to PR391 at all three checked parameter points. In a
+separate six-pair comparison against that frame implementation, the
+temporary recording program cuts the first gradient from 2.71 to 1.96 s at
+400 rows and from 26.87 to 19.24 s at 4000 rows, with warmed gradients and
+preparation at parity and live allocation bytes and counts exactly equal in
+every pair. The index and iterator specializations then reduce first
+gradients from 1.963 to 1.569 s at 400 rows and from 19.367 to 15.273 s at
+4000 rows in another matched six-pair experiment, again with identical live
+bytes and allocation counts. The
+[recording-site experiment](../../docs/superpowers/plans/2026-09-20-ctsem-index-recording.md)
+documents the proofs, refusal tests and measurements; the
+[memory experiment](../../docs/superpowers/plans/2026-09-19-ctsem-memory.md)
+covers smaller cases, ordinary-model controls, build identities and the
+remaining first-recording limitation; ordinary-model timing and RSS
+follow-up is in
+[notes](../../notes/performance/2026-09-20-ctsem-ordinary-model-controls.md).
+
 ## Tape islands (`island.cpp`, disable: `STANLI_NO_ISLAND=1`)
 
 Some code cannot be vectorized by anyone: an HMM's forward recursion

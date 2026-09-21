@@ -773,7 +773,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--no-lp", action="store_true",
                     help="compare gradients only, not lp: a STANLI_LITE_LP "
-                         "build shifts lp by a constant (docs/lite-lp.md)")
+                         "build shifts lp by a constant (docs/lp-constant.md)")
     ap.add_argument("--no-wa", action="store_true",
                     help="replay lp and gradients only (the WASM check "
                          "driver has no write_array entry point yet)")

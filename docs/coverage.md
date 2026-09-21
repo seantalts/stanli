@@ -105,7 +105,7 @@ gradient agreement is the primary contract, and `lp__` may differ by a
 parameter-independent offset. The offset may have either sign and matters when
 an absolute log density is required. It does not affect Hamiltonian dynamics
 or Metropolis acceptance ratios within one model. See
-[compact densities](compact-densities.md).
+[lp__ off by a constant](lp-constant.md).
 
 ## Known unsupported forms
 
@@ -132,7 +132,7 @@ The headline ratios hide several important gaps:
   operation. The exponentiated-quadratic, Matern 3/2, Matern 5/2 and
   exponential kernels are supported.
 - **Complex values:** complex arguments or results are refused by policy. The
-  graph represents real and integer values, not complex values.
+  graph represents only real and integer values.
 - **Tuple results:** tuple-valued results are refused by policy. The graph
   cannot yet represent or destructure tuples.
 
@@ -182,7 +182,7 @@ dimension expression.
 
 ## Truncation and censored likelihoods
 
-Stan's `T[lower, upper]` syntax means truncation, not censoring. Stanc rewrites
+Stan's `T[lower, upper]` syntax means truncation rather than censoring. Stanc rewrites
 a two-sided truncated sampling statement as a proportional density, a
 normalization term, and support checks on the variate. For a continuous
 distribution, the main target contribution is:
@@ -236,39 +236,15 @@ Runtime regions implement parameter-dependent `if` and ternary expressions.
 `for` loops with load-time bounds are unrolled; `break` and `continue` inside
 parameter-dependent branches become runtime jumps. A `while` loop works only
 when its condition can be evaluated during region construction on every
-iteration. Probability functions backed by graph kernels, including sampling
-syntax (`~`), vectorized calls, discrete distributions, CDFs, GLMs, and matrix
-density functions, use the same kernel ABI in parameter-dependent regions.
-Their argument shapes, integer payloads, propto flag, and activity mask come
-from one shared registry also used by ordinary graph lowering and MIR
-interpretation. This includes `categorical_lpmf` and
-`categorical_logit_lpmf`; their atomic vector argument and scalar-versus-array
-outcome selection are a registry shape policy rather than backend-specific
-dispatch. `hypergeometric_lpmf` and `discrete_range_lpmf` use the registry's
-all-integer evaluation policy: because they have no differentiable edge, each
-backend reaches the same scalar-or-array Stan Math evaluator (through one
-generic runtime kernel where evaluation must be deferred), retaining
-validation and `propto` semantics.
-Multivariate vectorization is likewise a registry policy rather than a
-backend exception. `multi_normal_lpdf`, `multi_normal_prec_lpdf`,
-`multi_normal_cholesky_lpdf`, `multi_student_t_lpdf`, and
-`multi_student_t_cholesky_lpdf` all accept a vector or array of vectors for
-both the random variable and location. The registry centrally validates the
-shared widths, distinguishes a single vector from an array of one vector, and
-requires equal array lengths when both arguments are arrays; graph lowering,
-runtime-control programs, and MIR interpretation consume the same encoded
-layout.
-The same vector-layout policy covers `dirichlet_lpdf` when either argument is
-an array of vectors, and the ordered-logistic/probit densities when cutpoints
-are supplied as one vector per observation.
-Generated source fixtures instantiate all 12,131 density signatures the
-pinned `stanc --dump-stan-math-signatures` reports for the 177 registered
-probability functions (the eight `wiener_lpdf` signatures are excluded),
-execute them in transformed data, ordinary autodiff, parameter-dependent
-runtime control, and generated quantities, and are checked for dump drift by
-CTest.
-The explicitly unsupported probability functions listed above remain outside
-that registry.
+iteration. Probability functions backed by graph kernels, including `~` statements,
+vectorized calls, discrete distributions, CDFs, GLMs and the multivariate
+densities, use the same kernel ABI and the same argument-shape registry in
+parameter-dependent regions as in ordinary graph lowering and MIR
+interpretation. Generated fixtures instantiate all 12,131 density signatures
+the pinned `stanc --dump-stan-math-signatures` reports for the 177 registered
+probability functions in transformed data, ordinary autodiff,
+parameter-dependent runtime control, and generated quantities; CTest checks
+them for dump drift.
 
 stanli also refuses a `print` or `reject` inside a replayed
 parameter-dependent region because reverse-mode replay could execute it twice.
@@ -298,62 +274,11 @@ autodiff may require explicit lowering and kernel code. See
 ## Reproduce the coverage summary
 
 The checked-in baseline records each pinned signature's classification, but
-not the numerical deviations from the run that produced it. This script
-reproduces the three name-level rows above:
+not the numerical deviations from the run that produced it.
+`tools/coverage_summary.py` reproduces the three name-level rows above:
 
 ```sh
-python3 - <<'PY'
-import collections
-import gzip
-import json
-import re
-
-with gzip.open("docs/conformance-baseline.json.gz", "rt") as handle:
-    rows = json.load(handle)["classifications"]
-
-by_name = collections.defaultdict(list)
-for signature, result in rows.items():
-    name = signature.split("(", 1)[0]
-    by_name[name].append((signature, result["status"]))
-
-def tally(names):
-    names = sorted(names)
-    covered = sum(
-        all(status != "unexpected_unsupported" for _, status in by_name[name])
-        for name in names
-    )
-    return covered, len(names)
-
-densities = {
-    name for name in by_name if name.endswith(("_lpdf", "_lpmf"))
-}
-cdfs = {
-    name for name in by_name if name.endswith(("_cdf", "_lcdf", "_lccdf"))
-}
-
-excluded = (
-    "_lpdf", "_lpmf", "_rng", "_cdf", "_lcdf", "_lccdf", "_qf", "_log_qf"
-)
-scalar_math = set()
-pattern = re.compile(r"^([A-Za-z_][A-Za-z_0-9]*)\((.*?)\)=>(.*)$")
-for signature in rows:
-    match = pattern.match(signature)
-    if not match:
-        continue
-    name, arguments, result = match.groups()
-    argument_types = arguments.split(",") if arguments else []
-    if (
-        result == "real"
-        and 1 <= len(argument_types) <= 5
-        and all(argument == "real" for argument in argument_types)
-        and not name.endswith(excluded)
-    ):
-        scalar_math.add(name)
-
-print("densities", tally(densities))
-print("distribution functions", tally(cdfs))
-print("scalar math", tally(scalar_math))
-PY
+python3 tools/coverage_summary.py
 ```
 
 Expected output for the current baseline:
