@@ -2076,6 +2076,13 @@ jobs:
             gzip -c deps/stanc3/stancjs.bc.js | wc -c
           } 2>&1 | tee /tmp/portable-mir-browser-measurements.txt
 
+      # Exercise the R/JavaScript bridge without the post-submit side-module
+      # build, so changes to compiler arguments are checked before merging.
+      - name: R compiler helper in webR
+        run: |
+          npm install --no-save --no-package-lock webr@0.6.0
+          node tests/test_webr.mjs --compiler-only deps/stanc3/stanli-compiler.js
+
       - name: Stage browser compilers
         run: |
           mkdir -p browser-dist
