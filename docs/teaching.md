@@ -1,49 +1,38 @@
 # Teaching Bayesian workflow with stanli
 
-For brms and Rethinking examples, see [Generated models and R workflows](teaching-support.md).
-Model coverage and numerical evidence are in the shared [corpus inventory](corpus-status.md).
-
 ## Before the first class
 
-Use **R-universe binaries**. Give students with supported macOS or Windows R
-installations these two lines (the first also installs the tutorial packages):
+Use R-universe binaries. Students with supported macOS or Windows R
+installations need two lines; the first also installs the tutorial packages:
 
 ```r
 install.packages(c("stanli", "posterior", "bayesplot", "loo", "tidybayes"), repos = c("https://seantalts.r-universe.dev", "https://cloud.r-project.org"), type = "binary")
 stanli::stanli_install()
 ```
 
-`stanli_install()` downloads the prebuilt runtime tarball for the platform and
-R architecture, including its compiler, from the package's pinned GitHub
-release. It extracts into
-`file.path(tools::R_user_dir("stanli", "cache"), "v0.14.4")` for this package
-version. `stanli::stanli_runtime_path()` prints the actual library path. Run
-installation once per machine and again after a package upgrade changes the
-runtime pin; model compilation and sampling make no downloads.
-
-The performance report identifies its development runtime by source revision.
-Classroom installations use the package's pinned public release; performance
-changes reach those installations when a release includes them.
+`stanli_install()` downloads the prebuilt runtime for the platform and R
+architecture, including its compiler, from the GitHub release the package is
+pinned to, and extracts it under `tools::R_user_dir("stanli", "cache")` in a
+directory named after that release. `stanli::stanli_runtime_path()` prints the
+library path. Run it once per machine and again after a package upgrade;
+compilation and sampling make no downloads.
 
 ### Linux labs
 
-The ordinary repository URL can select source packages on Linux. Instructors
-should provision a matching binary repository and system libraries before
-class. R-universe's current Linux binary target is Ubuntu 26.04 (resolute), for
-R-release and R-devel on x86_64 and arm64; other distributions need a prepared
-lab image or hosted session. See the
+On Linux the ordinary repository URL selects source packages. R-universe's
+current Linux binary target is Ubuntu 26.04 (resolute) for R-release and
+R-devel on x86_64 and arm64; other distributions need a prepared lab image or a
+hosted session. See the
 [R-universe binary installation guide](https://docs.r-universe.dev/install/binaries.html)
-for supported targets and changes. On that Ubuntu target, replace the first
-installation line with:
+for supported targets. On that Ubuntu target, replace the first line with:
 
 ```r
 repos <- sprintf("https://%s.r-universe.dev/bin/linux/resolute-%s/%s/", c("seantalts", "cran"), R.version$arch, paste(R.version$major, sub("\\..*$", "", R.version$minor), sep = "."))
 install.packages(c("stanli", "posterior", "bayesplot", "loo", "tidybayes"), repos = repos)
 ```
 
-Run `stanli::stanli_install()` next. Verify the installed binaries and the
-example below on the exact lab image before students arrive. An instructor
-must provision source-only dependencies ahead of class if binaries are absent.
+then run `stanli::stanli_install()`. Verify the example below on the exact lab
+image before students arrive.
 
 ## Five-line eight-schools example
 
@@ -58,20 +47,54 @@ summary(fit); stanli_diagnose(fit)
 bayesplot::mcmc_trace(as_draws_array(fit), pars = "mu", np = bayesplot::nuts_params(fit))
 ```
 
-If the report flags divergences, rerun with `delta = 0.99` and check the
-diagnostics again.
+If the report flags divergences, rerun with `delta = 0.99` and check again.
+[Coming from cmdstanr](from-cmdstanr.md) has the full translation table,
+initial values, posterior predictive checks, LOO, tidybayes, and saving a fit.
 
-For the table used in cmdstanr tutorials, use
-`posterior::summarise_draws(as_draws_array(fit))`. See
-[Coming from cmdstanr](from-cmdstanr.md) for the full translation table, initial
-values, posterior predictive checks, LOO, tidybayes, and saving a fit.
+## Models from brms and Rethinking
+
+Both routes produce a `stanli_fit`, not a `brmsfit` or a fitted `ulam`
+object, so package methods such as `brms::conditional_effects()` do not apply
+to the result. Parameter names are the ones the package generates; see
+`fit$columns`. Pass the same formula, data, family and priors to both `make_*`
+calls rather than editing the generated Stan text:
+
+```r
+library(stanli)
+d <- data.frame(x = seq(-1, 1, length.out = 20),
+                y = c(-1.0, -0.6, -0.8, -0.4, -0.5, -0.1, -0.3, 0.1, 0.0, 0.3,
+                      0.1, 0.5, 0.4, 0.8, 0.6, 1.0, 0.9, 1.3, 1.1, 1.5))
+code <- brms::make_stancode(y ~ x, data = d, family = gaussian())
+data <- brms::make_standata(y ~ x, data = d, family = gaussian())
+model <- stanli_model(code = code, data = data)
+fit <- sample_model(model, chains = 4, seed = 1, refresh = 0)
+stanli_diagnose(fit)
+```
+
+With rethinking 2.42, `sample = FALSE` returns the prepared model and data
+without fitting:
+
+```r
+prepared <- rethinking::ulam(
+  alist(y ~ dnorm(mu, sigma), mu ~ dnorm(0, 1), sigma ~ dexp(1)),
+  data = list(y = c(-0.8, -0.2, 0.1, 0.4, 0.9)), sample = FALSE)
+model <- stanli::stanli_model(code = prepared$model, data = prepared$data)
+fit <- stanli::sample_model(model, chains = 4, seed = 1, refresh = 0)
+stanli::stanli_diagnose(fit)
+```
+
+For a book model, keep its data preparation. A model the book makes
+deliberately difficult has the same poor diagnostics here; changing the
+engine does not fix an unidentified model. The brms and Rethinking fixtures in
+the [corpus](corpus-status.md) are replayed against CmdStan in CI.
 
 ## Offline labs
 
-Install R, the stanli R package, and the tutorial packages on the lab image while
-online. Keep their binary installers or a repository snapshot for rebuilding
-that image. The runtime is a separate download: prepare one tarball for each
-R architecture in the room, from the **release pinned by that package**.
+Install R, the stanli R package, and the tutorial packages on the lab image
+while online, and keep their binary installers or a repository snapshot for
+rebuilding it. The runtime is a separate download: prepare one tarball for
+each R architecture in the room, from the release the installed package is
+pinned to. `stanli:::stanli_runtime_release` prints that tag.
 
 | R platform | Runtime tarball | Library inside |
 |---|---|---|
@@ -84,13 +107,13 @@ R architecture in the room, from the **release pinned by that package**.
 For example, download the Apple Silicon runtime on a connected machine:
 
 ```r
-tag <- "v0.14.4"  # match the lab's package runtime pin
+tag <- stanli:::stanli_runtime_release  # the release this package pairs with
 asset <- "stanli-runtime-darwin-arm64.tar.gz"
 download.file(paste0("https://github.com/seantalts/stanli/releases/download/", tag, "/", asset), asset, mode = "wb")
 ```
 
-Copy the tarball to the lab. Before loading stanli, extract **all** its files
-(the Windows compiler and supporting DLLs must stay beside the runtime):
+Copy the tarball to the lab. Before loading stanli, extract all of its files;
+the Windows compiler and supporting DLLs must stay beside the runtime:
 
 ```r
 dir.create("~/stanli-runtime", showWarnings = FALSE)
@@ -99,44 +122,23 @@ Sys.setenv(STANLI_RUNTIME = path.expand("~/stanli-runtime/libstanli.dylib"))
 library(stanli)
 ```
 
-Use the appropriate tarball/library from the table on other platforms. Set an
-absolute `STANLI_RUNTIME` path in the lab's `.Renviron` to persist it across
-sessions. With that path set, skip `stanli_install()` entirely. For R running
+Set an absolute `STANLI_RUNTIME` path in the lab's `.Renviron` to persist it
+across sessions. With that path set, skip `stanli_install()`. For R running
 under Rosetta, use the Intel runtime even on Apple Silicon hardware.
 
-## Time from a fresh R session to the first posterior
+<a id="time-from-a-fresh-r-session-to-the-first-posterior"></a>
+## Time to the first posterior
 
-`tools/bench_r_first_posterior.R` launches three separate `Rscript --vanilla`
-processes and records wall time through completed sampling: process startup,
-loading stanli and its installed runtime, compiling the example, and four chains
-with 1000 warmup plus 1000 post-warmup draws per chain. Installation/download,
-summaries, and plotting are excluded. These are fresh sessions on a running
-machine, not cold filesystem-cache measurements.
-
-| Platform | Measured median wall time | Evidence |
-|---|---|---|
-| macOS arm64, macos-15 CI runner | 0.152 s | 0.157, 0.149, 0.152 s |
-| Linux x86_64, ubuntu-24.04 CI runner | 0.217 s | 0.216, 0.220, 0.217 s |
-| Windows x86_64, windows-2022 CI runner | 0.230 s | 0.230, 0.240, 0.220 s |
-
-All three platforms use R 4.6.1 and the development runtime built in
-[CI run 35060736527](https://github.com/seantalts/stanli/actions/runs/35060736527),
-revision `6e462c2e`.
-The same jobs pass the R ecosystem acceptance suite, including the independent
-CSV oracle and native density/transform methods.
-
-The [wheels workflow](../.github/workflows/wheels.yml) records Linux timings
-against its freshly built runtime on source PRs, and macOS/Windows timings on
-full manual runs, after merge, nightly, and on releases. Its job summaries and downloadable CSV
-artifacts include the platform, R/package versions, and all three timings.
-The CSV artifacts are `r-first-posterior-darwin-arm64`,
-`r-first-posterior-linux`, and `r-first-posterior-windows-x86_64`.
-Re-run on the classroom hardware before promising a timing to students.
+`tools/bench_r_first_posterior.R` times fresh `Rscript --vanilla` sessions
+from process startup through four chains of the example above, excluding
+installation, summaries and plotting. CI records the result on every platform
+under `output/teaching-performance/`; on current runners a session takes well
+under a second. Rerun it on the classroom hardware before promising a timing
+to students.
 
 ## Students without a laptop
 
-The [browser build](https://seantalts.github.io/stanli/) runs Stan locally in a
-web browser with model presets, sampling, plots, and diagnostics. Students can
-use a shared computer or another supported device without installing R. R
-package exercises still require access to an R session, such as a lab computer
-or a hosted classroom environment.
+The [browser build](https://seantalts.github.io/stanli/) runs Stan in a web
+browser with model presets, sampling, plots, and diagnostics, with no install.
+R package exercises still need an R session, such as a lab computer or a
+hosted classroom environment.

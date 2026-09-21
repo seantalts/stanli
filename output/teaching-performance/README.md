@@ -36,7 +36,7 @@ CmdStan ran first for each seed. Stanli's cap was min(3 × that CmdStan CLI time
 
 Screen clear: no retained-draw divergences or depth hits, finite R-hat ≤ 1.01 and bulk ESS ≥ 400 for every nonconstant variable in the parameters block. Structural fixed matrix entries are checked and omitted. The CSV also records tail ESS, minimum E-BFMI, and minimum bulk ESS divided by the sum of the four serial CLI durations. These are descriptive diagnostics; fixed-budget runtime is not time to equal inferential accuracy.
 
-Gradient results in the CSV use six alternating pairs at the same parameter point. `paired_speedup` is the CmdStan/Stanli gradient time ratio; values above one favor Stanli. Each pair must satisfy the full density/gradient scaled-error gate of 1e-9. The separate three-point numerical replay and its known exceptions are described in the [support guide](../../docs/teaching-support.md).
+Gradient results in the CSV use six alternating pairs at the same parameter point. `paired_speedup` is the CmdStan/Stanli gradient time ratio; values above one favor Stanli. Each pair must satisfy the full density/gradient scaled-error gate of 1e-9. The separate three-point numerical replay and its known exceptions are described in the [support guide](../../docs/teaching.md).
 
 ## Full appendix
 

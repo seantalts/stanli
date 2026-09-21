@@ -12,35 +12,36 @@ model, then pass that model to sampling or optimization. These examples assume
 | `fit$summary()` | `posterior::summarise_draws(as_draws_array(fit))` for the cmdstanr default table; `summary(fit)` for the stansummary table. |
 | `fit$draws()` | `as_draws_array(fit)` |
 | `fit$draws("mu")` | `posterior::subset_draws(as_draws_array(fit), variable = "mu")` |
-| `fit$diagnostic_summary()` or `fit$cmdstan_diagnose()` | `stanli_diagnose(fit)` prints a report; `fit$report` contains per-chain timings, divergence counts, and treedepth counts, rather than the cmdstanr summary table. |
+| `fit$diagnostic_summary()` or `fit$cmdstan_diagnose()` | `stanli_diagnose(fit)` prints a report; `fit$report` holds per-chain timings, divergence counts, and treedepth counts. |
 | `fit$sampler_diagnostics()` | `fit$sampler` is the raw array, including `lp__`; `bayesplot::nuts_params(fit)` gives the plotting table, excluding `lp__` by default. |
 | `m$optimize(data = data, jacobian = TRUE)` | `optimize_model(m)` includes the transform Jacobian. CmdStan's default `jacobian = FALSE` gives penalized maximum likelihood and has no stanli equivalent. |
 | `m$pathfinder(data = data)` | `sample_model(m, pathfinder_init = list())` uses single-path Pathfinder to initialize NUTS. Standalone Pathfinder draws are not exposed in R. |
 | `fit$loo()` | `loo::loo(fit)` with pointwise `log_lik` in generated quantities. |
 | `fit$save_object("fit.rds")` | Strip the live model, then `saveRDS(saved, "fit.rds")`; see persistence below. |
 
+Code written against CmdStanR's fit methods can use `sample_cstan()` and
+`as_cstanfit()` instead of translating; see
+[fit adapters](../r/README.md#fit-adapters).
+
 ## Initialization and saved warmup
 
-Cmdstanr initial values are constrained parameter lists (or functions/files).
-Stanli's `init` is an **unconstrained numeric vector**, or a matrix with one row
+cmdstanr initial values are constrained parameter lists, functions or files.
+stanli's `init` is an unconstrained numeric vector, or a matrix with one row
 per chain. Convert a complete constrained start with one line:
 
 ```r
 q <- unconstrain(m, list(mu = 0, tau = 1, theta_tilde = rep(0, 8)))
 ```
 
-The names must match your model. For separate chain starts, apply `unconstrain()`
-to each list and combine the vectors with `rbind()`. Omit `init` to use random
-starts; `init_radius = 0` starts at the unconstrained origin.
+The names must match your model. For separate chain starts, apply
+`unconstrain()` to each list and combine the vectors with `rbind()`. Omit
+`init` for random starts; `init_radius = 0` starts at the unconstrained origin.
 
-With `save_warmup = TRUE`, raw `fit$draws` and `fit$sampler` include saved warmup.
-`as_draws_array()`, the ecosystem diagnostics, LOO, and tidybayes exclude it.
-Use `as_draws_array(fit, inc_warmup = TRUE)` to include it explicitly. Iteration
-numbers index retained draws within each chain, starting at one after warmup.
-The existing `summary(fit)` summarizes the raw array; use
-`posterior::summarise_draws(as_draws_array(fit))` for a post-warmup table when
-you saved warmup. Older saved fits lack warmup metadata: use fits made with this
-version, or set `fit$warmup_draws` to the number of saved warmup rows per chain.
+With `save_warmup = TRUE`, raw `fit$draws` and `fit$sampler` include saved
+warmup, and `summary(fit)` summarizes that raw array. `as_draws_array()`, the
+ecosystem diagnostics, LOO, and tidybayes exclude warmup unless you pass
+`inc_warmup = TRUE`. Iteration numbers index retained draws within each chain,
+starting at one after warmup.
 
 ## Tutorial plotting and tidy draws
 
@@ -60,15 +61,11 @@ bayesplot::mcmc_trace(as_draws_array(fit), pars = "mu", np = np)
 tidybayes::spread_draws(fit, mu, theta[j])
 ```
 
-`nuts_params()` returns `Chain`, `Iteration`, factor `Parameter`, and numeric
-`Value`; `log_posterior()` returns `Chain`, `Iteration`, and `Value`. This matches
+`nuts_params()` and `log_posterior()` return the same columns as
 [bayesplot's CmdStanMCMC methods](https://github.com/stan-dev/bayesplot/blob/master/R/bayesplot-extractors.R).
-The divergence, acceptance, and treedepth functions return composite
-`bayesplot_grid` objects; the other calls above return `ggplot` objects.
-
-One numerical difference: stanli's `neff_ratio()` uses `summary()`'s **bulk ESS**
-divided by total retained post-warmup draws. Bayesplot's CmdStanMCMC method uses
-**basic ESS**. For that estimator, use:
+One numerical difference: stanli's `neff_ratio()` divides bulk ESS by the
+retained post-warmup draws, where bayesplot's CmdStanMCMC method uses basic
+ESS. For that estimator:
 
 ```r
 posterior::summarise_draws(as_draws_array(fit), ratio = function(x) posterior::ess_basic(x) / length(x))
@@ -100,19 +97,17 @@ After sampling:
 ll <- log_lik(fit)  # iteration x chain x observation, in Stan column order
 loo1 <- loo::loo(fit)
 loo::loo_compare(fit, fit2)  # fits must describe the same observations
-# For a named list, compare the computed LOO results:
 loo::loo_compare(list(model1 = loo1, model2 = loo::loo(fit2)))
 ```
 
-Stanli computes relative efficiency from the likelihood with the chain axis
-intact. A differently named variable is supported with
-`loo::loo(fit, variable = "pointwise")`. It does not synthesize pointwise
-likelihoods from `lp__`.
+Relative efficiency is computed with the chain axis intact. A differently
+named variable is supported with `loo::loo(fit, variable = "pointwise")`.
+Pointwise likelihoods are never synthesized from `lp__`.
 
 ## Persistence
 
-R cannot serialize a live external pointer. Save the analysis data with the
-model removed; the original fit remains available in the current session:
+R cannot serialize a live external pointer. Save the fit with the model
+removed; the original stays usable in the current session:
 
 ```r
 saved <- fit
@@ -122,31 +117,18 @@ fit <- readRDS("fit.rds")
 ```
 
 The class, draws, sampler statistics, unconstrained draws, seed, and report
-round-trip. Posterior, bayesplot plots, tidybayes, and LOO work after loading.
-`summary()`, `stanli_diagnose()`, `rhat()`, and `neff_ratio()` also work when the
-stanli runtime is installed; they need its estimators, but no model pointer.
-Keep your Stan source and data separately. To evaluate the model or sample
-again, reconstruct it with `stanli_model(file, data = data)` and optionally
-reattach it as `fit$model`. Calling `saveRDS(fit)` without removing the model
-also saves the arrays, but its restored `fit$model$ptr` is unusable.
+round-trip, and posterior, bayesplot, tidybayes, and LOO work after loading.
+`summary()`, `stanli_diagnose()`, `rhat()`, and `neff_ratio()` need the stanli
+runtime installed for its estimators, but no model pointer. To evaluate the
+model or sample again, reconstruct it with `stanli_model(file, data = data)`
+and reattach it as `fit$model`.
 
 ## Features without a stanli equivalent
 
 - Standalone `generate_quantities()` and `laplace()`.
 - Multi-path Pathfinder and `variational()`.
-- Cmdstanr's `$output()` and per-chain CSV files: R draws live in memory.
+- cmdstanr's `$output()` and per-chain CSV files: R draws live in memory.
 - Optimization with `jacobian = FALSE`.
 
-See the [course quickstart](teaching.md) for installation and an eight-schools
-example that requires no model files.
-
-## Optional fit-method adapter (development)
-
-`as_cstanfit()` exposes a native Stanli fit through CmdStanR-style `$draws()`,
-`$summary()`, `$sampler_diagnostics()`, `$metadata()`, `$num_chains()`, `$time()`,
-and `$loo()` methods. `sample_cstan()` prepares a model and returns this view
-using CmdStanR-style sampling arguments. Neither requires cmdstanr or rstan.
-The object has its own `stanli_cstanfit` class, so this supports consumers of
-those methods, not every package that requires CmdStanR classes or executables.
-The default `stanli_fit` API remains available and unchanged. See
-[`r/README.md`](../r/README.md#cmdstanr-style-fit-methods) for usage and limits.
+The [teaching page](teaching.md) covers installation and an eight-schools
+example that needs no model files.
