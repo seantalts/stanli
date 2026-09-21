@@ -24,7 +24,7 @@ and each saved draw takes 36 ms instead of 6 s. A run of 30 warmup and 30
 saved draws at 33 rows takes 248 s against 354 s for CmdStan. Across the
 316 other corpus models that evaluate, warm-gradient latency is unchanged
 against 0.16.0 (median ratio 0.999) and preparation is within 3%. The
-measurements are in [docs/benchmark-history.md](docs/benchmark-history.md).
+measurements are in [notes/performance/benchmark-history.md](notes/performance/benchmark-history.md).
 
 - Retained loops replay a recorded instruction stream instead of walking the
   loop body on every gradient. The first evaluation records the kernel calls
@@ -45,7 +45,7 @@ measurements are in [docs/benchmark-history.md](docs/benchmark-history.md).
 - Fold the Aalto teaching fixtures into the common corpus: the replay now
   covers 329 models at three points, and inventory, diagnostics and benchmark
   reports share one path. Retained historical measurements moved to
-  `docs/benchmark-history.md`.
+  `notes/performance/benchmark-history.md`.
 - Refresh the Stan conformance baseline for Stan 2.40: 256 `student_t_qf`
   overloads verified, 12 new `normal_id_glm_lpdf` signatures recorded as
   generator gaps, and the integrated function probes regenerated against
@@ -669,7 +669,7 @@ Includes the shape fixes drafted for 0.4.1, which was never released.
 - Enable SIMD128, improving measured browser performance by 2–11% with bitwise
   gradient parity. Runtime payload is 1.52 MB gzipped; native library is
   22.2 MB installed and wheel 7.8 MB. The
-  [density-pack experiment](docs/density-pack.md) records why side-loading
+  [density-pack experiment](notes/density-pack.md) records why side-loading
   uncommon densities was not retained.
 - Split density kernels across nine translation units to reduce compiler memory
   and build serialization.

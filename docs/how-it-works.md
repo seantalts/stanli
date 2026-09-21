@@ -381,7 +381,7 @@ Two models show the scale of the structural changes:
 - `election88_full` falls from 289,165 ops to 65. The September 11 snapshot
   records 4.16x CmdStan.
 
-The targeted A/B isolates one optimization. The [archived corpus rows](benchmark-2026-09-11.md#historical-posteriordb-model-results)
+The targeted A/B isolates one optimization. The [archived corpus rows](../notes/performance/2026-09-11-posteriordb-benchmark.md#historical-posteriordb-model-results)
 record those complete-system measurements. The [current benchmark](benchmarks.md)
 measures the current build separately.
 

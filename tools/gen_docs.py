@@ -6,8 +6,6 @@ Every headline number in README.md, python/README.md and the demo page
 is derived from recorded artifacts:
 
   docs/verification.json   written by tools/verify_sample.py
-  docs/corpus-bench.tsv    historical archive validation only
-  docs/benchmark-2026-09-11.md  historical archive validation only
   output/corpus-performance/  one current full-corpus benchmark
 
 The docs carry <!--gen:key-->...<!--/gen--> markers; this script replaces
@@ -152,56 +150,6 @@ def render_problems(path):
             f"literal pipes)"]
 
 
-def benchmark_table_problems():
-    """Require the hand-edited benchmark tables to match their generator."""
-    page = (REPO / "docs" / "benchmark-2026-09-11.md").read_text()
-    generated = subprocess.check_output(
-        [sys.executable, str(REPO / "tools" / "corpus_table.py"),
-         str(REPO / "docs" / "corpus-bench.tsv")], text=True)
-
-    def first_table(section):
-        table = []
-        for line in section.splitlines():
-            if line.startswith("|"):
-                table.append(line)
-            elif table:
-                break
-        return table
-
-    generated_main = first_table(generated)
-    generated_stuck = first_table(generated.split(
-        "| model | stanli gradient | CmdStan gradient | gradient speedup | "
-        "what stopped it |", 1)[1])
-    generated_stuck.insert(
-        0, "| model | stanli gradient | CmdStan gradient | gradient speedup | "
-           "what stopped it |")
-
-    full = page.split("## Historical posteriordb model results", 1)[1].split(
-        "### Runs that did not complete", 1)[0]
-    stuck = page.split("### Runs that did not complete", 1)[1].split(
-        "## Benchmark method", 1)[0]
-    problems = []
-    if first_table(full) != generated_main:
-        problems.append("docs/benchmark-2026-09-11.md: full corpus table is stale")
-    if first_table(stuck) != generated_stuck:
-        problems.append("docs/benchmark-2026-09-11.md: incomplete-runs table is stale")
-
-    representative = first_table(page.split("## Representative models", 1)[1])
-    generated_by_model = {
-        line.split("|")[1].strip(): [c.strip() for c in line.strip("|").split("|")]
-        for line in generated_main if line.startswith("| `")
-    }
-    for line in representative[2:]:
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        source = generated_by_model.get(cells[0])
-        expected = ([source[i] for i in (0, 1, 2, 3, 4, 6, 7)]
-                    if source else None)
-        if cells != expected:
-            problems.append(
-                f"docs/benchmark-2026-09-11.md: representative row {cells[0]} is stale")
-    return problems
-
-
 def main():
     check = "--check" in sys.argv
     stats = compute()
@@ -235,13 +183,6 @@ def main():
     if broken:
         print("the rendered page would be wrong:")
         for b in broken:
-            print(" ", b)
-        return 1
-    benchmark_broken = benchmark_table_problems()
-    if benchmark_broken:
-        print("benchmark tables disagree with docs/corpus-bench.tsv "
-              "(run tools/corpus_table.py):")
-        for b in benchmark_broken:
             print(" ", b)
         return 1
     if check and stale:

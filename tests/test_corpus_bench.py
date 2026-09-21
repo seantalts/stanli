@@ -420,7 +420,7 @@ class HistoricalResultsTests(unittest.TestCase):
 
     def test_results_page_matches_retained_measurements(self):
         rendered = self.render(self.report())
-        page = (REPO / "docs/benchmark-history.md").read_text()
+        page = (REPO / "notes/performance/benchmark-history.md").read_text()
         body = page.split("<!-- educational-results:start -->\n")[1].split(
             "<!-- educational-results:end -->")[0]
         self.assertEqual(rendered, body)
@@ -433,7 +433,7 @@ class HistoricalResultsTests(unittest.TestCase):
         result = io.StringIO()
         with contextlib.redirect_stdout(result):
             render_gradients(rows, col)
-        body = (REPO / "docs/benchmark-history.md").read_text().split(
+        body = (REPO / "notes/performance/benchmark-history.md").read_text().split(
             "<!-- educational-gradients:start -->\n")[1].split(
             "<!-- educational-gradients:end -->")[0]
         self.assertEqual(result.getvalue(), body)

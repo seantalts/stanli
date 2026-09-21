@@ -2,11 +2,11 @@
 
 These retained measurements describe their recorded revisions, inputs and protocols.
 They are not a new sweep of the unified corpus. New measurements use the
-[common benchmark runner and protocol](benchmark-protocol.md); source collection
+[common benchmark runner and protocol](../../docs/benchmark-protocol.md); source collection
 names are provenance and optional filters.
 
-Other retained runs include the [September 11 posteriordb tables](benchmark-2026-09-11.md#historical-posteriordb-measurements)
-and the [September 16, 199-fixture appendix](../output/teaching-performance/README.md).
+Other retained runs include the [September 11 posteriordb tables](2026-09-11-posteriordb-benchmark.md#historical-posteriordb-measurements)
+and the [September 16, 199-fixture appendix](../../output/teaching-performance/README.md).
 The latter retains its original collection-oriented report and all failures.
 Do not pool these runs into a single median or substitute later results into them.
 
@@ -76,18 +76,18 @@ Pareto's **1.072x** result has a modest margin: its median absolute deviation
 is 0.662 ms versus 0.445 ms for CmdStan. The experiment required Pareto
 at or above 1.0x and every other model at or above 0.5x. All 13 passed the
 three-point log-density/gradient/generated-output oracle and sampling checks.
-[Raw observations](../tests/educational/pareto-benchmark-results.json),
-[fixture provenance](../tests/educational/IMPORT_README.md), and the
-[detailed results](../tests/educational/RESULTS.md) retain methodology,
+[Raw observations](../../tests/educational/pareto-benchmark-results.json),
+[fixture provenance](../../tests/educational/IMPORT_README.md), and the
+[detailed results](../../tests/educational/RESULTS.md) retain methodology,
 uncertainty and correctness evidence. These end-to-end measurements are
-separate from the [archived posteriordb measurements](benchmark-2026-09-11.md).
+separate from the [archived posteriordb measurements](2026-09-11-posteriordb-benchmark.md).
 
 ## Fixed-point gradients: 14 September 2026
 
 A separate run through the standard corpus drivers measures warmed gradients
 at the same deterministic unconstrained point, with CmdStan `--O1`. These
 are arithmetic means from one timed loop per engine/model, following the
-[historical gradient method](benchmark-2026-09-11.md#benchmark-method); no sampling or build time enters the gradient ratio.
+[historical gradient method](2026-09-11-posteriordb-benchmark.md#benchmark-method); no sampling or build time enters the gradient ratio.
 
 <!-- educational-gradients:start -->
 | model | parameters | stanli gradient | CmdStan gradient | gradient speedup |
@@ -111,12 +111,12 @@ Pareto measures **0.64x** CmdStan gradient throughput at this point, while
 its separately measured complete run reaches **1.072x**. Complete-run time
 also includes preparation and output, and the samplers can take different
 NUTS trajectories and gradient counts. The gradient result is not a claim
-that every phase beats CmdStan. [Raw gradient observations](educational-bench-o1.tsv),
-[compiler identities](educational-bench-o1.manifest.json), and
-[driver/fixture hashes](educational-bench-o1.metadata.json) are retained.
+that every phase beats CmdStan. [Raw gradient observations](../../docs/educational-bench-o1.tsv),
+[compiler identities](../../docs/educational-bench-o1.manifest.json), and
+[driver/fixture hashes](../../docs/educational-bench-o1.metadata.json) are retained.
 
 The required-floor column records this experiment's policy. It is not a
-special performance gate for the current corpus. The [detailed investigation](../tests/educational/RESULTS.md)
+special performance gate for the current corpus. The [detailed investigation](../../tests/educational/RESULTS.md)
 retains revision comparisons, numerical checks and raw observations.
 
 To render the archived sampling table from its retained observations:

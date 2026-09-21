@@ -45,7 +45,7 @@ is retained separately and excluded from aggregation.
 The original run remains at `/tmp/stanli-teaching-perf/teaching-v6.tsv.run`.
 Earlier sweeps and their raw archives remain separately retained. Later GP,
 inverse-Gaussian, COM-Poisson and residual-model measurements are summarized in
-the [brms performance report](../../docs/brms-performance.md). They do not
+the [brms performance report](../../notes/performance/2026-09-16-brms-performance.md). They do not
 replace this frozen sweep's rows or change its counts.
 
 ## Reproduction

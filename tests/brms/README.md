@@ -94,7 +94,7 @@ and uses Stan Math autodiff replay for those operations. The original failure
 and reduced examples are recorded in [#376](https://github.com/seantalts/stanli/issues/376).
 
 Numerical coverage does not imply matching sampling performance. The
-[performance report](../../docs/brms-performance.md) retains the separately
+[performance report](../../notes/performance/2026-09-16-brms-performance.md) retains the separately
 measured performance gaps and sampler measurements.
 
 ## Regenerating and recording

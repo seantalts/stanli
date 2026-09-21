@@ -768,7 +768,7 @@ Interrupted partial evidence remains separately labeled inside it. Published
 text logs normalize whitespace; the archive retains their original bytes.
 
 The GP/inverse-Gaussian checks are summarized in the
-[brms report](../../brms-performance.md#earlier-gp-and-inverse-gaussian-results).
+[brms report](../../../notes/performance/2026-09-16-brms-performance.md#earlier-gp-and-inverse-gaussian-results).
 Raw records are retained outside the source tree. Applying the retained measured
 patch to its recorded baseline reconstructs exactly the two runtime files in
 commit `4db5dca2`; source equivalence and executable identity are included.

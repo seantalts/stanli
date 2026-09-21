@@ -211,7 +211,7 @@ compiler.
 compressed runtime payload (measured by stubbing every density kernel and
 relinking). Loading the uncommon densities on demand was built and removed;
 the measurements and the emscripten limitation that blocks it are in
-[docs/density-pack.md](docs/density-pack.md).
+[notes/density-pack.md](notes/density-pack.md).
 
 ## C++
 
@@ -446,7 +446,7 @@ Override the result with `STANLI_JOBS=12 ./tools/dev_setup.sh`, or raise the
 per-job budget for a heavier toolchain with `STANLI_JOB_MEMORY_GIB` (the local
 AddressSanitizer recipe uses 12 GiB).
 The measured scaling curve and CI baseline are in
-[docs/build-performance.md](docs/build-performance.md).
+[notes/performance/2026-08-28-build-performance.md](notes/performance/2026-08-28-build-performance.md).
 
 ## Releasing
 

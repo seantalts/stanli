@@ -9,7 +9,7 @@ CmdStan on this workload.
 All ratios below are **CmdStan / Stanli**: above one means Stanli is faster.
 The COM-Poisson confirmation uses runtime `cb58eb22`; the later result-copy
 comparison below uses `06fb1b90`. Both September 16, 2026 measurements supplement the
-[199-model teaching report](../output/teaching-performance/README.md).
+[199-model teaching report](../../output/teaching-performance/README.md).
 
 ## COM-Poisson sampling
 
@@ -175,7 +175,7 @@ does not establish time to equally accurate inference.
 
 ### GEV close to zero shape
 
-A separate 40-row stress fixture uses the [same GEV expression](../tests/brms/s2_gev.stan)
+A separate 40-row stress fixture uses the [same GEV expression](../../tests/brms/s2_gev.stan)
 with scale 1, responses `y[i] = (i - 20) / 8` and locations
 `mu[i] = 0.025 * sin(i + 1)`, for `i = 0, ..., 39`. The table compares the
 likelihood derivative with respect to shape against a 100-digit calculation
@@ -256,14 +256,14 @@ to either upstream implementation is applied.
   warnings, or skips. A separate instrumented replay check also passed all 316
   references; that instrumentation is absent from the measured executable.
 - No Stan Math source changes were introduced. The dependency setup's older
-  adjoint ODE initialization patch in [deps/fetch.sh](../deps/fetch.sh) predates
+  adjoint ODE initialization patch in [deps/fetch.sh](../../deps/fetch.sh) predates
   this work and is unrelated to these models.
 
-The [benchmark protocol](benchmark-protocol.md) documents the runner, numerical
+The [benchmark protocol](../../docs/benchmark-protocol.md) documents the runner, numerical
 gate, thread settings and retained failures. Current runs measure setup and warm gradients and
 report an explicit setup-plus-20,000-gradient time estimate; the sampling evidence
 above belongs to this historical experiment. For a fresh run, use
-`harnesses/corpus_bench.py` with `--corpus brms --filter s2_com_poisson`. [TESTING.md](../TESTING.md) covers build setup and validation:
+`harnesses/corpus_bench.py` with `--corpus brms --filter s2_com_poisson`. [TESTING.md](../../TESTING.md) covers build setup and validation:
 
 ```sh
 ctest --test-dir build-rel --output-on-failure

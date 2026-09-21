@@ -195,7 +195,7 @@ recovered. Conversion from a `stanli_fit` requires the sampling metadata saved
 by the current package. Set R's seed before conversion when reproducible
 permuted extraction is needed.
 
-See [stanfit compatibility notes](../docs/stanfit-compatibility.md) for checked
+See [stanfit compatibility notes](../notes/2026-09-16-stanfit-validation.md) for checked
 consumer versions, independently recorded RStan references, and CLI validation.
 
 ## How it is put together

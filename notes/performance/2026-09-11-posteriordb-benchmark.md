@@ -4,8 +4,8 @@ The benchmark runner uses the same model inventory as numerical testing.
 Application models from every source collection participate in the default
 `--corpus all` run; language-conformance fixtures remain numerical tests.
 Collection names identify provenance and can be used as optional filters.
-The [corpus inventory](corpus-status.md) describes numerical coverage, and the
-[benchmark protocol](benchmark-protocol.md) defines each timed boundary.
+The [corpus inventory](../../docs/corpus-status.md) describes numerical coverage, and the
+[benchmark protocol](../../docs/benchmark-protocol.md) defines each timed boundary.
 
 | Measurement | What it answers | Timed work |
 | --- | --- | --- |
@@ -34,9 +34,9 @@ M3 Ultra, macOS ARM64. Each row's speedup is the median of its within-pair ratio
 | `ch12_m12_4` | Rethinking | 24.921 us | 2813.958 us | 111.93x ± 2.99 MAD |
 | `s2_gev` | brms | 13.829 us | 4.994 us | 0.37x ± 0.01 MAD |
 
-[Raw paired summaries](../output/teaching-performance/benchmark-summary.tsv),
-[run identity](../output/teaching-performance/benchmark-manifest.json), and the
-[full appendix](../output/teaching-performance/README.md) retain all 199 fixtures,
+[Raw paired summaries](../../output/teaching-performance/benchmark-summary.tsv),
+[run identity](../../output/teaching-performance/benchmark-manifest.json), and the
+[full appendix](../../output/teaching-performance/README.md) retain all 199 fixtures,
 including failures. These examples do not define a corpus-wide speedup.
 
 ## Complete sampling
@@ -60,9 +60,9 @@ Of 199 fixtures, 193 completed in both engines and 187 had lower Stanli CLI
 medians. The experiment's practical target was CmdStan/Stanli ≥ 0.8:
 189 met it, four fell below it, and six lacked a complete comparison.
 Failed or capped seeds prevent an aggregate time; diagnostic flags remain
-visible. The [appendix](../output/teaching-performance/README.md) defines the
+visible. The [appendix](../../output/teaching-performance/README.md) defines the
 diagnostic screen and retains every model. Later fixes and their
-[separate measurements](brms-performance.md) do not change this frozen run.
+[separate measurements](2026-09-16-brms-performance.md) do not change this frozen run.
 
 ### Parallel chains
 
@@ -83,8 +83,8 @@ asserted in `tests/test_multichain.cpp` and `tests/test_python.py`.
 Preparation from existing MIR excludes source compilation and first evaluation.
 A first-fit estimate that adds measured CmdStan compilation to a CLI duration
 must be labeled as a sum of stages. It is not a directly timed cold-cache fit.
-The [September 16 appendix](../output/teaching-performance/README.md) reports
-these stages per model; a [separate fresh-R-session measurement](teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)
+The [September 16 appendix](../../output/teaching-performance/README.md) reports
+these stages per model; a [separate fresh-R-session measurement](../../docs/teaching.md#time-from-a-fresh-r-session-to-the-first-posterior)
 includes package startup and the first fit.
 
 The following example is from the September 11 posteriordb run described in
@@ -185,18 +185,18 @@ covariances reuse their forward output to compute parameter derivatives;
 Cholesky reuses its saved factor and Stan Math's pullback. This removes
 nested-tape replay from these backward passes. Active coordinates, other
 covariance families, and unsafe numerical cases retain the existing GP
-fallback. The [implementation report](superpowers/plans/2026-09-11-shared-data-native-pullbacks.md)
+fallback. The [implementation report](../../docs/superpowers/plans/2026-09-11-shared-data-native-pullbacks.md)
 records matched before/after measurements and numerical checks; GP gradients
 can differ by rounding and are not claimed to be bitwise identical.
 
 
 ## Numerical agreement
 
-The shared [corpus replay](../TESTING.md#comparison-with-cmdstan-on-complete-models)
+The shared [corpus replay](../../TESTING.md#comparison-with-cmdstan-on-complete-models)
 compares recorded CmdStan log densities, every gradient component and available
 constrained/generated outputs at three deterministic points. It preserves
 matching domain refusals and documented ill-conditioned exceptions. See the
-[complete inventory and numerical results](corpus-status.md) for coverage.
+[complete inventory and numerical results](../../docs/corpus-status.md) for coverage.
 Benchmark timing pairs also have their own fixed-point numerical gate.
 
 <a id="full-corpus"></a>
@@ -360,7 +360,7 @@ The tables above build CmdStan the way most users build it, with `stanc` and
 no extra flags. This section instead builds CmdStan with `stanc3` at the
 pinned commit `8e154ac34`, patched so `--O1` also runs `vectorize_loops`, the
 same pass stanli's own pipeline runs by default (see
-[`compiler/ocaml/stanli_pipeline.ml`](../compiler/ocaml/stanli_pipeline.ml)).
+[`compiler/ocaml/stanli_pipeline.ml`](../../compiler/ocaml/stanli_pipeline.ml)).
 It uses the same host and driver as the main table above. Only gradient and
 compile time are measured; there is no sampling column.
 
@@ -535,7 +535,7 @@ against the executor. The reported cells are warmed arithmetic means from one
 timed loop per model.
 
 For complete runs, `stanli_sample_s` in
-[`corpus-bench.tsv`](corpus-bench.tsv) measures the entire `stanli_run`
+[`corpus-bench.tsv`](../../docs/corpus-bench.tsv) measures the entire `stanli_run`
 process from Stan source to CSV. CmdStan's build and execution are timed
 separately, so the displayed total adds `cmdstan_build_s` and
 `cmdstan_sample_s`. The sampler rows are real wall-clock observations, not a
@@ -545,10 +545,10 @@ throughput independent of a particular NUTS trajectory.
 ## For developers
 
 The implementation story is intentionally elsewhere. For a conceptual
-overview, read [How stanli works](how-it-works.md). For graph re-rolling, lane
+overview, read [How stanli works](../../docs/how-it-works.md). For graph re-rolling, lane
 partitioning, generated adjoints, tape islands, the compiled ODE right-hand
 side, and their targeted A/B measurements, read
-[Graph optimizations and performance work](../runtime/src/OPTIMIZATIONS.md).
+[Graph optimizations and performance work](../../runtime/src/OPTIMIZATIONS.md).
 
 ## New measurements
 
@@ -569,7 +569,7 @@ python3 harnesses/ab_corpus.py deps/posteriordb
 The stanc3 optimizer and loop vectorizer table comes from a separate run
 against a patched stanc. The patch is a stanc3 checkout at the pinned commit
 with `vectorize_loops` enabled at `--O1` in its optimization level table; see
-[`compiler/ocaml/stanli_pipeline.ml`](../compiler/ocaml/stanli_pipeline.ml)
+[`compiler/ocaml/stanli_pipeline.ml`](../../compiler/ocaml/stanli_pipeline.ml)
 for where stanli's own pipeline does the same.
 
 ```sh

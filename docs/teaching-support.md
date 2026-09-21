@@ -74,7 +74,7 @@ Stanli; changing the execution engine does not fix an unidentified model.
 `as_stanfit()` constructs the fit in memory and provides native density,
 gradient, and transform methods through the retained model. RStan is optional;
 conversion compiles no C++ model. Read the [compatibility and persistence
-limits](stanfit-compatibility.md), including the Jacobian requirement, restoring
+limits](../notes/2026-09-16-stanfit-validation.md), including the Jacobian requirement, restoring
 live models after serialization, and unsupported RStan resampling operations.
 For argument-by-argument translations, including initialization and optimization,
 see [Coming from cmdstanr](from-cmdstanr.md).
