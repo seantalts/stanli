@@ -491,3 +491,21 @@ isolated Mac wheel passes the Python suite and BridgeStan transport check;
 the optional Python `bridgestan` wrapper was not installed in that check.
 Compiler objects are now saved immediately after a successful CI build, so a
 later test failure no longer discards the compilation cache needed by retries.
+
+The R optimization assertion made the same assumption about floating-point
+constant folding; it now checks dead-branch removal too. The complete R test
+directory passes against the current runtime, with one existing empty-test
+skip for unavailable subprocess compilers. A fresh install with tests also
+passes the ecosystem suite without skips and the bundled V8 compiler check,
+including gradients, sampling and generated quantities.
+
+The typed/legacy MIR check previously compared different optimization
+policies: stock O1 can introduce an FMA that Stanli deliberately avoids.
+The measurement probe can now write upstream's legacy serialization of the
+same optimized MIR as its portable output. All decoded fields and executable
+graphs still must match. Eight Schools, nested UDFs and `mother` pass this
+check; their portable bytes and the embedded compiler object are unchanged.
+Compiler unit tests pass. Eight Schools' portable encoding is 8,892 bytes
+versus 26,707 for legacy, with median decode times of 52,375 and 270,209 ns
+over 51 repetitions on this Mac. Both existing twofold cost gates pass;
+the five preparation samples per format remain descriptive measurements.

@@ -467,9 +467,10 @@ expression where pristine stanc3's host-width-dependent folds disagree. A
 focused worker harness proves the preferred custom
 import and the missing-artifact fallback import. The tested JavaScript
 artifacts are the ones consumed by the Pages and npm jobs. The manylinux gate
-then checks the typed-producer output with `test_mir_decode`,
-produced by the probe with `vectorize_loops` off since `stanc --O1` has no
-switch for it.
+then uses `test_mir_decode` to compare portable output with upstream's legacy
+serialization of the same optimized MIR. Both encodings use Stanli's
+arithmetic-preserving policy, so this tests serialization without introducing
+differences from stock stanc's numerical rewrites.
 Post-submit measurements use `bench_mir_decode`. For Eight Schools, compact v2
 must take no more than half the legacy decoder's
 median time across 51 repetitions and no more than half its raw bytes. Gzip and

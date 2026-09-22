@@ -48,13 +48,14 @@ test_that("the bundled JavaScript compiler applies O1", {
   mir <- stanli:::mir_from_js("
     parameters { real theta; }
     model {
-      target += 0.1 + 0.2;
-      theta ~ std_normal();
+      if (1) theta ~ normal(0, 1);
+      else theta ~ student_t(3, 0, 1);
     }")
 
+  # O1 removes the dead branch while preserving the live source arithmetic.
   payload <- portable_payload(mir)
-  folded <- writeBin(0.1 + 0.2, raw(), size = 8L, endian = "little")
-  expect_true(raw_contains(payload, folded))
+  expect_true(raw_contains(payload, "normal_lpdf"))
+  expect_false(raw_contains(payload, "student_t_lpdf"))
 })
 
 test_that("the V8 helper prefers portable output and never retries its errors", {
