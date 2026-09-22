@@ -72,12 +72,28 @@ void matvec_bwd(KernelCtx& ctx) {
     Eigen::Map<const Eigen::MatrixXd> Xm(ctx.in[0].data, rows, cols);
     Eigen::Map<const Eigen::VectorXd> doutm(ctx.out_adj_vec.data, rows);
     Eigen::Map<Eigen::VectorXd> adjm(ctx.in_adj[1].data, cols);
-    adjm.noalias() += Xm.transpose() * doutm;
+    // CmdStan's Matrix<var> exposes a scalar adjoint expression to Eigen.
+    // A plain double Map selects a different, packetized reduction; severe
+    // cancellation can turn that reassociation into thousands of ULP.
+    adjm +=
+        Xm.transpose() * doutm.unaryExpr([](double value) { return value; });
   }
 }
 
-// OP_SUM_VEC: scalar out = sum(x), ascending like Eigen's redux.
+// OP_SUM_VEC: scalar out = sum(x). Matrix<var> and std::vector use scalar
+// traversal. Data Eigen expressions retain their packet/offset grouping.
 void sum_vec_fwd(KernelCtx& ctx) {
+  if (ctx.in[0].len && ctx.variant) {
+    using Vec = Eigen::Matrix<double, Eigen::Dynamic, 1>;
+    const Eigen::Map<const Vec> input(ctx.in[0].data, ctx.in[0].len);
+    ctx.out.data[0] =
+        ctx.variant == 2
+            ? reduce_phased(ctx.in[0].data, ctx.in[0].len, ctx.idata[0],
+                            Eigen::internal::scalar_sum_op<double>())
+            : input.unaryExpr(Eigen::internal::core_cast_op<double, double>())
+                  .sum();
+    return;
+  }
   double acc = 0;
   for (int64_t i = 0; i < ctx.in[0].len; ++i) acc += ctx.in[0].data[i];
   ctx.out.data[0] = acc;

@@ -179,7 +179,13 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
     | Ok mir -> (
       let settings =
         { (Analysis_and_optimization.Optimize.level_optimizations O1) with
-          vectorize_loops= passes.vectorize_loops } in
+          vectorize_loops= passes.vectorize_loops
+        ; preserve_stability= true
+        ; partial_evaluation= false } in
+      (* Keep upstream's dataflow optimizations without rewriting the source
+         arithmetic into fused operations. The standalone partial evaluator
+         does not accept preserve_stability, so it must stay disabled too.
+         A one-ULP intermediate change can become hundreds in a gradient. *)
       let optimize candidate settings =
         Common.ICE.with_exn_message (fun () ->
             Analysis_and_optimization.Optimize.optimization_suite ~settings
@@ -191,7 +197,8 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
          procedures the portable encoder actually consumes. *)
       match
         Common.ICE.with_exn_message (fun () ->
-            Analysis_and_optimization.Optimize.function_inlining mir)
+            Analysis_and_optimization.Optimize.function_inlining
+              ~bind_repeated_scalar_args:true mir)
       with
       | Error internal -> (Error (Internal_error internal), [])
       | Ok inlined ->

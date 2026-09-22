@@ -159,6 +159,7 @@ struct FrameEncoder {
       }
       bool backward = false;
       switch (instruction.kind) {
+        case StreamInstr::AdjointCall:
         case StreamInstr::Call: {
           const auto& f = st.calls[instruction.index];
           const auto& n = *s.sites[f.site];
@@ -341,6 +342,7 @@ void check_frame_layout(LoopState& s, const Stream& st,
     const auto* y = b.words.data() + pc + 1;
     pc += header >> 8;
     switch (header & 255) {
+      case StreamInstr::AdjointCall:
       case StreamInstr::Call: {
         require(x[0] == y[0] && x[1] == y[1] && x[2] == y[2]);
         size_t at = 3;
@@ -624,6 +626,8 @@ struct FrameExecution {
       const uint64_t* w = code.words.data() + pc + 1;
       pc += header >> 8;
       switch (header & 255) {
+        case StreamInstr::AdjointCall:
+          break;
         case StreamInstr::Call:
           call(w, false);
           break;
@@ -674,6 +678,7 @@ struct FrameExecution {
       const auto at = code.backward[i];
       const uint64_t* w = code.words.data() + at + 1;
       switch (code.words[at] & 255) {
+        case StreamInstr::AdjointCall:
         case StreamInstr::Call:
           call(w, true);
           break;

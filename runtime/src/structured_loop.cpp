@@ -369,6 +369,16 @@ void classify(StructuredLoop& p) {
     if (n.kind != Node::KernelCall || n.storage == Node::InPlace) return;
     const Op& op = p.body.ops[n.op];
     if (is_effectful_op(op.opcode)) return;
+    if (n.active) {
+      // Cache only a stateless primal. Each source execution still gets its
+      // own adjoint and reverse call, preserving the order of contributions
+      // to shared inputs. Stateful/scratch-bearing kernels keep full calls.
+      const Kernel* k = find_kernel(op.opcode);
+      if (std::getenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS") ||
+          op.out2 >= 0 || op.dyn_lengths || n.kernel_scratch || !k ||
+          k->make_state || n.forward != k->forward || n.backward != k->backward)
+        return;
+    }
     for (int loop : enclosing) {
       bool varies = false;
       for (int k = 0; k < op.n_in; ++k) varies |= written[loop][op.in[k]] != 0;
@@ -1226,7 +1236,8 @@ struct StreamInstr {
     GuardFor,
     Tgt,
     Set,
-    Gather
+    Gather,
+    AdjointCall
   } kind;
   uint32_t index = 0;
 };
@@ -1398,21 +1409,11 @@ double* resolve_pooled_adjoint(double* slot, const StructuredLoop& p,
 }
 
 double reduce_target(std::vector<double>& work) {
-  size_t count = work.size();
-  while (count > 1) {
-    size_t next = 0;
-    for (size_t i = 0; i < count; i += 6) {
-      if (i + 1 == count) {
-        work[next++] = work[i];
-        continue;
-      }
-      double sum = 0;
-      for (size_t j = i; j < std::min(count, i + 6); ++j) sum += work[j];
-      work[next++] = sum;
-    }
-    count = next;
-  }
-  return count ? work[0] : 0.0;
+  // Stan's var accumulator reduces a prefix into the first element of its
+  // next buffer. Its scalar value expression therefore sums in source order.
+  double sum = 0.0;
+  for (double value : work) sum += value;
+  return sum;
 }
 
 struct LoopState : KernelState {
@@ -1792,9 +1793,10 @@ struct Execution {
                                       adj_offset, flags, n.site});
   }
 
-  void log_call(const Node& n, const Op& op, const KernelCtx& c) {
+  void log_call(const Node& n, const Op& op, const KernelCtx& c,
+                bool cached_primal = false) {
     if (!s.building) return;
-    if (gather_eligible(n, op)) {
+    if (!cached_primal && gather_eligible(n, op)) {
       log_gather(n, op, c);
       return;
     }
@@ -1820,7 +1822,8 @@ struct Execution {
     if (n.reuse_primal_output && s.reuse_primals)
       flags |= kFrozenCallReusePrimal;
     const uint32_t idx = static_cast<uint32_t>(st.calls.size());
-    st.program.push_back(StreamInstr{StreamInstr::Call, idx});
+    st.program.push_back(StreamInstr{
+        cached_primal ? StreamInstr::AdjointCall : StreamInstr::Call, idx});
     st.calls.push_back(FrozenCall{n.site, ptr_offset, adj_offset,
                                   static_cast<uint16_t>(op.n_in), flags});
   }
@@ -1881,6 +1884,25 @@ struct Execution {
     if (n.active && !s.building)
       s.records.push_back(Record{Record::Kernel, n.site, handles, out, -1});
     if (!folded) log_call(n, op, c);
+  }
+
+  void reuse_invariant_primal(const Node& n, const Op& op, KernelCtx& c) {
+    const int64_t cached = s.node_version[n.site];
+    c.out.data = s.versions[static_cast<size_t>(cached)].value;
+    c.scratch = nullptr;
+    int64_t handles = -1;
+    if (!s.building) {
+      handles = static_cast<int64_t>(s.handles.size());
+      for (int k = 0; k < op.n_in; ++k)
+        s.handles.push_back(s.bindings[op.in[k]]);
+    }
+    const bool folded = is_const(cached);
+    const int64_t out = make_version(
+        c.out.data, reserve_adjoint(p.body.slots[op.out].len), folded);
+    s.bindings[op.out] = out;
+    if (!s.building)
+      s.records.push_back(Record{Record::Kernel, n.site, handles, out, -1});
+    if (!folded) log_call(n, op, c, true);
   }
 
   void run_in_place(const Node& n, const Op& op, KernelCtx& c) {
@@ -2055,6 +2077,11 @@ struct Execution {
     KernelCtx& c = s.ctx[n.site];
     if (n.invariant_loop >= 0 &&
         s.node_generation[n.site] == s.loop_generation[n.invariant_loop]) {
+      if (n.active) {
+        reuse_invariant_primal(n, op, c);
+        ++s.effects;
+        return;
+      }
       s.bindings[op.out] = s.node_version[n.site];
       if (op.out2 >= 0) s.bindings[op.out2] = s.node_version2[n.site];
       return;
@@ -2837,6 +2864,7 @@ void freeze(LoopState& s) {
     bool live = false;
     switch (instr.kind) {
       case StreamInstr::Call:
+      case StreamInstr::AdjointCall:
         live = (st.calls[instr.index].flags & kFrozenCallActive) != 0;
         break;
       case StreamInstr::InPlace:
@@ -2907,12 +2935,23 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
   }
   for (const auto& instr : st.program) {
     switch (instr.kind) {
+      case StreamInstr::AdjointCall:
+        break;
       case StreamInstr::Call: {
         const FrozenCall& f = st.calls[instr.index];
         KernelCtx& c = s.ctx[f.site];
         double** ptrs = st.call_ptrs.data() + f.ptr_offset;
         c.n_in = f.n_in;
-        for (int k = 0; k < f.n_in; ++k) c.in[k].data = ptrs[k];
+        switch (f.n_in) {
+          case 2:
+            c.in[1].data = ptrs[1];
+            [[fallthrough]];
+          case 1:
+            c.in[0].data = ptrs[0];
+            break;
+          default:
+            for (int k = 0; k < f.n_in; ++k) c.in[k].data = ptrs[k];
+        }
         c.out.data = ptrs[f.n_in];
         int next = f.n_in + 1;
         if (f.flags & kFrozenCallHasOut2) c.out2.data = ptrs[next++];
@@ -3012,15 +3051,26 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
       case StreamInstr::Set:
       case StreamInstr::Tgt:
         break;
+      case StreamInstr::AdjointCall:
       case StreamInstr::Call: {
         const FrozenCall& f = st.calls[instr.index];
         KernelCtx& c = s.ctx[f.site];
         double** ptrs = st.call_ptrs.data() + f.ptr_offset;
         double* const* adj = st.call_adj.data() + f.adj_offset;
         c.n_in = f.n_in;
-        for (int k = 0; k < f.n_in; ++k) {
+        const auto bind_input = [&](int k) {
           c.in[k].data = ptrs[k];
           c.in_adj[k].data = resolve_pooled_adjoint(adj[k], p, ctx);
+        };
+        switch (f.n_in) {
+          case 2:
+            bind_input(1);
+            [[fallthrough]];
+          case 1:
+            bind_input(0);
+            break;
+          default:
+            for (int k = 0; k < f.n_in; ++k) bind_input(k);
         }
         c.out.data = ptrs[f.n_in];
         c.out_adj_vec.data = resolve_pooled_adjoint(adj[f.n_in], p, ctx);

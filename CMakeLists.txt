@@ -356,6 +356,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
   runtime/src/cse.cpp
+  runtime/src/gp_cov_fusion.cpp
   runtime/src/graph_print.cpp
   runtime/src/partition.cpp
   runtime/src/data.cpp

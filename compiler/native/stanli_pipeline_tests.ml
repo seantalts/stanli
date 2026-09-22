@@ -27,14 +27,18 @@ let compile_portable code =
   | {result= Ok encoded; _} -> encoded
   | {result= Error _; _} -> failwith "Stan source did not compile"
 
-let compile_upstream_o1 code =
+let compile_upstream_stable_o1 code =
   let flags =
     { Driver.Flags.default with
-      optimization_level= Analysis_and_optimization.Optimize.O1 } in
+      optimization_level= Analysis_and_optimization.Optimize.O0 } in
   match
     Driver.Entry.stan2mir "pass_selection_test" (`Code code) flags (fun _ -> ())
   with
-  | Ok mir -> mir
+  | Ok mir ->
+      let module O = Analysis_and_optimization.Optimize in
+      O.optimization_suite
+        ~settings:{ (O.level_optimizations O.O1) with
+          preserve_stability=true; partial_evaluation=false } mir
   | Error _ -> failwith "Stan source did not compile"
 
 let compile_upstream_o0 code =
@@ -87,6 +91,89 @@ let log_prob_has_vector_density mir =
   List.exists has_vector_density_stmt mir.Program.log_prob
 
 let require condition message = if not condition then failwith message
+
+let has_call name mir =
+  let rec expr (e : Expr.Typed.t) =
+    (match e.pattern with
+     | Expr.Pattern.FunApp (Fun_kind.StanLib (called, _, _), _) ->
+         String.equal called name
+     | _ -> false)
+    || Expr.Pattern.fold (fun found e -> found || expr e) false e.pattern in
+  let rec stmt (s : Stmt.Located.t) =
+    Stmt.Pattern.fold (fun found e -> found || expr e)
+      (fun found s -> found || stmt s) false s.pattern in
+  List.exists stmt mir.Program.log_prob
+
+let arithmetic_preservation_test () =
+  let implicit = compile {|
+    parameters { real x; real y; real z; }
+    model { target += x * y + z; }
+  |} in
+  let explicit = compile {|
+    parameters { real x; real y; real z; }
+    model { target += fma(x, y, z); }
+  |} in
+  require (not (has_call "fma" implicit))
+    "ordinary multiplication and addition acquired fused rounding";
+  require (has_call "fma" explicit)
+    "an explicit fused operation lost its source semantics"
+
+let repeated_scalar_argument_test () =
+  let mir = compile {|
+    functions {
+      real piecewise(real x, real weight) {
+        if (x < 1) return x * (weight - 1);
+        return x * weight;
+      }
+    }
+    parameters { real theta; real weight; }
+    model { target += piecewise(exp(theta), weight); }
+  |} in
+  let rec expr n (e : Expr.Typed.t) =
+    let n = match e.pattern with
+      | FunApp (Fun_kind.StanLib ("exp", _, _), _) -> n + 1
+      | _ -> n in
+    Expr.Pattern.fold expr n e.pattern in
+  let rec stmt n (s : Stmt.Located.t) =
+    Stmt.Pattern.fold expr stmt n s.pattern in
+  require (List.fold_left stmt 0 mir.Program.log_prob = 1)
+    "inlining duplicated a repeated scalar function argument"
+
+let inlining_effect_order_test () =
+  let inline source =
+    compile_upstream_o0 source
+    |> Analysis_and_optimization.Optimize.function_inlining
+         ~bind_repeated_scalar_args:true in
+  let rec expr events (e : Expr.Typed.t) =
+    let events = match e.pattern with
+      | FunApp (Fun_kind.StanLib ("normal_rng", _, _), _) ->
+          events @ ["normal_rng"]
+      | _ -> events in
+    Expr.Pattern.fold expr events e.pattern in
+  let rec stmt events (s : Stmt.Located.t) =
+    let events = match s.pattern with
+      | NRFunApp (Fun_kind.CompilerInternal FnPrint, _) -> events @ ["print"]
+      | _ -> events in
+    Stmt.Pattern.fold expr stmt events s.pattern in
+  let events mir = List.fold_left stmt [] mir.Program.generate_quantities in
+  let ordered = inline {|
+    functions {
+      real twice(real x, real y) { return x * x + y * y; }
+      real announce(real x) { print(x); return x; }
+    }
+    generated quantities {
+      real a = twice(normal_rng(0, 1), announce(2));
+      real b = twice(announce(3), normal_rng(4, 1));
+    }
+  |} in
+  require (events ordered = ["print"; "normal_rng"; "normal_rng"; "print"])
+    "inlining reordered argument effects";
+  let void = inline {|
+    functions { void twice(real x) { print(x, x); } }
+    generated quantities { twice(normal_rng(0, 1)); }
+  |} in
+  require (events void = ["normal_rng"; "print"])
+    "inlining duplicated a repeated argument of a void function"
 
 let matching_loop =
   {|
@@ -182,6 +269,9 @@ let () =
   ignore (compile "parameters { real x; } model { x ~ normal(0, 1); }");
   require (materialized () > 0 && materialized () < List.length builtin_sets / 2)
     "simple compilation forced unrelated built-in overloads";
+  arithmetic_preservation_test ();
+  repeated_scalar_argument_test ();
+  inlining_effect_order_test ();
   List.iter (fun code ->
       match (Stanli_pipeline.compile_mir_with_passes
         ~passes:Stanli_pipeline.default_pass_selection ~model_name:"undefined" code).result with
@@ -258,10 +348,10 @@ let () =
     (fun (name, code) ->
       let pass_off_bytes =
         encode (compile ~passes:(passes false) ~prune_unused_sections:false code) in
-      let upstream_o1_bytes = encode (compile_upstream_o1 code) in
+      let upstream_o1_bytes = encode (compile_upstream_stable_o1 code) in
       require
         (String.equal pass_off_bytes upstream_o1_bytes)
-        ("pass-off output differs from upstream O1 for " ^ name);
+        ("pass-off output differs from upstream stable O1 for " ^ name);
       let pass_on_bytes =
         encode (compile ~passes:(passes true) code) in
       require

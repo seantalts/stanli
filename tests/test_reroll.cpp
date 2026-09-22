@@ -8,6 +8,7 @@
 #include <stanli/inplace.hpp>
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/partition.hpp>
 #include <stanli/reroll.hpp>
 
 #include "../runtime/src/reroll_profile.hpp"
@@ -2213,10 +2214,11 @@ static void test_e2e_fixtures() {
     const char* sexp;
     const char* json;
     const char* name;
+    size_t max_ops;
   };
   const Case cases[] = {
-      {"tests/fixtures/rloop.tmir.sexp", rdata, "rloop"},
-      {"tests/fixtures/arloop.tmir.sexp", adata, "arloop"},
+      {"tests/fixtures/rloop.tmir.sexp", rdata, "rloop", 7},
+      {"tests/fixtures/arloop.tmir.sexp", adata, "arloop", 10},
   };
   for (const Case& c : cases) {
     size_t ops_unrolled = 0, ops_rerolled = 0;
@@ -2233,8 +2235,8 @@ static void test_e2e_fixtures() {
       expect_close((std::string(c.name) + " v" + std::to_string(i)).c_str(),
                    got[i], want[i]);
     std::printf("%s: %zu ops -> %zu ops\n", c.name, ops_unrolled, ops_rerolled);
-    expect((std::string(c.name) + " shrinks 4x").c_str(),
-           ops_rerolled * 4 <= ops_unrolled);
+    expect((std::string(c.name) + " preserves compact loop").c_str(),
+           ops_rerolled <= c.max_ops && ops_rerolled < ops_unrolled);
   }
 }
 
@@ -2667,7 +2669,39 @@ static void test_lane_plan_boundary() {
   }
 }
 
+static void test_shared_gradient_source_order() {
+  for (bool partition : {false, true}) {
+    Graph g;
+    Fills fills;
+    const int parameter = g.add_slot(1, true);
+    std::vector<int> terms;
+    stan::math::nested_rev_autodiff scope;
+    stan::math::var x = fill_at(0), total = 0;
+    const double weights[] = {1e16, -1e16, 1.0};
+    for (int lane = 0; lane < 12; ++lane) {
+      const double weight = weights[lane % 3];
+      const int coefficient = g.add_slot(1, false);
+      fills.emplace_back(coefficient, std::vector<double>{weight});
+      const int product = g.add_slot(1, false), term = g.add_slot(1, false);
+      g.add_op(OP_MUL, {parameter, coefficient}, product);
+      g.add_op(OP_ADD, {product, parameter}, term);
+      terms.push_back(term);
+      total += x * weight + x;
+    }
+    stan::math::grad(total.vi_);
+    if (partition)
+      partition_lanes(g, fills, terms, {});
+    else
+      reroll(g, fills, terms, {});
+    expect("shared gradient keeps source operations", g.ops.size() == 24);
+    reduce_into_result(g, terms);
+    const auto got = run_grad(std::move(g), fills);
+    expect("shared gradient preserves cancellation", got[1] == x.adj());
+  }
+}
+
 int main() {
+  test_shared_gradient_source_order();
   test_opaque_payload_not_hoisted();
   test_proven_lane_pricing();
   test_lane_plan_boundary();

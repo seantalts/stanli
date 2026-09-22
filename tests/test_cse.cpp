@@ -1,10 +1,11 @@
-// Common-subexpression elimination: identical pure ops collapse to one, and
-// the values the graph computes do not move.
+// Common-subexpression elimination shares pure values while retaining each
+// active source pullback and its floating-point accumulation order.
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/cse.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stan/math.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -49,7 +50,7 @@ static int count_opcode(const Graph& g, uint16_t oc) {
   return n;
 }
 
-// exp(p) computed twice, both results consumed.
+// exp(p) computed once, but both source pullbacks remain independent.
 static void test_merges_identical_ops() {
   Graph g;
   Fills fills;
@@ -66,9 +67,18 @@ static void test_merges_identical_ops() {
 
   std::vector<int> terms;
   const CseStats st = cse(g, fills, terms, {});
-  expect("one op removed", st.ops_removed == 1);
-  expect("one EXP left", count_opcode(g, OP_EXP) == 1);
-  expect("the use is rewritten", g.ops[1].in[0] == e1 && g.ops[1].in[1] == e1);
+  expect("one primal shared", st.primals_shared == 1 && st.ops_removed == 0);
+  expect("two EXP pullbacks", count_opcode(g, OP_EXP) == 2);
+  expect("adjoint identities retained",
+         g.ops[2].in[0] == e1 && g.ops[2].in[1] == e2);
+  Executor storage(g);
+  expect("shared value storage",
+         storage.value_ptr(e1) == storage.value_ptr(e2));
+  Executor clone(storage);
+  expect("clone retains value sharing",
+         clone.value_ptr(e1) == clone.value_ptr(e2));
+  expect("clone has independent storage",
+         clone.value_ptr(e1) != storage.value_ptr(e1));
   expect_same_values("value and gradient unchanged",
                      run_grad(std::move(g), fills), want);
 }
@@ -84,9 +94,9 @@ static void test_rewrites_target_terms() {
   g.add_op(OP_EXP, {p}, t2);
   std::vector<int> terms{t1, t2};
   const CseStats st = cse(g, fills, terms, {});
-  expect("duplicate term op removed", st.ops_removed == 1);
-  expect("both terms name the survivor",
-         terms.size() == 2 && terms[0] == t1 && terms[1] == t1);
+  expect("duplicate term primal shared", st.primals_shared == 1);
+  expect("terms keep separate adjoints",
+         terms.size() == 2 && terms[0] == t1 && terms[1] == t2);
 }
 
 // Effects are graph semantics: two prints print twice.
@@ -197,8 +207,8 @@ static void test_chain_dedup() {
 
   std::vector<int> terms;
   const CseStats st = cse(g, fills, terms, {});
-  expect("both levels collapse", st.ops_removed == 2);
-  expect("three ops left", g.ops.size() == 3);
+  expect("both levels share primals", st.primals_shared == 2);
+  expect("all pullbacks remain", g.ops.size() == 5);
   expect_same_values("chain case unchanged", run_grad(std::move(g), fills),
                      want);
 }
@@ -234,6 +244,54 @@ static void test_env_disable() {
   expect("disabled by env", st.ops_removed == 0 && g.ops.size() == 3);
 }
 
+static void test_gradient_accumulation_order() {
+  // Merging the three identical multiplications changes a cancellation from
+  // repeated scaled contributions into one scaled subtotal. Their values
+  // may share storage; their adjoints must not share an accumulator.
+  for (double input : {0.3, -0.71, 1.13}) {
+    Graph g;
+    Fills fills;
+    const int p = g.add_slot(1, true), c = g.add_slot(1, false);
+    fills.emplace_back(c, std::vector<double>{1.1});
+    const double weights[] = {1e16, -1e16, 1.0};
+    std::vector<int> terms;
+    for (double weight : weights) {
+      const int w = g.add_slot(1, false);
+      fills.emplace_back(w, std::vector<double>{weight});
+      const int product = g.add_slot(1, false), term = g.add_slot(1, false);
+      g.add_op(OP_MUL, {p, c}, product);
+      g.add_op(OP_MUL, {product, w}, term);
+      terms.push_back(term);
+    }
+    const int result = g.add_slot(1, false);
+    g.add_op(OP_ADD_N, {terms[0], terms[1], terms[2]}, result);
+    g.result_slot = result;
+    expect("cancellation primals shared",
+           cse(g, fills, terms, {}).primals_shared == 2);
+    Executor ex(std::move(g));
+    for (const auto& fill : fills)
+      ex.set_values(fill.first, fill.second.data(), fill.second.size());
+    ex.params_data()[0] = input;
+    stan::math::nested_rev_autodiff scope;
+    stan::math::var x = input, sum = 0;
+    for (double weight : weights) sum += (x * 1.1) * weight;
+    stan::math::grad(sum.vi_);
+    double gradient;
+    expect("cancellation value exact", ex.gradient(&gradient) == sum.val());
+    expect("cancellation gradient exact", gradient == x.adj());
+    ex.gradient(&gradient);
+    expect("repeated gradient exact", gradient == x.adj());
+    ex.set_profile(true);
+    expect("profiled cached value exact", ex.gradient(&gradient) == sum.val());
+    expect("profiled cached gradient exact", gradient == x.adj());
+    expect("cached profile is populated", !ex.profile_report().empty());
+    ex.set_profile(false);
+    Executor clone(ex);
+    expect("cloned cached value exact", clone.gradient(&gradient) == sum.val());
+    expect("cloned cached gradient exact", gradient == x.adj());
+  }
+}
+
 int main() {
   {  // kernels register through the first Executor
     Graph g;
@@ -252,6 +310,7 @@ int main() {
   test_chain_dedup();
   test_keeps_roots();
   test_env_disable();
+  test_gradient_accumulation_order();
   if (failures == 0) std::printf("test_cse OK\n");
   return failures == 0 ? 0 : 1;
 }

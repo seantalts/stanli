@@ -1,6 +1,7 @@
 #include "lower_internal.hpp"
 
 #include "build_id.hpp"
+#include <stanli/gp_cov_fusion.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -588,25 +589,20 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
 }
 namespace {
 
-// The grouping loop behind reduce_terms: chunks of up to 6 terms fold
-// through one ADD_N each until one remains. emit_chunk does the actual op
-// emission.
+// Stan's var accumulator folds in source order (its 128-entry buffer carries
+// each reduced prefix into the next buffer). Carry that same prefix through
+// our six-input ADD_N calls; independent chunks would reassociate the sum.
 template <typename EmitChunk>
 int reduce_terms_grouped(std::vector<int> terms, EmitChunk emit_chunk) {
-  while (terms.size() > 1) {
-    std::vector<int> next;
-    for (size_t i = 0; i < terms.size(); i += 6) {
-      const size_t n = std::min<size_t>(6, terms.size() - i);
-      if (n == 1) {
-        next.push_back(terms[i]);
-        continue;
-      }
-      std::vector<int> chunk(terms.begin() + i, terms.begin() + i + n);
-      next.push_back(emit_chunk(chunk));
-    }
-    terms = std::move(next);
+  if (terms.empty()) return -1;
+  int prefix = terms[0];
+  for (size_t i = 1; i < terms.size(); i += 5) {
+    const size_t end = std::min(i + 5, terms.size());
+    std::vector<int> chunk{prefix};
+    chunk.insert(chunk.end(), terms.begin() + i, terms.begin() + end);
+    prefix = emit_chunk(chunk);
   }
-  return terms.empty() ? -1 : terms[0];
+  return prefix;
 }
 
 }  // namespace
@@ -647,6 +643,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   std::vector<int> update_roots = roots;
   update_roots.insert(update_roots.end(), target_terms.begin(),
                       target_terms.end());
+  fuse_gp_diagonal_updates(g, update_roots);
   const auto inplace_time = prep.start();
   const int inplace =
       make_inplace_updates(g, update_roots);  // off under STANLI_NO_INPLACE

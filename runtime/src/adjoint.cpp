@@ -435,6 +435,8 @@ bool gen_adjoint(IslandProg& p) {
   };
 
   int n_regs = n0 + nblocks;
+  const bool elide_private_clears =
+      std::getenv("STANLI_NO_PRIVATE_ADJOINT_CLEARS") == nullptr;
   std::vector<double> pool;
   std::vector<int> pc_map(orig.size() + 1), adj_starts(nblocks + 1);
   int flag_one = 0;
@@ -572,6 +574,20 @@ bool gen_adjoint(IslandProg& p) {
     // `dst` in the numbering it had before compaction.
     if (wl == 0) continue;
 
+    // These rules only clear an adjoint. At a private register's first
+    // definition there is no earlier value to differentiate, so that final
+    // clear has no reader. Live-ins and shared cells retain their clears;
+    // each invocation starts with a zeroed adjoint file.
+    const bool only_clear = spec.has(kProgramNoInputs) ||
+                            (I.code >= Program::GT && I.code <= Program::NE) ||
+                            I.code == Program::EXTREMA_RANGE;
+    if (elide_private_clears && only_clear) {
+      bool private_first = true;
+      for (int k = 0; k < wl; ++k)
+        private_first &= first_write[I.dst + k] == i && !no_alias[I.dst + k];
+      if (private_first) continue;
+    }
+
     // An output value is needed as this instruction LEFT it, so only a
     // later overwrite can lose it.
     if (spec.has(kProgramSaveOut)) A.vd = save_range(I.dst, wl, i);
@@ -618,6 +634,11 @@ bool gen_adjoint(IslandProg& p) {
   fwd.calls = std::move(bound_calls);
   fwd.n_regs = n_regs;
   p.adj = std::move(ap);
+  for (auto& li : p.ins) {
+    li.immutable = true;
+    for (int k = 0; k < li.len; ++k)
+      li.immutable &= first_write[(size_t)(li.reg + k)] < 0;
+  }
   return true;
 }
 

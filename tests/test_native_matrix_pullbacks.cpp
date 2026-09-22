@@ -1,5 +1,6 @@
 // Differential checks against the previously used nested Stan Math tape.
 #include <stanli/graph.hpp>
+#include <stanli/gp_cov_fusion.hpp>
 #include <stanli/optable.hpp>
 #include <stan/math.hpp>
 #include <cmath>
@@ -45,15 +46,17 @@ static void expect_ulp(const std::string& what, double got, double want,
   }
 }
 static void gp(int n, int d, int active, uint8_t variant, bool repeated,
-               double rho = 0.7, double sigma = 1.3, double seed_scale = 0.7) {
+               double rho = 0.7, double sigma = 1.3, double seed_scale = 0.7,
+               bool diagonal_update = false) {
   using namespace stanli;
   std::vector<double> x(n * d), xadj(n * d, 0.125), out(n * n), seed(n * n);
   double sadj = 0.125, radj = 0.125;
+  double jitter = 1e-12, jadj = 0.125;
   for (int i = 0; i < n * d; ++i) x[i] = repeated ? 0.2 : std::sin(0.31 * i);
   for (int i = 0; i < n * n; ++i) seed[i] = std::cos(0.43 * i) * seed_scale;
   KernelCtx ctx;
   int dims[] = {n, d};
-  ctx.n_in = 3;
+  ctx.n_in = diagonal_update ? 4 : 3;
   ctx.idata = dims;
   ctx.n_idata = 2;
   ctx.variant = variant;
@@ -63,6 +66,8 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
   ctx.in_adj[0] = {active & 1 ? xadj.data() : nullptr, n * d};
   ctx.in_adj[1] = {active & 2 ? &sadj : nullptr, 1};
   ctx.in_adj[2] = {active & 4 ? &radj : nullptr, 1};
+  ctx.in[3] = {&jitter, 1};
+  ctx.in_adj[3] = {active & 8 ? &jadj : nullptr, 1};
   ctx.out = {out.data(), n * n};
   ctx.out_adj_vec = {seed.data(), n * n};
   const Kernel& k = *find_kernel(OP_GP_COV);
@@ -103,6 +108,9 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
       for (int j = 0; j < d; ++j) fixed[i][j] = x[i * d + j];
     cov = covariance(fixed);
   }
+  Var j = jitter;
+  if (diagonal_update)
+    for (int i = 0; i < n; ++i) cov(i, i) += j;
   Var objective = stan::math::sum(
       stan::math::elt_multiply(cov, Eigen::Map<Mat>(seed.data(), n, n)));
   stan::math::grad(objective.vi_);
@@ -121,6 +129,44 @@ static void gp(int n, int d, int active, uint8_t variant, bool repeated,
     check(sadj, 0.125 + a.adj(), ("GP sigma" + context).c_str(), exact);
   if (active & 4)
     check(radj, 0.125 + r.adj(), ("GP rho" + context).c_str(), exact);
+  if (diagonal_update && (active & 8))
+    check(jadj, 0.125 + j.adj(), "GP diagonal increment", true);
+}
+
+static void gp_diagonal_fusion_proof() {
+  using namespace stanli;
+  for (int refusal = 0; refusal < 5; ++refusal) {
+    Graph g;
+    const int n = 3;
+    const int x = g.add_slot(n, false), sigma = g.add_slot(1, true);
+    const int rho = g.add_slot(1, true), jitter = g.add_slot(1, false);
+    const int covariance = g.add_slot(n * n, false);
+    g.add_op(OP_GP_COV, {x, sigma, rho}, covariance, {n, 1});
+    g.ops.back().variant = kGpMatern32;
+    int current = covariance, interior = -1;
+    for (int i = 0; i < n; ++i) {
+      const int index = refusal == 3 ? (n - 1 - i) * (n + 1) : i * (n + 1);
+      const int read = g.add_slot(1, false), add = g.add_slot(1, false);
+      const int write = g.add_slot(n * n, false);
+      g.add_op(OP_INDEX, {current}, read, {index});
+      g.add_op(refusal == 4 ? OP_SUB : OP_ADD, {read, jitter}, add);
+      g.add_op(OP_SET_INDEX, {current, add}, write, {index});
+      if (i == 0) interior = add;
+      current = write;
+    }
+    g.result_slot = current;
+    std::vector<int> roots;
+    if (refusal == 1) roots.push_back(covariance);
+    if (refusal == 2) roots.push_back(interior);
+    const int fused = fuse_gp_diagonal_updates(g, roots);
+    check(fused, refusal == 0 ? 1 : 0, "GP fusion proof", true);
+    if (!refusal) {
+      check(g.ops.size(), 1, "GP fused op count", true);
+      check(g.ops[0].n_in, 4, "GP fused scalar input", true);
+      check(g.ops[0].out, current, "GP output identity", true);
+      check(g.slots[covariance].len, 0, "GP releases intermediate", true);
+    }
+  }
 }
 static void chol(int n) {
   using namespace stanli;
@@ -522,6 +568,12 @@ int main(int argc, char** argv) {
           gp(n, d, mask, variant, false);
           gp(n, d, mask, variant, true);
         }
+  gp_diagonal_fusion_proof();
+  for (auto variant :
+       {stanli::kGpMatern32, stanli::kGpMatern52, stanli::kGpExponential})
+    for (int n : {1, 7, 30})
+      for (int active : {0, 2, 4, 6, 7, 8, 14, 15})
+        gp(n, 2, active, variant, false, .7, 1.3, .7, true);
   gp(4, 2, 7, stanli::kGpExpQuad, false, 1e-110);
   gp(4, 2, 7, stanli::kGpExpQuad, false, 1e110);
   for (double sigma : {1e-155, 1e-100, 1e100, 1e150})

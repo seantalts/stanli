@@ -1,0 +1,165 @@
+diff --git a/src/analysis_and_optimization/Optimize.ml b/src/analysis_and_optimization/Optimize.ml
+index f60845bd..f22c02c4 100644
+--- a/src/analysis_and_optimization/Optimize.ml
++++ b/src/analysis_and_optimization/Optimize.ml
+@@ -254,6 +254,32 @@ let compute_suffix_and_name propto suffix fname =
+   | FnLpmf _ -> (FnLpmf false, fname)
+   | _ -> (suffix, fname)
+
++(* A function evaluates each argument once. Substituting an expression at every
++   use repeats its computation, autodiff nodes, and possible effects. *)
++let bind_repeated_scalar_actual fname name body
++    (decls, stmts, (e : Expr.Typed.t)) =
++  let rec uses_expr n (e : Expr.Typed.t) =
++    let n =
++      match e.pattern with Var v when String.equal v name -> n + 1 | _ -> n
++    in
++    Expr.Pattern.fold uses_expr n e.pattern in
++  let rec uses_stmt n (s : Stmt.Located.t) =
++    Stmt.Pattern.fold uses_expr uses_stmt n s.pattern in
++  let simple = match e.pattern with Var _ | Lit _ -> true | _ -> false in
++  if simple || e.meta.type_ <> UnsizedType.UReal || uses_stmt 0 body < 2 then
++    (decls, stmts, e)
++  else
++    let temp = gen_inline_var fname (name ^ "_arg") in
++    ( decls
++      @ [ Stmt.Pattern.Decl
++            { decl_adtype= e.meta.adlevel
++            ; decl_type= Type.Sized SizedType.SReal
++            ; decl_id= temp
++            ; initialize= Uninit } ]
++    , stmts
++      @ [Stmt.Pattern.Assignment (Stmt.Helpers.lvariable temp, e.meta.type_, e)]
++    , {e with pattern= Var temp} )
++
+ (* Triple is (declaration list, statement list, return expression) *)
+ let rec inline_function_expression propto adt fim (Expr.{pattern; _} as e) =
+   match pattern with
+@@ -263,8 +289,7 @@ let rec inline_function_expression propto adt fim (Expr.{pattern; _} as e) =
+       let d, sl, expr' = inline_function_expression propto adt fim expr in
+       (d, sl, {e with pattern= Promotion (expr', ut, ad)})
+   | FunApp (kind, es) -> (
+-      let d_list, s_list, es =
+-        inline_list (inline_function_expression propto adt fim) es in
++      let d_list, s_list, es = inline_function_args propto adt fim kind es in
+       match kind with
+       | CompilerInternal _ ->
+           (d_list, s_list, {e with pattern= FunApp (kind, es)})
+@@ -283,7 +308,7 @@ let rec inline_function_expression propto adt fim (Expr.{pattern; _} as e) =
+               , { e with
+                   pattern= FunApp (Fun_kind.UserDefined (fname, suffix), es) }
+               )
+-          | Some (rt, args, body) ->
++          | Some (rt, args, body, _) ->
+               let inline_return_name = gen_inline_var fname "return" in
+               let handle =
+                 handle_early_returns fname (Some inline_return_name) in
+@@ -357,6 +382,22 @@ let rec inline_function_expression propto adt fim (Expr.{pattern; _} as e) =
+               )) ] in
+       (dl1 @ dl2, sl1 @ sl2, {e with pattern= EOr (e1, e2)})
+
++and inline_function_args propto adt fim kind es =
++  let inline = inline_function_expression propto adt fim in
++  match kind with
++  | UserDefined (fname, suffix) -> (
++      let _, name = compute_suffix_and_name propto suffix fname in
++      match String.Map.find_opt name fim with
++      | Some (_, args, body, true) ->
++          (* Bind each actual alongside its own inlined statements, retaining
++             inline_list's right-to-left argument evaluation order. *)
++          inline_list
++            (fun (name, e) ->
++              bind_repeated_scalar_actual fname name body (inline e))
++            (List.combine args es)
++      | Some _ | None -> inline_list inline es)
++  | _ -> inline_list inline es
++
+ and inline_function_index propto adt fim i =
+   match i with
+   | All -> ([], [], All)
+@@ -402,15 +443,14 @@ let rec inline_function_statement propto adt fim Stmt.{pattern; meta} =
+             slist_concat_no_loc (d @ s) (JacobianPE e)
+         | NRFunApp (kind, exprs) ->
+             let d_list, s_list, es =
+-              inline_list (inline_function_expression propto adt fim) exprs
+-            in
++              inline_function_args propto adt fim kind exprs in
+             slist_concat_no_loc (d_list @ s_list)
+               (match kind with
+               | CompilerInternal _ | StanLib _ -> NRFunApp (kind, es)
+               | UserDefined (s, _) -> (
+                   match String.Map.find_opt s fim with
+                   | None -> NRFunApp (kind, es)
+-                  | Some (_, args, b) ->
++                  | Some (_, args, b, _) ->
+                       let b = replace_fresh_local_vars s b in
+                       let b = handle_early_returns s None b in
+                       (subst_args_stmt args es
+@@ -480,7 +520,7 @@ let rec inline_function_statement propto adt fim Stmt.{pattern; meta} =
+         | Continue -> Continue)
+     ; meta }
+
+-let create_function_inline_map adt l =
++let create_function_inline_map ~bind_repeated_scalar_args adt l =
+   let f accum Program.{fdname; fdargs; fdbody; fdrt; _} =
+     match fdbody with
+     | None -> accum
+@@ -490,7 +530,8 @@ let create_function_inline_map adt l =
+               ~f:(fun x -> Type.Unsized x)
+               (UnsizedType.returntype_to_type_opt fdrt)
+           , List.map ~f:(fun (_, name, _) -> name) fdargs
+-          , inline_function_statement propto adt accum fdbody ) in
++          , inline_function_statement propto adt accum fdbody
++          , bind_repeated_scalar_args ) in
+         match Fun_kind.with_unnormalized_suffix fdname with
+         | None ->
+             let data = create_data true in
+@@ -503,7 +544,8 @@ let create_function_inline_map adt l =
+             String.Map.union accum m ~f:(fun _ v1 _ -> Some v1)) in
+   List.fold_left l ~init:String.Map.empty ~f
+
+-let function_inlining (mir : Program.Typed.t) =
++let function_inlining ?(bind_repeated_scalar_args = false)
++    (mir : Program.Typed.t) =
+   (* We add only the functions with a single definition to the inline map.
+      Overloaded functions cannot be inlined. *)
+   let can_inline =
+@@ -515,10 +557,11 @@ let function_inlining (mir : Program.Typed.t) =
+     List.filter mir.functions_block ~f:(fun Program.{fdname; _} ->
+         String.Map.find fdname can_inline) in
+   let dataonly_inline_map =
+-    create_function_inline_map UnsizedType.DataOnly inlineable_functions in
++    create_function_inline_map ~bind_repeated_scalar_args UnsizedType.DataOnly
++      inlineable_functions in
+   let autodiff_inline_map =
+-    create_function_inline_map UnsizedType.AutoDiffable inlineable_functions
+-  in
++    create_function_inline_map ~bind_repeated_scalar_args
++      UnsizedType.AutoDiffable inlineable_functions in
+   let dataonly_inline_function_statements =
+     List.map
+       ~f:
+@@ -1560,7 +1603,8 @@ let optimization_suite ?(settings = all_optimizations) mir =
+       (* Book section A *)
+       (* Book section B *)
+       (* Book: Procedure integration *)
+-      (function_inlining, settings.function_inlining)
++      ( function_inlining ~bind_repeated_scalar_args:false
++      , settings.function_inlining )
+       (* Book: Sparse conditional constant propagation *)
+     ; (constant_propagation ~preserve_stability, settings.constant_propagation)
+       (* Book section C *)
+diff --git a/src/analysis_and_optimization/Optimize.mli b/src/analysis_and_optimization/Optimize.mli
+index af42a9cf..663224df 100644
+--- a/src/analysis_and_optimization/Optimize.mli
++++ b/src/analysis_and_optimization/Optimize.mli
+@@ -1,7 +1,8 @@
+ (* Code for optimization passes on the MIR *)
+ open Middle
+
+-val function_inlining : Program.Typed.t -> Program.Typed.t
++val function_inlining :
++  ?bind_repeated_scalar_args:bool -> Program.Typed.t -> Program.Typed.t
+ (** Inline all functions except for ones with forward declarations (e.g.
+     recursive functions, mutually recursive functions, and functions without a
+     definition *)

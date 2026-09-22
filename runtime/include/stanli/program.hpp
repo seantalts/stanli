@@ -377,6 +377,9 @@ bool sink_program_fills(Program& p);
 // register compaction, this local proof is also valid in programs with loops.
 bool elide_program_dead_constants(Program& p);
 
+// Acyclic CFG version, retaining arithmetic and refusing unmodelled spans.
+bool elide_acyclic_program_constants(Program& p);
+
 // Prove definite initialization at every read and exit across the CFG. CALL
 // scratch is private during var replay and therefore is not a register write.
 bool program_initializes_reads(const Program& p,

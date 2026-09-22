@@ -16,14 +16,16 @@ type 'a compilation =
   ; warnings: Frontend.Warnings.t list
   ; diagnostics: diagnostic list }
 
-(** Source-level MIR passes that stanli may add to upstream's O1 policy. *)
+(** Source-level MIR passes added to upstream's stability-preserving O1 policy. *)
 type pass_selection =
   { vectorize_loops: bool
   ; max_o1_statement_depth_cost: int option }
 
 val default_pass_selection : pass_selection
-(** The shipping selection: upstream O1 plus loop vectorization, guarded by a
-    deterministic pre-dataflow structural budget. *)
+(** The shipping selection: upstream O1 with stability preservation, without
+    partial evaluation, plus loop vectorization and one-time binding of
+    repeated scalar call arguments. A deterministic pre-dataflow
+    structural budget guards the dataflow passes. *)
 
 val compile_mir :
      ?include_source:Frontend.Include_files.t
@@ -44,7 +46,7 @@ val compile_mir_with_passes :
   -> string
   -> Middle.Program.Typed.t compilation
 (** Internal pass-selection entrypoint. It obtains backend-transformed MIR at
-    O0, then applies upstream O1 with only the selected additive passes. *)
+    O0, then applies the stability-preserving O1 selection described above. *)
 
 val compile_portable :
      ?include_source:Frontend.Include_files.t

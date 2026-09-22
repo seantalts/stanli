@@ -37,6 +37,13 @@ with measured and explained exceptions. The checks below include tighter
 local contracts and broader scaled-error gates; passing a scaled-error gate
 does not establish a 10-ULP bound.
 
+The same corpus replay also enforces the per-fixture 10-ULP limits in
+`tools/verify_refs.py`, including log density, gradients, and recorded
+per-draw outputs at all three points. These catch arithmetic and accumulation
+order differences that the broader scaled-error gate would miss. Fixture
+provenance documents the covered model sources; no additional corpus run is
+required, and three probe points do not prove a bound for every parameter value.
+
 The numerical criterion depends on the comparison. Agreement with CmdStan is
 measured in ULPs; the default policy is within 2 ULP. Bitwise agreement is not
 a gate; a change that moves a model from bitwise to a small ULP band is

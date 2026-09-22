@@ -63,6 +63,18 @@ else
   exit 1
 fi
 
+# Scalar call arguments are values, not expressions to duplicate into every
+# use in an inlined body. Keep repeated nontrivial scalar actuals in locals.
+INLINE_PATCH=$(pwd)/compiler/ocaml/stanc3-inline-args.patch
+if git -C "$SRC" apply --check "$INLINE_PATCH" >/dev/null 2>&1; then
+  git -C "$SRC" apply "$INLINE_PATCH"
+elif git -C "$SRC" apply --reverse --check "$INLINE_PATCH" >/dev/null 2>&1; then
+  :
+else
+  echo "stanc3 scalar argument binding does not apply to this source tree" >&2
+  exit 1
+fi
+
 cp compiler/ocaml/*.ml compiler/ocaml/*.mli "$LOCAL_DIR"/*.ml \
   "$LOCAL_DIR"/dune "$SRC/$STANC3_DIR/"
 if [ "$TARGET" = js ]; then

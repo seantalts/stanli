@@ -517,9 +517,27 @@ inline double pow_zero_base_partial(uint8_t law, double seed, double base,
   return 0.0;
 }
 
+// A source matrix divided by a scalar uses Stan's reciprocal-multiply
+// overload, even for a one-element matrix. Keep that static shape and the
+// source scalar types through lowering; lengths alone cannot recover them.
+enum DivVariant : uint8_t {
+  kDivMatrixScalar = 1,
+  kDivMatrixActive = 2,
+  kDivScalarActive = 4,
+  // Independent source scalar calls retain scalar arithmetic when rerolled.
+  kDivScalarLanes = 8,
+};
+
+// ADD of one matrix and its transpose. The two views share scalar var
+// nodes, so Stan's callback interleaves their updates coefficient by
+// coefficient. idata[0] is the square matrix width.
+enum AddVariant : uint8_t {
+  kAddTransposeRight = 1,
+  kAddTransposeLeft = 2,
+};
+
 // Which DIV reverse-mode grouping an instruction carries: a Program::Instr's
-// `len` (scalar) or a RANGE's `law` (ranged), the same slots PowZeroBaseLaw
-// rides for POW.
+// `len` (scalar) or a RANGE's `law` (ranged), as for PowZeroBaseLaw.
 enum DivLaw : uint8_t {
   // -(u*a)/(b*b): stan-math's own var/var operator/, so a Program this
   // grouping runs over stays bitwise identical to running it under

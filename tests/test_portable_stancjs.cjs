@@ -77,6 +77,7 @@ const models = [
   ["stan240-containers", "tests/fixtures/stan240_containers.stan"],
   ["stan240-glm", "tests/fixtures/stan240_glm.stan"],
   ["nested-udf", "tests/fixtures/view_udf_local_data_branch.stan"],
+  ["repeated-scalar-argument", "tests/compiler/portable_repeated_scalar_argument.stan"],
   ["loop-control", "tests/fixtures/paramcond_break.stan"],
   ["vectorized-loop", "tests/compiler/portable_vectorize_loop.stan"],
   ["full-span-assignment",
@@ -114,8 +115,10 @@ for (const [name, relative, includes] of models) {
   if (encoded.endsWith("\n") || encoded.endsWith("\r"))
     fail(name + ": trailing newline");
   if (name === "folded-float" &&
-      !payload.includes(Buffer.from("343333333333d33f", "hex")))
-    fail(name + ": O1 did not preserve the folded 0.1 + 0.2 bit pattern");
+      (!payload.includes(Buffer.from("9a9999999999b93f", "hex")) ||
+       !payload.includes(Buffer.from("9a9999999999c93f", "hex")) ||
+       !payload.includes(Buffer.from("Plus__", "utf8"))))
+    fail(name + ": source floating-point addition was not preserved");
   if (name === "int32-overflow" &&
       (!payload.includes(Buffer.from([0x80, 0x38, 0x01, 0x00])) ||
        !payload.includes(Buffer.from("Times__", "utf8")) ||

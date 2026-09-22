@@ -608,8 +608,8 @@ static void test_store_delimited_lanes() {
 
 // multi_occupancy's branch structure: two templates chosen by a data
 // condition, alternating, the second a prefix-extension of the first. The
-// fingerprint separates them and each bucket is rewritten at its own first
-// lane.
+// fingerprint separates them. The extended template uses sigma twice, so
+// its interleaved gradient contributions must keep the original schedule.
 static void test_two_templates_interleaved() {
   const int L = 12;
   Graph g;
@@ -638,9 +638,10 @@ static void test_two_templates_interleaved() {
   std::vector<int> tt = terms;
   Fills f2 = fills;
   const PartitionStats st = partition_lanes(g, f2, tt, {});
-  expect("two templates two groups", st.groups == 2 && st.lanes == 2 * L);
-  expect("two templates op count", g.ops.size() == 6 && tt.size() == 2);
-  expect("two templates two gathers", count_opcode(g, OP_GATHER) == 2);
+  expect("only independent template widens", st.groups == 1 && st.lanes == L);
+  expect("interleaved gradient template stays",
+         g.ops.size() == 3 * L + 2 && tt.size() == L + 1);
+  expect("independent template gathers", count_opcode(g, OP_GATHER) == 1);
   expect_same_grad("two templates", std::move(g), f2, tt, want);
 }
 

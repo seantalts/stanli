@@ -65,7 +65,7 @@ constexpr int64_t kMaxSplits = 32;
 // variant byte, like the other registered densities.
 bool is_blocked(const Op& op, bool is_delimiter) {
   if (op.opcode == OP_CATEGORICAL) return !is_delimiter || op.out2 >= 0;
-  return is_effectful_op(op.opcode) ||
+  return is_effectful_op(op.opcode) || (op.opcode == OP_ADD && op.variant) ||
          has_op_trait(op.opcode, op_trait::kVariantGrouped) || op.out2 >= 0 ||
          op.udata != nullptr;
 }
@@ -865,6 +865,25 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     }
     if (!ok) {
       split_here();
+      continue;
+    }
+    // Preserve per-lane reverse order when several operations contribute to
+    // the same active scalar. Grouping all contributions by opcode can lose
+    // many ULP even though every individual kernel is exact.
+    std::unordered_set<int> shared_adjoints;
+    for (int p = 0; p < k && ok; ++p) {
+      const Op& op = op_at(p, 0);
+      for (int j = 0; j < op.n_in && ok; ++j) {
+        const int s = op.in[j];
+        if (pos[(size_t)p].ins[j].kind != InKind::kInvariant || s < 0 ||
+            g.slots[(size_t)s].len != 1 ||
+            (!g.slots[(size_t)s].is_param && writers[(size_t)s].empty()))
+          continue;
+        if (!shared_adjoints.insert(s).second) ok = false;
+      }
+    }
+    if (!ok) {
+      ++st.declined;
       continue;
     }
     // Exactly one delimiter per lane, at its end: any other disposition

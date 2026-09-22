@@ -2229,6 +2229,37 @@ class MirInterp {
         r.r = {T((double)total)};
         return r;
       }
+      if constexpr (std::is_same_v<T, double>) {
+        const mir::Expr& operand = e.args[0];
+        if (mir::eigen_leaf(operand) && operand.unsized.depth == 0) {
+          ExpressionLayout layout = mir::source_expression_layout(operand);
+          const mir::Expr* base = &operand;
+          if (base->kind == mir::Expr::Indexed && !base->args.empty() &&
+              base->args[0].unsized.depth > 0)
+            base = &base->args[0];
+          CallableTransformSpec transform;
+          if (base->kind == mir::Expr::FunApp &&
+              callable_transform(base->name, &transform))
+            layout = ExpressionLayout::direct();
+          if (layout.packet_access()) {
+            if (a.r.empty())
+              r.r = {0.0};
+            else if (layout.direct_access() && layout.element_offset != 0)
+              r.r = {reduce_phased(a.r.data(), (int64_t)a.r.size(),
+                                   layout.element_offset,
+                                   Eigen::internal::scalar_sum_op<double>())};
+            else {
+              const Eigen::Map<const Eigen::VectorXd> input(a.r.data(),
+                                                            a.r.size());
+              r.r = {input
+                         .unaryExpr(
+                             Eigen::internal::core_cast_op<double, double>())
+                         .sum()};
+            }
+            return r;
+          }
+        }
+      }
       const BuiltinSpec* reduction = reduction_builtin_spec(e.name, 1);
       if (reduction == nullptr)
         fail("sum: missing reduction descriptor", e.raw);

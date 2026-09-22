@@ -118,6 +118,8 @@ bool ops_match(const Graph& g, const Op& a, const Op& b,
   // despite identical visible operands. Hoisting or widening needs a proof
   // for that payload's semantics, which this matcher does not provide.
   if (a.udata != nullptr || b.udata != nullptr) return false;
+  if ((a.opcode == OP_ADD && a.variant) || (b.opcode == OP_ADD && b.variant))
+    return false;
   if (a.opcode != b.opcode) {
     const bool maybe_row_store =
         (a.opcode == OP_SET_SLICE && b.opcode == OP_SET_SLICE_INPLACE) ||
@@ -1350,6 +1352,27 @@ static RerollStats reroll_impl(
                 ap.outcome_idata.push_back(op_at(p, l).idata[k]);
           }
           lane0_producer[t.out] = p;
+        }
+        if (ok) {
+          // Widening evaluates one reverse operation across all lanes before
+          // moving to the preceding operation. A shared active scalar read
+          // at multiple positions would therefore receive regrouped, rather
+          // than interleaved, contributions. Keep the scalar schedule.
+          std::unordered_set<int> shared_adjoints;
+          for (int p = 0; p < P && ok; ++p) {
+            const Op& op = op_at(p, 0);
+            for (int j = 0; j < op.n_in && ok; ++j) {
+              const int s = op.in[j];
+              if (pos[(size_t)p].ins[j].kind != InKind::kInvariant || s < 0 ||
+                  g.slots[(size_t)s].len != 1 ||
+                  (!g.slots[(size_t)s].is_param && writers[(size_t)s].empty()))
+                continue;
+              if (!shared_adjoints.insert(s).second) {
+                ok = false;
+                prefix = 0;
+              }
+            }
+          }
         }
         if (ok && (any_term_density || any_store || any_elt_density ||
                    any_term_widen)) {

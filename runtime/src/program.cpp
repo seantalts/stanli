@@ -697,6 +697,96 @@ bool program_initializes_reads(const Program& p,
   return true;
 }
 
+// Remove only unreachable instructions and constant stores whose value is
+// overwritten on every path before any read. Arithmetic is never treated as
+// dead: even a zero-seeded pullback can affect non-finite classifications.
+bool elide_acyclic_program_constants(Program& p) {
+  if (std::getenv("STANLI_NO_CFG_DEAD_CONSTANTS")) return false;
+  const size_t n = p.code.size();
+  if (n == 0 || n > 2048) return false;
+  bool control = false;
+  size_t constants = 0;
+  for (size_t pc = 0; pc < n; ++pc) {
+    const auto& I = p.code[pc];
+    if (branches(I.code)) {
+      if (I.dst <= (int)pc || (size_t)I.dst > n) return false;
+      control = true;
+    } else if (program_spec_of(I).has(kProgramNoAdjoint)) {
+      return false;
+    }
+    if (I.code == Program::CALL && (I.a < 0 || (size_t)I.a >= p.calls.size()))
+      return false;
+    constants += I.code == Program::CONST || I.code == Program::CONSTR ||
+                 I.code == Program::FILL;
+  }
+  if (!control || constants * n > 1024 * 1024) return false;
+  std::vector<char> reached(n + 1, false), remove(n, false), seen(n + 1);
+  reached[0] = true;
+  for (size_t pc = 0; pc < n; ++pc) {
+    if (!reached[pc]) {
+      remove[pc] = true;
+      continue;
+    }
+    const auto& I = p.code[pc];
+    if (branches(I.code)) reached[(size_t)I.dst] = true;
+    if (I.code != Program::JMP) reached[pc + 1] = true;
+  }
+  std::vector<size_t> pending;
+  for (size_t pc = 0; pc < n; ++pc) {
+    const auto& initial = p.code[pc];
+    if (remove[pc] ||
+        (initial.code != Program::CONST && initial.code != Program::CONSTR &&
+         initial.code != Program::FILL))
+      continue;
+    const Span cell{initial.dst, program_output_len(initial)};
+    std::fill(seen.begin(), seen.end(), false);
+    pending.assign(1, pc + 1);
+    bool read = false;
+    while (!pending.empty() && !read) {
+      const size_t next = pending.back();
+      pending.pop_back();
+      if (seen[next]) continue;
+      seen[next] = true;
+      if (next == n) {
+        for (int reg : p.out_regs) read |= overlaps(cell, Span{reg, 1});
+        continue;
+      }
+      const auto& I = p.code[next];
+      each_read(p, I, [&](Span s) { read |= overlaps(cell, s); });
+      if (read) break;
+      bool overwritten = false;
+      const auto writes = [&](Span s) {
+        overwritten |=
+            s.reg <= cell.reg && s.reg + s.len >= cell.reg + cell.len;
+      };
+      if (I.code == Program::CALL) {
+        const auto& call = p.calls[(size_t)I.a];
+        writes(Span{call.out, call.out_len});
+      } else {
+        each_write(p, I, writes);
+      }
+      if (overwritten) continue;
+      if (branches(I.code)) pending.push_back((size_t)I.dst);
+      if (I.code != Program::JMP) pending.push_back(next + 1);
+    }
+    if (!read) remove[pc] = true;
+  }
+  if (std::none_of(remove.begin(), remove.end(), [](char b) { return b; }))
+    return false;
+  std::vector<int> new_pc(n + 1);
+  std::vector<Program::Instr> code;
+  code.reserve(n);
+  for (size_t pc = 0; pc < n; ++pc) {
+    new_pc[pc] = static_cast<int>(code.size());
+    if (!remove[pc]) code.push_back(p.code[pc]);
+  }
+  new_pc[n] = static_cast<int>(code.size());
+  for (auto& I : code)
+    if (branches(I.code)) I.dst = new_pc[(size_t)I.dst];
+  p.code = std::move(code);
+  return true;
+}
+
 bool elide_program_dead_constants(Program& p) {
   if (std::getenv("STANLI_NO_DEAD_CONSTANTS")) return false;
   const size_t n = p.code.size();

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pathlib
 import copy
+import math
 import stat
 import sys
 import tempfile
@@ -154,6 +155,19 @@ class CheckModelPointsTest(unittest.TestCase):
 
     def test_agreeing_at_every_point_passes(self):
         self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1], "OK")
+
+    def test_tight_ulp_gate_catches_small_scaled_error(self):
+        with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
+            for distance, verdict in ((10, "OK"), (11, "ULP_GATE"),
+                                      (256, "ULP_GATE")):
+                value = 1.0
+                for _ in range(distance):
+                    value = math.nextafter(value, math.inf)
+                result = self.run_check(f'echo "OK -3.5 {value!r} -2"')
+                self.assertEqual(result[1], verdict, distance)
+                if verdict == "ULP_GATE":
+                    self.assertLess(result[2], 1e-9)
+                    self.assertEqual(result[3], distance)
 
     def test_printed_output_before_each_result_is_ignored(self):
         self.assertEqual(self.run_check(

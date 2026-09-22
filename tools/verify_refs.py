@@ -127,6 +127,12 @@ ILL_CONDITIONED = {
 }
 
 
+# These cancellation regressions used to pass the scaled-error gate despite
+# hundreds or thousands of ULP of error. Reuse the same three-point corpus
+# replay to enforce the tighter contract, without another model/CI sweep.
+ULP_LIMITS = {source.stem: 10 for source in (REPO / "tests" / "brms").glob("*.stan")}
+
+
 def load_refs(path=REFS_PATH):
     """(models, provenance) from the reference file, or a hard failure.
 
@@ -635,6 +641,10 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             return (model, "GATE", rel, ulp, total,
                     f"point {point}: {rel:.2e} ({ulp} ulp) over {n} "
                     f"values, allowed {gate:.1e}", notes)
+        if model in ULP_LIMITS and ulp > ULP_LIMITS[model]:
+            return (model, "ULP_GATE", rel, ulp, total,
+                    f"point {point}: {ulp} ULP over {n} values, "
+                    f"allowed {ULP_LIMITS[model]}", notes)
         if model in ILL_CONDITIONED and rel >= max_rel:
             notes.append(f"ILL-CONDITIONED {model} point {point}: "
                          f"{ILL_CONDITIONED[model]} ({rel:.2e})")

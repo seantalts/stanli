@@ -8837,10 +8837,15 @@ int main() {
     for (int i = 0; i < 9; ++i) dmat.data()[i] = dm[(size_t)i];
     for (int i = 0; i < 3; ++i) dvec.data()[i] = dvv[(size_t)i];
 
-    const Eigen::Matrix<var, -1, -1> sym = a + a.transpose();
+    // Mirror generated C++: Stan's matrix add callback, evaluated separately
+    // at both source calls, rather than one shared Eigen expression.
+    const Eigen::Matrix<var, -1, -1> sym =
+        stan::math::add(a, stan::math::transpose(a));
     const Eigen::Matrix<var, -1, -1> qm = stan::math::quad_form_sym(sym, b);
     var reference = qm(0, 0) - 0.7 * qm(1, 0) + 1.3 * qm(0, 1) + 0.4 * qm(1, 1);
-    reference += 0.9 * stan::math::quad_form_sym(sym, v);
+    const Eigen::Matrix<var, -1, -1> sym_vector =
+        stan::math::add(a, stan::math::transpose(a));
+    reference += 0.9 * stan::math::quad_form_sym(sym_vector, v);
     reference += 1.7 * stan::math::quad_form_sym(dmat, dvec);
     reference += 0.3 * stan::math::quad_form_sym(dmat, v);
     reference.grad();
