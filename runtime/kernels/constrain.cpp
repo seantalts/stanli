@@ -485,6 +485,38 @@ int64_t structured_output_width(const KernelCtx& ctx) {
     return ctx.idata[2];
 }
 
+// The prim vector overload uses Eigen's packet tanh, whereas Matrix<var>
+// calls scalar std::tanh. Follow the pinned cholesky_corr_constrain algorithm
+// with scalar transcendentals so the forward values agree with the tape that
+// structured_bwd replays. Value-only evaluation retains the prim overload.
+Eigen::MatrixXd cholesky_corr_rev_values(
+    const Eigen::Map<const Eigen::VectorXd>& y, int K, double& lp) {
+  stan::math::check_size_match("cholesky_corr_constrain", "y.size()", y.size(),
+                               "k_choose_2", (K * (K - 1)) / 2);
+  Eigen::VectorXd z(y.size());
+  double jacobian = 0.0;
+  for (Eigen::Index i = 0; i < y.size(); ++i) {
+    z(i) = std::tanh(y(i));
+    jacobian += stan::math::log1m(stan::math::square(z(i)));
+  }
+  lp += jacobian;
+  Eigen::MatrixXd x = Eigen::MatrixXd::Zero(K, K);
+  if (K == 0) return x;
+  x(0, 0) = 1.0;
+  int k = 0;
+  for (int i = 1; i < K; ++i) {
+    x(i, 0) = z(k++);
+    double sum_sqs = stan::math::square(x(i, 0));
+    for (int j = 1; j < i; ++j) {
+      lp += 0.5 * stan::math::log1m(sum_sqs);
+      x(i, j) = z(k++) * std::sqrt(1.0 - sum_sqs);
+      sum_sqs += stan::math::square(x(i, j));
+    }
+    x(i, i) = std::sqrt(1.0 - sum_sqs);
+  }
+  return x;
+}
+
 template <StructuredKind K>
 void structured_fwd(KernelCtx& ctx) {
   const int64_t nb = ctx.idata[0], inner_raw = ctx.idata[1];
@@ -504,6 +536,13 @@ void structured_fwd(KernelCtx& ctx) {
     } else {
       const Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data + b * inner_raw,
                                                 inner_raw);
+      if constexpr (K == StructuredKind::CholeskyCorr) {
+        if (!values_only()) {
+          const auto x = cholesky_corr_rev_values(y, ctx.idata[2], lp);
+          std::copy_n(x.data(), inner_con, ctx.out.data + b * inner_con);
+          continue;
+        }
+      }
       const auto x = apply_structured<K>(y, lp, ctx);
       for (int64_t i = 0; i < inner_con; ++i)
         ctx.out.data[b * inner_con + i] = x.data()[i];

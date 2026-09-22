@@ -420,3 +420,64 @@ quantities. The JavaScript file grows by 655 bytes (2,866,698→2,867,353), or
 281 bytes under Python gzip with its default compression level and a fixed
 zero timestamp (393,178→393,459). These are compiler-artifact sizes, not
 complete package download sizes.
+
+### Linux PR verification
+
+PR run [35724116569](https://github.com/seantalts/stanli/actions/runs/35724116569)
+passed the native tests but failed 31 new ULP checks. They compared Linux
+x86_64 results with CmdStan recordings made on Darwin arm64. Independently
+recording CmdStan in the PR's manylinux 2.28 image reproduced cross-platform
+changes above 10 ULP on the same 31 models. The existing scaled-error checks
+already accommodated this; the new unconditional 10-ULP check did not.
+
+The [Linux recording run](https://github.com/seantalts/stanli/actions/runs/35732018941)
+used CmdStan 2.40.0, Stan `a6806ef8`, Math `5252d51d`, stanc3 `d58446e6`,
+Clang 21.1.8, glibc 2.28, stock stanc optimization and
+`-O1 -ffp-contract=off`. It retained every CmdStan answer independently of
+Stanli's result, together with raw stdout/stderr, source/data hashes and the
+reference-driver hash. The primary Mac recordings remain unchanged.
+
+Those Linux references exposed one remaining Stanli difference: 17 ULP in
+`s2_unstr`. The Cholesky correlation transform computed its forward values
+using Eigen's packet `tanh`, while its backward replay and CmdStan's gradient
+used scalar `tanh`. The gradient path now follows the pinned Stan Math scalar
+algorithm for the forward values too. Value-only evaluation continues to use
+Stan Math's primitive overload. A direct Stan Math comparison covers sizes
+0, 1, 2, 4 and 8, batches, and alternating evaluation modes. It fails with the
+old runtime (88 failed comparisons) and passes with the fix. The affected
+Mac point now agrees exactly with CmdStan.
+
+GCC release validation found a separate 244-ULP difference in
+`i320_gp_matern32`. An [independent GCC recording](https://github.com/seantalts/stanli/actions/runs/35739063332)
+showed that GCC-built CmdStan and GCC-built Stanli agree exactly on its log
+density, gradients and saved outputs at all three points. GCC-built and
+Clang-built CmdStan produce different answers here. The small GCC supplement
+records this model and `s2_unstr`; the remaining 122 models share the Linux
+Clang recording. `stanli_check --compiler` selects the applicable recording
+before model evaluation. This is a single expected answer per build, with
+an unchanged 10-ULP limit, rather than a wider interval or a nearest-answer
+search. Unit tests explicitly reject the other compiler's answer.
+
+With those references, both Linux Clang and GCC compare all 124 fixtures,
+15,374 values and five rejected points successfully: maximum log-density
+error **3 ULP**, gradient error **8 ULP**, and saved-output error **8 ULP**.
+The local Darwin arm64 replay passes **329/329 models**, 1,020,194 values,
+and all **266 CTests** pass. Missing recordings, changed pins or inputs,
+incomplete point/output coverage and wrong compiler metadata fail closed.
+Other platforms retain their documented scaled-error and structural checks;
+the report explicitly counts the models receiving a same-platform ULP check.
+The Node adapter uses `--target-platform 'WebAssembly wasm32'`.
+
+A focused six-pair, alternating-order warm-gradient check on this shared Mac
+measured `s2_unstr` at 6.010 ± 0.152 µs before and 6.390 ± 0.117 µs after
+(median ± MAD). Its paired latency ratio was 1.039 ± 0.044. This small
+correctness cost is not evidence of a speedup. Gaussian and Bernoulli
+controls had paired ratios 1.017 ± 0.034 and 0.989 ± 0.015; their kernel paths
+are unchanged. The fix adds no persistent state, graph nodes or preparation
+work. First-gradient latency, allocation counts, peak memory and package
+sizes were not remeasured in this focused check.
+
+Raw comparisons, compiler runs, regression ablation and timing samples are in
+`.cache/issue374-small-perf-20260922/pr/`. CmdStan regeneration remains an
+on-demand task, using `verify_sample.py --output` and, for GCC, `--cxx g++`.
+The ordinary PR keeps its existing single corpus replay.

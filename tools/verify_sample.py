@@ -24,6 +24,7 @@ away defeats the whole oracle. See TESTING.md.
 
 Usage: tools/verify_sample.py CMDSTAN_DIR PDB_DIR model1 model2 ...
        tools/verify_sample.py CMDSTAN_DIR PDB_DIR --from-refs [--jobs N]
+       tools/verify_sample.py CMDSTAN_DIR PDB_DIR --output PATH model1 ...
 """
 import argparse
 import concurrent.futures
@@ -71,15 +72,18 @@ def cmdstan_version(cs):
     return "unknown"
 
 
-def provenance(cs):
+def provenance(cs, cxx="clang++"):
     """The revisions this run's numbers came out of."""
     p = {name: head_sha(path) for name, path in PINNED.items()}
     p.update(cmdstan=head_sha(cs), stan=head_sha(cs / "stan"),
              math=head_sha(cs / "stan/lib/stan_math"))
     p["cmdstan_version"] = cmdstan_version(cs)
     p["stanc_sha256"] = hashlib.sha256((REPO / "deps/stanc3/stanc").read_bytes()).hexdigest()
-    p["compiler"] = subprocess.run(["clang++", "--version"], capture_output=True,
+    p["compiler"] = subprocess.run([cxx, "--version"], capture_output=True,
                                     text=True, check=True).stdout.splitlines()[0]
+    version = p["compiler"].lower()
+    p["compiler_family"] = ("clang" if "clang" in version else
+                            "gcc" if "gcc" in version or "g++" in version else "unknown")
     p["reference_flags"] = "-O1 -ffp-contract=off; stanc default optimization"
     # The libm is part of the answer: transcendentals round differently
     # per platform, which is why the replay gate is 1e-9 and not 1e-10.
@@ -119,7 +123,7 @@ def write_results(results):
     out.write_text(json.dumps(prev, indent=1, sort_keys=True) + "\n")
 
 
-def write_refs(refs, recorded, fresh=False):
+def write_refs(refs, recorded, fresh=False, path=None):
     """Merge the raw CmdStan values into the committed reference file.
 
     tools/verify_refs.py replays these without CmdStan installed, which is
@@ -135,9 +139,10 @@ def write_refs(refs, recorded, fresh=False):
     A --from-refs run (fresh) re-records every model, so its first write
     under drift replaces the file instead.
     """
+    path = REFS_PATH if path is None else path
     blob = {"schema": SCHEMA, "recorded": recorded, "models": {}}
-    if REFS_PATH.exists():
-        prev = json.loads(gzip.decompress(REFS_PATH.read_bytes()))
+    if path.exists():
+        prev = json.loads(gzip.decompress(path.read_bytes()))
         if prev.get("schema") == SCHEMA:
             drift = [k for k, v in recorded.items()
                      if prev["recorded"].get(k) != v]
@@ -145,7 +150,7 @@ def write_refs(refs, recorded, fresh=False):
                 prev["models"] = {}
             if drift and set(prev["models"]) - set(refs):
                 raise SystemExit(
-                    f"docs/corpus-refs.json.gz was recorded against a "
+                    f"{path} was recorded against a "
                     f"different {', '.join(drift)}; re-record every model "
                     f"(--from-refs) rather than mixing two rigs in one "
                     f"file.")
@@ -155,10 +160,10 @@ def write_refs(refs, recorded, fresh=False):
     blob["models"].update({name: {**entry, "recorded": entry.get("recorded", recorded)}
                            for name, entry in refs.items()})
     text = json.dumps(blob, indent=0, sort_keys=True).encode()
-    REFS_PATH.write_bytes(gzip.compress(text, mtime=0))
+    path.write_bytes(gzip.compress(text, mtime=0))
 
 
-def build_ref(cs, work, model, stan):
+def build_ref(cs, work, model, stan, cxx="clang++"):
     """Compile ref_driver against this model. (exe, error).
 
     Cache identity includes source, driver, compiler, and dependency pins.
@@ -167,7 +172,7 @@ def build_ref(cs, work, model, stan):
     """
     identity = {"source": source_digest(stan),
                 "driver": source_digest(REPO / "tools/ref_driver.cpp"),
-                "rig": provenance(cs)}
+                "rig": provenance(cs, cxx)}
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
     exe = work / f"{model}_{key}_ref"
     if exe.exists():
@@ -179,8 +184,9 @@ def build_ref(cs, work, model, stan):
         return None, f"stanc: {stanc.stderr.strip().splitlines()[-1][:120]}"
     # ODE models pull in CVODES; CmdStan ships it prebuilt.
     tmp_exe = work / f"{model}_ref.part"
-    r = subprocess.run(compile_cmd(cs, hpp, REPO / "tools/ref_driver.cpp",
-                                   tmp_exe), capture_output=True, text=True)
+    cmd = compile_cmd(cs, hpp, REPO / "tools/ref_driver.cpp", tmp_exe)
+    cmd[0] = cxx
+    r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         return None, r.stderr.strip().splitlines()[-1][:120]
     tmp_exe.rename(exe)  # only a complete binary lands in the cache
@@ -333,12 +339,12 @@ def record_model(model, stan, dj, exe, check_bin, strict=False):
     return {"primary": primary, "points": points}, result, lines
 
 
-def one(model, cs, pdb, work, cases, check_bin):
+def one(model, cs, pdb, work, cases, check_bin, cxx="clang++"):
     """(model, entry, result, lines) for one model, or entry None if it
     could not be built."""
     case = cases[model]
     stan, dj = model_files(model, {"data": case.metadata.get("data_name")}, pdb, work)
-    exe, why = build_ref(cs, work, model, stan)
+    exe, why = build_ref(cs, work, model, stan, cxx)
     if exe is None:
         return (model, None, None, [f"BUILD_FAIL {model}: {why}"])
     entry, result, lines = record_model(model, stan, dj, exe, check_bin,
@@ -366,7 +372,11 @@ def main():
     ap.add_argument("pdb", type=pathlib.Path)
     ap.add_argument("models", nargs="*")
     ap.add_argument("--from-refs", action="store_true",
-                    help="record every model already in the reference file")
+                    help="record every model already in the output reference file")
+    ap.add_argument("--output", type=pathlib.Path, default=REFS_PATH,
+                    help="reference destination; an alternate file leaves the "
+                         "primary reference and scoreboard unchanged")
+    ap.add_argument("--cxx", default="clang++", help="CmdStan C++ compiler")
     ap.add_argument("--jobs", type=int, default=1,
                     help="models recorded in parallel; the CmdStan "
                          "compiles are the wall time")
@@ -379,7 +389,7 @@ def main():
     pdb = args.pdb / "posterior_database"
     models = list(args.models)
     if args.from_refs:
-        models += sorted(load_refs()[0])
+        models += sorted(load_refs(args.output)[0])
     models = list(dict.fromkeys(models))
     if not models:
         ap.error("name at least one model, or pass --from-refs")
@@ -387,7 +397,7 @@ def main():
         tempfile.mkdtemp(prefix="stanli_verify_"))
     work.mkdir(parents=True, exist_ok=True)
     check_bin = default_check_bin()
-    recorded = provenance(cs)
+    recorded = provenance(cs, args.cxx)
     print(f"recording against CmdStan {recorded['cmdstan_version']} "
           f"({recorded['cmdstan'][:12]}), math {recorded['math'][:12]}, "
           f"on {recorded['platform']}")
@@ -399,7 +409,7 @@ def main():
 
     n_pass = 0
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        futs = [pool.submit(one, m, cs, pdb, work, cases, check_bin)
+        futs = [pool.submit(one, m, cs, pdb, work, cases, check_bin, args.cxx)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, entry, result, lines = fut.result()
@@ -413,8 +423,10 @@ def main():
             # Incremental, under a lock: a later hang keeps the rest, and
             # two workers must not read-modify-write the same file.
             with WRITE_LOCK:
-                write_refs({model: entry}, recorded, fresh=args.from_refs)
-                write_results({model: result})
+                write_refs({model: entry}, recorded, fresh=args.from_refs,
+                           path=args.output)
+                if args.output.resolve() == REFS_PATH.resolve():
+                    write_results({model: result})
 
     print(f"\n{n_pass}/{len(models)} models verified against CmdStan at "
           f"their primary point, all {len(POINTS)} points recorded")
