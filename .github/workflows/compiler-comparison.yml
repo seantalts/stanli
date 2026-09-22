@@ -28,6 +28,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Verify the unchanged production sources
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git diff --exit-code f1face395bfe9511a81fa2bb8c53decd3bb9b4a0 HEAD -- \
+            runtime compiler CMakeLists.txt tools/bench_grad.cpp tools/benchmark_timer.hpp deps/fetch.sh
       - name: Identify the matched toolchains
         id: compilers
         run: |

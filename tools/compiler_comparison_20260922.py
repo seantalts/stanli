@@ -24,8 +24,13 @@ PAIRS = 6
 
 
 def run(args, **kwargs):
-    return subprocess.run([str(x) for x in args], check=True, text=True,
-                          capture_output=True, timeout=180, **kwargs)
+    try:
+        return subprocess.run([str(x) for x in args], check=True, text=True,
+                              capture_output=True, timeout=180, cwd=ROOT, **kwargs)
+    except subprocess.CalledProcessError as error:
+        print(error.stdout, end="", file=sys.stderr)
+        print(error.stderr, end="", file=sys.stderr)
+        raise
 
 
 def stats(values):
