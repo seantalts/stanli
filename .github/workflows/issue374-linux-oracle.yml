@@ -1,4 +1,4 @@
-name: Issue 374 Linux numerical references
+name: Issue 374 Linux release compiler validation
 'on':
   push:
     branches:
@@ -12,10 +12,9 @@ env:
   STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
   OCAML_VERSION: 5.5.0
   OPAM_VERSION: 2.5.2
-  CANDIDATE_SHA: 8e725b618908027ce7f2443d9bb714ad19a13c33
 jobs:
   oracle:
-    name: Record and compare Linux CmdStan references
+    name: GCC numerical replay
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
@@ -25,8 +24,23 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - uses: actions/checkout@v4
-    - name: Install the PR compiler
-      run: manylinux-install-clang
+    - name: Fingerprint Clang
+      id: toolchain
+      shell: bash
+      run: 'fingerprint=$(c++ --version | sha256sum | cut -d'' '' -f1)
+
+        echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+        '
+    - name: Restore the PR compiler cache
+      id: compiler-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .ccache
+        key: ccache-manylinux_2_28_x86_64-release-v4-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt',
+          'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh')
+          }}
+        restore-keys: ccache-manylinux_2_28_x86_64-release-v4-${{ steps.toolchain.outputs.id }}-
     - name: Restore the vendored dependencies
       uses: actions/cache@v4
       with:
@@ -133,33 +147,40 @@ jobs:
       with:
         path: deps/stanc3-src
         key: ${{ steps.stanc-build-cache.outputs.cache-primary-key }}
-    - name: Prepare independent pinned CmdStan
-      run: 'cp deps/stanc3/stanc deps/stanc3/stanc-pinned
-
-        cp deps/stanc3/stanc.src deps/stanc3/stanc-pinned.src
-
-        ./harnesses/conformance/fetch_cmdstan.sh
-
-        '
-    - name: Record all Linux CmdStan answers
-      run: python3 tools/issue374_linux_oracle.py
-    - name: Download the diagnostic runtime
+    - name: Compile the release runtime
+      shell: bash
+      run: "export CC=cc CXX=c++\nexport CCACHE_DIR=\"$PWD/.ccache\" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M\nexport\
+        \ CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime\nccache -z\ncmake -B build-rel\
+        \ -DCMAKE_BUILD_TYPE=Release \\\n  -DCMAKE_C_COMPILER=\"$CC\" \\\n  -DCMAKE_CXX_COMPILER=\"$CXX\" \\\n \
+        \ -DCMAKE_C_COMPILER_LAUNCHER=ccache \\\n  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \\\n  -DSTANLI_STANC_EMBED_OBJ=\"\
+        $PWD/deps/stanc3/stanc_embed.o\" \\\n  -DSTANLI_OCAML_STDLIB=\"$PWD/deps/ocaml-include\"\ncmake --build\
+        \ build-rel --target stanli_check -j2\nccache -s\n"
+    - name: Save the completed PR compiler cache
+      if: steps.compiler-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: .ccache
+        key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+    - name: Download independent Linux CmdStan values
       uses: actions/download-artifact@v4
       with:
-        name: issue374-linux-checker
-        run-id: 35730304619
+        name: issue374-linux-oracle
+        run-id: 35732018941
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        path: build-rel
-    - name: Compare with the PR runtime
-      run: 'chmod +x build-rel/stanli_check
-
-        python3 tools/issue374_linux_oracle.py
-
-        '
-    - name: Save raw oracle evidence
+        path: linux-oracle-input
+    - name: Replay the GCC runtime
+      run: python3 tools/issue374_gcc_replay.py
+    - name: Save GCC evidence
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: issue374-linux-oracle
-        path: linux-oracle-results/
+        name: issue374-gcc-results
+        path: gcc-results/
         if-no-files-found: error
+    - name: Save GCC checker
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: issue374-gcc-checker
+        path: build-rel/stanli_check
+        if-no-files-found: warn
