@@ -11,11 +11,12 @@ import json
 import pathlib
 import platform
 import subprocess
+import sys
 import threading
 
 from cmdstan_ref import compile_cmd
 from corpus_inventory import source_digest
-from verify_refs import load_refs, parse_status, parse_wa, worst_pair
+from verify_refs import accepted, load_refs, parse_status, parse_wa, worst_pair
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "linux-oracle-results"
@@ -74,15 +75,18 @@ def one(stan):
             (OUT / f"{name}.build.log").write_text(result.stdout + result.stderr)
             raise RuntimeError(f"{name}: build failed; see log")
     entry = {"source_sha256": source_digest(stan),
-             "data_sha256": source_digest(data),
-             "primary": OLD[name]["primary"], "points": {}}
+             "data_sha256": source_digest(data), "points": {}}
+    if "primary" in OLD[name]:
+        entry["primary"] = OLD[name]["primary"]
     report = {}
     for point in (0, 1, 2):
         ref = subprocess.run([str(exe), str(data), str(point)],
                              capture_output=True, text=True, timeout=600)
-        got = subprocess.run([str(CHECK), str(stan), str(data),
-                              "--point", str(point), "--wa-values"],
-                             capture_output=True, text=True, timeout=600)
+        got = (subprocess.run([str(CHECK), str(stan), str(data),
+                               "--point", str(point), "--wa-values"],
+                              capture_output=True, text=True, timeout=600)
+               if CHECK.exists() else subprocess.CompletedProcess(
+                   [], 0, stdout="", stderr="reference-only recording\n"))
         for engine, result in (("cmdstan", ref), ("stanli", got)):
             (OUT / f"{name}.{point}.{engine}.txt").write_text(result.stdout)
             (OUT / f"{name}.{point}.{engine}.stderr").write_text(result.stderr)
@@ -91,12 +95,12 @@ def one(stan):
         result = {"cmdstan_status": rf[:1], "stanli_status": gf[:1],
                   "cmdstan_returncode": ref.returncode,
                   "stanli_returncode": got.returncode}
-        if rf[:1] == ["OK"]:
+        if accepted(rf):
             pt.update(status="OK", values=rf[1:])
             wa = parse_wa(ref.stdout)
             if wa:
                 pt["wa"] = {"names": wa[0], "values": wa[1]}
-            if gf[:1] == ["OK"]:
+            if accepted(gf):
                 result["lp"] = compare(rf[1:2], gf[1:2])
                 result["grad"] = compare(rf[2:], gf[2:])
                 gwa = parse_wa(got.stdout)
@@ -121,7 +125,10 @@ def one(stan):
 
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-    futures = [pool.submit(one, stan) for stan in sorted((ROOT / "tests/brms").glob("*.stan"))]
+    models = sorted((ROOT / "tests/brms").glob("*.stan"))
+    if sys.argv[1:]:
+        models = [stan for stan in models if stan.stem in sys.argv[1:]]
+    futures = [pool.submit(one, stan) for stan in models]
     errors = []
     for future in concurrent.futures.as_completed(futures):
         try:

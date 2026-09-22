@@ -1,4 +1,4 @@
-name: Issue 374 Linux numerical diagnosis
+name: Issue 374 Linux rejection reference
 'on':
   push:
     branches:
@@ -13,7 +13,7 @@ env:
   OPAM_VERSION: 2.5.2
 jobs:
   oracle:
-    name: Linux CmdStan brms comparison
+    name: Linux CmdStan inverse-Gaussian rejection
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
@@ -25,23 +25,6 @@ jobs:
     - uses: actions/checkout@v4
     - name: Install the PR compiler
       run: manylinux-install-clang
-    - name: Fingerprint Clang
-      id: toolchain
-      shell: bash
-      run: 'fingerprint=$(clang++ --version | sha256sum | cut -d'' '' -f1)
-
-        echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
-
-        '
-    - name: Restore the PR compiler cache
-      id: compiler-cache
-      uses: actions/cache/restore@v4
-      with:
-        path: .ccache
-        key: ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt',
-          '.github/manylinux/**', '.github/workflows/clang-ccache-seed.yml', '.github/workflows/wheels.yml', 'runtime/**',
-          'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
-        restore-keys: ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-
     - name: Restore the vendored dependencies
       uses: actions/cache@v4
       with:
@@ -148,20 +131,6 @@ jobs:
       with:
         path: deps/stanc3-src
         key: ${{ steps.stanc-build-cache.outputs.cache-primary-key }}
-    - name: Compile the PR target graph
-      shell: bash
-      run: "export CC=clang CXX=clang++\nexport CCACHE_DIR=\"$PWD/.ccache\" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M\n\
-        export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime\nccache -z\ncmake\
-        \ -B build-rel -DCMAKE_BUILD_TYPE=Release \\\n  -DCMAKE_C_COMPILER=\"$CC\" \\\n  -DCMAKE_CXX_COMPILER=\"\
-        $CXX\" \\\n  -DCMAKE_C_COMPILER_LAUNCHER=ccache \\\n  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \\\n  -DSTANLI_STANC_EMBED_OBJ=\"\
-        $PWD/deps/stanc3/stanc_embed.o\" \\\n  -DSTANLI_OCAML_STDLIB=\"$PWD/deps/ocaml-include\"\ncmake --build\
-        \ build-rel --target stanli_check -j2\nccache -s\n"
-    - name: Save the completed PR compiler cache
-      if: steps.compiler-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: .ccache
-        key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
     - name: Prepare independent pinned CmdStan
       run: 'cp deps/stanc3/stanc deps/stanc3/stanc-pinned
 
@@ -170,8 +139,8 @@ jobs:
         ./harnesses/conformance/fetch_cmdstan.sh
 
         '
-    - name: Compare all brms fixtures with Linux CmdStan
-      run: python3 tools/issue374_linux_oracle.py
+    - name: Record rejected inverse-Gaussian points
+      run: python3 tools/issue374_linux_oracle.py s2_invgaussian
     - name: Save raw oracle evidence
       if: always()
       uses: actions/upload-artifact@v4
@@ -179,10 +148,3 @@ jobs:
         name: issue374-linux-oracle
         path: linux-oracle-results/
         if-no-files-found: error
-    - name: Save diagnostic runtime
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: issue374-linux-checker
-        path: build-rel/stanli_check
-        if-no-files-found: warn
