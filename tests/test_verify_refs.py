@@ -557,6 +557,8 @@ class PlatformReferenceTest(unittest.TestCase):
 
     def test_compiler_selects_one_reference_without_accepting_the_other_answer(self):
         entry = copy.deepcopy(self.entry)
+        entry["source_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.stan")
+        entry["data_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.json")
         rounded = 1.0 + 244 * math.ulp(1.0)
         for pt in entry["points"].values():
             pt["values"] = ["-3.5", str(rounded), "-2"]

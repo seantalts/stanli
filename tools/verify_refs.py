@@ -173,10 +173,12 @@ def native_platform():
 def replay_refs(target_platform, compiler=None):
     """Select independently recorded answers for the runtime's platform.
 
-    The primary recording remains the cross-platform fallback. Supplements
-    must cover every ULP-gated fixture at the same dependency pins; a missing
-    or stale supplement must fail instead of silently dropping the ULP gate.
-    Keep this selection out of load_refs, which also serves the recorder.
+    The primary recording remains the cross-platform fallback. A platform
+    supplement covers every ULP-gated fixture; compiler supplements replace
+    the few answers where independent CmdStan builds differ. All use the
+    same dependency pins and unchanged ULP limits. Select before evaluation,
+    never by proximity to the candidate. Keep this out of load_refs, which
+    also serves the recorder.
     """
     refs, recorded = load_refs()
     refs = {name: {**ref, "recorded": ref.get("recorded", recorded)}
