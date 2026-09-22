@@ -37,6 +37,15 @@ with measured and explained exceptions. The checks below include tighter
 local contracts and broader scaled-error gates; passing a scaled-error gate
 does not establish a 10-ULP bound.
 
+The same corpus replay also enforces the per-fixture 10-ULP limits in
+`tools/verify_refs.py` against same-platform CmdStan recordings, including
+log density, gradients, and recorded per-draw outputs at all three points.
+The primary recording covers Darwin arm64; the Linux x86_64 supplement covers
+the same 124 fixtures with the same dependency pins. Other platforms retain
+the scaled-error checks and report that no same-platform ULP limit applies.
+No additional model evaluation is required. Three probe points do not prove
+a bound for every parameter value.
+
 The numerical criterion depends on the comparison. Agreement with CmdStan is
 measured in ULPs; the default policy is within 2 ULP. Bitwise agreement is not
 a gate; a change that moves a model from bitwise to a small ULP band is
@@ -89,7 +98,7 @@ and are separate from CI correctness gates.
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | source-changing PRs |
 | compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | native/JS on source-changing PRs; Windows after merge and on demand |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | after merge, nightly, and on demand |
-| corpus comparison | Are the 329 models in the shared corpus consistent with recorded CmdStan behavior at three fixed inputs? | Scaled error of 1e-9 for most points; documented limits for three `kronecker_gp` points and for every point of the three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
+| corpus comparison | Are the 329 models in the shared corpus consistent with recorded CmdStan behavior at three fixed inputs? | 10 ULP for 124 fixtures with same-platform references; scaled error of 1e-9 for most points, with documented limits for `kronecker_gp` and three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
 | corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | source-changing PRs, within CTest |
 | cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | source-changing PRs, within CTest |
 | transformation A/B | Do selected graph optimizations preserve model results? | Optimizations enabled and disabled agree at the default point within 1e-11 | manually after optimization changes |
@@ -215,6 +224,25 @@ The reference artifact
 - Reference provenance recorded in the file: CmdStan
   2.40.0 at `d3d5df6a`, Stan `a6806ef8`, Math 5.4.0 at `5252d51d`, stanc3
   2.40.0 at `d58446e6`, posteriordb `28f8d3d6`, on Darwin arm64.
+
+For Linux x86_64, [`docs/corpus-refs-linux-x86_64.json.gz`](docs/corpus-refs-linux-x86_64.json.gz)
+supplies independent CmdStan values for the 124 fixtures with a 10-ULP limit.
+It records the compiler, libc, dependency pins, and source/data hashes. The
+replay requires complete fixture coverage and matching pins; missing files,
+incomplete points or outputs, and changed inputs fail the check. Reference
+selection changes the expected numbers, never the 10-ULP limit. Rejections,
+non-finite classifications, output names, and shapes still have to agree.
+The small [GCC supplement](docs/corpus-refs-linux-x86_64-gcc.json.gz) records
+`i320_gp_matern32` and `s2_unstr` with GCC: the former's CmdStan gradient differs
+by 244 ULP between Clang and GCC, while Stanli matches its respective compiler.
+The replay reads `stanli_check --compiler` and selects a reference before
+evaluating any model. It never chooses whichever answer is closest.
+The other 122 fixtures use the shared Linux recording with either compiler.
+The recorder's `--output PATH --from-refs` options regenerate the models in a
+separate platform recording without changing the primary file or its
+scoreboard. When creating a new supplement, provide all model names listed in
+`ULP_LIMITS` instead of `--from-refs`. Use `--cxx g++` for the GCC supplement;
+the compiler is part of the recording provenance and compiled-reference cache.
 
 The references were recorded by
 [`tools/verify_sample.py`](tools/verify_sample.py) against that CmdStan
@@ -439,9 +467,10 @@ expression where pristine stanc3's host-width-dependent folds disagree. A
 focused worker harness proves the preferred custom
 import and the missing-artifact fallback import. The tested JavaScript
 artifacts are the ones consumed by the Pages and npm jobs. The manylinux gate
-then checks the typed-producer output with `test_mir_decode`,
-produced by the probe with `vectorize_loops` off since `stanc --O1` has no
-switch for it.
+then uses `test_mir_decode` to compare portable output with upstream's legacy
+serialization of the same optimized MIR. Both encodings use Stanli's
+arithmetic-preserving policy, so this tests serialization without introducing
+differences from stock stanc's numerical rewrites.
 Post-submit measurements use `bench_mir_decode`. For Eight Schools, compact v2
 must take no more than half the legacy decoder's
 median time across 51 repetitions and no more than half its raw bytes. Gzip and
@@ -977,7 +1006,8 @@ dependencies used by CI. After those prerequisites are installed:
 ```sh
 ./tools/build_web.sh
 python3 tools/verify_refs.py deps/posteriordb \
-  --check tools/wasm_check.sh --skip nn_rbm1bJ100
+  --check tools/wasm_check.sh --target-platform 'WebAssembly wasm32' \
+  --skip nn_rbm1bJ100
 ```
 
 `./tools/dev_setup.sh --all` prepares the native corpus and conformance

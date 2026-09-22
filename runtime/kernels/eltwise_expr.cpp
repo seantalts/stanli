@@ -47,6 +47,19 @@ void add_fwd(KernelCtx& ctx) {
 // ascending order (measured against add(var, Matrix<var>); a local Eigen
 // sum added once differs by 1 ULP).
 void add_bwd(KernelCtx& ctx) {
+  if (ctx.variant) {
+    const int original = ctx.variant == kAddTransposeRight ? 0 : 1;
+    if (!ctx.in_adj[original].data) return;
+    double* adj = ctx.in_adj[original].data;
+    const int64_t n = ctx.idata[0];
+    for (int64_t i = 0; i < ctx.out.len; ++i) {
+      const int64_t transposed = (i % n) * n + i / n;
+      const double seed = ctx.out_adj_vec.data[i];
+      adj[original == 0 ? i : transposed] += seed;
+      adj[original == 0 ? transposed : i] += seed;
+    }
+    return;
+  }
   for (int k = 0; k < 2; ++k) {
     if (!ctx.in_adj[k].data) continue;
     if (scal(ctx, k)) {
@@ -169,6 +182,13 @@ void mul_bwd(KernelCtx& ctx) {
 }
 
 void div_fwd(KernelCtx& ctx) {
+  if ((ctx.variant & kDivMatrixScalar) &&
+      (ctx.variant & (kDivMatrixActive | kDivScalarActive))) {
+    const double inv = 1.0 / ctx.in[1].data[0];
+    for (int64_t i = 0; i < ctx.out.len; ++i)
+      ctx.out.data[i] = inv * ctx.in[0].data[i];
+    return;
+  }
   if (scal(ctx, 0) && scal(ctx, 1))
     ctx.out.data[0] = ctx.in[0].data[0] / ctx.in[1].data[0];
   else if (scal(ctx, 1))
@@ -180,11 +200,42 @@ void div_fwd(KernelCtx& ctx) {
 }
 void div_bwd(KernelCtx& ctx) {
   const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
+  if (ctx.variant & kDivMatrixScalar) {
+    const double inv = 1.0 / ctx.in[1].data[0];
+    double scalar_partial = 0.0;
+    for (int64_t i = 0; i < ctx.out.len; ++i) {
+      const double seed =
+          ctx.out.len == 1 ? ctx.out_adj : ctx.out_adj_vec.data[i];
+      const double scaled_seed = inv * seed;
+      if (ctx.in_adj[0].data) ctx.in_adj[0].data[i] += scaled_seed;
+      if (ctx.in_adj[1].data) {
+        if (ctx.variant & kDivMatrixActive)
+          scalar_partial += scaled_seed * ctx.out.data[i];
+        else
+          scalar_partial += seed * ctx.out.data[i];
+      }
+    }
+    if (ctx.in_adj[1].data)
+      ctx.in_adj[1].data[0] -= (ctx.variant & kDivMatrixActive)
+                                   ? scalar_partial
+                                   : inv * scalar_partial;
+    return;
+  }
   if (ctx.out.len == 1) {
+    const double a = ctx.in[0].data[0];
     const double b = ctx.in[1].data[0];
     if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj / b;
-    if (ctx.in_adj[1].data)
-      ctx.in_adj[1].data[0] += -ctx.out_adj * ctx.out.data[0] / b;
+    if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] -= ctx.out_adj * a / (b * b);
+    return;
+  }
+  if (ctx.variant & kDivScalarLanes) {
+    for (int64_t i = ctx.out.len; i-- > 0;) {
+      const int64_t ai = s0 ? 0 : i, bi = s1 ? 0 : i;
+      const double a = ctx.in[0].data[ai], b = ctx.in[1].data[bi];
+      const double seed = ctx.out_adj_vec.data[i];
+      if (ctx.in_adj[0].data) ctx.in_adj[0].data[ai] += seed / b;
+      if (ctx.in_adj[1].data) ctx.in_adj[1].data[bi] -= seed * a / (b * b);
+    }
     return;
   }
   CMapA out_v(ctx.out.data, ctx.out.len);
@@ -238,9 +289,9 @@ void pow_bwd(KernelCtx& ctx) {
             pow_zero_base_partial(ctx.variant, ctx.out_adj, a, b);
       return;
     }
-    if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj * b * v / a;
-    if (ctx.in_adj[1].data)
-      ctx.in_adj[1].data[0] += ctx.out_adj * std::log(a) * v;
+    const double scaled_value = ctx.out_adj * v;
+    if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += scaled_value * b / a;
+    if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += scaled_value * std::log(a);
     return;
   }
   for (int64_t i = 0; i < ctx.out.len; ++i) {
@@ -254,16 +305,29 @@ void pow_bwd(KernelCtx& ctx) {
             pow_zero_base_partial(ctx.variant, dout, a, b);
       continue;
     }
-    if (ctx.in_adj[0].data) ctx.in_adj[0].data[s0 ? 0 : i] += dout * b * v / a;
+    const double scaled_value = dout * v;
+    if (ctx.in_adj[0].data)
+      ctx.in_adj[0].data[s0 ? 0 : i] += scaled_value * b / a;
     if (ctx.in_adj[1].data)
-      ctx.in_adj[1].data[s1 ? 0 : i] += dout * std::log(a) * v;
+      ctx.in_adj[1].data[s1 ? 0 : i] += scaled_value * std::log(a);
   }
 }
 
 void dot_fwd(KernelCtx& ctx) {
+  if (ctx.variant == 1) {
+    double sum = 0;
+    for (int64_t i = 0; i < ctx.in[0].len; ++i)
+      sum += ctx.in[0].data[i] * ctx.in[0].data[i];
+    ctx.out.data[0] = sum;
+    return;
+  }
   ctx.out.data[0] = (in_a(ctx, 0) * in_a(ctx, 1)).sum();
 }
 void dot_bwd(KernelCtx& ctx) {
+  if (ctx.variant == 1) {
+    if (ctx.in_adj[0].data) dx_a(ctx, 0) += (2.0 * ctx.out_adj) * in_a(ctx, 0);
+    return;
+  }
   if (ctx.in_adj[0].data) dx_a(ctx, 0) += ctx.out_adj * in_a(ctx, 1);
   if (ctx.in_adj[1].data) dx_a(ctx, 1) += ctx.out_adj * in_a(ctx, 0);
 }

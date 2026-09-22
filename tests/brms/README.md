@@ -18,6 +18,12 @@ log density and full gradient in `docs/corpus-refs.json.gz`, replayed by
 [`tools/verify_refs.py`](../../tools/verify_refs.py) in CI on every push.
 The shared [inventory](../../tools/corpus_inventory.py) resolves model names,
 source/data paths and provenance for numerical replay and benchmarks.
+The shared replay enforces **10 ULP** against same-platform CmdStan recordings
+on Darwin arm64 and Linux x86_64 for every finite log density, gradient, and
+recorded per-draw output at all three reference points. Other platforms keep
+the documented scaled-error checks. Rejections and non-finite classifications
+must agree everywhere. This is a recorded regression contract, not a bound for
+every possible data set or parameter value.
 
 ## What they cover
 

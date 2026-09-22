@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pathlib
 import copy
+import math
 import stat
 import sys
 import tempfile
@@ -154,6 +155,37 @@ class CheckModelPointsTest(unittest.TestCase):
 
     def test_agreeing_at_every_point_passes(self):
         self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1], "OK")
+
+    def test_tight_ulp_gate_catches_small_scaled_error(self):
+        ref = {**REF, "recorded": {"platform": verify_refs.native_platform()}}
+        with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
+            for distance, verdict in ((10, "OK"), (11, "ULP_GATE"),
+                                      (256, "ULP_GATE")):
+                value = 1.0
+                for _ in range(distance):
+                    value = math.nextafter(value, math.inf)
+                result = self.run_check(f'echo "OK -3.5 {value!r} -2"', ref)
+                self.assertEqual(result[1], verdict, distance)
+                if verdict == "ULP_GATE":
+                    self.assertLess(result[2], 1e-9)
+                    self.assertEqual(result[3], distance)
+
+    def test_cross_platform_rounding_keeps_the_scaled_error_gate(self):
+        ref = {**REF, "recorded": {"platform": "another platform"}}
+        with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
+            rounded = 1.0 + 256 * math.ulp(1.0)
+            result = self.run_check(f'echo "OK -3.5 {rounded!r} -2"', ref)
+            self.assertEqual(result[1], "OK")
+            self.assertEqual(result[3], 256)
+            self.assertEqual(self.run_check('echo "OK -3.5 1.000001 -2"', ref)[1],
+                             "GATE")
+            self.assertEqual(self.run_check('echo "OK -3.5 nan -2"', ref)[1],
+                             "GATE")
+
+    def test_missing_ulp_reference_provenance_fails(self):
+        with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
+            self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1],
+                             "REFERENCE_INCOMPLETE")
 
     def test_printed_output_before_each_result_is_ignored(self):
         self.assertEqual(self.run_check(
@@ -485,6 +517,95 @@ class SchemaTest(unittest.TestCase):
             self.assertIn(f"schema {SCHEMA}", str(caught.exception))
 
 
+class PlatformReferenceTest(unittest.TestCase):
+    """Platform-specific answers must never silently reduce oracle coverage."""
+
+    def setUp(self):
+        self.primary = {"platform": "Darwin arm64", "cmdstan": "c",
+                        "stan": "s", "math": "m", "stanc3": "f"}
+        self.rig = {**self.primary, "platform": "Linux x86_64"}
+        self.entry = {**REF, "source_sha256": "source", "data_sha256": "data",
+                      "points": {str(p): {**VALUES, "wa": {"names": "a", "values": ["1"]}}
+                                 for p in POINTS}}
+
+    def select(self, supplement=None, rig=None, target="Linux x86_64",
+               compiler=None, compiler_refs=None, compiler_rig=None):
+        supplement = {MODEL: self.entry} if supplement is None else supplement
+        recordings = [({MODEL: REF}, self.primary), (supplement, rig or self.rig)]
+        if compiler == "gcc":
+            recordings.append((compiler_refs if compiler_refs is not None else {MODEL: self.entry},
+                               compiler_rig or {**self.rig, "compiler_family": "gcc"}))
+        with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}, clear=True), \
+             unittest.mock.patch("verify_refs.load_refs", side_effect=recordings):
+            return verify_refs.replay_refs(target, compiler)[0]
+
+    def test_matching_platform_selects_its_independent_values_and_provenance(self):
+        selected = self.select()[MODEL]
+        self.assertEqual(selected["points"], self.entry["points"])
+        self.assertEqual(selected["recorded"], self.rig)
+        self.assertNotIn("recorded", REF)
+
+    def test_unrecorded_target_retains_primary_reference(self):
+        selected = self.select(target="WebAssembly wasm32")[MODEL]
+        self.assertEqual(selected["points"], REF["points"])
+        self.assertEqual(selected["recorded"], self.primary)
+        self.assertIsNone(verify_refs.ulp_limit_for(MODEL, selected, "WebAssembly wasm32"))
+
+    def test_missing_fixture_fails_instead_of_falling_back(self):
+        with self.assertRaisesRegex(SystemExit, "cover every"):
+            self.select(supplement={})
+
+    def test_compiler_selects_one_reference_without_accepting_the_other_answer(self):
+        entry = copy.deepcopy(self.entry)
+        entry["source_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.stan")
+        entry["data_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.json")
+        rounded = 1.0 + 244 * math.ulp(1.0)
+        for pt in entry["points"].values():
+            pt["values"] = ["-3.5", str(rounded), "-2"]
+        selected = self.select(compiler="gcc", compiler_refs={MODEL: entry})[MODEL]
+        self.assertEqual(selected["recorded"]["compiler_family"], "gcc")
+        with tempfile.TemporaryDirectory() as tmp, \
+             unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
+            for value, verdict in ((rounded, "OK"), (1.0, "ULP_GATE")):
+                result = check_model(MODEL, selected, REPO / "nonexistent-pdb",
+                                     stub(tmp, f'echo "OK -3.5 {value!r} -2"'),
+                                     pathlib.Path(tmp), 60, 1e-9,
+                                     target_platform="Linux x86_64")
+                self.assertEqual(result[1], verdict)
+
+    def test_empty_or_wrong_compiler_recording_fails(self):
+        with self.assertRaises(SystemExit):
+            self.select(compiler="gcc", compiler_refs={})
+        with self.assertRaisesRegex(SystemExit, "compiler mismatch"):
+            self.select(compiler="gcc", compiler_rig={**self.rig, "compiler_family": "clang"})
+
+    def test_runtime_compiler_comes_from_the_tested_binary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for compiler in ("clang", "gcc"):
+                checker = stub(tmp, f'echo {compiler}', wa=False)
+                self.assertEqual(verify_refs.runtime_compiler(checker), compiler)
+            for body in ('echo clang; exit 1', 'echo unrecognized'):
+                with self.assertRaisesRegex(SystemExit, "cannot identify"):
+                    verify_refs.runtime_compiler(stub(tmp, body, wa=False))
+
+    def test_changed_pins_or_wrong_platform_fail(self):
+        for key in ("platform", "cmdstan", "stan", "math", "stanc3"):
+            with self.subTest(key=key), self.assertRaisesRegex(SystemExit, "mismatch"):
+                self.select(rig={**self.rig, key: "different"})
+
+    def test_incomplete_recordings_fail(self):
+        for key in ("source_sha256", "data_sha256", "points"):
+            entry = copy.deepcopy(self.entry)
+            del entry[key]
+            with self.subTest(key=key), self.assertRaises(SystemExit):
+                self.select(supplement={MODEL: entry})
+        for key in ("wa", "values"):
+            entry = copy.deepcopy(self.entry)
+            del entry["points"]["1"][key]
+            with self.subTest(key=key), self.assertRaises(SystemExit):
+                self.select(supplement={MODEL: entry})
+
+
 class WriteRefsTest(unittest.TestCase):
     """Merging one model's values into the committed file."""
 
@@ -515,6 +636,15 @@ class WriteRefsTest(unittest.TestCase):
         write_refs({"m1": REF}, self.old)
         self.assertEqual(self.models()["imported"]["recorded"], imported["recorded"])
         self.assertEqual(self.models()["m1"]["recorded"], self.old)
+
+    def test_alternate_destination_preserves_primary_recording(self):
+        path = self.path.with_name("other-platform.json.gz")
+        original = self.path.read_bytes()
+        write_refs({"m1": REF}, self.new, path=path)
+        models, recorded = load_refs(path)
+        self.assertEqual(recorded, self.new)
+        self.assertEqual(set(models), {"m1"})
+        self.assertEqual(self.path.read_bytes(), original)
 
     def test_a_partial_run_under_drift_is_refused(self):
         with self.assertRaises(SystemExit):

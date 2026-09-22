@@ -67,6 +67,10 @@ struct Op {
   int64_t dyn_capacity = 0;
   int8_t dyn_extent_in = -1;
   uint8_t dyn_lengths = 0;
+  // CSE may share a pure forward value and scratch while retaining each
+  // source pullback and its separate adjoint. Names the surviving output;
+  // the survivor names itself. Fits the existing tail padding of Op.
+  int32_t primal_source = -1;
 };
 
 // Bit 6 of a dynamic-length mask names the output; bits 0..5 name inputs.

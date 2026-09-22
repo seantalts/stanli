@@ -564,6 +564,38 @@ struct Build {
   }
 };
 
+// A private constant's last reverse clear is dead, but overwriting a value
+// that already depends on an input must still stop its gradient there.
+static void test_private_adjoint_clears() {
+  for (bool comparison : {false, true}) {
+    Build b({1.3});
+    const int two = b.konst(2.0);
+    const int scratch = b.emit(Program::MUL, 0, 0);
+    const int saved = b.emit(Program::EXP, scratch);
+    if (comparison)
+      b.emit_to(Program::LT, scratch, 0, two);
+    else
+      b.emit_to(Program::CONST, scratch, 0);
+    const int result = b.emit(Program::ADD, saved, scratch);
+    check(comparison ? "comparison overwrites active temporary"
+                     : "constant overwrites active temporary",
+          b.done({result}, {-1.7}));
+  }
+  Build b({1.3});
+  const int two = b.konst(2.0);
+  const int comparison = b.emit(Program::LT, 0, two);
+  const int product = b.emit(Program::MUL, 0, two);
+  const int result = b.emit(Program::ADD, product, comparison);
+  auto c = b.done({result}, {1.7});
+  check("private constants and comparisons", c);
+  expect("private clear generation", gen_adjoint(c.p));
+  expect("private terminal clears omitted",
+         std::none_of(
+             c.p.adj.code.begin(), c.p.adj.code.end(), [](const AdjInstr& i) {
+               return i.code == Program::CONST || i.code == Program::LT;
+             }));
+}
+
 // Forward-only branches must preserve executed paths, overwritten values,
 // conditional copies and joins. Reuse the register file while toggling paths
 // so stale flags/checkpoints cannot pass by starting from zero every time.
@@ -1934,6 +1966,7 @@ static void test_fuzz_ranges() {
 
 int main() {
   test_inactive_call_replay();
+  test_private_adjoint_clears();
   test_acyclic_branches();
   test_call_binding_refusal();
   test_call_cached_forward_reverse_aliasing();

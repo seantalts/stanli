@@ -265,7 +265,7 @@ class Executor {
     const double* out2_adj;  // null when the op has no second output
   };
   std::vector<BwdStep> bwd_;
-  std::vector<double*> out2_adj_ptr_;  // parallel to ops; null when no out2
+  std::vector<uint16_t> ctx_opcodes_;  // parallel to ctx_; profiling only
   bool profile_ = false;
   std::vector<ProfEntry> prof_;  // indexed by opcode; empty until enabled
   int64_t n_grad_evals_ = 0;

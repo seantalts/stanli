@@ -409,9 +409,20 @@ void Executor::bind_() {
   // Only parameters and written slots need private value storage. Classify
   // both outputs, including inactive writes: activity is not immutability.
   std::vector<char> written(graph_.slots.size(), 0);
+  bool has_shared_primals = false;
+  size_t n_forward = 0;
   for (const auto& op : graph_.ops) {
     written[op.out] = 1;
     if (op.out2 >= 0) written[op.out2] = 1;
+    has_shared_primals |= op.primal_source >= 0;
+    n_forward += op.primal_source < 0 || op.primal_source == op.out;
+  }
+  std::vector<int> primal_sources;
+  if (has_shared_primals) {
+    primal_sources.assign(graph_.slots.size(), -1);
+    for (const auto& op : graph_.ops)
+      if (op.primal_source >= 0 && op.primal_source != op.out)
+        primal_sources[(size_t)op.out] = op.primal_source;
   }
   int64_t off = 0, data_size = 0;
   data_offsets_.assign(graph_.slots.size(), -1);
@@ -426,6 +437,7 @@ void Executor::bind_() {
     auto& s = graph_.slots[i];
     if (s.is_param) continue;
     if (written[i]) {
+      if (has_shared_primals && primal_sources[i] >= 0) continue;
       s.offset = off;
       off = checked_size(off, s.len);
     } else {
@@ -434,6 +446,10 @@ void Executor::bind_() {
       data_size = checked_size(data_size, s.len);
     }
   }
+  if (has_shared_primals)
+    for (size_t i = 0; i < graph_.slots.size(); ++i)
+      if (primal_sources[i] >= 0)
+        graph_.slots[i].offset = graph_.slots[(size_t)primal_sources[i]].offset;
   values_.assign(off, 0.0);
   if (!data_) data_ = std::make_shared<std::vector<double>>(data_size, 0.0);
   assert(static_cast<int64_t>(data_->size()) == data_size);
@@ -473,6 +489,9 @@ void Executor::bind_() {
   // context pointers survive this function; copies compute their own layout.
   std::vector<int64_t> scratch_offsets;
   scratch_offsets.reserve(graph_.ops.size());
+  // Reuse the optional map now that value offsets have been assigned.
+  if (has_shared_primals)
+    std::fill(primal_sources.begin(), primal_sources.end(), -1);
   for (const auto& op : graph_.ops) {
     const Kernel& k = kernel(op.opcode);
     if (op.opcode == OP_NONE_ || k.forward == nullptr)
@@ -481,6 +500,15 @@ void Executor::bind_() {
       // to do from this string.
       throw std::runtime_error(std::string("opcode not registered: ") +
                                opcode_name(op.opcode));
+    if (op.primal_source >= 0 && op.primal_source != op.out) {
+      const int source = primal_sources[(size_t)op.primal_source];
+      if (source < 0)
+        throw std::logic_error("cached primal precedes its source");
+      scratch_offsets.push_back(scratch_offsets[(size_t)source]);
+      continue;
+    }
+    if (op.primal_source == op.out)
+      primal_sources[(size_t)op.out] = (int)scratch_offsets.size();
     scratch_offsets.push_back(scratch);
     scratch = checked_size(
         scratch, k.scratch_size ? k.scratch_size(op, graph_.slots.data()) : 0);
@@ -494,36 +522,48 @@ void Executor::bind_() {
   // vectorize) was a third of the time.
   ctx_.resize(graph_.ops.size());
   kernel_states_.clear();
-  out2_adj_ptr_.assign(graph_.ops.size(), nullptr);
+  // Keep executable forwards in a contiguous prefix. Cached primals only
+  // need their original reverse callbacks, so their contexts follow it.
+  // The ordinary forward loop and its context layout stay unchanged.
+  if (has_shared_primals) primal_sources.resize(graph_.ops.size());
+  size_t next_forward = 0, next_cached = n_forward;
   for (size_t i = 0; i < graph_.ops.size(); ++i) {
-    ctx_[i] =
-        make_ctx_(graph_.ops[i], scratch_offsets[i], written, adjoint_offsets);
+    const Op& op = graph_.ops[i];
+    const size_t ci = op.primal_source >= 0 && op.primal_source != op.out
+                          ? next_cached++
+                          : next_forward++;
+    if (has_shared_primals) primal_sources[i] = static_cast<int>(ci);
+    ctx_[ci] = make_ctx_(op, scratch_offsets[i], written, adjoint_offsets);
     const Kernel& k = kernel(graph_.ops[i].opcode);
     if (k.make_state) {
       std::unique_ptr<KernelState> state(
           k.make_state(graph_.ops[i], graph_.slots.data()));
       if (state) {
-        ctx_[i].state = state.get();
+        ctx_[ci].state = state.get();
         kernel_states_.push_back(std::move(state));
       }
-    }
-    const int o2 = graph_.ops[i].out2;
-    if (o2 >= 0) {
-      assert(adjoint_offsets[o2] >= 0);
-      out2_adj_ptr_[i] = adjoints_.data() + adjoint_offsets[o2];
     }
   }
   // Resolve dispatch now that ctx_ is final (it never reallocates after
   // this, so BwdStep may hold pointers into it).
-  fwd_fn_.resize(graph_.ops.size());
+  fwd_fn_.clear();
+  fwd_fn_.reserve(n_forward);
   bwd_.clear();
   bwd_.reserve(graph_.ops.size());
   for (size_t i = 0; i < graph_.ops.size(); ++i) {
-    fwd_fn_[i] = resolve_forward_fn(graph_.ops[i]);
+    const Op& op = graph_.ops[i];
+    if (op.primal_source < 0 || op.primal_source == op.out)
+      fwd_fn_.push_back(resolve_forward_fn(op));
   }
   for (size_t i = graph_.ops.size(); i-- > 0;) {
     void (*b)(KernelCtx&) = kernel(graph_.ops[i].opcode).backward;
-    if (b) bwd_.push_back(BwdStep{b, &ctx_[i], out2_adj_ptr_[i]});
+    if (b) {
+      const int o2 = graph_.ops[i].out2;
+      const double* out2 =
+          o2 >= 0 ? adjoints_.data() + adjoint_offsets[o2] : nullptr;
+      const size_t ci = has_shared_primals ? (size_t)primal_sources[i] : i;
+      bwd_.push_back(BwdStep{b, &ctx_[ci], out2});
+    }
   }
 }
 
@@ -572,11 +612,16 @@ void Executor::detach_data_() {
   auto replacement = std::make_shared<std::vector<double>>(*data_);
   data_ = std::move(replacement);
   // Bound contexts hold input pointers. No output can belong to data_.
-  for (size_t k = 0; k < graph_.ops.size(); ++k)
-    for (int i = 0; i < graph_.ops[k].n_in; ++i) {
-      const int slot = graph_.ops[k].in[i];
-      if (data_offsets_[slot] >= 0) ctx_[k].in[i].data = slot_data_(slot);
+  size_t forward = 0, cached = fwd_fn_.size();
+  for (const Op& op : graph_.ops) {
+    const size_t ci = op.primal_source >= 0 && op.primal_source != op.out
+                          ? cached++
+                          : forward++;
+    for (int i = 0; i < op.n_in; ++i) {
+      const int slot = op.in[i];
+      if (data_offsets_[slot] >= 0) ctx_[ci].in[i].data = slot_data_(slot);
     }
+  }
 }
 
 double* Executor::value_ptr(int slot) {
@@ -598,6 +643,16 @@ void Executor::set_values(int slot, const double* data, size_t size) {
 void Executor::set_profile(bool on) {
   profile_ = on;
   if (on && prof_.empty()) prof_.resize(OP_COUNT_);
+  if (on && ctx_opcodes_.empty()) {
+    ctx_opcodes_.resize(ctx_.size());
+    size_t forward = 0, cached = fwd_fn_.size();
+    for (const Op& op : graph_.ops) {
+      const size_t ci = op.primal_source >= 0 && op.primal_source != op.out
+                            ? cached++
+                            : forward++;
+      ctx_opcodes_[ci] = op.opcode;
+    }
+  }
 }
 
 std::string Executor::profile_report() const {
@@ -607,7 +662,7 @@ std::string Executor::profile_report() const {
   // Opcodes by total time, descending.
   std::vector<uint16_t> order;
   for (uint16_t op = 0; op < prof_.size(); ++op)
-    if (prof_[op].calls > 0) order.push_back(op);
+    if (prof_[op].calls > 0 || prof_[op].bwd_ns > 0) order.push_back(op);
   std::sort(order.begin(), order.end(), [&](uint16_t a, uint16_t b) {
     return prof_[a].fwd_ns + prof_[a].bwd_ns >
            prof_[b].fwd_ns + prof_[b].bwd_ns;
@@ -651,9 +706,9 @@ void Executor::run_forward_only(EvalState state) {
   // mutable for extension kernels; consulting it here would make profiling
   // change both variant specialization and post-bind kernel overrides.
   if (profile_) {
-    const size_t np = graph_.ops.size();
+    const size_t np = fwd_fn_.size();
     for (size_t i = 0; i < np; ++i) {
-      const uint16_t op = graph_.ops[i].opcode;
+      const uint16_t op = ctx_opcodes_[i];
       const auto t0 = std::chrono::steady_clock::now();
       fwd_fn_[i](ctx_[i]);
       const auto t1 = std::chrono::steady_clock::now();
@@ -735,7 +790,7 @@ void Executor::reverse(double* grad_out, double seed) {
       if (step.out2_adj) ctx.out2_adj = *step.out2_adj;
       const auto t0 = std::chrono::steady_clock::now();
       step.fn(ctx);
-      prof_[graph_.ops[pi].opcode].bwd_ns +=
+      prof_[ctx_opcodes_[pi]].bwd_ns +=
           std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::steady_clock::now() - t0)
               .count();

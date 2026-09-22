@@ -185,7 +185,11 @@ bool callable(const Graph& g, const Op& op) {
 // before elementwise ops had range forms: scalar arithmetic, and vector
 // unaries only for log and exp.
 bool in_vocab(const Graph& g, const Op& op, bool strict = false) {
-  if (op.out2 >= 0 || op.dyn_lengths) return false;
+  // A cached copy can be expanded back into its original computation inside
+  // the cheaper instruction stream. Keep the survivor graph-visible: copies
+  // outside this region still share its forward value and scratch.
+  if (op.out2 >= 0 || op.dyn_lengths || op.primal_source == op.out)
+    return false;
   switch (op.opcode) {
     case OP_ADD:
     case OP_SUB:
@@ -430,8 +434,19 @@ struct Compiler {
                           OP_DIV == OP_ADD + 3,
                       "binary code order");
         const auto c = (Program::Code)(Program::ADD + (op.opcode - OP_ADD));
+        if (c == Program::ADD && op.variant) return compile_call(op);
+        // The matrix/scalar overload has a shared reciprocal and a grouped
+        // scalar pullback. Preserve its native kernel until the program can
+        // represent that operation rather than treating it as scalar lanes.
+        if (c == Program::DIV && (op.variant & kDivMatrixScalar)) return false;
+        // Rerolled scalar calls accumulate shared adjoints in reverse source
+        // order; RANGE's broadcast rule currently walks in ascending order.
+        if (c == Program::DIV && out_len != 1 && (op.variant & kDivScalarLanes))
+          return false;
         return compile_elementwise(op, c,
-                                   c == Program::DIV ? kDivSafeGrouping : 0);
+                                   c == Program::DIV && out_len != 1
+                                       ? kDivSafeGrouping
+                                       : kDivReplayGrouping);
       }
       case OP_ADD_N: {
         const int a0 = read_reg(op.in[0]);
@@ -493,6 +508,7 @@ struct Compiler {
         return ok;
       }
       case OP_DOT: {
+        if (op.variant) return compile_call(op);
         const int a = read_reg(op.in[0]), b = read_reg(op.in[1]);
         emit(Program::DOT, write_reg(op.out), a, b, 0,
              (int)g.slots[op.in[0]].len);
@@ -1217,6 +1233,10 @@ struct Carver {
         dst = g.add_slot(len, false);
         slot_active.resize(g.slots.size(), 1);
         slot_active[(size_t)dst] = slot_active[(size_t)o];
+        // Later candidates inspect the renamed slot too. Its final read is
+        // unchanged; losing that liveness fact can discard a vector update.
+        const auto use = last_use.find(o);
+        if (use != last_use.end()) last_use[dst] = use->second;
         for (size_t u = j; u < g.ops.size(); ++u) {
           for (int q = 0; q < g.ops[u].n_in; ++q)
             if (g.ops[u].in[q] == o) g.ops[u].in[q] = dst;

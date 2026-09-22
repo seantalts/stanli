@@ -284,8 +284,8 @@ static void invariant_active_reuse_tests() {
   plan->outputs = {result};
   plan->prepare();
   const Node* scale_node = find_call(plan->root, scale_op);
-  check(scale_node && scale_node->active && scale_node->invariant_loop == 0,
-        "active loop-invariant kernel is cached against its loop");
+  check(scale_node && scale_node->active && scale_node->invariant_loop >= 0,
+        "active loop-invariant kernel preserves separate pullbacks");
   check(set_forward(plan->root, scale_op, count_mul_forward) &&
             set_backward(plan->root, scale_op, count_mul_backward),
         "find invariant callbacks");
@@ -294,13 +294,55 @@ static void invariant_active_reuse_tests() {
   const Evaluation result_value = evaluate(executor, .25, 0);
   close(result_value.value, 1.5, "active invariant value");
   close(result_value.gradient[0], 6, "active invariant gradient");
-  check(counted_forward_calls == 1 && counted_backward_calls == 1,
-        "active invariant runs forward and backward once");
+  check(counted_forward_calls == 1 && counted_backward_calls == 3,
+        "active invariant caches its value with separate source pullbacks");
   const Evaluation again = evaluate(executor, .25, 0);
-  check(counted_forward_calls == 2 && counted_backward_calls == 2,
-        "invariant cache resets for a new forward evaluation");
+  check(counted_forward_calls == 2 && counted_backward_calls == 6,
+        "repeated evaluation refreshes the value and preserves each pullback");
   check(std::memcmp(&result_value, &again, sizeof(Evaluation)) == 0,
         "repeated invariant evaluation is bitwise stable");
+}
+
+static void invariant_gradient_order_test() {
+  for (int trips : {3, 40, 129}) {
+    auto plan = std::make_shared<StructuredLoop>();
+    const int theta = plan->body.add_slot(1, false);
+    const int lower = scalar(*plan, 1), upper = scalar(*plan, trips);
+    const int iterator = plan->body.add_slot(1, false);
+    const int scaled = plan->body.add_slot(1, false);
+    const int reciprocal = plan->body.add_slot(1, false);
+    const int result = plan->body.add_slot(1, false);
+    plan->imports = {{theta, 0, 0, true}};
+    plan->has_target = true;
+    plan->root =
+        counted(lower, upper, iterator,
+                sequence({call(*plan, OP_MUL, {theta, iterator}, scaled),
+                          call(*plan, OP_DIV, {lower, theta}, reciprocal),
+                          call(*plan, OP_MUL, {scaled, reciprocal}, result),
+                          target(result)}));
+    plan->prepare();
+    Executor executor(outer(plan));
+    for (double point : {0.17, 0.04820923213628131, 1.3}) {
+      stan::math::nested_rev_autodiff nested;
+      stan::math::var q = point;
+      stan::math::accumulator<stan::math::var> sum;
+      for (int i = 1; i <= trips; ++i) {
+        stan::math::var scaled_ref = q * i;
+        stan::math::var inverse_ref = 1.0 / q;
+        sum.add(scaled_ref * inverse_ref);
+      }
+      stan::math::var reference = sum.sum();
+      reference.grad();
+      const double expected = q.adj();
+      // Exercise recording, replay, and a changed parameter on one executor.
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        const Evaluation got = evaluate(executor, point, 0);
+        check(got.value == reference.val(), "invariant value matches Stan");
+        check(got.gradient[0] == expected,
+              "cancelling invariant pullbacks match Stan's source order");
+      }
+    }
+  }
 }
 
 static void inplace_import_base_tests() {
@@ -6204,6 +6246,17 @@ int main() {
   test_setenv("STANLI_STRUCTURED_CHECK_REMAP", "1");
   transient_classification_tests();
   invariant_active_reuse_tests();
+  invariant_gradient_order_test();
+  for (const char* flag :
+       {"STANLI_NO_STRUCTURED_REPLAY", "STANLI_STRUCTURED_FRAMES"}) {
+    test_setenv(flag, "1");
+    invariant_active_reuse_tests();
+    invariant_gradient_order_test();
+    test_unsetenv(flag);
+  }
+  test_setenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS", "1");
+  invariant_gradient_order_test();
+  test_unsetenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS");
   inplace_import_base_tests();
   inplace_promotion_tests();
   inplace_duplicate_position_tests();

@@ -1280,10 +1280,12 @@ static void test_join_and_split_floor_values_pinned() {
        }))
     if (l.find("split_floor=") != std::string::npos) split_line = l;
   expect("split floor line captured", !split_line.empty());
+  // The joined program omits one private constant's terminal adjoint clear.
+  // Both bounds charge that same one-instruction reduction.
   expect_eq("split_floor value", parse_field(split_line, "split_floor"),
-            (int64_t)434);
+            (int64_t)433);
   expect_eq("split floor's joined value", parse_field(split_line, "joined"),
-            (int64_t)429);
+            (int64_t)428);
 }
 
 // A wide-state chain (every one of its ops must carry the whole `width`-
@@ -1466,7 +1468,7 @@ static void test_no_island_liveness_disables_splitting() {
 // offer two separately-boundaried islands, but liveness recognizes the
 // whole 74-op span compiles as one piece under the run's own (non-strict)
 // vocabulary and prices that instead, at a lower cost than the two-piece
-// floor test_join_and_split_floor_values_pinned pins (434).
+// floor test_join_and_split_floor_values_pinned pins (433).
 static void test_liveness_finds_a_cheaper_split_than_strict() {
   int64_t joined_cost = -1;
   int matches = 0;
@@ -2250,11 +2252,9 @@ static void check_pow_zero_law(const std::string& tag, uint8_t law,
   }
 }
 
-// The carver's DIV instructions carry kDivSafeGrouping (island.cpp's
-// compile_elementwise call for OP_DIV), which must round exactly as the
-// graph's own elementwise division kernel does, including at magnitudes
-// where squaring b would overflow or underflow and the quotient itself
-// would not.
+// Scalar division follows Stan's scalar reverse operation; vector division
+// retains the vector kernel's overflow-safe grouping. Carving must preserve
+// both rules, including their different behavior when b squared overflows.
 static void test_div_extreme_matches_graph_kernel() {
   const double points[2][2] = {{1e200, 1e200}, {1e-200, 1e-200}};
   for (const auto& pt : points) {
@@ -2268,7 +2268,7 @@ static void test_div_extreme_matches_graph_kernel() {
       IslandProg p;
       p.n_regs = 3;
       p.code.push_back(
-          Program::Instr{Program::DIV, 2, 0, 1, 0, kDivSafeGrouping});
+          Program::Instr{Program::DIV, 2, 0, 1, 0, kDivReplayGrouping});
       p.out_regs = {2};
       expect((tag + " scalar gen_adjoint").c_str(), gen_adjoint(p));
 
@@ -2362,6 +2362,91 @@ static void test_pow_zero_base_carved() {
   check_pow_zero_law("pow zero scalar law", kPowZeroBaseScalar,
                      {8.0, 8.0, 0.0});
   check_pow_zero_law("pow zero guarded", kPowZeroBaseGuarded, {8.0, 0.0, 0.0});
+}
+
+static void test_incoming_gradient_accumulation() {
+  for (bool native : {false, true}) {
+    auto p = std::make_shared<IslandProg>();
+    p->n_regs = 5;
+    p->ins = {{0, 1}};
+    p->pool = {1e16, -1e16};
+    p->code = {{Program::CONST, 1, 0},
+               {Program::MUL, 2, 0, 1},
+               {Program::CONST, 3, 1},
+               {Program::MUL, 4, 0, 3}};
+    p->out_regs = {2, 4};
+    expect("incoming gradient adjoint generated", gen_adjoint(*p));
+    p->native_adj = native;
+    Graph g;
+    const int x = g.add_slot(1, true), output = g.add_slot(2, false);
+    const int first = g.add_slot(1, false), second = g.add_slot(1, false);
+    const int result = g.add_slot(1, false);
+    g.add_op(OP_ISLAND, {x}, output);
+    g.ops.back().udata = p.get();
+    g.udata_pool.push_back(p);
+    g.add_op(OP_INDEX, {output}, first, {0});
+    g.add_op(OP_INDEX, {output}, second, {1});
+    g.add_op(OP_ADD_N, {x, first, second}, result);
+    g.result_slot = result;
+    Executor ex(std::move(g));
+    for (double value : {.3, -.71, 1.13}) {
+      ex.params_data()[0] = value;
+      stan::math::nested_rev_autodiff scope;
+      stan::math::var parameter = value;
+      stan::math::var a = parameter * 1e16, b = parameter * -1e16;
+      stan::math::var total = (parameter + a) + b;
+      stan::math::grad(total.vi_);
+      for (int repetition = 0; repetition < 2; ++repetition) {
+        double gradient;
+        expect_exact("incoming gradient value", ex.gradient(&gradient),
+                     total.val());
+        expect_exact("incoming gradient source order", gradient,
+                     parameter.adj());
+      }
+    }
+  }
+}
+
+static void test_incoming_gradient_aliases() {
+  for (bool native : {false, true}) {
+    for (bool shared_input : {false, true}) {
+      auto p = std::make_shared<IslandProg>();
+      p->n_regs = 3;
+      p->ins = {{0, 1}};
+      if (shared_input) {
+        p->ins.push_back({1, 1});
+        p->code = {{Program::MUL, 2, 0, 1}};
+        p->out_regs = {2};
+      } else {
+        p->pool = {2};
+        p->code = {{Program::CONST, 1, 0}, {Program::MUL, 0, 0, 1}};
+        p->out_regs = {0};
+      }
+      expect("aliased input adjoint generated", gen_adjoint(*p));
+      p->native_adj = native;
+      Graph g;
+      const int x = g.add_slot(1, true), output = g.add_slot(1, false);
+      const int result = g.add_slot(1, false);
+      if (shared_input)
+        g.add_op(OP_ISLAND, {x, x}, output);
+      else
+        g.add_op(OP_ISLAND, {x}, output);
+      g.ops.back().udata = p.get();
+      g.udata_pool.push_back(p);
+      g.add_op(OP_ADD_N, {x, x, x, output}, result);
+      g.result_slot = result;
+      Executor ex(std::move(g));
+      for (double value : {.25, -.5, 1.0}) {
+        ex.params_data()[0] = value;
+        double gradient;
+        const double lp = ex.gradient(&gradient);
+        expect_exact("aliased input value", lp,
+                     3 * value + (shared_input ? value * value : 2 * value));
+        expect_exact("aliased input existing gradient", gradient,
+                     3 + (shared_input ? 2 * value : 2));
+      }
+    }
+  }
 }
 
 // A recurrence threaded through ops the register machine has no
@@ -2588,6 +2673,63 @@ static void test_packed_live_ins() {
 
 // Trim windows within a packed descriptor, preserving branches and a direct
 // live-out. Both backwards must leave unused parameter cells at zero adjoint.
+static void test_acyclic_constant_elision() {
+  IslandProg original;
+  original.n_regs = 6;
+  original.ins = {{0, 1}, {1, 1}};
+  original.pool = {std::numeric_limits<double>::quiet_NaN(), 1., 99.};
+  original.code = {
+      {Program::CONST, 2, 0},  {Program::CONST, 3, 1},  {Program::LT, 4, 0, 3},
+      {Program::JZ, 7, 4},     {Program::MUL, 2, 1, 1}, {Program::JMP, 8},
+      {Program::DIV, 2, 1, 0}, {Program::ADD, 2, 1, 1}, {Program::CONST, 5, 2}};
+  original.out_regs = {2};
+  for (bool optimized : {false, true}) {
+    for (bool native : {false, true}) {
+      auto p = std::make_shared<IslandProg>(original);
+      if (optimized) {
+        expect("CFG removes unused and overwritten constants",
+               elide_acyclic_program_constants(*p));
+        expect("CFG removes only three dead instructions", p->code.size() == 6);
+        compact_island(*p);
+      }
+      expect("CFG adjoint generation", gen_adjoint(*p));
+      p->native_adj = native;
+      Graph g;
+      const int condition = g.add_slot(1, true), x = g.add_slot(1, true);
+      const int out = g.add_slot(1, false);
+      const int op = g.add_op(OP_ISLAND, {condition, x}, out);
+      g.ops[op].udata = p.get();
+      g.udata_pool.push_back(p);
+      g.result_slot = out;
+      Executor ex(std::move(g));
+      for (double control : {0., 2., -1.}) {
+        ex.params_data()[0] = control;
+        ex.params_data()[1] = -0.75;
+        double gradient[2];
+        expect_exact("CFG selected value", ex.gradient(gradient),
+                     control < 1 ? 0.5625 : -1.5);
+        expect_exact("CFG comparison has no gradient", gradient[0], 0.);
+        expect_exact("CFG selected derivative", gradient[1],
+                     control < 1 ? -1.5 : 2.);
+      }
+    }
+  }
+  Program partial = original;
+  partial.code[7] = {Program::ADD, 2, 1, 2};
+  elide_acyclic_program_constants(partial);
+  expect("CFG keeps initializer read by either branch",
+         partial.code.front().code == Program::CONST &&
+             partial.code.front().dst == 2);
+  Program loop = original;
+  loop.code[5].dst = 2;
+  expect("CFG declines back edges", !elide_acyclic_program_constants(loop));
+  Program arithmetic = original;
+  arithmetic.code.insert(arithmetic.code.end(), {Program::DIV, 5, 1, 0});
+  elide_acyclic_program_constants(arithmetic);
+  expect("CFG preserves unused arithmetic and its exceptional pullback",
+         arithmetic.code.back().code == Program::DIV);
+}
+
 static void test_input_windows() {
   {
     Program p;
@@ -2612,58 +2754,65 @@ static void test_input_windows() {
            used_program_inputs(p, inputs) ==
                std::vector<std::pair<int, int>>{{2, 4}, {7, 2}, {12, 0}});
   }
-  for (bool native : {false, true}) {
-    Graph g;
-    const int values = g.add_slot(24, true);
-    const int control = g.add_slot(1, true);
-    auto p = std::make_shared<IslandProg>();
-    p->n_regs = 20;
-    p->ins = {{0, 8, 0, 2}, {8, 8, 0, 12}, {16, 1, 1, 0}};
-    p->pool = {0.};
-    p->code = {{Program::CONST, 17, 0}, {Program::LT, 18, 16, 17},
-               {Program::JZ, 5, 18},    {Program::MUL, 19, 3, 10},
-               {Program::JMP, 6},       {Program::ADD, 19, 5, 12}};
-    p->out_regs = {19, 7};
-    expect("window adjoint generated", gen_adjoint(*p));
-    p->native_adj = native;
-    const std::vector<std::pair<int, int>> ranges{{0, 8}, {8, 8}, {16, 1}};
-    const auto used = used_program_inputs(*p, ranges);
-    expect("window bounds include both branches and direct output",
-           used == std::vector<std::pair<int, int>>{{3, 5}, {10, 3}, {16, 1}});
-    for (size_t k = 0; k < p->ins.size(); ++k) {
-      p->ins[k].offset += used[k].first - p->ins[k].reg;
-      p->ins[k].reg = used[k].first;
-      p->ins[k].len = used[k].second;
-    }
-    const int out = g.add_slot(2, false);
-    const int op = g.add_op(OP_ISLAND, {values, control}, out);
-    g.ops[op].udata = p.get();
-    g.udata_pool.push_back(p);
-    const int sum = g.add_slot(1, false);
-    g.add_op(OP_SUM_VEC, {out}, sum);
-    g.result_slot = sum;
-    Executor ex(std::move(g));
-    for (double sign : {-1., 1., -1.}) {
-      for (int i = 0; i < 24; ++i) ex.params_data()[i] = .25 * (i + 1);
-      ex.params_data()[24] = sign;
-      std::vector<double> gradient(25), want(25, 0.);
-      const auto* x = ex.params_data();
-      const double expected = (sign < 0 ? x[5] * x[14] : x[7] + x[16]) + x[9];
-      want[9] = 1.;
-      if (sign < 0) {
-        want[5] = x[14];
-        want[14] = x[5];
-      } else {
-        want[7] = want[16] = 1.;
+  for (bool compact : {false, true}) {
+    for (bool native : {false, true}) {
+      Graph g;
+      const int values = g.add_slot(24, true);
+      const int control = g.add_slot(1, true);
+      auto p = std::make_shared<IslandProg>();
+      p->n_regs = 20;
+      p->ins = {{0, 8, 0, 2}, {8, 8, 0, 12}, {16, 1, 1, 0}};
+      p->pool = {0.};
+      p->code = {{Program::CONST, 17, 0}, {Program::LT, 18, 16, 17},
+                 {Program::JZ, 5, 18},    {Program::MUL, 19, 3, 10},
+                 {Program::JMP, 6},       {Program::ADD, 19, 5, 12}};
+      p->out_regs = {19, 7};
+      const std::vector<std::pair<int, int>> ranges{{0, 8}, {8, 8}, {16, 1}};
+      const auto used = used_program_inputs(*p, ranges);
+      expect(
+          "window bounds include both branches and direct output",
+          used == std::vector<std::pair<int, int>>{{3, 5}, {10, 3}, {16, 1}});
+      for (size_t k = 0; k < p->ins.size(); ++k) {
+        p->ins[k].offset += used[k].first - p->ins[k].reg;
+        p->ins[k].reg = used[k].first;
+        p->ins[k].len = used[k].second;
       }
-      expect_exact("window value", ex.gradient(gradient.data()), expected);
-      for (int i = 0; i < 25; ++i)
-        expect_exact("window gradient", gradient[i], want[i]);
+      if (compact) {
+        compact_island(*p);
+        expect("input windows release unused register storage", p->n_regs < 20);
+      }
+      expect("window adjoint generated", gen_adjoint(*p));
+      p->native_adj = native;
+      const int out = g.add_slot(2, false);
+      const int op = g.add_op(OP_ISLAND, {values, control}, out);
+      g.ops[op].udata = p.get();
+      g.udata_pool.push_back(p);
+      const int sum = g.add_slot(1, false);
+      g.add_op(OP_SUM_VEC, {out}, sum);
+      g.result_slot = sum;
+      Executor ex(std::move(g));
+      for (double sign : {-1., 1., -1.}) {
+        for (int i = 0; i < 24; ++i) ex.params_data()[i] = .25 * (i + 1);
+        ex.params_data()[24] = sign;
+        std::vector<double> gradient(25), want(25, 0.);
+        const auto* x = ex.params_data();
+        const double expected = (sign < 0 ? x[5] * x[14] : x[7] + x[16]) + x[9];
+        want[9] = 1.;
+        if (sign < 0) {
+          want[5] = x[14];
+          want[14] = x[5];
+        } else {
+          want[7] = want[16] = 1.;
+        }
+        expect_exact("window value", ex.gradient(gradient.data()), expected);
+        for (int i = 0; i < 25; ++i)
+          expect_exact("window gradient", gradient[i], want[i]);
+      }
+      Program unmodelled = *p;
+      unmodelled.code.push_back({Program::DYN_INDEX, 19, 0, 16, 0, 8});
+      expect("window refuses unmodelled spans",
+             used_program_inputs(unmodelled, ranges) == ranges);
     }
-    Program unmodelled = *p;
-    unmodelled.code.push_back({Program::DYN_INDEX, 19, 0, 16, 0, 8});
-    expect("window refuses unmodelled spans",
-           used_program_inputs(unmodelled, ranges) == ranges);
   }
 }
 
@@ -3178,6 +3327,7 @@ int main() {
   test_six_live_ins_ok();
   test_packed_live_ins();
   test_input_windows();
+  test_acyclic_constant_elision();
   test_kernel_call_ops_carved(true);
   test_kernel_call_ops_carved(false);
   test_density_mask_data_argument();
@@ -3209,6 +3359,8 @@ int main() {
   test_scalar_chain_carved();
   test_native_extras_carved();
   test_pow_zero_base_carved();
+  test_incoming_gradient_accumulation();
+  test_incoming_gradient_aliases();
   test_div_extreme_matches_graph_kernel();
   test_div_range_model_matches_uncarved();
   test_inplace_slice_cost_refuses_wide_state();

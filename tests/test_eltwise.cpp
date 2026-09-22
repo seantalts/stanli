@@ -34,6 +34,54 @@ static VecV mkv(const std::vector<double>& v) {
   return x;
 }
 
+static void test_matrix_transpose_add() {
+  using MatV = Eigen::Matrix<var, -1, -1>;
+  for (int n : {1, 3, 7}) {
+    for (bool left : {false, true}) {
+      stan::math::nested_rev_autodiff scope;
+      MatV a(n, n);
+      std::vector<double> x(n * n), transposed(n * n), seeds(n * n),
+          gradient(n * n), other(n * n, 0), output(n * n);
+      for (int i = 0; i < n * n; ++i) {
+        x[i] = .13 * (i + 1);
+        a.data()[i] = x[i];
+        seeds[i] = i % 3 == 0 ? 1e16 : (i % 3 == 1 ? -1e16 : 1.0);
+        gradient[i] = .7;
+      }
+      for (int i = 0; i < n * n; ++i) transposed[i] = x[(i % n) * n + i / n];
+      MatV result = left ? MatV(stan::math::add(stan::math::transpose(a), a))
+                         : MatV(stan::math::add(a, stan::math::transpose(a)));
+      var total = 0;
+      for (int i = 0; i < n * n; ++i) total += result.data()[i] * seeds[i];
+      for (int i = 0; i < n * n; ++i) a.data()[i].adj() = gradient[i];
+      stan::math::grad(total.vi_);
+      stanli::KernelCtx ctx;
+      ctx.n_in = 2;
+      ctx.in[0] = {left ? transposed.data() : x.data(), n * n};
+      ctx.in[1] = {left ? x.data() : transposed.data(), n * n};
+      ctx.in_adj[0] = {left ? other.data() : gradient.data(), n * n};
+      ctx.in_adj[1] = {left ? gradient.data() : other.data(), n * n};
+      ctx.out = {output.data(), n * n};
+      ctx.out_adj_vec = {seeds.data(), n * n};
+      ctx.out_adj = seeds[0];
+      ctx.variant =
+          left ? stanli::kAddTransposeLeft : stanli::kAddTransposeRight;
+      ctx.idata = &n;
+      ctx.n_idata = 1;
+      const auto* kernel = stanli::find_kernel(stanli::OP_ADD);
+      kernel->forward(ctx);
+      kernel->backward(ctx);
+      for (int i = 0; i < n * n; ++i) {
+        expect_eq("matrix transpose add value", output[i],
+                  result.data()[i].val());
+        expect_eq("matrix transpose add gradient", gradient[i],
+                  a.data()[i].adj());
+        expect_eq("matrix transpose add direct accumulation", other[i], 0);
+      }
+    }
+  }
+}
+
 // OP_LOGV takes Eigen's packet log, a ulp off libm on some arguments. The
 // gradients are 1/x and stay bitwise; only lp carries the difference, and a
 // sum that cancels reports it as several ulps of the result.
@@ -341,9 +389,157 @@ static void test_gather_bwd_null_in_adj() {
   }
 }
 
+// Use arbitrary output seeds and preexisting input adjoints: a unit-seeded
+// sum hides several distinct Stan overloads' multiplication/reduction orders.
+static void test_matrix_scalar_division() {
+  using namespace stanli;
+  for (int n : {1, 7, 40, 129}) {
+    for (bool active_matrix : {false, true}) {
+      for (bool active_scalar : {false, true}) {
+        stan::math::nested_rev_autodiff nested;
+        Eigen::VectorXd values(n), seeds(n), out(n), adj(n);
+        for (int i = 0; i < n; ++i) {
+          values[i] = (i % 2 ? -1.0 : 1.0) * (0.17 + 0.031 * i);
+          seeds[i] = 0.23 + 0.073 * ((i * 7) % 11);
+          adj[i] = -0.17;
+        }
+        double divisor = 0.04820923213628131, scalar_adj = -0.17;
+        VecV a = values.cast<var>();
+        var b = divisor;
+        VecV result;
+        Eigen::VectorXd expected_out;
+        if (active_matrix && active_scalar)
+          result = stan::math::divide(a, b);
+        else if (active_matrix)
+          result = stan::math::divide(a, divisor);
+        else if (active_scalar)
+          result = stan::math::divide(values, b);
+        else
+          expected_out = stan::math::divide(values, divisor);
+        if (active_matrix || active_scalar) {
+          expected_out = result.val();
+          a.adj().setConstant(-0.17);
+          b.adj() = -0.17;
+          result.adj() = seeds;
+          stan::math::grad();
+        }
+        KernelCtx c{};
+        c.n_in = 2;
+        c.in[0] = {values.data(), n};
+        c.in[1] = {&divisor, 1};
+        c.out = {out.data(), n};
+        c.out_adj = seeds[0];
+        c.out_adj_vec = {seeds.data(), n};
+        if (active_matrix) c.in_adj[0] = {adj.data(), n};
+        if (active_scalar) c.in_adj[1] = {&scalar_adj, 1};
+        c.variant = kDivMatrixScalar | (active_matrix ? kDivMatrixActive : 0) |
+                    (active_scalar ? kDivScalarActive : 0);
+        const Kernel* k = find_kernel(OP_DIV);
+        k->forward(c);
+        k->backward(c);
+        for (int i = 0; i < n; ++i) {
+          expect_eq("matrix/scalar division value", out[i], expected_out[i]);
+          if (active_matrix)
+            expect_eq("matrix/scalar division da", adj[i], a[i].adj());
+        }
+        if (active_scalar)
+          expect_eq("matrix/scalar division db", scalar_adj, b.adj());
+      }
+    }
+  }
+}
+
+static void test_power_seed_grouping() {
+  using namespace stanli;
+  for (int n : {1, 7, 40}) {
+    stan::math::nested_rev_autodiff scope;
+    Eigen::VectorXd a(n), b(n), seed(n), output(n), da(n), db(n);
+    VecV av(n), bv(n), result(n);
+    for (int i = 0; i < n; ++i) {
+      a[i] = .17 + .031 * i;
+      b[i] = .71 + .043 * i;
+      seed[i] = -.29 + .071 * i;
+      av[i] = a[i];
+      bv[i] = b[i];
+      result[i] = stan::math::pow(av[i], bv[i]);
+      av[i].adj() = da[i] = .13;
+      bv[i].adj() = db[i] = -.11;
+      result[i].adj() = seed[i];
+    }
+    stan::math::grad();
+    KernelCtx ctx{};
+    ctx.n_in = 2;
+    ctx.in[0] = {a.data(), n};
+    ctx.in[1] = {b.data(), n};
+    ctx.in_adj[0] = {da.data(), n};
+    ctx.in_adj[1] = {db.data(), n};
+    ctx.out = {output.data(), n};
+    ctx.out_adj = seed[0];
+    ctx.out_adj_vec = {seed.data(), n};
+    const Kernel* implementation = find_kernel(OP_POW);
+    implementation->forward(ctx);
+    implementation->backward(ctx);
+    for (int i = 0; i < n; ++i) {
+      expect_eq("power weighted value", output[i], result[i].val());
+      expect_eq("power weighted base", da[i], av[i].adj());
+      expect_eq("power weighted exponent", db[i], bv[i].adj());
+    }
+  }
+}
+
+static void test_reduction_overloads() {
+  using namespace stanli;
+  for (int n : {0, 1, 7, 40, 129}) {
+    stan::math::nested_rev_autodiff scope;
+    Eigen::VectorXd values(n + 1), adj = Eigen::VectorXd::Constant(n, .13);
+    VecV active(n);
+    for (int i = 0; i <= n; ++i) {
+      values[i] = (i % 3 == 0 ? 1e7 : -.3) + .17 * i;
+      if (i < n) active[i] = values[i];
+    }
+    var result = stan::math::dot_self(active);
+    active.adj().setConstant(.13);
+    result.adj() = -.731;
+    stan::math::grad();
+    double output;
+    KernelCtx ctx{};
+    ctx.n_in = 2;
+    ctx.in[0] = ctx.in[1] = {values.data(), n};
+    ctx.in_adj[0] = ctx.in_adj[1] = {adj.data(), n};
+    ctx.out = {&output, 1};
+    ctx.out_adj = -.731;
+    ctx.variant = 1;  // Matrix<var> dot_self
+    const Kernel* dot = find_kernel(OP_DOT);
+    dot->forward(ctx);
+    dot->backward(ctx);
+    expect_eq("dot_self value grouping", output, result.val());
+    for (int i = 0; i < n; ++i)
+      expect_eq("dot_self gradient grouping", adj[i], active[i].adj());
+
+    const Kernel* sum = find_kernel(OP_SUM_VEC);
+    ctx.n_in = 1;
+    ctx.variant = 1;  // owning Eigen double input
+    sum->forward(ctx);
+    Eigen::VectorXd owning = values.head(n);
+    expect_eq("sum owning Eigen", output, stan::math::sum(owning));
+    int offset = 1;
+    ctx.in[0] = {values.data() + 1, n};
+    ctx.variant = 2;
+    ctx.idata = &offset;
+    ctx.n_idata = 1;
+    sum->forward(ctx);
+    expect_eq("sum shifted Eigen", output,
+              stan::math::sum(values.segment(1, n)));
+  }
+}
+
 int main() {
+  test_matrix_transpose_add();
   using namespace stanli;
   test_expression_layout_policy();
+  test_matrix_scalar_division();
+  test_power_seed_grouping();
+  test_reduction_overloads();
   const int N = 4;
 
   // Binary: all shape combos. Scalars are length-1 slots; the var reference
@@ -389,11 +585,30 @@ int main() {
   check_case("div vv", OP_DIV, N, {A, B}, [](auto& v) {
     return stan::math::sum(stan::math::elt_divide(v[0], v[1]));
   });
-  check_case("div vs", OP_DIV, N, {A, {T}}, [](auto& v) {
-    return stan::math::sum(stan::math::divide(v[0], v[1](0)));
-  });
+  check_case_params(
+      "div vs", OP_DIV, N, {A, {T}}, {true, true},
+      [](auto& v) {
+        return stan::math::sum(stan::math::divide(v[0], v[1](0)));
+      },
+      0, kDivMatrixScalar | kDivMatrixActive | kDivScalarActive);
   check_case("div ss", OP_DIV, 1, {{S}, {T}},
              [](auto& v) { return v[0](0) / v[1](0); });
+  check_case_params(
+      "div scalar lanes", OP_DIV, N, {A, B}, {true, true},
+      [](auto& v) {
+        VecV out(v[0].size());
+        for (int i = 0; i < out.size(); ++i) out[i] = v[0][i] / v[1][i];
+        return stan::math::sum(out);
+      },
+      0, kDivScalarLanes);
+  check_case_params(
+      "div scalar broadcast lanes", OP_DIV, N, {A, {T}}, {true, true},
+      [](auto& v) {
+        VecV out(v[0].size());
+        for (int i = 0; i < out.size(); ++i) out[i] = v[0][i] / v[1][0];
+        return stan::math::sum(out);
+      },
+      0, kDivScalarLanes);
   // POW: all shape combos, like the binaries above. Bases stay positive so
   // fractional exponents remain in support on both sides of the comparison.
   const std::vector<double> P{0.5, 1.2, 2.0, 0.3};

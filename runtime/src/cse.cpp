@@ -23,6 +23,9 @@
 // inputs through the map as the single forward pass reaches it is enough,
 // and chains collapse in that same pass. Rescanning the tail after each
 // merge would be quadratic in the op count.
+// Active outputs instead retain their slot identity and reverse callback.
+// Only their primal and read-only forward scratch are shared: summing seeds
+// before a nonlinear pullback would change floating-point accumulation.
 #include <stanli/cse.hpp>
 #include <stanli/optable.hpp>
 
@@ -68,8 +71,11 @@ CseStats cse(Graph& g,
   for (const auto& f : fills) keep.insert(f.first);
 
   std::vector<int64_t> version(n_slots, 0);
-  std::unordered_map<Key, int, KeyHash> table;
+  std::vector<char> active(n_slots, 0);
+  for (size_t s = 0; s < n_slots; ++s) active[s] = g.slots[s].is_param;
+  std::unordered_map<Key, size_t, KeyHash> table;
   std::unordered_map<int, int> rename;  // removed output -> surviving output
+  std::unordered_map<int, int> primal;  // same value, independent adjoint
   const auto resolve = [&](int s) {
     auto it = rename.find(s);
     return it == rename.end() ? s : it->second;
@@ -80,13 +86,23 @@ CseStats cse(Graph& g,
   for (size_t i = 0; i < g.ops.size(); ++i) {
     Op& op = g.ops[i];
     for (int j = 0; j < op.n_in; ++j) op.in[j] = resolve(op.in[j]);
+    bool any_active = false;
+    for (int j = 0; j < op.n_in; ++j)
+      if (op.in[j] >= 0) any_active |= active[(size_t)op.in[j]];
+    if (op.out >= 0) active[(size_t)op.out] |= any_active;
+    if (op.out2 >= 0) active[(size_t)op.out2] |= any_active;
 
     bool candidate = op.out >= 0 && op.out2 < 0 && op.udata == nullptr &&
+                     op.primal_source < 0 && !op.dyn_lengths &&
                      !never_merge(op.opcode) && writes[(size_t)op.out] == 1 &&
                      !keep.count(op.out) && !g.slots[(size_t)op.out].is_param;
     for (int j = 0; candidate && j < op.n_in; ++j)
       candidate = op.in[j] != op.out;
 
+    if (candidate) {
+      const Kernel* implementation = find_kernel(op.opcode);
+      if (!implementation || implementation->make_state) candidate = false;
+    }
     if (candidate) {
       key.w.clear();
       key.w.push_back(op.opcode);
@@ -94,18 +110,29 @@ CseStats cse(Graph& g,
       key.w.push_back(g.slots[(size_t)op.out].len);
       key.w.push_back(op.n_in);
       for (int j = 0; j < op.n_in; ++j) {
-        key.w.push_back(op.in[j]);
-        key.w.push_back(op.in[j] >= 0 ? version[(size_t)op.in[j]] : 0);
+        const auto shared = primal.find(op.in[j]);
+        const int input = shared == primal.end() ? op.in[j] : shared->second;
+        key.w.push_back(input);
+        key.w.push_back(input >= 0 ? version[(size_t)input] : 0);
       }
       key.w.push_back(op.n_idata);
       for (int64_t k = 0; k < op.n_idata; ++k) key.w.push_back(op.idata[k]);
-      auto ins = table.emplace(key, op.out);
+      auto ins = table.emplace(key, i);
       if (!ins.second) {
-        rename.emplace(op.out, ins.first->second);
-        g.slots[(size_t)op.out].len = 0;
-        drop[i] = 1;
-        ++st.ops_removed;
-        continue;
+        Op& survivor = g.ops[ins.first->second];
+        if (any_active) {
+          // Combining output adjoints before the pullback reassociates
+          // arithmetic. Share only the primal, keeping source reverse order.
+          op.primal_source = survivor.primal_source = survivor.out;
+          primal.emplace(op.out, survivor.out);
+          ++st.primals_shared;
+        } else {
+          rename.emplace(op.out, survivor.out);
+          g.slots[(size_t)op.out].len = 0;
+          drop[i] = 1;
+          ++st.ops_removed;
+          continue;
+        }
       }
     }
     if (op.out >= 0) ++version[(size_t)op.out];

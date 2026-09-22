@@ -59,6 +59,9 @@ struct IslandProg : Program {
     // True where nobody says otherwise, which is the all-active binding
     // this was before.
     bool active = true;
+    // Filled by gen_adjoint. Only an unmodified input's adjoint cells may
+    // continue accumulation from the corresponding external adjoints.
+    bool immutable = false;
   };
   std::vector<LiveIn> ins;
   // The generated backward (adjoint.hpp), empty for a program the generator

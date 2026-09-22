@@ -274,6 +274,42 @@ static void test_shared_data() {
   expect_eq("constant shared result", cc.gradient(&grad), 2);
 }
 
+static void test_shared_data_with_cached_primals() {
+  using namespace stanli;
+  Graph g;
+  const int x = g.add_slot(1, true), a = g.add_slot(1, false);
+  const int b = g.add_slot(1, false), product = g.add_slot(1, false);
+  const int cached = g.add_slot(1, false), weighted = g.add_slot(1, false);
+  const int result = g.add_slot(1, false);
+  g.add_op(OP_MUL, {x, a}, product);
+  g.ops.back().primal_source = product;
+  g.add_op(OP_MUL, {x, a}, cached);
+  g.ops.back().primal_source = product;
+  g.add_op(OP_MUL, {cached, b}, weighted);
+  g.add_op(OP_ADD, {product, weighted}, result);
+  g.result_slot = result;
+  Executor src(std::move(g));
+  const double three = 3, five = 5;
+  src.set_values(a, &three, 1);
+  src.set_values(b, &five, 1);
+  src.params_data()[0] = 2;
+  Executor clone(src);
+  double grad = 0;
+  expect_eq("cached clone value", clone.gradient(&grad), 36);
+  expect_eq("cached clone gradient", grad, 18);
+  *src.value_ptr(a) = 7;
+  expect_eq("cached detached value", src.gradient(&grad), 84);
+  expect_eq("cached detached gradient", grad, 42);
+  expect_eq("cached clone isolated", clone.gradient(&grad), 36);
+  Executor shared_again(clone);
+  const double minus_four = -4;
+  clone.set_values(b, &minus_four, 1);
+  expect_eq("cached filled value", clone.gradient(&grad), -18);
+  expect_eq("cached filled gradient", grad, -9);
+  expect_eq("cached second clone isolated", shared_again.gradient(&grad), 36);
+  expect_eq("cached second clone gradient", grad, 18);
+}
+
 int main() {
   using namespace stanli;
 
@@ -484,6 +520,7 @@ int main() {
   }
 
   test_shared_data();
+  test_shared_data_with_cached_primals();
   test_compact_idata_lifecycle();
   test_compact_append_after_copy();
   test_mixed_owned_borrowed_idata();

@@ -71,7 +71,8 @@ void nary_bwd(KernelCtx& ctx, F&& f) {
 // ---- gp_*_cov(x, alpha, rho) ----------------------------------------------
 // in = {x (data, N*D), alpha, rho}; idata = {N, D}; out = N*N column-major.
 // x as array[N] real is D == 1; array[N] vector[D] flattens array-major.
-// The variant selects the covariance function.
+// The variant selects the covariance function. An optional fourth scalar
+// input adds to each diagonal in increasing source order, on this same tape.
 std::vector<VecD> gp_points(const KernelCtx& ctx) {
   const int64_t N = ctx.idata[0], D = ctx.idata[1];
   std::vector<VecD> pts(N, VecD(D));
@@ -97,6 +98,8 @@ void gp_cov_fwd(KernelCtx& ctx) {
   const int64_t N = ctx.idata[0];
   auto pts = gp_points(ctx);
   MatD c = gp_cov_call(ctx.variant, pts, ctx.in[1].data[0], ctx.in[2].data[0]);
+  if (ctx.n_in == 4)
+    for (int64_t i = 0; i < N; ++i) c(i, i) += ctx.in[3].data[0];
   MapM(ctx.out.data, N, N) = c;
 }
 void gp_cov_replay_bwd(KernelCtx& ctx) {
@@ -106,15 +109,21 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
     // inactive geometry stays double. Active locations retain the full path.
     stan::math::nested_rev_autodiff nested;
     stan::math::var sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
-    const auto covariance =
-        gp_cov_call(ctx.variant, gp_points(ctx), sigma, rho);
+    auto covariance = gp_cov_call(ctx.variant, gp_points(ctx), sigma, rho);
     const int64_t n = ctx.idata[0];
     if (n == 0) return;
+    stan::math::var jitter;
+    if (ctx.n_in == 4) {
+      jitter = ctx.in[3].data[0];
+      for (int64_t i = 0; i < n; ++i) covariance(i, i) += jitter;
+    }
     const stan::math::var objective = stan::math::sum(stan::math::elt_multiply(
         covariance, CMapM(ctx.out_adj_vec.data, n, n)));
     stan::math::grad(objective.vi_);
     if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += sigma.adj();
     if (ctx.in_adj[2].data) ctx.in_adj[2].data[0] += rho.adj();
+    if (ctx.n_in == 4 && ctx.in_adj[3].data)
+      ctx.in_adj[3].data[0] += jitter.adj();
     return;
   }
   // x may be a parameter: rebuild the points from the promoted xs[0] so its
@@ -126,7 +135,10 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
     std::vector<VarV> pts(N, VarV(D));
     for (int64_t n = 0; n < N; ++n)
       for (int64_t d = 0; d < D; ++d) pts[n](d) = xs[0](n * D + d);
-    return gp_cov_call(variant, pts, xs[1](0), xs[2](0));
+    auto covariance = gp_cov_call(variant, pts, xs[1](0), xs[2](0));
+    if (ctx.n_in == 4)
+      for (int64_t i = 0; i < N; ++i) covariance(i, i) += xs[3](0);
+    return covariance;
   });
 }
 
@@ -136,7 +148,7 @@ void gp_cov_replay_bwd(KernelCtx& ctx) {
 // See stan/math/rev/fun/gp_exp_quad_cov.hpp for the reference callback.
 void gp_cov_bwd(KernelCtx& ctx) {
   const double sigma = ctx.in[1].data[0], rho = ctx.in[2].data[0];
-  if (ctx.variant != kGpExpQuad || ctx.in_adj[0].data ||
+  if (ctx.n_in == 4 || ctx.variant != kGpExpQuad || ctx.in_adj[0].data ||
       !std::isnormal(sigma * sigma) || !std::isnormal(rho * rho * rho)) {
     gp_cov_replay_bwd(ctx);
     return;
@@ -861,10 +873,21 @@ void gemm_bwd(KernelCtx& ctx) {
   CMapM A(ctx.in[0].data, ra, ca);
   CMapM B(ctx.in[1].data, ca, cb);
   CMapM dO(ctx.out_adj_vec.data, ra, cb);
-  if (ctx.in_adj[0].data)
-    MapM(ctx.in_adj[0].data, ra, ca) += dO * B.transpose();
-  if (ctx.in_adj[1].data)
-    MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * dO;
+  const auto scalar_adjoint = dO.unaryExpr([](double value) { return value; });
+  // The mixed Stan Math overloads consume Matrix<var>::adj_op() directly;
+  // only the two-active-input overload evaluates that view into doubles.
+  if (ctx.in_adj[0].data) {
+    if (ctx.in_adj[1].data)
+      MapM(ctx.in_adj[0].data, ra, ca) += dO * B.transpose();
+    else
+      MapM(ctx.in_adj[0].data, ra, ca) += scalar_adjoint * B.transpose();
+  }
+  if (ctx.in_adj[1].data) {
+    if (ctx.in_adj[0].data)
+      MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * dO;
+    else
+      MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * scalar_adjoint;
+  }
 }
 
 // ---- crossprod(A): out = A' * A ------------------------------------------

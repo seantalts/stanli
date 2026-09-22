@@ -494,6 +494,22 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
       has_back_edge = true;
     }
   }
+  if (!has_back_edge && !has_unmodelled_ranges)
+    elide_acyclic_program_constants(*prog);
+  // Narrow input windows before register compaction. Otherwise an unused
+  // vector prefix/suffix is pinned by the seed range and survives in every
+  // invocation's scratch. Offsets stay relative to the graph descriptor;
+  // emit_island adds any descriptor-packing offset later.
+  std::vector<std::pair<int, int>> input_ranges;
+  for (const auto& input : prog->ins)
+    input_ranges.emplace_back(input.reg, input.len);
+  const auto used_inputs = used_program_inputs(*prog, input_ranges);
+  for (size_t k = 0; k < prog->ins.size(); ++k) {
+    auto& input = prog->ins[k];
+    input.offset += used_inputs[k].first - input.reg;
+    input.reg = used_inputs[k].first;
+    input.len = used_inputs[k].second;
+  }
   // The straight-line compactor derives every range width from Instr::len.
   // Structured matrix calls use that field for the result width while
   // their operands can have different widths, so retain the original
@@ -523,7 +539,6 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
   if (inputs.size() <= 6) {
     for (size_t k = 0; k < prog->ins.size(); ++k) {
       prog->ins[k].input = (int)k;
-      prog->ins[k].offset = 0;
     }
   } else {
     // Op::in is deliberately compact. Pack just enough leading live-ins
@@ -539,31 +554,18 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
     int offset = 0;
     for (size_t k = 0; k < packed_count; ++k) {
       prog->ins[k].input = 0;
-      prog->ins[k].offset = offset;
-      offset += prog->ins[k].len;
+      prog->ins[k].offset += offset;
+      offset += g.slots[reg.in_slots[k]].len;
     }
     std::vector<int> compact{packed};
     for (size_t k = packed_count; k < inputs.size(); ++k) {
       prog->ins[k].input = (int)compact.size();
-      prog->ins[k].offset = 0;
       compact.push_back(inputs[k]);
     }
     inputs = std::move(compact);
   }
-  // Preserve graph descriptors (and their upstream evaluation). Only the
-  // register seed/harvest window narrows, after packed offsets are assigned.
-  std::vector<std::pair<int, int>> input_ranges;
-  for (const auto& input : prog->ins)
-    input_ranges.emplace_back(input.reg, input.len);
-  const auto used_inputs = used_program_inputs(*prog, input_ranges);
-  for (size_t k = 0; k < prog->ins.size(); ++k) {
-    auto& input = prog->ins[k];
-    input.offset += used_inputs[k].first - input.reg;
-    input.reg = used_inputs[k].first;
-    input.len = used_inputs[k].second;
-  }
   if (!prog->native_adj) {
-    input_ranges.clear();
+    std::vector<std::pair<int, int>> input_ranges;
     for (const auto& input : prog->ins)
       input_ranges.emplace_back(input.reg, input.len);
     prog->replay_initialized = program_initializes_reads(*prog, input_ranges);

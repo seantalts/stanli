@@ -191,6 +191,7 @@ void print_graph(std::string& out, const Graph& g, const GraphPrintInfo& info) {
       append_slot_ref(out, g, op.in[k]);
     }
     if (op.out2 != -1) appendf(out, " out2=s%d", op.out2);
+    if (op.primal_source >= 0) appendf(out, " primal=s%d", op.primal_source);
     if (op.n_idata) {
       appendf(out, " idata=[");
       for (int64_t k = 0; k < op.n_idata && k < 8; ++k)

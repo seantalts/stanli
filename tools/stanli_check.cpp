@@ -68,6 +68,18 @@ static std::string read_mir(const std::string& path) {
 }
 
 int main(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "--compiler") {
+#if defined(__clang__)
+    std::puts("clang");
+#elif defined(__GNUC__)
+    std::puts("gcc");
+#elif defined(_MSC_VER)
+    std::puts("msvc");
+#else
+    std::puts("unknown");
+#endif
+    return 0;
+  }
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
@@ -75,7 +87,8 @@ int main(int argc, char** argv) {
                  "       [--point N] [--columns]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--ledger PATH]]\n"
-                 "       [--dump-passes=STAGES] [--dump-dir=DIR]\n");
+                 "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
+                 "       stanli_check --compiler\n");
     return 2;
   }
   std::string stanc;

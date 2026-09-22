@@ -112,15 +112,45 @@ void island_fwd_impl(KernelCtx& ctx) {
 
 void island_fwd(KernelCtx& ctx) { island_fwd_impl<false>(ctx); }
 
+// Shared input descriptors and mutable registers retain the additive boundary:
+// their separate local cells do not represent one persistent external adjoint.
+bool continue_input_adjoints(const IslandProg& p, const KernelCtx& ctx) {
+  if (p.adj.empty()) return false;
+  for (int i = 0; i < ctx.n_in; ++i) {
+    if (!ctx.in_adj[i].data) continue;
+    const uintptr_t a = reinterpret_cast<uintptr_t>(ctx.in_adj[i].data);
+    for (int j = 0; j < i; ++j) {
+      if (!ctx.in_adj[j].data) continue;
+      const uintptr_t b = reinterpret_cast<uintptr_t>(ctx.in_adj[j].data);
+      if (a < b + ctx.in_adj[j].len * sizeof(double) &&
+          b < a + ctx.in_adj[i].len * sizeof(double))
+        return false;
+    }
+  }
+  return true;
+}
+
 // The generated backward: seed the live-outs, sweep, harvest the live-ins.
 void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
+  const bool continuing = continue_input_adjoints(p, ctx);
   double* adj = ctx.scratch + p.n_regs;
   std::fill_n(adj, p.adj.n_regs, 0.0);
+  // A region's input may already have contributions from later graph ops.
+  // Continue those accumulations in source order, rather than summing from
+  // zero here and adding one rounded subtotal at the boundary.
+  const auto& map = p.adj.adj_reg;
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const auto& li = p.ins[k];
+    const int input = li.input >= 0 ? li.input : (int)k;
+    if (!continuing || !li.immutable || !ctx.in_adj[input].data) continue;
+    for (int i = 0; i < li.len; ++i)
+      adj[(size_t)map[(size_t)(li.reg + i)]] =
+          ctx.in_adj[input].data[li.offset + i];
+  }
   // Through the sharing map, since a live-out register need not own its
   // adjoint cell. Descending, because two live-out slots can share a
   // register range (the carver aliases a dead copy-then-modify chain onto
   // its base) and the replay's seeding sum unwinds in that order.
-  const auto& map = p.adj.adj_reg;
   for (size_t m = p.out_regs.size(); m-- > 0;)
     adj[(size_t)map[(size_t)p.out_regs[m]]] += ctx.out_adj_vec.data[m];
   run_adjoint(p, p.adj, ctx.scratch, adj);
@@ -128,9 +158,13 @@ void island_bwd_native(const IslandProg& p, KernelCtx& ctx) {
     const auto& li = p.ins[k];
     const int input = li.input >= 0 ? li.input : (int)k;
     if (!ctx.in_adj[input].data) continue;
-    for (int i = 0; i < li.len; ++i)
-      ctx.in_adj[input].data[li.offset + i] +=
-          adj[(size_t)map[(size_t)(li.reg + i)]];
+    for (int i = 0; i < li.len; ++i) {
+      const double contribution = adj[(size_t)map[(size_t)(li.reg + i)]];
+      if (continuing && li.immutable)
+        ctx.in_adj[input].data[li.offset + i] = contribution;
+      else
+        ctx.in_adj[input].data[li.offset + i] += contribution;
+    }
   }
 }
 
@@ -141,6 +175,7 @@ void island_bwd(KernelCtx& ctx) {
     return;
   }
   stan::math::nested_rev_autodiff nested;
+  const bool continuing = continue_input_adjoints(p, ctx);
   using stan::math::var;
   int64_t total = 0;
   for (int k = 0; k < ctx.n_in; ++k) total += ctx.in[k].len;
@@ -150,8 +185,10 @@ void island_bwd(KernelCtx& ctx) {
   var* const reg = vin + total;
   var* const vout = reg + p.n_regs;
   const var* in[6];
+  int64_t input_offsets[6];
   int64_t off = 0;
   for (int k = 0; k < ctx.n_in; ++k) {
+    input_offsets[k] = off;
     for (int64_t i = 0; i < ctx.in[k].len; ++i)
       vin[(size_t)(off + i)] = ctx.scratch[off + i];
     in[k] = vin + off;
@@ -161,13 +198,27 @@ void island_bwd(KernelCtx& ctx) {
   var j = 0.0;
   for (size_t m = 0; m < p.out_regs.size(); ++m)
     j += vout[m] * ctx.out_adj_vec.data[m];
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const auto& li = p.ins[k];
+    const int input = li.input >= 0 ? li.input : (int)k;
+    if (continuing && li.immutable && ctx.in_adj[input].data)
+      for (int i = 0; i < li.len; ++i)
+        vin[(size_t)(input_offsets[input] + li.offset + i)].adj() =
+            ctx.in_adj[input].data[li.offset + i];
+  }
   stan::math::grad(j.vi_);
-  off = 0;
-  for (int k = 0; k < ctx.n_in; ++k) {
-    if (ctx.in_adj[k].data)
-      for (int64_t i = 0; i < ctx.in[k].len; ++i)
-        ctx.in_adj[k].data[i] += vin[(size_t)(off + i)].adj();
-    off += ctx.in[k].len;
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const auto& li = p.ins[k];
+    const int input = li.input >= 0 ? li.input : (int)k;
+    if (!ctx.in_adj[input].data) continue;
+    for (int i = 0; i < li.len; ++i) {
+      const double contribution =
+          vin[(size_t)(input_offsets[input] + li.offset + i)].adj();
+      if (continuing && li.immutable)
+        ctx.in_adj[input].data[li.offset + i] = contribution;
+      else
+        ctx.in_adj[input].data[li.offset + i] += contribution;
+    }
   }
 }
 

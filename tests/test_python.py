@@ -917,17 +917,17 @@ def test_full_span_assignment_from_source():
 
 
 def test_stan_to_mir_is_optimized():
-    # The MIR handed to the runtime uses stanli's shared optimization policy,
-    # not raw transformed MIR. Partial evaluation is the observable here: at
-    # O1 stanc3 rewrites log(1 - theta) to log1m(theta), and the transformed
-    # MIR never contains log1m. Both compile paths -- the embedded compiler
-    # and the subprocess fallback -- must agree on this.
-    code = ("parameters { real<lower=0, upper=1> theta; } "
-            "model { target += log(1 - theta); }")
+    # The shared policy keeps O1 dataflow optimizations and preserves source
+    # arithmetic. Dead-branch removal is observable in both the embedded
+    # compiler and subprocess output, including the stock-compiler fallback.
+    code = ("parameters { real x; } model { "
+            "if (1) target += normal_lpdf(x | 0, 1); "
+            "else target += student_t_lpdf(x | 3, 0, 1); }")
     mir = stanli.stan_to_mir(code)
     optimized = (_portable_payload(mir) if mir.startswith("STANLI2:")
                  else mir.encode("utf-8"))
-    assert b"log1m" in optimized, "MIR is not optimized (expected log1m from --O1)"
+    assert b"normal_lpdf" in optimized, "MIR lost the live branch"
+    assert b"student_t_lpdf" not in optimized, "MIR retained the dead branch"
 
 
 def test_stan_to_mir_reports_syntax_errors():

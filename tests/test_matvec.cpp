@@ -59,7 +59,7 @@ static void run_case(const std::string& name, int R, int C,
   Eigen::Map<const Eigen::MatrixXd> Xm(X.data(), R, C);
   Eigen::Matrix<var, -1, 1> vb(C);
   for (int i = 0; i < C; ++i) vb(i) = beta[i];
-  Eigen::Matrix<var, -1, 1> veta = Xm * vb;
+  Eigen::Matrix<var, -1, 1> veta = stan::math::multiply(Xm, vb);
   Eigen::Map<const Eigen::VectorXd> ym(y.data(), R);
   var vlp = stan::math::normal_lpdf<false>(ym, veta, 1.0);
   vlp.grad();
@@ -68,9 +68,63 @@ static void run_case(const std::string& name, int R, int C,
   for (int i = 0; i < C; ++i)
     expect_ulp(name + " dbeta" + std::to_string(i), grad[i], vb(i).adj(),
                budget);
+  stan::math::recover_memory();
+}
+
+// Nonuniform seeds and cancellation distinguish Stan's scalar adjoint view
+// from a contiguous-double matrix product. Exercise both native product
+// opcodes with the same upstream multiply expression.
+static void cancellation_case(int rows, int cols, int outputs) {
+  using namespace stanli;
+  using stan::math::var;
+  Eigen::MatrixXd x(rows, cols), seeds(rows, outputs);
+  Eigen::Matrix<var, -1, -1> b(cols, outputs);
+  for (int j = 0; j < cols; ++j)
+    for (int i = 0; i < rows; ++i)
+      x(i, j) = (i < rows / 2 ? 0.5 : -0.5) * (1.0 + 0.01 * j);
+  for (int j = 0; j < outputs; ++j) {
+    for (int i = 0; i < rows; ++i)
+      seeds(i, j) = 0.7 + 0.013 * ((i * 7 + j * 3) % 11);
+    for (int i = 0; i < cols; ++i) b(i, j) = 0.1 + 0.03 * i;
+  }
+  Eigen::Matrix<var, -1, -1> y;
+  if (outputs == 1) {
+    const Eigen::Matrix<var, -1, 1> vector_b = b.col(0);
+    y = stan::math::multiply(x, vector_b);
+  } else {
+    y = stan::math::multiply(x, b);
+  }
+  for (int j = 0; j < outputs; ++j)
+    for (int i = 0; i < rows; ++i) y(i, j).adj() = seeds(i, j);
+  stan::math::grad();
+  const Eigen::MatrixXd values = b.val();
+  Eigen::MatrixXd out(rows, outputs),
+      grad = Eigen::MatrixXd::Zero(cols, outputs);
+  int shape[] = {rows, cols, outputs};
+  KernelCtx c{};
+  c.n_in = 2;
+  c.in[0] = {const_cast<double*>(x.data()), x.size()};
+  c.in[1] = {const_cast<double*>(values.data()), values.size()};
+  c.out = {out.data(), out.size()};
+  c.in_adj[1] = {grad.data(), grad.size()};
+  c.out_adj_vec = {seeds.data(), seeds.size()};
+  c.idata = shape;
+  c.n_idata = outputs == 1 ? 2 : 3;
+  const Kernel* k = find_kernel(outputs == 1 ? OP_MATVEC : OP_GEMM);
+  k->forward(c);
+  k->backward(c);
+  for (int j = 0; j < outputs; ++j)
+    for (int i = 0; i < cols; ++i)
+      expect_ulp("cancelling matrix gradient " + std::to_string(rows) + "x" +
+                     std::to_string(cols) + "x" + std::to_string(outputs),
+                 grad(i, j), b(i, j).adj(), 0);
+  stan::math::recover_memory();
 }
 
 int main() {
+  for (int rows : {1, 7, 40, 129, 572})
+    for (int cols : {1, 3})
+      for (int outputs : {1, 3}) cancellation_case(rows, cols, outputs);
   {
     const int R = 5, C = 3;
     // Column-major X (Stan/Eigen convention).

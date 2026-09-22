@@ -1274,10 +1274,52 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     const BuiltinLayout layout = resolved_builtin_layout(e, *builtin, values);
     SlotInfo si = values[layout.result_argument].si;
     si.param_free = a.si.param_free && b.si.param_free;
+    if (builtin->opcode == OP_ADD && !in_write_array && a.autodiff &&
+        is_matrix(a.si) && a.si.rows == a.si.cols && !g.ops.empty()) {
+      const Op& previous = g.ops.back();
+      const bool right = previous.out == b.slot && previous.in[0] == a.slot;
+      const bool left = previous.out == a.slot && previous.in[0] == b.slot;
+      if (previous.opcode == OP_TRANSPOSE && previous.n_in == 1 &&
+          (right || left)) {
+        Val result = emit_value(OP_ADD, {a, b}, layout.lanes, si,
+                                {checked_immediate(a.si.rows, "matrix add")});
+        g.ops.back().variant = right ? kAddTransposeRight : kAddTransposeLeft;
+        return with_layout(result, elementwise_layout({a, b}));
+      }
+    }
+    // Stan's scalar pow(var, data) overload dispatches these exponents to
+    // the corresponding unary function. Preserve that arithmetic (and its
+    // derivative grouping) before an island or reroll can erase the static
+    // argument types. This is overload selection, not an algebraic rewrite.
+    if (builtin->opcode == OP_POW && a.autodiff && !b.autodiff &&
+        mir::language_scalar(e.args[0]) && mir::language_scalar(e.args[1])) {
+      if (const auto* exponent = observation(b);
+          exponent && exponent->r.size() == 1) {
+        const double power = exponent->r[0];
+        if (power == 1.0) return a;
+        const uint16_t unary = power == 0.5    ? OP_SQRT
+                               : power == 2.0  ? OP_SQUARE
+                               : power == -2.0 ? OP_INV_SQUARE
+                               : power == -1.0 ? OP_INV
+                               : power == -0.5 ? OP_INV_SQRT
+                                               : OP_NONE_;
+        if (unary != OP_NONE_)
+          return with_layout(emit_value(unary, {a}, layout.lanes, si),
+                             elementwise_layout({a}));
+      }
+    }
     Val v = emit_value(builtin->opcode, {a, b}, layout.lanes, si);
     if (builtin->opcode == OP_POW) {
       g.ops.back().variant =
           mir::pow_zero_base_law(e.args[0], e.args[1], b.autodiff);
+    } else if (builtin->opcode == OP_DIV && e.args[0].unsized.depth == 0 &&
+               mir::eigen_leaf(e.args[0]) && mir::language_scalar(e.args[1])) {
+      g.ops.back().variant = kDivMatrixScalar |
+                             (a.autodiff ? kDivMatrixActive : 0) |
+                             (b.autodiff ? kDivScalarActive : 0);
+    } else if (builtin->opcode == OP_DIV && mir::language_scalar(e.args[0]) &&
+               mir::language_scalar(e.args[1])) {
+      g.ops.back().variant = kDivScalarLanes;
     } else if (builtin->opcode == OP_FMAX || builtin->opcode == OP_FMIN) {
       // Operand activity selects the stan-math overload: ties and NaN
       // adjoints differ between the var,var and mixed instantiations, and
@@ -1475,8 +1517,13 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       return with_layout(emit_value(OP_DOT, {d, d}, 1),
                          ExpressionLayout::scalar());
     }
-    return with_layout(emit_value(OP_DOT, {a, b}, 1),
-                       ExpressionLayout::scalar());
+    Val result = emit_value(OP_DOT, {a, b}, 1);
+    // The Matrix<var> dot_self overload sums squares in source order and
+    // contributes (2 * seed) * x once, unlike a two-input dot product.
+    if (paired->arity == 1 && a.autodiff && !in_write_array &&
+        mir::eigen_leaf(e.args[0]))
+      g.ops.back().variant = 1;
+    return with_layout(result, ExpressionLayout::scalar());
   }
 
   // Registered grouped reductions: one dot per column or row through the
@@ -1600,6 +1647,16 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     actuals.require_arity(1);
     Val a = actuals.at(0).value();
     (void)resolved_builtin_layout(e, *reduction, std::vector<Val>{a});
+    if (reduction->opcode == OP_SUM_VEC && mir::eigen_leaf(e.args[0]) &&
+        e.args[0].unsized.depth == 0 && (!a.autodiff || in_write_array)) {
+      const ReductionGrouping grouping = reduction_grouping(a, false);
+      Val result = emit_value(OP_SUM_VEC, {a}, 1, {},
+                              reduction_phase_idata(a, grouping, "sum"));
+      g.ops.back().variant = grouping == ReductionGrouping::Packet   ? 1u
+                             : grouping == ReductionGrouping::Phased ? 2u
+                                                                     : 0u;
+      return with_layout(result, ExpressionLayout::scalar());
+    }
     return with_layout(emit_value(reduction->opcode, {a}, 1),
                        ExpressionLayout::scalar());
   }

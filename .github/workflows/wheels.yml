@@ -244,7 +244,8 @@ jobs:
       # clang-ccache-seed.yml: that trusted main-only workflow is what makes
       # the first build of a brand-new PR warm.
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        id: compiler-cache
+        uses: actions/cache/restore@v4
         with:
           path: .ccache
           key: >-
@@ -500,6 +501,15 @@ jobs:
           fi
           ccache -s
 
+      # Keep successful compilation when a later test fails, so its retry
+      # can reuse these objects instead of rebuilding the whole runtime.
+      - name: Save the completed compiler cache
+        if: steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+
       # Every core, not matrix.build_jobs. That number is a memory ceiling
       # for the compile phase (one densities shard peaks near 3 GB); the
       # tests are 200-odd small processes with no such constraint. The
@@ -683,12 +693,10 @@ jobs:
           # argument, two models through the one dlopen'd runtime library.
           /tmp/wheeltest/bin/python tests/test_bridgestan_embed.py
 
-      # Exercise the real OCaml producer against the exact-source legacy
-      # compiler, then compare the decoded program and the executable graph.
+      # Encode the same optimized MIR with the real portable producer and
+      # upstream's legacy serializer, then compare decoded fields and graphs.
       # The normal C++ test has a test-only writer so it can run without an
       # OCaml toolchain; this closes the producer/schema drift gap in CI.
-      # stanc's --O1 has no switch for loop vectorization, so the probe runs
-      # with it off to match.
       - name: Typed producer matches exact-source legacy MIR
         if: matrix.runtime == 'linux-x86_64'
         run: |
@@ -698,10 +706,8 @@ jobs:
             /tmp/stanli-portable-nested-udf.stan
           cp tests/stanc3/mother.stan /tmp/stanli-portable-mother.stan
           for name in es nested-udf mother; do
-            deps/stanc3/stanc --O1 --debug-optimized-mir \
-              /tmp/stanli-portable-$name.stan \
-              > /tmp/stanli-$name.legacy-mir
             deps/stanc3/stanli-vectorize-probe --vectorize-loops off \
+              --legacy-output /tmp/stanli-$name.legacy-mir \
               --output /tmp/stanli-$name.portable-mir \
               /tmp/stanli-portable-$name.stan
             head -c 8 /tmp/stanli-$name.portable-mir | grep -q '^STANLI2:'
