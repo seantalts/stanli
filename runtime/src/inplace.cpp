@@ -343,8 +343,18 @@ int elide_full_extent_stores(Graph& g, const std::vector<int>& roots) {
   int removed = 0;
   for (size_t i = 0; i < n_ops; ++i) {
     const Op& op = g.ops[i];
-    if (!covers_destination(op)) continue;
-    const int dest = op.out, val = op.in[1];
+    // A full-range slice is the same copy as a full-extent store. Keep
+    // the single-reader source proof below: removing an identity copy with
+    // shared adjoints can otherwise regroup floating-point additions.
+    const bool identity_slice =
+        op.opcode == OP_SLICE && op.n_in == 1 && op.in[0] >= 0 && op.out >= 0 &&
+        op.out2 < 0 && op.variant == 0 && op.udata == nullptr &&
+        !op.dyn_lengths && op.primal_source < 0 && op.n_idata == 1 &&
+        op.idata != nullptr && op.idata[0] == 0 &&
+        g.slots[(size_t)op.in[0]].len == g.slots[(size_t)op.out].len &&
+        writers[(size_t)op.out].size() == 1;
+    if (!identity_slice && !covers_destination(op)) continue;
+    const int dest = op.out, val = op.in[identity_slice ? 0 : 1];
     if (dest == val) continue;
     if (root_set.count(dest) || root_set.count(val)) continue;
     if (g.slots[(size_t)dest].is_param || g.slots[(size_t)val].is_param)

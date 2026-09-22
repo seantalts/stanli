@@ -801,7 +801,40 @@ static void test_copying_full_store_elided() {
            got[i] == want[i]);
 }
 
+// Full-range copies may bypass their buffer only when the source has no
+// other reader: its reverse accumulation then still starts from zero.
+static void test_identity_slices() {
+  for (int mode = 0; mode < 7; ++mode) {
+    Graph g;
+    const int p = g.add_slot(4, true);
+    const int source = g.add_slot(4, false);
+    g.add_op(OP_EXPV, {p}, source);
+    const int copied = g.add_slot(mode == 1 ? 3 : 4, false);
+    g.add_op(OP_SLICE, {source}, copied, {mode == 1 ? 1 : 0});
+    const int first = g.add_slot(1, false);
+    g.add_op(OP_LOG_SUM_EXP, {copied}, first);
+    const int second = g.add_slot(1, false);
+    g.add_op(OP_SUM_VEC, {mode == 2 ? source : copied}, second);
+    if (mode == 4) g.add_op(OP_EXPV, {p}, source);
+    if (mode == 5) g.add_op(OP_EXPV, {p}, copied);
+    reduce_into_result(g, {first, second});
+    const auto want = run_grad(g, {});
+    const std::vector<int> roots =
+        mode == 3 ? std::vector<int>{copied} : std::vector<int>{};
+    if (mode == 6) test_setenv("STANLI_NO_INPLACE", "1", 1);
+    expect("identity slice eligibility",
+           elide_full_extent_stores(g, roots) == (mode == 0 ? 1 : 0));
+    if (mode == 6) test_unsetenv("STANLI_NO_INPLACE");
+    expect("identity slice graph", count_opcode(g, OP_SLICE) == (mode != 0));
+    const auto got = run_grad_twice(std::move(g), {});
+    expect("identity slice result size", got.size() == want.size());
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect("identity slice bitwise result", got[i] == want[i]);
+  }
+}
+
 int main() {
+  test_identity_slices();
   test_chain_collapses();
   test_slice_chain(false);
   test_slice_chain(true);

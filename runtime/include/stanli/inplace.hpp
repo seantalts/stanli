@@ -42,8 +42,10 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots);
 // Drops slice stores that overwrite their whole destination: the value the
 // store writes IS the vector its readers want, so they read it directly.
 // Applies to the four OP_SET_SLICE forms with start 0, unit stride and a
-// value as long as the destination. Returns the number of stores dropped.
-// Disabled under STANLI_NO_INPLACE.
+// value as long as the destination, and to full-range OP_SLICE copies with
+// a uniquely written output. The source must have no other reader, so
+// forwarding preserves adjoint accumulation order. Returns the number of
+// copies dropped. Disabled under STANLI_NO_INPLACE.
 int elide_full_extent_stores(Graph& g, const std::vector<int>& roots);
 
 }  // namespace stanli
