@@ -1,4 +1,4 @@
-name: Issue 374 Linux release compiler validation
+name: Issue 374 scalar transform validation
 'on':
   push:
     branches:
@@ -14,7 +14,7 @@ env:
   OPAM_VERSION: 2.5.2
 jobs:
   oracle:
-    name: GCC numerical replay
+    name: ${{ matrix.compiler }} numerical replay
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
@@ -24,10 +24,12 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - uses: actions/checkout@v4
-    - name: Fingerprint Clang
+    - name: Install Clang
+      run: manylinux-install-clang
+    - name: Fingerprint the compiler
       id: toolchain
       shell: bash
-      run: 'fingerprint=$(c++ --version | sha256sum | cut -d'' '' -f1)
+      run: 'fingerprint=$("$CXX" --version | sha256sum | cut -d'' '' -f1)
 
         echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
 
@@ -37,10 +39,10 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: .ccache
-        key: ccache-manylinux_2_28_x86_64-release-v4-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt',
+        key: ccache-manylinux_2_28_x86_64-release-${{ matrix.cache }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt',
           'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh')
           }}
-        restore-keys: ccache-manylinux_2_28_x86_64-release-v4-${{ steps.toolchain.outputs.id }}-
+        restore-keys: ccache-manylinux_2_28_x86_64-release-${{ matrix.cache }}-${{ steps.toolchain.outputs.id }}-
     - name: Restore the vendored dependencies
       uses: actions/cache@v4
       with:
@@ -149,12 +151,11 @@ jobs:
         key: ${{ steps.stanc-build-cache.outputs.cache-primary-key }}
     - name: Compile the release runtime
       shell: bash
-      run: "export CC=cc CXX=c++\nexport CCACHE_DIR=\"$PWD/.ccache\" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M\nexport\
-        \ CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime\nccache -z\ncmake -B build-rel\
-        \ -DCMAKE_BUILD_TYPE=Release \\\n  -DCMAKE_C_COMPILER=\"$CC\" \\\n  -DCMAKE_CXX_COMPILER=\"$CXX\" \\\n \
-        \ -DCMAKE_C_COMPILER_LAUNCHER=ccache \\\n  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \\\n  -DSTANLI_STANC_EMBED_OBJ=\"\
+      run: "export CCACHE_DIR=\"$PWD/.ccache\" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M\nexport CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime\n\
+        ccache -z\ncmake -B build-rel -DCMAKE_BUILD_TYPE=Release \\\n  -DCMAKE_C_COMPILER=\"$CC\" \\\n  -DCMAKE_CXX_COMPILER=\"\
+        $CXX\" \\\n  -DCMAKE_C_COMPILER_LAUNCHER=ccache \\\n  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \\\n  -DSTANLI_STANC_EMBED_OBJ=\"\
         $PWD/deps/stanc3/stanc_embed.o\" \\\n  -DSTANLI_OCAML_STDLIB=\"$PWD/deps/ocaml-include\"\ncmake --build\
-        \ build-rel --target stanli_check -j2\nccache -s\n"
+        \ build-rel --target stanli_check test_constrain_structured -j2\nccache -s\n"
     - name: Save the completed PR compiler cache
       if: steps.compiler-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
@@ -168,19 +169,60 @@ jobs:
         run-id: 35732018941
         github-token: ${{ secrets.GITHUB_TOKEN }}
         path: linux-oracle-input
-    - name: Replay the GCC runtime
+    - name: Test the structured transforms
+      run: ./build-rel/test_constrain_structured
+    - name: Prepare independent GCC CmdStan
+      if: matrix.compiler == 'gcc'
+      run: 'cp deps/stanc3/stanc deps/stanc3/stanc-pinned
+
+        cp deps/stanc3/stanc.src deps/stanc3/stanc-pinned.src
+
+        ./harnesses/conformance/fetch_cmdstan.sh
+
+        '
+    - name: Record independent GCC answers
+      if: matrix.compiler == 'gcc'
+      run: python3 tools/issue374_linux_oracle.py i320_gp_matern32 s2_unstr
+      env:
+        REF_CXX: c++
+        ORACLE_OUT: gcc-oracle-results
+        ORACLE_WORK: .cache/gcc-oracle-build
+    - name: Save independent GCC evidence
+      if: always() && matrix.compiler == 'gcc'
+      uses: actions/upload-artifact@v4
+      with:
+        name: issue374-gcc-independent-oracle
+        path: gcc-oracle-results/
+        if-no-files-found: warn
+    - name: Replay the runtime
       run: python3 tools/issue374_gcc_replay.py
-    - name: Save GCC evidence
+    - name: Save numerical evidence
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: issue374-gcc-results
+        name: issue374-${{ matrix.compiler }}-scalar-results
         path: gcc-results/
         if-no-files-found: error
-    - name: Save GCC checker
+    - name: Save the checker
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: issue374-gcc-checker
+        name: issue374-${{ matrix.compiler }}-scalar-checker
         path: build-rel/stanli_check
         if-no-files-found: warn
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - compiler: clang
+          cc: clang
+          cxx: clang++
+          cache: clang-v6
+        - compiler: gcc
+          cc: cc
+          cxx: c++
+          cache: v4
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      CANDIDATE_SHA: ${{ github.sha }}

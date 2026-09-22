@@ -1,6 +1,7 @@
 import concurrent.futures
 import json
 import pathlib
+import os
 import subprocess
 
 from verify_refs import ULP_LIMITS, check_model, load_refs
@@ -30,7 +31,7 @@ def one(name):
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
     results = list(pool.map(one, sorted(refs)))
-report = {"compiler": subprocess.check_output(["c++", "--version"], text=True),
+report = {"compiler": subprocess.check_output([os.environ.get("CXX", "c++"), "--version"], text=True),
           "cmdstan_rig": rig, "results": results}
 (OUT / "report.json").write_text(json.dumps(report, indent=2) + "\n")
 failures = [r for r in results if r[1] != "OK"]

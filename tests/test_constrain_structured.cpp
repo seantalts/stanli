@@ -143,6 +143,62 @@ std::vector<double> reference_positive_ordered(const Batch& b, int64_t nb,
 int main() {
   const int64_t nb = 2, K = 4;
 
+  // Gradient evaluation must use the scalar-var transform's values. The
+  // double overload has packet tanh, so value-only evaluation keeps its own
+  // reference. Include empty, scalar and packet-sized batches, and alternate
+  // evaluation modes to catch retained mode state.
+  for (int size : {0, 1, 2, 4, 8}) {
+    const int raw = size * (size - 1) / 2, width = size * size;
+    Graph g;
+    const int input = g.add_slot(nb * raw, true);
+    const int output = g.add_slot(nb * width, false);
+    const int jac = g.add_slot(1, false);
+    const int sum = g.add_slot(1, false);
+    const int lp = g.add_slot(1, false);
+    Op op;
+    op.opcode = OP_CONSTRAIN_CHOL_CORR;
+    op.in[0] = input;
+    op.n_in = 1;
+    op.out = output;
+    op.out2 = jac;
+    const int dims[] = {(int)nb, raw, size, size};
+    op.idata = dims;
+    op.n_idata = 4;
+    g.ops.push_back(op);
+    g.add_op(OP_SUM_VEC, {output}, sum);
+    g.add_op(OP_ADD_N, {sum, jac}, lp);
+    g.result_slot = lp;
+    Executor ex(std::move(g));
+    for (int i = 0; i < nb * raw; ++i)
+      ex.param_ptr(input)[i] = 0.07 * ((i % 9) - 4);
+    stan::math::nested_rev_autodiff nested;
+    std::vector<double> rev_values, prim_values;
+    var rev_lp = 0.0;
+    double prim_lp = 0.0;
+    for (int b = 0; b < nb; ++b) {
+      Eigen::VectorXd y(raw);
+      for (int i = 0; i < raw; ++i) y(i) = ex.param_ptr(input)[b * raw + i];
+      Eigen::Matrix<var, -1, 1> vy = y;
+      const auto v = stan::math::cholesky_corr_constrain(vy, size, rev_lp);
+      const auto d = stan::math::cholesky_corr_constrain(y, size, prim_lp);
+      for (int i = 0; i < width; ++i) {
+        rev_values.push_back(v.data()[i].val());
+        prim_values.push_back(d.data()[i]);
+      }
+    }
+    for (bool value_only : {false, true, false}) {
+      if (value_only)
+        ex.forward_value_only();
+      else
+        ex.forward();
+      const auto& values = value_only ? prim_values : rev_values;
+      for (int i = 0; i < nb * width; ++i)
+        check(ex.value_ptr(output)[i] == values[i], "Cholesky correlation forward value");
+      check(ex.value_ptr(jac)[0] == (value_only ? prim_lp : rev_lp.val()),
+            "Cholesky correlation forward Jacobian");
+    }
+  }
+
   {
     Batch b;
     b.x = {0.3, -0.8, 0.5, -0.2, 0.6, -0.4};

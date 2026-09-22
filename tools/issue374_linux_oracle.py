@@ -20,8 +20,8 @@ from corpus_inventory import source_digest
 from verify_refs import accepted, load_refs, parse_status, parse_wa, worst_pair
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-OUT = ROOT / "linux-oracle-results"
-WORK = ROOT / ".cache/linux-oracle-build"
+OUT = ROOT / os.environ.get("ORACLE_OUT", "linux-oracle-results")
+WORK = ROOT / os.environ.get("ORACLE_WORK", ".cache/linux-oracle-build")
 CS = ROOT / "deps/cmdstan"
 STANC = ROOT / "deps/stanc3/stanc"
 CHECK = ROOT / "build-rel/stanli_check"
@@ -47,7 +47,7 @@ RIG = {
     "math": sha(CS / "stan/lib/stan_math"),
     "stanc3": (STANC.with_suffix(".src")).read_text().strip(),
     "stanc_sha256": hashlib.sha256(STANC.read_bytes()).hexdigest(),
-    "compiler": command(["clang++", "--version"]),
+    "compiler": command([os.environ.get("REF_CXX", "clang++"), "--version"]),
     "reference_flags": "-O1 -ffp-contract=off; stanc default optimization",
     "platform": f"{platform.system()} {platform.machine()}",
     "libc": " ".join(platform.libc_ver()),
@@ -72,6 +72,7 @@ def one(stan):
         [str(STANC), str(stan), f"--o={hpp}"],
         compile_cmd(CS, hpp, ROOT / "tools/ref_driver.cpp", exe, sundials=False),
     ]
+    commands[1][0] = os.environ.get("REF_CXX", "clang++")
     # A second comparison in the same immutable job reuses its fresh binaries.
     for args in ([] if exe.exists() else commands):
         result = subprocess.run(args, capture_output=True, text=True, timeout=600)
