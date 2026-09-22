@@ -606,6 +606,99 @@ class PlatformReferenceTest(unittest.TestCase):
                 self.select(supplement={MODEL: entry})
 
 
+class SparsePlatformReferenceTest(unittest.TestCase):
+    """A platform correction must preserve the existing measured contract."""
+
+    def setUp(self):
+        self.primary = {"platform": "Darwin arm64", "cmdstan": "c",
+                        "stan": "s", "math": "m", "stanc3": "f"}
+        self.rig = {**self.primary, "platform": "Darwin x86_64",
+                    "compiler_family": "clang"}
+        self.original = copy.deepcopy(REF)
+        for pt in self.original["points"].values():
+            pt.update(status="MISMATCH", max_rel=0.006)
+        self.entry = copy.deepcopy(self.original)
+        self.entry.update(
+            source_sha256=source_digest(REPO / "tests/stanc3" / f"{MODEL}.stan"),
+            data_sha256=source_digest(REPO / "tests/stanc3" / f"{MODEL}.json"))
+        for pt in self.entry["points"].values():
+            pt["values"] = ["-3.5", "1.01", "-2"]
+
+    def select(self, entry=None, rig=None, compiler="clang", models=None):
+        extra = {MODEL: self.entry if entry is None else entry}
+        with unittest.mock.patch.dict(verify_refs.SPARSE_PLATFORM_REFS, {
+                "Darwin x86_64": (pathlib.Path("sparse.json.gz"), "clang",
+                                  frozenset({MODEL} if models is None else models))},
+                clear=True), unittest.mock.patch("verify_refs.load_refs", side_effect=[
+                    ({MODEL: self.original}, self.primary), (extra, rig or self.rig)]):
+            return verify_refs.replay_refs("Darwin x86_64", compiler)[0][MODEL]
+
+    def test_selects_independent_values_preserving_gates_and_absent_wa(self):
+        selected = self.select()
+        self.assertEqual(selected["recorded"], self.rig)
+        for point in POINTS:
+            before = self.original["points"][str(point)]
+            after = selected["points"][str(point)]
+            self.assertEqual(after["values"], ["-3.5", "1.01", "-2"])
+            self.assertNotIn("wa", after)
+            self.assertEqual(verify_refs.gate_for(MODEL, before, 1e-9),
+                             verify_refs.gate_for(MODEL, after, 1e-9))
+        self.assertIsNone(verify_refs.ulp_limit_for(MODEL, selected, "Darwin x86_64"))
+
+    def test_platform_compiler_and_dependency_provenance_fail_closed(self):
+        for key in ("platform", "compiler_family", "cmdstan", "stan", "math", "stanc3"):
+            with self.subTest(key=key), self.assertRaisesRegex(SystemExit, "mismatch"):
+                self.select(rig={**self.rig, key: "wrong"})
+        for compiler in (None, "gcc", "unknown"):
+            with self.subTest(compiler=compiler), self.assertRaisesRegex(SystemExit, "compiler"):
+                self.select(compiler=compiler)
+
+    def test_declared_fixture_set_is_required(self):
+        with self.assertRaisesRegex(SystemExit, "declared fixtures"):
+            self.select(models={MODEL, "missing"})
+
+    def test_missing_hashes_or_points_fail_closed(self):
+        for key in ("source_sha256", "data_sha256"):
+            entry = copy.deepcopy(self.entry)
+            del entry[key]
+            with self.subTest(key=key), self.assertRaisesRegex(SystemExit, "hashes"):
+                self.select(entry=entry)
+        entry = copy.deepcopy(self.entry)
+        del entry["points"]["2"]
+        with self.assertRaisesRegex(SystemExit, "points are incomplete"):
+            self.select(entry=entry)
+
+    def test_changed_gate_or_coverage_is_refused(self):
+        for key, value in (("max_rel", 0.1), ("status", "VERIFIED"),
+                           ("wa", {"names": "a", "values": ["1"]}),
+                           ("values", ["-3.5", "1"])):
+            entry = copy.deepcopy(self.entry)
+            entry["points"]["0"][key] = value
+            with self.subTest(key=key), self.assertRaises(SystemExit):
+                self.select(entry=entry)
+        entry = copy.deepcopy(self.entry)
+        del entry["points"]["0"]["values"]
+        with self.assertRaisesRegex(SystemExit, "coverage changed"):
+            self.select(entry=entry)
+
+    def test_selected_answers_still_enforce_numerics_and_actual_input_hashes(self):
+        selected = self.select()
+        with tempfile.TemporaryDirectory() as tmp:
+            for value, verdict in (("1.01", "OK"), ("99", "GATE")):
+                result = check_model(MODEL, selected, REPO / "nonexistent-pdb",
+                                     stub(tmp, f'echo "OK -3.5 {value} -2"'),
+                                     pathlib.Path(tmp), 60, 1e-9,
+                                     target_platform="Darwin x86_64")
+                self.assertEqual(result[1], verdict)
+            for key in ("source_sha256", "data_sha256"):
+                changed = {**selected, key: "wrong"}
+                result = check_model(MODEL, changed, REPO / "nonexistent-pdb",
+                                     stub(tmp, 'echo "OK -3.5 1.01 -2"'),
+                                     pathlib.Path(tmp), 60, 1e-9,
+                                     target_platform="Darwin x86_64")
+                self.assertEqual(result[1], "INPUT_HASH_FAIL")
+
+
 class WriteRefsTest(unittest.TestCase):
     """Merging one model's values into the committed file."""
 

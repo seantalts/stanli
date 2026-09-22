@@ -138,6 +138,13 @@ ULP_LIMITS = {source.stem: 10 for source in (REPO / "tests" / "brms").glob("*.st
 PLATFORM_REFS = {
     "Linux x86_64": REPO / "docs" / "corpus-refs-linux-x86_64.json.gz",
 }
+# Sparse platform recordings address documented cross-platform instability
+# without changing the original point gates or output coverage. Select solely
+# by the tested platform/compiler, before seeing any candidate values.
+SPARSE_PLATFORM_REFS = {
+    "Darwin x86_64": (REPO / "docs" / "corpus-refs-darwin-x86_64.json.gz",
+                      "clang", frozenset({"kronecker_gp"})),
+}
 COMPILER_REFS = {
     ("Linux x86_64", "gcc"): REPO / "docs" / "corpus-refs-linux-x86_64-gcc.json.gz",
 }
@@ -176,23 +183,33 @@ def replay_refs(target_platform, compiler=None):
     The primary recording remains the cross-platform fallback. A platform
     supplement covers every ULP-gated fixture; compiler supplements replace
     the few answers where independent CmdStan builds differ. All use the
-    same dependency pins and unchanged ULP limits. Select before evaluation,
+    same dependency pins and unchanged ULP limits. Sparse platform supplements
+    preserve the original gates and output coverage for their declared models.
+    Select before evaluation,
     never by proximity to the candidate. Keep this out of load_refs, which
     also serves the recorder.
     """
     refs, recorded = load_refs()
     refs = {name: {**ref, "recorded": ref.get("recorded", recorded)}
             for name, ref in refs.items()}
-    if target_platform not in PLATFORM_REFS:
-        return refs, recorded
-    sources = [(PLATFORM_REFS[target_platform], True)]
+    sources = []
+    if target_platform in PLATFORM_REFS:
+        sources.append((PLATFORM_REFS[target_platform], True, None))
     if (target_platform, compiler) in COMPILER_REFS:
-        sources.append((COMPILER_REFS[target_platform, compiler], False))
-    for path, complete in sources:
+        sources.append((COMPILER_REFS[target_platform, compiler], False, None))
+    if target_platform in SPARSE_PLATFORM_REFS:
+        path, expected_compiler, models = SPARSE_PLATFORM_REFS[target_platform]
+        if compiler != expected_compiler:
+            raise SystemExit("sparse platform reference compiler mismatch")
+        sources.append((path, False, models))
+    for path, complete, sparse_models in sources:
         extra, rig = load_refs(path)
         if complete and set(extra) != set(ULP_LIMITS):
             raise SystemExit("platform references must cover every ULP-gated fixture")
-        if not extra or not set(extra) <= set(ULP_LIMITS):
+        if sparse_models is not None:
+            if set(extra) != sparse_models or not set(extra) <= set(refs):
+                raise SystemExit("sparse platform references must cover their declared fixtures")
+        elif not extra or not set(extra) <= set(ULP_LIMITS):
             raise SystemExit("compiler references must contain ULP-gated fixtures")
         for name, ref in extra.items():
             provenance = ref.get("recorded", rig)
@@ -207,8 +224,23 @@ def replay_refs(target_platform, compiler=None):
                 raise SystemExit(f"{name}: platform reference input hashes are required")
             if set(ref.get("points", {})) != {str(p) for p in POINTS}:
                 raise SystemExit(f"{name}: platform reference points are incomplete")
+            if sparse_models is not None:
+                original = refs[name]
+                for key in ("data", "primary", "strict"):
+                    if ref.get(key) != original.get(key):
+                        raise SystemExit(f"{name}: sparse reference {key} metadata changed")
+                for point, pt in ref["points"].items():
+                    old = original["points"][point]
+                    for key in ("status", "max_rel"):
+                        if pt.get(key) != old.get(key):
+                            raise SystemExit(f"{name}: sparse reference point gate changed")
+                    for key in ("values", "wa"):
+                        if (key in pt) != (key in old):
+                            raise SystemExit(f"{name}: sparse reference output coverage changed")
+                    if "values" in pt and len(pt["values"]) != len(old["values"]):
+                        raise SystemExit(f"{name}: sparse reference output shape changed")
             for pt in ref["points"].values():
-                if "values" in pt and "wa" not in pt:
+                if sparse_models is None and "values" in pt and "wa" not in pt:
                     raise SystemExit(f"{name}: platform reference outputs are incomplete")
                 if "values" not in pt and pt.get("status") != "REJECTED_BOTH":
                     raise SystemExit(f"{name}: platform reference refusal is missing")
@@ -903,7 +935,8 @@ def main():
         return check_wa_coverage(pdb, check_bin, args.models, args.filter,
                                  args.timeout, skip)
     compiler = args.reference_compiler
-    if compiler is None and args.target_platform in PLATFORM_REFS:
+    if compiler is None and (args.target_platform in PLATFORM_REFS or
+                             args.target_platform in SPARSE_PLATFORM_REFS):
         compiler = runtime_compiler(check_bin)
     refs, recorded = replay_refs(args.target_platform, compiler)
     # All local inventory additions must enter the default gate; iterating

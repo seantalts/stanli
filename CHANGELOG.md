@@ -1,19 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.17.1
 
-- Add `include_paths` to Python and R, with automatic lookup beside Stan files.
-- Full-output NUTS sampling now runs generated quantities on the live chain
-  RNG between saved transitions, matching CmdStan's stream ordering. Seeded
-  trajectories change for models with random generated quantities; numerical
-  differences between compilers can still produce different trajectories.
-- A generated-quantity domain error writes a NaN output row and continues
-  sampling, keeping any randomness consumed before the error. The C API now
-  follows the CLI's behavior. Parameter-only sampling and standalone
-  generated-quantity APIs keep their separate contracts.
-- The CLI formats output during sampling, with bounded temporary CSV files
-  for subsequent chains. `--timings` includes generated quantities and CSV
-  formatting in `sample_s`; `output_s` covers copying and the final flush.
+- Support Stan `#include` paths in Python and R, including lookup beside model files.
+- Match CmdStan's NUTS startup and generated-quantity RNG ordering. Seeded
+  trajectories may change; generated-quantity domain errors produce NaN rows
+  and sampling continues.
+- Improve CmdStan numerical agreement and gradient performance for brms models.
+- Reduce retained-loop memory and recording costs; speed up matrix solves and
+  scalar gradients.
+- Simplify benchmark reporting around setup plus 20,000 warm gradients, with
+  one corpus table and a vectorized CmdStan appendix.
 
 ## 0.17.0
 

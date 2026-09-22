@@ -272,7 +272,13 @@ cross-engine comparisons. The CmdStan 2.40
 recording has no `CMDSTAN_ONLY` points. The three
 `MISMATCH` points belong to `kronecker_gp`, where two eigenvector
 gradients are sensitive to a nearly degenerate covariance whose smallest
-eigenvalue gap is 6.5e-17. The formerly failing `s2_ar_cov` points and
+eigenvalue gap is 6.5e-17. Intel macOS uses an independent same-platform CmdStan recording for this
+model: Intel CmdStan itself differs from the arm64 recording by 0.04349 at
+point zero. The supplement preserves the original three-point gradient
+coverage and tolerance; raw eigenvector outputs remain outside that gate
+because the degenerate eigenspace has no unique basis. See the
+[recording evidence](notes/performance/2026-09-22-intel-oracle.md).
+The formerly failing `s2_ar_cov` points and
 all previously refused brms models, including `s2_com_poisson`, now
 verify against the recorded values.
 
