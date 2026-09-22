@@ -8,10 +8,11 @@ C++ toolchain, and no 2 GB checkout: just a stanli_check binary and the
 posteriordb model + data files. That is what lets the strongest oracle in
 the project run in CI on every push, on every platform.
 
-The references were generated on macOS arm64 with Apple's libm. Other
-platforms' libm implementations round transcendentals differently, so the
-gate here is deliberately looser than the 1e-10 the generating rig holds
-itself to: 1e-9 relative. Every bug class that has actually reached the
+The primary references were generated on macOS arm64 with Apple's libm.
+Other platforms' libm implementations round transcendentals differently,
+so the cross-platform gate is deliberately looser than the 1e-10 the
+generating rig holds itself to: 1e-9 relative. Same-platform recordings
+also enforce the ULP limits below. Every bug class that has actually reached the
 corpus (silent in-place corruption at 1.7e+05 relative, quadratic
 recompute, dropped tape links) sits many orders of magnitude above it,
 and honest cross-libm drift sits well below.
@@ -33,6 +34,7 @@ import gzip
 import json
 import math
 import pathlib
+import platform
 import re
 import struct
 import subprocess
@@ -129,8 +131,16 @@ ILL_CONDITIONED = {
 
 # These cancellation regressions used to pass the scaled-error gate despite
 # hundreds or thousands of ULP of error. Reuse the same three-point corpus
-# replay to enforce the tighter contract, without another model/CI sweep.
+# replay to enforce the tighter contract against a same-platform CmdStan
+# recording, without another model/CI sweep. Cross-platform libm differences
+# are still held to the scaled-error gate above.
 ULP_LIMITS = {source.stem: 10 for source in (REPO / "tests" / "brms").glob("*.stan")}
+PLATFORM_REFS = {
+    "Linux x86_64": REPO / "docs" / "corpus-refs-linux-x86_64.json.gz",
+}
+COMPILER_REFS = {
+    ("Linux x86_64", "gcc"): REPO / "docs" / "corpus-refs-linux-x86_64-gcc.json.gz",
+}
 
 
 def load_refs(path=REFS_PATH):
@@ -154,6 +164,71 @@ def load_refs(path=REFS_PATH):
             f"full pass. Re-record with tools/verify_sample.py "
             f"--from-refs, or check out the commit that matches the file.")
     return blob["models"], blob["recorded"]
+
+
+def native_platform():
+    return f"{platform.system()} {platform.machine()}"
+
+
+def replay_refs(target_platform, compiler=None):
+    """Select independently recorded answers for the runtime's platform.
+
+    The primary recording remains the cross-platform fallback. Supplements
+    must cover every ULP-gated fixture at the same dependency pins; a missing
+    or stale supplement must fail instead of silently dropping the ULP gate.
+    Keep this selection out of load_refs, which also serves the recorder.
+    """
+    refs, recorded = load_refs()
+    refs = {name: {**ref, "recorded": ref.get("recorded", recorded)}
+            for name, ref in refs.items()}
+    if target_platform not in PLATFORM_REFS:
+        return refs, recorded
+    sources = [(PLATFORM_REFS[target_platform], True)]
+    if (target_platform, compiler) in COMPILER_REFS:
+        sources.append((COMPILER_REFS[target_platform, compiler], False))
+    for path, complete in sources:
+        extra, rig = load_refs(path)
+        if complete and set(extra) != set(ULP_LIMITS):
+            raise SystemExit("platform references must cover every ULP-gated fixture")
+        if not extra or not set(extra) <= set(ULP_LIMITS):
+            raise SystemExit("compiler references must contain ULP-gated fixtures")
+        for name, ref in extra.items():
+            provenance = ref.get("recorded", rig)
+            if provenance.get("platform") != target_platform:
+                raise SystemExit(f"{name}: platform reference provenance mismatch")
+            if not complete and provenance.get("compiler_family") != compiler:
+                raise SystemExit(f"{name}: reference compiler mismatch")
+            for pin in ("cmdstan", "stan", "math", "stanc3"):
+                if provenance.get(pin) != refs[name]["recorded"].get(pin):
+                    raise SystemExit(f"{name}: platform reference {pin} pin mismatch")
+            if not all(ref.get(key) for key in ("source_sha256", "data_sha256")):
+                raise SystemExit(f"{name}: platform reference input hashes are required")
+            if set(ref.get("points", {})) != {str(p) for p in POINTS}:
+                raise SystemExit(f"{name}: platform reference points are incomplete")
+            for pt in ref["points"].values():
+                if "values" in pt and "wa" not in pt:
+                    raise SystemExit(f"{name}: platform reference outputs are incomplete")
+                if "values" not in pt and pt.get("status") != "REJECTED_BOTH":
+                    raise SystemExit(f"{name}: platform reference refusal is missing")
+            refs[name] = {**ref, "recorded": provenance}
+    return refs, recorded
+
+
+def runtime_compiler(check_bin):
+    """Read the compiler from the tested binary, not the host's toolchain."""
+    proc = subprocess.run([str(check_bin), "--compiler"], capture_output=True,
+                          text=True, timeout=10)
+    compiler = proc.stdout.strip()
+    if proc.returncode or compiler not in ("clang", "gcc", "msvc", "unknown"):
+        raise SystemExit("cannot identify runtime compiler; rebuild stanli_check "
+                         "or specify --reference-compiler for an external driver")
+    return compiler
+
+
+def ulp_limit_for(model, ref, target_platform):
+    if ref.get("recorded", {}).get("platform") == target_platform:
+        return ULP_LIMITS.get(model)
+    return None
 
 
 def default_check_bin():
@@ -559,10 +634,10 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
 
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                no_wa=False, no_lp=False):
+                no_wa=False, no_lp=False, target_platform=None):
     """Replay one model, under whatever KNOWN_GAPS says about it."""
     result = replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                          no_wa, no_lp)
+                          no_wa, no_lp, target_platform)
     if model not in KNOWN_GAPS:
         return result
     _, status, rel, ulp, total, _, notes = result
@@ -577,7 +652,7 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
 
 
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                 no_wa=False, no_lp=False):
+                 no_wa=False, no_lp=False, target_platform=None):
     """Replay every point of one model.
 
     Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
@@ -596,6 +671,10 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     for key, path in (("source_sha256", stan), ("data_sha256", dj)):
         if key in ref and ref[key] != source_digest(path):
             return (model, "INPUT_HASH_FAIL", 0.0, 0, 0, key, [])
+    if model in ULP_LIMITS and not ref.get("recorded", {}).get("platform"):
+        return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
+                "ULP-gated fixtures require recording platform provenance", [])
+    ulp_limit = ulp_limit_for(model, ref, target_platform or native_platform())
     strict = ref.get("strict", False)
     if strict:
         if set(ref.get("points", {})) != {str(p) for p in POINTS}:
@@ -641,10 +720,10 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             return (model, "GATE", rel, ulp, total,
                     f"point {point}: {rel:.2e} ({ulp} ulp) over {n} "
                     f"values, allowed {gate:.1e}", notes)
-        if model in ULP_LIMITS and ulp > ULP_LIMITS[model]:
+        if ulp_limit is not None and ulp > ulp_limit:
             return (model, "ULP_GATE", rel, ulp, total,
                     f"point {point}: {ulp} ULP over {n} values, "
-                    f"allowed {ULP_LIMITS[model]}", notes)
+                    f"allowed {ulp_limit}", notes)
         if model in ILL_CONDITIONED and rel >= max_rel:
             notes.append(f"ILL-CONDITIONED {model} point {point}: "
                          f"{ILL_CONDITIONED[model]} ({rel:.2e})")
@@ -781,6 +860,11 @@ def main():
                     default=default_check_bin())
     ap.add_argument("--max-rel", type=float, default=1e-9)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--target-platform", default=native_platform(),
+                    help="runtime platform for reference selection (default: "
+                         "native host); use 'WebAssembly wasm32' for the Node driver")
+    ap.add_argument("--reference-compiler", choices=("clang", "gcc", "msvc", "unknown"),
+                    help="external driver's C++ compiler; normally read from stanli_check")
     ap.add_argument("--no-lp", action="store_true",
                     help="compare gradients only, not lp: a STANLI_LITE_LP "
                          "build shifts lp by a constant (docs/lite-lp.md)")
@@ -816,7 +900,10 @@ def main():
     if args.wa_report:
         return check_wa_coverage(pdb, check_bin, args.models, args.filter,
                                  args.timeout, skip)
-    refs, recorded = load_refs()
+    compiler = args.reference_compiler
+    if compiler is None and args.target_platform in PLATFORM_REFS:
+        compiler = runtime_compiler(check_bin)
+    refs, recorded = replay_refs(args.target_platform, compiler)
     # All local inventory additions must enter the default gate; iterating
     # existing references alone silently omits fixtures that failed to record.
     cases = corpus_cases(pdb, include_language=True)
@@ -833,16 +920,22 @@ def main():
     print(f"references recorded against CmdStan "
           f"{recorded['cmdstan_version']} ({recorded['cmdstan'][:12]}), "
           f"math {recorded['math'][:12]}, on {recorded['platform']}")
-    overrides = sum("recorded" in refs[m] for m in models)
+    overrides = sum(refs[m]["recorded"] != recorded for m in models)
     if overrides:
         print(f"{overrides} models retain per-model recording provenance overrides")
+    tight = sum(ulp_limit_for(m, refs[m], args.target_platform) is not None
+                for m in models)
+    print(f"same-platform ULP limits: {tight} models on {args.target_platform}; "
+          "all models retain their scaled-error and structural checks")
+    if compiler:
+        print(f"runtime compiler: {compiler}; references selected before evaluation")
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_refs_"))
     failures, values = [], 0
     worst_overall = ("", 0.0, 0)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futs = [pool.submit(check_model, m, refs[m], pdb, check_bin, tmp,
                             args.timeout, args.max_rel, args.no_wa,
-                            args.no_lp)
+                            args.no_lp, args.target_platform)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, status, rel, ulp, n, detail, notes = fut.result()

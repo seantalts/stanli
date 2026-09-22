@@ -193,7 +193,8 @@ int main() {
         ex.forward();
       const auto& values = value_only ? prim_values : rev_values;
       for (int i = 0; i < nb * width; ++i)
-        check(ex.value_ptr(output)[i] == values[i], "Cholesky correlation forward value");
+        check(ex.value_ptr(output)[i] == values[i],
+              "Cholesky correlation forward value");
       check(ex.value_ptr(jac)[0] == (value_only ? prim_lp : rev_lp.val()),
             "Cholesky correlation forward Jacobian");
     }
