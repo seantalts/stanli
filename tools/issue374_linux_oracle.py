@@ -8,6 +8,7 @@ import concurrent.futures
 import gzip
 import hashlib
 import json
+import os
 import pathlib
 import platform
 import subprocess
@@ -35,7 +36,8 @@ def command(args):
 
 
 def sha(path):
-    return command(["git", "-C", str(path), "rev-parse", "HEAD"])
+    return command(["git", "-c", f"safe.directory={path}",
+                    "-C", str(path), "rev-parse", "HEAD"])
 
 
 RIG = {
@@ -52,7 +54,8 @@ RIG = {
     "driver_sha256": source_digest(ROOT / "tools/ref_driver.cpp"),
 }
 REFS = {"schema": 2, "recorded": RIG, "models": {}}
-REPORT = {"candidate": sha(ROOT), "recorded": RIG, "models": {}}
+REPORT = {"candidate": os.environ.get("CANDIDATE_SHA") or sha(ROOT),
+          "recorded": RIG, "models": {}}
 
 
 def compare(left, right):
@@ -69,7 +72,8 @@ def one(stan):
         [str(STANC), str(stan), f"--o={hpp}"],
         compile_cmd(CS, hpp, ROOT / "tools/ref_driver.cpp", exe, sundials=False),
     ]
-    for args in commands:
+    # A second comparison in the same immutable job reuses its fresh binaries.
+    for args in ([] if exe.exists() else commands):
         result = subprocess.run(args, capture_output=True, text=True, timeout=600)
         if result.returncode:
             (OUT / f"{name}.build.log").write_text(result.stdout + result.stderr)

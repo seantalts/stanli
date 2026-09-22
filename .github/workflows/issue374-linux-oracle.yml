@@ -1,4 +1,4 @@
-name: Issue 374 Linux rejection reference
+name: Issue 374 Linux numerical references
 'on':
   push:
     branches:
@@ -6,14 +6,16 @@ name: Issue 374 Linux rejection reference
 permissions:
   contents: read
   packages: read
+  actions: read
 env:
   STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
   STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
   OCAML_VERSION: 5.5.0
   OPAM_VERSION: 2.5.2
+  CANDIDATE_SHA: 8e725b618908027ce7f2443d9bb714ad19a13c33
 jobs:
   oracle:
-    name: Linux CmdStan inverse-Gaussian rejection
+    name: Record and compare Linux CmdStan references
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     container:
@@ -139,8 +141,21 @@ jobs:
         ./harnesses/conformance/fetch_cmdstan.sh
 
         '
-    - name: Record rejected inverse-Gaussian points
-      run: python3 tools/issue374_linux_oracle.py s2_invgaussian
+    - name: Record all Linux CmdStan answers
+      run: python3 tools/issue374_linux_oracle.py
+    - name: Download the diagnostic runtime
+      uses: actions/download-artifact@v4
+      with:
+        name: issue374-linux-checker
+        run-id: 35730304619
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path: build-rel
+    - name: Compare with the PR runtime
+      run: 'chmod +x build-rel/stanli_check
+
+        python3 tools/issue374_linux_oracle.py
+
+        '
     - name: Save raw oracle evidence
       if: always()
       uses: actions/upload-artifact@v4
