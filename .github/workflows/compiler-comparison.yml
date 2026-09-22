@@ -1,0 +1,116 @@
+name: Bounded Clang and GCC comparison
+on:
+  push:
+    branches: [codex/compare-clang-gcc-20260922]
+permissions:
+  contents: read
+  actions: read
+  packages: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/seantalts/stanli-manylinux:2_28-x86_64
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
+      PDB_SHA: 28f8d3d6e975315f42aa274a8399f21e07a43b30
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Identify the matched toolchains
+        id: compilers
+        run: |
+          manylinux-install-clang
+          echo "gcc=$(c++ --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "clang=$(clang++ --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          mkdir -p compiler-results
+          lscpu > compiler-results/cpu.txt
+          ldd --version > compiler-results/libc.txt
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+      - run: ./deps/fetch.sh
+      - uses: actions/cache/restore@v4
+        id: stanc
+        with:
+          path: |
+            deps/stanc3/stanc_embed.o
+            deps/stanc3/stanc_embed.o.stamp
+            deps/stanc3/stanc
+            deps/stanc3/stanc.src
+            deps/stanc3/stanli-vectorize-probe
+            deps/stanc3/stanli-vectorize-probe.stamp
+            deps/ocaml-include
+          key: stanc-embed-v2-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml5.5.0-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+      - name: Verify compiler provenance
+        run: |
+          test "${{ steps.stanc.outputs.cache-hit }}" = true
+          source tools/stanc_embed/provenance.sh
+          stanc_embed_artifact_matches deps/stanc3/stanc_embed.o "$STANC3_SRC_SHA" stanc3-55
+          stanc_embed_artifact_matches deps/stanc3/stanli-vectorize-probe "$STANC3_SRC_SHA" stanc3-55
+      - uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-manylinux_2_28_x86_64-release-v4-${{ steps.compilers.outputs.gcc }}-6449b9a7f9c63536170951252f308fdd3b81ccc41f021f697755812429c46f46
+          restore-keys: ccache-manylinux_2_28_x86_64-release-v4-${{ steps.compilers.outputs.gcc }}-
+      - name: Build GCC measurement tools and library
+        run: |
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros
+          ccache -z
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+            -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+          cmake --build build-rel --target bench_grad stanli_check stanli_shared -j2
+          ccache -s > compiler-results/gcc-cache.txt
+          mv build-rel build-gcc
+          mv .ccache .ccache-gcc
+      - uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.compilers.outputs.clang }}-35fe1955776e90741d0910f67a3780c9a403a6043dfa4671e57484274a91eb19
+          restore-keys: ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.compilers.outputs.clang }}-
+      - name: Build Clang measurement tools and library
+        run: |
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros
+          ccache -z
+          cmake -B build-rel -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+            -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+          cmake --build build-rel --target bench_grad stanli_check stanli_shared -j2
+          ccache -s > compiler-results/clang-cache.txt
+          mv build-rel build-clang
+      - uses: actions/cache/restore@v4
+        id: pdb
+        with:
+          path: deps/posteriordb
+          key: pdb-lite-${{ env.PDB_SHA }}-2
+      - name: Require the pinned corpus
+        run: |
+          test "${{ steps.pdb.outputs.cache-hit }}" = true
+          test "$(git -C deps/posteriordb rev-parse HEAD)" = "$PDB_SHA"
+      - name: Check numerics and measure six alternating pairs
+        run: python3 tools/compiler_comparison_20260922.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compiler-comparison
+          path: compiler-results/
