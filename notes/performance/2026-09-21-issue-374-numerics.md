@@ -481,3 +481,13 @@ Raw comparisons, compiler runs, regression ablation and timing samples are in
 `.cache/issue374-small-perf-20260922/pr/`. CmdStan regeneration remains an
 on-demand task, using `verify_sample.py --output` and, for GCC, `--cxx g++`.
 The ordinary PR keeps its existing single corpus replay.
+
+The full Linux PR run then passed 266 CTests and all 329 corpus models, but
+reached a stale installed-Python assertion: it required the `log(1-x)` to
+`log1m(x)` rewrite intentionally disabled by the numerical policy. Its
+replacement checks that a constant dead branch is removed while the live
+density remains. Stock O0 retains that branch and O1 removes it. The rebuilt,
+isolated Mac wheel passes the Python suite and BridgeStan transport check;
+the optional Python `bridgestan` wrapper was not installed in that check.
+Compiler objects are now saved immediately after a successful CI build, so a
+later test failure no longer discards the compilation cache needed by retries.
