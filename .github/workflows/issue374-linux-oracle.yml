@@ -1,0 +1,188 @@
+name: Issue 374 Linux numerical diagnosis
+'on':
+  push:
+    branches:
+    - codex/issue374-linux-oracle
+permissions:
+  contents: read
+  packages: read
+env:
+  STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
+  STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
+  OCAML_VERSION: 5.5.0
+  OPAM_VERSION: 2.5.2
+jobs:
+  oracle:
+    name: Linux CmdStan brms comparison
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: ghcr.io/seantalts/stanli-manylinux:2_28-x86_64
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install the PR compiler
+      run: manylinux-install-clang
+    - name: Fingerprint Clang
+      id: toolchain
+      shell: bash
+      run: 'fingerprint=$(clang++ --version | sha256sum | cut -d'' '' -f1)
+
+        echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+        '
+    - name: Restore the PR compiler cache
+      id: compiler-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .ccache
+        key: ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt',
+          '.github/manylinux/**', '.github/workflows/clang-ccache-seed.yml', '.github/workflows/wheels.yml', 'runtime/**',
+          'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+        restore-keys: ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-
+    - name: Restore the vendored dependencies
+      uses: actions/cache@v4
+      with:
+        path: 'deps/math
+
+          deps/stan
+
+          '
+        key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+    - name: Fetch pinned dependencies
+      run: "setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\\([^ ]*\\).*/\\1/p' \\\n               tools/dev_setup.sh)\n\
+        setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\\([0-9a-f]*\\).*/\\1/p' \\\n              tools/dev_setup.sh)\ntest\
+        \ \"$setup_repo\" = \"$STANC3_SRC_REPO\"\ntest \"$setup_pin\" = \"$STANC3_SRC_SHA\"\n./deps/fetch.sh\n"
+    - name: Restore the embedded stanc3 object
+      id: stanc-cache
+      uses: actions/cache@v4
+      with:
+        path: 'deps/stanc3/stanc_embed.o
+
+          deps/stanc3/stanc_embed.o.stamp
+
+          deps/stanc3/stanc
+
+          deps/stanc3/stanc.src
+
+          deps/stanc3/stanli-vectorize-probe
+
+          deps/stanc3/stanli-vectorize-probe.stamp
+
+          deps/ocaml-include
+
+          '
+        key: stanc-embed-v2-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**',
+          'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+    - name: Identify the stanc3 build toolchain
+      if: steps.stanc-cache.outputs.cache-hit != 'true'
+      id: stanc-toolchain
+      shell: bash
+      run: 'echo "OPAMROOT=$GITHUB_WORKSPACE/.ci-opam" >> "$GITHUB_ENV"
+
+        fingerprint=$({ cc --version; ld --version; ldd --version; } | sha256sum | cut -d'' '' -f1)
+
+        echo "id=$fingerprint" >> "$GITHUB_OUTPUT"
+
+        '
+    - name: Restore the OCaml toolchain
+      if: steps.stanc-cache.outputs.cache-hit != 'true'
+      id: opam-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .ci-opam
+        key: stanc-toolchain-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA
+          }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh',
+          'tools/dev_setup.sh') }}
+    - name: Restore the incremental stanc3 build
+      if: steps.stanc-cache.outputs.cache-hit != 'true'
+      id: stanc-build-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: deps/stanc3-src
+        key: stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA
+          }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh',
+          'tools/dev_setup.sh') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**')
+          }}
+        restore-keys: stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA
+          }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh',
+          'tools/dev_setup.sh') }}-
+    - name: Install opam ${{ env.OPAM_VERSION }}
+      if: steps.stanc-cache.outputs.cache-hit != 'true'
+      run: "url=https://github.com/ocaml/opam/releases/download\n# This runs in manylinux, whose old curl lacks\
+        \ --retry-all-errors.\n# An outer loop still retries every curl failure, including resets.\nfor attempt\
+        \ in 1 2 3 4 5; do\n  if curl -fsSL -o /tmp/opam \\\n    \"$url/$OPAM_VERSION/opam-$OPAM_VERSION-x86_64-linux\"\
+        ; then\n    break\n  fi\n  [ \"$attempt\" -lt 5 ] || exit 1\n  sleep $((attempt * 2))\ndone\nchmod +x /tmp/opam\n\
+        sudo install -m 755 /tmp/opam /usr/local/bin/opam 2>/dev/null ||\n  install -m 755 /tmp/opam /usr/local/bin/opam\n\
+        opam --version\n"
+    - name: Build the embedded stanc3 object
+      if: steps.stanc-cache.outputs.cache-hit != 'true'
+      run: "rm -f deps/stanc3/stanc_embed.o deps/stanc3/stanc_embed.o.stamp \\\n  deps/stanc3/stanc deps/stanc3/stanc.src\
+        \ \\\n  deps/stanc3/stanli-vectorize-probe \\\n  deps/stanc3/stanli-vectorize-probe.stamp\n# Remove old\
+        \ untracked overlay sources (including deleted modules),\n# retaining Dune's dependency-checked build state.\
+        \ The builder resets\n# tracked sources to the exact upstream pin before applying this overlay.\nif [ -d\
+        \ deps/stanc3-src/.git ]; then\n  git -C deps/stanc3-src clean -ffd -e _build\nfi\nopam init --bare --disable-sandboxing\
+        \ --no-setup -y\n./tools/dev_setup.sh --embed --no-build\nmkdir -p deps/ocaml-include\ncp -R \"$(opam var\
+        \ lib --switch=stanc3-55)/ocaml/caml\" \\\n      deps/ocaml-include/\n"
+      env:
+        OPAMYES: '1'
+    - name: Validate the embedded stanc3 object
+      shell: bash
+      run: "source tools/stanc_embed/provenance.sh\nstanc_embed_artifact_matches deps/stanc3/stanc_embed.o \\\n\
+        \  \"$STANC3_SRC_SHA\" stanc3-55\ntest -x deps/stanc3/stanli-vectorize-probe\nstanc_embed_artifact_matches\
+        \ \\\n  deps/stanc3/stanli-vectorize-probe \\\n  \"$STANC3_SRC_SHA\" stanc3-55\nfor symbol in caml_c_thread_register\
+        \ caml_c_thread_unregister; do\n  nm -g deps/stanc3/stanc_embed.o | awk -v wanted=\"$symbol\" '\n    ($NF\
+        \ == wanted || $NF == \"_\" wanted) &&\n        $(NF - 1) ~ /^[Tt]$/ { found = 1 }\n    END { exit found\
+        \ ? 0 : 1 }\n  ' || {\n    echo \"embedded compiler lacks ${symbol}\" >&2\n    exit 1\n  }\ndone\n"
+    - name: Save the OCaml toolchain
+      if: steps.stanc-cache.outputs.cache-hit != 'true' && steps.opam-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: .ci-opam
+        key: ${{ steps.opam-cache.outputs.cache-primary-key }}
+    - name: Save the incremental stanc3 build
+      if: steps.stanc-cache.outputs.cache-hit != 'true' && steps.stanc-build-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: deps/stanc3-src
+        key: ${{ steps.stanc-build-cache.outputs.cache-primary-key }}
+    - name: Compile the PR target graph
+      shell: bash
+      run: "export CC=clang CXX=clang++\nexport CCACHE_DIR=\"$PWD/.ccache\" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M\n\
+        export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime\nccache -z\ncmake\
+        \ -B build-rel -DCMAKE_BUILD_TYPE=Release \\\n  -DCMAKE_C_COMPILER=\"$CC\" \\\n  -DCMAKE_CXX_COMPILER=\"\
+        $CXX\" \\\n  -DCMAKE_C_COMPILER_LAUNCHER=ccache \\\n  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \\\n  -DSTANLI_STANC_EMBED_OBJ=\"\
+        $PWD/deps/stanc3/stanc_embed.o\" \\\n  -DSTANLI_OCAML_STDLIB=\"$PWD/deps/ocaml-include\"\ncmake --build\
+        \ build-rel --target stanli_check -j2\nccache -s\n"
+    - name: Save the completed PR compiler cache
+      if: steps.compiler-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: .ccache
+        key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+    - name: Prepare independent pinned CmdStan
+      run: 'cp deps/stanc3/stanc deps/stanc3/stanc-pinned
+
+        cp deps/stanc3/stanc.src deps/stanc3/stanc-pinned.src
+
+        ./harnesses/conformance/fetch_cmdstan.sh
+
+        '
+    - name: Compare all brms fixtures with Linux CmdStan
+      run: python3 tools/issue374_linux_oracle.py
+    - name: Save raw oracle evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: issue374-linux-oracle
+        path: linux-oracle-results/
+        if-no-files-found: error
+    - name: Save diagnostic runtime
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: issue374-linux-checker
+        path: build-rel/stanli_check
+        if-no-files-found: warn
