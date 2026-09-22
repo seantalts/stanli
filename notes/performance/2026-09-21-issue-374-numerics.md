@@ -410,3 +410,13 @@ The final local shared library is 39,998,608 bytes: +36,048 bytes (0.09%)
 against the saved main-branch baseline. Earlier sizes above describe their
 respective measurement packets. Final validation logs and the MIR hash
 comparison are under `.cache/issue374-small-perf-20260922/pr/`.
+
+The tracked R JavaScript compiler was refreshed from the same built producer,
+with its source/toolchain/hash record updated. The CI provenance check and
+native/JavaScript parity pass for that exact bundled file. An isolated R
+package install passes `tests/test_r_portable_compiler.R` through V8, the
+current native decoder, gradient evaluation, sampling, and generated
+quantities. The JavaScript file grows by 655 bytes (2,866,698→2,867,353), or
+281 bytes under Python gzip with its default compression level and a fixed
+zero timestamp (393,178→393,459). These are compiler-artifact sizes, not
+complete package download sizes.
