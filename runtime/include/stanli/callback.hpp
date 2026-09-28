@@ -31,10 +31,22 @@ inline std::vector<int64_t> callback_matrix_dimensions(const RhsArg& arg) {
 template <typename T>
 class MirInterp;
 
-// Plain matrices have the same column-major order in both engines, but their
-// dimensions must survive the retained-call boundary. Keep the established
-// positional path for callbacks without matrices; nested arrays need a
-// separate, explicit storage adapter before they can join this path.
+inline std::vector<int64_t> callback_array_dimensions(
+    const RhsArg& arg, const mir::UnsizedView& view) {
+  const size_t leaf_rank = view.leaf == mir::UnsizedLeaf::Matrix ? 2
+      : (view.leaf == mir::UnsizedLeaf::Vector ||
+         view.leaf == mir::UnsizedLeaf::RowVector) ? 1 : 0;
+  const int64_t count = arg.is_int ? arg.ints.size() : arg.len;
+  auto dims = arg.dims;
+  if (dims.empty() && view.depth == 1 && leaf_rank == 0) dims = {count};
+  if (view.depth == 0 || dims.size() != view.depth + leaf_rank ||
+      checked_container_size(dims, "callback array") != count)
+    throw std::invalid_argument("callback array dimensions do not match its values");
+  return dims;
+}
+
+// Preserve complete geometry and convert graph buffers to the interpreter's
+// serialized order at the call boundary. Simple positional calls stay cheap.
 template <typename T>
 std::vector<T> interpret_retained_callback(
     MirInterp<T>& interpreter, const mir::FunDef& function,
@@ -43,7 +55,9 @@ std::vector<T> interpret_retained_callback(
     const std::vector<RhsArg>& bindings) {
   bool matrix = false;
   for (const auto& view : function.arg_views)
-    matrix |= view.depth == 0 && view.leaf == mir::UnsizedLeaf::Matrix;
+    matrix |= view.leaf == mir::UnsizedLeaf::Matrix || view.depth > 1 ||
+              (view.depth && (view.leaf == mir::UnsizedLeaf::Vector ||
+                              view.leaf == mir::UnsizedLeaf::RowVector));
   if (!matrix) return interpreter.call(function, reals, ints);
   if (function.arg_views.size() != function.arg_names.size() ||
       bindings.size() > function.arg_names.size())
@@ -54,11 +68,6 @@ std::vector<T> interpret_retained_callback(
   size_t ri = 0, ii = 0;
   for (size_t k = 0; k < function.arg_names.size(); ++k) {
     const auto& view = function.arg_views[k];
-    if (view.depth > 1 ||
-        (view.depth == 1 && view.leaf != mir::UnsizedLeaf::Real &&
-         view.leaf != mir::UnsizedLeaf::Int))
-      throw std::invalid_argument(
-          "matrix callback has an unsupported array view");
     typename MirInterp<T>::Value value;
     value.is_int = view.leaf == mir::UnsizedLeaf::Int;
     if (value.is_int) {
@@ -71,7 +80,14 @@ std::vector<T> interpret_retained_callback(
         throw std::invalid_argument("missing callback real argument");
       value.r = reals[ri++];
     }
-    if (view.depth == 0 && view.leaf == mir::UnsizedLeaf::Matrix) {
+    if (view.depth && k >= prefix) {
+      value.dims = callback_array_dimensions(bindings[k - prefix], view);
+      if (value.r.size() != static_cast<size_t>(
+              checked_container_size(value.dims, "callback array")))
+        throw std::invalid_argument("callback array value count mismatch");
+      if (!value.is_int)
+        value.r = serialized_container_order(value.r, value.dims, view.depth);
+    } else if (view.depth == 0 && view.leaf == mir::UnsizedLeaf::Matrix) {
       if (k < prefix)
         throw std::invalid_argument(
             "matrix callback state has no logical dimensions");
@@ -142,7 +158,7 @@ std::vector<Active> pack_callback_arguments(
         continue;
       }
       binding.is_int = true;
-      binding.ints = get_ints(i);
+      binding.ints = get_ints(i, binding);
     } else if (arg.data_only && !runtime_reals) {
       std::vector<double> values = get_reals(i, binding);
       if (values.size() >

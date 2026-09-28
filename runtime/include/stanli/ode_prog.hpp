@@ -63,6 +63,10 @@ struct RhsArg {
   // zero extents are valid. Scalar/vector/one-dimensional array bindings keep
   // their established length-only representation. No per-argument allocation.
   int64_t rows = -1, cols = -1;
+  // Arrays retain all outer and leaf extents. Real buffers use graph order;
+  // integer constants use Stan's serialized order. Empty means the legacy
+  // one-dimensional scalar-array convention, inferred from the value count.
+  std::vector<int64_t> dims;
 };
 
 // Compile `f` against a variadic argument list. Semantic refusal comes back

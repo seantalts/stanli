@@ -35,13 +35,26 @@ def main(check, fixture="gq_scalar_rng_complete", expected_interpreter="0"):
         assert fields[0] == "OK", out.stdout
         wa = parse_wa(out.stdout)
         assert wa and wa[0] == row["wa"]["names"], out.stdout
-        for expected, got in [(row["values"], fields[1:]), (row["wa"]["values"], wa[1])]:
+        for section, expected, got in [("density", row["values"], fields[1:]),
+                                       ("outputs", row["wa"]["values"], wa[1])]:
             assert len(expected) == len(got)
-            for a, b in zip(expected, got):
+            for index, (a, b) in enumerate(zip(expected, got)):
                 a, b = float(a), float(b)
                 assert math.isfinite(a) and math.isfinite(b)
                 ulp = abs(ordered(a) - ordered(b))
-                assert ulp <= 10, (point, a, b, ulp)
+                # This new cross-solver fixture isolates an existing adjoint
+                # ODE sensitivity difference (14-16 ULP in the combined rate
+                # gradient). Both callback engines agree; also require the
+                # analytic gradient below. See the nested-callback note.
+                solver_roundoff = (
+                    fixture in {"nested_callback_contexts", "nested_callback_contexts_fallback"}
+                    and section == "density" and index == 2)
+                limit = 16 if solver_roundoff else 10
+                assert ulp <= limit, (point, a, b, ulp)
+                if solver_roundoff:
+                    gate, rate = map(float, wa[1][:2])
+                    analytic = 3.96 * (2 if gate > 0 else 1) - rate
+                    assert abs(ordered(b) - ordered(analytic)) <= 2, (point, b, analytic)
                 worst = max(worst, ulp)
                 count += 1
     print(f"CmdStan {fixture} reference: {count} values, max {worst} ULP")

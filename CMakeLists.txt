@@ -988,6 +988,8 @@ if(NOT EMSCRIPTEN)
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns
                        ode_runtime_for for_bound_semantics ode_integer_arithmetic
+                       ode_nested_callback ode_nested_callback_fallback
+                       nested_callback_contexts nested_callback_contexts_fallback
                        ode_matrix_callback ode_matrix_callback_flat
                        ode_matrix_callback_fallback matrix_callback_contexts
                        matrix_callback_contexts_fallback matrix_callback_geometry_edges

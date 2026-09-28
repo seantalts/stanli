@@ -83,6 +83,7 @@ void pack_data_callback(RetainedCallback& spec,
   for (size_t i = begin; i < end; ++i) {
     Entry value = eval(args[i]);
     RhsArg binding;
+    if (args[i].unsized.depth) binding.dims = value.dims;
     if (args[i].unsized.leaf == mir::UnsizedLeaf::Int) {
       binding.is_int = true;
       binding.ints = int_values(value, "integer callback argument");

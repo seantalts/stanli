@@ -24,34 +24,35 @@ def callbacks(node):
 
 
 def main(check, dump_ops):
-    for suffix in ("", "_fallback"):
-        stem = ROOT / "tests/fixtures" / ("matrix_callback_contexts" + suffix)
-        report = json.loads(subprocess.check_output(
-            [dump_ops, str(stem.with_suffix(".tmir.sexp")),
-             str(stem.with_suffix(".json")), "--execution-json"], text=True))
-        selected = list(callbacks(report["log_prob"]))
-        assert Counter(node["operation"] for node in selected) == {
-            "OP_ODE": 2, "OP_DAE": 2, "OP_ALGEBRA_SOLVER": 2,
-            "OP_QUADRATURE": 2, "OP_ODE_ADJOINT": 2}, selected
-        for node in selected:
-            callback = node["callback"]
-            assert callback["value_engine"] == (
-                "mir_interpreter" if suffix else "register_program"), callback
-        # Runtime data-only reals stay in the output graph. A refused callback
-        # remains local to the solver instead of rejecting the whole block.
-        wa = report["write_array"]
-        assert wa.get("value_engine") != "mir_interpreter", wa
-        wa_callbacks = list(callbacks(wa))
-        assert len(wa_callbacks) == 5, wa
-        for node in wa_callbacks:
-            assert node["callback"]["value_engine"] == (
-                "mir_interpreter" if suffix else "register_program"), node
-            flags = node["variant"]
-            assert flags == {"OP_ODE": 0x10, "OP_DAE": 0x8,
-                             "OP_ALGEBRA_SOLVER": 0, "OP_QUADRATURE": 0,
-                             "OP_ODE_ADJOINT": 0x10}[node["operation"]], node
-
-    for name in ("ode_runtime_for", "for_bound_semantics", "ode_integer_arithmetic"):
+    for family in ("matrix_callback_contexts", "nested_callback_contexts"):
+        for suffix in ("", "_fallback"):
+            stem = ROOT / "tests/fixtures" / (family + suffix)
+            report = json.loads(subprocess.check_output(
+                [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+                 str(stem.with_suffix(".json")), "--execution-json"], text=True))
+            selected = list(callbacks(report["log_prob"]))
+            assert Counter(node["operation"] for node in selected) == {
+                "OP_ODE": 2, "OP_DAE": 2, "OP_ALGEBRA_SOLVER": 2,
+                "OP_QUADRATURE": 2, "OP_ODE_ADJOINT": 2}, selected
+            for node in selected:
+                callback = node["callback"]
+                assert callback["value_engine"] == (
+                    "mir_interpreter" if suffix else "register_program"), callback
+            # Runtime data-only reals stay in the output graph. A refused callback
+            # remains local to the solver instead of rejecting the whole block.
+            wa = report["write_array"]
+            assert wa.get("value_engine") != "mir_interpreter", wa
+            wa_callbacks = list(callbacks(wa))
+            assert len(wa_callbacks) == 5, wa
+            for node in wa_callbacks:
+                assert node["callback"]["value_engine"] == (
+                    "mir_interpreter" if suffix else "register_program"), node
+                flags = node["variant"]
+                assert flags == {"OP_ODE": 0x10, "OP_DAE": 0x8,
+                                 "OP_ALGEBRA_SOLVER": 0, "OP_QUADRATURE": 0,
+                                 "OP_ODE_ADJOINT": 0x10}[node["operation"]], node
+    for name in ("ode_runtime_for", "for_bound_semantics", "ode_integer_arithmetic",
+                 "ode_nested_callback"):
         stem = ROOT / "tests/fixtures" / name
         report = json.loads(subprocess.check_output(
             [dump_ops, str(stem.with_suffix(".tmir.sexp")),

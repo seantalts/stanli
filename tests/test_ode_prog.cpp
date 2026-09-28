@@ -563,8 +563,108 @@ void check_matrix_callbacks() {
   }
   auto nested = f;
   nested.arg_views[2].depth = 1;
-  expect("matrix arrays remain outside admission",
+  expect("matrix array without full geometry refuses compilation",
          !compile_rhs_args(nested, funs, 2, {active}).ok);
+}
+
+void check_nested_callbacks() {
+  using namespace stanli;
+  const auto mir = mir::read_program(
+      sexp::parse(slurp("tests/fixtures/matrix_callback_functions.tmir.sexp")));
+  std::map<std::string, const mir::FunDef*> funs;
+  for (const auto& f : mir.fun_defs) funs[f.name] = &f;
+  RhsArg active, data, integers;
+  active.is_param = true;
+  active.len = 12;
+  active.dims = {2, 2, 3};
+  data.len = 6;
+  data.dims = {2, 3};
+  integers.is_int = true;
+  integers.ints = {1, 3, 2, 4};  // serialized order
+  integers.dims = {2, 2};
+  const auto& f = *funs.at("nested_values");
+  const std::vector<RhsArg> args{active, data, integers};
+  const auto compiled = compile_rhs_args(f, funs, 2, args);
+  expect("nested array callback compiles", compiled.ok);
+  if (!compiled.ok) std::printf("nested refusal: %s\n", compiled.why.c_str());
+  for (int trial = 0; trial < 8; ++trial) {
+    std::vector<double> av, bv;
+    for (int k = 0; k < 12; ++k) av.push_back(probe(trial * 12 + k));
+    for (int k = 0; k < 6; ++k) bv.push_back(probe(trial * 6 + 19 + k));
+    const auto xr = graph_container_order(bv, data.dims, 2);
+    const auto run = [&](int mode) {
+      stan::math::nested_rev_autodiff nested;
+      using stan::math::var;
+      std::vector<var> y{0.4, -0.8}, a(av.begin(), av.end());
+      const auto packed = graph_container_order(a, active.dims, 1);
+      std::vector<var> b(xr.begin(), xr.end()), out, registers;
+      MirInterp<var> interp(funs, "nested callback test");
+      if (mode == 0) {
+        run_rhs<var>(compiled, 0.2, y.data(), packed.data(), xr.data(), out,
+                     registers);
+      } else if (mode == 1) {
+        out = interpret_retained_callback(interp, f,
+            {{var(0.2)}, y, packed, b}, {integers.ints}, args);
+      } else {
+        std::vector<MirInterp<var>::Value> values(5);
+        values[0].r = {var(0.2)};
+        values[1].r = y;
+        values[1].dims = {2};
+        values[2].r = a;
+        values[2].dims = active.dims;
+        values[3].r.assign(bv.begin(), bv.end());
+        values[3].dims = data.dims;
+        values[4].is_int = true;
+        values[4].i = integers.ints;
+        values[4].r.assign(integers.ints.begin(), integers.ints.end());
+        values[4].dims = integers.dims;
+        out = interp.call(f, values).r;
+      }
+      var root = out[0] * 0.37 + out[1] * -0.29;
+      root.grad();
+      std::vector<uint64_t> result;
+      for (const auto& v : out) result.push_back(bits(v.val()));
+      for (const auto& v : y) result.push_back(bits(v.adj()));
+      for (const auto& v : a) result.push_back(bits(v.adj()));
+      return result;
+    };
+    const auto reference = run(2);
+    expect("nested fallback values and gradients exact", run(1) == reference);
+    if (compiled.ok)
+      expect("nested compiled values and gradients exact", run(0) == reference);
+  }
+  const auto& shape = *funs.at("nested_shape");
+  for (const std::vector<int64_t> dims :
+       {std::vector<int64_t>{2, 3, 4}, {3, 2, 4}, {2, 0, 4}, {2, 3, 0}}) {
+    RhsArg a;
+    a.is_param = true;
+    a.dims = dims;
+    a.len = static_cast<int>(checked_container_size(dims, "test"));
+    const auto p = compile_rhs_args(shape, funs, 2, {a});
+    expect("array-of-vector geometry compiles", p.ok);
+    std::vector<double> y{0.2, 0.8}, theta(a.len, 0.3), out, registers;
+    const std::vector<double> want{dims[0] + y[0], dims[1] + y[1]};
+    if (p.ok) run_rhs<double>(p, 0.0, y.data(), theta.data(), nullptr, out, registers);
+    expect("array geometry keeps empty and equal-size extents", out == want);
+    MirInterp<double> interp(funs, "nested shape test");
+    expect("nested fallback keeps empty axes",
+        interpret_retained_callback(interp, shape, {{0.0}, y, theta}, {}, {a}) == want);
+  }
+  for (const std::vector<int64_t> dims :
+       {std::vector<int64_t>{2, 6}, {2, 2, 4}, {0, -1, 0}, {}}) {
+    RhsArg bad = active;
+    bad.dims = dims;
+    expect("incomplete or invalid nested geometry refuses compilation",
+           !compile_rhs_args(f, funs, 2, {bad, data, integers}).ok);
+    bool refused = false;
+    try {
+      MirInterp<double> interp(funs, "invalid nested test");
+      interpret_retained_callback(interp, f,
+          {{0.0}, {0.2, 0.8}, std::vector<double>(12), std::vector<double>(6)},
+          {integers.ints}, {bad, data, integers});
+    } catch (const std::exception&) { refused = true; }
+    expect("invalid nested geometry refuses interpretation", refused);
+  }
 }
 
 }  // namespace
@@ -654,6 +754,7 @@ int main() {
   }
   check_exact_opcode_contract();
   check_matrix_callbacks();
+  check_nested_callbacks();
 
   // stan-math instantiates a var state whenever either side is active. The
   // data-y/active-theta case is included too: run_rhs is a generic boundary,

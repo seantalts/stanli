@@ -16,6 +16,7 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
       spec, e.args, begin, end,
       [&](size_t i, RhsArg& binding) {
         Range value = c.expr(e.args[i]);
+        if (e.args[i].unsized.depth) binding.dims = value.dims;
         if (value.kind == ViewKind::Matrix) {
           binding.rows = value.rows;
           binding.cols = value.cols;
@@ -27,6 +28,7 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
             program_constant(c, e.args[i], e.name + " data argument");
         if (value.is_int)
           c.bail(e.name + ": real data argument is integer-valued");
+        if (e.args[i].unsized.depth) binding.dims = value.dims;
         const bool matrix = e.args[i].unsized.depth == 0 &&
                             e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix;
         if (matrix) {
@@ -42,10 +44,11 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
             e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix;
         return graph_order(value, matrix, nested_matrix);
       },
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         DataMap::Entry value =
             program_constant(c, e.args[i], e.name + " integer argument");
         if (!value.is_int) c.bail(e.name + ": integer argument is real-valued");
+        if (e.args[i].unsized.depth) binding.dims = value.dims;
         return value.i;
       },
       [&](const std::string& message) { c.bail(e.name + ": " + message); },
@@ -976,6 +979,8 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
       *spec, e.args, call->callback_args_begin, callback_end,
       [&](size_t i, RhsArg& binding) {
         Val value = actuals.at(i).value();
+        if (e.args[i].unsized.depth)
+          binding.dims = logical_shape(value, "callback array");
         if (value.si.kind == ViewKind::Matrix) {
           binding.rows = value.si.rows;
           binding.cols = value.si.cols;
@@ -997,11 +1002,22 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
           binding.rows = dims.at(0);
           binding.cols = dims.at(1);
         }
+        if (e.args[i].unsized.depth) {
+          const auto* entry = actuals.at(i).pure_value();
+          binding.dims = entry && !entry->dims.empty() ? entry->dims
+              : logical_shape(actuals.at(i).value(), "callback array");
+          return graph_container_order(values, binding.dims, e.args[i].unsized.depth);
+        }
         return std::vector<double>(values.begin(), values.end());
       },
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         const auto& values =
             actuals.at(i).require_constant_ints("quadrature integer argument");
+        if (e.args[i].unsized.depth) {
+          const auto* entry = actuals.at(i).pure_value();
+          binding.dims = entry && !entry->dims.empty() ? entry->dims
+              : logical_shape(actuals.at(i).value(), "callback integer array");
+        }
         return std::vector<int>(values.begin(), values.end());
       },
       [&](const std::string& message) { fail(e.name + ": " + message, e.raw); },
@@ -1254,6 +1270,11 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
     if (is_int && a.data_only) {
       ra.is_int = true;
       ra.ints = actual.require_constant_ints("ODE integer argument");
+      if (a.unsized.depth) {
+        const auto* entry = actual.pure_value();
+        ra.dims = entry && !entry->dims.empty() ? entry->dims
+            : logical_shape(actual.value(), "callback integer array");
+      }
     } else if (a.data_only && !in_write_array) {
       // One evaluation, held in a local. Calling const_values(a) twice
       // and taking begin() from one temporary and end() from the other
@@ -1272,7 +1293,15 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
         ra.rows = dims.at(0);
         ra.cols = dims.at(1);
       }
-      spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());
+      if (a.unsized.depth) {
+        const auto* entry = actual.pure_value();
+        ra.dims = entry && !entry->dims.empty() ? entry->dims
+            : logical_shape(actual.value(), "callback array");
+        const auto packed = graph_container_order(vals, ra.dims, a.unsized.depth);
+        spec->x_r.insert(spec->x_r.end(), packed.begin(), packed.end());
+      } else {
+        spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());
+      }
     } else {
       if (is_int)
         fail(e.name + ": integer argument " + std::to_string(k - fixed + 1) +
@@ -1281,6 +1310,7 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
       const Val v = actual.value();
       ra.is_param = true;
       ra.len = (int)g.slots[v.slot].len;
+      if (a.unsized.depth) ra.dims = logical_shape(v, "callback array");
       if (v.si.kind == ViewKind::Matrix) {
         ra.rows = v.si.rows;
         ra.cols = v.si.cols;

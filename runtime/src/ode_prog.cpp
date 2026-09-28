@@ -32,10 +32,6 @@ void compact_rhs(RhsProgram& p) {
 }
 
 bool supported_rhs_view(const mir::UnsizedView& view) {
-  if (view.depth > 1) return false;
-  if (view.depth == 1)
-    return view.leaf == mir::UnsizedLeaf::Real ||
-           view.leaf == mir::UnsizedLeaf::Int;
   return view.leaf == mir::UnsizedLeaf::Real ||
          view.leaf == mir::UnsizedLeaf::Int ||
          view.leaf == mir::UnsizedLeaf::Vector ||
@@ -95,8 +91,16 @@ bool exact_ode_adjoint_opcode(Program::Code code) {
 
 void stamp_rhs_view(Range* range, const mir::UnsizedView& view,
                     const RhsArg* argument = nullptr) {
-  if (view.depth == 1)
+  if (view.depth) {
+    RhsArg inferred;
+    inferred.len = range->len;
+    range->dims = callback_array_dimensions(argument ? *argument : inferred, view);
     range->kind = ViewKind::Array;
+    range->leaf = view.leaf == mir::UnsizedLeaf::Matrix ? ViewKind::Matrix
+        : view.leaf == mir::UnsizedLeaf::Vector ? ViewKind::Vector
+        : view.leaf == mir::UnsizedLeaf::RowVector ? ViewKind::RowVector
+        : ViewKind::Flat;
+  }
   else if (view.leaf == mir::UnsizedLeaf::Vector)
     range->kind = ViewKind::Vector;
   else if (view.leaf == mir::UnsizedLeaf::RowVector)
@@ -166,7 +170,14 @@ RhsProgram compile_dae_args(
       const RhsArg& a = args[k];
       const std::string& name = f.arg_names[k + 3];
       if (a.is_int) {
-        c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+        const auto& view = f.arg_views[k + 3];
+        if (view.depth) {
+          c.known_int_array_dims[name] = callback_array_dimensions(a, view);
+          c.known_int_arrays[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+          c.int_array_names.insert(name);
+        } else {
+          c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+        }
       } else if (a.is_param) {
         Range r{p.th0 + th_at, a.len};
         stamp_rhs_view(&r, f.arg_views[k + 3], &a);
@@ -257,7 +268,14 @@ RhsProgram compile_rhs_args(
       const RhsArg& a = args[k];
       const std::string& name = f.arg_names[k + 2];
       if (a.is_int) {
-        c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+        const auto& view = f.arg_views[k + 2];
+        if (view.depth) {
+          c.known_int_array_dims[name] = callback_array_dimensions(a, view);
+          c.known_int_arrays[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+          c.int_array_names.insert(name);
+        } else {
+          c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+        }
       } else if (a.is_param) {
         Range r{p.th0 + th_at, a.len};
         stamp_rhs_view(&r, f.arg_views[k + 2], &a);
