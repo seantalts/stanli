@@ -1,4 +1,19 @@
 functions {
+  vector matrix_gather(real t, vector y, matrix A, matrix B) {
+    int i = y[1] > 0 ? 1 : 2;
+    array[2] int selected = {i, i};
+    matrix[2, 3] C = A;
+    C[selected, {2, 1}] = A[{2, 1}, {1, 2}];
+    row_vector[3] row = C[i];
+    matrix[2, 3] gathered = C[selected, ];
+    return [row[2] + gathered[1, 1] * y[1],
+            gathered[2, 2] * y[2] + B[1, 3]]';
+  }
+  vector matrix_bounds(real t, vector y, matrix A, matrix B) {
+    int i = t < 0 ? 0 : t > 1 ? 3 : 1;
+    return [A[i, 2] * y[1], B[2, 3] * y[2]]';
+  }
+
   vector nested_shape(real t, vector y, array[,] vector A) {
     return [size(A) + y[1], size(A[1]) + y[2]]';
   }

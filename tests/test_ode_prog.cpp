@@ -456,7 +456,7 @@ void check_matrix_callbacks() {
   data.is_param = false;
   const std::vector<RhsArg> args{active, data};
   const std::vector<double> xr{0.1, 0.3, 0.7, -0.2, 0.5, -0.4};
-  for (const char* name : {"matrix_early", "matrix_dynamic"}) {
+  for (const char* name : {"matrix_early", "matrix_dynamic", "matrix_gather", "matrix_bounds"}) {
     const auto& f = *funs.at(name);
     const auto compiled = compile_rhs_args(f, funs, 2, args);
     const bool dynamic = std::string(name) == "matrix_dynamic";
@@ -517,6 +517,25 @@ void check_matrix_callbacks() {
         expect(std::string(name) +
                    ": compiled values and weighted gradients exact",
                run(0) == reference);
+    }
+  }
+  {
+    const auto& bounds = *funs.at("matrix_bounds");
+    const auto program = compile_rhs_args(bounds, funs, 2, args);
+    for (double t : {-0.5, 1.5}) {
+      for (bool compiled_path : {false, true}) {
+        bool rejected = false;
+        try {
+          std::vector<double> y{0.2, 0.8}, a(6, 0.3), out, registers;
+          if (compiled_path && program.ok)
+            run_rhs<double>(program, t, y.data(), a.data(), xr.data(), out, registers);
+          else {
+            MirInterp<double> interp(funs, "matrix bounds test");
+            out = interpret_retained_callback(interp, bounds, {{t}, y, a, xr}, {}, args);
+          }
+        } catch (const std::exception&) { rejected = true; }
+        expect("runtime matrix row rejects each invalid axis", rejected);
+      }
     }
   }
   const auto& f = *funs.at("matrix_shape");
@@ -706,8 +725,7 @@ int main() {
       {"f_no_loop_integer_overflow", 2, 4, true, false},
       {"f_runtime_for_shape", 2, 4, false, false, "integer"},
       {"f_runtime_for_integer_overflow", 2, 4, true, false},
-      {"f_runtime_for_int_array", 2, 4, false, false,
-       "writes an integer array"},
+      {"f_runtime_for_int_array", 2, 4, true, false},
       {"f_runtime_for_mutates_bound", 2, 4, true, false},
       {"f_runtime_for_in_while", 2, 4, false, false, "nested in while"},
       {"f_bad_return_shape", 2, 4, false, false},
