@@ -26,8 +26,10 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
   static const std::unordered_map<std::string_view, BuiltinDispatch> kBuiltins =
       {
           {"multi_normal_rng", BuiltinFamily::MultiNormalRng},
+          {"multi_normal_cholesky_rng", BuiltinFamily::MultiNormalRng},
           {"dirichlet_rng", BuiltinFamily::DirichletRng},
           {"categorical_rng", BuiltinFamily::CategoricalRng},
+          {"poisson_binomial_rng", BuiltinFamily::CategoricalRng},
           {"categorical_logit_rng", BuiltinFamily::CategoricalRng},
           {"append_array", BuiltinFamily::AppendArray},
           {"tcrossprod", BuiltinFamily::Matrix},
@@ -550,7 +552,9 @@ Lowering::Val Lowering::lower_multi_normal_rng(const mir::Expr& e,
   Val draw = with_layout(emit_value(OP_RNG, {location, covariance}, k,
                                     view_of(e.type_), {static_cast<int>(k)}),
                          ExpressionLayout::direct());
-  g.ops.back().variant = kMultiNormalRngVariant;
+  g.ops.back().variant = e.name == "multi_normal_cholesky_rng"
+                             ? kMultiNormalCholeskyRngVariant
+                             : kMultiNormalRngVariant;
   draw.si.param_free = false;
   draw.autodiff = false;
   return draw;
@@ -612,8 +616,10 @@ Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
   const bool is_logit = e.name == "categorical_logit_rng";
   if (!in_write_array)
     fail(e.name + " is supported only in generated quantities", e.raw);
-  if (e.args.size() != 1 || e.type_ != "UInt" ||
-      e.unsized.leaf != mir::UnsizedLeaf::Int || e.unsized.depth != 0)
+  const bool promoted_int =
+      e.promoted && e.unsized.leaf == mir::UnsizedLeaf::Real;
+  if (e.args.size() != 1 || e.unsized.depth != 0 ||
+      (e.unsized.leaf != mir::UnsizedLeaf::Int && !promoted_int))
     fail(e.name + ": expected one scalar int result", e.raw);
   const mir::Expr& probabilities = actuals.at(0).expr();
   if (probabilities.type_ != "UVector" || probabilities.unsized.depth != 0 ||
@@ -625,15 +631,14 @@ Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
   Val argument = actuals.at(0).value();
   if (!is_vector(argument.si))
     fail(e.name + ": argument is not a logical vector", e.raw);
-  if (is_logit)
-    argument =
-        lower_regular_unary(OP_SOFTMAX, "UVector", "softmax", e.raw, argument);
   Val draw = with_layout(emit_value(OP_RNG, {argument}, 1, view_of(e.type_)),
                          ExpressionLayout::scalar());
-  g.ops.back().variant = kCategoricalRngVariant;
-  // A successful call returns a Stan int, but deliberately do not widen
-  // this tranche into runtime-sum range reasoning. Survey only needs the
-  // scalar value; dynamic integer control and indexing still fail closed.
+  g.ops.back().variant = is_logit ? kCategoricalLogitRngVariant
+                         : e.name == "poisson_binomial_rng"
+                             ? kPoissonBinomialRngVariant
+                             : kCategoricalRngVariant;
+  // Successful calls return initialized Stan integers. Their values remain
+  // runtime effects; no compile-time range or extent may be inferred here.
   draw.si.param_free = false;
   draw.autodiff = false;
   set_int_initialized(draw);

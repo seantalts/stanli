@@ -1,5 +1,13 @@
 # Decision: the next execution architecture
 
+> **Current decision (2026-09-28):** Native instruction generation, stencil
+> JIT, and dispatch-JIT research are tabled at the user's request, informed
+> by their earlier negative investigations. The codegen proposals below are
+> historical, not active next steps. Native performance is the priority; Wasm
+> is a secondary demo. Continue coverage migration and measured improvements
+> within the existing graph, register, structured-loop and kernel engines.
+> Removing `MirInterp` remains an objective and does not require a JIT.
+
 The user asked to continue until completion or a major design decision. The
 [census](2026-09-28-execution-census-implementation.md) and
 [eleven-family scalar RNG migration](2026-09-28-scalar-rng-implementation.md)

@@ -124,19 +124,34 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
   throw std::logic_error("unknown scalar RNG family");
 }
 
-int categorical_rng_draw(const double* probabilities, size_t size, WaRng& rng) {
+int vector_integer_rng_draw(const double* probabilities, size_t size,
+                            WaRng& rng, uint8_t variant) {
   if (size != 0 && probabilities == nullptr)
     throw std::logic_error("malformed categorical RNG arguments");
   Eigen::VectorXd theta(static_cast<Eigen::Index>(size));
   for (size_t i = 0; i < size; ++i)
     theta[static_cast<Eigen::Index>(i)] = probabilities[i];
-  return stan::math::categorical_rng(theta, rng.gen());
+  switch (variant) {
+    case kCategoricalRngVariant:
+      return stan::math::categorical_rng(theta, rng.gen());
+    case kCategoricalLogitRngVariant:
+      // Upstream indexes its cumulative sum even for an empty input. Reject
+      // that invalid distribution before it consumes the stream or reads OOB.
+      stan::math::check_nonzero_size("categorical_logit_rng",
+                                     "Log odds parameter", theta);
+      return stan::math::categorical_logit_rng(theta, rng.gen());
+    case kPoissonBinomialRngVariant:
+      return stan::math::poisson_binomial_rng(theta, rng.gen());
+    default:
+      throw std::logic_error("unknown vector-to-integer RNG family");
+  }
 }
 
 void multi_normal_rng_draw(const double* location, size_t location_size,
                            const double* covariance, size_t covariance_size,
                            size_t covariance_rows, size_t covariance_cols,
-                           double* output, size_t output_size, WaRng& rng) {
+                           double* output, size_t output_size, WaRng& rng,
+                           bool cholesky) {
   if ((location_size != 0 && location == nullptr) ||
       (covariance_size != 0 && covariance == nullptr) ||
       (output_size != 0 && output == nullptr) || output_size != location_size ||
@@ -157,7 +172,8 @@ void multi_normal_rng_draw(const double* location, size_t location_size,
           covariance[j * covariance_rows + i];
 
   const Eigen::VectorXd draw =
-      stan::math::multi_normal_rng(mu, sigma, rng.gen());
+      cholesky ? stan::math::multi_normal_cholesky_rng(mu, sigma, rng.gen())
+               : stan::math::multi_normal_rng(mu, sigma, rng.gen());
   for (size_t i = 0; i < output_size; ++i)
     output[i] = draw[static_cast<Eigen::Index>(i)];
 }
@@ -347,7 +363,7 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
   };
 
   // Vector-valued draw from a mean vector and covariance (or Cholesky
-  // factor) matrix. The covariance form shares its owning-Eigen helper with
+  // factor) matrix. Admitted shapes share their owning-Eigen helper with
   // OP_RNG so validation and engine schedules cannot drift between modes.
   if (base == "multi_normal" || base == "multi_normal_cholesky") {
     const auto& mu = av.at(0);
@@ -355,14 +371,17 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
     const int64_t K = (int64_t)mu.r.size();
     out->dims = {K};
     out->r.resize(static_cast<size_t>(K));
-    if (base == "multi_normal") {
+    if (base == "multi_normal" ||
+        (S.dims.size() == 2 && S.dims[0] == K && S.dims[1] == K)) {
       if (S.dims.size() != 2)
         throw std::logic_error("malformed multi-normal covariance shape");
-      multi_normal_rng_draw(mu.r.data(), mu.r.size(), S.r.data(), S.r.size(),
-                            static_cast<size_t>(S.dims[0]),
-                            static_cast<size_t>(S.dims[1]), out->r.data(),
-                            out->r.size(), rng);
+      multi_normal_rng_draw(
+          mu.r.data(), mu.r.size(), S.r.data(), S.r.size(),
+          static_cast<size_t>(S.dims[0]), static_cast<size_t>(S.dims[1]),
+          out->r.data(), out->r.size(), rng, base == "multi_normal_cholesky");
     } else {
+      // Preserve the legacy adapter outside the square-vector contract.
+      // Rectangular and vectorized shapes need a separate shape migration.
       Eigen::VectorXd m(K);
       for (int64_t i = 0; i < K; ++i) m[i] = mu.r[(size_t)i];
       Eigen::MatrixXd sig(K, K);
@@ -386,31 +405,19 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
     return true;
   }
 
-  // Poisson-binomial RNG consumes one complete probability vector.
-  if (base == "poisson_binomial") {
-    const auto& a = av.at(0);
-    Eigen::VectorXd theta(a.r.size());
-    for (size_t i = 0; i < a.r.size(); ++i) theta[i] = a.r[i];
-    const int draw = stan::math::poisson_binomial_rng(theta, g);
-    out->is_int = true;
-    out->i = {draw};
-    out->r = {static_cast<double>(draw)};
-    return true;
-  }
-
-  // Whole-vector argument, one categorical draw.
-  if (base == "categorical" || base == "categorical_logit") {
-    int k = 0;
-    if (base == "categorical") {
-      k = categorical_rng_draw(av.at(0).r.data(), av.at(0).r.size(), rng);
-    } else {
-      Eigen::VectorXd th((int64_t)av.at(0).r.size());
-      for (size_t i = 0; i < av[0].r.size(); ++i) th[(int64_t)i] = av[0].r[i];
-      k = stan::math::categorical_logit_rng(th, g);
-    }
+  // Whole-vector arguments with one integer draw. Use the same owning
+  // Eigen instantiation and validation in every execution path.
+  if (base == "poisson_binomial" || base == "categorical" ||
+      base == "categorical_logit") {
+    const uint8_t variant =
+        base == "poisson_binomial"    ? kPoissonBinomialRngVariant
+        : base == "categorical_logit" ? kCategoricalLogitRngVariant
+                                      : kCategoricalRngVariant;
+    const int k = vector_integer_rng_draw(av.at(0).r.data(), av.at(0).r.size(),
+                                          rng, variant);
     out->is_int = true;
     out->i = {k};
-    out->r = {(double)k};
+    out->r = {static_cast<double>(k)};
     return true;
   }
 

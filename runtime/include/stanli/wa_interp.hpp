@@ -61,11 +61,14 @@ class WaRng {
 // same Stan Math function with the exact same stream.
 double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
                        WaRng& rng);
-int categorical_rng_draw(const double* probabilities, size_t size, WaRng& rng);
+int vector_integer_rng_draw(const double* probabilities, size_t size,
+                            WaRng& rng,
+                            uint8_t variant = kCategoricalRngVariant);
 void multi_normal_rng_draw(const double* location, size_t location_size,
                            const double* covariance, size_t covariance_size,
                            size_t covariance_rows, size_t covariance_cols,
-                           double* output, size_t output_size, WaRng& rng);
+                           double* output, size_t output_size, WaRng& rng,
+                           bool cholesky = false);
 void dirichlet_rng_draw(const double* alpha, size_t alpha_size, double* output,
                         size_t output_size, WaRng& rng);
 

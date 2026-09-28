@@ -1,5 +1,12 @@
 # Interpreter and execution-path audit — 2026-09-28
 
+> **Coverage update:** Subsequent scalar and vector RNG slices close all 13
+> originally missing RNG names and the categorical register-context gaps for
+> the admitted scalar/single-vector forms. This is name coverage, not complete
+> overload or shape coverage. See the [current implementation record](2026-09-28-vector-rng-implementation.md).
+> Native instruction generation, stencil JIT and dispatch-JIT are tabled by
+> user direction; continue with existing-engine coverage and performance.
+
 Audited source: `0bb5b54c8dfa7e9ee40d109209495fe7a9024508` (0.17.1), fetched
 `origin/HEAD` → `origin/main`. The clean starting worktree was three commits
 behind. Created `codex/interpreter-gap-audit` from that fetched ref and verified

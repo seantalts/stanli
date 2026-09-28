@@ -2080,7 +2080,9 @@ struct ProgramCompiler {
   // graph's OP_RNG kernel speaks.
   static bool rng_call_name(const std::string& name) {
     return scalar_rng_family(name) != nullptr || name == "categorical_rng" ||
-           name == "multi_normal_rng" || name == "dirichlet_rng";
+           name == "categorical_logit_rng" || name == "poisson_binomial_rng" ||
+           name == "multi_normal_cholesky_rng" || name == "multi_normal_rng" ||
+           name == "dirichlet_rng";
   }
 
   // A draw inside a runtime-control region, spelled as one Program::CALL on
@@ -2120,8 +2122,18 @@ struct ProgramCompiler {
         if (!is_scalar(a))
           bail(e.name + ": container arguments stay on WaInterp");
       variant = static_cast<uint8_t>(*family);
-    } else if (e.name == "categorical_rng") {
-      bail("categorical_rng: an integer draw stays on WaInterp");
+    } else if (e.name == "categorical_rng" ||
+               e.name == "categorical_logit_rng" ||
+               e.name == "poisson_binomial_rng") {
+      const bool promoted_int =
+          e.promoted && e.unsized.leaf == mir::UnsizedLeaf::Real;
+      if (e.unsized.depth != 0 ||
+          (e.unsized.leaf != mir::UnsizedLeaf::Int && !promoted_int) ||
+          args.size() != 1 || args[0].kind != ViewKind::Vector)
+        bail(e.name + ": expected a vector argument and scalar integer result");
+      variant = e.name == "categorical_logit_rng"  ? kCategoricalLogitRngVariant
+                : e.name == "poisson_binomial_rng" ? kPoissonBinomialRngVariant
+                                                   : kCategoricalRngVariant;
     } else if (e.name == "dirichlet_rng") {
       if (args.size() != 1 || args[0].kind != ViewKind::Vector ||
           args[0].len <= 0)
@@ -2137,7 +2149,9 @@ struct ProgramCompiler {
             "matrix");
       if (args[1].rows != args[0].len || args[1].cols != args[0].len)
         bail("multi_normal_rng: covariance shape must match the location");
-      variant = kMultiNormalRngVariant;
+      variant = e.name == "multi_normal_cholesky_rng"
+                    ? kMultiNormalCholeskyRngVariant
+                    : kMultiNormalRngVariant;
       out_len = args[0].len;
       out_kind = ViewKind::Vector;
       idata.push_back(out_len);

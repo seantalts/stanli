@@ -1771,7 +1771,7 @@ void test_categorical_rng_helper_contract() {
       WaRng got_rng(seed + static_cast<unsigned>(c));
       WaRng want_rng(seed + static_cast<unsigned>(c));
       const int got =
-          categorical_rng_draw(valid[c].data(), valid[c].size(), got_rng);
+          vector_integer_rng_draw(valid[c].data(), valid[c].size(), got_rng);
       const int want = stan::math::categorical_rng(categorical_theta(valid[c]),
                                                    want_rng.gen());
       const auto got_next = got_rng.gen()();
@@ -1800,7 +1800,7 @@ void test_categorical_rng_helper_contract() {
     WaRng got_rng(static_cast<unsigned>(401 + c));
     WaRng want_rng(static_cast<unsigned>(401 + c));
     const RngException got = capture_rng_exception([&] {
-      (void)categorical_rng_draw(
+      (void)vector_integer_rng_draw(
           invalid[c].empty() ? nullptr : invalid[c].data(), invalid[c].size(),
           got_rng);
     });
@@ -1821,7 +1821,7 @@ void test_categorical_rng_helper_contract() {
   // descriptor must carry storage. It must fail before touching the engine.
   WaRng malformed(991), untouched(991);
   const RngException null_input = capture_rng_exception(
-      [&] { (void)categorical_rng_draw(nullptr, 1, malformed); });
+      [&] { (void)vector_integer_rng_draw(nullptr, 1, malformed); });
   if (null_input.kind != 3 || malformed.gen()() != untouched.gen()()) {
     ++failures;
     std::printf("FAIL categorical helper malformed pointer contract\n");
@@ -2603,8 +2603,19 @@ void test_multi_normal_rng_lowering_guards() {
   cholesky.replace(call + std::string("(FunApp (StanLib ").size(),
                    std::string("multi_normal_rng").size(),
                    "multi_normal_cholesky_rng");
-  expect_interp(cholesky, "unsupported function multi_normal_cholesky_rng",
-                "multi-normal Cholesky stays interpreted");
+  auto cholesky_cm = compile_model(cholesky, DataMap{});
+  if (!cholesky_cm.write_array || cholesky_cm.write_array->interp ||
+      !cholesky_cm.write_array->truncated.empty()) {
+    ++failures;
+    std::printf("FAIL multi-normal Cholesky did not compile\n");
+  }
+  // A new family must not weaken the shared geometry proof.
+  mismatched_covariance.replace(call + std::string("(FunApp (StanLib ").size(),
+                                std::string("multi_normal_rng").size(),
+                                "multi_normal_cholesky_rng");
+  expect_interp(mismatched_covariance,
+                "covariance shape must match the location",
+                "Cholesky mismatched geometry stays interpreted");
 }
 
 void test_compiled_multi_normal_rng() {

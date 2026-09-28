@@ -104,10 +104,12 @@ Compressed sizes are in the JSON; they are development artifacts, not released
 package sizes. No inference-wide speedup is claimed beyond this small measured
 model.
 
-## Next research boundary
+## Historical next step (superseded)
 
-The scalar tranche is ready. The roadmap calls for an early code-generation
-feasibility comparison before expanding every remaining value path. Developer-
-only native and Wasm probes are separate from this production change. Their
-results will inform the major choice of generated-model/kernel interface and
-backend; they do not authorize deleting existing execution engines.
+The earlier roadmap proposed code-generation feasibility work after this
+scalar slice. The user has now explicitly tabled native instruction
+emission, stencil JIT and dispatch-JIT research, informed by prior negative
+investigations. Native performance is the priority and Wasm is secondary.
+Continue [remaining RNG coverage](2026-09-28-vector-rng-implementation.md),
+callback/control support and measured improvements to the existing engines.
+The isolated probes remain historical evidence, not an active work item.

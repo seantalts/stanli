@@ -24,6 +24,7 @@ SOURCE_ONLY_PATTERN = re.compile(
 O0_FIXTURES = {
     "call_argument_cache",
     "gq_udf_return_layout",
+    "gq_rng_udf_effect",
     "paramcond_intarray",
     "reduce_sum_arguments",
     "runtime_int_array_udf",

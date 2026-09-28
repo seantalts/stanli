@@ -42,6 +42,8 @@ enum class ScalarRng : uint8_t {
   Weibull,
   NegBinomial2,
   NegBinomial2Log,
+  // Container variants below also reserve 26 through 28. Future scalar
+  // additions must start at 29 to preserve the existing variant numbers.
 };
 
 // OP_RNG's first non-scalar-argument variant. Keep it outside ScalarRng:
@@ -51,6 +53,13 @@ inline constexpr uint8_t kCategoricalRngVariant =
     static_cast<uint8_t>(ScalarRng::Exponential) + 1;
 inline constexpr uint8_t kMultiNormalRngVariant = kCategoricalRngVariant + 1;
 inline constexpr uint8_t kDirichletRngVariant = kMultiNormalRngVariant + 1;
+
+// Append new container families without changing existing opcode variants.
+inline constexpr uint8_t kCategoricalLogitRngVariant = 26;
+inline constexpr uint8_t kPoissonBinomialRngVariant =
+    kCategoricalLogitRngVariant + 1;
+inline constexpr uint8_t kMultiNormalCholeskyRngVariant =
+    kPoissonBinomialRngVariant + 1;
 
 // The Stan spelling of each family, so the graph lowering and the register
 // program's region compiler recognize exactly the same set. Null for a name

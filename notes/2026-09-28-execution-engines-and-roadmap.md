@@ -1,5 +1,14 @@
 # Execution engines and a path to interpreter independence
 
+> **Current decision (2026-09-28):** Native instruction generation, stencil
+> JIT, and dispatch-JIT research are tabled at the user's request, informed
+> by their earlier negative investigations. The codegen proposals below are
+> historical, not active next steps. Native performance is the priority; Wasm
+> is a secondary demo. Continue coverage migration and measured improvements
+> within the existing graph, register, structured-loop and kernel engines.
+> Removing `MirInterp` remains an objective and does not require a JIT.
+> Continued work: [remaining RNG coverage](2026-09-28-vector-rng-implementation.md).
+
 Source baseline: `0bb5b54c8dfa7e9ee40d109209495fe7a9024508`, fetched
 `origin/HEAD` → `origin/main` on 2026-09-28 and verified as an ancestor of HEAD.
 On the review turn, the branch fast-forwarded to fetched `origin/HEAD`

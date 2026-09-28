@@ -17,8 +17,8 @@ def ordered(value):
     return (~bits & ((1 << 64) - 1)) if bits >> 63 else bits | (1 << 63)
 
 
-def main(check):
-    source = ROOT / "tests/fixtures/gq_scalar_rng_complete.stan"
+def main(check, fixture="gq_scalar_rng_complete"):
+    source = ROOT / "tests/fixtures" / (fixture + ".stan")
     reference = json.loads(source.with_suffix(".ref.json").read_text())
     for path, key in [(source, "source_sha256"), (source.with_suffix(".json"), "data_sha256")]:
         assert hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == reference[key]
@@ -44,8 +44,8 @@ def main(check):
                 assert ulp <= 10, (point, a, b, ulp)
                 worst = max(worst, ulp)
                 count += 1
-    print(f"CmdStan scalar RNG reference: {count} values, max {worst} ULP")
+    print(f"CmdStan {fixture} reference: {count} values, max {worst} ULP")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(*sys.argv[1:])
