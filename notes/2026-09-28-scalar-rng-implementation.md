@@ -61,7 +61,9 @@ remains a snapshot of its identified earlier tool/MIR artifacts.
 Logs: `.cache/scalar-rng-final-ctest.log`, `scalar-rng-guard-tests.log`,
 `scalar-rng-corpus.log`, `scalar-rng-python-tests.log`, `scalar-rng-r-tests.log`.
 The default runtime and C ABI were exercised; native/browser compiler parity
-was not rerun, and no compiler source changed.
+was not rerun, and no compiler source changed. A subsequent fresh WebAssembly
+runtime build passed the end-to-end Node smoke and this same 54-value RNG
+reference replay at a maximum of 1 ULP (see the code-generation decision note).
 
 ## Performance evidence
 

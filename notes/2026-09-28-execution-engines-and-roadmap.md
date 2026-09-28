@@ -15,7 +15,10 @@ by Fable.
 
 This document records the explanation and plan. The subsequent
 [first census implementation and validation](2026-09-28-execution-census-implementation.md)
-records delivered work and remaining attribution limits. No fresh performance
+records delivered work and remaining attribution limits. The subsequent
+[scalar RNG migration](2026-09-28-scalar-rng-implementation.md) and
+[code-generation decision](2026-09-28-codegen-decision.md) record the next
+implementation and feasibility evidence. No fresh performance
 experiment is claimed here. The user objective is to move more
 supported Stan execution onto efficient paths and ultimately make an
 interpreter unnecessary, while preserving numerical fidelity, short startup,

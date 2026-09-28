@@ -1,0 +1,642 @@
+{
+  "source_base": "5288ed03",
+  "status": "developer-only probes; no production backend or ABI",
+  "platform": "Darwin arm64; native Apple clang 21; Wasm Node 24.19.0",
+  "native_flags": "-O3 -ffp-contract=off -dynamiclib",
+  "wasm_flags": "--target=wasm32 -O3 -ffp-contract=off -nostdlib --no-entry --import-memory; explicit exports/imports",
+  "native_initial": {
+    "summary": {
+      "0": {
+        "vm_ns": {
+          "median": 47.589349999999996,
+          "mad": 1.1939499999999974
+        },
+        "generated_ns": {
+          "median": 20.85385,
+          "mad": 0.44865000000000066
+        }
+      },
+      "1": {
+        "vm_ns": {
+          "median": 768.6434999999999,
+          "mad": 142.183
+        },
+        "generated_ns": {
+          "median": 551.0319999999999,
+          "mad": 18.226999999999975
+        }
+      },
+      "2": {
+        "vm_ns": {
+          "median": 33.9541,
+          "mad": 1.1105499999999964
+        },
+        "generated_ns": {
+          "median": 9.998025,
+          "mad": 0.15432500000000005
+        }
+      },
+      "3": {
+        "vm_ns": {
+          "median": 154.00099999999998,
+          "mad": 4.8489999999999895
+        },
+        "generated_ns": {
+          "median": 151.75,
+          "mad": 2.7505000000000024
+        }
+      }
+    },
+    "raw": [
+      {
+        "case": 0,
+        "pair": 0,
+        "vm_ns": 53.6927,
+        "generated_ns": 20.8852
+      },
+      {
+        "case": 0,
+        "pair": 1,
+        "vm_ns": 60.948,
+        "generated_ns": 20.8225
+      },
+      {
+        "case": 0,
+        "pair": 2,
+        "vm_ns": 47.6982,
+        "generated_ns": 20.3205
+      },
+      {
+        "case": 0,
+        "pair": 3,
+        "vm_ns": 46.4283,
+        "generated_ns": 21.2178
+      },
+      {
+        "case": 0,
+        "pair": 4,
+        "vm_ns": 47.4805,
+        "generated_ns": 19.7884
+      },
+      {
+        "case": 0,
+        "pair": 5,
+        "vm_ns": 46.3625,
+        "generated_ns": 21.598
+      },
+      {
+        "case": 1,
+        "pair": 0,
+        "vm_ns": 896.184,
+        "generated_ns": 573.036
+      },
+      {
+        "case": 1,
+        "pair": 1,
+        "vm_ns": 1073.2,
+        "generated_ns": 528.836
+      },
+      {
+        "case": 1,
+        "pair": 2,
+        "vm_ns": 907.081,
+        "generated_ns": 570.083
+      },
+      {
+        "case": 1,
+        "pair": 3,
+        "vm_ns": 641.103,
+        "generated_ns": 533.629
+      },
+      {
+        "case": 1,
+        "pair": 4,
+        "vm_ns": 611.756,
+        "generated_ns": 552.591
+      },
+      {
+        "case": 1,
+        "pair": 5,
+        "vm_ns": 622.715,
+        "generated_ns": 549.473
+      },
+      {
+        "case": 2,
+        "pair": 0,
+        "vm_ns": 35.6601,
+        "generated_ns": 9.73965
+      },
+      {
+        "case": 2,
+        "pair": 1,
+        "vm_ns": 34.5729,
+        "generated_ns": 9.99405
+      },
+      {
+        "case": 2,
+        "pair": 2,
+        "vm_ns": 33.3353,
+        "generated_ns": 10.4543
+      },
+      {
+        "case": 2,
+        "pair": 3,
+        "vm_ns": 35.6894,
+        "generated_ns": 9.64718
+      },
+      {
+        "case": 2,
+        "pair": 4,
+        "vm_ns": 32.5878,
+        "generated_ns": 10.0483
+      },
+      {
+        "case": 2,
+        "pair": 5,
+        "vm_ns": 33.0993,
+        "generated_ns": 10.002
+      },
+      {
+        "case": 3,
+        "pair": 0,
+        "vm_ns": 154.599,
+        "generated_ns": 154.439
+      },
+      {
+        "case": 3,
+        "pair": 1,
+        "vm_ns": 161.781,
+        "generated_ns": 144.062
+      },
+      {
+        "case": 3,
+        "pair": 2,
+        "vm_ns": 149.99,
+        "generated_ns": 149.409
+      },
+      {
+        "case": 3,
+        "pair": 3,
+        "vm_ns": 146.441,
+        "generated_ns": 155.374
+      },
+      {
+        "case": 3,
+        "pair": 4,
+        "vm_ns": 159.688,
+        "generated_ns": 148.938
+      },
+      {
+        "case": 3,
+        "pair": 5,
+        "vm_ns": 153.403,
+        "generated_ns": 154.091
+      }
+    ]
+  },
+  "native_final": {
+    "summary": {
+      "0": {
+        "vm_ns": {
+          "median": 47.267300000000006,
+          "mad": 1.0823999999999998
+        },
+        "generated_ns": {
+          "median": 20.76635,
+          "mad": 0.41409999999999947
+        }
+      },
+      "1": {
+        "vm_ns": {
+          "median": 631.6514999999999,
+          "mad": 13.54849999999999
+        },
+        "generated_ns": {
+          "median": 553.92,
+          "mad": 7.34499999999997
+        }
+      },
+      "2": {
+        "vm_ns": {
+          "median": 34.816900000000004,
+          "mad": 0.6597999999999935
+        },
+        "generated_ns": {
+          "median": 9.92037,
+          "mad": 0.13775000000000048
+        }
+      },
+      "3": {
+        "vm_ns": {
+          "median": 162.11200000000002,
+          "mad": 3.932499999999976
+        },
+        "generated_ns": {
+          "median": 155.89350000000002,
+          "mad": 5.947500000000005
+        }
+      }
+    },
+    "raw": [
+      {
+        "case": 0,
+        "pair": 0,
+        "vm_ns": 48.5911,
+        "generated_ns": 20.2219
+      },
+      {
+        "case": 0,
+        "pair": 1,
+        "vm_ns": 45.6687,
+        "generated_ns": 21.7305
+      },
+      {
+        "case": 0,
+        "pair": 2,
+        "vm_ns": 49.1206,
+        "generated_ns": 19.7549
+      },
+      {
+        "case": 0,
+        "pair": 3,
+        "vm_ns": 47.1199,
+        "generated_ns": 20.857
+      },
+      {
+        "case": 0,
+        "pair": 4,
+        "vm_ns": 47.4147,
+        "generated_ns": 20.6757
+      },
+      {
+        "case": 0,
+        "pair": 5,
+        "vm_ns": 46.4263,
+        "generated_ns": 21.0501
+      },
+      {
+        "case": 1,
+        "pair": 0,
+        "vm_ns": 597.412,
+        "generated_ns": 558.954
+      },
+      {
+        "case": 1,
+        "pair": 1,
+        "vm_ns": 646.377,
+        "generated_ns": 544.264
+      },
+      {
+        "case": 1,
+        "pair": 2,
+        "vm_ns": 619.28,
+        "generated_ns": 567.228
+      },
+      {
+        "case": 1,
+        "pair": 3,
+        "vm_ns": 638.813,
+        "generated_ns": 536.622
+      },
+      {
+        "case": 1,
+        "pair": 4,
+        "vm_ns": 624.49,
+        "generated_ns": 555.16
+      },
+      {
+        "case": 1,
+        "pair": 5,
+        "vm_ns": 847.456,
+        "generated_ns": 552.68
+      },
+      {
+        "case": 2,
+        "pair": 0,
+        "vm_ns": 35.0842,
+        "generated_ns": 9.89295
+      },
+      {
+        "case": 2,
+        "pair": 1,
+        "vm_ns": 33.8571,
+        "generated_ns": 10.1455
+      },
+      {
+        "case": 2,
+        "pair": 2,
+        "vm_ns": 35.3225,
+        "generated_ns": 9.87
+      },
+      {
+        "case": 2,
+        "pair": 3,
+        "vm_ns": 34.5496,
+        "generated_ns": 9.94779
+      },
+      {
+        "case": 2,
+        "pair": 4,
+        "vm_ns": 32.9644,
+        "generated_ns": 10.527
+      },
+      {
+        "case": 2,
+        "pair": 5,
+        "vm_ns": 35.6309,
+        "generated_ns": 9.67512
+      },
+      {
+        "case": 3,
+        "pair": 0,
+        "vm_ns": 165.003,
+        "generated_ns": 148.344
+      },
+      {
+        "case": 3,
+        "pair": 1,
+        "vm_ns": 153.121,
+        "generated_ns": 163.294
+      },
+      {
+        "case": 3,
+        "pair": 2,
+        "vm_ns": 167.086,
+        "generated_ns": 151.369
+      },
+      {
+        "case": 3,
+        "pair": 3,
+        "vm_ns": 152.206,
+        "generated_ns": 163.264
+      },
+      {
+        "case": 3,
+        "pair": 4,
+        "vm_ns": 160.752,
+        "generated_ns": 158.671
+      },
+      {
+        "case": 3,
+        "pair": 5,
+        "vm_ns": 163.472,
+        "generated_ns": 153.116
+      }
+    ]
+  },
+  "native_compile": {
+    "elapsed_seconds": 0.255881166,
+    "returncode": 0,
+    "stderr": ""
+  },
+  "native_final_log": "LOAD_US 370.75\nPARITY 0 passed changing-input/reuse/weighted-adjoint checks\nBENCH 0 0 48.5911 20.2219\nBENCH 0 1 45.6687 21.7305\nBENCH 0 2 49.1206 19.7549\nBENCH 0 3 47.1199 20.857\nBENCH 0 4 47.4147 20.6757\nBENCH 0 5 46.4263 21.0501\nPARITY 1 passed changing-input/reuse/weighted-adjoint checks\nBENCH 1 0 597.412 558.954\nBENCH 1 1 646.377 544.264\nBENCH 1 2 619.28 567.228\nBENCH 1 3 638.813 536.622\nBENCH 1 4 624.49 555.16\nBENCH 1 5 847.456 552.68\nPARITY 2 passed changing-input/reuse/weighted-adjoint checks\nBENCH 2 0 35.0842 9.89295\nBENCH 2 1 33.8571 10.1455\nBENCH 2 2 35.3225 9.87\nBENCH 2 3 34.5496 9.94779\nBENCH 2 4 32.9644 10.527\nBENCH 2 5 35.6309 9.67512\nPARITY 3 passed changing-input/reuse/weighted-adjoint checks\nBENCH 3 0 165.003 148.344\nBENCH 3 1 153.121 163.294\nBENCH 3 2 167.086 151.369\nBENCH 3 3 152.206 163.264\nBENCH 3 4 160.752 158.671\nBENCH 3 5 163.472 153.116\n",
+  "native_program_sizes": "PROGRAM 0 forward=16 reverse=16 values=18 adjoints=18\nPROGRAM 1 forward=256 reverse=256 values=258 adjoints=258\nPROGRAM 2 forward=13 reverse=4 values=11 adjoints=5\nPROGRAM 3 forward=1 reverse=1 values=8 adjoints=8\n",
+  "wasm_initial": {
+    "parity": "passed",
+    "exceptionRecovery": "passed",
+    "memoryGrowth": "passed",
+    "memoryBefore": 16777216,
+    "memoryAfter": 25821184,
+    "instantiationUs": 11.9170000000004,
+    "generatedImports": [
+      {
+        "module": "env",
+        "name": "memory",
+        "kind": "memory"
+      },
+      {
+        "module": "stanli",
+        "name": "forward",
+        "kind": "function"
+      },
+      {
+        "module": "stanli",
+        "name": "reverse",
+        "kind": "function"
+      }
+    ],
+    "samples": [
+      {
+        "pair": 0,
+        "directNs": 75.3224018559248,
+        "importedNs": 76.41321789895161
+      },
+      {
+        "pair": 1,
+        "directNs": 72.98874284713298,
+        "importedNs": 77.68971410814173
+      },
+      {
+        "pair": 2,
+        "directNs": 76.28905892404872,
+        "importedNs": 73.29672188342913
+      },
+      {
+        "pair": 3,
+        "directNs": 72.00924851661952,
+        "importedNs": 79.12661666033668
+      },
+      {
+        "pair": 4,
+        "directNs": 74.04131497112397,
+        "importedNs": 78.11824922663494
+      },
+      {
+        "pair": 5,
+        "directNs": 77.06201343936866,
+        "importedNs": 74.8297791080515
+      }
+    ]
+  },
+  "wasm_final": {
+    "parity": "passed",
+    "exceptionRecovery": "passed",
+    "memoryGrowth": "passed",
+    "memoryBefore": 16777216,
+    "memoryAfter": 25821184,
+    "compileUs": 44.49999999999932,
+    "instantiationUs": 12.375000000002245,
+    "generatedImports": [
+      {
+        "module": "env",
+        "name": "memory",
+        "kind": "memory"
+      },
+      {
+        "module": "stanli",
+        "name": "forward",
+        "kind": "function"
+      },
+      {
+        "module": "stanli",
+        "name": "reverse",
+        "kind": "function"
+      }
+    ],
+    "samples": [
+      {
+        "pair": 0,
+        "directNs": 67.47793522267206,
+        "importedNs": 74.57404903949411
+      },
+      {
+        "pair": 1,
+        "directNs": 70.21152217260648,
+        "importedNs": 73.01776950261402
+      },
+      {
+        "pair": 2,
+        "directNs": 72.36618490751731,
+        "importedNs": 73.61565472159238
+      },
+      {
+        "pair": 3,
+        "directNs": 69.67236100660482,
+        "importedNs": 74.03281619236576
+      },
+      {
+        "pair": 4,
+        "directNs": 72.76252219214763,
+        "importedNs": 71.43492070748916
+      },
+      {
+        "pair": 5,
+        "directNs": 67.592926703977,
+        "importedNs": 76.21999481707323
+      }
+    ]
+  },
+  "artifacts": {
+    "tools/probe_native_program.cpp": {
+      "sha256": "dabc172847fde45924645b6bb38921e23a7efbc52ec95a7bc3c330441d3cfb0d",
+      "bytes": 11682,
+      "gzip_bytes": 3399
+    },
+    "tools/probe_kernel_bridge.cpp": {
+      "sha256": "9db32b3451bfacf3aff2061cd71f550efb74f2a19bfc878421a84ee85a2a82c8",
+      "bytes": 1256,
+      "gzip_bytes": 583
+    },
+    "tools/probe_generated_kernel.c": {
+      "sha256": "b1930528466de89b07f731b61d1a8b1c9231e1ae66cb253f89ad8e3a93c1f800",
+      "bytes": 712,
+      "gzip_bytes": 342
+    },
+    "tools/probe_generated_kernel.cjs": {
+      "sha256": "da096ddc12ac9108e9414dccd3f23d20660de2cfae48f1a707e0986e304a6f54",
+      "bytes": 4021,
+      "gzip_bytes": 1425
+    },
+    ".cache/native-probe/generated.cpp": {
+      "sha256": "ff9662d3756ec084595744c5774b9e933f2380d0feb3c2dd5f014a273a3b2578",
+      "bytes": 23087,
+      "gzip_bytes": 4584
+    },
+    ".cache/native-probe/generated.dylib": {
+      "sha256": "95af8a7a050c21ec4b1be42d79ff926fb381b47be25a5eb155846c380cf1b4ca",
+      "bytes": 16992,
+      "gzip_bytes": 3316
+    },
+    ".cache/native-probe/generated.wasm": {
+      "sha256": "06dab203e9d9cabe6311e8d9bce2e729585fc250941acbe074ccf57698e03a69",
+      "bytes": 496,
+      "gzip_bytes": 405
+    },
+    "build-wasm-probe/stanli.wasm": {
+      "sha256": "3821995a19a9d589481218c1ccbaf23263b2d0d99034402a86bad997e7d3cdba",
+      "bytes": 15264179,
+      "gzip_bytes": 3384550
+    },
+    "build-wasm-probe/stanli_codegen_probe.wasm": {
+      "sha256": "befb0c6679241c0efabb7adf66273d62a6f96be609d5bc16dc7376946730fea0",
+      "bytes": 15264629,
+      "gzip_bytes": 3382996
+    }
+  },
+  "wasm_after_review": {
+    "parity": "passed",
+    "exceptionRecovery": "passed",
+    "memoryGrowth": "passed",
+    "adjointConsumption": "passed",
+    "memoryBefore": 16777216,
+    "memoryAfter": 25821184,
+    "compileUs": 41.707999999999856,
+    "instantiationUs": 10.999999999999233,
+    "generatedImports": [
+      {
+        "module": "env",
+        "name": "memory",
+        "kind": "memory"
+      },
+      {
+        "module": "stanli",
+        "name": "forward",
+        "kind": "function"
+      },
+      {
+        "module": "stanli",
+        "name": "reverse",
+        "kind": "function"
+      }
+    ],
+    "samples": [
+      {
+        "pair": 0,
+        "directNs": 71.09515853831935,
+        "importedNs": 78.67235194159481
+      },
+      {
+        "pair": 1,
+        "directNs": 76.11146619173749,
+        "importedNs": 71.35973853970428
+      },
+      {
+        "pair": 2,
+        "directNs": 69.5712049533881,
+        "importedNs": 76.25951987310499
+      },
+      {
+        "pair": 3,
+        "directNs": 70.68845958096527,
+        "importedNs": 74.5144332508718
+      },
+      {
+        "pair": 4,
+        "directNs": 72.77966201857292,
+        "importedNs": 71.20343339694114
+      },
+      {
+        "pair": 5,
+        "directNs": 69.62544434232875,
+        "importedNs": 78.54433710336161
+      }
+    ]
+  },
+  "after_review_changes": [
+    "Consume and clear output adjoints; check a second unseeded reverse adds nothing",
+    "Share browser link options between ordinary and experimental runtime targets",
+    "Revise decision text; do not rank native generation against native-host Wasm without matched evidence"
+  ],
+  "after_review_artifacts": {
+    "tools/probe_kernel_bridge.cpp": {
+      "sha256": "bc8077d5c26575426d5b29d322079cef237f4c1f22d2c75db7933d47381129c8",
+      "bytes": 1344,
+      "gzip_bytes": 616
+    },
+    "tools/probe_generated_kernel.cjs": {
+      "sha256": "857ae59e1ce3d157d67710927ee7985aaf9fa48d002ed7183c2eed6c7b6dbe9a",
+      "bytes": 4301,
+      "gzip_bytes": 1473
+    },
+    "build-wasm-probe/stanli.wasm": {
+      "sha256": "3821995a19a9d589481218c1ccbaf23263b2d0d99034402a86bad997e7d3cdba",
+      "bytes": 15264179,
+      "gzip_bytes": 3384550
+    },
+    "build-wasm-probe/stanli_codegen_probe.wasm": {
+      "sha256": "dbe9b5baaf1ab3594d393b6fd86a64103b0b3ca25c36f227e5ef7fd3e3f2aad9",
+      "bytes": 15264673,
+      "gzip_bytes": 3383027
+    }
+  }
+}
