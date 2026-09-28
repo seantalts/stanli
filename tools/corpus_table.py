@@ -525,13 +525,13 @@ def _catalog_tables(rows, details):
     incomplete = []
     for row in sorted(rows, key=lambda item: item["model"]):
         speedup = _catalog_number(row, "paired_speedup")
-        cells = [_catalog_model(row["model"]), f"{speedup:.2f}x" if speedup is not None else "—"]
+        cells = [_catalog_model(row["model"]), f"{speedup:.3g}x" if speedup is not None else "—"]
         for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
                                ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
             components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
             estimate = (components[0] + components[1] + CATALOG_GRADIENT_BUDGET * components[2] / 1e9
                         if all(value is not None for value in components) else None)
-            cells.append(f"{estimate:.4g}" if estimate is not None else "—")
+            cells.append(f"{estimate:.3g}" if estimate is not None else "—")
         record = details[row["model"]]
         if record["status"] == "ok":
             output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
