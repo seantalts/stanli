@@ -48,8 +48,9 @@ def publish(summary, output, compiler_evidence=None, build_identity=None):
             f"records {len(records)} application models.\n\n"
             "The manifest identifies the exact sources, inputs, binaries and settings. "
             "The summary, raw paired observations and command events are retained here. "
-            "Estimated time is measured setup plus 20,000 times median warm gradient "
-            "latency; full sampling is not run. Failures remain in the inventory.\n\n"
+            "The summary retains the protocol's setup-plus-20,000-gradient estimate; "
+            "the table below recalculates totals for 2,000 gradients from the same measurements. "
+            "Full sampling is not run. Failures remain in the inventory.\n\n"
             f"Full inputs, generated code and command logs remain locally at `{run}`; "
             "these larger artifacts are not hosted with this report.\n\n" + table)
         checksums = [f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}"

@@ -2,7 +2,8 @@
 """Render the benchmark catalog and detailed historical appendix tables.
 
 --catalog renders one complete, current benchmark run for benchmarks.md.
-The original TSV mode emits two tables for docs/benchmark-appendix.md. The first is every model both engines measured end to end,
+The original TSV mode emits two tables for docs/benchmark-2026-09-11.md.
+The first is every model both engines measured end to end,
 sorted by per-gradient speedup. It shows both engines' absolute gradient
 times and the wall time from Stan source to a completed 1,000-warmup,
 1,000-draw run. stanli_sample_s already includes the whole stanli process;
@@ -15,7 +16,8 @@ Prints markdown to stdout; the appendix is edited by hand around it.
 
 --catalog requires the current full-corpus v4 summary, raw model records and
 manifest under output/corpus-performance; it never substitutes historical measurements.
-Its setup-plus-20,000-gradients estimate is a fixed-work proxy, not measured sampling.
+Its setup-plus-2,000-gradients estimate is a fixed-work proxy, not measured sampling.
+The retained v4 artifacts are still validated against their recorded 20,000-gradient budget.
 
 --gradients INPUT.tsv renders only the fixed-point gradient comparison.
 
@@ -30,6 +32,7 @@ python3 tools/corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec
 """
 import csv
 import gzip
+import html
 import shlex
 import re
 import json
@@ -319,6 +322,7 @@ CATALOG_SUMMARY = CATALOG_ROOT / "output/corpus-performance/benchmark-summary.ts
 CATALOG_RECORDS = CATALOG_ROOT / "output/corpus-performance/model-results.json.gz"
 CATALOG_MANIFEST = CATALOG_ROOT / "output/corpus-performance/benchmark-manifest.json"
 VECTORIZED_ROOT = CATALOG_ROOT / "output/corpus-performance-vectorized"
+CATALOG_GRADIENT_BUDGET = 2000
 GRADIENT_FIELDS = ("stanli_ns_grad", "stanli_ns_grad_mad", "cmdstan_ns_grad",
                    "cmdstan_ns_grad_mad", "paired_speedup", "paired_speedup_mad")
 SETUP_PHASES = {"stanli_compile": "stanli-mir", "cmdstan_stanc": "stanc-cpp",
@@ -502,30 +506,59 @@ def _catalog_notes(row, record):
     return "; ".join(notes) or "complete"
 
 
+def _catalog_model(model):
+    # GitHub strips <wbr>; split long identifiers at underscores instead.
+    if len(model) <= 24:
+        return f"`{model}`"
+    lines = [""]
+    for part in re.split(r"(?<=_)", model):
+        if lines[-1] and len(lines[-1]) + len(part) > 24:
+            lines.append("")
+        lines[-1] += part
+    return "<code>" + "<br>".join(html.escape(line) for line in lines) + "</code>"
+
+
+def _catalog_tables(rows, details):
+    """Present both compiler configurations with the same public workload."""
+    header = "| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
+    output = [header, "| --- | ---: | ---: | ---: |"]
+    incomplete = []
+    for row in sorted(rows, key=lambda item: item["model"]):
+        speedup = _catalog_number(row, "paired_speedup")
+        cells = [_catalog_model(row["model"]), f"{speedup:.2f}x" if speedup is not None else "—"]
+        for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
+                               ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
+            components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
+            estimate = (components[0] + components[1] + CATALOG_GRADIENT_BUDGET * components[2] / 1e9
+                        if all(value is not None for value in components) else None)
+            cells.append(f"{estimate:.4g}" if estimate is not None else "—")
+        record = details[row["model"]]
+        if record["status"] == "ok":
+            output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+        else:
+            cells.append(_catalog_notes(row, record))
+            incomplete.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+    output.extend([
+        "", f"Total sampling is an estimate: each engine's measured setup time + {CATALOG_GRADIENT_BUDGET:,} × "
+        "its median warm gradient time. Full sampling is not run.",
+    ])
+    if incomplete:
+        output.extend(["", "**Incomplete results**", "",
+                       "Missing measurements are —; available timings are retained.", "",
+                       header + " Reason |", "| --- | ---: | ---: | ---: | --- |", *incomplete])
+    return "\n".join(output) + "\n"
+
+
 def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
                    manifest_path=CATALOG_MANIFEST):
     """One current setup-plus-fixed-gradient proxy table, never sampling time."""
     rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path)
     config = manifest["identity"]["config"]
-    output = [
+    intro = (
         f"Run `{_catalog_cell(manifest['run_id'])}` ({_catalog_cell(manifest['started_utc'][:10])}): "
-        f"{len(rows)} models, {config['rounds']} alternating gradient pairs.", "",
-        "Gradient ratio is the median paired CmdStan/Stanli ratio ± MAD. "
-        "Estimated seconds are measured setup plus 20,000 × median gradient latency; "
-        "this fixed-work proxy is not measured HMC sampling time. Missing components "
-        "leave estimates blank; failures remain visible.", "",
-        "| Model | Paired gradient ratio ± MAD | Stanli setup + 20,000 gradients (s) | CmdStan equivalent (s) | Notes |",
-        "| --- | ---: | ---: | ---: | --- |",
-    ]
-    for row in sorted(rows, key=lambda item: item["model"]):
-        speedup, mad = (_catalog_number(row, key) for key in ("paired_speedup", "paired_speedup_mad"))
-        gradient = f"{speedup:.2f}x ± {mad:.2f}" if speedup is not None else "—"
-        estimates = [_catalog_number(row, engine + "_estimated_s") for engine in ("stanli", "cmdstan")]
-        cells = [f"`{row['model']}`", gradient,
-                 *(f"{value:.4g}" if value is not None else "—" for value in estimates),
-                 _catalog_notes(row, details[row["model"]])]
-        output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
-    return "\n".join(output) + "\n"
+        f"{len(rows)} models, {config['rounds']} alternating gradient pairs.\n\n"
+    )
+    return intro + _catalog_tables(rows, details)
 
 
 def render_gradient_catalog(summary_path=VECTORIZED_ROOT / "benchmark-summary.tsv",
@@ -533,7 +566,7 @@ def render_gradient_catalog(summary_path=VECTORIZED_ROOT / "benchmark-summary.ts
                             records_path=VECTORIZED_ROOT / "model-results.json.gz",
                             provenance_path=VECTORIZED_ROOT / "compiler-provenance.json",
                             default_manifest_path=CATALOG_MANIFEST):
-    """Current O1+vectorization gradients with the same runtime and inputs."""
+    """Current O1+vectorization comparison with the same runtime and inputs."""
     rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path)
     baseline = json.loads(Path(default_manifest_path).read_text())
     default_config = _catalog_config(baseline)
@@ -561,24 +594,9 @@ def render_gradient_catalog(summary_path=VECTORIZED_ROOT / "benchmark-summary.ts
             or not isinstance(provenance.get("build_commands"), list) or not provenance["build_commands"]
             or not all(isinstance(command, str) and command.strip() for command in provenance["build_commands"])):
         raise ValueError("Invalid optimized compiler provenance")
-    output = [
-        f"Run `{_catalog_cell(manifest['run_id'])}`: {len(rows)} models, {config['rounds']} alternating pairs. "
-        "Gradient latencies are microseconds (median ± MAD); speedup is the median "
-        "within-pair CmdStan/Stanli ratio ± MAD. Missing measurements are —.", "",
-        "| Model | Stanli µs | CmdStan O1+vec µs | Paired speedup ± MAD | Notes |",
-        "| --- | ---: | ---: | ---: | --- |",
-    ]
-    for row in sorted(rows, key=lambda item: item["model"]):
-        speedup = _catalog_number(row, "paired_speedup")
-        if speedup is not None:
-            cells = [f"{_catalog_number(row, engine + '_ns_grad')/1000:.4g} ± "
-                     f"{_catalog_number(row, engine + '_ns_grad_mad')/1000:.3g}" for engine in ("stanli", "cmdstan")]
-            speed = f"{speedup:.2f}x ± {_catalog_number(row, 'paired_speedup_mad'):.2f}"
-        else:
-            cells, speed = ["—", "—"], "—"
-        cells = [f"`{row['model']}`", *cells, speed, _catalog_notes(row, details[row["model"]])]
-        output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
-    return "\n".join(output) + "\n"
+    intro = (f"Run `{_catalog_cell(manifest['run_id'])}`: {len(rows)} models, "
+             f"{config['rounds']} alternating gradient pairs.\n\n")
+    return intro + _catalog_tables(rows, details)
 
 
 def require_historical_tsv(col):

@@ -60,6 +60,10 @@ remain visible if a later ordinary-model build fails.
 The fixed workload corresponds to an assumption of 2,000 iterations at ten
 gradient evaluations each. It excludes adaptation, tree building, generated
 quantities and output, and does not predict a particular model's NUTS runtime.
+The [public tables](benchmarks.md#full-corpus) recalculate totals for a
+2,000-gradient workload from these same measurements; the retained v4
+artifacts keep their recorded 20,000-gradient budget.
+
 Numerical and sampler correctness remain covered independently by
 [TESTING.md](../TESTING.md).
 
@@ -103,7 +107,7 @@ python3 tools/gen_docs.py
 ```
 
 Documentation generation also requires the optimized-reference artifacts
-specified in the [appendix](benchmark-appendix.md). The current table validates the entire
+specified in the [appendix](benchmarks.md#appendix). The current table validates the entire
 inventory, raw pairs and recomputed estimates before publishing.
 It never fills missing cells from historical measurements.
 
