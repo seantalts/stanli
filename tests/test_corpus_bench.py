@@ -482,8 +482,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
     def test_proxy_uses_all_setup_terms_and_two_thousand_gradients(self):
         rendered = self.render()
         self.assertIn("1.42x", rendered)
-        self.assertNotIn("2.00x", rendered)
-        self.assertIn("| 0.1207 | 2.201 |", rendered)
+        self.assertNotIn("| 2x |", rendered)
+        self.assertIn("| 0.121 | 2.2 |", rendered)
         self.assertIn("Full sampling is not run", rendered)
         self.assertIn("2,000", rendered)
         complete, incomplete = rendered.split("**Incomplete results**")
@@ -540,13 +540,13 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.update_row(cmdstan_build_s="", cmdstan_estimated_s="", note="ordinary build failed")
         rendered = self.render()
         self.assertIn("1.42x", rendered)
-        self.assertIn("| 0.1207 | — | failed; ordinary build failed", rendered)
+        self.assertIn("| 0.121 | — | failed; ordinary build failed", rendered)
 
     def test_partial_preparation_preserves_gradient_and_reference_estimate(self):
         self.records[0]["status"] = "censored"
         self.records[0]["preparation_s"].pop()
         self.update_row(stanli_prep_s="", stanli_estimated_s="", note="prepare timed out")
-        self.assertIn("| — | 2.201 | censored; prepare timed out", self.render())
+        self.assertIn("| — | 2.2 | censored; prepare timed out", self.render())
 
     def test_failed_setup_cannot_supply_a_duration(self):
         self.records[0]["setup"]["cmdstan_build"]["status"] = "failed"
@@ -635,8 +635,8 @@ class VectorizedCatalogTests(unittest.TestCase):
         default = render_catalog(self.paths[0], self.paths[2], self.paths[1])
         self.assertEqual(rendered.split("\n\n", 1)[1], default.split("\n\n", 1)[1])
         self.assertIn("1.42x", rendered)
-        self.assertNotIn("2.00x", rendered)
-        self.assertIn("| 0.1207 | 2.201 |", rendered)
+        self.assertNotIn("| 2x |", rendered)
+        self.assertIn("| 0.121 | 2.2 |", rendered)
         self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
 
     def test_default_inputs_and_executables_must_match(self):
