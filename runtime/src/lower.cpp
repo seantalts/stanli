@@ -2,6 +2,7 @@
 
 #include "build_id.hpp"
 #include <stanli/gp_cov_fusion.hpp>
+#include <stanli/execution_report.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -313,6 +314,7 @@ void Lowering::bind_data(const mir::Program& p) {
          direct_input_load(st, input_names) ||
          canonical_input_rebuild(st, input_names)))
       continue;
+    record_interpreter_event("prepare_data", "statement_entry");
     td.exec(st);
   }
   for (auto& [name, e] : td.env()) {
@@ -972,6 +974,10 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
 }
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed, const CompileOptions& options) {
+  const bool report_enabled = execution_reporting_enabled();
+  ExecutionTrace execution_trace;
+  std::optional<ExecutionTraceScope> execution_scope;
+  if (report_enabled) execution_scope.emplace(execution_trace);
   if (options.reduce_sum_threads < 1 || options.reduce_sum_min_elements < 0 ||
       options.reduce_sum_max_chunks < 1)
     throw std::invalid_argument("invalid reduce_sum compilation options");
@@ -1095,6 +1101,10 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     throw CompileError(interpreter_error(cm));
   prep.plain("compile", "total", compile_time);
   prep.report();
+  if (report_enabled) {
+    execution_trace.check();
+    emit_diagnostic(execution_report(cm, &execution_trace));
+  }
   return cm;
 }
 

@@ -65,6 +65,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
     return false;
   };
   try {
+    record_interpreter_event("lowering", "bounded_admission_probe");
     MirInterp<double> probe(fun_defs, "structured data probe", hooks);
     probe.env() = td.env();
     return probe.eval(e);

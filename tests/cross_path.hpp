@@ -547,6 +547,16 @@ class Matrix {
     const std::string pair = "graph/wa_interp";
     if (!a.have_graph_row && !a.have_interp_row) return;  // no section
     if (a.have_graph_row && !a.have_interp_row) {
+      // A truncated graph evaluated only a prefix, so success says nothing
+      // about a rejection in the unlowered suffix. Keep complete-graph
+      // outcome comparisons strict; report this incomplete comparison.
+      if (a.paths.wa == "truncated+interp") {
+        line(
+            "CROSS NOTE " + opt_.model +
+            " write_array prefix succeeded but the full interpreter refused: " +
+            a.wa_error);
+        return;
+      }
       // The graph lowered the section and the interpreter refused it. That
       // is the loud form of the gap this axis exists to find: a
       // generated-quantities function one vocabulary table has and another

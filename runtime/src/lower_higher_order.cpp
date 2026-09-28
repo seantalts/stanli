@@ -236,6 +236,9 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
     spec->args[2].ints = spec->x_i;
     spec->prog = compile_rhs(*spec->rhs(), *spec->funs(), S, theta.len,
                              (int)spec->x_r.size(), spec->x_i);
+    if (!spec->prog.ok)
+      note_interpreter_fallback("the ODE right-hand side " + spec->rhs_name,
+                                spec->prog.why);
   } else {
     if (call->with_tolerance) {
       spec->rtol = program_scalar_real(c, e.args[4], "ODE relative tolerance");
@@ -1096,6 +1099,9 @@ Lowering::Val Lowering::emit_ode(std::shared_ptr<OdeSpec> spec, const Val& z0,
                                  const Val& theta, int64_t N, int64_t S,
                                  SlotInfo result_si, std::optional<Val> t0,
                                  std::optional<Val> ts) {
+  if (!spec->prog.ok)
+    note_interpreter_fallback("the ODE right-hand side " + spec->rhs_name,
+                              spec->prog.why);
   // Falling back to the interpreter is correct but ~30x slower, so make
   // it findable rather than silent.
   if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ODE"))

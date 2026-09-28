@@ -208,6 +208,35 @@ The tools you will reach for most:
   call also includes emitting the buffered profile rows.
 - [`dump_ops`](../tools/dump_ops.cpp): print the op list a model
   lowered to. Usually the first thing to look at.
+- `dump_ops model.tmir.sexp data.json --execution-json`: JSON describing the
+  final selected graph, nested register calls, structured sites, solver
+  callback admission, write-array fallback and constrained initialization.
+  It also captures interpreter constructions and selected preparation probes.
+  `--forbid-mir` adds a strict diagnostic refusal, including preparation; it
+  is intentionally stronger than the existing `STANLI_NO_INTERPRETER` policy.
+  Constructions and probe entries are not instruction/evaluation counts.
+- `STANLI_EXECUTION_REPORT=1`: emit the same manifest through the diagnostic
+  sink at model compilation. The C API and BridgeStan emit a separate host
+  selection event after write-array discovery, distinguishing an attached
+  fallback from successful output discovery. Standalone function handles
+  created with this flag emit interpreter construction traces on calls.
+  The flag does not add clocks or counters inside graph/register instructions.
+  C++ diagnostic callers can scope `ExecutionTrace` around initialization,
+  write-array or callback evaluation; scopes are thread-local and nested
+  scopes observe inclusive counts. Call `trace.check()` after any speculative
+  catches when using its strict policy.
+
+  Schema version 1 reports retained structure, not measured path frequency.
+  Region `native_adj` describes generated derivative instructions, not machine
+  code. Kernel derivative metadata belongs to the registered implementation;
+  most kernels currently say `unclassified`, while graph softmax/log-softmax
+  explicitly report `nested_tape`. Missing metadata never proves tape freedom.
+  Logical shapes erased by lowering are `null`; flattened buffer sizes remain
+  available. Dynamic solver/replay decisions are marked conditional. Structured
+  sites on different branches are all listed, not claimed to have executed.
+  Only the selected write-array route is listed; a partial/unselected graph
+  is not added to its executing coverage. Use existing inclusive profiles for
+  time attribution, and do not sum overlapping parent/child times.
 - `STANLI_DUMP_PASSES=<dir>`: an environment variable read by anything that
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus

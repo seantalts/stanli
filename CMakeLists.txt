@@ -294,6 +294,7 @@ set_source_files_properties(runtime/src/build_id.cpp PROPERTIES
 # stan-math-heavy translation unit merely to change the final archive kind
 # used to make a clean native build do the expensive half of its work twice.
 set(STANLI_RUNTIME_SOURCES
+  runtime/src/execution_report.cpp
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
@@ -955,6 +956,13 @@ add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)
+add_dependencies(dump_ops stanli_mir_fixtures)
+if(NOT EMSCRIPTEN)
+  add_test(NAME execution_report_cli
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_execution_report_cli.py
+            $<TARGET_FILE:dump_ops> $<TARGET_FILE:stanli_shared>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 add_executable(dump_islands tools/dump_islands.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_islands PRIVATE stanli)
@@ -1099,6 +1107,7 @@ if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
 endif()
 
 set(STANLI_TESTS
+  test_execution_report
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp

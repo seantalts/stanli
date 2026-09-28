@@ -1363,6 +1363,7 @@ std::optional<DataMap::Entry> Lowering::try_eval_interpreter(
     if (calls_user(e)) return std::nullopt;
   }
   try {
+    record_interpreter_event("lowering", "folding_probe");
     return td.eval(e);
   } catch (const CompileError&) {
     return std::nullopt;

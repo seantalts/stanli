@@ -11,11 +11,13 @@
 #endif
 #include <stanli/mir_decode.hpp>
 #include <stanli/mir_interp.hpp>
+#include <stanli/message_sink.hpp>
 
 #include <cstring>
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -139,6 +141,8 @@ const stanli::mir::FunDef* select_function(
 }  // namespace
 
 struct stanli_function {
+  // Select diagnostics at handle construction, not inside the repeated call.
+  bool report_execution = stanli::execution_reporting_enabled();
   std::shared_ptr<const stanli::mir::Program> program;
   std::string requested_name;
   // Built once, then read-only. The immutable Program owns every pointed-to
@@ -204,6 +208,9 @@ int stanli_function_call(const stanli_function* function,
                          const stanli::DataMap* arguments,
                          stanli_function_result_writer write_result,
                          void* result_context, char* err, size_t err_len) {
+  stanli::ExecutionTrace trace;
+  std::optional<stanli::ExecutionTraceScope> trace_scope;
+  if (function && function->report_execution) trace_scope.emplace(trace);
   try {
     if (function == nullptr || arguments == nullptr || write_result == nullptr)
       throw std::runtime_error(
@@ -234,9 +241,17 @@ int stanli_function_call(const stanli_function* function,
                      result.r.size(), result.i.data(), result.i.size(),
                      result.dims.data(), result.dims.size()) != 0)
       throw std::runtime_error("function result writer failed");
+    if (trace_scope)
+      stanli::emit_diagnostic(stanli::execution_trace_report(trace));
     return 0;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
+    if (trace_scope) {
+      try {
+        stanli::emit_diagnostic(stanli::execution_trace_report(trace));
+      } catch (...) {
+      }  // Preserve the original C-API error even if a sink fails.
+    }
     return 1;
   }
 }

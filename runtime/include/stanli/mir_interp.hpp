@@ -20,6 +20,8 @@
 #ifndef STANLI_MIR_INTERP_HPP
 #define STANLI_MIR_INTERP_HPP
 
+#include <stanli/execution_report.hpp>
+
 #include <stanli/compile.hpp>
 #include <stanli/container_shape.hpp>
 #include <stanli/data.hpp>
@@ -99,7 +101,9 @@ class MirInterp {
 
   MirInterp(const std::map<std::string, const mir::FunDef*>& funs,
             std::string where, MirHooks hooks = {})
-      : funs_(funs), where_(std::move(where)), hooks_(std::move(hooks)) {}
+      : funs_(funs), where_(std::move(where)), hooks_(std::move(hooks)) {
+    record_interpreter_event(where_, "construction");
+  }
 
   std::map<std::string, Value>& env() { return env_; }
 

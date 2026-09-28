@@ -1,0 +1,465 @@
+{
+  "source_base": "5b913866768f351f86eed4d5a7246414530f3b2d",
+  "source_state": "uncommitted execution-census implementation",
+  "tool_sha256": "94a4d51a0ef4c1a0dd65c062592b9b5922c1fefd7312cabb01de38b015721d54",
+  "observations": [
+    {
+      "fixture": "execution_legacy_ode",
+      "mir_sha256": "af0343a0b909f9c18dee839d3b0169ec3e263fa3671d0214c0555771e59d442a",
+      "report": {
+        "schema_version": 1,
+        "kind": "execution_manifest",
+        "stage": "compiled_model",
+        "host_probe": "not_run",
+        "evidence": "selected_structure_not_execution_counts",
+        "interpreter_events": [
+          {
+            "context": "lowering",
+            "event": "folding_probe",
+            "count": 11
+          },
+          {
+            "context": "prepare_data",
+            "event": "construction",
+            "count": 2
+          }
+        ],
+        "strict_violation": false,
+        "log_prob": {
+          "site": "log_prob",
+          "operations": [
+            {
+              "site": "log_prob/op/0",
+              "operation": "OP_ODE",
+              "variant": 6,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ],
+              "direct_rk_payload": false,
+              "direct_rk_enabled": false,
+              "direct_rk_refusal": "",
+              "solver_derivative_selection": "type_shape_and_mode_dependent",
+              "callback": {
+                "name": "graph_rhs",
+                "value_engine": "mir_interpreter",
+                "refusal": "return inside a data-dependent branch",
+                "derivative": "solver_dependent",
+                "fresh_interpreter_per_call": true
+              }
+            },
+            {
+              "site": "log_prob/op/1",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            },
+            {
+              "site": "log_prob/op/2",
+              "operation": "OP_ISLAND",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ],
+              "region": {
+                "value_engine": "register_program",
+                "derivative": "generated_reverse_program",
+                "native_adj": true,
+                "adjoint_instructions": 4,
+                "registers": 13,
+                "instructions": 13,
+                "kernel_calls": [
+                  {
+                    "site": "log_prob/op/2/call/10",
+                    "operation": "OP_ODE",
+                    "variant": 6,
+                    "input_adjoint_mask": 2,
+                    "output_elements": 1,
+                    "value_engine": "kernel_call",
+                    "derivative": "unclassified",
+                    "direct_rk_payload": false,
+                    "direct_rk_enabled": false,
+                    "direct_rk_refusal": "",
+                    "solver_derivative_selection": "type_shape_and_mode_dependent",
+                    "callback": {
+                      "name": "region_rhs",
+                      "value_engine": "mir_interpreter",
+                      "refusal": "return inside a data-dependent branch",
+                      "derivative": "solver_dependent",
+                      "fresh_interpreter_per_call": true
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "site": "log_prob/op/3",
+              "operation": "OP_ADD_N",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ]
+            }
+          ]
+        },
+        "write_array": {
+          "value_engine": "bound_graph",
+          "status": "lowered",
+          "refusal": "",
+          "graph": {
+            "site": "write_array",
+            "operations": []
+          }
+        },
+        "transform_inits": {
+          "value_engine": "mir_interpreter",
+          "refusal": ""
+        },
+        "reported_fallbacks": [
+          "the ODE right-hand side graph_rhs (return inside a data-dependent branch)",
+          "the ODE right-hand side region_rhs (return inside a data-dependent branch)"
+        ]
+      }
+    },
+    {
+      "fixture": "execution_rng",
+      "mir_sha256": "f9cdaac602fb0bd63584a01dd56932548be17dafabd7f553a1ecd75cd524ed46",
+      "report": {
+        "schema_version": 1,
+        "kind": "execution_manifest",
+        "stage": "compiled_model",
+        "host_probe": "not_run",
+        "evidence": "selected_structure_not_execution_counts",
+        "interpreter_events": [
+          {
+            "context": "lowering",
+            "event": "folding_probe",
+            "count": 2
+          },
+          {
+            "context": "prepare_data",
+            "event": "construction",
+            "count": 2
+          },
+          {
+            "context": "prepare_data",
+            "event": "statement_entry",
+            "count": 2
+          }
+        ],
+        "strict_violation": false,
+        "log_prob": {
+          "site": "log_prob",
+          "operations": [
+            {
+              "site": "log_prob/op/0",
+              "operation": "OP_CONSTRAIN_LOWER",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ]
+            },
+            {
+              "site": "log_prob/op/1",
+              "operation": "OP_NORMAL_LPDF",
+              "variant": 129,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "log_prob/op/2",
+              "operation": "OP_ADD_N",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ]
+            }
+          ]
+        },
+        "write_array": {
+          "value_engine": "mir_interpreter",
+          "status": "attached_unprobed",
+          "refusal": "generated quantities (stanli compile: unsupported function gamma_rng)"
+        },
+        "transform_inits": {
+          "value_engine": "mir_interpreter",
+          "refusal": ""
+        },
+        "reported_fallbacks": [
+          "generated quantities (stanli compile: unsupported function gamma_rng)"
+        ]
+      }
+    },
+    {
+      "fixture": "execution_matrix_callback",
+      "mir_sha256": "3fc13866b20581c8f707d0debdefa56745a4a6b55c23e30288e7e0b73194aa17",
+      "report": {
+        "schema_version": 1,
+        "kind": "execution_manifest",
+        "stage": "compiled_model",
+        "host_probe": "not_run",
+        "evidence": "selected_structure_not_execution_counts",
+        "interpreter_events": [
+          {
+            "context": "lowering",
+            "event": "folding_probe",
+            "count": 5
+          },
+          {
+            "context": "prepare_data",
+            "event": "construction",
+            "count": 2
+          }
+        ],
+        "strict_violation": false,
+        "log_prob": {
+          "site": "log_prob",
+          "operations": [
+            {
+              "site": "log_prob/op/0",
+              "operation": "OP_ODE",
+              "variant": 6,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                6
+              ],
+              "direct_rk_payload": false,
+              "direct_rk_enabled": false,
+              "direct_rk_refusal": "",
+              "solver_derivative_selection": "type_shape_and_mode_dependent",
+              "callback": {
+                "name": "matrix_rhs",
+                "value_engine": "mir_interpreter",
+                "refusal": "right-hand side argument 3 has an unsupported logical view",
+                "derivative": "solver_dependent",
+                "fresh_interpreter_per_call": true
+              }
+            },
+            {
+              "site": "log_prob/op/1",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            }
+          ]
+        },
+        "write_array": {
+          "value_engine": "bound_graph",
+          "status": "lowered",
+          "refusal": "",
+          "graph": {
+            "site": "write_array",
+            "operations": []
+          }
+        },
+        "transform_inits": {
+          "value_engine": "mir_interpreter",
+          "refusal": ""
+        },
+        "reported_fallbacks": [
+          "the ODE right-hand side matrix_rhs (right-hand side argument 3 has an unsupported logical view)"
+        ]
+      }
+    },
+    {
+      "fixture": "ar1",
+      "mir_sha256": "aeb487d7fc1babf588853f5413991486343d22843f04951609a20eeea15a32f4",
+      "report": {
+        "schema_version": 1,
+        "kind": "execution_manifest",
+        "stage": "compiled_model",
+        "host_probe": "not_run",
+        "evidence": "selected_structure_not_execution_counts",
+        "interpreter_events": [
+          {
+            "context": "lowering",
+            "event": "folding_probe",
+            "count": 2
+          },
+          {
+            "context": "prepare_data",
+            "event": "construction",
+            "count": 2
+          },
+          {
+            "context": "prepare_data",
+            "event": "statement_entry",
+            "count": 6
+          }
+        ],
+        "strict_violation": false,
+        "log_prob": {
+          "site": "log_prob",
+          "operations": [
+            {
+              "site": "log_prob/op/0",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                24
+              ]
+            },
+            {
+              "site": "log_prob/op/1",
+              "operation": "OP_NORMAL_LPDF",
+              "variant": 129,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "log_prob/op/2",
+              "operation": "OP_SLICE",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 23,
+              "logical_shape": null,
+              "input_elements": [
+                24
+              ]
+            },
+            {
+              "site": "log_prob/op/3",
+              "operation": "OP_SLICE",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 23,
+              "logical_shape": null,
+              "input_elements": [
+                24
+              ]
+            },
+            {
+              "site": "log_prob/op/4",
+              "operation": "OP_MUL",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 23,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                23
+              ]
+            },
+            {
+              "site": "log_prob/op/5",
+              "operation": "OP_NORMAL_LPDF",
+              "variant": 131,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                23,
+                23,
+                1
+              ]
+            },
+            {
+              "site": "log_prob/op/6",
+              "operation": "OP_ADD_N",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "unclassified",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ]
+            }
+          ]
+        },
+        "write_array": {
+          "value_engine": "bound_graph",
+          "status": "lowered",
+          "refusal": "",
+          "graph": {
+            "site": "write_array",
+            "operations": []
+          }
+        },
+        "transform_inits": {
+          "value_engine": "mir_interpreter",
+          "refusal": ""
+        },
+        "reported_fallbacks": []
+      }
+    }
+  ],
+  "matrix_callback_baseline": {
+    "fixture": "execution_matrix_callback",
+    "unconstrained_parameters": [1.0, 4.0, 2.0, 5.0, 3.0, 0.3],
+    "evaluation_error": "stanli ODE function: unsupported index: dims=1 [IndexSingle] [IndexSingle]",
+    "gradient_status": 1,
+    "lp": "-Infinity",
+    "gradient": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "analytic_solution_if_supported": 0.9704455335485082
+  }
+}

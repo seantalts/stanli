@@ -228,9 +228,12 @@ void log_softmax_bwd(KernelCtx& ctx) {
 }  // namespace
 
 void register_legacy_kernels() {
-  register_kernel(OP_LOG_SOFTMAX,
-                  Kernel{log_softmax_fwd, log_softmax_bwd, nullptr});
-  register_kernel(OP_SOFTMAX, Kernel{softmax_fwd, softmax_bwd, nullptr});
+  Kernel log_softmax{log_softmax_fwd, log_softmax_bwd, nullptr};
+  log_softmax.derivative_mechanism = "nested_tape";
+  register_kernel(OP_LOG_SOFTMAX, log_softmax);
+  Kernel softmax{softmax_fwd, softmax_bwd, nullptr};
+  softmax.derivative_mechanism = "nested_tape";
+  register_kernel(OP_SOFTMAX, softmax);
   register_kernel(OP_DIRICHLET_LPDF,
                   Kernel{dirichlet_fwd, dirichlet_bwd, sum_in_lens});
 }
