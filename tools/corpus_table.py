@@ -507,7 +507,7 @@ def _catalog_notes(row, record):
 
 
 def _catalog_model(model):
-    # GitHub strips <wbr>; split long identifiers at underscores instead.
+    # GitHub strips <wbr> and hides <br> inside code spans, so break between spans.
     if len(model) <= 24:
         return f"`{model}`"
     lines = [""]
@@ -515,7 +515,7 @@ def _catalog_model(model):
         if lines[-1] and len(lines[-1]) + len(part) > 24:
             lines.append("")
         lines[-1] += part
-    return "<code>" + "<br>".join(html.escape(line) for line in lines) + "</code>"
+    return "<br>".join(f"<code>{html.escape(line)}</code>" for line in lines)
 
 
 def _catalog_tables(rows, details):

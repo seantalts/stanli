@@ -168,7 +168,7 @@ Run `f81381a8b3b6b2ba` (2026-09-21): 319 models, 6 alternating gradient pairs.
 | `dugongs_model` | 1.83x | 0.008918 | 1.767 |
 | `earn_height` | 2.48x | 0.01567 | 1.554 |
 | `eight_schools_centered` | 1.42x | 0.007399 | 1.721 |
-| <code>eight_schools_<br>noncentered</code> | 1.82x | 0.007673 | 2.03 |
+| <code>eight_schools_</code><br><code>noncentered</code> | 1.82x | 0.007673 | 2.03 |
 | `election88_full` | 4.12x | 0.4805 | 4.798 |
 | `extra_hurdle_poisson` | 2.22x | 0.007234 | 1.317 |
 | `garch11` | 1.12x | 0.02369 | 1.699 |
@@ -223,7 +223,7 @@ Run `f81381a8b3b6b2ba` (2026-09-21): 319 models, 6 alternating gradient pairs.
 | `losscurve_sislob` | 2.16x | 0.01715 | 3.071 |
 | `lotka_volterra` | 2.08x | 0.0566 | 3.179 |
 | `low_dim_gauss_mix` | 2.08x | 0.1117 | 2.166 |
-| <code>low_dim_gauss_mix_<br>collapse</code> | 2.00x | 0.1125 | 2.067 |
+| <code>low_dim_gauss_mix_</code><br><code>collapse</code> | 2.00x | 0.1125 | 2.067 |
 | `lsat_model` | 2.32x | 0.09035 | 2.689 |
 | `mesquite` | 3.79x | 0.008574 | 1.827 |
 | `multi_occupancy` | 2.48x | 0.07184 | 5.013 |
@@ -238,17 +238,17 @@ Run `f81381a8b3b6b2ba` (2026-09-21): 319 models, 6 alternating gradient pairs.
 | `prophet` | 2.01x | 0.09211 | 3.877 |
 | `radon_county` | 2.31x | 0.08537 | 2.035 |
 | `radon_county_intercept` | 8.45x | 0.1516 | 2.965 |
-| <code>radon_hierarchical_<br>intercept_centered</code> | 8.47x | 0.2198 | 3.2 |
-| <code>radon_hierarchical_<br>intercept_noncentered</code> | 8.84x | 0.2101 | 3.416 |
-| <code>radon_partially_pooled_<br>centered</code> | 7.90x | 0.1115 | 2.326 |
-| <code>radon_partially_pooled_<br>noncentered</code> | 8.06x | 0.1145 | 2.569 |
+| <code>radon_hierarchical_</code><br><code>intercept_centered</code> | 8.47x | 0.2198 | 3.2 |
+| <code>radon_hierarchical_</code><br><code>intercept_noncentered</code> | 8.84x | 0.2101 | 3.416 |
+| <code>radon_partially_pooled_</code><br><code>centered</code> | 7.90x | 0.1115 | 2.326 |
+| <code>radon_partially_pooled_</code><br><code>noncentered</code> | 8.06x | 0.1145 | 2.569 |
 | `radon_pooled` | 7.57x | 0.1038 | 2.148 |
-| <code>radon_variable_<br>intercept_centered</code> | 8.43x | 0.1522 | 2.724 |
-| <code>radon_variable_<br>intercept_noncentered</code> | 8.70x | 0.1552 | 2.925 |
-| <code>radon_variable_<br>intercept_slope_centered</code> | 7.63x | 0.1794 | 2.878 |
-| <code>radon_variable_<br>intercept_slope_<br>noncentered</code> | 7.56x | 0.1772 | 3.142 |
-| <code>radon_variable_slope_<br>centered</code> | 8.13x | 0.1601 | 2.755 |
-| <code>radon_variable_slope_<br>noncentered</code> | 8.36x | 0.1625 | 2.918 |
+| <code>radon_variable_</code><br><code>intercept_centered</code> | 8.43x | 0.1522 | 2.724 |
+| <code>radon_variable_</code><br><code>intercept_noncentered</code> | 8.70x | 0.1552 | 2.925 |
+| <code>radon_variable_</code><br><code>intercept_slope_centered</code> | 7.63x | 0.1794 | 2.878 |
+| <code>radon_variable_</code><br><code>intercept_slope_</code><br><code>noncentered</code> | 7.56x | 0.1772 | 3.142 |
+| <code>radon_variable_slope_</code><br><code>centered</code> | 8.13x | 0.1601 | 2.755 |
+| <code>radon_variable_slope_</code><br><code>noncentered</code> | 8.36x | 0.1625 | 2.918 |
 | `rats_model` | 4.68x | 0.01116 | 1.844 |
 | `s2_ar_cov` | 1.02x | 0.03192 | 6.037 |
 | `s2_beta_binomial` | 1.24x | 0.01764 | 2.516 |
@@ -314,7 +314,7 @@ Run `f81381a8b3b6b2ba` (2026-09-21): 319 models, 6 alternating gradient pairs.
 | `seeds_stanified_model` | 1.73x | 0.009257 | 2.339 |
 | `sesame_one_pred_a` | 2.43x | 0.009366 | 1.545 |
 | `soil_incubation` | 2.16x | 0.07544 | 2.333 |
-| <code>state_space_stochastic_<br>level_stochastic_<br>seasonal</code> | 3.09x | 0.0241 | 3.677 |
+| <code>state_space_stochastic_</code><br><code>level_stochastic_</code><br><code>seasonal</code> | 3.09x | 0.0241 | 3.677 |
 | `surgical_model` | 1.30x | 0.008771 | 2.188 |
 | `sw_acat` | 3.55x | 0.1065 | 2.997 |
 | `sw_acat_cs` | 3.24x | 0.1395 | 4.191 |
@@ -374,7 +374,7 @@ Run `f81381a8b3b6b2ba` (2026-09-21): 319 models, 6 alternating gradient pairs.
 | `wells_dist` | 1.84x | 0.0513 | 1.752 |
 | `wells_dist100_model` | 1.01x | 0.04412 | 2.008 |
 | `wells_dist100ars_model` | 1.04x | 0.04483 | 2.013 |
-| <code>wells_interaction_c_<br>model</code> | 1.01x | 0.05052 | 2.126 |
+| <code>wells_interaction_c_</code><br><code>model</code> | 1.01x | 0.05052 | 2.126 |
 | `wells_interaction_model` | 1.01x | 0.04862 | 2.071 |
 
 Total sampling is an estimate: each engine's measured setup time + 2,000 × its median warm gradient time. Full sampling is not run.
@@ -625,7 +625,7 @@ Run `7bc507e14400797e`: 319 models, 6 alternating gradient pairs.
 | `dugongs_model` | 1.83x | 0.008424 | 1.76 |
 | `earn_height` | 1.73x | 0.016 | 1.598 |
 | `eight_schools_centered` | 1.39x | 0.007624 | 1.718 |
-| <code>eight_schools_<br>noncentered</code> | 1.38x | 0.007198 | 1.967 |
+| <code>eight_schools_</code><br><code>noncentered</code> | 1.38x | 0.007198 | 1.967 |
 | `election88_full` | 2.09x | 0.4612 | 4.784 |
 | `extra_hurdle_poisson` | 2.16x | 0.007146 | 1.331 |
 | `garch11` | 0.94x | 0.02339 | 1.691 |
@@ -680,7 +680,7 @@ Run `7bc507e14400797e`: 319 models, 6 alternating gradient pairs.
 | `losscurve_sislob` | 1.92x | 0.01606 | 3.493 |
 | `lotka_volterra` | 2.02x | 0.05693 | 3.32 |
 | `low_dim_gauss_mix` | 2.02x | 0.1136 | 2.157 |
-| <code>low_dim_gauss_mix_<br>collapse</code> | 2.09x | 0.1083 | 2.058 |
+| <code>low_dim_gauss_mix_</code><br><code>collapse</code> | 2.09x | 0.1083 | 2.058 |
 | `lsat_model` | 1.62x | 0.08929 | 2.634 |
 | `mesquite` | 2.89x | 0.009332 | 2.086 |
 | `multi_occupancy` | 2.27x | 0.07486 | 5.418 |
@@ -695,17 +695,17 @@ Run `7bc507e14400797e`: 319 models, 6 alternating gradient pairs.
 | `prophet` | 1.49x | 0.09402 | 4.462 |
 | `radon_county` | 2.10x | 0.08635 | 2.031 |
 | `radon_county_intercept` | 6.80x | 0.1562 | 2.438 |
-| <code>radon_hierarchical_<br>intercept_centered</code> | 6.83x | 0.215 | 2.966 |
-| <code>radon_hierarchical_<br>intercept_noncentered</code> | 6.98x | 0.2161 | 3.138 |
-| <code>radon_partially_pooled_<br>centered</code> | 7.93x | 0.1145 | 2.35 |
-| <code>radon_partially_pooled_<br>noncentered</code> | 7.66x | 0.1164 | 2.537 |
+| <code>radon_hierarchical_</code><br><code>intercept_centered</code> | 6.83x | 0.215 | 2.966 |
+| <code>radon_hierarchical_</code><br><code>intercept_noncentered</code> | 6.98x | 0.2161 | 3.138 |
+| <code>radon_partially_pooled_</code><br><code>centered</code> | 7.93x | 0.1145 | 2.35 |
+| <code>radon_partially_pooled_</code><br><code>noncentered</code> | 7.66x | 0.1164 | 2.537 |
 | `radon_pooled` | 1.82x | 0.104 | 1.762 |
-| <code>radon_variable_<br>intercept_centered</code> | 6.96x | 0.1557 | 2.535 |
-| <code>radon_variable_<br>intercept_noncentered</code> | 6.99x | 0.1575 | 2.774 |
-| <code>radon_variable_<br>intercept_slope_centered</code> | 6.20x | 0.1779 | 2.739 |
-| <code>radon_variable_<br>intercept_slope_<br>noncentered</code> | 6.21x | 0.1783 | 3.009 |
-| <code>radon_variable_slope_<br>centered</code> | 6.86x | 0.1558 | 2.57 |
-| <code>radon_variable_slope_<br>noncentered</code> | 6.63x | 0.1639 | 2.77 |
+| <code>radon_variable_</code><br><code>intercept_centered</code> | 6.96x | 0.1557 | 2.535 |
+| <code>radon_variable_</code><br><code>intercept_noncentered</code> | 6.99x | 0.1575 | 2.774 |
+| <code>radon_variable_</code><br><code>intercept_slope_centered</code> | 6.20x | 0.1779 | 2.739 |
+| <code>radon_variable_</code><br><code>intercept_slope_</code><br><code>noncentered</code> | 6.21x | 0.1783 | 3.009 |
+| <code>radon_variable_slope_</code><br><code>centered</code> | 6.86x | 0.1558 | 2.57 |
+| <code>radon_variable_slope_</code><br><code>noncentered</code> | 6.63x | 0.1639 | 2.77 |
 | `rats_model` | 4.07x | 0.01115 | 1.825 |
 | `s2_ar_cov` | 1.02x | 0.03229 | 6.415 |
 | `s2_beta_binomial` | 1.12x | 0.01745 | 2.47 |
@@ -770,7 +770,7 @@ Run `7bc507e14400797e`: 319 models, 6 alternating gradient pairs.
 | `seeds_stanified_model` | 1.44x | 0.009981 | 2.383 |
 | `sesame_one_pred_a` | 1.80x | 0.009308 | 1.583 |
 | `soil_incubation` | 2.13x | 0.07127 | 2.81 |
-| <code>state_space_stochastic_<br>level_stochastic_<br>seasonal</code> | 3.00x | 0.02372 | 3.677 |
+| <code>state_space_stochastic_</code><br><code>level_stochastic_</code><br><code>seasonal</code> | 3.00x | 0.02372 | 3.677 |
 | `surgical_model` | 1.30x | 0.008074 | 2.181 |
 | `sw_acat` | 3.06x | 0.1131 | 3.014 |
 | `sw_acat_cs` | 3.45x | 0.1421 | 4.269 |
@@ -830,7 +830,7 @@ Run `7bc507e14400797e`: 319 models, 6 alternating gradient pairs.
 | `wells_dist` | 1.53x | 0.05165 | 1.793 |
 | `wells_dist100_model` | 1.01x | 0.04308 | 1.989 |
 | `wells_dist100ars_model` | 1.02x | 0.04548 | 2.026 |
-| <code>wells_interaction_c_<br>model</code> | 1.04x | 0.04988 | 2.137 |
+| <code>wells_interaction_c_</code><br><code>model</code> | 1.04x | 0.04988 | 2.137 |
 | `wells_interaction_model` | 0.98x | 0.05054 | 2.079 |
 
 Total sampling is an estimate: each engine's measured setup time + 2,000 × its median warm gradient time. Full sampling is not run.
