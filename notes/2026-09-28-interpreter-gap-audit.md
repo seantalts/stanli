@@ -1,5 +1,10 @@
 # Interpreter and execution-path audit — 2026-09-28
 
+> **Transform update:** ordinary Cholesky-correlation reverse now uses retained
+> scalar intermediates; exceptional histories keep the Stan tape. Measured
+> Kronecker GP inference improves 15.8%; [results and storage costs](2026-09-28-cholesky-correlation-results.md).
+
+
 > **Native performance update:** normal_id_glm now records Stan's analytical
 > partials without a nested tape. Small Gaussian gradients improve 27.6% in the
 > measured native case; [results and limitations](2026-09-28-normal-glm-results.md).

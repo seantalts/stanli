@@ -1,0 +1,253 @@
+{
+  "method": "six alternating fresh-process pairs using precompiled MIR and /usr/bin/time -l bench_grad, 200ms warmup then one measured gradient; source compiler excluded",
+  "samples": [
+    {
+      "model": "kronecker_gp",
+      "label": "baseline",
+      "repeat": 0,
+      "peak_rss": 11075584
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "candidate",
+      "repeat": 0,
+      "peak_rss": 10993664
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "candidate",
+      "repeat": 1,
+      "peak_rss": 10993664
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "baseline",
+      "repeat": 1,
+      "peak_rss": 10993664
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "baseline",
+      "repeat": 2,
+      "peak_rss": 10960896
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "candidate",
+      "repeat": 2,
+      "peak_rss": 10960896
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "candidate",
+      "repeat": 3,
+      "peak_rss": 10944512
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "baseline",
+      "repeat": 3,
+      "peak_rss": 11124736
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "baseline",
+      "repeat": 4,
+      "peak_rss": 10977280
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "candidate",
+      "repeat": 4,
+      "peak_rss": 10977280
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "candidate",
+      "repeat": 5,
+      "peak_rss": 10977280
+    },
+    {
+      "model": "kronecker_gp",
+      "label": "baseline",
+      "repeat": 5,
+      "peak_rss": 11042816
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "baseline",
+      "repeat": 0,
+      "peak_rss": 11894784
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "candidate",
+      "repeat": 0,
+      "peak_rss": 12042240
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "candidate",
+      "repeat": 1,
+      "peak_rss": 12107776
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "baseline",
+      "repeat": 1,
+      "peak_rss": 12009472
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "baseline",
+      "repeat": 2,
+      "peak_rss": 11878400
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "candidate",
+      "repeat": 2,
+      "peak_rss": 12009472
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "candidate",
+      "repeat": 3,
+      "peak_rss": 11862016
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "baseline",
+      "repeat": 3,
+      "peak_rss": 11960320
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "baseline",
+      "repeat": 4,
+      "peak_rss": 11862016
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "candidate",
+      "repeat": 4,
+      "peak_rss": 12156928
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "candidate",
+      "repeat": 5,
+      "peak_rss": 12042240
+    },
+    {
+      "model": "ch14_m14_2",
+      "label": "baseline",
+      "repeat": 5,
+      "peak_rss": 11829248
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "baseline",
+      "repeat": 0,
+      "peak_rss": 8224768
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "candidate",
+      "repeat": 0,
+      "peak_rss": 8192000
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "candidate",
+      "repeat": 1,
+      "peak_rss": 8175616
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "baseline",
+      "repeat": 1,
+      "peak_rss": 8159232
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "baseline",
+      "repeat": 2,
+      "peak_rss": 8241152
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "candidate",
+      "repeat": 2,
+      "peak_rss": 8159232
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "candidate",
+      "repeat": 3,
+      "peak_rss": 8257536
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "baseline",
+      "repeat": 3,
+      "peak_rss": 8142848
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "baseline",
+      "repeat": 4,
+      "peak_rss": 8142848
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "candidate",
+      "repeat": 4,
+      "peak_rss": 8192000
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "candidate",
+      "repeat": 5,
+      "peak_rss": 8192000
+    },
+    {
+      "model": "s2_mv_shared_re",
+      "label": "baseline",
+      "repeat": 5,
+      "peak_rss": 8175616
+    }
+  ],
+  "summary": {
+    "ch14_m14_2": {
+      "baseline": {
+        "median": 11886592.0,
+        "mad": 40960.0
+      },
+      "candidate": {
+        "median": 12042240.0,
+        "mad": 49152.0
+      }
+    },
+    "s2_mv_shared_re": {
+      "baseline": {
+        "median": 8167424.0,
+        "mad": 24576.0
+      },
+      "candidate": {
+        "median": 8192000.0,
+        "mad": 8192.0
+      }
+    },
+    "kronecker_gp": {
+      "baseline": {
+        "median": 11018240.0,
+        "mad": 49152.0
+      },
+      "candidate": {
+        "median": 10977280.0,
+        "mad": 16384.0
+      }
+    }
+  }
+}
