@@ -190,20 +190,6 @@ struct ProgramCompiler {
     for (const auto& child : s.body) assigned_names(child, names);
   }
 
-  static bool peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
-    if (s->kind == mir::Stmt::Return) {
-      if (!s->has_init) return false;
-      *value = s->rhs;
-      s->kind = mir::Stmt::Skip;
-      s->body.clear();
-      return true;
-    }
-    if ((s->kind == mir::Stmt::Block || s->kind == mir::Stmt::SList) &&
-        !s->body.empty())
-      return peel_terminal_return(&s->body.back(), value);
-    return false;
-  }
-
   // Move an already-declared scalar integer into a register before compiling
   // a structured while which writes it.  Keeping it in `ints` would fold the
   // first assignment into every later use and turn a runtime recurrence back
@@ -3434,6 +3420,63 @@ struct ProgramCompiler {
   struct Returned {
     Range r;
   };
+  // Ends the current lexical path after emitting a runtime function exit.
+  // Branch/loop handlers still compile their other reachable paths.
+  struct PathExit {};
+  struct ReturnFrame {
+    size_t loop_base = 0;
+    bool has_result = false;
+    Range result;
+    std::vector<int> jumps;
+  };
+  ReturnFrame* return_frame = nullptr;
+
+  void emit_function_return(Range value) {
+    if (!return_frame) bail("runtime return has no function scope");
+    auto& frame = *return_frame;
+    if (!frame.has_result) {
+      frame.result = value;
+      frame.result.reg = alloc(value.len);
+      frame.has_result = true;
+    } else if (!same_view(frame.result, value)) {
+      bail("function returns have different logical views");
+    }
+    for (int k = 0; k < value.len; ++k)
+      emit(Program::MOV, frame.result.reg + k, value.reg + k);
+    frame.jumps.push_back(emit(Program::JMP, 0));
+  }
+
+  Range function_body(const std::vector<mir::Stmt>& body) {
+    ReturnFrame frame;
+    frame.loop_base = loops.size();
+    struct Scope {
+      ReturnFrame*& current;
+      ReturnFrame* saved;
+      ~Scope() { current = saved; }
+    } scope{return_frame, return_frame};
+    return_frame = &frame;
+    try {
+      for (const auto& statement : body) stmt(statement);
+      bail("function can finish without returning a value");
+    } catch (Returned& returned) {
+      // A single unconditional return never needed a join or new storage.
+      return returned.r;
+    } catch (PathExit&) {
+      if (!frame.has_result) bail("function returned no value");
+      // Fall through at the final return instead of dispatching a no-op jump.
+      // PathExit propagates only through all-return paths; handlers with a
+      // fallthrough edge to code.size() consume it before reaching here.
+      if (!frame.jumps.empty() &&
+          frame.jumps.back() == (int)p.code.size() - 1) {
+        p.code.pop_back();
+        frame.jumps.pop_back();
+      }
+      for (int jump : frame.jumps)
+        p.code[(size_t)jump].dst = (int)p.code.size();
+      return frame.result;
+    }
+  }
+
   struct CompileBreak {};
   struct CompileContinue {};
 
@@ -3927,14 +3970,24 @@ struct ProgramCompiler {
         }
         return;
       }
-      case mir::Stmt::Return:
-        // A return under a runtime branch is a control-flow join this flat
-        // program has no way to express; the interpreter still handles it.
-        if (branch_depth || structured_while_depth > return_while_base)
-          bail("return inside runtime control" +
-               (inline_stack.empty() ? std::string()
-                                     : " in " + inline_stack.back()));
+      case mir::Stmt::Return: {
+        bool runtime_exit =
+            branch_depth || structured_while_depth > return_while_base;
+        // A pending break or continue can bypass an apparently top-level
+        // return in an unrolled loop. Finish and patch that loop before the
+        // function's exit, rather than unwinding compilation immediately.
+        if (return_frame)
+          for (size_t i = return_frame->loop_base; i < loops.size(); ++i)
+            runtime_exit = runtime_exit || !loops[i].breaks.empty() ||
+                           !loops[i].continues.empty();
+        if (return_frame && (runtime_exit || return_frame->has_result)) {
+          emit_function_return(s.has_init ? expr(s.rhs) : Range{0, 0});
+          throw PathExit{};
+        }
+        if (runtime_exit)
+          bail("return inside runtime control without a function scope");
         throw Returned{s.has_init ? expr(s.rhs) : Range{0, 0}};
+      }
       case mir::Stmt::Break:
         if (loops.empty()) bail("break outside a loop");
         if (branch_depth || loops.back().structured) {
@@ -3953,7 +4006,9 @@ struct ProgramCompiler {
         const long lo = cint(s.lower), hi = cint(s.upper);
         loops.push_back({});
         bool broken = false;
+        bool returned = false;
         for (long v = lo; v <= hi; ++v) {
+          bool path_returned = false;
           ints[s.loopvar] = {v};
           int_decl_at[s.loopvar] = {branch_depth, loops.size()};
           try {
@@ -3961,6 +4016,15 @@ struct ProgramCompiler {
           } catch (CompileContinue&) {
           } catch (CompileBreak&) {
             broken = true;
+          } catch (PathExit&) {
+            path_returned = true;
+          }
+          // A continue can reach another unrolled trip; a break reaches the
+          // statements after the loop. Only an all-return iteration ends
+          // the enclosing lexical path.
+          if (path_returned && loops.back().continues.empty()) {
+            returned = loops.back().breaks.empty();
+            break;
           }
           for (int jump : loops.back().continues)
             p.code[(size_t)jump].dst = (int)p.code.size();
@@ -3972,6 +4036,7 @@ struct ProgramCompiler {
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.pop_back();
+        if (returned) throw PathExit{};
         return;
       }
       case mir::Stmt::While: {
@@ -3991,10 +4056,15 @@ struct ProgramCompiler {
         loops.back().structured = true;
         structured_while_seen = true;
         ++structured_while_depth;
-        for (const auto& k : s.body) stmt(k);
+        bool body_returned = false;
+        try {
+          for (const auto& k : s.body) stmt(k);
+        } catch (PathExit&) {
+          body_returned = true;
+        }
         --structured_while_depth;
         for (int jump : loops.back().continues) p.code[(size_t)jump].dst = head;
-        emit(Program::JMP, head);
+        if (!body_returned) emit(Program::JMP, head);
         p.code[(size_t)exit].dst = (int)p.code.size();
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
@@ -4008,51 +4078,30 @@ struct ProgramCompiler {
           if (c == 0 && s.body.size() > 1) stmt(s.body[1]);
           return;
         }
-        if (s.body.size() == 2 && branch_depth == 0 &&
-            structured_while_depth == return_while_base) {
-          mir::Stmt then_effects = s.body[0];
-          mir::Stmt else_effects = s.body[1];
-          mir::Expr then_value, else_value;
-          if (peel_terminal_return(&then_effects, &then_value) &&
-              peel_terminal_return(&else_effects, &else_value)) {
-            const Range cv = expr(s.cond);
-            if (!is_scalar(cv)) bail("branch on a container");
-            ++branch_depth;
-            const int jz = emit(Program::JZ, 0, cv.reg);
-            stmt(then_effects);
-            const Range tv = expr(then_value);
-            const int dst = alloc(tv.len);
-            for (int k = 0; k < tv.len; ++k)
-              emit(Program::MOV, dst + k, tv.reg + k);
-            const int jmp = emit(Program::JMP, 0);
-            p.code[(size_t)jz].dst = (int)p.code.size();
-            stmt(else_effects);
-            const Range ev = expr(else_value);
-            if (!same_view(tv, ev))
-              bail("conditional returns have different logical views");
-            for (int k = 0; k < ev.len; ++k)
-              emit(Program::MOV, dst + k, ev.reg + k);
-            p.code[(size_t)jmp].dst = (int)p.code.size();
-            --branch_depth;
-            Range out = tv;
-            out.reg = dst;
-            throw Returned{out};
-          }
-        }
         const Range cv = expr(s.cond);
         if (!is_scalar(cv)) bail("branch on a container");
         ++branch_depth;
         const int jz = emit(Program::JZ, 0, cv.reg);
-        if (!s.body.empty()) stmt(s.body[0]);
+        bool then_exits = false, else_exits = false;
+        try {
+          if (!s.body.empty()) stmt(s.body[0]);
+        } catch (PathExit&) {
+          then_exits = true;
+        }
         if (s.body.size() > 1) {
-          const int jmp = emit(Program::JMP, 0);
+          const int jmp = then_exits ? -1 : emit(Program::JMP, 0);
           p.code[(size_t)jz].dst = (int)p.code.size();
-          stmt(s.body[1]);
-          p.code[(size_t)jmp].dst = (int)p.code.size();
+          try {
+            stmt(s.body[1]);
+          } catch (PathExit&) {
+            else_exits = true;
+          }
+          if (jmp >= 0) p.code[(size_t)jmp].dst = (int)p.code.size();
         } else {
           p.code[(size_t)jz].dst = (int)p.code.size();
         }
         --branch_depth;
+        if (then_exits && else_exits) throw PathExit{};
         return;
       }
       case mir::Stmt::Block:
@@ -4151,10 +4200,7 @@ struct ProgramCompiler {
     }
     Range out{0, 0};
     try {
-      for (const auto& s : f.body) stmt(s);
-      bail("function " + f.name + " returned no value");
-    } catch (Returned& r) {
-      out = r.r;
+      out = function_body(f.body);
     } catch (...) {
       inline_stack.pop_back();
       reals = std::move(saved_reals);

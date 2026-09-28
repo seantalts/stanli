@@ -6,10 +6,9 @@
 // not to a tolerance: the two evaluate the same operations in the same order,
 // and anything else is a bug, not rounding.
 //
-// The other half is the fallback. compile_rhs refuses what it cannot express
-// (a return out of a branch on the solve time), and the test pins both halves
-// of that contract: it must refuse, with a reason, and the interpreter must
-// still produce the right answer.
+// The other half is the fallback: return paths with incompatible logical
+// shapes still refuse, with a reason, while supported early exits select the
+// shared register compiler. Both values and weighted derivatives are checked.
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/island.hpp>
@@ -230,11 +229,28 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
            refusal.find("JZ") != std::string::npos ||
                refusal.find("JMP") != std::string::npos);
 
+  // The general region derivative engine supports forward-only branches even
+  // though the stricter direct-RK eligibility contract still excludes them.
+  IslandProg branch_adjoint;
+  const bool check_branch_adjoint =
+      name == "f_early" || name == "f_nested_early" || name == "f_loop_exits";
+  if (check_branch_adjoint) {
+    static_cast<Program&>(branch_adjoint) = static_cast<const Program&>(p);
+    branch_adjoint.ins = {{p.t_reg, 1, -1, 0, false},
+                          {p.y0, p.n_y, -1, 0, true},
+                          {p.th0, p.n_th, -1, 0, true},
+                          {p.xr0, p.n_xr, -1, 0, false}};
+    expect(name + ": acyclic exit supports generated reverse",
+           gen_adjoint(branch_adjoint));
+  }
+
   for (int trial = 0; trial < 12; ++trial) {
-    const double t = probe(trial) * 2.0;  // straddles the t > 0.5 branch
+    const double t =
+        trial == 0 ? 0.25 : probe(trial) * 2.0;  // straddles the t > 0.5 branch
     std::vector<double> y((size_t)n_y), th((size_t)n_th);
     for (int i = 0; i < n_y; ++i) y[(size_t)i] = probe(trial * 7 + i) + 0.4;
     for (int i = 0; i < n_th; ++i) th[(size_t)i] = probe(trial * 11 + i) + 0.2;
+    if (trial % 2 == 0 && !y.empty()) y[0] = -y[0];
 
     std::vector<double> got;
     std::vector<double> registers;
@@ -259,7 +275,7 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
       return;
     }
     for (size_t k = 0; k < got.size(); ++k) {
-      if (got[k] != want[k]) {  // bitwise: same ops, same order
+      if (bits(got[k]) != bits(want[k])) {  // same ops, same order
         ++failures;
         std::printf("FAIL %s trial %d out %zu: %.17g vs %.17g\n", name.c_str(),
                     trial, k, got[k], want[k]);
@@ -267,6 +283,32 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
       }
     }
     if (generated) check_generated_local(name, p, *generated, t, y, th, x_r);
+    if (check_branch_adjoint && branch_adjoint.native_adj)
+      check_generated_local(name + " branch", p, branch_adjoint, t, y, th, x_r);
+    const auto gradient = [&](bool compiled) {
+      stan::math::nested_rev_autodiff nested;
+      using stan::math::var;
+      std::vector<var> yv(y.begin(), y.end()), tv(th.begin(), th.end());
+      std::vector<var> values;
+      if (compiled) {
+        std::vector<var> registers;
+        run_rhs<var>(p, t, yv.data(), tv.data(), x_r.data(), values, registers);
+      } else {
+        MirInterp<var> ev(funs, "callback gradient reference");
+        std::vector<var> xr(x_r.begin(), x_r.end());
+        values = ev.call(f, {{var(t)}, yv, tv, xr}, {x_i});
+      }
+      var target = 0;
+      for (size_t k = 0; k < values.size(); ++k)
+        target += values[k] * (0.7 + 0.2 * k);
+      target.grad();
+      std::vector<uint64_t> result;
+      for (auto v : yv) result.push_back(bits(v.adj()));
+      for (auto v : tv) result.push_back(bits(v.adj()));
+      return result;
+    };
+    expect(name + ": weighted callback gradient bits",
+           gradient(true) == gradient(false));
   }
 }
 
@@ -414,11 +456,14 @@ int main() {
       {"f_lin", 2, 4, true, true},
       {"f_branch", 2, 4, true, false},  // JZ/JMP fail closed
       {"f_udf", 2, 4, true, false},     // runtime ternary emits JZ/JMP
-      {"f_nested_early", 2, 4, false, false},
-      {"f_while_pair", 2, 4, false, false},
+      {"f_nested_early", 2, 4, true, false},
+      {"f_while_pair", 2, 4, true, false},
       {"f_call_in_while", 2, 4, true, false},
-      {"f_while_early", 2, 4, false, false},  // return from a runtime loop
-      {"f_early", 2, 4, false, false},        // return from a runtime branch
+      {"f_while_early", 2, 4, true, false},  // return from a runtime loop
+      {"f_loop_exits", 2, 4, true, false},
+      {"f_return_in_loop", 2, 4, true, false},
+      {"f_bad_return_shape", 2, 4, false, false},
+      {"f_early", 2, 4, true, false},  // return from a runtime branch
   };
   for (const Case& c : cases) {
     auto it = funs.find(c.name);
@@ -430,8 +475,8 @@ int main() {
     check(c.name, *it->second, funs, c.n_y, c.n_th, x_r, x_i, c.want_ok,
           c.want_generated);
   }
-  // Refusing an incomplete runtime exit must preserve the working callback
-  // fallback on both sides of each guard, including the nested return pair.
+  // Check both sides of each guard, including the nested return pair,
+  // against an explicit formula as well as the interpreter.
   for (const char* name :
        {"f_early", "f_while_early", "f_nested_early", "f_while_pair"}) {
     for (double t : {0.25, 0.75})
@@ -445,8 +490,16 @@ int main() {
                                        : std::vector<double>{theta[0] * y[0],
                                                              theta[1] * y[1]};
         }
-        MirInterp<double> interp(funs, "early-return fallback");
-        expect(std::string(name) + ": fallback selects the executed return",
+        const auto compiled = compile_rhs(*funs.at(name), funs, 2, 4, 2, x_i);
+        std::vector<double> values, registers;
+        if (compiled.ok)
+          run_rhs<double>(compiled, t, y.data(), theta.data(), x_r.data(),
+                          values, registers);
+        expect(
+            std::string(name) + ": compiled path selects the executed return",
+            compiled.ok && values == expected);
+        MirInterp<double> interp(funs, "early-return oracle");
+        expect(std::string(name) + ": interpreter selects the executed return",
                interp.call(*funs.at(name), {{t}, y, theta, x_r}, {x_i}) ==
                    expected);
       }

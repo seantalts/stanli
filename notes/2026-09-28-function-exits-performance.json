@@ -1,0 +1,773 @@
+{
+  "baseline_commit": "21937576",
+  "candidate": "working tree shared exits",
+  "libraries": {
+    "baseline": {
+      "path": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/.cache/function-exits-baseline/libstanli.dylib",
+      "sha256": "51d0440766a9cfdac98fee33ac0c4468382b73c7c58a21eb6399b305736098af",
+      "gzip_bytes": 12360972
+    },
+    "candidate": {
+      "path": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/build-release/libstanli.dylib",
+      "sha256": "bbb9c87928f4ba51733b5c8ddf00ed40724b31cd3ff9e3507c43476f29dc0a27",
+      "gzip_bytes": 12360522
+    }
+  },
+  "samples": [
+    {
+      "model": "ode_branch_returns",
+      "source_us": 509.4317718940937,
+      "prep_us": 205.89845679012345,
+      "first_grad_us": 433.292,
+      "grad_us": 224.75307008086253,
+      "first_row_us": 311.375,
+      "row_us": 224.16509856630825,
+      "inference_us": 342375.958,
+      "peak_rss": 26820608,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 0
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 505.5854383838384,
+      "prep_us": 298.52993198090695,
+      "first_grad_us": 3482.625,
+      "grad_us": 2.6506137110625754,
+      "first_row_us": 1760.167,
+      "row_us": 1.7722128492134943,
+      "inference_us": 3674.375,
+      "peak_rss": 26738688,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 0
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 513.5349938398357,
+      "prep_us": 291.2600896391153,
+      "first_grad_us": 40.125,
+      "grad_us": 2.4552834849050305,
+      "first_row_us": 22.291,
+      "row_us": 1.7871368871033462,
+      "inference_us": 3235.709,
+      "peak_rss": 27492352,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 541.7183441558442,
+      "prep_us": 207.19431814415907,
+      "first_grad_us": 303.834,
+      "grad_us": 204.52875388389205,
+      "first_row_us": 241.542,
+      "row_us": 213.22886445012787,
+      "inference_us": 359932.875,
+      "peak_rss": 27066368,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 540.7816760259178,
+      "prep_us": 202.13810266774453,
+      "first_grad_us": 299.0,
+      "grad_us": 220.29390660792953,
+      "first_row_us": 264.666,
+      "row_us": 213.74066923076924,
+      "inference_us": 367917.5,
+      "peak_rss": 27099136,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 525.4919474789916,
+      "prep_us": 314.99947481108313,
+      "first_grad_us": 40.5,
+      "grad_us": 2.684610927365663,
+      "first_row_us": 25.584,
+      "row_us": 1.8544686373414436,
+      "inference_us": 3636.125,
+      "peak_rss": 26820608,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 530.4247012711864,
+      "prep_us": 295.1676981132075,
+      "first_grad_us": 46.0,
+      "grad_us": 2.4399629224778208,
+      "first_row_us": 21.0,
+      "row_us": 1.764852105467509,
+      "inference_us": 3152.5,
+      "peak_rss": 26771456,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 535.5367601713062,
+      "prep_us": 214.87220790378007,
+      "first_grad_us": 300.917,
+      "grad_us": 227.95464904284412,
+      "first_row_us": 267.709,
+      "row_us": 215.1712917383821,
+      "inference_us": 367469.583,
+      "peak_rss": 27017216,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 515.0533271604938,
+      "prep_us": 207.44385737976785,
+      "first_grad_us": 270.875,
+      "grad_us": 233.38976958955226,
+      "first_row_us": 240.583,
+      "row_us": 231.45567437557818,
+      "inference_us": 347536.5,
+      "peak_rss": 26984448,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 505.22887272727274,
+      "prep_us": 300.35434093637457,
+      "first_grad_us": 40.209,
+      "grad_us": 2.590241874488432,
+      "first_row_us": 21.0,
+      "row_us": 1.7827298819838129,
+      "inference_us": 3523.541,
+      "peak_rss": 26853376,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 515.5642597938145,
+      "prep_us": 292.39980467836256,
+      "first_grad_us": 38.375,
+      "grad_us": 2.600886113480785,
+      "first_row_us": 22.416,
+      "row_us": 1.8840547353665982,
+      "inference_us": 3573.291,
+      "peak_rss": 26902528,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "model": "ode_branch_returns",
+      "source_us": 543.9829717391304,
+      "prep_us": 209.52139112227806,
+      "first_grad_us": 305.542,
+      "grad_us": 215.0717618228719,
+      "first_row_us": 264.417,
+      "row_us": 214.68229613733905,
+      "inference_us": 373098.5,
+      "peak_rss": 26853376,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 5
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 630.0920428211587,
+      "prep_us": 155.32419751552794,
+      "first_grad_us": 11.292,
+      "grad_us": 0.5887089217466249,
+      "first_row_us": 46.542,
+      "row_us": 0.6246524862389218,
+      "inference_us": 357.834,
+      "peak_rss": 25903104,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 0
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 573.2456155606407,
+      "prep_us": 151.3800696125908,
+      "first_grad_us": 9.458,
+      "grad_us": 0.6158255542417973,
+      "first_row_us": 1030.917,
+      "row_us": 0.6615317495389126,
+      "inference_us": 354.583,
+      "peak_rss": 25788416,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 0
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 628.9249371859296,
+      "prep_us": 152.08510766423356,
+      "first_grad_us": 11.041,
+      "grad_us": 0.5618183759003113,
+      "first_row_us": 14.458,
+      "row_us": 0.6204371026103013,
+      "inference_us": 319.0,
+      "peak_rss": 25853952,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 607.0691747572815,
+      "prep_us": 158.6006131896005,
+      "first_grad_us": 9.625,
+      "grad_us": 0.619380269058296,
+      "first_row_us": 15.25,
+      "row_us": 0.6563466212650665,
+      "inference_us": 358.25,
+      "peak_rss": 25968640,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 594.5352327790974,
+      "prep_us": 144.2654114252741,
+      "first_grad_us": 14.083,
+      "grad_us": 0.5876950053010054,
+      "first_row_us": 16.0,
+      "row_us": 0.6589933573558059,
+      "inference_us": 330.542,
+      "peak_rss": 25968640,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 627.4562456140351,
+      "prep_us": 153.20751654411765,
+      "first_grad_us": 11.334,
+      "grad_us": 0.5860729237239461,
+      "first_row_us": 14.291,
+      "row_us": 0.6159740453651734,
+      "inference_us": 356.291,
+      "peak_rss": 25886720,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 574.0835252293577,
+      "prep_us": 147.61026682408502,
+      "first_grad_us": 9.708,
+      "grad_us": 0.6014998195501747,
+      "first_row_us": 16.042,
+      "row_us": 0.6716124129927278,
+      "inference_us": 366.584,
+      "peak_rss": 25853952,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 610.6100609756098,
+      "prep_us": 142.32553101878202,
+      "first_grad_us": 10.042,
+      "grad_us": 0.599137161577599,
+      "first_row_us": 14.042,
+      "row_us": 0.661747900939151,
+      "inference_us": 361.333,
+      "peak_rss": 25853952,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 627.6323082706766,
+      "prep_us": 155.97065377417343,
+      "first_grad_us": 10.458,
+      "grad_us": 0.5981914903798989,
+      "first_row_us": 15.833,
+      "row_us": 0.6009833672287047,
+      "inference_us": 323.333,
+      "peak_rss": 25886720,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 592.0199976359338,
+      "prep_us": 159.29214394904457,
+      "first_grad_us": 10.416,
+      "grad_us": 0.59958946212163,
+      "first_row_us": 17.75,
+      "row_us": 0.6389771732212826,
+      "inference_us": 360.25,
+      "peak_rss": 25919488,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 589.6155882352941,
+      "prep_us": 145.9703736135435,
+      "first_grad_us": 14.209,
+      "grad_us": 0.6381255854793465,
+      "first_row_us": 19.333,
+      "row_us": 0.6519864491294687,
+      "inference_us": 328.208,
+      "peak_rss": 25935872,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 592.8221753554502,
+      "prep_us": 156.26736937500002,
+      "first_grad_us": 11.292,
+      "grad_us": 0.6177847101239766,
+      "first_row_us": 23.208,
+      "row_us": 0.6186949937759387,
+      "inference_us": 366.625,
+      "peak_rss": 26279936,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 5
+    },
+    {
+      "model": "ar1",
+      "source_us": 524.2219601677149,
+      "prep_us": 154.10417991373998,
+      "first_grad_us": 26.5,
+      "grad_us": 0.8257889556123696,
+      "first_row_us": 6.417,
+      "row_us": 0.45661395520438935,
+      "inference_us": 8485.584,
+      "peak_rss": 26181632,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 0
+    },
+    {
+      "model": "ar1",
+      "source_us": 539.3276745689656,
+      "prep_us": 147.52350088495575,
+      "first_grad_us": 889.417,
+      "grad_us": 0.7921449877851323,
+      "first_row_us": 5.625,
+      "row_us": 0.4518133038872132,
+      "inference_us": 7890.666,
+      "peak_rss": 26148864,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 0
+    },
+    {
+      "model": "ar1",
+      "source_us": 547.0611772428883,
+      "prep_us": 156.98564030131826,
+      "first_grad_us": 15.708,
+      "grad_us": 0.8768542497483436,
+      "first_row_us": 6.25,
+      "row_us": 0.48776596259428495,
+      "inference_us": 8546.875,
+      "peak_rss": 26099712,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "model": "ar1",
+      "source_us": 548.9965285087719,
+      "prep_us": 146.45874765807963,
+      "first_grad_us": 13.334,
+      "grad_us": 0.7885915646232753,
+      "first_row_us": 4.625,
+      "row_us": 0.4506956331271555,
+      "inference_us": 7687.459,
+      "peak_rss": 26230784,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "model": "ar1",
+      "source_us": 558.7651584821429,
+      "prep_us": 157.81322334384856,
+      "first_grad_us": 14.833,
+      "grad_us": 0.8201043990289988,
+      "first_row_us": 4.125,
+      "row_us": 0.42265955302936803,
+      "inference_us": 7739.875,
+      "peak_rss": 25821184,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "model": "ar1",
+      "source_us": 540.4352051835853,
+      "prep_us": 153.86407692307694,
+      "first_grad_us": 14.5,
+      "grad_us": 0.8200477693112599,
+      "first_row_us": 4.083,
+      "row_us": 0.43374776403474835,
+      "inference_us": 8466.792,
+      "peak_rss": 26181632,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "model": "ar1",
+      "source_us": 514.1734271047228,
+      "prep_us": 147.79745330969268,
+      "first_grad_us": 14.458,
+      "grad_us": 0.8380883646554786,
+      "first_row_us": 5.416,
+      "row_us": 0.45706125713700674,
+      "inference_us": 8459.666,
+      "peak_rss": 26050560,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "model": "ar1",
+      "source_us": 551.2626651982379,
+      "prep_us": 149.03364600715136,
+      "first_grad_us": 15.375,
+      "grad_us": 0.8042463817069915,
+      "first_row_us": 3.75,
+      "row_us": 0.461176399296063,
+      "inference_us": 8396.375,
+      "peak_rss": 26198016,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "model": "ar1",
+      "source_us": 519.6562074688796,
+      "prep_us": 156.39769606003753,
+      "first_grad_us": 13.542,
+      "grad_us": 0.869955580223543,
+      "first_row_us": 5.875,
+      "row_us": 0.4520646361155765,
+      "inference_us": 8537.375,
+      "peak_rss": 26132480,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "model": "ar1",
+      "source_us": 553.2289823008849,
+      "prep_us": 147.46506485849056,
+      "first_grad_us": 16.917,
+      "grad_us": 0.8240750071694394,
+      "first_row_us": 6.167,
+      "row_us": 0.4300655677636774,
+      "inference_us": 7804.792,
+      "peak_rss": 26542080,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "model": "ar1",
+      "source_us": 530.9141889596602,
+      "prep_us": 158.4349917617237,
+      "first_grad_us": 14.625,
+      "grad_us": 0.8674396974375879,
+      "first_row_us": 5.667,
+      "row_us": 0.4444015091857685,
+      "inference_us": 8506.375,
+      "peak_rss": 26492928,
+      "library_bytes": 40051008,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "model": "ar1",
+      "source_us": 554.3033738938053,
+      "prep_us": 148.54728639334522,
+      "first_grad_us": 15.25,
+      "grad_us": 0.7746663764253842,
+      "first_row_us": 5.458,
+      "row_us": 0.4227884961095054,
+      "inference_us": 7723.167,
+      "peak_rss": 26263552,
+      "library_bytes": 40061568,
+      "label": "baseline",
+      "repeat": 5
+    }
+  ],
+  "summary": {
+    "gq_scalar_rng": {
+      "baseline": {
+        "source_us": {
+          "median": 608.8396178664457,
+          "mad": 15.160913799171851
+        },
+        "prep_us": {
+          "median": 155.64742564485067,
+          "mad": 1.7865656374495842
+        },
+        "first_grad_us": {
+          "median": 10.875,
+          "mad": 0.625
+        },
+        "grad_us": {
+          "median": 0.598664325978749,
+          "mad": 0.010462362454933816
+        },
+        "first_row_us": {
+          "median": 15.9165,
+          "mad": 1.2704999999999993
+        },
+        "row_us": {
+          "median": 0.6404995537519942,
+          "mad": 0.019871075395484272
+        },
+        "inference_us": {
+          "median": 358.04200000000003,
+          "mad": 5.936999999999983
+        },
+        "peak_rss": {
+          "median": 25935872.0,
+          "mad": 40960.0
+        },
+        "library_bytes": {
+          "median": 40061568.0,
+          "mad": 0.0
+        }
+      },
+      "candidate": {
+        "source_us": {
+          "median": 590.817792935614,
+          "mad": 17.153222540614763
+        },
+        "prep_us": {
+          "median": 151.73258863841218,
+          "mad": 2.798624860016318
+        },
+        "first_grad_us": {
+          "median": 10.7285,
+          "mad": 0.8129999999999997
+        },
+        "grad_us": {
+          "median": 0.6005446408359023,
+          "mad": 0.014876315258925576
+        },
+        "first_row_us": {
+          "median": 16.896,
+          "mad": 2.437499999999999
+        },
+        "row_us": {
+          "median": 0.6454818111753756,
+          "mad": 0.020547323464305656
+        },
+        "inference_us": {
+          "median": 355.437,
+          "mad": 7.97999999999999
+        },
+        "peak_rss": {
+          "median": 25870336.0,
+          "mad": 32768.0
+        },
+        "library_bytes": {
+          "median": 40051008.0,
+          "mad": 0.0
+        }
+      }
+    },
+    "ar1": {
+      "baseline": {
+        "source_us": {
+          "median": 550.1295968535048,
+          "mad": 6.404669334469247
+        },
+        "prep_us": {
+          "median": 151.5689129604457,
+          "mad": 3.9252048333461573
+        },
+        "first_grad_us": {
+          "median": 15.0415,
+          "mad": 0.9165000000000001
+        },
+        "grad_us": {
+          "median": 0.8121753903679951,
+          "mad": 0.01859869549454718
+        },
+        "first_row_us": {
+          "median": 5.0415,
+          "mad": 0.875
+        },
+        "row_us": {
+          "median": 0.451380134621366,
+          "mad": 0.007515042628860186
+        },
+        "inference_us": {
+          "median": 8068.125,
+          "mad": 362.8119999999999
+        },
+        "peak_rss": {
+          "median": 26189824.0,
+          "mad": 49152.0
+        },
+        "library_bytes": {
+          "median": 40061568.0,
+          "mad": 0.0
+        }
+      },
+      "candidate": {
+        "source_us": {
+          "median": 539.8814398762754,
+          "mad": 8.073494141614049
+        },
+        "prep_us": {
+          "median": 150.8307651163848,
+          "mad": 3.336482244661653
+        },
+        "first_grad_us": {
+          "median": 15.1665,
+          "mad": 0.6874999999999991
+        },
+        "grad_us": {
+          "median": 0.831081685912459,
+          "mad": 0.023695964063163988
+        },
+        "first_row_us": {
+          "median": 5.646,
+          "mad": 0.3754999999999997
+        },
+        "row_us": {
+          "median": 0.44810740653649084,
+          "mad": 0.011656746551129193
+        },
+        "inference_us": {
+          "median": 8463.229,
+          "mad": 63.39600000000064
+        },
+        "peak_rss": {
+          "median": 26165248.0,
+          "mad": 90112.0
+        },
+        "library_bytes": {
+          "median": 40051008.0,
+          "mad": 0.0
+        }
+      }
+    },
+    "ode_branch_returns": {
+      "baseline": {
+        "source_us": {
+          "median": 538.159218098612,
+          "mad": 4.691439848875348
+        },
+        "prep_us": {
+          "median": 207.31908776196346,
+          "mad": 1.811467166077307
+        },
+        "first_grad_us": {
+          "median": 302.3755,
+          "mad": 3.2709999999999866
+        },
+        "grad_us": {
+          "median": 222.52348834439601,
+          "mad": 6.441443609986109
+        },
+        "first_row_us": {
+          "median": 264.5415,
+          "mad": 13.0835
+        },
+        "row_us": {
+          "median": 214.92679393786057,
+          "mad": 1.4420270974120086
+        },
+        "inference_us": {
+          "median": 363701.229,
+          "mad": 6806.771000000008
+        },
+        "peak_rss": {
+          "median": 27000832.0,
+          "mad": 81920.0
+        },
+        "library_bytes": {
+          "median": 40061568.0,
+          "mad": 0.0
+        }
+      },
+      "candidate": {
+        "source_us": {
+          "median": 514.5496268168251,
+          "mad": 9.142471261269577
+        },
+        "prep_us": {
+          "median": 296.8488150470572,
+          "mad": 3.9772681290060063
+        },
+        "first_grad_us": {
+          "median": 40.3545,
+          "mad": 1.1045000000000016
+        },
+        "grad_us": {
+          "median": 2.5955639939846087,
+          "mad": 0.07204832522951055
+        },
+        "first_row_us": {
+          "median": 22.3535,
+          "mad": 1.3535000000000004
+        },
+        "row_us": {
+          "median": 1.7849333845435795,
+          "mad": 0.016400907203077852
+        },
+        "inference_us": {
+          "median": 3548.416,
+          "mad": 106.83399999999983
+        },
+        "peak_rss": {
+          "median": 26836992.0,
+          "mad": 65536.0
+        },
+        "library_bytes": {
+          "median": 40051008.0,
+          "mad": 0.0
+        }
+      }
+    }
+  },
+  "method": "Release Apple Clang 21 arm64; six alternating fresh-process pairs per fixture; public C API through ctypes; 200 ms warmup + 250 ms sampling for warm phases; 100 warmup + 100 samples and output rows for inference; median and MAD; no concurrent builds/tests.",
+  "fixtures": {
+    "gq_scalar_rng": {
+      "source_sha256": "4ef226b33e7b45d3343a04c229d7e416b504900e81bb91d2a2df7af455691217",
+      "data_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "ar1": {
+      "source_sha256": "0741698cfec04c5639f408dcc26342fa64999cefe20fa53fdded326352fd4635",
+      "data_sha256": "9764860fab216a12d27b447921de087eb3235d821c5a97ffed0443f36bc9166a"
+    },
+    "ode_branch_returns": {
+      "source_sha256": "19c061eec524c5f4a4724766fa1c931eef25ef3d1d61649043db0849002bf3fe",
+      "data_sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+    }
+  }
+}

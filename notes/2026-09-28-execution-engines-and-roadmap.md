@@ -1,5 +1,12 @@
 # Execution engines and a path to interpreter independence
 
+> **Progress update:** Shared register compilation now handles fixed-shape early
+> returns through branches and loops; see [implementation, validation and native
+> measurements](2026-09-28-function-exits.md). The remaining standalone function
+> entry point is the [next bounded slice](2026-09-28-standalone-function-plan.md).
+> Earlier inventory statements below describe the audit baseline, not this
+> completed return coverage. Native instruction generation remains tabled.
+
 > **Current decision (2026-09-28):** Native instruction generation, stencil
 > JIT, and dispatch-JIT research are tabled at the user's request, informed
 > by their earlier negative investigations. The codegen proposals below are

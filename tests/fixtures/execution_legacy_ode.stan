@@ -1,13 +1,17 @@
 functions {
   array[] real graph_rhs(real t, array[] real y, array[] real theta,
                          array[] real x_r, array[] int x_i) {
+    int n = t > 2 ? 2 : 1;
+    array[n] real unused = rep_array(0.0, n);
     if (t > 2) return {theta[1] * y[1]};
-    return {-theta[1] * y[1]};
+    return {-theta[1] * y[1] + unused[n]};
   }
   array[] real region_rhs(real t, array[] real y, array[] real theta,
                           array[] real x_r, array[] int x_i) {
+    int n = t > 3 ? 2 : 1;
+    array[n] real unused = rep_array(0.0, n);
     if (t > 3) return {theta[1] * y[1]};
-    return {-theta[1] * y[1]};
+    return {-theta[1] * y[1] + unused[n]};
   }
 }
 parameters { real rate; }

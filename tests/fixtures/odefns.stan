@@ -34,9 +34,8 @@ functions {
   real scale(real a, real b) {
     return a * b + inv_logit(a);
   }
-  // Returns from inside a branch on a runtime value. The flat program has no
-  // way to express that join, so compile_rhs must refuse it and the
-  // interpreter must still handle it.
+  // Returns from inside a branch on a runtime value. Both exits join in the
+  // compiled function's result, preserving the selected return expression.
   array[] real f_early(real t, array[] real z, array[] real theta,
                        array[] real x_r, array[] int x_i) {
     if (t > 0.5) {
@@ -88,6 +87,34 @@ functions {
       value += conditional_scale(z[2], theta[2]);
     }
     return {value, -value};
+  }
+
+  array[] real f_loop_exits(real t, array[] real z, array[] real theta,
+                            array[] real x_r, array[] int x_i) {
+    for (k in 1:3) {
+      if (t < 0.3) continue;
+      if (t > 0.7) break;
+      return {theta[1]*z[1], theta[2]*z[2]};
+    }
+    return {-z[1], -z[2]};
+  }
+  array[] real f_return_in_loop(real t, array[] real z, array[] real theta,
+                                array[] real x_r, array[] int x_i) {
+    real v = z[1];
+    int i = 0;
+    while (i < 3) {
+      i += 1;
+      if (i == 1) continue;
+      if (t < 0.3) break;
+      if (t > 0.7) return {v, z[2]};
+      v += theta[1];
+    }
+    return {v, -z[2]};
+  }
+  array[] real f_bad_return_shape(real t, array[] real z, array[] real theta,
+                                  array[] real x_r, array[] int x_i) {
+    if (t > 0.5) return {z[1]};
+    return {z[1], z[2]};
   }
 
 }

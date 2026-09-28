@@ -909,6 +909,28 @@ void test_runtime_guarded_effects() {
       -1.0, "negative t rejected: -1", "negative branch t=-1\n");
 }
 
+void test_early_return_effects() {
+  Stmt arm;
+  arm.kind = Stmt::Block;
+  arm.body = {nr_fun_app("FnPrint", {lit_string("early")}),
+              return_value(make_array({var("t", "UReal")})),
+              nr_fun_app("FnReject", {lit_string("unreachable after return")})};
+  Stmt guarded;
+  guarded.kind = Stmt::IfElse;
+  guarded.cond = fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.body = {arm};
+  FunDef entry = rhs_function(
+      "early_effects", {nr_fun_app("FnPrint", {lit_string("prefix")}), guarded,
+                        nr_fun_app("FnPrint", {lit_string("late")}),
+                        return_value(make_array({lit_real(7)}))});
+  run_observation_case(
+      "early exit effects", "only the executed return path prints", {entry},
+      1.0, observed_values({1.0}, "prefix\nearly\n"), nullptr, true);
+  run_observation_case(
+      "trailing exit effects", "the skipped arm neither prints nor rejects",
+      {entry}, -1.0, observed_values({7.0}, "prefix\nlate\n"), nullptr, true);
+}
+
 void test_unknown_nrfunapp_fails_loud() {
   // Erasing an unrecognized non-returning call invents semantics. Until its
   // effect is implemented, both routes must fail loudly rather than return.
@@ -1248,6 +1270,7 @@ int main() {
   test_nested_print_effect();
   test_print_then_reject_effects();
   test_runtime_guarded_effects();
+  test_early_return_effects();
   test_unknown_nrfunapp_fails_loud();
   if (failures == 0)
     std::printf("test_mir_program_conformance: all cases passed\n");

@@ -159,13 +159,7 @@ RhsProgram compile_dae_args(
         xr_at += a.len;
       }
     }
-    Range out{0, 0};
-    try {
-      for (const auto& s : f.body) c.stmt(s);
-      c.bail("DAE residual returned no value");
-    } catch (ProgramCompiler::Returned& r) {
-      out = r.r;
-    }
+    const Range out = c.function_body(f.body);
     if (out.len != n_y)
       c.bail("DAE residual returns " + std::to_string(out.len) +
              " values for " + std::to_string(n_y) + " states");
@@ -244,13 +238,7 @@ RhsProgram compile_rhs_args(
       }
     }
 
-    Range out{0, 0};
-    try {
-      for (const auto& s : f.body) c.stmt(s);
-      c.bail("right-hand side returned no value");
-    } catch (ProgramCompiler::Returned& r) {
-      out = r.r;
-    }
+    const Range out = c.function_body(f.body);
     if (out.len != n_y)
       c.bail("right-hand side returns " + std::to_string(out.len) +
              " values for " + std::to_string(n_y) + " states");

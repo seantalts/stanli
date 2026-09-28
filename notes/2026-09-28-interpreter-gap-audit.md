@@ -1,5 +1,12 @@
 # Interpreter and execution-path audit — 2026-09-28
 
+> **Progress update:** Shared register compilation now handles fixed-shape early
+> returns through branches and loops; see [implementation, validation and native
+> measurements](2026-09-28-function-exits.md). The remaining standalone function
+> entry point is the [next bounded slice](2026-09-28-standalone-function-plan.md).
+> Earlier inventory statements below describe the audit baseline, not this
+> completed return coverage. Native instruction generation remains tabled.
+
 > **Coverage update:** Subsequent scalar and vector RNG slices close all 13
 > originally missing RNG names and the categorical register-context gaps for
 > the admitted scalar/single-vector forms. This is name coverage, not complete

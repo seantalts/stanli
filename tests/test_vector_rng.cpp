@@ -235,8 +235,10 @@ void exercise(int family, int region, int n, bool benchmark) {
     }
   }
 }
-void udf_effect() {
-  const auto text = slurp("tests/fixtures/gq_rng_udf_effect.tmir.sexp");
+void udf_effect(bool early_exits = false) {
+  const auto text =
+      slurp(early_exits ? "tests/fixtures/gq_function_exits.tmir.sexp"
+                        : "tests/fixtures/gq_rng_udf_effect.tmir.sexp");
   auto cm = compile_model(text, DataMap{});
   require(cm.write_array && !cm.write_array->interp,
           "UDF effect fixture did not compile");
@@ -255,13 +257,19 @@ void udf_effect() {
   for (unsigned chain : {0u, 3u}) {
     WaRng gr(1234, chain), ir(1234, chain), dr(1234, chain);
     for (int i = 0; i < 12; ++i) {
-      const double x = 0.1 * i;
+      const double x = early_exits ? -1.1 + 0.2 * i : 0.1 * i;
       std::map<std::string, DataMap::Entry> params;
       params["x"].r = {x};
       graph.params_data()[0] = x;
-      std::vector<double> expected{x, stan::math::normal_rng(0, 1, dr.gen()),
-                                   stan::math::normal_rng(x, 1, dr.gen()),
-                                   stan::math::normal_rng(0, 1, dr.gen())};
+      std::vector<double> expected{x, stan::math::normal_rng(0, 1, dr.gen())};
+      const double draw = !early_exits || x > 0
+                              ? stan::math::normal_rng(x, 1, dr.gen())
+                          : x < -0.5 ? stan::math::normal_rng(x, 2, dr.gen())
+                          : x < -0.1 ? stan::math::uniform_rng(0, 1, dr.gen())
+                                     : stan::math::normal_rng(0, 1, dr.gen());
+      expected.push_back(draw);
+      if (early_exits) expected.push_back(1);  // exported loop counter
+      expected.push_back(stan::math::normal_rng(0, 1, dr.gen()));
       const auto interpreted = interp.eval(params, ir);
       require(same(interpreted, expected),
               "UDF interpreter argument evaluated more than once");
@@ -287,6 +295,7 @@ void udf_effect() {
 int main(int argc, char**) {
   try {
     udf_effect();
+    udf_effect(true);
     for (int family = 0; family < 4; ++family)
       for (int region = 0; region < 2; ++region)
         for (int n : {0, 1, 3}) {

@@ -986,6 +986,12 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns)
+    add_test(NAME ${exit_fixture}_reference
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+              $<TARGET_FILE:stanli_check> ${exit_fixture}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endforeach()
   add_test(NAME execution_report_cli
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_execution_report_cli.py
             $<TARGET_FILE:dump_ops> $<TARGET_FILE:stanli_shared>
