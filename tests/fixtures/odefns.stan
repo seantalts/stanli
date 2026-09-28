@@ -44,6 +44,52 @@ functions {
     }
     return {-z[1], -z[2]};
   }
+  // The loop guard must still select between the early and trailing returns.
+  array[] real f_while_early(real t, array[] real z, array[] real theta,
+                             array[] real x_r, array[] int x_i) {
+    while (t > 0.5) {
+      return {theta[1] * z[1], theta[2] * z[2]};
+    }
+    return {-z[1], -z[2]};
+  }
+
+  array[] real f_nested_early(real t, array[] real z, array[] real theta,
+                              array[] real x_r, array[] int x_i) {
+    if (t > 0.5) {
+      if (z[1] > 0) return {theta[1] * z[1], theta[2] * z[2]};
+      else return {z[1], z[2]};
+    }
+    return {-z[1], -z[2]};
+  }
+  array[] real f_while_pair(real t, array[] real z, array[] real theta,
+                            array[] real x_r, array[] int x_i) {
+    while (t > 0.5) {
+      if (z[1] > 0) return {theta[1] * z[1], theta[2] * z[2]};
+      else return {z[1], z[2]};
+    }
+    return {-z[1], -z[2]};
+  }
+  real first_scale(real a, real b) {
+    for (k in 1:2) return a*b;
+    return a;
+  }
+  real conditional_scale(real a, real b) {
+    if (a > 0) return a*b;
+    else return a+b;
+  }
+  array[] real f_call_in_while(real t, array[] real z, array[] real theta,
+                               array[] real x_r, array[] int x_i) {
+    real value = 0;
+    int i = 0;
+    while (i < 2) {
+      value += first_scale(z[1], theta[1]);
+      i += 1;
+      if (i == 1) continue;
+      value += conditional_scale(z[2], theta[2]);
+    }
+    return {value, -value};
+  }
+
 }
 data {
   int<lower=0> N;

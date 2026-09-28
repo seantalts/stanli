@@ -119,6 +119,9 @@ struct ProgramCompiler {
   // live in ordinary double registers (their producers still preserve Stan's
   // integer-valued operations where they are supported below).
   int structured_while_depth = 0;
+  // A callee may return normally while its caller is inside a loop. Only
+  // loops entered within this function make its return a runtime exit.
+  int return_while_base = 0;
   bool structured_while_seen = false;
   int inline_depth = 0;
   std::vector<std::string> inline_stack;
@@ -3927,8 +3930,8 @@ struct ProgramCompiler {
       case mir::Stmt::Return:
         // A return under a runtime branch is a control-flow join this flat
         // program has no way to express; the interpreter still handles it.
-        if (branch_depth)
-          bail("return inside a data-dependent branch" +
+        if (branch_depth || structured_while_depth > return_while_base)
+          bail("return inside runtime control" +
                (inline_stack.empty() ? std::string()
                                      : " in " + inline_stack.back()));
         throw Returned{s.has_init ? expr(s.rhs) : Range{0, 0}};
@@ -4005,7 +4008,8 @@ struct ProgramCompiler {
           if (c == 0 && s.body.size() > 1) stmt(s.body[1]);
           return;
         }
-        if (s.body.size() == 2) {
+        if (s.body.size() == 2 && branch_depth == 0 &&
+            structured_while_depth == return_while_base) {
           mir::Stmt then_effects = s.body[0];
           mir::Stmt else_effects = s.body[1];
           mir::Expr then_value, else_value;
@@ -4112,6 +4116,9 @@ struct ProgramCompiler {
     auto saved_int_decl_at = int_decl_at;
     auto saved_extern_bound = extern_bound;
     const int saved_branch_depth = branch_depth;
+    const int saved_return_while_base = return_while_base;
+    const size_t saved_loop_count = loops.size();
+    return_while_base = structured_while_depth;
     reals.clear();
     ints.clear();
     known_reals.clear();
@@ -4160,6 +4167,8 @@ struct ProgramCompiler {
       int_decl_at = std::move(saved_int_decl_at);
       extern_bound = std::move(saved_extern_bound);
       branch_depth = saved_branch_depth;
+      return_while_base = saved_return_while_base;
+      loops.resize(saved_loop_count);
       --inline_depth;
       throw;
     }
@@ -4174,6 +4183,8 @@ struct ProgramCompiler {
     int_decl_at = std::move(saved_int_decl_at);
     extern_bound = std::move(saved_extern_bound);
     branch_depth = saved_branch_depth;
+    return_while_base = saved_return_while_base;
+    loops.resize(saved_loop_count);
     --inline_depth;
     return out;
   }

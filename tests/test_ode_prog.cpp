@@ -414,7 +414,11 @@ int main() {
       {"f_lin", 2, 4, true, true},
       {"f_branch", 2, 4, true, false},  // JZ/JMP fail closed
       {"f_udf", 2, 4, true, false},     // runtime ternary emits JZ/JMP
-      {"f_early", 2, 4, false, false},  // return from a runtime branch
+      {"f_nested_early", 2, 4, false, false},
+      {"f_while_pair", 2, 4, false, false},
+      {"f_call_in_while", 2, 4, true, false},
+      {"f_while_early", 2, 4, false, false},  // return from a runtime loop
+      {"f_early", 2, 4, false, false},        // return from a runtime branch
   };
   for (const Case& c : cases) {
     auto it = funs.find(c.name);
@@ -425,6 +429,27 @@ int main() {
     }
     check(c.name, *it->second, funs, c.n_y, c.n_th, x_r, x_i, c.want_ok,
           c.want_generated);
+  }
+  // Refusing an incomplete runtime exit must preserve the working callback
+  // fallback on both sides of each guard, including the nested return pair.
+  for (const char* name :
+       {"f_early", "f_while_early", "f_nested_early", "f_while_pair"}) {
+    for (double t : {0.25, 0.75})
+      for (double first : {-0.7, 0.7}) {
+        std::vector<double> y{first, 1.2}, theta{0.8, 1.4, 0, 0};
+        std::vector<double> expected{-y[0], -y[1]};
+        if (t > 0.5) {
+          const bool pair = std::string(name) == "f_nested_early" ||
+                            std::string(name) == "f_while_pair";
+          expected = pair && y[0] <= 0 ? y
+                                       : std::vector<double>{theta[0] * y[0],
+                                                             theta[1] * y[1]};
+        }
+        MirInterp<double> interp(funs, "early-return fallback");
+        expect(std::string(name) + ": fallback selects the executed return",
+               interp.call(*funs.at(name), {{t}, y, theta, x_r}, {x_i}) ==
+                   expected);
+      }
   }
   check_exact_opcode_contract();
 
