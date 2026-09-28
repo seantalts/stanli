@@ -51,7 +51,7 @@ def main(check, dump_ops):
                              "OP_ALGEBRA_SOLVER": 0, "OP_QUADRATURE": 0,
                              "OP_ODE_ADJOINT": 0x10}[node["operation"]], node
 
-    for name in ("ode_runtime_for", "for_bound_semantics"):
+    for name in ("ode_runtime_for", "for_bound_semantics", "ode_integer_arithmetic"):
         stem = ROOT / "tests/fixtures" / name
         report = json.loads(subprocess.check_output(
             [dump_ops, str(stem.with_suffix(".tmir.sexp")),

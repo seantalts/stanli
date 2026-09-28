@@ -301,7 +301,7 @@ int main() {
     Function plus_one(source, "plus_one");
     DataMap ints;
     ints.set_int("x", 41);
-    const DataMap::Entry integer = plus_one(ints);
+    const DataMap::Entry integer = compiled_call(plus_one, ints);
     check(integer.is_int && integer.i == std::vector<int>({42}) &&
               integer.r == std::vector<double>({42.0}) && integer.dims.empty(),
           "integer result keeps both representations");
@@ -318,7 +318,7 @@ int main() {
       DataMap input;
       input.set_int("x", -7);
       input.set_int("y", 3);
-      const auto got = operation(input);
+      const auto got = compiled_call(operation, input);
       const int want = std::string(name) == "integer_divide" ? -2 : -1;
       check(got.i == std::vector<int>{want} &&
                 got.r == std::vector<double>{(double)want},

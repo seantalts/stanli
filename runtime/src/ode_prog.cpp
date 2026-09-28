@@ -56,6 +56,11 @@ bool exact_ode_adjoint_opcode(Program::Code code) {
     case Program::MOV:
     case Program::MOVR:
     case Program::ADD:
+    case Program::IADD:
+    case Program::ISUB:
+    case Program::IMUL:
+    case Program::INEG:
+    case Program::IABS:
     case Program::SUB:
     case Program::MUL:
     case Program::DIV:

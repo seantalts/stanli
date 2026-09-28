@@ -9,9 +9,9 @@
 //
 // The shape of the problem is what keeps this small: storage sizes are
 // known at compile time, even when loop bounds are runtime values. Most
-// indices and integers are also known at preparation. Runtime integer reads
-// and predicates use scalar registers; unproved integer arithmetic retains
-// the existing fallback when admitting a runtime for loop.
+// indices and integers are also known at preparation. Runtime integer values
+// use scalar registers and integer operations; dynamic storage still requires
+// a separate shape proof.
 //
 // Names the compiler does not know are the one thing that differs
 // between callers. The ODE side knows them all up front (t, y, theta,
@@ -77,10 +77,9 @@ struct Bail {
   std::string why;
 };
 
-// Integer arithmetic has a distinct 32-bit/mirror contract that
-// the double register file does not yet encode. This includes integer-valued
-// subexpressions promoted into an otherwise real return. Predicates and shape
-// queries are safe; integer arithmetic stays on the established evaluator.
+// Every admitted integer operation needs an integer implementation, including
+// integer-valued subexpressions promoted into a real return. Register storage
+// is double, while the I* instructions execute with Stan's integer type.
 inline void check_program_integer_contract(
     const std::vector<stanli::mir::Stmt>& body,
     const std::map<std::string, const stanli::mir::FunDef*>& functions,
@@ -97,6 +96,10 @@ inline void check_program_integer_contract(
                  spec && spec->builtin() &&
                  spec->result() == FunctionArgumentKind::Integer) {
         const auto policy = spec->builtin()->shape;
+        const auto op = spec->builtin()->opcode;
+        const bool native_integer =
+            op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
+            op == OP_NEG || op == OP_ABS || op == OP_CHOOSE || op == OP_SUM_VEC;
         // Stanc retains a negative integer literal as unary negation even
         // when a real comparison consumes it. Its exact value is proven here
         // without invoking integer arithmetic on unknown runtime operands.
@@ -105,7 +108,8 @@ inline void check_program_integer_contract(
             value.args[0].kind == mir::Expr::LitInt &&
             value.args[0].lit_i >= -(int64_t)std::numeric_limits<int>::max() &&
             value.args[0].lit_i <= std::numeric_limits<int>::max();
-        if (!literal_negation && policy != BuiltinShapePolicy::Predicate &&
+        if (!native_integer && !literal_negation &&
+            policy != BuiltinShapePolicy::Predicate &&
             policy != BuiltinShapePolicy::ShapeQuery &&
             policy != BuiltinShapePolicy::SliceView &&
             policy != BuiltinShapePolicy::Constructor &&
@@ -2278,6 +2282,18 @@ struct ProgramCompiler {
                        {}, e.name);
   }
 
+  static Program::Code integer_instruction(Program::Code code) {
+    switch (code) {
+      case Program::ADD: return Program::IADD;
+      case Program::SUB: return Program::ISUB;
+      case Program::MUL: return Program::IMUL;
+      case Program::DIV: return Program::IDIV;
+      case Program::NEG: return Program::INEG;
+      case Program::FABS: return Program::IABS;
+      default: return code;
+    }
+  }
+
   static std::optional<Program::Code> native_builtin_code(uint16_t opcode) {
     switch (opcode) {
       case OP_ADD:
@@ -2333,7 +2349,8 @@ struct ProgramCompiler {
     const int n = (int)layout.lanes;
 
     Program::Code code = native_code;
-    if (spec.opcode == OP_DIV && e.type_ == "UInt") code = Program::IDIV;
+    if (spec.result == FunctionArgumentKind::Integer)
+      code = integer_instruction(code);
     // fmax/fmin ties and NaN adjoints depend on which operands are data
     // (adjoint.cpp, program_extremum), the same way pow's zero-base law
     // depends on the exponent's.
@@ -3413,6 +3430,7 @@ struct ProgramCompiler {
         }
       } else
         bail("function " + e.name);
+      if (e.type_ == "UInt") c = integer_instruction(c);
       const int law = c == Program::POW
                           ? mir::pow_zero_base_law(e.args[0], e.args[1],
                                                    !e.args[1].data_only)
@@ -3449,7 +3467,8 @@ struct ProgramCompiler {
         if (a.len == 0) return {konst(0.0), 1};
         const int r = alloc(1);
         emit(Program::MOV, r, a.reg);
-        for (int i = 1; i < a.len; ++i) emit(Program::ADD, r, r, a.reg + i);
+        const auto add = e.type_ == "UInt" ? Program::IADD : Program::ADD;
+        for (int i = 1; i < a.len; ++i) emit(add, r, r, a.reg + i);
         return {r, 1};
       }
       // Registered unary predicates, spelled on the comparison opcodes
@@ -4137,9 +4156,8 @@ struct ProgramCompiler {
         const bool invariant_upper = invariant_for_bound(s.upper, written);
         if (!invariant_upper ||
             !try_cint(s.lower, &lo) || !try_cint(s.upper, &hi)) {
-          // The flat register file does not represent Stan integer overflow
-          // and mirror semantics. Reuse standalone admission's conservative
-          // contract rather than silently widening integer arithmetic here.
+          // Every integer operation in the repeated body must have a typed
+          // implementation; double storage alone does not prove this.
           require_runtime_integer_contract();
           // An enclosing while can have folded integer declarations whose
           // initialization must repeat at their original lexical location.

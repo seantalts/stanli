@@ -175,6 +175,7 @@ struct FunctionPlan {
   stanli::Program program;
   std::vector<std::pair<int, int>> inputs;
   std::vector<int64_t> result_dims;
+  bool integer_result = false;
   bool ok = false;
   std::string refusal;
   size_t storage = 0;
@@ -198,10 +199,6 @@ void return_view(const std::vector<stanli::mir::Stmt>& body,
       if (!statement.has_init || !direct_function_view(next))
         throw Bail{
             "standalone return has unsupported or missing type metadata"};
-      // Integer result mirrors and overflow semantics are not represented by
-      // Range. Keep this API surface on its established implementation.
-      if (next.leaf == mir::UnsizedLeaf::Int)
-        throw Bail{"standalone integer results require the MIR interpreter"};
       if (view && (view->depth != next.depth || view->leaf != next.leaf))
         throw Bail{"standalone return types disagree"};
       view = next;
@@ -220,6 +217,7 @@ std::shared_ptr<const FunctionPlan> compile_function(
     std::optional<mir::UnsizedView> result_type;
     return_view(definition.body, result_type);
     if (!result_type) throw Bail{"standalone function has no typed return"};
+    out->integer_result = result_type->leaf == mir::UnsizedLeaf::Int;
     std::set<const mir::FunDef*> checked_functions;
     check_program_integer_contract(definition.body, functions,
                                    checked_functions);
@@ -422,6 +420,11 @@ stanli::DataMap::Entry run_function(
   result.r.reserve(plan.program.out_regs.size());
   for (int reg : plan.program.out_regs)
     result.r.push_back(registers[(size_t)reg]);
+  if (plan.integer_result) {
+    result.is_int = true;
+    result.i.reserve(result.r.size());
+    for (double value : result.r) result.i.push_back(static_cast<int>(value));
+  }
   return result;
 }
 }  // namespace
@@ -450,7 +453,8 @@ stanli_function* stanli_function_new_from_mir(const char* mir_text,
         try {
           std::optional<stanli::mir::UnsizedView> view;
           return_view(f.body, view);
-          if (view) out->real_returns.insert(&f);
+          if (view && view->leaf != stanli::mir::UnsizedLeaf::Int)
+            out->real_returns.insert(&f);
         } catch (const stanli::Bail&) {
         }
       }
