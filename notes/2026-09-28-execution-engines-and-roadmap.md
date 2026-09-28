@@ -1,5 +1,10 @@
 # Execution engines and a path to interpreter independence
 
+> **Native performance update:** normal_id_glm now records Stan's analytical
+> partials without a nested tape. Small Gaussian gradients improve 27.6% in the
+> measured native case; [results and limitations](2026-09-28-normal-glm-results.md).
+
+
 > **Progress update:** Shared register compilation now handles fixed-shape early
 > returns through branches and loops; see [implementation, validation and native
 > measurements](2026-09-28-function-exits.md). Eligible standalone functions now
