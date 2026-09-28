@@ -98,9 +98,9 @@ void quadrature_eval(KernelCtx& ctx, const QuadratureSpec& spec) {
 
   auto integral = integrate(spec, a, b, theta);
   ctx.out.data[0] = stan::math::value_of(integral);
-  const int64_t scratch_len = 2 + ctx.in[2].len;
-  std::fill(ctx.scratch, ctx.scratch + scratch_len, 0.0);
   if constexpr (ActiveA || ActiveB || ActiveTheta) {
+    const int64_t scratch_len = 2 + ctx.in[2].len;
+    std::fill(ctx.scratch, ctx.scratch + scratch_len, 0.0);
     integral.grad();
     if constexpr (ActiveA) ctx.scratch[0] = a.adj();
     if constexpr (ActiveB) ctx.scratch[1] = b.adj();
@@ -144,6 +144,7 @@ void quadrature_fwd(KernelCtx& ctx) {
 }
 
 void quadrature_bwd(KernelCtx& ctx) {
+  if ((ctx.variant & 0x7u) == 0) return;
   int64_t at = 0;
   for (int k = 0; k < ctx.n_in; ++k) {
     for (int64_t i = 0; i < ctx.in[k].len; ++i, ++at)
@@ -153,6 +154,7 @@ void quadrature_bwd(KernelCtx& ctx) {
 }
 
 int64_t quadrature_scratch(const Op& op, const Slot* slots) {
+  if ((op.variant & 0x7u) == 0) return 0;
   return sum_in_lens(op, slots);
 }
 

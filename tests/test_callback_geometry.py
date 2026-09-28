@@ -37,10 +37,36 @@ def main(check, dump_ops):
             callback = node["callback"]
             assert callback["value_engine"] == (
                 "mir_interpreter" if suffix else "register_program"), callback
-        # This existing caller limitation deliberately exercises value-only
-        # interpretation and its separate retained-callback argument packer.
-        assert report["write_array"]["value_engine"] == "mir_interpreter"
-        assert "data argument must be data-only" in report["write_array"]["refusal"]
+        # Runtime data-only reals stay in the output graph. A refused callback
+        # remains local to the solver instead of rejecting the whole block.
+        wa = report["write_array"]
+        assert wa.get("value_engine") != "mir_interpreter", wa
+        wa_callbacks = list(callbacks(wa))
+        assert len(wa_callbacks) == 5, wa
+        for node in wa_callbacks:
+            assert node["callback"]["value_engine"] == (
+                "mir_interpreter" if suffix else "register_program"), node
+            flags = node["variant"]
+            assert flags == {"OP_ODE": 0x10, "OP_DAE": 0x8,
+                             "OP_ALGEBRA_SOLVER": 0, "OP_QUADRATURE": 0,
+                             "OP_ODE_ADJOINT": 0x10}[node["operation"]], node
+
+    stem = ROOT / "tests/fixtures/gq_callback_shared_function"
+    report = json.loads(subprocess.check_output(
+        [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+         str(stem.with_suffix(".json")), "--execution-json"], text=True))
+    selected = list(callbacks(report["write_array"]))
+    assert Counter(n["operation"] for n in selected) == {"OP_ODE": 1, "OP_ALGEBRA_SOLVER": 1}
+    for node in selected:
+        assert node["variant"] == (0x10 if node["operation"] == "OP_ODE" else 0), node
+        assert node.get("input_adjoint_mask", 0) == 0, node
+
+    stem = ROOT / "tests/fixtures/matrix_callback_value_fallback"
+    report = json.loads(subprocess.check_output(
+        [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+         str(stem.with_suffix(".json")), "--execution-json"], text=True))
+    assert report["write_array"]["value_engine"] == "mir_interpreter", report
+    assert "compile time" in report["write_array"]["refusal"], report
 
     for name in ("ode_matrix_callback", "ode_matrix_callback_flat"):
         stem = ROOT / "tests/fixtures" / name

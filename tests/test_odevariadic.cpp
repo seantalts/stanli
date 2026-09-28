@@ -171,9 +171,12 @@ OdeActivityRun kernel_activity_run(
   out.value.assign(spec.ts.size() * y0_values.size(), 0.0);
   out.y_grad.assign(y0_values.size(), 0.0);
   out.theta_grad.assign(theta_values.size(), 0.0);
-  out.jacobian.assign(
-      out.value.size() * (y0_values.size() + theta_values.size()),
-      std::numeric_limits<double>::quiet_NaN());
+  // An all-double solve has no derivative scratch. Mixed/active solves retain
+  // the full Jacobian layout, including explicit zero columns for data inputs.
+  if constexpr (YAutodiff || ThetaAutodiff)
+    out.jacobian.assign(
+        out.value.size() * (y0_values.size() + theta_values.size()),
+        std::numeric_limits<double>::quiet_NaN());
 
   KernelCtx ctx;
   ctx.n_in = 2;
@@ -182,7 +185,7 @@ OdeActivityRun kernel_activity_run(
   ctx.in[1] = Desc{const_cast<double*>(theta_values.data()),
                    (int64_t)theta_values.size()};
   ctx.out = Desc{out.value.data(), (int64_t)out.value.size()};
-  ctx.scratch = out.jacobian.data();
+  ctx.scratch = out.jacobian.empty() ? nullptr : out.jacobian.data();
   ctx.udata = &spec;
   ctx.variant =
       (uint8_t)(0x4u | (YAutodiff ? 0x1u : 0u) | (ThetaAutodiff ? 0x2u : 0u));
@@ -201,7 +204,7 @@ OdeActivityRun kernel_activity_run(
   // column can contain NaN. Poison those columns after checking forward and
   // require the type mask, rather than mere buffer presence, to gate scatter.
   const size_t width = y0_values.size() + theta_values.size();
-  for (size_t o = 0; o < out.value.size(); ++o) {
+  for (size_t o = 0; o < out.value.size() && !out.jacobian.empty(); ++o) {
     if constexpr (!YAutodiff)
       for (size_t i = 0; i < y0_values.size(); ++i)
         out.jacobian[o * width + i] = std::numeric_limits<double>::quiet_NaN();
@@ -247,7 +250,10 @@ void check_activity_case(const stanli::OdeSpec& spec, const char* label) {
                  got.theta_grad[i], want.theta_grad[i]);
 
   const size_t width = test_y0.size() + test_theta.size();
-  for (size_t o = 0; o < got.value.size(); ++o) {
+  if constexpr (!YAutodiff && !ThetaAutodiff)
+    expect(std::string(label) + " has no derivative scratch",
+           got.jacobian.empty());
+  for (size_t o = 0; o < got.value.size() && !got.jacobian.empty(); ++o) {
     if constexpr (!YAutodiff)
       for (size_t i = 0; i < test_y0.size(); ++i)
         expect(std::string(label) + " zero y Jacobian column",

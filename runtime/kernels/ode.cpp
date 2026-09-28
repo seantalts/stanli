@@ -532,7 +532,6 @@ void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
     for (size_t n = 0; n < solv.size(); ++n)
       for (int64_t k = 0; k < S; ++k)
         ctx.out.data[(int64_t)n * S + k] = solv[n][k];
-    for (int64_t i = 0; i < ctx.out.len * W; ++i) J[i] = 0.0;
   } else {
     // The lowering-time switch keeps the exact current solve as a same-binary
     // oracle without an environment lookup in this repeated kernel. A payload
@@ -685,6 +684,11 @@ void ode_bwd(KernelCtx& ctx) {
 }
 
 int64_t ode_scratch(const Op& op, const Slot* slots) {
+  const uint8_t mask =
+      (op.variant & 0x10u) != 0
+          ? (op.variant & 0x0fu)
+          : ((op.variant & 0x4u) != 0 ? (op.variant & 0x3u) : 0x3u);
+  if (mask == 0) return 0;
   int64_t width = slots[op.in[0]].len + slots[op.in[1]].len;
   if (op.n_in >= 4) width += 1 + slots[op.in[3]].len;
   return slots[op.out].len * width;

@@ -143,8 +143,6 @@ void algebra_fwd(KernelCtx& ctx) {
     if (solved.size() != ctx.out.len)
       throw std::runtime_error("algebra_solver: result size mismatch");
     std::copy(solved.data(), solved.data() + solved.size(), ctx.out.data);
-    if (!values_only() && ctx.out.len != 0 && P != 0)
-      std::fill(ctx.scratch, ctx.scratch + ctx.out.len * P, 0.0);
     return;
   }
 
@@ -202,6 +200,7 @@ void algebra_bwd(KernelCtx& ctx) {
 }
 
 int64_t algebra_scratch(const Op& op, const Slot* slots) {
+  if ((op.variant & 0x1u) == 0) return 0;
   return slots[op.out].len * slots[op.in[1]].len;
 }
 

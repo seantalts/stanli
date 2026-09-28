@@ -989,11 +989,15 @@ if(NOT EMSCRIPTEN)
   foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns
                        ode_matrix_callback ode_matrix_callback_flat
                        ode_matrix_callback_fallback matrix_callback_contexts
-                       matrix_callback_contexts_fallback matrix_callback_geometry_edges)
+                       matrix_callback_contexts_fallback matrix_callback_geometry_edges
+                       gq_callback_runtime_values matrix_callback_value_fallback
+                       gq_callback_shared_function gq_callback_runtime_integer
+                       gq_callback_runtime_control gq_callback_rng_values)
     set(_expected_interpreter 0)
     if(exit_fixture MATCHES "_fallback$" OR
-       exit_fixture STREQUAL "matrix_callback_contexts" OR
-       exit_fixture STREQUAL "matrix_callback_geometry_edges")
+       exit_fixture STREQUAL "matrix_callback_geometry_edges" OR
+       exit_fixture STREQUAL "gq_callback_runtime_integer" OR
+       exit_fixture STREQUAL "gq_callback_runtime_control")
       set(_expected_interpreter 1)
     endif()
     add_test(NAME ${exit_fixture}_reference
@@ -1174,7 +1178,7 @@ set(STANLI_TESTS
   test_solve test_solve_forwards test_solve_reuse test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
-  test_odevariadic test_algebra test_estimate test_brmsmono
+  test_odevariadic test_callback_values test_algebra test_estimate test_brmsmono
   test_reduce_sum
   test_structured_arrays test_pathfinder test_unconstrain
   test_init_interp test_constrain_structured)

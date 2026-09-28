@@ -49,7 +49,8 @@ struct RhsProgram : Program {
 // -- theta, x_r, x_i -- and the modern `ode_*` interface takes any number
 // of any type. Both reduce to this list, so there is one calling
 // convention: real arguments are packed in order into the theta region
-// when they carry autodiff and into the x_r region when they are data,
+// when supplied at runtime and into the x_r region when preparation constants,
+// independently of the kernel's scalar autodiff activity mask,
 // and integer arguments bind as compile-time constants. The lowering
 // packs the call site the same way, in the same order, which is what
 // makes the two halves agree.

@@ -1,5 +1,11 @@
 # Execution engines and a path to interpreter independence
 
+> **Output-path update:** runtime real callback arguments now stay compiled in
+> generated quantities with double-only solver execution and no derivative
+> scratch. [Results, costs and remaining fallbacks](2026-09-28-callback-runtime-values-results.md).
+> The next general-runtime [design decision](2026-09-28-general-value-program-decision.md)
+> concerns dynamic values/call frames; it proposes no JIT work.
+
 > **Callback geometry update:** plain matrix arguments now retain their shapes
 > through ODE, DAE, quadrature, variadic algebra and adjoint callbacks, including
 > genuine interpreted fallbacks. [Validation, performance and remaining gaps](2026-09-28-callback-geometry-results.md).

@@ -94,8 +94,9 @@ struct RetainedCallback {
   std::map<std::string, const mir::FunDef*> funs_map;
   std::string callback_name;
 
-  // Real callback arguments are packed in source order: active values into
-  // the kernel's parameter input and data values into x_r. Integer values
+  // Real callback arguments are packed in source order: runtime values into
+  // the kernel's theta input and preparation constants into x_r. Scalar AD
+  // activity is selected separately by the kernel variant. Integer values
   // remain in each RhsArg. The register compiler uses the same bindings to
   // reconstruct the callback's original positional signature.
   std::vector<RhsArg> args;
@@ -126,12 +127,10 @@ struct RetainedCallback {
 // RhsArg/x_r ordering and validation.
 template <typename Active, typename GetActive, typename GetReals,
           typename GetInts, typename Fail>
-std::vector<Active> pack_callback_arguments(RetainedCallback& retained,
-                                            const std::vector<mir::Expr>& exprs,
-                                            size_t begin, size_t end,
-                                            GetActive&& get_active,
-                                            GetReals&& get_reals,
-                                            GetInts&& get_ints, Fail&& fail) {
+std::vector<Active> pack_callback_arguments(
+    RetainedCallback& retained, const std::vector<mir::Expr>& exprs,
+    size_t begin, size_t end, GetActive&& get_active, GetReals&& get_reals,
+    GetInts&& get_ints, Fail&& fail, bool runtime_reals = false) {
   std::vector<Active> active;
   for (size_t i = begin; i < end; ++i) {
     const mir::Expr& arg = exprs[i];
@@ -144,7 +143,7 @@ std::vector<Active> pack_callback_arguments(RetainedCallback& retained,
       }
       binding.is_int = true;
       binding.ints = get_ints(i);
-    } else if (arg.data_only) {
+    } else if (arg.data_only && !runtime_reals) {
       std::vector<double> values = get_reals(i, binding);
       if (values.size() >
           static_cast<size_t>(std::numeric_limits<int>::max())) {

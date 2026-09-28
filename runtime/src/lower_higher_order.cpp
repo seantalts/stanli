@@ -48,7 +48,8 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
         if (!value.is_int) c.bail(e.name + ": integer argument is real-valued");
         return value.i;
       },
-      [&](const std::string& message) { c.bail(e.name + ": " + message); });
+      [&](const std::string& message) { c.bail(e.name + ": " + message); },
+      in_write_array);
   int total = 0;
   for (const Range& value : active) {
     if (value.len > ProgramCompiler::kMaxRegs - total)
@@ -115,9 +116,9 @@ bool Lowering::lower_program_variadic_algebra(ProgramCompiler& c,
 
   Range result{0, x.len};
   result.kind = ViewKind::Vector;
-  *out_range =
-      c.kernel_call(OP_ALGEBRA_SOLVER, {x, theta}, result,
-                    parameter_count == 0 ? 0u : 0x1u, 0x2u, {}, spec, e.name);
+  *out_range = c.kernel_call(OP_ALGEBRA_SOLVER, {x, theta}, result,
+                             in_write_array || parameter_count == 0 ? 0u : 0x1u,
+                             in_write_array ? 0u : 0x2u, {}, spec, e.name);
   return true;
 }
 bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
@@ -178,9 +179,12 @@ bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
   const Range b = c.expr(e.args[2]);
   if (!c.is_scalar(a) || !c.is_scalar(b))
     c.bail(e.name + ": integration bounds must be scalar");
-  const uint8_t variant = static_cast<uint8_t>(
-      (!e.args[1].data_only ? 0x1u : 0u) | (!e.args[2].data_only ? 0x2u : 0u) |
-      (spec->parameter_count != 0 ? 0x4u : 0u));
+  const uint8_t variant =
+      in_write_array
+          ? 0u
+          : static_cast<uint8_t>((!e.args[1].data_only ? 0x1u : 0u) |
+                                 (!e.args[2].data_only ? 0x2u : 0u) |
+                                 (spec->parameter_count != 0 ? 0x4u : 0u));
   Range result{0, 1};
   *out_range = c.kernel_call(OP_QUADRATURE, {a, b, theta}, result, variant,
                              variant, {}, spec, e.name);
@@ -272,10 +276,13 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
   result.kind = ViewKind::Array;
   result.dims = {N, S};
   result.leaf = call->legacy ? ViewKind::Flat : ViewKind::Vector;
-  const uint8_t activity = static_cast<uint8_t>(
-      (e.args[1].data_only ? 0u : 0x1u) | (theta_active ? 0x2u : 0u) |
-      (!call->legacy && !e.args[2].data_only ? 0x4u : 0u) |
-      (!call->legacy && !e.args[3].data_only ? 0x8u : 0u));
+  const uint8_t activity =
+      in_write_array
+          ? 0u
+          : static_cast<uint8_t>(
+                (e.args[1].data_only ? 0u : 0x1u) | (theta_active ? 0x2u : 0u) |
+                (!call->legacy && !e.args[2].data_only ? 0x4u : 0u) |
+                (!call->legacy && !e.args[3].data_only ? 0x8u : 0u));
   if (call->legacy) {
     *out_range = c.kernel_call(OP_ODE, {z0, theta}, result,
                                static_cast<uint8_t>(0x4u | activity), activity,
@@ -354,9 +361,12 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
   result.kind = ViewKind::Array;
   result.dims = {N, S};
   result.leaf = ViewKind::Vector;
-  const uint8_t activity = static_cast<uint8_t>(
-      (!e.args[1].data_only ? 0x1u : 0u) | (!e.args[2].data_only ? 0x2u : 0u) |
-      (!e.args[3].data_only ? 0x4u : 0u) | (parameter_count != 0 ? 0x8u : 0u));
+  const uint8_t activity =
+      in_write_array ? 0u
+                     : static_cast<uint8_t>((!e.args[1].data_only ? 0x1u : 0u) |
+                                            (!e.args[2].data_only ? 0x2u : 0u) |
+                                            (!e.args[3].data_only ? 0x4u : 0u) |
+                                            (parameter_count != 0 ? 0x8u : 0u));
   *out_range = c.kernel_call(OP_ODE_ADJOINT, {y0, t0, ts, theta}, result,
                              static_cast<uint8_t>(0x10u | activity), activity,
                              {N, S}, spec, e.name);
@@ -408,9 +418,11 @@ bool Lowering::lower_program_dae(ProgramCompiler& c, const mir::Expr& e,
   result.kind = ViewKind::Array;
   result.dims = {N, S};
   result.leaf = ViewKind::Vector;
-  const uint8_t activity = static_cast<uint8_t>(
-      (!e.args[1].data_only ? 0x1u : 0u) | (!e.args[2].data_only ? 0x2u : 0u) |
-      (parameter_count != 0 ? 0x4u : 0u));
+  const uint8_t activity =
+      in_write_array ? 0u
+                     : static_cast<uint8_t>((!e.args[1].data_only ? 0x1u : 0u) |
+                                            (!e.args[2].data_only ? 0x2u : 0u) |
+                                            (parameter_count != 0 ? 0x4u : 0u));
   *out_range = c.kernel_call(OP_DAE, {y0, yp0, theta}, result,
                              static_cast<uint8_t>(0x8u | activity), activity,
                              {(int)N, S}, spec, e.name);
@@ -490,9 +502,9 @@ bool Lowering::lower_program_higher_order(ProgramCompiler& c,
 
   Range result{0, x.len};
   result.kind = ViewKind::Vector;
-  const uint8_t active = e.args[2].data_only ? 0u : 0x1u;
-  *out_range = c.kernel_call(OP_ALGEBRA_SOLVER, {x, y}, result, active, 0x2u,
-                             {}, spec, e.name);
+  const uint8_t active = in_write_array || e.args[2].data_only ? 0u : 0x1u;
+  *out_range = c.kernel_call(OP_ALGEBRA_SOLVER, {x, y}, result, active,
+                             in_write_array ? 0u : 0x2u, {}, spec, e.name);
   return true;
 }
 // map_rect checks that the three job arrays have matching OUTER sizes and
@@ -992,9 +1004,8 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
             actuals.at(i).require_constant_ints("quadrature integer argument");
         return std::vector<int>(values.begin(), values.end());
       },
-      [&](const std::string& message) {
-        fail(e.name + ": " + message, e.raw);
-      });
+      [&](const std::string& message) { fail(e.name + ": " + message, e.raw); },
+      in_write_array);
 
   Val theta = constant(0.0);  // unread placeholder when there are no params
   spec->parameter_count = 0;
@@ -1020,9 +1031,9 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
   Val b = actuals.at(2).value();
   if (!is_scalar(a) || !is_scalar(b))
     fail(e.name + ": integration bounds must be scalar", e.raw);
-  const uint8_t variant =
-      static_cast<uint8_t>((a.autodiff ? 0x1u : 0u) | (b.autodiff ? 0x2u : 0u) |
-                           (spec->parameter_count != 0 ? 0x4u : 0u));
+  const uint8_t variant = static_cast<uint8_t>(
+      (a.autodiff ? 0x1u : 0u) | (b.autodiff ? 0x2u : 0u) |
+      (!in_write_array && spec->parameter_count != 0 ? 0x4u : 0u));
   SlotInfo si = view_of(e.type_);
   si.param_free = variant == 0;
   Val result = emit_raw(OP_QUADRATURE, {a.slot, b.slot, theta.slot}, 1, si, {},
@@ -1243,7 +1254,7 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
     if (is_int && a.data_only) {
       ra.is_int = true;
       ra.ints = actual.require_constant_ints("ODE integer argument");
-    } else if (a.data_only) {
+    } else if (a.data_only && !in_write_array) {
       // One evaluation, held in a local. Calling const_values(a) twice
       // and taking begin() from one temporary and end() from the other
       // is an invalid range, and it does not fail loudly: it appended

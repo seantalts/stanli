@@ -81,13 +81,11 @@ auto solve(const DaeSpec& spec, const double* y_values, const double* yp_values,
 void dae_fwd_data(KernelCtx& ctx, const DaeSpec& spec) {
   const int64_t S = ctx.in[0].len;
   const int64_t P = ctx.in[2].len;
-  const int64_t W = 2 * S + P;
   const auto solution = solve<double, double, double>(
       spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P);
   for (size_t n = 0; n < solution.size(); ++n)
     for (int64_t i = 0; i < S; ++i)
       ctx.out.data[(int64_t)n * S + i] = solution[n][i];
-  for (int64_t i = 0; i < ctx.out.len * W; ++i) ctx.scratch[i] = 0.0;
 }
 
 // Keep the typed input containers alive while harvesting their adjoints.
@@ -188,6 +186,7 @@ void dae_fwd(KernelCtx& ctx) {
 
 void dae_bwd(KernelCtx& ctx) {
   const uint8_t mask = (ctx.variant & 0x8u) != 0 ? (ctx.variant & 0x7u) : 0x7u;
+  if (mask == 0) return;
   const int64_t S = ctx.in[0].len, P = ctx.in[2].len, W = 2 * S + P;
   for (int64_t o = ctx.out.len; o-- > 0;) {
     const double adjoint = ctx.out_adj_vec.data[o];
@@ -204,6 +203,7 @@ void dae_bwd(KernelCtx& ctx) {
 }
 
 int64_t dae_scratch(const Op& op, const Slot* slots) {
+  if ((op.variant & 0x8u) != 0 && (op.variant & 0x7u) == 0) return 0;
   const int64_t S = slots[op.in[0]].len;
   return slots[op.out].len * (2 * S + slots[op.in[2]].len);
 }
