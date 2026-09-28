@@ -104,7 +104,8 @@ struct MirRhs {
       }
     }
     MirInterp<T> ev(*spec->funs(), "ODE function");
-    return ev.call(*spec->rhs(), reals, ints);
+    return interpret_retained_callback(ev, *spec->rhs(), reals, ints,
+                                       spec->args);
   }
 };
 

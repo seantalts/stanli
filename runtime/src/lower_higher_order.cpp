@@ -14,16 +14,29 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
                                        int* parameter_count) {
   std::vector<Range> active = pack_callback_arguments<Range>(
       spec, e.args, begin, end,
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         Range value = c.expr(e.args[i]);
+        if (value.kind == ViewKind::Matrix) {
+          binding.rows = value.rows;
+          binding.cols = value.cols;
+        }
         return std::make_pair(value, value.len);
       },
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         DataMap::Entry value =
             program_constant(c, e.args[i], e.name + " data argument");
         if (value.is_int)
           c.bail(e.name + ": real data argument is integer-valued");
-        const bool matrix = e.args[i].type_ == "UMatrix";
+        const bool matrix = e.args[i].unsized.depth == 0 &&
+                            e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix;
+        if (matrix) {
+          if (value.dims.size() != 2)
+            c.bail(
+                e.name +
+                ": matrix callback argument has incomplete logical dimensions");
+          binding.rows = value.dims[0];
+          binding.cols = value.dims[1];
+        }
         const bool nested_matrix =
             e.args[i].unsized.depth != 0 &&
             e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix;
@@ -949,15 +962,29 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
 
   std::vector<Val> active = pack_callback_arguments<Val>(
       *spec, e.args, call->callback_args_begin, callback_end,
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         Val value = actuals.at(i).value();
+        if (value.si.kind == ViewKind::Matrix) {
+          binding.rows = value.si.rows;
+          binding.cols = value.si.cols;
+        }
         if (g.slots[value.slot].len > std::numeric_limits<int>::max())
           fail(e.name + ": callback argument is too large", e.raw);
         return std::make_pair(value, static_cast<int>(g.slots[value.slot].len));
       },
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         const auto& values =
             actuals.at(i).require_constant_reals("quadrature data argument");
+        if (e.args[i].unsized.depth == 0 &&
+            e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix) {
+          const auto* entry = actuals.at(i).pure_value();
+          const auto dims = entry && entry->dims.size() == 2
+                                ? entry->dims
+                                : logical_shape(actuals.at(i).value(),
+                                                "matrix callback argument");
+          binding.rows = dims.at(0);
+          binding.cols = dims.at(1);
+        }
         return std::vector<double>(values.begin(), values.end());
       },
       [&](size_t i) {
@@ -1225,6 +1252,15 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
       const std::vector<double>& vals =
           actual.require_constant_reals("ODE data argument");
       ra.len = (int)vals.size();
+      if (a.unsized.depth == 0 && a.unsized.leaf == mir::UnsizedLeaf::Matrix) {
+        const auto* entry = actual.pure_value();
+        const auto dims =
+            entry && entry->dims.size() == 2
+                ? entry->dims
+                : logical_shape(actual.value(), "matrix callback argument");
+        ra.rows = dims.at(0);
+        ra.cols = dims.at(1);
+      }
       spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());
     } else {
       if (is_int)
@@ -1234,6 +1270,10 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
       const Val v = actual.value();
       ra.is_param = true;
       ra.len = (int)g.slots[v.slot].len;
+      if (v.si.kind == ViewKind::Matrix) {
+        ra.rows = v.si.rows;
+        ra.cols = v.si.cols;
+      }
       param_parts.push_back(v);
     }
     rargs.push_back(std::move(ra));

@@ -10,6 +10,8 @@
 // shapes still refuse, with a reason, while supported early exits select the
 // shared register compiler. Both values and weighted derivatives are checked.
 #include <stanli/mir.hpp>
+#include <stanli/callback.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/island.hpp>
 #include <stanli/ode_prog.hpp>
@@ -433,6 +435,132 @@ void check_mixed_seed(const stanli::RhsProgram& p, const char* label) {
          into.nochain_tape == staged.nochain_tape);
 }
 
+void check_matrix_callbacks() {
+  using namespace stanli;
+  const auto mir = mir::read_program(
+      sexp::parse(slurp("tests/fixtures/matrix_callback_functions.tmir.sexp")));
+  std::map<std::string, const mir::FunDef*> funs;
+  for (const auto& f : mir.fun_defs) funs[f.name] = &f;
+  RhsArg active;
+  active.is_param = true;
+  active.len = 6;
+  active.rows = 2;
+  active.cols = 3;
+  RhsArg data = active;
+  data.is_param = false;
+  const std::vector<RhsArg> args{active, data};
+  const std::vector<double> xr{0.1, 0.3, 0.7, -0.2, 0.5, -0.4};
+  for (const char* name : {"matrix_early", "matrix_dynamic"}) {
+    const auto& f = *funs.at(name);
+    const auto compiled = compile_rhs_args(f, funs, 2, args);
+    const bool dynamic = std::string(name) == "matrix_dynamic";
+    expect(std::string(name) + ": correct compiler selection",
+           compiled.ok != dynamic);
+    if (!compiled.ok && !dynamic)
+      std::printf("matrix refusal: %s\n", compiled.why.c_str());
+    for (int trial = 0; trial < 8; ++trial) {
+      const double t = trial % 2 ? 0.75 : 0.25;
+      std::vector<double> y{trial % 2 ? -0.4 : 0.4, 0.8};
+      std::vector<double> theta;
+      for (int k = 0; k < 6; ++k) theta.push_back(probe(trial * 6 + k));
+      const auto run = [&](int mode) {
+        stan::math::nested_rev_autodiff nested;
+        using stan::math::var;
+        std::vector<var> yv(y.begin(), y.end()), av(theta.begin(), theta.end());
+        std::vector<var> bv(xr.begin(), xr.end()), out, registers;
+        MirInterp<var> interp(funs, "matrix callback test");
+        std::vector<std::string> messages;
+        set_message_sink([&](const char* text, size_t len) {
+          messages.emplace_back(text, len);
+        });
+        if (mode == 0) {
+          run_rhs<var>(compiled, t, yv.data(), av.data(), xr.data(), out,
+                       registers);
+        } else if (mode == 1) {
+          out = interpret_retained_callback(interp, f, {{var(t)}, yv, av, bv},
+                                            {}, args);
+        } else {
+          std::vector<MirInterp<var>::Value> values(4);
+          values[0].r = {var(t)};
+          values[1].r = yv;
+          values[1].dims = {2};
+          values[2].r = av;
+          values[2].dims = {2, 3};
+          values[3].r = bv;
+          values[3].dims = {2, 3};
+          out = interp.call(f, values).r;
+        }
+        set_message_sink(nullptr);
+        expect("matrix callback effects happen exactly once",
+               messages ==
+                   (dynamic ? std::vector<std::string>{"matrix callback effect"}
+                            : std::vector<std::string>{}));
+        var root = out[0] * 0.37 + out[1] * -0.29;
+        root.grad();
+        std::vector<uint64_t> result;
+        for (const auto& v : out) result.push_back(bits(v.val()));
+        for (const auto& v : yv) result.push_back(bits(v.adj()));
+        for (const auto& v : av) result.push_back(bits(v.adj()));
+        return result;
+      };
+      const auto reference = run(2);
+      expect(
+          std::string(name) + ": fallback values and weighted gradients exact",
+          run(1) == reference);
+      if (compiled.ok)
+        expect(std::string(name) +
+                   ": compiled values and weighted gradients exact",
+               run(0) == reference);
+    }
+  }
+  const auto& f = *funs.at("matrix_shape");
+  for (const auto dims :
+       {std::pair<int, int>{2, 3}, {3, 2}, {0, 3}, {3, 0}, {0, 0}}) {
+    RhsArg arg = active;
+    arg.rows = dims.first;
+    arg.cols = dims.second;
+    arg.len = dims.first * dims.second;
+    const auto compiled = compile_rhs_args(f, funs, 2, {arg});
+    expect("matrix shape callback compiles", compiled.ok);
+    const std::vector<double> y{0.2, 0.8}, theta(arg.len, 0.3);
+    const std::vector<double> want{dims.first + y[0], dims.second + y[1]};
+    std::vector<double> got, registers;
+    if (compiled.ok)
+      run_rhs<double>(compiled, 0.0, y.data(), theta.data(), nullptr, got,
+                      registers);
+    expect("matrix geometry stays distinct at equal flattened length",
+           got == want);
+    MirInterp<double> interp(funs, "matrix shape test");
+    expect("matrix fallback preserves empty axes",
+           interpret_retained_callback(interp, f, {{0.0}, y, theta}, {},
+                                       {arg}) == want);
+  }
+  for (int invalid = 0; invalid < 6; ++invalid) {
+    RhsArg arg = active;
+    if (invalid == 0) arg.rows = -1;
+    if (invalid == 1) arg.cols = -2;
+    if (invalid == 2) arg.rows = 3;
+    if (invalid == 3) arg.rows = int64_t(std::numeric_limits<int>::max()) + 1;
+    if (invalid == 4) arg.len = -1;
+    if (invalid == 5) arg.is_int = true;
+    expect("malformed matrix geometry refuses compilation",
+           !compile_rhs_args(f, funs, 2, {arg}).ok);
+    bool refused = false;
+    try {
+      MirInterp<double> interp(funs, "invalid matrix test");
+      interpret_retained_callback(
+          interp, f, {{0.0}, {0.2, 0.8}, std::vector<double>(6)}, {}, {arg});
+    } catch (const std::invalid_argument&) {
+      refused = true;
+    }
+    expect("malformed matrix geometry refuses interpretation", refused);
+  }
+  auto nested = f;
+  nested.arg_views[2].depth = 1;
+  expect("matrix arrays remain outside admission",
+         !compile_rhs_args(nested, funs, 2, {active}).ok);
+}
+
 }  // namespace
 
 int main() {
@@ -505,6 +633,7 @@ int main() {
       }
   }
   check_exact_opcode_contract();
+  check_matrix_callbacks();
 
   // stan-math instantiates a var state whenever either side is active. The
   // data-y/active-theta case is included too: run_rhs is a generic boundary,

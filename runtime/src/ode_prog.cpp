@@ -4,6 +4,7 @@
 // ranges up front and x_i binds as compile-time integers. Everything the
 // body can contain is the shared compiler's problem.
 #include <stanli/ode_prog.hpp>
+#include <stanli/callback.hpp>
 
 #include <stanli/island.hpp>
 #include <stanli/mir_prog.hpp>
@@ -38,7 +39,8 @@ bool supported_rhs_view(const mir::UnsizedView& view) {
   return view.leaf == mir::UnsizedLeaf::Real ||
          view.leaf == mir::UnsizedLeaf::Int ||
          view.leaf == mir::UnsizedLeaf::Vector ||
-         view.leaf == mir::UnsizedLeaf::RowVector;
+         view.leaf == mir::UnsizedLeaf::RowVector ||
+         view.leaf == mir::UnsizedLeaf::Matrix;
 }
 
 // The direct RK path compares against a var replay, so admitting a derivative
@@ -86,13 +88,22 @@ bool exact_ode_adjoint_opcode(Program::Code code) {
   }
 }
 
-void stamp_rhs_view(Range* range, const mir::UnsizedView& view) {
+void stamp_rhs_view(Range* range, const mir::UnsizedView& view,
+                    const RhsArg* argument = nullptr) {
   if (view.depth == 1)
     range->kind = ViewKind::Array;
   else if (view.leaf == mir::UnsizedLeaf::Vector)
     range->kind = ViewKind::Vector;
   else if (view.leaf == mir::UnsizedLeaf::RowVector)
     range->kind = ViewKind::RowVector;
+  else if (view.leaf == mir::UnsizedLeaf::Matrix) {
+    if (!argument)
+      throw Bail{"matrix callback state has no logical dimensions"};
+    const auto dims = callback_matrix_dimensions(*argument);
+    range->kind = ViewKind::Matrix;
+    range->rows = dims[0];
+    range->cols = dims[1];
+  }
 }
 
 }  // namespace
@@ -121,7 +132,11 @@ RhsProgram compile_dae_args(
   ProgramCompiler c{p, funs};
   try {
     int n_th = 0, n_xr = 0;
-    for (const auto& a : args) {
+    for (size_t k = 0; k < args.size(); ++k) {
+      const auto& a = args[k];
+      if (f.arg_views[k + 3].depth == 0 &&
+          f.arg_views[k + 3].leaf == mir::UnsizedLeaf::Matrix)
+        callback_matrix_dimensions(a);
       if (a.is_int) continue;
       (a.is_param ? n_th : n_xr) += a.len;
     }
@@ -149,12 +164,12 @@ RhsProgram compile_dae_args(
         c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
       } else if (a.is_param) {
         Range r{p.th0 + th_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 3]);
+        stamp_rhs_view(&r, f.arg_views[k + 3], &a);
         c.reals[name] = r;
         th_at += a.len;
       } else {
         Range r{p.xr0 + xr_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 3]);
+        stamp_rhs_view(&r, f.arg_views[k + 3], &a);
         c.reals[name] = r;
         xr_at += a.len;
       }
@@ -213,7 +228,11 @@ RhsProgram compile_rhs_args(
     // sub-range of whichever region it belongs to, assigned in argument
     // order -- the same order the lowering concatenates the call site in.
     int n_th = 0, n_xr = 0;
-    for (const auto& a : args) {
+    for (size_t k = 0; k < args.size(); ++k) {
+      const auto& a = args[k];
+      if (f.arg_views[k + 2].depth == 0 &&
+          f.arg_views[k + 2].leaf == mir::UnsizedLeaf::Matrix)
+        callback_matrix_dimensions(a);
       if (a.is_int) continue;
       (a.is_param ? n_th : n_xr) += a.len;
     }
@@ -236,12 +255,12 @@ RhsProgram compile_rhs_args(
         c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
       } else if (a.is_param) {
         Range r{p.th0 + th_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 2]);
+        stamp_rhs_view(&r, f.arg_views[k + 2], &a);
         c.reals[name] = r;
         th_at += a.len;
       } else {
         Range r{p.xr0 + xr_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 2]);
+        stamp_rhs_view(&r, f.arg_views[k + 2], &a);
         c.reals[name] = r;
         xr_at += a.len;
       }

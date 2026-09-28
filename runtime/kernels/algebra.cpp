@@ -102,7 +102,8 @@ struct MirVariadicSystem {
         reals.push_back(std::move(values));
       }
       MirInterp<T> ev(*spec->funs(), "algebraic system");
-      result = ev.call(*system, reals, ints);
+      result =
+          interpret_retained_callback(ev, *system, reals, ints, spec->args);
     }
     Eigen::Matrix<T, Eigen::Dynamic, 1> out((Eigen::Index)result.size());
     for (size_t i = 0; i < result.size(); ++i) out((Eigen::Index)i) = result[i];

@@ -58,6 +58,10 @@ struct RhsArg {
   bool is_param = false;  // reals: theta region when true, x_r when false
   int len = 0;            // reals
   std::vector<int> ints;  // ints
+  // Plain matrix geometry, captured before flattening. Negative means absent;
+  // zero extents are valid. Scalar/vector/one-dimensional array bindings keep
+  // their established length-only representation. No per-argument allocation.
+  int64_t rows = -1, cols = -1;
 };
 
 // Compile `f` against a variadic argument list. Semantic refusal comes back

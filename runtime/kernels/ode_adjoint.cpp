@@ -56,7 +56,8 @@ struct AdjointRhs {
       }
     }
     MirInterp<T> interpreter(*spec->funs(), "adjoint ODE function");
-    const std::vector<T> rhs = interpreter.call(*spec->rhs(), reals, ints);
+    const std::vector<T> rhs = interpret_retained_callback(
+        interpreter, *spec->rhs(), reals, ints, spec->args);
     for (size_t i = 0; i < rhs.size(); ++i) out((Eigen::Index)i) = rhs[i];
     return out;
   }

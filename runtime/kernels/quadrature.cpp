@@ -55,7 +55,8 @@ struct MirIntegrand {
         reals.push_back(std::move(values));
       }
       MirInterp<T> interpreter(*spec->funs(), "quadrature integrand");
-      result = interpreter.call(*callback, reals, ints);
+      result = interpret_retained_callback(interpreter, *callback, reals, ints,
+                                           spec->args);
     }
     if (result.size() != 1)
       throw std::runtime_error("quadrature: integrand must return one real");

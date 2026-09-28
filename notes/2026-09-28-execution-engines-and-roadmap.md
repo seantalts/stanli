@@ -1,5 +1,9 @@
 # Execution engines and a path to interpreter independence
 
+> **Callback geometry update:** plain matrix arguments now retain their shapes
+> through ODE, DAE, quadrature, variadic algebra and adjoint callbacks, including
+> genuine interpreted fallbacks. [Validation, performance and remaining gaps](2026-09-28-callback-geometry-results.md).
+
 > **Transform update:** ordinary Cholesky-correlation reverse now uses retained
 > scalar intermediates; exceptional histories keep the Stan tape. Measured
 > Kronecker GP inference improves 15.8%; [results and storage costs](2026-09-28-cholesky-correlation-results.md).

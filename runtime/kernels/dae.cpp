@@ -55,8 +55,8 @@ struct DaeResidual {
       }
     }
     MirInterp<T> interpreter(*spec->funs(), "DAE residual");
-    const std::vector<T> residual =
-        interpreter.call(*spec->residual(), reals, ints);
+    const std::vector<T> residual = interpret_retained_callback(
+        interpreter, *spec->residual(), reals, ints, spec->args);
     for (size_t i = 0; i < residual.size(); ++i)
       out((Eigen::Index)i) = residual[i];
     return out;

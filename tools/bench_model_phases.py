@@ -6,8 +6,15 @@ Run baseline/candidate in alternating fresh processes. Returns one JSON sample;
 source compilation is warmed, ctypes overhead is included, peak RSS is whole
 process memory, and short inference is illustrative (100 warmup + 100 draws).
 """
-import ctypes as c, json, pathlib, resource, sys, time
-libpath, manifest_path, name = sys.argv[1:]
+import argparse, ctypes as c, json, pathlib, resource, time
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("library")
+parser.add_argument("manifest")
+parser.add_argument("model")
+parser.add_argument("--skip-inference", action="store_true",
+                    help="measure evaluation phases only; report inference_us as null")
+args = parser.parse_args()
+libpath, manifest_path, name = args.library, args.manifest, args.model
 lib=c.CDLL(libpath)
 ptr=c.c_void_p; doubles=c.POINTER(c.c_double)
 for fn in ('stanli_model_new','stanli_model_new_from_stan'):
@@ -56,12 +63,14 @@ first_grad_us=measure(gradient,1);grad_us=warm_measure(gradient)
 check_values=[lp.value,*grad]
 def row(): assert lib.stanli_wa_row(p,q,out)==0
 first_row_us=measure(row,1);row_us=warm_measure(row)
-draws=(c.c_double*(100*n))()
-start=time.perf_counter_ns()
-assert lib.stanli_sample(p,1234,100,100,0.8,draws,err,len(err))==0,err.value
-# Include output generation for every posterior draw; sampling excludes it.
-for i in range(100):
-    q=(c.c_double*n)(*draws[i*n:(i+1)*n]);row()
-inference_us=(time.perf_counter_ns()-start)/1000
+inference_us = None
+if not args.skip_inference:
+    draws=(c.c_double*(100*n))()
+    start=time.perf_counter_ns()
+    assert lib.stanli_sample(p,1234,100,100,0.8,draws,err,len(err))==0,err.value
+    # Include output generation for every posterior draw; sampling excludes it.
+    for i in range(100):
+        q=(c.c_double*n)(*draws[i*n:(i+1)*n]);row()
+    inference_us=(time.perf_counter_ns()-start)/1000
 lib.stanli_model_free(p)
-print(json.dumps(dict(model=name,check_values=check_values,source_us=source_us,prep_us=prep_us,first_grad_us=first_grad_us,grad_us=grad_us,first_row_us=first_row_us,row_us=row_us,inference_us=inference_us,peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,library_bytes=pathlib.Path(libpath).stat().st_size)))
+print(json.dumps(dict(model=name,check_values=check_values,source_us=source_us,prep_us=prep_us,first_grad_us=first_grad_us,grad_us=grad_us,first_row_us=first_row_us,row_us=row_us,inference_us=inference_us,inference_skipped=args.skip_inference,peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,library_bytes=pathlib.Path(libpath).stat().st_size)))

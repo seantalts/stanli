@@ -17,7 +17,7 @@ def ordered(value):
     return (~bits & ((1 << 64) - 1)) if bits >> 63 else bits | (1 << 63)
 
 
-def main(check, fixture="gq_scalar_rng_complete"):
+def main(check, fixture="gq_scalar_rng_complete", expected_interpreter="0"):
     source = ROOT / "tests/fixtures" / (fixture + ".stan")
     reference = json.loads(source.with_suffix(".ref.json").read_text())
     for path, key in [(source, "source_sha256"), (source.with_suffix(".json"), "data_sha256")]:
@@ -30,7 +30,7 @@ def main(check, fixture="gq_scalar_rng_complete"):
         out = subprocess.run([check, str(source), str(source.with_suffix(".json")),
                               "--mir", str(source.with_suffix(".tmir.sexp")), "--wa-values", "--point", point],
                              check=True, text=True, capture_output=True)
-        assert "INTERP " not in out.stderr, out.stderr
+        assert ("INTERP " in out.stderr) == (expected_interpreter == "1"), out.stderr
         fields = parse_status(out.stdout)
         assert fields[0] == "OK", out.stdout
         wa = parse_wa(out.stdout)

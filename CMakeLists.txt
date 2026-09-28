@@ -986,12 +986,25 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns)
+  foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns
+                       ode_matrix_callback ode_matrix_callback_flat
+                       ode_matrix_callback_fallback matrix_callback_contexts
+                       matrix_callback_contexts_fallback matrix_callback_geometry_edges)
+    set(_expected_interpreter 0)
+    if(exit_fixture MATCHES "_fallback$" OR
+       exit_fixture STREQUAL "matrix_callback_contexts" OR
+       exit_fixture STREQUAL "matrix_callback_geometry_edges")
+      set(_expected_interpreter 1)
+    endif()
     add_test(NAME ${exit_fixture}_reference
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-              $<TARGET_FILE:stanli_check> ${exit_fixture}
+              $<TARGET_FILE:stanli_check> ${exit_fixture} ${_expected_interpreter}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
+  add_test(NAME callback_geometry
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_callback_geometry.py
+            $<TARGET_FILE:stanli_check> $<TARGET_FILE:dump_ops>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME execution_report_cli
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_execution_report_cli.py
             $<TARGET_FILE:dump_ops> $<TARGET_FILE:stanli_shared>
