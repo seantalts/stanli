@@ -64,7 +64,9 @@ def main(check, dump_ops):
             assert all(n["callback"]["value_engine"] == "register_program"
                        for n in selected), (phase, selected)
 
-    for name in ("gq_callback_runtime_integer", "gq_callback_integer_contexts",
+    for name in ("gq_callback_runtime_integer", "gq_callback_runtime_control",
+                 "gq_callback_ode_controls", "gq_callback_solver_controls",
+                 "gq_callback_integer_contexts",
                  "gq_callback_integer_contexts_fallback"):
         stem = ROOT / "tests/fixtures" / name
         report = json.loads(subprocess.check_output(
@@ -73,7 +75,9 @@ def main(check, dump_ops):
         wa = report["write_array"]
         assert wa.get("value_engine") != "mir_interpreter", wa
         selected = list(callbacks(wa))
-        assert len(selected) == (1 if name == "gq_callback_runtime_integer" else 5), wa
+        expected_count = {"gq_callback_ode_controls": 7, "gq_callback_solver_controls": 9,
+                          "gq_callback_runtime_integer": 1, "gq_callback_runtime_control": 1}.get(name, 5)
+        assert len(selected) == expected_count, wa
         for node in selected:
             expected = "mir_interpreter" if name.endswith("_fallback") else "register_program"
             assert node["callback"]["value_engine"] == expected, node

@@ -1,0 +1,1451 @@
+{
+  "summary": {
+    "gq_callback_runtime_control_before": {
+      "source_us": {
+        "median": 436.2534280880019,
+        "mad": 6.047897136719513
+      },
+      "prep_us": {
+        "median": 156.09151545433468,
+        "mad": 7.022370528031587
+      },
+      "first_grad_us": {
+        "median": 5.6455,
+        "mad": 0.375
+      },
+      "grad_us": {
+        "median": 0.5928602289611544,
+        "mad": 0.00491893426523371
+      },
+      "first_row_us": {
+        "median": 50.562,
+        "mad": 13.123999999999995
+      },
+      "row_us": {
+        "median": 18.190790785045923,
+        "mad": 0.06573974519937487
+      },
+      "inference_us": {
+        "median": 2030.646,
+        "mad": 26.833499999999958
+      },
+      "peak_rss": {
+        "median": 27852800.0,
+        "mad": 16384.0
+      },
+      "library_bytes": {
+        "median": 39688512.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 18.844726072515098,
+        "mad": 0.3252982637720194
+      }
+    },
+    "gq_callback_runtime_control_after": {
+      "source_us": {
+        "median": 447.0352974521581,
+        "mad": 13.330891999075874
+      },
+      "prep_us": {
+        "median": 163.61785379588682,
+        "mad": 1.3242812938065214
+      },
+      "first_grad_us": {
+        "median": 12.042,
+        "mad": 0.9785000000000004
+      },
+      "grad_us": {
+        "median": 0.5989128699342656,
+        "mad": 0.02155476303888254
+      },
+      "first_row_us": {
+        "median": 29.9375,
+        "mad": 8.7295
+      },
+      "row_us": {
+        "median": 1.3469574127660136,
+        "mad": 0.05392429790123954
+      },
+      "inference_us": {
+        "median": 390.9375,
+        "mad": 11.542000000000002
+      },
+      "peak_rss": {
+        "median": 28057600.0,
+        "mad": 40960.0
+      },
+      "library_bytes": {
+        "median": 39706320.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 19.256667418116848,
+        "mad": 0.22806743275250696
+      }
+    },
+    "gq_callback_solver_controls_before": {
+      "source_us": {
+        "median": 1417.7417839632278,
+        "mad": 17.360111552369858
+      },
+      "prep_us": {
+        "median": 656.3380600548296,
+        "mad": 5.683342161215023
+      },
+      "first_grad_us": {
+        "median": 5.875,
+        "mad": 0.1665000000000001
+      },
+      "grad_us": {
+        "median": 0.6003912094636084,
+        "mad": 0.02918285366645862
+      },
+      "first_row_us": {
+        "median": 314.97900000000004,
+        "mad": 20.875
+      },
+      "row_us": {
+        "median": 229.22531467652493,
+        "mad": 3.424231250518048
+      },
+      "inference_us": {
+        "median": 24769.792,
+        "mad": 194.72899999999754
+      },
+      "peak_rss": {
+        "median": 29622272.0,
+        "mad": 49152.0
+      },
+      "library_bytes": {
+        "median": 39688512.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 18.5701430418613,
+        "mad": 0.10298602168349547
+      }
+    },
+    "gq_callback_solver_controls_after": {
+      "source_us": {
+        "median": 1417.6468168754013,
+        "mad": 47.07302770555725
+      },
+      "prep_us": {
+        "median": 602.5145071454225,
+        "mad": 15.531004819508837
+      },
+      "first_grad_us": {
+        "median": 12.458,
+        "mad": 1.5625
+      },
+      "grad_us": {
+        "median": 0.6004041363097345,
+        "mad": 0.00975433731856401
+      },
+      "first_row_us": {
+        "median": 136.14600000000002,
+        "mad": 18.062500000000014
+      },
+      "row_us": {
+        "median": 26.71496947177775,
+        "mad": 0.7779128446245327
+      },
+      "inference_us": {
+        "median": 2979.7709999999997,
+        "mad": 162.27050000000008
+      },
+      "peak_rss": {
+        "median": 29777920.0,
+        "mad": 98304.0
+      },
+      "library_bytes": {
+        "median": 39706320.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 18.76382518839424,
+        "mad": 0.2693794267855729
+      }
+    },
+    "ode_branch_returns_before": {
+      "source_us": {
+        "median": 535.5375017226863,
+        "mad": 6.681563212378592
+      },
+      "prep_us": {
+        "median": 317.24415198037,
+        "mad": 6.893197029236092
+      },
+      "first_grad_us": {
+        "median": 40.5205,
+        "mad": 1.0619999999999976
+      },
+      "grad_us": {
+        "median": 2.4771213483014964,
+        "mad": 0.07884648486538892
+      },
+      "first_row_us": {
+        "median": 13.729,
+        "mad": 1.7915
+      },
+      "row_us": {
+        "median": 1.758247461575427,
+        "mad": 0.0472376875507331
+      },
+      "inference_us": {
+        "median": 3187.8955,
+        "mad": 24.708499999999958
+      },
+      "peak_rss": {
+        "median": 28270592.0,
+        "mad": 32768.0
+      },
+      "library_bytes": {
+        "median": 39688512.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1940.9042426215278,
+        "mad": 34.483913407958084
+      }
+    },
+    "ode_branch_returns_after": {
+      "source_us": {
+        "median": 519.2928180334223,
+        "mad": 15.258020920121993
+      },
+      "prep_us": {
+        "median": 318.0506741136012,
+        "mad": 4.771954596976315
+      },
+      "first_grad_us": {
+        "median": 38.6255,
+        "mad": 0.3539999999999992
+      },
+      "grad_us": {
+        "median": 2.5122543890652373,
+        "mad": 0.04533636246875106
+      },
+      "first_row_us": {
+        "median": 13.5205,
+        "mad": 1.0620000000000003
+      },
+      "row_us": {
+        "median": 1.8277625952488101,
+        "mad": 0.07184999730680064
+      },
+      "inference_us": {
+        "median": 3134.6045,
+        "mad": 27.25
+      },
+      "peak_rss": {
+        "median": 28377088.0,
+        "mad": 40960.0
+      },
+      "library_bytes": {
+        "median": 39706320.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1953.622081938244,
+        "mad": 38.36081540487646
+      }
+    }
+  },
+  "samples": [
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 434.19712152777777,
+        "prep_us": 146.01437536485696,
+        "first_grad_us": 5.958,
+        "grad_us": 0.5958428453622007,
+        "first_row_us": 45.541,
+        "row_us": 18.26909331384728,
+        "inference_us": 2048.292,
+        "inference_skipped": false,
+        "peak_rss": 28033024,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13107200,
+        "elapsed_ns": 250539959,
+        "batch": 65536,
+        "warmup_iterations": 9273343,
+        "warmup_elapsed_ns": 200426916,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 459.21154495412844,
+        "prep_us": 165.29957038995374,
+        "first_grad_us": 18.583,
+        "grad_us": 0.5712411229218269,
+        "first_row_us": 47.667,
+        "row_us": 1.2850555141483977,
+        "inference_us": 386.25,
+        "inference_skipped": false,
+        "peak_rss": 28082176,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12910592,
+        "elapsed_ns": 250965666,
+        "batch": 65536,
+        "warmup_iterations": 10551295,
+        "warmup_elapsed_ns": 200156750,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1484.5525147928993,
+        "prep_us": 653.2553315926892,
+        "first_grad_us": 6.084,
+        "grad_us": 0.5849512081556061,
+        "first_row_us": 296.459,
+        "row_us": 218.60864685314684,
+        "inference_us": 24960.834,
+        "inference_skipped": false,
+        "peak_rss": 29704192,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13565952,
+        "elapsed_ns": 250590959,
+        "batch": 65536,
+        "warmup_iterations": 10289151,
+        "warmup_elapsed_ns": 200901209,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1445.9554393063584,
+        "prep_us": 621.6366848635236,
+        "first_grad_us": 13.458,
+        "grad_us": 0.6154736134635838,
+        "first_row_us": 356.625,
+        "row_us": 27.176671195652172,
+        "inference_us": 3149.583,
+        "inference_skipped": false,
+        "peak_rss": 29736960,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13369344,
+        "elapsed_ns": 250038250,
+        "batch": 65536,
+        "warmup_iterations": 10223615,
+        "warmup_elapsed_ns": 200398917,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 501.89036472945895,
+        "prep_us": 308.11812438423647,
+        "first_grad_us": 104.25,
+        "grad_us": 2.7300673560984134,
+        "first_row_us": 13.875,
+        "row_us": 1.8676415108434994,
+        "inference_us": 3687.583,
+        "inference_skipped": false,
+        "peak_rss": 28311552,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 250583041,
+        "batch": 1024,
+        "warmup_iterations": 109567,
+        "warmup_elapsed_ns": 200941500,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 505.5994121212121,
+        "prep_us": 301.3650096385542,
+        "first_grad_us": 75.25,
+        "grad_us": 2.520004465410707,
+        "first_row_us": 13.5,
+        "row_us": 1.8609378372946457,
+        "inference_us": 3109.292,
+        "inference_skipped": false,
+        "peak_rss": 28426240,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 123904,
+        "elapsed_ns": 250872667,
+        "batch": 1024,
+        "warmup_iterations": 105983,
+        "warmup_elapsed_ns": 200284000,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 442.56585663716817,
+        "prep_us": 160.67756555269924,
+        "first_grad_us": 12.167,
+        "grad_us": 0.5550838575168245,
+        "first_row_us": 20.75,
+        "row_us": 1.3569561160685206,
+        "inference_us": 379.25,
+        "inference_skipped": false,
+        "peak_rss": 27983872,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12910592,
+        "elapsed_ns": 250481584,
+        "batch": 65536,
+        "warmup_iterations": 10747903,
+        "warmup_elapsed_ns": 201182334,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 446.90833214285715,
+        "prep_us": 162.34542727272728,
+        "first_grad_us": 5.208,
+        "grad_us": 0.5994184840986688,
+        "first_row_us": 77.375,
+        "row_us": 17.266587264313834,
+        "inference_us": 2229.334,
+        "inference_skipped": false,
+        "peak_rss": 27852800,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13500416,
+        "elapsed_ns": 250001042,
+        "batch": 65536,
+        "warmup_iterations": 10158079,
+        "warmup_elapsed_ns": 200104083,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1389.3381944444445,
+        "prep_us": 614.4543390663391,
+        "first_grad_us": 14.625,
+        "grad_us": 0.6048433337930134,
+        "first_row_us": 142.959,
+        "row_us": 26.559385955593328,
+        "inference_us": 3118.625,
+        "inference_skipped": false,
+        "peak_rss": 29917184,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13631488,
+        "elapsed_ns": 250695750,
+        "batch": 65536,
+        "warmup_iterations": 10289151,
+        "warmup_elapsed_ns": 200882417,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1405.8609550561798,
+        "prep_us": 657.3198818897638,
+        "first_grad_us": 5.917,
+        "grad_us": 0.6158312107716107,
+        "first_row_us": 338.209,
+        "row_us": 227.29178,
+        "inference_us": 24811.584,
+        "inference_skipped": false,
+        "peak_rss": 29589504,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 14221312,
+        "elapsed_ns": 251100458,
+        "batch": 65536,
+        "warmup_iterations": 10354687,
+        "warmup_elapsed_ns": 200092500,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 506.13200202429147,
+        "prep_us": 327.3121178010471,
+        "first_grad_us": 36.833,
+        "grad_us": 2.58587522755482,
+        "first_row_us": 12.458,
+        "row_us": 1.9333261207476549,
+        "inference_us": 3437.416,
+        "inference_skipped": false,
+        "peak_rss": 28409856,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 128000,
+        "elapsed_ns": 250966125,
+        "batch": 1024,
+        "warmup_iterations": 109055,
+        "warmup_elapsed_ns": 200020459,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 519.2051348547718,
+        "prep_us": 305.01407439024393,
+        "first_grad_us": 39.667,
+        "grad_us": 2.480679665406483,
+        "first_row_us": 13.583,
+        "row_us": 1.7800960538870139,
+        "inference_us": 3186.5,
+        "inference_skipped": false,
+        "peak_rss": 28278784,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 128000,
+        "elapsed_ns": 251997125,
+        "batch": 1024,
+        "warmup_iterations": 113663,
+        "warmup_elapsed_ns": 201683708,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 450.890990990991,
+        "prep_us": 150.13788055222088,
+        "first_grad_us": 4.625,
+        "grad_us": 0.5895806155682014,
+        "first_row_us": 83.709,
+        "row_us": 18.243967746643317,
+        "inference_us": 2001.792,
+        "inference_skipped": false,
+        "peak_rss": 27852800,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12779520,
+        "elapsed_ns": 250186917,
+        "batch": 65536,
+        "warmup_iterations": 10944511,
+        "warmup_elapsed_ns": 200353916,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 461.5208339483395,
+        "prep_us": 162.6510078023407,
+        "first_grad_us": 11.917,
+        "grad_us": 0.5902341333736265,
+        "first_row_us": 36.625,
+        "row_us": 1.28706177892412,
+        "inference_us": 379.541,
+        "inference_skipped": false,
+        "peak_rss": 28082176,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13434880,
+        "elapsed_ns": 250347958,
+        "batch": 65536,
+        "warmup_iterations": 10158079,
+        "warmup_elapsed_ns": 200157042,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1382.713629834254,
+        "prep_us": 674.5329083557951,
+        "first_grad_us": 5.084,
+        "grad_us": 0.6295949894354048,
+        "first_row_us": 315.208,
+        "row_us": 233.96417960710946,
+        "inference_us": 24968.208,
+        "inference_skipped": false,
+        "peak_rss": 29605888,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13369344,
+        "elapsed_ns": 250091500,
+        "batch": 65536,
+        "warmup_iterations": 10616831,
+        "warmup_elapsed_ns": 200725875,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1381.7458563535913,
+        "prep_us": 570.1398997722096,
+        "first_grad_us": 13.75,
+        "grad_us": 0.5623801210239798,
+        "first_row_us": 108.542,
+        "row_us": 26.870552987962167,
+        "inference_us": 2840.917,
+        "inference_skipped": false,
+        "peak_rss": 29917184,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12189696,
+        "elapsed_ns": 251315875,
+        "batch": 65536,
+        "warmup_iterations": 10551295,
+        "warmup_elapsed_ns": 201174334,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 542.2564025974026,
+        "prep_us": 315.02954534005033,
+        "first_grad_us": 40.333,
+        "grad_us": 2.3736766772374245,
+        "first_row_us": 9.459,
+        "row_us": 1.7958119931328251,
+        "inference_us": 3159.958,
+        "inference_skipped": false,
+        "peak_rss": 28164096,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 126976,
+        "elapsed_ns": 251672625,
+        "batch": 1024,
+        "warmup_iterations": 109567,
+        "warmup_elapsed_ns": 200279042,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 532.4536340425532,
+        "prep_us": 316.81983164556965,
+        "first_grad_us": 38.709,
+        "grad_us": 2.504504312719768,
+        "first_row_us": 21.0,
+        "row_us": 1.7055805305025311,
+        "inference_us": 3089.291,
+        "inference_skipped": false,
+        "peak_rss": 28377088,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 134144,
+        "elapsed_ns": 250096625,
+        "batch": 1024,
+        "warmup_iterations": 102399,
+        "warmup_elapsed_ns": 200187708,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 431.56688275862064,
+        "prep_us": 163.11929223744292,
+        "first_grad_us": 10.959,
+        "grad_us": 0.6361017762500031,
+        "first_row_us": 21.666,
+        "row_us": 1.3949103747265992,
+        "inference_us": 432.375,
+        "inference_skipped": false,
+        "peak_rss": 28000256,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13107200,
+        "elapsed_ns": 250505958,
+        "batch": 65536,
+        "warmup_iterations": 10485759,
+        "warmup_elapsed_ns": 201108167,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 426.213940374787,
+        "prep_us": 147.75721086828116,
+        "first_grad_us": 8.833,
+        "grad_us": 0.5792212573705733,
+        "first_row_us": 31.792,
+        "row_us": 18.155879302832243,
+        "inference_us": 2013.0,
+        "inference_skipped": false,
+        "peak_rss": 27820032,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12779520,
+        "elapsed_ns": 250140625,
+        "batch": 65536,
+        "warmup_iterations": 11141119,
+        "warmup_elapsed_ns": 200425334,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1486.9672071005916,
+        "prep_us": 607.0342839805825,
+        "first_grad_us": 11.458,
+        "grad_us": 0.583198420233699,
+        "first_row_us": 127.625,
+        "row_us": 25.221745889236356,
+        "inference_us": 3196.75,
+        "inference_skipped": false,
+        "peak_rss": 29687808,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13500416,
+        "elapsed_ns": 251080209,
+        "batch": 65536,
+        "warmup_iterations": 9961471,
+        "warmup_elapsed_ns": 200652292,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1406.9665224719101,
+        "prep_us": 664.6220159151193,
+        "first_grad_us": 5.667,
+        "grad_us": 0.6347091260834463,
+        "first_row_us": 314.75,
+        "row_us": 231.1588493530499,
+        "inference_us": 24728.0,
+        "inference_skipped": false,
+        "peak_rss": 29507584,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13565952,
+        "elapsed_ns": 250811167,
+        "batch": 65536,
+        "warmup_iterations": 10485759,
+        "warmup_elapsed_ns": 200396042,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 488.68855859375,
+        "prep_us": 313.45598370927314,
+        "first_grad_us": 38.25,
+        "grad_us": 2.6510793408411275,
+        "first_row_us": 12.459,
+        "row_us": 1.8753603834728598,
+        "inference_us": 3150.25,
+        "inference_skipped": false,
+        "peak_rss": 28311552,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 125952,
+        "elapsed_ns": 250658000,
+        "batch": 1024,
+        "warmup_iterations": 111615,
+        "warmup_elapsed_ns": 201414958,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 542.1817272727272,
+        "prep_us": 319.4587586206897,
+        "first_grad_us": 42.875,
+        "grad_us": 2.4735630311965093,
+        "first_row_us": 18.5,
+        "row_us": 1.6479356843874624,
+        "inference_us": 3189.291,
+        "inference_skipped": false,
+        "peak_rss": 28311552,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 132096,
+        "elapsed_ns": 250563333,
+        "batch": 1024,
+        "warmup_iterations": 104447,
+        "warmup_elapsed_ns": 201066792,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 435.69541114982576,
+        "prep_us": 162.0451503564485,
+        "first_grad_us": 5.75,
+        "grad_us": 0.5898776125601083,
+        "first_row_us": 55.583,
+        "row_us": 17.24605380423536,
+        "inference_us": 2005.833,
+        "inference_skipped": false,
+        "peak_rss": 27852800,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13500416,
+        "elapsed_ns": 250038917,
+        "batch": 65536,
+        "warmup_iterations": 10223615,
+        "warmup_elapsed_ns": 201077125,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 427.09236348122863,
+        "prep_us": 164.1164153543307,
+        "first_grad_us": 10.459,
+        "grad_us": 0.6075916064949048,
+        "first_row_us": 41.458,
+        "row_us": 1.4136659409882044,
+        "inference_us": 395.625,
+        "inference_skipped": false,
+        "peak_rss": 28180480,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12845056,
+        "elapsed_ns": 250873292,
+        "batch": 65536,
+        "warmup_iterations": 10944511,
+        "warmup_elapsed_ns": 200298125,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1440.5811781609195,
+        "prep_us": 655.3562382198953,
+        "first_grad_us": 5.833,
+        "grad_us": 0.5712292821024876,
+        "first_row_us": 400.5,
+        "row_us": 232.30427855153204,
+        "inference_us": 22413.0,
+        "inference_skipped": false,
+        "peak_rss": 29687808,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13434880,
+        "elapsed_ns": 250937000,
+        "batch": 65536,
+        "warmup_iterations": 10485759,
+        "warmup_elapsed_ns": 201177708,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1475.8919117647058,
+        "prep_us": 597.9947303102625,
+        "first_grad_us": 10.625,
+        "grad_us": 0.6007879919542632,
+        "first_row_us": 129.333,
+        "row_us": 25.31430994329688,
+        "inference_us": 2789.833,
+        "inference_skipped": false,
+        "peak_rss": 29671424,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13303808,
+        "elapsed_ns": 250448083,
+        "batch": 65536,
+        "warmup_iterations": 10420223,
+        "warmup_elapsed_ns": 200188625,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 533.5854648187633,
+        "prep_us": 325.4124941482445,
+        "first_grad_us": 39.25,
+        "grad_us": 2.3808513023189373,
+        "first_row_us": 10.375,
+        "row_us": 1.7363988692638406,
+        "inference_us": 3166.416,
+        "inference_skipped": false,
+        "peak_rss": 28262400,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 250263417,
+        "batch": 1024,
+        "warmup_iterations": 106495,
+        "warmup_elapsed_ns": 200646125,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 542.5405813449024,
+        "prep_us": 319.2815165816327,
+        "first_grad_us": 38.958,
+        "grad_us": 2.481711456565115,
+        "first_row_us": 17.375,
+        "row_us": 1.7316603888592585,
+        "inference_us": 3118.959,
+        "inference_skipped": false,
+        "peak_rss": 28278784,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 251154417,
+        "batch": 1024,
+        "warmup_iterations": 97279,
+        "warmup_elapsed_ns": 201996875,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 451.504738267148,
+        "prep_us": 170.16550408163266,
+        "first_grad_us": 12.916,
+        "grad_us": 0.614350648999592,
+        "first_row_us": 23.25,
+        "row_us": 1.3369587094635065,
+        "inference_us": 429.375,
+        "inference_skipped": false,
+        "peak_rss": 28033024,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 14090240,
+        "elapsed_ns": 250049542,
+        "batch": 65536,
+        "warmup_iterations": 10158079,
+        "warmup_elapsed_ns": 200024333,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_runtime_control",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 436.81144502617803,
+        "prep_us": 163.88234469200526,
+        "first_grad_us": 5.541,
+        "grad_us": 0.6055533831016893,
+        "first_row_us": 43.084,
+        "row_us": 18.225702267259603,
+        "inference_us": 2266.875,
+        "inference_skipped": false,
+        "peak_rss": 27901952,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13500416,
+        "elapsed_ns": 250767125,
+        "batch": 65536,
+        "warmup_iterations": 10354687,
+        "warmup_elapsed_ns": 201144833,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1356.8655405405407,
+        "prep_us": 572.157514874142,
+        "first_grad_us": 9.208,
+        "grad_us": 0.6000202806652059,
+        "first_row_us": 222.458,
+        "row_us": 27.80909343715239,
+        "inference_us": 2825.042,
+        "inference_skipped": false,
+        "peak_rss": 29818880,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12845056,
+        "elapsed_ns": 250574833,
+        "batch": 65536,
+        "warmup_iterations": 10878975,
+        "warmup_elapsed_ns": 200252541,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_solver_controls",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 1428.5170454545455,
+        "prep_us": 639.373724489796,
+        "first_grad_us": 6.0,
+        "grad_us": 0.5634528446470871,
+        "first_row_us": 291.084,
+        "row_us": 225.45581605049594,
+        "inference_us": 22059.208,
+        "inference_skipped": false,
+        "peak_rss": 29638656,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13434880,
+        "elapsed_ns": 250587416,
+        "batch": 65536,
+        "warmup_iterations": 10223615,
+        "warmup_elapsed_ns": 200998917,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 536.1154539614561,
+        "prep_us": 322.99989290322577,
+        "first_grad_us": 38.542,
+        "grad_us": 2.4521245966278578,
+        "first_row_us": 13.541,
+        "row_us": 1.7945873532029748,
+        "inference_us": 3163.792,
+        "inference_skipped": false,
+        "peak_rss": 28377088,
+        "library_bytes": 39706320
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 131072,
+        "elapsed_ns": 250791292,
+        "batch": 1024,
+        "warmup_iterations": 108543,
+        "warmup_elapsed_ns": 201234708,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 537.4895386266095,
+        "prep_us": 322.86220387096773,
+        "first_grad_us": 40.708,
+        "grad_us": 2.538544272049715,
+        "first_row_us": 13.958,
+        "row_us": 1.701336618031359,
+        "inference_us": 3560.208,
+        "inference_skipped": false,
+        "peak_rss": 28246016,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 133632,
+        "elapsed_ns": 250510209,
+        "batch": 512,
+        "warmup_iterations": 97279,
+        "warmup_elapsed_ns": 201013292,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    }
+  ],
+  "library": {
+    "bytes": 39706320,
+    "gzip_bytes": 12389675,
+    "sha256": "f0d7ba2d285cd7ee32528694475334ceec90a2a7b0a551f6be03e65f93132947"
+  }
+}

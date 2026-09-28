@@ -64,12 +64,16 @@ void check(const stanli::Op& op) {
       break;
     case OP_ODE_ADJOINT:
       inputs = {{0.4}, {0.0}, {0.1}, theta};
+      if (op.n_in == 5)
+        inputs.push_back({1e-10, 1e-10, 1e-10, 1e-10, 1e-10, 1e-10,
+                          100000, 10, 1, 1, 1});
       expect("adjoint ODE explicitly selects double scalar types",
              op.variant == 0x10u);
       break;
     default:
       return;
   }
+  expect("solver test supplies every runtime input", inputs.size() == op.n_in);
   const Kernel* kernel = find_kernel(op.opcode);
   expect("solver kernel exists", kernel != nullptr);
   if (!kernel) return;

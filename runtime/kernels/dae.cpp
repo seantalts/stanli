@@ -65,7 +65,8 @@ struct DaeResidual {
 
 template <typename T_y0, typename T_yp0, typename T_theta>
 auto solve(const DaeSpec& spec, const double* y_values, const double* yp_values,
-           int64_t states, const double* theta_values, int64_t parameters) {
+           int64_t states, const double* theta_values, int64_t parameters,
+           const double* controls = nullptr) {
   Eigen::Matrix<T_y0, Eigen::Dynamic, 1> y0(states);
   Eigen::Matrix<T_yp0, Eigen::Dynamic, 1> yp0(states);
   for (int64_t i = 0; i < states; ++i) {
@@ -74,7 +75,9 @@ auto solve(const DaeSpec& spec, const double* y_values, const double* yp_values,
   }
   std::vector<T_theta> theta(theta_values, theta_values + parameters);
   return stan::math::dae_tol(DaeResidual{&spec}, y0, yp0, spec.t0, spec.ts,
-                             spec.rtol, spec.atol, spec.max_steps, nullptr,
+                             controls ? controls[0] : spec.rtol,
+                             controls ? controls[1] : spec.atol,
+                             controls ? static_cast<long>(controls[2]) : spec.max_steps, nullptr,
                              theta, spec.x_r, spec.x_i);
 }
 
@@ -82,7 +85,8 @@ void dae_fwd_data(KernelCtx& ctx, const DaeSpec& spec) {
   const int64_t S = ctx.in[0].len;
   const int64_t P = ctx.in[2].len;
   const auto solution = solve<double, double, double>(
-      spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P);
+      spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P,
+      ctx.n_in == 4 ? ctx.in[3].data : nullptr);
   for (size_t n = 0; n < solution.size(); ++n)
     for (int64_t i = 0; i < S; ++i)
       ctx.out.data[(int64_t)n * S + i] = solution[n][i];
@@ -144,12 +148,16 @@ void dae_fwd_active(KernelCtx& ctx, const DaeSpec& spec) {
 void dae_fwd(KernelCtx& ctx) {
   const DaeSpec& spec = *static_cast<const DaeSpec*>(ctx.udata);
   const int64_t S = ctx.in[0].len, P = ctx.in[2].len;
+  if (ctx.n_in == 4 && (ctx.in[3].len != 3 ||
+                           (!values_only() && ctx.variant != 0x8u)))
+    throw std::invalid_argument("runtime DAE controls require a value-only solve");
   if (ctx.in[1].len != S)
     throw std::invalid_argument(
         "dae: initial state and derivative differ in size");
   if (values_only()) {
     const auto solution = solve<double, double, double>(
-        spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P);
+        spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P,
+      ctx.n_in == 4 ? ctx.in[3].data : nullptr);
     for (size_t n = 0; n < solution.size(); ++n)
       for (int64_t i = 0; i < S; ++i)
         ctx.out.data[(int64_t)n * S + i] = solution[n][i];

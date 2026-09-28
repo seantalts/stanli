@@ -66,20 +66,25 @@ struct MirIntegrand {
 
 template <typename T_a, typename T_b, typename T_theta>
 auto integrate(const QuadratureSpec& spec, const T_a& a, const T_b& b,
-               const Eigen::Matrix<T_theta, Eigen::Dynamic, 1>& theta) {
+               const Eigen::Matrix<T_theta, Eigen::Dynamic, 1>& theta,
+               const double* controls = nullptr) {
+  const double relative = controls ? controls[0] : spec.relative_tolerance;
+  const bool modern = spec.method != mir::QuadratureMethod::Integrate1D;
+  const double absolute = controls && modern ? controls[1] : spec.absolute_tolerance;
+  const int steps = controls && modern ? static_cast<int>(controls[2]) : spec.max_steps;
   const MirIntegrand f{&spec};
   switch (spec.method) {
     case mir::QuadratureMethod::Integrate1D:
-      return stan::math::integrate_1d_impl(f, a, b, spec.relative_tolerance,
+      return stan::math::integrate_1d_impl(f, a, b, relative,
                                            nullptr, theta);
     case mir::QuadratureMethod::DoubleExponential:
       return stan::math::integrate_1d_double_exponential_tol(
-          f, a, b, spec.relative_tolerance, spec.absolute_tolerance,
-          spec.max_steps, nullptr, theta);
+          f, a, b, relative, absolute,
+          steps, nullptr, theta);
     case mir::QuadratureMethod::GaussKronrod:
       return stan::math::integrate_1d_gauss_kronrod_tol(
-          f, a, b, spec.relative_tolerance, spec.absolute_tolerance,
-          spec.max_steps, nullptr, theta);
+          f, a, b, relative, absolute,
+          steps, nullptr, theta);
   }
   throw std::logic_error("quadrature: unknown method");
 }
@@ -96,7 +101,7 @@ void quadrature_eval(KernelCtx& ctx, const QuadratureSpec& spec) {
   for (int i = 0; i < spec.parameter_count; ++i)
     theta(i) = T(ctx.in[2].data[i]);
 
-  auto integral = integrate(spec, a, b, theta);
+  auto integral = integrate(spec, a, b, theta, ctx.n_in == 4 ? ctx.in[3].data : nullptr);
   ctx.out.data[0] = stan::math::value_of(integral);
   if constexpr (ActiveA || ActiveB || ActiveTheta) {
     const int64_t scratch_len = 2 + ctx.in[2].len;
@@ -111,10 +116,14 @@ void quadrature_eval(KernelCtx& ctx, const QuadratureSpec& spec) {
 }
 
 void quadrature_fwd(KernelCtx& ctx) {
-  if (ctx.n_in != 3 || ctx.out.len != 1 || ctx.in[0].len != 1 ||
+  if ((ctx.n_in != 3 && ctx.n_in != 4) || ctx.out.len != 1 || ctx.in[0].len != 1 ||
       ctx.in[1].len != 1)
     throw std::runtime_error("quadrature: malformed kernel arguments");
   const auto& spec = *static_cast<const QuadratureSpec*>(ctx.udata);
+  if (ctx.n_in == 4 &&
+      (ctx.in[3].len != (spec.method == mir::QuadratureMethod::Integrate1D ? 1 : 3) ||
+       (ctx.variant & 0x7u) != 0))
+    throw std::invalid_argument("runtime quadrature controls require a value-only solve");
   switch (ctx.variant & 0x7u) {
     case 0:
       quadrature_eval<false, false, false>(ctx, spec);
