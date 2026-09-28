@@ -1191,6 +1191,11 @@ if(STANLI_FAST_TEST_TUS)
 endif()
 add_test(NAME test_function COMMAND test_function
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+if(Python3_Interpreter_FOUND)
+  add_test(NAME standalone_function_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_function_reference.py
+            $<TARGET_FILE:stanli_shared>)
+endif()
 
 # The conformance gate has its own failure modes (parser drift, a broad policy
 # rule, nonfinite comparison, partition loss) which C++ runtime tests cannot

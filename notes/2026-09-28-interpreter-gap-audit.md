@@ -2,8 +2,8 @@
 
 > **Progress update:** Shared register compilation now handles fixed-shape early
 > returns through branches and loops; see [implementation, validation and native
-> measurements](2026-09-28-function-exits.md). The remaining standalone function
-> entry point is the [next bounded slice](2026-09-28-standalone-function-plan.md).
+> measurements](2026-09-28-function-exits.md). Eligible standalone functions now
+> use cached register plans; see [results and remaining refusals](2026-09-28-standalone-function-results.md).
 > Earlier inventory statements below describe the audit baseline, not this
 > completed return coverage. Native instruction generation remains tabled.
 

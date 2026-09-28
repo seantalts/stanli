@@ -172,6 +172,15 @@ RhsProgram compile_dae_args(
     p.why = b.why;
     p.code.clear();
     p.out_regs.clear();
+  } catch (const std::bad_alloc&) {
+    throw;
+  } catch (const std::exception& failure) {
+    // A folded constructor in an untaken return arm can throw a Stan domain
+    // error during compilation. Defer it to the callback's actual execution.
+    p.ok = false;
+    p.why = failure.what();
+    p.code.clear();
+    p.out_regs.clear();
   }
   return p;
 }
@@ -249,6 +258,15 @@ RhsProgram compile_rhs_args(
   } catch (Bail& b) {
     p.ok = false;
     p.why = b.why;
+    p.code.clear();
+    p.out_regs.clear();
+  } catch (const std::bad_alloc&) {
+    throw;
+  } catch (const std::exception& failure) {
+    // A folded constructor in an untaken return arm can throw a Stan domain
+    // error during compilation. Defer it to the callback's actual execution.
+    p.ok = false;
+    p.why = failure.what();
     p.code.clear();
     p.out_regs.clear();
   }

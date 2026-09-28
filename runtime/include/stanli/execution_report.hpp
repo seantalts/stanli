@@ -35,6 +35,8 @@ class ExecutionTraceScope {
 
 void record_interpreter_event(const std::string& phase, const char* event);
 bool execution_reporting_enabled();
+void report_execution_function(const std::string& name, bool compiled,
+                               const std::string& refusal, int registers);
 
 // Inspect only the final selected model, before its graphs are moved into
 // Executors. This does not execute/probe the model, predict dynamic paths, or

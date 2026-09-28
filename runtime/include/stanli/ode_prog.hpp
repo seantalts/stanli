@@ -60,8 +60,8 @@ struct RhsArg {
   std::vector<int> ints;  // ints
 };
 
-// Compile `f` against a variadic argument list. Never throws: failure
-// comes back as ok == false with a reason.
+// Compile `f` against a variadic argument list. Semantic refusal comes back
+// as ok == false with a reason; allocation failure may still propagate.
 RhsProgram compile_rhs_args(
     const mir::FunDef& f, const std::map<std::string, const mir::FunDef*>& funs,
     int n_y, const std::vector<RhsArg>& args);

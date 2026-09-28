@@ -931,6 +931,27 @@ void test_early_return_effects() {
       {entry}, -1.0, observed_values({7.0}, "prefix\nlate\n"), nullptr, true);
 }
 
+void test_guarded_constructor_error() {
+  Stmt guarded;
+  guarded.kind = Stmt::IfElse;
+  guarded.cond = fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.body = {return_value(
+      make_array({fun("sum",
+                      {fun("linspaced_vector",
+                           {lit_int(-1), lit_real(0), lit_real(1)}, "UVector")},
+                      "UReal")}))};
+  FunDef entry =
+      rhs_function("guarded_constructor",
+                   {nr_fun_app("FnPrint", {lit_string("checked")}), guarded,
+                    return_value(make_array({var("t", "UReal")}))});
+  run_case("untaken invalid constructor",
+           "compilation cannot reject an untaken return", {entry}, -1, {-1},
+           "checked\n", "linspaced_vector");
+  run_domain_error_case("executed invalid constructor",
+                        "fallback rejects after printing once", {entry}, 1, {},
+                        "checked\n", "linspaced_vector");
+}
+
 void test_unknown_nrfunapp_fails_loud() {
   // Erasing an unrecognized non-returning call invents semantics. Until its
   // effect is implemented, both routes must fail loudly rather than return.
@@ -1271,6 +1292,7 @@ int main() {
   test_print_then_reject_effects();
   test_runtime_guarded_effects();
   test_early_return_effects();
+  test_guarded_constructor_error();
   test_unknown_nrfunapp_fails_loud();
   if (failures == 0)
     std::printf("test_mir_program_conformance: all cases passed\n");

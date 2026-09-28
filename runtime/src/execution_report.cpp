@@ -299,6 +299,17 @@ void report_execution_host(const char* host, const char* value_engine,
   r.str("reason", reason);
   emit_diagnostic(r.finish());
 }
+void report_execution_function(const std::string& name, bool compiled,
+                               const std::string& refusal, int registers) {
+  Report r;
+  r.start("execution_function_selection");
+  r.str("function", name);
+  r.str("phase", "standalone_function");
+  r.str("value_engine", compiled ? "register_program" : "mir_interpreter");
+  r.str("refusal", refusal);
+  r.number("registers", registers);
+  emit_diagnostic(r.finish());
+}
 bool execution_reporting_enabled() {
   const char* flag = std::getenv("STANLI_EXECUTION_REPORT");
   return flag && *flag && *flag != '0';

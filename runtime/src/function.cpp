@@ -11,13 +11,19 @@
 #endif
 #include <stanli/mir_decode.hpp>
 #include <stanli/mir_interp.hpp>
+#include <stanli/mir_prog.hpp>
 #include <stanli/message_sink.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -138,6 +144,217 @@ const stanli::mir::FunDef* select_function(
       "'; use a resolved signature");
 }
 
+// Values remain runtime inputs. Only integer formals and complete dimensions
+// specialize a program; promotion has already happened before this boundary.
+struct FunctionKey {
+  const stanli::mir::FunDef* definition = nullptr;
+  std::vector<std::vector<int64_t>> dims;
+  std::vector<std::vector<int>> integers;
+  size_t fingerprint() const {
+    size_t hash = std::hash<const stanli::mir::FunDef*>{}(definition);
+    const auto mix = [&](size_t value) {
+      hash ^= value + (size_t)0x9e3779b9 + (hash << 6) + (hash >> 2);
+    };
+    for (const auto& shape : dims) {
+      mix(shape.size());
+      for (auto extent : shape) mix(std::hash<int64_t>{}(extent));
+    }
+    for (const auto& values : integers) {
+      mix(values.size());
+      for (auto value : values) mix(std::hash<int>{}(value));
+    }
+    return hash;
+  }
+  bool operator==(const FunctionKey& other) const {
+    return definition == other.definition && dims == other.dims &&
+           integers == other.integers;
+  }
+};
+
+struct FunctionPlan {
+  stanli::Program program;
+  std::vector<std::pair<int, int>> inputs;
+  std::vector<int64_t> result_dims;
+  bool ok = false;
+  std::string refusal;
+  size_t storage = 0;
+};
+
+bool direct_function_view(const stanli::mir::UnsizedView& view) {
+  using Leaf = stanli::mir::UnsizedLeaf;
+  if (view.depth == 1) return view.leaf == Leaf::Real || view.leaf == Leaf::Int;
+  if (view.depth != 0) return false;
+  return view.leaf == Leaf::Real || view.leaf == Leaf::Int ||
+         view.leaf == Leaf::Vector || view.leaf == Leaf::RowVector ||
+         view.leaf == Leaf::Matrix;
+}
+
+void return_view(const std::vector<stanli::mir::Stmt>& body,
+                 std::optional<stanli::mir::UnsizedView>& view) {
+  using namespace stanli;
+  for (const auto& statement : body) {
+    if (statement.kind == mir::Stmt::Return) {
+      const auto next = statement.rhs.unsized;
+      if (!statement.has_init || !direct_function_view(next))
+        throw Bail{
+            "standalone return has unsupported or missing type metadata"};
+      // Integer result mirrors and overflow semantics are not represented by
+      // Range. Keep this API surface on its established implementation.
+      if (next.leaf == mir::UnsizedLeaf::Int)
+        throw Bail{"standalone integer results require the MIR interpreter"};
+      if (view && (view->depth != next.depth || view->leaf != next.leaf))
+        throw Bail{"standalone return types disagree"};
+      view = next;
+    }
+    return_view(statement.body, view);
+  }
+}
+
+// Integer arithmetic has a distinct 32-bit/mirror contract that
+// the double register file does not yet encode. This includes integer-valued
+// subexpressions promoted into an otherwise real return. Predicates and shape
+// queries are safe; integer arithmetic stays on the established evaluator.
+void check_integer_contract(
+    const stanli::mir::FunDef& definition,
+    const std::map<std::string, const stanli::mir::FunDef*>& functions,
+    std::set<const stanli::mir::FunDef*>& visited) {
+  using namespace stanli;
+  if (!visited.insert(&definition).second) return;
+  std::function<void(const mir::Expr&)> expression;
+  expression = [&](const mir::Expr& value) {
+    if (value.kind == mir::Expr::FunApp) {
+      if (value.fn_lib == mir::Expr::Lib::UserDefined) {
+        const auto found = functions.find(value.name);
+        if (found != functions.end())
+          check_integer_contract(*found->second, functions, visited);
+      } else if (const auto* spec = function_spec(value);
+                 spec && spec->builtin() &&
+                 spec->result() == FunctionArgumentKind::Integer) {
+        const auto policy = spec->builtin()->shape;
+        // Stanc retains a negative integer literal as unary negation even
+        // when a real comparison consumes it. Its exact value is proven here
+        // without invoking integer arithmetic on unknown runtime operands.
+        const bool literal_negation =
+            spec->builtin()->opcode == OP_NEG && value.args.size() == 1 &&
+            value.args[0].kind == mir::Expr::LitInt &&
+            value.args[0].lit_i >= -(int64_t)std::numeric_limits<int>::max() &&
+            value.args[0].lit_i <= std::numeric_limits<int>::max();
+        if (!literal_negation && policy != BuiltinShapePolicy::Predicate &&
+            policy != BuiltinShapePolicy::ShapeQuery &&
+            policy != BuiltinShapePolicy::SliceView &&
+            policy != BuiltinShapePolicy::Constructor &&
+            policy != BuiltinShapePolicy::Rng)
+          throw Bail{
+              "standalone integer arithmetic requires the MIR interpreter"};
+      }
+    }
+    for (const auto& child : value.args) expression(child);
+  };
+  std::function<void(const mir::Stmt&)> statement;
+  statement = [&](const mir::Stmt& value) {
+    for (const auto* expr : {&value.init, &value.rhs, &value.target,
+                             &value.lower, &value.upper, &value.cond})
+      expression(*expr);
+    for (const auto* exprs : {&value.read_dims, &value.lhs_idx, &value.fn_args})
+      for (const auto& expr : *exprs) expression(expr);
+    for (const auto& child : value.body) statement(child);
+  };
+  for (const auto& value : definition.body) statement(value);
+}
+
+std::shared_ptr<const FunctionPlan> compile_function(
+    const stanli::mir::FunDef& definition,
+    const std::map<std::string, const stanli::mir::FunDef*>& functions,
+    const std::vector<stanli::DataMap::Entry>& values) {
+  using namespace stanli;
+  auto out = std::make_shared<FunctionPlan>();
+  try {
+    std::optional<mir::UnsizedView> result_type;
+    return_view(definition.body, result_type);
+    if (!result_type) throw Bail{"standalone function has no typed return"};
+    std::set<const mir::FunDef*> checked_functions;
+    check_integer_contract(definition, functions, checked_functions);
+    // No interpreter, target, higher-order or external-folding hooks. Failed
+    // compilation cannot execute user code or expose partial side effects.
+    ProgramCompiler compiler{out->program, functions};
+    std::vector<InlineArg> args;
+    for (size_t k = 0; k < values.size(); ++k) {
+      const auto& value = values[k];
+      const auto view = definition.arg_views[k];
+      if (!direct_function_view(view))
+        throw Bail{"standalone argument requires a storage-order adapter"};
+      InlineArg arg;
+      if (view.leaf == mir::UnsizedLeaf::Int) {
+        arg.is_const_int = true;
+        arg.ints.assign(value.i.begin(), value.i.end());
+        arg.int_dims = value.dims;
+        out->inputs.emplace_back(-1, 0);
+      } else {
+        if (value.r.size() > (size_t)ProgramCompiler::kMaxRegs)
+          throw Bail{"standalone argument exceeds the register limit"};
+        auto& range = arg.real;
+        range.len = (int)value.r.size();
+        range.reg = compiler.alloc(range.len);
+        if (view.depth == 1) {
+          range.kind = ViewKind::Array;
+          range.dims = value.dims;
+        } else if (view.leaf == mir::UnsizedLeaf::Vector) {
+          range.kind = ViewKind::Vector;
+        } else if (view.leaf == mir::UnsizedLeaf::RowVector) {
+          range.kind = ViewKind::RowVector;
+        } else if (view.leaf == mir::UnsizedLeaf::Matrix) {
+          range.kind = ViewKind::Matrix;
+          range.rows = value.dims[0];
+          range.cols = value.dims[1];
+        }
+        out->inputs.emplace_back(range.reg, range.len);
+      }
+      args.push_back(std::move(arg));
+    }
+    const Range result = compiler.inline_call(definition, args);
+    if (!ProgramCompiler::unsized_accepts(*result_type, result))
+      throw Bail{"standalone result disagrees with its typed logical view"};
+    if (result.kind == ViewKind::Array)
+      out->result_dims =
+          result.dims.empty() ? std::vector<int64_t>{result.len} : result.dims;
+    else if (result.kind == ViewKind::Matrix)
+      out->result_dims = {result.rows, result.cols};
+    else if (result.kind == ViewKind::Vector ||
+             result.kind == ViewKind::RowVector)
+      out->result_dims = {result.len};
+    for (int i = 0; i < result.len; ++i)
+      out->program.out_regs.push_back(result.reg + i);
+    compiler.finish();
+    compact_program(out->program, out->inputs);
+    out->storage = sizeof(FunctionPlan) +
+                   out->program.code.size() * sizeof(Program::Instr) +
+                   out->program.pool.size() * sizeof(double) +
+                   out->program.n_regs * sizeof(double) +
+                   out->program.out_regs.size() * sizeof(int) +
+                   out->program.calls.size() * sizeof(Program::Call);
+    for (const auto& call : out->program.calls)
+      out->storage += call.idata.size() * sizeof(int);
+    out->ok = true;
+  } catch (const Bail& failure) {
+    // Nothing from a refused compilation survives in the cache.
+    *out = FunctionPlan{};
+    out->refusal = failure.why;
+    out->storage = sizeof(FunctionPlan) + out->refusal.size();
+  } catch (const std::bad_alloc&) {
+    throw;  // Resource exhaustion is not a reusable semantic refusal.
+  } catch (const std::exception& failure) {
+    // Constant constructors and shape validators may report Stan domain
+    // errors while compiling an arm that this call will never execute.
+    // No hooks executed user code, so defer that error to the established
+    // evaluator, at the original point in the function's control flow.
+    *out = FunctionPlan{};
+    out->refusal =
+        "standalone compilation refused: " + std::string(failure.what());
+    out->storage = sizeof(FunctionPlan) + out->refusal.size();
+  }
+  return out;
+}
+
 }  // namespace
 
 struct stanli_function {
@@ -150,7 +367,115 @@ struct stanli_function {
   // NOT cached: type/rank/promotion validation still runs on each call.
   std::map<std::string, const stanli::mir::FunDef*> functions;
   std::vector<const stanli::mir::FunDef*> candidates;
+  std::set<const stanli::mir::FunDef*> real_returns;
+  struct CachedPlan {
+    FunctionKey key;
+    std::shared_ptr<const FunctionPlan> plan;
+    size_t storage;
+  };
+  mutable std::mutex cache_mutex;
+  mutable std::vector<CachedPlan> cache;
+  mutable size_t cache_storage = 0;
+  mutable bool cache_saturated = false;
+  mutable std::optional<size_t> pending_fingerprint;
 };
+
+namespace {
+std::shared_ptr<const FunctionPlan> function_plan(
+    const stanli_function& function, const stanli::mir::FunDef& definition,
+    const std::vector<stanli::DataMap::Entry>& values) {
+  // Bound retained programs and their potential per-call register buffers.
+  // Kernel metadata/string overhead is additional; this is not a process RSS
+  // cap. In-flight calls may retain an evicted immutable plan until completion.
+  constexpr size_t capacity = 8;
+  constexpr size_t storage_budget = 4 * 1024 * 1024;
+  FunctionKey key;
+  key.definition = &definition;
+  size_t key_storage = sizeof(FunctionKey);
+  for (const auto& value : values) {
+    // DataMap::set_int accepts long and keeps that value in the real mirror,
+    // even if narrowing to Stan's int changed the integer mirror. Preserve
+    // that legacy API behavior without allowing two distinct mirrors to
+    // collide on the integer-only specialization key.
+    if (value.is_int)
+      for (size_t i = 0; i < value.i.size(); ++i)
+        if (value.r[i] != (double)value.i[i] ||
+            (value.r[i] == 0 && std::signbit(value.r[i]))) {
+          auto refused = std::make_shared<FunctionPlan>();
+          refused->refusal =
+              "standalone integer input mirrors require the MIR interpreter";
+          return refused;
+        }
+    key_storage +=
+        value.dims.size() * sizeof(int64_t) + value.i.size() * sizeof(int);
+    if (key_storage > storage_budget) {
+      auto refused = std::make_shared<FunctionPlan>();
+      refused->refusal =
+          "standalone specialization key exceeds the cache budget";
+      return refused;
+    }
+    key.dims.push_back(value.dims);
+    key.integers.push_back(value.i);
+  }
+  {
+    std::lock_guard<std::mutex> lock(function.cache_mutex);
+    for (const auto& cached : function.cache)
+      if (cached.key == key) return cached.plan;
+    if (function.cache.size() >= capacity || function.cache_saturated) {
+      // One-off signatures must not turn bounded storage into unbounded
+      // recompilation work. A stable new signature promotes on its second
+      // miss. Fingerprint collisions only cause earlier compilation: actual
+      // plan lookup always compares the complete key above.
+      const size_t fingerprint = key.fingerprint();
+      if (function.pending_fingerprint != fingerprint) {
+        function.pending_fingerprint = fingerprint;
+        auto refused = std::make_shared<FunctionPlan>();
+        refused->refusal = "standalone cache awaiting a repeated signature";
+        return refused;
+      }
+      function.pending_fingerprint.reset();
+    }
+  }
+  auto plan = compile_function(definition, function.functions, values);
+  if (plan->storage + key_storage > storage_budget) {
+    auto refused = std::make_shared<FunctionPlan>();
+    refused->refusal = "standalone compiled program exceeds the cache budget";
+    refused->storage = sizeof(FunctionPlan) + refused->refusal.size();
+    plan = std::move(refused);
+  }
+  const size_t storage = plan->storage + key_storage;
+  std::lock_guard<std::mutex> lock(function.cache_mutex);
+  for (const auto& cached : function.cache)
+    if (cached.key == key) return cached.plan;
+  while (!function.cache.empty() &&
+         (function.cache.size() >= capacity ||
+          function.cache_storage + storage > storage_budget)) {
+    function.cache_saturated = true;
+    function.cache_storage -= function.cache.front().storage;
+    function.cache.erase(function.cache.begin());
+  }
+  function.cache.push_back({std::move(key), plan, storage});
+  function.cache_storage += storage;
+  return plan;
+}
+
+stanli::DataMap::Entry run_function(
+    const FunctionPlan& plan,
+    const std::vector<stanli::DataMap::Entry>& values) {
+  std::vector<double> registers((size_t)plan.program.n_regs);
+  for (size_t k = 0; k < values.size(); ++k) {
+    const auto [reg, len] = plan.inputs[k];
+    if (len > 0) std::copy_n(values[k].r.begin(), len, registers.begin() + reg);
+  }
+  stanli::run_program(plan.program, registers);
+  stanli::DataMap::Entry result;
+  result.dims = plan.result_dims;
+  result.r.reserve(plan.program.out_regs.size());
+  for (int reg : plan.program.out_regs)
+    result.r.push_back(registers[(size_t)reg]);
+  return result;
+}
+}  // namespace
 
 extern "C" {
 
@@ -168,7 +493,18 @@ stanli_function* stanli_function_new_from_mir(const char* mir_text,
     // selected later, when their argument values are present.
     for (const auto& f : out->program->fun_defs) {
       out->functions.emplace(f.name, &f);
-      if (named(f, function_name)) out->candidates.push_back(&f);
+      if (named(f, function_name)) {
+        out->candidates.push_back(&f);
+        // The public result follows the typed return, just as promoted input
+        // formals do. The interpreter can otherwise leave integer mirrors on
+        // a real return, making its type depend on cache admission.
+        try {
+          std::optional<stanli::mir::UnsizedView> view;
+          return_view(f.body, view);
+          if (view) out->real_returns.insert(&f);
+        } catch (const stanli::Bail&) {
+        }
+      }
     }
     if (out->candidates.empty())
       throw std::runtime_error("Stan function not found: " +
@@ -234,9 +570,23 @@ int stanli_function_call(const stanli_function* function,
       values.push_back(std::move(value));
     }
 
-    stanli::MirInterp<double> interpreter(
-        function->functions, "function " + function->requested_name);
-    const auto result = interpreter.call(*selected, values);
+    const auto plan = function_plan(*function, *selected, values);
+    if (function->report_execution)
+      stanli::report_execution_function(selected->name, plan->ok, plan->refusal,
+                                        plan->program.n_regs);
+    stanli::DataMap::Entry result;
+    if (plan->ok) {
+      // Execution errors propagate. Never repeat effects through a fallback.
+      result = run_function(*plan, values);
+    } else {
+      stanli::MirInterp<double> interpreter(
+          function->functions, "function " + function->requested_name);
+      result = interpreter.call(*selected, values);
+    }
+    if (function->real_returns.count(selected)) {
+      result.is_int = false;
+      result.i.clear();
+    }
     if (write_result(result_context, result.is_int ? 1 : 0, result.r.data(),
                      result.r.size(), result.i.data(), result.i.size(),
                      result.dims.data(), result.dims.size()) != 0)
