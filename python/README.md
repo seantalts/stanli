@@ -16,7 +16,7 @@ That is the whole install. No compiler, no `make`, no CmdStan checkout,
 no multi-minute first-run build. One wheel, one shared library, under
 eight megabytes. Models run without a per-model C++ build; see the
 [current benchmark](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
-for measured gradients and setup-plus-20,000-gradient time estimates.
+for measured gradients and setup-plus-2,000-gradient time estimates.
 
 ```python
 import stanli
@@ -239,7 +239,7 @@ opportunities; the model and data determine the result.
 
 The [current full table and method](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
 include every model, failed or capped measurement, and the explicit cost-estimate formula.
-The [optimized-reference appendix](https://github.com/seantalts/stanli/blob/main/docs/benchmark-appendix.md)
+The [optimized-reference appendix](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md#cmdstan-with-stanc3-loop-vectorization)
 compares against CmdStan with stanc3 O1 and loop vectorization enabled.
 
 ## API

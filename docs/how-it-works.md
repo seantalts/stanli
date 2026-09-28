@@ -612,10 +612,10 @@ and deferred at the user's request.
 
 ## Measured behavior and limits
 
-The [benchmark page](benchmarks.md) reports warm gradients and complete CLI
-runs across the application corpus. The [experiment details](benchmark-appendix.md)
-separate model compilation, executor preparation and sampling, and describe
-the numerical gates, dispersion and diagnostic warnings.
+The [benchmark page](benchmarks.md) reports warm gradients and setup-plus-gradient
+time estimates across the application corpus. The [experiment details](benchmarks.md#appendix)
+separate model compilation, executor preparation and gradient evaluation, and
+describe the numerical gates, dispersion and incomplete results.
 
 Computation shape matters more than parameter count:
 

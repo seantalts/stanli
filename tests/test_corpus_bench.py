@@ -479,14 +479,19 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.rows[0].update(values)
         self.records[0]["row"].update(values)
 
-    def test_proxy_uses_all_setup_terms_and_twenty_thousand_gradients(self):
+    def test_proxy_uses_all_setup_terms_and_two_thousand_gradients(self):
         rendered = self.render()
-        self.assertIn("1.42x ±", rendered)
+        self.assertIn("1.42x", rendered)
         self.assertNotIn("2.00x", rendered)
-        self.assertIn("| 0.127 | 2.214 |", rendered)
-        self.assertIn("not measured HMC sampling time", rendered)
-        self.assertIn("20,000", rendered)
-        self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
+        self.assertIn("| 0.1207 | 2.201 |", rendered)
+        self.assertIn("Full sampling is not run", rendered)
+        self.assertIn("2,000", rendered)
+        complete, incomplete = rendered.split("**Incomplete results**")
+        self.assertIn("`good`", complete)
+        self.assertNotIn("`failed`", complete)
+        self.assertNotIn("±", complete)
+        self.assertNotIn("Notes", complete)
+        self.assertIn("`failed` | — | — | — | failed; gradient build failed", incomplete)
 
     def test_missing_failed_row_is_not_complete_inventory(self):
         self.rows.pop()
@@ -534,14 +539,14 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.records[0]["setup"]["cmdstan_build"]["status"] = "failed"
         self.update_row(cmdstan_build_s="", cmdstan_estimated_s="", note="ordinary build failed")
         rendered = self.render()
-        self.assertIn("1.42x ±", rendered)
-        self.assertIn("| 0.127 | — | failed; ordinary build failed", rendered)
+        self.assertIn("1.42x", rendered)
+        self.assertIn("| 0.1207 | — | failed; ordinary build failed", rendered)
 
     def test_partial_preparation_preserves_gradient_and_reference_estimate(self):
         self.records[0]["status"] = "censored"
         self.records[0]["preparation_s"].pop()
         self.update_row(stanli_prep_s="", stanli_estimated_s="", note="prepare timed out")
-        self.assertIn("| — | 2.214 | censored; prepare timed out", self.render())
+        self.assertIn("| — | 2.201 | censored; prepare timed out", self.render())
 
     def test_failed_setup_cannot_supply_a_duration(self):
         self.records[0]["setup"]["cmdstan_build"]["status"] = "failed"
@@ -624,12 +629,15 @@ class VectorizedCatalogTests(unittest.TestCase):
         self.paths[4].write_text(json.dumps(self.baseline))
         return self.render_catalog(*self.paths)
 
-    def test_paired_ratio_mad_and_failures_are_retained(self):
+    def test_vectorized_comparison_uses_same_workload_and_tables(self):
+        from tools.corpus_table import render_catalog
         rendered = self.render()
-        self.assertIn("1.42x ±", rendered)
+        default = render_catalog(self.paths[0], self.paths[2], self.paths[1])
+        self.assertEqual(rendered.split("\n\n", 1)[1], default.split("\n\n", 1)[1])
+        self.assertIn("1.42x", rendered)
         self.assertNotIn("2.00x", rendered)
+        self.assertIn("| 0.1207 | 2.201 |", rendered)
         self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
-        self.assertIn("| Stanli µs | CmdStan O1+vec µs |", rendered)
 
     def test_default_inputs_and_executables_must_match(self):
         for field in ("inputs", "bench", "vectorize_probe"):
