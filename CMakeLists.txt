@@ -958,6 +958,10 @@ add_executable(dump_ops tools/dump_ops.cpp
 target_link_libraries(dump_ops PRIVATE stanli)
 add_dependencies(dump_ops stanli_mir_fixtures)
 if(NOT EMSCRIPTEN)
+  add_test(NAME scalar_rng_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME execution_report_cli
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_execution_report_cli.py
             $<TARGET_FILE:dump_ops> $<TARGET_FILE:stanli_shared>
@@ -1107,7 +1111,7 @@ if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
 endif()
 
 set(STANLI_TESTS
-  test_execution_report
+  test_execution_report test_rng_families
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp

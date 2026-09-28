@@ -551,6 +551,18 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("poisson_rng", rng_builtin(ScalarRng::Poisson));
     builtin("student_t_rng", rng_builtin(ScalarRng::StudentT));
     builtin("bernoulli_logit_rng", rng_builtin(ScalarRng::BernoulliLogit));
+    builtin("std_normal_rng", rng_builtin(ScalarRng::StdNormal));
+    builtin("gamma_rng", rng_builtin(ScalarRng::Gamma));
+    builtin("inv_gamma_rng", rng_builtin(ScalarRng::InvGamma));
+    builtin("beta_rng", rng_builtin(ScalarRng::Beta));
+    builtin("chi_square_rng", rng_builtin(ScalarRng::ChiSquare));
+    builtin("cauchy_rng", rng_builtin(ScalarRng::Cauchy));
+    builtin("double_exponential_rng",
+            rng_builtin(ScalarRng::DoubleExponential));
+    builtin("logistic_rng", rng_builtin(ScalarRng::Logistic));
+    builtin("weibull_rng", rng_builtin(ScalarRng::Weibull));
+    builtin("neg_binomial_2_rng", rng_builtin(ScalarRng::NegBinomial2));
+    builtin("neg_binomial_2_log_rng", rng_builtin(ScalarRng::NegBinomial2Log));
 
     constexpr auto kInt = BuiltinArgumentKind::Integer;
     constexpr auto kReal = BuiltinArgumentKind::Real;

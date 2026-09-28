@@ -20,14 +20,6 @@ namespace stanli {
 namespace {
 
 void rng_fwd(KernelCtx& ctx) {
-  if (ctx.variant > static_cast<uint8_t>(ScalarRng::Exponential) &&
-      ctx.variant != static_cast<uint8_t>(ScalarRng::Poisson) &&
-      ctx.variant != static_cast<uint8_t>(ScalarRng::StudentT) &&
-      ctx.variant != static_cast<uint8_t>(ScalarRng::BernoulliLogit) &&
-      ctx.variant != kCategoricalRngVariant &&
-      ctx.variant != kMultiNormalRngVariant &&
-      ctx.variant != kDirichletRngVariant)
-    throw std::logic_error("malformed RNG op");
   if (ctx.variant == kCategoricalRngVariant) {
     if (ctx.out.len != 1 || ctx.n_in != 1 || ctx.in[0].len < 0)
       throw std::logic_error("malformed categorical RNG op");

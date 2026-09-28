@@ -645,13 +645,19 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
   if (!in_write_array)
     fail(e.name + " is supported only in generated quantities", e.raw);
   const size_t arity = scalar_rng_arity(family);
+  // Newly admitted families start with scalar forms. Their container forms
+  // need a separate validation/broadcasting proof before scalar expansion.
+  if (family >= ScalarRng::StdNormal && e.unsized.depth != 0)
+    fail(e.name + ": container arguments stay on WaInterp", e.raw);
   if (actuals.size() != arity || e.unsized.depth > 1)
     fail(e.name + ": expected " + std::to_string(arity) + " argument(s)",
          e.raw);
   const mir::UnsizedLeaf result_leaf = scalar_rng_is_int(family)
                                            ? mir::UnsizedLeaf::Int
                                            : mir::UnsizedLeaf::Real;
-  if (e.unsized.leaf != result_leaf)
+  const bool promoted_int = scalar_rng_is_int(family) && e.promoted &&
+                            e.unsized.leaf == mir::UnsizedLeaf::Real;
+  if (e.unsized.leaf != result_leaf && !promoted_int)
     fail(e.name + ": result type does not match RNG family", e.raw);
   // Unlike the other scalar families, binomial's (and beta_binomial's)
   // first argument is a population count. Valid stanc MIR always marks it
@@ -703,7 +709,9 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
                     ExpressionLayout::scalar()));
     }
     Val draw = with_layout(
-        arity == 1 ? emit_value(OP_RNG, {call_args[0]}, 1, view_of(scalar_type))
+        arity == 0 ? emit_value(OP_RNG, {}, 1, view_of(scalar_type))
+        : arity == 1
+            ? emit_value(OP_RNG, {call_args[0]}, 1, view_of(scalar_type))
         : arity == 2
             ? emit_value(OP_RNG, {call_args[0], call_args[1]}, 1,
                          view_of(scalar_type))

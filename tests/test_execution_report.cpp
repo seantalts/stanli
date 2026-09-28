@@ -138,7 +138,7 @@ int main() {
     auto rng_model =
         compile_model(slurp("tests/fixtures/execution_rng.tmir.sexp"), data);
     check(rng_model.write_array && rng_model.write_array->interp,
-          "gamma fixture retains interpreter");
+          "container RNG fixture retains interpreter");
     check(rng_model.transform_inits && rng_model.transform_inits->interp,
           "initialization fixture retains interpreter");
     ExecutionTrace entries;

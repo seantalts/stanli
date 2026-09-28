@@ -31,6 +31,17 @@ enum class ScalarRng : uint8_t {
   Poisson = 12,
   StudentT,
   BernoulliLogit,
+  StdNormal,
+  Gamma,
+  InvGamma,
+  Beta,
+  ChiSquare,
+  Cauchy,
+  DoubleExponential,
+  Logistic,
+  Weibull,
+  NegBinomial2,
+  NegBinomial2Log,
 };
 
 // OP_RNG's first non-scalar-argument variant. Keep it outside ScalarRng:

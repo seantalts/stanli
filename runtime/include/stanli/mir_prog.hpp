@@ -2106,7 +2106,9 @@ struct ProgramCompiler {
       // and dynamic indexing uses the existing checked register operations.
       const auto leaf = scalar_rng_is_int(*family) ? mir::UnsizedLeaf::Int
                                                    : mir::UnsizedLeaf::Real;
-      if (e.unsized.depth != 0 || e.unsized.leaf != leaf)
+      const bool promoted_int = scalar_rng_is_int(*family) && e.promoted &&
+                                e.unsized.leaf == mir::UnsizedLeaf::Real;
+      if (e.unsized.depth != 0 || (e.unsized.leaf != leaf && !promoted_int))
         bail(e.name + ": result type does not match scalar RNG family");
       if (args.size() != scalar_rng_arity(*family))
         bail(e.name + ": wrong number of arguments");
