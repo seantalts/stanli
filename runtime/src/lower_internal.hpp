@@ -1453,6 +1453,16 @@ struct Lowering {
       out->push_back(s.lhs);
     for (const auto& k : s.body) assigned_names(k, out);
   }
+  bool invariant_for_upper(const mir::Stmt& s) {
+    if (expr_effectful(s.upper)) return false;
+    mir::Expr upper = s.upper;
+    specialize_static_shapes(&upper);
+    std::vector<std::string> written;
+    for (const auto& child : s.body) assigned_names(child, &written);
+    for (const auto& name : written)
+      if (expr_references(upper, name)) return false;
+    return true;
+  }
   // Remove a return at the lexical end of a statement arm, preserving every
   // statement that precedes it.  This is the structured form used by UDFs
   // such as ctsem's mcalc: each arm returns, but one arm first updates a local

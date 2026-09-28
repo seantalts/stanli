@@ -1,0 +1,995 @@
+{
+  "base": "6ce2018b5382b459666ab32fe0df50d4a6d30ba4",
+  "baseline": "d7d3591d",
+  "binary_identities": {
+    "before": {
+      "sha256": "2f15800c24dd334bc52103816d228a90d20196caf70b9a2a32ec2075741e6e87",
+      "bytes": 39666480,
+      "gzip_bytes": 12367121
+    },
+    "after": {
+      "sha256": "8369ff255416f8b753a516cfa933ffbc51cef8170866d3dbdb3e5f94226912c1",
+      "bytes": 39667152,
+      "gzip_bytes": 12371880
+    }
+  },
+  "manifest": [
+    {
+      "model": "ode_runtime_for",
+      "source": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_runtime_for.stan",
+      "mir": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_runtime_for.tmir.sexp",
+      "data": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_runtime_for.json"
+    },
+    {
+      "model": "ode_branch_returns",
+      "source": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_branch_returns.stan",
+      "mir": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_branch_returns.tmir.sexp",
+      "data": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_branch_returns.json"
+    }
+  ],
+  "summary": {
+    "ode_runtime_for_before": {
+      "source_us": {
+        "median": 702.5570676921866,
+        "mad": 15.371600239170789
+      },
+      "prep_us": {
+        "median": 271.91921947332173,
+        "mad": 1.8786506565029129
+      },
+      "first_grad_us": {
+        "median": 48.729,
+        "mad": 4.438000000000002
+      },
+      "grad_us": {
+        "median": 5.496589407633927,
+        "mad": 0.10528629511916643
+      },
+      "first_row_us": {
+        "median": 21.25,
+        "mad": 1.1455000000000002
+      },
+      "row_us": {
+        "median": 5.343750921953687,
+        "mad": 0.057778398469823244
+      },
+      "inference_us": {
+        "median": 5461.853999999999,
+        "mad": 258.08300000000054
+      },
+      "peak_rss": {
+        "median": 28475392.0,
+        "mad": 32768.0
+      },
+      "library_bytes": {
+        "median": 39666480.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 5166.709363523827,
+        "mad": 175.21840353400694
+      }
+    },
+    "ode_runtime_for_after": {
+      "source_us": {
+        "median": 719.234654971388,
+        "mad": 13.398711120102803
+      },
+      "prep_us": {
+        "median": 275.98095668377675,
+        "mad": 2.2179201165963036
+      },
+      "first_grad_us": {
+        "median": 44.8335,
+        "mad": 2.6045000000000016
+      },
+      "grad_us": {
+        "median": 5.378365642775323,
+        "mad": 0.10333327325185371
+      },
+      "first_row_us": {
+        "median": 20.749499999999998,
+        "mad": 2.3125
+      },
+      "row_us": {
+        "median": 5.293537003412195,
+        "mad": 0.11205527031279461
+      },
+      "inference_us": {
+        "median": 5103.478999999999,
+        "mad": 73.97899999999936
+      },
+      "peak_rss": {
+        "median": 28532736.0,
+        "mad": 57344.0
+      },
+      "library_bytes": {
+        "median": 39667152.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 5128.30792439628,
+        "mad": 105.63387864507149
+      }
+    },
+    "ode_branch_returns_before": {
+      "source_us": {
+        "median": 509.4106956060882,
+        "mad": 14.374962320145698
+      },
+      "prep_us": {
+        "median": 314.2472586872283,
+        "mad": 5.427767564807766
+      },
+      "first_grad_us": {
+        "median": 40.0835,
+        "mad": 3.2920000000000016
+      },
+      "grad_us": {
+        "median": 2.5235185023627706,
+        "mad": 0.03646579046759646
+      },
+      "first_row_us": {
+        "median": 17.8545,
+        "mad": 2.042
+      },
+      "row_us": {
+        "median": 1.7440389182592533,
+        "mad": 0.05528787066405083
+      },
+      "inference_us": {
+        "median": 3265.6040000000003,
+        "mad": 86.75000000000023
+      },
+      "peak_rss": {
+        "median": 28286976.0,
+        "mad": 49152.0
+      },
+      "library_bytes": {
+        "median": 39666480.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1922.037832996038,
+        "mad": 45.9953579813199
+      }
+    },
+    "ode_branch_returns_after": {
+      "source_us": {
+        "median": 519.2595468168665,
+        "mad": 15.526956698589231
+      },
+      "prep_us": {
+        "median": 319.5995221702799,
+        "mad": 7.649356025934054
+      },
+      "first_grad_us": {
+        "median": 35.083,
+        "mad": 0.9795000000000016
+      },
+      "grad_us": {
+        "median": 2.5438475377322924,
+        "mad": 0.05428099892878069
+      },
+      "first_row_us": {
+        "median": 17.7705,
+        "mad": 3.0414999999999983
+      },
+      "row_us": {
+        "median": 1.7801381329876924,
+        "mad": 0.047433191649409734
+      },
+      "inference_us": {
+        "median": 3397.4375,
+        "mad": 48.58349999999996
+      },
+      "peak_rss": {
+        "median": 28377088.0,
+        "mad": 24576.0
+      },
+      "library_bytes": {
+        "median": 39667152.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1837.1352575775377,
+        "mad": 6.502200936912686
+      }
+    }
+  },
+  "raw": [
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 700.313312849162,
+        "prep_us": 268.4360697424893,
+        "first_grad_us": 53.834,
+        "grad_us": 5.415480677584265,
+        "first_row_us": 20.833,
+        "row_us": 5.141838567697086,
+        "inference_us": 5096.417,
+        "inference_skipped": false,
+        "peak_rss": 28508160,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 46080,
+        "elapsed_ns": 250836209,
+        "batch": 256,
+        "warmup_iterations": 38655,
+        "warmup_elapsed_ns": 200427750,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 742.2821483679526,
+        "prep_us": 289.72416917728856,
+        "first_grad_us": 123.333,
+        "grad_us": 5.2941089723228085,
+        "first_row_us": 33.25,
+        "row_us": 5.066854482073731,
+        "inference_us": 5034.542,
+        "inference_skipped": false,
+        "peak_rss": 28459008,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 50688,
+        "elapsed_ns": 250218375,
+        "batch": 256,
+        "warmup_iterations": 37631,
+        "warmup_elapsed_ns": 201149083,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 517.5582809917355,
+        "prep_us": 327.3934332460733,
+        "first_grad_us": 38.625,
+        "grad_us": 2.5733924178324017,
+        "first_row_us": 17.25,
+        "row_us": 1.7031588832798545,
+        "inference_us": 3528.375,
+        "inference_skipped": false,
+        "peak_rss": 28295168,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 141312,
+        "elapsed_ns": 250559875,
+        "batch": 512,
+        "warmup_iterations": 100863,
+        "warmup_elapsed_ns": 200346250,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 508.1806402439025,
+        "prep_us": 317.8391041931385,
+        "first_grad_us": 34.75,
+        "grad_us": 2.6567543464399574,
+        "first_row_us": 14.667,
+        "row_us": 1.836902122719491,
+        "inference_us": 3454.875,
+        "inference_skipped": false,
+        "peak_rss": 28393472,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 136192,
+        "elapsed_ns": 250215333,
+        "batch": 1024,
+        "warmup_iterations": 109055,
+        "warmup_elapsed_ns": 201710250,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 675.5673854447439,
+        "prep_us": 276.7959524336283,
+        "first_grad_us": 43.75,
+        "grad_us": 5.761618192712775,
+        "first_row_us": 20.916,
+        "row_us": 5.532484641940338,
+        "inference_us": 5609.834,
+        "inference_skipped": false,
+        "peak_rss": 28557312,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 48384,
+        "elapsed_ns": 250751916,
+        "batch": 256,
+        "warmup_iterations": 41471,
+        "warmup_elapsed_ns": 200525417,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 705.1938985915492,
+        "prep_us": 267.02868196371395,
+        "first_grad_us": 46.083,
+        "grad_us": 5.630280228813368,
+        "first_row_us": 22.917,
+        "row_us": 5.414894193073274,
+        "inference_us": 5703.708,
+        "inference_skipped": false,
+        "peak_rss": 28508160,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 52224,
+        "elapsed_ns": 251177875,
+        "batch": 256,
+        "warmup_iterations": 41727,
+        "warmup_elapsed_ns": 200157917,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 489.7318160469667,
+        "prep_us": 321.1903620025674,
+        "first_grad_us": 33.75,
+        "grad_us": 2.609481498877929,
+        "first_row_us": 14.791,
+        "row_us": 1.8085692283207095,
+        "inference_us": 3415.125,
+        "inference_skipped": false,
+        "peak_rss": 28393472,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 137216,
+        "elapsed_ns": 251792625,
+        "batch": 1024,
+        "warmup_iterations": 107007,
+        "warmup_elapsed_ns": 200971042,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 497.81974751491055,
+        "prep_us": 317.99110546378654,
+        "first_grad_us": 36.416,
+        "grad_us": 2.559391205978706,
+        "first_row_us": 18.292,
+        "row_us": 1.855350682023956,
+        "inference_us": 3556.625,
+        "inference_skipped": false,
+        "peak_rss": 28229632,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 131072,
+        "elapsed_ns": 250722917,
+        "batch": 1024,
+        "warmup_iterations": 111615,
+        "warmup_elapsed_ns": 200607791,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 674.4506981132076,
+        "prep_us": 272.14313492927096,
+        "first_grad_us": 41.209,
+        "grad_us": 5.567270164343295,
+        "first_row_us": 19.625,
+        "row_us": 5.496720328921331,
+        "inference_us": 5666.833,
+        "inference_skipped": false,
+        "peak_rss": 28377088,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 47360,
+        "elapsed_ns": 251389625,
+        "batch": 256,
+        "warmup_iterations": 39679,
+        "warmup_elapsed_ns": 200832500,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 717.3037249283667,
+        "prep_us": 275.1694631463146,
+        "first_grad_us": 41.166,
+        "grad_us": 5.324921916932907,
+        "first_row_us": 14.792,
+        "row_us": 5.292067991786795,
+        "inference_us": 5024.458,
+        "inference_skipped": false,
+        "peak_rss": 28475392,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 48128,
+        "elapsed_ns": 250878500,
+        "batch": 256,
+        "warmup_iterations": 40959,
+        "warmup_elapsed_ns": 201233667,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 542.9125986984816,
+        "prep_us": 310.0820941759603,
+        "first_grad_us": 46.416,
+        "grad_us": 2.486459625043513,
+        "first_row_us": 11.583,
+        "row_us": 1.7392932369536027,
+        "inference_us": 3265.25,
+        "inference_skipped": false,
+        "peak_rss": 28360704,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 251889584,
+        "batch": 1024,
+        "warmup_iterations": 114687,
+        "warmup_elapsed_ns": 201907834,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 534.2199957264958,
+        "prep_us": 318.00868233799235,
+        "first_grad_us": 40.459,
+        "grad_us": 2.418251825770693,
+        "first_row_us": 22.041,
+        "row_us": 1.7172052395147885,
+        "inference_us": 3075.25,
+        "inference_skipped": false,
+        "peak_rss": 28213248,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 251179000,
+        "batch": 1024,
+        "warmup_iterations": 107519,
+        "warmup_elapsed_ns": 200375000,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 722.9845838150289,
+        "prep_us": 276.79245022123894,
+        "first_grad_us": 46.792,
+        "grad_us": 5.255955766724131,
+        "first_row_us": 22.042,
+        "row_us": 5.123324692091727,
+        "inference_us": 5040.458,
+        "inference_skipped": false,
+        "peak_rss": 28590080,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 49408,
+        "elapsed_ns": 250700041,
+        "batch": 256,
+        "warmup_iterations": 39167,
+        "warmup_elapsed_ns": 200382125,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 746.3536059701493,
+        "prep_us": 272.1933710554951,
+        "first_grad_us": 52.5,
+        "grad_us": 5.367125547445256,
+        "first_row_us": 20.584,
+        "row_us": 5.299337396133628,
+        "inference_us": 5100.417,
+        "inference_skipped": false,
+        "peak_rss": 28426240,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 48384,
+        "elapsed_ns": 250461833,
+        "batch": 256,
+        "warmup_iterations": 43007,
+        "warmup_elapsed_ns": 200864917,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 543.9706521739131,
+        "prep_us": 333.1378162450066,
+        "first_grad_us": 35.709,
+        "grad_us": 2.5124107650718037,
+        "first_row_us": 18.708,
+        "row_us": 1.7517070376546755,
+        "inference_us": 3379.75,
+        "inference_skipped": false,
+        "peak_rss": 28360704,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 137216,
+        "elapsed_ns": 250591666,
+        "batch": 1024,
+        "warmup_iterations": 102399,
+        "warmup_elapsed_ns": 201084916,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 492.2517190569745,
+        "prep_us": 310.50341191066997,
+        "first_grad_us": 36.125,
+        "grad_us": 2.5251940951284304,
+        "first_row_us": 21.833,
+        "row_us": 1.855993734177685,
+        "inference_us": 3265.958,
+        "inference_skipped": false,
+        "peak_rss": 28196864,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 125952,
+        "elapsed_ns": 250592625,
+        "batch": 1024,
+        "warmup_iterations": 111615,
+        "warmup_elapsed_ns": 201782583,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 704.8008225352112,
+        "prep_us": 271.69530401737245,
+        "first_grad_us": 51.375,
+        "grad_us": 5.425908650924559,
+        "first_row_us": 21.667,
+        "row_us": 5.320879003937427,
+        "inference_us": 5256.875,
+        "inference_skipped": false,
+        "peak_rss": 28475392,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 48640,
+        "elapsed_ns": 250830459,
+        "batch": 256,
+        "warmup_iterations": 43007,
+        "warmup_elapsed_ns": 200472959,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 721.1655850144093,
+        "prep_us": 268.52953813104193,
+        "first_grad_us": 45.917,
+        "grad_us": 5.431809368617738,
+        "first_row_us": 17.417,
+        "row_us": 5.295006015037594,
+        "inference_us": 5166.5,
+        "inference_skipped": false,
+        "peak_rss": 28606464,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 47616,
+        "elapsed_ns": 250229166,
+        "batch": 256,
+        "warmup_iterations": 39423,
+        "warmup_elapsed_ns": 200747958,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 542.8815075921909,
+        "prep_us": 337.6317476383266,
+        "first_grad_us": 41.542,
+        "grad_us": 2.463998837003016,
+        "first_row_us": 21.334,
+        "row_us": 1.6743432119105504,
+        "inference_us": 3185.958,
+        "inference_skipped": false,
+        "peak_rss": 28278784,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 135168,
+        "elapsed_ns": 251450125,
+        "batch": 1024,
+        "warmup_iterations": 104447,
+        "warmup_elapsed_ns": 200442916,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 530.3384533898305,
+        "prep_us": 336.0798615591398,
+        "first_grad_us": 35.416,
+        "grad_us": 2.5009195010203675,
+        "first_row_us": 20.917,
+        "row_us": 1.7420357394206716,
+        "inference_us": 3437.167,
+        "inference_skipped": false,
+        "peak_rss": 28426240,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 136192,
+        "elapsed_ns": 250190917,
+        "batch": 1024,
+        "warmup_iterations": 99839,
+        "warmup_elapsed_ns": 200630291,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 679.3550135501356,
+        "prep_us": 272.3601122004357,
+        "first_grad_us": 41.583,
+        "grad_us": 5.825584480950716,
+        "first_row_us": 20.583,
+        "row_us": 5.3474352327173165,
+        "inference_us": 5647.584,
+        "inference_skipped": false,
+        "peak_rss": 28508160,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 51200,
+        "elapsed_ns": 250474334,
+        "batch": 256,
+        "warmup_iterations": 40703,
+        "warmup_elapsed_ns": 200712666,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 671.8595844504022,
+        "prep_us": 285.16296123147094,
+        "first_grad_us": 42.0,
+        "grad_us": 5.773785588914549,
+        "first_row_us": 23.083,
+        "row_us": 5.366622839969947,
+        "inference_us": 5736.166,
+        "inference_skipped": false,
+        "peak_rss": 28475392,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 50432,
+        "elapsed_ns": 250022750,
+        "batch": 256,
+        "warmup_iterations": 40191,
+        "warmup_elapsed_ns": 200502584,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 503.1660823293173,
+        "prep_us": 304.0207059538275,
+        "first_grad_us": 28.5,
+        "grad_us": 2.575284310392781,
+        "first_row_us": 16.833,
+        "row_us": 1.8391019818149719,
+        "inference_us": 3083.208,
+        "inference_skipped": false,
+        "peak_rss": 28344320,
+        "library_bytes": 39667152
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 134144,
+        "elapsed_ns": 252041417,
+        "batch": 1024,
+        "warmup_iterations": 111615,
+        "warmup_elapsed_ns": 201255250,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 501.2631102204409,
+        "prep_us": 307.5568880688807,
+        "first_grad_us": 43.0,
+        "grad_us": 2.521842909597111,
+        "first_row_us": 17.417,
+        "row_us": 1.748784599564904,
+        "inference_us": 3171.75,
+        "inference_skipped": false,
+        "peak_rss": 28327936,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 130048,
+        "elapsed_ns": 251150208,
+        "batch": 1024,
+        "warmup_iterations": 111615,
+        "warmup_elapsed_ns": 201343125,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    }
+  ],
+  "staged_diff_sha256": "17683cbdc1e75f80883d80794422ff528d8e8df6e17c3d8689aa7441178d88f9"
+}

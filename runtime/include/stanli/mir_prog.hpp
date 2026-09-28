@@ -244,11 +244,17 @@ struct ProgramCompiler {
     for (const auto& child : s.body) assigned_names(child, names);
   }
 
-  // Stan's C++ loop condition can re-read the upper bound, whereas MirInterp
-  // snapshots it. Admit only the shared semantics: an effect-free bound whose
-  // inputs the body cannot change. A UDF needs a separate effect proof.
-  static bool invariant_for_bound(const mir::Expr& e,
-                                  const std::set<std::string>& written) {
+  // Unrolling may capture an upper bound only when reevaluation cannot
+  // change its value or produce effects. Other bounds run at the loop head.
+  bool invariant_for_bound(const mir::Expr& e,
+                            const std::set<std::string>& written) {
+    // Fixed container geometry does not depend on element mutations.
+    // Retain the effect check on the operand even when only its shape matters.
+    if (is_shape_query(e)) {
+      Range view;
+      if (static_view(e.args[0], &view))
+        return invariant_for_bound(e.args[0], {});
+    }
     switch (e.kind) {
       case mir::Expr::Var:
         return !written.count(e.name);
@@ -259,15 +265,16 @@ struct ProgramCompiler {
       case mir::Expr::TernaryIf:
       case mir::Expr::EAnd:
       case mir::Expr::EOr:
+      case mir::Expr::Indexed:
         break;
       case mir::Expr::FunApp: {
+        if (e.name == "FnMakeArray" || e.name == "FnMakeRowVec" ||
+            e.name.compare(0, 5, "Index") == 0)
+          break;
         if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
         const auto* spec = function_spec(e);
         if (!spec || !spec->builtin()) return false;
-        const auto shape = spec->builtin()->shape;
-        if (shape != BuiltinShapePolicy::Predicate &&
-            shape != BuiltinShapePolicy::ShapeQuery)
-          return false;
+        if (spec->builtin()->shape == BuiltinShapePolicy::Rng) return false;
         break;
       }
       default:
@@ -3520,11 +3527,14 @@ struct ProgramCompiler {
     std::vector<int> jumps;
   };
   ReturnFrame* return_frame = nullptr;
+  const mir::Stmt* checked_region = nullptr;
 
   void require_runtime_integer_contract() {
-    if (!return_frame)
+    if (!return_frame && !checked_region)
       bail("runtime for/integer binding needs a checked function scope");
     std::set<const mir::FunDef*> visited;
+    if (checked_region)
+      check_program_integer_contract({*checked_region}, funs, visited);
     for (auto* frame = return_frame; frame; frame = frame->parent)
       check_program_integer_contract(*frame->body, funs, visited);
   }
@@ -4122,7 +4132,11 @@ struct ProgramCompiler {
         throw CompileContinue{};
       case mir::Stmt::For: {
         long lo, hi;
-        if (!try_cint(s.lower, &lo) || !try_cint(s.upper, &hi)) {
+        std::set<std::string> written;
+        for (const auto& child : s.body) assigned_names(child, &written);
+        const bool invariant_upper = invariant_for_bound(s.upper, written);
+        if (!invariant_upper ||
+            !try_cint(s.lower, &lo) || !try_cint(s.upper, &hi)) {
           // The flat register file does not represent Stan integer overflow
           // and mirror semantics. Reuse standalone admission's conservative
           // contract rather than silently widening integer arithmetic here.
@@ -4134,23 +4148,13 @@ struct ProgramCompiler {
           if (structured_while_depth != runtime_for_depth)
             bail("runtime for nested in while needs repeated integer bindings");
 
-          std::set<std::string> written;
-          for (const auto& child : s.body) assigned_names(child, &written);
-          if (!invariant_for_bound(s.upper, written))
-            bail("runtime for needs an invariant, effect-free upper bound");
-
-          // Evaluate and snapshot each bound exactly once, in source order.
+          // Evaluate and snapshot the lower bound exactly once.
           // In particular, the lower bound may be a variable assigned by the
           // body, so it cannot remain an aliased Range.
           const Range lower = expr(s.lower);
           if (!is_scalar(lower)) bail("for lower bound is not scalar");
           const int index = alloc(1);
           emit(Program::MOV, index, lower.reg);
-          const Range upper = expr(s.upper);
-          if (!is_scalar(upper)) bail("for upper bound is not scalar");
-          const int limit = alloc(1);
-          emit(Program::MOV, limit, upper.reg);
-
           for (const auto& name : written) {
             if (int_array_names.count(name))
               bail("runtime for writes an integer array: " + name);
@@ -4160,9 +4164,12 @@ struct ProgramCompiler {
           reals[s.loopvar] = Range{index, 1};
           const int one = konst(1);
           const int condition = alloc(1);
-          emit(Program::LE, condition, index, limit);
-          const int empty = emit(Program::JZ, 0, condition);
           const int head = (int)p.code.size();
+          const Range upper = expr(s.upper);
+          if (!is_scalar(upper)) bail("for upper bound is not scalar");
+          emit(Program::LE, condition, index, upper.reg);
+          const int empty = emit(Program::JZ, 0, condition);
+          const int body_head = (int)p.code.size();
           loops.push_back({});
           loops.back().structured = true;
           structured_while_seen = true;
@@ -4177,15 +4184,19 @@ struct ProgramCompiler {
           --structured_while_depth;
           for (int jump : loops.back().continues)
             p.code[(size_t)jump].dst = (int)p.code.size();
-          // Test before incrementing, including at INT_MAX. The loop variable
-          // remains a valid Stan integer for every executed body.
-          emit(Program::LT, condition, index, limit);
-          const int done = emit(Program::JZ, 0, condition);
+          // The private double counter represents INT_MAX + 1 exactly; no
+          // out-of-range loop variable reaches a body with an int upper bound.
+          // Proven invariant bounds keep the cheaper counted-loop backedge.
+          int done = -1;
+          if (invariant_upper) {
+            emit(Program::LT, condition, index, upper.reg);
+            done = emit(Program::JZ, 0, condition);
+          }
           emit(Program::ADD, index, index, one);
-          emit(Program::JMP, head);
+          emit(Program::JMP, invariant_upper ? body_head : head);
           const int end = (int)p.code.size();
           p.code[(size_t)empty].dst = end;
-          p.code[(size_t)done].dst = end;
+          if (done >= 0) p.code[(size_t)done].dst = end;
           for (int jump : loops.back().breaks) p.code[(size_t)jump].dst = end;
           loops.pop_back();
           reals.erase(s.loopvar);

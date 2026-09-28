@@ -5089,8 +5089,8 @@ void test_runtime_int_sum_is_not_compile_time() {
       "    (meta <opaque>))\n   ";
   std::string loop = base;
   loop.insert(insertion, runtime_loop);
-  expect_reduction_interp(loop, "unknown int total",
-                          "runtime sum cannot provide a loop bound", true);
+  expect_reduction_interp(loop, "runtime-control region produces nothing",
+                          "unused runtime loop has no live output", true);
 
   const std::string runtime_condition =
       "((pattern\n"

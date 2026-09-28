@@ -1,5 +1,9 @@
 # Fill existing execution-engine gaps before replacing MirInterp
 
+Update: the previously deferred upper-bound discrepancy is now fixed; see
+[Stan loop semantics](2026-09-28-for-bound-semantics.md). The results below
+describe the earlier runtime-for coverage patch.
+
 The objective is predictable native performance. Removing `MirInterp` is useful
 only insofar as it removes a performance cliff. A replacement with comparable
 cost is not progress. The general typed-value-program proposal is deferred.

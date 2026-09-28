@@ -51,15 +51,17 @@ def main(check, dump_ops):
                              "OP_ALGEBRA_SOLVER": 0, "OP_QUADRATURE": 0,
                              "OP_ODE_ADJOINT": 0x10}[node["operation"]], node
 
-    stem = ROOT / "tests/fixtures/ode_runtime_for"
-    report = json.loads(subprocess.check_output(
-        [dump_ops, str(stem.with_suffix(".tmir.sexp")),
-         str(stem.with_suffix(".json")), "--execution-json"], text=True))
-    for phase in ("log_prob", "write_array"):
-        selected = list(callbacks(report[phase]))
-        assert selected, (phase, report)
-        assert all(n["callback"]["value_engine"] == "register_program"
-                   for n in selected), (phase, selected)
+    for name in ("ode_runtime_for", "for_bound_semantics"):
+        stem = ROOT / "tests/fixtures" / name
+        report = json.loads(subprocess.check_output(
+            [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+             str(stem.with_suffix(".json")), "--execution-json"], text=True))
+        for phase in ("log_prob", "write_array"):
+            assert report[phase].get("value_engine") != "mir_interpreter", report
+            selected = list(callbacks(report[phase]))
+            assert selected, (phase, report)
+            assert all(n["callback"]["value_engine"] == "register_program"
+                       for n in selected), (phase, selected)
 
     stem = ROOT / "tests/fixtures/gq_callback_shared_function"
     report = json.loads(subprocess.check_output(

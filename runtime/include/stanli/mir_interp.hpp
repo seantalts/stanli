@@ -543,8 +543,10 @@ class MirInterp {
         }
       }
       case mir::Stmt::For: {
-        const long lo = as_int(st.lower), hi = as_int(st.upper);
-        for (long v = lo; v <= hi; ++v) {
+        const long lo = as_int(st.lower);
+        // Match stanc's C++ for condition, including upper-bound effects on
+        // the final failed test. Only the lower bound is evaluated once.
+        for (long v = lo; v <= as_int(st.upper); ++v) {
           Value lv;
           lv.is_int = true;
           lv.i = {(int)v};

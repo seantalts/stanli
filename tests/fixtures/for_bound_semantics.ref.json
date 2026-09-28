@@ -1,0 +1,81 @@
+{
+  "source_sha256": "ca2a51c5541d60e1f35afa1b1f62b3ea3ce9281c0fd7ade78ff7551551b581c9",
+  "data_sha256": "c225e47dc2bff9e5b2bca62f03e10c4dd15317c3d876047a66335e2aecc8bfe4",
+  "recorded": {
+    "cmdstan": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+    "stan": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+    "math": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+    "stanc3": "d58446e631b02cacc5355e373defc6092a684554",
+    "posteriordb": "28f8d3d6e975315f42aa274a8399f21e07a43b30",
+    "cmdstan_version": "2.40.0",
+    "stanc_sha256": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "compiler_family": "clang",
+    "reference_flags": "-O1 -ffp-contract=off; stanc default optimization",
+    "platform": "Darwin arm64"
+  },
+  "seed": 1234,
+  "chain": 0,
+  "points": {
+    "0": {
+      "values": [
+        "0.71460528042383786",
+        "12.092157887830432"
+      ],
+      "wa": {
+        "names": "rate,a,b,c,solution.1.1,solution.2.1,draw,visits,last",
+        "values": [
+          "0.10000000000000001",
+          "0.10000000000000001",
+          "0.40000000000000002",
+          "0.69999999999999996",
+          "0.99004983374916844",
+          "0.98019867330675592",
+          "0.7431061727634215",
+          "6",
+          "3"
+        ]
+      }
+    },
+    "1": {
+      "values": [
+        "-0.86886434270304747",
+        "9.2432257370812199"
+      ],
+      "wa": {
+        "names": "rate,a,b,c,solution.1.1,solution.2.1,draw,visits,last",
+        "values": [
+          "-0.040000000000000001",
+          "-0.040000000000000001",
+          "-0.16",
+          "-0.16",
+          "1.0040080106773417",
+          "1.0080320855042735",
+          "0.7431061727634215",
+          "6",
+          "3"
+        ]
+      }
+    },
+    "2": {
+      "values": [
+        "-0.5",
+        "9.1999999999999993"
+      ],
+      "wa": {
+        "names": "rate,a,b,c,solution.1.1,solution.2.1,draw,visits,last",
+        "values": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "1",
+          "1",
+          "0.7431061727634215",
+          "6",
+          "3"
+        ]
+      }
+    }
+  }
+}
