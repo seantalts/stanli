@@ -93,7 +93,7 @@ struct MirRhs {
     size_t th_at = 0, xr_at = 0;
     for (const RhsArg& a : spec->args) {
       if (a.is_int) {
-        ints.push_back(a.ints);
+        ints.push_back(callback_integer_values(a, theta.data(), &th_at));
       } else if (a.is_param) {
         reals.emplace_back(theta.begin() + th_at,
                            theta.begin() + th_at + a.len);

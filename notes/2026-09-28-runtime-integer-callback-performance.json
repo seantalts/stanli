@@ -1,0 +1,1475 @@
+{
+  "summary": {
+    "gq_callback_runtime_integer_before": {
+      "source_us": {
+        "median": 459.67277781157065,
+        "mad": 3.823607418780341
+      },
+      "prep_us": {
+        "median": 163.97778985243627,
+        "mad": 5.155505925863295
+      },
+      "first_grad_us": {
+        "median": 5.7085,
+        "mad": 0.16749999999999954
+      },
+      "grad_us": {
+        "median": 0.5884785154391294,
+        "mad": 0.01959669403249381
+      },
+      "first_row_us": {
+        "median": 49.9585,
+        "mad": 11.75
+      },
+      "row_us": {
+        "median": 20.092628708978047,
+        "mad": 0.10436223923022325
+      },
+      "inference_us": {
+        "median": 2329.0209999999997,
+        "mad": 127.89599999999973
+      },
+      "peak_rss": {
+        "median": 27852800.0,
+        "mad": 65536.0
+      },
+      "library_bytes": {
+        "median": 39669392.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 19.181883489948305,
+        "mad": 0.456244421333281
+      }
+    },
+    "gq_callback_runtime_integer_after": {
+      "source_us": {
+        "median": 464.6999165082383,
+        "mad": 16.179403211605234
+      },
+      "prep_us": {
+        "median": 139.51067555058893,
+        "mad": 2.0256219056786193
+      },
+      "first_grad_us": {
+        "median": 11.4585,
+        "mad": 1.4379999999999997
+      },
+      "grad_us": {
+        "median": 0.5777901453909835,
+        "mad": 0.006388024821164517
+      },
+      "first_row_us": {
+        "median": 18.771,
+        "mad": 2.291499999999999
+      },
+      "row_us": {
+        "median": 1.348675724663281,
+        "mad": 0.05159561823030989
+      },
+      "inference_us": {
+        "median": 388.333,
+        "mad": 5.979000000000013
+      },
+      "peak_rss": {
+        "median": 27672576.0,
+        "mad": 40960.0
+      },
+      "library_bytes": {
+        "median": 39688512.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 19.277859570029953,
+        "mad": 0.2582836744993031
+      }
+    },
+    "gq_callback_integer_contexts_before": {
+      "source_us": {
+        "median": 1984.7260303399576,
+        "mad": 19.084820909593418
+      },
+      "prep_us": {
+        "median": 790.6369452057521,
+        "mad": 15.612814814163244
+      },
+      "first_grad_us": {
+        "median": 5.8125,
+        "mad": 0.2705000000000002
+      },
+      "grad_us": {
+        "median": 0.631369456393898,
+        "mad": 0.006817259552042321
+      },
+      "first_row_us": {
+        "median": 245.375,
+        "mad": 5.896000000000001
+      },
+      "row_us": {
+        "median": 179.77966445480632,
+        "mad": 1.7994262176217575
+      },
+      "inference_us": {
+        "median": 18937.3125,
+        "mad": 159.52100000000064
+      },
+      "peak_rss": {
+        "median": 30162944.0,
+        "mad": 32768.0
+      },
+      "library_bytes": {
+        "median": 39669392.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 38.05615697215869,
+        "mad": 1.3679551131299732
+      }
+    },
+    "gq_callback_integer_contexts_after": {
+      "source_us": {
+        "median": 2048.6171583333335,
+        "mad": 55.8884383053221
+      },
+      "prep_us": {
+        "median": 795.1439743653057,
+        "mad": 8.658189722193981
+      },
+      "first_grad_us": {
+        "median": 11.624500000000001,
+        "mad": 0.4375000000000009
+      },
+      "grad_us": {
+        "median": 0.6114041289202393,
+        "mad": 0.013592586654623595
+      },
+      "first_row_us": {
+        "median": 108.062,
+        "mad": 3.9369999999999976
+      },
+      "row_us": {
+        "median": 21.46448676547064,
+        "mad": 0.4485380046087446
+      },
+      "inference_us": {
+        "median": 2447.9165000000003,
+        "mad": 24.750000000000227
+      },
+      "peak_rss": {
+        "median": 30269440.0,
+        "mad": 16384.0
+      },
+      "library_bytes": {
+        "median": 39688512.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 37.10777008649215,
+        "mad": 0.6970348622248714
+      }
+    },
+    "ode_branch_returns_before": {
+      "source_us": {
+        "median": 514.4854811982424,
+        "mad": 9.488925186893283
+      },
+      "prep_us": {
+        "median": 319.1214928408888,
+        "mad": 8.53449858788099
+      },
+      "first_grad_us": {
+        "median": 36.3335,
+        "mad": 3.2079999999999984
+      },
+      "grad_us": {
+        "median": 2.5265983337309006,
+        "mad": 0.06031285034494571
+      },
+      "first_row_us": {
+        "median": 17.229,
+        "mad": 4.1665
+      },
+      "row_us": {
+        "median": 1.7935572309310992,
+        "mad": 0.046350657312918764
+      },
+      "inference_us": {
+        "median": 3383.5,
+        "mad": 213.875
+      },
+      "peak_rss": {
+        "median": 28237824.0,
+        "mad": 40960.0
+      },
+      "library_bytes": {
+        "median": 39669392.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1863.5630934373553,
+        "mad": 32.376148395968585
+      }
+    },
+    "ode_branch_returns_after": {
+      "source_us": {
+        "median": 495.39870228153245,
+        "mad": 3.9986209219104296
+      },
+      "prep_us": {
+        "median": 315.0222659421911,
+        "mad": 3.9198553397301623
+      },
+      "first_grad_us": {
+        "median": 36.0835,
+        "mad": 1.8125
+      },
+      "grad_us": {
+        "median": 2.566030021542374,
+        "mad": 0.0628263900312871
+      },
+      "first_row_us": {
+        "median": 13.458,
+        "mad": 1.2089999999999996
+      },
+      "row_us": {
+        "median": 1.811664108797883,
+        "mad": 0.02144856742640211
+      },
+      "inference_us": {
+        "median": 3274.917,
+        "mad": 170.24950000000013
+      },
+      "peak_rss": {
+        "median": 28246016.0,
+        "mad": 49152.0
+      },
+      "library_bytes": {
+        "median": 39688512.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1925.423463246179,
+        "mad": 17.201067848811135
+      }
+    }
+  },
+  "samples": [
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 444.9629306049822,
+        "prep_us": 157.69790353089533,
+        "first_grad_us": 5.667,
+        "grad_us": 0.5858660289323887,
+        "first_row_us": 51.375,
+        "row_us": 21.290077067188964,
+        "inference_us": 2482.0,
+        "inference_skipped": false,
+        "peak_rss": 28049408,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13434880,
+        "elapsed_ns": 250606584,
+        "batch": 65536,
+        "warmup_iterations": 11337727,
+        "warmup_elapsed_ns": 201013500,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 453.58091666666667,
+        "prep_us": 135.6839392295171,
+        "first_grad_us": 11.625,
+        "grad_us": 0.5738978875987677,
+        "first_row_us": 28.584,
+        "row_us": 1.3284144530938653,
+        "inference_us": 389.583,
+        "inference_skipped": false,
+        "peak_rss": 27721728,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12845056,
+        "elapsed_ns": 250937792,
+        "batch": 65536,
+        "warmup_iterations": 11403263,
+        "warmup_elapsed_ns": 201226917,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 1973.4826141732283,
+        "prep_us": 751.3074324324324,
+        "first_grad_us": 5.75,
+        "grad_us": 0.5852047158018924,
+        "first_row_us": 180.167,
+        "row_us": 180.18675,
+        "inference_us": 17475.167,
+        "inference_skipped": false,
+        "peak_rss": 30031872,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6356992,
+        "elapsed_ns": 250441041,
+        "batch": 32768,
+        "warmup_iterations": 5570559,
+        "warmup_elapsed_ns": 200224958,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 2006.318,
+        "prep_us": 750.81674251497,
+        "first_grad_us": 11.541,
+        "grad_us": 0.6141977220688096,
+        "first_row_us": 295.541,
+        "row_us": 21.780979526049837,
+        "inference_us": 2458.166,
+        "inference_skipped": false,
+        "peak_rss": 30326784,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6750208,
+        "elapsed_ns": 250771458,
+        "batch": 32768,
+        "warmup_iterations": 5177343,
+        "warmup_elapsed_ns": 200753250,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 516.2072164948454,
+        "prep_us": 326.72720757180156,
+        "first_grad_us": 112.5,
+        "grad_us": 2.5886901961190385,
+        "first_row_us": 25.875,
+        "row_us": 1.7777616816116393,
+        "inference_us": 3579.542,
+        "inference_skipped": false,
+        "peak_rss": 28311552,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 142336,
+        "elapsed_ns": 250925084,
+        "batch": 1024,
+        "warmup_iterations": 105471,
+        "warmup_elapsed_ns": 201437084,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 494.22488537549407,
+        "prep_us": 334.84722222222223,
+        "first_grad_us": 81.167,
+        "grad_us": 2.6579132990995014,
+        "first_row_us": 12.416,
+        "row_us": 1.7659368647090818,
+        "inference_us": 3476.5,
+        "inference_skipped": false,
+        "peak_rss": 28295168,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 141312,
+        "elapsed_ns": 250027583,
+        "batch": 1024,
+        "warmup_iterations": 103423,
+        "warmup_elapsed_ns": 201246958,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 434.9737686956522,
+        "prep_us": 139.99951007838746,
+        "first_grad_us": 10.333,
+        "grad_us": 0.5923957859417652,
+        "first_row_us": 16.667,
+        "row_us": 1.4105453940204358,
+        "inference_us": 428.291,
+        "inference_skipped": false,
+        "peak_rss": 27688960,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13238272,
+        "elapsed_ns": 250964666,
+        "batch": 65536,
+        "warmup_iterations": 11206655,
+        "warmup_elapsed_ns": 200837375,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 456.214644160584,
+        "prep_us": 165.1846103038309,
+        "first_grad_us": 5.541,
+        "grad_us": 0.5649688634879311,
+        "first_row_us": 32.875,
+        "row_us": 20.77193079096045,
+        "inference_us": 2210.709,
+        "inference_skipped": false,
+        "peak_rss": 27770880,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 11337728,
+        "elapsed_ns": 250940208,
+        "batch": 65536,
+        "warmup_iterations": 9895935,
+        "warmup_elapsed_ns": 200063459,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 2107.0129495798324,
+        "prep_us": 789.3443753943218,
+        "first_grad_us": 11.333,
+        "grad_us": 0.5894767463794428,
+        "first_row_us": 117.125,
+        "row_us": 21.55154728040686,
+        "inference_us": 2437.667,
+        "inference_skipped": false,
+        "peak_rss": 30277632,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6553600,
+        "elapsed_ns": 250758458,
+        "batch": 32768,
+        "warmup_iterations": 5275647,
+        "warmup_elapsed_ns": 200001041,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 2050.2274590163934,
+        "prep_us": 802.5217692307692,
+        "first_grad_us": 5.417,
+        "grad_us": 0.633483172175429,
+        "first_row_us": 240.125,
+        "row_us": 179.37257890961263,
+        "inference_us": 18934.792,
+        "inference_skipped": false,
+        "peak_rss": 30195712,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6488064,
+        "elapsed_ns": 250777292,
+        "batch": 32768,
+        "warmup_iterations": 5308415,
+        "warmup_elapsed_ns": 200506709,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 518.7665124481327,
+        "prep_us": 312.2616004993758,
+        "first_grad_us": 38.375,
+        "grad_us": 2.65769478137923,
+        "first_row_us": 12.291,
+        "row_us": 1.8213953503620919,
+        "inference_us": 3112.875,
+        "inference_skipped": false,
+        "peak_rss": 28229632,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 250070584,
+        "batch": 1024,
+        "warmup_iterations": 107519,
+        "warmup_elapsed_ns": 200659583,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 542.1893939393939,
+        "prep_us": 333.6871106666666,
+        "first_grad_us": 40.0,
+        "grad_us": 2.4506791518811144,
+        "first_row_us": 19.625,
+        "row_us": 1.692898927381565,
+        "inference_us": 3151.792,
+        "inference_skipped": false,
+        "peak_rss": 28311552,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 134144,
+        "elapsed_ns": 250611833,
+        "batch": 1024,
+        "warmup_iterations": 106495,
+        "warmup_elapsed_ns": 200248042,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 462.9726851851852,
+        "prep_us": 178.30384248039914,
+        "first_grad_us": 6.375,
+        "grad_us": 0.616844195129895,
+        "first_row_us": 82.291,
+        "row_us": 20.034507973395304,
+        "inference_us": 2446.167,
+        "inference_skipped": false,
+        "peak_rss": 27918336,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13238272,
+        "elapsed_ns": 250070875,
+        "batch": 65536,
+        "warmup_iterations": 10223615,
+        "warmup_elapsed_ns": 200266708,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 431.8756476683938,
+        "prep_us": 145.01987942028987,
+        "first_grad_us": 9.0,
+        "grad_us": 0.6131500719837344,
+        "first_row_us": 23.0,
+        "row_us": 1.4018352790768092,
+        "inference_us": 432.916,
+        "inference_skipped": false,
+        "peak_rss": 27770880,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12976128,
+        "elapsed_ns": 250524708,
+        "batch": 65536,
+        "warmup_iterations": 10682367,
+        "warmup_elapsed_ns": 200419042,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 1957.7998046875,
+        "prep_us": 724.5951329479769,
+        "first_grad_us": 6.25,
+        "grad_us": 0.6198486530713444,
+        "first_row_us": 239.0,
+        "row_us": 180.4875836940837,
+        "inference_us": 16884.667,
+        "inference_skipped": false,
+        "peak_rss": 30179328,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6258688,
+        "elapsed_ns": 251102417,
+        "batch": 32768,
+        "warmup_iterations": 5472255,
+        "warmup_elapsed_ns": 200674167,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 2090.9163166666667,
+        "prep_us": 806.6607548387097,
+        "first_grad_us": 13.916,
+        "grad_us": 0.6333711446769053,
+        "first_row_us": 107.083,
+        "row_us": 21.377426250534416,
+        "inference_us": 2726.459,
+        "inference_skipped": false,
+        "peak_rss": 30261248,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 7012352,
+        "elapsed_ns": 250971875,
+        "batch": 32768,
+        "warmup_iterations": 5013503,
+        "warmup_elapsed_ns": 200958834,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 497.3888330019881,
+        "prep_us": 325.04377792207794,
+        "first_grad_us": 35.625,
+        "grad_us": 2.582314616838648,
+        "first_row_us": 22.875,
+        "row_us": 1.875886351869499,
+        "inference_us": 3499.542,
+        "inference_skipped": false,
+        "peak_rss": 28196864,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 136192,
+        "elapsed_ns": 251691542,
+        "batch": 1024,
+        "warmup_iterations": 113663,
+        "warmup_elapsed_ns": 201313917,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 494.9766956521739,
+        "prep_us": 305.1014731707317,
+        "first_grad_us": 34.292,
+        "grad_us": 2.532042001316656,
+        "first_row_us": 17.75,
+        "row_us": 1.8019328672336745,
+        "inference_us": 3051.5,
+        "inference_skipped": false,
+        "peak_rss": 28262400,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 250606292,
+        "batch": 1024,
+        "warmup_iterations": 107519,
+        "warmup_elapsed_ns": 201818542,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 480.5914913627639,
+        "prep_us": 142.38188097949885,
+        "first_grad_us": 11.292,
+        "grad_us": 0.5786275592628767,
+        "first_row_us": 17.5,
+        "row_us": 1.2986440426161894,
+        "inference_us": 378.458,
+        "inference_skipped": false,
+        "peak_rss": 27590656,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13041664,
+        "elapsed_ns": 251040750,
+        "batch": 65536,
+        "warmup_iterations": 10878975,
+        "warmup_elapsed_ns": 201026125,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 482.4648362235067,
+        "prep_us": 178.59711285714286,
+        "first_grad_us": 5.75,
+        "grad_us": 0.6168355765553486,
+        "first_row_us": 48.542,
+        "row_us": 19.942024966100345,
+        "inference_us": 2478.292,
+        "inference_skipped": false,
+        "peak_rss": 27820032,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 14024704,
+        "elapsed_ns": 250988209,
+        "batch": 65536,
+        "warmup_iterations": 10223615,
+        "warmup_elapsed_ns": 200305209,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 1981.0337952755906,
+        "prep_us": 820.0204918032787,
+        "first_grad_us": 11.708,
+        "grad_us": 0.608610535771669,
+        "first_row_us": 109.041,
+        "row_us": 20.883903516832348,
+        "inference_us": 2430.041,
+        "inference_skipped": false,
+        "peak_rss": 30310400,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6750208,
+        "elapsed_ns": 250198875,
+        "batch": 32768,
+        "warmup_iterations": 5046271,
+        "warmup_elapsed_ns": 200593333,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 1978.2903543307089,
+        "prep_us": 795.3842603174603,
+        "first_grad_us": 5.875,
+        "grad_us": 0.6475279136146538,
+        "first_row_us": 250.792,
+        "row_us": 182.7149685902118,
+        "inference_us": 19124.75,
+        "inference_skipped": false,
+        "peak_rss": 30277632,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6684672,
+        "elapsed_ns": 250409250,
+        "batch": 32768,
+        "warmup_iterations": 5242879,
+        "warmup_elapsed_ns": 200439875,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 488.57527734375,
+        "prep_us": 311.7121731008717,
+        "first_grad_us": 34.25,
+        "grad_us": 2.588823359463182,
+        "first_row_us": 14.5,
+        "row_us": 1.8351991029612555,
+        "inference_us": 3451.791,
+        "inference_skipped": false,
+        "peak_rss": 28360704,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 131072,
+        "elapsed_ns": 250698250,
+        "batch": 1024,
+        "warmup_iterations": 109567,
+        "warmup_elapsed_ns": 200160167,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 512.7637459016394,
+        "prep_us": 303.9947861482382,
+        "first_grad_us": 32.084,
+        "grad_us": 2.6218053589219235,
+        "first_row_us": 14.833,
+        "row_us": 1.8093527802505591,
+        "inference_us": 3674.709,
+        "inference_skipped": false,
+        "peak_rss": 28196864,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 135168,
+        "elapsed_ns": 251263292,
+        "batch": 1024,
+        "warmup_iterations": 108543,
+        "warmup_elapsed_ns": 200349833,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 456.3728704379562,
+        "prep_us": 162.77096940104167,
+        "first_grad_us": 5.541,
+        "grad_us": 0.5727947793253402,
+        "first_row_us": 29.375,
+        "row_us": 20.12132458752515,
+        "inference_us": 2211.875,
+        "inference_skipped": false,
+        "peak_rss": 27885568,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12845056,
+        "elapsed_ns": 250141708,
+        "batch": 65536,
+        "warmup_iterations": 11141119,
+        "warmup_elapsed_ns": 200424000,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 475.8189163498099,
+        "prep_us": 138.3306371681416,
+        "first_grad_us": 13.209,
+        "grad_us": 0.5769527315190902,
+        "first_row_us": 16.292,
+        "row_us": 1.29355805470181,
+        "inference_us": 387.083,
+        "inference_skipped": false,
+        "peak_rss": 27639808,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 13369344,
+        "elapsed_ns": 250543708,
+        "batch": 65536,
+        "warmup_iterations": 10289151,
+        "warmup_elapsed_ns": 200055333,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 1991.1617063492065,
+        "prep_us": 785.8896300940439,
+        "first_grad_us": 5.667,
+        "grad_us": 0.6321474696443291,
+        "first_row_us": 319.334,
+        "row_us": 175.80361278988053,
+        "inference_us": 19068.917,
+        "inference_skipped": false,
+        "peak_rss": 30146560,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6848512,
+        "elapsed_ns": 251068125,
+        "batch": 32768,
+        "warmup_iterations": 5079039,
+        "warmup_elapsed_ns": 200096625,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 1920.1475801526717,
+        "prep_us": 790.801261829653,
+        "first_grad_us": 11.041,
+        "grad_us": 0.6469476439519604,
+        "first_row_us": 101.833,
+        "row_us": 23.330284901082493,
+        "inference_us": 2720.625,
+        "inference_skipped": false,
+        "peak_rss": 30261248,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6553600,
+        "elapsed_ns": 250444709,
+        "batch": 32768,
+        "warmup_iterations": 5570559,
+        "warmup_elapsed_ns": 200756125,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 518.4853354037267,
+        "prep_us": 313.1992077596996,
+        "first_grad_us": 37.042,
+        "grad_us": 2.468064495429147,
+        "first_row_us": 10.167,
+        "row_us": 1.7210816271737186,
+        "inference_us": 3267.458,
+        "inference_skipped": false,
+        "peak_rss": 28196864,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 250096917,
+        "batch": 1024,
+        "warmup_iterations": 113663,
+        "warmup_elapsed_ns": 201716792,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 544.4719195652174,
+        "prep_us": 319.55188378033205,
+        "first_grad_us": 37.5,
+        "grad_us": 2.4123834819360814,
+        "first_row_us": 14.709,
+        "row_us": 1.73145592431504,
+        "inference_us": 3111.292,
+        "inference_skipped": false,
+        "peak_rss": 28164096,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 129024,
+        "elapsed_ns": 250684083,
+        "batch": 1024,
+        "warmup_iterations": 104447,
+        "warmup_elapsed_ns": 200175417,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 481.1671480769231,
+        "prep_us": 139.02184102279043,
+        "first_grad_us": 13.833,
+        "grad_us": 0.5689063535408703,
+        "first_row_us": 20.042,
+        "row_us": 1.3689369962326967,
+        "inference_us": 386.25,
+        "inference_skipped": false,
+        "peak_rss": 27656192,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12845056,
+        "elapsed_ns": 250947916,
+        "batch": 65536,
+        "warmup_iterations": 11272191,
+        "warmup_elapsed_ns": 200330209,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_runtime_integer",
+        "check_values": [
+          -0.005000000000000001,
+          -0.1
+        ],
+        "source_us": 463.86185899814467,
+        "prep_us": 159.94666432225063,
+        "first_grad_us": 6.084,
+        "grad_us": 0.5910910019458703,
+        "first_row_us": 56.375,
+        "row_us": 20.063932830430947,
+        "inference_us": 2191.541,
+        "inference_skipped": false,
+        "peak_rss": 27787264,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 12779520,
+        "elapsed_ns": 250043042,
+        "batch": 65536,
+        "warmup_iterations": 11337727,
+        "warmup_elapsed_ns": 201152750,
+        "values": [
+          -0.005000000000000001,
+          -0.1
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 2101.9982436974788,
+        "prep_us": 799.4866869009584,
+        "first_grad_us": 13.875,
+        "grad_us": 0.6061463381517886,
+        "first_row_us": 106.417,
+        "row_us": 20.832614615448716,
+        "inference_us": 2416.292,
+        "inference_skipped": false,
+        "peak_rss": 30244864,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6815744,
+        "elapsed_ns": 250960875,
+        "batch": 32768,
+        "warmup_iterations": 5111807,
+        "warmup_elapsed_ns": 200551792,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "gq_callback_integer_contexts",
+        "check_values": [
+          -0.010000000000000002,
+          -0.1,
+          -0.1
+        ],
+        "source_us": 2035.6995203252031,
+        "prep_us": 809.9777508090615,
+        "first_grad_us": 6.208,
+        "grad_us": 0.6305914431434668,
+        "first_row_us": 250.625,
+        "row_us": 176.88873125884018,
+        "inference_us": 18939.833,
+        "inference_skipped": false,
+        "peak_rss": 30130176,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 6914048,
+        "elapsed_ns": 250432875,
+        "batch": 32768,
+        "warmup_iterations": 5210111,
+        "warmup_elapsed_ns": 200495125,
+        "values": [
+          -0.005000000000000001,
+          -0.1,
+          -2.7755575615628914e-17
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 495.8207089108911,
+        "prep_us": 317.78293138500635,
+        "first_grad_us": 34.667,
+        "grad_us": 2.5432366836215663,
+        "first_row_us": 11.959,
+        "row_us": 1.8310262494873148,
+        "inference_us": 3436.959,
+        "inference_skipped": false,
+        "peak_rss": 28196864,
+        "library_bytes": 39688512
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 140288,
+        "elapsed_ns": 251518333,
+        "batch": 1024,
+        "warmup_iterations": 110591,
+        "warmup_elapsed_ns": 201537458,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 499.50748502994014,
+        "prep_us": 309.6582103960396,
+        "first_grad_us": 33.584,
+        "grad_us": 2.4708820506231532,
+        "first_row_us": 14.542,
+        "row_us": 1.8137829417995561,
+        "inference_us": 3146.5,
+        "inference_skipped": false,
+        "peak_rss": 28278784,
+        "library_bytes": 39669392
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 131072,
+        "elapsed_ns": 250716667,
+        "batch": 1024,
+        "warmup_iterations": 110591,
+        "warmup_elapsed_ns": 200244333,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    }
+  ],
+  "library": {
+    "bytes": 39688512,
+    "gzip_bytes": 12382875,
+    "sha256": "02091e70b1bb4b5c808a8ccfbb9e40a2be1d97dfc9faef593dfe5ce754ac4689"
+  }
+}

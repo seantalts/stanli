@@ -44,7 +44,7 @@ struct DaeResidual {
     size_t th_at = 0, xr_at = 0;
     for (const RhsArg& arg : spec->args) {
       if (arg.is_int) {
-        ints.push_back(arg.ints);
+        ints.push_back(callback_integer_values(arg, theta.data(), &th_at));
       } else if (arg.is_param) {
         reals.emplace_back(theta.begin() + th_at,
                            theta.begin() + th_at + arg.len);

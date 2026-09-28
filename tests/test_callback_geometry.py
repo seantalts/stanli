@@ -64,6 +64,21 @@ def main(check, dump_ops):
             assert all(n["callback"]["value_engine"] == "register_program"
                        for n in selected), (phase, selected)
 
+    for name in ("gq_callback_runtime_integer", "gq_callback_integer_contexts",
+                 "gq_callback_integer_contexts_fallback"):
+        stem = ROOT / "tests/fixtures" / name
+        report = json.loads(subprocess.check_output(
+            [dump_ops, str(stem.with_suffix(".tmir.sexp")),
+             str(stem.with_suffix(".json")), "--execution-json"], text=True))
+        wa = report["write_array"]
+        assert wa.get("value_engine") != "mir_interpreter", wa
+        selected = list(callbacks(wa))
+        assert len(selected) == (1 if name == "gq_callback_runtime_integer" else 5), wa
+        for node in selected:
+            expected = "mir_interpreter" if name.endswith("_fallback") else "register_program"
+            assert node["callback"]["value_engine"] == expected, node
+            assert node.get("input_adjoint_mask", 0) == 0, node
+
     stem = ROOT / "tests/fixtures/gq_callback_shared_function"
     report = json.loads(subprocess.check_output(
         [dump_ops, str(stem.with_suffix(".tmir.sexp")),

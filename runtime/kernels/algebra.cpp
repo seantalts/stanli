@@ -87,7 +87,7 @@ struct MirVariadicSystem {
       size_t theta_at = 0, xr_at = 0;
       for (const RhsArg& arg : spec->args) {
         if (arg.is_int) {
-          ints.push_back(arg.ints);
+          ints.push_back(callback_integer_values(arg, theta.data(), &theta_at));
           continue;
         }
         std::vector<T> values;

@@ -994,12 +994,12 @@ if(NOT EMSCRIPTEN)
                        ode_matrix_callback_fallback matrix_callback_contexts
                        matrix_callback_contexts_fallback matrix_callback_geometry_edges
                        gq_callback_runtime_values matrix_callback_value_fallback
+                       gq_callback_integer_contexts gq_callback_integer_contexts_fallback
                        gq_callback_shared_function gq_callback_runtime_integer
                        gq_callback_runtime_control gq_callback_rng_values)
     set(_expected_interpreter 0)
     if(exit_fixture MATCHES "_fallback$" OR
        exit_fixture STREQUAL "matrix_callback_geometry_edges" OR
-       exit_fixture STREQUAL "gq_callback_runtime_integer" OR
        exit_fixture STREQUAL "gq_callback_runtime_control")
       set(_expected_interpreter 1)
     endif()

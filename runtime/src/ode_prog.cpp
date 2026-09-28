@@ -146,7 +146,7 @@ RhsProgram compile_dae_args(
       if (f.arg_views[k + 3].depth == 0 &&
           f.arg_views[k + 3].leaf == mir::UnsizedLeaf::Matrix)
         callback_matrix_dimensions(a);
-      if (a.is_int) continue;
+      if (a.is_int && !a.is_param) continue;
       (a.is_param ? n_th : n_xr) += a.len;
     }
     p.t_reg = c.alloc(1);
@@ -169,7 +169,7 @@ RhsProgram compile_dae_args(
     for (size_t k = 0; k < args.size(); ++k) {
       const RhsArg& a = args[k];
       const std::string& name = f.arg_names[k + 3];
-      if (a.is_int) {
+      if (a.is_int && !a.is_param) {
         const auto& view = f.arg_views[k + 3];
         if (view.depth) {
           c.known_int_array_dims[name] = callback_array_dimensions(a, view);
@@ -182,6 +182,8 @@ RhsProgram compile_dae_args(
         Range r{p.th0 + th_at, a.len};
         stamp_rhs_view(&r, f.arg_views[k + 3], &a);
         c.reals[name] = r;
+        if (a.is_int && f.arg_views[k + 3].depth)
+          c.int_array_names.insert(name);
         th_at += a.len;
       } else {
         Range r{p.xr0 + xr_at, a.len};
@@ -249,7 +251,7 @@ RhsProgram compile_rhs_args(
       if (f.arg_views[k + 2].depth == 0 &&
           f.arg_views[k + 2].leaf == mir::UnsizedLeaf::Matrix)
         callback_matrix_dimensions(a);
-      if (a.is_int) continue;
+      if (a.is_int && !a.is_param) continue;
       (a.is_param ? n_th : n_xr) += a.len;
     }
     p.t_reg = c.alloc(1);
@@ -267,7 +269,7 @@ RhsProgram compile_rhs_args(
     for (size_t k = 0; k < args.size(); ++k) {
       const RhsArg& a = args[k];
       const std::string& name = f.arg_names[k + 2];
-      if (a.is_int) {
+      if (a.is_int && !a.is_param) {
         const auto& view = f.arg_views[k + 2];
         if (view.depth) {
           c.known_int_array_dims[name] = callback_array_dimensions(a, view);
@@ -280,6 +282,8 @@ RhsProgram compile_rhs_args(
         Range r{p.th0 + th_at, a.len};
         stamp_rhs_view(&r, f.arg_views[k + 2], &a);
         c.reals[name] = r;
+        if (a.is_int && f.arg_views[k + 2].depth)
+          c.int_array_names.insert(name);
         th_at += a.len;
       } else {
         Range r{p.xr0 + xr_at, a.len};

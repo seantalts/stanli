@@ -51,13 +51,14 @@ struct RhsProgram : Program {
 // convention: real arguments are packed in order into the theta region
 // when supplied at runtime and into the x_r region when preparation constants,
 // independently of the kernel's scalar autodiff activity mask,
-// and integer arguments bind as compile-time constants. The lowering
+// and integer arguments bind as compile-time constants unless a value-only
+// solve supplies runtime integer lanes in theta. The lowering
 // packs the call site the same way, in the same order, which is what
 // makes the two halves agree.
 struct RhsArg {
   bool is_int = false;
-  bool is_param = false;  // reals: theta region when true, x_r when false
-  int len = 0;            // reals
+  bool is_param = false;  // runtime theta region, including value-only ints
+  int len = 0;            // reals or runtime integers
   std::vector<int> ints;  // ints
   // Plain matrix geometry, captured before flattening. Negative means absent;
   // zero extents are valid. Scalar/vector/one-dimensional array bindings keep

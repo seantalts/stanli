@@ -9,6 +9,7 @@
 
 #include <map>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,13 +37,28 @@ inline std::vector<int64_t> callback_array_dimensions(
   const size_t leaf_rank = view.leaf == mir::UnsizedLeaf::Matrix ? 2
       : (view.leaf == mir::UnsizedLeaf::Vector ||
          view.leaf == mir::UnsizedLeaf::RowVector) ? 1 : 0;
-  const int64_t count = arg.is_int ? arg.ints.size() : arg.len;
+  const int64_t count = arg.is_int && !arg.is_param ? arg.ints.size() : arg.len;
   auto dims = arg.dims;
   if (dims.empty() && view.depth == 1 && leaf_rank == 0) dims = {count};
   if (view.depth == 0 || dims.size() != view.depth + leaf_rank ||
       checked_container_size(dims, "callback array") != count)
     throw std::invalid_argument("callback array dimensions do not match its values");
   return dims;
+}
+
+// Runtime integer lanes share the inactive theta input in value-only solves.
+// Reconstruct serialized integer arrays only when a callback needs fallback.
+template <typename T>
+std::vector<int> callback_integer_values(const RhsArg& arg, const T* theta,
+                                         size_t* at) {
+  if (!arg.is_param) return arg.ints;
+  std::vector<int> values;
+  values.reserve(arg.len);
+  for (int k = 0; k < arg.len; ++k)
+    values.push_back(static_cast<int>(stan::math::value_of(theta[(*at)++])));
+  if (arg.dims.size() > 1)
+    return serialized_container_order(values, arg.dims, arg.dims.size());
+  return values;
 }
 
 // Preserve complete geometry and convert graph buffers to the interpreter's
@@ -112,8 +128,9 @@ struct RetainedCallback {
 
   // Real callback arguments are packed in source order: runtime values into
   // the kernel's theta input and preparation constants into x_r. Scalar AD
-  // activity is selected separately by the kernel variant. Integer values
-  // remain in each RhsArg. The register compiler uses the same bindings to
+  // activity is selected separately by the kernel variant. Constant integers
+  // remain in each RhsArg; value-only solves may pass runtime integers in the
+  // same inactive theta buffer. The register compiler uses these bindings to
   // reconstruct the callback's original positional signature.
   std::vector<RhsArg> args;
   std::vector<double> x_r;
@@ -146,20 +163,31 @@ template <typename Active, typename GetActive, typename GetReals,
 std::vector<Active> pack_callback_arguments(
     RetainedCallback& retained, const std::vector<mir::Expr>& exprs,
     size_t begin, size_t end, GetActive&& get_active, GetReals&& get_reals,
-    GetInts&& get_ints, Fail&& fail, bool runtime_reals = false) {
+    GetInts&& get_ints, Fail&& fail, bool runtime_values = false) {
   std::vector<Active> active;
   for (size_t i = begin; i < end; ++i) {
     const mir::Expr& arg = exprs[i];
     RhsArg binding;
     if (arg.unsized.leaf == mir::UnsizedLeaf::Int) {
-      if (!arg.data_only) {
+      if (!arg.data_only && !runtime_values) {
         fail("integer callback argument " + std::to_string(i - begin + 1) +
              " is not data");
         continue;
       }
       binding.is_int = true;
-      binding.ints = get_ints(i, binding);
-    } else if (arg.data_only && !runtime_reals) {
+      auto values = get_ints(i, binding);
+      if (values) {
+        binding.ints = std::move(*values);
+      } else if (runtime_values) {
+        auto value = get_active(i, binding);
+        binding.is_param = true;
+        binding.len = value.second;
+        active.push_back(std::move(value.first));
+      } else {
+        fail("integer callback argument must be known at compile time");
+        continue;
+      }
+    } else if (arg.data_only && !runtime_values) {
       std::vector<double> values = get_reals(i, binding);
       if (values.size() >
           static_cast<size_t>(std::numeric_limits<int>::max())) {

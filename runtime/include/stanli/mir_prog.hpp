@@ -480,6 +480,14 @@ struct ProgramCompiler {
     for (mir::Expr& arg : e->args) literalize_external_ints(&arg);
   }
 
+  bool refers_to_local_runtime(const mir::Expr& e) const {
+    if (e.kind == mir::Expr::Var && reals.count(e.name) &&
+        !extern_bound.count(e.name)) return true;
+    for (const auto& arg : e.args)
+      if (refers_to_local_runtime(arg)) return true;
+    return false;
+  }
+
   bool external_int_array(const mir::Expr& e, std::vector<long>* values,
                           std::vector<int64_t>* dims) {
     if (!extern_ints) return false;
@@ -499,6 +507,7 @@ struct ProgramCompiler {
     }
     mir::Expr literal = e;
     literalize_external_ints(&literal);
+    if (refers_to_local_runtime(literal)) return false;
     if (!extern_ints(literal, values, dims)) return false;
     *dims = validated_int_array_dims(*values, std::move(*dims),
                                      "external integer array expression");
@@ -3888,6 +3897,9 @@ struct ProgramCompiler {
         if (it == reals.end()) bail("assignment to undeclared " + s.lhs);
         const Range dst = it->second;
         const Range v = expr(s.rhs);
+        // Once written here, the imported value can no longer be answered
+        // from the enclosing graph's preparation-time observation.
+        extern_bound.erase(s.lhs);
         if (s.lhs_idx.empty()) {
           std::vector<long> folded_ints;
           const bool have_folded_ints = int_array_names.count(s.lhs) &&

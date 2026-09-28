@@ -44,12 +44,21 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
             e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix;
         return graph_order(value, matrix, nested_matrix);
       },
-      [&](size_t i, RhsArg& binding) {
-        DataMap::Entry value =
-            program_constant(c, e.args[i], e.name + " integer argument");
-        if (!value.is_int) c.bail(e.name + ": integer argument is real-valued");
-        if (e.args[i].unsized.depth) binding.dims = value.dims;
-        return value.i;
+      [&](size_t i, RhsArg& binding) -> std::optional<std::vector<int>> {
+        const auto& arg = e.args[i];
+        std::vector<long> values;
+        if (arg.unsized.depth == 0) {
+          long value;
+          if (!c.try_cint(arg, &value)) return std::nullopt;
+          values = {value};
+        } else if (!c.external_int_array(arg, &values, &binding.dims)) {
+          if (!c.try_cints(arg, &values)) return std::nullopt;
+          Range shape;
+          if (!c.static_view(arg, &shape)) return std::nullopt;
+          binding.dims = shape.dims.empty()
+              ? std::vector<int64_t>{shape.len} : shape.dims;
+        }
+        return std::vector<int>(values.begin(), values.end());
       },
       [&](const std::string& message) { c.bail(e.name + ": " + message); },
       in_write_array);
@@ -1010,7 +1019,8 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
         }
         return std::vector<double>(values.begin(), values.end());
       },
-      [&](size_t i, RhsArg& binding) {
+      [&](size_t i, RhsArg& binding) -> std::optional<std::vector<int>> {
+        if (in_write_array && needs_runtime_value(e.args[i])) return std::nullopt;
         const auto& values =
             actuals.at(i).require_constant_ints("quadrature integer argument");
         if (e.args[i].unsized.depth) {
@@ -1267,7 +1277,8 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
     const mir::Expr& a = actual.expr();
     RhsArg ra;
     const bool is_int = a.unsized.leaf == mir::UnsizedLeaf::Int;
-    if (is_int && a.data_only) {
+    if (is_int && a.data_only &&
+        !(in_write_array && needs_runtime_value(a))) {
       ra.is_int = true;
       ra.ints = actual.require_constant_ints("ODE integer argument");
       if (a.unsized.depth) {
@@ -1303,11 +1314,12 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
         spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());
       }
     } else {
-      if (is_int)
+      if (is_int && !in_write_array)
         fail(e.name + ": integer argument " + std::to_string(k - fixed + 1) +
                  " is not data",
              e.raw);
       const Val v = actual.value();
+      ra.is_int = is_int;
       ra.is_param = true;
       ra.len = (int)g.slots[v.slot].len;
       if (a.unsized.depth) ra.dims = logical_shape(v, "callback array");
