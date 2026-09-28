@@ -987,6 +987,7 @@ if(NOT EMSCRIPTEN)
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns
+                       ode_runtime_for
                        ode_matrix_callback ode_matrix_callback_flat
                        ode_matrix_callback_fallback matrix_callback_contexts
                        matrix_callback_contexts_fallback matrix_callback_geometry_edges

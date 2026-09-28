@@ -7,10 +7,11 @@
 // at all: `if (theta > 0)` has no op-graph form, and until this existed
 // it was a compile error (lower.cpp).
 //
-// The shape of the problem is what keeps this small: every size and loop
-// bound is known at compile time. Most indices and integers are too. The
-// one runtime-integer surface is a checked scalar read from a flat array;
-// generated-quantities Viterbi backtracking needs exactly that operation.
+// The shape of the problem is what keeps this small: storage sizes are
+// known at compile time, even when loop bounds are runtime values. Most
+// indices and integers are also known at preparation. Runtime integer reads
+// and predicates use scalar registers; unproved integer arithmetic retains
+// the existing fallback when admitting a runtime for loop.
 //
 // Names the compiler does not know are the one thing that differs
 // between callers. The ODE side knows them all up front (t, y, theta,
@@ -76,6 +77,56 @@ struct Bail {
   std::string why;
 };
 
+// Integer arithmetic has a distinct 32-bit/mirror contract that
+// the double register file does not yet encode. This includes integer-valued
+// subexpressions promoted into an otherwise real return. Predicates and shape
+// queries are safe; integer arithmetic stays on the established evaluator.
+inline void check_program_integer_contract(
+    const std::vector<stanli::mir::Stmt>& body,
+    const std::map<std::string, const stanli::mir::FunDef*>& functions,
+    std::set<const stanli::mir::FunDef*>& visited) {
+  std::function<void(const mir::Expr&)> expression;
+  expression = [&](const mir::Expr& value) {
+    if (value.kind == mir::Expr::FunApp) {
+      if (value.fn_lib == mir::Expr::Lib::UserDefined) {
+        const auto found = functions.find(value.name);
+        if (found != functions.end() && visited.insert(found->second).second)
+          check_program_integer_contract(found->second->body, functions,
+                                         visited);
+      } else if (const auto* spec = function_spec(value);
+                 spec && spec->builtin() &&
+                 spec->result() == FunctionArgumentKind::Integer) {
+        const auto policy = spec->builtin()->shape;
+        // Stanc retains a negative integer literal as unary negation even
+        // when a real comparison consumes it. Its exact value is proven here
+        // without invoking integer arithmetic on unknown runtime operands.
+        const bool literal_negation =
+            spec->builtin()->opcode == OP_NEG && value.args.size() == 1 &&
+            value.args[0].kind == mir::Expr::LitInt &&
+            value.args[0].lit_i >= -(int64_t)std::numeric_limits<int>::max() &&
+            value.args[0].lit_i <= std::numeric_limits<int>::max();
+        if (!literal_negation && policy != BuiltinShapePolicy::Predicate &&
+            policy != BuiltinShapePolicy::ShapeQuery &&
+            policy != BuiltinShapePolicy::SliceView &&
+            policy != BuiltinShapePolicy::Constructor &&
+            policy != BuiltinShapePolicy::Rng)
+          throw Bail{"integer arithmetic requires the MIR interpreter"};
+      }
+    }
+    for (const auto& child : value.args) expression(child);
+  };
+  std::function<void(const mir::Stmt&)> statement;
+  statement = [&](const mir::Stmt& value) {
+    for (const auto* expr : {&value.init, &value.rhs, &value.target,
+                             &value.lower, &value.upper, &value.cond})
+      expression(*expr);
+    for (const auto* exprs : {&value.read_dims, &value.lhs_idx, &value.fn_args})
+      for (const auto& expr : *exprs) expression(expr);
+    for (const auto& child : value.body) statement(child);
+  };
+  for (const auto& value : body) statement(value);
+}
+
 struct ProgramCompiler {
   Program& p;
   const std::map<std::string, const mir::FunDef*>& funs;
@@ -119,10 +170,13 @@ struct ProgramCompiler {
   // live in ordinary double registers (their producers still preserve Stan's
   // integer-valued operations where they are supported below).
   int structured_while_depth = 0;
+  // Runtime for bodies execute repeatedly too. Keep their scalar integer
+  // locals in registers so declarations initialize on each executed trip.
+  int runtime_for_depth = 0;
+  bool structured_while_seen = false;
   // A callee may return normally while its caller is inside a loop. Only
   // loops entered within this function make its return a runtime exit.
   int return_while_base = 0;
-  bool structured_while_seen = false;
   int inline_depth = 0;
   std::vector<std::string> inline_stack;
   struct LoopFrame {
@@ -188,6 +242,40 @@ struct ProgramCompiler {
   static void assigned_names(const mir::Stmt& s, std::set<std::string>* names) {
     if (s.kind == mir::Stmt::Assignment) names->insert(s.lhs);
     for (const auto& child : s.body) assigned_names(child, names);
+  }
+
+  // Stan's C++ loop condition can re-read the upper bound, whereas MirInterp
+  // snapshots it. Admit only the shared semantics: an effect-free bound whose
+  // inputs the body cannot change. A UDF needs a separate effect proof.
+  static bool invariant_for_bound(const mir::Expr& e,
+                                  const std::set<std::string>& written) {
+    switch (e.kind) {
+      case mir::Expr::Var:
+        return !written.count(e.name);
+      case mir::Expr::LitInt:
+      case mir::Expr::LitReal:
+        return true;
+      case mir::Expr::Promotion:
+      case mir::Expr::TernaryIf:
+      case mir::Expr::EAnd:
+      case mir::Expr::EOr:
+        break;
+      case mir::Expr::FunApp: {
+        if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
+        const auto* spec = function_spec(e);
+        if (!spec || !spec->builtin()) return false;
+        const auto shape = spec->builtin()->shape;
+        if (shape != BuiltinShapePolicy::Predicate &&
+            shape != BuiltinShapePolicy::ShapeQuery)
+          return false;
+        break;
+      }
+      default:
+        return false;
+    }
+    for (const auto& arg : e.args)
+      if (!invariant_for_bound(arg, written)) return false;
+    return true;
   }
 
   // Move an already-declared scalar integer into a register before compiling
@@ -3424,12 +3512,22 @@ struct ProgramCompiler {
   // Branch/loop handlers still compile their other reachable paths.
   struct PathExit {};
   struct ReturnFrame {
+    const std::vector<mir::Stmt>* body = nullptr;
+    ReturnFrame* parent = nullptr;
     size_t loop_base = 0;
     bool has_result = false;
     Range result;
     std::vector<int> jumps;
   };
   ReturnFrame* return_frame = nullptr;
+
+  void require_runtime_integer_contract() {
+    if (!return_frame)
+      bail("runtime for/integer binding needs a checked function scope");
+    std::set<const mir::FunDef*> visited;
+    for (auto* frame = return_frame; frame; frame = frame->parent)
+      check_program_integer_contract(*frame->body, funs, visited);
+  }
 
   void emit_function_return(Range value) {
     if (!return_frame) bail("runtime return has no function scope");
@@ -3448,6 +3546,8 @@ struct ProgramCompiler {
 
   Range function_body(const std::vector<mir::Stmt>& body) {
     ReturnFrame frame;
+    frame.body = &body;
+    frame.parent = return_frame;
     frame.loop_base = loops.size();
     struct Scope {
       ReturnFrame*& current;
@@ -3562,6 +3662,8 @@ struct ProgramCompiler {
             int_decl_at[s.decl_id] = {branch_depth, loops.size()};
           }
           if (!s.has_init) {
+            if (runtime_for_depth)
+              bail("runtime for needs a sized container declaration");
             reals[s.decl_id] = Range{};
             deferred_shapes[s.decl_id] = view;
             return;
@@ -3591,6 +3693,17 @@ struct ProgramCompiler {
                s.decl_id);
         if (s.decl_type.base == "SInt") {
           int_decl_at[s.decl_id] = {branch_depth, loops.size()};
+          if (runtime_for_depth) {
+            const Range d =
+                declare(s.decl_id, 1, Range{},
+                        static_cast<double>(std::numeric_limits<int>::min()));
+            if (s.has_init) {
+              const Range v = expr(s.init);
+              if (!is_scalar(v)) bail("integer declaration is not scalar");
+              emit(Program::MOV, d.reg, v.reg);
+            }
+            return;
+          }
           if (s.has_init) {
             long folded;
             if (try_cint(s.init, &folded)) {
@@ -3658,6 +3771,8 @@ struct ProgramCompiler {
         return;
       }
       case mir::Stmt::Assignment: {
+        if (runtime_for_depth && int_array_names.count(s.lhs))
+          bail("runtime for writes an integer array: " + s.lhs);
         auto deferred = deferred_shapes.find(s.lhs);
         if (deferred != deferred_shapes.end()) {
           if (!s.lhs_idx.empty())
@@ -3697,15 +3812,18 @@ struct ProgramCompiler {
           long ignored;
           // A conditional write must preserve the old value on the untaken
           // path, so it cannot be folded into the single compile-time copy.
-          // Likewise, an unconditional assignment after a structured while
-          // may read loop-carried state, and a generated-quantities integer
-          // may receive an RNG draw before its first while. The
-          // lowering can export scalar-int live-outs, so reify both cases
-          // instead of refusing a representable integer recurrence.
-          if (!fold_is_certain(s.lhs) ||
-              ((structured_while_seen || in_write_array) &&
-               !try_cint(s.rhs, &ignored)))
+          // A runtime integer can also be assigned before its first loop
+          // (for example a bound selected by a comparison of real inputs).
+          // Reify any nonconstant scalar assignment; expr still decides
+          // whether its integer operations have a supported implementation.
+          const bool certain = fold_is_certain(s.lhs);
+          const bool constant = certain && try_cint(s.rhs, &ignored);
+          if (!certain || !constant) {
+            if (certain && !constant && !structured_while_seen &&
+                !in_write_array)
+              require_runtime_integer_contract();
             reify_written_int(s.lhs);
+          }
         }
         if (ints.count(s.lhs) && s.lhs_idx.empty()) {
           // This assignment is certain and its RHS stayed a compile-time
@@ -4003,7 +4121,77 @@ struct ProgramCompiler {
         }
         throw CompileContinue{};
       case mir::Stmt::For: {
-        const long lo = cint(s.lower), hi = cint(s.upper);
+        long lo, hi;
+        if (!try_cint(s.lower, &lo) || !try_cint(s.upper, &hi)) {
+          // The flat register file does not represent Stan integer overflow
+          // and mirror semantics. Reuse standalone admission's conservative
+          // contract rather than silently widening integer arithmetic here.
+          require_runtime_integer_contract();
+          // An enclosing while can have folded integer declarations whose
+          // initialization must repeat at their original lexical location.
+          // Keep that case interpreted until it has the same binding contract
+          // as the runtime for locals below.
+          if (structured_while_depth != runtime_for_depth)
+            bail("runtime for nested in while needs repeated integer bindings");
+
+          std::set<std::string> written;
+          for (const auto& child : s.body) assigned_names(child, &written);
+          if (!invariant_for_bound(s.upper, written))
+            bail("runtime for needs an invariant, effect-free upper bound");
+
+          // Evaluate and snapshot each bound exactly once, in source order.
+          // In particular, the lower bound may be a variable assigned by the
+          // body, so it cannot remain an aliased Range.
+          const Range lower = expr(s.lower);
+          if (!is_scalar(lower)) bail("for lower bound is not scalar");
+          const int index = alloc(1);
+          emit(Program::MOV, index, lower.reg);
+          const Range upper = expr(s.upper);
+          if (!is_scalar(upper)) bail("for upper bound is not scalar");
+          const int limit = alloc(1);
+          emit(Program::MOV, limit, upper.reg);
+
+          for (const auto& name : written) {
+            if (int_array_names.count(name))
+              bail("runtime for writes an integer array: " + name);
+            reify_written_int(name);
+          }
+          ints.erase(s.loopvar);
+          reals[s.loopvar] = Range{index, 1};
+          const int one = konst(1);
+          const int condition = alloc(1);
+          emit(Program::LE, condition, index, limit);
+          const int empty = emit(Program::JZ, 0, condition);
+          const int head = (int)p.code.size();
+          loops.push_back({});
+          loops.back().structured = true;
+          structured_while_seen = true;
+          ++structured_while_depth;
+          ++runtime_for_depth;
+          try {
+            for (const auto& child : s.body) stmt(child);
+          } catch (PathExit&) {
+            // Other paths may still continue or break; patch them below.
+          }
+          --runtime_for_depth;
+          --structured_while_depth;
+          for (int jump : loops.back().continues)
+            p.code[(size_t)jump].dst = (int)p.code.size();
+          // Test before incrementing, including at INT_MAX. The loop variable
+          // remains a valid Stan integer for every executed body.
+          emit(Program::LT, condition, index, limit);
+          const int done = emit(Program::JZ, 0, condition);
+          emit(Program::ADD, index, index, one);
+          emit(Program::JMP, head);
+          const int end = (int)p.code.size();
+          p.code[(size_t)empty].dst = end;
+          p.code[(size_t)done].dst = end;
+          for (int jump : loops.back().breaks) p.code[(size_t)jump].dst = end;
+          loops.pop_back();
+          reals.erase(s.loopvar);
+          int_decl_at.erase(s.loopvar);
+          return;
+        }
         loops.push_back({});
         bool broken = false;
         bool returned = false;
@@ -4184,7 +4372,13 @@ struct ProgramCompiler {
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
       if (args[k].is_const_int) {
         if (args[k].int_dims.empty()) {
-          ints[f.arg_names[k]] = args[k].ints;
+          if (runtime_for_depth && assigned.count(f.arg_names[k]) &&
+              args[k].ints.size() == 1) {
+            const int reg = konst(static_cast<double>(args[k].ints[0]));
+            reals[f.arg_names[k]] = Range{reg, 1};
+          } else {
+            ints[f.arg_names[k]] = args[k].ints;
+          }
         } else {
           known_int_arrays[f.arg_names[k]] = args[k].ints;
           known_int_array_dims[f.arg_names[k]] = args[k].int_dims;

@@ -188,7 +188,8 @@ void check_exact_opcode_contract() {
 void check(const std::string& name, const stanli::mir::FunDef& f,
            const std::map<std::string, const stanli::mir::FunDef*>& funs,
            int n_y, int n_th, const std::vector<double>& x_r,
-           const std::vector<int>& x_i, bool want_ok, bool want_generated) {
+           const std::vector<int>& x_i, bool want_ok, bool want_generated,
+           const char* expected_refusal = nullptr) {
   using namespace stanli;
   RhsProgram p = compile_rhs(f, funs, n_y, n_th, (int)x_r.size(), x_i);
   if (p.ok != want_ok) {
@@ -214,6 +215,11 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
   expect(name + ": derivative builder preserves canonical bytecode",
          canonical_unchanged);
   if (!want_ok) {
+    if (expected_refusal && p.why.find(expected_refusal) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL %s: expected refusal containing %s, got %s\n",
+                  name.c_str(), expected_refusal, p.why.c_str());
+    }
     if (p.why.empty()) {
       ++failures;
       std::printf("FAIL %s: refused without saying why\n", name.c_str());
@@ -579,6 +585,7 @@ int main() {
     int n_y, n_th;
     bool want_ok;
     bool want_generated;
+    const char* refusal = nullptr;
   };
   const Case cases[] = {
       {"f_lin", 2, 4, true, true},
@@ -590,6 +597,21 @@ int main() {
       {"f_while_early", 2, 4, true, false},  // return from a runtime loop
       {"f_loop_exits", 2, 4, true, false},
       {"f_return_in_loop", 2, 4, true, false},
+      {"f_runtime_for", 2, 4, true, false},
+      {"f_runtime_for_nested", 2, 4, true, false},
+      {"f_runtime_for_return", 2, 4, true, false},
+      {"f_runtime_for_max", 2, 4, true, false},
+      {"f_runtime_for_shift", 2, 4, true, false},
+      {"f_runtime_for_int_data", 2, 4, true, false},
+      {"f_no_loop_integer_overflow", 2, 4, false, false, "integer arithmetic"},
+      {"f_runtime_for_shape", 2, 4, false, false, "integer"},
+      {"f_runtime_for_integer_overflow", 2, 4, false, false,
+       "integer arithmetic"},
+      {"f_runtime_for_int_array", 2, 4, false, false,
+       "writes an integer array"},
+      {"f_runtime_for_mutates_bound", 2, 4, false, false,
+       "invariant, effect-free"},
+      {"f_runtime_for_in_while", 2, 4, false, false, "nested in while"},
       {"f_bad_return_shape", 2, 4, false, false},
       {"f_early", 2, 4, true, false},  // return from a runtime branch
   };
@@ -601,7 +623,7 @@ int main() {
       continue;
     }
     check(c.name, *it->second, funs, c.n_y, c.n_th, x_r, x_i, c.want_ok,
-          c.want_generated);
+          c.want_generated, c.refusal);
   }
   // Check both sides of each guard, including the nested return pair,
   // against an explicit formula as well as the interpreter.

@@ -210,58 +210,6 @@ void return_view(const std::vector<stanli::mir::Stmt>& body,
   }
 }
 
-// Integer arithmetic has a distinct 32-bit/mirror contract that
-// the double register file does not yet encode. This includes integer-valued
-// subexpressions promoted into an otherwise real return. Predicates and shape
-// queries are safe; integer arithmetic stays on the established evaluator.
-void check_integer_contract(
-    const stanli::mir::FunDef& definition,
-    const std::map<std::string, const stanli::mir::FunDef*>& functions,
-    std::set<const stanli::mir::FunDef*>& visited) {
-  using namespace stanli;
-  if (!visited.insert(&definition).second) return;
-  std::function<void(const mir::Expr&)> expression;
-  expression = [&](const mir::Expr& value) {
-    if (value.kind == mir::Expr::FunApp) {
-      if (value.fn_lib == mir::Expr::Lib::UserDefined) {
-        const auto found = functions.find(value.name);
-        if (found != functions.end())
-          check_integer_contract(*found->second, functions, visited);
-      } else if (const auto* spec = function_spec(value);
-                 spec && spec->builtin() &&
-                 spec->result() == FunctionArgumentKind::Integer) {
-        const auto policy = spec->builtin()->shape;
-        // Stanc retains a negative integer literal as unary negation even
-        // when a real comparison consumes it. Its exact value is proven here
-        // without invoking integer arithmetic on unknown runtime operands.
-        const bool literal_negation =
-            spec->builtin()->opcode == OP_NEG && value.args.size() == 1 &&
-            value.args[0].kind == mir::Expr::LitInt &&
-            value.args[0].lit_i >= -(int64_t)std::numeric_limits<int>::max() &&
-            value.args[0].lit_i <= std::numeric_limits<int>::max();
-        if (!literal_negation && policy != BuiltinShapePolicy::Predicate &&
-            policy != BuiltinShapePolicy::ShapeQuery &&
-            policy != BuiltinShapePolicy::SliceView &&
-            policy != BuiltinShapePolicy::Constructor &&
-            policy != BuiltinShapePolicy::Rng)
-          throw Bail{
-              "standalone integer arithmetic requires the MIR interpreter"};
-      }
-    }
-    for (const auto& child : value.args) expression(child);
-  };
-  std::function<void(const mir::Stmt&)> statement;
-  statement = [&](const mir::Stmt& value) {
-    for (const auto* expr : {&value.init, &value.rhs, &value.target,
-                             &value.lower, &value.upper, &value.cond})
-      expression(*expr);
-    for (const auto* exprs : {&value.read_dims, &value.lhs_idx, &value.fn_args})
-      for (const auto& expr : *exprs) expression(expr);
-    for (const auto& child : value.body) statement(child);
-  };
-  for (const auto& value : definition.body) statement(value);
-}
-
 std::shared_ptr<const FunctionPlan> compile_function(
     const stanli::mir::FunDef& definition,
     const std::map<std::string, const stanli::mir::FunDef*>& functions,
@@ -273,7 +221,8 @@ std::shared_ptr<const FunctionPlan> compile_function(
     return_view(definition.body, result_type);
     if (!result_type) throw Bail{"standalone function has no typed return"};
     std::set<const mir::FunDef*> checked_functions;
-    check_integer_contract(definition, functions, checked_functions);
+    check_program_integer_contract(definition.body, functions,
+                                   checked_functions);
     // No interpreter, target, higher-order or external-folding hooks. Failed
     // compilation cannot execute user code or expose partial side effects.
     ProgramCompiler compiler{out->program, functions};

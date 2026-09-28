@@ -841,6 +841,42 @@ void test_mixed_integer_udf_arguments() {
            {std::move(entry), std::move(score)}, 1.0, {13.0});
 }
 
+void test_runtime_for_bound_effects() {
+  FunDef bound;
+  bound.name = "bound";
+  bound.arg_names = {"n"};
+  bound.arg_types = {"UInt"};
+  bound.arg_views = {{0, UnsizedLeaf::Int}};
+  bound.body = {nr_fun_app("FnPrint", {lit_string("bound "), var("n", "UInt")}),
+                return_value(var("n", "UInt"))};
+  for (int first : {1, 5}) {
+    Stmt loop;
+    loop.kind = Stmt::For;
+    loop.loopvar = "index";
+    loop.lower = fun("bound", {lit_int(first)}, "UInt", Expr::Lib::UserDefined);
+    loop.upper = lit_int(3);
+    loop.body = {nr_fun_app("FnPrint", {var("index", "UInt")})};
+    FunDef entry = rhs_function(
+        "runtime_bounds_rhs",
+        {std::move(loop), return_value(make_array({lit_real(0)}))});
+    const std::string printed = first == 1 ? "bound 1\n1\n2\n3\n" : "bound 5\n";
+    run_observation_case("for bound effects",
+                         "the lower bound runs once, even for an empty range",
+                         {entry, bound}, 1.0, observed_values({0.0}, printed),
+                         nullptr, true);
+    entry.body[0].upper =
+        fun("bound", {lit_int(3)}, "UInt", Expr::Lib::UserDefined);
+    std::map<std::string, const FunDef*> functions{{entry.name, &entry},
+                                                   {bound.name, &bound}};
+    const auto refused = compile_rhs(entry, functions, 1, 1, 1, {2});
+    if (refused.ok ||
+        refused.why.find("invariant, effect-free") == std::string::npos) {
+      ++failures;
+      std::printf("FAIL effectful for upper bound was not refused\n");
+    }
+  }
+}
+
 void test_nested_print_effect() {
   // print is an ordered language effect even when it lives in an inlined
   // user-defined function. Its arguments are evaluated and rendered once.
@@ -1288,6 +1324,7 @@ int main() {
   test_program_extrema();
   test_matrix_row_indexing();
   test_mixed_integer_udf_arguments();
+  test_runtime_for_bound_effects();
   test_nested_print_effect();
   test_print_then_reject_effects();
   test_runtime_guarded_effects();

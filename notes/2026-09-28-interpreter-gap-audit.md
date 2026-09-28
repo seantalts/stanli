@@ -1,5 +1,10 @@
 # Interpreter and execution-path audit — 2026-09-28
 
+> **Priority update:** prevent user-visible performance cliffs. A general-value
+> replacement for `MirInterp` is deferred while gaps can use the existing
+> engines. Fixed-shape callback `for` loops with runtime bounds now have a
+> guarded register path; see [coverage, results and remaining work](2026-09-28-runtime-for-coverage.md).
+
 > **Output-path update:** runtime real callback arguments now stay compiled in
 > generated quantities with double-only solver execution and no derivative
 > scratch. [Results, costs and remaining fallbacks](2026-09-28-callback-runtime-values-results.md).
