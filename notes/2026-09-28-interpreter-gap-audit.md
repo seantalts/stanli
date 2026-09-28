@@ -1,5 +1,14 @@
 # Interpreter and execution-path audit — 2026-09-28
 
+> **Current status:** This document preserves the original audit baseline. Its
+> refusal lists and proposed ordering are historical. The current, simpler
+> [execution-engine plan](2026-09-28-execution-engines-and-roadmap.md) records
+> completed coverage: runtime loop bounds and Stan bound semantics, typed
+> integers, nested callback arrays, generated-quantity runtime integer/control
+> inputs, and fixed-shape multidimensional runtime indexing and writes. Large
+> constant loops remain a performance tradeoff under investigation. Native
+> code generation remains tabled.
+
 > **Priority update:** prevent user-visible performance cliffs. A general-value
 > replacement for `MirInterp` is deferred while gaps can use the existing
 > engines. Fixed-shape callback `for` loops with runtime bounds now have a

@@ -1,0 +1,3277 @@
+{
+  "summary": {
+    "ode_constant_loop-8": {
+      "source_us": {
+        "median": 584.1175249904669,
+        "mad": 17.20440747558905
+      },
+      "prep_us": {
+        "median": 256.89601911116733,
+        "mad": 5.925053044703645
+      },
+      "first_grad_us": {
+        "median": 32.0,
+        "mad": 1.2705000000000002
+      },
+      "grad_us": {
+        "median": 2.423846637517411,
+        "mad": 0.06353244502937816
+      },
+      "first_row_us": {
+        "median": 15.4585,
+        "mad": 0.4790000000000001
+      },
+      "row_us": {
+        "median": 1.8987992889421395,
+        "mad": 0.051530390999772746
+      },
+      "inference_us": {
+        "median": 1785.8335,
+        "mad": 40.062500000000114
+      },
+      "peak_rss": {
+        "median": 28270592.0,
+        "mad": 40960.0
+      },
+      "native_grad_ns": {
+        "median": 1581.296316354544,
+        "mad": 23.014580302377567
+      }
+    },
+    "ode_constant_loop-128": {
+      "source_us": {
+        "median": 565.3101389586826,
+        "mad": 13.040454631971784
+      },
+      "prep_us": {
+        "median": 546.3057227074237,
+        "mad": 6.346281853393975
+      },
+      "first_grad_us": {
+        "median": 47.104,
+        "mad": 2.5630000000000024
+      },
+      "grad_us": {
+        "median": 15.440283482120112,
+        "mad": 0.6658315109943587
+      },
+      "first_row_us": {
+        "median": 20.6875,
+        "mad": 3.625
+      },
+      "row_us": {
+        "median": 8.7463334583192,
+        "mad": 0.16382733672315375
+      },
+      "inference_us": {
+        "median": 11112.125,
+        "mad": 80.16650000000027
+      },
+      "peak_rss": {
+        "median": 28459008.0,
+        "mad": 49152.0
+      },
+      "native_grad_ns": {
+        "median": 13986.474977874215,
+        "mad": 273.34244000752915
+      }
+    },
+    "ode_constant_loop-2048": {
+      "source_us": {
+        "median": 581.1762881165678,
+        "mad": 9.55782120194101
+      },
+      "prep_us": {
+        "median": 5296.303744237589,
+        "mad": 80.6837542109929
+      },
+      "first_grad_us": {
+        "median": 252.58350000000002,
+        "mad": 14.208500000000015
+      },
+      "grad_us": {
+        "median": 223.09096601276502,
+        "mad": 3.509938143304609
+      },
+      "first_row_us": {
+        "median": 130.91649999999998,
+        "mad": 3.208500000000001
+      },
+      "row_us": {
+        "median": 117.1961433816643,
+        "mad": 3.397888797580393
+      },
+      "inference_us": {
+        "median": 165318.8335,
+        "mad": 3997.083500000008
+      },
+      "peak_rss": {
+        "median": 30957568.0,
+        "mad": 98304.0
+      },
+      "native_grad_ns": {
+        "median": 207079.36691580233,
+        "mad": 3789.3575813867355
+      }
+    },
+    "ode_retained_loop-8": {
+      "source_us": {
+        "median": 592.7087222163083,
+        "mad": 7.440225720981175
+      },
+      "prep_us": {
+        "median": 247.14262866572923,
+        "mad": 3.734917864441954
+      },
+      "first_grad_us": {
+        "median": 39.271,
+        "mad": 1.2914999999999992
+      },
+      "grad_us": {
+        "median": 4.028622351988281,
+        "mad": 0.06903027008696738
+      },
+      "first_row_us": {
+        "median": 18.999499999999998,
+        "mad": 1.1464999999999996
+      },
+      "row_us": {
+        "median": 2.395003352458728,
+        "mad": 0.062268709036915615
+      },
+      "inference_us": {
+        "median": 3005.4795,
+        "mad": 14.541500000000042
+      },
+      "peak_rss": {
+        "median": 28491776.0,
+        "mad": 24576.0
+      },
+      "native_grad_ns": {
+        "median": 3121.6128100741444,
+        "mad": 61.409271213890406
+      }
+    },
+    "ode_retained_loop-128": {
+      "source_us": {
+        "median": 612.753221449979,
+        "mad": 14.640797815096391
+      },
+      "prep_us": {
+        "median": 239.63791568891256,
+        "mad": 2.063784402997925
+      },
+      "first_grad_us": {
+        "median": 67.5,
+        "mad": 1.875
+      },
+      "grad_us": {
+        "median": 29.85388770612523,
+        "mad": 0.8123920157419047
+      },
+      "first_row_us": {
+        "median": 27.8335,
+        "mad": 0.2710000000000008
+      },
+      "row_us": {
+        "median": 15.003441815779961,
+        "mad": 0.09648063821133501
+      },
+      "inference_us": {
+        "median": 21670.1665,
+        "mad": 42.29099999999926
+      },
+      "peak_rss": {
+        "median": 28491776.0,
+        "mad": 16384.0
+      },
+      "native_grad_ns": {
+        "median": 31065.830109126982,
+        "mad": 216.0434027777792
+      }
+    },
+    "ode_retained_loop-2048": {
+      "source_us": {
+        "median": 635.4638646426681,
+        "mad": 13.771991536209725
+      },
+      "prep_us": {
+        "median": 243.34638424124512,
+        "mad": 5.222851946975965
+      },
+      "first_grad_us": {
+        "median": 554.271,
+        "mad": 5.270500000000027
+      },
+      "grad_us": {
+        "median": 440.51500002634657,
+        "mad": 13.08688076293609
+      },
+      "first_row_us": {
+        "median": 211.625,
+        "mad": 2.5005000000000024
+      },
+      "row_us": {
+        "median": 209.0817842466304,
+        "mad": 3.9601318192003134
+      },
+      "inference_us": {
+        "median": 342972.833,
+        "mad": 5235.042000000016
+      },
+      "peak_rss": {
+        "median": 29048832.0,
+        "mad": 24576.0
+      },
+      "native_grad_ns": {
+        "median": 441445.2186238058,
+        "mad": 4806.910209130205
+      }
+    }
+  },
+  "raw": [
+    {
+      "repeat": 0,
+      "phase": {
+        "model": "ode_constant_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 565.332862302483,
+        "prep_us": 257.90992268041236,
+        "first_grad_us": 66.75,
+        "grad_us": 2.485351844119694,
+        "first_row_us": 15.666,
+        "row_us": 1.9572314142110043,
+        "inference_us": 1826.959,
+        "inference_skipped": false,
+        "peak_rss": 28246016,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 155648,
+        "elapsed_ns": 250281166,
+        "batch": 1024,
+        "warmup_iterations": 131071,
+        "warmup_elapsed_ns": 200231000,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 0,
+      "phase": {
+        "model": "ode_retained_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 585.1313271028038,
+        "prep_us": 245.1469774509804,
+        "first_grad_us": 40.375,
+        "grad_us": 4.176288095954028,
+        "first_row_us": 20.209,
+        "row_us": 2.4947278369855903,
+        "inference_us": 3017.083,
+        "inference_skipped": false,
+        "peak_rss": 28508160,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 80384,
+        "elapsed_ns": 250015791,
+        "batch": 512,
+        "warmup_iterations": 64511,
+        "warmup_elapsed_ns": 201445000,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 0,
+      "phase": {
+        "model": "ode_constant_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 552.433774834437,
+        "prep_us": 561.2260852017937,
+        "first_grad_us": 50.459,
+        "grad_us": 16.334544789284546,
+        "first_row_us": 24.833,
+        "row_us": 8.388990000335559,
+        "inference_us": 12316.041,
+        "inference_skipped": false,
+        "peak_rss": 28491776,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 19200,
+        "elapsed_ns": 251726000,
+        "batch": 128,
+        "warmup_iterations": 14207,
+        "warmup_elapsed_ns": 201093750,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 0,
+      "phase": {
+        "model": "ode_retained_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 602.733534939759,
+        "prep_us": 238.0663653663178,
+        "first_grad_us": 67.041,
+        "grad_us": 31.04561964485285,
+        "first_row_us": 27.333,
+        "row_us": 15.028975052599941,
+        "inference_us": 21664.583,
+        "inference_skipped": false,
+        "peak_rss": 28491776,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 8000,
+        "elapsed_ns": 250736125,
+        "batch": 64,
+        "warmup_iterations": 7039,
+        "warmup_elapsed_ns": 200110834,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 0,
+      "phase": {
+        "model": "ode_constant_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 592.368695035461,
+        "prep_us": 5327.035446808511,
+        "first_grad_us": 274.875,
+        "grad_us": 218.19713525305409,
+        "first_row_us": 134.042,
+        "row_us": 110.60240645731977,
+        "inference_us": 179066.667,
+        "inference_skipped": false,
+        "peak_rss": 31408128,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 1232,
+        "elapsed_ns": 251130334,
+        "batch": 8,
+        "warmup_iterations": 991,
+        "warmup_elapsed_ns": 200773084,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 0,
+      "phase": {
+        "model": "ode_retained_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 602.492469879518,
+        "prep_us": 234.7458525821596,
+        "first_grad_us": 492.417,
+        "grad_us": 466.5743936567164,
+        "first_row_us": 210.625,
+        "row_us": 215.59112758620688,
+        "inference_us": 325901.0,
+        "inference_skipped": false,
+        "peak_rss": 29032448,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 572,
+        "elapsed_ns": 250976625,
+        "batch": 4,
+        "warmup_iterations": 431,
+        "warmup_elapsed_ns": 200638709,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 1,
+      "phase": {
+        "model": "ode_retained_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 620.9998982630273,
+        "prep_us": 252.22660383064516,
+        "first_grad_us": 37.792,
+        "grad_us": 4.017313171891822,
+        "first_row_us": 20.792,
+        "row_us": 2.343636718164092,
+        "inference_us": 3032.958,
+        "inference_skipped": false,
+        "peak_rss": 28426240,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 81408,
+        "elapsed_ns": 251308042,
+        "batch": 512,
+        "warmup_iterations": 60927,
+        "warmup_elapsed_ns": 200396791,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 1,
+      "phase": {
+        "model": "ode_constant_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 575.3218390804598,
+        "prep_us": 242.08567279767666,
+        "first_grad_us": 30.709,
+        "grad_us": 2.340665418320725,
+        "first_row_us": 13.833,
+        "row_us": 1.9531055530382337,
+        "inference_us": 1594.583,
+        "inference_skipped": false,
+        "peak_rss": 28590080,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 149504,
+        "elapsed_ns": 251672625,
+        "batch": 1024,
+        "warmup_iterations": 129023,
+        "warmup_elapsed_ns": 200245541,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 1,
+      "phase": {
+        "model": "ode_retained_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 626.0133325,
+        "prep_us": 242.19393417231365,
+        "first_grad_us": 72.375,
+        "grad_us": 28.88855350127109,
+        "first_row_us": 27.792,
+        "row_us": 14.977908578959982,
+        "inference_us": 21675.75,
+        "inference_skipped": false,
+        "peak_rss": 28442624,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 8064,
+        "elapsed_ns": 250237250,
+        "batch": 64,
+        "warmup_iterations": 7231,
+        "warmup_elapsed_ns": 201289584,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 1,
+      "phase": {
+        "model": "ode_constant_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 573.0871487414187,
+        "prep_us": 526.6783347368421,
+        "first_grad_us": 41.292,
+        "grad_us": 15.64091697947948,
+        "first_row_us": 19.375,
+        "row_us": 8.90780510225896,
+        "inference_us": 11075.125,
+        "inference_skipped": false,
+        "peak_rss": 28491776,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 17536,
+        "elapsed_ns": 251658875,
+        "batch": 128,
+        "warmup_iterations": 15615,
+        "warmup_elapsed_ns": 201108667,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 1,
+      "phase": {
+        "model": "ode_retained_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 644.9007731958762,
+        "prep_us": 253.21044230769232,
+        "first_grad_us": 548.209,
+        "grad_us": 451.29939819819816,
+        "first_row_us": 233.167,
+        "row_us": 195.44068984375,
+        "inference_us": 349013.417,
+        "inference_skipped": false,
+        "peak_rss": 29065216,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 552,
+        "elapsed_ns": 250415750,
+        "batch": 4,
+        "warmup_iterations": 475,
+        "warmup_elapsed_ns": 200870500,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 1,
+      "phase": {
+        "model": "ode_constant_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 573.253052631579,
+        "prep_us": 5145.544204081632,
+        "first_grad_us": 237.875,
+        "grad_us": 224.87267715827338,
+        "first_row_us": 127.625,
+        "row_us": 117.0339845577913,
+        "inference_us": 160301.583,
+        "inference_skipped": false,
+        "peak_rss": 30801920,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 1232,
+        "elapsed_ns": 250346208,
+        "batch": 8,
+        "warmup_iterations": 951,
+        "warmup_elapsed_ns": 200642791,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 2,
+      "phase": {
+        "model": "ode_constant_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 592.913210900474,
+        "prep_us": 263.94462025316454,
+        "first_grad_us": 31.583,
+        "grad_us": 2.446504937027215,
+        "first_row_us": 17.417,
+        "row_us": 1.8500447710386883,
+        "inference_us": 1807.667,
+        "inference_skipped": false,
+        "peak_rss": 28213248,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 159744,
+        "elapsed_ns": 250441791,
+        "batch": 1024,
+        "warmup_iterations": 121855,
+        "warmup_elapsed_ns": 200869875,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 2,
+      "phase": {
+        "model": "ode_retained_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 586.2185807962529,
+        "prep_us": 249.13827988047808,
+        "first_grad_us": 40.167,
+        "grad_us": 4.03993153208474,
+        "first_row_us": 19.958,
+        "row_us": 2.473809032347441,
+        "inference_us": 2988.0,
+        "inference_skipped": false,
+        "peak_rss": 28508160,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 78336,
+        "elapsed_ns": 251445833,
+        "batch": 512,
+        "warmup_iterations": 64511,
+        "warmup_elapsed_ns": 200252083,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 2,
+      "phase": {
+        "model": "ode_constant_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 557.5331291759466,
+        "prep_us": 546.2295305676856,
+        "first_grad_us": 40.292,
+        "grad_us": 15.239649984760742,
+        "first_row_us": 25.209,
+        "row_us": 8.880562055981812,
+        "inference_us": 11149.125,
+        "inference_skipped": false,
+        "peak_rss": 28311552,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 17536,
+        "elapsed_ns": 250527791,
+        "batch": 128,
+        "warmup_iterations": 15231,
+        "warmup_elapsed_ns": 200755041,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 2,
+      "phase": {
+        "model": "ode_retained_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 622.7729079601991,
+        "prep_us": 239.96992994241842,
+        "first_grad_us": 76.167,
+        "grad_us": 29.194437879495563,
+        "first_row_us": 27.792,
+        "row_us": 14.176029598548425,
+        "inference_us": 21937.5,
+        "inference_skipped": false,
+        "peak_rss": 28524544,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 8512,
+        "elapsed_ns": 250900791,
+        "batch": 64,
+        "warmup_iterations": 6591,
+        "warmup_elapsed_ns": 200470167,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 2,
+      "phase": {
+        "model": "ode_constant_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 618.6370370370371,
+        "prep_us": 5757.67425,
+        "first_grad_us": 265.75,
+        "grad_us": 229.14797069597068,
+        "first_row_us": 136.0,
+        "row_us": 114.50757417582417,
+        "inference_us": 177862.791,
+        "inference_skipped": false,
+        "peak_rss": 30998528,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 1192,
+        "elapsed_ns": 250700459,
+        "batch": 8,
+        "warmup_iterations": 1039,
+        "warmup_elapsed_ns": 200401459,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 2,
+      "phase": {
+        "model": "ode_retained_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 617.3567901234568,
+        "prep_us": 243.3451274319066,
+        "first_grad_us": 558.75,
+        "grad_us": 425.125636672326,
+        "first_row_us": 212.625,
+        "row_us": 210.29327838519765,
+        "inference_us": 344483.5,
+        "inference_skipped": false,
+        "peak_rss": 29065216,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 572,
+        "elapsed_ns": 251552250,
+        "batch": 4,
+        "warmup_iterations": 467,
+        "warmup_elapsed_ns": 201195208,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 3,
+      "phase": {
+        "model": "ode_retained_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 585.4056658878504,
+        "prep_us": 244.75676810176125,
+        "first_grad_us": 38.375,
+        "grad_us": 4.112077898580522,
+        "first_row_us": 17.916,
+        "row_us": 2.3999614376637965,
+        "inference_us": 3014.25,
+        "inference_skipped": false,
+        "peak_rss": 28524544,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 82944,
+        "elapsed_ns": 251391459,
+        "batch": 512,
+        "warmup_iterations": 62463,
+        "warmup_elapsed_ns": 201489709,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 3,
+      "phase": {
+        "model": "ode_constant_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 568.4933727272727,
+        "prep_us": 242.44791666666666,
+        "first_grad_us": 30.75,
+        "grad_us": 2.492298036088127,
+        "first_row_us": 15.375,
+        "row_us": 1.9400035695994289,
+        "inference_us": 1764.0,
+        "inference_skipped": false,
+        "peak_rss": 28246016,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 157696,
+        "elapsed_ns": 251497209,
+        "batch": 1024,
+        "warmup_iterations": 129023,
+        "warmup_elapsed_ns": 201201375,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 3,
+      "phase": {
+        "model": "ode_retained_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 594.3259097387173,
+        "prep_us": 239.3059014354067,
+        "first_grad_us": 64.292,
+        "grad_us": 29.978217386091128,
+        "first_row_us": 31.083,
+        "row_us": 15.245959873155263,
+        "inference_us": 24265.291,
+        "inference_skipped": false,
+        "peak_rss": 28491776,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 8064,
+        "elapsed_ns": 250792458,
+        "batch": 64,
+        "warmup_iterations": 7167,
+        "warmup_elapsed_ns": 201237958,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 3,
+      "phase": {
+        "model": "ode_constant_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 616.1937610837439,
+        "prep_us": 546.3819148471616,
+        "first_grad_us": 48.875,
+        "grad_us": 14.756539487663794,
+        "first_row_us": 17.25,
+        "row_us": 8.384339995975584,
+        "inference_us": 11048.0,
+        "inference_skipped": false,
+        "peak_rss": 28393472,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 18304,
+        "elapsed_ns": 251493291,
+        "batch": 128,
+        "warmup_iterations": 14591,
+        "warmup_elapsed_ns": 201043500,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 3,
+      "phase": {
+        "model": "ode_retained_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 656.8214120734908,
+        "prep_us": 243.34764105058366,
+        "first_grad_us": 556.25,
+        "grad_us": 424.8636112054329,
+        "first_row_us": 207.833,
+        "row_us": 207.87029010806316,
+        "inference_us": 341462.166,
+        "inference_skipped": false,
+        "peak_rss": 29097984,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 568,
+        "elapsed_ns": 251688625,
+        "batch": 4,
+        "warmup_iterations": 455,
+        "warmup_elapsed_ns": 201438042,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 3,
+      "phase": {
+        "model": "ode_constant_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 553.204092920354,
+        "prep_us": 5408.473404255319,
+        "first_grad_us": 239.417,
+        "grad_us": 227.06989827429612,
+        "first_row_us": 126.292,
+        "row_us": 121.30335177098496,
+        "inference_us": 162341.917,
+        "inference_skipped": false,
+        "peak_rss": 30916608,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 1168,
+        "elapsed_ns": 251337666,
+        "batch": 8,
+        "warmup_iterations": 1039,
+        "warmup_elapsed_ns": 201318417,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 4,
+      "phase": {
+        "model": "ode_constant_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 603.8702819277108,
+        "prep_us": 255.88211554192227,
+        "first_grad_us": 34.375,
+        "grad_us": 2.3582869540609375,
+        "first_row_us": 14.708,
+        "row_us": 1.7555944930548728,
+        "inference_us": 1592.208,
+        "inference_skipped": false,
+        "peak_rss": 28295168,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 160768,
+        "elapsed_ns": 251114083,
+        "batch": 1024,
+        "warmup_iterations": 117759,
+        "warmup_elapsed_ns": 200417833,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 4,
+      "phase": {
+        "model": "ode_retained_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 625.176875,
+        "prep_us": 259.42946058091286,
+        "first_grad_us": 37.209,
+        "grad_us": 3.9740173584065874,
+        "first_row_us": 17.084,
+        "row_us": 2.321832568679533,
+        "inference_us": 2996.709,
+        "inference_skipped": false,
+        "peak_rss": 28475392,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 79872,
+        "elapsed_ns": 250235583,
+        "batch": 512,
+        "warmup_iterations": 58879,
+        "warmup_elapsed_ns": 200322291,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 4,
+      "phase": {
+        "model": "ode_constant_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 552.1055938189846,
+        "prep_us": 557.3897550111358,
+        "first_grad_us": 46.291,
+        "grad_us": 16.08820250965251,
+        "first_row_us": 22.0,
+        "row_us": 8.912516487825746,
+        "inference_us": 12388.167,
+        "inference_skipped": false,
+        "peak_rss": 28426240,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 18176,
+        "elapsed_ns": 251788833,
+        "batch": 128,
+        "warmup_iterations": 15231,
+        "warmup_elapsed_ns": 200393750,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 4,
+      "phase": {
+        "model": "ode_retained_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 628.7747060301508,
+        "prep_us": 232.39207713754647,
+        "first_grad_us": 66.958,
+        "grad_us": 29.729558026159335,
+        "first_row_us": 27.875,
+        "row_us": 15.161383201940572,
+        "inference_us": 21632.334,
+        "inference_skipped": false,
+        "peak_rss": 28491776,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 8256,
+        "elapsed_ns": 251073875,
+        "batch": 64,
+        "warmup_iterations": 7167,
+        "warmup_elapsed_ns": 200318291,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 4,
+      "phase": {
+        "model": "ode_constant_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 588.6415670588235,
+        "prep_us": 5247.105895833333,
+        "first_grad_us": 238.875,
+        "grad_us": 220.0500219876869,
+        "first_row_us": 133.167,
+        "row_us": 123.01608853910477,
+        "inference_us": 164114.333,
+        "inference_skipped": false,
+        "peak_rss": 30769152,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 1176,
+        "elapsed_ns": 250055416,
+        "batch": 8,
+        "warmup_iterations": 991,
+        "warmup_elapsed_ns": 200937875,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 4,
+      "phase": {
+        "model": "ode_retained_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 636.4003384223919,
+        "prep_us": 234.78595492957749,
+        "first_grad_us": 564.916,
+        "grad_us": 439.8074850615114,
+        "first_row_us": 210.416,
+        "row_us": 210.49270454545456,
+        "inference_us": 332827.208,
+        "inference_skipped": false,
+        "peak_rss": 29016064,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 576,
+        "elapsed_ns": 250275625,
+        "batch": 4,
+        "warmup_iterations": 439,
+        "warmup_elapsed_ns": 201023375,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 5,
+      "phase": {
+        "model": "ode_retained_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 599.1988636363636,
+        "prep_us": 239.03533365200767,
+        "first_grad_us": 44.583,
+        "grad_us": 3.7995208820936806,
+        "first_row_us": 18.041,
+        "row_us": 2.390045267253659,
+        "inference_us": 2717.541,
+        "inference_skipped": false,
+        "peak_rss": 28409856,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 75776,
+        "elapsed_ns": 251362958,
+        "batch": 512,
+        "warmup_iterations": 63487,
+        "warmup_elapsed_ns": 200568625,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 5,
+      "phase": {
+        "model": "ode_constant_loop-8",
+        "check_values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ],
+        "source_us": 612.9426053921569,
+        "prep_us": 261.6975240585774,
+        "first_grad_us": 32.417,
+        "grad_us": 2.401188338007607,
+        "first_row_us": 15.542,
+        "row_us": 1.8575950082848502,
+        "inference_us": 1824.833,
+        "inference_skipped": false,
+        "peak_rss": 28360704,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 164864,
+        "elapsed_ns": 251124875,
+        "batch": 1024,
+        "warmup_iterations": 120831,
+        "warmup_elapsed_ns": 200487458,
+        "values": [
+          -1.9767590288952304,
+          -0.15842357604173957
+        ]
+      }
+    },
+    {
+      "repeat": 5,
+      "phase": {
+        "model": "ode_retained_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 591.2683215130024,
+        "prep_us": 248.7117296222664,
+        "first_grad_us": 67.959,
+        "grad_us": 31.09189876880985,
+        "first_row_us": 33.709,
+        "row_us": 14.968421925517902,
+        "inference_us": 21623.417,
+        "inference_skipped": false,
+        "peak_rss": 28524544,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 8064,
+        "elapsed_ns": 251772042,
+        "batch": 64,
+        "warmup_iterations": 7103,
+        "warmup_elapsed_ns": 200258041,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 5,
+      "phase": {
+        "model": "ode_constant_loop-128",
+        "check_values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ],
+        "source_us": 593.1422796208532,
+        "prep_us": 544.6971913043478,
+        "first_grad_us": 47.917,
+        "grad_us": 14.719519693847513,
+        "first_row_us": 16.875,
+        "row_us": 8.612104860656585,
+        "inference_us": 11015.917,
+        "inference_skipped": false,
+        "peak_rss": 28524544,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 17792,
+        "elapsed_ns": 251225375,
+        "batch": 128,
+        "warmup_iterations": 14975,
+        "warmup_elapsed_ns": 200229167,
+        "values": [
+          -1.9767590288952304,
+          -0.1584235760417395
+        ]
+      }
+    },
+    {
+      "repeat": 5,
+      "phase": {
+        "model": "ode_retained_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 634.5273908629442,
+        "prep_us": 245.23165882352941,
+        "first_grad_us": 552.292,
+        "grad_us": 441.2225149911817,
+        "first_row_us": 237.875,
+        "row_us": 195.46455078125,
+        "inference_us": 347402.333,
+        "inference_skipped": false,
+        "peak_rss": 28917760,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 556,
+        "elapsed_ns": 250245459,
+        "batch": 4,
+        "warmup_iterations": 471,
+        "warmup_elapsed_ns": 201395875,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    },
+    {
+      "repeat": 5,
+      "phase": {
+        "model": "ode_constant_loop-2048",
+        "check_values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ],
+        "source_us": 573.7110091743119,
+        "prep_us": 5265.572041666667,
+        "first_grad_us": 272.959,
+        "grad_us": 221.30925486725664,
+        "first_row_us": 128.666,
+        "row_us": 117.3583022055373,
+        "inference_us": 166523.334,
+        "inference_skipped": false,
+        "peak_rss": 30998528,
+        "library_bytes": 39707168
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 1232,
+        "elapsed_ns": 250560375,
+        "batch": 8,
+        "warmup_iterations": 935,
+        "warmup_elapsed_ns": 200470959,
+        "values": [
+          -1.9767590288952313,
+          -0.15842357604174018
+        ]
+      }
+    }
+  ],
+  "engines": {
+    "ode_constant_loop-8": {
+      "schema_version": 1,
+      "kind": "execution_manifest",
+      "stage": "compiled_model",
+      "host_probe": "not_run",
+      "evidence": "selected_structure_not_execution_counts",
+      "interpreter_events": [
+        {
+          "context": "lowering",
+          "event": "folding_probe",
+          "count": 11
+        },
+        {
+          "context": "prepare_data",
+          "event": "construction",
+          "count": 2
+        },
+        {
+          "context": "prepare_data",
+          "event": "statement_entry",
+          "count": 3
+        }
+      ],
+      "strict_violation": false,
+      "log_prob": {
+        "site": "log_prob",
+        "operations": [
+          {
+            "site": "log_prob/op/0",
+            "operation": "OP_CONSTRAIN_LU",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/1",
+            "operation": "OP_ODE",
+            "variant": 6,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": true,
+            "direct_rk_enabled": true,
+            "direct_rk_refusal": "",
+            "solver_derivative_selection": "type_shape_and_mode_dependent",
+            "callback": {
+              "name": "rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "solver_dependent",
+              "fresh_interpreter_per_call": false,
+              "registers": 37,
+              "instructions": 42,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "log_prob/op/2",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/3",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/4",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/5",
+            "operation": "OP_ADD_N",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "write_array": {
+        "value_engine": "bound_graph",
+        "status": "lowered",
+        "refusal": "",
+        "graph": {
+          "site": "write_array",
+          "operations": [
+            {
+              "site": "write_array/op/0",
+              "operation": "OP_CONSTRAIN_LU",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "write_array/op/1",
+              "operation": "OP_ODE",
+              "variant": 4,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ],
+              "direct_rk_payload": true,
+              "direct_rk_enabled": true,
+              "direct_rk_refusal": "",
+              "solver_derivative_selection": "not_used",
+              "callback": {
+                "name": "rhs",
+                "value_engine": "register_program",
+                "refusal": "",
+                "derivative": "not_used",
+                "fresh_interpreter_per_call": false,
+                "registers": 37,
+                "instructions": 42,
+                "kernel_calls": []
+              }
+            },
+            {
+              "site": "write_array/op/2",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "transform_inits": {
+        "value_engine": "mir_interpreter",
+        "refusal": ""
+      },
+      "reported_fallbacks": []
+    },
+    "ode_constant_loop-128": {
+      "schema_version": 1,
+      "kind": "execution_manifest",
+      "stage": "compiled_model",
+      "host_probe": "not_run",
+      "evidence": "selected_structure_not_execution_counts",
+      "interpreter_events": [
+        {
+          "context": "lowering",
+          "event": "folding_probe",
+          "count": 11
+        },
+        {
+          "context": "prepare_data",
+          "event": "construction",
+          "count": 2
+        },
+        {
+          "context": "prepare_data",
+          "event": "statement_entry",
+          "count": 3
+        }
+      ],
+      "strict_violation": false,
+      "log_prob": {
+        "site": "log_prob",
+        "operations": [
+          {
+            "site": "log_prob/op/0",
+            "operation": "OP_CONSTRAIN_LU",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/1",
+            "operation": "OP_ODE",
+            "variant": 6,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": true,
+            "direct_rk_enabled": true,
+            "direct_rk_refusal": "",
+            "solver_derivative_selection": "type_shape_and_mode_dependent",
+            "callback": {
+              "name": "rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "solver_dependent",
+              "fresh_interpreter_per_call": false,
+              "registers": 517,
+              "instructions": 642,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "log_prob/op/2",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/3",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/4",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/5",
+            "operation": "OP_ADD_N",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "write_array": {
+        "value_engine": "bound_graph",
+        "status": "lowered",
+        "refusal": "",
+        "graph": {
+          "site": "write_array",
+          "operations": [
+            {
+              "site": "write_array/op/0",
+              "operation": "OP_CONSTRAIN_LU",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "write_array/op/1",
+              "operation": "OP_ODE",
+              "variant": 4,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ],
+              "direct_rk_payload": true,
+              "direct_rk_enabled": true,
+              "direct_rk_refusal": "",
+              "solver_derivative_selection": "not_used",
+              "callback": {
+                "name": "rhs",
+                "value_engine": "register_program",
+                "refusal": "",
+                "derivative": "not_used",
+                "fresh_interpreter_per_call": false,
+                "registers": 517,
+                "instructions": 642,
+                "kernel_calls": []
+              }
+            },
+            {
+              "site": "write_array/op/2",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "transform_inits": {
+        "value_engine": "mir_interpreter",
+        "refusal": ""
+      },
+      "reported_fallbacks": []
+    },
+    "ode_constant_loop-2048": {
+      "schema_version": 1,
+      "kind": "execution_manifest",
+      "stage": "compiled_model",
+      "host_probe": "not_run",
+      "evidence": "selected_structure_not_execution_counts",
+      "interpreter_events": [
+        {
+          "context": "lowering",
+          "event": "folding_probe",
+          "count": 11
+        },
+        {
+          "context": "prepare_data",
+          "event": "construction",
+          "count": 2
+        },
+        {
+          "context": "prepare_data",
+          "event": "statement_entry",
+          "count": 3
+        }
+      ],
+      "strict_violation": false,
+      "log_prob": {
+        "site": "log_prob",
+        "operations": [
+          {
+            "site": "log_prob/op/0",
+            "operation": "OP_CONSTRAIN_LU",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/1",
+            "operation": "OP_ODE",
+            "variant": 6,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": true,
+            "direct_rk_enabled": true,
+            "direct_rk_refusal": "",
+            "solver_derivative_selection": "type_shape_and_mode_dependent",
+            "callback": {
+              "name": "rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "solver_dependent",
+              "fresh_interpreter_per_call": false,
+              "registers": 8197,
+              "instructions": 10242,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "log_prob/op/2",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/3",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/4",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/5",
+            "operation": "OP_ADD_N",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "write_array": {
+        "value_engine": "bound_graph",
+        "status": "lowered",
+        "refusal": "",
+        "graph": {
+          "site": "write_array",
+          "operations": [
+            {
+              "site": "write_array/op/0",
+              "operation": "OP_CONSTRAIN_LU",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "write_array/op/1",
+              "operation": "OP_ODE",
+              "variant": 4,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ],
+              "direct_rk_payload": true,
+              "direct_rk_enabled": true,
+              "direct_rk_refusal": "",
+              "solver_derivative_selection": "not_used",
+              "callback": {
+                "name": "rhs",
+                "value_engine": "register_program",
+                "refusal": "",
+                "derivative": "not_used",
+                "fresh_interpreter_per_call": false,
+                "registers": 8197,
+                "instructions": 10242,
+                "kernel_calls": []
+              }
+            },
+            {
+              "site": "write_array/op/2",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "transform_inits": {
+        "value_engine": "mir_interpreter",
+        "refusal": ""
+      },
+      "reported_fallbacks": []
+    },
+    "ode_retained_loop-8": {
+      "schema_version": 1,
+      "kind": "execution_manifest",
+      "stage": "compiled_model",
+      "host_probe": "not_run",
+      "evidence": "selected_structure_not_execution_counts",
+      "interpreter_events": [
+        {
+          "context": "lowering",
+          "event": "folding_probe",
+          "count": 11
+        },
+        {
+          "context": "prepare_data",
+          "event": "construction",
+          "count": 2
+        },
+        {
+          "context": "prepare_data",
+          "event": "statement_entry",
+          "count": 3
+        }
+      ],
+      "strict_violation": false,
+      "log_prob": {
+        "site": "log_prob",
+        "operations": [
+          {
+            "site": "log_prob/op/0",
+            "operation": "OP_CONSTRAIN_LU",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/1",
+            "operation": "OP_ODE",
+            "variant": 6,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": false,
+            "direct_rk_enabled": false,
+            "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+            "solver_derivative_selection": "type_shape_and_mode_dependent",
+            "callback": {
+              "name": "rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "solver_dependent",
+              "fresh_interpreter_per_call": false,
+              "registers": 22,
+              "instructions": 29,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "log_prob/op/2",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/3",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/4",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/5",
+            "operation": "OP_ADD_N",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "write_array": {
+        "value_engine": "bound_graph",
+        "status": "lowered",
+        "refusal": "",
+        "graph": {
+          "site": "write_array",
+          "operations": [
+            {
+              "site": "write_array/op/0",
+              "operation": "OP_CONSTRAIN_LU",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "write_array/op/1",
+              "operation": "OP_ODE",
+              "variant": 4,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ],
+              "direct_rk_payload": false,
+              "direct_rk_enabled": false,
+              "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+              "solver_derivative_selection": "not_used",
+              "callback": {
+                "name": "rhs",
+                "value_engine": "register_program",
+                "refusal": "",
+                "derivative": "not_used",
+                "fresh_interpreter_per_call": false,
+                "registers": 22,
+                "instructions": 29,
+                "kernel_calls": []
+              }
+            },
+            {
+              "site": "write_array/op/2",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "transform_inits": {
+        "value_engine": "mir_interpreter",
+        "refusal": ""
+      },
+      "reported_fallbacks": []
+    },
+    "ode_retained_loop-128": {
+      "schema_version": 1,
+      "kind": "execution_manifest",
+      "stage": "compiled_model",
+      "host_probe": "not_run",
+      "evidence": "selected_structure_not_execution_counts",
+      "interpreter_events": [
+        {
+          "context": "lowering",
+          "event": "folding_probe",
+          "count": 11
+        },
+        {
+          "context": "prepare_data",
+          "event": "construction",
+          "count": 2
+        },
+        {
+          "context": "prepare_data",
+          "event": "statement_entry",
+          "count": 3
+        }
+      ],
+      "strict_violation": false,
+      "log_prob": {
+        "site": "log_prob",
+        "operations": [
+          {
+            "site": "log_prob/op/0",
+            "operation": "OP_CONSTRAIN_LU",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/1",
+            "operation": "OP_ODE",
+            "variant": 6,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": false,
+            "direct_rk_enabled": false,
+            "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+            "solver_derivative_selection": "type_shape_and_mode_dependent",
+            "callback": {
+              "name": "rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "solver_dependent",
+              "fresh_interpreter_per_call": false,
+              "registers": 22,
+              "instructions": 29,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "log_prob/op/2",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/3",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/4",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/5",
+            "operation": "OP_ADD_N",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "write_array": {
+        "value_engine": "bound_graph",
+        "status": "lowered",
+        "refusal": "",
+        "graph": {
+          "site": "write_array",
+          "operations": [
+            {
+              "site": "write_array/op/0",
+              "operation": "OP_CONSTRAIN_LU",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "write_array/op/1",
+              "operation": "OP_ODE",
+              "variant": 4,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ],
+              "direct_rk_payload": false,
+              "direct_rk_enabled": false,
+              "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+              "solver_derivative_selection": "not_used",
+              "callback": {
+                "name": "rhs",
+                "value_engine": "register_program",
+                "refusal": "",
+                "derivative": "not_used",
+                "fresh_interpreter_per_call": false,
+                "registers": 22,
+                "instructions": 29,
+                "kernel_calls": []
+              }
+            },
+            {
+              "site": "write_array/op/2",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "transform_inits": {
+        "value_engine": "mir_interpreter",
+        "refusal": ""
+      },
+      "reported_fallbacks": []
+    },
+    "ode_retained_loop-2048": {
+      "schema_version": 1,
+      "kind": "execution_manifest",
+      "stage": "compiled_model",
+      "host_probe": "not_run",
+      "evidence": "selected_structure_not_execution_counts",
+      "interpreter_events": [
+        {
+          "context": "lowering",
+          "event": "folding_probe",
+          "count": 11
+        },
+        {
+          "context": "prepare_data",
+          "event": "construction",
+          "count": 2
+        },
+        {
+          "context": "prepare_data",
+          "event": "statement_entry",
+          "count": 3
+        }
+      ],
+      "strict_violation": false,
+      "log_prob": {
+        "site": "log_prob",
+        "operations": [
+          {
+            "site": "log_prob/op/0",
+            "operation": "OP_CONSTRAIN_LU",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/1",
+            "operation": "OP_ODE",
+            "variant": 6,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": false,
+            "direct_rk_enabled": false,
+            "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+            "solver_derivative_selection": "type_shape_and_mode_dependent",
+            "callback": {
+              "name": "rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "solver_dependent",
+              "fresh_interpreter_per_call": false,
+              "registers": 22,
+              "instructions": 29,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "log_prob/op/2",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/3",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/4",
+            "operation": "OP_NORMAL_LPDF",
+            "variant": 129,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "site": "log_prob/op/5",
+            "operation": "OP_ADD_N",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "unclassified",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1,
+              1
+            ]
+          }
+        ]
+      },
+      "write_array": {
+        "value_engine": "bound_graph",
+        "status": "lowered",
+        "refusal": "",
+        "graph": {
+          "site": "write_array",
+          "operations": [
+            {
+              "site": "write_array/op/0",
+              "operation": "OP_CONSTRAIN_LU",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "site": "write_array/op/1",
+              "operation": "OP_ODE",
+              "variant": 4,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1,
+                1
+              ],
+              "direct_rk_payload": false,
+              "direct_rk_enabled": false,
+              "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+              "solver_derivative_selection": "not_used",
+              "callback": {
+                "name": "rhs",
+                "value_engine": "register_program",
+                "refusal": "",
+                "derivative": "not_used",
+                "fresh_interpreter_per_call": false,
+                "registers": 22,
+                "instructions": 29,
+                "kernel_calls": []
+              }
+            },
+            {
+              "site": "write_array/op/2",
+              "operation": "OP_INDEX",
+              "variant": 0,
+              "value_engine": "bound_graph_kernel",
+              "derivative": "not_used",
+              "output_elements": 1,
+              "logical_shape": null,
+              "input_elements": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "transform_inits": {
+        "value_engine": "mir_interpreter",
+        "refusal": ""
+      },
+      "reported_fallbacks": []
+    }
+  },
+  "ablation": {
+    "raw": [
+      {
+        "repeat": 0,
+        "model": "ode_constant_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 101888,
+          "elapsed_ns": 250926375,
+          "batch": 512,
+          "warmup_iterations": 82943,
+          "warmup_elapsed_ns": 201157959,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 0,
+        "model": "ode_retained_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 74752,
+          "elapsed_ns": 250784208,
+          "batch": 512,
+          "warmup_iterations": 63999,
+          "warmup_elapsed_ns": 200800500,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 0,
+        "model": "ode_constant_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 12288,
+          "elapsed_ns": 250286709,
+          "batch": 64,
+          "warmup_iterations": 11007,
+          "warmup_elapsed_ns": 200837208,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 0,
+        "model": "ode_retained_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 8256,
+          "elapsed_ns": 250697834,
+          "batch": 64,
+          "warmup_iterations": 7039,
+          "warmup_elapsed_ns": 200783625,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 0,
+        "model": "ode_constant_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 860,
+          "elapsed_ns": 250284417,
+          "batch": 4,
+          "warmup_iterations": 707,
+          "warmup_elapsed_ns": 200931500,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 0,
+        "model": "ode_retained_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 584,
+          "elapsed_ns": 250246334,
+          "batch": 4,
+          "warmup_iterations": 435,
+          "warmup_elapsed_ns": 200132333,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 1,
+        "model": "ode_retained_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 79360,
+          "elapsed_ns": 251559916,
+          "batch": 512,
+          "warmup_iterations": 59903,
+          "warmup_elapsed_ns": 200234167,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 1,
+        "model": "ode_constant_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 101888,
+          "elapsed_ns": 250927541,
+          "batch": 512,
+          "warmup_iterations": 84479,
+          "warmup_elapsed_ns": 201042250,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 1,
+        "model": "ode_retained_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 8384,
+          "elapsed_ns": 251782292,
+          "batch": 64,
+          "warmup_iterations": 7167,
+          "warmup_elapsed_ns": 200515416,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 1,
+        "model": "ode_constant_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 12992,
+          "elapsed_ns": 250463625,
+          "batch": 64,
+          "warmup_iterations": 10431,
+          "warmup_elapsed_ns": 200984750,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 1,
+        "model": "ode_retained_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 580,
+          "elapsed_ns": 250722417,
+          "batch": 4,
+          "warmup_iterations": 439,
+          "warmup_elapsed_ns": 200132583,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 1,
+        "model": "ode_constant_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 912,
+          "elapsed_ns": 250882916,
+          "batch": 4,
+          "warmup_iterations": 659,
+          "warmup_elapsed_ns": 200849167,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 2,
+        "model": "ode_constant_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 102912,
+          "elapsed_ns": 251155708,
+          "batch": 512,
+          "warmup_iterations": 83455,
+          "warmup_elapsed_ns": 200222875,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 2,
+        "model": "ode_retained_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 73728,
+          "elapsed_ns": 251002375,
+          "batch": 512,
+          "warmup_iterations": 64511,
+          "warmup_elapsed_ns": 200205583,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 2,
+        "model": "ode_constant_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 13312,
+          "elapsed_ns": 250991125,
+          "batch": 64,
+          "warmup_iterations": 11007,
+          "warmup_elapsed_ns": 200409667,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 2,
+        "model": "ode_retained_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 8960,
+          "elapsed_ns": 251585000,
+          "batch": 64,
+          "warmup_iterations": 6463,
+          "warmup_elapsed_ns": 200049959,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 2,
+        "model": "ode_constant_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 896,
+          "elapsed_ns": 250754917,
+          "batch": 4,
+          "warmup_iterations": 659,
+          "warmup_elapsed_ns": 200219833,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 2,
+        "model": "ode_retained_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 544,
+          "elapsed_ns": 251305750,
+          "batch": 4,
+          "warmup_iterations": 463,
+          "warmup_elapsed_ns": 201412750,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 3,
+        "model": "ode_retained_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 74240,
+          "elapsed_ns": 250814583,
+          "batch": 512,
+          "warmup_iterations": 65535,
+          "warmup_elapsed_ns": 200738542,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 3,
+        "model": "ode_constant_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 98816,
+          "elapsed_ns": 250484000,
+          "batch": 512,
+          "warmup_iterations": 84991,
+          "warmup_elapsed_ns": 200493584,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 3,
+        "model": "ode_retained_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 8320,
+          "elapsed_ns": 251866209,
+          "batch": 64,
+          "warmup_iterations": 6911,
+          "warmup_elapsed_ns": 200747250,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 3,
+        "model": "ode_constant_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 13440,
+          "elapsed_ns": 250105459,
+          "batch": 64,
+          "warmup_iterations": 10495,
+          "warmup_elapsed_ns": 200581375,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 3,
+        "model": "ode_retained_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 592,
+          "elapsed_ns": 251406833,
+          "batch": 4,
+          "warmup_iterations": 427,
+          "warmup_elapsed_ns": 201759167,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 3,
+        "model": "ode_constant_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 864,
+          "elapsed_ns": 250587042,
+          "batch": 4,
+          "warmup_iterations": 683,
+          "warmup_elapsed_ns": 201206417,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 4,
+        "model": "ode_constant_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 99840,
+          "elapsed_ns": 250715333,
+          "batch": 512,
+          "warmup_iterations": 86015,
+          "warmup_elapsed_ns": 201059417,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 4,
+        "model": "ode_retained_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 78848,
+          "elapsed_ns": 250919084,
+          "batch": 512,
+          "warmup_iterations": 65023,
+          "warmup_elapsed_ns": 200621334,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 4,
+        "model": "ode_constant_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 12416,
+          "elapsed_ns": 250311125,
+          "batch": 64,
+          "warmup_iterations": 9919,
+          "warmup_elapsed_ns": 200490500,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 4,
+        "model": "ode_retained_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 7936,
+          "elapsed_ns": 251679417,
+          "batch": 64,
+          "warmup_iterations": 6783,
+          "warmup_elapsed_ns": 201598875,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 4,
+        "model": "ode_constant_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 912,
+          "elapsed_ns": 250095417,
+          "batch": 4,
+          "warmup_iterations": 663,
+          "warmup_elapsed_ns": 200008750,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 4,
+        "model": "ode_retained_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 556,
+          "elapsed_ns": 251839125,
+          "batch": 4,
+          "warmup_iterations": 427,
+          "warmup_elapsed_ns": 200930125,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 5,
+        "model": "ode_retained_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 81408,
+          "elapsed_ns": 250207208,
+          "batch": 512,
+          "warmup_iterations": 58879,
+          "warmup_elapsed_ns": 200232750,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 5,
+        "model": "ode_constant_loop-8",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 105472,
+          "elapsed_ns": 250192500,
+          "batch": 512,
+          "warmup_iterations": 80383,
+          "warmup_elapsed_ns": 200512708,
+          "values": [
+            -1.9767590288952304,
+            -0.15842357604173957
+          ]
+        }
+      },
+      {
+        "repeat": 5,
+        "model": "ode_retained_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 8256,
+          "elapsed_ns": 250366250,
+          "batch": 64,
+          "warmup_iterations": 6847,
+          "warmup_elapsed_ns": 200607209,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 5,
+        "model": "ode_constant_loop-128",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 12416,
+          "elapsed_ns": 250957542,
+          "batch": 64,
+          "warmup_iterations": 11071,
+          "warmup_elapsed_ns": 200430125,
+          "values": [
+            -1.9767590288952304,
+            -0.1584235760417395
+          ]
+        }
+      },
+      {
+        "repeat": 5,
+        "model": "ode_retained_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 564,
+          "elapsed_ns": 251856042,
+          "batch": 4,
+          "warmup_iterations": 467,
+          "warmup_elapsed_ns": 200302750,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      },
+      {
+        "repeat": 5,
+        "model": "ode_constant_loop-2048",
+        "native": {
+          "protocol": "stanli-gradient-v2",
+          "iterations": 916,
+          "elapsed_ns": 250139958,
+          "batch": 4,
+          "warmup_iterations": 675,
+          "warmup_elapsed_ns": 200248542,
+          "values": [
+            -1.9767590288952313,
+            -0.15842357604174018
+          ]
+        }
+      }
+    ],
+    "summary": {
+      "ode_constant_loop-8": {
+        "median_ns": 2462.7724364007536,
+        "mad_ns": 35.34059652159863
+      },
+      "ode_constant_loop-128": {
+        "median_ns": 19719.331964991936,
+        "mad_ns": 571.0757435595297
+      },
+      "ode_constant_loop-2048": {
+        "median_ns": 277475.6575520834,
+        "mad_ns": 3822.663707277563
+      },
+      "ode_retained_loop-8": {
+        "median_ns": 3268.598394622287,
+        "mad_ns": 104.28568830818972
+      },
+      "ode_retained_loop-128": {
+        "median_ns": 30298.875158858824,
+        "mad_ns": 167.12369537398627
+      },
+      "ode_retained_loop-2048": {
+        "median_ns": 439416.64763389586,
+        "mad_ns": 12222.034985710052
+      }
+    }
+  },
+  "oracle-sizes": [
+    {
+      "model": "ode_constant_loop-8",
+      "point": 0,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-8",
+      "point": 1,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-8",
+      "point": 2,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-128",
+      "point": 0,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-128",
+      "point": 1,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-128",
+      "point": 2,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-2048",
+      "point": 0,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-2048",
+      "point": 1,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_constant_loop-2048",
+      "point": 2,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-8",
+      "point": 0,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-8",
+      "point": 1,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-8",
+      "point": 2,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-128",
+      "point": 0,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-128",
+      "point": 1,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-128",
+      "point": 2,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-2048",
+      "point": 0,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-2048",
+      "point": 1,
+      "values": 4,
+      "max_ulp": 0
+    },
+    {
+      "model": "ode_retained_loop-2048",
+      "point": 2,
+      "values": 4,
+      "max_ulp": 0
+    }
+  ],
+  "context": {
+    "commit": "b6963d5a",
+    "runtime_changed": false,
+    "build": "Release AppleClang 21 Darwin arm64",
+    "pairs": 6,
+    "sizes": [
+      8,
+      128,
+      2048
+    ],
+    "library_sha256": "668f339a1895c49e0a4bad568b5f1e16c8d76b508e59841c8fae127a3c3500ff",
+    "checksum": "bitwise equal between models in all timed phase samples",
+    "rss": "Whole-process peak, not retained model memory",
+    "ablation": "STANLI_NO_ODE_DIRECT_RK=1 for both representations"
+  }
+}
