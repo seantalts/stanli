@@ -190,8 +190,8 @@ inclusive counts overlap and cover a ten-second recording window. The next
 startup hypothesis is reducing repeated operand resolution, with a separate
 certificate; this change does not assume a reusable relocation plan.
 
-The [initial proof audit](../../docs/superpowers/plans/2026-09-20-ctsem-proof-review.md)
-and [implementation audit](../../docs/superpowers/plans/2026-09-20-ctsem-proof-implementation-review.md)
+The [initial proof audit](../../docs/internal/archive/plans/2026-09-20-ctsem-proof-review.md)
+and [implementation audit](../../docs/internal/archive/plans/2026-09-20-ctsem-proof-implementation-review.md)
 found no implementation counterexample. The implementation audit's additional
 refusal and concurrent-replay tests are included and pass. The Fréchet
 replacement remains rejected under the previously recorded non-normal matrix

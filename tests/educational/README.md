@@ -17,7 +17,7 @@ other application models.
 
 ## Numerical and sampling tests
 
-The common reference archive, [`docs/corpus-refs.json.gz`](../../docs/corpus-refs.json.gz),
+The common reference archive, [`docs/internal/artifacts/corpus-refs.json.gz`](../../docs/internal/artifacts/corpus-refs.json.gz),
 contains all 13 models at three deterministic points. The
 [corpus replay](../../tools/verify_refs.py) compares log density (proportional,
 with Jacobian), every unconstrained gradient, output names/order, constrained

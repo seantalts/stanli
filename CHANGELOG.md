@@ -542,8 +542,8 @@ supported runtime types.
   with MIR embedded under the reserved `__stanli` data key. Clients must permit
   modifying the data argument; library-path-only clients are unsupported.
   `tools/bs_conformance.py` checks against BridgeStan. See the
-  [facade design](docs/superpowers/specs/2026-08-10-bridgestan-facade-design.md)
-  and [embedded-MIR design](docs/superpowers/specs/2026-08-11-embedded-mir-data.md).
+  [facade design](docs/internal/archive/specs/2026-08-10-bridgestan-facade-design.md)
+  and [embedded-MIR design](docs/internal/archive/specs/2026-08-11-embedded-mir-data.md).
 - Add WALNUTS through vendored walnutpie headers, with `run_walnuts`,
   `stanli_sample_walnuts_stream`, and npm's `sampler: "walnuts"`. Its
   `max_error` option controls within-trajectory step adaptation.
@@ -666,7 +666,7 @@ Includes the shape fixes drafted for 0.4.1, which was never released.
 - Enable SIMD128, improving measured browser performance by 2–11% with bitwise
   gradient parity. Runtime payload is 1.52 MB gzipped; native library is
   22.2 MB installed and wheel 7.8 MB. The
-  [density-pack experiment](docs/density-pack.md) records why side-loading
+  [density-pack experiment](docs/internal/archive/density-pack.md) records why side-loading
   uncommon densities was not retained.
 - Split density kernels across nine translation units to reduce compiler memory
   and build serialization.
