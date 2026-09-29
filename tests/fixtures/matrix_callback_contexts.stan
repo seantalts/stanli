@@ -21,10 +21,10 @@ transformed data {
 parameters { real gate; real rate; }
 model {
   matrix[2, 3] A = rep_matrix(rate, 2, 3);
-  
+
   vector[1] yp0 = [rate + B[2, 1]]';
-  
-  
+
+
   target += -0.5 * (square(gate) + square(rate));
   target += ode_rk45(rhs, y0, 0, ts, A, B)[1, 1];
   target += dae(residual, y0, yp0, 0, ts, A, B)[1, 1];
@@ -47,10 +47,10 @@ generated quantities {
   matrix[2, 3] A = rep_matrix(rate, 2, 3);
   real answer = 0;
   if (gate > 0) {
-    
+
     vector[1] yp0 = [rate + B[2, 1]]';
-    
-    
+
+
     answer += ode_rk45(rhs, y0, 0, ts, A, B)[1, 1];
     answer += dae(residual, y0, yp0, 0, ts, A, B)[1, 1];
     answer += solve_newton(system_eq, y0, A, B)[1];

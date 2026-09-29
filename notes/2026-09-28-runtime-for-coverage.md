@@ -175,5 +175,3 @@ new general-value engine. These would allow more ordinary fixed-size loops and
 functions to stay compiled. Follow with runtime integer/control packing and
 broader checked selectors. Profile preparation and truly dynamic storage cases
 before deciding whether their interpreter use is a performance problem.
-
-
