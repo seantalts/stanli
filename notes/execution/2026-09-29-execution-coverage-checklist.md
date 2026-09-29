@@ -41,7 +41,7 @@ itself a MIR fallback or another model execution engine.
 - [x] Obtain Fable's overarching review and record source-based corrections.
 - [x] Preserve negative research results: stencil JIT/instruction generation
   remain tabled; removed loop/reverse prototypes are not production options.
-- [ ] Record the actual native build/dependency identities before new timings.
+- [x] Record the actual native build/dependency identities before new timings.
   Prior PR measurements are historical evidence, not this work's baseline.
 
 ## 1. Make the remaining coverage measurable
@@ -73,16 +73,19 @@ entire inventory is not a prerequisite for a small, independently proved fix.
 ## 2. Close direct gaps in existing engines first
 
 - [ ] **2.1 Container arguments to RNG functions — first implementation slice.**
-  - [ ] Baseline the existing array-argument `binomial_rng` output fallback and
+  - [x] Baseline the existing array-argument `binomial_rng` output fallback and
     newer scalar-family container refusal, such as `gamma_rng`.
-  - [ ] Extend the existing RNG lowering/kernel contract for proved fixed shapes;
+  - [x] Extend the existing RNG lowering/kernel contract for proved fixed shapes;
     cover graph and register-region admission without duplicating algorithms.
-  - [ ] Preserve scalar broadcasting versus length-one containers, empty inputs,
+  - [x] Preserve scalar broadcasting versus length-one containers, empty inputs,
     length mismatches, validation order, draw order and subsequent RNG state.
-  - [ ] Verify against pinned upstream Stan/CmdStan behavior, including an invalid
+  - [x] Verify against pinned upstream Stan/CmdStan behavior, including an invalid
     later element and a following draw. MIR agreement alone is not sufficient.
-  - [ ] Measure complete output time, preparation and memory for small and larger
+  - [x] Measure complete output time, preparation and peak process memory for small and larger
     workloads; retain a genuinely unsupported fixture for fallback tests.
+  - [ ] Resolve the [measured preparation tradeoff](2026-09-29-container-rng-results.md)
+    before adoption. Candidate passes correctness and improves repeated output,
+    but the mixed-family fixture needs about three rows to recover added setup.
 - [ ] **2.2 Runtime integer expressions.**
   - [ ] Route eligible integer division through existing integer instructions.
   - [ ] Extend sums/extrema where shape, initialization and range proofs permit.
@@ -248,4 +251,5 @@ show they dominate interactive use.
 5. Continue numerical/language coverage alongside these bounded improvements;
    bring the marked type, region and dynamic-frame decisions back explicitly.
 
-No runtime changes or new performance results are claimed by this checklist.
+The initial outline preceded implementation. Item 2.1 now links a tested candidate
+and measurements; it is not marked complete while its adoption decision is open.
