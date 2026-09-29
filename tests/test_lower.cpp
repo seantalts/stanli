@@ -5279,6 +5279,39 @@ int main() {
     }
   }
 
+  // Parameter-dependent truncation must retain its real normalizer even
+  // when stanc's synthesized MIR expressions carry UInt metadata. These
+  // CmdStan values/gradients are from the independent conformance oracle:
+  // https://github.com/seantalts/stanli/actions/runs/36575332712
+  // Exercise generated reverse and var replay, including support rejection.
+  for (bool replay : {false, true}) {
+    if (replay) test_setenv("STANLI_NO_NATIVE_ADJ", "1", 1);
+    auto tm = compile_model(slurp("tests/fixtures/trunc_param.tmir.sexp"),
+                            DataMap::from_json("{}"));
+    if (replay) test_unsetenv("STANLI_NO_NATIVE_ADJ");
+    Executor tex(std::move(tm.graph));
+    tm.bind(tex);
+    const double points[][2] = {{0.0, 0.0}, {0.25, -0.2}};
+    const double expected[][3] = {
+        {0.20016629432446262, 0.125, 0.4275050482817715},
+        {0.1104812435987938, -0.2479561744103176, 0.41128010285505334}};
+    for (int p = 0; p < 2; ++p) {
+      std::copy_n(points[p], 2, tex.params_data());
+      double grad[2];
+      const double lp = tex.gradient(grad);
+      expect_ulp("trunc_param lp", lp, expected[p][0], 10);
+      expect_ulp("trunc_param dtheta", grad[0], expected[p][1], 10);
+      expect_ulp("trunc_param dsigma", grad[1], expected[p][2], 10);
+      expect_ulp("trunc_param forward", tex.forward(), expected[p][0], 10);
+    }
+    for (double theta : {-1.1, 2.1}) {
+      tex.params_data()[0] = theta;
+      tex.params_data()[1] = 0.0;
+      check(tex.forward() == -std::numeric_limits<double>::infinity(),
+            "trunc_param rejects outside its support");
+    }
+  }
+
   // Vectorized truncation. The fixture above truncates a scalar, which is
   // the shape that kept working while both vectorized forms failed to
   // compile at all: one needs the FnLength compiler-internal, the other a

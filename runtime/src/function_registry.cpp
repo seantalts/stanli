@@ -887,7 +887,18 @@ const FunctionSpec* function_spec(const mir::Expr& call) {
   uint64_t integer_arguments = 0;
   for (size_t index = 0; index < call.args.size(); ++index) {
     FunctionArgumentKind kind;
-    if (!numeric_kind(call.args[index], &kind)) return nullptr;
+    const mir::Expr& argument = call.args[index];
+    if (!numeric_kind(argument, &kind)) return nullptr;
+    // Synthesized truncation expressions can carry UInt metadata through
+    // real CDFs, log_diff_exp and their enclosing arithmetic. Resolve these
+    // call results bottom-up before choosing an integer overload. Keep real
+    // metadata (including explicit promotions) and user-defined calls intact.
+    if (kind == FunctionArgumentKind::Integer &&
+        argument.kind == mir::Expr::FunApp &&
+        argument.fn_lib == mir::Expr::Lib::StanLib) {
+      if (const FunctionSpec* nested = function_spec(argument))
+        kind = nested->result();
+    }
     if (kind == FunctionArgumentKind::Integer)
       integer_arguments |= uint64_t{1} << index;
   }

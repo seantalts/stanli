@@ -126,6 +126,54 @@ int main() {
     std::printf("FAIL complex overload matched numeric registry\n");
     return 1;
   }
+  // stanc synthesizes truncation normalizers with UInt metadata even on
+  // real-valued CDFs and log_diff_exp. Their surrounding unary minus must
+  // resolve from the registered result, not truncate the normalizer to int.
+  const auto call = [](std::string name, std::vector<mir::Expr> args) {
+    mir::Expr e;
+    e.kind = mir::Expr::FunApp;
+    e.name = std::move(name);
+    e.args = std::move(args);
+    e.type_ = "UInt";
+    e.unsized.leaf = mir::UnsizedLeaf::Int;
+    return e;
+  };
+  mir::Expr real;
+  real.kind = mir::Expr::Var;
+  real.type_ = "UReal";
+  real.unsized.leaf = mir::UnsizedLeaf::Real;
+  const auto cdf = call("normal_lcdf", {real, real, real});
+  const auto normalizer = call("log_diff_exp", {cdf, cdf});
+  const auto negated = call("PMinus__", {normalizer});
+  if (function_spec(negated)->result() != FunctionArgumentKind::Real ||
+      function_spec(call("PMinus__", {negated}))->result() !=
+          FunctionArgumentKind::Real) {
+    std::printf("FAIL synthesized real normalizer resolved as integer\n");
+    return 1;
+  }
+  mir::Expr integer;
+  integer.kind = mir::Expr::LitInt;
+  integer.type_ = "UInt";
+  integer.unsized.leaf = mir::UnsizedLeaf::Int;
+  const auto integer_negated = call("PMinus__", {integer});
+  if (function_spec(call("PMinus__", {integer_negated}))->result() !=
+      FunctionArgumentKind::Integer) {
+    std::printf("FAIL nested integer negation lost its integer overload\n");
+    return 1;
+  }
+  auto promoted = integer_negated;
+  promoted.promoted = true;
+  promoted.type_ = "UReal";
+  promoted.unsized.leaf = mir::UnsizedLeaf::Real;
+  auto user_call = normalizer;
+  user_call.fn_lib = mir::Expr::Lib::UserDefined;
+  if (function_spec(call("PMinus__", {promoted}))->result() !=
+          FunctionArgumentKind::Real ||
+      function_spec(call("PMinus__", {user_call}))->result() !=
+          FunctionArgumentKind::Integer) {
+    std::printf("FAIL promotion or user-function result metadata ignored\n");
+    return 1;
+  }
   const auto scalar_shape = [](FunctionArgumentKind kind) {
     return make_function_shape(kind, FunctionContainerKind::Scalar,
                                FunctionContainerKind::Scalar, {}, 1);
