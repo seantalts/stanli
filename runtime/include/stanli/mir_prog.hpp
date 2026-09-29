@@ -773,6 +773,39 @@ struct ProgramCompiler {
       return true;
     }
     try {
+      if (b.kind == ViewKind::Array) {
+        const auto dims = b.dims.empty() ? std::vector<int64_t>{b.len} : b.dims;
+        const size_t leaf_axes = leaf_rank(b.leaf);
+        const size_t selected = e.args.size() - 1;
+        if (dims.size() < leaf_axes || selected > dims.size() - leaf_axes)
+          return false;
+        // A checked, constant prefix leaves the suffix geometry unchanged.
+        // Runtime or invalid selectors must still be evaluated normally:
+        // knowing the suffix shape is not permission to erase their effects
+        // or bounds errors (including x[1] on an empty outer array).
+        for (size_t d = 0; d < selected; ++d) {
+          const auto& index = e.args[d + 1];
+          long value;
+          if (index.name != "IndexSingle" || index.args.size() != 1 ||
+              !try_cint(index.args[0], &value) || value < 1 || value > dims[d])
+            return false;
+        }
+        const std::vector<int64_t> suffix(dims.begin() + selected, dims.end());
+        Range r{0, (int)checked_shape_product(suffix, "array prefix")};
+        if (suffix.size() > leaf_axes) {
+          r.kind = ViewKind::Array;
+          r.leaf = b.leaf;
+          r.dims = suffix;
+        } else {
+          r.kind = b.leaf;
+          if (b.leaf == ViewKind::Matrix) {
+            r.rows = suffix[0];
+            r.cols = suffix[1];
+          }
+        }
+        *out = r;
+        return true;
+      }
       if (b.kind == ViewKind::Matrix && e.args.size() == 3) {
         const int64_t nr =
             (int64_t)matrix_positions(e.args[1], b.rows, "row").size();

@@ -216,13 +216,106 @@ int main() {
     DataMap nested_arg;
     nested_arg.set_real_array("x", {1, 2, 3, 4, 5, 6}, {2, 3});
     {
-      stanli_test::StdoutCapture diagnostic(stderr);
-      const auto got = nested(nested_arg);
-      const auto report = diagnostic.finish();
+      const auto got = compiled_call(nested, nested_arg);
       check(got.r == std::vector<double>({1, 2, 3, 4, 5, 6}) &&
-                got.dims == std::vector<int64_t>({2, 3}) &&
-                report.find("\"event\":") != std::string::npos,
-            "array-of-vector storage retains interpreter semantics");
+                got.dims == std::vector<int64_t>({2, 3}),
+            "array-of-vector storage preserves public order");
+    }
+    for (const char* name :
+         {"nested_scalars", "nested_rows", "nested_matrices"}) {
+      Function transform(source, name);
+      const bool matrices = std::string(name) == "nested_matrices";
+      for (int outer : {1, 2, 3}) {
+        const std::vector<int64_t> dims =
+            matrices ? std::vector<int64_t>{outer, 2, 3}
+                     : std::vector<int64_t>{outer, 3};
+        const size_t width = outer * (matrices ? 6 : 3);
+        for (double scale : {2.0, -0.5}) {
+          std::vector<double> input(width), expected(width);
+          for (size_t k = 0; k < width; ++k) {
+            input[k] = k + scale;
+            const size_t i = k % outer + 1;
+            const size_t row = (k / outer) % 2 + 1;
+            const size_t col = k / (outer * 2) + 1;
+            expected[k] = scale * input[k] + 100 * i +
+                          (matrices ? 10 * row + col : k / outer + 1);
+          }
+          DataMap args;
+          args.set_real_array("x", input, dims);
+          args.set_real("a", scale);
+          const auto got = compiled_call(transform, args);
+          check(got.r == expected && got.dims == dims && !got.is_int,
+                "nested indexed arithmetic preserves serialized order and "
+                "current values");
+        }
+      }
+    }
+    Function nested_ints(source, "nested_integers");
+    Function matrix_identity(source, "nested_matrix_identity");
+    // Empty outer arrays and zero-width leaves preserve all trailing extents.
+    for (const auto& dims :
+         {std::vector<int64_t>{2, 3}, {0, 3}, {2, 0}, {1, 1}}) {
+      DataMap args;
+      std::vector<int> ints(static_cast<size_t>(dims[0] * dims[1]));
+      for (size_t k = 0; k < ints.size(); ++k) ints[k] = int(k) * 3 - 4;
+      args.set_int_array("x", ints, dims);
+      auto got = compiled_call(nested_ints, args);
+      check(got.is_int && got.i == ints && got.dims == dims,
+            "nested integer specialization preserves order, shape and mirrors");
+      std::vector<double> reals(ints.begin(), ints.end());
+      args.set_real_array("x", reals, dims);
+      got = compiled_call(nested, args);
+      check(got.r == reals && got.dims == dims,
+            "array-of-vector empty and singleton extents");
+    }
+    for (const auto& dims : {std::vector<int64_t>{2, 3, 2, 3},
+                             {0, 3, 2, 3},
+                             {2, 0, 2, 3},
+                             {2, 3, 0, 3},
+                             {2, 3, 2, 0}}) {
+      size_t n = 1;
+      for (auto d : dims) n *= d;
+      std::vector<double> input(n);
+      for (size_t k = 0; k < n; ++k) input[k] = double(k) - 7.5;
+      DataMap args;
+      args.set_real_array("x", input, dims);
+      const auto got = compiled_call(matrix_identity, args);
+      check(got.r == input && got.dims == dims,
+            "nested arrays of matrices preserve complete geometry");
+    }
+    {
+      std::vector<double> input(65536);
+      for (size_t i = 0; i < input.size(); ++i) input[i] = double(i) - 1024;
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        input[17] = repeat + 0.25;
+        DataMap args;
+        args.set_real_array("x", input, {8192, 8});
+        const auto got = compiled_call(nested, args);
+        check(got.r == input && got.dims == std::vector<int64_t>({8192, 8}),
+              "large no-op function reads current input without a layout "
+              "roundtrip");
+      }
+    }
+    Function nested_length(source, "nested_length");
+    for (double gate : {1.0, -1.0, 2.0}) {
+      DataMap args;
+      args.set_real_array("x", {1, 2, 3, 4, 5, 6}, {2, 3});
+      args.set_real("gate", gate);
+      if (gate > 0) {
+        check(compiled_call(nested_length, args).i == std::vector<int>{3},
+              "runtime prefix preserves the fixed leaf length");
+      } else {
+        throws_with([&] { (void)compiled_call(nested_length, args); }, "index",
+                    "shape query retains runtime bounds errors");
+      }
+    }
+    {
+      Function empty_read(source, "nested_scalars");
+      DataMap args;
+      args.set_real_array("x", {}, {0, 3});
+      args.set_real("a", 2.0);
+      throws_with([&] { (void)empty_read(args); }, "index",
+                  "constant prefix cannot erase an empty-array read");
     }
     Function dynamic(source, "dynamic_result");
     for (double x : {1., -1., 2.}) {

@@ -98,13 +98,15 @@ entire inventory is not a prerequisite for a small, independently proved fix.
     indexing effects and partial initialization. Never replace integer division
     with floating-point division or simply remove a proof guard.
 - [ ] **2.3 Standalone function arguments and results.**
-  - [ ] Reuse callback shape/layout helpers for nested arrays and arrays of
+  Nested-container adapters are [tested and adopted](2026-09-29-standalone-container-results.md);
+  the remaining bullets below retain distinct contracts.
+  - [x] Reuse callback shape/layout helpers for nested arrays and arrays of
     vectors/matrices; preserve public data order, dimensions and empty extents.
-  - [ ] Audit void/effectful calls and RNG/higher-order host hooks separately from
+  - [x] Audit void/effectful calls and RNG/higher-order host hooks separately from
     numerical return values; fallback does not supply every absent host hook.
   - [ ] Reduce integer specialization churn only after proving which integers
     determine storage. Keep the existing bounded-cache memory contract.
-  - [ ] Keep changing result shapes and recursive frames in section 6 until a
+  - [x] Keep changing result shapes and recursive frames in section 6 until a
     suitable contract exists; do not pretend they are simple adapters.
 - [ ] **2.4 Repeated solver callbacks and call sites.**
   - [ ] Inventory refusals separately for forward ODE, adjoint ODE, DAE,
