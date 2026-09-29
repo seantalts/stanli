@@ -185,7 +185,7 @@ covariances reuse their forward output to compute parameter derivatives;
 Cholesky reuses its saved factor and Stan Math's pullback. This removes
 nested-tape replay from these backward passes. Active coordinates, other
 covariance families, and unsafe numerical cases retain the existing GP
-fallback. The [implementation report](internal/archive/plans/2026-09-11-shared-data-native-pullbacks.md)
+fallback. The [implementation report](superpowers/plans/2026-09-11-shared-data-native-pullbacks.md)
 records matched before/after measurements and numerical checks; GP gradients
 can differ by rounding and are not claimed to be bitwise identical.
 
@@ -376,7 +376,7 @@ throughput.
 CmdStan's build time here uses the same warm precompiled-header path as the
 main table.
 
-<!-- corpus_table.py docs/internal/artifacts/corpus-bench-o1vec.tsv --o1vec -->
+<!-- corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec -->
 | model | gradient speedup | stanli compile | CmdStan compile | compile+sample speedup |
 | --- | ---: | ---: | ---: | ---: |
 | `gpcm_latent_reg_irt` | 11.26x | 0.090 s | 5.3 s | ~24x |
@@ -535,7 +535,7 @@ against the executor. The reported cells are warmed arithmetic means from one
 timed loop per model.
 
 For complete runs, `stanli_sample_s` in
-[`corpus-bench.tsv`](internal/artifacts/corpus-bench.tsv) measures the entire `stanli_run`
+[`corpus-bench.tsv`](corpus-bench.tsv) measures the entire `stanli_run`
 process from Stan source to CSV. CmdStan's build and execution are timed
 separately, so the displayed total adds `cmdstan_build_s` and
 `cmdstan_sample_s`. The sampler rows are real wall-clock observations, not a

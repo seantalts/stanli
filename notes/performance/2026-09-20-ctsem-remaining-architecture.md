@@ -197,14 +197,14 @@ trips, and enter a retained WhileTest via `continue` inside the condition
 block. Changed data forces recording again; values and gradients compare
 bitwise with the unspecialized recorder and tree evaluator.
 
-Fable 5.1 reviewed the [architecture](../../docs/internal/archive/plans/2026-09-20-ctsem-remaining-fable-review.md),
-[implementation](../../docs/internal/archive/plans/2026-09-20-ctsem-remaining-implementation-review.md)
-and [dispatch delta](../../docs/internal/archive/plans/2026-09-20-ctsem-remaining-dispatch-review.md)
+Fable 5.1 reviewed the [architecture](../../docs/superpowers/plans/2026-09-20-ctsem-remaining-fable-review.md),
+[implementation](../../docs/superpowers/plans/2026-09-20-ctsem-remaining-implementation-review.md)
+and [dispatch delta](../../docs/superpowers/plans/2026-09-20-ctsem-remaining-dispatch-review.md)
 through the read-only Claude CLI. It found no actionable correctness defects.
 CLI initialization and every assistant response identify `claude-fable-5-1`;
 the CLI also reports ancillary Haiku usage. There were no tool denials.
 
-The [updated plan](../../docs/internal/archive/plans/2026-09-20-ctsem-remaining-architecture.md)
+The [updated plan](../../docs/superpowers/plans/2026-09-20-ctsem-remaining-architecture.md)
 records each disposition. The [machine-readable scorecard](2026-09-20-ctsem-remaining-architecture.json) preserves identities,
 raw paired observations, numerical summaries, ablations, ordinary controls and
 probe results. Raw scripts, libraries, inputs and logs remain under

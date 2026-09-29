@@ -46,8 +46,8 @@ class CurrentBenchmarkTests(unittest.TestCase):
         self.assertEqual(manifest["started_utc"][:10], "2026-09-21")
 
     def test_missing_current_artifacts_do_not_use_historical_measurements(self):
-        (self.root / "docs/internal/artifacts").mkdir(parents=True)
-        (self.root / "docs/internal/artifacts/corpus-bench.tsv").write_text("model\tpaired_speedup\nold\t99\n")
+        (self.root / "docs").mkdir()
+        (self.root / "docs/corpus-bench.tsv").write_text("model\tpaired_speedup\nold\t99\n")
         with self.assertRaises(FileNotFoundError):
             gen_docs.current_benchmark()
 
@@ -64,11 +64,11 @@ class CurrentBenchmarkTests(unittest.TestCase):
 
     def test_compute_preserves_reference_counts_and_vectorized_validation(self):
         self.write()
-        (self.root / "docs/internal/artifacts").mkdir(parents=True)
+        (self.root / "docs").mkdir()
         (self.root / "tests/educational/models").mkdir(parents=True)
-        (self.root / "docs/internal/artifacts/verification.json").write_text(json.dumps({
+        (self.root / "docs/verification.json").write_text(json.dumps({
             "pdb_case": {"status": "VERIFIED", "max_ulp": 0, "max_rel": 1e-13}}))
-        (self.root / "docs/internal/artifacts/corpus-refs.json.gz").write_bytes(gzip.compress(json.dumps({
+        (self.root / "docs/corpus-refs.json.gz").write_bytes(gzip.compress(json.dumps({
             "models": {"pdb_case": {"points": [{}, {}, {}]}}}).encode()))
         with mock.patch.object(gen_docs, "render_gradient_catalog", return_value="validated vector table") as vector:
             stats = gen_docs.compute()

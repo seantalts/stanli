@@ -194,7 +194,7 @@ comparison in the repository. It has found errors that isolated kernel tests
 did not reach, which is why it runs in addition to the unit-test suite.
 
 The reference artifact
-[`docs/internal/artifacts/corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz) contains:
+[`docs/corpus-refs.json.gz`](docs/corpus-refs.json.gz) contains:
 
 - 329 models at 3 deterministic unconstrained points each, 987 points in
   total, holding 358,925 log-density and gradient values. The models are
@@ -225,14 +225,14 @@ The reference artifact
   2.40.0 at `d3d5df6a`, Stan `a6806ef8`, Math 5.4.0 at `5252d51d`, stanc3
   2.40.0 at `d58446e6`, posteriordb `28f8d3d6`, on Darwin arm64.
 
-For Linux x86_64, [`docs/internal/artifacts/corpus-refs-linux-x86_64.json.gz`](docs/internal/artifacts/corpus-refs-linux-x86_64.json.gz)
+For Linux x86_64, [`docs/corpus-refs-linux-x86_64.json.gz`](docs/corpus-refs-linux-x86_64.json.gz)
 supplies independent CmdStan values for the 124 fixtures with a 10-ULP limit.
 It records the compiler, libc, dependency pins, and source/data hashes. The
 replay requires complete fixture coverage and matching pins; missing files,
 incomplete points or outputs, and changed inputs fail the check. Reference
 selection changes the expected numbers, never the 10-ULP limit. Rejections,
 non-finite classifications, output names, and shapes still have to agree.
-The small [GCC supplement](docs/internal/artifacts/corpus-refs-linux-x86_64-gcc.json.gz) records
+The small [GCC supplement](docs/corpus-refs-linux-x86_64-gcc.json.gz) records
 `i320_gp_matern32` and `s2_unstr` with GCC: the former's CmdStan gradient differs
 by 244 ULP between Clang and GCC, while Stanli matches its respective compiler.
 The replay reads `stanli_check --compiler` and selects a reference before
@@ -355,7 +355,7 @@ Bitwise agreement is reported for information but is not a gate; if a
 change improves performance by moving a model from bitwise to a small ULP band,
 that is an accepted trade. At their primary recorded point, 55 verified
 posteriordb models have 0 ULP difference with CmdStan. Eight additional language
-fixtures have 0 ULP difference in [`docs/internal/artifacts/verification.json`](docs/internal/artifacts/verification.json).
+fixtures have 0 ULP difference in [`docs/verification.json`](docs/verification.json).
 
 Kernels preserve the reference summation order where practical to stay within
 the 2 ULP budget. The contract in [`docs/hacking.md`](docs/hacking.md) gives a
@@ -633,7 +633,7 @@ absolute tolerance because relative error and ULP counts are not informative
 near cancellation.
 
 The checked-in inventory
-([`docs/internal/artifacts/conformance-baseline.json.gz`](docs/internal/artifacts/conformance-baseline.json.gz))
+([`docs/conformance-baseline.json.gz`](docs/conformance-baseline.json.gz))
 holds 24,277 cases over 564 function names: 24,246 signatures and 31
 language constructs. 18,750 verified, 3,662 inapplicable, 883
 `generator_gap`, 695 `expected_unsupported`, 287
@@ -713,7 +713,7 @@ inventory.
 ## Detecting losses in language coverage
 
 Because an unimplemented generated case is non-blocking, the nightly also
-compares each case with `docs/internal/artifacts/conformance-baseline.json.gz`. A case that was
+compares each case with `docs/conformance-baseline.json.gz`. A case that was
 verified and is no longer verified fails with `coverage_regressed:N` and
 lists the affected IDs. A missing case or changed toolchain pin also fails
 because the new run is no longer directly comparable with the baseline. A
@@ -734,7 +734,7 @@ compile. The census included that form, but its earlier aggregate count did
 not identify the affected model. Per-model baselines were added in #151.
 
 [`harnesses/model_census.py`](harnesses/model_census.py) compares each run
-with `docs/internal/artifacts/census-baseline.json.gz` by default across stanc3's 1,231
+with `docs/census-baseline.json.gz` by default across stanc3's 1,231
 integration models. In the census terminology, a model is `lowered` only after
 stanli translates it into the runtime representation and successfully
 evaluates its log density and gradient. The census uses two ordered
@@ -906,7 +906,7 @@ manual workflow dispatch.
 
 Documentation consistency is also checked. Every
 headline number in `README.md`, `python/README.md` and the demo page is
-stamped from `docs/internal/artifacts/verification.json`, `docs/internal/artifacts/corpus-bench.tsv`, and the
+stamped from `docs/verification.json`, `docs/corpus-bench.tsv`, and the
 representative-model choices in `docs/benchmarks.md` by
 [`tools/gen_docs.py`](tools/gen_docs.py). Its `--check` mode fails CI when a
 stamped number disagrees with those artifacts.
@@ -1028,4 +1028,4 @@ and output rows within 10 ULP except their combined rate gradient, which permits
 individual solvers attributes this difference to adjoint ODE sensitivity
 integration; the compiled and retained-interpreter callbacks agree bitwise.
 The ordinary nested ODE fixture remains within 10 ULP (observed 0).
-See `notes/execution/2026-09-28-nested-callback-coverage.md` for the measurements.
+See `notes/2026-09-28-nested-callback-coverage.md` for the measurements.

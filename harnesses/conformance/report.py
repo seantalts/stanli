@@ -355,7 +355,7 @@ def write_snapshot(report: ConformanceReport, path: pathlib.Path) -> None:
     # A .gz path is written compressed. The baseline is one line per case
     # over the whole inventory -- 2.5 MB of mostly-repeated JSON, an order
     # of magnitude less gzipped -- and this is the same trade
-    # docs/internal/artifacts/corpus-refs.json.gz already makes for the same reason.
+    # docs/corpus-refs.json.gz already makes for the same reason.
     if pathlib.Path(path).suffix == ".gz":
         _atomic_write_bytes(path, gzip.compress(text.encode("utf-8"), 9))
         return

@@ -429,7 +429,7 @@ internally and 1.3998x CmdStan), while `grsm_latent_reg_irt` moved 0.9705208 ->
 categorical opcode fell 4.45x and 5.00x respectively. These are targeted
 medians, not the later full-corpus warmed means of 0.121131 ms (11.04x CmdStan)
 and 0.070870 ms (10.75x CmdStan) after lane partitioning in
-`docs/internal/artifacts/corpus-bench.tsv`.
+`docs/corpus-bench.tsv`.
 
 ## Compiled scalar generated-quantities RNGs (`rng.cpp`, `wa_interp.cpp`)
 
@@ -569,7 +569,7 @@ sequential rows, the categorical draw `n` matched in all 18/18 C-ABI
 comparisons. The full rows also contained 8,532 expected bit differences in
 deterministic columns from the pre-existing graph/interpreter numerical
 boundary; those are not categorical or stream mismatches. These targeted
-results do not refresh `docs/internal/artifacts/corpus-bench.tsv` or the generated full-corpus
+results do not refresh `docs/corpus-bench.tsv` or the generated full-corpus
 table in `docs/benchmarks.md`.
 
 ## Compiled generated-quantities extrema (`elementwise.cpp`, `lower.cpp`)
@@ -603,7 +603,7 @@ In a targeted matched C-ABI A/B, `losscurve_sislob` moved from 329.9520 to
 3.3704 us/row (97.8970x), saving 0.3265816 s per 1,000 rows. Construction moved
 from 4107.375 to 5291.959 us, a 1184.584 us setup increase that amortizes after
 3.627 rows, or four whole rows. These targeted results do not refresh
-`docs/internal/artifacts/corpus-bench.tsv` or the generated full-corpus table in
+`docs/corpus-bench.tsv` or the generated full-corpus table in
 `docs/benchmarks.md`.
 
 ## Compiled covariance-form multivariate-normal RNG (`rng.cpp`, `wa_interp.cpp`)
@@ -616,7 +616,7 @@ one non-array `UVector` mean, and one square `UMatrix` covariance whose known
 dimensions match. Row-vector/array overloads and mismatched or unknown shapes
 still select `WaInterp`. Single-vector square `multi_normal_cholesky_rng`
 now uses the same compiled route; see the
-[remaining RNG coverage follow-up](../../notes/execution/2026-09-28-vector-rng-implementation.md).
+[remaining RNG coverage follow-up](../../notes/2026-09-28-vector-rng-implementation.md).
 
 The graph and interpreter call one helper. It reconstructs the same owning
 Eigen vector and column-major matrix accepted by pinned Stan Math, invokes
@@ -640,7 +640,7 @@ In a targeted 2026-08-25 matched C-ABI A/B (point 0, two warmups, seven batch
 medians), `multi_occupancy` moved from 298.9260 to 5.4898 us/row (54.4512x),
 saving 0.2934362 s per 1,000 rows. Construction also improved from 5864.792 to
 5368.583 us, so there is no setup break-even penalty. These targeted results
-do not refresh `docs/internal/artifacts/corpus-bench.tsv` or the generated full-corpus table.
+do not refresh `docs/corpus-bench.tsv` or the generated full-corpus table.
 
 ## Compiled generated-quantities runtime control (`mir_prog.hpp`, `lower.cpp`)
 
@@ -695,7 +695,7 @@ matched bitwise. For `iohmm_reg`, all categorical states and Viterbi
 states/scores matched; 2,945 continuous simulated observations inherited the
 pre-existing graph/interpreter transformed-input difference, bounded by
 8.89e-16. Exact later state draws prove the shared RNG stream remained aligned.
-These targeted medians do not refresh `docs/internal/artifacts/corpus-bench.tsv` or the generated
+These targeted medians do not refresh `docs/corpus-bench.tsv` or the generated
 full-corpus table.
 
 ## Control flow that depends on a parameter (`lower.cpp`, `mir_prog.hpp`)
@@ -1025,7 +1025,7 @@ The full change improves the geometric mean by 1.18876x. The same fresh
 parent and patched checkers produced byte-identical LP and gradient output at
 three evaluation points for all three models (63/63 scalars). This is a
 targeted mechanism A/B; it does not replace the full-corpus warmed means or
-CmdStan columns in `docs/internal/artifacts/corpus-bench.tsv`.
+CmdStan columns in `docs/corpus-bench.tsv`.
 
 ### Direct coupled RK sensitivities (`ode.cpp`, disable: `STANLI_NO_ODE_DIRECT_RK=1`)
 
@@ -1420,7 +1420,7 @@ headline historical measurements follow:
   boundary; they are not RNG mismatches. Focused tests avoid that boundary by
   routing the identical probability vector through the shared helper and the
   direct pinned Stan Math call, then comparing the next engine state. These
-  targeted results do not refresh `docs/internal/artifacts/corpus-bench.tsv` or the current
+  targeted results do not refresh `docs/corpus-bench.tsv` or the current
   [full-corpus table](../../docs/benchmarks.md#full-corpus).
 - **Compiled generated-quantities extrema** add the forward-only
   `OP_EXTREMA_VEC` min/max variants. Lowering admits only a top-level
@@ -1449,7 +1449,7 @@ headline historical measurements follow:
   3.3704 us/row (97.8970x), saving 0.3265816 s per 1,000 rows. Construction
   moved from 4107.375 to 5291.959 us, a 1184.584 us setup increase that
   amortizes after 3.627 rows, or four whole rows. These targeted results do not
-  refresh `docs/internal/artifacts/corpus-bench.tsv` or the current
+  refresh `docs/corpus-bench.tsv` or the current
   [full-corpus table](../../docs/benchmarks.md#full-corpus).
 - **Compiled covariance-form multivariate-normal RNGs** extend `OP_RNG` to
   the audited `multi_normal_rng(vector, matrix) -> vector` write-array surface.
@@ -1459,7 +1459,7 @@ headline historical measurements follow:
   symmetry, and positive-definiteness validation order and its exact normal
   draw schedule. Array overloads, non-square or mismatched shapes, and
   rectangular Cholesky forms remain on the whole-section interpreter.
-  The [RNG follow-up](../../notes/execution/2026-09-28-vector-rng-implementation.md)
+  The [RNG follow-up](../../notes/2026-09-28-vector-rng-implementation.md)
   adds square single-vector Cholesky, Poisson-binomial, and categorical
   register-region coverage. It also documents an explicit empty-logit guard
   around upstream categorical-logit RNG, whose empty case has an unchecked read.
@@ -1476,7 +1476,7 @@ headline historical measurements follow:
   batch medians), `multi_occupancy` moved from 298.9260 to 5.4898 us/row
   (54.4512x), saving 0.2934362 s per 1,000 rows. Construction also improved,
   from 5864.792 to 5368.583 us, so there is no setup break-even penalty. These
-  targeted results do not refresh `docs/internal/artifacts/corpus-bench.tsv` or the current
+  targeted results do not refresh `docs/corpus-bench.tsv` or the current
   [full-corpus table](../../docs/benchmarks.md#full-corpus).
 - **Compiled generated-quantities runtime control** completes the last five
   interpreted write arrays: `hmm_drive_0`, `hmm_drive_1`, `hmm_example`,
@@ -1508,7 +1508,7 @@ headline historical measurements follow:
   only differences were 2,945 continuous simulations inheriting the
   pre-existing transformed-input boundary, bounded by 8.89e-16. Exact later
   state draws confirm stream alignment. These targeted results do not refresh
-  `docs/internal/artifacts/corpus-bench.tsv` or the current
+  `docs/corpus-bench.tsv` or the current
   [full-corpus table](../../docs/benchmarks.md#full-corpus).
 - **Compiled scalar integer RNG control** extends the register-machine path
   to generated-quantity branches, rejection loops and checked indices driven

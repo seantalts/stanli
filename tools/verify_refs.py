@@ -2,7 +2,7 @@
 """Differential corpus verification against committed CmdStan references.
 
 tools/verify_sample.py runs CmdStan itself and records the exact lp and
-gradient values it printed into docs/internal/artifacts/corpus-refs.json.gz. This script
+gradient values it printed into docs/corpus-refs.json.gz. This script
 replays stanli against those recorded values, which needs no CmdStan, no
 C++ toolchain, and no 2 GB checkout: just a stanli_check binary and the
 posteriordb model + data files. That is what lets the strongest oracle in
@@ -54,7 +54,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms",
                 REPO / "tests" / "rethinking")
 N_SAMPLER_COLS = 7
-REFS_PATH = REPO / "docs" / "internal" / "artifacts" / "corpus-refs.json.gz"
+REFS_PATH = REPO / "docs" / "corpus-refs.json.gz"
 # The reference file's format. Bumping this is a hard break on purpose:
 # load_refs refuses anything else rather than reading what it recognizes
 # and silently skipping the rest, which for an oracle is the failure mode
@@ -136,24 +136,24 @@ ILL_CONDITIONED = {
 # are still held to the scaled-error gate above.
 ULP_LIMITS = {source.stem: 10 for source in (REPO / "tests" / "brms").glob("*.stan")}
 PLATFORM_REFS = {
-    "Linux x86_64": REPO / "docs" / "internal" / "artifacts" / "corpus-refs-linux-x86_64.json.gz",
+    "Linux x86_64": REPO / "docs" / "corpus-refs-linux-x86_64.json.gz",
 }
 # Sparse platform recordings address documented cross-platform instability
 # without changing the original point gates or output coverage. Select solely
 # by the tested platform/compiler, before seeing any candidate values.
 SPARSE_PLATFORM_REFS = {
-    "Darwin x86_64": (REPO / "docs" / "internal" / "artifacts" / "corpus-refs-darwin-x86_64.json.gz",
+    "Darwin x86_64": (REPO / "docs" / "corpus-refs-darwin-x86_64.json.gz",
                       "clang", frozenset({"kronecker_gp"})),
 }
 COMPILER_REFS = {
-    ("Linux x86_64", "gcc"): REPO / "docs" / "internal" / "artifacts" / "corpus-refs-linux-x86_64-gcc.json.gz",
+    ("Linux x86_64", "gcc"): REPO / "docs" / "corpus-refs-linux-x86_64-gcc.json.gz",
 }
 
 
 def load_refs(path=REFS_PATH):
     """(models, provenance) from the reference file, or a hard failure.
 
-    The one reader of docs/internal/artifacts/corpus-refs.json.gz, shared by the replay, the
+    The one reader of docs/corpus-refs.json.gz, shared by the replay, the
     recorder, the lite-build cross-check and the corpus scoreboard, so a
     schema change cannot land in one and not the others. `models` maps a
     model name to {"data", "primary", "points": {"0": {...}, ...}};

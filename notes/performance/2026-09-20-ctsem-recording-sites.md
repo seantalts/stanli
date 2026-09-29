@@ -76,6 +76,6 @@ The next experiment should distinguish repeated operand lookup/dispatch
 from frame encoding before selecting another change. Direct emission into
 a proven frame layout could avoid rebuilding encoding metadata, but needs
 a separate lifetime and variable-shape proof; it remains unimplemented.
-The [implementation/proof log](../../docs/internal/archive/plans/2026-09-20-ctsem-index-recording.md)
+The [implementation/proof log](../../docs/superpowers/plans/2026-09-20-ctsem-index-recording.md)
 contains the eligibility rules, adversarial tests, ablations and experiment
 sequence.

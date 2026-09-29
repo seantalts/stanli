@@ -63,8 +63,7 @@ keeping installation small and avoiding a local stan-math build.
 - Tutorial, three small models traced through every layer:
   [docs/lowering-walkthrough.md](docs/lowering-walkthrough.md)
 - Contributor map: [docs/hacking.md](docs/hacking.md)
-- All human-facing guides: [documentation index](docs/README.md).
-- Prior research and design decisions: [internal research index](docs/internal/README.md).
+- Design doc: `docs/superpowers/specs/2026-08-04-stan-portable-runtime-design.md`
 
 ## Architecture
 
@@ -212,7 +211,7 @@ compiler.
 compressed runtime payload (measured by stubbing every density kernel and
 relinking). Loading the uncommon densities on demand was built and removed;
 the measurements and the emscripten limitation that blocks it are in
-[docs/internal/archive/density-pack.md](docs/internal/archive/density-pack.md).
+[docs/density-pack.md](docs/density-pack.md).
 
 ## C++
 
@@ -296,7 +295,7 @@ Call overhead matters: an affine-function benchmark (`a*x+b`) measured
 These are 11-sample medians on an M3 Ultra, Release build, Python 3.11.15,
 and NumPy 2.4.6, excluding one-time compilation; the large-vector Stanli
 IQR was 125–127 µs. Scalar packing and cached native lookups reduced scalar
-latency by about 27% in a [paired A/B](docs/internal/archive/plans/2026-08-30-python-function-overhead.md).
+latency by about 27% in a [paired A/B](docs/superpowers/plans/2026-08-30-python-function-overhead.md).
 This is one workload, not a general Python speedup claim.
 [Run the comparison on your machine](tools/bench_python_function.py).
 
@@ -553,11 +552,11 @@ nearly degenerate covariance (see the note in the corpus status).
 
 The path to displacing CmdStan rather than out-running it on a corpus is
 written up in
-[docs/internal/archive/plans/2026-08-08-cmdstan-parity-roadmap.md](docs/internal/archive/plans/2026-08-08-cmdstan-parity-roadmap.md):
+[docs/superpowers/plans/2026-08-08-cmdstan-parity-roadmap.md](docs/superpowers/plans/2026-08-08-cmdstan-parity-roadmap.md):
 multi-chain and diagnostics (done), the missing parameter transforms
 (done), the modern `ode_*` and solver interfaces, Pathfinder and
 optimize, a native adjoint program for the sequential tail (done;
-[design](docs/internal/archive/plans/2026-08-08-native-adjoint-program.md)),
+[design](docs/superpowers/plans/2026-08-08-native-adjoint-program.md)),
 `reduce_sum`, and the R/brms and browser packaging.
 
 Engine-level items that predate it:

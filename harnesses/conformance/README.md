@@ -160,7 +160,7 @@ the runtime under test rather than the rig measuring it.
 That leaves a hole the baseline closes. A lowering regression which turns a
 verified function into a compile refusal lands in `unexpected_unsupported`,
 so nothing would stop a run that quietly lost coverage. The nightly compares
-against `docs/internal/artifacts/conformance-baseline.json.gz` and the comparison is
+against `docs/conformance-baseline.json.gz` and the comparison is
 **directional**:
 
 | change | blocks |
@@ -190,7 +190,7 @@ is its only gate failure. Then download `conformance-aggregate` and run:
 ```sh
 .venv-conformance/bin/python harnesses/stan_conformance.py \
   --report-only --input conformance-aggregate/conformance.json \
-  --baseline docs/internal/artifacts/conformance-baseline.json.gz --update-snapshot \
+  --baseline docs/conformance-baseline.json.gz --update-snapshot \
   --output conformance-out/refreshed
 ```
 

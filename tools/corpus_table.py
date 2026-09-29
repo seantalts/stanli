@@ -11,7 +11,7 @@ CmdStan's equivalent first-run time is its separately measured build plus
 run. The second table holds models the run could not complete, with what
 stopped them. Missing numbers sort to the bottom because missing is not slow.
 
-Usage: python3 tools/corpus_table.py docs/internal/artifacts/corpus-bench.tsv
+Usage: python3 tools/corpus_table.py docs/corpus-bench.tsv
 Prints markdown to stdout; the appendix is edited by hand around it.
 
 --catalog requires the current full-corpus v4 summary, raw model records and
@@ -25,10 +25,10 @@ The retained v4 artifacts are still validated against their recorded 20,000-grad
 python3 tools/corpus_table.py --historical-sampling tests/educational/pareto-benchmark-results.json
 The old --educational spelling remains an alias for archived commands.
 
---o1vec renders docs/internal/artifacts/corpus-bench-o1vec.tsv instead: gradient and compile
+--o1vec renders docs/corpus-bench-o1vec.tsv instead: gradient and compile
 time only, no sampling columns, plus a compile+sample speedup that adds
 2,000 synthetic gradient evaluations to each side's compile time. Usage:
-python3 tools/corpus_table.py docs/internal/artifacts/corpus-bench-o1vec.tsv --o1vec
+python3 tools/corpus_table.py docs/corpus-bench-o1vec.tsv --o1vec
 """
 import csv
 import gzip

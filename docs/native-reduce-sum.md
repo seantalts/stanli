@@ -91,4 +91,4 @@ Buffers and threads are reused; kernels and exceptional paths may still allocate
 A failed job drains the team before propagating the first error in chunk order,
 and a later fresh gradient can reuse the executor.
 
-Validation and benchmark evidence: [integration record](internal/archive/plans/2026-09-18-native-reduce-sum-integration.md).
+Validation and benchmark evidence: [integration record](superpowers/plans/2026-09-18-native-reduce-sum-integration.md).

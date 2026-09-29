@@ -308,7 +308,7 @@ import gzip
 import json
 import re
 
-with gzip.open("docs/internal/artifacts/conformance-baseline.json.gz", "rt") as handle:
+with gzip.open("docs/conformance-baseline.json.gz", "rt") as handle:
     rows = json.load(handle)["classifications"]
 
 by_name = collections.defaultdict(list)

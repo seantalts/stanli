@@ -155,7 +155,7 @@ int unary_code(uint16_t oc) {
 // Scalar-out only for now: a vector-out op's value to an island is the
 // same kernel the graph already ran, and admitting them means compiling
 // entire vectorized models just for the estimate to refuse them
-// (docs/internal/archive/plans/2026-08-09-kernel-call-instruction.md, phase 2).
+// (docs/superpowers/plans/2026-08-09-kernel-call-instruction.md, phase 2).
 // The meta ops carry udata (message text, an ODE spec) or are the island
 // itself; propto stays refused for the same reason as above.
 bool callable(const Graph& g, const Op& op) {

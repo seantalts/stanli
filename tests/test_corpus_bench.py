@@ -429,7 +429,7 @@ class HistoricalResultsTests(unittest.TestCase):
 
     def test_gradient_results_page_matches_raw_suite_rows(self):
         from tools.corpus_table import load_rows, render_gradients
-        rows, col = load_rows(REPO / "docs/internal/artifacts/educational-bench-o1.tsv")
+        rows, col = load_rows(REPO / "docs/educational-bench-o1.tsv")
         result = io.StringIO()
         with contextlib.redirect_stdout(result):
             render_gradients(rows, col)

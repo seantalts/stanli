@@ -56,7 +56,7 @@ the differential above costs about a second on a second run:
   harnesses/model_census.py --differential --cmdstan deps/cmdstan \
       --jobs 10 --out model-census.json
 
-Every run is also held to a recorded one. docs/internal/artifacts/census-baseline.json.gz
+Every run is also held to a recorded one. docs/census-baseline.json.gz
 carries a status per model, and a model that used to lower and no longer
 does fails the run by name; see "The coverage ratchet" below for why the
 tally alone was not enough and what it cost.
@@ -637,7 +637,7 @@ def differential_one(entry, corpus, cache, check, stanc, shim, cmdstan, opt,
 # that goes red for progress is re-baselined reflexively until nobody reads
 # it, which is how the sweep's previous gate stopped meaning anything.
 
-BASELINE = REPO / "docs" / "internal" / "artifacts" / "census-baseline.json.gz"
+BASELINE = REPO / "docs" / "census-baseline.json.gz"
 BASELINE_SCHEMA = 1
 
 # Ladder one: what the census itself decided, best rung to worst.
@@ -795,7 +795,7 @@ def write_baseline(report, path):
     write_once(path, gzip.compress(text.encode("utf-8"), 9, mtime=0)
                if path.suffix == ".gz" else text.encode("utf-8"))
     # write_once builds the file with mkstemp, which is 0600 by design.
-    # This one is checked in beside docs/internal/artifacts/corpus-refs.json.gz and read by
+    # This one is checked in beside docs/corpus-refs.json.gz and read by
     # everybody, so it gets the mode the rest of docs/ has.
     path.chmod(0o644)
 

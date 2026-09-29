@@ -548,7 +548,7 @@ jobs:
 
       # The strongest oracle in the project: every referenced posteriordb
       # model evaluated and compared against CmdStan's recorded lp and full
-      # gradient (docs/internal/artifacts/corpus-refs.json.gz, written by the local rig).
+      # gradient (docs/corpus-refs.json.gz, written by the local rig).
       # This class of check has caught what unit tests missed: eight
       # models silently wrong by up to 1.7e5 relative reached main with
       # every test green, and only the corpus diff flagged them.

@@ -314,9 +314,9 @@ static void test_gauss_mix_shape() {
     expect_close(("gmix v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
-// Gap 3 (docs/internal/archive/plans/2026-09-11-lane-layout-unification.md):
-// the gauss_mix idiom above, but each lane's density result is a row rather
-// than a scalar, the way a per-subject mixture over several binary items looks
+// Gap 3 (docs/superpowers/plans/2026-09-11-lane-layout-unification.md): the
+// gauss_mix idiom above, but each lane's density result is a row rather than
+// a scalar, the way a per-subject mixture over several binary items looks
 // (log_mix(theta, bernoulli_logit_lpmf(y[i,:] | eta1), bernoulli_logit_lpmf
 // (y[i,:] | eta2))). bernoulli_logit has an elementwise form that costs per
 // element what its summed one does, so widening it costs nothing extra: an
@@ -2075,7 +2075,7 @@ static void test_row_lane_shared_read() {
   }
 }
 
-// Gap 1 (docs/internal/archive/plans/2026-09-11-lane-layout-unification.md): a
+// Gap 1 (docs/superpowers/plans/2026-09-11-lane-layout-unification.md): a
 // partial row read that lowering hands reroll as one OP_GATHER per lane
 // (`m[i, 2:K]` on a column-major parameter matrix, a fixed row alongside a
 // range on the other axis) rather than a strided window. Twelve lanes, each
@@ -2125,7 +2125,7 @@ static void test_gather_lane_partial_row() {
     expect_close(("gap1 v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
-// Gap 2 (docs/internal/archive/plans/2026-09-11-lane-layout-unification.md): a
+// Gap 2 (docs/superpowers/plans/2026-09-11-lane-layout-unification.md): a
 // vector operand shared by every lane, as wide as the row itself
 // (`y[i,:] ~ normal(mu, s)` with `mu` a parameter vector). Row-major
 // storage (a plain OP_SLICE row read): mu tiles tail-to-tail, mode

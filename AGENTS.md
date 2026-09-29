@@ -45,26 +45,6 @@ fallback when the proof does not apply. Record exploratory work and deferred
 research under `notes/`; production code and executable test fixtures belong
 outside that documentation-only directory.
 
-## Read the research index before proposing work
-
-Before considering research ideas, optimizations, or architectural changes,
-read [`docs/internal/README.md`](docs/internal/README.md), then only the relevant
-topic guide and linked decision/result record. Check what was tried, what
-shipped, what was rejected or deferred, and what remains uncertain before
-repeating an experiment. Historical plans are evidence, not current task
-instructions or authorization; confirm current behavior in code and tests.
-Do not load entire archive directories or raw measurement logs into context.
-Use the [document catalog](docs/internal/catalog.md) to locate a specific record.
-
-Human-facing guides belong in `docs/`; internal topic guides and historical
-plans belong in `docs/internal/`; new research results belong in a topical
-subdirectory of `notes/`. Keep one short current summary per topic and link
-to detailed evidence. When compacting, preserve decisions, proof obligations,
-revision/provenance, negative results and unresolved limits; link the full Git
-version for removed detail. Do not rewrite raw evidence. Update the index and
-catalog when adding or moving documents. Executable prototypes do not belong
-in documentation directories.
-
 ## Validation and CI
 
 Use focused regression tests for the behavior being changed. PR CI retains

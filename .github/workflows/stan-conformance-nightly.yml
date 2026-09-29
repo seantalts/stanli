@@ -229,7 +229,7 @@ jobs:
       # the pinned stanc or policy moving under the baseline.
       #
       # Advancing it is a reviewed act: re-run with --update-snapshot and
-      # commit docs/internal/artifacts/conformance-baseline.json.gz in the same PR as the work
+      # commit docs/conformance-baseline.json.gz in the same PR as the work
       # that earned it.
       - name: Reject missing or duplicate rows and render the aggregate
         id: aggregate
@@ -238,7 +238,7 @@ jobs:
           python3 harnesses/stan_conformance.py \
             --aggregate conformance-parts/*/conformance.json \
             --manifest conformance-manifest/partition-manifest.json \
-            --baseline docs/internal/artifacts/conformance-baseline.json.gz \
+            --baseline docs/conformance-baseline.json.gz \
             --output conformance-aggregate \
             --failure-limit 40
 

@@ -5,8 +5,8 @@ Every headline number in README.md, python/README.md and the demo page
 (counts, bitwise counts, worst deviation, and current benchmark summaries)
 is derived from recorded artifacts:
 
-  docs/internal/artifacts/verification.json   written by tools/verify_sample.py
-  docs/internal/artifacts/corpus-bench.tsv    historical archive validation only
+  docs/verification.json   written by tools/verify_sample.py
+  docs/corpus-bench.tsv    historical archive validation only
   docs/benchmark-2026-09-11.md  historical archive validation only
   output/corpus-performance/  one current full-corpus benchmark
 
@@ -66,7 +66,7 @@ def corpus_stats(rows):
 
 
 def compute():
-    ver = json.loads((REPO / "docs" / "internal" / "artifacts" / "verification.json").read_text())
+    ver = json.loads((REPO / "docs" / "verification.json").read_text())
     # The same record holds three corpora, and the sentences about them
     # say different things: posteriordb is real posteriors, tests/stanc3
     # is language constructs no posterior happens to use, tests/brms is
@@ -82,7 +82,7 @@ def compute():
     imported = {p.name for p in (REPO / "tests/educational/models").iterdir() if p.is_dir()}
     ver = {k: v for k, v in ver.items()
            if k not in lang and k not in brms and k not in rethinking and k not in imported}
-    references = json.loads(gzip.decompress((REPO / "docs/internal/artifacts/corpus-refs.json.gz").read_bytes()))["models"]
+    references = json.loads(gzip.decompress((REPO / "docs/corpus-refs.json.gz").read_bytes()))["models"]
     verified = {k: v for k, v in ver.items() if v["status"] == "VERIFIED"}
     bitwise = sum(1 for v in verified.values() if v["max_ulp"] == 0)
     worst = max(v["max_rel"] for v in verified.values())
@@ -157,7 +157,7 @@ def benchmark_table_problems():
     page = (REPO / "docs" / "benchmark-2026-09-11.md").read_text()
     generated = subprocess.check_output(
         [sys.executable, str(REPO / "tools" / "corpus_table.py"),
-         str(REPO / "docs" / "internal" / "artifacts" / "corpus-bench.tsv")], text=True)
+         str(REPO / "docs" / "corpus-bench.tsv")], text=True)
 
     def first_table(section):
         table = []
@@ -239,7 +239,7 @@ def main():
         return 1
     benchmark_broken = benchmark_table_problems()
     if benchmark_broken:
-        print("benchmark tables disagree with docs/internal/artifacts/corpus-bench.tsv "
+        print("benchmark tables disagree with docs/corpus-bench.tsv "
               "(run tools/corpus_table.py):")
         for b in benchmark_broken:
             print(" ", b)

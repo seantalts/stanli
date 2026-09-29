@@ -14,7 +14,7 @@ generator; it needs brms, mgcv, mice and splines2, and rerunning it
 reproduces this directory byte for byte.
 
 These models go through the same oracle as the corpus: CmdStan's recorded
-log density and full gradient in `docs/internal/artifacts/corpus-refs.json.gz`, replayed by
+log density and full gradient in `docs/corpus-refs.json.gz`, replayed by
 [`tools/verify_refs.py`](../../tools/verify_refs.py) in CI on every push.
 The shared [inventory](../../tools/corpus_inventory.py) resolves model names,
 source/data paths and provenance for numerical replay and benchmarks.
@@ -117,8 +117,8 @@ revision as `unknown` and the merge is refused for drift that is not
 there.
 
 The recorder prints one line per evaluation point and writes a reference
-at each of them; commit `docs/internal/artifacts/corpus-refs.json.gz` and
-`docs/internal/artifacts/verification.json` with the model. A point CmdStan refuses is
+at each of them; commit `docs/corpus-refs.json.gz` and
+`docs/verification.json` with the model. A point CmdStan refuses is
 recorded as a refusal, and one where stanli disagrees is recorded anyway,
 because references describe CmdStan. Read the per-point lines before
 committing: a `MISMATCH` on a new model is a finding.

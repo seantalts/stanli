@@ -28,7 +28,7 @@ DEST = REPO / "tests" / "function_coverage"
 
 def render():
     baseline = json.loads(gzip.decompress(
-        (REPO / "docs/internal/artifacts/conformance-baseline.json.gz").read_bytes()))
+        (REPO / "docs/conformance-baseline.json.gz").read_bytes()))
     rows = baseline["classifications"]
     # Canonical IDs use the same grammar as stanc's signature dump. These
     # checked-in signatures and classifications are the selection authority;
