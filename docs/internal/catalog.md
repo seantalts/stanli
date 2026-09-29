@@ -73,6 +73,7 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-09-29 · Bounded integer output blocks](../../notes/execution/2026-09-29-bounded-integer-blocks.md) | Full logical initialization and int32 partial-sum proofs, adversarial refusals, independent oracle and native comparisons. |
 | [2026-09-29 · Bounded vector output blocks](../../notes/execution/2026-09-29-bounded-vector-blocks.md) | Vector/row-vector admission, shape and sum proofs, MIR indexed-write correction, and native comparisons. |
 | [2026-09-29 · Bounded generated-quantity blocks](../../notes/execution/2026-09-29-bounded-output-blocks.md) | Closed-block admission, resource limits, logical-length tests, existing structured execution policy, and native measurements. |
 | [2026-09-29 · Execution inventory and bounded-storage probe](../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md) | Corpus and fixture execution selections, scoped runtime traces, logical-length correctness fix, native measurements and remaining admission design gates. |

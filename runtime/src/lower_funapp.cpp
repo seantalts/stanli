@@ -1660,6 +1660,8 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       const bool int_surface =
           e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int ||
           (!e.args.empty() && e.args[0].unsized.leaf == mir::UnsizedLeaf::Int);
+      if (int_surface && bounded_output)
+        return lower_runtime_int_sum(e, actuals);
       if (int_surface && write_array_unregioned()) {
         if (runtime_int_sum_candidate(e) ||
             (is_int_sum_surface(e) && e.args[0].kind != mir::Expr::Var))

@@ -847,6 +847,8 @@ struct Lowering {
   // finite runtime scalar bounds
   // Definite initialization proof for the target construction grammar.
   // Writes must extend one contiguous prefix; gaps/strides fail closed.
+  // -1 means the entire runtime logical extent, excluding unused capacity.
+  // Only bounded output reductions consume that stronger shape-aware proof.
   std::map<int, int64_t> int_initialized_prefix;
   std::map<double, int> const_cache;
   struct ObservationKey {
@@ -1068,7 +1070,8 @@ struct Lowering {
     return out;
   }
   void set_int_range(const Val& v, int64_t lo, int64_t hi) {
-    int_initialized_prefix[v.slot] = g.slots[v.slot].len;
+    int_initialized_prefix[v.slot] =
+        bounded_output && has_runtime_shape(v) ? -1 : g.slots[v.slot].len;
     if (lo < std::numeric_limits<int32_t>::min() ||
         hi > std::numeric_limits<int32_t>::max() || lo > hi) {
       int_ranges.erase(v.slot);
@@ -1877,10 +1880,17 @@ struct Lowering {
   Val lower_scalar_rng(const mir::Expr& e, CallArguments& actuals,
                        ScalarRng family);
 
-  static bool is_int_sum_surface(const mir::Expr& e) {
+  static bool is_int_sum_surface(const mir::Expr& e,
+                                 bool allow_promoted = false) {
+    // Parsing folds a scalar int-to-real Promotion onto the call. Its
+    // integer-array argument still selects Stan's integer sum overload.
+    const bool scalar_result =
+        (e.type_ == "UInt" && e.unsized.leaf == mir::UnsizedLeaf::Int) ||
+        (allow_promoted && e.promoted && e.type_ == "UReal" &&
+         e.unsized.leaf == mir::UnsizedLeaf::Real);
     return e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
-           e.name == "sum" && e.args.size() == 1 && e.type_ == "UInt" &&
-           e.unsized.leaf == mir::UnsizedLeaf::Int && e.unsized.depth == 0 &&
+           e.name == "sum" && e.args.size() == 1 && scalar_result &&
+           e.unsized.depth == 0 &&
            e.args[0].unsized.leaf == mir::UnsizedLeaf::Int &&
            e.args[0].unsized.depth == 1;
   }

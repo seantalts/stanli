@@ -1,9 +1,9 @@
 # Execution coverage and interpreter research
 
-Current result: [bounded vectors](../../../notes/execution/2026-09-29-bounded-vector-blocks.md)
-extends the existing bounded-output path to vectors and row vectors, with
-shape, summation, and interpreter bounds corrections. The earlier
-[bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
+Current result: [bounded integer arrays](../../../notes/execution/2026-09-29-bounded-integer-blocks.md)
+adds full-fill and safe integer-sum proofs to the existing output engine.
+[Bounded vectors](../../../notes/execution/2026-09-29-bounded-vector-blocks.md)
+shipped in #413; [bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
 record the shared admission limits and execution policy.
 
 Start with the [inventory and bounded-storage results](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md):

@@ -86,7 +86,8 @@ bool bounded_output_candidate(const mir::Stmt& root,
         if (s.read_transform) return false;
         if (containers.count(s.decl_id)) {
           if ((s.decl_type.base == "SArray" &&
-               s.decl_type.elem_base != "SReal") ||
+               s.decl_type.elem_base != "SReal" &&
+               s.decl_type.elem_base != "SInt") ||
               s.decl_type.dims.size() != 1 || s.has_init)
             return false;
           if (!expression(expression, s.decl_type.dims[0])) return false;
@@ -832,6 +833,12 @@ void region_widen_carried(const mir::Stmt& s,
       real = found->second;
     bool integer_unknown = false, real_unknown = false;
     std::function<void(const mir::Stmt&)> widen = [&](const mir::Stmt& st) {
+      // A range from an earlier full fill cannot describe a partially
+      // updated array on subsequent iterations. Re-establish it only after
+      // a new full-fill proof, never from the final element assignment.
+      if (bounded_output && st.kind == mir::Stmt::Assignment &&
+          st.lhs == name && !st.lhs_idx.empty())
+        integer_unknown = true;
       if (st.kind == mir::Stmt::Assignment && st.lhs == name &&
           st.lhs_idx.empty()) {
         if (auto r = region_range(st.rhs)) {
@@ -1632,8 +1639,40 @@ void lower_region_stmt(const mir::Stmt& s) {
               return;
             full_int_writes.emplace_back(body.lhs, &body.rhs);
           };
-      if (known && lo->lo == 1 && lo->hi == 1 && hi->lo == hi->hi)
+      if (known && lo->lo == 1 && lo->hi == 1 &&
+          (bounded_output || hi->lo == hi->hi))
         for (const auto& child : s.body) find_full_int_writes(child);
+      if (bounded_output && !full_int_writes.empty()) {
+        // The live extent may change between calls. An unconditional a[i]
+        // write proves a complete fill only if it is the sole write to a,
+        // and its range depends solely on the iterator and loop invariants.
+        // In particular, do not infer the range from a carried scalar's
+        // value at the end of the body or from another partially filled array.
+        std::map<std::string, size_t> writes;
+        const auto collect_writes = [&](const auto& self,
+                                        const mir::Stmt& body) -> void {
+          if (body.kind == mir::Stmt::Assignment) ++writes[body.lhs];
+          if (body.kind == mir::Stmt::Decl) ++writes[body.decl_id];
+          if (body.kind == mir::Stmt::For) ++writes[body.loopvar];
+          for (const auto& child : body.body) self(self, child);
+        };
+        for (const auto& child : s.body) collect_writes(collect_writes, child);
+        const auto invariant = [&](const auto& self,
+                                   const mir::Expr& e) -> bool {
+          if (e.kind == mir::Expr::Var && writes.count(e.name)) return false;
+          for (const auto& arg : e.args)
+            if (!self(self, arg)) return false;
+          return true;
+        };
+        full_int_writes.erase(
+            std::remove_if(full_int_writes.begin(), full_int_writes.end(),
+                           [&](const auto& write) {
+                             return writes[write.first] != 1 ||
+                                    writes.count(s.loopvar) ||
+                                    !invariant(invariant, *write.second);
+                           }),
+            full_int_writes.end());
+      }
       if (count == 0) return;
       bool has_loop_control = false;
       std::function<void(const mir::Stmt&)> scan_control =
