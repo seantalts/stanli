@@ -952,6 +952,18 @@ add_dependencies(bench_rhs_adjoint stanli_mir_fixtures)
 add_executable(bench_ode_ceiling EXCLUDE_FROM_ALL
   tools/bench_ode_ceiling.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_ode_ceiling PRIVATE stanli)
+# Structured callback experiment shares the coupled-solver benchmark, without
+# instantiating its historical fvar Program adapter. Neither target is shipped.
+add_executable(bench_structured_callback EXCLUDE_FROM_ALL
+  tools/bench_ode_ceiling.cpp tests/tbb_stub.cpp)
+target_compile_definitions(bench_structured_callback PRIVATE STANLI_STRUCTURED_CALLBACK_PROBE=1)
+target_link_libraries(bench_structured_callback PRIVATE stanli)
+add_dependencies(bench_structured_callback stanli_mir_fixtures)
+add_executable(bench_structured_callback_local EXCLUDE_FROM_ALL
+  tools/bench_structured_callback_local.cpp tests/tbb_stub.cpp)
+target_link_libraries(bench_structured_callback_local PRIVATE stanli)
+add_dependencies(bench_structured_callback_local stanli_mir_fixtures)
+
 add_executable(bench_ode_cvodes_ceiling EXCLUDE_FROM_ALL
   tools/bench_ode_cvodes_ceiling.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_ode_cvodes_ceiling PRIVATE stanli)
@@ -988,7 +1000,8 @@ if(NOT EMSCRIPTEN)
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns
                        ode_runtime_for for_bound_semantics ode_integer_arithmetic ode_runtime_index
-                       ode_constant_loop ode_retained_loop
+                       ode_constant_loop ode_retained_loop ode_structured_callback_branch
+                       structured_callback_loop structured_callback_branch
                        ode_nested_callback ode_nested_callback_fallback
                        nested_callback_contexts nested_callback_contexts_fallback
                        ode_matrix_callback ode_matrix_callback_flat
@@ -1007,6 +1020,10 @@ if(NOT EMSCRIPTEN)
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
               $<TARGET_FILE:stanli_check> ${exit_fixture} ${_expected_interpreter}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    if(exit_fixture MATCHES "^structured_callback_")
+      set_tests_properties(${exit_fixture}_reference PROPERTIES
+        ENVIRONMENT "STANLI_STRUCTURED_LOOPS=force")
+    endif()
   endforeach()
   add_test(NAME callback_geometry
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_callback_geometry.py

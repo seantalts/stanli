@@ -8,10 +8,15 @@
 // the ceiling from removing nested autodiff and the ordinary-RHS adapter
 // without changing the numerical solver.
 //
-// Two developer-only Jacobian providers are available:
+// Developer-only Jacobian providers are available:
 //
 //   generated  a double forward plus the existing generated register adjoint;
-//   fvar       one branch-aware fvar<double> column replay per input.
+//   fvar       historical branch-aware fvar<double> column replay per input;
+//   structured scalar callback wrapper through the existing loop executor.
+//
+// Build bench_structured_callback for the current structured experiment. It
+// excludes historical fvar instantiation, whose generic Program contract no
+// longer supports the current CALL/transform/range and pow instructions.
 //
 // The generated provider is deliberately *not* the failed Phase 0 bridge: it
 // constructs no precomputed-gradient callback nodes and is never installed in
@@ -22,7 +27,8 @@
 //   bench_ode_ceiling MODEL.tmir.sexp DATA.json [options]
 //
 // Options:
-//   --provider auto|generated|fvar   (default: auto)
+//   --provider auto|generated|fvar|structured   (default: auto)
+//   --structured-mir PATH           one-state callback wrapper for the probe
 //   --solver model|rk45|ckrk         (default: model)
 //   --point 0|1|2                    deterministic unconstrained point
 //   --iterations N                   solves per timing batch (default: 200)
@@ -30,6 +36,7 @@
 //   --warmup-ms N                    warmup duration per arm (default: 200)
 //   --diagnostic                     print perturbative component timers
 #include <stan/math/fwd.hpp>
+#include "structured_rhs_probe.hpp"
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
@@ -148,6 +155,7 @@ struct Options {
   std::string mir;
   std::string data;
   std::string provider = "auto";
+  std::string structured_mir;
   std::string solver = "model";
   int point = 0;
   int iterations = 200;
@@ -160,7 +168,7 @@ struct Options {
 void usage() {
   std::fprintf(stderr,
                "usage: bench_ode_ceiling MODEL.tmir.sexp DATA.json "
-               "[--provider auto|generated|fvar] [--solver model|rk45|ckrk] "
+               "[--provider auto|generated|fvar|structured] [--structured-mir PATH] [--solver model|rk45|ckrk] "
                "[--point 0|1|2] [--iterations N] [--batches N] "
                "[--warmup-ms N] [--diagnostic] [--require-exact]\n");
 }
@@ -187,6 +195,8 @@ Options parse_options(int argc, char** argv) {
     };
     if (arg == "--provider")
       out.provider = value("--provider");
+    else if (arg == "--structured-mir")
+      out.structured_mir = value("--structured-mir");
     else if (arg == "--solver")
       out.solver = value("--solver");
     else if (arg == "--point")
@@ -209,8 +219,10 @@ Options parse_options(int argc, char** argv) {
     }
   }
   if (out.provider != "auto" && out.provider != "generated" &&
-      out.provider != "fvar")
-    throw std::runtime_error("--provider must be auto, generated, or fvar");
+      out.provider != "fvar" && out.provider != "structured")
+    throw std::runtime_error("--provider must be auto, generated, fvar, or structured");
+  if ((out.provider == "structured") != !out.structured_mir.empty())
+    throw std::runtime_error("structured provider requires --structured-mir exclusively");
   if (out.solver != "model" && out.solver != "rk45" && out.solver != "ckrk")
     throw std::runtime_error("--solver must be model, rk45, or ckrk");
   return out;
@@ -492,13 +504,13 @@ SolveResult run_oracle(RkSolver solver, const OdeSpec& spec,
                                                     breakdown);
 }
 
-enum class ProviderKind { Generated, Fvar };
+enum class ProviderKind { Generated, Fvar, Structured };
 
 class DerivativeProvider {
  public:
   DerivativeProvider(const RhsProgram& rhs, size_t theta_source,
-                     const std::string& requested)
-      : rhs_(rhs), theta_source_(theta_source) {
+                     const std::string& requested, StructuredRhsProbe* structured = nullptr)
+      : rhs_(rhs), theta_source_(theta_source), structured_(structured) {
     // Developer-only direct-coupled machinery.  The clone absorbs any
     // checkpoint MOVs; OdeSpec::prog remains canonical and untouched.
     static_cast<Program&>(generated_) = static_cast<const Program&>(rhs_);
@@ -515,7 +527,12 @@ class DerivativeProvider {
       if (refusal_.empty()) refusal_ = "adjoint generation failed";
     }
 
-    if (requested == "generated") {
+    if (requested == "structured") {
+      if (!structured_ || rhs_.n_y != 1 || rhs_.n_th != 1 ||
+          theta_source_ != 1 || rhs_.n_xr != 0)
+        throw std::runtime_error("structured probe requires one state and one theta");
+      kind_ = ProviderKind::Structured;
+    } else if (requested == "generated") {
       if (!generated_ok_)
         throw std::runtime_error("generated provider refused: " + refusal_);
       kind_ = ProviderKind::Generated;
@@ -538,6 +555,7 @@ class DerivativeProvider {
   const std::string& refusal() const { return refusal_; }
 
   const char* name() const {
+    if (kind_ == ProviderKind::Structured) return "structured";
     return kind_ == ProviderKind::Generated ? "generated" : "fvar";
   }
 
@@ -557,7 +575,15 @@ class DerivativeProvider {
     if (theta_source_ != 0)
       std::fill(J_theta,
                 J_theta + static_cast<size_t>(rhs_.n_y) * theta_source_, 0.0);
-    if (kind_ == ProviderKind::Generated) {
+    if (kind_ == ProviderKind::Structured) {
+      TimePoint phase;
+      if constexpr (Diagnostic) phase = Clock::now();
+      double gradient[3];
+      f[0] = structured_->gradient(t, y[0], theta[0], gradient);
+      J_y[0] = gradient[1];
+      if (theta_derivatives) J_theta[0] = gradient[2];
+      if constexpr (Diagnostic) breakdown->jacobian_ns += elapsed_ns(phase);
+    } else if (kind_ == ProviderKind::Generated) {
       evaluate_generated<Diagnostic>(t, y, theta, x_r, theta_derivatives, f,
                                      J_y, J_theta, breakdown);
     } else {
@@ -572,6 +598,11 @@ class DerivativeProvider {
                        double* f, Breakdown* breakdown) {
     TimePoint phase;
     if constexpr (Diagnostic) phase = Clock::now();
+    if (kind_ == ProviderKind::Structured) {
+      f[0] = structured_->forward(t, y[0], theta[0]);
+      if constexpr (Diagnostic) breakdown->body_ns += elapsed_ns(phase);
+      return;
+    }
     std::vector<double>* registers = &primal_values_;
     const Program* program = &rhs_;
     if (kind_ == ProviderKind::Generated) {
@@ -678,6 +709,12 @@ class DerivativeProvider {
                      const std::vector<double>& theta, const double* x_r,
                      bool theta_derivatives, double* f, double* J_y,
                      double* J_theta, Breakdown* breakdown) {
+#ifdef STANLI_STRUCTURED_CALLBACK_PROBE
+    // The contemporary runtime only instantiates Program for double/var.
+    // Keep this experiment separate from the historical fvar ceiling tool.
+    throw std::runtime_error("fvar is outside the structured-callback probe");
+#else
+
     TimePoint phase;
     if constexpr (Diagnostic) phase = Clock::now();
     seed(rhs_, primal_values_, t, y, theta, x_r, -1);
@@ -713,11 +750,13 @@ class DerivativeProvider {
       }
     }
     if constexpr (Diagnostic) breakdown->jacobian_ns += elapsed_ns(phase);
+#endif
   }
 
   const RhsProgram& rhs_;
   size_t theta_source_;
   ProviderKind kind_ = ProviderKind::Fvar;
+  StructuredRhsProbe* structured_ = nullptr;
   IslandProg generated_;
   bool generated_ok_ = false;
   std::string refusal_;
@@ -1067,7 +1106,13 @@ int main(int argc, char** argv) {
         (ode_op->variant & 0x4u) != 0 ? (ode_op->variant & 0x3u) : 0x3u;
     const RkSolver solver = select_solver(options, *spec);
 
-    DerivativeProvider provider(spec->prog, P, options.provider);
+    std::unique_ptr<StructuredRhsProbe> structured;
+    if (options.provider == "structured") {
+      const auto start = Clock::now();
+      structured = std::make_unique<StructuredRhsProbe>(slurp(options.structured_mir), data);
+      std::printf("structured_preparation_ns=%lld\n", (long long)elapsed_ns(start));
+    }
+    DerivativeProvider provider(spec->prog, P, options.provider, structured.get());
     const size_t N_y0 = (type_mask & 0x1u) != 0 ? S : 0;
     const size_t N_theta = (type_mask & 0x2u) != 0 ? P : 0;
     const size_t coupled_size = S * (1 + N_y0 + N_theta);
@@ -1164,7 +1209,8 @@ int main(int argc, char** argv) {
     const bool solution_numerical = solution_values.max_relative <= 1e-9 &&
                                     solution_jacobian.max_relative <= 1e-9;
     const bool exact_required =
-        options.require_exact || provider.kind() == ProviderKind::Generated;
+        options.require_exact || provider.kind() == ProviderKind::Generated ||
+        provider.kind() == ProviderKind::Structured;
     if (!callback_equal || !local_numerical || !solution_numerical ||
         (exact_required && (!local_exact || !solution_exact)))
       throw std::runtime_error(

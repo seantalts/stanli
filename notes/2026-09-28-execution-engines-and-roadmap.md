@@ -85,20 +85,25 @@ existing paths at 8, 128, and 2,048 iterations. Both remain register programs;
 the experiment tests whether compact code also delivers faster execution.
 No production unrolling threshold has been changed.
 
-The proposed next architectural step is to make compact callback loops use
-an efficient derivative path before changing the unrolling policy. First test
-an adapter to the existing structured-loop engine, with a fixed-shape body,
-explicit inputs/outputs, and recorded iteration history. Compare it with
-extending generated register reverse to retain per-iteration state. The former
-reuses working loop history; the latter avoids converting the body between
-representations but adds a second loop-history implementation. Neither has
-been implemented or benchmarked here.
+The [structured-callback experiment](2026-09-28-structured-callback-results.md)
+now implements the first proposed adapter. It reuses structured history and
+kernel backwards, and also tests grouping each iteration into an existing
+register segment. Both are correct against the register oracle but slower in
+complete ODE solves. At 2,048 trips, the simple case takes about 197 µs with
+generated register reverse and 470–489 µs with the structured variants. The
+production unrolling and callback policies remain unchanged.
 
-Start with a counted scalar loop and overwritten loop-carried values, then
-branches, array writes, and weighted gradients. Require independent Stan
-agreement and measure preparation, first/warm gradients, inference, and memory.
-Expand admission only after that comparison establishes a useful route. Keep
-the current unrolled path for small loops where it is better.
+The next architectural option is loop-aware generated reverse in the register
+engine. It would save the values and branch decisions needed for each iteration
+and run existing derivative instructions in reverse iteration order. This
+requires a real lifetime/history contract; merely permitting backward jumps
+would be incorrect. It has not been implemented or benchmarked. Start with
+counted scalar loops and overwritten values, then branches and exits, before
+expanding admission. Keep the current fast expanded path where it wins.
+
+The experiment also found a shared 24-ULP gradient discrepancy against CmdStan
+in the large branch stress case. Both current and experimental callback paths
+agree bitwise there. Its cause remains unresolved, and no tolerance was widened.
 
 ## What still needs a fallback
 

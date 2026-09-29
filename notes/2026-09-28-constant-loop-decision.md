@@ -1,5 +1,9 @@
 # Large callback loops: preparation improves, execution regresses
 
+> Follow-up: the proposed structured-callback adapter and register-segment
+> variant have now been tested. Both preserve internal exactness but lose in
+> complete solves; see the [results and next design choice](2026-09-28-structured-callback-results.md).
+
 Keep the current production unrolling policy for now. Retaining a large loop
 in the existing register engine removes substantial preparation and code
 storage, but this experiment roughly doubles warm gradient and inference time.
