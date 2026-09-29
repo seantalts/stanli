@@ -4,10 +4,9 @@ Initial source base: `df86223160f1387a37ed47c267df1bf31e77f11c`. Integrated
 fetched `origin/HEAD` at `d13f7fa907eb85617aba85a9e570de0389cdae86` without
 conflicts on September 29, 2026; integration commit `d6449fbf`.
 
-Latest sync: `dacfaae17cb6ca8d18bc1df678c4a8843f8a7b9f`, including merged
-PR #410; integration `948b83f3` preserved later review notes. See the
-[inventory and bounded-storage results](2026-09-29-execution-inventory-and-bounded-storage.md)
-for the subsequent census, correctness fix and next design gates.
+Latest sync: `50c1b14b6a46e80929db9e0cd01431ec119c92ae`, including merged
+PRs #411 and #412. See the [bounded-vector follow-up](2026-09-29-bounded-vector-blocks.md)
+for the next type extension and correctness findings.
 
 Our goal is to prevent surprising native performance cliffs while expanding
 Stan compatibility. Removing MirInterp is an eventual consequence of covering
@@ -200,7 +199,10 @@ real hot application refusal remains open.
     recording/rebuilding a reusable execution path costs more on changing draws.
   - [x] Test refusal rollback, initialization, changing extents, bounds errors,
     independent CmdStan values, RNG continuation and multiple imports/results.
-  - [ ] Extend other element/container types and consumers with their own
+  - [x] Extend owned real vectors/row vectors, including rows/cols and Eigen
+    summation, under the same limits. Correct scalar sums at capacity one and
+    MIR indexed-write rejection; see the [results](2026-09-29-bounded-vector-blocks.md).
+  - [ ] Extend integer/nested containers and other consumers with their own
     logical-length proofs. Effects and active callbacks remain separate scopes.
 
 - [ ] Find a real refusal with substantial supported surrounding work; estimate

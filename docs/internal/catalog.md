@@ -73,6 +73,7 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-09-29 · Bounded vector output blocks](../../notes/execution/2026-09-29-bounded-vector-blocks.md) | Vector/row-vector admission, shape and sum proofs, MIR indexed-write correction, and native comparisons. |
 | [2026-09-29 · Bounded generated-quantity blocks](../../notes/execution/2026-09-29-bounded-output-blocks.md) | Closed-block admission, resource limits, logical-length tests, existing structured execution policy, and native measurements. |
 | [2026-09-29 · Execution inventory and bounded-storage probe](../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md) | Corpus and fixture execution selections, scoped runtime traces, logical-length correctness fix, native measurements and remaining admission design gates. |
 | [2026-09-28 · Next coverage slice: shape-preserving retained callbacks](../../notes/execution/2026-09-28-callback-geometry-plan.md) | Proof/evaluator or decision; check status before proposing work. |

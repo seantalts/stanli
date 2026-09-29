@@ -779,6 +779,18 @@ struct Lowering {
       fail(what + ": needs one runtime logical extent");
     return v.runtime_dims[0];
   }
+  // Vectors store one logical extent, regardless of orientation. A negative
+  // axis denotes the other, singleton matrix dimension (rows of a row vector
+  // or columns of a column vector).
+  int runtime_shape_axis(const Val& v, const std::string& query) const {
+    if (is_vector(v.si) || is_row_vector(v.si)) {
+      if ((query == "rows" && is_row_vector(v.si)) ||
+          (query == "cols" && is_vector(v.si)))
+        return -1;
+      return 0;
+    }
+    return query == "cols" ? 1 : 0;
+  }
   const DataMap& data;
   std::shared_ptr<ShapeInterner> shape_pool;
   PrepTrace& prep;

@@ -1457,26 +1457,35 @@ void expect_bounded_output(const std::string& fixture,
       pex.params_data()[i] = wex.params_data()[i] = x;
     pex.run_forward_only();
     bool graph_error = false, interp_error = false;
+    std::string graph_message, interp_message;
     std::vector<double> actual, expected;
     try {
       wex.run_forward_only(EvalState{&graph_rng});
       for (const auto& col : model.write_array->columns)
         for (int64_t i = 0; i < col.len; ++i)
           actual.push_back(wex.value_ptr(col.slot)[col.storage_index(i)]);
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
       graph_error = true;
+      graph_message = e.what();
     }
     try {
       expected = model.write_array->interp->eval(model.constrained_env(pex),
                                                  interp_rng);
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
       interp_error = true;
+      interp_message = e.what();
     }
     if (graph_error != interp_error ||
         (!graph_error && !same_double_bytes(actual, expected))) {
       ++failures;
       std::printf("FAIL %s bounded row/error parity at x=%g\n", fixture.c_str(),
                   x);
+      std::printf("  graph: %s; interpreter: %s\n", graph_message.c_str(),
+                  interp_message.c_str());
+      if (data.has("mode"))
+        std::printf("  mode=%d lower=%d upper=%d repeats=%d\n",
+                    data.at("mode").i[0], data.at("lower_size").i[0],
+                    data.at("upper_size").i[0], data.at("repeats").i[0]);
     }
     // Compare continuation state even after an error. An exception must not
     // retry MIR, duplicate the preceding draw, or execute the following draw.
@@ -1506,16 +1515,33 @@ void test_write_array_bounded_blocks() {
   for (int mode = 0; mode <= 4; ++mode)
     expect_bounded_output("gq_bounded_block", data(mode, 1, 2), true);
   expect_bounded_output("gq_bounded_block", data(0, 0, 2), true);
+  expect_bounded_output("gq_bounded_block", data(0, 0, 1), true);
   expect_bounded_output("gq_bounded_block", data(0, 1, 8, 3), true);
   // Refuse before capacity/fill allocation or excessive recording. Negative
   // extents keep their runtime validation in MIR.
   expect_bounded_output("gq_bounded_block", data(0, -1, 2), false);
   expect_bounded_output("gq_bounded_block", data(0, 1, 100000000), false);
   expect_bounded_output("gq_bounded_block", data(0, 1, 2, 1000000), false);
+  for (const std::string fixture :
+       {"gq_bounded_vector", "gq_bounded_row_vector"}) {
+    for (int mode = 0; mode <= 5; ++mode)
+      expect_bounded_output(fixture, data(mode, 1, 8), true);
+    expect_bounded_output(fixture, data(0, 0, 2), true);
+    expect_bounded_output(fixture, data(0, 0, 1), true);
+    expect_bounded_output(fixture, data(5, 0, 8, 3), true);
+    expect_bounded_output(fixture, data(0, -1, 2), false);
+    expect_bounded_output(fixture, data(0, 1, 100000000), false);
+    expect_bounded_output(fixture, data(0, 1, 2, 1000000), false);
+  }
   for (int mode = 0; mode <= 4; ++mode) {
     DataMap d;
     d.set_int("mode", mode);
     expect_bounded_output("gq_bounded_refusals", d, false);
+  }
+  for (int mode = 0; mode < 4; ++mode) {
+    DataMap d;
+    d.set_int("mode", mode);
+    expect_bounded_output("gq_bounded_vector_refusals", d, false);
   }
 }
 

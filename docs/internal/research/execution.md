@@ -1,8 +1,10 @@
 # Execution coverage and interpreter research
 
-Current result: [bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
-extends admission into the existing structured engine under explicit limits,
-with measured native gains for steady and changing lengths.
+Current result: [bounded vectors](../../../notes/execution/2026-09-29-bounded-vector-blocks.md)
+extends the existing bounded-output path to vectors and row vectors, with
+shape, summation, and interpreter bounds corrections. The earlier
+[bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
+record the shared admission limits and execution policy.
 
 Start with the [inventory and bounded-storage results](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md):
 no application callback fallback found in the surveyed corpus; the probe
