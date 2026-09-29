@@ -111,9 +111,9 @@ Pareto measures **0.64x** CmdStan gradient throughput at this point, while
 its separately measured complete run reaches **1.072x**. Complete-run time
 also includes preparation and output, and the samplers can take different
 NUTS trajectories and gradient counts. The gradient result is not a claim
-that every phase beats CmdStan. [Raw gradient observations](educational-bench-o1.tsv),
-[compiler identities](educational-bench-o1.manifest.json), and
-[driver/fixture hashes](educational-bench-o1.metadata.json) are retained.
+that every phase beats CmdStan. [Raw gradient observations](internal/artifacts/educational-bench-o1.tsv),
+[compiler identities](internal/artifacts/educational-bench-o1.manifest.json), and
+[driver/fixture hashes](internal/artifacts/educational-bench-o1.metadata.json) are retained.
 
 The required-floor column records this experiment's policy. It is not a
 special performance gate for the current corpus. The [detailed investigation](../tests/educational/RESULTS.md)

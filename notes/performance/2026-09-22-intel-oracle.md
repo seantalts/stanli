@@ -13,7 +13,7 @@ same-platform maximum scaled differences at the three points are 0.001771,
 0.000399 and 0.000418, in the model's already documented unstable bandwidth
 gradient. These remain within the original gate.
 
-`docs/corpus-refs-darwin-x86_64.json.gz` retains all three independent CmdStan
+`docs/internal/artifacts/corpus-refs-darwin-x86_64.json.gz` retains all three independent CmdStan
 answers, input/toolchain hashes and provenance. Selection happens by platform
 and compiler before evaluation. The original recording, point statuses,
 recorded deviations and tolerance formula remain unchanged. The supplement

@@ -13,8 +13,8 @@ because ordinary-model slowdowns remained unresolved.
 
 The fetched base is PR392's merge,
 `1449c018406e961bc5a3b103740bd122b113fd29`. Fable 5.1 reviewed the revised
-[plan](../../docs/superpowers/plans/2026-09-20-ctsem-post-392.md) and
-[implementation](../../docs/superpowers/reviews/2026-09-20-ctsem-solve-implementation-fable.md)
+[plan](../../docs/internal/archive/plans/2026-09-20-ctsem-post-392.md) and
+[implementation](../../docs/internal/archive/reviews/2026-09-20-ctsem-solve-implementation-fable.md)
 through the `claude` CLI. It found no blocking correctness issues. Selection
 between the numerically correct stages followed the performance experiments.
 

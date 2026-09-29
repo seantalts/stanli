@@ -3,7 +3,7 @@
 and by how much. Reads the TSV corpus_bench.py writes. Current runs show
 setup-plus-gradient estimates; older sampling artifacts remain readable.
 
-Usage: python3 harnesses/triage_bench.py docs/corpus-bench.tsv [--all]
+Usage: python3 harnesses/triage_bench.py docs/internal/artifacts/corpus-bench.tsv [--all]
 """
 import csv
 import pathlib

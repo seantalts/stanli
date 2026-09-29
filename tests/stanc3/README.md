@@ -12,7 +12,7 @@ These models fill that in. They are lifted from stanc3's
 compiled and never to be run. Source is unchanged except for the runnable
 adaptations documented below. They go through the same oracle as the corpus:
 CmdStan's recorded log density and full gradient in
-`docs/corpus-refs.json.gz`, replayed by `tools/verify_refs.py` in CI on
+`docs/internal/artifacts/corpus-refs.json.gz`, replayed by `tools/verify_refs.py` in CI on
 every push. `tools/verify_refs.py` finds a model here by name before it
 looks in posteriordb, so nothing about the CI step changed.
 
@@ -60,7 +60,7 @@ python3 tools/verify_sample.py deps/cmdstan deps/posteriordb foo
 ```
 
 That prints one line per evaluation point and writes a reference at each
-of them; commit `docs/corpus-refs.json.gz` and `docs/verification.json`
+of them; commit `docs/internal/artifacts/corpus-refs.json.gz` and `docs/internal/artifacts/verification.json`
 with the model, then run `tools/gen_docs.py` so the README count follows.
 A point CmdStan refuses is recorded as a refusal, and one where stanli
 disagrees is recorded anyway -- references describe CmdStan. Read the
