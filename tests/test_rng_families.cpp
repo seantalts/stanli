@@ -209,23 +209,27 @@ void exercise(int family, int region, bool benchmark) {
 }  // namespace
 int main(int argc, char**) {
   try {
-    // Container forms are a separate tranche and retain the working fallback.
+    // The container form now uses the same vectorized Stan Math call.
     auto container = compile_model(
         slurp("tests/fixtures/gq_scalar_rng_container_guard.tmir.sexp"),
         DataMap{});
-    require(container.write_array && container.write_array->interp,
-            "new container RNG unexpectedly admitted");
+    require(container.write_array && !container.write_array->interp,
+            "container RNG fell back");
+    Executor container_graph(std::move(container.write_array->graph));
+    container.write_array->bind(container_graph);
+    container_graph.params_data()[0] = 0.1;
+    container_graph.params_data()[1] = 0.2;
     WaRng fallback_rng(1234), direct_rng(1234);
-    std::map<std::string, DataMap::Entry> container_params;
-    container_params["shape"].r = {0.1, 0.2};
-    container_params["shape"].dims = {2};
     const std::vector<double> expected = {
         0.1, 0.2, stan::math::gamma_rng(std::exp(0.1), 1.5, direct_rng.gen()),
         stan::math::gamma_rng(std::exp(0.2), 1.5, direct_rng.gen())};
-    require(same(container.write_array->interp->eval(container_params,
-                                                     fallback_rng),
-                 expected),
-            "container fallback changed");
+    container_graph.run_forward_only(EvalState{&fallback_rng});
+    std::vector<double> actual;
+    for (const auto& col : container.write_array->columns)
+      for (int64_t i = 0; i < col.len; ++i)
+        actual.push_back(
+            container_graph.value_ptr(col.slot)[col.storage_index(i)]);
+    require(same(actual, expected), "container RNG changed");
     require(fallback_rng.gen() == direct_rng.gen(),
             "container fallback stream differs");
     for (int family = 0; family < 11; ++family)

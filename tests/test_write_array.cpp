@@ -1401,9 +1401,8 @@ void test_write_array_vector_rng() {
   }
 }
 
-// binomial_rng with an int-array population-count argument is not part of
-// the vectorized RNG tranche. Its transformed-parameter block lowers
-// cleanly; only generated quantities should fall back.
+// A helper with genuinely runtime-sized local storage still needs MIR. Its
+// transformed-parameter block lowers; generated quantities falls back.
 void test_write_array_partial_fallback() {
   using namespace stanli;
   const int k = 3;
@@ -2815,8 +2814,8 @@ void test_binomial_rng_lowering_guards() {
       "DataOnly)))))))\n"
       "               (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
       "DataOnly))))");
-  expect_interp(container_arg, "container arguments stay on WaInterp",
-                "binomial container argument stays interpreted");
+  expect_interp(container_arg, "result shape does not match RNG arguments",
+                "binomial container argument with scalar result refuses");
 
   std::string container_result = base;
   const std::string result_meta =
@@ -2830,8 +2829,8 @@ void test_binomial_rng_lowering_guards() {
   container_result.replace(result, result_meta.size(),
                            "\n           (meta ((type_ (UArray UInt)) (loc "
                            "<opaque>) (adlevel DataOnly)))");
-  expect_interp(container_result, "expected scalar result",
-                "binomial container result stays interpreted");
+  expect_interp(container_result, "result shape does not match RNG arguments",
+                "binomial scalar arguments with container result refuses");
 }
 
 void test_compiled_scalar_rng() {
@@ -5175,8 +5174,8 @@ void test_runtime_int_sum_redeclaration_shadowing() {
       "    (meta <opaque>))\n   ";
   std::string uninitialized = base;
   uninitialized.insert(insertion, uninitialized_decl);
-  expect_reduction_interp(uninitialized, "unknown variable total",
-                          "same-id uninitialized int fails closed", true);
+  expect_reduction_compiled(uninitialized, reduction_data(),
+                            "same-id uninitialized int sentinel");
   std::vector<std::string> names;
   const std::vector<double> row = eval_reduction_interp(uninitialized, &names);
   bool found_sentinel = false;
@@ -5189,6 +5188,24 @@ void test_runtime_int_sum_redeclaration_shadowing() {
     std::printf(
         "FAIL uninitialized scalar interpreter did not preserve the "
         "INT_MIN sentinel\n");
+  }
+  CompiledModel sentinel = compile_model(uninitialized, reduction_data());
+  if (sentinel.write_array && !sentinel.write_array->interp) {
+    Executor graph(std::move(sentinel.write_array->graph));
+    sentinel.write_array->bind(graph);
+    graph.params_data()[0] = 0.25;
+    for (int i = 0; i < 5; ++i) graph.params_data()[1 + i] = 0.5;
+    WaRng rng(44);
+    graph.run_forward_only(EvalState{&rng});
+    std::vector<double> compiled;
+    for (const auto& column : sentinel.write_array->columns)
+      for (int64_t i = 0; i < column.len; ++i)
+        compiled.push_back(
+            graph.value_ptr(column.slot)[column.storage_index(i)]);
+    if (!same_double_bytes(compiled, row)) {
+      ++failures;
+      std::printf("FAIL scalar redeclaration graph/interpreter rows differ\n");
+    }
   }
 }
 
@@ -5555,7 +5572,123 @@ void test_integer_rng_control() {
   }
 }
 
+// Check compiled selection as well as values: the MIR comparison alone would
+// otherwise allow the complete output block to fall back unnoticed.
+void test_integer_expressions() {
+  using namespace stanli;
+  const std::string source =
+      slurp("tests/fixtures/gq_integer_expressions.tmir.sexp");
+  for (int divisor : {2, -2, 1, -1, std::numeric_limits<int>::max(),
+                      std::numeric_limits<int>::min(), 0}) {
+    DataMap data;
+    data.set_int("divisor", divisor);
+    test_setenv("STANLI_WA_FORCE_INTERP", "1");
+    auto model = compile_model(source, data);
+    test_unsetenv("STANLI_WA_FORCE_INTERP");
+    if (!model.write_array || !model.write_array->interp ||
+        !model.write_array->truncated.empty()) {
+      ++failures;
+      std::printf("FAIL integer expressions did not compile\n");
+      continue;
+    }
+    Executor ex(model.write_array->graph);
+    model.write_array->bind(ex);
+    for (double x : {-3.0, 0.4, 3.0}) {
+      ex.params_data()[0] = x;
+      std::map<std::string, DataMap::Entry> params;
+      params["x"].r = {x};
+      for (unsigned seed : {1u, 1234u, 2026u}) {
+        WaRng graph_rng(seed), interp_rng(seed), oracle(seed);
+        const int draw =
+            stan::math::binomial_rng(9, stan::math::inv_logit(x), oracle.gen());
+        std::vector<double> graph_row, interp_row;
+        bool graph_error = false, interp_error = false;
+        try {
+          ex.run_forward_only(EvalState{&graph_rng});
+          for (const auto& column : model.write_array->columns)
+            for (int64_t i = 0; i < column.len; ++i)
+              graph_row.push_back(
+                  ex.value_ptr(column.slot)[column.storage_index(i)]);
+        } catch (const std::domain_error&) {
+          graph_error = true;
+        }
+        try {
+          interp_row = model.write_array->interp->eval(params, interp_rng);
+        } catch (const std::domain_error&) {
+          interp_error = true;
+        }
+        if (graph_error != (divisor == 0) || interp_error != graph_error ||
+            graph_row != interp_row || !(graph_rng.gen() == interp_rng.gen())) {
+          ++failures;
+          std::printf("FAIL integer expression row/error/stream parity\n");
+        }
+        if (divisor == 0) {
+          if (!(graph_rng.gen() == oracle.gen())) {
+            ++failures;
+            std::printf("FAIL zero divisor consumed a later RNG draw\n");
+          }
+          continue;
+        }
+        // Independent integer semantics, including truncation toward zero and
+        // integer quotients/remainders subsequently assigned to real outputs.
+        const int choice = stan::math::bernoulli_logit_rng(x, oracle.gen());
+        const double after = stan::math::normal_rng(0, 1, oracle.gen());
+        const std::vector<double> expected{x,
+                                           double(draw),
+                                           double(draw / divisor),
+                                           double(-draw / divisor),
+                                           double(draw / divisor),
+                                           double(draw % divisor),
+                                           double(-draw % divisor),
+                                           double((draw + 1) / divisor),
+                                           double((draw + 1) / divisor),
+                                           double(-draw % divisor),
+                                           double(choice),
+                                           double(2 * choice + 1),
+                                           double(choice),
+                                           2,
+                                           after};
+        if (graph_row != expected || !(graph_rng.gen() == oracle.gen())) {
+          ++failures;
+          std::printf("FAIL integer expression Stan oracle\n");
+        }
+      }
+    }
+  }
+
+  const auto refused = [&](const std::string& text, const char* reason) {
+    DataMap data;
+    data.set_int("divisor", 2);
+    auto model = compile_model(text, data);
+    if (!model.write_array || !model.write_array->interp ||
+        model.write_array->truncated.find(reason) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL direct integer sum lost guard: %s\n", reason);
+    }
+  };
+  std::string unbounded = source;
+  const auto rng = unbounded.find("bernoulli_logit_rng");
+  if (rng == std::string::npos) {
+    ++failures;
+  } else {
+    unbounded.replace(rng, std::string("bernoulli_logit_rng").size(),
+                      "poisson_log_rng");
+    refused(unbounded, "unproved integral slot values");
+  }
+  std::string overflow = source;
+  const auto sum = overflow.find("(FunApp (StanLib sum");
+  const auto one = overflow.find("(Lit Int 1)", sum);
+  if (one == std::string::npos) {
+    ++failures;
+  } else {
+    overflow.replace(one, std::string("(Lit Int 1)").size(),
+                     "(Lit Int 2147483647)");
+    refused(overflow, "overflow int32");
+  }
+}
+
 int main() {
+  test_integer_expressions();
   test_integer_rng_control();
   test_naming_rules();
   test_wanames_pipeline();

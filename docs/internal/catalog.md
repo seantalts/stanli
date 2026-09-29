@@ -123,6 +123,20 @@ paths and hashes in raw records unchanged.
 | [2026-09-28 · Structured callback experiment: correct, but slower on the tested solves](../../notes/execution/2026-09-28-structured-callback-results.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-28 · Remaining RNG name and context coverage](../../notes/execution/2026-09-28-vector-rng-implementation.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-29 · Execution coverage: pre-merge code and benchmark audit](../../notes/execution/2026-09-29-execution-code-cleanup.md) | Removed code, retained benchmarks and validation. |
+| [2026-09-29 · Container RNG arguments in the existing engines](../../notes/execution/2026-09-29-container-rng-results.md) | Values/stream/error parity and native measurements; setup tradeoff accepted for normal use, not yet merged. |
+| [Integer-expression results](../../notes/execution/2026-09-29-integer-expression-results.md) | Existing register division/remainder and proved array-literal reductions; independent oracle and normal-use tradeoff. |
+| [Integer-expression measurements](../../notes/execution/data/2026-09-29-integer-expression-performance.json) | Raw paired native phase timings, source/binary identities and canaries. |
+| [Standalone nested-container results](../../notes/execution/2026-09-29-standalone-container-results.md) | Prepared layout adapters and proved no-op returns; correctness, native gains, rejected roundtrips and remaining contracts. |
+| [Standalone container measurements](../../notes/execution/data/2026-09-29-standalone-container-performance.json) | Paired native calls, independent CmdStan layout oracle and rejected iterations. |
+| [Scalar integer initialization](../../notes/execution/2026-09-29-uninitialized-int-results.md) | Final corpus output refusal, sentinel semantics, independent oracle and native timings. |
+| [Scalar initialization measurements](../../notes/execution/data/2026-09-29-uninitialized-int-performance.json) | Paired native phases, normal-use canaries and binary identities. |
+| [Recorded-corpus output coverage](../../notes/execution/data/2026-09-29-output-coverage.txt) | All 329 recorded models select complete compiled outputs after the scalar-initialization fix; other MIR roles are outside this report. |
+| [Local-storage design checkpoint](../../notes/execution/2026-09-29-local-storage-checkpoint.md) | Proposed closed bounded regions before local MIR; scope, proof obligations and evaluation plan. |
+| [Local fallback opportunity measurements](../../notes/execution/data/2026-09-29-local-fallback-opportunity.json) | Whole-output MIR versus fixed-storage source control; potential savings, not an implemented boundary. |
+| [2026-09-29 · Execution coverage: working checklist](../../notes/execution/2026-09-29-execution-coverage-checklist.md) | Hierarchical implementation queue: known gaps, direct extensions, local fallback experiments, design checkpoints and performance/correctness gates. |
+| [2026-09-29 · Remaining uses of the MIR interpreter](../../notes/execution/2026-09-29-mir-interpreter-remaining-uses.md) | Source audit after #407/#408: production entry points, remaining refusals, existing-engine opportunities and diagnostic limits. |
+| [2026-09-29 · Local fallbacks and a route to broad Stan coverage](../../notes/execution/2026-09-29-local-fallback-and-coverage-strategy.md) | Strategic proposal: contain fallbacks, extend existing engines, define compatibility and performance gates. |
+| [2026-09-29 · Fable review: local fallback and long-term coverage](../../notes/execution/2026-09-29-fable-local-fallback-review.md) | Read-only strategic review, lead's source corrections and full returned text. |
 
 ## Loops and ctsem
 

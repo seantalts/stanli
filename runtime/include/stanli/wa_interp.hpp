@@ -61,6 +61,15 @@ class WaRng {
 // same Stan Math function with the exact same stream.
 double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
                        WaRng& rng);
+// Preserve language scalar/container identity even for zero/one elements.
+// Vectorized calls validate complete arguments before consuming the stream.
+struct RngArgument {
+  const double* data;
+  size_t size;
+  bool scalar;
+};
+void container_rng_draw(ScalarRng family, const RngArgument* args, size_t nargs,
+                        double* output, size_t output_size, WaRng& rng);
 int vector_integer_rng_draw(const double* probabilities, size_t size,
                             WaRng& rng,
                             uint8_t variant = kCategoricalRngVariant);

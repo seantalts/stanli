@@ -64,11 +64,30 @@ void rng_fwd(KernelCtx& ctx) {
                        *ctx.eval_state->wa_rng);
     return;
   }
-  if (ctx.out.len != 1) throw std::logic_error("malformed scalar RNG op");
   const ScalarRng family = static_cast<ScalarRng>(ctx.variant);
   const size_t nargs = scalar_rng_arity(family);
   if (ctx.n_in != static_cast<int>(nargs))
     throw std::logic_error("malformed scalar RNG op");
+  if (ctx.n_idata != 0) {
+    if (ctx.n_idata != 1 || ctx.idata == nullptr || ctx.idata[0] <= 0 ||
+        ctx.idata[0] >= (1 << nargs) || ctx.out.len < 0)
+      throw std::logic_error("malformed container RNG op");
+    RngArgument args[3]{};
+    for (size_t i = 0; i < nargs; ++i) {
+      if (ctx.in[i].len < 0)
+        throw std::logic_error("malformed container RNG argument");
+      args[i] = {ctx.in[i].data, static_cast<size_t>(ctx.in[i].len),
+                 (ctx.idata[0] & (1 << i)) == 0};
+    }
+    if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
+      throw std::logic_error(
+          "OP_RNG requires caller-owned evaluation RNG state");
+    container_rng_draw(family, args, nargs, ctx.out.data,
+                       static_cast<size_t>(ctx.out.len),
+                       *ctx.eval_state->wa_rng);
+    return;
+  }
+  if (ctx.out.len != 1) throw std::logic_error("malformed scalar RNG op");
   double args[3]{};
   for (size_t i = 0; i < nargs; ++i) {
     if (ctx.in[i].len != 1)

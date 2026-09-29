@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Benchmark the public native standalone-function ABI in one fresh process.
 
-Usage: bench_function_paths.py /absolute/libstanli.dylib affine|branch_exit|sized
+Usage: bench_function_paths.py /absolute/libstanli.dylib FUNCTION [OUTER_EXTENT]
+Functions: affine, branch_exit, sized, nested_identity, nested_scalars,
+nested_matrices. OUTER_EXTENT defaults to 4 for nested containers.
 The result writer deliberately does no copying. ctypes/callback overhead remains
 included. sized additionally measures twelve integer specializations in rotation.
 Run alternating baseline/candidate processes; report medians and dispersion.
@@ -13,7 +15,8 @@ import resource
 import sys
 import time
 
-libpath, name = sys.argv[1:]
+libpath, name = sys.argv[1:3]
+outer = int(sys.argv[3]) if len(sys.argv) > 3 else 4
 lib = c.CDLL(libpath)
 ptr = c.c_void_p
 doubles = c.POINTER(c.c_double)
@@ -45,6 +48,13 @@ elif name == 'branch_exit':
     args = (Argument*1)(argument('x',[.2]))
 elif name == 'sized':
     args = (Argument*2)(argument('x',[.2]),argument('n',[8],integer=True))
+elif name in {'nested_identity', 'nested_scalars', 'nested_matrices'}:
+    dimensions = (outer, 3, 4) if name == 'nested_matrices' else (outer, 8)
+    width = outer * (12 if name == 'nested_matrices' else 8)
+    inputs = [argument('x', range(width), dimensions)]
+    if name != 'nested_identity':
+        inputs.append(argument('a', [.5]))
+    args = (Argument*len(inputs))(*inputs)
 else:
     raise ValueError(name)
 @Writer
@@ -86,5 +96,6 @@ if name == 'sized':
 lib.stanli_function_free(f)
 print(json.dumps(dict(function=name,handle_us=handle_us,first_call_us=first_us,
                      warm_call_us=warm_us,churn_call_us=churn_us,
+                     outer_extent=outer if name.startswith('nested_') else None,
                      peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
                      library_bytes=Path(libpath).stat().st_size)))

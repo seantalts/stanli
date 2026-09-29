@@ -4,8 +4,12 @@ Agents should start at [the short research index](../docs/internal/README.md),
 then read only the relevant topic and evidence. The
 [full catalog](../docs/internal/catalog.md) describes individual records.
 
-- [Execution research](execution/2026-09-28-execution-engines-and-roadmap.md):
-  interpreter coverage, callbacks, RNGs, local tapes and removed experiments;
+- [Execution checklist](execution/2026-09-29-execution-coverage-checklist.md):
+  current ordered gap map and validation/design checkpoints.
+- [Remaining MIR uses](execution/2026-09-29-mir-interpreter-remaining-uses.md):
+  current source audit and concrete coverage opportunities. The
+  [execution roadmap](execution/2026-09-28-execution-engines-and-roadmap.md)
+  covers shipped improvements, local tapes and removed experiments;
   raw measurements are in `execution/data/`.
 - `performance/`: earlier ctsem, numerical-oracle, sampler and regression
   investigations with their evidence. These are dated records, not current

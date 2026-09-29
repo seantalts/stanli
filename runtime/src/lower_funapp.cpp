@@ -32,6 +32,7 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
           {"poisson_binomial_rng", BuiltinFamily::CategoricalRng},
           {"categorical_logit_rng", BuiltinFamily::CategoricalRng},
           {"append_array", BuiltinFamily::AppendArray},
+          {"Modulo__", BuiltinFamily::Elementwise},
           {"tcrossprod", BuiltinFamily::Matrix},
           {"diag_pre_multiply", BuiltinFamily::Matrix},
           {"diag_post_multiply", BuiltinFamily::Matrix},
@@ -650,10 +651,6 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
   if (!in_write_array)
     fail(e.name + " is supported only in generated quantities", e.raw);
   const size_t arity = scalar_rng_arity(family);
-  // Newly admitted families start with scalar forms. Their container forms
-  // need a separate validation/broadcasting proof before scalar expansion.
-  if (family >= ScalarRng::StdNormal && e.unsized.depth != 0)
-    fail(e.name + ": container arguments stay on WaInterp", e.raw);
   if (actuals.size() != arity || e.unsized.depth > 1)
     fail(e.name + ": expected " + std::to_string(arity) + " argument(s)",
          e.raw);
@@ -674,78 +671,58 @@ Lowering::Val Lowering::lower_scalar_rng(const mir::Expr& e,
   std::vector<Val> args;
   args.reserve(arity);
   int64_t n = 1;
-  bool saw_container = false;
+  int container_mask = 0;
   for (size_t i = 0; i < actuals.size(); ++i) {
     const mir::Expr& arg = actuals.at(i).expr();
-    if (arg.unsized.depth != 0)
-      fail(e.name + ": container arguments stay on WaInterp", e.raw);
+    const bool scalar =
+        arg.unsized.depth == 0 && (arg.unsized.leaf == mir::UnsizedLeaf::Real ||
+                                   arg.unsized.leaf == mir::UnsizedLeaf::Int);
+    const bool array =
+        arg.unsized.depth == 1 && (arg.unsized.leaf == mir::UnsizedLeaf::Real ||
+                                   arg.unsized.leaf == mir::UnsizedLeaf::Int);
+    if (!scalar && !array &&
+        !(arg.unsized.depth == 0 &&
+          (arg.unsized.leaf == mir::UnsizedLeaf::Vector ||
+           arg.unsized.leaf == mir::UnsizedLeaf::RowVector)))
+      fail(e.name + ": expected scalar or one-dimensional arguments", e.raw);
     Val v = actuals.at(i).value();
-    if (!is_scalar(v) && !is_vector(v.si) && !is_row_vector(v.si))
-      fail(e.name + ": container arguments stay on WaInterp", e.raw);
+    if (has_runtime_shape(v))
+      fail(e.name + ": RNG arguments need fixed extents", e.raw);
     args.push_back(v);
-    saw_container = saw_container || is_vector(v.si) || is_row_vector(v.si);
     const int64_t len = g.slots[v.slot].len;
-    if (len != 1) {
-      if (n != 1 && len != n)
+    if (scalar) {
+      if (!is_scalar(v)) fail(e.name + ": expected scalar storage", e.raw);
+    } else {
+      if (container_mask != 0 && len != n)
         fail(e.name + ": argument lengths disagree", e.raw);
       n = len;
+      container_mask |= 1 << i;
     }
   }
-  if (e.unsized.depth == 0 && n != 1)
-    fail(e.name + ": expected scalar result and " + std::to_string(arity) +
-             " scalar argument(s)",
-         e.raw);
-  if (e.unsized.depth == 1 && !saw_container)
-    fail(e.name + ": expected scalar result and " + std::to_string(arity) +
-             " scalar argument(s)",
-         e.raw);
+  if ((e.unsized.depth == 1) != (container_mask != 0))
+    fail(e.name + ": result shape does not match RNG arguments", e.raw);
+  // One vectorized call validates complete arguments before drawing. Scalar
+  // calls retain their original no-metadata path.
   const char* const scalar_type = scalar_rng_is_int(family) ? "UInt" : "UReal";
-  const auto draw_at = [&](int64_t i) {
-    std::vector<Val> call_args;
-    call_args.reserve(arity);
-    for (const Val& v : args) {
-      const int64_t len = g.slots[v.slot].len;
-      call_args.push_back(
-          len == 1
-              ? v
-              : with_layout(
-                    emit_value(OP_INDEX, {v}, 1, view_of(scalar_type),
-                               {checked_immediate(i, "rng argument offset")}),
-                    ExpressionLayout::scalar()));
-    }
-    Val draw = with_layout(
-        arity == 0 ? emit_value(OP_RNG, {}, 1, view_of(scalar_type))
-        : arity == 1
-            ? emit_value(OP_RNG, {call_args[0]}, 1, view_of(scalar_type))
-        : arity == 2
-            ? emit_value(OP_RNG, {call_args[0], call_args[1]}, 1,
-                         view_of(scalar_type))
-            : emit_value(OP_RNG, {call_args[0], call_args[1], call_args[2]}, 1,
-                         view_of(scalar_type)),
-        ExpressionLayout::scalar());
-    g.ops.back().variant = static_cast<uint8_t>(family);
-    // An effect is never a graph constant, even when all distribution
-    // parameters are. This also keeps downstream compile-time demands from
-    // mistaking a draw for data.
-    draw.si.param_free = false;
-    draw.autodiff = false;
-    return draw;
-  };
-  if (e.unsized.depth == 0) {
-    Val draw = draw_at(0);
-    if (scalar_rng_is_int(family)) set_int_initialized(draw);
-    if (family == ScalarRng::Bernoulli) set_int_range(draw, 0, 1);
-    return draw;
-  }
-  Val acc = draw_at(0);
-  for (int64_t i = 1; i < n; ++i)
-    acc = emit_value(OP_CONCAT2, {acc, draw_at(i)}, i + 1);
-  acc.si = array_view({n}, ViewKind::Flat, false);
-  acc.autodiff = false;
-  acc.layout = owning_layout(acc.si);
-  if (scalar_rng_is_int(family)) set_int_initialized(acc);
-  if (family == ScalarRng::Bernoulli) set_int_range(acc, 0, 1);
-  return acc;
+  const auto si = container_mask != 0 ? array_view({n}, ViewKind::Flat, false)
+                                      : view_of(scalar_type);
+  const std::vector<int> idata = container_mask != 0
+                                     ? std::vector<int>{container_mask}
+                                     : std::vector<int>{};
+  Val draw = with_layout(
+      arity == 0   ? emit_value(OP_RNG, {}, n, si, idata)
+      : arity == 1 ? emit_value(OP_RNG, {args[0]}, n, si, idata)
+      : arity == 2
+          ? emit_value(OP_RNG, {args[0], args[1]}, n, si, idata)
+          : emit_value(OP_RNG, {args[0], args[1], args[2]}, n, si, idata),
+      owning_layout(si));
+  g.ops.back().variant = static_cast<uint8_t>(family);
+  draw.si.param_free = false;
+  draw.autodiff = false;
+  if (scalar_rng_is_int(family)) set_int_initialized(draw);
+  if (family == ScalarRng::Bernoulli || family == ScalarRng::BernoulliLogit)
+    set_int_range(draw, 0, 1);
+  return draw;
 }
 Lowering::Val Lowering::lower_append_array(const mir::Expr& e,
                                            CallArguments& actuals) {
@@ -903,6 +880,32 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
         }
       }
       acc.si = array_view(std::move(dims), leaf, acc.si.param_free);
+    }
+    if (e.name == "FnMakeArray" && e.unsized.leaf == mir::UnsizedLeaf::Int) {
+      bool initialized = true, bounded = !parts.empty();
+      IntRange range{std::numeric_limits<int32_t>::max(),
+                     std::numeric_limits<int32_t>::min()};
+      for (const Val& part : parts) {
+        const auto prefix = int_initialized_prefix.find(part.slot);
+        initialized = initialized && prefix != int_initialized_prefix.end() &&
+                      prefix->second == g.slots[part.slot].len;
+        const auto bounds = int_ranges.find(part.slot);
+        if (bounds == int_ranges.end()) {
+          bounded = false;
+        } else {
+          range.lo = std::min(range.lo, bounds->second.lo);
+          range.hi = std::max(range.hi, bounds->second.hi);
+        }
+      }
+      // Concatenation preserves integer values. Carry the proof only when
+      // every child supplies it; an uninitialized or unbounded child must
+      // still prevent the guarded integer reduction from compiling.
+      if (initialized) {
+        if (bounded)
+          set_int_range(acc, range.lo, range.hi);
+        else
+          set_int_initialized(acc);
+      }
     }
     if (acc.si.param_free) {
       // MirInterp's scalar-vs-container probe reads child[0], which is not
@@ -1126,13 +1129,25 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
 // Elementwise math, reductions, and dot products.
 std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     const mir::Expr& e, CallArguments& actuals, const BuiltinSpec* builtin) {
-  // Once a generated int RNG has become a runtime scalar slot, named
-  // integer division is no longer foldable. OP_DIV is real division and
-  // would return 3.5 for divide(7, 2), while Stan truncates to 3. Refuse it
-  // so the whole write_array stays on WaInterp until there is a native int
-  // division op. The operator spelling is IntDivide__ and already refuses.
+  // The register engine already implements Stan's integer division and
+  // remainder, including zero-divisor errors. Preserve the selected integer
+  // overload even when its result is subsequently promoted to real.
+  if (write_array_unregioned() &&
+      ((builtin && builtin->result == FunctionArgumentKind::Integer &&
+        builtin->opcode == OP_DIV) ||
+       (e.name == "Modulo__" && e.args.size() == 2 &&
+        std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& arg) {
+          return arg.unsized.leaf == mir::UnsizedLeaf::Int &&
+                 arg.unsized.depth == 0;
+        })))) {
+    Val result = lower_program_expression(e);
+    result.si.param_free = false;
+    result.autodiff = false;
+    set_int_initialized(result);
+    return result;
+  }
   if ((e.name == "divide" || e.name == "elt_divide") && e.type_ == "UInt")
-    fail(e.name + ": runtime integer division stays on WaInterp", e.raw);
+    fail(e.name + ": integer division needs a register expression", e.raw);
   // `A \ B` and `B / A` with a matrix divisor are linear solves, not
   // elementwise division: stanc spells them with the ordinary division
   // operators and lowers them to mdivide_left/mdivide_right. The divisor's
@@ -1645,15 +1660,14 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
           e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int ||
           (!e.args.empty() && e.args[0].unsized.leaf == mir::UnsizedLeaf::Int);
       if (int_surface && write_array_unregioned()) {
-        if (runtime_int_sum_candidate(e))
+        if (runtime_int_sum_candidate(e) ||
+            (is_int_sum_surface(e) && e.args[0].kind != mir::Expr::Var))
           return lower_runtime_int_sum(e, actuals);
         if (!is_int_sum_surface(e))
           fail(
               "runtime integer sum needs one one-dimensional int-array "
               "argument and a scalar int result",
               e.raw);
-        if (e.args[0].kind != mir::Expr::Var || expr_effectful(e))
-          fail("direct runtime integer sum stays on WaInterp", e.raw);
         // A param-free named array retains the legacy OP_SUM_VEC/fold path.
       }
     }

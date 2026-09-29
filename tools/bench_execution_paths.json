@@ -46,5 +46,29 @@
     "source": "tests/fixtures/gq_callback_solver_controls.stan",
     "mir": "tests/fixtures/gq_callback_solver_controls.tmir.sexp",
     "data": "tests/fixtures/gq_callback_solver_controls.json"
+  },
+  {
+    "model": "gq_container_rng_binomial",
+    "source": "tests/fixtures/gq_container_rng_binomial.stan",
+    "mir": "tests/fixtures/gq_container_rng_binomial.tmir.sexp",
+    "data": "tests/fixtures/gq_container_rng_binomial.json"
+  },
+  {
+    "model": "gq_container_rng_complete",
+    "source": "tests/fixtures/gq_container_rng_complete.stan",
+    "mir": "tests/fixtures/gq_container_rng_complete.tmir.sexp",
+    "data": "tests/fixtures/gq_container_rng_complete.json"
+  },
+  {
+    "model": "gq_integer_expressions",
+    "source": "tests/fixtures/gq_integer_expressions.stan",
+    "mir": "tests/fixtures/gq_integer_expressions.tmir.sexp",
+    "data": "tests/fixtures/gq_integer_expressions.json"
+  },
+  {
+    "model": "gq_uninitialized_int",
+    "source": "tests/fixtures/gq_uninitialized_int.stan",
+    "mir": "tests/fixtures/gq_uninitialized_int.tmir.sexp",
+    "data": "tests/fixtures/gq_uninitialized_int.json"
   }
 ]

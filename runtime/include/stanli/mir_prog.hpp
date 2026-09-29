@@ -773,6 +773,39 @@ struct ProgramCompiler {
       return true;
     }
     try {
+      if (b.kind == ViewKind::Array) {
+        const auto dims = b.dims.empty() ? std::vector<int64_t>{b.len} : b.dims;
+        const size_t leaf_axes = leaf_rank(b.leaf);
+        const size_t selected = e.args.size() - 1;
+        if (dims.size() < leaf_axes || selected > dims.size() - leaf_axes)
+          return false;
+        // A checked, constant prefix leaves the suffix geometry unchanged.
+        // Runtime or invalid selectors must still be evaluated normally:
+        // knowing the suffix shape is not permission to erase their effects
+        // or bounds errors (including x[1] on an empty outer array).
+        for (size_t d = 0; d < selected; ++d) {
+          const auto& index = e.args[d + 1];
+          long value;
+          if (index.name != "IndexSingle" || index.args.size() != 1 ||
+              !try_cint(index.args[0], &value) || value < 1 || value > dims[d])
+            return false;
+        }
+        const std::vector<int64_t> suffix(dims.begin() + selected, dims.end());
+        Range r{0, (int)checked_shape_product(suffix, "array prefix")};
+        if (suffix.size() > leaf_axes) {
+          r.kind = ViewKind::Array;
+          r.leaf = b.leaf;
+          r.dims = suffix;
+        } else {
+          r.kind = b.leaf;
+          if (b.leaf == ViewKind::Matrix) {
+            r.rows = suffix[0];
+            r.cols = suffix[1];
+          }
+        }
+        *out = r;
+        return true;
+      }
       if (b.kind == ViewKind::Matrix && e.args.size() == 3) {
         const int64_t nr =
             (int64_t)matrix_positions(e.args[1], b.rows, "row").size();
@@ -2431,7 +2464,7 @@ struct ProgramCompiler {
                                                    : mir::UnsizedLeaf::Real;
       const bool promoted_int = scalar_rng_is_int(*family) && e.promoted &&
                                 e.unsized.leaf == mir::UnsizedLeaf::Real;
-      if (e.unsized.depth != 0 || (e.unsized.leaf != leaf && !promoted_int))
+      if (e.unsized.depth > 1 || (e.unsized.leaf != leaf && !promoted_int))
         bail(e.name + ": result type does not match scalar RNG family");
       if (args.size() != scalar_rng_arity(*family))
         bail(e.name + ": wrong number of arguments");
@@ -2439,9 +2472,34 @@ struct ProgramCompiler {
            *family == ScalarRng::BetaBinomial) &&
           e.args[0].unsized.leaf != mir::UnsizedLeaf::Int)
         bail(e.name + ": first argument must be int");
-      for (const Range& a : args)
-        if (!is_scalar(a))
-          bail(e.name + ": container arguments stay on WaInterp");
+      int container_mask = 0;
+      for (size_t k = 0; k < args.size(); ++k) {
+        const auto& type = e.args[k].unsized;
+        const bool scalar =
+            type.depth == 0 && (type.leaf == mir::UnsizedLeaf::Real ||
+                                type.leaf == mir::UnsizedLeaf::Int);
+        const bool array =
+            type.depth == 1 && (type.leaf == mir::UnsizedLeaf::Real ||
+                                type.leaf == mir::UnsizedLeaf::Int);
+        if (scalar) {
+          if (!is_scalar(args[k])) bail(e.name + ": expected scalar storage");
+        } else {
+          if (!array &&
+              !(type.depth == 0 && (type.leaf == mir::UnsizedLeaf::Vector ||
+                                    type.leaf == mir::UnsizedLeaf::RowVector)))
+            bail(e.name + ": expected scalar or one-dimensional arguments");
+          if (container_mask != 0 && args[k].len != out_len)
+            bail(e.name + ": argument lengths disagree");
+          container_mask |= 1 << k;
+          out_len = args[k].len;
+        }
+      }
+      if ((e.unsized.depth == 1) != (container_mask != 0))
+        bail(e.name + ": result shape does not match RNG arguments");
+      if (container_mask != 0) {
+        idata.push_back(container_mask);
+        out_kind = ViewKind::Array;
+      }
       variant = static_cast<uint8_t>(*family);
     } else if (e.name == "categorical_rng" ||
                e.name == "categorical_logit_rng" ||
@@ -2480,6 +2538,7 @@ struct ProgramCompiler {
 
     Range out{0, out_len};
     out.kind = out_kind;
+    if (out_kind == ViewKind::Array) out.dims = {out_len};
     return kernel_call(OP_RNG, args, out, variant, 0, std::move(idata), {},
                        e.name);
   }

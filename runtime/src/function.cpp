@@ -9,6 +9,7 @@
 // usable there; only the convenience constructor from Stan source is absent.
 #define STANLI_FUNCTION_HAS_CAPI 0
 #endif
+#include <stanli/container_shape.hpp>
 #include <stanli/mir_decode.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/mir_prog.hpp>
@@ -22,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -172,9 +174,15 @@ struct FunctionKey {
 };
 
 struct FunctionPlan {
+  struct MappedInput {
+    size_t argument;
+    std::vector<int> registers;
+  };
   stanli::Program program;
   std::vector<std::pair<int, int>> inputs;
+  std::vector<MappedInput> mapped_inputs;
   std::vector<int64_t> result_dims;
+  int passthrough_argument = -1;
   bool integer_result = false;
   bool ok = false;
   std::string refusal;
@@ -183,8 +191,6 @@ struct FunctionPlan {
 
 bool direct_function_view(const stanli::mir::UnsizedView& view) {
   using Leaf = stanli::mir::UnsizedLeaf;
-  if (view.depth == 1) return view.leaf == Leaf::Real || view.leaf == Leaf::Int;
-  if (view.depth != 0) return false;
   return view.leaf == Leaf::Real || view.leaf == Leaf::Int ||
          view.leaf == Leaf::Vector || view.leaf == Leaf::RowVector ||
          view.leaf == Leaf::Matrix;
@@ -229,7 +235,7 @@ std::shared_ptr<const FunctionPlan> compile_function(
       const auto& value = values[k];
       const auto view = definition.arg_views[k];
       if (!direct_function_view(view))
-        throw Bail{"standalone argument requires a storage-order adapter"};
+        throw Bail{"standalone argument has unsupported type metadata"};
       InlineArg arg;
       if (view.leaf == mir::UnsizedLeaf::Int) {
         arg.is_const_int = true;
@@ -242,9 +248,14 @@ std::shared_ptr<const FunctionPlan> compile_function(
         auto& range = arg.real;
         range.len = (int)value.r.size();
         range.reg = compiler.alloc(range.len);
-        if (view.depth == 1) {
+        if (view.depth != 0) {
           range.kind = ViewKind::Array;
           range.dims = value.dims;
+          range.leaf =
+              view.leaf == mir::UnsizedLeaf::Matrix      ? ViewKind::Matrix
+              : view.leaf == mir::UnsizedLeaf::Vector    ? ViewKind::Vector
+              : view.leaf == mir::UnsizedLeaf::RowVector ? ViewKind::RowVector
+                                                         : ViewKind::Flat;
         } else if (view.leaf == mir::UnsizedLeaf::Vector) {
           range.kind = ViewKind::Vector;
         } else if (view.leaf == mir::UnsizedLeaf::RowVector) {
@@ -269,16 +280,54 @@ std::shared_ptr<const FunctionPlan> compile_function(
     else if (result.kind == ViewKind::Vector ||
              result.kind == ViewKind::RowVector)
       out->result_dims = {result.len};
+    compiler.finish();
+    if (out->program.code.empty()) {
+      for (size_t k = 0; k < out->inputs.size(); ++k) {
+        const auto& view = definition.arg_views[k];
+        if (out->inputs[k] == std::make_pair(result.reg, result.len) &&
+            view.depth == result_type->depth &&
+            view.leaf == result_type->leaf &&
+            values[k].dims == out->result_dims) {
+          // A proved no-op return can use the caller's serialized value
+          // directly. Building and traversing a graph-order register buffer
+          // would add substantial copying for large identity functions.
+          *out = FunctionPlan{};
+          out->passthrough_argument = static_cast<int>(k);
+          out->storage = sizeof(FunctionPlan);
+          out->ok = true;
+          return out;
+        }
+      }
+    }
     for (int i = 0; i < result.len; ++i)
       out->program.out_regs.push_back(result.reg + i);
-    compiler.finish();
+    // Prepare the boundary permutations once. Per-call division/modulo and
+    // temporary containers can outweigh execution for simple large inputs.
+    if (result_type->depth != 0 && out->result_dims.size() > 1)
+      out->program.out_regs = serialized_container_order(
+          out->program.out_regs, out->result_dims, result_type->depth);
     compact_program(out->program, out->inputs);
+    for (size_t k = 0; k < values.size(); ++k) {
+      auto& input = out->inputs[k];
+      if (input.second == 0 || definition.arg_views[k].depth == 0 ||
+          values[k].dims.size() <= 1)
+        continue;
+      std::vector<int> registers(input.second);
+      std::iota(registers.begin(), registers.end(), input.first);
+      out->mapped_inputs.push_back(
+          {k, serialized_container_order(registers, values[k].dims,
+                                         definition.arg_views[k].depth)});
+      input.second = 0;  // Supplied by the prepared mapping instead of a copy.
+    }
     out->storage = sizeof(FunctionPlan) +
                    out->program.code.size() * sizeof(Program::Instr) +
                    out->program.pool.size() * sizeof(double) +
                    out->program.n_regs * sizeof(double) +
                    out->program.out_regs.size() * sizeof(int) +
                    out->program.calls.size() * sizeof(Program::Call);
+    for (const auto& input : out->mapped_inputs)
+      out->storage += sizeof(FunctionPlan::MappedInput) +
+                      input.registers.size() * sizeof(int);
     for (const auto& call : out->program.calls)
       out->storage += call.idata.size() * sizeof(int);
     out->ok = true;
@@ -409,11 +458,15 @@ std::shared_ptr<const FunctionPlan> function_plan(
 stanli::DataMap::Entry run_function(
     const FunctionPlan& plan,
     const std::vector<stanli::DataMap::Entry>& values) {
+  if (plan.passthrough_argument >= 0) return values[plan.passthrough_argument];
   std::vector<double> registers((size_t)plan.program.n_regs);
   for (size_t k = 0; k < values.size(); ++k) {
     const auto [reg, len] = plan.inputs[k];
     if (len > 0) std::copy_n(values[k].r.begin(), len, registers.begin() + reg);
   }
+  for (const auto& input : plan.mapped_inputs)
+    for (size_t k = 0; k < input.registers.size(); ++k)
+      registers[input.registers[k]] = values[input.argument].r[k];
   stanli::run_program(plan.program, registers);
   stanli::DataMap::Entry result;
   result.dims = plan.result_dims;

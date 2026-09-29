@@ -966,6 +966,18 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_vector_rng_complete
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME container_rng_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check> gq_container_rng_complete
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME integer_expressions_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check> gq_integer_expressions
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME uninitialized_int_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check> gq_uninitialized_int
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME rng_udf_effect_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect
@@ -1155,7 +1167,7 @@ if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
 endif()
 
 set(STANLI_TESTS
-  test_execution_report test_rng_families test_vector_rng
+  test_execution_report test_rng_families test_vector_rng test_container_rng
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
