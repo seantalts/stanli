@@ -160,7 +160,8 @@ std::vector<std::vector<stan::return_type_t<T_y0, T_theta, T_t0, T_ts>>> solve(
   using T = stan::return_type_t<T_y0, T_theta, T_t0, T_ts>;
   const double rtol = controls ? controls[0] : s.rtol;
   const double atol = controls ? controls[1] : s.atol;
-  const long max_steps = controls ? static_cast<long>(controls[2]) : s.max_steps;
+  const long max_steps =
+      controls ? static_cast<long>(controls[2]) : s.max_steps;
   VarRhs f{&s};
   Eigen::Matrix<T_y0, Eigen::Dynamic, 1> y0((Eigen::Index)z0.size());
   for (size_t i = 0; i < z0.size(); ++i) y0((Eigen::Index)i) = z0[i];
@@ -180,13 +181,13 @@ std::vector<std::vector<stan::return_type_t<T_y0, T_theta, T_t0, T_ts>>> solve(
         break;
       case OdeSpec::ADAMS:
         res = stan::math::ode_adams_tol_impl("integrate_ode_adams", f, y0, t0,
-                                             ts, rtol, atol, max_steps,
-                                             nullptr, theta, s.x_r, s.x_i);
+                                             ts, rtol, atol, max_steps, nullptr,
+                                             theta, s.x_r, s.x_i);
         break;
       default:
         res = stan::math::ode_rk45_tol_impl("integrate_ode_rk45", f, y0, t0, ts,
-                                            rtol, atol, max_steps,
-                                            nullptr, theta, s.x_r, s.x_i);
+                                            rtol, atol, max_steps, nullptr,
+                                            theta, s.x_r, s.x_i);
         break;
     }
     std::vector<std::vector<T>> out;
@@ -206,9 +207,8 @@ std::vector<std::vector<stan::return_type_t<T_y0, T_theta, T_t0, T_ts>>> solve(
                                     nullptr, theta, s.x_r, s.x_i);
       break;
     case OdeSpec::ADAMS:
-      res =
-          stan::math::ode_adams_tol(f, y0, t0, ts, rtol, atol, max_steps,
-                                    nullptr, theta, s.x_r, s.x_i);
+      res = stan::math::ode_adams_tol(f, y0, t0, ts, rtol, atol, max_steps,
+                                      nullptr, theta, s.x_r, s.x_i);
       break;
     case OdeSpec::CKRK:
       res = stan::math::ode_ckrk_tol(f, y0, t0, ts, rtol, atol, max_steps,
@@ -517,7 +517,8 @@ const double* ode_runtime_controls(const KernelCtx& ctx) {
   // carry initial/output times. Controls are inactive and local to the solve.
   if (ctx.n_in != 3 && ctx.n_in != 5) return nullptr;
   const auto& controls = ctx.in[ctx.n_in - 1];
-  if (controls.len != 3) throw std::invalid_argument("ODE control count mismatch");
+  if (controls.len != 3)
+    throw std::invalid_argument("ODE control count mismatch");
   return controls.data;
 }
 

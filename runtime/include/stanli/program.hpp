@@ -89,9 +89,9 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
   X(IMOD, kProgramReadB | kProgramNoAdjoint)                                  \
   X(IDIV, kProgramReadB | kProgramNoAdjoint)                                  \
-  X(IADD, kProgramReadB)                                                       \
-  X(ISUB, kProgramReadB)                                                       \
-  X(IMUL, kProgramReadB)                                                       \
+  X(IADD, kProgramReadB)                                                      \
+  X(ISUB, kProgramReadB)                                                      \
+  X(IMUL, kProgramReadB)                                                      \
   X(INEG, 0)                                                                  \
   X(IABS, 0)                                                                  \
   /* len holds the PowZeroBaseLaw; a RANGE's law field carries it instead. */ \

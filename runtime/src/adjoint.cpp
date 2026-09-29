@@ -579,10 +579,11 @@ bool gen_adjoint(IslandProg& p) {
     // definition there is no earlier value to differentiate, so that final
     // clear has no reader. Live-ins and shared cells retain their clears;
     // each invocation starts with a zeroed adjoint file.
-    const bool only_clear = spec.has(kProgramNoInputs) ||
-                            (I.code >= Program::GT && I.code <= Program::NE) ||
-                            (I.code >= Program::IADD && I.code <= Program::IABS) ||
-                            I.code == Program::EXTREMA_RANGE;
+    const bool only_clear =
+        spec.has(kProgramNoInputs) ||
+        (I.code >= Program::GT && I.code <= Program::NE) ||
+        (I.code >= Program::IADD && I.code <= Program::IABS) ||
+        I.code == Program::EXTREMA_RANGE;
     if (elide_private_clears && only_clear) {
       bool private_first = true;
       for (int k = 0; k < wl; ++k)

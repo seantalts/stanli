@@ -94,14 +94,15 @@ void stamp_rhs_view(Range* range, const mir::UnsizedView& view,
   if (view.depth) {
     RhsArg inferred;
     inferred.len = range->len;
-    range->dims = callback_array_dimensions(argument ? *argument : inferred, view);
+    range->dims =
+        callback_array_dimensions(argument ? *argument : inferred, view);
     range->kind = ViewKind::Array;
-    range->leaf = view.leaf == mir::UnsizedLeaf::Matrix ? ViewKind::Matrix
-        : view.leaf == mir::UnsizedLeaf::Vector ? ViewKind::Vector
-        : view.leaf == mir::UnsizedLeaf::RowVector ? ViewKind::RowVector
-        : ViewKind::Flat;
-  }
-  else if (view.leaf == mir::UnsizedLeaf::Vector)
+    range->leaf = view.leaf == mir::UnsizedLeaf::Matrix   ? ViewKind::Matrix
+                  : view.leaf == mir::UnsizedLeaf::Vector ? ViewKind::Vector
+                  : view.leaf == mir::UnsizedLeaf::RowVector
+                      ? ViewKind::RowVector
+                      : ViewKind::Flat;
+  } else if (view.leaf == mir::UnsizedLeaf::Vector)
     range->kind = ViewKind::Vector;
   else if (view.leaf == mir::UnsizedLeaf::RowVector)
     range->kind = ViewKind::RowVector;
@@ -173,7 +174,8 @@ RhsProgram compile_dae_args(
         const auto& view = f.arg_views[k + 3];
         if (view.depth) {
           c.known_int_array_dims[name] = callback_array_dimensions(a, view);
-          c.known_int_arrays[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+          c.known_int_arrays[name] =
+              std::vector<long>(a.ints.begin(), a.ints.end());
           c.int_array_names.insert(name);
         } else {
           c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
@@ -273,7 +275,8 @@ RhsProgram compile_rhs_args(
         const auto& view = f.arg_views[k + 2];
         if (view.depth) {
           c.known_int_array_dims[name] = callback_array_dimensions(a, view);
-          c.known_int_arrays[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+          c.known_int_arrays[name] =
+              std::vector<long>(a.ints.begin(), a.ints.end());
           c.int_array_names.insert(name);
         } else {
           c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());

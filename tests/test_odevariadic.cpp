@@ -196,7 +196,8 @@ OdeActivityRun kernel_activity_run(
     ctx.in[at] = Desc{const_cast<double*>(controls), 3};
     if (runtime_times) {
       ctx.in[2] = Desc{const_cast<double*>(&spec.t0), 1};
-      ctx.in[3] = Desc{const_cast<double*>(spec.ts.data()), (int64_t)spec.ts.size()};
+      ctx.in[3] =
+          Desc{const_cast<double*>(spec.ts.data()), (int64_t)spec.ts.size()};
       ctx.variant = 0x10u;
     }
   }
@@ -326,22 +327,33 @@ static void check_runtime_controls(const stanli::OdeSpec& shared) {
     if (trial == 4) reference.max_steps = 0;
     if (trial == 5) reference.rtol = std::numeric_limits<double>::quiet_NaN();
     if (trial == 6) reference.max_steps = 1;
-    const double controls[]{reference.rtol, reference.atol, (double)reference.max_steps};
+    const double controls[]{reference.rtol, reference.atol,
+                            (double)reference.max_steps};
     OdeActivityRun want;
     OdeError error;
-    try { want = direct_activity_run<false, false>(reference); }
-    catch (const std::exception& e) { error = {true, typeid(e).name(), e.what()}; }
+    try {
+      want = direct_activity_run<false, false>(reference);
+    } catch (const std::exception& e) {
+      error = {true, typeid(e).name(), e.what()};
+    }
     for (bool times : {false, true}) {
       OdeActivityRun got;
       OdeError failure;
-      try { got = kernel_activity_run<false, false>(shared, test_y0, test_theta, controls, times); }
-      catch (const std::exception& e) { failure = {true, typeid(e).name(), e.what()}; }
-      expect("runtime controls preserve Stan rejection", failure.threw == error.threw);
+      try {
+        got = kernel_activity_run<false, false>(shared, test_y0, test_theta,
+                                                controls, times);
+      } catch (const std::exception& e) {
+        failure = {true, typeid(e).name(), e.what()};
+      }
+      expect("runtime controls preserve Stan rejection",
+             failure.threw == error.threw);
       if (error.threw) {
         expect("runtime control exception type", failure.type == error.type);
-        expect("runtime control exception message", failure.message == error.message);
+        expect("runtime control exception message",
+               failure.message == error.message);
       } else {
-        expect("runtime controls preserve Stan values", bitwise_equal(got.value, want.value));
+        expect("runtime controls preserve Stan values",
+               bitwise_equal(got.value, want.value));
       }
     }
   }

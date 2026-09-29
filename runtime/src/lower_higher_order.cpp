@@ -68,8 +68,8 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
           if (!c.try_cints(arg, &values)) return std::nullopt;
           Range shape;
           if (!c.static_view(arg, &shape)) return std::nullopt;
-          binding.dims = shape.dims.empty()
-              ? std::vector<int64_t>{shape.len} : shape.dims;
+          binding.dims =
+              shape.dims.empty() ? std::vector<int64_t>{shape.len} : shape.dims;
         }
         return std::vector<int>(values.begin(), values.end());
       },
@@ -186,7 +186,8 @@ bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
   spec->callback_name = integrand->name;
   spec->method = call->method;
   Range controls;
-  const bool runtime_controls = in_write_array &&
+  const bool runtime_controls =
+      in_write_array &&
       (call->legacy ? e.args.size() == 7 : call->with_tolerance);
   if (runtime_controls) {
     controls = scalar_solver_controls(c, e, call->legacy ? 6 : 3,
@@ -225,8 +226,8 @@ bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
   Range result{0, 1};
   std::vector<Range> inputs{a, b, theta};
   if (runtime_controls) inputs.push_back(controls);
-  *out_range = c.kernel_call(OP_QUADRATURE, inputs, result, variant,
-                             variant, {}, spec, e.name);
+  *out_range = c.kernel_call(OP_QUADRATURE, inputs, result, variant, variant,
+                             {}, spec, e.name);
   return true;
 }
 bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
@@ -267,7 +268,8 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
     c.bail(e.name + ": result is too large");
 
   Range theta, controls;
-  const bool runtime_controls = in_write_array &&
+  const bool runtime_controls =
+      in_write_array &&
       (call->legacy ? e.args.size() == 10 : call->with_tolerance);
   const auto bind_controls = [&](size_t first) {
     controls = scalar_solver_controls(c, e, first);
@@ -382,7 +384,8 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
         real(9, "quadrature absolute tolerance");
     spec->max_num_steps = integer(10, "maximum steps");
     spec->num_steps_between_checkpoints = integer(11, "checkpoint interval");
-    spec->interpolation_polynomial = (int)integer(12, "interpolation polynomial");
+    spec->interpolation_polynomial =
+        (int)integer(12, "interpolation polynomial");
     spec->solver_forward = (int)integer(13, "forward solver");
     spec->solver_backward = (int)integer(14, "backward solver");
   }
@@ -398,7 +401,7 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
   const int S = y0.len;
   const int N = ts.len;
   if (!in_write_array && ((int)spec->absolute_tolerance_forward.size() != S ||
-      (int)spec->absolute_tolerance_backward.size() != S))
+                          (int)spec->absolute_tolerance_backward.size() != S))
     c.bail(e.name + ": absolute tolerance vectors must match state size");
   if (S < 0 || N < 0 || (N && S > ProgramCompiler::kMaxRegs / N))
     c.bail(e.name + ": result is too large");
@@ -1095,20 +1098,26 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
         }
         if (e.args[i].unsized.depth) {
           const auto* entry = actuals.at(i).pure_value();
-          binding.dims = entry && !entry->dims.empty() ? entry->dims
-              : logical_shape(actuals.at(i).value(), "callback array");
-          return graph_container_order(values, binding.dims, e.args[i].unsized.depth);
+          binding.dims =
+              entry && !entry->dims.empty()
+                  ? entry->dims
+                  : logical_shape(actuals.at(i).value(), "callback array");
+          return graph_container_order(values, binding.dims,
+                                       e.args[i].unsized.depth);
         }
         return std::vector<double>(values.begin(), values.end());
       },
       [&](size_t i, RhsArg& binding) -> std::optional<std::vector<int>> {
-        if (in_write_array && needs_runtime_value(e.args[i])) return std::nullopt;
+        if (in_write_array && needs_runtime_value(e.args[i]))
+          return std::nullopt;
         const auto& values =
             actuals.at(i).require_constant_ints("quadrature integer argument");
         if (e.args[i].unsized.depth) {
           const auto* entry = actuals.at(i).pure_value();
-          binding.dims = entry && !entry->dims.empty() ? entry->dims
-              : logical_shape(actuals.at(i).value(), "callback integer array");
+          binding.dims = entry && !entry->dims.empty()
+                             ? entry->dims
+                             : logical_shape(actuals.at(i).value(),
+                                             "callback integer array");
         }
         return std::vector<int>(values.begin(), values.end());
       },
@@ -1362,14 +1371,14 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
     const mir::Expr& a = actual.expr();
     RhsArg ra;
     const bool is_int = a.unsized.leaf == mir::UnsizedLeaf::Int;
-    if (is_int && a.data_only &&
-        !(in_write_array && needs_runtime_value(a))) {
+    if (is_int && a.data_only && !(in_write_array && needs_runtime_value(a))) {
       ra.is_int = true;
       ra.ints = actual.require_constant_ints("ODE integer argument");
       if (a.unsized.depth) {
         const auto* entry = actual.pure_value();
-        ra.dims = entry && !entry->dims.empty() ? entry->dims
-            : logical_shape(actual.value(), "callback integer array");
+        ra.dims = entry && !entry->dims.empty()
+                      ? entry->dims
+                      : logical_shape(actual.value(), "callback integer array");
       }
     } else if (a.data_only && !in_write_array) {
       // One evaluation, held in a local. Calling const_values(a) twice
@@ -1391,9 +1400,11 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
       }
       if (a.unsized.depth) {
         const auto* entry = actual.pure_value();
-        ra.dims = entry && !entry->dims.empty() ? entry->dims
-            : logical_shape(actual.value(), "callback array");
-        const auto packed = graph_container_order(vals, ra.dims, a.unsized.depth);
+        ra.dims = entry && !entry->dims.empty()
+                      ? entry->dims
+                      : logical_shape(actual.value(), "callback array");
+        const auto packed =
+            graph_container_order(vals, ra.dims, a.unsized.depth);
         spec->x_r.insert(spec->x_r.end(), packed.begin(), packed.end());
       } else {
         spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());

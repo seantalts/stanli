@@ -264,7 +264,7 @@ struct ProgramCompiler {
   // Unrolling may capture an upper bound only when reevaluation cannot
   // change its value or produce effects. Other bounds run at the loop head.
   bool invariant_for_bound(const mir::Expr& e,
-                            const std::set<std::string>& written) {
+                           const std::set<std::string>& written) {
     // Fixed container geometry does not depend on element mutations.
     // Retain the effect check on the operand even when only its shape matters.
     if (is_shape_query(e)) {
@@ -331,10 +331,14 @@ struct ProgramCompiler {
       auto known = known_int_arrays.find(name);
       if (!reals.count(name) && known != known_int_arrays.end()) {
         const auto shape = known_int_array_dims.find(name);
-        const std::vector<int64_t> dims = shape == known_int_array_dims.end()
-            ? std::vector<int64_t>{static_cast<int64_t>(known->second.size())} : shape->second;
+        const std::vector<int64_t> dims =
+            shape == known_int_array_dims.end()
+                ? std::vector<int64_t>{static_cast<int64_t>(
+                      known->second.size())}
+                : shape->second;
         const auto values = int_array_graph_values(known->second, dims);
-        Range value{alloc(static_cast<int>(values.size())), static_cast<int>(values.size())};
+        Range value{alloc(static_cast<int>(values.size())),
+                    static_cast<int>(values.size())};
         value.kind = ViewKind::Array;
         value.dims = dims;
         emit_const(value.reg, values.data(), value.len);
@@ -530,7 +534,8 @@ struct ProgramCompiler {
 
   bool refers_to_local_runtime(const mir::Expr& e) const {
     if (e.kind == mir::Expr::Var && reals.count(e.name) &&
-        !extern_bound.count(e.name)) return true;
+        !extern_bound.count(e.name))
+      return true;
     for (const auto& arg : e.args)
       if (refers_to_local_runtime(arg)) return true;
     return false;
@@ -1488,7 +1493,8 @@ struct ProgramCompiler {
     if (branch_depth != depth) return false;
     for (size_t k = enclosing; k < loops.size(); ++k)
       if (loops[k].structured || !loops[k].breaks.empty() ||
-          !loops[k].continues.empty()) return false;
+          !loops[k].continues.empty())
+        return false;
     return true;
   }
 
@@ -1656,18 +1662,22 @@ struct ProgramCompiler {
         // remaining base-only node is the identity, as in MirInterp.
         if (e.args.size() == 1) return b;
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
-        const std::vector<mir::Expr> selectors(e.args.begin() + 1, e.args.end());
+        const std::vector<mir::Expr> selectors(e.args.begin() + 1,
+                                               e.args.end());
         if ((b.kind == ViewKind::Matrix || b.kind == ViewKind::Array ||
              (e.args.size() == 2 && e.args[1].name == "IndexMulti")) &&
             has_runtime_selector(selectors)) {
           // Preserve the existing single-op path for a final scalar array
           // index; other geometries use the shared checked kernel below.
-          bool final_scalar = b.kind == ViewKind::Array && b.leaf == ViewKind::Flat &&
+          bool final_scalar =
+              b.kind == ViewKind::Array && b.leaf == ViewKind::Flat &&
               selectors.size() == (b.dims.empty() ? 1 : b.dims.size());
           for (size_t k = 0; k < selectors.size() && final_scalar; ++k) {
             long fixed;
-            final_scalar = selectors[k].name == "IndexSingle" && selectors[k].args.size() == 1 &&
-                (k + 1 == selectors.size() || try_cint(selectors[k].args[0], &fixed));
+            final_scalar = selectors[k].name == "IndexSingle" &&
+                           selectors[k].args.size() == 1 &&
+                           (k + 1 == selectors.size() ||
+                            try_cint(selectors[k].args[0], &fixed));
           }
           if (!final_scalar) return dynamic_index(b, selectors);
         }
@@ -2206,7 +2216,8 @@ struct ProgramCompiler {
       if (index.name == "IndexAll") continue;
       if (index.name == "IndexMulti") {
         std::vector<long> values;
-        if (index.args.size() != 1 || !try_cints(index.args[0], &values)) return true;
+        if (index.args.size() != 1 || !try_cints(index.args[0], &values))
+          return true;
       } else {
         for (const auto& arg : index.args) {
           long value;
@@ -2220,7 +2231,8 @@ struct ProgramCompiler {
   // Fixed shapes with runtime selectors use the same checked gather/scatter
   // kernels as structured loops. Only selector values vary; result extents
   // must be proven here before allocating any result registers.
-  Range dynamic_index(const Range& base, const std::vector<mir::Expr>& selectors,
+  Range dynamic_index(const Range& base,
+                      const std::vector<mir::Expr>& selectors,
                       const Range* rhs = nullptr) {
     std::vector<int64_t> dims;
     ViewKind leaf = base.kind;
@@ -2229,14 +2241,17 @@ struct ProgramCompiler {
       leaf = base.leaf;
     } else if (base.kind == ViewKind::Matrix) {
       dims = {base.rows, base.cols};
-    } else if (base.kind == ViewKind::Vector || base.kind == ViewKind::RowVector) {
+    } else if (base.kind == ViewKind::Vector ||
+               base.kind == ViewKind::RowVector) {
       dims = {base.len};
     } else {
       bail("runtime indexed access needs a container view");
     }
     if (selectors.size() > dims.size()) bail("too many runtime indices");
-    const size_t leaf_rank = leaf == ViewKind::Matrix ? 2
-        : (leaf == ViewKind::Vector || leaf == ViewKind::RowVector) ? 1 : 0;
+    const size_t leaf_rank =
+        leaf == ViewKind::Matrix                                    ? 2
+        : (leaf == ViewKind::Vector || leaf == ViewKind::RowVector) ? 1
+                                                                    : 0;
     if (dims.size() < leaf_rank) bail("incomplete runtime index shape");
     const size_t outer = dims.size() - leaf_rank;
     std::vector<int64_t> strides(dims.size(), 1);
@@ -2286,13 +2301,16 @@ struct ProgramCompiler {
       } else {
         // A range may coexist with runtime selectors on other axes, but its
         // length must remain static. Variable-length ranges still refuse.
-        const auto positions = matrix_positions(*index, dims[d], "runtime selection");
+        const auto positions =
+            matrix_positions(*index, dims[d], "runtime selection");
         axis.kind = DynamicIndexSpec::Axis::Range;
         axis.count = positions.size();
-        values = Range{konst(positions.empty() ? 1.0 : positions.front() + 1.0), 1};
+        values =
+            Range{konst(positions.empty() ? 1.0 : positions.front() + 1.0), 1};
       }
       if (axis.kind != DynamicIndexSpec::Axis::All) {
-        if (values.len > kMaxRegs - packed_size) bail("runtime selectors are too large");
+        if (values.len > kMaxRegs - packed_size)
+          bail("runtime selectors are too large");
         parts.push_back(values);
         packed_size += values.len;
       }
@@ -2311,9 +2329,12 @@ struct ProgramCompiler {
     Range selected{0, selected_size};
     ViewKind result_leaf = leaf;
     if (leaf == ViewKind::Matrix)
-      result_leaf = keep[outer] ? (keep[outer + 1] ? ViewKind::Matrix : ViewKind::Vector)
-          : (keep[outer + 1] ? ViewKind::RowVector : ViewKind::Flat);
-    else if (leaf_rank && !keep[outer]) result_leaf = ViewKind::Flat;
+      result_leaf =
+          keep[outer]
+              ? (keep[outer + 1] ? ViewKind::Matrix : ViewKind::Vector)
+              : (keep[outer + 1] ? ViewKind::RowVector : ViewKind::Flat);
+    else if (leaf_rank && !keep[outer])
+      result_leaf = ViewKind::Flat;
     if (remaining_outer) {
       selected.kind = ViewKind::Array;
       selected.leaf = result_leaf;
@@ -2327,16 +2348,17 @@ struct ProgramCompiler {
     }
     if (rhs && !same_view(selected, *rhs))
       bail("runtime indexed assignment logical view mismatch");
-    Range packed{packed_size ? alloc(packed_size) : konst(0.0), packed_size ? packed_size : 1};
+    Range packed{packed_size ? alloc(packed_size) : konst(0.0),
+                 packed_size ? packed_size : 1};
     int at = 0;
     for (const Range& part : parts)
       for (int k = 0; k < part.len; ++k)
         emit(Program::MOV, packed.reg + at++, part.reg + k);
     if (rhs)
-      return kernel_call(OP_SET_INDEX_DYNAMIC, {base, packed, *rhs}, base,
-                         0, 0x5, {}, spec, "runtime indexed assignment");
-    return kernel_call(OP_INDEX_DYNAMIC, {base, packed}, selected,
-                       0, 0x1, {}, spec, "runtime indexed read");
+      return kernel_call(OP_SET_INDEX_DYNAMIC, {base, packed, *rhs}, base, 0,
+                         0x5, {}, spec, "runtime indexed assignment");
+    return kernel_call(OP_INDEX_DYNAMIC, {base, packed}, selected, 0, 0x1, {},
+                       spec, "runtime indexed read");
   }
 
   Range kernel_call(uint16_t opcode, const std::vector<Range>& args, Range out,
@@ -2495,13 +2517,20 @@ struct ProgramCompiler {
 
   static Program::Code integer_instruction(Program::Code code) {
     switch (code) {
-      case Program::ADD: return Program::IADD;
-      case Program::SUB: return Program::ISUB;
-      case Program::MUL: return Program::IMUL;
-      case Program::DIV: return Program::IDIV;
-      case Program::NEG: return Program::INEG;
-      case Program::FABS: return Program::IABS;
-      default: return code;
+      case Program::ADD:
+        return Program::IADD;
+      case Program::SUB:
+        return Program::ISUB;
+      case Program::MUL:
+        return Program::IMUL;
+      case Program::DIV:
+        return Program::IDIV;
+      case Program::NEG:
+        return Program::INEG;
+      case Program::FABS:
+        return Program::IABS;
+      default:
+        return code;
     }
   }
 
@@ -3855,7 +3884,8 @@ struct ProgramCompiler {
   // position (CONST/CONSTR's `a` is a pool index, CALL's is a call index).
   void finish() {
     if (late_bound.empty() && hoisted_int_initializers.empty() &&
-        unused_int_resets.empty()) return;
+        unused_int_resets.empty())
+      return;
     std::vector<Program::Instr> code = std::move(hoisted_int_initializers);
     for (const auto& [reg, len] : late_bound) {
       const std::vector<double> nan((size_t)len,
@@ -4204,12 +4234,14 @@ struct ProgramCompiler {
         if ((dst.kind == ViewKind::Array || dst.kind == ViewKind::Matrix ||
              (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexMulti")) &&
             has_runtime_selector(s.lhs_idx)) {
-          const bool scalar_array = dst.kind == ViewKind::Array &&
-              dst.leaf == ViewKind::Flat && (dst.dims.empty() || dst.dims.size() == 1) &&
+          const bool scalar_array =
+              dst.kind == ViewKind::Array && dst.leaf == ViewKind::Flat &&
+              (dst.dims.empty() || dst.dims.size() == 1) &&
               s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexSingle";
           if (scalar_array && is_scalar(v)) {
             const Range index = expr(s.lhs_idx[0].args.at(0));
-            if (!is_scalar(index)) bail("runtime assignment index must be scalar");
+            if (!is_scalar(index))
+              bail("runtime assignment index must be scalar");
             emit(Program::DYN_SET, dst.reg, dst.reg, v.reg, index.reg, dst.len);
           } else {
             const Range updated = dynamic_index(dst, s.lhs_idx, &v);
@@ -4409,8 +4441,8 @@ struct ProgramCompiler {
         std::set<std::string> written;
         for (const auto& child : s.body) assigned_names(child, &written);
         const bool invariant_upper = invariant_for_bound(s.upper, written);
-        if (!invariant_upper ||
-            !try_cint(s.lower, &lo) || !try_cint(s.upper, &hi)) {
+        if (!invariant_upper || !try_cint(s.lower, &lo) ||
+            !try_cint(s.upper, &hi)) {
           // Every integer operation in the repeated body must have a typed
           // implementation; double storage alone does not prove this.
           require_runtime_integer_contract();

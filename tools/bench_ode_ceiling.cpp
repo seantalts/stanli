@@ -169,7 +169,8 @@ struct Options {
 void usage() {
   std::fprintf(stderr,
                "usage: bench_ode_ceiling MODEL.tmir.sexp DATA.json "
-               "[--provider auto|generated|fvar|structured|loop] [--structured-mir PATH] [--solver model|rk45|ckrk] "
+               "[--provider auto|generated|fvar|structured|loop] "
+               "[--structured-mir PATH] [--solver model|rk45|ckrk] "
                "[--point 0|1|2] [--iterations N] [--batches N] "
                "[--warmup-ms N] [--diagnostic] [--require-exact]\n");
 }
@@ -220,10 +221,13 @@ Options parse_options(int argc, char** argv) {
     }
   }
   if (out.provider != "auto" && out.provider != "generated" &&
-      out.provider != "fvar" && out.provider != "structured" && out.provider != "loop")
-    throw std::runtime_error("--provider must be auto, generated, fvar, structured, or loop");
+      out.provider != "fvar" && out.provider != "structured" &&
+      out.provider != "loop")
+    throw std::runtime_error(
+        "--provider must be auto, generated, fvar, structured, or loop");
   if ((out.provider == "structured") != !out.structured_mir.empty())
-    throw std::runtime_error("structured provider requires --structured-mir exclusively");
+    throw std::runtime_error(
+        "structured provider requires --structured-mir exclusively");
   if (out.solver != "model" && out.solver != "rk45" && out.solver != "ckrk")
     throw std::runtime_error("--solver must be model, rk45, or ckrk");
   return out;
@@ -510,7 +514,8 @@ enum class ProviderKind { Generated, Fvar, Structured, Loop };
 class DerivativeProvider {
  public:
   DerivativeProvider(const RhsProgram& rhs, size_t theta_source,
-                     const std::string& requested, StructuredRhsProbe* structured = nullptr)
+                     const std::string& requested,
+                     StructuredRhsProbe* structured = nullptr)
       : rhs_(rhs), theta_source_(theta_source), structured_(structured) {
     // Developer-only direct-coupled machinery.  The clone absorbs any
     // checkpoint MOVs; OdeSpec::prog remains canonical and untouched.
@@ -534,7 +539,8 @@ class DerivativeProvider {
     } else if (requested == "structured") {
       if (!structured_ || rhs_.n_y != 1 || rhs_.n_th != 1 ||
           theta_source_ != 1 || rhs_.n_xr != 0)
-        throw std::runtime_error("structured probe requires one state and one theta");
+        throw std::runtime_error(
+            "structured probe requires one state and one theta");
       kind_ = ProviderKind::Structured;
     } else if (requested == "generated") {
       if (!generated_ok_)
@@ -1120,10 +1126,13 @@ int main(int argc, char** argv) {
     std::unique_ptr<StructuredRhsProbe> structured;
     if (options.provider == "structured") {
       const auto start = Clock::now();
-      structured = std::make_unique<StructuredRhsProbe>(slurp(options.structured_mir), data);
-      std::printf("structured_preparation_ns=%lld\n", (long long)elapsed_ns(start));
+      structured = std::make_unique<StructuredRhsProbe>(
+          slurp(options.structured_mir), data);
+      std::printf("structured_preparation_ns=%lld\n",
+                  (long long)elapsed_ns(start));
     }
-    DerivativeProvider provider(spec->prog, P, options.provider, structured.get());
+    DerivativeProvider provider(spec->prog, P, options.provider,
+                                structured.get());
     const size_t N_y0 = (type_mask & 0x1u) != 0 ? S : 0;
     const size_t N_theta = (type_mask & 0x2u) != 0 ? P : 0;
     const size_t coupled_size = S * (1 + N_y0 + N_theta);
@@ -1219,9 +1228,10 @@ int main(int argc, char** argv) {
         solution_jacobian.bitwise == solution_jacobian.total;
     const bool solution_numerical = solution_values.max_relative <= 1e-9 &&
                                     solution_jacobian.max_relative <= 1e-9;
-    const bool exact_required =
-        options.require_exact || provider.kind() == ProviderKind::Generated ||
-        provider.kind() == ProviderKind::Structured || provider.kind() == ProviderKind::Loop;
+    const bool exact_required = options.require_exact ||
+                                provider.kind() == ProviderKind::Generated ||
+                                provider.kind() == ProviderKind::Structured ||
+                                provider.kind() == ProviderKind::Loop;
     if (!callback_equal || !local_numerical || !solution_numerical ||
         (exact_required && (!local_exact || !solution_exact)))
       throw std::runtime_error(

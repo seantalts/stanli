@@ -866,9 +866,9 @@ void test_runtime_for_bound_effects() {
                          nullptr, true);
     entry.body[0].upper =
         fun("bound", {lit_int(3)}, "UInt", Expr::Lib::UserDefined);
-    const std::string repeated = first == 1
-        ? "bound 1\nbound 3\n1\nbound 3\n2\nbound 3\n3\nbound 3\n"
-        : "bound 5\nbound 3\n";
+    const std::string repeated =
+        first == 1 ? "bound 1\nbound 3\n1\nbound 3\n2\nbound 3\n3\nbound 3\n"
+                   : "bound 5\nbound 3\n";
     run_observation_case("for upper bound effects",
                          "the upper bound runs on every condition test",
                          {entry, bound}, 1.0, observed_values({0.0}, repeated),

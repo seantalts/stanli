@@ -76,14 +76,16 @@ auto solve(const OdeAdjointSpec& spec, const T_y0& y0, const T_t0& t0,
       controls ? S : (Eigen::Index)spec.absolute_tolerance_backward.size());
   return stan::math::ode_adjoint_tol_ctl(
       AdjointRhs{&spec}, y0, t0, ts,
-      controls ? controls[0] : spec.relative_tolerance_forward,
-      atol_forward, controls ? controls[S + 1] : spec.relative_tolerance_backward,
+      controls ? controls[0] : spec.relative_tolerance_forward, atol_forward,
+      controls ? controls[S + 1] : spec.relative_tolerance_backward,
       atol_backward,
       controls ? controls[2 * S + 2] : spec.relative_tolerance_quadrature,
       controls ? controls[2 * S + 3] : spec.absolute_tolerance_quadrature,
       controls ? static_cast<long>(controls[2 * S + 4]) : spec.max_num_steps,
-      controls ? static_cast<long>(controls[2 * S + 5]) : spec.num_steps_between_checkpoints,
-      controls ? static_cast<int>(controls[2 * S + 6]) : spec.interpolation_polynomial,
+      controls ? static_cast<long>(controls[2 * S + 5])
+               : spec.num_steps_between_checkpoints,
+      controls ? static_cast<int>(controls[2 * S + 6])
+               : spec.interpolation_polynomial,
       controls ? static_cast<int>(controls[2 * S + 7]) : spec.solver_forward,
       controls ? static_cast<int>(controls[2 * S + 8]) : spec.solver_backward,
       nullptr, theta, spec.x_r, spec.x_i);
@@ -96,11 +98,12 @@ void ode_adjoint_fwd(KernelCtx& ctx) {
   const double t0 = ctx.in[1].data[0];
   std::vector<double> ts(ctx.in[2].data, ctx.in[2].data + ctx.in[2].len);
   std::vector<double> theta(ctx.in[3].data, ctx.in[3].data + ctx.in[3].len);
-  if (ctx.n_in == 5 && (ctx.in[4].len != 2 * S + 9 ||
-                         (ctx.variant & 0x0fu) != 0))
-    throw std::invalid_argument("runtime adjoint ODE controls require a value-only solve");
-  const auto solution = solve(spec, y0, t0, ts, theta,
-                              ctx.n_in == 5 ? ctx.in[4].data : nullptr);
+  if (ctx.n_in == 5 &&
+      (ctx.in[4].len != 2 * S + 9 || (ctx.variant & 0x0fu) != 0))
+    throw std::invalid_argument(
+        "runtime adjoint ODE controls require a value-only solve");
+  const auto solution =
+      solve(spec, y0, t0, ts, theta, ctx.n_in == 5 ? ctx.in[4].data : nullptr);
   if ((int64_t)solution.size() * S != ctx.out.len)
     throw std::runtime_error(
         "ode_adjoint_tol_ctl: result shape disagrees with output times");

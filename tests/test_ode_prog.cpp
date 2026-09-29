@@ -456,7 +456,8 @@ void check_matrix_callbacks() {
   data.is_param = false;
   const std::vector<RhsArg> args{active, data};
   const std::vector<double> xr{0.1, 0.3, 0.7, -0.2, 0.5, -0.4};
-  for (const char* name : {"matrix_early", "matrix_dynamic", "matrix_gather", "matrix_bounds"}) {
+  for (const char* name :
+       {"matrix_early", "matrix_dynamic", "matrix_gather", "matrix_bounds"}) {
     const auto& f = *funs.at(name);
     const auto compiled = compile_rhs_args(f, funs, 2, args);
     const bool dynamic = std::string(name) == "matrix_dynamic";
@@ -528,12 +529,16 @@ void check_matrix_callbacks() {
         try {
           std::vector<double> y{0.2, 0.8}, a(6, 0.3), out, registers;
           if (compiled_path && program.ok)
-            run_rhs<double>(program, t, y.data(), a.data(), xr.data(), out, registers);
+            run_rhs<double>(program, t, y.data(), a.data(), xr.data(), out,
+                            registers);
           else {
             MirInterp<double> interp(funs, "matrix bounds test");
-            out = interpret_retained_callback(interp, bounds, {{t}, y, a, xr}, {}, args);
+            out = interpret_retained_callback(interp, bounds, {{t}, y, a, xr},
+                                              {}, args);
           }
-        } catch (const std::exception&) { rejected = true; }
+        } catch (const std::exception&) {
+          rejected = true;
+        }
         expect("runtime matrix row rejects each invalid axis", rejected);
       }
     }
@@ -622,8 +627,8 @@ void check_nested_callbacks() {
         run_rhs<var>(compiled, 0.2, y.data(), packed.data(), xr.data(), out,
                      registers);
       } else if (mode == 1) {
-        out = interpret_retained_callback(interp, f,
-            {{var(0.2)}, y, packed, b}, {integers.ints}, args);
+        out = interpret_retained_callback(interp, f, {{var(0.2)}, y, packed, b},
+                                          {integers.ints}, args);
       } else {
         std::vector<MirInterp<var>::Value> values(5);
         values[0].r = {var(0.2)};
@@ -663,11 +668,13 @@ void check_nested_callbacks() {
     expect("array-of-vector geometry compiles", p.ok);
     std::vector<double> y{0.2, 0.8}, theta(a.len, 0.3), out, registers;
     const std::vector<double> want{dims[0] + y[0], dims[1] + y[1]};
-    if (p.ok) run_rhs<double>(p, 0.0, y.data(), theta.data(), nullptr, out, registers);
+    if (p.ok)
+      run_rhs<double>(p, 0.0, y.data(), theta.data(), nullptr, out, registers);
     expect("array geometry keeps empty and equal-size extents", out == want);
     MirInterp<double> interp(funs, "nested shape test");
     expect("nested fallback keeps empty axes",
-        interpret_retained_callback(interp, shape, {{0.0}, y, theta}, {}, {a}) == want);
+           interpret_retained_callback(interp, shape, {{0.0}, y, theta}, {},
+                                       {a}) == want);
   }
   for (const std::vector<int64_t> dims :
        {std::vector<int64_t>{2, 6}, {2, 2, 4}, {0, -1, 0}, {}}) {
@@ -678,10 +685,13 @@ void check_nested_callbacks() {
     bool refused = false;
     try {
       MirInterp<double> interp(funs, "invalid nested test");
-      interpret_retained_callback(interp, f,
+      interpret_retained_callback(
+          interp, f,
           {{0.0}, {0.2, 0.8}, std::vector<double>(12), std::vector<double>(6)},
           {integers.ints}, {bad, data, integers});
-    } catch (const std::exception&) { refused = true; }
+    } catch (const std::exception&) {
+      refused = true;
+    }
     expect("invalid nested geometry refuses interpretation", refused);
   }
 }

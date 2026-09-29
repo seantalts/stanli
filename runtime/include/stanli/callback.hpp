@@ -35,14 +35,17 @@ class MirInterp;
 inline std::vector<int64_t> callback_array_dimensions(
     const RhsArg& arg, const mir::UnsizedView& view) {
   const size_t leaf_rank = view.leaf == mir::UnsizedLeaf::Matrix ? 2
-      : (view.leaf == mir::UnsizedLeaf::Vector ||
-         view.leaf == mir::UnsizedLeaf::RowVector) ? 1 : 0;
+                           : (view.leaf == mir::UnsizedLeaf::Vector ||
+                              view.leaf == mir::UnsizedLeaf::RowVector)
+                               ? 1
+                               : 0;
   const int64_t count = arg.is_int && !arg.is_param ? arg.ints.size() : arg.len;
   auto dims = arg.dims;
   if (dims.empty() && view.depth == 1 && leaf_rank == 0) dims = {count};
   if (view.depth == 0 || dims.size() != view.depth + leaf_rank ||
       checked_container_size(dims, "callback array") != count)
-    throw std::invalid_argument("callback array dimensions do not match its values");
+    throw std::invalid_argument(
+        "callback array dimensions do not match its values");
   return dims;
 }
 
@@ -98,8 +101,8 @@ std::vector<T> interpret_retained_callback(
     }
     if (view.depth && k >= prefix) {
       value.dims = callback_array_dimensions(bindings[k - prefix], view);
-      if (value.r.size() != static_cast<size_t>(
-              checked_container_size(value.dims, "callback array")))
+      if (value.r.size() != static_cast<size_t>(checked_container_size(
+                                value.dims, "callback array")))
         throw std::invalid_argument("callback array value count mismatch");
       if (!value.is_int)
         value.r = serialized_container_order(value.r, value.dims, view.depth);
