@@ -73,6 +73,7 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-09-29 · Execution inventory and bounded-storage probe](../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md) | Corpus and fixture execution selections, scoped runtime traces, logical-length correctness fix, native measurements and remaining admission design gates. |
 | [2026-09-28 · Next coverage slice: shape-preserving retained callbacks](../../notes/execution/2026-09-28-callback-geometry-plan.md) | Proof/evaluator or decision; check status before proposing work. |
 | [2026-09-28 · Matrix geometry at retained callback boundaries](../../notes/execution/2026-09-28-callback-geometry-results.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-28 · Callback return safety before broader exit lowering](../../notes/execution/2026-09-28-callback-return-guards.md) | Dated results, proof limits and linked evidence. |
@@ -132,6 +133,7 @@ paths and hashes in raw records unchanged.
 | [Scalar initialization measurements](../../notes/execution/data/2026-09-29-uninitialized-int-performance.json) | Paired native phases, normal-use canaries and binary identities. |
 | [Recorded-corpus output coverage](../../notes/execution/data/2026-09-29-output-coverage.txt) | All 329 recorded models select complete compiled outputs after the scalar-initialization fix; other MIR roles are outside this report. |
 | [Local-storage design checkpoint](../../notes/execution/2026-09-29-local-storage-checkpoint.md) | Proposed closed bounded regions before local MIR; scope, proof obligations and evaluation plan. |
+| [Fable next-steps review and comparison](../../notes/execution/2026-09-29-fable-next-steps-review.md) | Revised ordering after PR #410: focused context inventory, then direct admission or bounded-region probe; verbatim review, source corrections and deferred work. |
 | [Local fallback opportunity measurements](../../notes/execution/data/2026-09-29-local-fallback-opportunity.json) | Whole-output MIR versus fixed-storage source control; potential savings, not an implemented boundary. |
 | [2026-09-29 · Execution coverage: working checklist](../../notes/execution/2026-09-29-execution-coverage-checklist.md) | Hierarchical implementation queue: known gaps, direct extensions, local fallback experiments, design checkpoints and performance/correctness gates. |
 | [2026-09-29 · Remaining uses of the MIR interpreter](../../notes/execution/2026-09-29-mir-interpreter-remaining-uses.md) | Source audit after #407/#408: production entry points, remaining refusals, existing-engine opportunities and diagnostic limits. |

@@ -5,6 +5,18 @@ implemented and measured in the [working checklist](2026-09-29-execution-coverag
 The next storage change needs a design review. This note proposes a concrete
 scope; it does not introduce another execution engine or ship an experiment.
 
+Subsequent [Fable review and comparison](2026-09-29-fable-next-steps-review.md)
+recommends a focused inventory of remaining execution contexts before this
+design review, then an existing-engine feasibility probe if no higher-impact
+refusal emerges. The proposal below remains conditional, not an implementation
+commitment.
+
+The subsequent [inventory and probe](2026-09-29-execution-inventory-and-bounded-storage.md)
+found no application callback fallback in the corpus. The forced structured
+probe exposed a logical-length bug, now repaired and tested through automatic
+loop selection too. Ordinary block admission still needs the selector,
+capacity policy and consumer audit described below.
+
 ## What the small experiment says
 
 The existing `gq_partial_fallback` fixture calls a helper that creates either a

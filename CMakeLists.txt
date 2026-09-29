@@ -978,6 +978,10 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_uninitialized_int
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME structured_local_shape_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check> structured_local_shape
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME rng_udf_effect_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect

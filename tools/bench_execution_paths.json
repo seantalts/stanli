@@ -70,5 +70,11 @@
     "source": "tests/fixtures/gq_uninitialized_int.stan",
     "mir": "tests/fixtures/gq_uninitialized_int.tmir.sexp",
     "data": "tests/fixtures/gq_uninitialized_int.json"
+  },
+  {
+    "model": "structured_local_shape",
+    "source": "tests/fixtures/structured_local_shape.stan",
+    "mir": "tests/fixtures/structured_local_shape.tmir.sexp",
+    "data": "tests/fixtures/structured_local_shape.json"
   }
 ]

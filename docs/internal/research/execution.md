@@ -1,7 +1,10 @@
 # Execution coverage and interpreter research
 
-Start with the [working checklist](../../../notes/execution/2026-09-29-execution-coverage-checklist.md)
-for the ordered gap map, dependencies, validation gates and design checkpoints.
+Start with the [inventory and bounded-storage results](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md):
+no application callback fallback found in the surveyed corpus; the probe
+exposed a logical-length bug in the existing structured engine. The
+[working checklist](../../../notes/execution/2026-09-29-execution-coverage-checklist.md)
+holds the gap map, dependencies, validation gates and design checkpoints.
 Use the [remaining MIR uses report](../../../notes/execution/2026-09-29-mir-interpreter-remaining-uses.md)
 for the source audit after PRs #407 and #408: production entry points, concrete
 remaining coverage gaps, and opportunities to reuse existing engines. The
@@ -12,8 +15,8 @@ The goal is predictable native performance, not deleting an interpreter at any c
 
 | Question | Evidence to open |
 | --- | --- |
-| What should we work on next? | [Working checklist](../../../notes/execution/2026-09-29-execution-coverage-checklist.md): direct RNG/integer/container coverage first, then measured local fallbacks and explicit broader design decisions. |
-| What did the container-RNG experiment establish? | [Results](../../../notes/execution/2026-09-29-container-rng-results.md): shared upstream vectorized calls, correctness and native gains. Setup tradeoff accepted for normal end-to-end use; not yet merged. |
+| What should we work on next? | [Inventory and probe](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md): current selections, scoped traces, logical-length fix and remaining admission/capacity design gates. [Fable comparison](../../../notes/execution/2026-09-29-fable-next-steps-review.md) explains the agreed order. |
+| What did the container-RNG experiment establish? | [Results](../../../notes/execution/2026-09-29-container-rng-results.md): shared upstream vectorized calls, correctness and native gains. Setup tradeoff accepted for normal end-to-end use; merged in #410. |
 | What changed for integers and standalone containers? | [Integer results](../../../notes/execution/2026-09-29-integer-expression-results.md) and [standalone results](../../../notes/execution/2026-09-29-standalone-container-results.md): existing-engine admission, native phase costs, independent oracles, rejected layout roundtrips and remaining limits. |
 | What happened to the final interpreted output case in the recorded corpus? | [Scalar initialization](../../../notes/execution/2026-09-29-uninitialized-int-results.md): preserve Stan's sentinel in compiled declarations; coverage, independent reference and native timings. |
 | What needs design review next? | [Local storage](../../../notes/execution/2026-09-29-local-storage-checkpoint.md): measured removable cost, proposed closed bounded regions in the existing engine, logical-length and capacity contracts. |

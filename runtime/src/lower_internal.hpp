@@ -1459,8 +1459,38 @@ struct Lowering {
     specialize_static_shapes(&upper);
     std::vector<std::string> written;
     for (const auto& child : s.body) assigned_names(child, &written);
-    for (const auto& name : written)
-      if (expr_references(upper, name)) return false;
+    for (const auto& name : written) {
+      if (!expr_references(upper, name)) continue;
+      const auto value = scope.find(name);
+      if (value == scope.end() || !has_runtime_shape(value->second))
+        return false;
+      // Indexed writes change elements, not a local's declaration-time
+      // extent snapshot. Such a shape query is invariant without being
+      // compile-time constant. Whole assignments and redeclarations need
+      // a separate proof and remain excluded here.
+      const auto changes_shape = [&](const auto& self,
+                                     const mir::Stmt& body) -> bool {
+        if ((body.kind == mir::Stmt::Assignment && body.lhs == name &&
+             body.lhs_idx.empty()) ||
+            (body.kind == mir::Stmt::Decl && body.decl_id == name))
+          return true;
+        for (const auto& child : body.body)
+          if (self(self, child)) return true;
+        return false;
+      };
+      if (changes_shape(changes_shape, s)) return false;
+      const auto reads_elements = [&](const auto& self,
+                                      const mir::Expr& e) -> bool {
+        if (is_shape_query(e) && e.args[0].kind == mir::Expr::Var &&
+            e.args[0].name == name)
+          return false;
+        if (e.kind == mir::Expr::Var && e.name == name) return true;
+        for (const auto& arg : e.args)
+          if (self(self, arg)) return true;
+        return false;
+      };
+      if (reads_elements(reads_elements, upper)) return false;
+    }
     return true;
   }
   // Remove a return at the lexical end of a statement arm, preserving every

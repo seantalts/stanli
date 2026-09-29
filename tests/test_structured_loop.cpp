@@ -3450,6 +3450,40 @@ static DataMap runtime_slice_data(int op) {
   return data;
 }
 
+static void runtime_local_shape_tests() {
+  for (Mode mode : {Mode::Auto, Mode::Force}) {
+    const auto model =
+        compile_fixture("structured_local_shape", DataMap{}, mode);
+    check(retained(model) != nullptr,
+          "runtime local shape uses the existing structured engine");
+    check(model.write_array && !model.write_array->interp,
+          "runtime local shape outputs compile");
+    if (!model.write_array || model.write_array->interp) continue;
+    Executor ex(model.graph), wa(model.write_array->graph);
+    model.bind(ex);
+    model.write_array->bind(wa);
+    for (double x : {-.3, .2, 0., -.4, .3}) {
+      const double n = x > 0 ? 1 : (x < 0 ? 2 : 0);
+      const double s = 32 * n * (x + 2);
+      ex.params_data()[0] = wa.params_data()[0] = x;
+      double gradient = 0;
+      close(ex.gradient(&gradient), s - .5 * x * x,
+            "local size and num_elements use logical extent");
+      close(gradient, 32 * n - x,
+            "runtime local shape preserves gradients across calls");
+      wa.run_forward_only();
+      bool found = false;
+      for (const auto& column : model.write_array->columns) {
+        if (column.name != "s") continue;
+        found = true;
+        close(wa.value_ptr(column.slot)[0], s,
+              "runtime local shape preserves output values across calls");
+      }
+      check(found, "runtime local shape has its scalar output");
+    }
+  }
+}
+
 // A slice whose upper bound is a loop-carried integer keeps the declared
 // capacity as its storage, so every consumer of one has to be told where the
 // live values stop. The flat model spells the same arithmetic over a
@@ -6280,6 +6314,7 @@ int main() {
   region_range_cache_tests();
   prefer_parent_tests();
   direct_index_lowering_tests();
+  runtime_local_shape_tests();
   runtime_slice_tests();
   runtime_index_tests();
   memo_tests();

@@ -4,6 +4,11 @@ Initial source base: `df86223160f1387a37ed47c267df1bf31e77f11c`. Integrated
 fetched `origin/HEAD` at `d13f7fa907eb85617aba85a9e570de0389cdae86` without
 conflicts on September 29, 2026; integration commit `d6449fbf`.
 
+Latest sync: `dacfaae17cb6ca8d18bc1df678c4a8843f8a7b9f`, including merged
+PR #410; integration `948b83f3` preserved later review notes. See the
+[inventory and bounded-storage results](2026-09-29-execution-inventory-and-bounded-storage.md)
+for the subsequent census, correctness fix and next design gates.
+
 Our goal is to prevent surprising native performance cliffs while expanding
 Stan compatibility. Removing MirInterp is an eventual consequence of covering
 its jobs efficiently, not a reason to replace it with something equally slow.
@@ -68,6 +73,10 @@ itself a MIR fallback or another model execution engine.
     its declaration now compiles with Stan's sentinel value. This does not
     count solver callbacks, probes, transformed data or initialization paths.
 - [ ] Combine static execution reports with scoped runtime traces and timings.
+  - [x] One focused selection inventory: 330 corpus cases (329 recorded), 43
+    execution/solver fixtures, and scoped traces on the four corpus ODE models.
+    No application callback fallback identified; unrecorded `sir` still rejects
+    sampled points. Deliberate callback refusals all concern dynamic storage.
   - [ ] Distinguish construction/probe counts from actual execution frequency.
   - [ ] Identify how much otherwise-supported work each fallback pulls into MIR.
   - [ ] Keep per-case engine expectations so existing models cannot silently
@@ -81,7 +90,7 @@ entire inventory is not a prerequisite for a small, independently proved fix.
 
 ## 2. Close direct gaps in existing engines first
 
-- [x] **2.1 Container arguments to RNG functions — tested, accepted; not merged.**
+- [x] **2.1 Container arguments to RNG functions — merged in #410.**
   - [x] Baseline the existing array-argument `binomial_rng` output fallback and
     newer scalar-family container refusal, such as `gamma_rng`.
   - [x] Extend the existing RNG lowering/kernel contract for proved fixed shapes;
@@ -95,7 +104,7 @@ entire inventory is not a prerequisite for a small, independently proved fix.
   - [x] Resolve the [measured preparation tradeoff](2026-09-29-container-rng-results.md).
     Accepted for normal use: the mixed-family fixture needs about three rows to
     recover added setup; ordinary canaries show no clear slowdown.
-- [x] **2.2 Runtime integer expressions — bounded slice tested; not merged.**
+- [x] **2.2 Runtime integer expressions — bounded slice merged in #410.**
   [Results and remaining limits](2026-09-29-integer-expression-results.md).
   [Scalar initialization follow-up](2026-09-29-uninitialized-int-results.md)
   closes a separate output-declaration fallback.
@@ -116,6 +125,9 @@ entire inventory is not a prerequisite for a small, independently proved fix.
   - [x] Keep changing result shapes and recursive frames in section 6 until a
     suitable contract exists; do not pretend they are simple adapters.
 - [ ] **2.4 Repeated solver callbacks and call sites.**
+  - [x] Complete the initial selected-path census across all five solver families
+    in targeted fixtures; sample runtime traces on corpus ODE models. This did
+    not identify a real repeated refusal needing a direct handler fix.
   - [ ] Inventory refusals separately for forward ODE, adjoint ODE, DAE,
     algebraic solves and quadrature; measure callback frequency and total solves.
   - [ ] Fill fixed-shape builtin/statement gaps using shared kernels; investigate
@@ -170,14 +182,24 @@ section follow real workloads and measured impact, not headline name counts.
 Do this after cheap direct closures and an opportunity measurement. The first
 boundary experiment is a major design checkpoint, not a required new backend.
 The [local-storage checkpoint](2026-09-29-local-storage-checkpoint.md) records a
-synthetic measurement and recommends bounded direct regions first. Selecting a
-real hot workload and designing the closed-region admission policy remain open.
+synthetic measurement and recommends bounded direct regions first. The
+[subsequent probe](2026-09-29-execution-inventory-and-bounded-storage.md) tests
+that direction. Selecting a real hot workload and designing the closed-region
+admission policy remain open.
+
+- [x] Probe an existing structured region around bounded storage and a scalar
+  result, preserving the wrapper in MIR; check actual execution, not just admission.
+- [x] Fix the discovered capacity-versus-logical-length bug in existing shape
+  folding; retain automatic-engine and independent numerical regressions.
+- [ ] Review ordinary closed-block admission, capacity/memory policy and the
+  admitted logical-length consumers before broadening root selection.
 
 - [ ] Find a real refusal with substantial supported surrounding work; estimate
   call frequency, input/output copying and environment setup before coding.
-- [ ] Start with a pure, value-only function with fixed external result shape
-  and unsupported internal storage. Prepare a graph/register call into MIR,
-  then resume prepared execution. Do not retry after runtime exceptions.
+- [ ] Only if a costly refusal cannot use direct support: start a local-MIR
+  experiment with a pure, value-only function and fixed external result shape.
+  Prepare a graph/register call into MIR, then resume prepared execution.
+  Do not retry after runtime exceptions.
 - [ ] Specify typed inputs/outputs, layout, lifetime, private invocation state,
   error placement and continuation. Existing kernel calls are an insertion point,
   not a complete adapter; six-input/fixed-output limits still apply.
@@ -266,9 +288,15 @@ scalar-initialization slices are implemented and tested. Their linked reports
 record native performance and ordinary-use canaries; none adds an execution
 engine. Unchecked categories above remain open.
 
-Next review the concrete [local-storage contract](2026-09-29-local-storage-checkpoint.md)
-before broadening region admission or adding a local-MIR boundary. Reuse bounded
-storage in an existing engine when a proof permits it; measure a real hot
-remaining refusal before investing in general dynamic storage. The callback and
-signature inventories remain useful parallel lines of investigation, not claims
-already established by the output corpus result.
+The subsequent [Fable review and comparison](2026-09-29-fable-next-steps-review.md)
+changes the immediate order: make one focused execution-selection pass over
+remaining contexts, especially solver callbacks, before choosing the next
+implementation. Measure shortlisted repeated fallbacks and prefer direct
+register/handler admission when justified. If no stronger target emerges, run a
+small forced-region feasibility probe, then review the concrete
+[local-storage contract](2026-09-29-local-storage-checkpoint.md) before broadening
+admission. The probe, inventory and new region implementation have not run.
+
+Keep a separate queue for small missing-function capabilities; they need their
+own semantic/oracle proof but not an exhaustive architecture census. General
+dynamic storage and local MIR calls remain conditional on demonstrated need.
