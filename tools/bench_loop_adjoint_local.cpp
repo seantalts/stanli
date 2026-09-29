@@ -96,7 +96,8 @@ int main(int argc, char** argv) {
         std::chrono::duration<double, std::nano>(Clock::now() - start).count();
     if (!rhs.ok) throw std::runtime_error(rhs.why);
     if (rhs.n_y != 1 || rhs.n_th != 1 || rhs.n_xr != 0 || rhs.n_yp != 0)
-      throw std::runtime_error("local probe requires one state and one real parameter");
+      throw std::runtime_error(
+          "local probe requires one state and one real parameter");
     start = Clock::now();
     LoopRhsProbe probe(rhs);
     const double prep_ns =
@@ -141,6 +142,10 @@ int main(int argc, char** argv) {
               << probe.plan().prepared_instructions()
               << ",\"blocks_executed\":" << probe.workspace().blocks_executed
               << ",\"history_bytes\":" << probe.workspace().retained_bytes()
+              << ",\"cached_plan_bytes\":"
+              << probe.workspace().cached_plan_bytes()
+              << ",\"cache_hits\":" << probe.workspace().cache_hits
+              << ",\"cache_misses\":" << probe.workspace().cache_misses
               << ",\"register_var_ns\":"
               << measure([&] { return oracle(rhs, 0.2, 0.75, 0.31, 1).value; })
               << ",\"loop_gradient_ns\":"

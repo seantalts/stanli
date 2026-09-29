@@ -127,7 +127,7 @@ Build `bench_loop_adjoint` and `bench_loop_adjoint_local` in Release mode.
 `python3 tools/bench_loop_adjoint.py --output /tmp/loop-adjoint-results` runs the
 six-process complete-solve comparison for expanded history.
 
-To reproduce the mapped variant in a separate checkout, apply
+To reproduce the mapped variant in a separate checkout of `5b878354`, apply
 `tools/experiments/loop-adjoint-mapped.patch`, clean-build the same two targets, and
 save the resulting benchmark binary separately. The runner's `--mapped-bin`
 option compares it with an unmodified expanded-history build. The patch changes

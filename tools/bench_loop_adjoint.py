@@ -7,6 +7,7 @@ callback counts before timing. These measurements exclude model preparation.
 """
 import argparse
 import json
+import os
 import pathlib
 import re
 import statistics
@@ -18,6 +19,8 @@ def main():
     parser.add_argument('--build', default='build-release')
     parser.add_argument('--mapped-bin', type=pathlib.Path)
     parser.add_argument('--output', required=True, type=pathlib.Path)
+    parser.add_argument('--histories', nargs='+', choices=('expanded', 'selective', 'cached'),
+                        default=['expanded'])
     parser.add_argument('--repeats', type=int, default=6)
     args = parser.parse_args()
     if args.repeats < 1:
@@ -26,7 +29,7 @@ def main():
     build = pathlib.Path(args.build).resolve()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
-    modes = {'expanded': build / 'bench_loop_adjoint'}
+    modes = {mode: build / 'bench_loop_adjoint' for mode in args.histories}
     if args.mapped_bin:
         modes['mapped'] = args.mapped_bin.resolve()
     rows = []
@@ -45,8 +48,10 @@ def main():
                                str(data), '--provider', 'loop', '--iterations',
                                str(30 if n < 2048 else 3), '--batches', '2',
                                '--warmup-ms', '50', '--require-exact']
+                    env = os.environ.copy()
+                    env["STANLI_LOOP_HISTORY"] = mode
                     result = subprocess.run(command, text=True, capture_output=True,
-                                            check=True, timeout=120, cwd=root)
+                                            check=True, timeout=120, cwd=root, env=env)
                     (out / f'{case}-{n}-{mode}-{rep}.log').write_text(
                         result.stdout + result.stderr)
                     match = re.search(

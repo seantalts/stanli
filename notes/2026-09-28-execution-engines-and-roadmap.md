@@ -60,6 +60,7 @@ path. Removing one does not automatically remove the other.
 | --- | --- |
 | Early returns and eligible standalone functions | Shared register compilation handles fixed-shape exits through branches/loops; eligible standalone functions use cached plans. [Returns](2026-09-28-function-exits.md), [function API](2026-09-28-standalone-function-results.md). |
 | RNG coverage | Shared graph/register handlers cover the migrated scalar and vector families, preserving draw order and validation. [Scalar](2026-09-28-scalar-rng-implementation.md), [vector](2026-09-28-vector-rng-implementation.md). |
+| Nested runtime loops | Eligible `for` loops inside `while` now retain lexical integer resets and stay in the register engine. [Coverage and native measurements](2026-09-28-nested-loop-coverage.md). |
 | Runtime `for` bounds | Fixed-storage callbacks retain loops in the register engine. Lower bounds run once; upper bounds are reevaluated with Stan's semantics. [Coverage](2026-09-28-runtime-for-coverage.md), [semantic correction](2026-09-28-for-bound-semantics.md). |
 | Runtime integer arithmetic/results | Typed integer operations and integer function results stay compiled. [Results](2026-09-28-native-integer-coverage.md). |
 | Matrix and nested-array callback arguments | Complete dimensions and storage order survive both compiled and interpreted adapters. [Matrices](2026-09-28-callback-geometry-results.md), [nested arrays](2026-09-28-nested-callback-coverage.md). |
@@ -102,12 +103,17 @@ bitwise checks. Neither beats the current callback: complete solves take about
 history already costs more than the incumbent's complete callback gradient in
 a representative local comparison.
 
-The next decision is whether to invest in a more selective history layout:
-keep ordinary forward registers and save only values required by reverse,
-with explicit bindings for aliases and overwritten values. This is a separate
-storage/compiler experiment, not permission to relax correctness or change
-callback routing. There is no measured replacement ready to ship, and the
-current fast expanded path should remain available.
+The [follow-up experiments](2026-09-28-loop-history-followup.md) now test selective
+saving and reuse of guarded prepared paths. Selective per-call recording still
+loses. Guarded reuse gives 1.7–2.3× faster warm solves in the tested cases, but
+adds first-call compilation and retained memory; it remains developer-only.
+No new production engine or callback selector was added.
+
+The production win instead extends shared register lowering: runtime `for`
+loops inside `while` can preserve integer-local resets. The measured fixture's
+warm gradient improves from 9.56 ms to 86.3 µs, with independent CmdStan parity.
+This removes a repeated interpreter fallback while retaining existing fast
+paths. Performance controls and limits are documented in the linked report.
 
 The experiment also found a shared 24-ULP gradient discrepancy against CmdStan
 in the large branch stress case. Both current and experimental callback paths
@@ -117,9 +123,6 @@ agree bitwise there. Its cause remains unresolved, and no tolerance was widened.
 
 - Containers or slices whose sizes change during execution need a storage
   contract beyond the present fixed-size register buffers.
-- A runtime `for` nested inside `while` still needs a correct lifetime for
-  integer locals that reset on each outer iteration. Removing the guard alone
-  would miscompile those resets.
 - Standalone integer arguments remain specialized by value. Runtime integer
   callback inputs and controls described above are enabled for generated
   quantities; they do not establish general active-density support.

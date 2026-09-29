@@ -33,7 +33,7 @@ inline size_t loop_adjoint_checks() {
   LoopAdjointProbe plan(p, {0, 1, 2});
   LoopAdjointProbe::Workspace w;
   size_t checked = 0;
-  for (double n : {0., 1., 2., 17.})
+  for (double n : {0., 1., 2., 17., 3., 16., 0.})
     for (double x : {-0.7, 0., 0.31})
       for (double rate : {-0.3, 1.2}) {
         std::vector<double> input(p.n_regs), gradient;
