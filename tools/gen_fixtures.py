@@ -30,6 +30,7 @@ O0_FIXTURES = {
     "reduce_sum_arguments",
     "runtime_int_array_udf",
     "structured_matrix_ops",
+    "trunc_param",
     "udf_conditional_return",
     "udf_local_shape",
     "whileloop",

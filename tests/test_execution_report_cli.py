@@ -1,5 +1,4 @@
 """Exercise diagnostic JSON through the tool and the shipped C API."""
-import ctypes as ct
 import json
 import os
 from pathlib import Path
@@ -7,22 +6,13 @@ import subprocess
 import sys
 
 
-def child(library, fixture):
-    lib = ct.CDLL(library)
-    lib.stanli_model_new.argtypes = [ct.c_char_p, ct.c_char_p, ct.c_char_p, ct.c_size_t]
-    lib.stanli_model_new.restype = ct.c_void_p
-    lib.stanli_model_free.argtypes = [ct.c_void_p]
-    lib.stanli_wa_n_columns.argtypes = [ct.c_void_p]
-    lib.stanli_wa_n_columns.restype = ct.c_int64
-    error = ct.create_string_buffer(8192)
-    model = lib.stanli_model_new(Path(fixture).read_bytes(), b"{}", error, len(error))
-    if not model:
-        raise RuntimeError(error.value.decode())
-    print(json.dumps({"columns": lib.stanli_wa_n_columns(model)}))
-    lib.stanli_model_free(model)
+def run_checked(command, **kwargs):
+    result = subprocess.run(command, text=True, capture_output=True, **kwargs)
+    assert result.returncode == 0, (command, result.returncode, result.stdout, result.stderr)
+    return result
 
 
-def main(tool, library):
+def main(tool, host):
     fixtures = Path("tests/fixtures")
     fixture = fixtures / "execution_rng.tmir.sexp"
     # Use an existing empty JSON fixture; avoid temporary output beside sources.
@@ -31,7 +21,7 @@ def main(tool, library):
         data = Path(directory) / "empty.json"
         data.write_text("{}")
         command = [tool, str(fixture), str(data), "--execution-json"]
-        result = subprocess.run(command, text=True, capture_output=True, check=True)
+        result = run_checked(command)
         report = json.loads(result.stdout)
         assert report["kind"] == "execution_manifest"
         assert report["host_probe"] == "not_run"
@@ -53,12 +43,11 @@ def main(tool, library):
         ("execution_rng_reject", "unavailable_or_empty", "failed"),
         ("execution_legacy_ode", "bound_graph", "not_required"),
     ]:
-        command = [sys.executable, __file__, "--child", library,
-                   str(fixtures / (name + ".tmir.sexp"))]
-        ordinary = subprocess.run(command, text=True, capture_output=True, check=True,
-                                  env={**os.environ, "STANLI_EXECUTION_REPORT": "0"})
-        observed = subprocess.run(command, text=True, capture_output=True, check=True,
-                                  env={**os.environ, "STANLI_EXECUTION_REPORT": "1"})
+        command = [host, str(fixtures / (name + ".tmir.sexp"))]
+        ordinary = run_checked(command,
+                               env={**os.environ, "STANLI_EXECUTION_REPORT": "0"})
+        observed = run_checked(command,
+                               env={**os.environ, "STANLI_EXECUTION_REPORT": "1"})
         assert ordinary.stdout == observed.stdout
         assert '"kind":"execution_' not in ordinary.stderr
         events = [json.loads(line) for line in observed.stderr.splitlines()
@@ -74,7 +63,4 @@ def main(tool, library):
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "--child":
-        child(*sys.argv[2:])
-    else:
-        main(*sys.argv[1:])
+    main(*sys.argv[1:])

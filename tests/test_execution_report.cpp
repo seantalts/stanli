@@ -91,7 +91,7 @@ int main() {
   synthetic.graph.add_op(OP_ISLAND, {slot}, slot);
   synthetic.graph.ops.back().udata = region.get();
   synthetic.graph.udata_pool.push_back(region);
-  synthetic.write_array.emplace();
+  synthetic.write_array = CompiledModel::WriteArray{};
   synthetic.write_array->graph = synthetic.graph;
   auto report = parse(execution_report(synthetic));
   auto& selected = report["log_prob"]["operations"][0]["region"];
