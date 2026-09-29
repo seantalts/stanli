@@ -1009,9 +1009,14 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_callback_geometry.py
             $<TARGET_FILE:stanli_check> $<TARGET_FILE:dump_ops>
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  # Native hosts initialize the sanitizer runtime before the C ABI library;
+  # an ordinary Python interpreter cannot load that library with ctypes.
+  add_executable(capi_execution_report tests/capi_execution_report.cpp)
+  target_link_libraries(capi_execution_report PRIVATE stanli_shared)
+  add_dependencies(capi_execution_report stanli_mir_fixtures)
   add_test(NAME execution_report_cli
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_execution_report_cli.py
-            $<TARGET_FILE:dump_ops> $<TARGET_FILE:stanli_shared>
+            $<TARGET_FILE:dump_ops> $<TARGET_FILE:capi_execution_report>
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 add_executable(dump_islands tools/dump_islands.cpp
@@ -1209,9 +1214,12 @@ endif()
 add_test(NAME test_function COMMAND test_function
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 if(Python3_Interpreter_FOUND)
+  add_executable(capi_function_reference tests/capi_function_reference.cpp)
+  target_link_libraries(capi_function_reference PRIVATE stanli_shared)
+  add_dependencies(capi_function_reference stanli_mir_fixtures)
   add_test(NAME standalone_function_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_function_reference.py
-            $<TARGET_FILE:stanli_shared>)
+            $<TARGET_FILE:capi_function_reference>)
 endif()
 
 # The conformance gate has its own failure modes (parser drift, a broad policy
