@@ -17,6 +17,11 @@ probe exposed a logical-length bug, now repaired and tested through automatic
 loop selection too. Ordinary block admission still needs the selector,
 capacity policy and consumer audit described below.
 
+The user subsequently accepted the closed-block direction. See the
+[bounded-output implementation and results](2026-09-29-bounded-output-blocks.md)
+for the narrow admission grammar, resource limits, and existing-engine policy.
+The broader contracts below remain reference material, not renewed approval gates.
+
 ## What the small experiment says
 
 The existing `gq_partial_fallback` fixture calls a helper that creates either a

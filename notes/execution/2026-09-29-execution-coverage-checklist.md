@@ -82,7 +82,7 @@ itself a MIR fallback or another model execution engine.
   - [ ] Keep per-case engine expectations so existing models cannot silently
     regress. New supported models may legitimately add interpreted regions.
 - [ ] Update existing benchmark tools/manifests only where a new behavior or
-  missing metric requires it. The current eight execution fixtures do not cover
+  missing metric requires it. The existing execution fixtures do not cover
   all remaining refusals, and output generation must be timed directly.
 
 Dependencies: the focused baseline for an item comes first; completing the
@@ -184,15 +184,24 @@ boundary experiment is a major design checkpoint, not a required new backend.
 The [local-storage checkpoint](2026-09-29-local-storage-checkpoint.md) records a
 synthetic measurement and recommends bounded direct regions first. The
 [subsequent probe](2026-09-29-execution-inventory-and-bounded-storage.md) tests
-that direction. Selecting a real hot workload and designing the closed-region
-admission policy remain open.
+that direction. The [bounded-output implementation](2026-09-29-bounded-output-blocks.md)
+now admits a narrow pure grammar under explicit storage/work limits. Finding a
+real hot application refusal remains open.
 
 - [x] Probe an existing structured region around bounded storage and a scalar
   result, preserving the wrapper in MIR; check actual execution, not just admission.
 - [x] Fix the discovered capacity-versus-logical-length bug in existing shape
   folding; retain automatic-engine and independent numerical regressions.
-- [ ] Review ordinary closed-block admission, capacity/memory policy and the
+- [x] Review ordinary closed-block admission, capacity/memory policy and the
   admitted logical-length consumers before broadening root selection.
+  - [x] Pure generated quantities: owned one-dimensional real arrays, bounded
+    loops, single indexing, sums/shape queries and scalar external results.
+  - [x] Execute those small regions with the existing structured tree path;
+    recording/rebuilding a reusable execution path costs more on changing draws.
+  - [x] Test refusal rollback, initialization, changing extents, bounds errors,
+    independent CmdStan values, RNG continuation and multiple imports/results.
+  - [ ] Extend other element/container types and consumers with their own
+    logical-length proofs. Effects and active callbacks remain separate scopes.
 
 - [ ] Find a real refusal with substantial supported surrounding work; estimate
   call frequency, input/output copying and environment setup before coding.
@@ -288,14 +297,14 @@ scalar-initialization slices are implemented and tested. Their linked reports
 record native performance and ordinary-use canaries; none adds an execution
 engine. Unchecked categories above remain open.
 
-The subsequent [Fable review and comparison](2026-09-29-fable-next-steps-review.md)
-changes the immediate order: make one focused execution-selection pass over
-remaining contexts, especially solver callbacks, before choosing the next
-implementation. Measure shortlisted repeated fallbacks and prefer direct
-register/handler admission when justified. If no stronger target emerges, run a
-small forced-region feasibility probe, then review the concrete
-[local-storage contract](2026-09-29-local-storage-checkpoint.md) before broadening
-admission. The probe, inventory and new region implementation have not run.
+The [Fable review and comparison](2026-09-29-fable-next-steps-review.md) led to
+an inventory, an existing-engine feasibility probe, and then the
+[bounded-output implementation](2026-09-29-bounded-output-blocks.md). The current
+recorded application corpus has no interpreted output graph or observed
+interpreted solver callback at the sampled valid points. The narrow output
+extension closes one deliberate fixture fallback, using an existing engine.
+It does not establish general dynamic containers, active callbacks, or a local
+MIR continuation contract. Those need separate proofs and a measured target.
 
 Keep a separate queue for small missing-function capabilities; they need their
 own semantic/oracle proof but not an exhaustive architecture census. General

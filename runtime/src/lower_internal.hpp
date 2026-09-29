@@ -970,6 +970,16 @@ struct Lowering {
   }
   void forget_observation(const Val& v) { observations.erase({v.slot, v.si}); }
   int add_slot(int64_t len, bool is_param) {
+    if (bounded_output) {
+      if (len < 0 || g.slots.size() >= 256 ||
+          uint64_t(len) > 8192 - bounded_output_elements ||
+          uint64_t(len) > (65536 - bounded_output_weighted_elements) /
+                              bounded_output_multiplier)
+        fail("bounded output block exceeds storage budget");
+      bounded_output_elements += uint64_t(len);
+      bounded_output_weighted_elements +=
+          uint64_t(len) * bounded_output_multiplier;
+    }
     if (bounded_specialization) {
       if (len < 0 || g.slots.size() >= specialization_slot_limit ||
           uint64_t(len) >

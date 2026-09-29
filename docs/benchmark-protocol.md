@@ -86,7 +86,8 @@ graph canary, scalar/vector RNG output, container RNG arguments (including
 integer-array binomial trials), runtime integer expressions, uninitialized
 integer outputs, runtime solver controls in generated quantities, and logical
 length queries on bounded local arrays in automatically selected structured
-loops. These are
+loops. It also includes closed generated-quantity blocks with bounded real
+temporaries, scalar results, and surrounding RNG calls. These are
 focused regression workloads, not additions to the public
 application-model corpus. Every entry runs the shipped runtime; there are no
 experimental providers. The standalone tool accepts `affine`, `branch_exit`,

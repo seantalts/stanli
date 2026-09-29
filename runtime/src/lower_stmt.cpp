@@ -1269,6 +1269,10 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
     }
     case mir::Stmt::Block:
     case mir::Stmt::SList: {
+      std::set<std::string> output_references;
+      if (bounded_output_candidate(s, &output_references) &&
+          try_lower_region(s, std::nullopt, &output_references))
+        return;
       if (!write_array_known_static && in_write_array &&
           needs_runtime_control(s)) {
         auto snapshot = wa_snapshot();

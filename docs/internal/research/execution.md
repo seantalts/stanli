@@ -1,5 +1,9 @@
 # Execution coverage and interpreter research
 
+Current result: [bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
+extends admission into the existing structured engine under explicit limits,
+with measured native gains for steady and changing lengths.
+
 Start with the [inventory and bounded-storage results](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md):
 no application callback fallback found in the surveyed corpus; the probe
 exposed a logical-length bug in the existing structured engine. The
@@ -15,11 +19,11 @@ The goal is predictable native performance, not deleting an interpreter at any c
 
 | Question | Evidence to open |
 | --- | --- |
-| What should we work on next? | [Inventory and probe](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md): current selections, scoped traces, logical-length fix and remaining admission/capacity design gates. [Fable comparison](../../../notes/execution/2026-09-29-fable-next-steps-review.md) explains the agreed order. |
+| What should we work on next? | [Bounded output results](../../../notes/execution/2026-09-29-bounded-output-blocks.md) describe the implemented slice and remaining type/effect/callback limits. [Inventory and probe](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md): current selections, scoped traces, logical-length fix and remaining admission/capacity design gates. [Fable comparison](../../../notes/execution/2026-09-29-fable-next-steps-review.md) explains the agreed order. |
 | What did the container-RNG experiment establish? | [Results](../../../notes/execution/2026-09-29-container-rng-results.md): shared upstream vectorized calls, correctness and native gains. Setup tradeoff accepted for normal end-to-end use; merged in #410. |
 | What changed for integers and standalone containers? | [Integer results](../../../notes/execution/2026-09-29-integer-expression-results.md) and [standalone results](../../../notes/execution/2026-09-29-standalone-container-results.md): existing-engine admission, native phase costs, independent oracles, rejected layout roundtrips and remaining limits. |
 | What happened to the final interpreted output case in the recorded corpus? | [Scalar initialization](../../../notes/execution/2026-09-29-uninitialized-int-results.md): preserve Stan's sentinel in compiled declarations; coverage, independent reference and native timings. |
-| What needs design review next? | [Local storage](../../../notes/execution/2026-09-29-local-storage-checkpoint.md): measured removable cost, proposed closed bounded regions in the existing engine, logical-length and capacity contracts. |
+| What remains beyond bounded output blocks? | [Local storage](../../../notes/execution/2026-09-29-local-storage-checkpoint.md): measured removable cost, proposed closed bounded regions in the existing engine, logical-length and capacity contracts. |
 | Where does MIR still run, and which remaining gaps are worth investigating? | [Remaining uses](../../../notes/execution/2026-09-29-mir-interpreter-remaining-uses.md): callbacks, whole-output fallback, standalone functions, preparation, probes and initialization; source evidence, not new timing measurements. |
 | Can fallback be local, and how do we approach broader Stan compatibility? | [Strategy](../../../notes/execution/2026-09-29-local-fallback-and-coverage-strategy.md) and [Fable review with corrections](../../../notes/execution/2026-09-29-fable-local-fallback-review.md): proposed region boundaries, dynamic storage/call frames, derivative contracts and staged evaluation; no implementation selected. |
 | Which fallbacks have been closed? | Roadmap coverage table, then its linked per-capability reports. |
