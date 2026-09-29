@@ -6,6 +6,11 @@ with something equally slow. We are extending the existing engines first.
 Wasm is secondary. Native instruction generation and stencil JIT research
 remain tabled. Fable review is reserved for rare, overarching plans.
 
+For a source audit after PRs #407 and #408, read
+[remaining MIR interpreter uses](2026-09-29-mir-interpreter-remaining-uses.md).
+It separates repeated execution fallbacks from preparation/initialization and
+identifies smaller opportunities to extend the existing engines.
+
 This is the current plan after the September 28 coverage work. The detailed
 [original inventory](2026-09-28-interpreter-gap-audit.md) is a historical audit;
 its old refusal lists must be read alongside the completed changes below.

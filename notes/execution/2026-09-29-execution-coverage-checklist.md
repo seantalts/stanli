@@ -1,0 +1,251 @@
+# Execution coverage: working checklist
+
+Source base: `df86223160f1387a37ed47c267df1bf31e77f11c`, fetched and
+verified against `origin/HEAD` on September 29, 2026.
+
+Our goal is to prevent surprising native performance cliffs while expanding
+Stan compatibility. Removing MirInterp is an eventual consequence of covering
+its jobs efficiently, not a reason to replace it with something equally slow.
+
+This is the working order and gap map. Checked items have evidence linked below;
+unchecked items are work, experiments, or explicitly marked design decisions.
+It covers the known categories, not a claim that every unsupported overload has
+already been individually audited. Section 1 closes that inventory gap.
+
+Read the [source audit](2026-09-29-mir-interpreter-remaining-uses.md) for current
+entry points, the [strategy](2026-09-29-local-fallback-and-coverage-strategy.md)
+for boundary contracts, and the [Fable review](2026-09-29-fable-local-fallback-review.md)
+for counterarguments and corrections. This checklist is the implementation
+queue; those documents retain the reasoning rather than duplicating progress.
+
+## Engines we are extending
+
+- **Graph:** prepared operations over known storage, often calling substantial
+  numerical kernels. Best when work can be arranged before evaluation.
+- **Register programs:** prepared instructions over numbered storage locations,
+  including branches, jumps and kernel calls. Useful for runtime decisions.
+- **Structured loops:** retained loop/control structure that runs prepared
+  segments and kernels without expanding every iteration during preparation.
+- **MIR interpreter:** executes the compiler's intermediate representation
+  directly. It remains the compatibility path for several different jobs.
+
+These paths compose; they are not four mutually exclusive model modes. A local
+Stan Math autodiff tape records derivatives inside an operation. It is not
+itself a MIR fallback or another model execution engine.
+
+## 0. Establish the starting point
+
+- [x] Sync the task branch with fetched `origin/HEAD`; preserve existing notes.
+- [x] Audit all six production MIR roles: solver callbacks, output generation,
+  standalone functions, transformed data, preparation probes and initialization.
+- [x] Obtain Fable's overarching review and record source-based corrections.
+- [x] Preserve negative research results: stencil JIT/instruction generation
+  remain tabled; removed loop/reverse prototypes are not production options.
+- [ ] Record the actual native build/dependency identities before new timings.
+  Prior PR measurements are historical evidence, not this work's baseline.
+
+## 1. Make the remaining coverage measurable
+
+- [ ] Extend the existing signature/model inventories rather than start another
+  disconnected function list.
+  - [ ] Record overload, argument/result types, scalar versus container shapes,
+    block or callback context, active inputs, selected execution path and refusal.
+  - [ ] Separate supported, unsupported, untested/generator gap, numerically
+    wrong, and correct-but-slow cases. A supported function name is insufficient.
+  - [ ] Include error behavior, output schema, RNG/printing effects and gradients;
+    a successful value-only example does not establish model compatibility.
+  - [ ] Cover ordinary graph, runtime region, retained callback, standalone,
+    transformed-data and generated-quantity contexts where legal.
+- [ ] Refresh each relevant historical refusal against current source/tests.
+  Older prose about loops, integer outputs and print/reject is not authoritative.
+- [ ] Combine static execution reports with scoped runtime traces and timings.
+  - [ ] Distinguish construction/probe counts from actual execution frequency.
+  - [ ] Identify how much otherwise-supported work each fallback pulls into MIR.
+  - [ ] Keep per-case engine expectations so existing models cannot silently
+    regress. New supported models may legitimately add interpreted regions.
+- [ ] Update existing benchmark tools/manifests only where a new behavior or
+  missing metric requires it. The current eight execution fixtures do not cover
+  all remaining refusals, and output generation must be timed directly.
+
+Dependencies: the focused baseline for an item comes first; completing the
+entire inventory is not a prerequisite for a small, independently proved fix.
+
+## 2. Close direct gaps in existing engines first
+
+- [ ] **2.1 Container arguments to RNG functions — first implementation slice.**
+  - [ ] Baseline the existing array-argument `binomial_rng` output fallback and
+    newer scalar-family container refusal, such as `gamma_rng`.
+  - [ ] Extend the existing RNG lowering/kernel contract for proved fixed shapes;
+    cover graph and register-region admission without duplicating algorithms.
+  - [ ] Preserve scalar broadcasting versus length-one containers, empty inputs,
+    length mismatches, validation order, draw order and subsequent RNG state.
+  - [ ] Verify against pinned upstream Stan/CmdStan behavior, including an invalid
+    later element and a following draw. MIR agreement alone is not sufficient.
+  - [ ] Measure complete output time, preparation and memory for small and larger
+    workloads; retain a genuinely unsupported fixture for fallback tests.
+- [ ] **2.2 Runtime integer expressions.**
+  - [ ] Route eligible integer division through existing integer instructions.
+  - [ ] Extend sums/extrema where shape, initialization and range proofs permit.
+  - [ ] Test negative operands, zero divisors, overflow boundaries, empty inputs,
+    indexing effects and partial initialization. Never replace integer division
+    with floating-point division or simply remove a proof guard.
+- [ ] **2.3 Standalone function arguments and results.**
+  - [ ] Reuse callback shape/layout helpers for nested arrays and arrays of
+    vectors/matrices; preserve public data order, dimensions and empty extents.
+  - [ ] Audit void/effectful calls and RNG/higher-order host hooks separately from
+    numerical return values; fallback does not supply every absent host hook.
+  - [ ] Reduce integer specialization churn only after proving which integers
+    determine storage. Keep the existing bounded-cache memory contract.
+  - [ ] Keep changing result shapes and recursive frames in section 6 until a
+    suitable contract exists; do not pretend they are simple adapters.
+- [ ] **2.4 Repeated solver callbacks and call sites.**
+  - [ ] Inventory refusals separately for forward ODE, adjoint ODE, DAE,
+    algebraic solves and quadrature; measure callback frequency and total solves.
+  - [ ] Fill fixed-shape builtin/statement gaps using shared kernels; investigate
+    structured inverse transforms only with a supported, repeated-use example.
+  - [ ] Audit active integer/control arguments and DAE time restrictions at the
+    solver call site. These can reject the outer model, not just its callback.
+  - [ ] Where interpreted output rebuilds solver specifications per evaluation,
+    establish whether immutable preparation can safely be reused with changing
+    inputs, correct ownership and no startup/memory regression.
+  - [ ] Verify values, solver failure behavior and active derivatives separately.
+
+## 3. Close broader Stan function and language gaps
+
+These include features MirInterp cannot currently rescue. Priorities within this
+section follow real workloads and measured impact, not headline name counts.
+
+- [ ] **3.1 Numerical functions and overloads**, starting from the pinned
+  [coverage inventory](../../docs/coverage.md#known-unsupported-forms).
+  - [ ] Extended `wiener_lpdf` overloads and `gaussian_dlm_obs_lpdf`: choose an
+    argument-packing/call contract beyond today's fixed input limits; avoid
+    enlarging every hot operation without evidence that the cost is acceptable.
+  - [ ] `hypergeometric_1F0`, `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`,
+    `wiener_lcdf_unnorm`, `wiener_lccdf_unnorm`, and `gp_periodic_cov`.
+  - [ ] `discrete_range_cdf`, `_lcdf`, `_lccdf`: all-integer inputs still need
+    runtime validation/value support even without a differentiable edge.
+  - [ ] Remaining overload, vectorization and named-transform gaps discovered
+    by the inventory. Declaration support does not imply named-function support.
+  - [ ] Reuse pinned Stan Math algorithms and derivatives; turn generator gaps
+    into independent oracle cases before marking support complete.
+- [ ] **3.2 Control, effects and observable behavior.**
+  - [ ] Audit parameter-dependent truncation/support checks and exact rejection
+    placement; distinguish still-open cases from recently supported control flow.
+  - [ ] Fill message argument-count and nested-container/matrix formatting gaps.
+  - [ ] Verify print, reject, target updates, short-circuiting, bounds errors,
+    early returns, break/continue and loops across applicable paths.
+  - [ ] Preserve error/RNG ordering and prevent reverse replay from duplicating
+    observable effects; printing and rejection already have compiled support.
+- [ ] **3.3 Missing types — major design checkpoint.**
+  - [ ] Define complex values across compiler/MIR representation, storage,
+    arithmetic, differentiation and external interfaces.
+  - [ ] Define tuple construction, access, return values and nested composition.
+  - [ ] Extend shape/layout and oracle generation consistently. These are
+    end-to-end capabilities, not just new arithmetic instructions.
+- [ ] **3.4 Compatibility beyond numerical kernels.**
+  - [ ] Exercise model loading, data validation, initialization, constrained
+    output/names, generated quantities and relevant Python/R/C clients.
+  - [ ] State the supported pinned CmdStan language/library baseline. Track
+    upstream additions and external C++ integrations as explicit contracts.
+
+## 4. Contain fallbacks that remain
+
+Do this after cheap direct closures and an opportunity measurement. The first
+boundary experiment is a major design checkpoint, not a required new backend.
+
+- [ ] Find a real refusal with substantial supported surrounding work; estimate
+  call frequency, input/output copying and environment setup before coding.
+- [ ] Start with a pure, value-only function with fixed external result shape
+  and unsupported internal storage. Prepare a graph/register call into MIR,
+  then resume prepared execution. Do not retry after runtime exceptions.
+- [ ] Specify typed inputs/outputs, layout, lifetime, private invocation state,
+  error placement and continuation. Existing kernel calls are an insertion point,
+  not a complete adapter; six-input/fixed-output limits still apply.
+- [ ] Compare whole-output MIR, local MIR and direct lowering where feasible.
+  Include tiny surrounding work, repeated loop calls and varying container sizes.
+- [ ] Keep it only if total work improves without a resolved ordinary-case
+  regression. Coarsen the region or defer it when crossings dominate.
+- [ ] Extend independently, with proofs and measurements:
+  - [ ] Multiple results, assignment/writeback, aliases and safe control exits.
+  - [ ] RNG, messages and target effects with exactly-once ordering.
+  - [ ] Branch/loop/function-sized regions when one expression is not closed.
+  - [ ] Active inputs: backward implementation, retained values/branch history,
+    tape lifetime, exception cleanup and safe nested/concurrent execution.
+
+A value-only success does not establish faster active solver callbacks. Prefer
+eliminating a hot fallback with direct support over repeatedly crossing into it.
+
+## 5. Cover preparation and initialization
+
+These complete the MIR inventory; prioritize earlier if startup measurements
+show they dominate interactive use.
+
+- [ ] Prepare transformed-data execution, preserving its one-time effects,
+  construction RNG stream, validation and reuse by model/output execution.
+- [ ] Replace pure folding/shape/admission probes with shared analysis or
+  prepared evaluation where useful; preserve transactional refusal and limits.
+- [ ] Prepare initialization control/data movement around existing unconstrain
+  routines; support bounds depending on previously read parameters and preserve
+  dimensions, ordering, Jacobians where applicable, and rejection behavior.
+- [ ] Measure source compilation, preparation, first use and repeated
+  unconstraining separately. Moving work earlier does not make it free.
+
+## 6. Decide how to execute genuinely dynamic programs
+
+**Major design checkpoint; deferred until remaining hot workloads justify it.**
+
+- [ ] Identify values whose size changes during execution and cannot remain
+  inside a fixed-interface call or use a proved bounded capacity.
+- [ ] Evaluate extending existing register programs with separately stored
+  dynamic handles/views, ownership and lifetime rules. Preserve cheap fixed
+  numeric instructions; do not box every scalar by default.
+- [ ] Design typed call frames and return handling for recursion and general
+  calls that cannot be inlined; include depth/resource limits and cleanup.
+- [ ] Define differentiation across dynamic values/frames, including storage
+  retained until backward execution and avoiding unnecessary dense Jacobians.
+- [ ] Compare this extension with larger local MIR regions and direct specialized
+  kernels on real workloads, including preparation, memory and binary size.
+- [ ] Require a consolidation/migration plan before adoption. Do not maintain
+  another general evaluator with the same coverage and costs as MirInterp.
+
+## 7. Improve expensive paths that are already compiled
+
+- [ ] Profile local Stan Math tapes, register var replay, and constant-loop
+  expansion separately from MIR. Rank by complete model/inference cost.
+- [ ] Add shared direct derivatives only where measured tape cost warrants them,
+  preserving Stan arithmetic and necessary exceptional-case behavior.
+- [ ] Revisit retained loops/reverse storage only with new evidence addressing
+  the earlier preparation/memory regressions. Consult the negative results first.
+- [ ] Keep instruction-generation/stencil-JIT research tabled.
+
+## 8. Gates for every landed change and eventual deletion
+
+- [ ] Establish a before/after native baseline with build identity, sample counts
+  and timing variation. Measure affected phases, ordinary small/medium canaries,
+  stress behavior, peak/retained memory and relevant binary-size costs.
+- [ ] Check independent CmdStan values, gradients and per-draw outputs, plus
+  shape/name/error/effect contracts. Preserve current tighter gates and document
+  numerical exceptions; never widen tolerances to hide a regression.
+- [ ] Preserve proven fast paths. Investigate and resolve any measured regression
+  before landing; finite canaries cannot prove that no possible model regresses.
+- [ ] Run focused positive/adversarial tests and required CI; add broad sweeps
+  only when the change requires that evidence. Keep WASM compatibility without
+  making browser performance the architecture's primary objective.
+- [ ] Ship only exercised, enabled code with a measured purpose. Remove failed
+  prototypes; retain compact results and logs, including negative findings.
+- [ ] Before deleting MirInterp, cover all six roles, supported types/control/
+  effects and active derivatives; migrate interpreter-dependent test oracles.
+- [ ] Audit execution diagnostics, forced-fallback hooks and callers, then verify
+  there are no remaining production references before removing the implementation.
+
+## Immediate work order
+
+1. Focused inventory and fresh baseline for **2.1 container RNG arguments**.
+2. Implement and validate that direct extension if its proof/evaluator passes.
+3. Tackle **2.2 integer expressions** and **2.3 standalone adapters**, with solver
+   refusal measurements informing whether a **2.4 callback** fix takes priority.
+4. Reassess remaining amplified fallbacks before selecting **4 local regions**.
+5. Continue numerical/language coverage alongside these bounded improvements;
+   bring the marked type, region and dynamic-frame decisions back explicitly.
+
+No runtime changes or new performance results are claimed by this checklist.

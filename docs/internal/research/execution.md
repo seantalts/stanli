@@ -1,12 +1,20 @@
 # Execution coverage and interpreter research
 
-Start with the [current execution roadmap](../../../notes/execution/2026-09-28-execution-engines-and-roadmap.md).
-It explains graph, register and structured-loop execution, instruction dispatch,
+Start with the [working checklist](../../../notes/execution/2026-09-29-execution-coverage-checklist.md)
+for the ordered gap map, dependencies, validation gates and design checkpoints.
+Use the [remaining MIR uses report](../../../notes/execution/2026-09-29-mir-interpreter-remaining-uses.md)
+for the source audit after PRs #407 and #408: production entry points, concrete
+remaining coverage gaps, and opportunities to reuse existing engines. The
+[execution roadmap](../../../notes/execution/2026-09-28-execution-engines-and-roadmap.md)
+explains graph, register and structured-loop execution, instruction dispatch,
 and why local autodiff tapes are a separate cost from MIR interpretation.
 The goal is predictable native performance, not deleting an interpreter at any cost.
 
 | Question | Evidence to open |
 | --- | --- |
+| What should we work on next? | [Working checklist](../../../notes/execution/2026-09-29-execution-coverage-checklist.md): direct RNG/integer/container coverage first, then measured local fallbacks and explicit broader design decisions. |
+| Where does MIR still run, and which remaining gaps are worth investigating? | [Remaining uses](../../../notes/execution/2026-09-29-mir-interpreter-remaining-uses.md): callbacks, whole-output fallback, standalone functions, preparation, probes and initialization; source evidence, not new timing measurements. |
+| Can fallback be local, and how do we approach broader Stan compatibility? | [Strategy](../../../notes/execution/2026-09-29-local-fallback-and-coverage-strategy.md) and [Fable review with corrections](../../../notes/execution/2026-09-29-fable-local-fallback-review.md): proposed region boundaries, dynamic storage/call frames, derivative contracts and staged evaluation; no implementation selected. |
 | Which fallbacks have been closed? | Roadmap coverage table, then its linked per-capability reports. |
 | Nested runtime loops and integer-local resets | [Nested-loop results](../../../notes/execution/2026-09-28-nested-loop-coverage.md): about 111× warm-gradient gain on the measured fixture; startup/canary limits included. |
 | Return semantics and standalone function caching | [Function exits](../../../notes/execution/2026-09-28-function-exits.md), [standalone results](../../../notes/execution/2026-09-28-standalone-function-results.md): fixed-shape admission, bounded specialization and churn. |
