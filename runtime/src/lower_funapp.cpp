@@ -1003,8 +1003,9 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
       if (e.name == "num_elements" && a.runtime_dims.size() != 1)
         fail("num_elements: a runtime view of this rank has no single extent",
              e.raw);
-      const size_t axis = e.name == "cols" ? 1 : 0;
-      if (axis < a.runtime_dims.size() && a.runtime_dims[axis] >= 0) {
+      const int axis = runtime_shape_axis(a, e.name);
+      if (axis < 0) return constant(1);
+      if (size_t(axis) < a.runtime_dims.size() && a.runtime_dims[axis] >= 0) {
         Val extent{a.runtime_dims[axis], false, view_of("UInt")};
         extent.si.param_free = true;
         return with_layout(extent, ExpressionLayout::scalar());

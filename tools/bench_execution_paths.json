@@ -82,5 +82,23 @@
     "source": "tests/fixtures/gq_bounded_block.stan",
     "mir": "tests/fixtures/gq_bounded_block.tmir.sexp",
     "data": "tests/fixtures/gq_bounded_block.json"
+  },
+  {
+    "model": "gq_bounded_vector",
+    "source": "tests/fixtures/gq_bounded_vector.stan",
+    "mir": "tests/fixtures/gq_bounded_vector.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_vector.json"
+  },
+  {
+    "model": "gq_bounded_row_vector",
+    "source": "tests/fixtures/gq_bounded_row_vector.stan",
+    "mir": "tests/fixtures/gq_bounded_row_vector.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_row_vector.json"
+  },
+  {
+    "model": "gq_bounded_vector_refusals",
+    "source": "tests/fixtures/gq_bounded_vector_refusals.stan",
+    "mir": "tests/fixtures/gq_bounded_vector_refusals.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_vector_refusals.json"
   }
 ]

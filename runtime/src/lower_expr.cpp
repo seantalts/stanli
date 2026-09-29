@@ -1320,7 +1320,10 @@ Lowering::Val Lowering::emit_value(uint16_t opcode,
     if (!has_runtime_shape(in) && g.slots[in.slot].len != 1)
       fail(std::string(opcode_name(opcode)) +
            ": a full-extent operand beside a runtime-length one");
-  const bool elementwise = out_len == op.dyn_capacity;
+  // A sum stays scalar even when its input capacity is one.
+  // Matching storage counts alone would give sum(vector[0:1]) a changing
+  // output shape and incorrectly reject its scalar assignment.
+  const bool elementwise = out_len == op.dyn_capacity && opcode != OP_SUM_VEC;
   if ((out_len != 1 && !elementwise) || out2 >= 0 || !idata.empty() ||
       is_matrix(out_si))
     fail(std::string(opcode_name(opcode)) +

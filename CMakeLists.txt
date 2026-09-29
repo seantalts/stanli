@@ -986,6 +986,12 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_bounded_block
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  foreach(fixture gq_bounded_vector gq_bounded_row_vector)
+    add_test(NAME ${fixture}_reference
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+              $<TARGET_FILE:stanli_check> ${fixture}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endforeach()
   add_test(NAME rng_udf_effect_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect

@@ -27,25 +27,27 @@ bool bounded_output_candidate(const mir::Stmt& root,
   if (!in_write_array || !n_gq_start || root.kind != mir::Stmt::Block ||
       structured_policy == StructuredMode::Off)
     return false;
-  std::set<std::string> locals, arrays, dependent;
+  std::set<std::string> locals, containers, dependent;
   size_t nodes = 0;
   const auto collect = [&](const auto& self, const mir::Stmt& s) -> bool {
     if (++nodes > 256) return false;
     if (s.kind == mir::Stmt::Decl || s.kind == mir::Stmt::For) {
       const auto& name = s.kind == mir::Stmt::Decl ? s.decl_id : s.loopvar;
       if (scope.count(name) || !locals.insert(name).second) return false;
-      if (s.kind == mir::Stmt::Decl && s.decl_type.base == "SArray")
-        arrays.insert(name);
+      if (s.kind == mir::Stmt::Decl &&
+          (s.decl_type.base == "SArray" || s.decl_type.base == "SVector" ||
+           s.decl_type.base == "SRowVector"))
+        containers.insert(name);
     }
     for (const auto& child : s.body)
       if (!self(self, child)) return false;
     return true;
   };
-  if (!collect(collect, root) || arrays.empty()) return false;
+  if (!collect(collect, root) || containers.empty()) return false;
   const auto expression = [&](const auto& self, const mir::Expr& e) -> bool {
     if (++nodes > 1024) return false;
     if (e.kind == mir::Expr::Var) {
-      if (arrays.count(e.name)) return false;
+      if (containers.count(e.name)) return false;
       if (locals.count(e.name)) return true;
       auto v = scope.find(e.name);
       if (v != scope.end() && !is_scalar(v->second)) return false;
@@ -56,14 +58,15 @@ bool bounded_output_candidate(const mir::Stmt& root,
       return true;
     if (e.kind == mir::Expr::Indexed) {
       return e.args.size() == 2 && e.args[0].kind == mir::Expr::Var &&
-             arrays.count(e.args[0].name) && e.args[1].name == "IndexSingle" &&
+             containers.count(e.args[0].name) && e.args[1].name == "IndexSingle" &&
              e.args[1].args.size() == 1 && self(self, e.args[1].args[0]);
     }
     if (e.kind == mir::Expr::FunApp) {
       if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
-      if (e.name == "sum" || e.name == "size" || e.name == "num_elements")
+      if (e.name == "sum" || e.name == "size" || e.name == "num_elements" ||
+          e.name == "rows" || e.name == "cols")
         return e.args.size() == 1 && e.args[0].kind == mir::Expr::Var &&
-               arrays.count(e.args[0].name);
+               containers.count(e.args[0].name);
       static const std::set<std::string> scalar_calls = {
           "Plus__",    "Minus__", "Times__",  "Divide__", "IntDivide__",
           "PMinus__",  "PPlus__", "PNot__",   "Less__",   "Leq__",
@@ -81,8 +84,9 @@ bool bounded_output_candidate(const mir::Stmt& root,
     switch (s.kind) {
       case mir::Stmt::Decl:
         if (s.read_transform) return false;
-        if (s.decl_type.base == "SArray") {
-          if (s.decl_type.elem_base != "SReal" ||
+        if (containers.count(s.decl_id)) {
+          if ((s.decl_type.base == "SArray" &&
+               s.decl_type.elem_base != "SReal") ||
               s.decl_type.dims.size() != 1 || s.has_init)
             return false;
           if (!expression(expression, s.decl_type.dims[0])) return false;
@@ -91,7 +95,7 @@ bool bounded_output_candidate(const mir::Stmt& root,
         if (s.has_init && !expression(expression, s.init)) return false;
         break;
       case mir::Stmt::Assignment:
-        if (arrays.count(s.lhs)) {
+        if (containers.count(s.lhs)) {
           if (s.lhs_idx.size() != 1 || s.lhs_idx[0].name != "IndexSingle" ||
               s.lhs_idx[0].args.size() != 1 ||
               !expression(expression, s.lhs_idx[0].args[0]))
@@ -580,7 +584,10 @@ std::optional<IntRange> region_range(const mir::Expr& e) {
     if (bounded_output && e.args[0].kind == mir::Expr::Var) {
       auto value = scope.find(e.args[0].name);
       if (value != scope.end() && value->second.runtime_dims.size() == 1) {
-        auto range = int_ranges.find(value->second.runtime_dims[0]);
+        const int axis = runtime_shape_axis(value->second, e.name);
+        if (axis < 0) return bounded(1, 1);
+        if (axis != 0) return {};
+        auto range = int_ranges.find(value->second.runtime_dims[axis]);
         if (range != int_ranges.end()) return range->second;
       }
     }
@@ -661,6 +668,9 @@ Val region_cell(const std::string& name) {
   }
   Val binding{add_slot(g.slots[source.slot].len, false), source.autodiff,
               source.si, source.runtime_dims};
+  // Newly admitted output containers are owned named values. Their Eigen
+  // sums use the owning layout, including after indexed writes or aliases.
+  if (bounded_output) binding.layout = owning_layout(binding.si);
   auto range = int_ranges.find(source.slot);
   if (range != int_ranges.end())
     int_ranges[binding.slot] = range->second;

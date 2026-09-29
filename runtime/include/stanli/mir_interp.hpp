@@ -443,6 +443,11 @@ class MirInterp {
         }
         if (st.lhs_idx.size() == 1 && st.lhs_idx[0].name == "IndexSingle") {
           const long ix = as_int(st.lhs_idx[0].args[0]);
+          const int64_t extent = en->dims.empty()
+                                     ? static_cast<int64_t>(en->r.size())
+                                     : en->dims.front();
+          if (ix < 1 || ix > extent)
+            fail("indexed assignment index out of bounds", st.raw);
           if (en->dims.size() == 2) {
             // Row write into a matrix (A[i] = row_vector), col-major strided.
             const int64_t R = en->dims[0], C = en->dims[1];
@@ -450,14 +455,9 @@ class MirInterp {
             for (int64_t j = 0; j < C; ++j) en->r.at(j * R + (ix - 1)) = v.r[j];
             return;
           }
-          if ((size_t)ix > en->r.size())
-            en->r.resize(ix, en->is_int
-                                 ? T(0.0)
-                                 : T(std::numeric_limits<double>::quiet_NaN()));
-          en->r[ix - 1] = v.r.at(0);
+          en->r.at(ix - 1) = v.r.at(0);
           if (en->is_int) {
-            if ((size_t)ix > en->i.size()) en->i.resize(ix, 0);
-            en->i[ix - 1] =
+            en->i.at(ix - 1) =
                 v.is_int && !v.i.empty() ? v.i[0] : (int)val(v.r.at(0));
           }
           return;
