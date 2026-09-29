@@ -98,11 +98,14 @@ wrapper. Binomial outputs follow the pure temporary region. Medians:
 | 1,024 | 410.4 → 383.2 | 96.7 → 107.5 | 74.60 → 54.94 | Not measured |
 
 Short inference includes 100 warmup iterations, 100 posterior draws and their
-output rows. Fixed-branch direct controls take 0.62, 2.27 and 56.08 µs per warm
+output rows. It runs after the preceding phase warmups; adding preparation
+does not make this a cold-start measurement and excludes source compilation.
+First-use costs are reported separately above. Fixed-branch direct controls
+take 0.62, 2.27 and 56.08 µs per warm
 row; their preparation-plus-inference totals are 0.900 and 3.473 ms for the two
 small sizes. Thus the structured wrapper nearly matches fixed branches on
-repeated identical inputs, but its complete-run benefit over MIR is only about
-11% and 4%, not the 10× and 3.7× warm-row ratios. Changing execution paths and
+repeated identical inputs, but its measured preparation-plus-inference benefit
+over MIR is only about 11% and 4%, not the 10× and 3.7× warm-row ratios. Changing execution paths and
 first-use costs matter. First output is slower, and the synthetic workload is
 not proof of an application bottleneck. Peak whole-process RSS spans roughly
 28–30 MB across the probe variants; this is not retained-region memory.
