@@ -2431,7 +2431,7 @@ struct ProgramCompiler {
                                                    : mir::UnsizedLeaf::Real;
       const bool promoted_int = scalar_rng_is_int(*family) && e.promoted &&
                                 e.unsized.leaf == mir::UnsizedLeaf::Real;
-      if (e.unsized.depth != 0 || (e.unsized.leaf != leaf && !promoted_int))
+      if (e.unsized.depth > 1 || (e.unsized.leaf != leaf && !promoted_int))
         bail(e.name + ": result type does not match scalar RNG family");
       if (args.size() != scalar_rng_arity(*family))
         bail(e.name + ": wrong number of arguments");
@@ -2439,9 +2439,34 @@ struct ProgramCompiler {
            *family == ScalarRng::BetaBinomial) &&
           e.args[0].unsized.leaf != mir::UnsizedLeaf::Int)
         bail(e.name + ": first argument must be int");
-      for (const Range& a : args)
-        if (!is_scalar(a))
-          bail(e.name + ": container arguments stay on WaInterp");
+      int container_mask = 0;
+      for (size_t k = 0; k < args.size(); ++k) {
+        const auto& type = e.args[k].unsized;
+        const bool scalar =
+            type.depth == 0 && (type.leaf == mir::UnsizedLeaf::Real ||
+                                type.leaf == mir::UnsizedLeaf::Int);
+        const bool array =
+            type.depth == 1 && (type.leaf == mir::UnsizedLeaf::Real ||
+                                type.leaf == mir::UnsizedLeaf::Int);
+        if (scalar) {
+          if (!is_scalar(args[k])) bail(e.name + ": expected scalar storage");
+        } else {
+          if (!array &&
+              !(type.depth == 0 && (type.leaf == mir::UnsizedLeaf::Vector ||
+                                    type.leaf == mir::UnsizedLeaf::RowVector)))
+            bail(e.name + ": expected scalar or one-dimensional arguments");
+          if (container_mask != 0 && args[k].len != out_len)
+            bail(e.name + ": argument lengths disagree");
+          container_mask |= 1 << k;
+          out_len = args[k].len;
+        }
+      }
+      if ((e.unsized.depth == 1) != (container_mask != 0))
+        bail(e.name + ": result shape does not match RNG arguments");
+      if (container_mask != 0) {
+        idata.push_back(container_mask);
+        out_kind = ViewKind::Array;
+      }
       variant = static_cast<uint8_t>(*family);
     } else if (e.name == "categorical_rng" ||
                e.name == "categorical_logit_rng" ||
@@ -2480,6 +2505,7 @@ struct ProgramCompiler {
 
     Range out{0, out_len};
     out.kind = out_kind;
+    if (out_kind == ViewKind::Array) out.dims = {out_len};
     return kernel_call(OP_RNG, args, out, variant, 0, std::move(idata), {},
                        e.name);
   }

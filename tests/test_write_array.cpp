@@ -1401,9 +1401,8 @@ void test_write_array_vector_rng() {
   }
 }
 
-// binomial_rng with an int-array population-count argument is not part of
-// the vectorized RNG tranche. Its transformed-parameter block lowers
-// cleanly; only generated quantities should fall back.
+// A helper with genuinely runtime-sized local storage still needs MIR. Its
+// transformed-parameter block lowers; generated quantities falls back.
 void test_write_array_partial_fallback() {
   using namespace stanli;
   const int k = 3;
@@ -2815,8 +2814,8 @@ void test_binomial_rng_lowering_guards() {
       "DataOnly)))))))\n"
       "               (meta ((type_ (UArray UInt)) (loc <opaque>) (adlevel "
       "DataOnly))))");
-  expect_interp(container_arg, "container arguments stay on WaInterp",
-                "binomial container argument stays interpreted");
+  expect_interp(container_arg, "result shape does not match RNG arguments",
+                "binomial container argument with scalar result refuses");
 
   std::string container_result = base;
   const std::string result_meta =
@@ -2830,8 +2829,8 @@ void test_binomial_rng_lowering_guards() {
   container_result.replace(result, result_meta.size(),
                            "\n           (meta ((type_ (UArray UInt)) (loc "
                            "<opaque>) (adlevel DataOnly)))");
-  expect_interp(container_result, "expected scalar result",
-                "binomial container result stays interpreted");
+  expect_interp(container_result, "result shape does not match RNG arguments",
+                "binomial scalar arguments with container result refuses");
 }
 
 void test_compiled_scalar_rng() {

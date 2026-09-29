@@ -1,8 +1,9 @@
 # Container RNG arguments in the existing engines
 
-Status: tested candidate, **not landed**. The implementation passes correctness
-checks and improves repeated output execution. A preparation-time tradeoff on
-the mixed-family fixture is awaiting the user's design decision before adoption.
+Status: tested and accepted for adoption, **not merged**. The implementation
+passes correctness checks and improves repeated output execution. The user
+accepted the measured preparation tradeoff: prevent regressions in normal use,
+rather than requiring every individual phase to become faster.
 
 Baseline: fetched `origin/HEAD` at `df86223160f1387a37ed47c267df1bf31e77f11c`.
 `df91dbe6` checkpoints the audit and plan without runtime changes. Release,
@@ -89,7 +90,7 @@ The native library grows by **106,000 bytes (0.27%)**, from 39,707,984 to
 29.72 MB; the other cases are close to baseline. Peak RSS includes the Python
 process and mapped code and does not establish retained executor memory.
 
-## Decision needed
+## Decision: judge normal end-to-end use
 
 The mixed fixture saves about 84 microseconds per output row but adds about
 175 microseconds of preparation. It therefore recovers the extra preparation
@@ -103,11 +104,12 @@ the baseline refuses early and leaves the body to MIR. The profiles also show
 more optimization work, but eliminating that alone cannot erase the difference.
 This is not new overhead on each unaffected scalar numerical instruction.
 
-The concrete decision is whether promotion is judged on the intended complete
-workload with an explicit startup cost/break-even point, or must also preserve
-preparation and one-row latency individually. Under the latter policy this
-candidate is not ready to land. A delayed or adaptive preparation policy would
-need a separate design; it has not been implemented or smuggled into this patch.
+The user chose to judge promotion on normal complete workloads, reporting the
+startup cost and break-even point. This candidate is accepted under that policy;
+the one-row limitation remains visible. This also governs later coverage work:
+measure normal use and preserve established fast paths, rather than requiring
+monotonic improvement in every phase. A delayed or adaptive preparation policy
+would need a separate design; none is added here.
 
 The [working checklist](2026-09-29-execution-coverage-checklist.md) retains integer
 expressions, standalone container adapters and callback gaps as the next direct

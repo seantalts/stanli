@@ -13,7 +13,7 @@ The goal is predictable native performance, not deleting an interpreter at any c
 | Question | Evidence to open |
 | --- | --- |
 | What should we work on next? | [Working checklist](../../../notes/execution/2026-09-29-execution-coverage-checklist.md): direct RNG/integer/container coverage first, then measured local fallbacks and explicit broader design decisions. |
-| What did the container-RNG experiment establish? | [Candidate results](../../../notes/execution/2026-09-29-container-rng-results.md): shared upstream vectorized calls, correctness and native gains, but an unresolved preparation-versus-repeated-execution decision; not landed. |
+| What did the container-RNG experiment establish? | [Results](../../../notes/execution/2026-09-29-container-rng-results.md): shared upstream vectorized calls, correctness and native gains. Setup tradeoff accepted for normal end-to-end use; not yet merged. |
 | Where does MIR still run, and which remaining gaps are worth investigating? | [Remaining uses](../../../notes/execution/2026-09-29-mir-interpreter-remaining-uses.md): callbacks, whole-output fallback, standalone functions, preparation, probes and initialization; source evidence, not new timing measurements. |
 | Can fallback be local, and how do we approach broader Stan compatibility? | [Strategy](../../../notes/execution/2026-09-29-local-fallback-and-coverage-strategy.md) and [Fable review with corrections](../../../notes/execution/2026-09-29-fable-local-fallback-review.md): proposed region boundaries, dynamic storage/call frames, derivative contracts and staged evaluation; no implementation selected. |
 | Which fallbacks have been closed? | Roadmap coverage table, then its linked per-capability reports. |

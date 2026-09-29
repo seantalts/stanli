@@ -46,5 +46,17 @@
     "source": "tests/fixtures/gq_callback_solver_controls.stan",
     "mir": "tests/fixtures/gq_callback_solver_controls.tmir.sexp",
     "data": "tests/fixtures/gq_callback_solver_controls.json"
+  },
+  {
+    "model": "gq_container_rng_binomial",
+    "source": "tests/fixtures/gq_container_rng_binomial.stan",
+    "mir": "tests/fixtures/gq_container_rng_binomial.tmir.sexp",
+    "data": "tests/fixtures/gq_container_rng_binomial.json"
+  },
+  {
+    "model": "gq_container_rng_complete",
+    "source": "tests/fixtures/gq_container_rng_complete.stan",
+    "mir": "tests/fixtures/gq_container_rng_complete.tmir.sexp",
+    "data": "tests/fixtures/gq_container_rng_complete.json"
   }
 ]

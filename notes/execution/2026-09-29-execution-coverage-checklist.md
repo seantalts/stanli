@@ -7,6 +7,10 @@ Our goal is to prevent surprising native performance cliffs while expanding
 Stan compatibility. Removing MirInterp is an eventual consequence of covering
 its jobs efficiently, not a reason to replace it with something equally slow.
 
+Performance policy clarified by the user: prevent regressions in normal
+end-to-end use. Individual setup phases may cost more when justified by measured
+normal-use gains; report those costs and the break-even point explicitly.
+
 This is the working order and gap map. Checked items have evidence linked below;
 unchecked items are work, experiments, or explicitly marked design decisions.
 It covers the known categories, not a claim that every unsupported overload has
@@ -72,7 +76,7 @@ entire inventory is not a prerequisite for a small, independently proved fix.
 
 ## 2. Close direct gaps in existing engines first
 
-- [ ] **2.1 Container arguments to RNG functions — first implementation slice.**
+- [x] **2.1 Container arguments to RNG functions — tested, accepted; not merged.**
   - [x] Baseline the existing array-argument `binomial_rng` output fallback and
     newer scalar-family container refusal, such as `gamma_rng`.
   - [x] Extend the existing RNG lowering/kernel contract for proved fixed shapes;
@@ -83,9 +87,9 @@ entire inventory is not a prerequisite for a small, independently proved fix.
     later element and a following draw. MIR agreement alone is not sufficient.
   - [x] Measure complete output time, preparation and peak process memory for small and larger
     workloads; retain a genuinely unsupported fixture for fallback tests.
-  - [ ] Resolve the [measured preparation tradeoff](2026-09-29-container-rng-results.md)
-    before adoption. Candidate passes correctness and improves repeated output,
-    but the mixed-family fixture needs about three rows to recover added setup.
+  - [x] Resolve the [measured preparation tradeoff](2026-09-29-container-rng-results.md).
+    Accepted for normal use: the mixed-family fixture needs about three rows to
+    recover added setup; ordinary canaries show no clear slowdown.
 - [ ] **2.2 Runtime integer expressions.**
   - [ ] Route eligible integer division through existing integer instructions.
   - [ ] Extend sums/extrema where shape, initialization and range proofs permit.
@@ -229,8 +233,9 @@ show they dominate interactive use.
 - [ ] Check independent CmdStan values, gradients and per-draw outputs, plus
   shape/name/error/effect contracts. Preserve current tighter gates and document
   numerical exceptions; never widen tolerances to hide a regression.
-- [ ] Preserve proven fast paths. Investigate and resolve any measured regression
-  before landing; finite canaries cannot prove that no possible model regresses.
+- [ ] Preserve proven fast paths. Investigate and resolve regressions in normal
+  use before landing; quantify accepted phase tradeoffs. Finite canaries cannot
+  prove that no possible model regresses.
 - [ ] Run focused positive/adversarial tests and required CI; add broad sweeps
   only when the change requires that evidence. Keep WASM compatibility without
   making browser performance the architecture's primary objective.
@@ -251,5 +256,5 @@ show they dominate interactive use.
 5. Continue numerical/language coverage alongside these bounded improvements;
    bring the marked type, region and dynamic-frame decisions back explicitly.
 
-The initial outline preceded implementation. Item 2.1 now links a tested candidate
-and measurements; it is not marked complete while its adoption decision is open.
+The initial outline preceded implementation. Item 2.1 now links a tested change,
+measurements and the user's acceptance of the normal-use performance tradeoff.

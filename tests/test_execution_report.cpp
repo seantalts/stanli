@@ -138,9 +138,12 @@ int main() {
     auto rng_model =
         compile_model(slurp("tests/fixtures/execution_rng.tmir.sexp"), data);
     check(rng_model.write_array && rng_model.write_array->interp,
-          "container RNG fixture retains interpreter");
+          "dynamic-storage RNG fixture retains interpreter");
     check(rng_model.transform_inits && rng_model.transform_inits->interp,
           "initialization fixture retains interpreter");
+    if (!rng_model.write_array || !rng_model.write_array->interp ||
+        !rng_model.transform_inits || !rng_model.transform_inits->interp)
+      return 1;
     ExecutionTrace entries;
     DataMap::Entry rate;
     rate.r = {2.0};

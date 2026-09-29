@@ -1,10 +1,3 @@
-functions {
-  real dynamic_temporary(real x) {
-    array[x > 0 ? 1 : 2] real temporary;
-    for (i in 1:size(temporary)) temporary[i] = x;
-    return sum(temporary);
-  }
-}
 data {
   int<lower=0> K;
   array[K] int trials;
@@ -17,8 +10,12 @@ parameters {
 transformed parameters {
   real tp_val = mu + sigma;
 }
+model {
+  p ~ beta(2, 2);
+  mu ~ std_normal();
+  sigma ~ lognormal(0, 1);
+}
 generated quantities {
-  real dynamic_result = dynamic_temporary(mu);
   real ok_val = tp_val * 2;
   array[K] int draws = binomial_rng(trials, p);
 }
