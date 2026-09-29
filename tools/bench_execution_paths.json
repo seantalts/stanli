@@ -64,5 +64,11 @@
     "source": "tests/fixtures/gq_integer_expressions.stan",
     "mir": "tests/fixtures/gq_integer_expressions.tmir.sexp",
     "data": "tests/fixtures/gq_integer_expressions.json"
+  },
+  {
+    "model": "gq_uninitialized_int",
+    "source": "tests/fixtures/gq_uninitialized_int.stan",
+    "mir": "tests/fixtures/gq_uninitialized_int.tmir.sexp",
+    "data": "tests/fixtures/gq_uninitialized_int.json"
   }
 ]

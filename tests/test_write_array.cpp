@@ -5174,8 +5174,8 @@ void test_runtime_int_sum_redeclaration_shadowing() {
       "    (meta <opaque>))\n   ";
   std::string uninitialized = base;
   uninitialized.insert(insertion, uninitialized_decl);
-  expect_reduction_interp(uninitialized, "unknown variable total",
-                          "same-id uninitialized int fails closed", true);
+  expect_reduction_compiled(uninitialized, reduction_data(),
+                            "same-id uninitialized int sentinel");
   std::vector<std::string> names;
   const std::vector<double> row = eval_reduction_interp(uninitialized, &names);
   bool found_sentinel = false;
@@ -5188,6 +5188,24 @@ void test_runtime_int_sum_redeclaration_shadowing() {
     std::printf(
         "FAIL uninitialized scalar interpreter did not preserve the "
         "INT_MIN sentinel\n");
+  }
+  CompiledModel sentinel = compile_model(uninitialized, reduction_data());
+  if (sentinel.write_array && !sentinel.write_array->interp) {
+    Executor graph(std::move(sentinel.write_array->graph));
+    sentinel.write_array->bind(graph);
+    graph.params_data()[0] = 0.25;
+    for (int i = 0; i < 5; ++i) graph.params_data()[1 + i] = 0.5;
+    WaRng rng(44);
+    graph.run_forward_only(EvalState{&rng});
+    std::vector<double> compiled;
+    for (const auto& column : sentinel.write_array->columns)
+      for (int64_t i = 0; i < column.len; ++i)
+        compiled.push_back(
+            graph.value_ptr(column.slot)[column.storage_index(i)]);
+    if (!same_double_bytes(compiled, row)) {
+      ++failures;
+      std::printf("FAIL scalar redeclaration graph/interpreter rows differ\n");
+    }
   }
 }
 

@@ -83,8 +83,9 @@ python3 tools/bench_function_paths.py /absolute/path/libstanli.dylib affine
 The [execution-path manifest](../tools/bench_execution_paths.json) includes
 nested loops, runtime indexing, constant-loop and branch callbacks, an ordinary
 graph canary, scalar/vector RNG output, container RNG arguments (including
-integer-array binomial trials), runtime integer expressions, and runtime solver controls in generated
-quantities. These are focused regression workloads, not additions to the public
+integer-array binomial trials), runtime integer expressions, uninitialized
+integer outputs, and runtime solver controls in generated quantities. These are
+focused regression workloads, not additions to the public
 application-model corpus. Every entry runs the shipped runtime; there are no
 experimental providers. The standalone tool accepts `affine`, `branch_exit`,
 `sized`, `nested_identity`, `nested_scalars`, and `nested_matrices`. `sized`

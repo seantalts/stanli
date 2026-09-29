@@ -970,6 +970,11 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             int_env[s.decl_id] = *value;
           else
             bind_runtime_int(s.decl_id, s.init, s.raw);
+        } else {
+          // Stan initializes scalar integers to the same INT_MIN sentinel
+          // as integer containers. Keep a fresh binding after shadowing so
+          // reading or emitting an unwritten local cannot revive an old value.
+          int_env[s.decl_id] = std::numeric_limits<int>::min();
         }
       } else if (s.decl_type.base.empty() &&
                  s.decl_type.unsized.leaf != mir::UnsizedLeaf::Unknown) {
