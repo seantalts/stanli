@@ -100,5 +100,17 @@
     "source": "tests/fixtures/gq_bounded_vector_refusals.stan",
     "mir": "tests/fixtures/gq_bounded_vector_refusals.tmir.sexp",
     "data": "tests/fixtures/gq_bounded_vector_refusals.json"
+  },
+  {
+    "model": "gq_bounded_integer",
+    "source": "tests/fixtures/gq_bounded_integer.stan",
+    "mir": "tests/fixtures/gq_bounded_integer.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_integer.json"
+  },
+  {
+    "model": "gq_bounded_integer_refusals",
+    "source": "tests/fixtures/gq_bounded_integer_refusals.stan",
+    "mir": "tests/fixtures/gq_bounded_integer_refusals.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_integer_refusals.json"
   }
 ]

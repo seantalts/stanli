@@ -837,7 +837,7 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
   if (!in_write_array)
     fail("runtime integer sum is supported only in generated quantities",
          e.raw);
-  if (!is_int_sum_surface(e))
+  if (!is_int_sum_surface(e, bounded_output))
     fail(
         "runtime integer sum needs one one-dimensional int-array argument "
         "and a scalar int result",
@@ -852,11 +852,15 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
   if (shape.leaf != ViewKind::Flat || shape.dims.size() != 1)
     fail("runtime integer sum needs a one-dimensional int array", e.raw);
   if (len <= 0) fail("runtime integer sum needs a nonempty int array", e.raw);
-  if (a.si.param_free)
+  if (a.si.param_free && !bounded_output)
     fail("runtime integer sum needs a runtime-produced int array", e.raw);
 
   const auto initialized = int_initialized_prefix.find(a.slot);
-  if (initialized == int_initialized_prefix.end() || initialized->second != len)
+  const bool logical_fill = bounded_output && has_runtime_shape(a) &&
+                            initialized != int_initialized_prefix.end() &&
+                            initialized->second == -1;
+  if (!logical_fill && (initialized == int_initialized_prefix.end() ||
+                        initialized->second != len))
     fail("runtime integer sum array is not definitely initialized", e.raw);
   const auto known = int_ranges.find(a.slot);
   if (known == int_ranges.end())
@@ -879,12 +883,14 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
   Val result = with_layout(emit_value(OP_SUM_VEC, {a}, 1, view_of("UInt")),
                            ExpressionLayout::scalar());
   result.autodiff = false;
-  // A range is only a static proof; the source itself was required to be
-  // runtime-produced.  Keeping this result non-constant prevents later
-  // compile-time geometry/control from consuming it through Val metadata.
+  // A range is only a static proof. The elements or logical extent may be
+  // runtime-produced; do not let compile-time geometry/control consume the
+  // result through Val metadata.
   result.si.param_free = false;
-  set_int_range(result, static_cast<int64_t>(range.lo) * len,
-                static_cast<int64_t>(range.hi) * len);
+  const int64_t lo = static_cast<int64_t>(range.lo) * len;
+  const int64_t hi = static_cast<int64_t>(range.hi) * len;
+  set_int_range(result, has_runtime_shape(a) ? std::min<int64_t>(0, lo) : lo,
+                has_runtime_shape(a) ? std::max<int64_t>(0, hi) : hi);
   return result;
 }
 void Lowering::assign_plain(const mir::Stmt& s) {

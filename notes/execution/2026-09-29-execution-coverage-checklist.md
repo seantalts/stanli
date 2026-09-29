@@ -4,9 +4,9 @@ Initial source base: `df86223160f1387a37ed47c267df1bf31e77f11c`. Integrated
 fetched `origin/HEAD` at `d13f7fa907eb85617aba85a9e570de0389cdae86` without
 conflicts on September 29, 2026; integration commit `d6449fbf`.
 
-Latest sync: `50c1b14b6a46e80929db9e0cd01431ec119c92ae`, including merged
-PRs #411 and #412. See the [bounded-vector follow-up](2026-09-29-bounded-vector-blocks.md)
-for the next type extension and correctness findings.
+Latest sync: `b2fe8596c11fd2ff7c7069195a4b8f156ecf0593`, including merged
+PRs #411–#413. The [integer-array follow-up](2026-09-29-bounded-integer-blocks.md)
+records the next type extension and its proof limits.
 
 Our goal is to prevent surprising native performance cliffs while expanding
 Stan compatibility. Removing MirInterp is an eventual consequence of covering
@@ -202,8 +202,12 @@ real hot application refusal remains open.
   - [x] Extend owned real vectors/row vectors, including rows/cols and Eigen
     summation, under the same limits. Correct scalar sums at capacity one and
     MIR indexed-write rejection; see the [results](2026-09-29-bounded-vector-blocks.md).
-  - [ ] Extend integer/nested containers and other consumers with their own
-    logical-length proofs. Effects and active callbacks remain separate scopes.
+  - [x] Extend one-dimensional integer arrays with an unconditional full-fill
+    proof and int32-safe partial sums, including empty/changing lengths and
+    promoted sums. See the [results](2026-09-29-bounded-integer-blocks.md).
+  - [ ] Extend nested containers, other construction patterns and consumers
+    with their own logical-length proofs. Effects and active callbacks remain
+    separate scopes.
 
 - [ ] Find a real refusal with substantial supported surrounding work; estimate
   call frequency, input/output copying and environment setup before coding.

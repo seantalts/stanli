@@ -1538,6 +1538,25 @@ void test_write_array_bounded_blocks() {
     d.set_int("mode", mode);
     expect_bounded_output("gq_bounded_refusals", d, false);
   }
+  for (int mode = 0; mode <= 4; ++mode) {
+    for (int capacity : {1, 2, 8}) {
+      auto d = data(mode, 0, capacity);
+      d.set_int("shift", mode == 3 ? 0 : -3);
+      expect_bounded_output("gq_bounded_integer", d, true);
+    }
+  }
+  for (int mode : {0, 4}) {
+    auto overflow = data(mode, 1, 2);
+    for (int shift : {1073741823, INT32_MIN + 1}) {
+      overflow.set_int("shift", shift);
+      expect_bounded_output("gq_bounded_integer", overflow, false);
+    }
+  }
+  for (int mode = 0; mode <= 9; ++mode) {
+    DataMap d;
+    d.set_int("mode", mode);
+    expect_bounded_output("gq_bounded_integer_refusals", d, false);
+  }
   for (int mode = 0; mode < 4; ++mode) {
     DataMap d;
     d.set_int("mode", mode);
