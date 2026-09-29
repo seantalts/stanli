@@ -290,12 +290,20 @@ long Lowering::eval_int(const mir::Expr& e) {
       if (scalar_shape_query(e) && e.args.size() == 1 &&
           e.args[0].kind == mir::Expr::Var) {
         auto sit = scope.find(e.args[0].name);
-        if (sit != scope.end() && !has_runtime_shape(sit->second))
+        if (sit != scope.end()) {
+          if (has_runtime_shape(sit->second))
+            fail(e.name + ": operand has no compile-time extent", e.raw);
           return answer_shape_query(e, sit->second.si,
                                     g.slots[sit->second.slot].len);
+        }
         auto dl = decls.find(e.args[0].name);
-        if (dl != decls.end())
+        if (dl != decls.end()) {
+          if (std::any_of(dl->second.runtime_dims.begin(),
+                          dl->second.runtime_dims.end(),
+                          [](int slot) { return slot >= 0; }))
+            fail(e.name + ": operand has no compile-time extent", e.raw);
           return answer_shape_query(e, dl->second.si, dl->second.len);
+        }
         // A name td knows but neither scope nor decls does: the scalar
         // `int` input. bind_data fills both tables from a declared shape
         // and a scalar int has none, so it falls past both -- the one
@@ -1445,15 +1453,25 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
     const mir::Expr& e) {
   if (e.kind == mir::Expr::Var) {
     auto value = scope.find(e.name);
-    if (value != scope.end())
+    if (value != scope.end()) {
+      // Allocated capacity is not the logical shape of a retained local.
+      // Returning it here would freeze size(a), including loop bounds, at
+      // the maximum extent even when this evaluation uses fewer elements.
+      if (has_runtime_shape(value->second)) return {};
       return {StaticProbeState::Known,
               {g.slots[value->second.slot].len, value->second.si},
               {}};
+    }
     auto declaration = decls.find(e.name);
-    if (declaration != decls.end())
+    if (declaration != decls.end()) {
+      if (std::any_of(declaration->second.runtime_dims.begin(),
+                      declaration->second.runtime_dims.end(),
+                      [](int slot) { return slot >= 0; }))
+        return {};
       return {StaticProbeState::Known,
               {declaration->second.len, declaration->second.si},
               {}};
+    }
     return {};
   }
   if (e.kind == mir::Expr::Promotion && e.args.size() == 1)

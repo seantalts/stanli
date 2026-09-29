@@ -84,7 +84,9 @@ The [execution-path manifest](../tools/bench_execution_paths.json) includes
 nested loops, runtime indexing, constant-loop and branch callbacks, an ordinary
 graph canary, scalar/vector RNG output, container RNG arguments (including
 integer-array binomial trials), runtime integer expressions, uninitialized
-integer outputs, and runtime solver controls in generated quantities. These are
+integer outputs, runtime solver controls in generated quantities, and logical
+length queries on bounded local arrays in automatically selected structured
+loops. These are
 focused regression workloads, not additions to the public
 application-model corpus. Every entry runs the shipped runtime; there are no
 experimental providers. The standalone tool accepts `affine`, `branch_exit`,

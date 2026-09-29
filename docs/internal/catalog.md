@@ -73,6 +73,7 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-09-29 · Execution inventory and bounded-storage probe](../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md) | Corpus and fixture execution selections, scoped runtime traces, logical-length correctness fix, native measurements and remaining admission design gates. |
 | [2026-09-28 · Next coverage slice: shape-preserving retained callbacks](../../notes/execution/2026-09-28-callback-geometry-plan.md) | Proof/evaluator or decision; check status before proposing work. |
 | [2026-09-28 · Matrix geometry at retained callback boundaries](../../notes/execution/2026-09-28-callback-geometry-results.md) | Dated results, proof limits and linked evidence. |
 | [2026-09-28 · Callback return safety before broader exit lowering](../../notes/execution/2026-09-28-callback-return-guards.md) | Dated results, proof limits and linked evidence. |
