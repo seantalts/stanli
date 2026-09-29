@@ -1,7 +1,8 @@
 # Execution coverage: working checklist
 
-Source base: `df86223160f1387a37ed47c267df1bf31e77f11c`, fetched and
-verified against `origin/HEAD` on September 29, 2026.
+Initial source base: `df86223160f1387a37ed47c267df1bf31e77f11c`. Integrated
+fetched `origin/HEAD` at `d13f7fa907eb85617aba85a9e570de0389cdae86` without
+conflicts on September 29, 2026; integration commit `d6449fbf`.
 
 Our goal is to prevent surprising native performance cliffs while expanding
 Stan compatibility. Removing MirInterp is an eventual consequence of covering
@@ -62,6 +63,10 @@ itself a MIR fallback or another model execution engine.
     transformed-data and generated-quantity contexts where legal.
 - [ ] Refresh each relevant historical refusal against current source/tests.
   Older prose about loops, integer outputs and print/reject is not authoritative.
+  - [x] Replay all 329 recorded corpus models and refresh output-path coverage.
+    The only interpreted output case was an uninitialized scalar integer;
+    its declaration now compiles with Stan's sentinel value. This does not
+    count solver callbacks, probes, transformed data or initialization paths.
 - [ ] Combine static execution reports with scoped runtime traces and timings.
   - [ ] Distinguish construction/probe counts from actual execution frequency.
   - [ ] Identify how much otherwise-supported work each fallback pulls into MIR.
@@ -92,6 +97,8 @@ entire inventory is not a prerequisite for a small, independently proved fix.
     recover added setup; ordinary canaries show no clear slowdown.
 - [x] **2.2 Runtime integer expressions — bounded slice tested; not merged.**
   [Results and remaining limits](2026-09-29-integer-expression-results.md).
+  [Scalar initialization follow-up](2026-09-29-uninitialized-int-results.md)
+  closes a separate output-declaration fallback.
   - [x] Route eligible integer division through existing integer instructions.
   - [x] Extend sums/extrema where shape, initialization and range proofs permit.
   - [x] Test negative operands, zero divisors, overflow boundaries, empty inputs,
@@ -162,6 +169,9 @@ section follow real workloads and measured impact, not headline name counts.
 
 Do this after cheap direct closures and an opportunity measurement. The first
 boundary experiment is a major design checkpoint, not a required new backend.
+The [local-storage checkpoint](2026-09-29-local-storage-checkpoint.md) records a
+synthetic measurement and recommends bounded direct regions first. Selecting a
+real hot workload and designing the closed-region admission policy remain open.
 
 - [ ] Find a real refusal with substantial supported surrounding work; estimate
   call frequency, input/output copying and environment setup before coding.
@@ -249,15 +259,16 @@ show they dominate interactive use.
 - [ ] Audit execution diagnostics, forced-fallback hooks and callers, then verify
   there are no remaining production references before removing the implementation.
 
-## Immediate work order
+## Current stopping point
 
-1. Focused inventory and fresh baseline for **2.1 container RNG arguments**.
-2. Implement and validate that direct extension if its proof/evaluator passes.
-3. Tackle **2.2 integer expressions** and **2.3 standalone adapters**, with solver
-   refusal measurements informing whether a **2.4 callback** fix takes priority.
-4. Reassess remaining amplified fallbacks before selecting **4 local regions**.
-5. Continue numerical/language coverage alongside these bounded improvements;
-   bring the marked type, region and dynamic-frame decisions back explicitly.
+The direct container RNG, bounded integer-expression, standalone layout and
+scalar-initialization slices are implemented and tested. Their linked reports
+record native performance and ordinary-use canaries; none adds an execution
+engine. Unchecked categories above remain open.
 
-The initial outline preceded implementation. Item 2.1 now links a tested change,
-measurements and the user's acceptance of the normal-use performance tradeoff.
+Next review the concrete [local-storage contract](2026-09-29-local-storage-checkpoint.md)
+before broadening region admission or adding a local-MIR boundary. Reuse bounded
+storage in an existing engine when a proof permits it; measure a real hot
+remaining refusal before investing in general dynamic storage. The callback and
+signature inventories remain useful parallel lines of investigation, not claims
+already established by the output corpus result.
