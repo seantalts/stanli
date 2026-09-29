@@ -90,10 +90,11 @@ entire inventory is not a prerequisite for a small, independently proved fix.
   - [x] Resolve the [measured preparation tradeoff](2026-09-29-container-rng-results.md).
     Accepted for normal use: the mixed-family fixture needs about three rows to
     recover added setup; ordinary canaries show no clear slowdown.
-- [ ] **2.2 Runtime integer expressions.**
-  - [ ] Route eligible integer division through existing integer instructions.
-  - [ ] Extend sums/extrema where shape, initialization and range proofs permit.
-  - [ ] Test negative operands, zero divisors, overflow boundaries, empty inputs,
+- [x] **2.2 Runtime integer expressions — bounded slice tested; not merged.**
+  [Results and remaining limits](2026-09-29-integer-expression-results.md).
+  - [x] Route eligible integer division through existing integer instructions.
+  - [x] Extend sums/extrema where shape, initialization and range proofs permit.
+  - [x] Test negative operands, zero divisors, overflow boundaries, empty inputs,
     indexing effects and partial initialization. Never replace integer division
     with floating-point division or simply remove a proof guard.
 - [ ] **2.3 Standalone function arguments and results.**

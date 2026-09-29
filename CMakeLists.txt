@@ -970,6 +970,10 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_container_rng_complete
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME integer_expressions_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check> gq_integer_expressions
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME rng_udf_effect_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect

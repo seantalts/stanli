@@ -1,0 +1,96 @@
+{
+  "source_sha256": "331cf4ee3762940cadd5b8fec8b468013cb207bad0ea94de4407ece20540ed3a",
+  "data_sha256": "8baf2c3aee7453bcfb9ebf5969869adb53d0b42df68bb4d96ce14bb2c2a76724",
+  "recorded": {
+    "cmdstan": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+    "stan": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+    "math": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+    "cmdstan_version": "2.40.0",
+    "stanc_sha256": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "reference_flags": "-O1 -ffp-contract=off; stanc default optimization",
+    "platform": "Darwin arm64"
+  },
+  "seed": 1234,
+  "chain": 0,
+  "points": {
+    "0": {
+      "values": [
+        "-0.005000000000000001",
+        "-0.10000000000000001"
+      ],
+      "wa": {
+        "names": "x,draw,positive,negative,operator_result,remainder,negative_remainder,promoted,promoted_operator,promoted_remainder,choice,direct_sum,direct_min,direct_max,after",
+        "values": [
+          "0.10000000000000001",
+          "6",
+          "3",
+          "-3",
+          "3",
+          "0",
+          "0",
+          "3",
+          "3",
+          "0",
+          "0",
+          "1",
+          "0",
+          "2",
+          "1.5610552356070362"
+        ]
+      }
+    },
+    "1": {
+      "values": [
+        "-0.00080000000000000004",
+        "0.040000000000000001"
+      ],
+      "wa": {
+        "names": "x,draw,positive,negative,operator_result,remainder,negative_remainder,promoted,promoted_operator,promoted_remainder,choice,direct_sum,direct_min,direct_max,after",
+        "values": [
+          "-0.040000000000000001",
+          "3",
+          "1",
+          "-1",
+          "1",
+          "1",
+          "-1",
+          "2",
+          "2",
+          "-1",
+          "0",
+          "1",
+          "0",
+          "2",
+          "1.5610552356070362"
+        ]
+      }
+    },
+    "2": {
+      "values": [
+        "0",
+        "0"
+      ],
+      "wa": {
+        "names": "x,draw,positive,negative,operator_result,remainder,negative_remainder,promoted,promoted_operator,promoted_remainder,choice,direct_sum,direct_min,direct_max,after",
+        "values": [
+          "0",
+          "3",
+          "1",
+          "-1",
+          "1",
+          "1",
+          "-1",
+          "2",
+          "2",
+          "-1",
+          "0",
+          "1",
+          "0",
+          "2",
+          "1.5610552356070362"
+        ]
+      }
+    }
+  }
+}

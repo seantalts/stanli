@@ -58,5 +58,11 @@
     "source": "tests/fixtures/gq_container_rng_complete.stan",
     "mir": "tests/fixtures/gq_container_rng_complete.tmir.sexp",
     "data": "tests/fixtures/gq_container_rng_complete.json"
+  },
+  {
+    "model": "gq_integer_expressions",
+    "source": "tests/fixtures/gq_integer_expressions.stan",
+    "mir": "tests/fixtures/gq_integer_expressions.tmir.sexp",
+    "data": "tests/fixtures/gq_integer_expressions.json"
   }
 ]

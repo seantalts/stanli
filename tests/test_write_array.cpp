@@ -5554,7 +5554,123 @@ void test_integer_rng_control() {
   }
 }
 
+// Check compiled selection as well as values: the MIR comparison alone would
+// otherwise allow the complete output block to fall back unnoticed.
+void test_integer_expressions() {
+  using namespace stanli;
+  const std::string source =
+      slurp("tests/fixtures/gq_integer_expressions.tmir.sexp");
+  for (int divisor : {2, -2, 1, -1, std::numeric_limits<int>::max(),
+                      std::numeric_limits<int>::min(), 0}) {
+    DataMap data;
+    data.set_int("divisor", divisor);
+    test_setenv("STANLI_WA_FORCE_INTERP", "1");
+    auto model = compile_model(source, data);
+    test_unsetenv("STANLI_WA_FORCE_INTERP");
+    if (!model.write_array || !model.write_array->interp ||
+        !model.write_array->truncated.empty()) {
+      ++failures;
+      std::printf("FAIL integer expressions did not compile\n");
+      continue;
+    }
+    Executor ex(model.write_array->graph);
+    model.write_array->bind(ex);
+    for (double x : {-3.0, 0.4, 3.0}) {
+      ex.params_data()[0] = x;
+      std::map<std::string, DataMap::Entry> params;
+      params["x"].r = {x};
+      for (unsigned seed : {1u, 1234u, 2026u}) {
+        WaRng graph_rng(seed), interp_rng(seed), oracle(seed);
+        const int draw =
+            stan::math::binomial_rng(9, stan::math::inv_logit(x), oracle.gen());
+        std::vector<double> graph_row, interp_row;
+        bool graph_error = false, interp_error = false;
+        try {
+          ex.run_forward_only(EvalState{&graph_rng});
+          for (const auto& column : model.write_array->columns)
+            for (int64_t i = 0; i < column.len; ++i)
+              graph_row.push_back(
+                  ex.value_ptr(column.slot)[column.storage_index(i)]);
+        } catch (const std::domain_error&) {
+          graph_error = true;
+        }
+        try {
+          interp_row = model.write_array->interp->eval(params, interp_rng);
+        } catch (const std::domain_error&) {
+          interp_error = true;
+        }
+        if (graph_error != (divisor == 0) || interp_error != graph_error ||
+            graph_row != interp_row || !(graph_rng.gen() == interp_rng.gen())) {
+          ++failures;
+          std::printf("FAIL integer expression row/error/stream parity\n");
+        }
+        if (divisor == 0) {
+          if (!(graph_rng.gen() == oracle.gen())) {
+            ++failures;
+            std::printf("FAIL zero divisor consumed a later RNG draw\n");
+          }
+          continue;
+        }
+        // Independent integer semantics, including truncation toward zero and
+        // integer quotients/remainders subsequently assigned to real outputs.
+        const int choice = stan::math::bernoulli_logit_rng(x, oracle.gen());
+        const double after = stan::math::normal_rng(0, 1, oracle.gen());
+        const std::vector<double> expected{x,
+                                           double(draw),
+                                           double(draw / divisor),
+                                           double(-draw / divisor),
+                                           double(draw / divisor),
+                                           double(draw % divisor),
+                                           double(-draw % divisor),
+                                           double((draw + 1) / divisor),
+                                           double((draw + 1) / divisor),
+                                           double(-draw % divisor),
+                                           double(choice),
+                                           double(2 * choice + 1),
+                                           double(choice),
+                                           2,
+                                           after};
+        if (graph_row != expected || !(graph_rng.gen() == oracle.gen())) {
+          ++failures;
+          std::printf("FAIL integer expression Stan oracle\n");
+        }
+      }
+    }
+  }
+
+  const auto refused = [&](const std::string& text, const char* reason) {
+    DataMap data;
+    data.set_int("divisor", 2);
+    auto model = compile_model(text, data);
+    if (!model.write_array || !model.write_array->interp ||
+        model.write_array->truncated.find(reason) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL direct integer sum lost guard: %s\n", reason);
+    }
+  };
+  std::string unbounded = source;
+  const auto rng = unbounded.find("bernoulli_logit_rng");
+  if (rng == std::string::npos) {
+    ++failures;
+  } else {
+    unbounded.replace(rng, std::string("bernoulli_logit_rng").size(),
+                      "poisson_log_rng");
+    refused(unbounded, "unproved integral slot values");
+  }
+  std::string overflow = source;
+  const auto sum = overflow.find("(FunApp (StanLib sum");
+  const auto one = overflow.find("(Lit Int 1)", sum);
+  if (one == std::string::npos) {
+    ++failures;
+  } else {
+    overflow.replace(one, std::string("(Lit Int 1)").size(),
+                     "(Lit Int 2147483647)");
+    refused(overflow, "overflow int32");
+  }
+}
+
 int main() {
+  test_integer_expressions();
   test_integer_rng_control();
   test_naming_rules();
   test_wanames_pipeline();

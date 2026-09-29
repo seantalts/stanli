@@ -42,3 +42,7 @@ Use the [maintained benchmark coverage](../../benchmark-protocol.md#focused-exec
 and [execution diagnostics](../../hacking.md) for new measurements. A known
 24-ULP large-branch stress discrepancy remains documented; tolerances were not
 widened to accept the experiments.
+
+The next completed slice covers generated-quantity integer division/remainder
+and proved array-literal reductions. See the [integer results](../../../notes/execution/2026-09-29-integer-expression-results.md)
+for the independent oracle and the measured 19-row preparation break-even.
