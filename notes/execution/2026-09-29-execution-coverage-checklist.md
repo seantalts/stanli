@@ -266,9 +266,15 @@ scalar-initialization slices are implemented and tested. Their linked reports
 record native performance and ordinary-use canaries; none adds an execution
 engine. Unchecked categories above remain open.
 
-Next review the concrete [local-storage contract](2026-09-29-local-storage-checkpoint.md)
-before broadening region admission or adding a local-MIR boundary. Reuse bounded
-storage in an existing engine when a proof permits it; measure a real hot
-remaining refusal before investing in general dynamic storage. The callback and
-signature inventories remain useful parallel lines of investigation, not claims
-already established by the output corpus result.
+The subsequent [Fable review and comparison](2026-09-29-fable-next-steps-review.md)
+changes the immediate order: make one focused execution-selection pass over
+remaining contexts, especially solver callbacks, before choosing the next
+implementation. Measure shortlisted repeated fallbacks and prefer direct
+register/handler admission when justified. If no stronger target emerges, run a
+small forced-region feasibility probe, then review the concrete
+[local-storage contract](2026-09-29-local-storage-checkpoint.md) before broadening
+admission. The probe, inventory and new region implementation have not run.
+
+Keep a separate queue for small missing-function capabilities; they need their
+own semantic/oracle proof but not an exhaustive architecture census. General
+dynamic storage and local MIR calls remain conditional on demonstrated need.
