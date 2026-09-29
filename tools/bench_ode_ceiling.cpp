@@ -27,7 +27,7 @@
 //   bench_ode_ceiling MODEL.tmir.sexp DATA.json [options]
 //
 // Options:
-//   --provider auto|generated|fvar|structured   (default: auto)
+//   --provider auto|generated|fvar|structured|loop   (default: auto)
 //   --structured-mir PATH           one-state callback wrapper for the probe
 //   --solver model|rk45|ckrk         (default: model)
 //   --point 0|1|2                    deterministic unconstrained point
@@ -37,6 +37,7 @@
 //   --diagnostic                     print perturbative component timers
 #include <stan/math/fwd.hpp>
 #include "structured_rhs_probe.hpp"
+#include "loop_adjoint_probe.hpp"
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
@@ -168,7 +169,7 @@ struct Options {
 void usage() {
   std::fprintf(stderr,
                "usage: bench_ode_ceiling MODEL.tmir.sexp DATA.json "
-               "[--provider auto|generated|fvar|structured] [--structured-mir PATH] [--solver model|rk45|ckrk] "
+               "[--provider auto|generated|fvar|structured|loop] [--structured-mir PATH] [--solver model|rk45|ckrk] "
                "[--point 0|1|2] [--iterations N] [--batches N] "
                "[--warmup-ms N] [--diagnostic] [--require-exact]\n");
 }
@@ -219,8 +220,8 @@ Options parse_options(int argc, char** argv) {
     }
   }
   if (out.provider != "auto" && out.provider != "generated" &&
-      out.provider != "fvar" && out.provider != "structured")
-    throw std::runtime_error("--provider must be auto, generated, fvar, or structured");
+      out.provider != "fvar" && out.provider != "structured" && out.provider != "loop")
+    throw std::runtime_error("--provider must be auto, generated, fvar, structured, or loop");
   if ((out.provider == "structured") != !out.structured_mir.empty())
     throw std::runtime_error("structured provider requires --structured-mir exclusively");
   if (out.solver != "model" && out.solver != "rk45" && out.solver != "ckrk")
@@ -504,7 +505,7 @@ SolveResult run_oracle(RkSolver solver, const OdeSpec& spec,
                                                     breakdown);
 }
 
-enum class ProviderKind { Generated, Fvar, Structured };
+enum class ProviderKind { Generated, Fvar, Structured, Loop };
 
 class DerivativeProvider {
  public:
@@ -527,7 +528,10 @@ class DerivativeProvider {
       if (refusal_.empty()) refusal_ = "adjoint generation failed";
     }
 
-    if (requested == "structured") {
+    if (requested == "loop") {
+      loop_ = std::make_unique<LoopRhsProbe>(rhs_);
+      kind_ = ProviderKind::Loop;
+    } else if (requested == "structured") {
       if (!structured_ || rhs_.n_y != 1 || rhs_.n_th != 1 ||
           theta_source_ != 1 || rhs_.n_xr != 0)
         throw std::runtime_error("structured probe requires one state and one theta");
@@ -555,6 +559,7 @@ class DerivativeProvider {
   const std::string& refusal() const { return refusal_; }
 
   const char* name() const {
+    if (kind_ == ProviderKind::Loop) return "loop";
     if (kind_ == ProviderKind::Structured) return "structured";
     return kind_ == ProviderKind::Generated ? "generated" : "fvar";
   }
@@ -575,7 +580,12 @@ class DerivativeProvider {
     if (theta_source_ != 0)
       std::fill(J_theta,
                 J_theta + static_cast<size_t>(rhs_.n_y) * theta_source_, 0.0);
-    if (kind_ == ProviderKind::Structured) {
+    if (kind_ == ProviderKind::Loop) {
+      TimePoint phase;
+      if constexpr (Diagnostic) phase = Clock::now();
+      loop_->evaluate(t, y, theta, x_r, theta_derivatives, f, J_y, J_theta);
+      if constexpr (Diagnostic) breakdown->jacobian_ns += elapsed_ns(phase);
+    } else if (kind_ == ProviderKind::Structured) {
       TimePoint phase;
       if constexpr (Diagnostic) phase = Clock::now();
       double gradient[3];
@@ -757,6 +767,7 @@ class DerivativeProvider {
   size_t theta_source_;
   ProviderKind kind_ = ProviderKind::Fvar;
   StructuredRhsProbe* structured_ = nullptr;
+  std::unique_ptr<LoopRhsProbe> loop_;
   IslandProg generated_;
   bool generated_ok_ = false;
   std::string refusal_;
@@ -1210,7 +1221,7 @@ int main(int argc, char** argv) {
                                     solution_jacobian.max_relative <= 1e-9;
     const bool exact_required =
         options.require_exact || provider.kind() == ProviderKind::Generated ||
-        provider.kind() == ProviderKind::Structured;
+        provider.kind() == ProviderKind::Structured || provider.kind() == ProviderKind::Loop;
     if (!callback_equal || !local_numerical || !solution_numerical ||
         (exact_required && (!local_exact || !solution_exact)))
       throw std::runtime_error(

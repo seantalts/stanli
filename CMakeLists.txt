@@ -963,6 +963,17 @@ add_executable(bench_structured_callback_local EXCLUDE_FROM_ALL
   tools/bench_structured_callback_local.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_structured_callback_local PRIVATE stanli)
 add_dependencies(bench_structured_callback_local stanli_mir_fixtures)
+# Loop reverse lifetime/history prototype; developer-only, never installed.
+add_executable(bench_loop_adjoint_local EXCLUDE_FROM_ALL
+  tools/bench_loop_adjoint_local.cpp tests/tbb_stub.cpp)
+target_link_libraries(bench_loop_adjoint_local PRIVATE stanli)
+add_dependencies(bench_loop_adjoint_local stanli_mir_fixtures)
+
+add_executable(bench_loop_adjoint EXCLUDE_FROM_ALL
+  tools/bench_ode_ceiling.cpp tests/tbb_stub.cpp)
+target_compile_definitions(bench_loop_adjoint PRIVATE STANLI_STRUCTURED_CALLBACK_PROBE=1)
+target_link_libraries(bench_loop_adjoint PRIVATE stanli)
+add_dependencies(bench_loop_adjoint stanli_mir_fixtures)
 
 add_executable(bench_ode_cvodes_ceiling EXCLUDE_FROM_ALL
   tools/bench_ode_cvodes_ceiling.cpp tests/tbb_stub.cpp)

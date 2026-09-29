@@ -1,0 +1,1095 @@
+{
+  "base": "8c00cc6efebdf78f6384ae8300b92de9c3ef4abd",
+  "upstream": "6ce2018b5382b459666ab32fe0df50d4a6d30ba4",
+  "platform": "Darwin arm64 AppleClang21 Release",
+  "scope": "native complete ODE solves; preparation excluded; local phase data exploratory single process",
+  "processes": 72,
+  "solve_samples": [
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 0,
+      "oracle_ns": 2988.2,
+      "candidate_ns": 4302.8,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 0,
+      "oracle_ns": 2873.6,
+      "candidate_ns": 4805.6,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 0,
+      "oracle_ns": 49659.0,
+      "candidate_ns": 73166.0,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 0,
+      "oracle_ns": 51932.6,
+      "candidate_ns": 105353.5,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 0,
+      "oracle_ns": 31141.0,
+      "candidate_ns": 58364.6,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 0,
+      "oracle_ns": 28340.3,
+      "candidate_ns": 59564.6,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 0,
+      "oracle_ns": 281828.5,
+      "candidate_ns": 468425.0,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 0,
+      "oracle_ns": 301456.9,
+      "candidate_ns": 710286.1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 0,
+      "oracle_ns": 477104.2,
+      "candidate_ns": 877257.0,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 0,
+      "oracle_ns": 476889.0,
+      "candidate_ns": 1040083.5,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 0,
+      "oracle_ns": 4585069.5,
+      "candidate_ns": 7351486.0,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 0,
+      "oracle_ns": 5251104.2,
+      "candidate_ns": 11760555.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 1,
+      "oracle_ns": 3272.9,
+      "candidate_ns": 5342.4,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 1,
+      "oracle_ns": 2886.8,
+      "candidate_ns": 4182.0,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 1,
+      "oracle_ns": 46513.2,
+      "candidate_ns": 90249.3,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 1,
+      "oracle_ns": 51299.3,
+      "candidate_ns": 75915.3,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 1,
+      "oracle_ns": 31539.6,
+      "candidate_ns": 66687.5,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 1,
+      "oracle_ns": 31345.2,
+      "candidate_ns": 56319.4,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 1,
+      "oracle_ns": 287447.2,
+      "candidate_ns": 647636.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 1,
+      "oracle_ns": 318441.0,
+      "candidate_ns": 532334.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 1,
+      "oracle_ns": 477166.5,
+      "candidate_ns": 1039632.2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 1,
+      "oracle_ns": 424833.5,
+      "candidate_ns": 809770.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 1,
+      "oracle_ns": 4612236.0,
+      "candidate_ns": 10309750.0,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 1,
+      "oracle_ns": 5166562.5,
+      "candidate_ns": 8429680.5,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 2,
+      "oracle_ns": 2878.5,
+      "candidate_ns": 4142.4,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 2,
+      "oracle_ns": 2915.3,
+      "candidate_ns": 4822.9,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 2,
+      "oracle_ns": 52002.1,
+      "candidate_ns": 75461.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 2,
+      "oracle_ns": 51947.2,
+      "candidate_ns": 103445.1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 2,
+      "oracle_ns": 31025.7,
+      "candidate_ns": 56110.4,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 2,
+      "oracle_ns": 28214.6,
+      "candidate_ns": 58644.4,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 2,
+      "oracle_ns": 302623.6,
+      "candidate_ns": 468495.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 2,
+      "oracle_ns": 320906.2,
+      "candidate_ns": 726766.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 2,
+      "oracle_ns": 426611.2,
+      "candidate_ns": 810159.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 2,
+      "oracle_ns": 423944.5,
+      "candidate_ns": 918611.0,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 2,
+      "oracle_ns": 5131277.7,
+      "candidate_ns": 8540916.7,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 2,
+      "oracle_ns": 4921541.7,
+      "candidate_ns": 10387965.2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 3,
+      "oracle_ns": 2917.4,
+      "candidate_ns": 4859.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 3,
+      "oracle_ns": 2924.3,
+      "candidate_ns": 4177.1,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 3,
+      "oracle_ns": 51627.1,
+      "candidate_ns": 104529.2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 3,
+      "oracle_ns": 50973.6,
+      "candidate_ns": 82012.5,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 3,
+      "oracle_ns": 28034.0,
+      "candidate_ns": 59025.0,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 3,
+      "oracle_ns": 27845.8,
+      "candidate_ns": 49895.2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 3,
+      "oracle_ns": 285897.2,
+      "candidate_ns": 650120.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 3,
+      "oracle_ns": 316466.0,
+      "candidate_ns": 520497.2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 3,
+      "oracle_ns": 481381.8,
+      "candidate_ns": 963923.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 3,
+      "oracle_ns": 425833.3,
+      "candidate_ns": 825201.5,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 3,
+      "oracle_ns": 4890354.3,
+      "candidate_ns": 11077819.3,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 3,
+      "oracle_ns": 5084687.7,
+      "candidate_ns": 8497340.3,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 4,
+      "oracle_ns": 2893.8,
+      "candidate_ns": 4191.0,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 4,
+      "oracle_ns": 2891.7,
+      "candidate_ns": 4821.5,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 4,
+      "oracle_ns": 48094.4,
+      "candidate_ns": 67456.9,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 4,
+      "oracle_ns": 50724.3,
+      "candidate_ns": 104020.1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 4,
+      "oracle_ns": 31156.2,
+      "candidate_ns": 57618.8,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 4,
+      "oracle_ns": 28148.6,
+      "candidate_ns": 58504.9,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 4,
+      "oracle_ns": 286447.2,
+      "candidate_ns": 473009.7,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 4,
+      "oracle_ns": 320067.3,
+      "candidate_ns": 716591.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 4,
+      "oracle_ns": 471986.2,
+      "candidate_ns": 905104.2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 4,
+      "oracle_ns": 428534.7,
+      "candidate_ns": 922138.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 4,
+      "oracle_ns": 4902194.5,
+      "candidate_ns": 7559784.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 4,
+      "oracle_ns": 5134889.0,
+      "candidate_ns": 11610381.8,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 5,
+      "oracle_ns": 2891.0,
+      "candidate_ns": 4769.4,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 5,
+      "oracle_ns": 2885.4,
+      "candidate_ns": 4219.5,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "mapped",
+      "repeat": 5,
+      "oracle_ns": 46281.3,
+      "candidate_ns": 94159.7,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "expanded",
+      "repeat": 5,
+      "oracle_ns": 52104.2,
+      "candidate_ns": 75056.2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 5,
+      "oracle_ns": 31131.2,
+      "candidate_ns": 63434.7,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 5,
+      "oracle_ns": 31172.9,
+      "candidate_ns": 55339.6,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "mapped",
+      "repeat": 5,
+      "oracle_ns": 285441.0,
+      "candidate_ns": 663120.8,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "expanded",
+      "repeat": 5,
+      "oracle_ns": 317511.1,
+      "candidate_ns": 527253.5,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 5,
+      "oracle_ns": 475034.8,
+      "candidate_ns": 1035333.3,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 5,
+      "oracle_ns": 423520.8,
+      "candidate_ns": 805569.3,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "mapped",
+      "repeat": 5,
+      "oracle_ns": 4729180.7,
+      "candidate_ns": 10391194.5,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "expanded",
+      "repeat": 5,
+      "oracle_ns": 5189833.3,
+      "candidate_ns": 8437916.7,
+      "exact": true
+    }
+  ],
+  "solve_summary": {
+    "loop-8-expanded": {
+      "oracle_ns": {
+        "median": 2890.3,
+        "mad": 8.350000000000136
+      },
+      "candidate_ns": {
+        "median": 4186.5,
+        "mad": 21.199999999999818
+      }
+    },
+    "loop-8-mapped": {
+      "oracle_ns": {
+        "median": 2903.5,
+        "mad": 13.200000000000045
+      },
+      "candidate_ns": {
+        "median": 4822.2,
+        "mad": 27.049999999999727
+      }
+    },
+    "branch-8-expanded": {
+      "oracle_ns": {
+        "median": 51136.45,
+        "mad": 916.7000000000007
+      },
+      "candidate_ns": {
+        "median": 75259.0,
+        "mad": 1374.6500000000015
+      }
+    },
+    "branch-8-mapped": {
+      "oracle_ns": {
+        "median": 51175.7,
+        "mad": 764.2000000000007
+      },
+      "candidate_ns": {
+        "median": 103732.6,
+        "mad": 1208.7499999999927
+      }
+    },
+    "loop-128-expanded": {
+      "oracle_ns": {
+        "median": 31148.6,
+        "mad": 73.60000000000036
+      },
+      "candidate_ns": {
+        "median": 56214.9,
+        "mad": 1139.6000000000022
+      }
+    },
+    "loop-128-mapped": {
+      "oracle_ns": {
+        "median": 28277.449999999997,
+        "mad": 186.14999999999782
+      },
+      "candidate_ns": {
+        "median": 59294.8,
+        "mad": 720.1500000000015
+      }
+    },
+    "branch-128-expanded": {
+      "oracle_ns": {
+        "median": 309544.8,
+        "mad": 8431.25
+      },
+      "candidate_ns": {
+        "median": 496753.45,
+        "mad": 28293.050000000017
+      }
+    },
+    "branch-128-mapped": {
+      "oracle_ns": {
+        "median": 294452.05000000005,
+        "mad": 8782.95000000004
+      },
+      "candidate_ns": {
+        "median": 686703.45,
+        "mad": 33235.44999999995
+      }
+    },
+    "loop-2048-expanded": {
+      "oracle_ns": {
+        "median": 426222.25,
+        "mad": 2045.1000000000058
+      },
+      "candidate_ns": {
+        "median": 817680.6,
+        "mad": 10010.54999999993
+      }
+    },
+    "loop-2048-mapped": {
+      "oracle_ns": {
+        "median": 475961.9,
+        "mad": 3312.249999999971
+      },
+      "candidate_ns": {
+        "median": 999628.5,
+        "mad": 40229.34999999998
+      }
+    },
+    "branch-2048-expanded": {
+      "oracle_ns": {
+        "median": 5107982.7,
+        "mad": 70215.19999999972
+      },
+      "candidate_ns": {
+        "median": 8433798.6,
+        "mad": 85329.90000000037
+      }
+    },
+    "branch-2048-mapped": {
+      "oracle_ns": {
+        "median": 4905948.0,
+        "mad": 202854.1499999999
+      },
+      "candidate_ns": {
+        "median": 10734506.9,
+        "mad": 385649.30000000075
+      }
+    }
+  },
+  "expanded_local": [
+    {
+      "N": 1,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 48417,
+      "register_prep_ns": 812417,
+      "first_gradient_ns": 3500,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 7,
+      "history_bytes": 1056,
+      "register_var_ns": 134.117,
+      "loop_gradient_ns": 172.394,
+      "loop_value_ns": 120.761,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 20792,
+      "register_prep_ns": 125417,
+      "first_gradient_ns": 3000,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 21,
+      "history_bytes": 3632,
+      "register_var_ns": 386.375,
+      "loop_gradient_ns": 542.791,
+      "loop_value_ns": 517.927,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 23708,
+      "register_prep_ns": 140792,
+      "first_gradient_ns": 17250,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 261,
+      "history_bytes": 47792,
+      "register_var_ns": 3918.52,
+      "loop_gradient_ns": 8179.03,
+      "loop_value_ns": 6359.81,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 19500,
+      "register_prep_ns": 150458,
+      "first_gradient_ns": 188083,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 4101,
+      "history_bytes": 754352,
+      "register_var_ns": 67689.8,
+      "loop_gradient_ns": 116601,
+      "loop_value_ns": 112064,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 0,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 35708,
+      "register_prep_ns": 201625,
+      "first_gradient_ns": 2375,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 8,
+      "history_bytes": 860,
+      "register_var_ns": 101.821,
+      "loop_gradient_ns": 128.943,
+      "loop_value_ns": 89.1195,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 1,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 32666,
+      "register_prep_ns": 151583,
+      "first_gradient_ns": 2250,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 13,
+      "history_bytes": 1340,
+      "register_var_ns": 175.662,
+      "loop_gradient_ns": 251.466,
+      "loop_value_ns": 179.956,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 30250,
+      "register_prep_ns": 148458,
+      "first_gradient_ns": 4167,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 48,
+      "history_bytes": 4700,
+      "register_var_ns": 756.877,
+      "loop_gradient_ns": 995.679,
+      "loop_value_ns": 1004.04,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 34500,
+      "register_prep_ns": 164792,
+      "first_gradient_ns": 31250,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 648,
+      "history_bytes": 62300,
+      "register_var_ns": 9048.58,
+      "loop_gradient_ns": 16067.6,
+      "loop_value_ns": 14106.2,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 32291,
+      "register_prep_ns": 144500,
+      "first_gradient_ns": 316250,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 10248,
+      "history_bytes": 983900,
+      "register_var_ns": 160123,
+      "loop_gradient_ns": 238464,
+      "loop_value_ns": 222869,
+      "case": "ode_structured_callback_branch"
+    }
+  ],
+  "mapped_local": [
+    {
+      "N": 1,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 22250,
+      "register_prep_ns": 147167,
+      "first_gradient_ns": 3084,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 7,
+      "history_bytes": 944,
+      "register_var_ns": 131.403,
+      "loop_gradient_ns": 201.866,
+      "loop_value_ns": 131.235,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 21500,
+      "register_prep_ns": 125416,
+      "first_gradient_ns": 3292,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 21,
+      "history_bytes": 2876,
+      "register_var_ns": 395.354,
+      "loop_gradient_ns": 661.922,
+      "loop_value_ns": 524.729,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 23750,
+      "register_prep_ns": 138417,
+      "first_gradient_ns": 17291,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 261,
+      "history_bytes": 35996,
+      "register_var_ns": 4032.74,
+      "loop_gradient_ns": 8786.73,
+      "loop_value_ns": 6601.3,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 20375,
+      "register_prep_ns": 125416,
+      "first_gradient_ns": 176083,
+      "register_instructions": 29,
+      "prepared_instructions": 23,
+      "blocks_executed": 4101,
+      "history_bytes": 565916,
+      "register_var_ns": 59875.9,
+      "loop_gradient_ns": 144443,
+      "loop_value_ns": 93807.7,
+      "case": "ode_retained_loop"
+    },
+    {
+      "N": 0,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 32083,
+      "register_prep_ns": 145458,
+      "first_gradient_ns": 1167,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 8,
+      "history_bytes": 892,
+      "register_var_ns": 112.241,
+      "loop_gradient_ns": 141.51,
+      "loop_value_ns": 110.291,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 1,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 35458,
+      "register_prep_ns": 161708,
+      "first_gradient_ns": 2916,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 13,
+      "history_bytes": 1332,
+      "register_var_ns": 175.721,
+      "loop_gradient_ns": 269.082,
+      "loop_value_ns": 213.577,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 37167,
+      "register_prep_ns": 154417,
+      "first_gradient_ns": 5208,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 48,
+      "history_bytes": 4412,
+      "register_var_ns": 669.792,
+      "loop_gradient_ns": 1570.43,
+      "loop_value_ns": 1037.01,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 30917,
+      "register_prep_ns": 137167,
+      "first_gradient_ns": 34416,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 648,
+      "history_bytes": 57212,
+      "register_var_ns": 9858.75,
+      "loop_gradient_ns": 20601,
+      "loop_value_ns": 16974.3,
+      "case": "ode_structured_callback_branch"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "history_checks": 48,
+      "loop_prep_ns": 36666,
+      "register_prep_ns": 166750,
+      "first_gradient_ns": 481750,
+      "register_instructions": 49,
+      "prepared_instructions": 39,
+      "blocks_executed": 10248,
+      "history_bytes": 902012,
+      "register_var_ns": 144682,
+      "loop_gradient_ns": 362217,
+      "loop_value_ns": 239207,
+      "case": "ode_structured_callback_branch"
+    }
+  ],
+  "source_sha256": {
+    "tools/loop_adjoint_probe.hpp": "428c43b68a9e12e42495a806846c5d5c571fdd09ab1a20856e0f2de239559f76",
+    "tools/loop_adjoint_checks.hpp": "21b867f5983b75291f8c31dd4972ec5c4d82ebd80d203f2612441059368a6172",
+    "tools/bench_loop_adjoint_local.cpp": "26823f28a6d0e85eee4de8fce2dfdd9c16a92a98257d22397c5b6d69a3194eb9",
+    "tools/bench_ode_ceiling.cpp": "37d646dee3bfc98473c2627e22dc6d70e146892db424e30b35568df78f81396c",
+    "tools/experiments/loop-adjoint-mapped.patch": "f5a9dd9f82268a4508bd6955d19d439bf3d3bf7a1cb71bd83548754f60f21742"
+  },
+  "validation": {
+    "ctest_passed": 309,
+    "ctest_failed": 0,
+    "runtime_diff_from_base": false,
+    "final_extra_solver_checks": [
+      {
+        "solver": "rk45",
+        "point": 2,
+        "exact": true
+      },
+      {
+        "solver": "ckrk",
+        "point": 1,
+        "exact": true
+      }
+    ]
+  }
+}

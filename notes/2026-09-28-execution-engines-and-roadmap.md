@@ -93,13 +93,21 @@ complete ODE solves. At 2,048 trips, the simple case takes about 197 µs with
 generated register reverse and 470–489 µs with the structured variants. The
 production unrolling and callback policies remain unchanged.
 
-The next architectural option is loop-aware generated reverse in the register
-engine. It would save the values and branch decisions needed for each iteration
-and run existing derivative instructions in reverse iteration order. This
-requires a real lifetime/history contract; merely permitting backward jumps
-would be incorrect. It has not been implemented or benchmarked. Start with
-counted scalar loops and overwritten values, then branches and exits, before
-expanding admission. Keep the current fast expanded path where it wins.
+The [loop-aware register reverse experiment](2026-09-28-loop-adjoint-results.md)
+now tests that second option too. It versions overwritten values, preserves
+copy aliases across iterations, and reuses existing derivative instructions.
+Both a complete instruction history and a smaller block-visit history pass
+bitwise checks. Neither beats the current callback: complete solves take about
+1.5–2.3 times as long across the tested shapes and sizes. Recording the forward
+history already costs more than the incumbent's complete callback gradient in
+a representative local comparison.
+
+The next decision is whether to invest in a more selective history layout:
+keep ordinary forward registers and save only values required by reverse,
+with explicit bindings for aliases and overwritten values. This is a separate
+storage/compiler experiment, not permission to relax correctness or change
+callback routing. There is no measured replacement ready to ship, and the
+current fast expanded path should remain available.
 
 The experiment also found a shared 24-ULP gradient discrepancy against CmdStan
 in the large branch stress case. Both current and experimental callback paths

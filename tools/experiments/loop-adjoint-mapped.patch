@@ -1,0 +1,164 @@
+--- a/runtime/include/stanli/adjoint.hpp
++++ b/runtime/include/stanli/adjoint.hpp
+@@ -96,6 +96,11 @@
+                                               const AdjProgram& ap,
+                                               const double* val, double* adj);
+ 
++// Developer loop probe: scalar SSA rules with local adjoint indices mapped to
++// shared history cells. The caller validates scalar-only code and bindings.
++void run_scalar_adjoint_mapped(const Program& fwd, const AdjProgram& ap,
++                               const double* val, double* adj, const int* ids);
++
+ }  // namespace stanli
+ 
+ #endif
+--- a/runtime/src/adjoint.cpp
++++ b/runtime/src/adjoint.cpp
+@@ -964,9 +964,10 @@
+   }
+ }
+ 
+-__attribute__((aligned(64))) void run_adjoint(const Program& fwd,
++template <class AdjointStorage>
++__attribute__((aligned(64))) void run_adjoint_impl(const Program& fwd,
+                                               const AdjProgram& ap,
+-                                              const double* val, double* adj) {
++                                              const double* val, AdjointStorage adj) {
+   // A per-invocation local, not a shared static: island_bwd_native calls
+   // back into run_adjoint for an island's own adjoint program, and that
+   // program can itself contain a CALL. A static (or thread_local) ctx here
+@@ -1279,4 +1280,28 @@
+       if (val[segment.guard] != 0.0) run_segment(segment.begin, segment.end);
+ }
+ 
++void run_adjoint(const Program& fwd, const AdjProgram& ap,
++                 const double* val, double* adj) {
++  run_adjoint_impl(fwd, ap, val, adj);
++}
++
++namespace {
++// Scalar-only experimental binding: never pretend mapped cells form a range.
++struct MappedAdjoints {
++  double* cells;
++  const int* ids;
++  double& operator[](int i) const { return cells[ids[i]]; }
++  double* operator+(int) const {
++    throw std::logic_error("mapped adjoints require scalar rules");
++  }
++  operator double*() const {
++    throw std::logic_error("mapped adjoints require scalar rules");
++  }
++};
++}
++void run_scalar_adjoint_mapped(const Program& fwd, const AdjProgram& ap,
++                               const double* val, double* adj, const int* ids) {
++  run_adjoint_impl(fwd, ap, val, MappedAdjoints{adj, ids});
++}
++
+ }  // namespace stanli
+--- a/tools/loop_adjoint_probe.hpp
++++ b/tools/loop_adjoint_probe.hpp
+@@ -76,14 +76,17 @@
+  public:
+   struct Workspace {
+     std::vector<double> values, adjoints;
+-    std::vector<int> versions, local_versions;
+-    stanli::AdjProgram history;
++    std::vector<int> versions, bindings;
++    struct Visit {
++      int block, offset;
++    };
++    std::vector<Visit> visits;
+     size_t blocks_executed = 0;
+     bool ready = false;
+     size_t retained_bytes() const {
+       return values.size() * sizeof(double) + adjoints.size() * sizeof(double) +
+-             history.code.size() * sizeof(stanli::AdjInstr) +
+-             (versions.size() + local_versions.size()) * sizeof(int);
++             visits.size() * sizeof(Visit) +
++             (versions.size() + bindings.size()) * sizeof(int);
+     }
+   };
+   LoopAdjointProbe(const Program& source, std::vector<int> inputs)
+@@ -211,7 +214,8 @@
+   void forward(const std::vector<double>& input, Workspace& w) const {
+     w.ready = false;
+     w.values.clear();
+-    w.history.code.clear();
++    w.visits.clear();
++    w.bindings.clear();
+     w.blocks_executed = 0;
+     w.versions.assign(registers_, -1);
+     if (input.size() < static_cast<size_t>(registers_))
+@@ -222,6 +226,7 @@
+       w.versions[r] = index(w.values.size());
+       w.values.push_back(input[r]);
+     }
++    w.bindings.resize(w.values.size());
+     int pc = 0;
+     while (pc < static_cast<int>(blocks_.size())) {
+       const Block& b = blocks_[pc];
+@@ -229,34 +234,21 @@
+       int offset = index(w.values.size());
+       index(w.values.size() + b.forward.n_regs);
+       w.values.resize(w.values.size() + b.forward.n_regs);
+-      w.local_versions.resize(b.forward.n_regs);
++      w.bindings.resize(w.values.size());
++      w.visits.push_back({pc, offset});
+       for (int k = 0; k < b.forward.n_regs; ++k)
+-        w.local_versions[k] = offset + k;
++        w.bindings[offset + k] = offset + k;
+       for (const auto& in : b.inputs) {
+         const int version = w.versions[in.global];
+         if (version < 0)
+           throw std::logic_error("read before definition in callback");
+         w.values[offset + in.local] = w.values[version];
+-        w.local_versions[in.local] = version;
++        w.bindings[offset + in.local] = version;
+       }
+       if (b.forward.n_regs)
+         stanli::run_program(b.forward, w.values.data() + offset);
+-      // Record in execution order, then reverse the complete stream once.
+-      for (auto it = b.reverse.code.rbegin(); it != b.reverse.code.rend();
+-           ++it) {
+-        auto rule = *it;
+-        rule.dst = w.local_versions[rule.dst];
+-        rule.a = w.local_versions[rule.a];
+-        rule.b = w.local_versions[rule.b];
+-        rule.c = w.local_versions[rule.c];
+-        rule.va += offset;
+-        rule.vb += offset;
+-        rule.vc += offset;
+-        rule.vd += offset;
+-        w.history.code.push_back(rule);
+-      }
+       for (const auto& out : b.outputs)
+-        w.versions[out.global] = w.local_versions[out.local];
++        w.versions[out.global] = w.bindings[offset + out.local];
+       if (b.condition >= 0) {
+         int version = w.versions[b.condition];
+         if (version < 0) throw std::logic_error("undefined condition");
+@@ -266,7 +258,6 @@
+     }
+     for (int r : outputs_)
+       if (w.versions[r] < 0) throw std::logic_error("undefined output");
+-    std::reverse(w.history.code.begin(), w.history.code.end());
+     w.ready = true;
+   }
+   double output(const Workspace& w, size_t i) const {
+@@ -280,9 +271,12 @@
+     w.adjoints.assign(w.values.size(), 0);
+     for (size_t i = 0; i < seed.size(); ++i)
+       w.adjoints[w.versions[outputs_[i]]] += seed[i];
+-    static const Program no_calls;
+-    stanli::run_adjoint(no_calls, w.history, w.values.data(),
+-                        w.adjoints.data());
++    for (auto it = w.visits.rbegin(); it != w.visits.rend(); ++it) {
++      const auto& block = blocks_[it->block];
++      stanli::run_scalar_adjoint_mapped(
++          block.forward, block.reverse, w.values.data() + it->offset,
++          w.adjoints.data(), w.bindings.data() + it->offset);
++    }
+     gradient.assign(w.adjoints.begin(), w.adjoints.begin() + inputs_.size());
+   }
+ };
